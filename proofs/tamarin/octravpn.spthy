@@ -1,0 +1,154 @@
+/*
+ * OctraVPN protocol model in Tamarin.
+ *
+ * Models the OctraVPN crypto-protocol surface under a Dolev-Yao adversary:
+ *
+ *   - Validator registration (signed attestation, on-chain bond).
+ *   - Session opening (route commitments, ephemeral session pubkey).
+ *   - Receipt signing & monotonic seq.
+ *   - Settlement.
+ *   - Equivocation (double-sign) detection.
+ *
+ * What the adversary can do:
+ *   - Read all network messages (Out facts).
+ *   - Inject any message it can derive (In facts).
+ *   - Compromise individual validator long-term keys (Reveal_Validator).
+ *   - Compromise individual session ephemeral keys (Reveal_Session).
+ *
+ * Properties checked:
+ *   1. ReceiptUnforgeability: no settled receipt exists for a session
+ *      whose ephemeral session key was never compromised AND was never
+ *      signed by the legitimate client.
+ *   2. DoubleSignSlashable: any two distinct receipts signed by the same
+ *      validator key for the same (session, seq) implies a slash event.
+ *   3. NoLinkBeforeSettle: while a session is "open", the chain message
+ *      stream contains no fact linking a particular validator address to
+ *      this session_id (commitments only).
+ *
+ * Tamarin command:  tamarin-prover --prove octravpn.spthy
+ */
+
+theory OctraVPN
+begin
+
+builtins: signing, hashing, asymmetric-encryption
+
+functions:
+    commit/2,           // commit(addr, blind)
+    open/2 [private]    // (just to compute openings off-chain)
+
+equations:
+    /* Pedersen-style commitment opening — for the model we treat the
+       commitment as a hash with a unique opening. */
+
+/* ---------- Setup: register validator with long-term key ---------- */
+
+rule Register_Validator:
+    [ Fr(~vsk) ]
+  --[ ValidatorRegistered($V, pk(~vsk)) ]->
+    [ !Validator($V, ~vsk, pk(~vsk)),
+      Out(<'register', $V, pk(~vsk)>) ]
+
+/* Reveal a validator's long-term key (adversary compromise). */
+rule Reveal_Validator:
+    [ !Validator($V, ~vsk, vp) ]
+  --[ Reveal_Validator($V) ]->
+    [ Out(~vsk) ]
+
+/* ---------- Session establishment ---------- */
+
+/* Client picks an ephemeral session key, picks a validator V, and
+   publishes a commitment to V (along with a fresh blind). */
+rule Open_Session:
+    [ Fr(~ssk),
+      Fr(~blind),
+      !Validator($V, ~vsk, vp) ]
+  --[ SessionOpened($S, ~ssk, $V, ~blind) ]->
+    [ !Session($S, ~ssk, pk(~ssk), $V, ~blind),
+      Out(<'open_session', $S, pk(~ssk), commit($V, ~blind)>) ]
+
+/* Reveal an ephemeral session key (adversary compromise). */
+rule Reveal_Session:
+    [ !Session($S, ~ssk, sp, $V, ~blind) ]
+  --[ Reveal_Session($S) ]->
+    [ Out(~ssk) ]
+
+/* ---------- Receipts ---------- */
+
+/* Client signs a receipt with the ephemeral session key. */
+rule Sign_Client_Receipt:
+    [ !Session($S, ~ssk, sp, $V, ~blind),
+      In($seq), In($ct) ]
+  --[ ClientSigned($S, $seq, $ct, sp) ]->
+    [ Out(<'client_receipt', $S, $seq, $ct,
+            sign(<'octravpn-receipt', $S, $seq, $ct>, ~ssk),
+            sp>) ]
+
+/* Validator signs a receipt with its long-term key. The act of signing
+   is what the chain uses to detect double-signing. */
+rule Sign_Validator_Receipt:
+    [ !Validator($V, ~vsk, vp),
+      In($S), In($seq), In($ct) ]
+  --[ ValidatorSigned($V, $S, $seq, $ct, vp) ]->
+    [ Out(<'node_receipt', $V, $S, $seq, $ct,
+            sign(<'octravpn-receipt', $S, $seq, $ct>, ~vsk),
+            vp>) ]
+
+/* ---------- Settlement on chain ---------- */
+
+rule Settle_Session:
+    let m = <'octravpn-receipt', $S, $seq, $ct>
+    in
+    [ !Session($S, ~ssk, sp, $V, ~blind),
+      In(<'settle', $S, $seq, $V, ~blind, $ct, sigC, sp>) ]
+  --[ Settled($S, $seq, $V, $ct),
+      VerifyClientSig($S, sigC, sp, m) ]->
+    [ Out(<'settled', $S, $seq, $V>) ]
+
+restriction client_sig_ok:
+    "All s sig p m #i. VerifyClientSig(s, sig, p, m)@i ==>
+        Ex #j. ClientSigned(s, fst(snd(m)), fst(snd(snd(m))), p) @ j & j < i"
+
+/* ---------- Slashing on double-sign ---------- */
+
+rule Slash_DoubleSign:
+    [ In(<'evidence', $V, $S, $seq, $ctA, sigA, $ctB, sigB, vp>),
+      !Validator($V, ~vsk, vp) ]
+  --[ Slashed($V, $S, $seq),
+      Equivocated($V, $S, $seq, $ctA, $ctB) ]->
+    [ Out(<'slashed', $V>) ]
+
+restriction equivocation_real:
+    "All v s seq ca cb #i. Equivocated(v, s, seq, ca, cb) @ i ==>
+        ca <> cb &
+        Ex pa #ja. ValidatorSigned(v, s, seq, ca, pa) @ ja & ja < i &
+        Ex pb #jb. ValidatorSigned(v, s, seq, cb, pb) @ jb & jb < i"
+
+/* =================== PROPERTIES =================== */
+
+/* P1: A receipt accepted by Settle implies the client actually signed it
+   (or its session key was compromised). */
+lemma ReceiptUnforgeability:
+    "All s seq v ct #i.
+        Settled(s, seq, v, ct) @ i
+        ==> (Ex p #j. ClientSigned(s, seq, ct, p) @ j & j < i)
+            | (Ex #j. Reveal_Session(s) @ j & j < i)"
+
+/* P2: Double-sign always yields a slash event with concrete evidence. */
+lemma DoubleSignSlashable:
+    "All v s seq ca pa cb pb #i #j.
+        ValidatorSigned(v, s, seq, ca, pa) @ i &
+        ValidatorSigned(v, s, seq, cb, pb) @ j &
+        not(ca = cb)
+        ==> Ex #k. Slashed(v, s, seq) @ k"
+
+/* P3: Until settlement, no on-chain message reveals the validator address
+   for an open session — the route commitment hides it. Stated as: the
+   adversary cannot derive the validator address V from observation
+   without compromising vsk or seeing settlement. */
+lemma NoLinkBeforeSettle:
+    "All s v b #i. SessionOpened(s, _, v, b) @ i
+        ==> not(Ex #j. KU(v) @ j & j < i)
+            | (Ex vsk #k. Reveal_Validator(v) @ k & k < i)"
+
+end

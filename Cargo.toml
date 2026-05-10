@@ -1,0 +1,92 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/octravpn-core",
+    "crates/octravpn-node",
+    "crates/octravpn-client",
+    "tests/mocks",
+    "tests/e2e",
+]
+
+[workspace.lints.clippy]
+all              = { level = "warn", priority = -1 }
+pedantic         = { level = "warn", priority = -1 }
+nursery          = { level = "warn", priority = -1 }
+# Pragmatic relaxations: these would otherwise drown signal.
+module_name_repetitions = "allow"
+must_use_candidate      = "allow"
+missing_errors_doc      = "allow"
+missing_panics_doc      = "allow"
+multiple_crate_versions = "allow"
+similar_names           = "allow"
+too_many_lines          = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss          = "allow"
+cast_lossless           = "allow"
+cast_possible_wrap      = "allow"
+items_after_statements  = "allow"
+significant_drop_tightening = "allow"
+significant_drop_in_scrutinee = "allow"
+unused_async            = "allow"
+future_not_send         = "allow"
+return_self_not_must_use = "allow"
+missing_const_for_fn    = "allow"
+struct_excessive_bools  = "allow"
+struct_field_names      = "allow"
+redundant_pub_crate     = "allow"
+option_if_let_else      = "allow"
+or_fun_call             = "allow"
+unwrap_used             = "warn"
+
+[workspace.lints.rust]
+unsafe_code             = "deny"
+unreachable_pub         = "warn"
+unused_must_use         = "deny"
+trivial_casts           = "warn"
+trivial_numeric_casts   = "warn"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["OctraVPN contributors"]
+rust-version = "1.75"
+
+[workspace.dependencies]
+anyhow      = "1"
+async-trait = "0.1"
+base64      = "0.22"
+boringtun   = { version = "0.7", default-features = false }
+bytes       = "1"
+clap        = { version = "4", features = ["derive", "env"] }
+ed25519-dalek = { version = "2", features = ["rand_core", "serde"] }
+hex         = "0.4"
+parking_lot = "0.12"
+rand        = "0.8"
+reqwest     = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+serde_with  = "3"
+sha2        = "0.10"
+thiserror   = "1"
+tokio       = { version = "1", features = ["full"] }
+toml        = "0.8"
+tracing     = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+zeroize     = { version = "1", features = ["derive"] }
+proptest    = "1"
+axum        = "0.7"
+tower-http  = "0.6"
+http-body-util = "0.1"
+tempfile    = "3"
+
+# Real crypto / FHE stack
+curve25519-dalek = { version = "4", features = ["serde", "digest", "rand_core"] }
+chacha20poly1305 = "0.10"
+hkdf            = "0.12"
+x25519-dalek    = { version = "2", features = ["static_secrets"] }
+num-bigint-dig  = { version = "0.8", features = ["serde", "rand"] }
+num-integer     = "0.1"
+num-traits      = "0.2"
+subtle          = "2"
+

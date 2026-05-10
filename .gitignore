@@ -1,0 +1,15 @@
+/target
+**/*.rs.bk
+*.pem
+*.key
+.envrc
+.env
+.DS_Store
+/proofs/tla/*.toolbox
+/proofs/tla/states
+/proofs/lean/build
+/proofs/lean/.lake
+/proofs/tamarin/*.png
+/proofs/tamarin/*.dot
+node_modules/
+.idea/

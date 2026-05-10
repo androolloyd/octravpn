@@ -1,0 +1,83 @@
+# OctraVPN compose harness.
+#
+# Brings up:
+#   - mock-rpc           in-process JSON-RPC mock standing in for an Octra node
+#   - node1, node2, node3 three validator-VPN node daemons
+#   - client             a one-shot client that runs `octravpn nodes` to verify
+#                        the chain registry round-trips
+#
+# To run the full e2e suite:
+#   docker compose --profile e2e up --abort-on-container-exit
+#
+# This is what the GitHub Actions e2e job uses.
+
+services:
+  builder:
+    image: octravpn-builder:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.builder
+
+  mock-rpc:
+    image: octravpn-mock-rpc:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.mock-rpc
+    depends_on:
+      - builder
+    ports:
+      - "18080:18080"
+    healthcheck:
+      test: ["CMD-SHELL", "exit 0"]
+      interval: 2s
+      timeout: 1s
+      retries: 5
+
+  node1: &node-template
+    image: octravpn-node:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.node
+    depends_on:
+      mock-rpc:
+        condition: service_started
+    environment:
+      RUST_LOG: "info,octravpn_node=debug"
+    volumes:
+      - ./docker/conf/node1:/etc/octravpn:ro
+    networks:
+      - octravpn
+
+  node2:
+    <<: *node-template
+    volumes:
+      - ./docker/conf/node2:/etc/octravpn:ro
+
+  node3:
+    <<: *node-template
+    volumes:
+      - ./docker/conf/node3:/etc/octravpn:ro
+
+  client:
+    image: octravpn-client:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.client
+    depends_on:
+      mock-rpc:
+        condition: service_started
+      node1: { condition: service_started }
+      node2: { condition: service_started }
+      node3: { condition: service_started }
+    environment:
+      RUST_LOG: "info,octravpn_client=debug"
+    volumes:
+      - ./docker/conf/client:/etc/octravpn:ro
+    networks:
+      - octravpn
+    profiles: ["e2e"]
+    command: ["--config", "/etc/octravpn/client.toml", "nodes"]
+
+networks:
+  octravpn:
+    driver: bridge

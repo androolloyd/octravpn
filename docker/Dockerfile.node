@@ -1,0 +1,16 @@
+FROM octravpn-builder:latest AS builder
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates iproute2 && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /work/target/release/octravpn-node /usr/local/bin/octravpn-node
+COPY --from=builder /work/target/release/octravpn-fhe-helper /usr/local/bin/octravpn-fhe-helper
+
+# Run as non-root.
+RUN useradd -r -s /bin/false octravpn
+USER octravpn
+
+EXPOSE 51820/udp
+ENTRYPOINT ["/usr/local/bin/octravpn-node"]
+CMD ["--config", "/etc/octravpn/node.toml", "run"]

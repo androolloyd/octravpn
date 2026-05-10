@@ -1,0 +1,646 @@
+// OctraVPN — decentralized VPN program for Octra.
+//
+// Real-crypto v1 design:
+//
+//   - VPN nodes are Octra validators. Registration requires a signed
+//     attestation from the validator key plus a bond.
+//   - Sessions are 1..3 hops. The client publishes only Pedersen
+//     commitments to chosen node addresses, so during the session the
+//     chain cannot tell which validators are routing.
+//   - Bandwidth metering uses *dual-signed* receipts: client's ephemeral
+//     session key + exit node's WG key both sign over `(session_id,
+//     seq, bytes_used, blind)`. Equivocation by the node is provable
+//     and slashable.
+//   - Settlement reveals the route commitments, verifies that each
+//     opens to a registered active validator, and credits each hop's
+//     earnings ledger with a Pedersen point:
+//
+//        E_v += bytes_used * price_v * split_v_bps / 10000 * G + r * H
+//
+//     where `r` is a fresh per-receipt blinding scalar.
+//   - Settlement also REFUNDS the unused portion of the deposit to the
+//     client's stealth output: refund = deposit - sum(weighted payments).
+//   - Validators redeem accumulated earnings via stealth output by
+//     revealing (claimed_amount, claimed_blind) — the chain checks
+//     E_v == claimed_amount * G + claimed_blind * H, then pays via
+//     `octra_privateTransfer`.
+//   - Slashing: double-signed receipts (different bytes_used for same
+//     (session, seq)), no-show (deposit but no progress), liveness
+//     (missed attestations).
+//
+// Host helpers used (per Octra Applied docs + standard primitives):
+//   sha256(bytes) -> bytes
+//   verify_ed25519(pubkey, msg, sig) -> bool
+//   verify_ed25519_acct(addr, msg, sig) -> bool        // verifies sig under addr's account key
+//   pedersen_add(point_a, point_b) -> point             // Curve25519 / Ristretto
+//   pedersen_mul_scalar_g(scalar) -> point              // scalar * G
+//   pedersen_mul_scalar_h(scalar) -> point              // scalar * H
+//   pedersen_zero() -> point                            // identity
+//   pedersen_verify_open(commit, value_bytes, blind) -> bool
+//   pedersen_verify_eq(point, amount_scalar, blind_scalar) -> bool
+//   addr_bytes(address) -> bytes                        // 32-byte canonical
+//   emit_private_transfer(stealth_output, amount) -> bool
+
+import IOctraVPN from "interfaces/IOctraVPN.aml"
+
+program OctraVPN implements IOctraVPN {
+
+  // -------------------------- state --------------------------
+
+  state {
+    owner: address
+    paused: int
+
+    validators: map[address]ValidatorRecord
+    active_count: int
+    active_index: list[address]
+
+    sessions: map[bytes]Session
+    session_nonce: int
+
+    // Earnings ledger as Pedersen points (32-byte compressed Ristretto).
+    enc_earnings: map[address]bytes
+
+    treasury: int
+    burned: int
+
+    params: Params
+
+    tag_attest: string
+    tag_bond: string
+    tag_receipt: string
+  }
+
+  // ---------------------- types & events ----------------------
+
+  struct RouteOpening {
+    node_addr: address
+    blind: bytes
+    split_bps: int
+  }
+
+  struct ValidatorRecord {
+    bond: int
+    endpoint: string
+    wg_pubkey: bytes
+    view_pubkey: bytes
+    region: string
+    price_per_mb: int
+    registered_at: int
+    last_attest_epoch: int
+    unbond_request_epoch: int
+    jailed_at: int
+    reputation: int
+  }
+
+  struct Session {
+    client_session_pubkey: bytes
+    route_commit: list[bytes]
+    deposit: int
+    opened_at: int
+    receipt_seq: int
+    status: int                 // 0=open, 1=settled, 2=refunded, 3=slashed
+    refund_stealth_output: bytes
+  }
+
+  struct Params {
+    min_bond: int
+    min_session_deposit: int
+    attest_grace_epochs: int
+    session_grace_epochs: int
+    unbond_epochs: int
+    slash_bounty_bps: int
+    slash_burn_bps: int
+    slash_treasury_bps: int
+  }
+
+  event ValidatorRegistered(validator: address, bond: int, endpoint: string, region: string)
+  event ValidatorUpdated(validator: address)
+  event AttestationRefreshed(validator: address, epoch: int)
+  event BondAdded(validator: address, new_bond: int)
+  event UnbondRequested(validator: address, at_epoch: int)
+  event UnbondCompleted(validator: address, returned: int)
+  event ValidatorJailed(validator: address, reason: string, at_epoch: int)
+  event ValidatorSlashed(validator: address, amount: int, reason: string)
+
+  event SessionOpened(session_id: bytes, hops: int, deposit: int, opened_at: int)
+  event SessionSettled(session_id: bytes, seq: int, total_paid: int, refund: int)
+  event SessionRefunded(session_id: bytes, reason: string)
+
+  event EarningsClaimed(validator: address, amount: int)
+
+  // -------------------------- ctor ---------------------------
+
+  constructor(
+    initial_min_bond: int,
+    initial_min_session_deposit: int,
+    initial_attest_grace_epochs: int,
+    initial_session_grace_epochs: int,
+    initial_unbond_epochs: int
+  ) {
+    require(initial_min_bond > 0, "bond>0")
+    require(initial_min_session_deposit > 0, "deposit>0")
+    require(initial_attest_grace_epochs > 0, "attest>0")
+    require(initial_session_grace_epochs > 0, "session>0")
+    require(initial_unbond_epochs > 0, "unbond>0")
+
+    self.owner = origin
+    self.paused = 0
+    self.active_count = 0
+    self.session_nonce = 0
+    self.treasury = 0
+    self.burned = 0
+
+    self.params = Params {
+      min_bond: initial_min_bond,
+      min_session_deposit: initial_min_session_deposit,
+      attest_grace_epochs: initial_attest_grace_epochs,
+      session_grace_epochs: initial_session_grace_epochs,
+      unbond_epochs: initial_unbond_epochs,
+      slash_bounty_bps: 1000,
+      slash_burn_bps: 5000,
+      slash_treasury_bps: 4000
+    }
+
+    self.tag_attest = "octravpn-validator-attest"
+    self.tag_bond = "octravpn-validator-bond"
+    self.tag_receipt = "octravpn-receipt-v1"
+  }
+
+  // ---------------------- helpers ----------------------------
+
+  private fn require_not_paused() {
+    require(self.paused == 0, "paused")
+  }
+
+  private fn require_owner() {
+    require(caller == self.owner, "not owner")
+  }
+
+  private fn is_validator_active(rec: ValidatorRecord): bool {
+    if rec.bond == 0 { return false }
+    if rec.jailed_at != 0 { return false }
+    if rec.unbond_request_epoch != 0 { return false }
+    if epoch > rec.last_attest_epoch + self.params.attest_grace_epochs { return false }
+    return true
+  }
+
+  private fn distribute_slash(amount: int, claimant: address) {
+    let bounty = (amount * self.params.slash_bounty_bps) / 10000
+    let burn = (amount * self.params.slash_burn_bps) / 10000
+    let treas = amount - bounty - burn
+    if bounty > 0 { transfer(claimant, bounty) }
+    self.burned = self.burned + burn
+    self.treasury = self.treasury + treas
+  }
+
+  // ---------------- validator entrypoints ---------------
+
+  fn register_validator(
+    endpoint: string,
+    wg_pubkey: bytes,
+    view_pubkey: bytes,
+    region: string,
+    price_per_mb: int,
+    attest_sig: bytes
+  ): bool {
+    require_not_paused()
+    require(value >= self.params.min_bond, "bond below min")
+    require(price_per_mb > 0, "price>0")
+    require(len(wg_pubkey) == 32, "wg pubkey 32B")
+    require(len(view_pubkey) == 32, "view pubkey 32B")
+    require(caller == origin, "direct caller only")
+
+    let existing = self.validators[caller]
+    require(existing.bond == 0, "already registered")
+
+    let bond_msg = sha256(concat3_addr_str_int(self_addr, self.tag_bond, epoch))
+    require(verify_ed25519_acct(caller, bond_msg, attest_sig), "bad attest sig")
+
+    self.enc_earnings[caller] = pedersen_zero()
+
+    let rec = ValidatorRecord {
+      bond: value,
+      endpoint: endpoint,
+      wg_pubkey: wg_pubkey,
+      view_pubkey: view_pubkey,
+      region: region,
+      price_per_mb: price_per_mb,
+      registered_at: epoch,
+      last_attest_epoch: epoch,
+      unbond_request_epoch: 0,
+      jailed_at: 0,
+      reputation: 0
+    }
+    self.validators[caller] = rec
+
+    self.active_index.append(caller)
+    self.active_count = self.active_count + 1
+
+    emit ValidatorRegistered(caller, value, endpoint, region)
+    return true
+  }
+
+  fn update_validator(
+    endpoint: string,
+    region: string,
+    price_per_mb: int
+  ): bool {
+    require_not_paused()
+    let rec = self.validators[caller]
+    require(rec.bond > 0, "not registered")
+    require(rec.unbond_request_epoch == 0, "unbonding")
+    require(price_per_mb > 0, "price>0")
+    rec.endpoint = endpoint
+    rec.region = region
+    rec.price_per_mb = price_per_mb
+    self.validators[caller] = rec
+    emit ValidatorUpdated(caller)
+    return true
+  }
+
+  fn refresh_attestation(attest_sig: bytes): bool {
+    require_not_paused()
+    let rec = self.validators[caller]
+    require(rec.bond > 0, "not registered")
+    require(caller == origin, "direct caller only")
+    let msg = sha256(concat3_addr_str_int(self_addr, self.tag_attest, epoch))
+    require(verify_ed25519_acct(caller, msg, attest_sig), "bad attest sig")
+    if rec.jailed_at != 0 && rec.bond >= self.params.min_bond { rec.jailed_at = 0 }
+    rec.last_attest_epoch = epoch
+    self.validators[caller] = rec
+    emit AttestationRefreshed(caller, epoch)
+    return true
+  }
+
+  fn add_bond(): bool {
+    require_not_paused()
+    require(value > 0, "no value")
+    let rec = self.validators[caller]
+    require(rec.bond > 0, "not registered")
+    rec.bond = rec.bond + value
+    self.validators[caller] = rec
+    emit BondAdded(caller, rec.bond)
+    return true
+  }
+
+  fn request_unbond(): bool {
+    require_not_paused()
+    let rec = self.validators[caller]
+    require(rec.bond > 0, "not registered")
+    require(rec.unbond_request_epoch == 0, "already unbonding")
+    rec.unbond_request_epoch = epoch
+    self.validators[caller] = rec
+    emit UnbondRequested(caller, epoch)
+    return true
+  }
+
+  fn complete_unbond(): bool {
+    let rec = self.validators[caller]
+    require(rec.bond > 0, "not registered")
+    require(rec.unbond_request_epoch > 0, "not unbonding")
+    require(
+      epoch >= rec.unbond_request_epoch + self.params.unbond_epochs,
+      "unbond not ready"
+    )
+    let amount = rec.bond
+    rec.bond = 0
+    rec.unbond_request_epoch = 0
+    self.validators[caller] = rec
+    self.active_count = self.active_count - 1
+    transfer(caller, amount)
+    emit UnbondCompleted(caller, amount)
+    return true
+  }
+
+  // ---------------- session entrypoints ----------------
+
+  fn open_session(
+    route_commit: list[bytes],
+    client_session_pubkey: bytes,
+    refund_stealth_output: bytes
+  ): bytes {
+    require_not_paused()
+    let hops = len(route_commit)
+    require(hops >= 1, "need >=1 hop")
+    require(hops <= 3, "max 3 hops")
+    require(len(client_session_pubkey) == 32, "session pubkey 32B")
+    require(len(refund_stealth_output) == 32, "stealth output 32B")
+    require(value >= self.params.min_session_deposit, "deposit below min")
+
+    let i = 0
+    while i < hops {
+      require(len(route_commit[i]) == 32, "commit 32B")
+      i = i + 1
+    }
+
+    self.session_nonce = self.session_nonce + 1
+    let id_seed = concat4_addr_int_int_bytes(
+      self_addr, epoch, self.session_nonce, client_session_pubkey
+    )
+    let session_id = sha256(id_seed)
+
+    let s = Session {
+      client_session_pubkey: client_session_pubkey,
+      route_commit: route_commit,
+      deposit: value,
+      opened_at: epoch,
+      receipt_seq: 0,
+      status: 0,
+      refund_stealth_output: refund_stealth_output
+    }
+    self.sessions[session_id] = s
+
+    emit SessionOpened(session_id, hops, value, epoch)
+    return session_id
+  }
+
+  // Settle a session with a dual-signed final receipt.
+  //
+  // The client passes:
+  //   - `seq` and `bytes_used` plus the `blind` scalar used in receipt sig
+  //   - both signatures (client and exit node) over the canonical payload
+  //   - openings for each hop's route commitment
+  //
+  // The chain credits each hop's earnings ledger with the appropriately
+  // weighted Pedersen point and refunds the unused deposit to the
+  // client's stealth output.
+  fn settle_session(
+    session_id: bytes,
+    seq: int,
+    bytes_used: int,
+    blind: bytes,
+    client_sig: bytes,
+    node_sig: bytes,
+    route_open: list[RouteOpening]
+  ): bool {
+    require_not_paused()
+    let s = self.sessions[session_id]
+    require(s.status == 0, "session not open")
+    require(seq > s.receipt_seq, "stale seq")
+    require(bytes_used >= 0, "bytes>=0")
+    require(len(blind) == 32, "blind 32B")
+
+    let hops = len(s.route_commit)
+    require(len(route_open) == hops, "route len mismatch")
+
+    // Verify each commitment opens to a registered, active validator.
+    let total_bps = 0
+    let i = 0
+    while i < hops {
+      let op = route_open[i]
+      let rec = self.validators[op.node_addr]
+      require(rec.bond > 0, "node not registered")
+      require(is_validator_active(rec), "node inactive")
+      require(
+        pedersen_verify_open(s.route_commit[i], addr_bytes(op.node_addr), op.blind),
+        "bad route opening"
+      )
+      total_bps = total_bps + op.split_bps
+      i = i + 1
+    }
+    require(total_bps == 10000, "splits != 100%")
+
+    // Verify dual signatures over the receipt payload.
+    let exit = route_open[hops - 1]
+    let exit_rec = self.validators[exit.node_addr]
+    let receipt_msg = sha256(concat_receipt_v1(
+      self.tag_receipt, session_id, seq, bytes_used, blind
+    ))
+    require(
+      verify_ed25519(s.client_session_pubkey, receipt_msg, client_sig),
+      "bad client sig"
+    )
+    require(
+      verify_ed25519(exit_rec.wg_pubkey, receipt_msg, node_sig),
+      "bad node sig"
+    )
+
+    // Credit each hop's earnings ledger:
+    //   pay_v = bytes_used * price_v * split_v / 10000
+    //   E_v += pay_v * G + r_v * H
+    // For simplicity we use the same `blind` scalar across all hops in
+    // this settlement; the chain accumulator stays consistent because
+    // each hop has a separate ledger.
+    let total_paid = 0
+    let j = 0
+    while j < hops {
+      let hop = route_open[j]
+      let hr = self.validators[hop.node_addr]
+      let pay_v = (bytes_used * hr.price_per_mb * hop.split_bps) / 10000
+      total_paid = total_paid + pay_v
+      let credit_g = pedersen_mul_scalar_g(pay_v)
+      let credit_h = pedersen_mul_scalar_h(blind_to_scalar(blind))
+      let credit = pedersen_add(credit_g, credit_h)
+      let prev = self.enc_earnings[hop.node_addr]
+      self.enc_earnings[hop.node_addr] = pedersen_add(prev, credit)
+      hr.reputation = hr.reputation + 1
+      self.validators[hop.node_addr] = hr
+      j = j + 1
+    }
+
+    require(total_paid <= s.deposit, "claim exceeds escrow")
+    let refund = s.deposit - total_paid
+    if refund > 0 {
+      emit_private_transfer(s.refund_stealth_output, refund)
+    }
+
+    s.status = 1
+    s.receipt_seq = seq
+    self.sessions[session_id] = s
+
+    emit SessionSettled(session_id, seq, total_paid, refund)
+    return true
+  }
+
+  fn claim_no_show(session_id: bytes): bool {
+    let s = self.sessions[session_id]
+    require(s.status == 0, "session not open")
+    require(
+      epoch >= s.opened_at + self.params.session_grace_epochs,
+      "grace not elapsed"
+    )
+    require(s.receipt_seq == 0, "session has progress")
+
+    emit_private_transfer(s.refund_stealth_output, s.deposit)
+
+    s.status = 2
+    self.sessions[session_id] = s
+    emit SessionRefunded(session_id, "no-show")
+    return true
+  }
+
+  fn slash_no_show_with_open(
+    session_id: bytes,
+    entry_addr: address,
+    entry_blind: bytes
+  ): bool {
+    let s = self.sessions[session_id]
+    require(s.status == 2, "session not refunded")
+    require(
+      pedersen_verify_open(s.route_commit[0], addr_bytes(entry_addr), entry_blind),
+      "bad opening"
+    )
+    let rec = self.validators[entry_addr]
+    require(rec.bond > 0, "node gone")
+
+    let max_slash = self.params.min_bond / 10
+    let proposed = s.deposit / 10
+    let slash_amt = if proposed < max_slash { proposed } else { max_slash }
+    if slash_amt > rec.bond { slash_amt = rec.bond }
+
+    rec.bond = rec.bond - slash_amt
+    if rec.bond < self.params.min_bond {
+      rec.jailed_at = epoch
+      emit ValidatorJailed(entry_addr, "no-show", epoch)
+    }
+    self.validators[entry_addr] = rec
+    distribute_slash(slash_amt, caller)
+    emit ValidatorSlashed(entry_addr, slash_amt, "no-show")
+    return true
+  }
+
+  // ---------------- earnings claim ----------------
+
+  view fn get_encrypted_earnings(addr: address): bytes {
+    return self.enc_earnings[addr]
+  }
+
+  // Validator opens their accumulated Pedersen earnings:
+  //   E_v == claimed_amount * G + claimed_blind * H
+  // and receives `claimed_amount` OCT via stealth output.
+  fn claim_earnings(
+    claimed_amount: int,
+    claimed_blind: bytes,
+    stealth_output: bytes
+  ): bool {
+    require_not_paused()
+    let rec = self.validators[caller]
+    require(rec.bond > 0, "not registered")
+    require(claimed_amount > 0, "amount>0")
+    require(len(claimed_blind) == 32, "blind 32B")
+    require(len(stealth_output) == 32, "stealth 32B")
+
+    let point = self.enc_earnings[caller]
+    require(
+      pedersen_verify_eq(point, claimed_amount, claimed_blind),
+      "bad opening"
+    )
+
+    self.enc_earnings[caller] = pedersen_zero()
+    emit_private_transfer(stealth_output, claimed_amount)
+    emit EarningsClaimed(caller, claimed_amount)
+    return true
+  }
+
+  // ---------------- slashing ----------------
+
+  // Two distinct dual-signed receipts at the same (session, seq) prove
+  // the node signed conflicting `bytes_used`.
+  fn slash_double_sign(
+    session_id: bytes,
+    seq: int,
+    bytes_a: int,
+    blind_a: bytes,
+    sig_a: bytes,
+    bytes_b: int,
+    blind_b: bytes,
+    sig_b: bytes,
+    node_addr: address
+  ): bool {
+    require(bytes_a != bytes_b || blind_a != blind_b, "identical receipts")
+    let rec = self.validators[node_addr]
+    require(rec.bond > 0, "node not registered")
+
+    let msg_a = sha256(concat_receipt_v1(self.tag_receipt, session_id, seq, bytes_a, blind_a))
+    let msg_b = sha256(concat_receipt_v1(self.tag_receipt, session_id, seq, bytes_b, blind_b))
+    require(verify_ed25519(rec.wg_pubkey, msg_a, sig_a), "bad sig a")
+    require(verify_ed25519(rec.wg_pubkey, msg_b, sig_b), "bad sig b")
+
+    let amount = rec.bond
+    rec.bond = 0
+    rec.jailed_at = epoch
+    self.validators[node_addr] = rec
+    distribute_slash(amount, caller)
+    emit ValidatorSlashed(node_addr, amount, "double-sign")
+    emit ValidatorJailed(node_addr, "double-sign", epoch)
+    return true
+  }
+
+  fn slash_offline(node_addr: address): bool {
+    let rec = self.validators[node_addr]
+    require(rec.bond > 0, "not registered")
+    require(rec.jailed_at == 0, "already jailed")
+    require(
+      epoch > rec.last_attest_epoch + self.params.attest_grace_epochs,
+      "still live"
+    )
+
+    let amount = rec.bond / 100
+    if amount == 0 { amount = 1 }
+    if amount > rec.bond { amount = rec.bond }
+    rec.bond = rec.bond - amount
+    rec.jailed_at = epoch
+    self.validators[node_addr] = rec
+    distribute_slash(amount, caller)
+    emit ValidatorSlashed(node_addr, amount, "offline")
+    emit ValidatorJailed(node_addr, "offline", epoch)
+    return true
+  }
+
+  // ---------------- views ----------------
+
+  view fn get_validator(addr: address): ValidatorRecord {
+    return self.validators[addr]
+  }
+
+  view fn get_session(session_id: bytes): Session {
+    return self.sessions[session_id]
+  }
+
+  view fn list_active_validators(offset: int, limit: int): list[address] {
+    let out = []
+    let i = offset
+    let end = offset + limit
+    if end > self.active_count { end = self.active_count }
+    while i < end {
+      out.append(self.active_index[i])
+      i = i + 1
+    }
+    return out
+  }
+
+  view fn get_params(): Params {
+    return self.params
+  }
+
+  // ---------------- governance ----------------
+
+  fn set_params(p: Params): bool {
+    require_owner()
+    require(p.min_bond > 0, "bond>0")
+    require(p.min_session_deposit > 0, "deposit>0")
+    require(p.attest_grace_epochs > 0, "attest>0")
+    require(p.session_grace_epochs > 0, "session>0")
+    require(p.unbond_epochs > 0, "unbond>0")
+    require(
+      p.slash_bounty_bps + p.slash_burn_bps + p.slash_treasury_bps == 10000,
+      "bps sum"
+    )
+    self.params = p
+    return true
+  }
+
+  fn set_paused(v: int): bool {
+    require_owner()
+    self.paused = v
+    return true
+  }
+
+  fn transfer_ownership(new_owner: address): bool {
+    require_owner()
+    require(is_address(new_owner), "bad addr")
+    self.owner = new_owner
+    return true
+  }
+}

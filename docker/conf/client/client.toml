@@ -1,0 +1,10 @@
+[chain]
+rpc_url = "http://mock-rpc:18080/rpc"
+program_addr = "octPROGmockaddress0000000000000000000000"
+
+[wallet]
+addr = "octCLIENT00000000000000000000000000000099"
+secret_path = "/etc/octravpn/wallet.key"
+
+[tunnel]
+local_listen = "127.0.0.1:51821"

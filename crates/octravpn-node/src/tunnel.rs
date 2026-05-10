@@ -1,0 +1,218 @@
+//! Userspace WireGuard data plane on the node.
+//!
+//! Each accepted client peer gets its own boringtun `Tunn` instance; we
+//! demultiplex by source UDP address. The node is a *forwarding* relay:
+//!
+//!   - Egress hop: decrypt incoming WG packet → onion-peel → if the
+//!     resulting layer is `Egress`, send the inner payload as a UDP
+//!     datagram to the public internet target encoded inside the inner
+//!     payload.
+//!   - Forward hop: decrypt incoming WG packet → onion-peel → forward
+//!     the inner blob to the next hop's WG endpoint as another WG
+//!     packet (re-encapsulated under the next hop's static pubkey).
+//!
+//! In both cases byte counters on the `OnionRouter` advance so receipt
+//! signing reflects actual served bandwidth.
+
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::Arc,
+};
+
+use anyhow::Result;
+use boringtun::noise::{Tunn, TunnResult};
+use parking_lot::Mutex;
+use tokio::net::UdpSocket;
+use tracing::{debug, warn};
+use x25519_dalek::{PublicKey as X25519Pub, StaticSecret};
+
+use crate::onion::{Direction, OnionRouter};
+
+/// One peer's per-connection state.
+pub struct Peer {
+    pub tun: Mutex<Tunn>,
+}
+
+/// UDP-bound forwarding server. Holds:
+///   - the node's static WireGuard secret (X25519)
+///   - peers, keyed by source SocketAddr
+///   - the onion router (carries per-session forwarding decisions)
+pub struct Server {
+    sock: Arc<UdpSocket>,
+    static_secret: StaticSecret,
+    static_public: X25519Pub,
+    router: Arc<OnionRouter>,
+    peers: Mutex<HashMap<SocketAddr, Arc<Peer>>>,
+}
+
+impl Server {
+    pub async fn bind(
+        addr: SocketAddr,
+        static_secret: StaticSecret,
+        router: Arc<OnionRouter>,
+    ) -> Result<Self> {
+        let sock = UdpSocket::bind(addr).await?;
+        let static_public = X25519Pub::from(&static_secret);
+        Ok(Self {
+            sock: Arc::new(sock),
+            static_secret,
+            static_public,
+            router,
+            peers: Mutex::new(HashMap::new()),
+        })
+    }
+
+    pub fn static_public(&self) -> [u8; 32] {
+        self.static_public.to_bytes()
+    }
+
+    /// Run the UDP receive loop forever.
+    pub async fn run(self: Arc<Self>) -> Result<()> {
+        let mut buf = vec![0u8; 65535];
+        let mut work = vec![0u8; 65535];
+        loop {
+            let (n, src) = match self.sock.recv_from(&mut buf).await {
+                Ok(p) => p,
+                Err(e) => {
+                    warn!(error = %e, "udp recv error");
+                    continue;
+                }
+            };
+            self.handle_packet(&buf[..n], src, &mut work).await;
+        }
+    }
+
+    async fn handle_packet(&self, packet: &[u8], src: SocketAddr, work: &mut [u8]) {
+        let peer = self.get_or_create_peer(src);
+
+        // boringtun decapsulation. The Tunn handles handshake + transport.
+        let res = peer.tun.lock().decapsulate(None, packet, work);
+        match res {
+            TunnResult::WriteToNetwork(bytes) => {
+                // Handshake response or keepalive — send back to the source.
+                let n = bytes.len();
+                if let Err(e) = self.sock.send_to(bytes, src).await {
+                    warn!(error = %e, "send_to failed");
+                }
+                debug!(?src, n, "wg control packet replied");
+            }
+            TunnResult::WriteToTunnelV4(bytes, _src_ip) => {
+                self.dispatch_inner(bytes, src).await;
+            }
+            TunnResult::WriteToTunnelV6(bytes, _src_ip) => {
+                self.dispatch_inner(bytes, src).await;
+            }
+            TunnResult::Done => {}
+            TunnResult::Err(e) => {
+                debug!(?src, ?e, "boringtun decap error");
+            }
+        }
+    }
+
+    /// We received a decapsulated inner packet from the WireGuard peer.
+    /// Treat the inner bytes as an onion layer; peel and act per the
+    /// resulting `HopAction`.
+    async fn dispatch_inner(&self, layer: &[u8], src: SocketAddr) {
+        // The first 32 bytes of `layer` carry the per-session id we
+        // assigned at session-announce. We expect the client to prefix
+        // each tunneled packet with `session_id || onion_blob`.
+        if layer.len() < 32 {
+            warn!("tunnel inner too short");
+            return;
+        }
+        let mut sid = [0u8; 32];
+        sid.copy_from_slice(&layer[..32]);
+        let onion = &layer[32..];
+
+        let session_id = octravpn_core::session::SessionId(sid);
+        match octravpn_core::onion::peel_layer(&self.static_secret, onion) {
+            Ok(peeled) => {
+                self.router
+                    .install(session_id.clone(), peeled.action.clone());
+                self.router
+                    .record_bytes(&session_id, Direction::In, layer.len() as u64);
+                match peeled.action {
+                    octravpn_core::onion::HopAction::Forward {
+                        endpoint,
+                        next_static_pubkey: _,
+                    } => {
+                        self.forward_to(&endpoint, &session_id, &peeled.inner).await;
+                    }
+                    octravpn_core::onion::HopAction::Egress => {
+                        self.egress(&peeled.inner).await;
+                    }
+                }
+            }
+            Err(e) => debug!(?src, error = %e, "onion peel failed"),
+        }
+    }
+
+    async fn forward_to(&self, endpoint: &str, session: &octravpn_core::session::SessionId, blob: &[u8]) {
+        // Prefix with session_id again so the next hop knows which
+        // session this belongs to.
+        let mut payload = Vec::with_capacity(32 + blob.len());
+        payload.extend_from_slice(&session.0);
+        payload.extend_from_slice(blob);
+        match endpoint.parse::<SocketAddr>() {
+            Ok(addr) => {
+                if let Err(e) = self.sock.send_to(&payload, addr).await {
+                    warn!(?addr, error = %e, "forward send_to failed");
+                } else {
+                    self.router
+                        .record_bytes(session, Direction::Out, payload.len() as u64);
+                }
+            }
+            Err(e) => warn!(endpoint, error = %e, "bad next endpoint"),
+        }
+    }
+
+    async fn egress(&self, payload: &[u8]) {
+        // Egress format: first 6 bytes = (4 IPv4 + 2 port BE), rest = data.
+        if payload.len() < 6 {
+            return;
+        }
+        let ip = std::net::Ipv4Addr::new(payload[0], payload[1], payload[2], payload[3]);
+        let port = u16::from_be_bytes([payload[4], payload[5]]);
+        let target = SocketAddr::new(std::net::IpAddr::V4(ip), port);
+        if let Err(e) = self.sock.send_to(&payload[6..], target).await {
+            warn!(?target, error = %e, "egress send_to failed");
+        }
+    }
+
+    fn get_or_create_peer(&self, src: SocketAddr) -> Arc<Peer> {
+        let mut g = self.peers.lock();
+        if let Some(p) = g.get(&src) {
+            return p.clone();
+        }
+        // For v1 we accept any peer that arrives. A production deployment
+        // would gate by registering each peer's static pubkey first
+        // (e.g. when the control plane learns about it from `announce`).
+        let tun = Tunn::new(
+            self.static_secret.clone(),
+            X25519Pub::from([0u8; 32]),
+            None,
+            None,
+            0,
+            None,
+        );
+        let peer = Arc::new(Peer { tun: Mutex::new(tun) });
+        g.insert(src, peer.clone());
+        peer
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn server_binds_and_returns_pubkey() {
+        let secret = StaticSecret::random_from_rng(rand::rngs::OsRng);
+        let router = Arc::new(OnionRouter::new());
+        let server = Server::bind("127.0.0.1:0".parse().unwrap(), secret, router)
+            .await
+            .unwrap();
+        assert_eq!(server.static_public().len(), 32);
+    }
+}
