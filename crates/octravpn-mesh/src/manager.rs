@@ -141,9 +141,8 @@ impl MeshManager {
             let state = self.conns.step(tailnet_id, &peer.snapshot.addr);
             let key = (tailnet_id.to_string(), peer.snapshot.addr.clone());
             alive.insert(key.clone());
-            let conn = match self.conns.state(tailnet_id, &peer.snapshot.addr) {
-                Some(c) => c,
-                None => continue,
+            let Some(conn) = self.conns.state(tailnet_id, &peer.snapshot.addr) else {
+                continue;
             };
             let allowed_ips = self.allowed_ips_for_peer(tailnet_id, &peer.snapshot.addr);
             match state {

@@ -88,9 +88,8 @@ pub(crate) fn run(config_path: &str, out_path: Option<&str>) -> Result<()> {
             if name_str.contains("secret") || name_str.contains("wallet") {
                 continue;
             }
-            match fs::read(ent.path()) {
-                Ok(bytes) => entries.push((arc_name, bytes)),
-                Err(_) => continue, // best effort
+            if let Ok(bytes) = fs::read(ent.path()) {
+                entries.push((arc_name, bytes));
             }
         }
     }
@@ -165,15 +164,16 @@ impl SystemInfo {
     }
 
     fn render_text(&self) -> String {
+        use std::fmt::Write;
         let mut s = String::new();
-        s.push_str(&format!("os:             {}\n", self.os));
-        s.push_str(&format!("arch:           {}\n", self.arch));
-        s.push_str(&format!("client_version: {}\n", self.client_version));
+        let _ = writeln!(s, "os:             {}", self.os);
+        let _ = writeln!(s, "arch:           {}", self.arch);
+        let _ = writeln!(s, "client_version: {}", self.client_version);
         s.push_str("uname:\n");
         match &self.uname {
             Some(u) => {
                 for line in u.lines() {
-                    s.push_str(&format!("  {line}\n"));
+                    let _ = writeln!(s, "  {line}");
                 }
             }
             None => s.push_str("  <unavailable>\n"),

@@ -1,17 +1,35 @@
 // IOctraVPN — public surface of the OctraVPN program.
 //
-// Tailnet-on-chain model: endpoints (paid relays/exits) must be Octra
-// protocol validators; tailnets are member groups with treasuries that
-// fund paid traffic. Bonding/attestation/slashing are delegated to the
-// Octra protocol layer.
+// Tailnet-on-chain model: paid relay/exit operators stake OU in the
+// program (`bond_endpoint`). Equivocation on signed receipts is
+// slashable by the program itself via `submit_equivocation`; we do
+// not depend on Octra protocol-layer slashing.
 
 interface IOctraVPN {
 
+  // ---- Operator stake (bond / unbond / slash) ----
+
+  fn bond_endpoint(): bool          // value-bearing: msg.value is added to stake
+  fn unbond_endpoint(): bool        // start grace period; endpoint deactivates
+  fn finalize_unbond(): bool        // claim stake back after grace elapsed
+
+  fn submit_equivocation(
+    operator_addr: address,
+    session_id: bytes,
+    seq: int,
+    bytes_used_a: int,
+    blind_a: bytes,
+    sig_a: bytes,
+    bytes_used_b: int,
+    blind_b: bytes,
+    sig_b: bytes
+  ): bool
+
   // ---- Endpoint (relay/exit) lifecycle ----
   //
-  // Caller MUST be an Octra protocol validator (chain-side gate via
-  // `is_octra_validator`). No in-program bond — Octra's own bond and
-  // slashing cover the security guarantees.
+  // `register_endpoint` requires the caller to have
+  // `endpoint_stake[caller] >= min_endpoint_stake`. Slashed operators
+  // can never re-register at the same address.
 
   fn register_endpoint(
     endpoint: string,
@@ -138,4 +156,14 @@ struct Params {
   session_grace_epochs: int
   sweep_grace_multiplier: int
   sweep_bounty_bps: int
+  min_endpoint_stake: int
+  unbond_grace_epochs: int
+  slash_burn_bps: int
+  slash_bounty_bps: int
+  protocol_fee_bps: int
+}
+
+struct UnbondingRecord {
+  stake: int
+  unlock_epoch: int
 }

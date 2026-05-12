@@ -121,16 +121,15 @@ impl ValidatorOracle {
         match mode {
             Mode::Direct => self.rpc.is_octra_validator(addr).await,
             Mode::Bulk => self.bulk_lookup(&display).await,
-            Mode::Unknown => match self.rpc.is_octra_validator(addr).await {
-                Ok(v) => {
+            Mode::Unknown => {
+                if let Ok(v) = self.rpc.is_octra_validator(addr).await {
                     self.state.write().mode = Mode::Direct;
                     Ok(v)
-                }
-                Err(_) => {
+                } else {
                     self.state.write().mode = Mode::Bulk;
                     self.bulk_lookup(&display).await
                 }
-            },
+            }
         }
     }
 

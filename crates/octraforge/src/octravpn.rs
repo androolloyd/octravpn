@@ -25,16 +25,114 @@ impl ForgeCtx {
         self.program_addr.clone()
     }
 
-    /// Mark `addr` as an Octra protocol validator on the mock chain.
-    /// Required before `call_register_endpoint` will succeed.
+    /// Mark `addr` as an Octra protocol validator on the mock chain
+    /// AND seed enough stake for `register_endpoint` to succeed. This
+    /// is the historical shape (callers used a single helper to get a
+    /// register-able operator); the new model just needs stake, but
+    /// keeping both turn-ons here means existing tests don't churn.
     pub fn become_octra_validator(&mut self, addr: &str) {
         self.app.add_octra_validator(addr);
+        self.app.seed_endpoint_stake(addr, octravpn_mock_rpc::MIN_ENDPOINT_STAKE);
+    }
+
+    /// Seed `addr` with `amount` OU of operator stake, skipping the
+    /// real `bond_endpoint` tx. Use when the test wants to exercise
+    /// register/settle without driving the full bonding flow.
+    pub fn seed_endpoint_stake(&mut self, addr: &str, amount: u64) {
+        self.app.seed_endpoint_stake(addr, amount);
+    }
+
+    /// `bond_endpoint()` — value-bearing call that deposits stake. The
+    /// caller (current prank or `DEFAULT_CALLER`) must not be slashed
+    /// and must not have an unbonding in flight.
+    pub fn call_bond_endpoint(&mut self, amount: u64) -> Result<SubmitResult, SubmitError> {
+        let call = json!({
+            "kind": "contract_call",
+            "from": DEFAULT_CALLER,
+            "to": self.program_addr,
+            "method": "bond_endpoint",
+            "params": [],
+            "value": amount,
+            "fee": 10u64,
+            "nonce": 0u64,
+        });
+        self.submit(call)
+    }
+
+    /// `unbond_endpoint()` — start the grace timer for stake withdrawal.
+    pub fn call_unbond_endpoint(&mut self) -> Result<SubmitResult, SubmitError> {
+        let call = json!({
+            "kind": "contract_call",
+            "from": DEFAULT_CALLER,
+            "to": self.program_addr,
+            "method": "unbond_endpoint",
+            "params": [],
+            "value": 0u64,
+            "fee": 10u64,
+            "nonce": 0u64,
+        });
+        self.submit(call)
+    }
+
+    /// `finalize_unbond()` — after grace, claim the stake back.
+    pub fn call_finalize_unbond(&mut self) -> Result<SubmitResult, SubmitError> {
+        let call = json!({
+            "kind": "contract_call",
+            "from": DEFAULT_CALLER,
+            "to": self.program_addr,
+            "method": "finalize_unbond",
+            "params": [],
+            "value": 0u64,
+            "fee": 10u64,
+            "nonce": 0u64,
+        });
+        self.submit(call)
+    }
+
+    /// `submit_equivocation(...)` — submit two contradictory signed
+    /// receipts under the same `(session_id, seq)`; on success the
+    /// program burns 90 % of the operator's stake and pays the rest
+    /// to the caller.
+    #[allow(clippy::too_many_arguments)]
+    pub fn call_submit_equivocation(
+        &mut self,
+        operator: &str,
+        session_id_hex: &str,
+        seq: u64,
+        bytes_a: u64,
+        blind_a_hex: &str,
+        sig_a_hex: &str,
+        bytes_b: u64,
+        blind_b_hex: &str,
+        sig_b_hex: &str,
+    ) -> Result<SubmitResult, SubmitError> {
+        let call = json!({
+            "kind": "contract_call",
+            "from": DEFAULT_CALLER,
+            "to": self.program_addr,
+            "method": "submit_equivocation",
+            "params": [
+                operator,
+                session_id_hex,
+                seq,
+                bytes_a,
+                blind_a_hex,
+                sig_a_hex,
+                bytes_b,
+                blind_b_hex,
+                sig_b_hex,
+            ],
+            "value": 0u64,
+            "fee": 10u64,
+            "nonce": 0u64,
+        });
+        self.submit(call)
     }
 
     /// `register_endpoint(endpoint, wg_pubkey, receipt_pubkey, view_pubkey, region, price_per_mb)`.
     ///
-    /// Caller (which defaults to [`DEFAULT_CALLER`] or the pranked address)
-    /// must already be an Octra validator — see [`Self::become_octra_validator`].
+    /// Caller must have at least `MIN_ENDPOINT_STAKE` bonded — use
+    /// [`Self::become_octra_validator`] or [`Self::call_bond_endpoint`].
     #[allow(clippy::too_many_arguments)]
     pub fn call_register_endpoint(
         &mut self,

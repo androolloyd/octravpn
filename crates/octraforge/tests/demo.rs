@@ -79,10 +79,10 @@ octra_test!(snapshot_and_revert, |forge| {
     assert!(active.as_array().unwrap().is_empty());
 });
 
-octra_test!(non_octra_validator_cannot_register_endpoint, |forge| {
+octra_test!(unbonded_address_cannot_register_endpoint, |forge| {
     forge.deploy_octravpn(100, 10);
     forge.prank(VALIDATOR);
-    forge.expect_revert("not an Octra validator");
+    forge.expect_revert("must bond_endpoint first");
     let r = forge.call_register_endpoint(
         "1.2.3.4:51820",
         &"de".repeat(32),
@@ -146,13 +146,15 @@ octra_test!(full_lifecycle_endpoint_tailnet_session_claim, |forge| {
     assert_eq!(settled.event_u64("SessionSettled", "total_paid"), Some(200));
     assert_eq!(settled.event_u64("SessionSettled", "refund"), Some(800));
 
-    // 7. Encrypted earnings on-chain == 200*G + blind*H.
+    // 7. Encrypted earnings on-chain == 199*G + blind*H. Gross pay is
+    //    200 OU but the protocol fee (0.5 % default) routes 1 OU to the
+    //    program treasury; the hop receives 200 * 9950 / 10000 = 199 OU.
     let earn = forge
         .view("get_encrypted_earnings", vec![json!(VALIDATOR)])
         .unwrap();
     let earn_hex = earn.as_str().unwrap();
-    let scalar_200 = Scalar::from(200u64);
-    let expected = &scalar_200 * RISTRETTO_BASEPOINT_TABLE + blind * h_generator();
+    let scalar_net = Scalar::from(199u64);
+    let expected = &scalar_net * RISTRETTO_BASEPOINT_TABLE + blind * h_generator();
     assert_eq!(earn_hex, hex::encode(expected.compress().to_bytes()));
 
     // 8. Refund returned to tailnet treasury: 2000 - 1000 + 800 = 1800.
@@ -161,10 +163,10 @@ octra_test!(full_lifecycle_endpoint_tailnet_session_claim, |forge| {
         .unwrap();
     assert_eq!(tnet.get("treasury").and_then(serde_json::Value::as_u64), Some(1800));
 
-    // 9. Validator claims the 200 OU.
+    // 9. Validator claims the post-fee 199 OU.
     forge.prank(VALIDATOR);
     let claimed = forge
-        .call_claim_earnings(200, &blind_hex, &"ee".repeat(32))
+        .call_claim_earnings(199, &blind_hex, &"ee".repeat(32))
         .expect("claim earnings");
     assert!(claimed.find_event("EarningsClaimed").is_some());
 

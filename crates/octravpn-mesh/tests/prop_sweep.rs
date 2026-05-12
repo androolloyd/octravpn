@@ -65,25 +65,26 @@ prop_compose! {
             0..5
         ),
     ) -> String {
+        use std::fmt::Write;
         let mut toml = String::from("version = 1\n");
         if !groups.is_empty() {
             toml.push_str("[groups]\n");
             for (name, members) in &groups {
-                toml.push_str(&format!("{name} = [\n"));
+                let _ = writeln!(toml, "{name} = [");
                 for m in members {
-                    toml.push_str(&format!("  \"{m}\",\n"));
+                    let _ = writeln!(toml, "  \"{m}\",");
                 }
                 toml.push_str("]\n");
             }
         }
         for (accept, src, dst) in &rules {
             toml.push_str("[[rules]]\n");
-            toml.push_str(&format!("action = \"{}\"\n", if *accept { "accept" } else { "deny" }));
+            let _ = writeln!(toml, "action = \"{}\"", if *accept { "accept" } else { "deny" });
             toml.push_str("src = [\n");
-            for s in src { toml.push_str(&format!("  \"{s}\",\n")); }
+            for s in src { let _ = writeln!(toml, "  \"{s}\","); }
             toml.push_str("]\n");
             toml.push_str("dst = [\n");
-            for d in dst { toml.push_str(&format!("  \"{d}\",\n")); }
+            for d in dst { let _ = writeln!(toml, "  \"{d}\","); }
             toml.push_str("]\n");
         }
         toml

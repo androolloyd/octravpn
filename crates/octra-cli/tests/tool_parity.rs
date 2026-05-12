@@ -94,6 +94,13 @@ fn forge_submit_matches_cast_inprocess_submit() {
         "octra_test_grantValidator",
         json!(["octV"]),
     );
+    // Seed operator stake on this fresh AppState so register_endpoint
+    // passes the bond check on the cast path too.
+    let _ = octra_cli::rpc_client::call(
+        &ep,
+        "octra_test_bondEndpoint",
+        json!(["octV"]),
+    );
     let cast_submit = octra_cli::rpc_client::call(&ep, "octra_submit", json!([tx])).unwrap();
     let cast_hash = cast_submit["hash"].as_str().unwrap().to_string();
     let cast_tx = octra_cli::rpc_client::call(&ep, "octra_transaction", json!([cast_hash]))
@@ -148,8 +155,11 @@ async fn http_anvil_register_then_list_matches_forge() {
 
     let val = "octHTTPV0000000000000000000000000000VALI";
 
-    // Seed validator status via the test helper.
+    // Seed validator status + operator stake via the test helpers.
     rpc.raw_call("octra_test_grantValidator", json!([val]))
+        .await
+        .unwrap();
+    rpc.raw_call("octra_test_bondEndpoint", json!([val]))
         .await
         .unwrap();
 

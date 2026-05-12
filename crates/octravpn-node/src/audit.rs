@@ -380,7 +380,7 @@ mod tests {
         }
         let audit_file = std::fs::read_dir(dir.path())
             .unwrap()
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .find(|e| e.file_name().to_string_lossy().starts_with("audit-"))
             .unwrap()
             .path();
@@ -406,7 +406,7 @@ mod tests {
         let key = log.key();
         let audit_file = std::fs::read_dir(dir.path())
             .unwrap()
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .find(|e| e.file_name().to_string_lossy().starts_with("audit-"))
             .unwrap()
             .path();

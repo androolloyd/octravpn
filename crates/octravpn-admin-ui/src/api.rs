@@ -46,6 +46,7 @@ fn err(status: StatusCode, msg: impl Into<String>) -> axum::response::Response {
     (status, Json(ApiError { error: msg.into() })).into_response()
 }
 
+#[allow(clippy::result_large_err)]
 fn require_wallet(s: &AdminState) -> Result<&octravpn_core::sig::KeyPair, axum::response::Response> {
     s.wallet
         .as_ref()

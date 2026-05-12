@@ -6,7 +6,6 @@
 //! counters, audit-log lines well-formed.
 
 use std::{
-    net::{IpAddr, Ipv4Addr},
     sync::Arc,
     thread,
 };
@@ -118,7 +117,7 @@ fn mesh_manager_tick_is_safe_under_concurrent_publish() {
         })
     };
     let ticker = {
-        let m = mgr.clone();
+        let m = mgr;
         thread::spawn(move || {
             for _ in 0..50 {
                 let _ = m.tick("t");

@@ -671,7 +671,7 @@ async fn advertise_subnet(
 // ----------------------- `up`: the mesh loop ------------------------
 
 async fn up(
-    client: &Client,
+    _client: &Client,
     cfg: &ClientConfig,
     tailnet: &str,
     hostname: Option<&str>,

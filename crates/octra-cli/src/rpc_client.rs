@@ -202,6 +202,19 @@ fn call_in_process(app: &AppState, method: &str, params: &Value) -> Result<Value
             }
             Ok(Value::Bool(true))
         }
+        "octra_test_bondEndpoint" => {
+            let arr = params.as_array().ok_or_else(|| anyhow!("params"))?;
+            let addr = arr
+                .first()
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow!("addr"))?;
+            let amount = arr
+                .get(1)
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(octravpn_mock_rpc::MIN_ENDPOINT_STAKE);
+            app.seed_endpoint_stake(addr, amount);
+            Ok(Value::Bool(true))
+        }
         other => Err(anyhow!("unknown method in mock: {other}")),
     }
 }

@@ -12,8 +12,6 @@ use octravpn_core::{
     sig::KeyPair,
     stealth,
 };
-use rand::rngs::OsRng;
-use rand::RngCore;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
 use x25519_dalek::{PublicKey as X25519Pub, StaticSecret};
@@ -105,6 +103,14 @@ impl Hub {
             allowlist,
             metrics,
         })
+    }
+
+    /// Open the audit log configured for this hub (or return `None`
+    /// if no `audit_dir` is set). Used by the `verify-audit-log`
+    /// subcommand to access the HMAC key for offline verification.
+    pub(crate) fn open_audit_log(&self) -> Option<crate::audit::AuditLog> {
+        let dir = self.cfg.control.audit_dir.as_ref()?;
+        crate::audit::AuditLog::open(dir).ok()
     }
 
     pub(crate) fn print_identity(&self) {

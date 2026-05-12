@@ -133,8 +133,8 @@ pub fn scan_with_view_secret(
     ephemeral_pubkey: &[u8; 32],
 ) -> ([u8; 32], [u8; 32]) {
     let sk = StaticSecret::from(*view_secret);
-    let R = PublicKey::from(*ephemeral_pubkey);
-    let dh = sk.diffie_hellman(&R);
+    let r_pub = PublicKey::from(*ephemeral_pubkey);
+    let dh = sk.diffie_hellman(&r_pub);
     let mut h = Sha256::new();
     h.update(dh.as_bytes());
     let shared: [u8; 32] = h.finalize().into();

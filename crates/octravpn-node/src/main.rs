@@ -45,7 +45,8 @@ enum Cmd {
     /// Run the daemon in long-lived mode.
     Run,
     /// Register endpoint on chain (idempotent: skips if already registered).
-    /// Caller must already be an Octra protocol validator.
+    /// Caller must have at least `MIN_ENDPOINT_STAKE` bonded — see
+    /// `bond_endpoint` in the AML program.
     Register,
     /// Claim accumulated earnings via stealth payout.
     ClaimEarnings,
@@ -59,6 +60,14 @@ enum Cmd {
         delta_amount: u64,
         #[arg(long)]
         delta_blind_hex: String,
+    },
+    /// Verify the HMAC chain of an audit log file. Reads the audit key
+    /// from the configured audit_dir (`.audit.key`) and walks the file
+    /// line-by-line. Exits 0 on a clean chain; non-zero with the first
+    /// broken line index otherwise.
+    VerifyAuditLog {
+        /// Path to the audit JSONL file to verify.
+        path: std::path::PathBuf,
     },
 }
 
@@ -82,8 +91,20 @@ async fn main() -> Result<()> {
             delta_amount,
             delta_blind_hex,
         } => hub.accumulator_add(delta_amount, &delta_blind_hex),
+        Cmd::VerifyAuditLog { path } => verify_audit_log(&hub, &path),
         Cmd::Run => run(hub).await,
     }
+}
+
+fn verify_audit_log(hub: &Hub, path: &std::path::Path) -> Result<()> {
+    let audit = hub
+        .open_audit_log()
+        .ok_or_else(|| anyhow::anyhow!("audit_dir not configured"))?;
+    let key = audit.key();
+    let n = crate::audit::AuditLog::verify_file(&key, path)?;
+    info!(verified = n, "audit chain ok");
+    println!("OK ({n} entries)");
+    Ok(())
 }
 
 async fn run(hub: Arc<Hub>) -> Result<()> {

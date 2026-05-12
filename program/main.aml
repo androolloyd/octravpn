@@ -4,15 +4,18 @@
 //   - Tailnets are on-chain groups of devices. Members address each other
 //     by their Octra account address; the chain is the coordination layer.
 //   - Peer-to-peer traffic between reachable members is free.
-//   - When a tailnet uses a paid relay or exit, the relay/exit must be
-//     an Octra protocol validator. Bonding, liveness, and slashing are
-//     enforced by the Octra protocol layer — this program does NOT
-//     duplicate them. The gate is `is_octra_validator(addr)`.
+//   - Paid relays/exits ("operators") stake OU in this program via
+//     `bond_endpoint`. The stake is slashable atomically by this program
+//     on cryptographic evidence of receipt equivocation; we do NOT rely on
+//     Octra protocol-layer slashing.
 //   - Tailnet members deposit OU into a per-tailnet treasury ("traffic
 //     membership"). The treasury funds sessions through paid endpoints.
 //   - Sessions use 1..3-hop onion routing, dual-signed bandwidth receipts,
-//     and Pedersen-committed validator earnings (claimed via stealth
+//     and Pedersen-committed operator earnings (claimed via stealth
 //     payouts). CEI ordering throughout.
+//   - A small protocol fee (default 0.5 %) on every settlement accrues
+//     to the program treasury (governance-controlled) for protocol
+//     maintenance: audits, bug bounties, dispute resolution.
 //
 // Host helpers (see docs/octra-research.md for status):
 //   sha256(bytes) -> bytes
@@ -26,7 +29,6 @@
 //   addr_bytes(address) -> bytes
 //   emit_private_transfer(stealth_output, amount) -> bool
 //   mul_div_safe(a: int, b: int, divisor: int) -> int
-//   is_octra_validator(addr: address) -> bool   // NEW: chain-level query
 
 import IOctraVPN from "interfaces/IOctraVPN.aml"
 
@@ -52,6 +54,18 @@ program OctraVPN implements IOctraVPN {
 
     enc_earnings: map[address]bytes  // 32-byte compressed Ristretto
 
+    // Operator stake locked in this program. Required for
+    // `register_endpoint`; slashed in full by `submit_equivocation`.
+    endpoint_stake: map[address]int
+    // While an operator is unbonding, their stake sits here until
+    // `finalize_unbond` after the grace window.
+    endpoint_unbonding: map[address]UnbondingRecord
+    // Once equivocation is proven, the operator is permanently slashed
+    // and may never re-register at the same address.
+    endpoint_slashed: map[address]int
+
+    // Program treasury accumulating protocol fees + the burn share of
+    // slashed stakes. Spendable by the program owner via governance.
     treasury: int
     burned: int
 
@@ -124,6 +138,16 @@ program OctraVPN implements IOctraVPN {
     session_grace_epochs: int
     sweep_grace_multiplier: int
     sweep_bounty_bps: int        // bounty paid to sweeper (default 100 = 1%)
+    min_endpoint_stake: int      // floor on operator bond (default 1B OU = 1000 OCT)
+    unbond_grace_epochs: int     // delay before a withdrawn stake can be claimed
+    slash_burn_bps: int          // share of slashed stake burned (default 9000 = 90%)
+    slash_bounty_bps: int        // share to evidence submitter (default 1000 = 10%)
+    protocol_fee_bps: int        // share of total_paid into program treasury (default 50 = 0.5%)
+  }
+
+  struct UnbondingRecord {
+    stake: int                   // amount unbonding
+    unlock_epoch: int            // epoch at/after which finalize is permitted
   }
 
   struct HopSnapshot {
@@ -135,6 +159,13 @@ program OctraVPN implements IOctraVPN {
   event EndpointUpdated(addr: address)
   event EndpointRetired(addr: address)
   event KeysRotated(addr: address)
+
+  event StakeBonded(addr: address, amount: int, new_stake: int)
+  event StakeUnbondingStarted(addr: address, stake: int, unlock_epoch: int)
+  event StakeUnbondingFinalized(addr: address, amount: int)
+  event OperatorSlashed(
+    addr: address, stake: int, burn_amt: int, bounty_amt: int, submitter: address
+  )
 
   event TailnetCreated(tailnet_id: bytes, owner: address)
   event TailnetMemberAdded(tailnet_id: bytes, member: address)
@@ -182,7 +213,12 @@ program OctraVPN implements IOctraVPN {
       min_tailnet_deposit: initial_min_tailnet_deposit,
       session_grace_epochs: initial_session_grace_epochs,
       sweep_grace_multiplier: 10,
-      sweep_bounty_bps: 100
+      sweep_bounty_bps: 100,
+      min_endpoint_stake: 1000000000,    // 1000 OCT
+      unbond_grace_epochs: 10000,        // ~30 days at typical epoch rate
+      slash_burn_bps: 9000,              // 90 %
+      slash_bounty_bps: 1000,            // 10 %
+      protocol_fee_bps: 50               // 0.5 %
     }
 
     self.tag_receipt = "octravpn-receipt-v1"
@@ -198,23 +234,22 @@ program OctraVPN implements IOctraVPN {
     require(caller == self.owner, "not owner")
   }
 
-  private fn require_octra_validator(addr: address) {
-    require(is_octra_validator(addr), "not an Octra validator")
-  }
-
   private fn endpoint_is_active(rec: EndpointRecord, addr: address): bool {
     if rec.active == 0 { return false }
-    // Liveness is delegated to the Octra protocol layer: a slashed or
-    // jailed validator stops returning true from `is_octra_validator`,
-    // which automatically removes them from the eligible-exit set.
-    return is_octra_validator(addr)
+    if self.endpoint_slashed[addr] != 0 { return false }
+    // Stake must remain ≥ MIN to keep the endpoint live; an operator who
+    // started unbonding clears `endpoint_stake[addr]` and is reported
+    // inactive here even before grace elapses.
+    return self.endpoint_stake[addr] >= self.params.min_endpoint_stake
   }
 
   // -------------- endpoint (relay/exit) entrypoints --------------
 
-  // Anyone who is currently an Octra protocol validator may register
-  // an endpoint. There is no in-program bond: Octra's own bond/slash
-  // covers the security guarantees this used to enforce.
+  // Anyone with `endpoint_stake[caller] >= min_endpoint_stake` may
+  // register an endpoint. The stake is held by this program and
+  // slashable on equivocation evidence (see `submit_equivocation`).
+  // A previously-slashed address can never re-register under the
+  // same address.
   fn register_endpoint(
     endpoint: string,
     wg_pubkey: bytes,
@@ -224,7 +259,11 @@ program OctraVPN implements IOctraVPN {
     price_per_mb: int
   ): bool {
     require_not_paused()
-    require_octra_validator(caller)
+    require(self.endpoint_slashed[caller] == 0, "previously slashed")
+    require(
+      self.endpoint_stake[caller] >= self.params.min_endpoint_stake,
+      "must bond_endpoint first"
+    )
     require(price_per_mb > 0, "price>0")
     require(len(wg_pubkey) == 32, "wg pubkey 32B")
     require(len(receipt_pubkey) == 32, "receipt pubkey 32B")
@@ -301,6 +340,141 @@ program OctraVPN implements IOctraVPN {
     rec.active = 0
     self.endpoints[caller] = rec
     emit EndpointRetired(caller)
+    return true
+  }
+
+  // ---------- operator stake (bond / unbond / slash) ----------
+
+  // Deposit `value` OU as stake. Required before `register_endpoint`.
+  // A previously-slashed address cannot bond again; the slash flag is
+  // terminal at the wallet level.
+  fn bond_endpoint(): bool {
+    require_not_paused()
+    require(value > 0, "no value")
+    require(self.endpoint_slashed[caller] == 0, "previously slashed")
+    require(
+      self.endpoint_unbonding[caller].stake == 0,
+      "unbonding in progress"
+    )
+    self.endpoint_stake[caller] = self.endpoint_stake[caller] + value
+    emit StakeBonded(caller, value, self.endpoint_stake[caller])
+    return true
+  }
+
+  // Begin unbonding the caller's entire stake. Moves the balance into
+  // `endpoint_unbonding[caller]` and zeroes the live stake — the
+  // endpoint is reported inactive immediately so no new sessions can
+  // start. `finalize_unbond` becomes callable at `unlock_epoch`.
+  fn unbond_endpoint(): bool {
+    require_not_paused()
+    let amt = self.endpoint_stake[caller]
+    require(amt > 0, "no stake")
+    require(
+      self.endpoint_unbonding[caller].stake == 0,
+      "already unbonding"
+    )
+    let unlock = epoch + self.params.unbond_grace_epochs
+    self.endpoint_unbonding[caller] = UnbondingRecord {
+      stake: amt, unlock_epoch: unlock
+    }
+    self.endpoint_stake[caller] = 0
+    let rec = self.endpoints[caller]
+    if rec.active != 0 {
+      rec.active = 0
+      self.endpoints[caller] = rec
+      emit EndpointRetired(caller)
+    }
+    emit StakeUnbondingStarted(caller, amt, unlock)
+    return true
+  }
+
+  // After grace elapses, finalize and return the unbonded stake to
+  // the caller.
+  fn finalize_unbond(): bool {
+    require_not_paused()
+    let u = self.endpoint_unbonding[caller]
+    require(u.stake > 0, "no unbonding")
+    require(epoch >= u.unlock_epoch, "grace not elapsed")
+    let amt = u.stake
+    self.endpoint_unbonding[caller] = UnbondingRecord {
+      stake: 0, unlock_epoch: 0
+    }
+    transfer(caller, amt)
+    emit StakeUnbondingFinalized(caller, amt)
+    return true
+  }
+
+  // Submit cryptographic evidence that an operator double-signed a
+  // receipt for the same `(session_id, seq)` with distinct
+  // `(bytes_used, blind)`. The chain re-runs the signature check,
+  // burns 90 % of the operator's stake (plus any in-flight unbonding
+  // balance), pays 10 % to the submitter, and marks the operator
+  // permanently slashed.
+  fn submit_equivocation(
+    operator_addr: address,
+    session_id: bytes,
+    seq: int,
+    bytes_used_a: int,
+    blind_a: bytes,
+    sig_a: bytes,
+    bytes_used_b: int,
+    blind_b: bytes,
+    sig_b: bytes
+  ): bool {
+    require_not_paused()
+    require(len(session_id) == 32, "session_id 32B")
+    require(len(blind_a) == 32, "blind_a 32B")
+    require(len(blind_b) == 32, "blind_b 32B")
+    require(len(sig_a) == 64, "sig_a 64B")
+    require(len(sig_b) == 64, "sig_b 64B")
+    require(seq > 0, "seq>0")
+    require(bytes_used_a >= 0, "bytes_a>=0")
+    require(bytes_used_b >= 0, "bytes_b>=0")
+
+    require(self.endpoint_slashed[operator_addr] == 0, "already slashed")
+
+    let live_stake = self.endpoint_stake[operator_addr]
+    let unb = self.endpoint_unbonding[operator_addr]
+    let total_stake = live_stake + unb.stake
+    require(total_stake > 0, "no stake to slash")
+
+    let rec = self.endpoints[operator_addr]
+    require(rec.active != 0 || total_stake > 0, "unknown operator")
+    let pubkey = rec.receipt_pubkey
+
+    let msg_a = sha256(concat_receipt_v1(
+      self.tag_receipt, session_id, seq, bytes_used_a, blind_a
+    ))
+    let msg_b = sha256(concat_receipt_v1(
+      self.tag_receipt, session_id, seq, bytes_used_b, blind_b
+    ))
+    require(verify_ed25519(pubkey, msg_a, sig_a), "bad sig_a")
+    require(verify_ed25519(pubkey, msg_b, sig_b), "bad sig_b")
+    require(
+      bytes_used_a != bytes_used_b || blind_a != blind_b,
+      "receipts identical — not equivocation"
+    )
+
+    let burn_amt = mul_div_safe(total_stake, self.params.slash_burn_bps, 10000)
+    let bounty_amt = total_stake - burn_amt
+
+    // CEI: state mutations before transfer.
+    self.endpoint_stake[operator_addr] = 0
+    self.endpoint_unbonding[operator_addr] = UnbondingRecord {
+      stake: 0, unlock_epoch: 0
+    }
+    self.endpoint_slashed[operator_addr] = 1
+    let rec2 = self.endpoints[operator_addr]
+    if rec2.active != 0 {
+      rec2.active = 0
+      self.endpoints[operator_addr] = rec2
+    }
+    self.treasury = self.treasury + burn_amt
+    if bounty_amt > 0 { transfer(caller, bounty_amt) }
+
+    emit OperatorSlashed(
+      operator_addr, total_stake, burn_amt, bounty_amt, caller
+    )
     return true
   }
 
@@ -557,7 +731,7 @@ program OctraVPN implements IOctraVPN {
   //
   // Ordering follows CEI:
   //   1. (Checks) Snapshot each hop's endpoint, verify openings, check
-  //      activity via `is_octra_validator`, verify dual sig.
+  //      `endpoint_is_active` (stake + not-slashed), verify dual sig.
   //   2. (Effects) Update earnings ledger, mark session settled, refund
   //      unused deposit to tailnet treasury.
   fn settle_session(
@@ -629,6 +803,13 @@ program OctraVPN implements IOctraVPN {
       j = j + 1
     }
     require(total_paid <= s.deposit, "claim exceeds escrow")
+
+    // Protocol fee (Tier 2): a share of total_paid accrues to the
+    // program treasury for protocol maintenance. Hops receive the
+    // post-fee amount proportional to their advertised split. The
+    // refund returns to the tailnet treasury intact.
+    let protocol_fee = mul_div_safe(total_paid, self.params.protocol_fee_bps, 10000)
+    let net_to_hops = total_paid - protocol_fee
     let refund = s.deposit - total_paid
 
     // ---- 2. EFFECTS ----
@@ -636,7 +817,14 @@ program OctraVPN implements IOctraVPN {
     while k < hops {
       let hop = route_open[k]
       let rec = self.endpoints[hop.node_addr]
-      let credit_g = pedersen_mul_scalar_g(pays[k])
+      // Each hop's payout is reduced proportionally to its share of
+      // the total before fee. mul_div_safe(pays[k], net_to_hops, total_paid)
+      // routes the post-fee balance back through the original split.
+      let net_pay = 0
+      if total_paid > 0 {
+        net_pay = mul_div_safe(pays[k], net_to_hops, total_paid)
+      }
+      let credit_g = pedersen_mul_scalar_g(net_pay)
       let credit_h = pedersen_mul_scalar_h(blind_to_scalar(blind))
       let credit = pedersen_add(credit_g, credit_h)
       let prev = self.enc_earnings[hop.node_addr]
@@ -644,6 +832,10 @@ program OctraVPN implements IOctraVPN {
       rec.reputation = rec.reputation + 1
       self.endpoints[hop.node_addr] = rec
       k = k + 1
+    }
+
+    if protocol_fee > 0 {
+      self.treasury = self.treasury + protocol_fee
     }
 
     s.status = 1
@@ -796,6 +988,11 @@ program OctraVPN implements IOctraVPN {
     require(p.session_grace_epochs > 0, "session grace>0")
     require(p.sweep_grace_multiplier > 0, "sweep>0")
     require(p.sweep_bounty_bps <= 1000, "bounty bps<=1000")  // ≤10%
+    require(p.min_endpoint_stake >= 100000000, "stake floor too low")  // ≥100 OCT
+    require(p.unbond_grace_epochs >= 1000, "unbond grace too short")
+    require(p.slash_burn_bps >= 5000, "burn share too low")            // ≥50%
+    require(p.slash_burn_bps + p.slash_bounty_bps == 10000, "slash bps sum != 10000")
+    require(p.protocol_fee_bps <= 200, "protocol fee > 2%")             // ≤2%
     self.params = p
     return true
   }

@@ -40,9 +40,19 @@ mod coverage {
 pub struct ChainState {
     pub epoch: u64,
     /// Addresses currently registered as protocol-level Octra validators.
-    /// `register_endpoint` requires the caller to be in this set.
+    /// Kept on the RPC surface for clients that still resolve identity
+    /// via Octra; the OctraVPN AML no longer gates on this.
     pub octra_validators: HashSet<String>,
     pub endpoints: HashMap<String, EndpointRow>,
+    /// In-program operator stake. Required for `register_endpoint`.
+    pub endpoint_stake: HashMap<String, u64>,
+    /// In-flight unbonding requests: `(stake, unlock_epoch)`.
+    pub endpoint_unbonding: HashMap<String, (u64, u64)>,
+    /// Permanent slashed flag — once set, that address can never
+    /// re-register or re-bond.
+    pub endpoint_slashed: HashSet<String>,
+    /// Program treasury (Tier 2 protocol fee + burn share of slashes).
+    pub program_treasury: u64,
     pub tailnets: HashMap<String, TailnetRow>,
     pub sessions: HashMap<String, SessionRow>,
     /// device_addr → wallet_addr that owns it (multi-device per identity).
@@ -57,6 +67,15 @@ pub struct ChainState {
     pub stealth_outputs: Vec<Value>,
     pub earnings: HashMap<String, RistrettoPoint>,
 }
+
+/// Default operator bond floor mirrored from `program/main.aml`. Matches
+/// `Params.min_endpoint_stake = 1_000_000_000` OU.
+pub const MIN_ENDPOINT_STAKE: u64 = 1_000_000_000;
+/// Default unbond grace mirrored from `program/main.aml`.
+pub const UNBOND_GRACE_EPOCHS: u64 = 10_000;
+pub const SLASH_BURN_BPS: u64 = 9_000;
+pub const SLASH_BOUNTY_BPS: u64 = 1_000;
+pub const PROTOCOL_FEE_BPS: u64 = 50;
 
 #[derive(Clone)]
 pub struct EndpointRow {
@@ -109,8 +128,10 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Test helper: mark `addr` as an Octra protocol validator. Required
-    /// before `register_endpoint` will succeed for that address.
+    /// Test helper: mark `addr` as an Octra protocol validator. This
+    /// no longer gates `register_endpoint` (the AML now uses
+    /// `endpoint_stake` instead) but is preserved for RPC parity and
+    /// for tests that exercise the validator-oracle plumbing.
     pub fn add_octra_validator(&self, addr: impl Into<String>) {
         self.state.write().octra_validators.insert(addr.into());
     }
@@ -118,6 +139,15 @@ impl AppState {
     /// Test helper: remove `addr` from the Octra validator set.
     pub fn remove_octra_validator(&self, addr: &str) {
         self.state.write().octra_validators.remove(addr);
+    }
+
+    /// Test helper: directly seed an operator's stake without routing
+    /// through `bond_endpoint`. Used by harnesses that want to skip the
+    /// economic bootstrap and exercise post-bond entrypoints.
+    pub fn seed_endpoint_stake(&self, addr: impl Into<String>, amount: u64) {
+        let addr = addr.into();
+        let mut s = self.state.write();
+        *s.endpoint_stake.entry(addr).or_insert(0) += amount;
     }
 }
 
@@ -153,9 +183,11 @@ async fn rpc_handler(State(app): State<AppState>, Json(req): Json<RpcReq>) -> im
         }])),
         "octra_isValidator" => Ok(octra_is_validator(&app, &req.params)),
         // Test-only helpers — present in the mock so e2e tests can
-        // pre-seed protocol-validator membership over the wire.
+        // pre-seed protocol-validator membership and operator stake
+        // over the wire.
         "octra_test_grantValidator" => Ok(test_grant_validator(&app, &req.params)),
         "octra_test_revokeValidator" => Ok(test_revoke_validator(&app, &req.params)),
+        "octra_test_bondEndpoint" => Ok(test_bond_endpoint(&app, &req.params)),
         "contract_call" => contract_call(&app, &req.params),
         "octra_viewPubkey" => Ok(json!({"view_pubkey": "00".repeat(32)})),
         "octra_privateTransfer" => Ok(json!({"hash": "deadbeef"})),
@@ -220,6 +252,21 @@ fn test_revoke_validator(app: &AppState, params: &Value) -> Value {
     Value::Bool(true)
 }
 
+fn test_bond_endpoint(app: &AppState, params: &Value) -> Value {
+    let Some(arr) = params.as_array() else {
+        return Value::Bool(false);
+    };
+    let Some(addr) = arr.first().and_then(|v| v.as_str()) else {
+        return Value::Bool(false);
+    };
+    let amount = arr
+        .get(1)
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(MIN_ENDPOINT_STAKE);
+    app.seed_endpoint_stake(addr, amount);
+    Value::Bool(true)
+}
+
 fn octra_balance(app: &AppState, params: &Value) -> Result<Value, String> {
     let arr = params.as_array().ok_or("params not array")?;
     let addr = arr.first().and_then(|x| x.as_str()).ok_or("addr missing")?;
@@ -258,6 +305,10 @@ fn octra_submit(app: &AppState, params: &Value) -> Result<Value, String> {
         "revoke_device" => apply_revoke_device(app, tx, &from)?,
         "redeem_join_token" => apply_redeem_join_token(app, tx, &from)?,
         "set_view_pubkey" => apply_set_view_pubkey(app, tx, &from)?,
+        "bond_endpoint" => apply_bond_endpoint(app, tx, &from)?,
+        "unbond_endpoint" => apply_unbond_endpoint(app, &from)?,
+        "finalize_unbond" => apply_finalize_unbond(app, &from)?,
+        "submit_equivocation" => apply_submit_equivocation(app, tx, &from)?,
         "register_endpoint" => apply_register_endpoint(app, tx, &from)?,
         "update_endpoint" => apply_update_endpoint(app, tx, &from)?,
         "rotate_keys" => apply_rotate_keys(app, tx, &from)?,
@@ -447,15 +498,19 @@ fn apply_register_endpoint(
     let price = p[5].as_u64().unwrap_or(0);
 
     let mut s = app.state.write();
-    coverage::record("register_endpoint", "require[1]"); // is_octra_validator
-    if !s.octra_validators.contains(from) {
-        return Err("not an Octra validator".into());
+    coverage::record("register_endpoint", "require[1]"); // not slashed
+    if s.endpoint_slashed.contains(from) {
+        return Err("previously slashed".into());
     }
-    coverage::record("register_endpoint", "require[2]"); // already registered
+    coverage::record("register_endpoint", "require[2]"); // has stake
+    if s.endpoint_stake.get(from).copied().unwrap_or(0) < MIN_ENDPOINT_STAKE {
+        return Err("must bond_endpoint first".into());
+    }
+    coverage::record("register_endpoint", "require[3]"); // already registered
     if s.endpoints.contains_key(from) {
         return Err("already registered".into());
     }
-    coverage::record("register_endpoint", "require[3]"); // price > 0
+    coverage::record("register_endpoint", "require[4]"); // price > 0
     if price == 0 {
         return Err("price must be > 0".into());
     }
@@ -532,6 +587,192 @@ fn apply_retire_endpoint(app: &AppState, from: &str) -> Result<Vec<Value>, Strin
     let ep = s.endpoints.get_mut(from).ok_or("not registered")?;
     ep.active = false;
     Ok(vec![json!({ "name": "EndpointRetired", "addr": from })])
+}
+
+// ------------------------- stake / slashing handlers -------------------------
+
+fn apply_bond_endpoint(
+    app: &AppState,
+    tx: &Value,
+    from: &str,
+) -> Result<Vec<Value>, String> {
+    let amount = tx
+        .get("value")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    if amount == 0 {
+        return Err("no value".into());
+    }
+    let mut s = app.state.write();
+    if s.endpoint_slashed.contains(from) {
+        return Err("previously slashed".into());
+    }
+    if s.endpoint_unbonding.contains_key(from) {
+        return Err("unbonding in progress".into());
+    }
+    let cur = s.endpoint_stake.get(from).copied().unwrap_or(0);
+    let new_stake = cur.checked_add(amount).ok_or("stake overflow")?;
+    s.endpoint_stake.insert(from.to_string(), new_stake);
+    Ok(vec![json!({
+        "name": "StakeBonded",
+        "addr": from,
+        "amount": amount,
+        "new_stake": new_stake,
+    })])
+}
+
+fn apply_unbond_endpoint(app: &AppState, from: &str) -> Result<Vec<Value>, String> {
+    let mut s = app.state.write();
+    let amt = s.endpoint_stake.get(from).copied().unwrap_or(0);
+    if amt == 0 {
+        return Err("no stake".into());
+    }
+    if s.endpoint_unbonding.contains_key(from) {
+        return Err("already unbonding".into());
+    }
+    let unlock = s.epoch + UNBOND_GRACE_EPOCHS;
+    s.endpoint_unbonding.insert(from.to_string(), (amt, unlock));
+    s.endpoint_stake.insert(from.to_string(), 0);
+    let mut events = Vec::with_capacity(2);
+    if let Some(ep) = s.endpoints.get_mut(from) {
+        if ep.active {
+            ep.active = false;
+            events.push(json!({ "name": "EndpointRetired", "addr": from }));
+        }
+    }
+    events.push(json!({
+        "name": "StakeUnbondingStarted",
+        "addr": from,
+        "stake": amt,
+        "unlock_epoch": unlock,
+    }));
+    Ok(events)
+}
+
+fn apply_finalize_unbond(app: &AppState, from: &str) -> Result<Vec<Value>, String> {
+    let mut s = app.state.write();
+    let (amt, unlock) = s
+        .endpoint_unbonding
+        .get(from)
+        .copied()
+        .ok_or("no unbonding")?;
+    if s.epoch < unlock {
+        return Err("grace not elapsed".into());
+    }
+    s.endpoint_unbonding.remove(from);
+    *s.balances.entry(from.to_string()).or_insert(0) += amt;
+    Ok(vec![json!({
+        "name": "StakeUnbondingFinalized",
+        "addr": from,
+        "amount": amt,
+    })])
+}
+
+fn apply_submit_equivocation(
+    app: &AppState,
+    tx: &Value,
+    from: &str,
+) -> Result<Vec<Value>, String> {
+    use octravpn_core::{
+        receipt::Receipt,
+        session::{Blind, SessionId},
+        sig::{self, PublicKey, Signature},
+    };
+
+    let p = tx
+        .get("params")
+        .and_then(|x| x.as_array())
+        .ok_or("params")?;
+    let operator = p[0].as_str().unwrap_or("").to_string();
+    let sid_hex = p[1].as_str().unwrap_or("");
+    let seq = p[2].as_u64().unwrap_or(0);
+    let bytes_a = p[3].as_u64().unwrap_or(0);
+    let blind_a_hex = p[4].as_str().unwrap_or("");
+    let sig_a_hex = p[5].as_str().unwrap_or("");
+    let bytes_b = p[6].as_u64().unwrap_or(0);
+    let blind_b_hex = p[7].as_str().unwrap_or("");
+    let sig_b_hex = p[8].as_str().unwrap_or("");
+
+    let sid_arr =
+        octravpn_core::util::hex_to_array::<32>(sid_hex, "session_id").map_err(|e| e.to_string())?;
+    let blind_a_arr = octravpn_core::util::hex_to_array::<32>(blind_a_hex, "blind_a")
+        .map_err(|e| e.to_string())?;
+    let blind_b_arr = octravpn_core::util::hex_to_array::<32>(blind_b_hex, "blind_b")
+        .map_err(|e| e.to_string())?;
+    let sig_a_arr =
+        octravpn_core::util::hex_to_array::<64>(sig_a_hex, "sig_a").map_err(|e| e.to_string())?;
+    let sig_b_arr =
+        octravpn_core::util::hex_to_array::<64>(sig_b_hex, "sig_b").map_err(|e| e.to_string())?;
+
+    if bytes_a == bytes_b && blind_a_arr == blind_b_arr {
+        return Err("receipts identical — not equivocation".into());
+    }
+
+    let pubkey_hex = {
+        let s = app.state.read();
+        s.endpoints
+            .get(&operator)
+            .map(|e| e.receipt_pubkey.clone())
+            .ok_or("operator not registered")?
+    };
+    let pubkey_arr = octravpn_core::util::hex_to_array::<32>(&pubkey_hex, "receipt_pubkey")
+        .map_err(|e| e.to_string())?;
+    let pk = PublicKey(pubkey_arr);
+
+    let r_a = Receipt {
+        session_id: SessionId::new(sid_arr),
+        seq,
+        bytes_used: bytes_a,
+        blind: Blind::new(blind_a_arr),
+    };
+    let r_b = Receipt {
+        session_id: SessionId::new(sid_arr),
+        seq,
+        bytes_used: bytes_b,
+        blind: Blind::new(blind_b_arr),
+    };
+    sig::verify(&pk, &r_a.signing_payload(), &Signature(sig_a_arr))
+        .map_err(|_| "bad sig_a".to_string())?;
+    sig::verify(&pk, &r_b.signing_payload(), &Signature(sig_b_arr))
+        .map_err(|_| "bad sig_b".to_string())?;
+
+    let mut s = app.state.write();
+    if s.endpoint_slashed.contains(&operator) {
+        return Err("already slashed".into());
+    }
+    let live = s.endpoint_stake.get(&operator).copied().unwrap_or(0);
+    let unb = s.endpoint_unbonding.get(&operator).map_or(0, |(amt, _)| *amt);
+    let total = live.checked_add(unb).ok_or("stake overflow")?;
+    if total == 0 {
+        return Err("no stake to slash".into());
+    }
+    let burn_amt = total
+        .checked_mul(SLASH_BURN_BPS)
+        .ok_or("overflow burn")?
+        / 10_000;
+    let bounty_amt = total - burn_amt;
+
+    s.endpoint_stake.insert(operator.clone(), 0);
+    s.endpoint_unbonding.remove(&operator);
+    s.endpoint_slashed.insert(operator.clone());
+    if let Some(ep) = s.endpoints.get_mut(&operator) {
+        ep.active = false;
+    }
+    s.program_treasury = s
+        .program_treasury
+        .checked_add(burn_amt)
+        .ok_or("overflow treasury")?;
+    if bounty_amt > 0 {
+        *s.balances.entry(from.to_string()).or_insert(0) += bounty_amt;
+    }
+    Ok(vec![json!({
+        "name": "OperatorSlashed",
+        "addr": operator,
+        "stake": total,
+        "burn_amt": burn_amt,
+        "bounty_amt": bounty_amt,
+        "submitter": from,
+    })])
 }
 
 // ------------------------- tailnet handlers -------------------------
@@ -852,6 +1093,8 @@ fn credit_openings(
     blind_scalar: Scalar,
     openings: &[Value],
 ) -> Result<u64, String> {
+    // Pass 1: validate each hop + compute gross per-hop pay.
+    let mut hops: Vec<(String, u64)> = Vec::with_capacity(openings.len());
     let mut total_paid: u64 = 0;
     for op in openings {
         let node_addr = op
@@ -866,7 +1109,14 @@ fn credit_openings(
             .endpoints
             .get(node_addr)
             .ok_or("opening node not registered")?;
-        if !ep.active || !s.octra_validators.contains(node_addr) {
+        let has_stake = s
+            .endpoint_stake
+            .get(node_addr)
+            .copied()
+            .unwrap_or(0)
+            >= MIN_ENDPOINT_STAKE;
+        let slashed = s.endpoint_slashed.contains(node_addr);
+        if !ep.active || slashed || !has_stake {
             return Err("opening node inactive".into());
         }
         let pay_v = bytes_used
@@ -876,14 +1126,35 @@ fn credit_openings(
             .ok_or("overflow split")?
             / 10_000;
         total_paid = total_paid.checked_add(pay_v).ok_or("overflow total")?;
+        hops.push((node_addr.to_string(), pay_v));
+    }
+    // Pass 2: apply protocol fee + credit per-hop net pay.
+    let protocol_fee = total_paid
+        .checked_mul(PROTOCOL_FEE_BPS)
+        .ok_or("overflow fee")?
+        / 10_000;
+    let net_to_hops = total_paid - protocol_fee;
+    for (node_addr, gross_pay) in hops {
+        let net_pay = if total_paid > 0 {
+            // mul-div-safe via u128 to avoid overflow when net_to_hops * gross_pay is large
+            (u128::from(gross_pay) * u128::from(net_to_hops) / u128::from(total_paid)) as u64
+        } else {
+            0
+        };
         let entry = s
             .earnings
-            .entry(node_addr.to_string())
+            .entry(node_addr)
             .or_insert_with(RistrettoPoint::identity);
-        let scalar_pay = Scalar::from(pay_v);
+        let scalar_pay = Scalar::from(net_pay);
         let g = &scalar_pay * RISTRETTO_BASEPOINT_TABLE;
         let h = blind_scalar * h_generator();
         *entry += g + h;
+    }
+    if protocol_fee > 0 {
+        s.program_treasury = s
+            .program_treasury
+            .checked_add(protocol_fee)
+            .ok_or("overflow treasury")?;
     }
     Ok(total_paid)
 }
@@ -1052,7 +1323,12 @@ fn contract_call(app: &AppState, params: &Value) -> Result<Value, String> {
             let mut active: Vec<String> = s
                 .endpoints
                 .values()
-                .filter(|e| e.active && s.octra_validators.contains(&e.addr))
+                .filter(|e| {
+                    e.active
+                        && !s.endpoint_slashed.contains(&e.addr)
+                        && s.endpoint_stake.get(&e.addr).copied().unwrap_or(0)
+                            >= MIN_ENDPOINT_STAKE
+                })
                 .map(|e| e.addr.clone())
                 .collect();
             active.sort();

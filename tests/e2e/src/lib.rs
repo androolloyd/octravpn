@@ -45,6 +45,12 @@ mod tests {
     /// Promote an address to an Octra validator on the mock chain via
     /// the test-helper RPC method.
     async fn become_octra_validator(rpc: &RpcClient, addr: &str) {
+        // Pre-seed both validator status and operator stake so the
+        // register_endpoint call in the lifecycle test passes the
+        // bond check on the new in-program model.
+        rpc.raw_call("octra_test_bondEndpoint", json!([addr]))
+            .await
+            .expect("bond endpoint");
         rpc.raw_call("octra_test_grantValidator", json!([addr]))
             .await
             .expect("grant validator");
@@ -220,23 +226,25 @@ mod tests {
             .unwrap();
         assert_eq!(tnet["treasury"].as_u64(), Some(1800));
 
-        // 9. Encrypted earnings: 200*G + blind*H.
+        // 9. Encrypted earnings: 199*G + blind*H. Gross pay was 200 OU
+        //    but the protocol fee (0.5 %) routes 1 OU to the program
+        //    treasury — the validator receives 200 * 9950/10000 = 199 OU.
         let earn = rpc
             .contract_call(&prog, "get_encrypted_earnings", &[json!(val)], None)
             .await
             .unwrap();
         let earn_hex = earn.as_str().unwrap();
-        let scalar_200 = Scalar::from(200u64);
-        let expected = &scalar_200 * RISTRETTO_BASEPOINT_TABLE + blind * h_generator();
+        let scalar_net = Scalar::from(199u64);
+        let expected = &scalar_net * RISTRETTO_BASEPOINT_TABLE + blind * h_generator();
         assert_eq!(hex::encode(expected.compress().to_bytes()), earn_hex);
 
-        // 10. Claim earnings.
+        // 10. Claim the post-fee 199 OU.
         let claim_tx = json!({
             "kind": "contract_call",
             "from": val,
             "to": "octPROG",
             "method": "claim_earnings",
-            "params": [200u64, hex::encode(blind_bytes), "ee".repeat(32)],
+            "params": [199u64, hex::encode(blind_bytes), "ee".repeat(32)],
             "value": 0u64,
             "fee": 10u64,
             "nonce": 1u64,

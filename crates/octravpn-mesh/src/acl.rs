@@ -349,10 +349,10 @@ mod tests {
     fn group_expansion_matches_member() {
         let doc = AclDoc {
             version: 1,
-            groups: [
-                ("admins".to_string(), vec!["octA".into(), "octB".into()]),
-            ]
-            .into_iter()
+            groups: std::iter::once((
+                "admins".to_string(),
+                vec!["octA".into(), "octB".into()],
+            ))
             .collect(),
             tags: BTreeMap::default(),
             rules: vec![AclRule {
@@ -460,7 +460,7 @@ mod tests {
             tags: BTreeMap::default(),
             rules: vec![],
         };
-        let mut signed = SignedAclDoc::sign(doc.clone(), "octOWNER", &kp);
+        let mut signed = SignedAclDoc::sign(doc, "octOWNER", &kp);
         // Mutate the doc — signature was over the old canonical bytes.
         signed.doc.rules.push(AclRule {
             action: AclAction::Accept,

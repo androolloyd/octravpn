@@ -5,7 +5,7 @@
 //! find a recipient's tag-derivation key. This removes the need for
 //! Octra to expose an `octra_viewPubkey` RPC.
 
-use octraforge::{octra_test, ForgeCtx};
+use octraforge::octra_test;
 use serde_json::json;
 
 const ALICE: &str = "octALICE000000000000000000000000000000001";
@@ -40,7 +40,7 @@ octra_test!(republish_overwrites, |forge| {
     assert_eq!(stored.as_str().unwrap(), "bb".repeat(32));
 });
 
-octra_test!(non_32B_pubkey_is_rejected, |forge| {
+octra_test!(non_32_byte_pubkey_is_rejected, |forge| {
     forge.deploy_octravpn(100, 10);
     forge.prank(ALICE);
     forge.expect_revert("view pubkey 32B");
