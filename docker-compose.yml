@@ -27,6 +27,8 @@ services:
       - builder
     ports:
       - "18080:18080"
+    networks:
+      - octravpn
     healthcheck:
       test: ["CMD-SHELL", "exit 0"]
       interval: 2s

@@ -10,9 +10,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Cache deps separately from sources for fast rebuilds.
 COPY Cargo.toml Cargo.lock* ./
-COPY rust-toolchain.toml ./
+COPY rust-toolchain.toml* ./
 COPY crates ./crates
 COPY tests ./tests
-COPY fhe-helper ./fhe-helper
+COPY program ./program
 
 RUN cargo build --release --workspace

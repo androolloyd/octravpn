@@ -112,8 +112,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Run docker e2e
+      - name: Endpoint-registration smoke
         run: ./docker/e2e.sh
+      - name: Full tailnet happy-path
+        run: ./docker/e2e-tailnet.sh
 
   coverage:
     name: cargo tarpaulin (coverage)

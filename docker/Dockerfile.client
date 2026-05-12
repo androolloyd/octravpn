@@ -2,10 +2,9 @@ FROM octravpn-builder:latest AS builder
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates iproute2 && rm -rf /var/lib/apt/lists/*
+    ca-certificates iproute2 curl && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /work/target/release/octravpn /usr/local/bin/octravpn
-COPY --from=builder /work/target/release/octravpn-fhe-helper /usr/local/bin/octravpn-fhe-helper
 
 RUN useradd -r -s /bin/false octravpn
 USER octravpn

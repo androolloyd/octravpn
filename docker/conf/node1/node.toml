@@ -1,23 +1,21 @@
 [chain]
-rpc_url = "http://mock-rpc:18080/rpc"
-program_addr = "octPROGmockaddress0000000000000000000000"
-validator_addr = "octHOPaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01"
-wallet_secret_path = "/etc/octravpn/wallet.key"
-initial_bond = 1000
+rpc_url             = "http://mock-rpc:18080/rpc"
+program_addr        = "octPROGmockaddress0000000000000000000000"
+validator_addr      = "octVNODE1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+wallet_secret_path  = "/etc/octravpn/wallet.key"
 
 [tunnel]
-public_endpoint = "node1:51820"
-listen = "0.0.0.0:51820"
-wg_secret_path = "/etc/octravpn/wg.key"
+public_endpoint     = "node1:51820"
+listen              = "0.0.0.0:51820"
+wg_secret_path      = "/etc/octravpn/wg.key"
 
 [pricing]
-price_per_mb = 100
-region = "compose"
+price_per_mb        = 100
+region              = "compose"
 
-[fhe]
-secret_path = "/etc/octravpn/fhe.sk"
-pubkey_path = "/etc/octravpn/fhe.pk"
+[control]
+listen              = "0.0.0.0:51821"
+audit_dir           = "/tmp/octravpn-audit"
 
 [attestation]
-refresh_every_epochs = 5
-safety_margin_epochs = 2
+poll_interval_secs  = 30
