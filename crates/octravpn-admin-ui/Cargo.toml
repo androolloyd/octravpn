@@ -37,6 +37,8 @@ sha2        = { workspace = true }
 tempfile = { workspace = true }
 tower    = "0.5"
 http-body-util = { workspace = true }
+assert_cmd = "2"
+predicates = "3"
 
 [lints]
 workspace = true

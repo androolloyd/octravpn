@@ -1789,6 +1789,7 @@ name = "octravpn-admin-ui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_cmd",
  "async-trait",
  "axum",
  "clap",
@@ -1797,6 +1798,7 @@ dependencies = [
  "octravpn-core",
  "octravpn-mesh",
  "parking_lot",
+ "predicates",
  "reqwest",
  "serde",
  "serde_json",
@@ -1912,6 +1914,7 @@ dependencies = [
  "hex",
  "octravpn-core",
  "parking_lot",
+ "proptest",
  "rand 0.8.6",
  "serde",
  "serde_json",
@@ -1960,6 +1963,7 @@ dependencies = [
  "futures-util",
  "hex",
  "octravpn-core",
+ "octravpn-mesh",
  "parking_lot",
  "rand 0.8.6",
  "serde",
