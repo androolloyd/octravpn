@@ -79,7 +79,7 @@ impl Hub {
         let wg_kp = Arc::new(KeyPair::from_secret_bytes(&receipt_sk));
         let wg_static_secret = StaticSecret::from(noise_sk);
 
-        let view_pubkey = wallet_view_pubkey(&chain.wallet);
+        let view_pubkey = wallet_view_pubkey(&wallet_secret);
 
         let allowlist = Arc::new(octravpn_core::bounded::BoundedMap::new(
             10_000,
@@ -176,9 +176,13 @@ impl Hub {
         // Read locally-tracked accumulator.
         let acc = AccumulatorStore::load(&self.cfg.chain.wallet_secret_path)?;
 
-        let mut nonce_buf = [0u8; 32];
-        OsRng.fill_bytes(&mut nonce_buf);
-        let stealth_target = stealth::derive_output(&self.view_pubkey, &nonce_buf);
+        // Real ECDH stealth: pick an ephemeral secret, run X25519 DH
+        // against our own view pubkey, get the tag. The ephemeral
+        // secret is dropped immediately after `build_fresh_output`.
+        let (stealth_out, _shared) =
+            stealth::build_fresh_output(&self.view_pubkey)
+                .map_err(|e| anyhow!("derive stealth output: {e}"))?;
+        let stealth_target = stealth_out.tag;
 
         let nonce = self.chain.nonce().await?;
         let fee = self.chain.fee("contract_call").await?;
@@ -372,10 +376,10 @@ fn read_secret_32(path: &str) -> Result<[u8; 32]> {
     octravpn_core::util::read_secret_32(path).with_context(|| format!("load secret {path}"))
 }
 
-fn wallet_view_pubkey(kp: &KeyPair) -> [u8; 32] {
-    // View key is a deterministic derivation from the wallet pubkey so a
-    // counterparty who knows the wallet pubkey can scan their stealth
-    // outputs. Octra's actual stealth-view derivation will replace this
-    // when the SDK exposes it; this lives behind `OctraBackend`.
-    octravpn_core::util::derive_subkey(&kp.public.0, octravpn_core::util::DOMAIN_VIEW)
+fn wallet_view_pubkey(wallet_secret: &[u8; 32]) -> [u8; 32] {
+    // The view PUBLIC key is `view_secret · G_x25519`, where
+    // `view_secret` is HKDF'd from the wallet SECRET. Deriving from the
+    // public key would let anyone with the on-chain address recompute
+    // stealth tags — see `octravpn_core::stealth` module docs.
+    octravpn_core::stealth::view_pubkey_from_wallet(wallet_secret)
 }

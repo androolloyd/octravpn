@@ -137,9 +137,19 @@ impl Client {
         }
 
         // 3. Generate ephemeral session key + refund stealth output.
+        //
+        // Refund destination uses the proper X25519 ECDH scheme so the
+        // chain-emitted tag isn't linkable from `view_pubkey` alone.
+        // Sender picks an ephemeral X25519 secret (zeroized after use);
+        // the receiver here is the wallet itself, so we publish the
+        // resulting tag and discard the secret.
         let session_kp = KeyPair::generate();
-        let refund_nonce = stealth::fresh_nonce();
-        let refund_stealth_output = stealth::derive_output(&self.wallet_kp.public.0, &refund_nonce);
+        let view_pubkey =
+            stealth::view_pubkey_from_wallet(&self.wallet_kp.secret_bytes());
+        let (stealth_out, _shared) = stealth::build_fresh_output(&view_pubkey)
+            .map_err(|e| anyhow!("derive stealth output: {e}"))?;
+        let refund_stealth_output = stealth_out.tag;
+        let _ = stealth_out.ephemeral_pubkey; // would be published in v2 wire shape
 
         // 4. Submit `open_session` on chain.
         let bal = self.rpc.balance(&self.wallet_addr).await?;

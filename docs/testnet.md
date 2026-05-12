@@ -23,6 +23,32 @@ and the dry-run procedure to verify the setup before going broader.
 The features marked ⚠ are blocked on Octra exposing specific helpers.
 Everything not marked ⚠ runs unchanged against a real Octra testnet.
 
+## Privacy analysis of the missing helpers
+
+A reasonable concern: if `octra_publicKey` and `octra_viewPubkey` are
+publicly queryable, do they leak something the protocol meant to hide?
+
+| Helper                  | Risk?  | Why                                                                                                                                      |
+| ----------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `octra_isValidator`     | No     | Validator set is already public on chain (you bond publicly to join). Endpoint registration is also a public event. No new linkage.       |
+| `octra_publicKey(addr)` | No     | Every signed tx already discloses the pubkey to anyone watching chain traffic. We can additionally avoid this by carrying the pubkey in the tx envelope and having AML verify `addr == derive_addr(pubkey)`. |
+| `octra_viewPubkey(addr)`| No, **iff** our stealth scheme is real ECDH | The view *pubkey* is exactly analogous to a Monero public view key — by design publishable. Tag computation requires the recipient's view *secret* (or, on the sender side, the ephemeral X25519 scalar that's deleted post-send). |
+| `octra_compileAml`      | No     | Compiler is account-independent.                                                                                                          |
+
+There **was** a privacy bug in the stealth derivation that made the
+third row a real problem: the implementation computed
+`tag = SHA256(view_pubkey || nonce)`, which anyone with the public view
+key could recompute for any `nonce` they saw on chain. That has been
+fixed: `crates/octravpn-core/src/stealth.rs` now implements the
+documented `shared = SHA256(X25519(eph_sk, view_pubkey))` scheme.
+Property test `observer_with_only_view_pubkey_cannot_recompute_tag`
+guards against regression.
+
+The view-pubkey-derivation path was also broken: it derived from the
+wallet *public* key, so the view key wasn't actually secret. That has
+been fixed too — `view_pubkey = view_secret · G` where `view_secret =
+HKDF(wallet_secret, "view-secret-v1")`.
+
 ## What Octra must expose for full operation
 
 These are the missing RPC methods OctraVPN reaches for. Each has a clean

@@ -37,13 +37,21 @@ pub trait OctraBackend: Send + Sync {
     /// Encode the 32-byte canonical form back to `oct...` display.
     fn address_to_display(&self, raw: &[u8; 32]) -> CoreResult<String>;
 
-    /// Derive a stealth view key from an account's public key.
-    fn derive_view_pubkey(&self, account_pubkey: &[u8; 32]) -> [u8; 32];
+    /// Derive the X25519 view pubkey from the wallet's **secret** scalar.
+    /// The corresponding view secret is what lets the wallet owner
+    /// scan the chain for stealth payments addressed to them; the
+    /// pubkey itself can be published.
+    ///
+    /// NOTE: the older API took the wallet *public* key here, which
+    /// allowed anyone with the address to recompute stealth tags.
+    /// That signature was a privacy bug and has been removed.
+    fn derive_view_pubkey(&self, account_secret: &[u8; 32]) -> [u8; 32];
 
-    /// Derive a one-time stealth output token from a receiver's view
-    /// pubkey and a fresh ephemeral nonce. The receiver scans the chain
-    /// for this 32-byte token to pick up the payment.
-    fn derive_stealth_output(&self, view_pubkey: &[u8; 32], nonce: &[u8; 32]) -> [u8; 32];
+    /// Derive a one-time stealth output tag, given a recipient
+    /// view pubkey and a *sender ephemeral* X25519 secret. Internally
+    /// runs the documented ECDH scheme — see
+    /// [`crate::stealth::build_output`].
+    fn derive_stealth_output(&self, view_pubkey: &[u8; 32], eph_secret: &[u8; 32]) -> [u8; 32];
 
     /// Verify a signature under an Octra account address. The real
     /// scheme may involve more than raw ed25519 (e.g. multi-sig).
@@ -78,17 +86,19 @@ impl OctraBackend for PlaceholderBackend {
         Ok(format!("octplaceholder{}", hex::encode(raw)))
     }
 
-    fn derive_view_pubkey(&self, account_pubkey: &[u8; 32]) -> [u8; 32] {
-        crate::util::derive_subkey(account_pubkey, crate::util::DOMAIN_VIEW)
+    fn derive_view_pubkey(&self, account_secret: &[u8; 32]) -> [u8; 32] {
+        crate::stealth::view_pubkey_from_wallet(account_secret)
     }
 
-    fn derive_stealth_output(&self, view_pubkey: &[u8; 32], nonce: &[u8; 32]) -> [u8; 32] {
-        use sha2::{Digest, Sha256};
-        let mut h = Sha256::new();
-        h.update(b"octravpn-stealth-v1");
-        h.update(view_pubkey);
-        h.update(nonce);
-        h.finalize().into()
+    fn derive_stealth_output(&self, view_pubkey: &[u8; 32], eph_secret: &[u8; 32]) -> [u8; 32] {
+        // Routes through the proper X25519 ECDH path defined in
+        // `stealth::build_output`. Any error reduces to a zeroed
+        // 32-byte slot so the trait method stays infallible — callers
+        // who need fallible behaviour use `crate::stealth` directly.
+        match crate::stealth::build_output(view_pubkey, eph_secret) {
+            Ok((out, _)) => out.tag,
+            Err(_) => [0u8; 32],
+        }
     }
 
     fn verify_account_sig(&self, addr: &Address, msg: &[u8], sig: &Signature) -> CoreResult<()> {
@@ -155,20 +165,15 @@ impl OctraBackend for RpcBackend {
         Ok(format!("oct{}", bs58::encode(raw).into_string()))
     }
 
-    fn derive_view_pubkey(&self, account_pubkey: &[u8; 32]) -> [u8; 32] {
-        // Until Octra publishes the canonical algorithm, we keep the
-        // deterministic HKDF derivation here so encrypted-earnings
-        // openings stay consistent across nodes running this version.
-        crate::util::derive_subkey(account_pubkey, crate::util::DOMAIN_VIEW)
+    fn derive_view_pubkey(&self, account_secret: &[u8; 32]) -> [u8; 32] {
+        crate::stealth::view_pubkey_from_wallet(account_secret)
     }
 
-    fn derive_stealth_output(&self, view_pubkey: &[u8; 32], nonce: &[u8; 32]) -> [u8; 32] {
-        use sha2::{Digest, Sha256};
-        let mut h = Sha256::new();
-        h.update(b"octravpn-stealth-v1");
-        h.update(view_pubkey);
-        h.update(nonce);
-        h.finalize().into()
+    fn derive_stealth_output(&self, view_pubkey: &[u8; 32], eph_secret: &[u8; 32]) -> [u8; 32] {
+        match crate::stealth::build_output(view_pubkey, eph_secret) {
+            Ok((out, _)) => out.tag,
+            Err(_) => [0u8; 32],
+        }
     }
 
     fn verify_account_sig(&self, addr: &Address, msg: &[u8], sig: &Signature) -> CoreResult<()> {
@@ -204,13 +209,15 @@ mod tests {
     }
 
     #[test]
-    fn placeholder_derives_view() {
+    fn placeholder_derives_view_from_secret_not_pubkey() {
         let b = PlaceholderBackend;
         let kp = KeyPair::generate();
-        let v = b.derive_view_pubkey(&kp.public.0);
-        let nonce = [7u8; 32];
-        let s = b.derive_stealth_output(&v, &nonce);
-        // Different nonces → different outputs.
+        // Critical: derive from SECRET. The pubkey would have let
+        // anyone with the on-chain address recompute the view key.
+        let secret = kp.secret_bytes();
+        let v = b.derive_view_pubkey(&secret);
+        // Distinct ephemeral secrets → distinct stealth tags.
+        let s = b.derive_stealth_output(&v, &[7u8; 32]);
         let s2 = b.derive_stealth_output(&v, &[8u8; 32]);
         assert_ne!(s, s2);
     }
