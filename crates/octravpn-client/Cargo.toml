@@ -13,11 +13,14 @@ path = "src/main.rs"
 
 [dependencies]
 octravpn-core = { path = "../octravpn-core" }
+octravpn-mesh = { path = "../octravpn-mesh" }
+octravpn-tun  = { path = "../octravpn-tun" }
 
 anyhow      = { workspace = true }
 async-trait = { workspace = true }
 base64      = { workspace = true }
 boringtun   = { workspace = true }
+bs58        = { workspace = true }
 bytes       = { workspace = true }
 clap        = { workspace = true }
 curve25519-dalek = { workspace = true }
@@ -34,7 +37,21 @@ tokio       = { workspace = true }
 toml        = { workspace = true }
 tracing     = { workspace = true }
 tracing-subscriber = { workspace = true }
+x25519-dalek = { workspace = true }
 zeroize     = { workspace = true }
+
+# Bug-report bundle (`octravpn bugreport`).
+tar         = "0.4"
+flate2      = "1"
+
+[dev-dependencies]
+assert_cmd  = "2"
+predicates  = "3"
+tempfile    = { workspace = true }
+flate2      = "1"
+tar         = "0.4"
+serde_json  = { workspace = true }
+toml        = { workspace = true }
 
 [lints]
 workspace = true

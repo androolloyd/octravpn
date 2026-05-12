@@ -1,55 +1,69 @@
 //! Settlement and reclaim handlers.
 //!
-//! The runner stashes an `ActiveSession` while the tunnel is up; on
-//! shutdown we read it out and call `settle_active`. We fetch the latest
-//! dual-signed receipt from the exit node's HTTP control plane, then
-//! submit `settle_session` on chain with the route openings.
+//! Flow:
+//!   1. GET /session/{id} on the exit node's control plane.
+//!   2. Take the exit's signed receipt proposal.
+//!   3. Verify the node sig.
+//!   4. Add the client's session-key signature.
+//!   5. Submit `settle_session` on chain with the dual-signed payload.
 
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use octravpn_core::{
-    receipt::{Receipt, SignedReceipt},
+    control::{ProposedReceipt, SessionStateResponse},
+    receipt::SignedReceipt,
     session::{RouteOpening, SessionId},
-    sig::KeyPair,
+    sig::verify,
 };
 use serde_json::json;
 use tracing::info;
 
 use crate::runner::{ActiveSession, Client};
 
-pub async fn settle_active(client: &Arc<Client>, active: ActiveSession) -> Result<()> {
+pub(crate) async fn settle_active(client: &Arc<Client>, active: ActiveSession) -> Result<()> {
     let openings: Vec<RouteOpening> = active
         .route
         .iter()
         .map(|h| RouteOpening {
             node_addr: h.validator.addr.clone(),
-            blind: h.blind,
+            blind: octravpn_core::session::Blind::new(h.blind),
             split_bps: h.split_bps,
         })
         .collect();
 
-    let exit = active
-        .route
-        .last()
-        .ok_or_else(|| anyhow!("empty route"))?;
-    let signed_receipt = fetch_latest_receipt(&exit.validator.endpoint, &active.session_id)
+    let exit = active.route.last().ok_or_else(|| anyhow!("empty route"))?;
+    let proposed = fetch_proposed_receipt(client, &exit.validator.endpoint, &active.session_id)
         .await
-        .context("fetch latest signed receipt from exit")?;
-    signed_receipt.verify().context("verify dual-sig")?;
+        .context("fetch proposed receipt from exit")?;
 
-    submit_settle(client, &active, &openings, &signed_receipt).await
+    // Verify the exit's signature first.
+    let payload = proposed.receipt.signing_payload();
+    verify(&proposed.node_pubkey, &payload, &proposed.node_sig)
+        .context("verify exit's proposed-receipt signature")?;
+
+    // Client adds its session-key signature.
+    let client_sig = active.session_kp.sign(&payload);
+    let signed = SignedReceipt {
+        receipt: proposed.receipt,
+        client_pubkey: active.session_kp.public,
+        client_sig,
+        node_pubkey: proposed.node_pubkey,
+        node_sig: proposed.node_sig,
+    };
+    signed.verify().context("dual-sig self-verify")?;
+
+    submit_settle(client, &active, &openings, &signed).await
 }
 
-pub async fn settle(_client: &Arc<Client>, _session_id: &str) -> Result<()> {
+pub(crate) async fn settle(_client: &Arc<Client>, _session_id: &str) -> Result<()> {
     Err(anyhow!(
         "stand-alone settle not yet supported; keep `connect` running until clean shutdown"
     ))
 }
 
-pub async fn reclaim(client: &Arc<Client>, session_id_hex: &str) -> Result<()> {
-    let id = SessionId::from_hex(session_id_hex)
-        .ok_or_else(|| anyhow!("bad session id hex"))?;
+pub(crate) async fn reclaim(client: &Arc<Client>, session_id_hex: &str) -> Result<()> {
+    let id = SessionId::from_hex(session_id_hex).ok_or_else(|| anyhow!("bad session id hex"))?;
     let bal = client.rpc().balance(client.wallet_addr()).await?;
     let nonce = bal.pending_nonce.max(bal.nonce);
     let fee = client
@@ -59,10 +73,10 @@ pub async fn reclaim(client: &Arc<Client>, session_id_hex: &str) -> Result<()> {
         .recommended;
     let call = json!({
         "kind": "contract_call",
-        "from": client.wallet_addr().display,
-        "to": client.program_addr().display,
+        "from": client.wallet_addr().display(),
+        "to": client.program_addr().display(),
         "method": "claim_no_show",
-        "params": [hex::encode(id.0)],
+        "params": [hex::encode(id.as_bytes())],
         "value": 0,
         "fee": fee,
         "nonce": nonce,
@@ -88,19 +102,19 @@ async fn submit_settle(
         .recommended;
     let call = json!({
         "kind": "contract_call",
-        "from": client.wallet_addr().display,
-        "to": client.program_addr().display,
+        "from": client.wallet_addr().display(),
+        "to": client.program_addr().display(),
         "method": "settle_session",
         "params": [
-            hex::encode(active.session_id.0),
+            hex::encode(active.session_id.as_bytes()),
             signed.receipt.seq,
             signed.receipt.bytes_used,
-            hex::encode(signed.receipt.blind),
+            hex::encode(signed.receipt.blind.as_bytes()),
             hex::encode(signed.client_sig.0),
             hex::encode(signed.node_sig.0),
             openings.iter().map(|o| json!({
-                "node_addr": o.node_addr.display,
-                "blind": hex::encode(o.blind),
+                "node_addr": o.node_addr.display(),
+                "blind": hex::encode(o.blind.as_bytes()),
                 "split_bps": o.split_bps,
             })).collect::<Vec<_>>(),
         ],
@@ -114,54 +128,21 @@ async fn submit_settle(
     Ok(())
 }
 
-async fn fetch_latest_receipt(
+async fn fetch_proposed_receipt(
+    client: &Arc<Client>,
     wg_endpoint: &str,
     session_id: &SessionId,
-) -> Result<SignedReceipt> {
-    let host = wg_endpoint
-        .rsplit_once(':')
-        .map(|(h, _)| h)
-        .unwrap_or(wg_endpoint);
-    let url = format!("http://{host}:51821/session/{}", session_id.to_hex());
-    let resp = reqwest::get(&url).await.context("control-plane GET")?;
+) -> Result<ProposedReceipt> {
+    let url = octravpn_core::control::session_state_url(wg_endpoint, session_id);
+    let resp = client
+        .http()
+        .get(&url)
+        .send()
+        .await
+        .context("control-plane GET")?;
     if !resp.status().is_success() {
         return Err(anyhow!("control GET status {}", resp.status()));
     }
-    let body: octravpn_core::control::SessionStateResponse =
-        resp.json().await.context("decode session state")?;
-    body.latest
-        .ok_or_else(|| anyhow!("no receipts collected during session"))
-}
-
-/// Submit a single client-signed receipt to the exit node and return the
-/// node's co-signed version.
-pub async fn push_receipt(
-    wg_endpoint: &str,
-    receipt: Receipt,
-    session_kp: &KeyPair,
-) -> Result<SignedReceipt> {
-    let host = wg_endpoint
-        .rsplit_once(':')
-        .map(|(h, _)| h)
-        .unwrap_or(wg_endpoint);
-    let payload = receipt.signing_payload();
-    let client_sig = session_kp.sign(&payload);
-    let req = octravpn_core::control::SubmitReceiptRequest {
-        receipt: receipt.clone(),
-        client_pubkey: session_kp.public,
-        client_sig,
-    };
-    let url = format!("http://{host}:51821/session/{}/receipt", receipt.session_id.to_hex());
-    let resp = reqwest::Client::new()
-        .post(&url)
-        .json(&req)
-        .send()
-        .await
-        .context("push receipt")?;
-    if !resp.status().is_success() {
-        return Err(anyhow!("push receipt status {}", resp.status()));
-    }
-    let body: octravpn_core::control::SubmitReceiptResponse =
-        resp.json().await.context("decode submit response")?;
-    Ok(body.signed)
+    let body: SessionStateResponse = resp.json().await.context("decode session state")?;
+    body.proposed.ok_or_else(|| anyhow!("no proposed receipt"))
 }

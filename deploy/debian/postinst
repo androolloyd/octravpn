@@ -1,0 +1,20 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+  configure)
+    getent group octravpn >/dev/null || groupadd --system octravpn
+    getent passwd octravpn >/dev/null || useradd --system --gid octravpn \
+      --no-create-home --shell /usr/sbin/nologin octravpn
+    install -d -o octravpn -g octravpn -m 0750 /etc/octravpn /var/lib/octravpn /var/log/octravpn
+    if command -v setcap >/dev/null 2>&1; then
+      setcap cap_net_admin,cap_net_bind_service+ep /usr/local/bin/octravpn-node || true
+    fi
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+    ;;
+esac
+
+#DEBHELPER#
+exit 0

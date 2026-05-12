@@ -1,11 +1,11 @@
 //! Dual-signed receipts.
 //!
 //! Each receipt carries a *plaintext* `bytes_used` count plus signatures
-//! from both the client's ephemeral session key and the exit node's WG
-//! key. The dual-signature is what makes equivocation slashable: if the
-//! exit node ever signs two different `bytes_used` values for the same
-//! `(session_id, seq)`, anyone can submit both signatures as evidence
-//! and slash the validator's bond.
+//! from both the client's ephemeral session key and the exit node's
+//! receipt-signing key. The dual-signature is what makes equivocation
+//! slashable: if the exit ever signs two different `bytes_used` values
+//! for the same `(session_id, seq)`, anyone can submit both signatures
+//! as evidence and slash the validator's bond.
 //!
 //! Canonical signing payload (binary, deterministic):
 //!
@@ -14,18 +14,14 @@
 //! session_id      = 32 bytes
 //! seq             = u64 big-endian
 //! bytes_used      = u64 big-endian
-//! blind           = 32 bytes (Curve25519 scalar canonical form)
+//! blind           = 32 bytes (Pedersen blinding scalar canonical form)
 //! ```
-//!
-//! The `blind` is the Pedersen blinding the client commits to at session
-//! open; the chain uses it during settlement to update each hop's
-//! earnings ledger via curve-point addition.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    session::SessionId,
+    session::{Blind, SessionId},
     sig::{verify, KeyPair, PublicKey, Signature},
     CoreError, CoreResult,
 };
@@ -37,10 +33,7 @@ pub struct Receipt {
     pub session_id: SessionId,
     pub seq: u64,
     pub bytes_used: u64,
-    /// Pedersen blinding scalar for the earnings-ledger update at settle
-    /// time. Each receipt carries a fresh, independent blind so the chain
-    /// can credit each hop's ledger with `bytes_used*price*split * G + b*H`.
-    pub blind: [u8; 32],
+    pub blind: Blind,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,10 +61,10 @@ impl Receipt {
     pub fn signing_payload(&self) -> [u8; 32] {
         let mut h = Sha256::new();
         h.update(DOMAIN_RECEIPT);
-        h.update(self.session_id.0);
+        h.update(self.session_id.as_bytes());
         h.update(self.seq.to_be_bytes());
         h.update(self.bytes_used.to_be_bytes());
-        h.update(self.blind);
+        h.update(self.blind.as_bytes());
         h.finalize().into()
     }
 }
@@ -79,11 +72,7 @@ impl Receipt {
 impl SignedReceipt {
     /// Construct a fully-signed receipt. Both the client and the node
     /// sign the same canonical payload.
-    pub fn build(
-        receipt: Receipt,
-        client_kp: &KeyPair,
-        node_kp: &KeyPair,
-    ) -> Self {
+    pub fn build(receipt: Receipt, client_kp: &KeyPair, node_kp: &KeyPair) -> Self {
         let payload = receipt.signing_payload();
         Self {
             receipt,
@@ -120,7 +109,7 @@ pub fn canonical_payload(
     session_id: &SessionId,
     seq: u64,
     bytes_used: u64,
-    blind: &[u8; 32],
+    blind: &Blind,
 ) -> CoreResult<[u8; 32]> {
     Ok(Receipt {
         session_id: session_id.clone(),
@@ -144,10 +133,10 @@ mod tests {
         let client = fresh_kp();
         let node = fresh_kp();
         let r = Receipt {
-            session_id: SessionId([7u8; 32]),
+            session_id: SessionId::new([7u8; 32]),
             seq: 1,
             bytes_used: 1024 * 1024,
-            blind: [9u8; 32],
+            blind: Blind::new([9u8; 32]),
         };
         let sr = SignedReceipt::build(r, &client, &node);
         sr.verify().unwrap();
@@ -158,14 +147,13 @@ mod tests {
         let client = fresh_kp();
         let node = fresh_kp();
         let r = Receipt {
-            session_id: SessionId([0u8; 32]),
+            session_id: SessionId::new([0u8; 32]),
             seq: 1,
             bytes_used: 100,
-            blind: [1u8; 32],
+            blind: Blind::new([1u8; 32]),
         };
         let mut sr = SignedReceipt::build(r, &client, &node);
         sr.receipt.bytes_used = 200;
-        // Both sigs were over the original payload; any tampering invalidates.
         assert!(sr.verify().is_err());
     }
 
@@ -175,13 +163,12 @@ mod tests {
         let node = fresh_kp();
         let attacker = fresh_kp();
         let r = Receipt {
-            session_id: SessionId([3u8; 32]),
+            session_id: SessionId::new([3u8; 32]),
             seq: 1,
             bytes_used: 50,
-            blind: [2u8; 32],
+            blind: Blind::new([2u8; 32]),
         };
         let mut sr = SignedReceipt::build(r, &client, &node);
-        // Replace node's pubkey with attacker's — sig won't verify against it.
         sr.node_pubkey = attacker.public;
         assert!(matches!(sr.verify().unwrap_err(), ReceiptError::BadNodeSig));
     }
@@ -189,10 +176,10 @@ mod tests {
     #[test]
     fn monotonic_seq_check() {
         let r = Receipt {
-            session_id: SessionId([0u8; 32]),
+            session_id: SessionId::new([0u8; 32]),
             seq: 5,
             bytes_used: 0,
-            blind: [0u8; 32],
+            blind: Blind::new([0u8; 32]),
         };
         let sr = SignedReceipt::build(r, &fresh_kp(), &fresh_kp());
         assert!(sr.check_monotonic(4).is_ok());

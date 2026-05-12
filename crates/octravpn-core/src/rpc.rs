@@ -1,19 +1,19 @@
 //! Octra JSON-RPC 2.0 client.
 //!
-//! Implements the subset of methods OctraVPN actually needs (per the
+//! Implements the subset of methods `OctraVPN` actually needs (per the
 //! developer-docs RPC scheme page):
 //!
-//!   - node_status           (current epoch)
-//!   - octra_balance         (account state)
-//!   - octra_recommendedFee  (fee discovery)
-//!   - octra_submit          (signed tx submission)
-//!   - octra_transaction     (submission status)
-//!   - contract_call         (read-only program method)
-//!   - octra_compileAmlMulti (used in CI to verify program builds)
-//!   - octra_listContracts   (discovery)
-//!   - octra_privateTransfer (stealth payment, used by validators on claim)
-//!   - octra_stealthOutputs  (used by client/node to discover incoming stealth)
-//!   - octra_viewPubkey      (look up stealth view key for a node)
+//!   - `node_status`           (current epoch)
+//!   - `octra_balance`         (account state)
+//!   - `octra_recommendedFee`  (fee discovery)
+//!   - `octra_submit`          (signed tx submission)
+//!   - `octra_transaction`     (submission status)
+//!   - `contract_call`         (read-only program method)
+//!   - `octra_compileAmlMulti` (used in CI to verify program builds)
+//!   - `octra_listContracts`   (discovery)
+//!   - `octra_privateTransfer` (stealth payment, used by validators on claim)
+//!   - `octra_stealthOutputs`  (used by client/node to discover incoming stealth)
+//!   - `octra_viewPubkey`      (look up stealth view key for a node)
 //!
 //! All params are positional arrays (per the spec).
 
@@ -23,6 +23,18 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::{address::Address, CoreError, CoreResult};
+
+/// Heuristic: retry on network/server errors but not on client-side
+/// errors (bad params, missing method, invalid signature). Real Octra
+/// returns these in the json-rpc `error` field; HTTP 5xx and timeouts
+/// are likely transient.
+fn is_retryable(e: &CoreError) -> bool {
+    if let CoreError::Rpc(msg) = e {
+        msg.starts_with("send ") || msg.contains("HTTP 5") || msg.contains("timeout")
+    } else {
+        false
+    }
+}
 
 #[derive(Clone)]
 pub struct RpcClient {
@@ -68,16 +80,35 @@ impl RpcClient {
         }
     }
 
-    async fn call<T: DeserializeOwned>(
-        &self,
-        method: &str,
-        params: Value,
-    ) -> CoreResult<T> {
+    async fn call<T: DeserializeOwned>(&self, method: &str, params: Value) -> CoreResult<T> {
+        // Exponential backoff with jitter on transient failures (5xx,
+        // network errors). Up to 4 attempts, capped at ~3s total wait.
+        let mut last_err: Option<CoreError> = None;
+        let mut delay_ms: u64 = 100;
+        for attempt in 0..4 {
+            match self.call_once::<T>(method, &params).await {
+                Ok(v) => return Ok(v),
+                Err(e) if !is_retryable(&e) => return Err(e),
+                Err(e) => {
+                    last_err = Some(e);
+                    if attempt == 3 {
+                        break;
+                    }
+                    let jitter = (rand::random::<u64>() % 50).saturating_add(1);
+                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms + jitter)).await;
+                    delay_ms = (delay_ms * 2).min(1500);
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| CoreError::Rpc(format!("rpc {method}: retries exhausted"))))
+    }
+
+    async fn call_once<T: DeserializeOwned>(&self, method: &str, params: &Value) -> CoreResult<T> {
         let req = RpcRequest {
             jsonrpc: "2.0",
             id: 1,
             method,
-            params,
+            params: params.clone(),
         };
         let resp = self
             .http
@@ -86,6 +117,10 @@ impl RpcClient {
             .send()
             .await
             .map_err(|e| CoreError::Rpc(format!("send {method}: {e}")))?;
+        let status = resp.status();
+        if status.is_server_error() {
+            return Err(CoreError::Rpc(format!("rpc {method} HTTP {status}")));
+        }
         let resp: RpcResponse<T> = resp
             .json()
             .await
@@ -105,7 +140,7 @@ impl RpcClient {
     }
 
     pub async fn balance(&self, addr: &Address) -> CoreResult<BalanceResult> {
-        self.call("octra_balance", json!([addr.display])).await
+        self.call("octra_balance", json!([addr.display()])).await
     }
 
     pub async fn recommended_fee(&self, op_type: Option<&str>) -> CoreResult<FeeResult> {
@@ -123,13 +158,9 @@ impl RpcClient {
         params: &[Value],
         caller: Option<&Address>,
     ) -> CoreResult<Value> {
-        let mut p = vec![
-            json!(program_addr.display),
-            json!(method),
-            json!(params),
-        ];
+        let mut p = vec![json!(program_addr.display()), json!(method), json!(params)];
         if let Some(c) = caller {
-            p.push(json!(c.display));
+            p.push(json!(c.display()));
         }
         self.call("contract_call", json!(p)).await
     }
@@ -147,22 +178,32 @@ impl RpcClient {
     }
 
     pub async fn view_pubkey(&self, addr: &Address) -> CoreResult<ViewPubkeyResult> {
-        self.call("octra_viewPubkey", json!([addr.display])).await
+        self.call("octra_viewPubkey", json!([addr.display()])).await
     }
 
     pub async fn private_transfer(&self, tx: &Value) -> CoreResult<SubmitResult> {
         self.call("octra_privateTransfer", json!([tx])).await
     }
 
-    pub async fn stealth_outputs(
-        &self,
-        from_epoch: Option<u64>,
-    ) -> CoreResult<Vec<Value>> {
+    pub async fn stealth_outputs(&self, from_epoch: Option<u64>) -> CoreResult<Vec<Value>> {
         let params = match from_epoch {
             Some(e) => json!([e]),
             None => json!([]),
         };
         self.call("octra_stealthOutputs", params).await
+    }
+
+    /// Escape hatch for tests / new RPC methods not yet wrapped above.
+    /// Returns the raw `result` field on success.
+    pub async fn raw_call(&self, method: &str, params: Value) -> CoreResult<Value> {
+        self.call(method, params).await
+    }
+
+    /// `octra_isValidator(addr)` — true iff `addr` is a current Octra
+    /// protocol validator. Used by `register_endpoint` callers as a
+    /// pre-check (the program-side gate is the authoritative one).
+    pub async fn is_octra_validator(&self, addr: &Address) -> CoreResult<bool> {
+        self.call("octra_isValidator", json!([addr.display()])).await
     }
 }
 

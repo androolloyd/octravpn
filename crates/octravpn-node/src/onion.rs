@@ -8,17 +8,24 @@
 //!
 //! Subsequent tunnel packets reuse the cached route.
 
-use std::{collections::HashMap, sync::atomic::{AtomicU64, Ordering}};
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use octravpn_core::{onion::HopAction, session::SessionId};
 use parking_lot::RwLock;
 
 #[derive(Default)]
-pub struct OnionRouter {
+pub(crate) struct OnionRouter {
     sessions: RwLock<HashMap<SessionId, SessionRoute>>,
+    /// Cumulative bytes seen across all sessions (survives session eviction).
+    /// Exposed via /metrics as `octravpn_bytes_served_total`.
+    bytes_total_in: AtomicU64,
+    bytes_total_out: AtomicU64,
 }
 
-pub struct SessionRoute {
+pub(crate) struct SessionRoute {
     pub action: HopAction,
     pub bytes_in: AtomicU64,
     pub bytes_out: AtomicU64,
@@ -35,31 +42,40 @@ impl Clone for SessionRoute {
 }
 
 impl OnionRouter {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    pub fn install(&self, session: SessionId, action: HopAction) {
-        self.sessions.write().insert(
-            session,
-            SessionRoute {
+    /// Install a route for a session. Idempotent: subsequent calls with
+    /// the same `session_id` are a no-op (preserving accumulated byte
+    /// counters), so the per-packet hot path may call it unconditionally.
+    pub(crate) fn install(&self, session: SessionId, action: HopAction) {
+        self.sessions
+            .write()
+            .entry(session)
+            .or_insert_with(|| SessionRoute {
                 action,
                 bytes_in: AtomicU64::new(0),
                 bytes_out: AtomicU64::new(0),
-            },
-        );
+            });
     }
 
-    pub fn record_bytes(&self, session: &SessionId, dir: Direction, n: u64) {
+    pub(crate) fn record_bytes(&self, session: &SessionId, dir: Direction, n: u64) {
         if let Some(route) = self.sessions.read().get(session) {
             match dir {
-                Direction::In => route.bytes_in.fetch_add(n, Ordering::Relaxed),
-                Direction::Out => route.bytes_out.fetch_add(n, Ordering::Relaxed),
-            };
+                Direction::In => {
+                    route.bytes_in.fetch_add(n, Ordering::Relaxed);
+                    self.bytes_total_in.fetch_add(n, Ordering::Relaxed);
+                }
+                Direction::Out => {
+                    route.bytes_out.fetch_add(n, Ordering::Relaxed);
+                    self.bytes_total_out.fetch_add(n, Ordering::Relaxed);
+                }
+            }
         }
     }
 
-    pub fn bytes(&self, session: &SessionId) -> Option<(u64, u64)> {
+    pub(crate) fn bytes(&self, session: &SessionId) -> Option<(u64, u64)> {
         self.sessions.read().get(session).map(|r| {
             (
                 r.bytes_in.load(Ordering::Relaxed),
@@ -68,17 +84,15 @@ impl OnionRouter {
         })
     }
 
-    pub fn action(&self, session: &SessionId) -> Option<HopAction> {
-        self.sessions.read().get(session).map(|r| r.action.clone())
-    }
-
-    pub fn close(&self, session: &SessionId) {
-        self.sessions.write().remove(session);
+    /// Cumulative bytes (in + out) across all sessions ever served.
+    pub(crate) fn total_bytes(&self) -> u64 {
+        self.bytes_total_in.load(Ordering::Relaxed)
+            + self.bytes_total_out.load(Ordering::Relaxed)
     }
 }
 
 #[derive(Clone, Copy)]
-pub enum Direction {
+pub(crate) enum Direction {
     In,
     Out,
 }
@@ -90,15 +104,12 @@ mod tests {
     #[test]
     fn install_and_count() {
         let r = OnionRouter::new();
-        let id = SessionId([1u8; 32]);
+        let id = SessionId::new([1u8; 32]);
         r.install(id.clone(), HopAction::Egress);
         r.record_bytes(&id, Direction::In, 100);
         r.record_bytes(&id, Direction::Out, 50);
         let (i, o) = r.bytes(&id).unwrap();
         assert_eq!(i, 100);
         assert_eq!(o, 50);
-        assert!(matches!(r.action(&id).unwrap(), HopAction::Egress));
-        r.close(&id);
-        assert!(r.bytes(&id).is_none());
     }
 }

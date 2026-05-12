@@ -1,0 +1,13 @@
+[Unit]
+Description=OctraVPN one-shot attestation refresh
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=octravpn
+Group=octravpn
+ExecStart=/usr/local/bin/octravpn-node --config /etc/octravpn/node.toml attest
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true

@@ -1,18 +1,23 @@
 /*
- * OctraVPN protocol model in Tamarin.
+ * OctraVPN protocol model in Tamarin (tailnet edition).
  *
  * Models the OctraVPN crypto-protocol surface under a Dolev-Yao adversary:
  *
- *   - Validator registration (signed attestation, on-chain bond).
+ *   - Endpoint registration (caller is an Octra protocol validator;
+ *     in-program bond and attestation are delegated to Octra's protocol
+ *     layer, which Tamarin abstracts as a long-term key holder).
  *   - Session opening (route commitments, ephemeral session pubkey).
  *   - Receipt signing & monotonic seq.
  *   - Settlement.
- *   - Equivocation (double-sign) detection.
+ *   - Equivocation (double-sign) detection — slashing is now applied at
+ *     the Octra protocol layer rather than in our program, but the proof
+ *     obligation is the same: any double-sign by an endpoint yields a
+ *     `Slashed` event (observed off-band by Octra).
  *
  * What the adversary can do:
  *   - Read all network messages (Out facts).
  *   - Inject any message it can derive (In facts).
- *   - Compromise individual validator long-term keys (Reveal_Validator).
+ *   - Compromise individual endpoint long-term keys (Reveal_Validator).
  *   - Compromise individual session ephemeral keys (Reveal_Session).
  *
  * Properties checked:
@@ -20,9 +25,10 @@
  *      whose ephemeral session key was never compromised AND was never
  *      signed by the legitimate client.
  *   2. DoubleSignSlashable: any two distinct receipts signed by the same
- *      validator key for the same (session, seq) implies a slash event.
+ *      endpoint key for the same (session, seq) implies a slash event
+ *      (now at protocol layer rather than in our program).
  *   3. NoLinkBeforeSettle: while a session is "open", the chain message
- *      stream contains no fact linking a particular validator address to
+ *      stream contains no fact linking a particular endpoint address to
  *      this session_id (commitments only).
  *
  * Tamarin command:  tamarin-prover --prove octravpn.spthy
@@ -124,13 +130,63 @@ restriction equivocation_real:
         Ex pa #ja. ValidatorSigned(v, s, seq, ca, pa) @ ja & ja < i &
         Ex pb #jb. ValidatorSigned(v, s, seq, cb, pb) @ jb & jb < i"
 
+/* ---------- Multi-hop: 2-hop and 3-hop session models ---------- */
+
+/* Open a 2-hop session: client commits to V1 (entry) and V2 (exit). */
+rule Open_Session_2Hop:
+    [ Fr(~ssk), Fr(~b1), Fr(~b2),
+      !Validator($V1, ~v1sk, vp1),
+      !Validator($V2, ~v2sk, vp2) ]
+  --[ SessionOpened2($S, ~ssk, $V1, $V2, ~b1, ~b2) ]->
+    [ !Session2($S, ~ssk, pk(~ssk), $V1, $V2, ~b1, ~b2),
+      Out(<'open_session2', $S, pk(~ssk), commit($V1, ~b1), commit($V2, ~b2)>) ]
+
+rule Open_Session_3Hop:
+    [ Fr(~ssk), Fr(~b1), Fr(~b2), Fr(~b3),
+      !Validator($V1, ~v1sk, vp1),
+      !Validator($V2, ~v2sk, vp2),
+      !Validator($V3, ~v3sk, vp3) ]
+  --[ SessionOpened3($S, ~ssk, $V1, $V2, $V3, ~b1, ~b2, ~b3) ]->
+    [ !Session3($S, ~ssk, pk(~ssk), $V1, $V2, $V3, ~b1, ~b2, ~b3),
+      Out(<'open_session3', $S, pk(~ssk),
+            commit($V1, ~b1), commit($V2, ~b2), commit($V3, ~b3)>) ]
+
+/* In multi-hop, only the EXIT signs the receipt jointly with the client.
+   Intermediate hops earn via the same final receipt + their stored
+   commitments (revealed at settle). The exit-side signature is what
+   matters for unforgeability. */
+
+rule Settle_Session_3Hop:
+    let m = <'octravpn-receipt-v1', $S, $seq, $ct>
+    in
+    [ !Session3($S, ~ssk, sp, $V1, $V2, $V3, ~b1, ~b2, ~b3),
+      !Validator($V3, ~v3sk, vp3),
+      In(<'settle3', $S, $seq, $V1, $V2, $V3, ~b1, ~b2, ~b3, $ct, sigC, sigE, sp, vp3>) ]
+  --[ Settled3($S, $seq, $V1, $V2, $V3, $ct),
+      VerifyClientSig($S, sigC, sp, m),
+      VerifyExitSig($S, sigE, vp3, m) ]->
+    [ Out(<'settled3', $S, $seq, $V1, $V2, $V3>) ]
+
+restriction exit_sig_ok:
+    "All s sig vp m #i. VerifyExitSig(s, sig, vp, m)@i ==>
+        Ex v ct #j.
+            ValidatorSigned(v, s, fst(snd(m)), ct, vp) @ j & j < i"
+
 /* =================== PROPERTIES =================== */
 
-/* P1: A receipt accepted by Settle implies the client actually signed it
-   (or its session key was compromised). */
+/* P1: Settled receipt implies a real client signature
+   (or the session key was compromised). */
 lemma ReceiptUnforgeability:
     "All s seq v ct #i.
         Settled(s, seq, v, ct) @ i
+        ==> (Ex p #j. ClientSigned(s, seq, ct, p) @ j & j < i)
+            | (Ex #j. Reveal_Session(s) @ j & j < i)"
+
+/* P1b: Same property for 3-hop settlement — the exit's settle requires
+   both client and exit signatures over the same message. */
+lemma ReceiptUnforgeability_3Hop:
+    "All s seq v1 v2 v3 ct #i.
+        Settled3(s, seq, v1, v2, v3, ct) @ i
         ==> (Ex p #j. ClientSigned(s, seq, ct, p) @ j & j < i)
             | (Ex #j. Reveal_Session(s) @ j & j < i)"
 
@@ -142,13 +198,29 @@ lemma DoubleSignSlashable:
         not(ca = cb)
         ==> Ex #k. Slashed(v, s, seq) @ k"
 
-/* P3: Until settlement, no on-chain message reveals the validator address
-   for an open session — the route commitment hides it. Stated as: the
-   adversary cannot derive the validator address V from observation
-   without compromising vsk or seeing settlement. */
+/* P3 (single-hop): adversary cannot derive validator V from observation
+   alone for an open session — route commitment hides it. */
 lemma NoLinkBeforeSettle:
     "All s v b #i. SessionOpened(s, _, v, b) @ i
         ==> not(Ex #j. KU(v) @ j & j < i)
             | (Ex vsk #k. Reveal_Validator(v) @ k & k < i)"
+
+/* P3b: 2-hop unlinkability — neither V1 nor V2 is derivable. */
+lemma NoLinkBeforeSettle_2Hop:
+    "All s v1 v2 b1 b2 #i. SessionOpened2(s, _, v1, v2, b1, b2) @ i
+        ==> (not(Ex #j. KU(v1) @ j & j < i) &
+             not(Ex #k. KU(v2) @ k & k < i))
+            | (Ex #j. Reveal_Validator(v1) @ j & j < i)
+            | (Ex #k. Reveal_Validator(v2) @ k & k < i)"
+
+/* P3c: 3-hop unlinkability — entry / middle / exit all hidden. */
+lemma NoLinkBeforeSettle_3Hop:
+    "All s v1 v2 v3 b1 b2 b3 #i. SessionOpened3(s, _, v1, v2, v3, b1, b2, b3) @ i
+        ==> (not(Ex #j. KU(v1) @ j & j < i) &
+             not(Ex #k. KU(v2) @ k & k < i) &
+             not(Ex #l. KU(v3) @ l & l < i))
+            | (Ex #j. Reveal_Validator(v1) @ j & j < i)
+            | (Ex #k. Reveal_Validator(v2) @ k & k < i)
+            | (Ex #l. Reveal_Validator(v3) @ l & l < i)"
 
 end

@@ -2,7 +2,7 @@
 //!
 //! Each validator has an earnings ledger entry: a single Ristretto point
 //!
-//!   E_v = a_v * G + r_v * H
+//!   `E_v` = `a_v` * G + `r_v` * H
 //!
 //! where `a_v` is the cumulative earned OCT and `r_v` is the cumulative
 //! blinding. Both `a_v` and `r_v` accumulate by simple curve-point
@@ -18,6 +18,8 @@
 //! adversary: there's only one `(a, r)` pair satisfying the equation
 //! for a given E, but extracting it still requires DLP. The validator
 //! tracks `r_v` off-chain by accumulating each settlement's blind.
+
+use std::sync::OnceLock;
 
 use curve25519_dalek::{
     constants::RISTRETTO_BASEPOINT_TABLE,
@@ -53,12 +55,17 @@ impl LedgerPoint {
     }
 }
 
-/// Second Pedersen generator H, with unknown discrete log w.r.t. G.
-/// Derived deterministically so client/node/chain agree.
+/// Second Pedersen generator H.
+///
+/// Derived deterministically with unknown DL w.r.t. G so client/node/chain
+/// agree. Cached after first call.
 pub fn h_generator() -> RistrettoPoint {
-    let mut hash = Sha512::new();
-    hash.update(b"octravpn-earnings-H-v1");
-    RistrettoPoint::from_uniform_bytes(&hash.finalize().into())
+    static H: OnceLock<RistrettoPoint> = OnceLock::new();
+    *H.get_or_init(|| {
+        let mut hash = Sha512::new();
+        hash.update(b"octravpn-earnings-H-v1");
+        RistrettoPoint::from_uniform_bytes(&hash.finalize().into())
+    })
 }
 
 /// Encode an unsigned 64-bit amount as a Curve25519 scalar.
@@ -104,12 +111,8 @@ pub fn scalar_to_bytes(s: &Scalar) -> [u8; 32] {
 
 /// Decode a scalar from its 32-byte canonical form.
 pub fn scalar_from_bytes(b: &[u8; 32]) -> Result<Scalar, CoreError> {
-    let ct = Scalar::from_canonical_bytes(*b);
-    if bool::from(ct.is_some()) {
-        Ok(ct.unwrap())
-    } else {
-        Err(CoreError::Crypto("non-canonical scalar".into()))
-    }
+    Option::<Scalar>::from(Scalar::from_canonical_bytes(*b))
+        .ok_or_else(|| CoreError::Crypto("non-canonical scalar".into()))
 }
 
 #[cfg(test)]

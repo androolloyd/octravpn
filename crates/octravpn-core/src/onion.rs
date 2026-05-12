@@ -31,7 +31,7 @@ use std::io::{Cursor, Read};
 
 use chacha20poly1305::{
     aead::{Aead, KeyInit},
-    ChaCha20Poly1305, Nonce, Key,
+    ChaCha20Poly1305, Key, Nonce,
 };
 use hkdf::Hkdf;
 use rand::rngs::OsRng;
@@ -118,11 +118,7 @@ pub struct HopBuildInput {
     pub endpoint: String,
 }
 
-fn wrap_layer(
-    static_pk: &[u8; 32],
-    header: &[u8],
-    inner: &[u8],
-) -> Result<Vec<u8>, OnionError> {
+fn wrap_layer(static_pk: &[u8; 32], header: &[u8], inner: &[u8]) -> Result<Vec<u8>, OnionError> {
     let eph_secret = EphemeralSecret::random_from_rng(OsRng);
     let eph_pub = X25519Pub::from(&eph_secret);
     let shared = eph_secret.diffie_hellman(&X25519Pub::from(*static_pk));
@@ -164,10 +160,7 @@ pub struct PeeledLayer {
 }
 
 /// Peel one layer: ECDH against our static secret, decrypt, parse header.
-pub fn peel_layer(
-    static_secret: &StaticSecret,
-    packet: &[u8],
-) -> Result<PeeledLayer, OnionError> {
+pub fn peel_layer(static_secret: &StaticSecret, packet: &[u8]) -> Result<PeeledLayer, OnionError> {
     if packet.len() < 32 + 16 {
         return Err(OnionError::Malformed);
     }
@@ -256,23 +249,27 @@ mod tests {
 
         // Hop 1: Forward to node2.
         let p1 = peel_layer(&sk1, &onion).unwrap();
-        match p1.action {
-            HopAction::Forward { endpoint, next_static_pubkey } => {
-                assert_eq!(endpoint, "node2:51820");
-                assert_eq!(next_static_pubkey, pk2);
-            }
-            _ => panic!("hop1 must forward"),
-        }
+        let HopAction::Forward {
+            endpoint,
+            next_static_pubkey,
+        } = p1.action
+        else {
+            panic!("hop1 must forward");
+        };
+        assert_eq!(endpoint, "node2:51820");
+        assert_eq!(next_static_pubkey, pk2);
 
         // Hop 2: Forward to node3.
         let p2 = peel_layer(&sk2, &p1.inner).unwrap();
-        match p2.action {
-            HopAction::Forward { endpoint, next_static_pubkey } => {
-                assert_eq!(endpoint, "node3:51820");
-                assert_eq!(next_static_pubkey, pk3);
-            }
-            _ => panic!("hop2 must forward"),
-        }
+        let HopAction::Forward {
+            endpoint,
+            next_static_pubkey,
+        } = p2.action
+        else {
+            panic!("hop2 must forward");
+        };
+        assert_eq!(endpoint, "node3:51820");
+        assert_eq!(next_static_pubkey, pk3);
 
         // Hop 3: Egress with the final payload.
         let p3 = peel_layer(&sk3, &p2.inner).unwrap();
@@ -285,7 +282,10 @@ mod tests {
         let (pk, _sk) = fresh_static();
         let (_pk_other, sk_other) = fresh_static();
         let onion = build_onion(
-            &[HopBuildInput { static_pubkey: pk, endpoint: "x".into() }],
+            &[HopBuildInput {
+                static_pubkey: pk,
+                endpoint: "x".into(),
+            }],
             b"x",
         )
         .unwrap();

@@ -6,10 +6,10 @@ use proptest::prelude::*;
 proptest! {
     #[test]
     fn session_id_hex_round_trip(bytes in any::<[u8; 32]>()) {
-        let id = SessionId(bytes);
+        let id = SessionId::new(bytes);
         let s = id.to_hex();
         let parsed = SessionId::from_hex(&s).unwrap();
-        prop_assert_eq!(parsed.0, bytes);
+        prop_assert_eq!(parsed.into_bytes(), bytes);
     }
 
     #[test]

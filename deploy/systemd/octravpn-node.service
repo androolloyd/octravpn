@@ -1,0 +1,48 @@
+[Unit]
+Description=OctraVPN validator-side node daemon
+Documentation=https://github.com/octra-labs/octravpn
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=octravpn
+Group=octravpn
+
+# Use the bond-staking + signing keypair living under /etc/octravpn.
+ExecStart=/usr/local/bin/octravpn-node --config /etc/octravpn/node.toml run
+
+# Restart on crash with a small backoff.
+Restart=on-failure
+RestartSec=5s
+
+# Hardening.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/octravpn /var/log/octravpn
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+# TUN device requires CAP_NET_ADMIN; CAP_NET_BIND_SERVICE lets us bind 51820/udp.
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+
+# Resource limits.
+LimitNOFILE=65536
+TasksMax=512
+
+# Standard out -> journal.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=octravpn-node
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=multi-user.target

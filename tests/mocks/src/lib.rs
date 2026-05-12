@@ -1,48 +1,54 @@
 //! In-memory mock of the Octra JSON-RPC surface OctraVPN exercises.
 //!
-//! Implements just enough of the documented method surface for the
-//! e2e tests: register/attest validators, open/settle/refund sessions,
-//! claim earnings, list active validators, fetch tx events.
+//! Implements the tailnet model: endpoint registration gated on the
+//! caller being an Octra protocol validator (the `octra_validators`
+//! set inside `ChainState`); tailnets with treasuries and member sets;
+//! sessions scoped to tailnets.
 //!
-//! The mock advances epoch by one each accepted submission so
-//! attestation grace logic can be exercised in tests.
+//! The mock advances epoch by one each accepted submission so any
+//! epoch-driven logic can be exercised in tests.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     net::SocketAddr,
     sync::Arc,
 };
 
-use axum::{
-    extract::State,
-    response::IntoResponse,
-    routing::post,
-    Json, Router,
-};
+use axum::{extract::State, response::IntoResponse, routing::post, Json, Router};
 use parking_lot::RwLock;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use curve25519_dalek::{
-    constants::RISTRETTO_BASEPOINT_TABLE, ristretto::RistrettoPoint,
-    scalar::Scalar, traits::Identity,
+    constants::RISTRETTO_BASEPOINT_TABLE, ristretto::RistrettoPoint, scalar::Scalar,
+    traits::Identity,
+};
+use octravpn_core::{
+    coverage as cov,
+    earnings::{h_generator, scalar_from_bytes},
 };
 
-fn scalar_from_canonical_bytes(b: [u8; 32]) -> Option<Scalar> {
-    let ct = Scalar::from_canonical_bytes(b);
-    if bool::from(ct.is_some()) {
-        Some(ct.unwrap())
-    } else {
-        None
+/// Local shim so handler call sites read `coverage::record(...)`.
+mod coverage {
+    pub(crate) fn record(method: &str, branch: &str) {
+        super::cov::record(method, branch);
     }
 }
 
 #[derive(Clone, Default)]
 pub struct ChainState {
     pub epoch: u64,
-    pub validators: HashMap<String, ValidatorRow>,
+    /// Addresses currently registered as protocol-level Octra validators.
+    /// `register_endpoint` requires the caller to be in this set.
+    pub octra_validators: HashSet<String>,
+    pub endpoints: HashMap<String, EndpointRow>,
+    pub tailnets: HashMap<String, TailnetRow>,
     pub sessions: HashMap<String, SessionRow>,
+    /// device_addr → wallet_addr that owns it (multi-device per identity).
+    pub device_owner: HashMap<String, String>,
+    /// Set of nonces that have been redeemed via `redeem_join_token`.
+    pub redeemed_nonces: HashSet<String>,
     pub balances: HashMap<String, u64>,
     pub txs: HashMap<String, TxRow>,
     pub stealth_outputs: Vec<Value>,
@@ -50,29 +56,39 @@ pub struct ChainState {
 }
 
 #[derive(Clone)]
-pub struct ValidatorRow {
+pub struct EndpointRow {
     pub addr: String,
-    pub bond: u64,
+    pub active: bool,
     pub endpoint: String,
     pub wg_pubkey: String,
+    pub receipt_pubkey: String,
     pub view_pubkey: String,
     pub region: String,
     pub price_per_mb: u64,
     pub registered_at: u64,
-    pub last_attest_epoch: u64,
-    pub jailed_at: u64,
     pub reputation: i64,
 }
 
 #[derive(Clone)]
+pub struct TailnetRow {
+    pub id: String,
+    pub owner: String,
+    pub treasury: u64,
+    pub members: HashSet<String>,
+    pub exits: HashSet<String>,
+    pub acl_policy: String,
+    pub created_at: u64,
+}
+
+#[derive(Clone)]
 pub struct SessionRow {
+    pub tailnet_id: String,
     pub deposit: u64,
     pub opened_at: u64,
-    pub status: u8, // 0 open, 1 settled, 2 refunded, 3 slashed
+    pub status: u8, // 0 open, 1 settled, 2 refunded
     pub last_seq: u64,
     pub route_commit: Vec<String>,
     pub client_session_pubkey: String,
-    pub refund_stealth_output: String,
 }
 
 #[derive(Clone)]
@@ -87,6 +103,19 @@ pub struct TxRow {
 pub struct AppState {
     pub state: Arc<RwLock<ChainState>>,
     pub program_addr: String,
+}
+
+impl AppState {
+    /// Test helper: mark `addr` as an Octra protocol validator. Required
+    /// before `register_endpoint` will succeed for that address.
+    pub fn add_octra_validator(&self, addr: impl Into<String>) {
+        self.state.write().octra_validators.insert(addr.into());
+    }
+
+    /// Test helper: remove `addr` from the Octra validator set.
+    pub fn remove_octra_validator(&self, addr: &str) {
+        self.state.write().octra_validators.remove(addr);
+    }
 }
 
 pub fn build_router(app: AppState) -> Router {
@@ -105,10 +134,7 @@ struct RpcReq {
     params: Value,
 }
 
-async fn rpc_handler(
-    State(app): State<AppState>,
-    Json(req): Json<RpcReq>,
-) -> impl IntoResponse {
+async fn rpc_handler(State(app): State<AppState>, Json(req): Json<RpcReq>) -> impl IntoResponse {
     let _ = req.jsonrpc;
     let result = match req.method.as_str() {
         "node_status" => Ok(node_status(&app)),
@@ -122,6 +148,11 @@ async fn rpc_handler(
             "address": app.program_addr,
             "name": "OctraVPN"
         }])),
+        "octra_isValidator" => Ok(octra_is_validator(&app, &req.params)),
+        // Test-only helpers — present in the mock so e2e tests can
+        // pre-seed protocol-validator membership over the wire.
+        "octra_test_grantValidator" => Ok(test_grant_validator(&app, &req.params)),
+        "octra_test_revokeValidator" => Ok(test_revoke_validator(&app, &req.params)),
         "contract_call" => contract_call(&app, &req.params),
         "octra_viewPubkey" => Ok(json!({"view_pubkey": "00".repeat(32)})),
         "octra_privateTransfer" => Ok(json!({"hash": "deadbeef"})),
@@ -129,6 +160,9 @@ async fn rpc_handler(
             let s = app.state.read();
             Ok(json!(s.stealth_outputs))
         }
+        "octra_compileAml" => octra_compile_aml(&req.params),
+        "octra_compileAmlMulti" => octra_compile_aml_multi(&req.params),
+        "epoch_get" => Ok(epoch_get(&app, &req.params)),
         _ => Err(format!("unknown method: {}", req.method)),
     };
     match result {
@@ -152,25 +186,51 @@ fn node_status(app: &AppState) -> Value {
     })
 }
 
+fn octra_is_validator(app: &AppState, params: &Value) -> Value {
+    let addr = params
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    json!(app.state.read().octra_validators.contains(addr))
+}
+
+fn test_grant_validator(app: &AppState, params: &Value) -> Value {
+    if let Some(addr) = params
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|v| v.as_str())
+    {
+        app.add_octra_validator(addr);
+    }
+    Value::Bool(true)
+}
+
+fn test_revoke_validator(app: &AppState, params: &Value) -> Value {
+    if let Some(addr) = params
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|v| v.as_str())
+    {
+        app.remove_octra_validator(addr);
+    }
+    Value::Bool(true)
+}
+
 fn octra_balance(app: &AppState, params: &Value) -> Result<Value, String> {
     let arr = params.as_array().ok_or("params not array")?;
     let addr = arr.first().and_then(|x| x.as_str()).ok_or("addr missing")?;
     let s = app.state.read();
-    let b = s.balances.get(addr).copied().unwrap_or(1_000_000_000);
+    let raw_balance = s.balances.get(addr).copied().unwrap_or(1_000_000_000);
+    #[allow(clippy::cast_precision_loss)]
+    let formatted = (raw_balance as f64 / 1_000_000.0).to_string();
     Ok(json!({
-        "formatted": (b as f64 / 1e9).to_string(),
-        "raw": b.to_string(),
+        "formatted": formatted,
+        "raw": raw_balance.to_string(),
         "nonce": 0u64,
         "pending_nonce": 0u64,
         "public_key": null,
     }))
-}
-
-fn h_generator() -> RistrettoPoint {
-    use sha2::Sha512;
-    let mut h = Sha512::new();
-    h.update(b"octravpn-earnings-H-v1");
-    RistrettoPoint::from_uniform_bytes(&h.finalize().into())
 }
 
 fn octra_submit(app: &AppState, params: &Value) -> Result<Value, String> {
@@ -191,11 +251,23 @@ fn octra_submit(app: &AppState, params: &Value) -> Result<Value, String> {
     let hash = hex::encode(hash_bytes.finalize());
 
     let events = match method.as_str() {
-        "register_validator" => apply_register(app, tx, &from)?,
-        "refresh_attestation" => apply_attest(app, &from)?,
+        "register_device" => apply_register_device(app, tx, &from)?,
+        "revoke_device" => apply_revoke_device(app, tx, &from)?,
+        "redeem_join_token" => apply_redeem_join_token(app, tx, &from)?,
+        "register_endpoint" => apply_register_endpoint(app, tx, &from)?,
+        "update_endpoint" => apply_update_endpoint(app, tx, &from)?,
+        "rotate_keys" => apply_rotate_keys(app, tx, &from)?,
+        "retire_endpoint" => apply_retire_endpoint(app, &from)?,
+        "create_tailnet" => apply_create_tailnet(app, tx, &from, &hash)?,
+        "add_member" => apply_add_member(app, tx, &from)?,
+        "remove_member" => apply_remove_member(app, tx, &from)?,
+        "deposit_to_tailnet" => apply_deposit_to_tailnet(app, tx, &from)?,
+        "configure_tailnet_exit" => apply_configure_tailnet_exit(app, tx, &from)?,
+        "update_acl" => apply_update_acl(app, tx, &from)?,
         "open_session" => apply_open_session(app, tx, &from, &hash)?,
         "settle_session" => apply_settle(app, tx)?,
         "claim_no_show" => apply_claim_no_show(app, tx)?,
+        "sweep_expired_session" => apply_sweep_expired_session(app, tx, &from)?,
         "claim_earnings" => apply_claim_earnings(app, tx)?,
         _ => Vec::new(),
     };
@@ -217,70 +289,429 @@ fn octra_submit(app: &AppState, params: &Value) -> Result<Value, String> {
     Ok(json!({"hash": hash, "status": "confirmed"}))
 }
 
-fn apply_register(app: &AppState, tx: &Value, from: &str) -> Result<Vec<Value>, String> {
-    let p = tx.get("params").and_then(|x| x.as_array()).ok_or("params")?;
+// ------------------------ endpoint handlers ------------------------
+
+fn apply_redeem_join_token(
+    app: &AppState,
+    tx: &Value,
+    from: &str,
+) -> Result<Vec<Value>, String> {
+    let p = tx
+        .get("params")
+        .and_then(|x| x.as_array())
+        .ok_or("params")?;
+    let tid = p
+        .first()
+        .and_then(|x| x.as_str())
+        .ok_or("tailnet_id missing")?
+        .to_string();
+    let expiry = p.get(1).and_then(serde_json::Value::as_u64).unwrap_or(0);
+    let nonce = p
+        .get(2)
+        .and_then(|x| x.as_str())
+        .ok_or("nonce missing")?
+        .to_string();
+    // The mock doesn't verify the owner signature (no on-chain pubkey
+    // resolver in the mock); production AML enforces it via
+    // `verify_ed25519_acct`. We do enforce expiry + replay.
+
+    let mut s = app.state.write();
+    if expiry < s.epoch {
+        return Err("token expired".into());
+    }
+    if s.redeemed_nonces.contains(&nonce) {
+        return Err("nonce already redeemed".into());
+    }
+    let t = s.tailnets.get_mut(&tid).ok_or("tailnet not found")?;
+    if t.members.contains(from) {
+        return Err("already member".into());
+    }
+    t.members.insert(from.to_string());
+    s.redeemed_nonces.insert(nonce.clone());
+    Ok(vec![
+        json!({
+            "name": "TailnetMemberAdded",
+            "tailnet_id": tid,
+            "member": from,
+        }),
+        json!({
+            "name": "JoinTokenRedeemed",
+            "tailnet_id": tid,
+            "member": from,
+            "nonce": nonce,
+        }),
+    ])
+}
+
+fn apply_register_device(
+    app: &AppState,
+    tx: &Value,
+    from: &str,
+) -> Result<Vec<Value>, String> {
+    let p = tx
+        .get("params")
+        .and_then(|x| x.as_array())
+        .ok_or("params")?;
+    let device = p
+        .first()
+        .and_then(|x| x.as_str())
+        .ok_or("device addr missing")?
+        .to_string();
+    let mut s = app.state.write();
+    if let Some(existing) = s.device_owner.get(&device) {
+        if existing == from {
+            return Ok(Vec::new()); // idempotent re-register
+        }
+        return Err("device already attached to another wallet".into());
+    }
+    s.device_owner.insert(device.clone(), from.to_string());
+    Ok(vec![json!({
+        "name": "DeviceRegistered",
+        "wallet": from,
+        "device": device,
+    })])
+}
+
+fn apply_revoke_device(
+    app: &AppState,
+    tx: &Value,
+    from: &str,
+) -> Result<Vec<Value>, String> {
+    let p = tx
+        .get("params")
+        .and_then(|x| x.as_array())
+        .ok_or("params")?;
+    let device = p
+        .first()
+        .and_then(|x| x.as_str())
+        .ok_or("device addr missing")?
+        .to_string();
+    let mut s = app.state.write();
+    match s.device_owner.get(&device) {
+        Some(owner) if owner == from => {
+            s.device_owner.remove(&device);
+            Ok(vec![json!({
+                "name": "DeviceRevoked",
+                "wallet": from,
+                "device": device,
+            })])
+        }
+        Some(_) => Err("not device owner".into()),
+        None => Err("device not registered".into()),
+    }
+}
+
+fn apply_register_endpoint(
+    app: &AppState,
+    tx: &Value,
+    from: &str,
+) -> Result<Vec<Value>, String> {
+    let p = tx
+        .get("params")
+        .and_then(|x| x.as_array())
+        .ok_or("params")?;
     let endpoint = p[0].as_str().unwrap_or("").to_string();
     let wg = p[1].as_str().unwrap_or("").to_string();
-    let view = p[2].as_str().unwrap_or("").to_string();
-    let region = p[3].as_str().unwrap_or("").to_string();
-    let price = p[4].as_u64().unwrap_or(0);
-    let bond = tx.get("value").and_then(|x| x.as_u64()).unwrap_or(0);
+    let receipt = p[2].as_str().unwrap_or("").to_string();
+    let view = p[3].as_str().unwrap_or("").to_string();
+    let region = p[4].as_str().unwrap_or("").to_string();
+    let price = p[5].as_u64().unwrap_or(0);
+
     let mut s = app.state.write();
+    coverage::record("register_endpoint", "require[1]"); // is_octra_validator
+    if !s.octra_validators.contains(from) {
+        return Err("not an Octra validator".into());
+    }
+    coverage::record("register_endpoint", "require[2]"); // already registered
+    if s.endpoints.contains_key(from) {
+        return Err("already registered".into());
+    }
+    coverage::record("register_endpoint", "require[3]"); // price > 0
+    if price == 0 {
+        return Err("price must be > 0".into());
+    }
     let epoch = s.epoch;
-    s.validators.insert(
+    s.endpoints.insert(
         from.to_string(),
-        ValidatorRow {
+        EndpointRow {
             addr: from.to_string(),
-            bond,
+            active: true,
             endpoint: endpoint.clone(),
             wg_pubkey: wg,
+            receipt_pubkey: receipt,
             view_pubkey: view,
             region: region.clone(),
             price_per_mb: price,
             registered_at: epoch,
-            last_attest_epoch: epoch,
-            jailed_at: 0,
             reputation: 0,
         },
     );
-    s.earnings.insert(from.to_string(), RistrettoPoint::identity());
+    s.earnings
+        .insert(from.to_string(), RistrettoPoint::identity());
     Ok(vec![json!({
-        "name": "ValidatorRegistered",
-        "validator": from,
-        "bond": bond,
+        "name": "EndpointRegistered",
+        "addr": from,
         "endpoint": endpoint,
         "region": region,
     })])
 }
 
-fn apply_attest(app: &AppState, from: &str) -> Result<Vec<Value>, String> {
+fn apply_update_endpoint(app: &AppState, tx: &Value, from: &str) -> Result<Vec<Value>, String> {
+    let p = tx
+        .get("params")
+        .and_then(|x| x.as_array())
+        .ok_or("params")?;
+    let endpoint = p[0].as_str().unwrap_or("").to_string();
+    let region = p[1].as_str().unwrap_or("").to_string();
+    let price = p[2].as_u64().unwrap_or(0);
+
     let mut s = app.state.write();
-    let epoch = s.epoch;
-    let v = s.validators.get_mut(from).ok_or("validator not registered")?;
-    v.last_attest_epoch = epoch;
+    let ep = s.endpoints.get_mut(from).ok_or("not registered")?;
+    if !ep.active {
+        return Err("endpoint retired".into());
+    }
+    if price == 0 {
+        return Err("price must be > 0".into());
+    }
+    ep.endpoint = endpoint;
+    ep.region = region;
+    ep.price_per_mb = price;
+    Ok(vec![json!({ "name": "EndpointUpdated", "addr": from })])
+}
+
+fn apply_rotate_keys(app: &AppState, tx: &Value, from: &str) -> Result<Vec<Value>, String> {
+    let p = tx
+        .get("params")
+        .and_then(|x| x.as_array())
+        .ok_or("params")?;
+    let wg = p[0].as_str().unwrap_or("").to_string();
+    let receipt = p[1].as_str().unwrap_or("").to_string();
+    let view = p[2].as_str().unwrap_or("").to_string();
+    let mut s = app.state.write();
+    let ep = s.endpoints.get_mut(from).ok_or("not registered")?;
+    if !ep.active {
+        return Err("endpoint retired".into());
+    }
+    ep.wg_pubkey = wg;
+    ep.receipt_pubkey = receipt;
+    ep.view_pubkey = view;
+    Ok(vec![json!({ "name": "KeysRotated", "addr": from })])
+}
+
+fn apply_retire_endpoint(app: &AppState, from: &str) -> Result<Vec<Value>, String> {
+    let mut s = app.state.write();
+    let ep = s.endpoints.get_mut(from).ok_or("not registered")?;
+    ep.active = false;
+    Ok(vec![json!({ "name": "EndpointRetired", "addr": from })])
+}
+
+// ------------------------- tailnet handlers -------------------------
+
+fn apply_create_tailnet(
+    app: &AppState,
+    tx: &Value,
+    from: &str,
+    hash: &str,
+) -> Result<Vec<Value>, String> {
+    let p = tx
+        .get("params")
+        .and_then(|x| x.as_array())
+        .ok_or("params")?;
+    let acl_policy = p
+        .first()
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    let deposit = tx
+        .get("value")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    if deposit == 0 {
+        return Err("tailnet deposit required".into());
+    }
+
+    let mut h = Sha256::new();
+    h.update(b"octravpn-tailnet");
+    h.update(hash.as_bytes());
+    let tid = hex::encode(h.finalize());
+
+    let mut s = app.state.write();
+    let created_at = s.epoch;
+    let mut members = HashSet::new();
+    members.insert(from.to_string());
+    s.tailnets.insert(
+        tid.clone(),
+        TailnetRow {
+            id: tid.clone(),
+            owner: from.to_string(),
+            treasury: deposit,
+            members,
+            exits: HashSet::new(),
+            acl_policy,
+            created_at,
+        },
+    );
+
+    Ok(vec![
+        json!({
+            "name": "TailnetCreated",
+            "tailnet_id": tid,
+            "owner": from,
+        }),
+        json!({
+            "name": "TailnetMemberAdded",
+            "tailnet_id": tid,
+            "member": from,
+        }),
+    ])
+}
+
+fn apply_add_member(app: &AppState, tx: &Value, from: &str) -> Result<Vec<Value>, String> {
+    let p = tx
+        .get("params")
+        .and_then(|x| x.as_array())
+        .ok_or("params")?;
+    let tid = p[0].as_str().unwrap_or("").to_string();
+    let member = p[1].as_str().unwrap_or("").to_string();
+    let mut s = app.state.write();
+    let t = s.tailnets.get_mut(&tid).ok_or("tailnet not found")?;
+    if t.owner != from {
+        return Err("not tailnet owner".into());
+    }
+    if t.members.contains(&member) {
+        return Err("already member".into());
+    }
+    t.members.insert(member.clone());
     Ok(vec![json!({
-        "name": "AttestationRefreshed",
-        "validator": from,
-        "epoch": epoch,
+        "name": "TailnetMemberAdded",
+        "tailnet_id": tid,
+        "member": member,
     })])
 }
+
+fn apply_remove_member(app: &AppState, tx: &Value, from: &str) -> Result<Vec<Value>, String> {
+    let p = tx
+        .get("params")
+        .and_then(|x| x.as_array())
+        .ok_or("params")?;
+    let tid = p[0].as_str().unwrap_or("").to_string();
+    let member = p[1].as_str().unwrap_or("").to_string();
+    let mut s = app.state.write();
+    let t = s.tailnets.get_mut(&tid).ok_or("tailnet not found")?;
+    if t.owner != from {
+        return Err("not tailnet owner".into());
+    }
+    if member == t.owner {
+        return Err("cannot remove owner".into());
+    }
+    if !t.members.remove(&member) {
+        return Err("not member".into());
+    }
+    Ok(vec![json!({
+        "name": "TailnetMemberRemoved",
+        "tailnet_id": tid,
+        "member": member,
+    })])
+}
+
+fn apply_deposit_to_tailnet(
+    app: &AppState,
+    tx: &Value,
+    _from: &str,
+) -> Result<Vec<Value>, String> {
+    let p = tx
+        .get("params")
+        .and_then(|x| x.as_array())
+        .ok_or("params")?;
+    let tid = p[0].as_str().unwrap_or("").to_string();
+    let amount = tx
+        .get("value")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    if amount == 0 {
+        return Err("no value".into());
+    }
+    let mut s = app.state.write();
+    let t = s.tailnets.get_mut(&tid).ok_or("tailnet not found")?;
+    t.treasury += amount;
+    let new_treasury = t.treasury;
+    Ok(vec![json!({
+        "name": "TailnetDeposit",
+        "tailnet_id": tid,
+        "amount": amount,
+        "new_treasury": new_treasury,
+    })])
+}
+
+fn apply_configure_tailnet_exit(
+    app: &AppState,
+    tx: &Value,
+    from: &str,
+) -> Result<Vec<Value>, String> {
+    let p = tx
+        .get("params")
+        .and_then(|x| x.as_array())
+        .ok_or("params")?;
+    let tid = p[0].as_str().unwrap_or("").to_string();
+    let exit_addr = p[1].as_str().unwrap_or("").to_string();
+    let mut s = app.state.write();
+    let exit_active = s.endpoints.get(&exit_addr).is_some_and(|e| e.active);
+    if !exit_active {
+        return Err("exit not registered or inactive".into());
+    }
+    let t = s.tailnets.get_mut(&tid).ok_or("tailnet not found")?;
+    if t.owner != from {
+        return Err("not tailnet owner".into());
+    }
+    t.exits.insert(exit_addr.clone());
+    Ok(vec![json!({
+        "name": "TailnetExitConfigured",
+        "tailnet_id": tid,
+        "exit_addr": exit_addr,
+    })])
+}
+
+fn apply_update_acl(app: &AppState, tx: &Value, from: &str) -> Result<Vec<Value>, String> {
+    let p = tx
+        .get("params")
+        .and_then(|x| x.as_array())
+        .ok_or("params")?;
+    let tid = p[0].as_str().unwrap_or("").to_string();
+    let new_acl = p[1].as_str().unwrap_or("").to_string();
+    let mut s = app.state.write();
+    let t = s.tailnets.get_mut(&tid).ok_or("tailnet not found")?;
+    if t.owner != from {
+        return Err("not tailnet owner".into());
+    }
+    t.acl_policy.clone_from(&new_acl);
+    Ok(vec![json!({
+        "name": "TailnetAclUpdated",
+        "tailnet_id": tid,
+        "acl_policy": new_acl,
+    })])
+}
+
+// ------------------------- session handlers --------------------------
 
 fn apply_open_session(
     app: &AppState,
     tx: &Value,
-    _from: &str,
+    from: &str,
     hash: &str,
 ) -> Result<Vec<Value>, String> {
-    let p = tx.get("params").and_then(|x| x.as_array()).ok_or("params")?;
-    let route_commit = p[0]
+    let p = tx
+        .get("params")
+        .and_then(|x| x.as_array())
+        .ok_or("params")?;
+    let tid = p[0].as_str().unwrap_or("").to_string();
+    let route_commit = p[1]
         .as_array()
         .ok_or("route_commit not array")?
         .iter()
         .filter_map(|v| v.as_str().map(String::from))
         .collect::<Vec<_>>();
-    let csp = p[1].as_str().unwrap_or("").to_string();
-    let stealth = p[2].as_str().unwrap_or("").to_string();
-    let deposit = tx.get("value").and_then(|x| x.as_u64()).unwrap_or(0);
+    let csp = p[2].as_str().unwrap_or("").to_string();
+    let deposit = p[3].as_u64().unwrap_or(0);
 
     let mut h = Sha256::new();
     h.update(b"octravpn-session");
@@ -289,50 +720,92 @@ fn apply_open_session(
 
     let mut s = app.state.write();
     let opened_at = s.epoch;
+    coverage::record("open_session", "require[1]"); // tailnet not found
+    // Resolve membership BEFORE taking a mut borrow on the tailnet row,
+    // so we can also look up the device-owner map (a sibling field of
+    // ChainState).
+    let device_owner = s.device_owner.get(from).cloned();
+    let t = s.tailnets.get_mut(&tid).ok_or("tailnet not found")?;
+    coverage::record("open_session", "require[2]"); // member check
+    let direct = t.members.contains(from);
+    let via_device = device_owner.as_deref().is_some_and(|w| t.members.contains(w));
+    if !direct && !via_device {
+        return Err("not a member".into());
+    }
+    coverage::record("open_session", "require[3]"); // deposit min
+    if deposit == 0 {
+        return Err("deposit must be > 0".into());
+    }
+    coverage::record("open_session", "require[4]"); // treasury sufficient
+    if t.treasury < deposit {
+        return Err("treasury insufficient".into());
+    }
+    coverage::record("open_session", "require[5]"); // route bounds (1..=3)
+    t.treasury -= deposit;
+
     s.sessions.insert(
         sid.clone(),
         SessionRow {
+            tailnet_id: tid.clone(),
             deposit,
             opened_at,
             status: 0,
             last_seq: 0,
             route_commit: route_commit.clone(),
             client_session_pubkey: csp,
-            refund_stealth_output: stealth,
         },
     );
 
     Ok(vec![json!({
         "name": "SessionOpened",
         "session_id": sid,
+        "tailnet_id": tid,
         "hops": route_commit.len(),
         "deposit": deposit,
         "opened_at": opened_at,
     })])
 }
 
-fn apply_settle(app: &AppState, tx: &Value) -> Result<Vec<Value>, String> {
-    let p = tx.get("params").and_then(|x| x.as_array()).ok_or("params")?;
-    let sid = p[0].as_str().unwrap_or("").to_string();
-    let seq = p[1].as_u64().unwrap_or(0);
-    let bytes_used = p[2].as_u64().unwrap_or(0);
-    let blind_hex = p[3].as_str().unwrap_or("");
-    let openings = p[6]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
+struct ParsedSettle {
+    sid: String,
+    seq: u64,
+    bytes_used: u64,
+    blind_scalar: Scalar,
+    openings: Vec<Value>,
+}
 
+fn parse_settle_params(tx: &Value) -> Result<ParsedSettle, String> {
+    let params = tx
+        .get("params")
+        .and_then(|x| x.as_array())
+        .ok_or("params")?;
+    let sid = params[0].as_str().unwrap_or("").to_string();
+    let seq = params[1].as_u64().unwrap_or(0);
+    let bytes_used = params[2].as_u64().unwrap_or(0);
+    let blind_hex = params[3].as_str().unwrap_or("");
+    let openings = params[6].as_array().cloned().unwrap_or_default();
     let blind_bytes = hex::decode(blind_hex).map_err(|e| format!("blind hex: {e}"))?;
     if blind_bytes.len() != 32 {
         return Err("blind not 32 bytes".into());
     }
     let mut blind_arr = [0u8; 32];
     blind_arr.copy_from_slice(&blind_bytes);
-    let blind_scalar = scalar_from_canonical_bytes(blind_arr)
-        .ok_or_else(|| "blind not canonical".to_string())?;
+    let blind_scalar = scalar_from_bytes(&blind_arr).map_err(|e| format!("blind: {e}"))?;
+    Ok(ParsedSettle {
+        sid,
+        seq,
+        bytes_used,
+        blind_scalar,
+        openings,
+    })
+}
 
-    let mut s = app.state.write();
-    let sess = s.sessions.get_mut(&sid).ok_or("session not found")?;
+fn validate_and_advance_session(
+    s: &mut ChainState,
+    sid: &str,
+    seq: u64,
+) -> Result<(String, u64), String> {
+    let sess = s.sessions.get_mut(sid).ok_or("session not found")?;
     if sess.status != 0 {
         return Err("session not open".into());
     }
@@ -341,57 +814,99 @@ fn apply_settle(app: &AppState, tx: &Value) -> Result<Vec<Value>, String> {
     }
     sess.status = 1;
     sess.last_seq = seq;
+    Ok((sess.tailnet_id.clone(), sess.deposit))
+}
 
-    let deposit = sess.deposit;
+fn credit_openings(
+    s: &mut ChainState,
+    bytes_used: u64,
+    blind_scalar: Scalar,
+    openings: &[Value],
+) -> Result<u64, String> {
     let mut total_paid: u64 = 0;
-    for op in &openings {
+    for op in openings {
         let node_addr = op
             .get("node_addr")
             .and_then(|x| x.as_str())
             .ok_or("opening node_addr")?;
         let split_bps = op
             .get("split_bps")
-            .and_then(|x| x.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
-        let v = s
-            .validators
+        let ep = s
+            .endpoints
             .get(node_addr)
             .ok_or("opening node not registered")?;
+        if !ep.active || !s.octra_validators.contains(node_addr) {
+            return Err("opening node inactive".into());
+        }
         let pay_v = bytes_used
-            .checked_mul(v.price_per_mb)
+            .checked_mul(ep.price_per_mb)
             .ok_or("overflow pay")?
             .checked_mul(split_bps)
             .ok_or("overflow split")?
             / 10_000;
-        total_paid = total_paid
-            .checked_add(pay_v)
-            .ok_or("overflow total")?;
-        let entry = s.earnings.entry(node_addr.to_string()).or_insert_with(RistrettoPoint::identity);
+        total_paid = total_paid.checked_add(pay_v).ok_or("overflow total")?;
+        let entry = s
+            .earnings
+            .entry(node_addr.to_string())
+            .or_insert_with(RistrettoPoint::identity);
         let scalar_pay = Scalar::from(pay_v);
         let g = &scalar_pay * RISTRETTO_BASEPOINT_TABLE;
         let h = blind_scalar * h_generator();
         *entry += g + h;
     }
+    Ok(total_paid)
+}
+
+fn apply_settle(app: &AppState, tx: &Value) -> Result<Vec<Value>, String> {
+    let p = parse_settle_params(tx)?;
+    let mut s = app.state.write();
+    coverage::record("settle_session", "require[1]"); // status == open
+    coverage::record("settle_session", "require[2]"); // seq > last
+    let (tid, deposit) = validate_and_advance_session(&mut s, &p.sid, p.seq)?;
+    coverage::record("settle_session", "while[1]"); // hop loop
+    let total_paid = credit_openings(&mut s, p.bytes_used, p.blind_scalar, &p.openings)?;
+    coverage::record("settle_session", "require[3]"); // claim <= deposit
     if total_paid > deposit {
         return Err("claim exceeds escrow".into());
     }
     let refund = deposit - total_paid;
-
+    if refund > 0 {
+        if let Some(t) = s.tailnets.get_mut(&tid) {
+            t.treasury += refund;
+        }
+    }
     Ok(vec![json!({
         "name": "SessionSettled",
-        "session_id": sid,
-        "seq": seq,
+        "session_id": p.sid,
+        "seq": p.seq,
         "total_paid": total_paid,
         "refund": refund,
     })])
 }
 
 fn apply_claim_no_show(app: &AppState, tx: &Value) -> Result<Vec<Value>, String> {
-    let p = tx.get("params").and_then(|x| x.as_array()).ok_or("params")?;
+    let p = tx
+        .get("params")
+        .and_then(|x| x.as_array())
+        .ok_or("params")?;
     let sid = p[0].as_str().unwrap_or("").to_string();
     let mut s = app.state.write();
-    let sess = s.sessions.get_mut(&sid).ok_or("session not found")?;
-    sess.status = 2;
+    let (tid, deposit) = {
+        let sess = s.sessions.get_mut(&sid).ok_or("session not found")?;
+        if sess.status != 0 {
+            return Err("session not open".into());
+        }
+        if sess.last_seq != 0 {
+            return Err("session has progress".into());
+        }
+        sess.status = 2;
+        (sess.tailnet_id.clone(), sess.deposit)
+    };
+    if let Some(t) = s.tailnets.get_mut(&tid) {
+        t.treasury += deposit;
+    }
     Ok(vec![json!({
         "name": "SessionRefunded",
         "session_id": sid,
@@ -399,8 +914,46 @@ fn apply_claim_no_show(app: &AppState, tx: &Value) -> Result<Vec<Value>, String>
     })])
 }
 
+fn apply_sweep_expired_session(
+    app: &AppState,
+    tx: &Value,
+    from: &str,
+) -> Result<Vec<Value>, String> {
+    let p = tx
+        .get("params")
+        .and_then(|x| x.as_array())
+        .ok_or("params")?;
+    let sid = p[0].as_str().unwrap_or("").to_string();
+    let mut s = app.state.write();
+    let (tid, deposit) = {
+        let sess = s.sessions.get_mut(&sid).ok_or("session not found")?;
+        if sess.status != 0 {
+            return Err("session not open".into());
+        }
+        sess.status = 2;
+        (sess.tailnet_id.clone(), sess.deposit)
+    };
+    let bounty = deposit / 100;
+    let refund = deposit - bounty;
+    if bounty > 0 {
+        *s.balances.entry(from.to_string()).or_insert(0) += bounty;
+    }
+    if refund > 0 {
+        if let Some(t) = s.tailnets.get_mut(&tid) {
+            t.treasury += refund;
+        }
+    }
+    Ok(vec![json!({
+        "name": "SessionSwept",
+        "session_id": sid,
+    })])
+}
+
 fn apply_claim_earnings(app: &AppState, tx: &Value) -> Result<Vec<Value>, String> {
-    let p = tx.get("params").and_then(|x| x.as_array()).ok_or("params")?;
+    let p = tx
+        .get("params")
+        .and_then(|x| x.as_array())
+        .ok_or("params")?;
     let claimed = p[0].as_u64().unwrap_or(0);
     let blind_hex = p[1].as_str().unwrap_or("");
     let stealth = p[2].as_str().unwrap_or("").to_string();
@@ -411,8 +964,7 @@ fn apply_claim_earnings(app: &AppState, tx: &Value) -> Result<Vec<Value>, String
     }
     let mut blind_arr = [0u8; 32];
     blind_arr.copy_from_slice(&blind_bytes);
-    let blind_scalar = scalar_from_canonical_bytes(blind_arr)
-        .ok_or_else(|| "blind not canonical".to_string())?;
+    let blind_scalar = scalar_from_bytes(&blind_arr).map_err(|e| format!("blind: {e}"))?;
 
     let from = tx
         .get("from")
@@ -427,8 +979,7 @@ fn apply_claim_earnings(app: &AppState, tx: &Value) -> Result<Vec<Value>, String
         .copied()
         .unwrap_or_else(RistrettoPoint::identity);
     let scalar_claimed = Scalar::from(claimed);
-    let recomputed =
-        &scalar_claimed * RISTRETTO_BASEPOINT_TABLE + blind_scalar * h_generator();
+    let recomputed = &scalar_claimed * RISTRETTO_BASEPOINT_TABLE + blind_scalar * h_generator();
     if entry != recomputed {
         return Err("bad opening".into());
     }
@@ -465,47 +1016,111 @@ fn contract_call(app: &AppState, params: &Value) -> Result<Value, String> {
     let method = arr[1].as_str().ok_or("method missing")?;
     let pp = arr[2].as_array().cloned().unwrap_or_default();
     match method {
-        "list_active_validators" => {
+        "list_active_endpoints" => {
+            let offset = pp.first().and_then(serde_json::Value::as_u64).unwrap_or(0);
+            let limit = pp.get(1).and_then(serde_json::Value::as_u64).unwrap_or(50);
             let s = app.state.read();
-            let active: Vec<String> = s
-                .validators
+            let mut active: Vec<String> = s
+                .endpoints
                 .values()
-                .filter(|v| v.bond > 0 && v.jailed_at == 0)
-                .map(|v| v.addr.clone())
+                .filter(|e| e.active && s.octra_validators.contains(&e.addr))
+                .map(|e| e.addr.clone())
                 .collect();
-            Ok(json!(active))
+            active.sort();
+            let end = (offset + limit).min(active.len() as u64) as usize;
+            let start = (offset as usize).min(end);
+            Ok(json!(&active[start..end]))
         }
-        "get_validator" => {
+        "list_tailnets" => {
+            let offset = pp.first().and_then(serde_json::Value::as_u64).unwrap_or(0);
+            let limit = pp.get(1).and_then(serde_json::Value::as_u64).unwrap_or(50);
+            let s = app.state.read();
+            let mut ids: Vec<String> = s.tailnets.keys().cloned().collect();
+            ids.sort();
+            let end = (offset + limit).min(ids.len() as u64) as usize;
+            let start = (offset as usize).min(end);
+            Ok(json!(&ids[start..end]))
+        }
+        "get_endpoint" => {
             let addr = pp.first().and_then(|x| x.as_str()).ok_or("addr")?;
             let s = app.state.read();
-            match s.validators.get(addr) {
-                Some(v) => Ok(json!({
-                    "bond": v.bond,
-                    "endpoint": v.endpoint,
-                    "wg_pubkey": v.wg_pubkey,
-                    "view_pubkey": v.view_pubkey,
-                    "region": v.region,
-                    "price_per_mb": v.price_per_mb,
-                    "registered_at": v.registered_at,
-                    "last_attest_epoch": v.last_attest_epoch,
-                    "jailed_at": v.jailed_at,
-                    "reputation": v.reputation,
+            match s.endpoints.get(addr) {
+                Some(e) => Ok(json!({
+                    "active": i32::from(e.active),
+                    "endpoint": e.endpoint,
+                    "wg_pubkey": e.wg_pubkey,
+                    "receipt_pubkey": e.receipt_pubkey,
+                    "view_pubkey": e.view_pubkey,
+                    "region": e.region,
+                    "price_per_mb": e.price_per_mb,
+                    "registered_at": e.registered_at,
+                    "reputation": e.reputation,
                 })),
-                None => Ok(json!({"bond": 0})),
+                None => Ok(json!({"active": 0})),
             }
+        }
+        "get_tailnet" => {
+            let tid = pp.first().and_then(|x| x.as_str()).ok_or("tailnet_id")?;
+            let s = app.state.read();
+            match s.tailnets.get(tid) {
+                Some(t) => Ok(json!({
+                    "owner": t.owner,
+                    "treasury": t.treasury,
+                    "member_count": t.members.len(),
+                    "acl_policy": t.acl_policy,
+                    "created_at": t.created_at,
+                    "exit_count": t.exits.len(),
+                })),
+                None => Ok(json!(null)),
+            }
+        }
+        "is_tailnet_member" => {
+            let tid = pp.first().and_then(|x| x.as_str()).ok_or("tailnet_id")?;
+            let addr = pp.get(1).and_then(|x| x.as_str()).ok_or("addr")?;
+            let s = app.state.read();
+            Ok(json!(s
+                .tailnets
+                .get(tid)
+                .is_some_and(|t| t.members.contains(addr))))
+        }
+        "get_device_owner" => {
+            let device = pp.first().and_then(|x| x.as_str()).ok_or("device")?;
+            let s = app.state.read();
+            Ok(json!(s
+                .device_owner
+                .get(device)
+                .cloned()
+                .unwrap_or_default()))
+        }
+        "is_device_of" => {
+            let device = pp.first().and_then(|x| x.as_str()).ok_or("device")?;
+            let wallet = pp.get(1).and_then(|x| x.as_str()).ok_or("wallet")?;
+            let s = app.state.read();
+            Ok(json!(
+                s.device_owner.get(device).map(String::as_str) == Some(wallet)
+            ))
+        }
+        "is_tailnet_exit" => {
+            let tid = pp.first().and_then(|x| x.as_str()).ok_or("tailnet_id")?;
+            let addr = pp.get(1).and_then(|x| x.as_str()).ok_or("addr")?;
+            let s = app.state.read();
+            Ok(json!(s
+                .tailnets
+                .get(tid)
+                .is_some_and(|t| t.exits.contains(addr))))
         }
         "get_session" => {
             let sid = pp.first().and_then(|x| x.as_str()).ok_or("sid")?;
             let s = app.state.read();
             match s.sessions.get(sid) {
                 Some(sess) => Ok(json!({
+                    "tailnet_id": sess.tailnet_id,
                     "deposit": sess.deposit,
                     "opened_at": sess.opened_at,
                     "status": sess.status,
                     "last_seq": sess.last_seq,
                     "route_commit": sess.route_commit,
                     "client_session_pubkey": sess.client_session_pubkey,
-                    "refund_stealth_output": sess.refund_stealth_output,
                 })),
                 None => Ok(json!(null)),
             }
@@ -521,17 +1136,253 @@ fn contract_call(app: &AppState, params: &Value) -> Result<Value, String> {
             Ok(json!(hex::encode(p.compress().to_bytes())))
         }
         "get_params" => Ok(json!({
-            "min_bond": 100,
             "min_session_deposit": 10,
-            "attest_grace_epochs": 5,
+            "min_tailnet_deposit": 100,
             "session_grace_epochs": 100,
-            "unbond_epochs": 10,
-            "slash_bounty_bps": 1000,
-            "slash_burn_bps": 5000,
-            "slash_treasury_bps": 4000,
+            "sweep_grace_multiplier": 10,
+            "sweep_bounty_bps": 100,
         })),
         other => Err(format!("unknown read method {other}")),
     }
+}
+
+/// Fake AML compile: hashes the source and synthesizes a deterministic
+/// bytecode/ABI shape. Real Octra returns real compiler output via
+/// `octra_compileAml`; this stub lets local tests + the offline mode of
+/// `forge build` exercise the same code path without a live node.
+fn octra_compile_aml(params: &Value) -> Result<Value, String> {
+    let arr = params.as_array().ok_or("params not array")?;
+    let source = arr.first().and_then(|x| x.as_str()).ok_or("source")?;
+    let name = arr
+        .get(1)
+        .and_then(|x| x.as_str())
+        .unwrap_or("Program")
+        .to_string();
+    Ok(compile_one(&name, source))
+}
+
+fn octra_compile_aml_multi(params: &Value) -> Result<Value, String> {
+    let arr = params.as_array().ok_or("params not array")?;
+    let files = arr.first().and_then(|x| x.as_object()).ok_or("files")?;
+    let mut out = serde_json::Map::new();
+    for (path, val) in files {
+        let source = val.as_str().unwrap_or_default();
+        let name = infer_program_name_from(path, source);
+        out.insert(path.clone(), compile_one(&name, source));
+    }
+    Ok(Value::Object(out))
+}
+
+fn infer_program_name_from(path: &str, source: &str) -> String {
+    let stripped = strip_aml_comments(source);
+    let bytes = stripped.as_bytes();
+    let mut i = 0;
+    while i + 8 <= bytes.len() {
+        let before_ok = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
+        if before_ok && &bytes[i..i + 8] == b"program " {
+            let mut j = i + 8;
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            let name_start = j;
+            while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
+                j += 1;
+            }
+            if j > name_start {
+                return stripped[name_start..j].to_string();
+            }
+        }
+        i += 1;
+    }
+    std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Program")
+        .to_string()
+}
+
+fn strip_aml_comments(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let bytes = source.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if i + 1 < bytes.len() && &bytes[i..i + 2] == b"//" {
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+        } else if i + 1 < bytes.len() && &bytes[i..i + 2] == b"/*" {
+            i += 2;
+            while i + 1 < bytes.len() && &bytes[i..i + 2] != b"*/" {
+                i += 1;
+            }
+            i = i.saturating_add(2);
+        } else {
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    out
+}
+
+fn compile_one(name: &str, source: &str) -> Value {
+    let mut h = Sha256::new();
+    h.update(name.as_bytes());
+    h.update(b"::");
+    h.update(source.as_bytes());
+    let digest = hex::encode(h.finalize());
+    let methods = extract_methods(source);
+    let events = extract_events(source);
+    let abi: Vec<Value> = methods
+        .into_iter()
+        .map(|m| json!({
+            "name": m.name,
+            "kind": if m.is_view { "view" } else { "call" },
+            "inputs": m.inputs.iter().map(|(n, t)| json!({"name": n, "type": t})).collect::<Vec<_>>(),
+        }))
+        .chain(events.into_iter().map(|e| json!({"name": e, "kind": "event"})))
+        .collect();
+    json!({
+        "name": name,
+        "abi": abi,
+        "bytecode": format!("0x{digest}"),
+        "assembly": format!("; mock AML bytecode for {name}\n; sha256(source) = {digest}\n"),
+        "source_hash": digest,
+        "compiler": "mock-aml-0.1",
+    })
+}
+
+struct MethodSig {
+    name: String,
+    is_view: bool,
+    inputs: Vec<(String, String)>,
+}
+
+fn extract_methods(source: &str) -> Vec<MethodSig> {
+    let mut out = Vec::new();
+    let bytes = source.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i..].starts_with(b"fn ") && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric()) {
+            let prefix_end = i;
+            let is_view = back_word_is(source, prefix_end, "view");
+            let mut j = i + 3;
+            let name_start = j;
+            while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
+                j += 1;
+            }
+            let name = source[name_start..j].to_string();
+            while j < bytes.len() && bytes[j] != b'(' {
+                j += 1;
+            }
+            if j >= bytes.len() {
+                break;
+            }
+            let params_start = j + 1;
+            let mut depth = 1;
+            j += 1;
+            while j < bytes.len() && depth > 0 {
+                match bytes[j] {
+                    b'(' => depth += 1,
+                    b')' => depth -= 1,
+                    _ => {}
+                }
+                j += 1;
+            }
+            let params_str = &source[params_start..j - 1];
+            let inputs = parse_params(params_str);
+            if !name.is_empty() && !is_private(source, prefix_end) {
+                out.push(MethodSig {
+                    name,
+                    is_view,
+                    inputs,
+                });
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+fn back_word_is(source: &str, end: usize, word: &str) -> bool {
+    let s = source[..end].trim_end();
+    s.ends_with(word) && {
+        let before = s.len() - word.len();
+        before == 0 || !source.as_bytes()[before - 1].is_ascii_alphanumeric()
+    }
+}
+
+fn is_private(source: &str, end: usize) -> bool {
+    back_word_is(source, end, "private") || back_word_is(source, end, "view private")
+}
+
+fn parse_params(s: &str) -> Vec<(String, String)> {
+    s.split(',')
+        .filter_map(|chunk| {
+            let chunk = chunk.trim();
+            if chunk.is_empty() {
+                return None;
+            }
+            let (n, t) = chunk.split_once(':')?;
+            Some((n.trim().to_string(), t.trim().to_string()))
+        })
+        .collect()
+}
+
+fn extract_events(source: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in source.lines() {
+        let t = line.trim();
+        if let Some(rest) = t.strip_prefix("event ") {
+            if let Some((name, _)) = rest.split_once('(') {
+                out.push(name.trim().to_string());
+            }
+        }
+    }
+    out
+}
+
+fn epoch_get(app: &AppState, params: &Value) -> Value {
+    let id = params
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(serde_json::Value::as_u64);
+    let s = app.state.read();
+    let epoch = id.unwrap_or(s.epoch);
+    json!({
+        "epoch_id": epoch,
+        "finalized_by": null,
+        "tx_count": s.txs.len(),
+        "timestamp": 0u64,
+    })
+}
+
+/// In-process equivalent of an `octra_submit` JSON-RPC call.
+///
+/// Routes a single `tx` JSON object through the same `apply_*` handlers
+/// the HTTP router uses, returning `(tx_hash, events)` on success.
+pub fn submit_tx(app: &AppState, tx: &Value) -> Result<(String, Vec<Value>), String> {
+    let params = json!([tx]);
+    let result = octra_submit(app, &params)?;
+    let hash = result
+        .get("hash")
+        .and_then(|v| v.as_str())
+        .ok_or("missing hash")?
+        .to_string();
+    let events = {
+        let s = app.state.read();
+        s.txs
+            .get(&hash)
+            .map_or_else(Vec::new, |row| row.events.clone())
+    };
+    Ok((hash, events))
+}
+
+/// In-process equivalent of `contract_call`.
+pub fn read_call(app: &AppState, method: &str, params: &[Value]) -> Result<Value, String> {
+    let p = json!([app.program_addr.clone(), method, params, Value::Null]);
+    contract_call(app, &p)
 }
 
 pub async fn serve(addr: SocketAddr, program_addr: String) -> anyhow::Result<()> {
@@ -544,7 +1395,6 @@ pub async fn serve(addr: SocketAddr, program_addr: String) -> anyhow::Result<()>
     };
     let router = build_router(app);
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    tracing::info!(?addr, "mock RPC listening");
     axum::serve(listener, router).await?;
     Ok(())
 }

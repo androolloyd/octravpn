@@ -9,11 +9,24 @@ use serde::{Deserialize, Serialize};
 
 use crate::{address::Address, sig::PublicKey};
 
-/// 32-byte session id returned from `open_session`.
+/// 32-byte session id returned from `open_session`. The chain derives it
+/// as `sha256(self_addr || epoch || nonce || client_session_pubkey)`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct SessionId(pub [u8; 32]);
+pub struct SessionId([u8; 32]);
 
 impl SessionId {
+    pub fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    pub fn into_bytes(self) -> [u8; 32] {
+        self.0
+    }
+
     pub fn from_hex(s: &str) -> Option<Self> {
         let v = hex::decode(s).ok()?;
         if v.len() != 32 {
@@ -29,41 +42,64 @@ impl SessionId {
     }
 }
 
-/// In-memory mirror of the on-chain `ValidatorRecord`.
+/// 32-byte Pedersen blinding scalar (raw bytes; the `Scalar` is reduced
+/// mod-l in the verifier when needed). The same value is used for the
+/// route commitment and the receipt accumulator entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Blind([u8; 32]);
+
+impl Blind {
+    pub fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    pub fn into_bytes(self) -> [u8; 32] {
+        self.0
+    }
+
+    pub fn to_hex(&self) -> String {
+        hex::encode(self.0)
+    }
+}
+
+/// In-memory mirror of the on-chain `EndpointRecord`.
 ///
-///   - `wg_pubkey` is the X25519 noise key for the WireGuard tunnel and
-///     also the public key the node co-signs receipts under (so the on-
-///     chain `slash_double_sign` evidence path matches).
-///   - `view_pubkey` is the stealth view key the client uses to derive a
-///     refund stealth output (and the validator uses for payouts).
+///   - `wg_pubkey` is the X25519 noise key for the WireGuard tunnel.
+///   - `receipt_pubkey` is the ed25519 key the node co-signs receipts with
+///     (separate from `wg_pubkey` so we don't reuse the same private
+///     scalar across protocols).
+///   - `view_pubkey` is the stealth view key the client uses to derive
+///     refund / payout outputs.
+///
+/// Bond / liveness / slashing are delegated to the Octra protocol layer:
+/// an endpoint is "active" iff `active == true` AND the chain still
+/// considers it an Octra validator.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ValidatorRecord {
+pub struct EndpointRecord {
     pub addr: Address,
-    pub bond: u64,
+    pub active: bool,
     pub endpoint: String,
     pub wg_pubkey: PublicKey,
+    pub receipt_pubkey: PublicKey,
     pub view_pubkey: [u8; 32],
     pub region: String,
     pub price_per_mb: u64,
     pub registered_at: u64,
-    pub last_attest_epoch: u64,
-    pub jailed_at: u64,
     pub reputation: i64,
 }
 
-impl ValidatorRecord {
-    pub fn is_active(&self, current_epoch: u64, attest_grace: u64) -> bool {
-        self.bond > 0
-            && self.jailed_at == 0
-            && current_epoch <= self.last_attest_epoch + attest_grace
-    }
-}
+/// Back-compat alias so older imports keep compiling during the rename.
+pub type ValidatorRecord = EndpointRecord;
 
 /// Per-hop opening data passed to `settle_session`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RouteOpening {
     pub node_addr: Address,
-    pub blind: [u8; 32],
+    pub blind: Blind,
     pub split_bps: u16,
 }
 

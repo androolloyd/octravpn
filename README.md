@@ -228,6 +228,22 @@ CI runs all of these on every PR.
   hop with diversity reduces correlation; Tor-over-OctraVPN eliminates
   it for users who need that.
 
+## Documentation
+
+| File | What's in it |
+| --- | --- |
+| [`docs/security.md`](docs/security.md) | Threat model, primitives, per-component guarantees, formal-verification correspondence |
+| [`docs/economics.md`](docs/economics.md) | OCT-only design, money flows, validator P&L, why no second token is viable |
+| [`docs/attack-cost.md`](docs/attack-cost.md) | Concrete attack-cost analysis with parameter symbols |
+| [`docs/governance.md`](docs/governance.md) | Roles, parameters, decentralization roadmap, treasury policy |
+| [`docs/architecture.md`](docs/architecture.md) | Long-form system design |
+| [`docs/threat-model.md`](docs/threat-model.md) | Adversary capability table |
+| [`docs/keys.md`](docs/keys.md) | Per-role key inventory and rotation |
+| [`docs/octra-research.md`](docs/octra-research.md) | Public-info dossier on the Octra chain (validator economics, RPC, address codec, …) |
+| [`docs/install.md`](docs/install.md) | Per-OS install: one-shot script, native package, or from source |
+| [`docs/deploy.md`](docs/deploy.md) | Operator deployment guide: sizing, ports, perms, backup, monitoring |
+| [`crates/octraforge/DESIGN.md`](crates/octraforge/DESIGN.md) | Foundry-like test framework for Octra programs |
+
 ## License
 
 MIT OR Apache-2.0

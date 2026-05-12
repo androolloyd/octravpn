@@ -4,7 +4,10 @@
 //!
 //! The on-chain side hashes `tag || sid || seq || bytes_used || blind`.
 
-use octravpn_core::{receipt::canonical_payload, session::SessionId};
+use octravpn_core::{
+    receipt::canonical_payload,
+    session::{Blind, SessionId},
+};
 use proptest::prelude::*;
 use sha2::{Digest, Sha256};
 
@@ -26,7 +29,8 @@ proptest! {
         bytes_used in any::<u64>(),
         blind in any::<[u8; 32]>(),
     ) {
-        let ours = canonical_payload(&SessionId(sid), seq, bytes_used, &blind).unwrap();
+        let ours =
+            canonical_payload(&SessionId::new(sid), seq, bytes_used, &Blind::new(blind)).unwrap();
         let theirs = ref_payload(&sid, seq, bytes_used, &blind);
         prop_assert_eq!(ours, theirs);
     }

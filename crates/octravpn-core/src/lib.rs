@@ -1,12 +1,15 @@
-//! OctraVPN shared types, RPC client, and crypto primitives.
+//! `OctraVPN` shared types, RPC client, and crypto primitives.
 //!
 //! This crate is split into modules so the node daemon and client CLI can
 //! depend on a single coherent surface. Everything that goes onto the wire
 //! between client/node/chain lives here so types only get defined once.
 
 pub mod address;
+pub mod backend;
+pub mod bounded;
 pub mod commit;
 pub mod control;
+pub mod coverage;
 pub mod earnings;
 pub mod onion;
 pub mod receipt;
@@ -14,12 +17,17 @@ pub mod rpc;
 pub mod session;
 pub mod sig;
 pub mod stealth;
+pub mod tx;
+pub mod util;
+pub mod wallet_enc;
+
+pub use backend::{OctraBackend, PlaceholderBackend, RpcBackend};
 
 pub use address::{Address, ADDRESS_LEN};
 pub use earnings::{LedgerPoint, POINT_LEN};
 pub use receipt::{Receipt, ReceiptError, SignedReceipt};
 pub use session::{
-    OpenSessionParams, RouteOpening, SessionId, SessionState, ValidatorRecord,
+    EndpointRecord, OpenSessionParams, RouteOpening, SessionId, SessionState, ValidatorRecord,
 };
 pub use sig::{KeyPair, PublicKey, Signature};
 

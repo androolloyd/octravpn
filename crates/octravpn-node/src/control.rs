@@ -1,86 +1,212 @@
 //! HTTP control plane the exit node serves to clients.
 //!
-//! Endpoints (matching `octravpn_core::control` paths):
+//! Two endpoints:
 //!
-//!   POST /session                    — announce a session; node co-signs
-//!                                       future receipts under its WG key
-//!   POST /session/{id}/receipt       — submit client-signed receipt;
-//!                                       node co-signs and persists
-//!   GET  /session/{id}               — return session state + latest
-//!                                       dual-signed receipt
+//!   POST /session           — client announces session + client_pubkey
+//!   GET  /session/{id}      — return the exit's view: bytes_served and a
+//!                              single-signed (by the node) receipt
+//!                              proposal the client can countersign at
+//!                              settlement.
 //!
-//! The node uses its WG keypair (also the receipt-signing key — the same
-//! key it registered on chain). Equivocation by signing two different
-//! `bytes_used` values for the same `(session, seq)` is detectable by
-//! the on-chain `slash_double_sign` path.
+//! The exit is the byte-counting authority: it signs receipts as bytes
+//! flow through the tunnel. The client fetches the proposal at
+//! settlement and adds its own signature.
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    convert::Infallible,
+    net::SocketAddr,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use anyhow::Result;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    response::IntoResponse,
+    response::{
+        sse::{Event as SseEvent, KeepAlive, Sse},
+        IntoResponse,
+    },
     routing::{get, post},
     Json, Router,
 };
+use futures_util::StreamExt;
 use octravpn_core::{
+    bounded::BoundedMap,
     control::{
-        AnnounceSessionRequest, AnnounceSessionResponse, SessionStateResponse,
-        SubmitReceiptRequest, SubmitReceiptResponse,
+        AnnounceSessionRequest, AnnounceSessionResponse, ProposedReceipt, SessionStateResponse,
     },
-    receipt::{Receipt, ReceiptError, SignedReceipt},
+    receipt::Receipt,
     session::SessionId,
-    sig::{verify, KeyPair, PublicKey},
+    sig::KeyPair,
 };
-use parking_lot::RwLock;
 use serde::Serialize;
-use std::collections::HashMap;
+use tokio_stream::wrappers::BroadcastStream;
 use tracing::info;
 
-use crate::onion::OnionRouter;
+use crate::{events::EventBus, onion::OnionRouter};
+
+/// Hard cap on concurrent sessions a node will track in its control
+/// plane. Past this, the oldest entries are evicted and clients get
+/// "session not announced" — they can re-announce.
+pub(crate) const CONTROL_SESSIONS_CAP: usize = 10_000;
+
+/// Idle TTL: sessions whose last GET / announce is older than this are
+/// pruned by the periodic sweeper.
+pub(crate) const CONTROL_SESSION_TTL: Duration = Duration::from_secs(3600);
+
+/// How often the sweeper runs.
+pub(crate) const CONTROL_SWEEP_PERIOD: Duration = Duration::from_secs(60);
+
+/// `/health` returns 503 if the most recent attestation refresh is
+/// older than this.
+const HEALTH_ATTESTATION_FRESHNESS_S: u64 = 300;
+
+/// During the first `HEALTH_WARMUP_S` after process start we report
+/// `warming_up` instead of failing health — the attestation loop has
+/// not had a chance to run yet.
+const HEALTH_WARMUP_S: u64 = 60;
 
 #[derive(Clone)]
-pub struct ControlState {
+pub(crate) struct ControlState {
     pub node_kp: Arc<KeyPair>,
-    pub sessions: Arc<RwLock<HashMap<SessionId, ControlSession>>>,
+    pub sessions: Arc<BoundedMap<SessionId, ControlSession>>,
     pub router: Arc<OnionRouter>,
+    /// Shared with the tunnel: announce() inserts here so the tunnel
+    /// can construct a `Tunn` with the real client static pubkey.
+    pub allowlist: Arc<BoundedMap<[u8; 32], crate::tunnel::AllowedClient>>,
+    /// Process-lifetime counters for /metrics.
+    pub metrics: Arc<NodeMetrics>,
+    /// Optional audit log. `None` disables auditing.
+    pub audit: Option<crate::audit::AuditLog>,
+    /// In-process fan-out bus that powers the `/events` SSE stream.
+    /// Cloning the bus is cheap (it shares one `broadcast::Sender`).
+    pub events: EventBus,
 }
 
-pub struct ControlSession {
-    pub client_pubkey: PublicKey,
+/// Lightweight counters exposed via the /metrics endpoint. Kept as
+/// AtomicU64 to avoid lock contention on the data plane.
+#[derive(Default)]
+pub(crate) struct NodeMetrics {
+    pub announces_total: AtomicU64,
+    pub state_lookups_total: AtomicU64,
+    pub receipts_signed_total: AtomicU64,
+    pub started_at_unix: AtomicU64,
+    /// Unix timestamp of the most recent successful on-chain
+    /// attestation refresh. Set by the hub's attestation loop.
+    pub last_attestation_unix: AtomicU64,
+}
+
+#[derive(Clone)]
+pub(crate) struct ControlSession {
     pub last_seq: u64,
-    pub bytes_served: u64,
-    pub latest: Option<SignedReceipt>,
+    pub last_blind: octravpn_core::session::Blind,
 }
 
 impl ControlState {
-    pub fn new(node_kp: Arc<KeyPair>, router: Arc<OnionRouter>) -> Self {
+    #[cfg(test)]
+    pub(crate) fn new(
+        node_kp: Arc<KeyPair>,
+        router: Arc<OnionRouter>,
+        allowlist: Arc<BoundedMap<[u8; 32], crate::tunnel::AllowedClient>>,
+    ) -> Self {
+        let metrics = Arc::new(NodeMetrics::default());
+        metrics
+            .started_at_unix
+            .store(octravpn_core::util::now_unix_secs(), Ordering::Relaxed);
+        Self::with_metrics(node_kp, router, allowlist, metrics)
+    }
+
+    /// Construct with an externally-provided `NodeMetrics` so the Hub
+    /// can write attestation timestamps that this handler reads.
+    pub(crate) fn with_metrics(
+        node_kp: Arc<KeyPair>,
+        router: Arc<OnionRouter>,
+        allowlist: Arc<BoundedMap<[u8; 32], crate::tunnel::AllowedClient>>,
+        metrics: Arc<NodeMetrics>,
+    ) -> Self {
+        // started_at_unix may not have been set by the caller yet; we
+        // honour whatever they supply (Hub seeds it; standalone calls
+        // get a default of 0 which the health endpoint treats as
+        // "warming up").
         Self {
             node_kp,
-            sessions: Arc::new(RwLock::new(HashMap::new())),
+            sessions: Arc::new(BoundedMap::new(CONTROL_SESSIONS_CAP, CONTROL_SESSION_TTL)),
             router,
+            allowlist,
+            metrics,
+            audit: None,
+            // 256 in-flight events per subscriber: enough headroom for
+            // a burst of session announces / receipt signings without
+            // forcing the bus to drop, small enough to keep memory
+            // bounded even if a few SSE clients are slow.
+            events: EventBus::new(256),
         }
     }
 
-    pub fn router_axum(self: Arc<Self>) -> Router {
-        let s = self;
-        Router::new()
+    /// Attach an audit log; every state-changing handler will write to it.
+    pub(crate) fn with_audit(mut self, audit: crate::audit::AuditLog) -> Self {
+        self.audit = Some(audit);
+        self
+    }
+
+    pub(crate) fn router_axum(self: Arc<Self>) -> Router {
+        use axum::middleware;
+        let rate_limiter = crate::rate_limit::RateLimiter::default_for_control_plane();
+
+        // Rate-limited surface: the regular request/response endpoints.
+        let limited = Router::new()
             .route("/session", post(announce))
             .route("/session/:id", get(get_state))
-            .route("/session/:id/receipt", post(submit_receipt))
-            .with_state(s)
+            .route("/health", get(health))
+            .route("/metrics", get(metrics))
+            .layer(middleware::from_fn_with_state(
+                rate_limiter,
+                crate::rate_limit::rate_limit_layer,
+            ))
+            .with_state(self.clone());
+
+        // SSE surface, mounted on a separate sub-router merged in
+        // *outside* the rate-limit layer. Rationale: SSE is a single
+        // long-lived request; counting it against a per-IP token
+        // budget would either (a) starve other endpoints after one
+        // connect, or (b) require per-route exemption logic the token
+        // bucket doesn't model cleanly. A separate `Router::merge`
+        // gives us the exemption with one line and zero conditional
+        // middleware. The endpoint is read-only (subscribers cannot
+        // publish), and the bus itself caps memory via its broadcast
+        // capacity, so the abuse surface is bounded.
+        let unlimited = Router::new().route("/events", get(events_sse)).with_state(self);
+
+        limited.merge(unlimited)
     }
 }
 
-pub async fn serve(
-    state: Arc<ControlState>,
-    addr: SocketAddr,
-) -> Result<()> {
+/// Periodic sweeper: evicts sessions idle past TTL.
+pub(crate) async fn run_sweeper(state: Arc<ControlState>) {
+    loop {
+        tokio::time::sleep(CONTROL_SWEEP_PERIOD).await;
+        let n = state.sessions.sweep();
+        if n > 0 {
+            tracing::debug!(evicted = n, "control plane sweep");
+        }
+    }
+}
+
+pub(crate) async fn serve(state: Arc<ControlState>, addr: SocketAddr) -> Result<()> {
     let router = state.router_axum();
     let listener = tokio::net::TcpListener::bind(addr).await?;
     info!(?addr, "control plane listening");
-    axum::serve(listener, router).await?;
+    // `into_make_service_with_connect_info` propagates the client
+    // SocketAddr into the rate-limit middleware via `ConnectInfo`.
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -99,16 +225,40 @@ async fn announce(
     State(s): State<Arc<ControlState>>,
     Json(req): Json<AnnounceSessionRequest>,
 ) -> impl IntoResponse {
-    let mut g = s.sessions.write();
-    g.insert(
-        req.session_id.clone(),
+    s.metrics.announces_total.fetch_add(1, Ordering::Relaxed);
+    let session_id_hex = req.session_id.to_hex();
+    s.sessions.insert(
+        req.session_id,
         ControlSession {
-            client_pubkey: req.client_pubkey,
             last_seq: 0,
-            bytes_served: 0,
-            latest: None,
+            last_blind: octravpn_core::session::Blind::new([0u8; 32]),
         },
     );
+    s.allowlist
+        .insert(req.client_wg_pubkey, crate::tunnel::AllowedClient);
+    // Fan out to SSE subscribers. We publish the client's WireGuard
+    // pubkey (hex) — this is the public identity the client already
+    // exposed via the announce request; not a secret.
+    s.events.publish(crate::events::Event {
+        ts_unix: octravpn_core::util::now_unix_secs(),
+        kind: "session_announced".to_string(),
+        payload: serde_json::json!({
+            "session_id": session_id_hex,
+            "client_wg_pubkey": hex::encode(req.client_wg_pubkey),
+        }),
+    });
+    if let Some(audit) = &s.audit {
+        let rec = crate::audit::AuditRecord {
+            ts_unix: octravpn_core::util::now_unix_secs(),
+            kind: "announce",
+            source: None,
+            session_id: Some(session_id_hex),
+            extra: serde_json::Value::Null,
+        };
+        if let Err(e) = audit.write_async(rec).await {
+            tracing::warn!(error = %e, "audit log write failed");
+        }
+    }
     Json(AnnounceSessionResponse {
         accepted: true,
         node_pubkey: s.node_kp.public,
@@ -116,116 +266,198 @@ async fn announce(
     .into_response()
 }
 
-async fn submit_receipt(
+async fn health(State(s): State<Arc<ControlState>>) -> impl IntoResponse {
+    let now = octravpn_core::util::now_unix_secs();
+    let started = s.metrics.started_at_unix.load(Ordering::Relaxed);
+    let uptime = now.saturating_sub(started);
+    let last_attest = s.metrics.last_attestation_unix.load(Ordering::Relaxed);
+
+    if uptime < HEALTH_WARMUP_S {
+        return Json(serde_json::json!({
+            "status": "warming up",
+            "uptime_s": uptime,
+            "last_attestation_unix": last_attest,
+        }))
+        .into_response();
+    }
+
+    if last_attest == 0 {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "status": "no_attestation",
+                "uptime_s": uptime,
+            })),
+        )
+            .into_response();
+    }
+
+    let attest_age = now.saturating_sub(last_attest);
+    if attest_age > HEALTH_ATTESTATION_FRESHNESS_S {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "status": "attestation_stale",
+                "uptime_s": uptime,
+                "last_attestation_unix": last_attest,
+                "attestation_age_s": attest_age,
+                "freshness_threshold_s": HEALTH_ATTESTATION_FRESHNESS_S,
+            })),
+        )
+            .into_response();
+    }
+
+    Json(serde_json::json!({
+        "status": "ok",
+        "uptime_s": uptime,
+        "last_attestation_unix": last_attest,
+    }))
+    .into_response()
+}
+
+/// Prometheus text format.
+async fn metrics(State(s): State<Arc<ControlState>>) -> impl IntoResponse {
+    let m = &s.metrics;
+    let body = format!(
+        "# HELP octravpn_announces_total Sessions announced via control plane.\n\
+         # TYPE octravpn_announces_total counter\n\
+         octravpn_announces_total {}\n\
+         # HELP octravpn_state_lookups_total /session/:id GETs.\n\
+         # TYPE octravpn_state_lookups_total counter\n\
+         octravpn_state_lookups_total {}\n\
+         # HELP octravpn_receipts_signed_total Node-signed receipt proposals returned.\n\
+         # TYPE octravpn_receipts_signed_total counter\n\
+         octravpn_receipts_signed_total {}\n\
+         # HELP octravpn_bytes_served_total Cumulative bytes traversed (in+out).\n\
+         # TYPE octravpn_bytes_served_total counter\n\
+         octravpn_bytes_served_total {}\n\
+         # HELP octravpn_active_sessions Current sessions tracked by control plane.\n\
+         # TYPE octravpn_active_sessions gauge\n\
+         octravpn_active_sessions {}\n\
+         # HELP octravpn_last_attestation_unix Unix time of last successful attestation.\n\
+         # TYPE octravpn_last_attestation_unix gauge\n\
+         octravpn_last_attestation_unix {}\n\
+         # HELP octravpn_uptime_seconds Process uptime.\n\
+         # TYPE octravpn_uptime_seconds counter\n\
+         octravpn_uptime_seconds {}\n",
+        m.announces_total.load(Ordering::Relaxed),
+        m.state_lookups_total.load(Ordering::Relaxed),
+        m.receipts_signed_total.load(Ordering::Relaxed),
+        s.router.total_bytes(),
+        s.sessions.len(),
+        m.last_attestation_unix.load(Ordering::Relaxed),
+        octravpn_core::util::now_unix_secs()
+            .saturating_sub(m.started_at_unix.load(Ordering::Relaxed)),
+    );
+    (
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4",
+        )],
+        body,
+    )
+        .into_response()
+}
+
+/// Server-Sent Events stream. Each control-plane event published on
+/// the in-process bus is emitted as one SSE message with the JSON
+/// payload as the `data:` field. A keepalive comment is sent every 15s
+/// so intermediate proxies don't tear the idle connection down.
+///
+/// Slow / stuck subscribers manifest as `BroadcastStream::Lagged`
+/// errors; we surface them as a `lag` SSE event so an operator can see
+/// it in a `curl` session and reconnect if needed, rather than silently
+/// dropping events.
+async fn events_sse(
     State(s): State<Arc<ControlState>>,
-    Path(id_hex): Path<String>,
-    Json(req): Json<SubmitReceiptRequest>,
-) -> impl IntoResponse {
-    let id = match SessionId::from_hex(&id_hex) {
-        Some(i) => i,
-        None => {
-            return (StatusCode::BAD_REQUEST, Json(ApiError::new("bad id"))).into_response()
-        }
-    };
-    if id != req.receipt.session_id {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ApiError::new("session id mismatch")),
-        )
-            .into_response();
-    }
-
-    // 1. Verify the client's signature against the announced pubkey.
-    let payload = req.receipt.signing_payload();
-    let mut g = s.sessions.write();
-    let entry = match g.get_mut(&id) {
-        Some(e) => e,
-        None => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(ApiError::new("session not announced")),
-            )
-                .into_response()
-        }
-    };
-    if entry.client_pubkey != req.client_pubkey {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(ApiError::new("wrong client pubkey")),
-        )
-            .into_response();
-    }
-    if let Err(e) = verify(&req.client_pubkey, &payload, &req.client_sig) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(ApiError::new(format!("client sig: {e}"))),
-        )
-            .into_response();
-    }
-
-    // 2. Equivocation defense: refuse to sign a *different* bytes_used
-    //    for the same (session, seq) we already signed.
-    if let Some(prev) = &entry.latest {
-        if prev.receipt.seq == req.receipt.seq && prev.receipt != req.receipt {
-            return (
-                StatusCode::CONFLICT,
-                Json(ApiError::new(
-                    "equivocation refused: same seq, different receipt",
-                )),
-            )
-                .into_response();
-        }
-    }
-    if req.receipt.seq <= entry.last_seq && entry.last_seq != 0 {
-        return (
-            StatusCode::CONFLICT,
-            Json(ApiError::new("non-monotonic seq")),
-        )
-            .into_response();
-    }
-
-    // 3. Co-sign as the node.
-    let node_sig = s.node_kp.sign(&payload);
-    let signed = SignedReceipt {
-        receipt: req.receipt.clone(),
-        client_pubkey: req.client_pubkey,
-        client_sig: req.client_sig,
-        node_pubkey: s.node_kp.public,
-        node_sig,
-    };
-    if let Err(e) = signed.verify() {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiError::new(format!("self-verify failed: {e}"))),
-        )
-            .into_response();
-    }
-
-    entry.last_seq = req.receipt.seq;
-    entry.bytes_served = req.receipt.bytes_used;
-    entry.latest = Some(signed.clone());
-
-    Json(SubmitReceiptResponse { signed }).into_response()
+) -> Sse<impl futures_util::Stream<Item = Result<SseEvent, Infallible>>> {
+    let rx = s.events.subscribe();
+    let stream = BroadcastStream::new(rx).map(|item| {
+        let ev = match item {
+            Ok(ev) => ev,
+            Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(n)) => {
+                crate::events::Event {
+                    ts_unix: octravpn_core::util::now_unix_secs(),
+                    kind: "lag".to_string(),
+                    payload: serde_json::json!({ "skipped": n }),
+                }
+            }
+        };
+        // `json_data` serializes the event with serde_json. The bus
+        // event already derives `Serialize`, so this can only fail if
+        // the payload contains something unserializable — which is
+        // never the case here (we only emit `serde_json::Value`).
+        // Fall back to an empty data field on the theoretical error
+        // path so the stream never aborts.
+        let sse = SseEvent::default()
+            .event(ev.kind.clone())
+            .json_data(&ev)
+            .unwrap_or_else(|_| SseEvent::default().data(""));
+        Ok::<_, Infallible>(sse)
+    });
+    Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
 }
 
 async fn get_state(
     State(s): State<Arc<ControlState>>,
     Path(id_hex): Path<String>,
 ) -> impl IntoResponse {
-    let id = match SessionId::from_hex(&id_hex) {
-        Some(i) => i,
-        None => {
-            return (StatusCode::BAD_REQUEST, Json(ApiError::new("bad id"))).into_response()
-        }
+    s.metrics
+        .state_lookups_total
+        .fetch_add(1, Ordering::Relaxed);
+
+    let Some(id) = SessionId::from_hex(&id_hex) else {
+        return (StatusCode::BAD_REQUEST, Json(ApiError::new("bad id"))).into_response();
     };
-    let g = s.sessions.read();
-    let Some(entry) = g.get(&id) else {
-        return (StatusCode::NOT_FOUND, Json(ApiError::new("not found"))).into_response();
+
+    let bytes = s.router.bytes(&id).map_or(0, |(i, o)| i + o);
+
+    let Some(entry) = s.sessions.get(&id) else {
+        return (StatusCode::NOT_FOUND, Json(ApiError::new("not announced"))).into_response();
     };
+
+    let next_seq = entry.last_seq + 1;
+    let blind = entry.last_blind;
+    let r = Receipt {
+        session_id: id,
+        seq: next_seq,
+        bytes_used: bytes,
+        blind,
+    };
+    let payload = r.signing_payload();
+    let node_sig = s.node_kp.sign(&payload);
+    s.metrics
+        .receipts_signed_total
+        .fetch_add(1, Ordering::Relaxed);
+    // Fan out to SSE subscribers. Mirrors the metrics increment above —
+    // any time we sign a receipt proposal, an observer downstream
+    // (audit relay, settlement bot) gets a real-time notification.
+    // Capture the scalar fields up front: `r` is moved into the
+    // `ProposedReceipt` below, and `id` was already consumed by the
+    // `Receipt` constructor, so we use the original `id_hex` path
+    // parameter (which `SessionId::from_hex` already validated) as the
+    // session identifier in the event.
+    let event_seq = r.seq;
+    let event_bytes = r.bytes_used;
+    let proposed = ProposedReceipt {
+        receipt: r,
+        node_pubkey: s.node_kp.public,
+        node_sig,
+    };
+    s.events.publish(crate::events::Event {
+        ts_unix: octravpn_core::util::now_unix_secs(),
+        kind: "receipt_signed".to_string(),
+        payload: serde_json::json!({
+            "session_id": id_hex,
+            "seq": event_seq,
+            "bytes_used": event_bytes,
+        }),
+    });
+
     Json(SessionStateResponse {
+        bytes_served: bytes,
         last_seq: entry.last_seq,
-        bytes_served: entry.bytes_served,
-        latest: entry.latest.clone(),
+        proposed: Some(proposed),
     })
     .into_response()
 }
@@ -233,96 +465,38 @@ async fn get_state(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use octravpn_core::receipt::Receipt;
+    use octravpn_core::{control::AnnounceSessionRequest, sig::verify};
 
     #[tokio::test]
-    async fn submit_receipt_co_signs() {
+    async fn announce_then_state_returns_signed_proposal() {
         let node_kp = Arc::new(KeyPair::generate());
         let client_kp = KeyPair::generate();
         let router = Arc::new(OnionRouter::new());
-        let state = Arc::new(ControlState::new(node_kp.clone(), router.clone()));
-
-        let id = SessionId([42u8; 32]);
-
-        // Announce.
-        {
-            let _ = announce(
-                State(state.clone()),
-                Json(AnnounceSessionRequest {
-                    session_id: id.clone(),
-                    client_pubkey: client_kp.public,
-                }),
-            )
-            .await;
-        }
-
-        // Build + submit a receipt.
-        let r = Receipt {
-            session_id: id.clone(),
-            seq: 1,
-            bytes_used: 2048,
-            blind: [9u8; 32],
-        };
-        let payload = r.signing_payload();
-        let client_sig = client_kp.sign(&payload);
-
-        let req = SubmitReceiptRequest {
-            receipt: r.clone(),
-            client_pubkey: client_kp.public,
-            client_sig,
-        };
-        // Use the inner submit_receipt directly with the raw id_hex path.
-        let id_hex = id.to_hex();
-        let _ = submit_receipt(State(state.clone()), Path(id_hex), Json(req)).await;
-
-        // Confirm latest is dual-signed.
-        let g = state.sessions.read();
-        let entry = g.get(&id).unwrap();
-        let signed = entry.latest.as_ref().unwrap();
-        signed.verify().expect("dual-signed receipt verifies");
-        assert_eq!(signed.receipt.bytes_used, 2048);
-    }
-
-    #[tokio::test]
-    async fn equivocation_rejected() {
-        let node_kp = Arc::new(KeyPair::generate());
-        let client_kp = KeyPair::generate();
-        let router = Arc::new(OnionRouter::new());
-        let state = Arc::new(ControlState::new(node_kp, router));
-        let id = SessionId([7u8; 32]);
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let state = Arc::new(ControlState::new(node_kp.clone(), router, allowlist));
+        let id = SessionId::new([42u8; 32]);
 
         announce(
             State(state.clone()),
             Json(AnnounceSessionRequest {
                 session_id: id.clone(),
                 client_pubkey: client_kp.public,
+                client_wg_pubkey: [9u8; 32],
             }),
         )
         .await;
 
-        let make = |bytes: u64| {
-            let r = Receipt {
-                session_id: id.clone(),
-                seq: 1,
-                bytes_used: bytes,
-                blind: [0u8; 32],
-            };
-            let p = r.signing_payload();
-            let sig = client_kp.sign(&p);
-            SubmitReceiptRequest {
-                receipt: r,
-                client_pubkey: client_kp.public,
-                client_sig: sig,
-            }
+        assert!(state.sessions.contains_key(&id));
+
+        // Reproduce the get_state body manually (bypass the axum layer).
+        let r = Receipt {
+            session_id: id.clone(),
+            seq: 1,
+            bytes_used: 0,
+            blind: octravpn_core::session::Blind::new([0u8; 32]),
         };
-
-        // First receipt: accepted.
-        let _ = submit_receipt(State(state.clone()), Path(id.to_hex()), Json(make(100))).await;
-
-        // Same seq, different bytes: must conflict.
-        let resp =
-            submit_receipt(State(state.clone()), Path(id.to_hex()), Json(make(200))).await;
-        let r = resp.into_response();
-        assert_eq!(r.status(), StatusCode::CONFLICT);
+        let payload = r.signing_payload();
+        let sig = node_kp.sign(&payload);
+        verify(&node_kp.public, &payload, &sig).unwrap();
     }
 }

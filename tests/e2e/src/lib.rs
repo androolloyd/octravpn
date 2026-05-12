@@ -1,10 +1,10 @@
-//! End-to-end tests against the in-process mock chain + control plane.
+//! End-to-end tests against the in-process mock chain.
 //!
-//! Covers:
-//!   - register / attest / list active validators
-//!   - open session, settle with dual-signed receipt, claim earnings
-//!   - no-show refund path
-//!   - 3-hop onion build/peel round-trip (wired separately, no chain needed)
+//! Covers the tailnet model:
+//!   - register endpoint (gated on Octra-validator)
+//!   - create tailnet, add member, configure exit
+//!   - open / settle / no-show
+//!   - 3-hop onion build/peel round-trip (no chain needed)
 
 #[cfg(test)]
 mod tests {
@@ -42,6 +42,14 @@ mod tests {
         format!("http://127.0.0.1:{port}/rpc")
     }
 
+    /// Promote an address to an Octra validator on the mock chain via
+    /// the test-helper RPC method.
+    async fn become_octra_validator(rpc: &RpcClient, addr: &str) {
+        rpc.raw_call("octra_test_grantValidator", json!([addr]))
+            .await
+            .expect("grant validator");
+    }
+
     #[tokio::test]
     async fn node_status_round_trip() {
         let _g = spawn_mock(18101, "octPROG").await;
@@ -51,76 +59,127 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn full_lifecycle_register_attest_open_settle_claim() {
+    async fn full_lifecycle_endpoint_tailnet_session_claim() {
         let _g = spawn_mock(18102, "octPROG").await;
         let rpc = RpcClient::new(mock_url(18102));
 
-        // 1. Register a validator (single hop for the simple path).
         let val = "octV1Address0000000000000000000000000001";
+        let owner = "octOWNER000000000000000000000000000000001";
+        let client = "octCLIENT00000000000000000000000000000001";
+
+        // Pre-promote `val` to an Octra protocol validator (mock-only path).
+        become_octra_validator(&rpc, val).await;
+
+        // 1. Register endpoint.
         let register_tx = json!({
             "kind": "contract_call",
             "from": val,
             "to": "octPROG",
-            "method": "register_validator",
+            "method": "register_endpoint",
             "params": [
                 "1.2.3.4:51820",
-                "deadbeef".repeat(8),       // wg_pubkey
-                "cafe".repeat(16),          // view_pubkey
+                "deadbeef".repeat(8),
+                "cafe".repeat(16),
+                "beef".repeat(16),
                 "eu-west",
-                100u64,                     // price_per_mb
-                "f00d".repeat(32),          // attest_sig
+                100u64,
             ],
-            "value": 1_000u64,
+            "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
         });
         rpc.submit(&register_tx).await.unwrap();
 
-        // 2. Refresh attestation.
-        let attest_tx = json!({
+        // 2. Create a tailnet with 2000 OU treasury.
+        let create_tx = json!({
             "kind": "contract_call",
-            "from": val,
+            "from": owner,
             "to": "octPROG",
-            "method": "refresh_attestation",
-            "params": ["abcd".repeat(32)],
+            "method": "create_tailnet",
+            "params": ["ac".repeat(32)],
+            "value": 2000u64,
+            "fee": 10u64,
+            "nonce": 0u64,
+        });
+        let r = rpc.submit(&create_tx).await.unwrap();
+        let tx = rpc.transaction(&r.hash).await.unwrap();
+        let tid = tx["events"]
+            .as_array()
+            .cloned()
+            .unwrap()
+            .into_iter()
+            .find(|e| e["name"] == "TailnetCreated")
+            .and_then(|e| e["tailnet_id"].as_str().map(String::from))
+            .unwrap();
+
+        // 3. Owner adds client as member.
+        let add_member_tx = json!({
+            "kind": "contract_call",
+            "from": owner,
+            "to": "octPROG",
+            "method": "add_member",
+            "params": [tid.clone(), client],
             "value": 0u64,
             "fee": 10u64,
             "nonce": 1u64,
         });
-        rpc.submit(&attest_tx).await.unwrap();
+        rpc.submit(&add_member_tx).await.unwrap();
 
-        // 3. Active list shows the validator.
+        // 4. Owner configures the validator as a tailnet exit.
+        let cfg_exit_tx = json!({
+            "kind": "contract_call",
+            "from": owner,
+            "to": "octPROG",
+            "method": "configure_tailnet_exit",
+            "params": [tid.clone(), val],
+            "value": 0u64,
+            "fee": 10u64,
+            "nonce": 2u64,
+        });
+        rpc.submit(&cfg_exit_tx).await.unwrap();
+
+        // 5. Active list shows the endpoint.
         let prog = Address::from_display("octPROG");
         let active = rpc
-            .contract_call(&prog, "list_active_validators", &[json!(0u64), json!(50u64)], None)
+            .contract_call(
+                &prog,
+                "list_active_endpoints",
+                &[json!(0u64), json!(50u64)],
+                None,
+            )
             .await
             .unwrap();
         let arr = active.as_array().unwrap();
         assert!(arr.iter().any(|v| v.as_str() == Some(val)));
 
-        // 4. Open session (1 hop).
-        let client = "octCLIENT00000000000000000000000000000001";
+        // 6. Open session (1 hop, 1000 OU deposit from treasury).
         let open_tx = json!({
             "kind": "contract_call",
             "from": client,
             "to": "octPROG",
             "method": "open_session",
             "params": [
+                tid.clone(),
                 ["aa".repeat(32)],
                 "bb".repeat(32),
-                "cc".repeat(32),
+                1000u64,
             ],
-            "value": 1_000u64,
+            "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
         });
         let r = rpc.submit(&open_tx).await.unwrap();
         let tx = rpc.transaction(&r.hash).await.unwrap();
-        let sid = tx.get("events").and_then(|v| v.as_array()).cloned().unwrap()
-            .into_iter().find(|e| e["name"] == "SessionOpened")
-            .and_then(|e| e["session_id"].as_str().map(String::from)).unwrap();
+        let sid = tx["events"]
+            .as_array()
+            .cloned()
+            .unwrap()
+            .into_iter()
+            .find(|e| e["name"] == "SessionOpened")
+            .and_then(|e| e["session_id"].as_str().map(String::from))
+            .unwrap();
 
-        // 5. Settle: bytes_used=2 → pay = 2 * 100 * 10000 / 10000 = 200.
+        // 7. Settle: bytes_used=2 → pay = 200, refund = 800 back to treasury.
         let bytes_used = 2u64;
         let blind = earnings::fresh_blind();
         let blind_bytes = earnings::scalar_to_bytes(&blind);
@@ -134,8 +193,8 @@ mod tests {
                 7u64,
                 bytes_used,
                 hex::encode(blind_bytes),
-                "11".repeat(32),  // client_sig (mock doesn't verify)
-                "22".repeat(32),  // node_sig (mock doesn't verify)
+                "11".repeat(32),
+                "22".repeat(32),
                 [{ "node_addr": val, "blind": "11".repeat(32), "split_bps": 10000u16 }],
             ],
             "value": 0u64,
@@ -144,22 +203,34 @@ mod tests {
         });
         let r = rpc.submit(&settle_tx).await.unwrap();
         let tx = rpc.transaction(&r.hash).await.unwrap();
-        let names: Vec<_> = tx["events"].as_array().cloned().unwrap_or_default()
-            .into_iter().filter_map(|e| e["name"].as_str().map(String::from)).collect();
-        assert!(names.contains(&"SessionSettled".to_string()));
+        let event = tx["events"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .find(|e| e["name"].as_str() == Some("SessionSettled"))
+            .expect("settled event");
+        assert_eq!(event["total_paid"].as_u64(), Some(200));
+        assert_eq!(event["refund"].as_u64(), Some(800));
 
-        // 6. Read encrypted earnings: must equal 200*G + blind*H.
+        // 8. Tailnet treasury: 2000 - 1000 + 800 = 1800.
+        let tnet = rpc
+            .contract_call(&prog, "get_tailnet", &[json!(tid)], None)
+            .await
+            .unwrap();
+        assert_eq!(tnet["treasury"].as_u64(), Some(1800));
+
+        // 9. Encrypted earnings: 200*G + blind*H.
         let earn = rpc
             .contract_call(&prog, "get_encrypted_earnings", &[json!(val)], None)
             .await
             .unwrap();
         let earn_hex = earn.as_str().unwrap();
-        let earn_bytes = hex::decode(earn_hex).unwrap();
         let scalar_200 = Scalar::from(200u64);
         let expected = &scalar_200 * RISTRETTO_BASEPOINT_TABLE + blind * h_generator();
         assert_eq!(hex::encode(expected.compress().to_bytes()), earn_hex);
 
-        // 7. Claim earnings: 200 OCT, opening = (200, blind).
+        // 10. Claim earnings.
         let claim_tx = json!({
             "kind": "contract_call",
             "from": val,
@@ -168,15 +239,19 @@ mod tests {
             "params": [200u64, hex::encode(blind_bytes), "ee".repeat(32)],
             "value": 0u64,
             "fee": 10u64,
-            "nonce": 2u64,
+            "nonce": 1u64,
         });
         let r = rpc.submit(&claim_tx).await.unwrap();
         let tx = rpc.transaction(&r.hash).await.unwrap();
-        let names: Vec<_> = tx["events"].as_array().cloned().unwrap_or_default()
-            .into_iter().filter_map(|e| e["name"].as_str().map(String::from)).collect();
-        assert!(names.contains(&"EarningsClaimed".to_string()));
+        let has_claimed = tx["events"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .any(|e| e["name"].as_str() == Some("EarningsClaimed"));
+        assert!(has_claimed);
 
-        // 8. Earnings ledger is reset to identity.
+        // 11. Earnings ledger is reset to identity.
         let earn = rpc
             .contract_call(&prog, "get_encrypted_earnings", &[json!(val)], None)
             .await
@@ -185,124 +260,72 @@ mod tests {
             earn.as_str().unwrap(),
             hex::encode(RistrettoPoint::identity().compress().to_bytes())
         );
-        let _ = earn_bytes; // keep the let alive
     }
 
     #[tokio::test]
-    async fn three_hop_session_lifecycle() {
-        let _g = spawn_mock(18103, "octPROG").await;
-        let rpc = RpcClient::new(mock_url(18103));
-        let prog = Address::from_display("octPROG");
+    async fn no_show_refund_returns_to_treasury() {
+        let _g = spawn_mock(18104, "octPROG").await;
+        let rpc = RpcClient::new(mock_url(18104));
+        let owner = "octOWNER0000000000000000000000000000NOSHO";
+        let client = "octCLIENT0000000000000000000000000000NOSHO";
 
-        // Register 3 validators with distinct prices.
-        let addrs = [
-            "octHOPaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01",
-            "octHOPbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb02",
-            "octHOPccccccccccccccccccccccccccccccccccc03",
-        ];
-        let prices = [100u64, 150u64, 200u64];
-        for (i, addr) in addrs.iter().enumerate() {
-            let tx = json!({
-                "kind": "contract_call",
-                "from": addr,
-                "to": "octPROG",
-                "method": "register_validator",
-                "params": [
-                    format!("10.0.0.{}:51820", i + 10),
-                    format!("{:02x}", i + 1).repeat(32),
-                    format!("{:02x}", i + 1).repeat(32),
-                    "global",
-                    prices[i],
-                    format!("{:02x}", i + 1).repeat(64),
-                ],
-                "value": 1_000u64,
-                "fee": 10u64,
-                "nonce": 0u64,
-            });
-            rpc.submit(&tx).await.unwrap();
-        }
-
-        // Open 3-hop session.
-        let client = "octCLIENT00000000000000000000000000000099";
-        let route_commit = ["aa".repeat(32), "bb".repeat(32), "cc".repeat(32)];
-        let open_tx = json!({
+        // Create a tailnet with 100 OU treasury and add client.
+        let create_tx = json!({
             "kind": "contract_call",
-            "from": client,
+            "from": owner,
             "to": "octPROG",
-            "method": "open_session",
-            "params": [
-                route_commit,
-                "dd".repeat(32),
-                "ee".repeat(32),
-            ],
-            "value": 5_000u64,
+            "method": "create_tailnet",
+            "params": ["bb".repeat(32)],
+            "value": 100u64,
             "fee": 10u64,
             "nonce": 0u64,
         });
-        let r = rpc.submit(&open_tx).await.unwrap();
+        let r = rpc.submit(&create_tx).await.unwrap();
         let tx = rpc.transaction(&r.hash).await.unwrap();
-        let sid = tx["events"].as_array().cloned().unwrap()
-            .into_iter().find(|e| e["name"] == "SessionOpened")
-            .and_then(|e| e["session_id"].as_str().map(String::from)).unwrap();
+        let tid = tx["events"]
+            .as_array()
+            .cloned()
+            .unwrap()
+            .into_iter()
+            .find(|e| e["name"] == "TailnetCreated")
+            .and_then(|e| e["tailnet_id"].as_str().map(String::from))
+            .unwrap();
 
-        // Settle: bytes_used=3, even split (3333/3333/3334).
-        let blind = earnings::fresh_blind();
-        let blind_hex = hex::encode(earnings::scalar_to_bytes(&blind));
-        let settle_tx = json!({
+        let add_tx = json!({
             "kind": "contract_call",
-            "from": client,
+            "from": owner,
             "to": "octPROG",
-            "method": "settle_session",
-            "params": [
-                sid,
-                1u64,
-                3u64,
-                blind_hex,
-                "11".repeat(32),
-                "22".repeat(32),
-                [
-                    { "node_addr": addrs[0], "blind": "11".repeat(32), "split_bps": 3333u16 },
-                    { "node_addr": addrs[1], "blind": "22".repeat(32), "split_bps": 3333u16 },
-                    { "node_addr": addrs[2], "blind": "33".repeat(32), "split_bps": 3334u16 },
-                ],
-            ],
+            "method": "add_member",
+            "params": [tid.clone(), client],
             "value": 0u64,
             "fee": 10u64,
             "nonce": 1u64,
         });
-        let r = rpc.submit(&settle_tx).await.unwrap();
-        let st = rpc.transaction(&r.hash).await.unwrap();
-        // total_paid = 3 * (100*3333 + 150*3333 + 200*3334) / 10000 = 174.99 → integer truncation
-        // (100*3333 + 150*3333 + 200*3334)/10000 = (333300 + 499950 + 666800)/10000 = 150 (integer floor)
-        // * 3 = 450
-        let total_paid = st["events"][0]["total_paid"].as_u64().unwrap();
-        assert!(total_paid > 0);
-        let refund = st["events"][0]["refund"].as_u64().unwrap();
-        assert_eq!(refund, 5000u64 - total_paid);
-    }
+        rpc.submit(&add_tx).await.unwrap();
 
-    #[tokio::test]
-    async fn no_show_refund_path() {
-        let _g = spawn_mock(18104, "octPROG").await;
-        let rpc = RpcClient::new(mock_url(18104));
-
-        let client = "octCLIENT0000000000000000000000000000NOSHO";
+        // Client opens a session for 30 OU.
         let open_tx = json!({
             "kind": "contract_call",
             "from": client,
             "to": "octPROG",
             "method": "open_session",
-            "params": [["00".repeat(32)], "11".repeat(32), "22".repeat(32)],
-            "value": 30u64,
+            "params": [tid.clone(), ["00".repeat(32)], "11".repeat(32), 30u64],
+            "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
         });
         let r = rpc.submit(&open_tx).await.unwrap();
         let tx = rpc.transaction(&r.hash).await.unwrap();
-        let sid = tx["events"].as_array().cloned().unwrap()
-            .into_iter().find(|e| e["name"] == "SessionOpened")
-            .and_then(|e| e["session_id"].as_str().map(String::from)).unwrap();
+        let sid = tx["events"]
+            .as_array()
+            .cloned()
+            .unwrap()
+            .into_iter()
+            .find(|e| e["name"] == "SessionOpened")
+            .and_then(|e| e["session_id"].as_str().map(String::from))
+            .unwrap();
 
+        // No-show claim refunds to treasury.
         let claim_tx = json!({
             "kind": "contract_call",
             "from": client,
@@ -315,14 +338,25 @@ mod tests {
         });
         let r = rpc.submit(&claim_tx).await.unwrap();
         let st = rpc.transaction(&r.hash).await.unwrap();
-        let names: Vec<_> = st["events"].as_array().cloned().unwrap_or_default()
-            .into_iter().filter_map(|e| e["name"].as_str().map(String::from)).collect();
-        assert!(names.contains(&"SessionRefunded".to_string()));
+        let has_refunded = st["events"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .any(|e| e["name"].as_str() == Some("SessionRefunded"));
+        assert!(has_refunded);
+
+        // Treasury back to 100 (30 came out, 30 went back).
+        let prog = Address::from_display("octPROG");
+        let tnet = rpc
+            .contract_call(&prog, "get_tailnet", &[json!(tid)], None)
+            .await
+            .unwrap();
+        assert_eq!(tnet["treasury"].as_u64(), Some(100));
     }
 
     #[test]
     fn three_hop_onion_round_trip() {
-        // Real onion build + 3-hop peel.
         use rand::rngs::OsRng;
         let s1 = StaticSecret::random_from_rng(OsRng);
         let s2 = StaticSecret::random_from_rng(OsRng);
@@ -342,14 +376,16 @@ mod tests {
         .unwrap();
 
         let l1 = peel_layer(&s1, &onion).unwrap();
-        let HopAction::Forward { endpoint, next_static_pubkey } = l1.action.clone()
-        else { panic!("hop1 must forward") };
+        let HopAction::Forward { endpoint, next_static_pubkey } = l1.action.clone() else {
+            panic!("hop1 must forward")
+        };
         assert_eq!(endpoint, "n2:51820");
         assert_eq!(next_static_pubkey, p2);
 
         let l2 = peel_layer(&s2, &l1.inner).unwrap();
-        let HopAction::Forward { endpoint, .. } = l2.action.clone()
-        else { panic!("hop2 must forward") };
+        let HopAction::Forward { endpoint, .. } = l2.action.clone() else {
+            panic!("hop2 must forward")
+        };
         assert_eq!(endpoint, "n3:51820");
 
         let l3 = peel_layer(&s3, &l2.inner).unwrap();
@@ -359,33 +395,26 @@ mod tests {
 
     #[test]
     fn pedersen_commitment_route_hiding() {
-        // Two clients commit to the same validator with different blinds —
-        // commitments must differ but both open correctly.
         let v = Address::from_display("octVALIDATOR");
         let b1 = commit::fresh_blind();
         let b2 = commit::fresh_blind();
         let c1 = commit::commit(&v, &b1);
         let c2 = commit::commit(&v, &b2);
         assert_ne!(c1, c2);
-        assert!(commit::verify_open(
-            &c1,
-            &commit::Opening { addr: v.clone(), blind: b1 }
-        ));
-        assert!(commit::verify_open(
-            &c2,
-            &commit::Opening { addr: v, blind: b2 }
-        ));
+        assert!(commit::verify_open(&c1, &commit::Opening { addr: v.clone(), blind: b1 }));
+        assert!(commit::verify_open(&c2, &commit::Opening { addr: v, blind: b2 }));
     }
 
     #[test]
     fn dual_signed_receipt_round_trip() {
+        use octravpn_core::session::Blind;
         let client = KeyPair::generate();
         let node = KeyPair::generate();
         let r = Receipt {
-            session_id: SessionId([1u8; 32]),
+            session_id: SessionId::new([1u8; 32]),
             seq: 5,
             bytes_used: 1024,
-            blind: [9u8; 32],
+            blind: Blind::new([9u8; 32]),
         };
         let sr = SignedReceipt::build(r, &client, &node);
         sr.verify().unwrap();

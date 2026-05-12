@@ -1,0 +1,23 @@
+# Auto-generated. Update via `cargo test -p octraforge --test ou_snapshot -- --include-ignored`.
+# Deterministic AML OU cost estimates per public method (see ou_cost_model.rs).
+add_member 1240
+claim_earnings 6500
+claim_no_show 1260
+configure_tailnet_exit 1260
+create_tailnet 1740
+deposit_to_tailnet 1240
+open_session 1880
+redeem_join_token 6320
+register_device 1240
+register_endpoint 1420
+remove_member 1260
+retire_endpoint 1220
+revoke_device 1220
+rotate_keys 1300
+set_params 1100
+set_paused 1000
+settle_session 14000
+sweep_expired_session 1790
+transfer_ownership 1020
+update_acl 1240
+update_endpoint 1240

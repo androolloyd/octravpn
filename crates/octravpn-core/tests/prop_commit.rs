@@ -34,7 +34,7 @@ proptest! {
         let addr = make_addr(&addr_seed);
         let wrong = make_addr(&wrong_seed);
         let c = commit(&addr, &blind);
-        let ok_match = verify_open(&c, &Opening { addr: addr.clone(), blind });
+        let ok_match = verify_open(&c, &Opening { addr, blind });
         let ok_mismatch = verify_open(&c, &Opening { addr: wrong, blind });
         prop_assert!(ok_match);
         prop_assert!(!ok_mismatch);

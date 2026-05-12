@@ -1,0 +1,223 @@
+:root {
+  --bg: #0e0f12;
+  --panel: #161821;
+  --panel2: #1c1f2a;
+  --text: #e6e8ef;
+  --muted: #8c93a8;
+  --accent: #6ea8fe;
+  --accent-fg: #0e0f12;
+  --good: #4cb782;
+  --bad: #e26d6d;
+  --warn: #d5a93f;
+  --border: #262a36;
+  --code-bg: #0a0b0f;
+}
+
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.45;
+}
+header.top {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.9rem 1.25rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+header.top h1 {
+  font-size: 1.05rem;
+  margin: 0;
+  letter-spacing: 0.02em;
+}
+nav {
+  display: flex;
+  gap: 0.25rem;
+  margin-left: auto;
+}
+nav a {
+  color: var(--muted);
+  text-decoration: none;
+  padding: 0.3rem 0.6rem;
+  border-radius: 0.35rem;
+  font-size: 0.95rem;
+}
+nav a:hover {
+  background: var(--panel2);
+  color: var(--text);
+}
+nav a.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.badge {
+  background: var(--panel2);
+  color: var(--muted);
+  padding: 0.15rem 0.5rem;
+  border-radius: 0.3rem;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+}
+.badge.writable {
+  color: var(--good);
+}
+.badge.readonly {
+  color: var(--warn);
+}
+main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 3rem;
+}
+.view.hidden {
+  display: none;
+}
+h2 {
+  font-size: 1.25rem;
+  margin: 0;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.row + .row {
+  margin-top: 1rem;
+}
+button.primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: 0;
+  padding: 0.5rem 0.95rem;
+  border-radius: 0.35rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+button.primary:hover {
+  filter: brightness(0.95);
+}
+button.ghost {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 0.4rem 0.8rem;
+  border-radius: 0.35rem;
+  cursor: pointer;
+}
+button.ghost:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+button.danger {
+  background: transparent;
+  color: var(--bad);
+  border: 1px solid var(--bad);
+  padding: 0.4rem 0.8rem;
+  border-radius: 0.35rem;
+  cursor: pointer;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--panel);
+  border-radius: 0.4rem;
+  overflow: hidden;
+}
+th,
+td {
+  padding: 0.6rem 0.85rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.92rem;
+}
+th {
+  background: var(--panel2);
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+tr:last-child td {
+  border-bottom: 0;
+}
+tr:hover {
+  background: var(--panel2);
+}
+code,
+.mono {
+  font-family: "SF Mono", "Menlo", monospace;
+  background: var(--code-bg);
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.2rem;
+  font-size: 0.85rem;
+  color: var(--accent);
+}
+textarea {
+  width: 100%;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  padding: 0.75rem;
+  font-family: "SF Mono", "Menlo", monospace;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.hint {
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin: 0.75rem 0;
+}
+dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.4rem 1rem;
+  margin: 0;
+}
+dt {
+  color: var(--muted);
+}
+dd {
+  margin: 0;
+}
+footer.bottom {
+  border-top: 1px solid var(--border);
+  padding: 0.7rem 1.25rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-align: center;
+}
+.expand {
+  padding: 0.75rem 0.85rem;
+  background: var(--panel2);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.expand .row {
+  margin-bottom: 0.5rem;
+}
+input[type="text"],
+input[type="number"] {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.9rem;
+}

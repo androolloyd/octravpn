@@ -31,11 +31,70 @@ serde_json  = { workspace = true }
 sha2        = { workspace = true }
 thiserror   = { workspace = true }
 tokio       = { workspace = true }
+# `tokio-stream` bridges a `broadcast::Receiver` into a `Stream` so the
+# SSE endpoint can wrap it with `axum::response::Sse`. The `sync`
+# feature enables `wrappers::BroadcastStream`.
+tokio-stream = { version = "0.1", features = ["sync"] }
+# Pulled in for `StreamExt::map` when adapting the broadcast stream into
+# the `Result<SseEvent, Infallible>` shape axum's `Sse::new` requires.
+futures-util = { version = "0.3", default-features = false }
 toml        = { workspace = true }
 tracing     = { workspace = true }
 tracing-subscriber = { workspace = true }
 x25519-dalek = { workspace = true }
 zeroize     = { workspace = true }
 
+[dev-dependencies]
+tempfile    = { workspace = true }
+
 [lints]
 workspace = true
+
+# cargo-deb metadata: `cargo deb -p octravpn-node` produces an installable .deb.
+[package.metadata.deb]
+name = "octravpn-node"
+maintainer = "OctraVPN contributors <dev@octra.org>"
+copyright = "2026, OctraVPN contributors"
+license-file = ["../../LICENSE", "0"]
+extended-description = """
+OctraVPN validator-side daemon: registers as an Octra validator-VPN
+node, runs the WireGuard data plane and HTTP control plane, signs
+bandwidth receipts, and settles via the on-chain OctraVPN program.
+"""
+section = "net"
+priority = "optional"
+depends = "libc6 (>= 2.31)"
+assets = [
+  ["target/release/octravpn-node", "/usr/local/bin/", "755"],
+  ["../../deploy/systemd/octravpn-node.service", "/lib/systemd/system/", "644"],
+  ["../../deploy/systemd/octravpn-attest.timer", "/lib/systemd/system/", "644"],
+  ["../../deploy/systemd/octravpn-attest.service", "/lib/systemd/system/", "644"],
+  ["../../README.md", "/usr/share/doc/octravpn-node/README.md", "644"],
+  ["../../docs/install.md", "/usr/share/doc/octravpn-node/install.md", "644"],
+]
+maintainer-scripts = "../../deploy/debian/"
+conf-files = ["/etc/octravpn/node.toml"]
+
+# cargo-generate-rpm metadata: `cargo generate-rpm -p octravpn-node`.
+[package.metadata.generate-rpm]
+name = "octravpn-node"
+summary = "OctraVPN validator-side node daemon"
+license = "MIT OR Apache-2.0"
+url = "https://github.com/octra-labs/octravpn"
+requires = []
+post_install_script = """
+getent group octravpn >/dev/null || groupadd --system octravpn
+getent passwd octravpn >/dev/null || useradd --system --gid octravpn --no-create-home --shell /usr/sbin/nologin octravpn
+install -d -o octravpn -g octravpn -m 0750 /etc/octravpn /var/lib/octravpn /var/log/octravpn
+systemctl daemon-reload >/dev/null 2>&1 || true
+setcap cap_net_admin,cap_net_bind_service+ep /usr/local/bin/octravpn-node >/dev/null 2>&1 || true
+"""
+pre_uninstall_script = """
+systemctl stop octravpn-node >/dev/null 2>&1 || true
+"""
+assets = [
+  { source = "target/release/octravpn-node", dest = "/usr/local/bin/octravpn-node", mode = "0755" },
+  { source = "deploy/systemd/octravpn-node.service", dest = "/usr/lib/systemd/system/octravpn-node.service", mode = "0644" },
+  { source = "deploy/systemd/octravpn-attest.timer", dest = "/usr/lib/systemd/system/octravpn-attest.timer", mode = "0644" },
+  { source = "deploy/systemd/octravpn-attest.service", dest = "/usr/lib/systemd/system/octravpn-attest.service", mode = "0644" },
+]

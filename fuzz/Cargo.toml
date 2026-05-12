@@ -1,0 +1,31 @@
+[package]
+name = "octravpn-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+octravpn-core = { path = "../crates/octravpn-core" }
+serde_json = "1"
+
+[[bin]]
+name = "receipt_decode"
+path = "fuzz_targets/receipt_decode.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "onion_peel"
+path = "fuzz_targets/onion_peel.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tx_canonical"
+path = "fuzz_targets/tx_canonical.rs"
+test = false
+doc = false

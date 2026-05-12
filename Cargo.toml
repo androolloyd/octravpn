@@ -4,6 +4,11 @@ members = [
     "crates/octravpn-core",
     "crates/octravpn-node",
     "crates/octravpn-client",
+    "crates/octravpn-tun",
+    "crates/octravpn-mesh",
+    "crates/octravpn-admin-ui",
+    "crates/octraforge",
+    "crates/octra-cli",
     "tests/mocks",
     "tests/e2e",
 ]
@@ -36,7 +41,12 @@ struct_field_names      = "allow"
 redundant_pub_crate     = "allow"
 option_if_let_else      = "allow"
 or_fun_call             = "allow"
-unwrap_used             = "warn"
+unwrap_used             = "allow"
+cognitive_complexity    = "allow"
+too_many_arguments      = "allow"
+doc_markdown            = "allow"
+doc_overindented_list_items = "allow"
+too_long_first_doc_paragraph = "allow"
 
 [workspace.lints.rust]
 unsafe_code             = "deny"
@@ -72,7 +82,7 @@ thiserror   = "1"
 tokio       = { version = "1", features = ["full"] }
 toml        = "0.8"
 tracing     = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 zeroize     = { version = "1", features = ["derive"] }
 proptest    = "1"
 axum        = "0.7"
@@ -89,4 +99,7 @@ num-bigint-dig  = { version = "0.8", features = ["serde", "rand"] }
 num-integer     = "0.1"
 num-traits      = "0.2"
 subtle          = "2"
+bs58            = "0.5"
+tun-rs          = { version = "2.8", default-features = false }
+futures         = "0.3"
 

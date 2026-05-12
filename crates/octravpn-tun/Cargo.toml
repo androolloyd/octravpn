@@ -1,0 +1,19 @@
+[package]
+name = "octravpn-tun"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Cross-platform TUN device abstraction for OctraVPN (Linux, macOS, Windows)."
+
+[dependencies]
+anyhow      = { workspace = true }
+bytes       = { workspace = true }
+tokio       = { workspace = true }
+tracing     = { workspace = true }
+futures     = { workspace = true }
+tun-rs      = { workspace = true, features = ["async_tokio"] }
+
+[lints]
+workspace = true

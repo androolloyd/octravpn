@@ -1,19 +1,14 @@
-//! `octravpn-node` — OctraVPN validator-side daemon.
+//! `octravpn-node` — OctraVPN endpoint daemon.
 //!
 //! Responsibilities:
-//!   1. Register on chain as a VPN validator (bond + attestation).
-//!   2. Run a userspace WireGuard endpoint (boringtun) for clients.
+//!   1. Verify the configured wallet is an Octra protocol validator and
+//!      register a paid endpoint (relay or exit) on the OctraVPN program.
+//!   2. Run a userspace WireGuard endpoint (boringtun) for connecting
+//!      tailnet clients.
 //!   3. Track per-session bandwidth, accept signed receipts, retain the
 //!      latest receipt per session for settlement / equivocation defense.
-//!   4. Periodically refresh attestation so we don't get jailed for offline.
+//!   4. Periodically re-verify Octra-validator membership; warn if lost.
 //!   5. On request, claim accumulated encrypted earnings via stealth payout.
-//!
-//! The binary is structured as small async tasks fanning off `main`:
-//!
-//!     main -> {chain registrar, attestation refresher, wg server,
-//!              onion forwarder, receipt collector, earnings claimer}
-//!
-//! Each task communicates through `mpsc` channels into a single `Hub`.
 
 use std::sync::Arc;
 
@@ -21,12 +16,14 @@ use anyhow::Result;
 use clap::Parser;
 use tracing::{info, warn};
 
+mod audit;
 mod chain;
 mod config;
 mod control;
+mod events;
 mod hub;
 mod onion;
-mod receipts;
+mod rate_limit;
 mod tunnel;
 
 use config::NodeConfig;
@@ -47,24 +44,27 @@ struct Cli {
 enum Cmd {
     /// Run the daemon in long-lived mode.
     Run,
-    /// Register on chain (idempotent: skips if already registered).
+    /// Register endpoint on chain (idempotent: skips if already registered).
+    /// Caller must already be an Octra protocol validator.
     Register,
-    /// One-shot attestation refresh.
-    Attest,
-    /// Claim accumulated encrypted earnings via stealth payout.
+    /// Claim accumulated earnings via stealth payout.
     ClaimEarnings,
     /// Print derived addresses / pubkeys without changing on-chain state.
     Identity,
+    /// Add (delta_amount, delta_blind) to the local earnings accumulator.
+    /// Used by reconciliation tooling that watches `SessionSettled` events
+    /// and tells the node which Pedersen contributions are theirs.
+    AccumulatorAdd {
+        #[arg(long)]
+        delta_amount: u64,
+        #[arg(long)]
+        delta_blind_hex: String,
+    },
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,octravpn_node=debug".into()),
-        )
-        .init();
+    octravpn_core::util::init_tracing("info,octravpn_node=debug");
 
     let cli = Cli::parse();
     let cfg = NodeConfig::load(&cli.config)?;
@@ -76,27 +76,28 @@ async fn main() -> Result<()> {
             hub.print_identity();
             Ok(())
         }
-        Cmd::Register => hub.register_validator().await,
-        Cmd::Attest => hub.refresh_attestation().await,
+        Cmd::Register => hub.register_endpoint().await,
         Cmd::ClaimEarnings => hub.claim_earnings().await,
+        Cmd::AccumulatorAdd {
+            delta_amount,
+            delta_blind_hex,
+        } => hub.accumulator_add(delta_amount, &delta_blind_hex),
         Cmd::Run => run(hub).await,
     }
 }
 
 async fn run(hub: Arc<Hub>) -> Result<()> {
-    // Make sure we're registered and attested before opening the tunnel.
-    if let Err(e) = hub.register_validator().await {
-        warn!(error = %e, "validator registration skipped or failed; continuing if already registered");
+    if let Err(e) = hub.register_endpoint().await {
+        warn!(error = %e, "endpoint registration skipped or failed; continuing if already registered");
     }
-    hub.refresh_attestation().await.ok();
 
-    let attestation_task = hub.clone().spawn_attestation_loop();
+    let health_task = hub.clone().spawn_validator_health_loop();
     let tunnel_task = hub.clone().spawn_tunnel();
     let control_task = hub.clone().spawn_control_plane();
 
     info!("octravpn-node running");
     tokio::select! {
-        r = attestation_task => r??,
+        r = health_task => r??,
         r = tunnel_task => r??,
         r = control_task => r??,
         _ = tokio::signal::ctrl_c() => {

@@ -1,22 +1,22 @@
 //! Pedersen commitments over the Ristretto group (Curve25519).
 //!
-//! commit(addr, blind) = blind * G + H(addr) * H_point
+//! commit(addr, blind) = blind * G + H(addr) * `H_point`
 //!
 //! Where:
 //!   - G is the Ristretto basepoint
-//!   - H_point is a fixed second generator derived deterministically from
+//!   - `H_point` is a fixed second generator derived deterministically from
 //!     a domain-separation tag (so its discrete log w.r.t. G is unknown)
 //!   - H(addr) maps the 32-byte address into a Ristretto scalar
 //!
 //! Properties:
 //!   - **Hiding**: a uniformly random `blind` perfectly hides `addr`.
 //!   - **Binding**: opening to a different (addr', blind') would require
-//!     knowing the discrete log of H_point w.r.t. G, which is hard.
+//!     knowing the discrete log of `H_point` w.r.t. G, which is hard.
 
 use curve25519_dalek::{
+    constants::RISTRETTO_BASEPOINT_TABLE,
     ristretto::{CompressedRistretto, RistrettoPoint},
     scalar::Scalar,
-    constants::RISTRETTO_BASEPOINT_TABLE,
 };
 use rand::RngCore;
 use sha2::{Digest, Sha512};
@@ -48,7 +48,7 @@ fn h_point() -> RistrettoPoint {
 fn addr_to_scalar(addr: &Address) -> Scalar {
     let mut hash = Sha512::new();
     hash.update(b"octravpn-pedersen-addr-v1");
-    hash.update(addr.raw);
+    hash.update(addr.as_bytes());
     Scalar::from_bytes_mod_order_wide(&hash.finalize().into())
 }
 
@@ -94,7 +94,7 @@ mod tests {
         let a = Address::from_display("octABC123");
         let b = fresh_blind();
         let c = commit(&a, &b);
-        assert!(verify_open(&c, &Opening { addr: a.clone(), blind: b }));
+        assert!(verify_open(&c, &Opening { addr: a, blind: b }));
     }
 
     #[test]
@@ -113,7 +113,13 @@ mod tests {
         let b = fresh_blind();
         let c = commit(&a, &b);
         let other = Address::from_display("octZZZ");
-        assert!(!verify_open(&c, &Opening { addr: other, blind: b }));
+        assert!(!verify_open(
+            &c,
+            &Opening {
+                addr: other,
+                blind: b
+            }
+        ));
     }
 
     #[test]
@@ -134,8 +140,14 @@ mod tests {
         let r2 = fresh_blind();
         let c1 = commit(&a1, &r1);
         let c2 = commit(&a2, &r2);
-        let p1 = CompressedRistretto::from_slice(&c1.0).unwrap().decompress().unwrap();
-        let p2 = CompressedRistretto::from_slice(&c2.0).unwrap().decompress().unwrap();
+        let p1 = CompressedRistretto::from_slice(&c1.0)
+            .unwrap()
+            .decompress()
+            .unwrap();
+        let p2 = CompressedRistretto::from_slice(&c2.0)
+            .unwrap()
+            .decompress()
+            .unwrap();
         let sum = p1 + p2;
 
         let r1s = blind_to_scalar(&r1);

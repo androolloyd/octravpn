@@ -1,39 +1,53 @@
 //! HTTP control plane between client and exit node.
 //!
-//! For each session, the exit node exposes a small JSON-over-HTTP API
-//! that the client uses to:
+//! Endpoints:
 //!
-//!   - announce a session (POST /session)
-//!   - submit signed receipts (POST /session/{id}/receipt)
-//!   - request the latest dual-signed receipt at settlement (GET ditto)
+//!   POST /session            — client announces a session, declaring its
+//!                               session pubkey to the exit node.
+//!   GET  /session/{id}       — returns the exit's current view of the
+//!                               session: bytes_served, last seq, and an
+//!                               *exit-only* signed proposal of the next
+//!                               receipt the client can countersign.
 //!
-//! We define request/response types here so the client and node share a
-//! single canonical schema. The actual HTTP server lives in the node
-//! crate; the client uses `reqwest` against the schema.
+//! Settlement: the client calls GET, takes the proposed receipt, signs it
+//! with its session key, and submits the dual-signed payload to chain.
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    receipt::{Receipt, SignedReceipt},
+    receipt::Receipt,
     session::SessionId,
     sig::{PublicKey, Signature},
 };
-
-/// Path constants. Kept here so client + server can't drift.
-pub const PATH_SESSION: &str = "/session";
-
-pub fn path_receipt(session_id: &SessionId) -> String {
-    format!("/session/{}/receipt", session_id.to_hex())
-}
 
 pub fn path_state(session_id: &SessionId) -> String {
     format!("/session/{}", session_id.to_hex())
 }
 
+/// Convention: WG endpoint is `host:51820`; HTTP control plane lives at
+/// the same host on port 51821. Centralized here so client + node never
+/// disagree on the convention.
+pub const CONTROL_PORT: u16 = 51821;
+
+pub fn base_url_for(wg_endpoint: &str) -> String {
+    let host = wg_endpoint.rsplit_once(':').map_or(wg_endpoint, |(h, _)| h);
+    format!("http://{host}:{CONTROL_PORT}")
+}
+
+/// Full URL for the per-session state endpoint on a node.
+pub fn session_state_url(wg_endpoint: &str, session_id: &SessionId) -> String {
+    format!("{}{}", base_url_for(wg_endpoint), path_state(session_id))
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AnnounceSessionRequest {
     pub session_id: SessionId,
+    /// Ephemeral session pubkey the client signs receipts with.
     pub client_pubkey: PublicKey,
+    /// X25519 static pubkey the client uses for the WG handshake against
+    /// the entry hop. Without this the entry hop can't construct a
+    /// valid `Tunn` peer state and the WG handshake never completes.
+    pub client_wg_pubkey: [u8; 32],
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -42,26 +56,21 @@ pub struct AnnounceSessionResponse {
     pub node_pubkey: PublicKey,
 }
 
-/// Client-side half of a receipt: the client signs `Receipt` first; the
-/// node co-signs and stores. The control-plane ingest endpoint takes
-/// the client side and returns the dual-signed result.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SubmitReceiptRequest {
-    pub receipt: Receipt,
-    pub client_pubkey: PublicKey,
-    pub client_sig: Signature,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SubmitReceiptResponse {
-    pub signed: SignedReceipt,
-}
-
+/// Exit-side view of a session, including the exit's signed receipt
+/// proposal. The client takes the (Receipt, node_sig) pair and adds its
+/// own signature at settlement.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionStateResponse {
-    pub last_seq: u64,
     pub bytes_served: u64,
-    pub latest: Option<SignedReceipt>,
+    pub last_seq: u64,
+    pub proposed: Option<ProposedReceipt>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProposedReceipt {
+    pub receipt: Receipt,
+    pub node_pubkey: PublicKey,
+    pub node_sig: Signature,
 }
 
 #[cfg(test)]
@@ -69,9 +78,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn paths_consistent() {
-        let id = SessionId([1u8; 32]);
-        assert!(path_receipt(&id).contains(&id.to_hex()));
+    fn path_consistent() {
+        let id = SessionId::new([1u8; 32]);
         assert!(path_state(&id).ends_with(&id.to_hex()));
     }
 }

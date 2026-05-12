@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OctraVPN admin</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="top">
+      <h1>OctraVPN</h1>
+      <span id="env-badge" class="badge">…</span>
+      <nav>
+        <a href="#tailnets" class="active">Tailnets</a>
+        <a href="#endpoints">Endpoints</a>
+        <a href="#acl">ACL editor</a>
+        <a href="#about">About</a>
+      </nav>
+    </header>
+
+    <main>
+      <!-- Tailnets view ------------------------------------------- -->
+      <section id="view-tailnets" class="view">
+        <div class="row">
+          <h2>Tailnets</h2>
+          <button id="btn-refresh-tailnets" class="primary">Refresh</button>
+        </div>
+        <table id="tailnet-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Owner</th>
+              <th>Members</th>
+              <th>Treasury (OU)</th>
+              <th>Exits</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p class="hint">
+          Click an ID to expand. Add/remove members, top up treasury, or
+          configure an exit endpoint from the expanded panel.
+        </p>
+      </section>
+
+      <!-- Endpoints view ----------------------------------------- -->
+      <section id="view-endpoints" class="view hidden">
+        <div class="row">
+          <h2>Active endpoints</h2>
+          <button id="btn-refresh-endpoints" class="primary">Refresh</button>
+        </div>
+        <table id="endpoint-table">
+          <thead>
+            <tr>
+              <th>Address</th>
+              <th>Region</th>
+              <th>Endpoint</th>
+              <th>OU/MB</th>
+              <th>Reputation</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <!-- ACL editor view --------------------------------------- -->
+      <section id="view-acl" class="view hidden">
+        <h2>ACL editor</h2>
+        <p class="hint">
+          Paste a TOML policy. The hash you see is what the chain stores
+          — a tailnet member fetches the document out-of-band and verifies
+          the hash matches.
+        </p>
+        <textarea id="acl-doc" rows="20"></textarea>
+        <div class="row">
+          <button id="btn-acl-hash" class="primary">Compute hash</button>
+          <span>
+            policy hash:
+            <code id="acl-hash-out">—</code>
+          </span>
+        </div>
+      </section>
+
+      <!-- About view -------------------------------------------- -->
+      <section id="view-about" class="view hidden">
+        <h2>About</h2>
+        <dl id="about-list">
+          <dt>Program address</dt>
+          <dd id="about-program">…</dd>
+          <dt>Signer</dt>
+          <dd id="about-signer">…</dd>
+          <dt>UI version</dt>
+          <dd id="about-version">…</dd>
+        </dl>
+      </section>
+    </main>
+
+    <footer class="bottom">
+      OctraVPN admin · read-only when no wallet is bound · changes
+      land as signed Octra transactions
+    </footer>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

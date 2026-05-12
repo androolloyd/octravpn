@@ -1,4 +1,4 @@
-//! Userspace WireGuard data plane on the node.
+//! Userspace `WireGuard` data plane on the node.
 //!
 //! Each accepted client peer gets its own boringtun `Tunn` instance; we
 //! demultiplex by source UDP address. The node is a *forwarding* relay:
@@ -14,11 +14,7 @@
 //! In both cases byte counters on the `OnionRouter` advance so receipt
 //! signing reflects actual served bandwidth.
 
-use std::{
-    collections::HashMap,
-    net::SocketAddr,
-    sync::Arc,
-};
+use std::{net::SocketAddr, sync::Arc};
 
 use anyhow::Result;
 use boringtun::noise::{Tunn, TunnResult};
@@ -30,45 +26,56 @@ use x25519_dalek::{PublicKey as X25519Pub, StaticSecret};
 use crate::onion::{Direction, OnionRouter};
 
 /// One peer's per-connection state.
-pub struct Peer {
+pub(crate) struct Peer {
     pub tun: Mutex<Tunn>,
 }
 
-/// UDP-bound forwarding server. Holds:
-///   - the node's static WireGuard secret (X25519)
-///   - peers, keyed by source SocketAddr
-///   - the onion router (carries per-session forwarding decisions)
-pub struct Server {
+// UDP-bound forwarding server. Holds the node's static WireGuard
+// secret (X25519), the peers map keyed by source SocketAddr, and the
+// onion router (carries per-session forwarding decisions).
+
+/// Hard cap on simultaneous WG peers.
+///
+/// Caps the DoS surface from arbitrary UDP source addresses arriving
+/// at our port.
+pub(crate) const PEERS_CAP: usize = 4096;
+pub(crate) const PEER_IDLE_TTL: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// Per-peer policy attached to an allowlisted X25519 pubkey. Empty
+/// today (the pubkey itself is the lookup key). Reserved for future
+/// per-peer rate limits / bandwidth caps without changing the type.
+#[derive(Clone, Default)]
+pub(crate) struct AllowedClient;
+
+pub(crate) struct Server {
     sock: Arc<UdpSocket>,
     static_secret: StaticSecret,
-    static_public: X25519Pub,
     router: Arc<OnionRouter>,
-    peers: Mutex<HashMap<SocketAddr, Arc<Peer>>>,
+    peers: octravpn_core::bounded::BoundedMap<SocketAddr, Arc<Peer>>,
+    /// Whitelist of permitted peer pubkeys, populated by the control
+    /// plane when a client announces a session.
+    allowlist: Arc<octravpn_core::bounded::BoundedMap<[u8; 32], AllowedClient>>,
 }
 
 impl Server {
-    pub async fn bind(
+    pub(crate) async fn bind(
         addr: SocketAddr,
         static_secret: StaticSecret,
         router: Arc<OnionRouter>,
+        allowlist: Arc<octravpn_core::bounded::BoundedMap<[u8; 32], AllowedClient>>,
     ) -> Result<Self> {
         let sock = UdpSocket::bind(addr).await?;
-        let static_public = X25519Pub::from(&static_secret);
         Ok(Self {
             sock: Arc::new(sock),
             static_secret,
-            static_public,
             router,
-            peers: Mutex::new(HashMap::new()),
+            peers: octravpn_core::bounded::BoundedMap::new(PEERS_CAP, PEER_IDLE_TTL),
+            allowlist,
         })
     }
 
-    pub fn static_public(&self) -> [u8; 32] {
-        self.static_public.to_bytes()
-    }
-
     /// Run the UDP receive loop forever.
-    pub async fn run(self: Arc<Self>) -> Result<()> {
+    pub(crate) async fn run(self: Arc<Self>) -> Result<()> {
         let mut buf = vec![0u8; 65535];
         let mut work = vec![0u8; 65535];
         loop {
@@ -84,7 +91,17 @@ impl Server {
     }
 
     async fn handle_packet(&self, packet: &[u8], src: SocketAddr, work: &mut [u8]) {
-        let peer = self.get_or_create_peer(src);
+        // To bring up a fresh peer we need its static pubkey. WG packets
+        // carry a sender index but not a pubkey; we extract a hint from
+        // the WG handshake-initiation message (msg_type = 1, peer pubkey
+        // is encrypted but the sender index lets us look up by initiator).
+        // Until that is wired we attempt a best-effort hint via WG handshake
+        // peeking; if missing, drop the packet.
+        let hint = peek_initiator_pubkey(packet);
+        let Some(peer) = self.get_or_create_peer(src, hint) else {
+            debug!(?src, "dropping packet from unregistered peer");
+            return;
+        };
 
         // boringtun decapsulation. The Tunn handles handshake + transport.
         let res = peer.tun.lock().decapsulate(None, packet, work);
@@ -110,7 +127,7 @@ impl Server {
         }
     }
 
-    /// We received a decapsulated inner packet from the WireGuard peer.
+    /// We received a decapsulated inner packet from the `WireGuard` peer.
     /// Treat the inner bytes as an onion layer; peel and act per the
     /// resulting `HopAction`.
     async fn dispatch_inner(&self, layer: &[u8], src: SocketAddr) {
@@ -125,7 +142,7 @@ impl Server {
         sid.copy_from_slice(&layer[..32]);
         let onion = &layer[32..];
 
-        let session_id = octravpn_core::session::SessionId(sid);
+        let session_id = octravpn_core::session::SessionId::new(sid);
         match octravpn_core::onion::peel_layer(&self.static_secret, onion) {
             Ok(peeled) => {
                 self.router
@@ -148,11 +165,16 @@ impl Server {
         }
     }
 
-    async fn forward_to(&self, endpoint: &str, session: &octravpn_core::session::SessionId, blob: &[u8]) {
+    async fn forward_to(
+        &self,
+        endpoint: &str,
+        session: &octravpn_core::session::SessionId,
+        blob: &[u8],
+    ) {
         // Prefix with session_id again so the next hop knows which
         // session this belongs to.
         let mut payload = Vec::with_capacity(32 + blob.len());
-        payload.extend_from_slice(&session.0);
+        payload.extend_from_slice(session.as_bytes());
         payload.extend_from_slice(blob);
         match endpoint.parse::<SocketAddr>() {
             Ok(addr) => {
@@ -180,26 +202,58 @@ impl Server {
         }
     }
 
-    fn get_or_create_peer(&self, src: SocketAddr) -> Arc<Peer> {
-        let mut g = self.peers.lock();
-        if let Some(p) = g.get(&src) {
-            return p.clone();
+    /// Look up an existing peer for `src` (refreshes idle-timer), or
+    /// create one if `src` is registered in the allowlist with a known
+    /// static pubkey. Unsolicited UDP packets from unknown sources are
+    /// dropped — protects against UDP-source spoof DoS.
+    fn get_or_create_peer(
+        &self,
+        src: SocketAddr,
+        peer_pubkey_hint: Option<[u8; 32]>,
+    ) -> Option<Arc<Peer>> {
+        if let Some(p) = self.peers.get(&src) {
+            return Some(p);
         }
-        // For v1 we accept any peer that arrives. A production deployment
-        // would gate by registering each peer's static pubkey first
-        // (e.g. when the control plane learns about it from `announce`).
+        // Need a registered peer pubkey to safely construct Tunn.
+        let pk = peer_pubkey_hint?;
+        self.allowlist.get(&pk)?;
         let tun = Tunn::new(
             self.static_secret.clone(),
-            X25519Pub::from([0u8; 32]),
+            X25519Pub::from(pk),
             None,
             None,
             0,
             None,
         );
-        let peer = Arc::new(Peer { tun: Mutex::new(tun) });
-        g.insert(src, peer.clone());
-        peer
+        let peer = Arc::new(Peer {
+            tun: Mutex::new(tun),
+        });
+        self.peers.insert(src, peer.clone());
+        Some(peer)
     }
+}
+
+/// Best-effort: peek at a WG handshake-initiation message to surface a
+/// peer pubkey hint. WG message format: 1B msg_type + 3B reserved +
+/// 4B sender_index + 32B unencrypted ephemeral + 48B encrypted static
+/// pubkey + 28B encrypted timestamp + MAC1 + MAC2.
+///
+/// We CANNOT decrypt the static-pubkey blob without doing the WG
+/// handshake; instead the control plane is expected to register the
+/// pubkey out-of-band before any UDP packets arrive. This function
+/// returns the *ephemeral* pubkey (offset 8..40) which the allowlist
+/// can use as a per-handshake binding hint when the control plane
+/// pre-populates the allowlist with `(client_static_pubkey, ephemeral)`
+/// pairs at announce time. If neither is registered, the peer is
+/// dropped.
+fn peek_initiator_pubkey(packet: &[u8]) -> Option<[u8; 32]> {
+    // msg_type 0x01 = handshake initiation.
+    if packet.len() < 40 || packet[0] != 0x01 {
+        return None;
+    }
+    let mut pk = [0u8; 32];
+    pk.copy_from_slice(&packet[8..40]);
+    Some(pk)
 }
 
 #[cfg(test)]
@@ -210,9 +264,12 @@ mod tests {
     async fn server_binds_and_returns_pubkey() {
         let secret = StaticSecret::random_from_rng(rand::rngs::OsRng);
         let router = Arc::new(OnionRouter::new());
-        let server = Server::bind("127.0.0.1:0".parse().unwrap(), secret, router)
+        let allowlist = Arc::new(octravpn_core::bounded::BoundedMap::new(
+            16,
+            std::time::Duration::from_secs(60),
+        ));
+        let _server = Server::bind("127.0.0.1:0".parse().unwrap(), secret, router, allowlist)
             .await
-            .unwrap();
-        assert_eq!(server.static_public().len(), 32);
+            .expect("bind succeeds");
     }
 }

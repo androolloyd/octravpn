@@ -1,46 +1,59 @@
 // IOctraVPN — public surface of the OctraVPN program.
+//
+// Tailnet-on-chain model: endpoints (paid relays/exits) must be Octra
+// protocol validators; tailnets are member groups with treasuries that
+// fund paid traffic. Bonding/attestation/slashing are delegated to the
+// Octra protocol layer.
 
 interface IOctraVPN {
 
-  // ---- Validator-VPN node lifecycle ----
+  // ---- Endpoint (relay/exit) lifecycle ----
+  //
+  // Caller MUST be an Octra protocol validator (chain-side gate via
+  // `is_octra_validator`). No in-program bond — Octra's own bond and
+  // slashing cover the security guarantees.
 
-  fn register_validator(
+  fn register_endpoint(
     endpoint: string,
     wg_pubkey: bytes,
+    receipt_pubkey: bytes,
     view_pubkey: bytes,
     region: string,
-    price_per_mb: int,
-    attest_sig: bytes
+    price_per_mb: int
   ): bool
 
-  fn update_validator(
+  fn update_endpoint(
     endpoint: string,
     region: string,
     price_per_mb: int
   ): bool
 
-  fn refresh_attestation(attest_sig: bytes): bool
-  fn add_bond(): bool
-  fn request_unbond(): bool
-  fn complete_unbond(): bool
+  fn rotate_keys(
+    new_wg_pubkey: bytes,
+    new_receipt_pubkey: bytes,
+    new_view_pubkey: bytes
+  ): bool
 
-  // ---- Session lifecycle (clients) ----
+  fn retire_endpoint(): bool
 
-  // Open a 1..3-hop session. `route_commit[i]` is a Pedersen
-  // commitment to hop i's address+blind. `client_session_pubkey`
-  // is an ephemeral ed25519 pubkey the client uses to sign receipts.
-  // `refund_stealth_output` is a 32-byte one-time stealth output the
-  // chain pays the unused deposit to at settlement.
+  // ---- Tailnet lifecycle ----
+
+  fn create_tailnet(acl_policy: bytes): bytes
+  fn add_member(tailnet_id: bytes, member: address): bool
+  fn remove_member(tailnet_id: bytes, member: address): bool
+  fn deposit_to_tailnet(tailnet_id: bytes): bool
+  fn configure_tailnet_exit(tailnet_id: bytes, exit_addr: address): bool
+  fn update_acl(tailnet_id: bytes, new_acl_policy: bytes): bool
+
+  // ---- Session lifecycle (paid traffic through an exit) ----
+
   fn open_session(
+    tailnet_id: bytes,
     route_commit: list[bytes],
     client_session_pubkey: bytes,
-    refund_stealth_output: bytes
+    deposit: int
   ): bytes
 
-  // Settle a session with a dual-signed final receipt.
-  // Distributes the weighted payment to each hop's earnings ledger and
-  // refunds the unused portion of the deposit to the client's stealth
-  // output. Refund = deposit - sum(pay_v).
   fn settle_session(
     session_id: bytes,
     seq: int,
@@ -52,47 +65,34 @@ interface IOctraVPN {
   ): bool
 
   fn claim_no_show(session_id: bytes): bool
-  fn slash_no_show_with_open(
-    session_id: bytes,
-    entry_addr: address,
-    entry_blind: bytes
-  ): bool
+  fn sweep_expired_session(session_id: bytes): bool
 
   // ---- Earnings claim ----
 
   view fn get_encrypted_earnings(addr: address): bytes
 
-  // Reveal (claimed_amount, claimed_blind) opening the validator's
-  // Pedersen earnings ledger. On success, ledger resets to zero and
-  // `claimed_amount` OCT is sent to `stealth_output` via private transfer.
   fn claim_earnings(
     claimed_amount: int,
     claimed_blind: bytes,
     stealth_output: bytes
   ): bool
 
-  // ---- Slashing ----
+  // ---- Views ----
 
-  fn slash_double_sign(
-    session_id: bytes,
-    seq: int,
-    bytes_a: int,
-    blind_a: bytes,
-    sig_a: bytes,
-    bytes_b: int,
-    blind_b: bytes,
-    sig_b: bytes,
-    node_addr: address
-  ): bool
-
-  fn slash_offline(node_addr: address): bool
-
-  // ---- Read-only views ----
-
-  view fn get_validator(addr: address): ValidatorRecord
+  view fn get_endpoint(addr: address): EndpointRecord
+  view fn get_tailnet(tailnet_id: bytes): Tailnet
+  view fn is_tailnet_member(tailnet_id: bytes, addr: address): bool
+  view fn is_tailnet_exit(tailnet_id: bytes, addr: address): bool
   view fn get_session(session_id: bytes): Session
-  view fn list_active_validators(offset: int, limit: int): list[address]
+  view fn list_active_endpoints(offset: int, limit: int): list[address]
+  view fn list_tailnets(offset: int, limit: int): list[bytes]
   view fn get_params(): Params
+
+  // ---- Governance ----
+
+  fn set_params(p: Params): bool
+  fn set_paused(v: int): bool
+  fn transfer_ownership(new_owner: address): bool
 }
 
 struct RouteOpening {
@@ -101,36 +101,41 @@ struct RouteOpening {
   split_bps: int
 }
 
-struct ValidatorRecord {
-  bond: int
+struct EndpointRecord {
+  active: int
   endpoint: string
   wg_pubkey: bytes
+  receipt_pubkey: bytes
   view_pubkey: bytes
   region: string
   price_per_mb: int
   registered_at: int
-  last_attest_epoch: int
-  unbond_request_epoch: int
-  jailed_at: int
   reputation: int
 }
 
+struct Tailnet {
+  owner: address
+  treasury: int
+  member_count: int
+  acl_policy: bytes
+  created_at: int
+  exit_count: int
+}
+
 struct Session {
+  tailnet_id: bytes
   client_session_pubkey: bytes
   route_commit: list[bytes]
   deposit: int
   opened_at: int
   receipt_seq: int
-  status: int   // 0=open, 1=settled, 2=refunded, 3=slashed
+  status: int   // 0=open, 1=settled, 2=refunded
 }
 
 struct Params {
-  min_bond: int
   min_session_deposit: int
-  attest_grace_epochs: int
+  min_tailnet_deposit: int
   session_grace_epochs: int
-  unbond_epochs: int
-  slash_bounty_bps: int
-  slash_burn_bps: int
-  slash_treasury_bps: int
+  sweep_grace_multiplier: int
+  sweep_bounty_bps: int
 }

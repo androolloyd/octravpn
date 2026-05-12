@@ -1,5 +1,10 @@
 /-!
-# State of the OctraVPN program — Lean 4 model.
+# State of the OctraVPN program — Lean 4 model (tailnet edition).
+
+Endpoints (paid relays/exits) carry no bond inside this program — bond
+and liveness are delegated to the Octra protocol layer, modeled as the
+external predicate `isOctraValidator`. Tailnets are member groups with
+shared treasuries that fund sessions.
 -/
 
 namespace OctraVPN
@@ -7,48 +12,52 @@ namespace OctraVPN
 abbrev Addr := Nat
 abbrev Bytes := List UInt8
 abbrev Epoch := Nat
-abbrev Bond := Nat
 abbrev OctRaw := Nat
-
-/-- An on-chain validator record, as stored under `validators[addr]`. -/
-structure ValidatorRecord where
-  bond              : Bond
-  endpoint          : String
-  region            : String
-  pricePerMb        : Nat
-  registeredAt      : Epoch
-  lastAttestEpoch   : Epoch
-  unbondRequest     : Option Epoch
-  jailedAt          : Option Epoch
-  reputation        : Int
-  deriving Repr
-
-def ValidatorRecord.empty : ValidatorRecord :=
-  { bond := 0, endpoint := "", region := "",
-    pricePerMb := 0, registeredAt := 0,
-    lastAttestEpoch := 0, unbondRequest := none,
-    jailedAt := none, reputation := 0 }
-
-/-- A session record. We track only fields relevant to the proofs. -/
-structure Session where
-  deposit          : OctRaw
-  openedAt         : Epoch
-  receiptSeq       : Nat
-  status           : SessionStatus
-  /-- Hops are a list of (validator address, split bps) pairs. We omit
-      Pedersen blinds in the model since they're cryptographic detail. -/
-  route            : List (Addr × Nat)
-  /-- Plaintext "view" of the FHE-encrypted bytes paid for. The real
-      program never stores this; the proof needs it to argue earnings. -/
-  paidBytes        : Nat
-  deriving Repr
 
 inductive SessionStatus where
   | open      : SessionStatus
   | settled   : SessionStatus
   | refunded  : SessionStatus
-  | slashed   : SessionStatus
   deriving Repr, DecidableEq
+
+/-- On-chain endpoint record under `endpoints[addr]`. -/
+structure EndpointRecord where
+  active           : Bool
+  endpoint         : String
+  region           : String
+  pricePerMb       : Nat
+  registeredAt     : Epoch
+  reputation       : Int
+  deriving Repr
+
+def EndpointRecord.empty : EndpointRecord :=
+  { active := false, endpoint := "", region := "",
+    pricePerMb := 0, registeredAt := 0, reputation := 0 }
+
+/-- On-chain tailnet record under `tailnets[id]`. -/
+structure Tailnet where
+  owner       : Addr
+  treasury    : OctRaw
+  members     : List Addr
+  exits       : List Addr
+  createdAt   : Epoch
+  deriving Repr
+
+def Tailnet.empty : Tailnet :=
+  { owner := 0, treasury := 0, members := [], exits := [], createdAt := 0 }
+
+/-- A session record. -/
+structure Session where
+  tailnetId       : Bytes
+  deposit         : OctRaw
+  openedAt        : Epoch
+  receiptSeq      : Nat
+  status          : SessionStatus
+  /-- Hops are a list of (endpoint address, split bps) pairs. -/
+  route           : List (Addr × Nat)
+  /-- Plaintext "view" of bytes paid for, for proof purposes only. -/
+  paidBytes       : Nat
+  deriving Repr
 
 abbrev Map (α : Type) (β : Type) := α → β
 
@@ -57,23 +66,23 @@ def Map.update {α} {β} [DecidableEq α]
   fun x => if x = k then v else m x
 
 structure Params where
-  minBond              : Bond
   minSessionDeposit    : OctRaw
-  attestGraceEpochs    : Nat
+  minTailnetDeposit    : OctRaw
   sessionGraceEpochs   : Nat
-  unbondEpochs         : Nat
-  slashBountyBps       : Nat
-  slashBurnBps         : Nat
-  slashTreasuryBps     : Nat
+  sweepGraceMultiplier : Nat
+  sweepBountyBps       : Nat
   deriving Repr
 
 structure ProgramState where
-  validators   : Map Addr ValidatorRecord
-  sessions     : Map Bytes (Option Session)
-  encEarn      : Map Addr Nat       -- decrypted view; in chain it's a ciphertext
-  treasury     : OctRaw
-  burned       : OctRaw
-  params       : Params
-  currentEpoch : Epoch
+  /-- External oracle: is `addr` currently an Octra protocol validator?
+      The program's `register_endpoint` gate checks this. -/
+  isOctraValidator : Addr → Bool
+  endpoints        : Map Addr EndpointRecord
+  tailnets         : Map Bytes Tailnet
+  sessions         : Map Bytes (Option Session)
+  encEarn          : Map Addr Nat
+  burned           : OctRaw
+  params           : Params
+  currentEpoch     : Epoch
 
 end OctraVPN

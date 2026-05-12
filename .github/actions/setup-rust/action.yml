@@ -1,0 +1,31 @@
+name: Set up Rust
+description: Checks out the repo and installs a Rust toolchain with cargo build cache.
+inputs:
+  toolchain:
+    description: "Toolchain channel (stable, nightly, etc.)"
+    required: false
+    default: stable
+  components:
+    description: "Comma-separated rustup components (clippy, rustfmt, ...)"
+    required: false
+    default: ""
+  targets:
+    description: "Comma-separated cross-compile targets"
+    required: false
+    default: ""
+  cache:
+    description: "Whether to enable Swatinem/rust-cache (true/false)"
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ inputs.toolchain }}
+        components: ${{ inputs.components }}
+        targets: ${{ inputs.targets }}
+    - if: inputs.cache == 'true'
+      uses: Swatinem/rust-cache@v2

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WiX template for the OctraVPN Windows MSI installer.
+
+  Build with `cargo wix init` (one-time) then `cargo wix --no-build`.
+  See https://volks73.github.io/cargo-wix/
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+    <Package Name="OctraVPN"
+             Manufacturer="OctraVPN contributors"
+             Version="!(bind.FileVersion.octravpn.exe)"
+             UpgradeCode="d50b41a3-2c8b-4f4b-9d9b-fbb84a3c5bd4"
+             Scope="perMachine"
+             Compressed="yes">
+
+        <SummaryInformation Description="OctraVPN client + node daemon"
+                            Keywords="Installer,OctraVPN,VPN,Octra" />
+        <MajorUpgrade DowngradeErrorMessage="A newer OctraVPN is already installed." />
+        <MediaTemplate EmbedCab="yes" />
+
+        <Feature Id="ProductFeature" Title="OctraVPN" Level="1">
+            <ComponentGroupRef Id="OctravpnBinaries" />
+            <ComponentRef Id="WintunDriverCheck" />
+        </Feature>
+
+        <StandardDirectory Id="ProgramFiles64Folder">
+            <Directory Id="INSTALLDIR" Name="OctraVPN">
+                <Directory Id="BinDir" Name="bin" />
+            </Directory>
+        </StandardDirectory>
+
+        <StandardDirectory Id="CommonAppDataFolder">
+            <Directory Id="OctravpnDataDir" Name="OctraVPN" />
+        </StandardDirectory>
+
+        <ComponentGroup Id="OctravpnBinaries" Directory="BinDir">
+            <Component Id="OctravpnExe" Guid="*">
+                <File Id="octravpn.exe" Source="target\release\octravpn.exe" />
+                <Environment Id="UpdatePath" Action="set" Name="PATH"
+                             Part="last" System="yes" Value="[BinDir]" />
+            </Component>
+            <Component Id="OctravpnNodeExe" Guid="*">
+                <File Id="octravpn_node.exe" Source="target\release\octravpn-node.exe" />
+            </Component>
+            <Component Id="InstallServiceScript" Guid="*">
+                <File Source="deploy\windows\install-service.ps1" />
+            </Component>
+            <Component Id="UninstallServiceScript" Guid="*">
+                <File Source="deploy\windows\uninstall-service.ps1" />
+            </Component>
+        </ComponentGroup>
+
+        <Component Id="WintunDriverCheck" Directory="BinDir" Guid="*">
+            <Condition>NOT WIX_INSTALL_LANGUAGE</Condition>
+            <CreateFolder />
+        </Component>
+
+        <!-- Optional: launch the service installer post-install. Disabled
+             by default to keep silent installs scriptable. -->
+    </Package>
+</Wix>
