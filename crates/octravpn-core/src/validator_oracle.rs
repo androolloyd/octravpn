@@ -29,6 +29,26 @@ use crate::{address::Address, rpc::RpcClient, CoreResult};
 /// How long to trust a cached bulk-listing result before refreshing.
 const DEFAULT_REFRESH: Duration = Duration::from_secs(60);
 
+/// The RPC method names the oracle tries, in priority order. First is
+/// the direct per-address query; remaining are bulk-listing fallbacks
+/// for when the direct method isn't exposed.
+pub const RPC_DIRECT: &str = "octra_isValidator";
+const RPC_BULK_CANDIDATES: &[(&str, &[u64])] = &[
+    ("octra_listValidators", &[0, 5_000]),
+    ("validator_list", &[]),
+];
+
+/// Probing state for the direct RPC.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Mode {
+    /// Haven't tried yet.
+    Unknown,
+    /// Direct query works — keep using it.
+    Direct,
+    /// Direct query is unavailable; use the bulk-cache fallback.
+    Bulk,
+}
+
 #[derive(Clone)]
 pub struct ValidatorOracle {
     rpc: RpcClient,
@@ -37,8 +57,7 @@ pub struct ValidatorOracle {
 }
 
 struct OracleState {
-    /// Whether the upstream supports the cheap per-addr query.
-    supports_direct: Option<bool>,
+    mode: Mode,
     /// Last bulk fetch result. `None` until first fetch.
     cached_set: Option<HashSet<String>>,
     last_refresh: Instant,
@@ -51,7 +70,7 @@ impl ValidatorOracle {
         Self {
             rpc,
             state: Arc::new(RwLock::new(OracleState {
-                supports_direct: None,
+                mode: Mode::Unknown,
                 cached_set: None,
                 last_refresh: Instant::now()
                     .checked_sub(Duration::from_secs(86_400))
@@ -90,26 +109,28 @@ impl ValidatorOracle {
     ///   - The static allowlist short-circuits to `true` regardless.
     pub async fn is_validator(&self, addr: &Address) -> CoreResult<bool> {
         let display = addr.display().to_string();
-        if self.state.read().static_allowlist.contains(&display) {
+        // Sample state into Copy / owned values so no guard is held
+        // across `.await` (RwLockReadGuard isn't Send).
+        let (in_allowlist, mode) = {
+            let s = self.state.read();
+            (s.static_allowlist.contains(&display), s.mode)
+        };
+        if in_allowlist {
             return Ok(true);
         }
-        let prefer_direct = self.state.read().supports_direct;
-        match prefer_direct {
-            Some(true) => self.rpc.is_octra_validator(addr).await,
-            Some(false) => self.bulk_lookup(&display).await,
-            None => {
-                // First attempt: try direct.
-                match self.rpc.is_octra_validator(addr).await {
-                    Ok(v) => {
-                        self.state.write().supports_direct = Some(true);
-                        Ok(v)
-                    }
-                    Err(_) => {
-                        self.state.write().supports_direct = Some(false);
-                        self.bulk_lookup(&display).await
-                    }
+        match mode {
+            Mode::Direct => self.rpc.is_octra_validator(addr).await,
+            Mode::Bulk => self.bulk_lookup(&display).await,
+            Mode::Unknown => match self.rpc.is_octra_validator(addr).await {
+                Ok(v) => {
+                    self.state.write().mode = Mode::Direct;
+                    Ok(v)
                 }
-            }
+                Err(_) => {
+                    self.state.write().mode = Mode::Bulk;
+                    self.bulk_lookup(&display).await
+                }
+            },
         }
     }
 
@@ -117,12 +138,8 @@ impl ValidatorOracle {
         if self.cache_is_stale() {
             self.refresh_bulk().await?;
         }
-        Ok(self
-            .state
-            .read()
-            .cached_set
-            .as_ref()
-            .is_some_and(|s| s.contains(addr)))
+        let s = self.state.read();
+        Ok(s.cached_set.as_ref().is_some_and(|x| x.contains(addr)))
     }
 
     fn cache_is_stale(&self) -> bool {
@@ -131,14 +148,13 @@ impl ValidatorOracle {
     }
 
     async fn refresh_bulk(&self) -> CoreResult<()> {
-        // Try the canonical bulk RPC names in order. The first one
-        // that returns an array of strings wins.
-        let candidates = [
-            ("octra_listValidators", json!([0u64, 5_000u64])),
-            ("validator_list", json!([])),
-        ];
-        for (method, params) in &candidates {
-            if let Ok(v) = self.rpc.raw_call(method, params.clone()).await {
+        for (method, args) in RPC_BULK_CANDIDATES {
+            let params = if args.is_empty() {
+                json!([])
+            } else {
+                json!(args)
+            };
+            if let Ok(v) = self.rpc.raw_call(method, params).await {
                 if let Some(arr) = v.as_array() {
                     let set: HashSet<String> = arr
                         .iter()

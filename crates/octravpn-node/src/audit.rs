@@ -206,9 +206,9 @@ impl AuditLog {
         Ok(count)
     }
 
-    /// The HMAC key as known to a running `AuditLog`. Useful for tests
-    /// that want to verify the file after writing.
-    #[cfg(test)]
+    /// The HMAC key as known to a running `AuditLog`. Needed for
+    /// `verify_file` and by operators auditing the log out-of-band
+    /// (e.g. shipping the chain to a separate auditor).
     pub(crate) fn key(&self) -> [u8; 32] {
         self.inner.lock().key
     }

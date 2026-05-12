@@ -143,14 +143,31 @@ impl AclDoc {
 /// owner's HTTPS endpoint or pinned to IPFS) so members can verify the
 /// authorship without trusting the transport.
 ///
-/// Wire form: `version=1`, `doc` (the AclDoc itself in JSON), `owner_addr`
-/// (string), `signature` (hex, 64 bytes).
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+/// Sig storage matches `SignedPeerSnapshot`: raw `[u8;64]` with a
+/// serde helper that emits as a byte string in JSON/CBOR.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SignedAclDoc {
     pub doc: AclDoc,
     pub owner_addr: String,
-    /// Hex-encoded Ed25519 signature over `doc.canonical_bytes()`.
-    pub signature: String,
+    #[serde(with = "acl_sig_bytes")]
+    pub sig: [u8; 64],
+}
+
+mod acl_sig_bytes {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde_with::{serde_as, Bytes};
+
+    #[serde_as]
+    #[derive(Serialize, Deserialize)]
+    struct Wrap(#[serde_as(as = "Bytes")] [u8; 64]);
+
+    pub(super) fn serialize<S: Serializer>(b: &[u8; 64], s: S) -> Result<S::Ok, S::Error> {
+        Wrap(*b).serialize(s)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<[u8; 64], D::Error> {
+        Wrap::deserialize(d).map(|w| w.0)
+    }
 }
 
 impl SignedAclDoc {
@@ -161,29 +178,19 @@ impl SignedAclDoc {
         Self {
             doc,
             owner_addr: owner_addr.into(),
-            signature: hex::encode(sig.0),
+            sig: sig.0,
         }
     }
 
-    /// Verify against an expected owner pubkey. Returns Ok(()) on
-    /// successful verify; Err(MeshError) on:
-    ///   - malformed signature hex / length
-    ///   - signature doesn't verify under `owner_pubkey`
+    /// Verify against an expected owner pubkey.
     pub fn verify(&self, owner_pubkey: &octravpn_core::sig::PublicKey) -> Result<(), MeshError> {
-        let sig_bytes = hex::decode(&self.signature)
-            .map_err(|e| MeshError::InvalidPeer(format!("acl sig hex: {e}")))?;
-        if sig_bytes.len() != 64 {
-            return Err(MeshError::InvalidPeer(format!(
-                "acl sig wrong length: {}",
-                sig_bytes.len()
-            )));
-        }
-        let mut sig_arr = [0u8; 64];
-        sig_arr.copy_from_slice(&sig_bytes);
-        let sig = octravpn_core::sig::Signature(sig_arr);
         let canonical = self.doc.canonical_bytes();
-        octravpn_core::sig::verify(owner_pubkey, &canonical, &sig)
-            .map_err(|e| MeshError::InvalidPeer(format!("acl sig verify: {e}")))?;
+        octravpn_core::sig::verify(
+            owner_pubkey,
+            &canonical,
+            &octravpn_core::sig::Signature(self.sig),
+        )
+        .map_err(|e| MeshError::InvalidPeer(format!("acl sig verify: {e}")))?;
         Ok(())
     }
 

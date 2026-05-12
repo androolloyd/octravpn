@@ -8,9 +8,11 @@ use rand::RngCore;
 
 mod bugreport;
 pub(crate) mod serve;
+pub(crate) mod slash;
 
 pub(crate) use bugreport::run as bugreport;
 pub(crate) use serve::{run_funnel as funnel, run_serve as serve, Op as ServeOp};
+pub(crate) use slash::{run as slash_evidence, SlashCmd};
 
 /// `octravpn init` — write a fresh config + wallet key into `dir`.
 ///

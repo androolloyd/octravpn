@@ -82,6 +82,11 @@ enum Cmd {
         #[command(subcommand)]
         op: tailnet::TailnetCmd,
     },
+    /// Build or verify equivocation evidence against an endpoint.
+    SlashEvidence {
+        #[command(subcommand)]
+        op: commands::SlashCmd,
+    },
     /// Expose a local TCP service to tailnet members at
     /// `<host>.<tailnet>.octra:<port><path>`.
     Serve {
@@ -156,6 +161,9 @@ async fn main() -> Result<()> {
         Cmd::Funnel { cmd } => {
             return commands::funnel(cmd.clone().into_inner());
         }
+        Cmd::SlashEvidence { op } => {
+            return commands::slash_evidence(op.clone());
+        }
         _ => {}
     }
 
@@ -198,6 +206,7 @@ async fn main() -> Result<()> {
         | Cmd::Doctor
         | Cmd::BugReport { .. }
         | Cmd::Serve { .. }
-        | Cmd::Funnel { .. } => unreachable!(),
+        | Cmd::Funnel { .. }
+        | Cmd::SlashEvidence { .. } => unreachable!(),
     }
 }

@@ -361,10 +361,8 @@ fn apply_set_view_pubkey(
         .and_then(|x| x.as_str())
         .ok_or("view pubkey missing")?
         .to_string();
-    // hex-32 sanity.
-    if hex::decode(&pubkey).map(|b| b.len()).unwrap_or(0) != 32 {
-        return Err("view pubkey 32B".into());
-    }
+    octravpn_core::util::hex_to_array::<32>(&pubkey, "view pubkey")
+        .map_err(|_| "view pubkey 32B")?;
     let mut s = app.state.write();
     s.view_keys.insert(from.to_string(), pubkey.clone());
     Ok(vec![json!({

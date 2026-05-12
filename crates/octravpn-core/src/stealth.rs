@@ -18,10 +18,6 @@
 //! sender's ephemeral secret (deleted post-send) or the recipient's
 //! `view_secret`. This matches the Monero "public view key" model.
 //!
-//! Earlier versions used `SHA256(view_pubkey || nonce)` directly, which
-//! made tags trivially recomputable by anyone with `view_pubkey`. That
-//! has been replaced with proper ECDH below.
-//!
 //! For OctraVPN's purposes (program-emitted private transfer), only
 //! steps 1-2 matter — the program emits a 16-byte stealth tag the
 //! recipient scans for via `octra_stealthOutputs`.
@@ -37,6 +33,15 @@ pub const STEALTH_DOMAIN_TAG: &[u8] = b"OCTRA_STEALTH_TAG_V1";
 pub const CLAIM_SECRET_DOMAIN: &[u8] = b"OCTRA_CLAIM_SECRET_V1";
 pub const CLAIM_BIND_DOMAIN: &[u8] = b"OCTRA_CLAIM_BIND_V1";
 pub const VIEW_SECRET_DOMAIN: &[u8] = b"octravpn-key-v1/view-secret-x25519";
+
+/// Sealed-payload layout: `nonce(12) || ciphertext(amount(8) || blind(32) || aead_tag(16))`.
+const SEALED_NONCE_LEN: usize = 12;
+const SEALED_AMOUNT_LEN: usize = 8;
+const SEALED_BLIND_LEN: usize = 32;
+const SEALED_AEAD_TAG_LEN: usize = 16;
+const SEALED_PLAINTEXT_LEN: usize = SEALED_AMOUNT_LEN + SEALED_BLIND_LEN;
+const SEALED_CIPHERTEXT_LEN: usize = SEALED_PLAINTEXT_LEN + SEALED_AEAD_TAG_LEN;
+const SEALED_BLOB_LEN: usize = SEALED_NONCE_LEN + SEALED_CIPHERTEXT_LEN;
 
 /// What a sender publishes on chain to make a stealth payment.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -183,33 +188,29 @@ pub fn seal_payload(
 /// `(amount, blind)`. Fails with `CoreError::Crypto` if the AEAD
 /// verification fails (i.e. wrong shared secret or tampered ciphertext).
 pub fn open_payload(shared: &[u8; 32], blob: &[u8]) -> CoreResult<(u64, [u8; 32])> {
-    if blob.len() < 12 + 16 + 40 {
-        // Allow the tagged ciphertext to be exactly 12 + 56 (Poly1305 tag = 16)
-        // = 68 bytes. We use >= here for forward-compat.
-    }
-    if blob.len() != 12 + 40 + 16 {
+    if blob.len() != SEALED_BLOB_LEN {
         return Err(CoreError::Crypto(format!(
-            "stealth: payload wrong size ({} != 68)",
+            "stealth: payload wrong size ({} != {SEALED_BLOB_LEN})",
             blob.len()
         )));
     }
     let key = derive_payload_key(shared);
     let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
-    let nonce = Nonce::from_slice(&blob[..12]);
+    let nonce = Nonce::from_slice(&blob[..SEALED_NONCE_LEN]);
     let plaintext = cipher
-        .decrypt(nonce, &blob[12..])
+        .decrypt(nonce, &blob[SEALED_NONCE_LEN..])
         .map_err(|_| CoreError::Crypto("stealth: open_payload decrypt".into()))?;
-    if plaintext.len() != 40 {
+    if plaintext.len() != SEALED_PLAINTEXT_LEN {
         return Err(CoreError::Crypto(format!(
             "stealth: plaintext wrong size ({})",
             plaintext.len()
         )));
     }
-    let mut amt_be = [0u8; 8];
-    amt_be.copy_from_slice(&plaintext[..8]);
+    let mut amt_be = [0u8; SEALED_AMOUNT_LEN];
+    amt_be.copy_from_slice(&plaintext[..SEALED_AMOUNT_LEN]);
     let amount = u64::from_be_bytes(amt_be);
-    let mut blind = [0u8; 32];
-    blind.copy_from_slice(&plaintext[8..]);
+    let mut blind = [0u8; SEALED_BLIND_LEN];
+    blind.copy_from_slice(&plaintext[SEALED_AMOUNT_LEN..]);
     Ok((amount, blind))
 }
 

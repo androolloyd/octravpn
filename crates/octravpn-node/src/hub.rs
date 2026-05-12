@@ -53,9 +53,7 @@ impl Hub {
         let wallet = KeyPair::from_secret_bytes(&wallet_secret);
 
         let validator_oracle =
-            octravpn_core::validator_oracle::ValidatorOracle::new(
-                octravpn_core::rpc::RpcClient::new(&cfg.chain.rpc_url),
-            );
+            octravpn_core::validator_oracle::ValidatorOracle::new(rpc.clone());
         let chain = ChainCtx {
             rpc,
             program_addr,
