@@ -65,6 +65,12 @@ program OctraVPN implements IOctraVPN {
     // is the epoch of redemption (`0` means "never redeemed").
     redeemed_nonces: map[bytes]int
 
+    // Address → X25519 view pubkey. Wallets publish their own view
+    // pubkey here so senders can compute stealth outputs without
+    // depending on an Octra-side `octra_viewPubkey` RPC. The
+    // corresponding view *secret* never leaves the wallet.
+    view_keys: map[address]bytes
+
     params: Params
 
     tag_receipt: string
@@ -148,6 +154,8 @@ program OctraVPN implements IOctraVPN {
   event DeviceRevoked(wallet: address, device: address)
 
   event JoinTokenRedeemed(tailnet_id: bytes, member: address, nonce: bytes)
+
+  event ViewPubkeyPublished(wallet: address, view_pubkey: bytes)
 
   // -------------------------- ctor ---------------------------
 
@@ -427,6 +435,24 @@ program OctraVPN implements IOctraVPN {
 
   view fn is_device_of(device: address, wallet: address): bool {
     return self.device_owner[device] == wallet
+  }
+
+  // ---------------- self-published view pubkey ----------------
+
+  // Publish or update the caller's X25519 view pubkey. Senders look
+  // this up to compute stealth outputs payable to the caller.
+  // Re-publishing replaces the old key; downstream senders should
+  // re-fetch before sending.
+  fn set_view_pubkey(pubkey: bytes): bool {
+    require_not_paused()
+    require(len(pubkey) == 32, "view pubkey 32B")
+    self.view_keys[caller] = pubkey
+    emit ViewPubkeyPublished(caller, pubkey)
+    return true
+  }
+
+  view fn get_view_pubkey(wallet: address): bytes {
+    return self.view_keys[wallet]
   }
 
   // ---------------- pre-auth join tokens ----------------

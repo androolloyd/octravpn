@@ -26,6 +26,7 @@
 //! steps 1-2 matter — the program emits a 16-byte stealth tag the
 //! recipient scans for via `octra_stealthOutputs`.
 
+use chacha20poly1305::{aead::Aead, ChaCha20Poly1305, Key, KeyInit, Nonce};
 use rand::{rngs::OsRng, RngCore};
 use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
@@ -147,6 +148,77 @@ pub fn tag16(tag: &[u8; 32]) -> [u8; 16] {
     let mut out = [0u8; 16];
     out.copy_from_slice(&tag[..16]);
     out
+}
+
+/// Seal a `(amount, blind)` payload under the stealth shared secret
+/// so only the recipient (who can recompute the shared secret via
+/// X25519(view_secret, R)) can recover it. Domain-separated and
+/// authenticated.
+///
+/// Wire format of the returned blob: `nonce(12) || ciphertext(40)`
+/// — i.e. 12 bytes ChaCha20-Poly1305 nonce followed by
+/// `Encrypt(key=shared, plaintext = u64 amount || 32B blind)`.
+pub fn seal_payload(
+    shared: &[u8; 32],
+    amount: u64,
+    blind: &[u8; 32],
+) -> CoreResult<Vec<u8>> {
+    let key = derive_payload_key(shared);
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
+    let mut nonce_bytes = [0u8; 12];
+    OsRng.fill_bytes(&mut nonce_bytes);
+    let mut plaintext = Vec::with_capacity(40);
+    plaintext.extend_from_slice(&amount.to_be_bytes());
+    plaintext.extend_from_slice(blind);
+    let ct = cipher
+        .encrypt(Nonce::from_slice(&nonce_bytes), plaintext.as_slice())
+        .map_err(|_| CoreError::Crypto("stealth: seal_payload encrypt".into()))?;
+    let mut out = Vec::with_capacity(12 + ct.len());
+    out.extend_from_slice(&nonce_bytes);
+    out.extend_from_slice(&ct);
+    Ok(out)
+}
+
+/// Decrypt a payload sealed by [`seal_payload`]. Returns
+/// `(amount, blind)`. Fails with `CoreError::Crypto` if the AEAD
+/// verification fails (i.e. wrong shared secret or tampered ciphertext).
+pub fn open_payload(shared: &[u8; 32], blob: &[u8]) -> CoreResult<(u64, [u8; 32])> {
+    if blob.len() < 12 + 16 + 40 {
+        // Allow the tagged ciphertext to be exactly 12 + 56 (Poly1305 tag = 16)
+        // = 68 bytes. We use >= here for forward-compat.
+    }
+    if blob.len() != 12 + 40 + 16 {
+        return Err(CoreError::Crypto(format!(
+            "stealth: payload wrong size ({} != 68)",
+            blob.len()
+        )));
+    }
+    let key = derive_payload_key(shared);
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
+    let nonce = Nonce::from_slice(&blob[..12]);
+    let plaintext = cipher
+        .decrypt(nonce, &blob[12..])
+        .map_err(|_| CoreError::Crypto("stealth: open_payload decrypt".into()))?;
+    if plaintext.len() != 40 {
+        return Err(CoreError::Crypto(format!(
+            "stealth: plaintext wrong size ({})",
+            plaintext.len()
+        )));
+    }
+    let mut amt_be = [0u8; 8];
+    amt_be.copy_from_slice(&plaintext[..8]);
+    let amount = u64::from_be_bytes(amt_be);
+    let mut blind = [0u8; 32];
+    blind.copy_from_slice(&plaintext[8..]);
+    Ok((amount, blind))
+}
+
+/// Domain-separated symmetric key for `seal_payload` / `open_payload`.
+fn derive_payload_key(shared: &[u8; 32]) -> [u8; 32] {
+    let mut h = Sha256::new();
+    h.update(shared);
+    h.update(b"OCTRA_STEALTH_PAYLOAD_V1");
+    h.finalize().into()
 }
 
 /// Derive the claim secret bound to a stealth output.
@@ -274,6 +346,57 @@ mod tests {
         let (out_b, sh_b) = build_output(&vp, &eph).unwrap();
         assert_eq!(out_a, out_b);
         assert_eq!(sh_a, sh_b);
+    }
+
+    #[test]
+    fn seal_then_open_round_trip() {
+        let wallet = rand_secret();
+        let vp = view_pubkey_from_wallet(&wallet);
+        let (_out, shared) = build_fresh_output(&vp).unwrap();
+        let amount = 12345u64;
+        let blind = [0x42u8; 32];
+        let blob = seal_payload(&shared, amount, &blind).unwrap();
+        let (a, b) = open_payload(&shared, &blob).unwrap();
+        assert_eq!(a, amount);
+        assert_eq!(b, blind);
+    }
+
+    #[test]
+    fn open_payload_rejects_wrong_shared() {
+        let shared = [7u8; 32];
+        let blob = seal_payload(&shared, 1, &[0u8; 32]).unwrap();
+        let r = open_payload(&[8u8; 32], &blob);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn open_payload_rejects_tampered_ciphertext() {
+        let shared = [9u8; 32];
+        let mut blob = seal_payload(&shared, 5, &[1u8; 32]).unwrap();
+        let last = blob.len() - 1;
+        blob[last] ^= 0xff;
+        assert!(open_payload(&shared, &blob).is_err());
+    }
+
+    #[test]
+    fn full_stealth_payment_e2e() {
+        // End-to-end: sender knows view_pubkey only; receiver knows
+        // view_secret only. They both recover (amount, blind).
+        let wallet = rand_secret();
+        let vs = view_secret_from_wallet(&wallet);
+        let vp = view_pubkey_from_secret(&vs);
+
+        // Sender side.
+        let (out, sender_shared) = build_fresh_output(&vp).unwrap();
+        let blob = seal_payload(&sender_shared, 5_000, &[0xAA; 32]).unwrap();
+
+        // Receiver side.
+        let (receiver_shared, receiver_tag) =
+            scan_with_view_secret(&vs, &out.ephemeral_pubkey);
+        assert_eq!(out.tag, receiver_tag);
+        let (amount, blind) = open_payload(&receiver_shared, &blob).unwrap();
+        assert_eq!(amount, 5_000);
+        assert_eq!(blind, [0xAA; 32]);
     }
 
     #[test]

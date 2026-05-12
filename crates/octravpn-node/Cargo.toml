@@ -24,6 +24,7 @@ clap        = { workspace = true }
 curve25519-dalek = { workspace = true }
 ed25519-dalek = { workspace = true }
 hex         = { workspace = true }
+hmac        = "0.12"
 parking_lot = { workspace = true }
 rand        = { workspace = true }
 serde       = { workspace = true }

@@ -16,6 +16,7 @@ revoke_device 1220
 rotate_keys 1300
 set_params 1100
 set_paused 1000
+set_view_pubkey 1220
 settle_session 14000
 sweep_expired_session 1790
 transfer_ownership 1020

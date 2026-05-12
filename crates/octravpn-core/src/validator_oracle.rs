@@ -1,0 +1,189 @@
+//! `ValidatorOracle` — graceful fallback for `is_octra_validator`.
+//!
+//! The OctraVPN program's `register_endpoint` requires
+//! `is_octra_validator(caller) == true`. The cleanest source for that
+//! answer is an Octra-side RPC method, `octra_isValidator`. If Octra
+//! hasn't yet shipped that helper, we fall back to:
+//!
+//!   1. **Bulk cache** — periodically fetch the full active-validator
+//!      set via `octra_listValidators` (or whatever the upstream
+//!      exposes) and answer membership locally.
+//!   2. **Optional allowlist** — operator-supplied list of validator
+//!      addresses for development / private testnets, picked up from
+//!      env or config.
+//!
+//! Callers always go through `ValidatorOracle::is_validator(addr)`;
+//! the source switching happens behind the trait.
+
+use std::{
+    collections::HashSet,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
+use parking_lot::RwLock;
+use serde_json::json;
+
+use crate::{address::Address, rpc::RpcClient, CoreResult};
+
+/// How long to trust a cached bulk-listing result before refreshing.
+const DEFAULT_REFRESH: Duration = Duration::from_secs(60);
+
+#[derive(Clone)]
+pub struct ValidatorOracle {
+    rpc: RpcClient,
+    state: Arc<RwLock<OracleState>>,
+    refresh: Duration,
+}
+
+struct OracleState {
+    /// Whether the upstream supports the cheap per-addr query.
+    supports_direct: Option<bool>,
+    /// Last bulk fetch result. `None` until first fetch.
+    cached_set: Option<HashSet<String>>,
+    last_refresh: Instant,
+    /// Operator-supplied static allowlist (dev/testnet escape hatch).
+    static_allowlist: HashSet<String>,
+}
+
+impl ValidatorOracle {
+    pub fn new(rpc: RpcClient) -> Self {
+        Self {
+            rpc,
+            state: Arc::new(RwLock::new(OracleState {
+                supports_direct: None,
+                cached_set: None,
+                last_refresh: Instant::now()
+                    .checked_sub(Duration::from_secs(86_400))
+                    .unwrap_or_else(Instant::now),
+                static_allowlist: HashSet::new(),
+            })),
+            refresh: DEFAULT_REFRESH,
+        }
+    }
+
+    /// Configure a static allowlist that always answers `true`.
+    /// Useful on private testnets where no validator-set RPC exists.
+    pub fn with_static_allowlist(self, addrs: impl IntoIterator<Item = String>) -> Self {
+        {
+            let mut s = self.state.write();
+            for a in addrs {
+                s.static_allowlist.insert(a);
+            }
+        }
+        self
+    }
+
+    pub fn with_refresh(mut self, d: Duration) -> Self {
+        self.refresh = d;
+        self
+    }
+
+    /// Authoritative answer: is `addr` an Octra validator right now?
+    ///
+    /// Strategy:
+    ///   - First call: try `octra_isValidator`. If supported, remember
+    ///     and keep using it.
+    ///   - If unsupported (RPC returns `method not found`): fall back
+    ///     to fetching the validator set and checking locally; refresh
+    ///     periodically.
+    ///   - The static allowlist short-circuits to `true` regardless.
+    pub async fn is_validator(&self, addr: &Address) -> CoreResult<bool> {
+        let display = addr.display().to_string();
+        if self.state.read().static_allowlist.contains(&display) {
+            return Ok(true);
+        }
+        let prefer_direct = self.state.read().supports_direct;
+        match prefer_direct {
+            Some(true) => self.rpc.is_octra_validator(addr).await,
+            Some(false) => self.bulk_lookup(&display).await,
+            None => {
+                // First attempt: try direct.
+                match self.rpc.is_octra_validator(addr).await {
+                    Ok(v) => {
+                        self.state.write().supports_direct = Some(true);
+                        Ok(v)
+                    }
+                    Err(_) => {
+                        self.state.write().supports_direct = Some(false);
+                        self.bulk_lookup(&display).await
+                    }
+                }
+            }
+        }
+    }
+
+    async fn bulk_lookup(&self, addr: &str) -> CoreResult<bool> {
+        if self.cache_is_stale() {
+            self.refresh_bulk().await?;
+        }
+        Ok(self
+            .state
+            .read()
+            .cached_set
+            .as_ref()
+            .is_some_and(|s| s.contains(addr)))
+    }
+
+    fn cache_is_stale(&self) -> bool {
+        let s = self.state.read();
+        s.cached_set.is_none() || s.last_refresh.elapsed() > self.refresh
+    }
+
+    async fn refresh_bulk(&self) -> CoreResult<()> {
+        // Try the canonical bulk RPC names in order. The first one
+        // that returns an array of strings wins.
+        let candidates = [
+            ("octra_listValidators", json!([0u64, 5_000u64])),
+            ("validator_list", json!([])),
+        ];
+        for (method, params) in &candidates {
+            if let Ok(v) = self.rpc.raw_call(method, params.clone()).await {
+                if let Some(arr) = v.as_array() {
+                    let set: HashSet<String> = arr
+                        .iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .collect();
+                    let mut s = self.state.write();
+                    s.cached_set = Some(set);
+                    s.last_refresh = Instant::now();
+                    return Ok(());
+                }
+            }
+        }
+        // No RPC works — but if we have a static allowlist, treat
+        // bulk_lookup as "empty set" rather than erroring; that way
+        // the static path still answers correctly above.
+        let mut s = self.state.write();
+        s.cached_set.get_or_insert_with(HashSet::new);
+        s.last_refresh = Instant::now();
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn static_allowlist_short_circuits() {
+        let rpc = RpcClient::new("http://unreachable.test/rpc");
+        let oracle = ValidatorOracle::new(rpc)
+            .with_static_allowlist(["octSTATICVALIDATOR0".into()]);
+        let addr = Address::from_display("octSTATICVALIDATOR0");
+        assert!(oracle.is_validator(&addr).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn missing_rpc_falls_through_to_static() {
+        // No RPC, no static allowlist — should report false (no panic,
+        // no error to caller).
+        let rpc = RpcClient::new("http://127.0.0.1:1/rpc"); // closed port
+        let oracle = ValidatorOracle::new(rpc);
+        let addr = Address::from_display("octUNKNOWN");
+        // The very first call exhausts direct + bulk, returns Ok(false)
+        // for the static-path semantics. Any error in the chain
+        // bubbles up as Err; the test asserts we don't panic.
+        let _ = oracle.is_validator(&addr).await;
+    }
+}

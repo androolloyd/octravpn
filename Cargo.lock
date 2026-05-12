@@ -1962,6 +1962,7 @@ dependencies = [
  "ed25519-dalek",
  "futures-util",
  "hex",
+ "hmac",
  "octravpn-core",
  "octravpn-mesh",
  "parking_lot",

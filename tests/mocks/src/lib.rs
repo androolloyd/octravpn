@@ -49,6 +49,9 @@ pub struct ChainState {
     pub device_owner: HashMap<String, String>,
     /// Set of nonces that have been redeemed via `redeem_join_token`.
     pub redeemed_nonces: HashSet<String>,
+    /// wallet_addr → published X25519 view pubkey (hex). Senders read
+    /// this when composing a stealth payment to a recipient.
+    pub view_keys: HashMap<String, String>,
     pub balances: HashMap<String, u64>,
     pub txs: HashMap<String, TxRow>,
     pub stealth_outputs: Vec<Value>,
@@ -254,6 +257,7 @@ fn octra_submit(app: &AppState, params: &Value) -> Result<Value, String> {
         "register_device" => apply_register_device(app, tx, &from)?,
         "revoke_device" => apply_revoke_device(app, tx, &from)?,
         "redeem_join_token" => apply_redeem_join_token(app, tx, &from)?,
+        "set_view_pubkey" => apply_set_view_pubkey(app, tx, &from)?,
         "register_endpoint" => apply_register_endpoint(app, tx, &from)?,
         "update_endpoint" => apply_update_endpoint(app, tx, &from)?,
         "rotate_keys" => apply_rotate_keys(app, tx, &from)?,
@@ -341,6 +345,33 @@ fn apply_redeem_join_token(
             "nonce": nonce,
         }),
     ])
+}
+
+fn apply_set_view_pubkey(
+    app: &AppState,
+    tx: &Value,
+    from: &str,
+) -> Result<Vec<Value>, String> {
+    let p = tx
+        .get("params")
+        .and_then(|x| x.as_array())
+        .ok_or("params")?;
+    let pubkey = p
+        .first()
+        .and_then(|x| x.as_str())
+        .ok_or("view pubkey missing")?
+        .to_string();
+    // hex-32 sanity.
+    if hex::decode(&pubkey).map(|b| b.len()).unwrap_or(0) != 32 {
+        return Err("view pubkey 32B".into());
+    }
+    let mut s = app.state.write();
+    s.view_keys.insert(from.to_string(), pubkey.clone());
+    Ok(vec![json!({
+        "name": "ViewPubkeyPublished",
+        "wallet": from,
+        "view_pubkey": pubkey,
+    })])
 }
 
 fn apply_register_device(
@@ -1089,6 +1120,15 @@ fn contract_call(app: &AppState, params: &Value) -> Result<Value, String> {
             Ok(json!(s
                 .device_owner
                 .get(device)
+                .cloned()
+                .unwrap_or_default()))
+        }
+        "get_view_pubkey" => {
+            let wallet = pp.first().and_then(|x| x.as_str()).ok_or("wallet")?;
+            let s = app.state.read();
+            Ok(json!(s
+                .view_keys
+                .get(wallet)
                 .cloned()
                 .unwrap_or_default()))
         }

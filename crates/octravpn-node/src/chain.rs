@@ -6,7 +6,10 @@
 //! protocol layer — this module does not duplicate them.
 
 use anyhow::{anyhow, Context, Result};
-use octravpn_core::{address::Address, rpc::RpcClient, sig::KeyPair};
+use octravpn_core::{
+    address::Address, rpc::RpcClient, sig::KeyPair,
+    validator_oracle::ValidatorOracle,
+};
 use serde_json::{json, Value};
 use tracing::{debug, info};
 
@@ -15,6 +18,9 @@ pub(crate) struct ChainCtx {
     pub program_addr: Address,
     pub validator_addr: Address,
     pub wallet: KeyPair,
+    /// Wraps `RpcClient::is_octra_validator` with a graceful fallback
+    /// to a bulk-listing cache when the direct RPC isn't available.
+    pub validator_oracle: ValidatorOracle,
 }
 
 /// Inputs to `register_endpoint`. Borrowed so call sites don't have to
@@ -44,10 +50,10 @@ impl ChainCtx {
     /// registration; we pre-check so the node can fail fast with a
     /// clear error message instead of waiting for the tx to revert.
     pub(crate) async fn is_octra_validator(&self) -> Result<bool> {
-        self.rpc
-            .is_octra_validator(&self.validator_addr)
+        self.validator_oracle
+            .is_validator(&self.validator_addr)
             .await
-            .context("octra_isValidator")
+            .context("validator_oracle")
             .map_err(|e| anyhow!(e))
     }
 

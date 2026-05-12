@@ -52,11 +52,16 @@ impl Hub {
             read_secret_32(&cfg.chain.wallet_secret_path).context("read wallet secret")?;
         let wallet = KeyPair::from_secret_bytes(&wallet_secret);
 
+        let validator_oracle =
+            octravpn_core::validator_oracle::ValidatorOracle::new(
+                octravpn_core::rpc::RpcClient::new(&cfg.chain.rpc_url),
+            );
         let chain = ChainCtx {
             rpc,
             program_addr,
             validator_addr,
             wallet,
+            validator_oracle,
         };
 
         // The on-disk file holds a single 32-byte master secret. Two

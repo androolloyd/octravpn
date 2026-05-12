@@ -351,6 +351,24 @@ impl ForgeCtx {
         self.submit(call)
     }
 
+    /// `set_view_pubkey(pubkey)` — publish this wallet's X25519 view pubkey.
+    pub fn call_set_view_pubkey(
+        &mut self,
+        view_pubkey_hex: &str,
+    ) -> Result<SubmitResult, SubmitError> {
+        let call = json!({
+            "kind": "contract_call",
+            "from": DEFAULT_CALLER,
+            "to": self.program_addr,
+            "method": "set_view_pubkey",
+            "params": [view_pubkey_hex],
+            "value": 0u64,
+            "fee": 10u64,
+            "nonce": 0u64,
+        });
+        self.submit(call)
+    }
+
     /// `register_device(device_addr)` — attach a device to the calling wallet.
     pub fn call_register_device(&mut self, device: &str) -> Result<SubmitResult, SubmitError> {
         let call = json!({

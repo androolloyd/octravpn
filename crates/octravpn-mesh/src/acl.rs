@@ -136,6 +136,67 @@ impl AclDoc {
         arr.copy_from_slice(&out);
         arr
     }
+}
+
+/// An ACL document plus the tailnet owner's signature over its
+/// canonical bytes. Distributed alongside the doc (e.g. served at the
+/// owner's HTTPS endpoint or pinned to IPFS) so members can verify the
+/// authorship without trusting the transport.
+///
+/// Wire form: `version=1`, `doc` (the AclDoc itself in JSON), `owner_addr`
+/// (string), `signature` (hex, 64 bytes).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SignedAclDoc {
+    pub doc: AclDoc,
+    pub owner_addr: String,
+    /// Hex-encoded Ed25519 signature over `doc.canonical_bytes()`.
+    pub signature: String,
+}
+
+impl SignedAclDoc {
+    /// Produce a SignedAclDoc by signing canonical_bytes with `kp`.
+    pub fn sign(doc: AclDoc, owner_addr: impl Into<String>, kp: &octravpn_core::sig::KeyPair) -> Self {
+        let canonical = doc.canonical_bytes();
+        let sig = kp.sign(&canonical);
+        Self {
+            doc,
+            owner_addr: owner_addr.into(),
+            signature: hex::encode(sig.0),
+        }
+    }
+
+    /// Verify against an expected owner pubkey. Returns Ok(()) on
+    /// successful verify; Err(MeshError) on:
+    ///   - malformed signature hex / length
+    ///   - signature doesn't verify under `owner_pubkey`
+    pub fn verify(&self, owner_pubkey: &octravpn_core::sig::PublicKey) -> Result<(), MeshError> {
+        let sig_bytes = hex::decode(&self.signature)
+            .map_err(|e| MeshError::InvalidPeer(format!("acl sig hex: {e}")))?;
+        if sig_bytes.len() != 64 {
+            return Err(MeshError::InvalidPeer(format!(
+                "acl sig wrong length: {}",
+                sig_bytes.len()
+            )));
+        }
+        let mut sig_arr = [0u8; 64];
+        sig_arr.copy_from_slice(&sig_bytes);
+        let sig = octravpn_core::sig::Signature(sig_arr);
+        let canonical = self.doc.canonical_bytes();
+        octravpn_core::sig::verify(owner_pubkey, &canonical, &sig)
+            .map_err(|e| MeshError::InvalidPeer(format!("acl sig verify: {e}")))?;
+        Ok(())
+    }
+
+    /// Convenience: hash of the underlying document (matches the
+    /// on-chain `acl_policy` field).
+    pub fn policy_hash(&self) -> [u8; 32] {
+        self.doc.policy_hash()
+    }
+}
+
+// Empty `impl` to keep the file's top-level structure compiling; the
+// previous `impl AclDoc { ... }` block ends above.
+impl AclDoc {
 
     /// Evaluate a (src, dst, port) tuple. Returns the action of the
     /// first matching rule, or `Deny` if no rule matched (default-deny).
@@ -348,6 +409,59 @@ mod tests {
             doc.decide("a", "b", PortRef::new("udp", 22)),
             AclAction::Deny
         );
+    }
+
+    #[test]
+    fn signed_acl_round_trip() {
+        use octravpn_core::sig::KeyPair;
+        let kp = KeyPair::generate();
+        let doc = AclDoc::from_toml(
+            r#"version = 1
+            [[rules]]
+            action = "accept"
+            src = ["*"]
+            dst = ["*"]
+            "#,
+        )
+        .unwrap();
+        let signed = SignedAclDoc::sign(doc, "octOWNER", &kp);
+        signed.verify(&kp.public).unwrap();
+    }
+
+    #[test]
+    fn signed_acl_rejects_wrong_pubkey() {
+        use octravpn_core::sig::KeyPair;
+        let owner = KeyPair::generate();
+        let attacker = KeyPair::generate();
+        let doc = AclDoc {
+            version: 1,
+            groups: BTreeMap::default(),
+            tags: BTreeMap::default(),
+            rules: vec![],
+        };
+        let signed = SignedAclDoc::sign(doc, "octOWNER", &owner);
+        assert!(signed.verify(&attacker.public).is_err());
+    }
+
+    #[test]
+    fn signed_acl_rejects_tampered_doc() {
+        use octravpn_core::sig::KeyPair;
+        let kp = KeyPair::generate();
+        let doc = AclDoc {
+            version: 1,
+            groups: BTreeMap::default(),
+            tags: BTreeMap::default(),
+            rules: vec![],
+        };
+        let mut signed = SignedAclDoc::sign(doc.clone(), "octOWNER", &kp);
+        // Mutate the doc — signature was over the old canonical bytes.
+        signed.doc.rules.push(AclRule {
+            action: AclAction::Accept,
+            src: vec!["*".into()],
+            dst: vec!["*".into()],
+            ports: vec![],
+        });
+        assert!(signed.verify(&kp.public).is_err());
     }
 
     #[test]

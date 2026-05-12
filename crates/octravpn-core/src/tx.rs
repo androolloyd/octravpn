@@ -228,9 +228,125 @@ pub fn sign_call(kp: &KeyPair, mut call: Value) -> Result<Value> {
     Ok(call)
 }
 
+/// Verify a signed tx envelope **using only the envelope itself** — no
+/// chain RPC required. The envelope must carry `public_key`,
+/// `signature`, and `from`; this helper checks that:
+///
+///   1. `Address::from_pubkey(public_key)` matches the `from` field.
+///   2. The Ed25519 signature verifies over the canonical bytes (with
+///      `signature` and `public_key` stripped before canonicalisation).
+///
+/// This removes the need for the chain to expose an `octra_publicKey`
+/// lookup: every signed tx carries the pubkey, and the address-from-pubkey
+/// derivation is part of the well-known Octra address scheme.
+pub fn verify_envelope_signature(call: &Value) -> Result<()> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let obj = call
+        .as_object()
+        .ok_or_else(|| anyhow!("tx must be a JSON object"))?;
+    let from = obj
+        .get("from")
+        .and_then(|x| x.as_str())
+        .ok_or_else(|| anyhow!("tx missing `from`"))?;
+    let sig_b64 = obj
+        .get("signature")
+        .and_then(|x| x.as_str())
+        .ok_or_else(|| anyhow!("tx missing `signature`"))?;
+    let pk_b64 = obj
+        .get("public_key")
+        .and_then(|x| x.as_str())
+        .ok_or_else(|| anyhow!("tx missing `public_key`"))?;
+    let sig_bytes = STANDARD
+        .decode(sig_b64)
+        .map_err(|e| anyhow!("signature base64: {e}"))?;
+    let pk_bytes = STANDARD
+        .decode(pk_b64)
+        .map_err(|e| anyhow!("public_key base64: {e}"))?;
+    if sig_bytes.len() != 64 {
+        return Err(anyhow!("signature wrong length: {}", sig_bytes.len()));
+    }
+    if pk_bytes.len() != 32 {
+        return Err(anyhow!("public_key wrong length: {}", pk_bytes.len()));
+    }
+    let mut pk_arr = [0u8; 32];
+    pk_arr.copy_from_slice(&pk_bytes);
+    let mut sig_arr = [0u8; 64];
+    sig_arr.copy_from_slice(&sig_bytes);
+
+    // (1) Address-from-pubkey check.
+    let derived_addr = crate::address::Address::from_pubkey(&pk_arr);
+    let derived = derived_addr.display();
+    if derived != from {
+        return Err(anyhow!(
+            "from={from} does not match Address::from_pubkey={derived}"
+        ));
+    }
+
+    // (2) Canonical bytes are computed with signature + public_key
+    //     stripped (those weren't part of the message the wallet signed).
+    let mut stripped = call.clone();
+    if let Some(m) = stripped.as_object_mut() {
+        m.remove("signature");
+        m.remove("public_key");
+    }
+    let bytes = canonical_bytes(&stripped)?;
+    crate::sig::verify(
+        &crate::sig::PublicKey(pk_arr),
+        &bytes,
+        &crate::sig::Signature(sig_arr),
+    )
+    .map_err(|e| anyhow!("sig verify: {e}"))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sig::KeyPair;
+
+    fn sample_call() -> Value {
+        json!({
+            "kind": "contract_call",
+            "from": "",            // filled in below from the kp pubkey
+            "to": "octPROG",
+            "method": "create_tailnet",
+            "params": ["ab".repeat(32)],
+            "value": 100u64,
+            "fee": 10u64,
+            "nonce": 0u64,
+        })
+    }
+
+    #[test]
+    fn sign_then_verify_envelope_round_trip() {
+        let kp = KeyPair::generate();
+        let mut call = sample_call();
+        call["from"] = json!(crate::address::Address::from_pubkey(&kp.public.0).display());
+        let signed = sign_call(&kp, call).unwrap();
+        verify_envelope_signature(&signed).unwrap();
+    }
+
+    #[test]
+    fn verify_envelope_rejects_address_mismatch() {
+        let kp = KeyPair::generate();
+        let mut call = sample_call();
+        // `from` is intentionally NOT the kp's derived address.
+        call["from"] = json!("octIMPOSTER0000000000000000000000000000001");
+        let signed = sign_call(&kp, call).unwrap();
+        let r = verify_envelope_signature(&signed);
+        assert!(r.is_err(), "address mismatch must fail; got {r:?}");
+    }
+
+    #[test]
+    fn verify_envelope_rejects_tampered_canonical_bytes() {
+        let kp = KeyPair::generate();
+        let mut call = sample_call();
+        call["from"] = json!(crate::address::Address::from_pubkey(&kp.public.0).display());
+        let mut signed = sign_call(&kp, call).unwrap();
+        // Mutate a field after signing — signature was over the old bytes.
+        signed["value"] = json!(999u64);
+        assert!(verify_envelope_signature(&signed).is_err());
+    }
 
     #[test]
     fn canonical_json_roundtrip_octratx() {

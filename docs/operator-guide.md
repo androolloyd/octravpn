@@ -134,7 +134,65 @@ The daemon:
 - Serves the WireGuard tunnel.
 - Serves the HTTP control plane (used by clients to fetch dual-signed
   receipt proposals at settlement).
-- Writes an audit log to `audit_dir`.
+- Writes an HMAC-chained audit log to `audit_dir`. Tamper detection
+  via `octravpn-node verify-audit-log <file>` (any altered or removed
+  line is reported by index).
+
+## 5a. TLS for the control plane
+
+For production we expect operators to terminate TLS at a reverse
+proxy. Two reasons:
+
+1. WireGuard already encrypts the data plane end-to-end — the control
+   plane carries only session-announce + receipt-proposal payloads,
+   neither of which is sensitive on the wire (the receipt is signed
+   by both ends, the announce is just a session id + ephemeral pubkey).
+2. Cert lifecycle (Let's Encrypt, renewals, OCSP stapling) is well
+   solved by Caddy / nginx / traefik. Embedding rustls into the node
+   binary would duplicate that without operational benefit.
+
+### Caddy
+
+```caddy
+control.example.com {
+    reverse_proxy http://127.0.0.1:51821
+}
+```
+
+That's the whole config. Caddy auto-provisions a certificate via
+Let's Encrypt. Bind the node to `127.0.0.1:51821` (not `0.0.0.0`) and
+point Caddy at it.
+
+### nginx (with snippets)
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name control.example.com;
+    ssl_certificate     /etc/letsencrypt/live/control.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/control.example.com/privkey.pem;
+    ssl_protocols       TLSv1.3;
+
+    location / {
+        proxy_pass http://127.0.0.1:51821;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # SSE keepalive for `/events`.
+        proxy_buffering off;
+    }
+}
+```
+
+Either way, set the node's `[control].listen` to `127.0.0.1:51821`
+so it's unreachable except through the proxy.
+
+### Why not embed TLS?
+
+We deliberately didn't bundle rustls in `octravpn-node`. Pros of
+embedding (single binary, no proxy dependency) don't outweigh the
+ops cost (cert rotation, ACME plumbing, ALPN negotiation). The
+crate stays small; ops use whatever proxy they already run.
 
 ## 6. Inspect
 

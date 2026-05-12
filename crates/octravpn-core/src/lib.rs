@@ -19,6 +19,7 @@ pub mod sig;
 pub mod stealth;
 pub mod tx;
 pub mod util;
+pub mod validator_oracle;
 pub mod wallet_enc;
 
 pub use backend::{OctraBackend, PlaceholderBackend, RpcBackend};
