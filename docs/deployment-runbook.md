@@ -1,18 +1,24 @@
 # Deployment Runbook
 
 This is the operator-facing playbook for taking OctraVPN from a
-fresh checkout to a running paid endpoint on testnet, then to mainnet,
-and reacting to common incidents. Audience: ops engineers who already
-know how to run an Octra protocol validator.
+fresh checkout to a running paid endpoint on testnet, then to
+mainnet, and reacting to common incidents.
+
+**v1 model** (per `docs/aml-gap-analysis.md`): Operators stake OU
+in the OctraVPN AML program; you do NOT need to be an Octra
+protocol validator. Equivocation slashing is currently governance
+(off-chain evidence → owner-signed slash tx); v1.1 moves to
+permissionless on-chain slashing once Octra exposes
+`verify_ed25519` in AML.
 
 ## 1. Pre-flight
 
 Before touching any host:
 
-- [ ] You're a registered Octra protocol validator (confirm via
-      `octra cast call <chain_addr> is_validator --rpc-url ...`).
+- [ ] You have at least `MIN_ENDPOINT_STAKE` (1 000 OCT = 10⁹ OU) in
+      OU available to bond as operator stake.
 - [ ] You have an unencrypted-in-RAM, encrypted-at-rest copy of the
-      validator wallet (see `docs/validator-hardening.md` §2).
+      operator wallet (see `docs/validator-hardening.md` §2).
 - [ ] The host satisfies the systemd hardening profile (run
       `systemd-analyze security octravpn-node` after install; target
       ≤ 1.5).
@@ -173,27 +179,35 @@ Grafana panels — at minimum:
 
 ## 7. Incident playbooks
 
-### 7.1 `/health` 503 attestation_stale
+### 7.1 `/health` 503 stake_below_minimum
 
-Cause: the node hasn't successfully verified its
-`is_octra_validator` status within 5 min.
+Cause: the operator's `endpoint_stake` has fallen below
+`MIN_ENDPOINT_STAKE` — either an unbonding was initiated, or
+governance slashed the operator.
 
 ```sh
-# Step 1 — is the Octra RPC reachable?
-octra cast rpc node_status --rpc-url <RPC_URL>
+# Step 1 — read the on-chain stake for your address.
+octra cast call <octravpn-program> get_endpoint_stake \
+  --params '["<your-operator-addr>"]' --rpc-url <RPC_URL>
 
-# Step 2 — is this validator still bonded on Octra?
-octra cast rpc octra_isValidator --params '["<your-validator-addr>"]' --rpc-url <RPC_URL>
+# Step 2 — is the slashed flag set?
+octra cast call <octravpn-program> is_endpoint_slashed \
+  --params '["<your-operator-addr>"]' --rpc-url <RPC_URL>
+# If true → you have been governance-slashed (permanent at this
+#           address). Recovery is impossible at the same wallet.
+#           File a dispute via the governance channel.
 
-# Step 3 — if false, you've been jailed at the protocol layer.
-#         The dVPN endpoint becomes inactive automatically because
-#         `register_endpoint` / `settle_session` gate on this.
-#         Resolution is an Octra-side concern (re-bond, dispute, etc.).
+# Step 3 — if not slashed but stake is 0, check unbonding state.
+octra cast call <octravpn-program> get_endpoint_unbonding \
+  --params '["<your-operator-addr>"]' --rpc-url <RPC_URL>
+# Non-zero stake here means you started an unbond. Either complete
+# it (finalize_unbond after grace) or re-bond:
+#   octravpn-node bond --amount 1000000000
 ```
 
-While jailed, **don't** restart the node aggressively — the chain
-state already reflects "not a validator", so further restarts won't
-help and may spam your peers with retried registers.
+While the endpoint is inactive, **don't** restart the node
+aggressively — the chain state already reflects inactivity, and
+restarts only spam your peers with retried registers.
 
 ### 7.2 Sudden control-plane traffic spike
 

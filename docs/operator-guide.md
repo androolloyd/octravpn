@@ -88,30 +88,35 @@ poll_interval_secs = 30
 
 A couple things to know:
 
-- `validator_addr` is your Octra protocol validator address. The
-  program will refuse registration if `octra_isValidator(validator_addr)`
-  returns false.
+- `validator_addr` is your operator wallet (the v1 model dropped
+  the Octra-validator gate; you stake in-program instead).
 - `price_per_mb` is in raw OU. At 100 OU/MB and 1 GB/hr of relayed
   traffic, you earn ~100 000 OU/hr = 0.1 OCT/hr.
 
-## 4. Register the endpoint
+## 4. Bond + register the endpoint
 
-One-time setup:
+Two-step setup (one-time):
 
 ```sh
+# Step 1: bond stake (>= MIN_ENDPOINT_STAKE = 1000 OCT = 10^9 OU)
+sudo octravpn-node bond --amount 1000000000 --config /etc/octravpn/node.toml
+
+# Step 2: register the endpoint on chain
 sudo octravpn-node register --config /etc/octravpn/node.toml
 ```
 
-This:
+The register step:
 
-1. Pre-checks `octra_isValidator(validator_addr)` and bails out with
-   a clear message if you're not a validator.
-2. Submits `register_endpoint(endpoint, wg_pub, receipt_pub,
-   view_pub, region, price_per_mb)` to the program.
+1. Reads `get_endpoint_stake(validator_addr)` and confirms
+   `>= MIN_ENDPOINT_STAKE`. Bails out with a clear message if your
+   bond is short.
+2. Submits `register_endpoint(endpoint, wg_pub, hfhe_pub,
+   initial_enc_zero, region, price_per_mb)` to the program.
 3. Logs the resulting tx hash.
 
 `register` is idempotent; you can re-run it safely. The chain
-remembers your endpoint until you `retire_endpoint`.
+remembers your endpoint until you `retire_endpoint` or
+`unbond_endpoint`.
 
 ## 5. Run
 
