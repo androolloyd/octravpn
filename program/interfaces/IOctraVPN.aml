@@ -1,41 +1,35 @@
 // IOctraVPN — public surface of the OctraVPN program.
 //
-// Tailnet-on-chain model: paid relay/exit operators stake OU in the
-// program (`bond_endpoint`). Equivocation on signed receipts is
-// slashable by the program itself via `submit_equivocation`; we do
-// not depend on Octra protocol-layer slashing.
+// v1 model built against confirmed Octra AML primitives. See
+// `docs/aml-gap-analysis.md` for the audit. Highlights:
+//   - Operators stake OU via `bond_endpoint`; slashable by
+//     governance based on off-chain equivocation evidence.
+//   - Single-hop sessions; validator-only settle with economic
+//     ceiling (the client's pre-deposited `max_pay`).
+//   - Earnings accumulate as HFHE ciphertext per operator.
+//   - Claim = AML transfer + native-tx stealth follow-up
+//     (client-side, off AML).
 
 interface IOctraVPN {
 
   // ---- Operator stake (bond / unbond / slash) ----
 
-  fn bond_endpoint(): bool          // value-bearing: msg.value is added to stake
-  fn unbond_endpoint(): bool        // start grace period; endpoint deactivates
-  fn finalize_unbond(): bool        // claim stake back after grace elapsed
+  fn bond_endpoint(): bool          // value-bearing: msg.value adds to stake
+  fn unbond_endpoint(): bool        // start grace; endpoint deactivates
+  fn finalize_unbond(): bool        // after grace, withdraw stake
 
-  fn submit_equivocation(
-    operator_addr: address,
-    session_id: bytes,
-    seq: int,
-    bytes_used_a: int,
-    blind_a: bytes,
-    sig_a: bytes,
-    bytes_used_b: int,
-    blind_b: bytes,
-    sig_b: bytes
-  ): bool
+  fn gov_slash_operator(operator_addr: address, reason: string): bool
 
   // ---- Endpoint (relay/exit) lifecycle ----
   //
-  // `register_endpoint` requires the caller to have
-  // `endpoint_stake[caller] >= min_endpoint_stake`. Slashed operators
-  // can never re-register at the same address.
+  // Caller must have `endpoint_stake[caller] >= min_endpoint_stake`.
+  // Slashed addresses can never re-register.
 
   fn register_endpoint(
     endpoint: string,
     wg_pubkey: bytes,
-    receipt_pubkey: bytes,
-    view_pubkey: bytes,
+    hfhe_pubkey: bytes,
+    initial_enc_zero: bytes,
     region: string,
     price_per_mb: int
   ): bool
@@ -48,8 +42,8 @@ interface IOctraVPN {
 
   fn rotate_keys(
     new_wg_pubkey: bytes,
-    new_receipt_pubkey: bytes,
-    new_view_pubkey: bytes
+    new_hfhe_pubkey: bytes,
+    new_initial_enc_zero: bytes
   ): bool
 
   fn retire_endpoint(): bool
@@ -63,68 +57,58 @@ interface IOctraVPN {
   fn configure_tailnet_exit(tailnet_id: bytes, exit_addr: address): bool
   fn update_acl(tailnet_id: bytes, new_acl_policy: bytes): bool
 
-  // ---- Session lifecycle (paid traffic through an exit) ----
+  // ---- Device registry ----
+
+  fn register_device(device: address): bool
+  fn revoke_device(device: address): bool
+
+  // ---- Session lifecycle (single-hop in v1) ----
 
   fn open_session(
     tailnet_id: bytes,
-    route_commit: list[bytes],
-    client_session_pubkey: bytes,
-    deposit: int
+    exit_addr: address,
+    max_pay: int
   ): bytes
 
-  fn settle_session(
-    session_id: bytes,
-    seq: int,
-    bytes_used: int,
-    blind: bytes,
-    client_sig: bytes,
-    node_sig: bytes,
-    route_open: list[RouteOpening]
-  ): bool
+  fn settle_session(session_id: bytes, bytes_used: int): bool
 
   fn claim_no_show(session_id: bytes): bool
   fn sweep_expired_session(session_id: bytes): bool
 
   // ---- Earnings claim ----
 
-  view fn get_encrypted_earnings(addr: address): bytes
-
-  fn claim_earnings(
-    claimed_amount: int,
-    claimed_blind: bytes,
-    stealth_output: bytes
-  ): bool
+  fn claim_earnings(claimed_amount: int, proof: bytes): bool
 
   // ---- Views ----
 
   view fn get_endpoint(addr: address): EndpointRecord
+  view fn get_endpoint_stake(addr: address): int
+  view fn get_endpoint_unbonding(addr: address): UnbondingRecord
+  view fn is_endpoint_slashed(addr: address): bool
   view fn get_tailnet(tailnet_id: bytes): Tailnet
   view fn is_tailnet_member(tailnet_id: bytes, addr: address): bool
   view fn is_tailnet_exit(tailnet_id: bytes, addr: address): bool
   view fn get_session(session_id: bytes): Session
+  view fn get_device_owner(device: address): address
+  view fn is_device_of(device: address, wallet: address): bool
+  view fn get_encrypted_earnings(addr: address): bytes
   view fn list_active_endpoints(offset: int, limit: int): list[address]
   view fn list_tailnets(offset: int, limit: int): list[bytes]
   view fn get_params(): Params
+  view fn get_program_treasury(): int
 
   // ---- Governance ----
 
   fn set_params(p: Params): bool
   fn set_paused(v: int): bool
   fn transfer_ownership(new_owner: address): bool
-}
-
-struct RouteOpening {
-  node_addr: address
-  blind: bytes
-  split_bps: int
+  fn withdraw_program_treasury(to: address, amount: int): bool
 }
 
 struct EndpointRecord {
   active: int
   endpoint: string
   wg_pubkey: bytes
-  receipt_pubkey: bytes
-  view_pubkey: bytes
   region: string
   price_per_mb: int
   registered_at: int
@@ -142,11 +126,9 @@ struct Tailnet {
 
 struct Session {
   tailnet_id: bytes
-  client_session_pubkey: bytes
-  route_commit: list[bytes]
+  exit: address
   deposit: int
   opened_at: int
-  receipt_seq: int
   status: int   // 0=open, 1=settled, 2=refunded
 }
 

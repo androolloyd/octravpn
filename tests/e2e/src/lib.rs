@@ -1,23 +1,21 @@
-//! End-to-end tests against the in-process mock chain.
+//! End-to-end tests against the in-process mock chain (v1 AML).
 //!
-//! Covers the tailnet model:
-//!   - register endpoint (gated on Octra-validator)
+//! Covers the v1 model:
+//!   - bond + register endpoint
 //!   - create tailnet, add member, configure exit
-//!   - open / settle / no-show
-//!   - 3-hop onion build/peel round-trip (no chain needed)
+//!   - single-hop open / validator-only settle / no-show
+//!   - FHE-backed encrypted earnings + two-step claim
+//!   - 3-hop onion build/peel round-trip (no chain needed; the data
+//!     plane keeps multi-hop onion routing even while v1 AML is
+//!     single-hop)
 
 #[cfg(test)]
 mod tests {
     use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-    use curve25519_dalek::{
-        constants::RISTRETTO_BASEPOINT_TABLE, ristretto::RistrettoPoint, scalar::Scalar,
-        traits::Identity,
-    };
     use octravpn_core::{
         address::Address,
         commit,
-        earnings::{self, h_generator},
         onion::{build_onion, peel_layer, HopAction, HopBuildInput},
         receipt::{Receipt, SignedReceipt},
         rpc::RpcClient,
@@ -42,18 +40,10 @@ mod tests {
         format!("http://127.0.0.1:{port}/rpc")
     }
 
-    /// Promote an address to an Octra validator on the mock chain via
-    /// the test-helper RPC method.
-    async fn become_octra_validator(rpc: &RpcClient, addr: &str) {
-        // Pre-seed both validator status and operator stake so the
-        // register_endpoint call in the lifecycle test passes the
-        // bond check on the new in-program model.
+    async fn bond_operator(rpc: &RpcClient, addr: &str) {
         rpc.raw_call("octra_test_bondEndpoint", json!([addr]))
             .await
             .expect("bond endpoint");
-        rpc.raw_call("octra_test_grantValidator", json!([addr]))
-            .await
-            .expect("grant validator");
     }
 
     #[tokio::test]
@@ -73,10 +63,9 @@ mod tests {
         let owner = "octOWNER000000000000000000000000000000001";
         let client = "octCLIENT00000000000000000000000000000001";
 
-        // Pre-promote `val` to an Octra protocol validator (mock-only path).
-        become_octra_validator(&rpc, val).await;
+        bond_operator(&rpc, val).await;
 
-        // 1. Register endpoint.
+        // 1. Register endpoint (post-bond, no signature pubkeys in v1).
         let register_tx = json!({
             "kind": "contract_call",
             "from": val,
@@ -85,8 +74,8 @@ mod tests {
             "params": [
                 "1.2.3.4:51820",
                 "deadbeef".repeat(8),
-                "cafe".repeat(16),
-                "beef".repeat(16),
+                "cafe".repeat(16),                  // hfhe_pubkey (mock-opaque)
+                "beef".repeat(16),                  // initial_enc_zero (mock-opaque)
                 "eu-west",
                 100u64,
             ],
@@ -158,18 +147,13 @@ mod tests {
         let arr = active.as_array().unwrap();
         assert!(arr.iter().any(|v| v.as_str() == Some(val)));
 
-        // 6. Open session (1 hop, 1000 OU deposit from treasury).
+        // 6. Open single-hop session: pick exit + max_pay = 1000.
         let open_tx = json!({
             "kind": "contract_call",
             "from": client,
             "to": "octPROG",
             "method": "open_session",
-            "params": [
-                tid.clone(),
-                ["aa".repeat(32)],
-                "bb".repeat(32),
-                1000u64,
-            ],
+            "params": [tid.clone(), val, 1000u64],
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
@@ -185,24 +169,14 @@ mod tests {
             .and_then(|e| e["session_id"].as_str().map(String::from))
             .unwrap();
 
-        // 7. Settle: bytes_used=2 → pay = 200, refund = 800 back to treasury.
-        let bytes_used = 2u64;
-        let blind = earnings::fresh_blind();
-        let blind_bytes = earnings::scalar_to_bytes(&blind);
+        // 7. Settle (validator-only): bytes_used=2 → 200 gross, 1 fee,
+        //    199 net pay, 800 refund.
         let settle_tx = json!({
             "kind": "contract_call",
-            "from": client,
+            "from": val,
             "to": "octPROG",
             "method": "settle_session",
-            "params": [
-                sid.clone(),
-                7u64,
-                bytes_used,
-                hex::encode(blind_bytes),
-                "11".repeat(32),
-                "22".repeat(32),
-                [{ "node_addr": val, "blind": "11".repeat(32), "split_bps": 10000u16 }],
-            ],
+            "params": [sid.clone(), 2u64],
             "value": 0u64,
             "fee": 10u64,
             "nonce": 1u64,
@@ -226,25 +200,27 @@ mod tests {
             .unwrap();
         assert_eq!(tnet["treasury"].as_u64(), Some(1800));
 
-        // 9. Encrypted earnings: 199*G + blind*H. Gross pay was 200 OU
-        //    but the protocol fee (0.5 %) routes 1 OU to the program
-        //    treasury — the validator receives 200 * 9950/10000 = 199 OU.
+        // 9. Program treasury collected the protocol fee (1 OU).
+        let pt = rpc
+            .contract_call(&prog, "get_program_treasury", &[], None)
+            .await
+            .unwrap();
+        assert_eq!(pt.as_u64(), Some(1));
+
+        // 10. Encrypted earnings: mock-cleartext = 199 OU.
         let earn = rpc
             .contract_call(&prog, "get_encrypted_earnings", &[json!(val)], None)
             .await
             .unwrap();
-        let earn_hex = earn.as_str().unwrap();
-        let scalar_net = Scalar::from(199u64);
-        let expected = &scalar_net * RISTRETTO_BASEPOINT_TABLE + blind * h_generator();
-        assert_eq!(hex::encode(expected.compress().to_bytes()), earn_hex);
+        assert_eq!(earn.as_str(), Some("hfhe_v1|mock|00000000000000c7")); // 0xc7 = 199
 
-        // 10. Claim the post-fee 199 OU.
+        // 11. Claim earnings: AML-side verify + plain transfer.
         let claim_tx = json!({
             "kind": "contract_call",
             "from": val,
             "to": "octPROG",
             "method": "claim_earnings",
-            "params": [199u64, hex::encode(blind_bytes), "ee".repeat(32)],
+            "params": [199u64, "00".repeat(32)],
             "value": 0u64,
             "fee": 10u64,
             "nonce": 1u64,
@@ -259,23 +235,42 @@ mod tests {
             .any(|e| e["name"].as_str() == Some("EarningsClaimed"));
         assert!(has_claimed);
 
-        // 11. Earnings ledger is reset to identity.
+        // 12. Earnings ledger reset to zero.
         let earn = rpc
             .contract_call(&prog, "get_encrypted_earnings", &[json!(val)], None)
             .await
             .unwrap();
-        assert_eq!(
-            earn.as_str().unwrap(),
-            hex::encode(RistrettoPoint::identity().compress().to_bytes())
-        );
+        assert_eq!(earn.as_str(), Some("hfhe_v1|mock|0000000000000000"));
     }
 
     #[tokio::test]
     async fn no_show_refund_returns_to_treasury() {
         let _g = spawn_mock(18104, "octPROG").await;
         let rpc = RpcClient::new(mock_url(18104));
+        let val = "octV2Address0000000000000000000000000NOSH";
         let owner = "octOWNER0000000000000000000000000000NOSHO";
         let client = "octCLIENT0000000000000000000000000000NOSHO";
+
+        bond_operator(&rpc, val).await;
+        rpc.submit(&json!({
+            "kind": "contract_call",
+            "from": val,
+            "to": "octPROG",
+            "method": "register_endpoint",
+            "params": [
+                "10.0.0.1:51820",
+                "11".repeat(32),
+                "cc".repeat(32),
+                "dd".repeat(32),
+                "eu-west",
+                100u64,
+            ],
+            "value": 0u64,
+            "fee": 10u64,
+            "nonce": 0u64,
+        }))
+        .await
+        .unwrap();
 
         // Create a tailnet with 100 OU treasury and add client.
         let create_tx = json!({
@@ -299,7 +294,7 @@ mod tests {
             .and_then(|e| e["tailnet_id"].as_str().map(String::from))
             .unwrap();
 
-        let add_tx = json!({
+        rpc.submit(&json!({
             "kind": "contract_call",
             "from": owner,
             "to": "octPROG",
@@ -308,8 +303,23 @@ mod tests {
             "value": 0u64,
             "fee": 10u64,
             "nonce": 1u64,
-        });
-        rpc.submit(&add_tx).await.unwrap();
+        }))
+        .await
+        .unwrap();
+
+        // Owner configures exit so client can open a session.
+        rpc.submit(&json!({
+            "kind": "contract_call",
+            "from": owner,
+            "to": "octPROG",
+            "method": "configure_tailnet_exit",
+            "params": [tid.clone(), val],
+            "value": 0u64,
+            "fee": 10u64,
+            "nonce": 2u64,
+        }))
+        .await
+        .unwrap();
 
         // Client opens a session for 30 OU.
         let open_tx = json!({
@@ -317,7 +327,7 @@ mod tests {
             "from": client,
             "to": "octPROG",
             "method": "open_session",
-            "params": [tid.clone(), ["00".repeat(32)], "11".repeat(32), 30u64],
+            "params": [tid.clone(), val, 30u64],
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
@@ -415,6 +425,9 @@ mod tests {
 
     #[test]
     fn dual_signed_receipt_round_trip() {
+        // Client-side dual-sig still works as a primitive; v1 AML
+        // doesn't verify it on-chain but the data-plane still uses
+        // signed receipts for client/operator dispute resolution.
         use octravpn_core::session::Blind;
         let client = KeyPair::generate();
         let node = KeyPair::generate();

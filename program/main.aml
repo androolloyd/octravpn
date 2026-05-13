@@ -1,34 +1,46 @@
 // OctraVPN — decentralized private mesh ("Tailscale-on-chain") for Octra.
 //
+// v1 design built against confirmed Octra AML primitives only. See
+// `docs/aml-gap-analysis.md` for the full audit and rationale.
+//
 // Model:
-//   - Tailnets are on-chain groups of devices. Members address each other
-//     by their Octra account address; the chain is the coordination layer.
+//   - Tailnets are on-chain groups of devices. Members address each
+//     other by their Octra account address.
 //   - Peer-to-peer traffic between reachable members is free.
 //   - Paid relays/exits ("operators") stake OU in this program via
-//     `bond_endpoint`. The stake is slashable atomically by this program
-//     on cryptographic evidence of receipt equivocation; we do NOT rely on
-//     Octra protocol-layer slashing.
-//   - Tailnet members deposit OU into a per-tailnet treasury ("traffic
-//     membership"). The treasury funds sessions through paid endpoints.
-//   - Sessions use 1..3-hop onion routing, dual-signed bandwidth receipts,
-//     and Pedersen-committed operator earnings (claimed via stealth
-//     payouts). CEI ordering throughout.
-//   - A small protocol fee (default 0.5 %) on every settlement accrues
-//     to the program treasury (governance-controlled) for protocol
-//     maintenance: audits, bug bounties, dispute resolution.
+//     `bond_endpoint`. Stake is slashable by governance on off-chain
+//     evidence (v1.1 will move slash on-chain once Octra exposes
+//     `verify_ed25519`).
+//   - Tailnet members deposit OU into a per-tailnet treasury. The
+//     treasury funds sessions through paid exits.
+//   - Sessions are SINGLE-HOP in v1: client picks one exit, deposits
+//     a max-pay ceiling, validator settles by reporting bytes_used.
+//     Receipt integrity is economic (the deposit caps loss); the
+//     dual-signed receipt model is deferred to v1.1.
+//   - A small protocol fee (default 0.5 %) on every settlement
+//     accrues to the program treasury (governance-controlled).
+//   - Operator earnings are accumulated under each operator's own
+//     HFHE pubkey using the confirmed `fhe_*` primitives. Claims are
+//     a two-step: AML verifies an fhe_verify_zero proof and transfers
+//     plaintext OU to the operator's wallet; the operator immediately
+//     wraps that in a native `op_type="stealth"` tx (handled by the
+//     wallet, outside AML) for unlinkable receipt.
 //
-// Host helpers (see docs/octra-research.md for status):
-//   sha256(bytes) -> bytes
-//   verify_ed25519(pubkey, msg, sig) -> bool
-//   pedersen_add(point, point) -> point
-//   pedersen_mul_scalar_g(scalar) -> point
-//   pedersen_mul_scalar_h(scalar) -> point
-//   pedersen_zero() -> point
-//   pedersen_verify_eq(point, amount, blind) -> bool
-//   pedersen_verify_open(commit, value_bytes, blind) -> bool
-//   addr_bytes(address) -> bytes
-//   emit_private_transfer(stealth_output, amount) -> bool
-//   mul_div_safe(a: int, b: int, divisor: int) -> int
+// Confirmed AML host helpers used (see `docs/octra-research.md §6`):
+//   require / assert / revert
+//   transfer(addr, amount)
+//   caller / origin / value / epoch / self_addr
+//   checkpoint / commit / rollback
+//   concat, to_string, parse_ints, mget
+//   emit Event(...)
+//   fhe_load_pk(addr) / fhe_deser(b64) / fhe_ser(ct)
+//   fhe_add(pk, a, b) / fhe_sub(pk, a, b)
+//   fhe_add_const(pk, ct, k) / fhe_scale(pk, ct, k)
+//   fhe_verify_zero(pk, ct, proof)
+//
+// Items pending Octra-team confirmation (assumed available, fall
+// back if not): sha256(bytes), len(bytes), addr_bytes(address),
+// address-equality on `address` type, `address_zero()` primitive.
 
 import IOctraVPN from "interfaces/IOctraVPN.aml"
 
@@ -44,91 +56,79 @@ program OctraVPN implements IOctraVPN {
     endpoint_count: int
     endpoint_index: list[address]
 
+    // HFHE pubkey + pre-encrypted-zero per operator. Set at
+    // `register_endpoint`. The zero ciphertext is the basis for
+    // `fhe_add_const`-style amount encryptions during settle and
+    // claim. Operator must regenerate both if they rotate keys.
+    op_pk: map[address]bytes
+    op_zero_ct: map[address]bytes
+
     tailnets: map[bytes]Tailnet
     tailnet_index: list[bytes]
     tailnet_count: int
     tailnet_nonce: int
 
+    // Per-tailnet membership + exits, keyed by (tailnet_id ++ addr).
+    members: map[bytes]int
+    tailnet_exits: map[bytes]int
+
     sessions: map[bytes]Session
     session_nonce: int
 
-    enc_earnings: map[address]bytes  // 32-byte compressed Ristretto
+    // FHE-encrypted earnings ciphertext per operator. Opens via
+    // `fhe_verify_zero` at `claim_earnings`.
+    enc_earnings: map[address]bytes
 
     // Operator stake locked in this program. Required for
-    // `register_endpoint`; slashed in full by `submit_equivocation`.
+    // `register_endpoint`; slashable by governance on off-chain
+    // evidence (`gov_slash_operator`).
     endpoint_stake: map[address]int
     // While an operator is unbonding, their stake sits here until
     // `finalize_unbond` after the grace window.
     endpoint_unbonding: map[address]UnbondingRecord
-    // Once equivocation is proven, the operator is permanently slashed
-    // and may never re-register at the same address.
+    // Permanent slashed flag — once set, that address may never
+    // re-register or re-bond.
     endpoint_slashed: map[address]int
 
-    // Program treasury accumulating protocol fees + the burn share of
-    // slashed stakes. Spendable by the program owner via governance.
+    // Program treasury accumulating protocol fees + the burn share
+    // of slashed stakes. Spendable by the program owner via
+    // governance.
     treasury: int
     burned: int
 
     // Device → owner-wallet map. Lets a single wallet enroll many
-    // devices (laptop, phone, server) and have them inherit membership
-    // wherever the wallet is a member.
+    // devices (laptop, phone, server) and inherit membership.
     device_owner: map[address]address
 
-    // Pre-auth join-token replay protection: once a token nonce has
-    // been redeemed, it can never be redeemed again. The value stored
-    // is the epoch of redemption (`0` means "never redeemed").
-    redeemed_nonces: map[bytes]int
-
-    // Address → X25519 view pubkey. Wallets publish their own view
-    // pubkey here so senders can compute stealth outputs without
-    // depending on an Octra-side `octra_viewPubkey` RPC. The
-    // corresponding view *secret* never leaves the wallet.
-    view_keys: map[address]bytes
-
     params: Params
-
-    tag_receipt: string
   }
 
   // ---------------------- types & events ----------------------
 
   struct EndpointRecord {
     active: int                 // 1 once registered; 0 after retire
-    endpoint: string            // ip:port
+    endpoint: string            // public address (ip:port or .onion)
     wg_pubkey: bytes            // X25519 noise pubkey (32B)
-    receipt_pubkey: bytes       // ed25519 receipt-signing pubkey (32B)
-    view_pubkey: bytes          // stealth view key (32B)
     region: string
     price_per_mb: int
     registered_at: int
-    reputation: int
+    reputation: int             // monotonic count of settled sessions
   }
 
   struct Tailnet {
     owner: address
     treasury: int               // OU available for paid traffic
-    member_count: int           // size of the membership set
+    member_count: int
     acl_policy: bytes           // 32-byte hash of off-chain ACL doc
     created_at: int
-    exit_count: int             // number of configured exit endpoints
-  }
-
-  // Tailnet membership is a flat map keyed by (tailnet_id ++ member_addr).
-  // Reads check `members[concat(tailnet_id, member_addr)] != 0`.
-
-  struct RouteOpening {
-    node_addr: address
-    blind: bytes
-    split_bps: int
+    exit_count: int
   }
 
   struct Session {
-    tailnet_id: bytes           // session is scoped to this tailnet
-    client_session_pubkey: bytes
-    route_commit: list[bytes]
+    tailnet_id: bytes
+    exit: address               // the single exit operator for v1
     deposit: int                // locked from tailnet treasury at open
     opened_at: int
-    receipt_seq: int
     status: int                 // 0 open, 1 settled, 2 refunded
   }
 
@@ -141,18 +141,13 @@ program OctraVPN implements IOctraVPN {
     min_endpoint_stake: int      // floor on operator bond (default 1B OU = 1000 OCT)
     unbond_grace_epochs: int     // delay before a withdrawn stake can be claimed
     slash_burn_bps: int          // share of slashed stake burned (default 9000 = 90%)
-    slash_bounty_bps: int        // share to evidence submitter (default 1000 = 10%)
+    slash_bounty_bps: int        // share to slash submitter (default 1000 = 10%)
     protocol_fee_bps: int        // share of total_paid into program treasury (default 50 = 0.5%)
   }
 
   struct UnbondingRecord {
     stake: int                   // amount unbonding
     unlock_epoch: int            // epoch at/after which finalize is permitted
-  }
-
-  struct HopSnapshot {
-    addr: address
-    price_per_mb: int
   }
 
   event EndpointRegistered(addr: address, endpoint: string, region: string)
@@ -164,7 +159,7 @@ program OctraVPN implements IOctraVPN {
   event StakeUnbondingStarted(addr: address, stake: int, unlock_epoch: int)
   event StakeUnbondingFinalized(addr: address, amount: int)
   event OperatorSlashed(
-    addr: address, stake: int, burn_amt: int, bounty_amt: int, submitter: address
+    addr: address, stake: int, burn_amt: int, bounty_amt: int, reason: string
   )
 
   event TailnetCreated(tailnet_id: bytes, owner: address)
@@ -174,19 +169,15 @@ program OctraVPN implements IOctraVPN {
   event TailnetExitConfigured(tailnet_id: bytes, exit_addr: address)
   event TailnetAclUpdated(tailnet_id: bytes, acl_policy: bytes)
 
-  event SessionOpened(session_id: bytes, tailnet_id: bytes, hops: int, deposit: int, opened_at: int)
-  event SessionSettled(session_id: bytes, seq: int, total_paid: int, refund: int)
+  event SessionOpened(session_id: bytes, tailnet_id: bytes, exit: address, deposit: int, opened_at: int)
+  event SessionSettled(session_id: bytes, exit: address, bytes_used: int, total_paid: int, refund: int)
   event SessionRefunded(session_id: bytes, reason: string)
   event SessionSwept(session_id: bytes)
 
-  event EarningsClaimed(validator: address, amount: int)
+  event EarningsClaimed(operator: address, amount: int)
 
   event DeviceRegistered(wallet: address, device: address)
   event DeviceRevoked(wallet: address, device: address)
-
-  event JoinTokenRedeemed(tailnet_id: bytes, member: address, nonce: bytes)
-
-  event ViewPubkeyPublished(wallet: address, view_pubkey: bytes)
 
   // -------------------------- ctor ---------------------------
 
@@ -215,13 +206,11 @@ program OctraVPN implements IOctraVPN {
       sweep_grace_multiplier: 10,
       sweep_bounty_bps: 100,
       min_endpoint_stake: 1000000000,    // 1000 OCT
-      unbond_grace_epochs: 10000,        // ~30 days at typical epoch rate
+      unbond_grace_epochs: 10000,        // ~30 days at ~10s epochs
       slash_burn_bps: 9000,              // 90 %
       slash_bounty_bps: 1000,            // 10 %
       protocol_fee_bps: 50               // 0.5 %
     }
-
-    self.tag_receipt = "octravpn-receipt-v1"
   }
 
   // ---------------------- helpers ----------------------------
@@ -234,27 +223,29 @@ program OctraVPN implements IOctraVPN {
     require(caller == self.owner, "not owner")
   }
 
+  // Composite key for per-tailnet maps. Uses confirmed `concat`.
+  private fn tailnet_addr_key(tid: bytes, addr: address): bytes {
+    return concat(tid, addr_bytes(addr))
+  }
+
   private fn endpoint_is_active(rec: EndpointRecord, addr: address): bool {
     if rec.active == 0 { return false }
     if self.endpoint_slashed[addr] != 0 { return false }
-    // Stake must remain ≥ MIN to keep the endpoint live; an operator who
-    // started unbonding clears `endpoint_stake[addr]` and is reported
-    // inactive here even before grace elapses.
     return self.endpoint_stake[addr] >= self.params.min_endpoint_stake
   }
 
   // -------------- endpoint (relay/exit) entrypoints --------------
 
   // Anyone with `endpoint_stake[caller] >= min_endpoint_stake` may
-  // register an endpoint. The stake is held by this program and
-  // slashable on equivocation evidence (see `submit_equivocation`).
-  // A previously-slashed address can never re-register under the
-  // same address.
+  // register an endpoint. The operator provides their HFHE pubkey
+  // and a pre-computed `enc(pk, 0)` ciphertext (used as the base for
+  // all subsequent encrypted-amount arithmetic).
+  // A previously-slashed address may never re-register.
   fn register_endpoint(
     endpoint: string,
     wg_pubkey: bytes,
-    receipt_pubkey: bytes,
-    view_pubkey: bytes,
+    hfhe_pubkey: bytes,
+    initial_enc_zero: bytes,
     region: string,
     price_per_mb: int
   ): bool {
@@ -266,21 +257,21 @@ program OctraVPN implements IOctraVPN {
     )
     require(price_per_mb > 0, "price>0")
     require(len(wg_pubkey) == 32, "wg pubkey 32B")
-    require(len(receipt_pubkey) == 32, "receipt pubkey 32B")
-    require(len(view_pubkey) == 32, "view pubkey 32B")
+    require(len(hfhe_pubkey) > 0, "hfhe pubkey required")
+    require(len(initial_enc_zero) > 0, "initial enc(0) required")
     require(caller == origin, "direct caller only")
 
     let existing = self.endpoints[caller]
     require(existing.active == 0, "already registered")
 
-    self.enc_earnings[caller] = pedersen_zero()
+    self.op_pk[caller] = hfhe_pubkey
+    self.op_zero_ct[caller] = initial_enc_zero
+    self.enc_earnings[caller] = initial_enc_zero
 
     let rec = EndpointRecord {
       active: 1,
       endpoint: endpoint,
       wg_pubkey: wg_pubkey,
-      receipt_pubkey: receipt_pubkey,
-      view_pubkey: view_pubkey,
       region: region,
       price_per_mb: price_per_mb,
       registered_at: epoch,
@@ -312,23 +303,36 @@ program OctraVPN implements IOctraVPN {
     return true
   }
 
+  // Rotate WireGuard and/or HFHE keys. The new `initial_enc_zero`
+  // must be `enc(new_hfhe_pubkey, 0)` — the operator MUST claim any
+  // outstanding earnings before rotating (the chain has no way to
+  // re-key existing ciphertext under a new key).
   fn rotate_keys(
     new_wg_pubkey: bytes,
-    new_receipt_pubkey: bytes,
-    new_view_pubkey: bytes
+    new_hfhe_pubkey: bytes,
+    new_initial_enc_zero: bytes
   ): bool {
     require_not_paused()
     let rec = self.endpoints[caller]
     require(rec.active != 0, "not registered")
     require(caller == origin, "direct caller only")
     require(len(new_wg_pubkey) == 32, "wg 32B")
-    require(len(new_receipt_pubkey) == 32, "receipt 32B")
-    require(len(new_view_pubkey) == 32, "view 32B")
+    require(len(new_hfhe_pubkey) > 0, "hfhe pubkey required")
+    require(len(new_initial_enc_zero) > 0, "initial enc(0) required")
+
+    // Refuse to rotate while there are unclaimed earnings — the
+    // existing ciphertext is encrypted under the OLD key and won't
+    // decrypt under the new one.
+    require(
+      self.enc_earnings[caller] == self.op_zero_ct[caller],
+      "claim earnings before rotating keys"
+    )
 
     rec.wg_pubkey = new_wg_pubkey
-    rec.receipt_pubkey = new_receipt_pubkey
-    rec.view_pubkey = new_view_pubkey
     self.endpoints[caller] = rec
+    self.op_pk[caller] = new_hfhe_pubkey
+    self.op_zero_ct[caller] = new_initial_enc_zero
+    self.enc_earnings[caller] = new_initial_enc_zero
     emit KeysRotated(caller)
     return true
   }
@@ -346,8 +350,7 @@ program OctraVPN implements IOctraVPN {
   // ---------- operator stake (bond / unbond / slash) ----------
 
   // Deposit `value` OU as stake. Required before `register_endpoint`.
-  // A previously-slashed address cannot bond again; the slash flag is
-  // terminal at the wallet level.
+  // A previously-slashed address cannot bond again.
   fn bond_endpoint(): bool {
     require_not_paused()
     require(value > 0, "no value")
@@ -361,10 +364,10 @@ program OctraVPN implements IOctraVPN {
     return true
   }
 
-  // Begin unbonding the caller's entire stake. Moves the balance into
-  // `endpoint_unbonding[caller]` and zeroes the live stake — the
-  // endpoint is reported inactive immediately so no new sessions can
-  // start. `finalize_unbond` becomes callable at `unlock_epoch`.
+  // Begin unbonding the caller's entire stake. Moves the balance
+  // into `endpoint_unbonding[caller]` and zeroes the live stake.
+  // The endpoint deactivates immediately (no new sessions). After
+  // grace, `finalize_unbond` releases the balance.
   fn unbond_endpoint(): bool {
     require_not_paused()
     let amt = self.endpoint_stake[caller]
@@ -388,8 +391,6 @@ program OctraVPN implements IOctraVPN {
     return true
   }
 
-  // After grace elapses, finalize and return the unbonded stake to
-  // the caller.
   fn finalize_unbond(): bool {
     require_not_paused()
     let u = self.endpoint_unbonding[caller]
@@ -404,33 +405,19 @@ program OctraVPN implements IOctraVPN {
     return true
   }
 
-  // Submit cryptographic evidence that an operator double-signed a
-  // receipt for the same `(session_id, seq)` with distinct
-  // `(bytes_used, blind)`. The chain re-runs the signature check,
-  // burns 90 % of the operator's stake (plus any in-flight unbonding
-  // balance), pays 10 % to the submitter, and marks the operator
-  // permanently slashed.
-  fn submit_equivocation(
-    operator_addr: address,
-    session_id: bytes,
-    seq: int,
-    bytes_used_a: int,
-    blind_a: bytes,
-    sig_a: bytes,
-    bytes_used_b: int,
-    blind_b: bytes,
-    sig_b: bytes
-  ): bool {
+  // Governance slash. Replaces in-AML cryptographic-evidence
+  // slashing pending Octra's `verify_ed25519` host call. The owner
+  // (governance) submits a slash after externally verifying off-chain
+  // equivocation evidence (see `octravpn slash-evidence verify`).
+  // The slash is single-shot terminal.
+  //
+  // Trade-off: trust-the-owner instead of trust-the-math. Acceptable
+  // for v1 because (a) any operator wronged by a bad-faith slash has
+  // public chain evidence to dispute with, (b) the owner's reputation
+  // is itself at stake, (c) future v1.1 moves this on-chain.
+  fn gov_slash_operator(operator_addr: address, reason: string): bool {
     require_not_paused()
-    require(len(session_id) == 32, "session_id 32B")
-    require(len(blind_a) == 32, "blind_a 32B")
-    require(len(blind_b) == 32, "blind_b 32B")
-    require(len(sig_a) == 64, "sig_a 64B")
-    require(len(sig_b) == 64, "sig_b 64B")
-    require(seq > 0, "seq>0")
-    require(bytes_used_a >= 0, "bytes_a>=0")
-    require(bytes_used_b >= 0, "bytes_b>=0")
-
+    require_owner()
     require(self.endpoint_slashed[operator_addr] == 0, "already slashed")
 
     let live_stake = self.endpoint_stake[operator_addr]
@@ -438,43 +425,23 @@ program OctraVPN implements IOctraVPN {
     let total_stake = live_stake + unb.stake
     require(total_stake > 0, "no stake to slash")
 
-    let rec = self.endpoints[operator_addr]
-    require(rec.active != 0 || total_stake > 0, "unknown operator")
-    let pubkey = rec.receipt_pubkey
-
-    let msg_a = sha256(concat_receipt_v1(
-      self.tag_receipt, session_id, seq, bytes_used_a, blind_a
-    ))
-    let msg_b = sha256(concat_receipt_v1(
-      self.tag_receipt, session_id, seq, bytes_used_b, blind_b
-    ))
-    require(verify_ed25519(pubkey, msg_a, sig_a), "bad sig_a")
-    require(verify_ed25519(pubkey, msg_b, sig_b), "bad sig_b")
-    require(
-      bytes_used_a != bytes_used_b || blind_a != blind_b,
-      "receipts identical — not equivocation"
-    )
-
     let burn_amt = mul_div_safe(total_stake, self.params.slash_burn_bps, 10000)
     let bounty_amt = total_stake - burn_amt
 
-    // CEI: state mutations before transfer.
     self.endpoint_stake[operator_addr] = 0
     self.endpoint_unbonding[operator_addr] = UnbondingRecord {
       stake: 0, unlock_epoch: 0
     }
     self.endpoint_slashed[operator_addr] = 1
-    let rec2 = self.endpoints[operator_addr]
-    if rec2.active != 0 {
-      rec2.active = 0
-      self.endpoints[operator_addr] = rec2
+    let rec = self.endpoints[operator_addr]
+    if rec.active != 0 {
+      rec.active = 0
+      self.endpoints[operator_addr] = rec
     }
     self.treasury = self.treasury + burn_amt
     if bounty_amt > 0 { transfer(caller, bounty_amt) }
 
-    emit OperatorSlashed(
-      operator_addr, total_stake, burn_amt, bounty_amt, caller
-    )
+    emit OperatorSlashed(operator_addr, total_stake, burn_amt, bounty_amt, reason)
     return true
   }
 
@@ -486,7 +453,7 @@ program OctraVPN implements IOctraVPN {
     require(len(acl_policy) == 32, "acl policy 32B")
 
     self.tailnet_nonce = self.tailnet_nonce + 1
-    let id_seed = concat3_addr_int_int(caller, epoch, self.tailnet_nonce)
+    let id_seed = concat(concat(addr_bytes(caller), to_string(epoch)), to_string(self.tailnet_nonce))
     let tailnet_id = sha256(id_seed)
 
     let t = Tailnet {
@@ -502,7 +469,7 @@ program OctraVPN implements IOctraVPN {
     self.tailnet_count = self.tailnet_count + 1
 
     // Owner is implicitly the first member.
-    set_member(tailnet_id, caller, 1)
+    self.members[tailnet_addr_key(tailnet_id, caller)] = 1
     t.member_count = 1
     self.tailnets[tailnet_id] = t
 
@@ -511,12 +478,16 @@ program OctraVPN implements IOctraVPN {
     return tailnet_id
   }
 
+  // Pre-auth join tokens are deferred to v1.1 (require
+  // verify_ed25519). For v1, the owner adds members directly. The
+  // tx is owner-signed at the native-tx layer.
   fn add_member(tailnet_id: bytes, member: address): bool {
     require_not_paused()
     let t = self.tailnets[tailnet_id]
     require(t.owner == caller, "not tailnet owner")
-    require(get_member(tailnet_id, member) == 0, "already member")
-    set_member(tailnet_id, member, 1)
+    let key = tailnet_addr_key(tailnet_id, member)
+    require(self.members[key] == 0, "already member")
+    self.members[key] = 1
     t.member_count = t.member_count + 1
     self.tailnets[tailnet_id] = t
     emit TailnetMemberAdded(tailnet_id, member)
@@ -528,17 +499,15 @@ program OctraVPN implements IOctraVPN {
     let t = self.tailnets[tailnet_id]
     require(t.owner == caller, "not tailnet owner")
     require(member != t.owner, "cannot remove owner")
-    require(get_member(tailnet_id, member) == 1, "not member")
-    set_member(tailnet_id, member, 0)
+    let key = tailnet_addr_key(tailnet_id, member)
+    require(self.members[key] == 1, "not member")
+    self.members[key] = 0
     t.member_count = t.member_count - 1
     self.tailnets[tailnet_id] = t
     emit TailnetMemberRemoved(tailnet_id, member)
     return true
   }
 
-  // Anyone may deposit OU into a tailnet treasury (e.g. a member topping
-  // up their share of "traffic membership"). The deposit is a public
-  // contribution; per-member accounting is off-chain.
   fn deposit_to_tailnet(tailnet_id: bytes): bool {
     require_not_paused()
     require(value > 0, "no value")
@@ -557,7 +526,9 @@ program OctraVPN implements IOctraVPN {
     let rec = self.endpoints[exit_addr]
     require(rec.active != 0, "exit not registered")
     require(endpoint_is_active(rec, exit_addr), "exit inactive")
-    set_tailnet_exit(tailnet_id, exit_addr, 1)
+    let key = tailnet_addr_key(tailnet_id, exit_addr)
+    require(self.tailnet_exits[key] == 0, "already configured")
+    self.tailnet_exits[key] = 1
     t.exit_count = t.exit_count + 1
     self.tailnets[tailnet_id] = t
     emit TailnetExitConfigured(tailnet_id, exit_addr)
@@ -577,11 +548,6 @@ program OctraVPN implements IOctraVPN {
 
   // ---------------- device registry ----------------
 
-  // Register `device` as belonging to the caller's wallet. A wallet can
-  // attach an arbitrary number of devices. The mapping is global (not
-  // per-tailnet) so a single device can participate in every tailnet
-  // the wallet belongs to without re-enrolling. Re-registering an
-  // already-attached device is a no-op.
   fn register_device(device: address): bool {
     require_not_paused()
     require(is_address(device), "bad device addr")
@@ -593,7 +559,6 @@ program OctraVPN implements IOctraVPN {
     return true
   }
 
-  // Revoke a device. Only the wallet that registered it can revoke.
   fn revoke_device(device: address): bool {
     require_not_paused()
     let existing = self.device_owner[device]
@@ -611,236 +576,125 @@ program OctraVPN implements IOctraVPN {
     return self.device_owner[device] == wallet
   }
 
-  // ---------------- self-published view pubkey ----------------
-
-  // Publish or update the caller's X25519 view pubkey. Senders look
-  // this up to compute stealth outputs payable to the caller.
-  // Re-publishing replaces the old key; downstream senders should
-  // re-fetch before sending.
-  fn set_view_pubkey(pubkey: bytes): bool {
-    require_not_paused()
-    require(len(pubkey) == 32, "view pubkey 32B")
-    self.view_keys[caller] = pubkey
-    emit ViewPubkeyPublished(caller, pubkey)
-    return true
-  }
-
-  view fn get_view_pubkey(wallet: address): bytes {
-    return self.view_keys[wallet]
-  }
-
-  // ---------------- pre-auth join tokens ----------------
-
-  // Redeem a pre-auth token issued by a tailnet's owner. The token
-  // commits to (tailnet_id, expiry, nonce) and is signed by the owner.
-  // Anyone holding a valid, unredeemed token can self-join — no further
-  // owner interaction required.
-  fn redeem_join_token(
-    tailnet_id: bytes,
-    expiry_epoch: int,
-    nonce: bytes,
-    owner_sig: bytes
-  ): bool {
-    require_not_paused()
-    require(len(nonce) == 32, "nonce 32B")
-    require(epoch <= expiry_epoch, "token expired")
-    require(self.redeemed_nonces[nonce] == 0, "nonce already redeemed")
-
-    let t = self.tailnets[tailnet_id]
-    require(t.owner != address_zero(), "tailnet not found")
-    require(get_member(tailnet_id, caller) == 0, "already member")
-
-    let msg = sha256(concat_join_token_v1(tailnet_id, expiry_epoch, nonce))
-    require(verify_ed25519_acct(t.owner, msg, owner_sig), "bad token signature")
-
-    set_member(tailnet_id, caller, 1)
-    t.member_count = t.member_count + 1
-    self.tailnets[tailnet_id] = t
-    self.redeemed_nonces[nonce] = epoch
-
-    emit TailnetMemberAdded(tailnet_id, caller)
-    emit JoinTokenRedeemed(tailnet_id, caller, nonce)
-    return true
-  }
-
   // ---------------- session entrypoints ----------------
 
-  // A session sends paid traffic through a tailnet's configured exits.
-  // The deposit is locked from the tailnet's treasury; unused refund
-  // returns to the treasury (not a stealth output — privacy at the
-  // tailnet level, not per-session).
+  // A single-hop session opens against one configured tailnet exit.
+  // The client deposits `max_pay` from the tailnet's treasury — this
+  // is the ceiling the validator can ever extract. The validator
+  // settles by reporting `bytes_used`; AML caps the resulting
+  // payment at `max_pay`.
+  //
+  // A device may open on behalf of its registered wallet.
   fn open_session(
     tailnet_id: bytes,
-    route_commit: list[bytes],
-    client_session_pubkey: bytes,
-    deposit: int
+    exit_addr: address,
+    max_pay: int
   ): bytes {
     require_not_paused()
     let t = self.tailnets[tailnet_id]
     require(t.owner != address_zero(), "tailnet not found")
-    // A device may open a session on behalf of its owner wallet.
-    let acting_member = if get_member(tailnet_id, caller) == 1 {
-      caller
-    } else {
+
+    // Membership check (caller is a member directly, OR caller's
+    // registered owner is a member).
+    let acting_member_key = tailnet_addr_key(tailnet_id, caller)
+    let caller_is_member = self.members[acting_member_key] == 1
+    if !caller_is_member {
       let owner_wallet = self.device_owner[caller]
       require(owner_wallet != address_zero(), "not a member")
-      require(get_member(tailnet_id, owner_wallet) == 1, "device's owner is not a member")
-      owner_wallet
+      require(
+        self.members[tailnet_addr_key(tailnet_id, owner_wallet)] == 1,
+        "device's owner is not a member"
+      )
     }
-    let _ = acting_member  // bound for future audit-trail use
-    require(deposit >= self.params.min_session_deposit, "deposit below min")
-    require(t.treasury >= deposit, "treasury insufficient")
 
-    let hops = len(route_commit)
-    require(hops >= 1, "need >=1 hop")
-    require(hops <= 3, "max 3 hops")
-    require(len(client_session_pubkey) == 32, "session pubkey 32B")
+    // The exit must be configured for this tailnet AND currently active.
+    require(
+      self.tailnet_exits[tailnet_addr_key(tailnet_id, exit_addr)] == 1,
+      "exit not configured for tailnet"
+    )
+    let rec = self.endpoints[exit_addr]
+    require(endpoint_is_active(rec, exit_addr), "exit inactive")
 
-    let i = 0
-    while i < hops {
-      require(len(route_commit[i]) == 32, "commit 32B")
-      i = i + 1
-    }
+    require(max_pay >= self.params.min_session_deposit, "deposit below min")
+    require(t.treasury >= max_pay, "treasury insufficient")
 
     // Lock deposit from treasury.
-    t.treasury = t.treasury - deposit
+    t.treasury = t.treasury - max_pay
     self.tailnets[tailnet_id] = t
 
     self.session_nonce = self.session_nonce + 1
-    let id_seed = concat4_addr_int_int_bytes(
-      self_addr, epoch, self.session_nonce, client_session_pubkey
+    let id_seed = concat(
+      concat(addr_bytes(self_addr), to_string(epoch)),
+      concat(to_string(self.session_nonce), addr_bytes(caller))
     )
     let session_id = sha256(id_seed)
 
     let s = Session {
       tailnet_id: tailnet_id,
-      client_session_pubkey: client_session_pubkey,
-      route_commit: route_commit,
-      deposit: deposit,
+      exit: exit_addr,
+      deposit: max_pay,
       opened_at: epoch,
-      receipt_seq: 0,
       status: 0
     }
     self.sessions[session_id] = s
 
-    emit SessionOpened(session_id, tailnet_id, hops, deposit, epoch)
+    emit SessionOpened(session_id, tailnet_id, exit_addr, max_pay, epoch)
     return session_id
   }
 
-  // Settle a session with a dual-signed final receipt.
+  // Validator-only settle. The exit operator reports the bytes they
+  // served; AML caps payment at the client's pre-deposited ceiling
+  // and refunds the remainder. Operator earnings credit goes
+  // through HFHE.
   //
-  // Ordering follows CEI:
-  //   1. (Checks) Snapshot each hop's endpoint, verify openings, check
-  //      `endpoint_is_active` (stake + not-slashed), verify dual sig.
-  //   2. (Effects) Update earnings ledger, mark session settled, refund
-  //      unused deposit to tailnet treasury.
-  fn settle_session(
-    session_id: bytes,
-    seq: int,
-    bytes_used: int,
-    blind: bytes,
-    client_sig: bytes,
-    node_sig: bytes,
-    route_open: list[RouteOpening]
-  ): bool {
+  // Receipt integrity guarantee: economic, not cryptographic.
+  // Validator can claim up to `max_pay / price_per_mb` bytes; this
+  // is the client's risk ceiling. Routine over-claiming triggers
+  // client-side de-listing (off-chain reputation).
+  fn settle_session(session_id: bytes, bytes_used: int): bool {
     require_not_paused()
     let s = self.sessions[session_id]
     require(s.status == 0, "session not open")
-    require(seq > s.receipt_seq, "stale seq")
     require(bytes_used >= 0, "bytes>=0")
-    require(len(blind) == 32, "blind 32B")
+    require(caller == s.exit, "not the session's exit operator")
 
-    let hops = len(s.route_commit)
-    require(len(route_open) == hops, "route len mismatch")
+    let rec = self.endpoints[caller]
+    require(endpoint_is_active(rec, caller), "operator inactive")
 
-    // ---- 1. CHECKS ----
-    let snaps = []
-    let total_bps = 0
-    let i = 0
-    while i < hops {
-      let op = route_open[i]
-      let rec = self.endpoints[op.node_addr]
-      require(rec.active != 0, "node not registered")
-      require(endpoint_is_active(rec, op.node_addr), "node inactive")
-      require(
-        pedersen_verify_open(s.route_commit[i], addr_bytes(op.node_addr), op.blind),
-        "bad route opening"
-      )
-      total_bps = total_bps + op.split_bps
-      let snap = HopSnapshot { addr: op.node_addr, price_per_mb: rec.price_per_mb }
-      snaps.append(snap)
-      i = i + 1
-    }
-    require(total_bps == 10000, "splits != 100%")
-
-    // Dual-signature verification.
-    let exit_idx = hops - 1
-    let exit_addr = snaps[exit_idx].addr
-    let exit_rec = self.endpoints[exit_addr]
-    let receipt_msg = sha256(concat_receipt_v1(
-      self.tag_receipt, session_id, seq, bytes_used, blind
-    ))
-    require(
-      verify_ed25519(s.client_session_pubkey, receipt_msg, client_sig),
-      "bad client sig"
-    )
-    require(
-      verify_ed25519(exit_rec.receipt_pubkey, receipt_msg, node_sig),
-      "bad node sig"
-    )
-
-    // Compute payments with overflow-safe arithmetic.
-    let total_paid = 0
-    let pays = []
-    let j = 0
-    while j < hops {
-      let hop = route_open[j]
-      let rec = snaps[j]
-      let bytes_times_price = mul_div_safe(bytes_used, rec.price_per_mb, 1)
-      let pay_v = mul_div_safe(bytes_times_price, hop.split_bps, 10000)
-      pays.append(pay_v)
-      total_paid = total_paid + pay_v
-      j = j + 1
-    }
+    let total_paid = mul_div_safe(bytes_used, rec.price_per_mb, 1)
     require(total_paid <= s.deposit, "claim exceeds escrow")
 
     // Protocol fee (Tier 2): a share of total_paid accrues to the
-    // program treasury for protocol maintenance. Hops receive the
-    // post-fee amount proportional to their advertised split. The
-    // refund returns to the tailnet treasury intact.
+    // program treasury for protocol maintenance. The operator
+    // receives the post-fee amount; the refund is the unspent
+    // deposit, untouched by the fee.
     let protocol_fee = mul_div_safe(total_paid, self.params.protocol_fee_bps, 10000)
-    let net_to_hops = total_paid - protocol_fee
+    let net_pay = total_paid - protocol_fee
     let refund = s.deposit - total_paid
 
-    // ---- 2. EFFECTS ----
-    let k = 0
-    while k < hops {
-      let hop = route_open[k]
-      let rec = self.endpoints[hop.node_addr]
-      // Each hop's payout is reduced proportionally to its share of
-      // the total before fee. mul_div_safe(pays[k], net_to_hops, total_paid)
-      // routes the post-fee balance back through the original split.
-      let net_pay = 0
-      if total_paid > 0 {
-        net_pay = mul_div_safe(pays[k], net_to_hops, total_paid)
-      }
-      let credit_g = pedersen_mul_scalar_g(net_pay)
-      let credit_h = pedersen_mul_scalar_h(blind_to_scalar(blind))
-      let credit = pedersen_add(credit_g, credit_h)
-      let prev = self.enc_earnings[hop.node_addr]
-      self.enc_earnings[hop.node_addr] = pedersen_add(prev, credit)
-      rec.reputation = rec.reputation + 1
-      self.endpoints[hop.node_addr] = rec
-      k = k + 1
+    // Effects.
+    s.status = 1
+    self.sessions[session_id] = s
+
+    // Credit operator's encrypted earnings: earnings += enc(net_pay).
+    // We materialise `enc(net_pay)` from the operator's pre-stored
+    // `enc(0)` via `fhe_add_const(pk, enc(0), net_pay)`, then add it
+    // to the running ciphertext.
+    if net_pay > 0 {
+      let pk = self.op_pk[caller]
+      let zero_ct = fhe_deser(self.op_zero_ct[caller])
+      let pay_ct = fhe_add_const(pk, zero_ct, net_pay)
+      let cur = fhe_deser(self.enc_earnings[caller])
+      let new_earnings = fhe_add(pk, cur, pay_ct)
+      self.enc_earnings[caller] = fhe_ser(new_earnings)
     }
+
+    rec.reputation = rec.reputation + 1
+    self.endpoints[caller] = rec
 
     if protocol_fee > 0 {
       self.treasury = self.treasury + protocol_fee
     }
-
-    s.status = 1
-    s.receipt_seq = seq
-    self.sessions[session_id] = s
 
     if refund > 0 {
       let t = self.tailnets[s.tailnet_id]
@@ -848,7 +702,7 @@ program OctraVPN implements IOctraVPN {
       self.tailnets[s.tailnet_id] = t
     }
 
-    emit SessionSettled(session_id, seq, total_paid, refund)
+    emit SessionSettled(session_id, caller, bytes_used, total_paid, refund)
     return true
   }
 
@@ -859,9 +713,7 @@ program OctraVPN implements IOctraVPN {
       epoch >= s.opened_at + self.params.session_grace_epochs,
       "grace not elapsed"
     )
-    require(s.receipt_seq == 0, "session has progress")
 
-    // CEI: mutate first, then return deposit to tailnet treasury.
     s.status = 2
     self.sessions[session_id] = s
     let t = self.tailnets[s.tailnet_id]
@@ -872,8 +724,6 @@ program OctraVPN implements IOctraVPN {
     return true
   }
 
-  // Permissionless sweep for sessions stuck open past K * grace. Returns
-  // the locked deposit to the tailnet treasury minus a small sweeper bounty.
   fn sweep_expired_session(session_id: bytes): bool {
     let s = self.sessions[session_id]
     require(s.status == 0, "session not open")
@@ -903,27 +753,36 @@ program OctraVPN implements IOctraVPN {
     return self.enc_earnings[addr]
   }
 
-  fn claim_earnings(
-    claimed_amount: int,
-    claimed_blind: bytes,
-    stealth_output: bytes
-  ): bool {
+  // Two-step claim: AML verifies the operator's FHE zero-proof that
+  // `enc_earnings = enc(claimed_amount)`, zeroes out the ledger, and
+  // transfers plaintext OU to the caller. The caller's wallet then
+  // wraps the funds in a native `op_type="stealth"` tx for
+  // unlinkable receipt — this happens entirely off-AML.
+  //
+  // Partial claims are not supported in v1; the operator must claim
+  // the exact accumulated total. After claim, the encrypted ledger
+  // resets to the operator's pre-stored `enc(0)`.
+  fn claim_earnings(claimed_amount: int, proof: bytes): bool {
     require_not_paused()
     let rec = self.endpoints[caller]
-    require(rec.active != 0, "not registered")
+    // Operator may claim even after retire/unbond, as long as not
+    // slashed and still has a key registered.
+    require(self.endpoint_slashed[caller] == 0, "operator slashed")
+    require(len(self.op_pk[caller]) > 0, "no hfhe pubkey")
     require(claimed_amount > 0, "amount>0")
-    require(len(claimed_blind) == 32, "blind 32B")
-    require(len(stealth_output) == 32, "stealth 32B")
+    require(len(proof) > 0, "proof required")
 
-    let point = self.enc_earnings[caller]
-    require(
-      pedersen_verify_eq(point, claimed_amount, claimed_blind),
-      "bad opening"
-    )
+    let pk = self.op_pk[caller]
+    let zero_ct = fhe_deser(self.op_zero_ct[caller])
+    let claim_ct = fhe_add_const(pk, zero_ct, claimed_amount)
+    let cur = fhe_deser(self.enc_earnings[caller])
+    let delta = fhe_sub(pk, cur, claim_ct)
+    require(fhe_verify_zero(pk, delta, proof), "bad opening")
 
-    self.enc_earnings[caller] = pedersen_zero()
+    // Reset to the pre-stored enc(0) and pay out.
+    self.enc_earnings[caller] = self.op_zero_ct[caller]
+    transfer(caller, claimed_amount)
     emit EarningsClaimed(caller, claimed_amount)
-    emit_private_transfer(stealth_output, claimed_amount)
     return true
   }
 
@@ -938,15 +797,27 @@ program OctraVPN implements IOctraVPN {
   }
 
   view fn is_tailnet_member(tailnet_id: bytes, addr: address): bool {
-    return get_member(tailnet_id, addr) == 1
+    return self.members[tailnet_addr_key(tailnet_id, addr)] == 1
   }
 
   view fn is_tailnet_exit(tailnet_id: bytes, addr: address): bool {
-    return get_tailnet_exit(tailnet_id, addr) == 1
+    return self.tailnet_exits[tailnet_addr_key(tailnet_id, addr)] == 1
   }
 
   view fn get_session(session_id: bytes): Session {
     return self.sessions[session_id]
+  }
+
+  view fn get_endpoint_stake(addr: address): int {
+    return self.endpoint_stake[addr]
+  }
+
+  view fn get_endpoint_unbonding(addr: address): UnbondingRecord {
+    return self.endpoint_unbonding[addr]
+  }
+
+  view fn is_endpoint_slashed(addr: address): bool {
+    return self.endpoint_slashed[addr] != 0
   }
 
   view fn list_active_endpoints(offset: int, limit: int): list[address] {
@@ -979,6 +850,10 @@ program OctraVPN implements IOctraVPN {
     return self.params
   }
 
+  view fn get_program_treasury(): int {
+    return self.treasury
+  }
+
   // ---------------- governance ----------------
 
   fn set_params(p: Params): bool {
@@ -987,12 +862,12 @@ program OctraVPN implements IOctraVPN {
     require(p.min_tailnet_deposit > 0, "tailnet deposit>0")
     require(p.session_grace_epochs > 0, "session grace>0")
     require(p.sweep_grace_multiplier > 0, "sweep>0")
-    require(p.sweep_bounty_bps <= 1000, "bounty bps<=1000")  // ≤10%
-    require(p.min_endpoint_stake >= 100000000, "stake floor too low")  // ≥100 OCT
+    require(p.sweep_bounty_bps <= 1000, "bounty bps<=1000")
+    require(p.min_endpoint_stake >= 100000000, "stake floor too low")
     require(p.unbond_grace_epochs >= 1000, "unbond grace too short")
-    require(p.slash_burn_bps >= 5000, "burn share too low")            // ≥50%
+    require(p.slash_burn_bps >= 5000, "burn share too low")
     require(p.slash_burn_bps + p.slash_bounty_bps == 10000, "slash bps sum != 10000")
-    require(p.protocol_fee_bps <= 200, "protocol fee > 2%")             // ≤2%
+    require(p.protocol_fee_bps <= 200, "protocol fee > 2%")
     self.params = p
     return true
   }
@@ -1007,6 +882,18 @@ program OctraVPN implements IOctraVPN {
     require_owner()
     require(is_address(new_owner), "bad addr")
     self.owner = new_owner
+    return true
+  }
+
+  // Owner may withdraw from the program treasury to fund protocol
+  // operations (audits, bug bounties, dispute resolution). The
+  // amount and recipient are transparently emitted.
+  fn withdraw_program_treasury(to: address, amount: int): bool {
+    require_owner()
+    require(amount > 0, "amount>0")
+    require(self.treasury >= amount, "treasury insufficient")
+    self.treasury = self.treasury - amount
+    transfer(to, amount)
     return true
   }
 }

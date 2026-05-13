@@ -27,11 +27,9 @@ fn coverage_records_branches_during_happy_and_revert_paths() {
     let mut ctx = ForgeCtx::new();
     ctx.become_octra_validator("octV");
     ctx.prank("octV");
-    ctx.call_register_endpoint(
+    ctx.call_register_endpoint_simple(
         "1.2.3.4:51820",
         &"de".repeat(32),
-        &"aa".repeat(32),
-        &"bb".repeat(32),
         "eu-west",
         100,
     )
@@ -48,17 +46,14 @@ fn coverage_records_branches_during_happy_and_revert_paths() {
     ctx.prank("octOWN");
     ctx.call_configure_tailnet_exit(&tid, "octV").unwrap();
     ctx.prank("octCLI");
-    ctx.call_open_session(&tid, &[&"aa".repeat(32)], &"bb".repeat(32), 1000)
-        .unwrap();
+    ctx.call_open_session(&tid, "octV", 1000).unwrap();
 
     // ----- 2. Revert path: unprivileged register_endpoint ------------
     let mut ctx2 = ForgeCtx::new();
     ctx2.prank("octR");
-    let _ = ctx2.call_register_endpoint(
+    let _ = ctx2.call_register_endpoint_simple(
         "1.2.3.4:51820",
         &"de".repeat(32),
-        &"aa".repeat(32),
-        &"bb".repeat(32),
         "x",
         100,
     );

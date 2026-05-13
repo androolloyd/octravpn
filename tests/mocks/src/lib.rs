@@ -1,12 +1,11 @@
 //! In-memory mock of the Octra JSON-RPC surface OctraVPN exercises.
 //!
-//! Implements the tailnet model: endpoint registration gated on the
-//! caller being an Octra protocol validator (the `octra_validators`
-//! set inside `ChainState`); tailnets with treasuries and member sets;
-//! sessions scoped to tailnets.
+//! v1 model (per `docs/aml-gap-analysis.md`): operator bonding +
+//! stake-gated registration, single-hop sessions with validator-only
+//! settle, HFHE-backed encrypted earnings, governance slashing.
 //!
-//! The mock advances epoch by one each accepted submission so any
-//! epoch-driven logic can be exercised in tests.
+//! Each accepted submission advances `epoch` by one so epoch-driven
+//! logic (grace windows, unbonding) can be exercised in tests.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -20,16 +19,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use curve25519_dalek::{
-    constants::RISTRETTO_BASEPOINT_TABLE, ristretto::RistrettoPoint, scalar::Scalar,
-    traits::Identity,
-};
-use octravpn_core::{
-    coverage as cov,
-    earnings::{h_generator, scalar_from_bytes},
-};
+use octravpn_core::coverage as cov;
 
-/// Local shim so handler call sites read `coverage::record(...)`.
 mod coverage {
     pub(crate) fn record(method: &str, branch: &str) {
         super::cov::record(method, branch);
@@ -39,9 +30,10 @@ mod coverage {
 #[derive(Clone, Default)]
 pub struct ChainState {
     pub epoch: u64,
-    /// Addresses currently registered as protocol-level Octra validators.
-    /// Kept on the RPC surface for clients that still resolve identity
-    /// via Octra; the OctraVPN AML no longer gates on this.
+    /// Addresses currently registered as protocol-level Octra
+    /// validators. Kept on the RPC surface for clients that still
+    /// resolve identity via Octra; the OctraVPN AML does not gate on
+    /// this in v1 (uses `endpoint_stake` instead).
     pub octra_validators: HashSet<String>,
     pub endpoints: HashMap<String, EndpointRow>,
     /// In-program operator stake. Required for `register_endpoint`.
@@ -57,21 +49,19 @@ pub struct ChainState {
     pub sessions: HashMap<String, SessionRow>,
     /// device_addr → wallet_addr that owns it (multi-device per identity).
     pub device_owner: HashMap<String, String>,
-    /// Set of nonces that have been redeemed via `redeem_join_token`.
-    pub redeemed_nonces: HashSet<String>,
-    /// wallet_addr → published X25519 view pubkey (hex). Senders read
-    /// this when composing a stealth payment to a recipient.
-    pub view_keys: HashMap<String, String>,
     pub balances: HashMap<String, u64>,
     pub txs: HashMap<String, TxRow>,
-    pub stealth_outputs: Vec<Value>,
-    pub earnings: HashMap<String, RistrettoPoint>,
+    /// Encrypted earnings ledger, mock-cleartext as u64. On real
+    /// Octra this is an HFHE ciphertext under each operator's
+    /// pubkey; the mock simulates the linear-additive structure
+    /// the program assumes.
+    pub earnings: HashMap<String, u64>,
+    /// Program owner (set by ctor). Used for governance gates.
+    pub owner: Option<String>,
 }
 
-/// Default operator bond floor mirrored from `program/main.aml`. Matches
-/// `Params.min_endpoint_stake = 1_000_000_000` OU.
+/// Default operator bond floor mirrored from `program/main.aml`.
 pub const MIN_ENDPOINT_STAKE: u64 = 1_000_000_000;
-/// Default unbond grace mirrored from `program/main.aml`.
 pub const UNBOND_GRACE_EPOCHS: u64 = 10_000;
 pub const SLASH_BURN_BPS: u64 = 9_000;
 pub const SLASH_BOUNTY_BPS: u64 = 1_000;
@@ -83,8 +73,13 @@ pub struct EndpointRow {
     pub active: bool,
     pub endpoint: String,
     pub wg_pubkey: String,
-    pub receipt_pubkey: String,
-    pub view_pubkey: String,
+    /// Operator's HFHE pubkey (hex). Used as the encryption key for
+    /// `enc_earnings` arithmetic.
+    pub hfhe_pubkey: String,
+    /// Pre-stored `enc_pk(0)` ciphertext (hex). In the mock this is
+    /// just an opaque blob; on real Octra it's the canonical zero
+    /// ciphertext for cheap `fhe_add_const`.
+    pub initial_enc_zero: String,
     pub region: String,
     pub price_per_mb: u64,
     pub registered_at: u64,
@@ -105,12 +100,11 @@ pub struct TailnetRow {
 #[derive(Clone)]
 pub struct SessionRow {
     pub tailnet_id: String,
+    /// The single configured exit for this session.
+    pub exit: String,
     pub deposit: u64,
     pub opened_at: u64,
     pub status: u8, // 0 open, 1 settled, 2 refunded
-    pub last_seq: u64,
-    pub route_commit: Vec<String>,
-    pub client_session_pubkey: String,
 }
 
 #[derive(Clone)]
@@ -128,26 +122,29 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Test helper: mark `addr` as an Octra protocol validator. This
-    /// no longer gates `register_endpoint` (the AML now uses
-    /// `endpoint_stake` instead) but is preserved for RPC parity and
-    /// for tests that exercise the validator-oracle plumbing.
+    /// Test helper: mark `addr` as an Octra protocol validator.
+    /// Kept for RPC parity; AML no longer gates on this.
     pub fn add_octra_validator(&self, addr: impl Into<String>) {
         self.state.write().octra_validators.insert(addr.into());
     }
 
-    /// Test helper: remove `addr` from the Octra validator set.
     pub fn remove_octra_validator(&self, addr: &str) {
         self.state.write().octra_validators.remove(addr);
     }
 
-    /// Test helper: directly seed an operator's stake without routing
-    /// through `bond_endpoint`. Used by harnesses that want to skip the
-    /// economic bootstrap and exercise post-bond entrypoints.
+    /// Test helper: seed operator stake without routing through
+    /// `bond_endpoint`. Used by harnesses that want to skip the
+    /// bonding tx and exercise post-bond entrypoints directly.
     pub fn seed_endpoint_stake(&self, addr: impl Into<String>, amount: u64) {
         let addr = addr.into();
         let mut s = self.state.write();
         *s.endpoint_stake.entry(addr).or_insert(0) += amount;
+    }
+
+    /// Test helper: set the program owner (governance wallet). Used
+    /// for tests that exercise governance-only entrypoints.
+    pub fn set_owner(&self, addr: impl Into<String>) {
+        self.state.write().owner = Some(addr.into());
     }
 }
 
@@ -182,19 +179,11 @@ async fn rpc_handler(State(app): State<AppState>, Json(req): Json<RpcReq>) -> im
             "name": "OctraVPN"
         }])),
         "octra_isValidator" => Ok(octra_is_validator(&app, &req.params)),
-        // Test-only helpers — present in the mock so e2e tests can
-        // pre-seed protocol-validator membership and operator stake
-        // over the wire.
         "octra_test_grantValidator" => Ok(test_grant_validator(&app, &req.params)),
         "octra_test_revokeValidator" => Ok(test_revoke_validator(&app, &req.params)),
         "octra_test_bondEndpoint" => Ok(test_bond_endpoint(&app, &req.params)),
+        "octra_test_setOwner" => Ok(test_set_owner(&app, &req.params)),
         "contract_call" => contract_call(&app, &req.params),
-        "octra_viewPubkey" => Ok(json!({"view_pubkey": "00".repeat(32)})),
-        "octra_privateTransfer" => Ok(json!({"hash": "deadbeef"})),
-        "octra_stealthOutputs" => {
-            let s = app.state.read();
-            Ok(json!(s.stealth_outputs))
-        }
         "octra_compileAml" => octra_compile_aml(&req.params),
         "octra_compileAmlMulti" => octra_compile_aml_multi(&req.params),
         "epoch_get" => Ok(epoch_get(&app, &req.params)),
@@ -267,6 +256,17 @@ fn test_bond_endpoint(app: &AppState, params: &Value) -> Value {
     Value::Bool(true)
 }
 
+fn test_set_owner(app: &AppState, params: &Value) -> Value {
+    let Some(arr) = params.as_array() else {
+        return Value::Bool(false);
+    };
+    let Some(addr) = arr.first().and_then(|v| v.as_str()) else {
+        return Value::Bool(false);
+    };
+    app.set_owner(addr);
+    Value::Bool(true)
+}
+
 fn octra_balance(app: &AppState, params: &Value) -> Result<Value, String> {
     let arr = params.as_array().ok_or("params not array")?;
     let addr = arr.first().and_then(|x| x.as_str()).ok_or("addr missing")?;
@@ -303,12 +303,10 @@ fn octra_submit(app: &AppState, params: &Value) -> Result<Value, String> {
     let events = match method.as_str() {
         "register_device" => apply_register_device(app, tx, &from)?,
         "revoke_device" => apply_revoke_device(app, tx, &from)?,
-        "redeem_join_token" => apply_redeem_join_token(app, tx, &from)?,
-        "set_view_pubkey" => apply_set_view_pubkey(app, tx, &from)?,
         "bond_endpoint" => apply_bond_endpoint(app, tx, &from)?,
         "unbond_endpoint" => apply_unbond_endpoint(app, &from)?,
         "finalize_unbond" => apply_finalize_unbond(app, &from)?,
-        "submit_equivocation" => apply_submit_equivocation(app, tx, &from)?,
+        "gov_slash_operator" => apply_gov_slash_operator(app, tx, &from)?,
         "register_endpoint" => apply_register_endpoint(app, tx, &from)?,
         "update_endpoint" => apply_update_endpoint(app, tx, &from)?,
         "rotate_keys" => apply_rotate_keys(app, tx, &from)?,
@@ -320,10 +318,11 @@ fn octra_submit(app: &AppState, params: &Value) -> Result<Value, String> {
         "configure_tailnet_exit" => apply_configure_tailnet_exit(app, tx, &from)?,
         "update_acl" => apply_update_acl(app, tx, &from)?,
         "open_session" => apply_open_session(app, tx, &from, &hash)?,
-        "settle_session" => apply_settle(app, tx)?,
+        "settle_session" => apply_settle(app, tx, &from)?,
         "claim_no_show" => apply_claim_no_show(app, tx)?,
         "sweep_expired_session" => apply_sweep_expired_session(app, tx, &from)?,
-        "claim_earnings" => apply_claim_earnings(app, tx)?,
+        "claim_earnings" => apply_claim_earnings(app, tx, &from)?,
+        "withdraw_program_treasury" => apply_withdraw_treasury(app, tx, &from)?,
         _ => Vec::new(),
     };
 
@@ -344,84 +343,7 @@ fn octra_submit(app: &AppState, params: &Value) -> Result<Value, String> {
     Ok(json!({"hash": hash, "status": "confirmed"}))
 }
 
-// ------------------------ endpoint handlers ------------------------
-
-fn apply_redeem_join_token(
-    app: &AppState,
-    tx: &Value,
-    from: &str,
-) -> Result<Vec<Value>, String> {
-    let p = tx
-        .get("params")
-        .and_then(|x| x.as_array())
-        .ok_or("params")?;
-    let tid = p
-        .first()
-        .and_then(|x| x.as_str())
-        .ok_or("tailnet_id missing")?
-        .to_string();
-    let expiry = p.get(1).and_then(serde_json::Value::as_u64).unwrap_or(0);
-    let nonce = p
-        .get(2)
-        .and_then(|x| x.as_str())
-        .ok_or("nonce missing")?
-        .to_string();
-    // The mock doesn't verify the owner signature (no on-chain pubkey
-    // resolver in the mock); production AML enforces it via
-    // `verify_ed25519_acct`. We do enforce expiry + replay.
-
-    let mut s = app.state.write();
-    if expiry < s.epoch {
-        return Err("token expired".into());
-    }
-    if s.redeemed_nonces.contains(&nonce) {
-        return Err("nonce already redeemed".into());
-    }
-    let t = s.tailnets.get_mut(&tid).ok_or("tailnet not found")?;
-    if t.members.contains(from) {
-        return Err("already member".into());
-    }
-    t.members.insert(from.to_string());
-    s.redeemed_nonces.insert(nonce.clone());
-    Ok(vec![
-        json!({
-            "name": "TailnetMemberAdded",
-            "tailnet_id": tid,
-            "member": from,
-        }),
-        json!({
-            "name": "JoinTokenRedeemed",
-            "tailnet_id": tid,
-            "member": from,
-            "nonce": nonce,
-        }),
-    ])
-}
-
-fn apply_set_view_pubkey(
-    app: &AppState,
-    tx: &Value,
-    from: &str,
-) -> Result<Vec<Value>, String> {
-    let p = tx
-        .get("params")
-        .and_then(|x| x.as_array())
-        .ok_or("params")?;
-    let pubkey = p
-        .first()
-        .and_then(|x| x.as_str())
-        .ok_or("view pubkey missing")?
-        .to_string();
-    octravpn_core::util::hex_to_array::<32>(&pubkey, "view pubkey")
-        .map_err(|_| "view pubkey 32B")?;
-    let mut s = app.state.write();
-    s.view_keys.insert(from.to_string(), pubkey.clone());
-    Ok(vec![json!({
-        "name": "ViewPubkeyPublished",
-        "wallet": from,
-        "view_pubkey": pubkey,
-    })])
-}
+// ------------------------ device handlers ------------------------
 
 fn apply_register_device(
     app: &AppState,
@@ -440,7 +362,7 @@ fn apply_register_device(
     let mut s = app.state.write();
     if let Some(existing) = s.device_owner.get(&device) {
         if existing == from {
-            return Ok(Vec::new()); // idempotent re-register
+            return Ok(Vec::new());
         }
         return Err("device already attached to another wallet".into());
     }
@@ -481,6 +403,8 @@ fn apply_revoke_device(
     }
 }
 
+// ------------------------ endpoint handlers ------------------------
+
 fn apply_register_endpoint(
     app: &AppState,
     tx: &Value,
@@ -492,8 +416,8 @@ fn apply_register_endpoint(
         .ok_or("params")?;
     let endpoint = p[0].as_str().unwrap_or("").to_string();
     let wg = p[1].as_str().unwrap_or("").to_string();
-    let receipt = p[2].as_str().unwrap_or("").to_string();
-    let view = p[3].as_str().unwrap_or("").to_string();
+    let hfhe = p[2].as_str().unwrap_or("").to_string();
+    let initial_zero = p[3].as_str().unwrap_or("").to_string();
     let region = p[4].as_str().unwrap_or("").to_string();
     let price = p[5].as_u64().unwrap_or(0);
 
@@ -506,13 +430,21 @@ fn apply_register_endpoint(
     if s.endpoint_stake.get(from).copied().unwrap_or(0) < MIN_ENDPOINT_STAKE {
         return Err("must bond_endpoint first".into());
     }
-    coverage::record("register_endpoint", "require[3]"); // already registered
+    coverage::record("register_endpoint", "require[3]"); // not already registered
     if s.endpoints.contains_key(from) {
         return Err("already registered".into());
     }
     coverage::record("register_endpoint", "require[4]"); // price > 0
     if price == 0 {
         return Err("price must be > 0".into());
+    }
+    coverage::record("register_endpoint", "require[5]"); // hfhe pubkey required
+    if hfhe.is_empty() {
+        return Err("hfhe pubkey required".into());
+    }
+    coverage::record("register_endpoint", "require[6]"); // initial enc(0) required
+    if initial_zero.is_empty() {
+        return Err("initial enc(0) required".into());
     }
     let epoch = s.epoch;
     s.endpoints.insert(
@@ -522,16 +454,16 @@ fn apply_register_endpoint(
             active: true,
             endpoint: endpoint.clone(),
             wg_pubkey: wg,
-            receipt_pubkey: receipt,
-            view_pubkey: view,
+            hfhe_pubkey: hfhe,
+            initial_enc_zero: initial_zero,
             region: region.clone(),
             price_per_mb: price,
             registered_at: epoch,
             reputation: 0,
         },
     );
-    s.earnings
-        .insert(from.to_string(), RistrettoPoint::identity());
+    // Initialise encrypted earnings ledger at zero. Mock-cleartext.
+    s.earnings.insert(from.to_string(), 0);
     Ok(vec![json!({
         "name": "EndpointRegistered",
         "addr": from,
@@ -568,17 +500,25 @@ fn apply_rotate_keys(app: &AppState, tx: &Value, from: &str) -> Result<Vec<Value
         .get("params")
         .and_then(|x| x.as_array())
         .ok_or("params")?;
-    let wg = p[0].as_str().unwrap_or("").to_string();
-    let receipt = p[1].as_str().unwrap_or("").to_string();
-    let view = p[2].as_str().unwrap_or("").to_string();
+    let new_wg = p[0].as_str().unwrap_or("").to_string();
+    let new_hfhe = p[1].as_str().unwrap_or("").to_string();
+    let new_zero = p[2].as_str().unwrap_or("").to_string();
+    if new_hfhe.is_empty() || new_zero.is_empty() {
+        return Err("hfhe pubkey + initial enc(0) required".into());
+    }
     let mut s = app.state.write();
+    // Refuse rotation while earnings are non-zero (would be encrypted
+    // under the old key).
+    if s.earnings.get(from).copied().unwrap_or(0) != 0 {
+        return Err("claim earnings before rotating keys".into());
+    }
     let ep = s.endpoints.get_mut(from).ok_or("not registered")?;
     if !ep.active {
         return Err("endpoint retired".into());
     }
-    ep.wg_pubkey = wg;
-    ep.receipt_pubkey = receipt;
-    ep.view_pubkey = view;
+    ep.wg_pubkey = new_wg;
+    ep.hfhe_pubkey = new_hfhe;
+    ep.initial_enc_zero = new_zero;
     Ok(vec![json!({ "name": "KeysRotated", "addr": from })])
 }
 
@@ -668,75 +608,30 @@ fn apply_finalize_unbond(app: &AppState, from: &str) -> Result<Vec<Value>, Strin
     })])
 }
 
-fn apply_submit_equivocation(
+/// Governance slash. Replaces in-AML cryptographic-evidence slashing.
+/// Only the program owner may call. Off-chain evidence verification
+/// is the owner's responsibility (`octravpn slash-evidence verify`).
+fn apply_gov_slash_operator(
     app: &AppState,
     tx: &Value,
     from: &str,
 ) -> Result<Vec<Value>, String> {
-    use octravpn_core::{
-        receipt::Receipt,
-        session::{Blind, SessionId},
-        sig::{self, PublicKey, Signature},
-    };
-
     let p = tx
         .get("params")
         .and_then(|x| x.as_array())
         .ok_or("params")?;
     let operator = p[0].as_str().unwrap_or("").to_string();
-    let sid_hex = p[1].as_str().unwrap_or("");
-    let seq = p[2].as_u64().unwrap_or(0);
-    let bytes_a = p[3].as_u64().unwrap_or(0);
-    let blind_a_hex = p[4].as_str().unwrap_or("");
-    let sig_a_hex = p[5].as_str().unwrap_or("");
-    let bytes_b = p[6].as_u64().unwrap_or(0);
-    let blind_b_hex = p[7].as_str().unwrap_or("");
-    let sig_b_hex = p[8].as_str().unwrap_or("");
-
-    let sid_arr =
-        octravpn_core::util::hex_to_array::<32>(sid_hex, "session_id").map_err(|e| e.to_string())?;
-    let blind_a_arr = octravpn_core::util::hex_to_array::<32>(blind_a_hex, "blind_a")
-        .map_err(|e| e.to_string())?;
-    let blind_b_arr = octravpn_core::util::hex_to_array::<32>(blind_b_hex, "blind_b")
-        .map_err(|e| e.to_string())?;
-    let sig_a_arr =
-        octravpn_core::util::hex_to_array::<64>(sig_a_hex, "sig_a").map_err(|e| e.to_string())?;
-    let sig_b_arr =
-        octravpn_core::util::hex_to_array::<64>(sig_b_hex, "sig_b").map_err(|e| e.to_string())?;
-
-    if bytes_a == bytes_b && blind_a_arr == blind_b_arr {
-        return Err("receipts identical — not equivocation".into());
-    }
-
-    let pubkey_hex = {
-        let s = app.state.read();
-        s.endpoints
-            .get(&operator)
-            .map(|e| e.receipt_pubkey.clone())
-            .ok_or("operator not registered")?
-    };
-    let pubkey_arr = octravpn_core::util::hex_to_array::<32>(&pubkey_hex, "receipt_pubkey")
-        .map_err(|e| e.to_string())?;
-    let pk = PublicKey(pubkey_arr);
-
-    let r_a = Receipt {
-        session_id: SessionId::new(sid_arr),
-        seq,
-        bytes_used: bytes_a,
-        blind: Blind::new(blind_a_arr),
-    };
-    let r_b = Receipt {
-        session_id: SessionId::new(sid_arr),
-        seq,
-        bytes_used: bytes_b,
-        blind: Blind::new(blind_b_arr),
-    };
-    sig::verify(&pk, &r_a.signing_payload(), &Signature(sig_a_arr))
-        .map_err(|_| "bad sig_a".to_string())?;
-    sig::verify(&pk, &r_b.signing_payload(), &Signature(sig_b_arr))
-        .map_err(|_| "bad sig_b".to_string())?;
+    let reason = p
+        .get(1)
+        .and_then(|x| x.as_str())
+        .unwrap_or("unspecified")
+        .to_string();
 
     let mut s = app.state.write();
+    let owner = s.owner.as_deref().ok_or("owner not set")?;
+    if owner != from {
+        return Err("not owner".into());
+    }
     if s.endpoint_slashed.contains(&operator) {
         return Err("already slashed".into());
     }
@@ -771,7 +666,7 @@ fn apply_submit_equivocation(
         "stake": total,
         "burn_amt": burn_amt,
         "bounty_amt": bounty_amt,
-        "submitter": from,
+        "reason": reason,
     })])
 }
 
@@ -933,7 +828,9 @@ fn apply_configure_tailnet_exit(
     if t.owner != from {
         return Err("not tailnet owner".into());
     }
-    t.exits.insert(exit_addr.clone());
+    if !t.exits.insert(exit_addr.clone()) {
+        return Err("already configured".into());
+    }
     Ok(vec![json!({
         "name": "TailnetExitConfigured",
         "tailnet_id": tid,
@@ -974,14 +871,8 @@ fn apply_open_session(
         .and_then(|x| x.as_array())
         .ok_or("params")?;
     let tid = p[0].as_str().unwrap_or("").to_string();
-    let route_commit = p[1]
-        .as_array()
-        .ok_or("route_commit not array")?
-        .iter()
-        .filter_map(|v| v.as_str().map(String::from))
-        .collect::<Vec<_>>();
-    let csp = p[2].as_str().unwrap_or("").to_string();
-    let deposit = p[3].as_u64().unwrap_or(0);
+    let exit_addr = p[1].as_str().unwrap_or("").to_string();
+    let max_pay = p[2].as_u64().unwrap_or(0);
 
     let mut h = Sha256::new();
     h.update(b"octravpn-session");
@@ -990,10 +881,9 @@ fn apply_open_session(
 
     let mut s = app.state.write();
     let opened_at = s.epoch;
-    coverage::record("open_session", "require[1]"); // tailnet not found
-    // Resolve membership BEFORE taking a mut borrow on the tailnet row,
-    // so we can also look up the device-owner map (a sibling field of
-    // ChainState).
+    coverage::record("open_session", "require[1]"); // tailnet found
+    // Membership check: caller is a direct member OR caller is a device
+    // whose owner is a member.
     let device_owner = s.device_owner.get(from).cloned();
     let t = s.tailnets.get_mut(&tid).ok_or("tailnet not found")?;
     coverage::record("open_session", "require[2]"); // member check
@@ -1002,27 +892,42 @@ fn apply_open_session(
     if !direct && !via_device {
         return Err("not a member".into());
     }
-    coverage::record("open_session", "require[3]"); // deposit min
-    if deposit == 0 {
+    coverage::record("open_session", "require[3]"); // exit configured
+    if !t.exits.contains(&exit_addr) {
+        return Err("exit not configured for tailnet".into());
+    }
+    coverage::record("open_session", "require[4]"); // deposit > 0
+    if max_pay == 0 {
         return Err("deposit must be > 0".into());
     }
-    coverage::record("open_session", "require[4]"); // treasury sufficient
-    if t.treasury < deposit {
+    coverage::record("open_session", "require[5]"); // treasury sufficient
+    if t.treasury < max_pay {
         return Err("treasury insufficient".into());
     }
-    coverage::record("open_session", "require[5]"); // route bounds (1..=3)
-    t.treasury -= deposit;
+    coverage::record("open_session", "require[6]"); // exit active (verified below)
+    // Verify exit operator is active (has stake, not slashed).
+    let exit_has_stake = s
+        .endpoint_stake
+        .get(&exit_addr)
+        .copied()
+        .unwrap_or(0)
+        >= MIN_ENDPOINT_STAKE;
+    let exit_slashed = s.endpoint_slashed.contains(&exit_addr);
+    let exit_active_ep = s.endpoints.get(&exit_addr).is_some_and(|e| e.active);
+    if !exit_active_ep || exit_slashed || !exit_has_stake {
+        return Err("exit inactive".into());
+    }
+    let t = s.tailnets.get_mut(&tid).ok_or("tailnet not found")?;
+    t.treasury -= max_pay;
 
     s.sessions.insert(
         sid.clone(),
         SessionRow {
             tailnet_id: tid.clone(),
-            deposit,
+            exit: exit_addr.clone(),
+            deposit: max_pay,
             opened_at,
             status: 0,
-            last_seq: 0,
-            route_commit: route_commit.clone(),
-            client_session_pubkey: csp,
         },
     );
 
@@ -1030,125 +935,75 @@ fn apply_open_session(
         "name": "SessionOpened",
         "session_id": sid,
         "tailnet_id": tid,
-        "hops": route_commit.len(),
-        "deposit": deposit,
+        "exit": exit_addr,
+        "deposit": max_pay,
         "opened_at": opened_at,
     })])
 }
 
-struct ParsedSettle {
-    sid: String,
-    seq: u64,
-    bytes_used: u64,
-    blind_scalar: Scalar,
-    openings: Vec<Value>,
-}
-
-fn parse_settle_params(tx: &Value) -> Result<ParsedSettle, String> {
-    let params = tx
+/// Validator-only settle. The exit operator reports `bytes_used`,
+/// AML caps payment at the client's max-deposit, refunds the rest
+/// to the tailnet treasury, takes the protocol fee, and credits
+/// the operator's encrypted earnings.
+fn apply_settle(app: &AppState, tx: &Value, from: &str) -> Result<Vec<Value>, String> {
+    let p = tx
         .get("params")
         .and_then(|x| x.as_array())
         .ok_or("params")?;
-    let sid = params[0].as_str().unwrap_or("").to_string();
-    let seq = params[1].as_u64().unwrap_or(0);
-    let bytes_used = params[2].as_u64().unwrap_or(0);
-    let blind_hex = params[3].as_str().unwrap_or("");
-    let openings = params[6].as_array().cloned().unwrap_or_default();
-    let blind_bytes = hex::decode(blind_hex).map_err(|e| format!("blind hex: {e}"))?;
-    if blind_bytes.len() != 32 {
-        return Err("blind not 32 bytes".into());
-    }
-    let mut blind_arr = [0u8; 32];
-    blind_arr.copy_from_slice(&blind_bytes);
-    let blind_scalar = scalar_from_bytes(&blind_arr).map_err(|e| format!("blind: {e}"))?;
-    Ok(ParsedSettle {
-        sid,
-        seq,
-        bytes_used,
-        blind_scalar,
-        openings,
-    })
-}
+    let sid = p[0].as_str().unwrap_or("").to_string();
+    let bytes_used = p[1].as_u64().unwrap_or(0);
 
-fn validate_and_advance_session(
-    s: &mut ChainState,
-    sid: &str,
-    seq: u64,
-) -> Result<(String, u64), String> {
-    let sess = s.sessions.get_mut(sid).ok_or("session not found")?;
-    if sess.status != 0 {
-        return Err("session not open".into());
-    }
-    if seq <= sess.last_seq {
-        return Err("seq not monotonic".into());
-    }
-    sess.status = 1;
-    sess.last_seq = seq;
-    Ok((sess.tailnet_id.clone(), sess.deposit))
-}
-
-fn credit_openings(
-    s: &mut ChainState,
-    bytes_used: u64,
-    blind_scalar: Scalar,
-    openings: &[Value],
-) -> Result<u64, String> {
-    // Pass 1: validate each hop + compute gross per-hop pay.
-    let mut hops: Vec<(String, u64)> = Vec::with_capacity(openings.len());
-    let mut total_paid: u64 = 0;
-    for op in openings {
-        let node_addr = op
-            .get("node_addr")
-            .and_then(|x| x.as_str())
-            .ok_or("opening node_addr")?;
-        let split_bps = op
-            .get("split_bps")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
-        let ep = s
-            .endpoints
-            .get(node_addr)
-            .ok_or("opening node not registered")?;
+    let mut s = app.state.write();
+    coverage::record("settle_session", "require[1]"); // status == open
+    coverage::record("settle_session", "require[2]"); // caller is exit
+    let (tid, deposit, exit, price) = {
+        let sess = s.sessions.get(&sid).ok_or("session not found")?;
+        if sess.status != 0 {
+            return Err("session not open".into());
+        }
+        if sess.exit != from {
+            return Err("not the session's exit operator".into());
+        }
+        let ep = s.endpoints.get(&sess.exit).ok_or("operator not registered")?;
         let has_stake = s
             .endpoint_stake
-            .get(node_addr)
+            .get(&sess.exit)
             .copied()
             .unwrap_or(0)
             >= MIN_ENDPOINT_STAKE;
-        let slashed = s.endpoint_slashed.contains(node_addr);
+        let slashed = s.endpoint_slashed.contains(&sess.exit);
         if !ep.active || slashed || !has_stake {
-            return Err("opening node inactive".into());
+            return Err("operator inactive".into());
         }
-        let pay_v = bytes_used
-            .checked_mul(ep.price_per_mb)
-            .ok_or("overflow pay")?
-            .checked_mul(split_bps)
-            .ok_or("overflow split")?
-            / 10_000;
-        total_paid = total_paid.checked_add(pay_v).ok_or("overflow total")?;
-        hops.push((node_addr.to_string(), pay_v));
+        (
+            sess.tailnet_id.clone(),
+            sess.deposit,
+            sess.exit.clone(),
+            ep.price_per_mb,
+        )
+    };
+
+    let total_paid = bytes_used.checked_mul(price).ok_or("overflow pay")?;
+    coverage::record("settle_session", "require[3]"); // claim <= deposit
+    if total_paid > deposit {
+        return Err("claim exceeds escrow".into());
     }
-    // Pass 2: apply protocol fee + credit per-hop net pay.
     let protocol_fee = total_paid
         .checked_mul(PROTOCOL_FEE_BPS)
         .ok_or("overflow fee")?
         / 10_000;
-    let net_to_hops = total_paid - protocol_fee;
-    for (node_addr, gross_pay) in hops {
-        let net_pay = if total_paid > 0 {
-            // mul-div-safe via u128 to avoid overflow when net_to_hops * gross_pay is large
-            (u128::from(gross_pay) * u128::from(net_to_hops) / u128::from(total_paid)) as u64
-        } else {
-            0
-        };
-        let entry = s
-            .earnings
-            .entry(node_addr)
-            .or_insert_with(RistrettoPoint::identity);
-        let scalar_pay = Scalar::from(net_pay);
-        let g = &scalar_pay * RISTRETTO_BASEPOINT_TABLE;
-        let h = blind_scalar * h_generator();
-        *entry += g + h;
+    let net_pay = total_paid - protocol_fee;
+    let refund = deposit - total_paid;
+
+    // Effects.
+    if let Some(sess) = s.sessions.get_mut(&sid) {
+        sess.status = 1;
+    }
+    if net_pay > 0 {
+        *s.earnings.entry(exit.clone()).or_insert(0) += net_pay;
+    }
+    if let Some(ep) = s.endpoints.get_mut(&exit) {
+        ep.reputation += 1;
     }
     if protocol_fee > 0 {
         s.program_treasury = s
@@ -1156,22 +1011,6 @@ fn credit_openings(
             .checked_add(protocol_fee)
             .ok_or("overflow treasury")?;
     }
-    Ok(total_paid)
-}
-
-fn apply_settle(app: &AppState, tx: &Value) -> Result<Vec<Value>, String> {
-    let p = parse_settle_params(tx)?;
-    let mut s = app.state.write();
-    coverage::record("settle_session", "require[1]"); // status == open
-    coverage::record("settle_session", "require[2]"); // seq > last
-    let (tid, deposit) = validate_and_advance_session(&mut s, &p.sid, p.seq)?;
-    coverage::record("settle_session", "while[1]"); // hop loop
-    let total_paid = credit_openings(&mut s, p.bytes_used, p.blind_scalar, &p.openings)?;
-    coverage::record("settle_session", "require[3]"); // claim <= deposit
-    if total_paid > deposit {
-        return Err("claim exceeds escrow".into());
-    }
-    let refund = deposit - total_paid;
     if refund > 0 {
         if let Some(t) = s.tailnets.get_mut(&tid) {
             t.treasury += refund;
@@ -1179,8 +1018,9 @@ fn apply_settle(app: &AppState, tx: &Value) -> Result<Vec<Value>, String> {
     }
     Ok(vec![json!({
         "name": "SessionSettled",
-        "session_id": p.sid,
-        "seq": p.seq,
+        "session_id": sid,
+        "exit": exit,
+        "bytes_used": bytes_used,
         "total_paid": total_paid,
         "refund": refund,
     })])
@@ -1197,9 +1037,6 @@ fn apply_claim_no_show(app: &AppState, tx: &Value) -> Result<Vec<Value>, String>
         let sess = s.sessions.get_mut(&sid).ok_or("session not found")?;
         if sess.status != 0 {
             return Err("session not open".into());
-        }
-        if sess.last_seq != 0 {
-            return Err("session has progress".into());
         }
         sess.status = 2;
         (sess.tailnet_id.clone(), sess.deposit)
@@ -1249,50 +1086,76 @@ fn apply_sweep_expired_session(
     })])
 }
 
-fn apply_claim_earnings(app: &AppState, tx: &Value) -> Result<Vec<Value>, String> {
+/// Two-step claim per `program/main.aml::claim_earnings`. Verifies
+/// the operator's claim exactly matches the encrypted-earnings
+/// balance (the mock simplifies the FHE zero-proof to direct
+/// equality), then transfers plaintext OU. Stealth follow-up tx is
+/// the operator's wallet's responsibility (off-AML).
+fn apply_claim_earnings(app: &AppState, tx: &Value, from: &str) -> Result<Vec<Value>, String> {
     let p = tx
         .get("params")
         .and_then(|x| x.as_array())
         .ok_or("params")?;
     let claimed = p[0].as_u64().unwrap_or(0);
-    let blind_hex = p[1].as_str().unwrap_or("");
-    let stealth = p[2].as_str().unwrap_or("").to_string();
-
-    let blind_bytes = hex::decode(blind_hex).map_err(|e| format!("blind: {e}"))?;
-    if blind_bytes.len() != 32 {
-        return Err("blind not 32".into());
-    }
-    let mut blind_arr = [0u8; 32];
-    blind_arr.copy_from_slice(&blind_bytes);
-    let blind_scalar = scalar_from_bytes(&blind_arr).map_err(|e| format!("blind: {e}"))?;
-
-    let from = tx
-        .get("from")
+    let proof = p
+        .get(1)
         .and_then(|x| x.as_str())
-        .ok_or("from missing")?
+        .unwrap_or("")
         .to_string();
 
+    if claimed == 0 {
+        return Err("amount>0".into());
+    }
+    if proof.is_empty() {
+        return Err("proof required".into());
+    }
+
     let mut s = app.state.write();
-    let entry = s
-        .earnings
-        .get(&from)
-        .copied()
-        .unwrap_or_else(RistrettoPoint::identity);
-    let scalar_claimed = Scalar::from(claimed);
-    let recomputed = &scalar_claimed * RISTRETTO_BASEPOINT_TABLE + blind_scalar * h_generator();
-    if entry != recomputed {
+    if s.endpoint_slashed.contains(from) {
+        return Err("operator slashed".into());
+    }
+    let balance = s.earnings.get(from).copied().unwrap_or(0);
+    // Mock FHE zero-proof verification: exact match.
+    if balance != claimed {
         return Err("bad opening".into());
     }
-    s.earnings.insert(from.clone(), RistrettoPoint::identity());
-    s.stealth_outputs.push(json!({
-        "to": stealth,
-        "amount": claimed,
-    }));
-
+    s.earnings.insert(from.to_string(), 0);
+    *s.balances.entry(from.to_string()).or_insert(0) += claimed;
     Ok(vec![json!({
         "name": "EarningsClaimed",
-        "validator": from,
+        "operator": from,
         "amount": claimed,
+    })])
+}
+
+fn apply_withdraw_treasury(
+    app: &AppState,
+    tx: &Value,
+    from: &str,
+) -> Result<Vec<Value>, String> {
+    let p = tx
+        .get("params")
+        .and_then(|x| x.as_array())
+        .ok_or("params")?;
+    let to = p[0].as_str().unwrap_or("").to_string();
+    let amount = p[1].as_u64().unwrap_or(0);
+    if amount == 0 {
+        return Err("amount>0".into());
+    }
+    let mut s = app.state.write();
+    let owner = s.owner.as_deref().ok_or("owner not set")?;
+    if owner != from {
+        return Err("not owner".into());
+    }
+    if s.program_treasury < amount {
+        return Err("treasury insufficient".into());
+    }
+    s.program_treasury -= amount;
+    *s.balances.entry(to.clone()).or_insert(0) += amount;
+    Ok(vec![json!({
+        "name": "ProgramTreasuryWithdrawn",
+        "to": to,
+        "amount": amount,
     })])
 }
 
@@ -1354,8 +1217,7 @@ fn contract_call(app: &AppState, params: &Value) -> Result<Value, String> {
                     "active": i32::from(e.active),
                     "endpoint": e.endpoint,
                     "wg_pubkey": e.wg_pubkey,
-                    "receipt_pubkey": e.receipt_pubkey,
-                    "view_pubkey": e.view_pubkey,
+                    "hfhe_pubkey": e.hfhe_pubkey,
                     "region": e.region,
                     "price_per_mb": e.price_per_mb,
                     "registered_at": e.registered_at,
@@ -1363,6 +1225,27 @@ fn contract_call(app: &AppState, params: &Value) -> Result<Value, String> {
                 })),
                 None => Ok(json!({"active": 0})),
             }
+        }
+        "get_endpoint_stake" => {
+            let addr = pp.first().and_then(|x| x.as_str()).ok_or("addr")?;
+            let s = app.state.read();
+            Ok(json!(s.endpoint_stake.get(addr).copied().unwrap_or(0)))
+        }
+        "get_endpoint_unbonding" => {
+            let addr = pp.first().and_then(|x| x.as_str()).ok_or("addr")?;
+            let s = app.state.read();
+            match s.endpoint_unbonding.get(addr) {
+                Some((stake, unlock)) => Ok(json!({
+                    "stake": stake,
+                    "unlock_epoch": unlock,
+                })),
+                None => Ok(json!({"stake": 0, "unlock_epoch": 0})),
+            }
+        }
+        "is_endpoint_slashed" => {
+            let addr = pp.first().and_then(|x| x.as_str()).ok_or("addr")?;
+            let s = app.state.read();
+            Ok(json!(s.endpoint_slashed.contains(addr)))
         }
         "get_tailnet" => {
             let tid = pp.first().and_then(|x| x.as_str()).ok_or("tailnet_id")?;
@@ -1397,15 +1280,6 @@ fn contract_call(app: &AppState, params: &Value) -> Result<Value, String> {
                 .cloned()
                 .unwrap_or_default()))
         }
-        "get_view_pubkey" => {
-            let wallet = pp.first().and_then(|x| x.as_str()).ok_or("wallet")?;
-            let s = app.state.read();
-            Ok(json!(s
-                .view_keys
-                .get(wallet)
-                .cloned()
-                .unwrap_or_default()))
-        }
         "is_device_of" => {
             let device = pp.first().and_then(|x| x.as_str()).ok_or("device")?;
             let wallet = pp.get(1).and_then(|x| x.as_str()).ok_or("wallet")?;
@@ -1429,12 +1303,10 @@ fn contract_call(app: &AppState, params: &Value) -> Result<Value, String> {
             match s.sessions.get(sid) {
                 Some(sess) => Ok(json!({
                     "tailnet_id": sess.tailnet_id,
+                    "exit": sess.exit,
                     "deposit": sess.deposit,
                     "opened_at": sess.opened_at,
                     "status": sess.status,
-                    "last_seq": sess.last_seq,
-                    "route_commit": sess.route_commit,
-                    "client_session_pubkey": sess.client_session_pubkey,
                 })),
                 None => Ok(json!(null)),
             }
@@ -1442,12 +1314,14 @@ fn contract_call(app: &AppState, params: &Value) -> Result<Value, String> {
         "get_encrypted_earnings" => {
             let addr = pp.first().and_then(|x| x.as_str()).ok_or("addr")?;
             let s = app.state.read();
-            let p = s
-                .earnings
-                .get(addr)
-                .copied()
-                .unwrap_or_else(RistrettoPoint::identity);
-            Ok(json!(hex::encode(p.compress().to_bytes())))
+            let amount = s.earnings.get(addr).copied().unwrap_or(0);
+            // Mock representation: prefix + zero-padded hex of u64.
+            // Production AML returns the actual HFHE ciphertext bytes.
+            Ok(json!(format!("hfhe_v1|mock|{amount:016x}")))
+        }
+        "get_program_treasury" => {
+            let s = app.state.read();
+            Ok(json!(s.program_treasury))
         }
         "get_params" => Ok(json!({
             "min_session_deposit": 10,
@@ -1455,6 +1329,11 @@ fn contract_call(app: &AppState, params: &Value) -> Result<Value, String> {
             "session_grace_epochs": 100,
             "sweep_grace_multiplier": 10,
             "sweep_bounty_bps": 100,
+            "min_endpoint_stake": MIN_ENDPOINT_STAKE,
+            "unbond_grace_epochs": UNBOND_GRACE_EPOCHS,
+            "slash_burn_bps": SLASH_BURN_BPS,
+            "slash_bounty_bps": SLASH_BOUNTY_BPS,
+            "protocol_fee_bps": PROTOCOL_FEE_BPS,
         })),
         other => Err(format!("unknown read method {other}")),
     }
@@ -1462,8 +1341,8 @@ fn contract_call(app: &AppState, params: &Value) -> Result<Value, String> {
 
 /// Fake AML compile: hashes the source and synthesizes a deterministic
 /// bytecode/ABI shape. Real Octra returns real compiler output via
-/// `octra_compileAml`; this stub lets local tests + the offline mode of
-/// `forge build` exercise the same code path without a live node.
+/// `octra_compileAml`; this stub keeps local tests + the offline mode
+/// of `forge build` exercising the same code path without a live node.
 fn octra_compile_aml(params: &Value) -> Result<Value, String> {
     let arr = params.as_array().ok_or("params not array")?;
     let source = arr.first().and_then(|x| x.as_str()).ok_or("source")?;
@@ -1673,9 +1552,6 @@ fn epoch_get(app: &AppState, params: &Value) -> Value {
 }
 
 /// In-process equivalent of an `octra_submit` JSON-RPC call.
-///
-/// Routes a single `tx` JSON object through the same `apply_*` handlers
-/// the HTTP router uses, returning `(tx_hash, events)` on success.
 pub fn submit_tx(app: &AppState, tx: &Value) -> Result<(String, Vec<Value>), String> {
     let params = json!([tx]);
     let result = octra_submit(app, &params)?;

@@ -1,15 +1,11 @@
-//! Demo end-to-end test exercising `octraforge` against `OctraVPN`.
+//! Demo end-to-end test exercising `octraforge` against `OctraVPN` v1.
 //!
-//! Flow: become an Octra validator, register an endpoint, create a
-//! tailnet with treasury, open a session against an exit endpoint,
-//! settle it, claim earnings.
+//! Flow: bond + register an endpoint, create a tailnet with treasury,
+//! configure the exit, open a session, settle (validator-only), claim
+//! earnings.
 
-use curve25519_dalek::{
-    constants::RISTRETTO_BASEPOINT_TABLE, ristretto::RistrettoPoint, scalar::Scalar,
-    traits::Identity,
-};
 use octraforge::{octra_test, ForgeCtx, SubmitError};
-use octravpn_core::earnings::{self, h_generator};
+use octravpn_mock_rpc::PROTOCOL_FEE_BPS;
 use serde_json::json;
 
 const VALIDATOR: &str = "octV1Address0000000000000000000000000001";
@@ -21,11 +17,9 @@ fn register_one(forge: &mut ForgeCtx) {
     forge.prank(VALIDATOR);
     forge.expect_emit("EndpointRegistered");
     forge
-        .call_register_endpoint(
+        .call_register_endpoint_simple(
             "1.2.3.4:51820",
             &"de".repeat(32),
-            &"aa".repeat(32),
-            "bb".repeat(32).as_str(),
             "eu-west",
             100,
         )
@@ -53,9 +47,6 @@ octra_test!(warp_and_age_endpoint, |forge| {
     forge.warp_epoch(before + 10);
     assert_eq!(forge.current_epoch(), before + 10);
 
-    // After warping, the endpoint is still active because liveness is
-    // delegated to the Octra protocol layer (mocked here as a static
-    // membership in `octra_validators`).
     let active = forge
         .view("list_active_endpoints", vec![json!(0u64), json!(50u64)])
         .unwrap();
@@ -83,11 +74,9 @@ octra_test!(unbonded_address_cannot_register_endpoint, |forge| {
     forge.deploy_octravpn(100, 10);
     forge.prank(VALIDATOR);
     forge.expect_revert("must bond_endpoint first");
-    let r = forge.call_register_endpoint(
+    let r = forge.call_register_endpoint_simple(
         "1.2.3.4:51820",
         &"de".repeat(32),
-        &"aa".repeat(32),
-        &"bb".repeat(32),
         "eu-west",
         100,
     );
@@ -97,10 +86,10 @@ octra_test!(unbonded_address_cannot_register_endpoint, |forge| {
 octra_test!(full_lifecycle_endpoint_tailnet_session_claim, |forge| {
     forge.deploy_octravpn(100, 10);
 
-    // 1. Register the exit endpoint (validator side).
+    // 1. Bond + register the exit operator.
     register_one(&mut forge);
 
-    // 2. Create a tailnet with 2000 OU treasury (owner side).
+    // 2. Create a tailnet with 2000 OU treasury.
     forge.prank(OWNER);
     let created = forge
         .call_create_tailnet(&"ac".repeat(32), 2000)
@@ -111,9 +100,7 @@ octra_test!(full_lifecycle_endpoint_tailnet_session_claim, |forge| {
 
     // 3. Owner adds CLIENT as a member.
     forge.prank(OWNER);
-    forge
-        .call_add_member(&tid, CLIENT)
-        .expect("add member");
+    forge.call_add_member(&tid, CLIENT).expect("add member");
 
     // 4. Owner configures the validator as a tailnet exit.
     forge.prank(OWNER);
@@ -121,70 +108,54 @@ octra_test!(full_lifecycle_endpoint_tailnet_session_claim, |forge| {
         .call_configure_tailnet_exit(&tid, VALIDATOR)
         .expect("configure exit");
 
-    // 5. CLIENT opens a session against the tailnet (1-hop, 1000 OU deposit).
+    // 5. CLIENT opens a session against the configured exit, with
+    //    max_pay = 1000 OU from the tailnet treasury.
     forge.prank(CLIENT);
     let opened = forge
-        .call_open_session(&tid, &[&"aa".repeat(32)], &"bb".repeat(32), 1000)
+        .call_open_session(&tid, VALIDATOR, 1000)
         .expect("open session");
     let sid = opened
         .event_str("SessionOpened", "session_id")
         .expect("session id");
 
-    // 6. Settle: bytes_used=2, single hop @ 100 price * 10000 split / 10000 = 200.
-    let blind = earnings::fresh_blind();
-    let blind_hex = hex::encode(earnings::scalar_to_bytes(&blind));
-    forge.prank(CLIENT);
+    // 6. Validator-only settle: bytes_used=2 → gross=200, fee=1, net=199, refund=800.
+    forge.prank(VALIDATOR);
     let settled = forge
-        .call_settle_session(
-            &sid,
-            7,
-            2,
-            &blind_hex,
-            &[(VALIDATOR, &"11".repeat(32), 10_000)],
-        )
+        .call_settle_session(&sid, 2)
         .expect("settle");
     assert_eq!(settled.event_u64("SessionSettled", "total_paid"), Some(200));
     assert_eq!(settled.event_u64("SessionSettled", "refund"), Some(800));
 
-    // 7. Encrypted earnings on-chain == 199*G + blind*H. Gross pay is
-    //    200 OU but the protocol fee (0.5 % default) routes 1 OU to the
-    //    program treasury; the hop receives 200 * 9950 / 10000 = 199 OU.
-    let earn = forge
-        .view("get_encrypted_earnings", vec![json!(VALIDATOR)])
-        .unwrap();
-    let earn_hex = earn.as_str().unwrap();
-    let scalar_net = Scalar::from(199u64);
-    let expected = &scalar_net * RISTRETTO_BASEPOINT_TABLE + blind * h_generator();
-    assert_eq!(earn_hex, hex::encode(expected.compress().to_bytes()));
-
-    // 8. Refund returned to tailnet treasury: 2000 - 1000 + 800 = 1800.
+    // 7. Refund returned to tailnet treasury: 2000 - 1000 + 800 = 1800.
     let tnet = forge
         .view("get_tailnet", vec![json!(tid)])
         .unwrap();
     assert_eq!(tnet.get("treasury").and_then(serde_json::Value::as_u64), Some(1800));
 
-    // 9. Validator claims the post-fee 199 OU.
+    // 8. Program treasury collected the 0.5 % protocol fee = 1 OU.
+    let pt = forge.view("get_program_treasury", vec![]).unwrap();
+    assert_eq!(pt.as_u64(), Some(200 * PROTOCOL_FEE_BPS / 10_000));
+
+    // 9. Validator claims the post-fee 199 OU. The mock simplifies the
+    //    HFHE zero-proof to a direct equality check; the "proof" is
+    //    any non-empty byte string.
     forge.prank(VALIDATOR);
     let claimed = forge
-        .call_claim_earnings(199, &blind_hex, &"ee".repeat(32))
+        .call_claim_earnings(199, &"00".repeat(32))
         .expect("claim earnings");
     assert!(claimed.find_event("EarningsClaimed").is_some());
 
-    // 10. Earnings reset to identity.
+    // 10. Earnings ledger reset to zero — exposed as the mock hex format.
     let earn = forge
         .view("get_encrypted_earnings", vec![json!(VALIDATOR)])
         .unwrap();
-    assert_eq!(
-        earn.as_str().unwrap(),
-        hex::encode(RistrettoPoint::identity().compress().to_bytes())
-    );
+    assert_eq!(earn.as_str().unwrap(), "hfhe_v1|mock|0000000000000000");
 });
 
 octra_test!(expect_revert_on_bad_settle, |forge| {
     forge.deploy_octravpn(100, 10);
     register_one(&mut forge);
 
-    // Tailnet + membership + exit configured.
     forge.prank(OWNER);
     let tid = forge
         .call_create_tailnet(&"ac".repeat(32), 1000)
@@ -200,22 +171,14 @@ octra_test!(expect_revert_on_bad_settle, |forge| {
 
     forge.prank(CLIENT);
     let opened = forge
-        .call_open_session(&tid, &[&"aa".repeat(32)], &"bb".repeat(32), 100)
+        .call_open_session(&tid, VALIDATOR, 100)
         .expect("open session");
     let sid = opened.event_str("SessionOpened", "session_id").unwrap();
 
-    // Settling for more than the deposit must revert with "claim exceeds escrow".
-    let blind = earnings::fresh_blind();
-    let blind_hex = hex::encode(earnings::scalar_to_bytes(&blind));
-    forge.prank(CLIENT);
+    // Validator over-claims: bytes_used=2 → 200 OU > 100 OU deposit.
+    forge.prank(VALIDATOR);
     forge.expect_revert("claim exceeds escrow");
-    let res = forge.call_settle_session(
-        &sid,
-        1,
-        100,
-        &blind_hex,
-        &[(VALIDATOR, &"11".repeat(32), 10_000)],
-    );
+    let res = forge.call_settle_session(&sid, 2);
     assert!(res.is_ok(), "got: {res:?}");
 });
 
@@ -223,7 +186,7 @@ octra_test!(wrong_revert_substring_surfaces_diff, |forge| {
     forge.deploy_octravpn(100, 10);
     forge.prank(CLIENT);
     forge.expect_revert("definitely not the actual reason");
-    let res = forge.call_settle_session(&"00".repeat(32), 1, 1, &"00".repeat(32), &[]);
+    let res = forge.call_settle_session(&"00".repeat(32), 1);
     match res {
         Err(SubmitError::WrongRevert { actual, .. }) => {
             assert!(actual.contains("session not found"), "got: {actual}");

@@ -112,11 +112,9 @@ fn op_register_endpoint(
     }
     ctx.prank(&addr);
     if ctx
-        .call_register_endpoint(
+        .call_register_endpoint_simple(
             &format!("1.2.3.{idx}:51820"),
             &"de".repeat(32),
-            &"aa".repeat(32),
-            &"bb".repeat(32),
             "global",
             100,
         )
@@ -196,7 +194,7 @@ fn op_open_session(
     let client = client_addr(rng.gen_range(0..N_CLIENTS));
     let deposit = 10u64 + rng.gen_range(0..100u64);
     ctx.prank(&client);
-    if let Ok(r) = ctx.call_open_session(&tid, &[&"aa".repeat(32)], &"bb".repeat(32), deposit) {
+    if let Ok(r) = ctx.call_open_session(&tid, &exit, deposit) {
         if let Some(sid) = r.event_str("SessionOpened", "session_id") {
             fz.open_sessions.push((sid, tid, exit));
         }
@@ -216,8 +214,8 @@ fn op_settle_session(
     let (sid, _tid, exit) = fz.open_sessions.remove(i);
     // settle for a few bytes — exit handler enforces total_paid <= deposit
     let bytes = 1u64 + rng.gen_range(0..3u64);
-    let blind = "11".repeat(32);
-    let _ = ctx.call_settle_session(&sid, 1, bytes, &blind, &[(&exit, &"00".repeat(32), 10_000)]);
+    ctx.prank(&exit);
+    let _ = ctx.call_settle_session(&sid, bytes);
     Ok(())
 }
 

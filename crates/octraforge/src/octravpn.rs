@@ -1,10 +1,8 @@
 //! Domain helpers for the `OctraVPN` AML program.
 //!
-//! These functions build canonical JSON envelopes matching the AML
-//! method signatures (see `program/main.aml`) and submit them via
-//! [`ForgeCtx::submit`]. They mirror what a real client SDK would build,
-//! so tests using these helpers exercise the same field structure the
-//! HTTP RPC path expects.
+//! Builds canonical JSON envelopes matching the AML method signatures
+//! in `program/main.aml` and submits them via [`ForgeCtx::submit`].
+//! Mirrors what a real client SDK would build.
 
 use serde_json::{json, Value};
 
@@ -12,6 +10,13 @@ use crate::{ForgeCtx, SubmitError, SubmitResult};
 
 /// Default address used as `from` when no prank is active.
 pub const DEFAULT_CALLER: &str = "octFORGEDEFAULTCALLER000000000000000000001";
+
+/// Stand-in HFHE pubkey + zero-ciphertext used by tests. Real Octra
+/// keys are produced by the operator's wallet; the mock just stores
+/// the bytes opaquely.
+pub const MOCK_HFHE_PUBKEY: &str = "fefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefe";
+pub const MOCK_INITIAL_ENC_ZERO: &str =
+    "00000000000000000000000000000000000000000000000000000000000000ab";
 
 impl ForgeCtx {
     /// "Deploy" `OctraVPN`. The mock returns hard-coded params today;
@@ -26,27 +31,29 @@ impl ForgeCtx {
     }
 
     /// Mark `addr` as an Octra protocol validator on the mock chain
-    /// AND seed enough stake for `register_endpoint` to succeed. This
-    /// is the historical shape (callers used a single helper to get a
-    /// register-able operator); the new model just needs stake, but
-    /// keeping both turn-ons here means existing tests don't churn.
+    /// AND seed enough stake for `register_endpoint` to succeed. The
+    /// AML no longer gates on validator status (uses stake), but
+    /// keeping both turn-ons here keeps existing tests un-churned.
     pub fn become_octra_validator(&mut self, addr: &str) {
         self.app.add_octra_validator(addr);
         self.app.seed_endpoint_stake(addr, octravpn_mock_rpc::MIN_ENDPOINT_STAKE);
     }
 
     /// Seed `addr` with `amount` OU of operator stake, skipping the
-    /// real `bond_endpoint` tx. Use when the test wants to exercise
-    /// register/settle without driving the full bonding flow.
+    /// real `bond_endpoint` tx.
     pub fn seed_endpoint_stake(&mut self, addr: &str, amount: u64) {
         self.app.seed_endpoint_stake(addr, amount);
     }
 
-    /// `bond_endpoint()` — value-bearing call that deposits stake. The
-    /// caller (current prank or `DEFAULT_CALLER`) must not be slashed
-    /// and must not have an unbonding in flight.
+    /// Set the program owner (governance wallet). Tests that exercise
+    /// `gov_slash_operator` / `withdraw_program_treasury` need this.
+    pub fn set_program_owner(&mut self, addr: &str) {
+        self.app.set_owner(addr);
+    }
+
+    /// `bond_endpoint()` — value-bearing.
     pub fn call_bond_endpoint(&mut self, amount: u64) -> Result<SubmitResult, SubmitError> {
-        let call = json!({
+        self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
             "to": self.program_addr,
@@ -55,13 +62,12 @@ impl ForgeCtx {
             "value": amount,
             "fee": 10u64,
             "nonce": 0u64,
-        });
-        self.submit(call)
+        }))
     }
 
-    /// `unbond_endpoint()` — start the grace timer for stake withdrawal.
+    /// `unbond_endpoint()`.
     pub fn call_unbond_endpoint(&mut self) -> Result<SubmitResult, SubmitError> {
-        let call = json!({
+        self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
             "to": self.program_addr,
@@ -70,13 +76,12 @@ impl ForgeCtx {
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
-        });
-        self.submit(call)
+        }))
     }
 
-    /// `finalize_unbond()` — after grace, claim the stake back.
+    /// `finalize_unbond()`.
     pub fn call_finalize_unbond(&mut self) -> Result<SubmitResult, SubmitError> {
-        let call = json!({
+        self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
             "to": self.program_addr,
@@ -85,65 +90,41 @@ impl ForgeCtx {
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
-        });
-        self.submit(call)
+        }))
     }
 
-    /// `submit_equivocation(...)` — submit two contradictory signed
-    /// receipts under the same `(session_id, seq)`; on success the
-    /// program burns 90 % of the operator's stake and pays the rest
-    /// to the caller.
-    #[allow(clippy::too_many_arguments)]
-    pub fn call_submit_equivocation(
+    /// `gov_slash_operator(operator_addr, reason)`. Owner only.
+    pub fn call_gov_slash_operator(
         &mut self,
         operator: &str,
-        session_id_hex: &str,
-        seq: u64,
-        bytes_a: u64,
-        blind_a_hex: &str,
-        sig_a_hex: &str,
-        bytes_b: u64,
-        blind_b_hex: &str,
-        sig_b_hex: &str,
+        reason: &str,
     ) -> Result<SubmitResult, SubmitError> {
-        let call = json!({
+        self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
             "to": self.program_addr,
-            "method": "submit_equivocation",
-            "params": [
-                operator,
-                session_id_hex,
-                seq,
-                bytes_a,
-                blind_a_hex,
-                sig_a_hex,
-                bytes_b,
-                blind_b_hex,
-                sig_b_hex,
-            ],
+            "method": "gov_slash_operator",
+            "params": [operator, reason],
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
-        });
-        self.submit(call)
+        }))
     }
 
-    /// `register_endpoint(endpoint, wg_pubkey, receipt_pubkey, view_pubkey, region, price_per_mb)`.
+    /// `register_endpoint(endpoint, wg_pubkey, hfhe_pubkey, initial_enc_zero, region, price_per_mb)`.
     ///
-    /// Caller must have at least `MIN_ENDPOINT_STAKE` bonded — use
-    /// [`Self::become_octra_validator`] or [`Self::call_bond_endpoint`].
+    /// Caller must have at least `MIN_ENDPOINT_STAKE` bonded.
     #[allow(clippy::too_many_arguments)]
     pub fn call_register_endpoint(
         &mut self,
         endpoint: &str,
         wg_pubkey_hex: &str,
-        receipt_pubkey_hex: &str,
-        view_pubkey_hex: &str,
+        hfhe_pubkey_hex: &str,
+        initial_enc_zero_hex: &str,
         region: &str,
         price_per_mb: u64,
     ) -> Result<SubmitResult, SubmitError> {
-        let call = json!({
+        self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
             "to": self.program_addr,
@@ -151,16 +132,33 @@ impl ForgeCtx {
             "params": [
                 endpoint,
                 wg_pubkey_hex,
-                receipt_pubkey_hex,
-                view_pubkey_hex,
+                hfhe_pubkey_hex,
+                initial_enc_zero_hex,
                 region,
                 price_per_mb,
             ],
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
-        });
-        self.submit(call)
+        }))
+    }
+
+    /// Convenience over `call_register_endpoint` using mock HFHE values.
+    pub fn call_register_endpoint_simple(
+        &mut self,
+        endpoint: &str,
+        wg_pubkey_hex: &str,
+        region: &str,
+        price_per_mb: u64,
+    ) -> Result<SubmitResult, SubmitError> {
+        self.call_register_endpoint(
+            endpoint,
+            wg_pubkey_hex,
+            MOCK_HFHE_PUBKEY,
+            MOCK_INITIAL_ENC_ZERO,
+            region,
+            price_per_mb,
+        )
     }
 
     /// `update_endpoint(endpoint, region, price_per_mb)`.
@@ -170,7 +168,7 @@ impl ForgeCtx {
         region: &str,
         price_per_mb: u64,
     ) -> Result<SubmitResult, SubmitError> {
-        let call = json!({
+        self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
             "to": self.program_addr,
@@ -179,33 +177,35 @@ impl ForgeCtx {
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
-        });
-        self.submit(call)
+        }))
     }
 
-    /// `rotate_keys(wg, receipt, view)`.
+    /// `rotate_keys(new_wg, new_hfhe, new_initial_enc_zero)`.
     pub fn call_rotate_keys(
         &mut self,
-        wg_pubkey_hex: &str,
-        receipt_pubkey_hex: &str,
-        view_pubkey_hex: &str,
+        new_wg_pubkey_hex: &str,
+        new_hfhe_pubkey_hex: &str,
+        new_initial_enc_zero_hex: &str,
     ) -> Result<SubmitResult, SubmitError> {
-        let call = json!({
+        self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
             "to": self.program_addr,
             "method": "rotate_keys",
-            "params": [wg_pubkey_hex, receipt_pubkey_hex, view_pubkey_hex],
+            "params": [
+                new_wg_pubkey_hex,
+                new_hfhe_pubkey_hex,
+                new_initial_enc_zero_hex,
+            ],
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
-        });
-        self.submit(call)
+        }))
     }
 
     /// `retire_endpoint()`.
     pub fn call_retire_endpoint(&mut self) -> Result<SubmitResult, SubmitError> {
-        let call = json!({
+        self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
             "to": self.program_addr,
@@ -214,8 +214,7 @@ impl ForgeCtx {
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
-        });
-        self.submit(call)
+        }))
     }
 
     /// `create_tailnet(acl_policy)` — `value` is the initial treasury.
@@ -224,7 +223,7 @@ impl ForgeCtx {
         acl_policy_hex: &str,
         treasury: u64,
     ) -> Result<SubmitResult, SubmitError> {
-        let call = json!({
+        self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
             "to": self.program_addr,
@@ -233,8 +232,7 @@ impl ForgeCtx {
             "value": treasury,
             "fee": 10u64,
             "nonce": 0u64,
-        });
-        self.submit(call)
+        }))
     }
 
     /// `add_member(tailnet_id, member)`.
@@ -243,7 +241,7 @@ impl ForgeCtx {
         tailnet_id: &str,
         member: &str,
     ) -> Result<SubmitResult, SubmitError> {
-        let call = json!({
+        self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
             "to": self.program_addr,
@@ -252,8 +250,7 @@ impl ForgeCtx {
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
-        });
-        self.submit(call)
+        }))
     }
 
     /// `remove_member(tailnet_id, member)`.
@@ -262,7 +259,7 @@ impl ForgeCtx {
         tailnet_id: &str,
         member: &str,
     ) -> Result<SubmitResult, SubmitError> {
-        let call = json!({
+        self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
             "to": self.program_addr,
@@ -271,8 +268,7 @@ impl ForgeCtx {
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
-        });
-        self.submit(call)
+        }))
     }
 
     /// `deposit_to_tailnet(tailnet_id)` — `value` is the deposit amount.
@@ -281,7 +277,7 @@ impl ForgeCtx {
         tailnet_id: &str,
         amount: u64,
     ) -> Result<SubmitResult, SubmitError> {
-        let call = json!({
+        self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
             "to": self.program_addr,
@@ -290,8 +286,7 @@ impl ForgeCtx {
             "value": amount,
             "fee": 10u64,
             "nonce": 0u64,
-        });
-        self.submit(call)
+        }))
     }
 
     /// `configure_tailnet_exit(tailnet_id, exit_addr)`.
@@ -300,7 +295,7 @@ impl ForgeCtx {
         tailnet_id: &str,
         exit_addr: &str,
     ) -> Result<SubmitResult, SubmitError> {
-        let call = json!({
+        self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
             "to": self.program_addr,
@@ -309,8 +304,7 @@ impl ForgeCtx {
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
-        });
-        self.submit(call)
+        }))
     }
 
     /// `update_acl(tailnet_id, new_acl_policy)`.
@@ -319,7 +313,7 @@ impl ForgeCtx {
         tailnet_id: &str,
         new_acl_hex: &str,
     ) -> Result<SubmitResult, SubmitError> {
-        let call = json!({
+        self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
             "to": self.program_addr,
@@ -328,77 +322,49 @@ impl ForgeCtx {
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
-        });
-        self.submit(call)
+        }))
     }
 
-    /// `open_session(tailnet_id, route_commit, client_session_pubkey, deposit)`.
+    /// `open_session(tailnet_id, exit_addr, max_pay)` — single-hop in v1.
     pub fn call_open_session(
         &mut self,
         tailnet_id: &str,
-        route_commit: &[&str],
-        client_session_pubkey_hex: &str,
-        deposit: u64,
+        exit_addr: &str,
+        max_pay: u64,
     ) -> Result<SubmitResult, SubmitError> {
-        let call = json!({
+        self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
             "to": self.program_addr,
             "method": "open_session",
-            "params": [
-                tailnet_id,
-                route_commit,
-                client_session_pubkey_hex,
-                deposit,
-            ],
+            "params": [tailnet_id, exit_addr, max_pay],
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
-        });
-        self.submit(call)
+        }))
     }
 
-    /// `settle_session(session_id, seq, bytes_used, blind, client_sig, node_sig, route_open)`.
-    ///
-    /// `openings` is `[(node_addr, blind_hex, split_bps), ...]`.
+    /// `settle_session(session_id, bytes_used)` — validator-only call.
     pub fn call_settle_session(
         &mut self,
         session_id: &str,
-        seq: u64,
         bytes_used: u64,
-        blind_hex: &str,
-        openings: &[(&str, &str, u16)],
     ) -> Result<SubmitResult, SubmitError> {
-        let openings_json: Vec<Value> = openings
-            .iter()
-            .map(|(addr, blind, split)| {
-                json!({ "node_addr": addr, "blind": blind, "split_bps": *split })
-            })
-            .collect();
-        let call = json!({
+        self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
             "to": self.program_addr,
             "method": "settle_session",
-            "params": [
-                session_id,
-                seq,
-                bytes_used,
-                blind_hex,
-                "11".repeat(32),  // client_sig — mock ignores
-                "22".repeat(32),  // node_sig   — mock ignores
-                openings_json,
-            ],
+            "params": [session_id, bytes_used],
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
-        });
-        self.submit(call)
+        }))
     }
 
     /// `claim_no_show(session_id)`.
     pub fn call_claim_no_show(&mut self, session_id: &str) -> Result<SubmitResult, SubmitError> {
-        let call = json!({
+        self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
             "to": self.program_addr,
@@ -407,8 +373,7 @@ impl ForgeCtx {
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
-        });
-        self.submit(call)
+        }))
     }
 
     /// `sweep_expired_session(session_id)`.
@@ -416,7 +381,7 @@ impl ForgeCtx {
         &mut self,
         session_id: &str,
     ) -> Result<SubmitResult, SubmitError> {
-        let call = json!({
+        self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
             "to": self.program_addr,
@@ -425,51 +390,49 @@ impl ForgeCtx {
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
-        });
-        self.submit(call)
+        }))
     }
 
-    /// `claim_earnings(claimed_amount, claimed_blind, stealth_output)`.
+    /// `claim_earnings(amount, proof)` — verifies FHE zero-proof.
+    /// The mock simplifies the proof to an exact-equality check.
     pub fn call_claim_earnings(
         &mut self,
         amount: u64,
-        blind_hex: &str,
-        stealth_output_hex: &str,
+        proof_hex: &str,
     ) -> Result<SubmitResult, SubmitError> {
-        let call = json!({
+        self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
             "to": self.program_addr,
             "method": "claim_earnings",
-            "params": [amount, blind_hex, stealth_output_hex],
+            "params": [amount, proof_hex],
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
-        });
-        self.submit(call)
+        }))
     }
 
-    /// `set_view_pubkey(pubkey)` — publish this wallet's X25519 view pubkey.
-    pub fn call_set_view_pubkey(
+    /// `withdraw_program_treasury(to, amount)`. Owner only.
+    pub fn call_withdraw_program_treasury(
         &mut self,
-        view_pubkey_hex: &str,
+        to: &str,
+        amount: u64,
     ) -> Result<SubmitResult, SubmitError> {
-        let call = json!({
+        self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
             "to": self.program_addr,
-            "method": "set_view_pubkey",
-            "params": [view_pubkey_hex],
+            "method": "withdraw_program_treasury",
+            "params": [to, amount],
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
-        });
-        self.submit(call)
+        }))
     }
 
-    /// `register_device(device_addr)` — attach a device to the calling wallet.
+    /// `register_device(device_addr)`.
     pub fn call_register_device(&mut self, device: &str) -> Result<SubmitResult, SubmitError> {
-        let call = json!({
+        self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
             "to": self.program_addr,
@@ -478,13 +441,12 @@ impl ForgeCtx {
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
-        });
-        self.submit(call)
+        }))
     }
 
     /// `revoke_device(device_addr)`.
     pub fn call_revoke_device(&mut self, device: &str) -> Result<SubmitResult, SubmitError> {
-        let call = json!({
+        self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
             "to": self.program_addr,
@@ -493,7 +455,10 @@ impl ForgeCtx {
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
-        });
-        self.submit(call)
+        }))
     }
 }
+
+// Suppress unused-import warning when `Value` isn't otherwise referenced.
+#[allow(dead_code)]
+const _: fn() -> Value = || Value::Null;
