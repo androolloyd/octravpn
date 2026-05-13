@@ -65,8 +65,9 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 
-echo "[tailnet-e2e] Granting Octra-validator status..."
+echo "[tailnet-e2e] Seeding validator status + operator bond..."
 rpc octra_test_grantValidator "[\"$VAL1\"]" >/dev/null
+rpc octra_test_bondEndpoint "[\"$VAL1\"]" >/dev/null
 
 echo "[tailnet-e2e] Starting node1..."
 docker compose up -d node1

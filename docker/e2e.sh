@@ -51,9 +51,10 @@ docker compose up -d mock-rpc
 wait_rpc_ready
 echo "[e2e] mock-rpc up."
 
-echo "[e2e] Granting Octra-validator status to each node..."
+echo "[e2e] Seeding validator status + operator bond for each node..."
 for addr in "${NODE_ADDRS[@]}"; do
   rpc_call octra_test_grantValidator "[\"$addr\"]" >/dev/null
+  rpc_call octra_test_bondEndpoint "[\"$addr\"]" >/dev/null
   echo "  ok  $addr"
 done
 
