@@ -45,8 +45,15 @@ pub struct ChainState {
     pub endpoint_slashed: HashSet<String>,
     /// Program treasury (Tier 2 protocol fee + burn share of slashes).
     pub program_treasury: u64,
-    pub tailnets: HashMap<String, TailnetRow>,
-    pub sessions: HashMap<String, SessionRow>,
+    /// Tailnets keyed by their counter id (string-encoded for
+    /// JSON-RPC convenience; value parses as u64).
+    pub tailnets: HashMap<u64, TailnetRow>,
+    /// Self-incrementing tailnet counter — matches `tailnet_count`
+    /// in the AML.
+    pub tailnet_count: u64,
+    /// Sessions keyed by their counter id.
+    pub sessions: HashMap<u64, SessionRow>,
+    pub session_count: u64,
     /// device_addr → wallet_addr that owns it (multi-device per identity).
     pub device_owner: HashMap<String, String>,
     pub balances: HashMap<String, u64>,
@@ -88,7 +95,7 @@ pub struct EndpointRow {
 
 #[derive(Clone)]
 pub struct TailnetRow {
-    pub id: String,
+    pub id: u64,
     pub owner: String,
     pub treasury: u64,
     pub members: HashSet<String>,
@@ -99,7 +106,7 @@ pub struct TailnetRow {
 
 #[derive(Clone)]
 pub struct SessionRow {
-    pub tailnet_id: String,
+    pub tailnet_id: u64,
     /// The single configured exit for this session.
     pub exit: String,
     pub deposit: u64,
@@ -676,7 +683,7 @@ fn apply_create_tailnet(
     app: &AppState,
     tx: &Value,
     from: &str,
-    hash: &str,
+    _hash: &str,
 ) -> Result<Vec<Value>, String> {
     let p = tx
         .get("params")
@@ -695,19 +702,16 @@ fn apply_create_tailnet(
         return Err("tailnet deposit required".into());
     }
 
-    let mut h = Sha256::new();
-    h.update(b"octravpn-tailnet");
-    h.update(hash.as_bytes());
-    let tid = hex::encode(h.finalize());
-
     let mut s = app.state.write();
+    let tid = s.tailnet_count;
+    s.tailnet_count += 1;
     let created_at = s.epoch;
     let mut members = HashSet::new();
     members.insert(from.to_string());
     s.tailnets.insert(
-        tid.clone(),
+        tid,
         TailnetRow {
-            id: tid.clone(),
+            id: tid,
             owner: from.to_string(),
             treasury: deposit,
             members,
@@ -736,7 +740,7 @@ fn apply_add_member(app: &AppState, tx: &Value, from: &str) -> Result<Vec<Value>
         .get("params")
         .and_then(|x| x.as_array())
         .ok_or("params")?;
-    let tid = p[0].as_str().unwrap_or("").to_string();
+    let tid = p[0].as_u64().ok_or("tailnet_id u64")?;
     let member = p[1].as_str().unwrap_or("").to_string();
     let mut s = app.state.write();
     let t = s.tailnets.get_mut(&tid).ok_or("tailnet not found")?;
@@ -759,7 +763,7 @@ fn apply_remove_member(app: &AppState, tx: &Value, from: &str) -> Result<Vec<Val
         .get("params")
         .and_then(|x| x.as_array())
         .ok_or("params")?;
-    let tid = p[0].as_str().unwrap_or("").to_string();
+    let tid = p[0].as_u64().ok_or("tailnet_id u64")?;
     let member = p[1].as_str().unwrap_or("").to_string();
     let mut s = app.state.write();
     let t = s.tailnets.get_mut(&tid).ok_or("tailnet not found")?;
@@ -788,7 +792,7 @@ fn apply_deposit_to_tailnet(
         .get("params")
         .and_then(|x| x.as_array())
         .ok_or("params")?;
-    let tid = p[0].as_str().unwrap_or("").to_string();
+    let tid = p[0].as_u64().ok_or("tailnet_id u64")?;
     let amount = tx
         .get("value")
         .and_then(serde_json::Value::as_u64)
@@ -817,7 +821,7 @@ fn apply_configure_tailnet_exit(
         .get("params")
         .and_then(|x| x.as_array())
         .ok_or("params")?;
-    let tid = p[0].as_str().unwrap_or("").to_string();
+    let tid = p[0].as_u64().ok_or("tailnet_id u64")?;
     let exit_addr = p[1].as_str().unwrap_or("").to_string();
     let mut s = app.state.write();
     let exit_active = s.endpoints.get(&exit_addr).is_some_and(|e| e.active);
@@ -843,7 +847,7 @@ fn apply_update_acl(app: &AppState, tx: &Value, from: &str) -> Result<Vec<Value>
         .get("params")
         .and_then(|x| x.as_array())
         .ok_or("params")?;
-    let tid = p[0].as_str().unwrap_or("").to_string();
+    let tid = p[0].as_u64().ok_or("tailnet_id u64")?;
     let new_acl = p[1].as_str().unwrap_or("").to_string();
     let mut s = app.state.write();
     let t = s.tailnets.get_mut(&tid).ok_or("tailnet not found")?;
@@ -864,26 +868,19 @@ fn apply_open_session(
     app: &AppState,
     tx: &Value,
     from: &str,
-    hash: &str,
+    _hash: &str,
 ) -> Result<Vec<Value>, String> {
     let p = tx
         .get("params")
         .and_then(|x| x.as_array())
         .ok_or("params")?;
-    let tid = p[0].as_str().unwrap_or("").to_string();
+    let tid = p[0].as_u64().ok_or("tailnet_id u64")?;
     let exit_addr = p[1].as_str().unwrap_or("").to_string();
     let max_pay = p[2].as_u64().unwrap_or(0);
-
-    let mut h = Sha256::new();
-    h.update(b"octravpn-session");
-    h.update(hash.as_bytes());
-    let sid = hex::encode(h.finalize());
 
     let mut s = app.state.write();
     let opened_at = s.epoch;
     coverage::record("open_session", "require[1]"); // tailnet found
-    // Membership check: caller is a direct member OR caller is a device
-    // whose owner is a member.
     let device_owner = s.device_owner.get(from).cloned();
     let t = s.tailnets.get_mut(&tid).ok_or("tailnet not found")?;
     coverage::record("open_session", "require[2]"); // member check
@@ -905,7 +902,6 @@ fn apply_open_session(
         return Err("treasury insufficient".into());
     }
     coverage::record("open_session", "require[6]"); // exit active (verified below)
-    // Verify exit operator is active (has stake, not slashed).
     let exit_has_stake = s
         .endpoint_stake
         .get(&exit_addr)
@@ -920,10 +916,12 @@ fn apply_open_session(
     let t = s.tailnets.get_mut(&tid).ok_or("tailnet not found")?;
     t.treasury -= max_pay;
 
+    let sid = s.session_count;
+    s.session_count += 1;
     s.sessions.insert(
-        sid.clone(),
+        sid,
         SessionRow {
-            tailnet_id: tid.clone(),
+            tailnet_id: tid,
             exit: exit_addr.clone(),
             deposit: max_pay,
             opened_at,
@@ -950,7 +948,7 @@ fn apply_settle(app: &AppState, tx: &Value, from: &str) -> Result<Vec<Value>, St
         .get("params")
         .and_then(|x| x.as_array())
         .ok_or("params")?;
-    let sid = p[0].as_str().unwrap_or("").to_string();
+    let sid = p[0].as_u64().ok_or("session_id u64")?;
     let bytes_used = p[1].as_u64().unwrap_or(0);
 
     let mut s = app.state.write();
@@ -976,7 +974,7 @@ fn apply_settle(app: &AppState, tx: &Value, from: &str) -> Result<Vec<Value>, St
             return Err("operator inactive".into());
         }
         (
-            sess.tailnet_id.clone(),
+            sess.tailnet_id,
             sess.deposit,
             sess.exit.clone(),
             ep.price_per_mb,
@@ -995,7 +993,6 @@ fn apply_settle(app: &AppState, tx: &Value, from: &str) -> Result<Vec<Value>, St
     let net_pay = total_paid - protocol_fee;
     let refund = deposit - total_paid;
 
-    // Effects.
     if let Some(sess) = s.sessions.get_mut(&sid) {
         sess.status = 1;
     }
@@ -1031,7 +1028,7 @@ fn apply_claim_no_show(app: &AppState, tx: &Value) -> Result<Vec<Value>, String>
         .get("params")
         .and_then(|x| x.as_array())
         .ok_or("params")?;
-    let sid = p[0].as_str().unwrap_or("").to_string();
+    let sid = p[0].as_u64().ok_or("session_id u64")?;
     let mut s = app.state.write();
     let (tid, deposit) = {
         let sess = s.sessions.get_mut(&sid).ok_or("session not found")?;
@@ -1039,7 +1036,7 @@ fn apply_claim_no_show(app: &AppState, tx: &Value) -> Result<Vec<Value>, String>
             return Err("session not open".into());
         }
         sess.status = 2;
-        (sess.tailnet_id.clone(), sess.deposit)
+        (sess.tailnet_id, sess.deposit)
     };
     if let Some(t) = s.tailnets.get_mut(&tid) {
         t.treasury += deposit;
@@ -1060,7 +1057,7 @@ fn apply_sweep_expired_session(
         .get("params")
         .and_then(|x| x.as_array())
         .ok_or("params")?;
-    let sid = p[0].as_str().unwrap_or("").to_string();
+    let sid = p[0].as_u64().ok_or("session_id u64")?;
     let mut s = app.state.write();
     let (tid, deposit) = {
         let sess = s.sessions.get_mut(&sid).ok_or("session not found")?;
@@ -1068,7 +1065,7 @@ fn apply_sweep_expired_session(
             return Err("session not open".into());
         }
         sess.status = 2;
-        (sess.tailnet_id.clone(), sess.deposit)
+        (sess.tailnet_id, sess.deposit)
     };
     let bounty = deposit / 100;
     let refund = deposit - bounty;
@@ -1203,8 +1200,8 @@ fn contract_call(app: &AppState, params: &Value) -> Result<Value, String> {
             let offset = pp.first().and_then(serde_json::Value::as_u64).unwrap_or(0);
             let limit = pp.get(1).and_then(serde_json::Value::as_u64).unwrap_or(50);
             let s = app.state.read();
-            let mut ids: Vec<String> = s.tailnets.keys().cloned().collect();
-            ids.sort();
+            let mut ids: Vec<u64> = s.tailnets.keys().copied().collect();
+            ids.sort_unstable();
             let end = (offset + limit).min(ids.len() as u64) as usize;
             let start = (offset as usize).min(end);
             Ok(json!(&ids[start..end]))
@@ -1248,9 +1245,9 @@ fn contract_call(app: &AppState, params: &Value) -> Result<Value, String> {
             Ok(json!(s.endpoint_slashed.contains(addr)))
         }
         "get_tailnet" => {
-            let tid = pp.first().and_then(|x| x.as_str()).ok_or("tailnet_id")?;
+            let tid = pp.first().and_then(serde_json::Value::as_u64).ok_or("tailnet_id u64")?;
             let s = app.state.read();
-            match s.tailnets.get(tid) {
+            match s.tailnets.get(&tid) {
                 Some(t) => Ok(json!({
                     "owner": t.owner,
                     "treasury": t.treasury,
@@ -1263,12 +1260,12 @@ fn contract_call(app: &AppState, params: &Value) -> Result<Value, String> {
             }
         }
         "is_tailnet_member" => {
-            let tid = pp.first().and_then(|x| x.as_str()).ok_or("tailnet_id")?;
+            let tid = pp.first().and_then(serde_json::Value::as_u64).ok_or("tailnet_id u64")?;
             let addr = pp.get(1).and_then(|x| x.as_str()).ok_or("addr")?;
             let s = app.state.read();
             Ok(json!(s
                 .tailnets
-                .get(tid)
+                .get(&tid)
                 .is_some_and(|t| t.members.contains(addr))))
         }
         "get_device_owner" => {
@@ -1289,18 +1286,18 @@ fn contract_call(app: &AppState, params: &Value) -> Result<Value, String> {
             ))
         }
         "is_tailnet_exit" => {
-            let tid = pp.first().and_then(|x| x.as_str()).ok_or("tailnet_id")?;
+            let tid = pp.first().and_then(serde_json::Value::as_u64).ok_or("tailnet_id u64")?;
             let addr = pp.get(1).and_then(|x| x.as_str()).ok_or("addr")?;
             let s = app.state.read();
             Ok(json!(s
                 .tailnets
-                .get(tid)
+                .get(&tid)
                 .is_some_and(|t| t.exits.contains(addr))))
         }
         "get_session" => {
-            let sid = pp.first().and_then(|x| x.as_str()).ok_or("sid")?;
+            let sid = pp.first().and_then(serde_json::Value::as_u64).ok_or("sid u64")?;
             let s = app.state.read();
-            match s.sessions.get(sid) {
+            match s.sessions.get(&sid) {
                 Some(sess) => Ok(json!({
                     "tailnet_id": sess.tailnet_id,
                     "exit": sess.exit,
@@ -1369,20 +1366,26 @@ fn octra_compile_aml_multi(params: &Value) -> Result<Value, String> {
 fn infer_program_name_from(path: &str, source: &str) -> String {
     let stripped = strip_aml_comments(source);
     let bytes = stripped.as_bytes();
+    let keywords: &[&[u8]] = &[b"contract ", b"program "];
     let mut i = 0;
-    while i + 8 <= bytes.len() {
-        let before_ok = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
-        if before_ok && &bytes[i..i + 8] == b"program " {
-            let mut j = i + 8;
-            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
-                j += 1;
+    while i < bytes.len() {
+        for kw in keywords {
+            if i + kw.len() > bytes.len() {
+                continue;
             }
-            let name_start = j;
-            while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
-                j += 1;
-            }
-            if j > name_start {
-                return stripped[name_start..j].to_string();
+            let before_ok = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
+            if before_ok && &bytes[i..i + kw.len()] == *kw {
+                let mut j = i + kw.len();
+                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                let name_start = j;
+                while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
+                    j += 1;
+                }
+                if j > name_start {
+                    return stripped[name_start..j].to_string();
+                }
             }
         }
         i += 1;

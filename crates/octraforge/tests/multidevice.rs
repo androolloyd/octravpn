@@ -96,18 +96,18 @@ octra_test!(device_opens_session_on_behalf_of_owner, |forge| {
     let tid = forge
         .call_create_tailnet(&"ab".repeat(32), 2000)
         .expect("create")
-        .event_str("TailnetCreated", "tailnet_id")
+        .event_u64("TailnetCreated", "tailnet_id")
         .unwrap();
     forge.prank(WALLET);
     forge.call_register_device(DEVICE_PHONE).expect("attach");
     forge.prank(WALLET);
     forge
-        .call_configure_tailnet_exit(&tid, VALIDATOR)
+        .call_configure_tailnet_exit(tid, VALIDATOR)
         .expect("exit");
 
     // The DEVICE opens the session — wallet itself isn't the caller.
     forge.prank(DEVICE_PHONE);
-    let r = forge.call_open_session(&tid, VALIDATOR, 500);
+    let r = forge.call_open_session(tid, VALIDATOR, 500);
     assert!(
         r.is_ok(),
         "device should be allowed to open on behalf of owner; got {r:?}"
@@ -120,15 +120,15 @@ octra_test!(unattached_addr_cannot_open_session, |forge| {
     let tid = forge
         .call_create_tailnet(&"ab".repeat(32), 2000)
         .expect("create")
-        .event_str("TailnetCreated", "tailnet_id")
+        .event_u64("TailnetCreated", "tailnet_id")
         .unwrap();
     // Stranger neither a member nor an attached device.
     forge.prank(WALLET);
     forge
-        .call_configure_tailnet_exit(&tid, VALIDATOR)
+        .call_configure_tailnet_exit(tid, VALIDATOR)
         .expect("exit");
     forge.prank("octRANDOM000000000000000000000000000000001");
     forge.expect_revert("not a member");
-    let r = forge.call_open_session(&tid, VALIDATOR, 500);
+    let r = forge.call_open_session(tid, VALIDATOR, 500);
     assert!(r.is_ok());
 });

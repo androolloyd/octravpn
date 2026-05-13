@@ -39,14 +39,14 @@ fn coverage_records_branches_during_happy_and_revert_paths() {
     let tid = ctx
         .call_create_tailnet(&"ab".repeat(32), 2000)
         .unwrap()
-        .event_str("TailnetCreated", "tailnet_id")
+        .event_u64("TailnetCreated", "tailnet_id")
         .unwrap();
     ctx.prank("octOWN");
-    ctx.call_add_member(&tid, "octCLI").unwrap();
+    ctx.call_add_member(tid, "octCLI").unwrap();
     ctx.prank("octOWN");
-    ctx.call_configure_tailnet_exit(&tid, "octV").unwrap();
+    ctx.call_configure_tailnet_exit(tid, "octV").unwrap();
     ctx.prank("octCLI");
-    ctx.call_open_session(&tid, "octV", 1000).unwrap();
+    ctx.call_open_session(tid, "octV", 1000).unwrap();
 
     // ----- 2. Revert path: unprivileged register_endpoint ------------
     let mut ctx2 = ForgeCtx::new();

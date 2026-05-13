@@ -104,7 +104,7 @@ mod tests {
             .unwrap()
             .into_iter()
             .find(|e| e["name"] == "TailnetCreated")
-            .and_then(|e| e["tailnet_id"].as_str().map(String::from))
+            .and_then(|e| e["tailnet_id"].as_u64())
             .unwrap();
 
         // 3. Owner adds client as member.
@@ -113,7 +113,7 @@ mod tests {
             "from": owner,
             "to": "octPROG",
             "method": "add_member",
-            "params": [tid.clone(), client],
+            "params": [tid, client],
             "value": 0u64,
             "fee": 10u64,
             "nonce": 1u64,
@@ -126,7 +126,7 @@ mod tests {
             "from": owner,
             "to": "octPROG",
             "method": "configure_tailnet_exit",
-            "params": [tid.clone(), val],
+            "params": [tid, val],
             "value": 0u64,
             "fee": 10u64,
             "nonce": 2u64,
@@ -153,7 +153,7 @@ mod tests {
             "from": client,
             "to": "octPROG",
             "method": "open_session",
-            "params": [tid.clone(), val, 1000u64],
+            "params": [tid, val, 1000u64],
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
@@ -166,7 +166,7 @@ mod tests {
             .unwrap()
             .into_iter()
             .find(|e| e["name"] == "SessionOpened")
-            .and_then(|e| e["session_id"].as_str().map(String::from))
+            .and_then(|e| e["session_id"].as_u64())
             .unwrap();
 
         // 7. Settle (validator-only): bytes_used=2 → 200 gross, 1 fee,
@@ -176,7 +176,7 @@ mod tests {
             "from": val,
             "to": "octPROG",
             "method": "settle_session",
-            "params": [sid.clone(), 2u64],
+            "params": [sid, 2u64],
             "value": 0u64,
             "fee": 10u64,
             "nonce": 1u64,
@@ -291,7 +291,7 @@ mod tests {
             .unwrap()
             .into_iter()
             .find(|e| e["name"] == "TailnetCreated")
-            .and_then(|e| e["tailnet_id"].as_str().map(String::from))
+            .and_then(|e| e["tailnet_id"].as_u64())
             .unwrap();
 
         rpc.submit(&json!({
@@ -299,7 +299,7 @@ mod tests {
             "from": owner,
             "to": "octPROG",
             "method": "add_member",
-            "params": [tid.clone(), client],
+            "params": [tid, client],
             "value": 0u64,
             "fee": 10u64,
             "nonce": 1u64,
@@ -313,7 +313,7 @@ mod tests {
             "from": owner,
             "to": "octPROG",
             "method": "configure_tailnet_exit",
-            "params": [tid.clone(), val],
+            "params": [tid, val],
             "value": 0u64,
             "fee": 10u64,
             "nonce": 2u64,
@@ -327,7 +327,7 @@ mod tests {
             "from": client,
             "to": "octPROG",
             "method": "open_session",
-            "params": [tid.clone(), val, 30u64],
+            "params": [tid, val, 30u64],
             "value": 0u64,
             "fee": 10u64,
             "nonce": 0u64,
@@ -340,7 +340,7 @@ mod tests {
             .unwrap()
             .into_iter()
             .find(|e| e["name"] == "SessionOpened")
-            .and_then(|e| e["session_id"].as_str().map(String::from))
+            .and_then(|e| e["session_id"].as_u64())
             .unwrap();
 
         // No-show claim refunds to treasury.

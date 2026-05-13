@@ -35,11 +35,11 @@ fn client_addr(i: usize) -> String {
 #[derive(Debug)]
 struct FuzzState {
     /// Tailnet ids we've created.
-    tailnets: Vec<String>,
+    tailnets: Vec<u64>,
     /// Validator addresses we've registered as endpoints.
     registered: Vec<String>,
-    /// Sessions opened (still open).
-    open_sessions: Vec<(String, String, String)>, // (sid, tid, client)
+    /// Sessions opened (still open). (sid, tid, exit)
+    open_sessions: Vec<(u64, u64, String)>,
 }
 
 fn op_count_from_env(default: usize) -> usize {
@@ -134,7 +134,7 @@ fn op_create_tailnet(
     ctx.prank(&owner);
     let deposit = 100 + rng.gen_range(0..1000);
     if let Ok(r) = ctx.call_create_tailnet(&"ab".repeat(32), deposit) {
-        if let Some(tid) = r.event_str("TailnetCreated", "tailnet_id") {
+        if let Some(tid) = r.event_u64("TailnetCreated", "tailnet_id") {
             fz.tailnets.push(tid);
         }
     }
@@ -149,7 +149,7 @@ fn op_add_member(
     if fz.tailnets.is_empty() {
         return Ok(());
     }
-    let tid = fz.tailnets[rng.gen_range(0..fz.tailnets.len())].clone();
+    let tid = fz.tailnets[rng.gen_range(0..fz.tailnets.len())];
     let owner = ctx
         .view("get_tailnet", vec![json!(tid)])
         .ok()
@@ -157,7 +157,7 @@ fn op_add_member(
         .unwrap_or_default();
     let member = client_addr(rng.gen_range(0..N_CLIENTS));
     ctx.prank(&owner);
-    let _ = ctx.call_add_member(&tid, &member);
+    let _ = ctx.call_add_member(tid, &member);
     Ok(())
 }
 
@@ -169,7 +169,7 @@ fn op_configure_exit(
     if fz.tailnets.is_empty() || fz.registered.is_empty() {
         return Ok(());
     }
-    let tid = fz.tailnets[rng.gen_range(0..fz.tailnets.len())].clone();
+    let tid = fz.tailnets[rng.gen_range(0..fz.tailnets.len())];
     let owner = ctx
         .view("get_tailnet", vec![json!(tid)])
         .ok()
@@ -177,7 +177,7 @@ fn op_configure_exit(
         .unwrap_or_default();
     let exit = fz.registered[rng.gen_range(0..fz.registered.len())].clone();
     ctx.prank(&owner);
-    let _ = ctx.call_configure_tailnet_exit(&tid, &exit);
+    let _ = ctx.call_configure_tailnet_exit(tid, &exit);
     Ok(())
 }
 
@@ -189,13 +189,13 @@ fn op_open_session(
     if fz.tailnets.is_empty() || fz.registered.is_empty() {
         return Ok(());
     }
-    let tid = fz.tailnets[rng.gen_range(0..fz.tailnets.len())].clone();
+    let tid = fz.tailnets[rng.gen_range(0..fz.tailnets.len())];
     let exit = fz.registered[rng.gen_range(0..fz.registered.len())].clone();
     let client = client_addr(rng.gen_range(0..N_CLIENTS));
     let deposit = 10u64 + rng.gen_range(0..100u64);
     ctx.prank(&client);
-    if let Ok(r) = ctx.call_open_session(&tid, &exit, deposit) {
-        if let Some(sid) = r.event_str("SessionOpened", "session_id") {
+    if let Ok(r) = ctx.call_open_session(tid, &exit, deposit) {
+        if let Some(sid) = r.event_u64("SessionOpened", "session_id") {
             fz.open_sessions.push((sid, tid, exit));
         }
     }
@@ -212,10 +212,9 @@ fn op_settle_session(
     }
     let i = rng.gen_range(0..fz.open_sessions.len());
     let (sid, _tid, exit) = fz.open_sessions.remove(i);
-    // settle for a few bytes — exit handler enforces total_paid <= deposit
     let bytes = 1u64 + rng.gen_range(0..3u64);
     ctx.prank(&exit);
-    let _ = ctx.call_settle_session(&sid, bytes);
+    let _ = ctx.call_settle_session(sid, bytes);
     Ok(())
 }
 
@@ -227,10 +226,10 @@ fn op_deposit_to_tailnet(
     if fz.tailnets.is_empty() {
         return Ok(());
     }
-    let tid = fz.tailnets[rng.gen_range(0..fz.tailnets.len())].clone();
+    let tid = fz.tailnets[rng.gen_range(0..fz.tailnets.len())];
     let depositor = client_addr(rng.gen_range(0..N_CLIENTS));
     let amount = 1 + rng.gen_range(0..200);
     ctx.prank(&depositor);
-    let _ = ctx.call_deposit_to_tailnet(&tid, amount);
+    let _ = ctx.call_deposit_to_tailnet(tid, amount);
     Ok(())
 }

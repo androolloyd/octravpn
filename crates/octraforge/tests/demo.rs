@@ -95,33 +95,33 @@ octra_test!(full_lifecycle_endpoint_tailnet_session_claim, |forge| {
         .call_create_tailnet(&"ac".repeat(32), 2000)
         .expect("create tailnet");
     let tid = created
-        .event_str("TailnetCreated", "tailnet_id")
+        .event_u64("TailnetCreated", "tailnet_id")
         .expect("tailnet id");
 
     // 3. Owner adds CLIENT as a member.
     forge.prank(OWNER);
-    forge.call_add_member(&tid, CLIENT).expect("add member");
+    forge.call_add_member(tid, CLIENT).expect("add member");
 
     // 4. Owner configures the validator as a tailnet exit.
     forge.prank(OWNER);
     forge
-        .call_configure_tailnet_exit(&tid, VALIDATOR)
+        .call_configure_tailnet_exit(tid, VALIDATOR)
         .expect("configure exit");
 
     // 5. CLIENT opens a session against the configured exit, with
     //    max_pay = 1000 OU from the tailnet treasury.
     forge.prank(CLIENT);
     let opened = forge
-        .call_open_session(&tid, VALIDATOR, 1000)
+        .call_open_session(tid, VALIDATOR, 1000)
         .expect("open session");
     let sid = opened
-        .event_str("SessionOpened", "session_id")
+        .event_u64("SessionOpened", "session_id")
         .expect("session id");
 
     // 6. Validator-only settle: bytes_used=2 → gross=200, fee=1, net=199, refund=800.
     forge.prank(VALIDATOR);
     let settled = forge
-        .call_settle_session(&sid, 2)
+        .call_settle_session(sid, 2)
         .expect("settle");
     assert_eq!(settled.event_u64("SessionSettled", "total_paid"), Some(200));
     assert_eq!(settled.event_u64("SessionSettled", "refund"), Some(800));
@@ -160,25 +160,25 @@ octra_test!(expect_revert_on_bad_settle, |forge| {
     let tid = forge
         .call_create_tailnet(&"ac".repeat(32), 1000)
         .expect("create")
-        .event_str("TailnetCreated", "tailnet_id")
+        .event_u64("TailnetCreated", "tailnet_id")
         .unwrap();
     forge.prank(OWNER);
-    forge.call_add_member(&tid, CLIENT).expect("add member");
+    forge.call_add_member(tid, CLIENT).expect("add member");
     forge.prank(OWNER);
     forge
-        .call_configure_tailnet_exit(&tid, VALIDATOR)
+        .call_configure_tailnet_exit(tid, VALIDATOR)
         .expect("configure exit");
 
     forge.prank(CLIENT);
     let opened = forge
-        .call_open_session(&tid, VALIDATOR, 100)
+        .call_open_session(tid, VALIDATOR, 100)
         .expect("open session");
-    let sid = opened.event_str("SessionOpened", "session_id").unwrap();
+    let sid = opened.event_u64("SessionOpened", "session_id").unwrap();
 
     // Validator over-claims: bytes_used=2 → 200 OU > 100 OU deposit.
     forge.prank(VALIDATOR);
     forge.expect_revert("claim exceeds escrow");
-    let res = forge.call_settle_session(&sid, 2);
+    let res = forge.call_settle_session(sid, 2);
     assert!(res.is_ok(), "got: {res:?}");
 });
 
@@ -186,7 +186,7 @@ octra_test!(wrong_revert_substring_surfaces_diff, |forge| {
     forge.deploy_octravpn(100, 10);
     forge.prank(CLIENT);
     forge.expect_revert("definitely not the actual reason");
-    let res = forge.call_settle_session(&"00".repeat(32), 1);
+    let res = forge.call_settle_session(999_999, 1);
     match res {
         Err(SubmitError::WrongRevert { actual, .. }) => {
             assert!(actual.contains("session not found"), "got: {actual}");

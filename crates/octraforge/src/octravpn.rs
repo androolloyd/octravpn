@@ -238,7 +238,7 @@ impl ForgeCtx {
     /// `add_member(tailnet_id, member)`.
     pub fn call_add_member(
         &mut self,
-        tailnet_id: &str,
+        tailnet_id: u64,
         member: &str,
     ) -> Result<SubmitResult, SubmitError> {
         self.submit(json!({
@@ -256,7 +256,7 @@ impl ForgeCtx {
     /// `remove_member(tailnet_id, member)`.
     pub fn call_remove_member(
         &mut self,
-        tailnet_id: &str,
+        tailnet_id: u64,
         member: &str,
     ) -> Result<SubmitResult, SubmitError> {
         self.submit(json!({
@@ -274,7 +274,7 @@ impl ForgeCtx {
     /// `deposit_to_tailnet(tailnet_id)` — `value` is the deposit amount.
     pub fn call_deposit_to_tailnet(
         &mut self,
-        tailnet_id: &str,
+        tailnet_id: u64,
         amount: u64,
     ) -> Result<SubmitResult, SubmitError> {
         self.submit(json!({
@@ -292,7 +292,7 @@ impl ForgeCtx {
     /// `configure_tailnet_exit(tailnet_id, exit_addr)`.
     pub fn call_configure_tailnet_exit(
         &mut self,
-        tailnet_id: &str,
+        tailnet_id: u64,
         exit_addr: &str,
     ) -> Result<SubmitResult, SubmitError> {
         self.submit(json!({
@@ -310,7 +310,7 @@ impl ForgeCtx {
     /// `update_acl(tailnet_id, new_acl_policy)`.
     pub fn call_update_acl(
         &mut self,
-        tailnet_id: &str,
+        tailnet_id: u64,
         new_acl_hex: &str,
     ) -> Result<SubmitResult, SubmitError> {
         self.submit(json!({
@@ -328,7 +328,7 @@ impl ForgeCtx {
     /// `open_session(tailnet_id, exit_addr, max_pay)` — single-hop in v1.
     pub fn call_open_session(
         &mut self,
-        tailnet_id: &str,
+        tailnet_id: u64,
         exit_addr: &str,
         max_pay: u64,
     ) -> Result<SubmitResult, SubmitError> {
@@ -347,7 +347,7 @@ impl ForgeCtx {
     /// `settle_session(session_id, bytes_used)` — validator-only call.
     pub fn call_settle_session(
         &mut self,
-        session_id: &str,
+        session_id: u64,
         bytes_used: u64,
     ) -> Result<SubmitResult, SubmitError> {
         self.submit(json!({
@@ -363,7 +363,7 @@ impl ForgeCtx {
     }
 
     /// `claim_no_show(session_id)`.
-    pub fn call_claim_no_show(&mut self, session_id: &str) -> Result<SubmitResult, SubmitError> {
+    pub fn call_claim_no_show(&mut self, session_id: u64) -> Result<SubmitResult, SubmitError> {
         self.submit(json!({
             "kind": "contract_call",
             "from": DEFAULT_CALLER,
@@ -379,7 +379,7 @@ impl ForgeCtx {
     /// `sweep_expired_session(session_id)`.
     pub fn call_sweep_expired_session(
         &mut self,
-        session_id: &str,
+        session_id: u64,
     ) -> Result<SubmitResult, SubmitError> {
         self.submit(json!({
             "kind": "contract_call",

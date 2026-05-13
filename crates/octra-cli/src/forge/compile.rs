@@ -41,26 +41,31 @@ pub fn synthesize_artifact(name: &str, source: &str) -> Value {
 pub fn infer_program_name(path: &str, source: &str) -> String {
     let stripped = strip_comments(source);
     let bytes = stripped.as_bytes();
+    // Real Octra AML uses `contract Name`; we also accept the legacy
+    // `program Name` keyword from earlier drafts so binders built
+    // against older sources still resolve.
+    let keywords: &[&[u8]] = &[b"contract ", b"program "];
     let mut i = 0;
-    while i + 8 <= bytes.len() {
-        // word boundary + `program ` literal.
-        let before_ok = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
-        if before_ok && &bytes[i..i + 8] == b"program " {
-            // Skip whitespace, then read identifier.
-            let mut j = i + 8;
-            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
-                j += 1;
+    while i < bytes.len() {
+        for kw in keywords {
+            if i + kw.len() > bytes.len() {
+                continue;
             }
-            let name_start = j;
-            while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
-                j += 1;
-            }
-            if j > name_start {
-                let name = &stripped[name_start..j];
-                // Sanity check: AML program names are PascalCase but the
-                // parser only insists on a valid Rust identifier.
-                if !name.is_empty() {
-                    return name.to_string();
+            let before_ok = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
+            if before_ok && &bytes[i..i + kw.len()] == *kw {
+                let mut j = i + kw.len();
+                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                let name_start = j;
+                while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
+                    j += 1;
+                }
+                if j > name_start {
+                    let name = &stripped[name_start..j];
+                    if !name.is_empty() {
+                        return name.to_string();
+                    }
                 }
             }
         }

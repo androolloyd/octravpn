@@ -41,17 +41,17 @@ impl<'a> StoreBuilder<'a> {
     }
 
     /// Insert (or replace) a tailnet row.
-    pub fn tailnet(self, id: impl Into<String>, row: TailnetRow) -> Self {
+    pub fn tailnet(self, id: u64, row: TailnetRow) -> Self {
         let mut s = self.ctx.app.state.write();
-        s.tailnets.insert(id.into(), row);
+        s.tailnets.insert(id, row);
         drop(s);
         self
     }
 
     /// Insert (or replace) a session row.
-    pub fn session(self, sid: impl Into<String>, row: SessionRow) -> Self {
+    pub fn session(self, sid: u64, row: SessionRow) -> Self {
         let mut s = self.ctx.app.state.write();
-        s.sessions.insert(sid.into(), row);
+        s.sessions.insert(sid, row);
         drop(s);
         self
     }
