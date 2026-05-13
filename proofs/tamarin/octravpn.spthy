@@ -1,32 +1,37 @@
 /*
- * OctraVPN protocol model in Tamarin (tailnet edition).
+ * OctraVPN protocol model in Tamarin.
  *
- * Models the OctraVPN crypto-protocol surface under a Dolev-Yao adversary:
+ * **SCOPE NOTE — v1 vs target**:
  *
- *   - Endpoint registration (caller is an Octra protocol validator;
- *     in-program bond and attestation are delegated to Octra's protocol
- *     layer, which Tamarin abstracts as a long-term key holder).
- *   - Session opening (route commitments, ephemeral session pubkey).
- *   - Receipt signing & monotonic seq.
- *   - Settlement.
- *   - Equivocation (double-sign) detection — slashing is now applied at
- *     the Octra protocol layer rather than in our program, but the proof
- *     obligation is the same: any double-sign by an endpoint yields a
- *     `Slashed` event (observed off-band by Octra).
+ *   This file models the *target* cryptographic guarantees we want
+ *   OctraVPN to satisfy: dual-signed receipt unforgeability +
+ *   double-sign slashable evidence + route-commitment unlinkability.
  *
- * What the adversary can do:
+ *   In **v1** these properties depend on Octra exposing `verify_ed25519`
+ *   as an AML host call. Today it isn't (see `docs/aml-gap-analysis.md`
+ *   and `docs/octra-research.md §6`). So the v1 AML drops in-program
+ *   signature verification, replaces receipts with validator-only settle
+ *   (economic-ceiling integrity, not cryptographic), and replaces
+ *   equivocation slashing with governance slash.
+ *
+ *   This Tamarin theory therefore captures the **v1.1+ target** — the
+ *   crypto properties we'll guarantee once Octra adds the needed host
+ *   calls. We retain it as the formal specification of the eventual
+ *   guarantee. The v1 AML state machine itself is verified in Lean
+ *   (`proofs/lean/`) and TLA+ (`proofs/tla/`).
+ *
+ * What the adversary can do (under Dolev-Yao):
  *   - Read all network messages (Out facts).
  *   - Inject any message it can derive (In facts).
  *   - Compromise individual endpoint long-term keys (Reveal_Validator).
  *   - Compromise individual session ephemeral keys (Reveal_Session).
  *
- * Properties checked:
+ * Properties checked (TARGET, not v1):
  *   1. ReceiptUnforgeability: no settled receipt exists for a session
  *      whose ephemeral session key was never compromised AND was never
  *      signed by the legitimate client.
  *   2. DoubleSignSlashable: any two distinct receipts signed by the same
- *      endpoint key for the same (session, seq) implies a slash event
- *      (now at protocol layer rather than in our program).
+ *      endpoint key for the same (session, seq) implies a slash event.
  *   3. NoLinkBeforeSettle: while a session is "open", the chain message
  *      stream contains no fact linking a particular endpoint address to
  *      this session_id (commitments only).

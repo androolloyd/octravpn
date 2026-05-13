@@ -30,22 +30,29 @@ The system has three load-bearing pieces:
 
 The novel contributions are:
 
-- **In-program bond and slashing.** Operators stake OU in the AML
-  program. Equivocation on any signed operational claim — receipt,
-  directory response, signaling response — is verified on chain and
-  slashes the stake atomically. We do not rely on Octra protocol-layer
-  slashing; Octra protects Octra consensus, not OctraVPN receipts.
-- **Unified operator role.** One bonded role, three revenue streams
-  (relay / directory / signaling), one reputation, one slash surface.
+- **In-program operator stake.** Operators stake OU in the AML
+  program via `bond_endpoint`. The stake gates registration and is
+  governance-slashable on off-chain equivocation evidence. (v1.1
+  moves slashing fully on-chain once Octra exposes `verify_ed25519`
+  in AML — see `docs/aml-gap-analysis.md`.)
+- **HFHE-backed encrypted earnings.** Operator earnings accumulate as
+  HFHE ciphertext under each operator's pubkey, using Octra's
+  confirmed `fhe_add` / `fhe_add_const` / `fhe_verify_zero` host
+  calls. Claims are a two-step: AML verifies the zero-proof and
+  transfers plaintext OU; the operator's wallet wraps the funds in a
+  native `op_type="stealth"` tx for unlinkable payout.
 - **Three-tier fee structure.** Tier 1 (gas to Octra protocol
   validators) + Tier 2 (0.5 % of settlements funds the program
-  treasury for audits + maintenance) + Tier 3 (per-operation pay to
+  treasury for audits + maintenance) + Tier 3 (per-byte pay to
   OctraVPN operators).
 - **Tailnet treasuries.** Per-tailnet OU pools fund sessions;
   refunds return to the same pool. No per-user balances on chain.
-- **Shielded payments + traffic.** Operators receive
-  Pedersen-committed earnings revealed only at claim; clients build
-  routes as Pedersen commitments revealed only at settle.
+- **Validator-only settlement with economic ceiling.** v1 is
+  single-hop: the client deposits a `max_pay` ceiling from their
+  tailnet treasury; the validator settles by reporting `bytes_used`;
+  AML caps payment at the deposit. Receipt integrity is economic
+  (the deposit), not cryptographic (v1.1 adds cryptographic dual-sig
+  via Octra primitives).
 - **Mesh-first connectivity.** Peer-to-peer WireGuard is the default;
   paid operators activate when direct probes fail. Upgrade is
   automatic.
@@ -62,39 +69,44 @@ We assume:
 - The Octra chain remains live and correct in the consensus sense
   (transactions ordered, double-spend prevented, finality respected).
 
-We protect:
+We protect (v1):
 
-- **Confidentiality of who is talking to whom** within a tailnet.
-  Pedersen commitments hide the route; only the exit (with the
-  client's cooperation) learns its own role.
-- **Confidentiality of payment volume per operator.** Encrypted
-  earnings ledger; opening happens only at the operator's own claim.
-- **Authenticity of receipts.** Dual-signed (client ephemeral session
-  key + operator long-term key). Tamarin proof
-  (`proofs/tamarin/octravpn.spthy`) shows unforgeability under
-  Dolev-Yao with key-compromise.
-- **Provable malice ⇒ atomic slash.** Equivocation on any signed
-  operational claim is detected and acted on by the AML program in
-  one transaction.
+- **Confidentiality of operator earnings volume.** HFHE-encrypted
+  earnings ledger; the chain operates on ciphertext via the
+  confirmed `fhe_*` primitives. Decrypted only at the operator's own
+  claim via the HFHE zero-proof.
+- **Confidentiality of operator payout addresses.** Operators wrap
+  the claim transfer in a native `op_type="stealth"` tx — the chain
+  records a public claim then a stealth payment to a fresh address
+  in the next block.
+- **No stuck OU.** TLA+ and Lean models prove `<>(SessionSettled \/
+  SessionRefunded)` and `treasury_monotone_on_no_show`.
+- **Slashed operators cannot earn.** Lean lemma `slash_burns_stake`
+  + TLA+ invariant `ActiveEndpointsAreBonded`.
+- **Provable economic ceiling.** Lean lemma `settle_bounded_by_deposit`
+  + AML `require(total_paid <= s.deposit)`. The client's max-pay
+  deposit caps loss from any single dishonest operator.
 
-We do not protect (at v1):
+We do not protect at v1 (deferred to v1.1 — see
+`docs/security-roadmap.md §0`):
 
-- **Tailnet membership.** Members are visible on chain; that's how
-  peer-to-peer authorisation works. The privacy goal is the contents
-  and partner of each flow, not the existence of the tailnet. See
-  `docs/security-roadmap.md` §6 for the privacy-extensions roadmap
-  (encrypted member metadata, plausible-deniability join, sealed
-  bandwidth).
+- **Cryptographic non-repudiation of receipts.** Requires
+  `verify_ed25519` as an AML host call. Today receipt integrity is
+  economic (the deposit ceiling).
+- **Multi-hop route unlinkability.** Requires either
+  `pedersen_verify_open` in AML or a native `op_type="vpn_route"`
+  Octra extension. v1 is single-hop.
+- **Cryptographic equivocation slashing.** Same dependency as
+  receipt verification. v1 uses governance slash with off-chain
+  evidence.
+- **Tailnet membership.** Members are visible on chain (intentional
+  for peer-to-peer authorisation). Privacy extensions in
+  `docs/security-roadmap.md §6`.
 - **Plaintext treasury balance.** Aggregate treasury is on-chain
-  visible. Per-member contributions can be made private by
-  depositing via stealth outputs once Octra exposes the necessary
-  primitives.
-- **Disputable malice.** A dishonest operator can drop packets,
-  serve correct-but-stale data, or be slow without producing
-  cryptographic evidence. We handle these via reputation + market
-  exit, not slashing. See `docs/economics.md §10` for the full
-  attack matrix and `docs/security-roadmap.md` §2 for planned
-  hardenings.
+  visible.
+- **Disputable malice.** A dishonest operator can drop packets or
+  be slow without producing cryptographic evidence. Reputation +
+  market exit, not slashing. See `docs/economics.md §10`.
 
 ## 2. Architecture
 
@@ -141,94 +153,100 @@ There is **no Octra-validator gate**. Any actor willing to bond
 `MIN_ENDPOINT_STAKE` can be an operator. The stake is the Sybil
 floor.
 
-### 2.3 Slashable evidence
+### 2.3 Governance slashing (v1) → cryptographic slashing (v1.1)
 
-The unified evidence type covers all three services:
+**v1 mechanism:** Off-chain evidence + governance slash.
 
 ```text
-EquivocationEvidence {
-  operator_addr        : Address
-  receipt_pubkey       : [u8; 32]
-  domain               : enum { Receipt, Directory, Signaling }
-  ref                  : bytes              // session_id||seq | query_hash||epoch | ...
-  claim_a              : bytes              // signed claim body
-  claim_b              : bytes
-  sig_a                : [u8; 64]
-  sig_b                : [u8; 64]
-}
+gov_slash_operator(operator_addr: address, reason: string) -> bool
+  // owner-only; gates on require(caller == owner)
+  // burns 90% of stake to program treasury, 10% to submitter (the owner here),
+  // marks endpoint_slashed[op] = 1 permanently
 ```
 
-`submit_equivocation(evidence)` is permissionless. AML verifies on
-chain:
+The off-chain evidence is verified by `octravpn slash-evidence verify`
+(in `crates/octravpn-client/src/commands/slash.rs`) — this performs
+the cryptographic check on two contradictory signed receipts under
+the operator's `receipt_pubkey`. The verified evidence is then
+submitted as a governance proposal. The trust assumption is the
+owner's honesty + the verifier's correctness.
 
-1. Both signatures validate under `receipt_pubkey` over the
-   domain-separated message.
-2. `Address::from_pubkey(receipt_pubkey) == operator_addr`.
-3. The claim bodies hash to distinct values (real equivocation, not
-   the same claim submitted twice).
-4. `endpoint_stake[operator_addr] > 0`.
+**v1.1 target:** Once Octra exposes `verify_ed25519` in AML, this
+becomes `submit_equivocation(evidence)` — permissionless and
+cryptographically gated. The Tamarin model
+(`proofs/tamarin/octravpn.spthy`) specifies the target guarantee.
 
-On success: 90 % of stake burned to program treasury, 10 % paid to
-submitter, operator permanently marked slashed.
+### 2.4 Sessions (single-hop, v1)
 
-The full `(domain, ref)` table:
-
-| Domain      | `ref`                              | Distinct means                  |
-| ----------- | ---------------------------------- | ------------------------------- |
-| `Receipt`   | `session_id ‖ seq`                 | Different `(bytes_used, blind)` |
-| `Directory` | `query_hash ‖ epoch`               | Different response body hash    |
-| `Signaling` | `session_handshake_id ‖ epoch`     | Different response body hash    |
-
-### 2.4 Sessions
-
-A session opens against a tailnet:
+A session opens against a tailnet's configured exit:
 
 ```text
-session_id := sha256(self_addr || epoch || nonce || client_session_pubkey)
+session_id := sha256(self_addr || epoch || nonce || caller_addr)
 sessions[session_id] := Session {
   tailnet_id,
-  client_session_pubkey,
-  route_commit = [pedersen_commit(hop_i_addr, blind_i) for i in 1..hops],
+  exit,                              // the chosen exit operator
   deposit = locked-from-tailnet-treasury,
+  opened_at = epoch,
   status = open,
 }
 ```
 
-The route is committed but not revealed; this hides which operators
-the client picked until settlement. The deposit is locked from the
-tailnet treasury.
+The client picks one exit at open time, deposits a `max_pay`
+ceiling from the tailnet treasury. v1 is single-hop pending the
+Octra primitives that make multi-hop route commitments verifiable
+on-chain (`docs/security-roadmap.md §0`).
 
-### 2.5 Settlement
+### 2.5 Settlement (validator-only)
 
-`settle_session` reveals the route, verifies the dual-signed final
-receipt, and credits each hop's encrypted-earnings ledger:
+`settle_session(session_id, bytes_used)` is callable only by the
+exit operator:
 
 ```text
-total_paid = sum_i (bytes_used * price_per_mb_i * split_bps_i / 10000)
-require total_paid <= deposit
-fee        = total_paid * protocol_fee_bps / 10000
-to_hops    = total_paid - fee
-for each hop i:
-  enc_earnings[hop_i] += pedersen_commit(pay_i * G + blind * H)
+require caller == s.exit
+require s.status == open
+let total_paid = bytes_used * price_per_mb
+require total_paid <= s.deposit                 // economic ceiling
+let fee = total_paid * protocol_fee_bps / 10000
+let net_pay = total_paid - fee
+let refund = s.deposit - total_paid
+
+// Effects (CEI ordering):
+s.status := settled
+enc_earnings[caller] := fhe_add(pk, enc_earnings[caller],
+                                fhe_add_const(pk, op_zero_ct[caller], net_pay))
+endpoints[caller].reputation += 1
 program_treasury += fee
-refund = deposit - total_paid
 tailnet.treasury += refund
 ```
 
-Directory and signaling have analogous batch settlements
-(`settle_directory_batch`, `settle_signaling_batch`) that prove a
-set of client-signed query/assist receipts and pay the operator
-accordingly. CEI ordering throughout: checks first, then state
-mutations, then external interactions.
+Integrity guarantee: **economic, not cryptographic**. The client's
+deposit caps total operator extraction. Routine over-claiming
+triggers off-chain reputation downgrade + market exit.
 
-### 2.6 Encrypted earnings
+### 2.6 Encrypted earnings (HFHE)
 
-Each operator's earnings accumulate as a Ristretto point — a
-Pedersen commitment to (amount, blind). The operator tracks their
-own running `(amount_sum, blind_sum)` locally and submits both at
-`claim_earnings`; the chain verifies the commitment opens correctly
-and emits a stealth output for the claimed amount via X25519 ECDH
-(see `docs/whitepaper-stealth.md` for the construction).
+Operator earnings accumulate as an HFHE ciphertext under each
+operator's own pubkey, using the confirmed AML host calls:
+
+- At `register_endpoint`, operator provides their HFHE pubkey and a
+  pre-computed `enc_pk(0)` ciphertext.
+- At each settle, `enc_earnings[op] = fhe_add(pk, cur,
+  fhe_add_const(pk, op_zero_ct, net_pay))`.
+- At `claim_earnings(amount, proof)`, AML reconstructs
+  `enc(amount)` via `fhe_add_const`, subtracts, and verifies the
+  zero-proof: `fhe_verify_zero(pk, cur - enc(amount), proof)`.
+
+On a successful claim:
+- AML resets `enc_earnings[op]` to the operator's `op_zero_ct`.
+- AML calls `transfer(caller, amount)` — the operator's wallet
+  receives plaintext OU.
+- The operator's wallet immediately wraps it in a native
+  `op_type="stealth"` tx (off-AML, at the Octra native-tx layer
+  which has range proofs + Pedersen + zero-proofs built into the
+  tx-validation pipeline per `docs/octra-research.md §5`).
+
+The on-chain trail shows a plaintext claim followed by a stealth
+output in the next block — the privacy story is intact.
 
 ### 2.7 Mesh data plane
 
@@ -261,7 +279,37 @@ calls.
 
 ## 3. Formal claims
 
-We make formal claims with corresponding proof artifacts:
+### 3.1 v1: AML state-machine safety + economic ceiling
+
+| Property                                                    | Tool      | Artifact                                |
+| ----------------------------------------------------------- | --------- | --------------------------------------- |
+| Treasury non-negativity                                     | TLA+      | `proofs/tla/OctraVPN.tla`               |
+| Session settles or refunds (no stuck OU)                    | TLA+      | `proofs/tla/OctraVPN.tla` (`Liveness_SettleOrRefund`) |
+| Slashed operators have zero stake                           | TLA+      | `proofs/tla/OctraVPN.tla` (`SlashedHaveZeroStake`) |
+| Active endpoints are bonded                                 | TLA+      | `proofs/tla/OctraVPN.tla` (`ActiveEndpointsAreBonded`) |
+| Session exits are configured at open-time                   | TLA+      | `proofs/tla/OctraVPN.tla` (`SessionExitsAreConfigured`) |
+| Settle requires caller is exit                              | Lean 4    | `proofs/lean/OctraVPN/Lemmas.lean::settle_requires_caller_is_exit` |
+| Settle bounded by deposit (economic ceiling)                | Lean 4    | `proofs/lean/OctraVPN/Lemmas.lean::settle_bounded_by_deposit` |
+| Settle returns refund to treasury                           | Lean 4    | `proofs/lean/OctraVPN/Lemmas.lean::settle_returns_refund_to_treasury` |
+| Settle finalises session                                    | Lean 4    | `proofs/lean/OctraVPN/Lemmas.lean::settle_finalizes` |
+| Register requires stake                                     | Lean 4    | `proofs/lean/OctraVPN/Lemmas.lean::register_requires_stake` |
+| Register not allowed after slash                            | Lean 4    | `proofs/lean/OctraVPN/Lemmas.lean::register_not_slashed` |
+| Bond increases stake                                        | Lean 4    | `proofs/lean/OctraVPN/Lemmas.lean::bond_increases_stake` |
+| Slash burns stake atomically                                | Lean 4    | `proofs/lean/OctraVPN/Lemmas.lean::slash_burns_stake` |
+| Slash is terminal (marks endpoint slashed)                  | Lean 4    | `proofs/lean/OctraVPN/Lemmas.lean::slash_marks_terminal` |
+| Slash requires owner                                        | Lean 4    | `proofs/lean/OctraVPN/Lemmas.lean::slash_requires_owner` |
+| Claim requires exact-match (FHE zero-proof soundness)       | Lean 4    | `proofs/lean/OctraVPN/Lemmas.lean::claim_requires_exact_match` |
+| Claim resets earnings ledger                                | Lean 4    | `proofs/lean/OctraVPN/Lemmas.lean::claim_resets_encEarn` |
+| Crypto primitives correct shape                             | Kani      | `proofs/kani/Cargo.toml`                |
+
+The Lean proofs go through without `sorry`; the TLA+ specification
+is model-checked by TLC in CI (`.github/workflows/ci.yml::tla`).
+
+### 3.2 v1.1 target (deferred pending Octra primitives)
+
+These properties live at the cryptographic layer and require Octra
+to expose `verify_ed25519` in AML (`docs/aml-gap-analysis.md §3`).
+The Tamarin theory specifies the target guarantee:
 
 | Property                                            | Tool      | Artifact                                |
 | --------------------------------------------------- | --------- | --------------------------------------- |
@@ -269,23 +317,8 @@ We make formal claims with corresponding proof artifacts:
 | Double-sign yields slash evidence                   | Tamarin   | `proofs/tamarin/octravpn.spthy`         |
 | Equivocation evidence cannot be fabricated          | Tamarin   | `proofs/tamarin/octravpn.spthy`         |
 | Route-commitment unlinkability                      | Tamarin   | `proofs/tamarin/octravpn.spthy`         |
-| Session settles or refunds                          | TLA+      | `proofs/tla/OctraVPN.tla`               |
-| Treasury non-negativity                             | TLA+      | `proofs/tla/OctraVPN.tla`               |
-| Slashed operators cannot earn                       | TLA+      | `proofs/tla/OctraVPN.tla`               |
-| Stake unlock reachable for honest operator          | TLA+      | `proofs/tla/OctraVPN.tla`               |
-| Settle advances receipt seq                         | Lean 4    | `proofs/lean/OctraVPN/Lemmas.lean`      |
-| Settle finalises session status                     | Lean 4    | `proofs/lean/OctraVPN/Lemmas.lean`      |
-| Settle returns refund to treasury                   | Lean 4    | `proofs/lean/OctraVPN/Lemmas.lean`      |
-| Slash burns stake atomically                        | Lean 4    | `proofs/lean/OctraVPN/Slashing.lean`    |
-| Slash is single-shot (no double-slash)              | Lean 4    | `proofs/lean/OctraVPN/Slashing.lean`    |
-| Crypto primitives correct shape                     | Kani      | `proofs/kani/Cargo.toml`                |
 
-The Lean proofs go through without `sorry`; the TLA+ specification
-is model-checked by TLC in CI (`.github/workflows/ci.yml::tla`).
-Tamarin lemmas are re-checked on each release.
-
-Property-based tests cover the cryptographic surfaces that don't
-admit symbolic-execution proof:
+### 3.3 Property-based tests
 
 | Property                                                  | File                                      |
 | --------------------------------------------------------- | ----------------------------------------- |
@@ -294,6 +327,20 @@ admit symbolic-execution proof:
 | Stealth tag unique per ephemeral                          | `crates/octravpn-core/tests/prop_security.rs` |
 | Sealed-payload AEAD tamper detection                      | `crates/octravpn-core/tests/prop_security.rs` |
 | Receiver/sender stealth tag agreement                     | `crates/octravpn-core/tests/prop_security.rs` |
+
+### 3.4 Honest scope limits
+
+Without Octra exposing additional host calls, the following move to
+the native-tx-layer trust assumption (Octra's runtime is
+closed-source and not yet formally verified):
+
+- Cryptographic non-repudiation of bandwidth receipts
+- Stealth payout unlinkability (depends on Octra's stealth
+  implementation)
+- Range-proof correctness on native stealth transfers
+
+`docs/security-roadmap.md §0` is the up-to-date list of Octra-team
+asks that close these gaps.
 
 ## 4. Economic design
 
@@ -346,19 +393,24 @@ Prioritised by phase (v1.1, v1.x, v2/research) in the roadmap doc.
 
 ## 6. Implementation status
 
-- AML program: complete for v1 surface; bonding/slashing additions in
-  progress. `crates/octraforge/tests/aml_fuzz.rs` runs 200+ random
-  call sequences with all invariants asserted.
+- AML program: v1 surface complete, built against confirmed Octra
+  primitives only (see `docs/aml-gap-analysis.md`). Bond / unbond /
+  finalize / governance-slash entrypoints present. Single-hop
+  sessions with validator-only settle. HFHE earnings via
+  `fhe_add`/`fhe_add_const`/`fhe_verify_zero`.
+- Mock chain (`tests/mocks`): faithfully implements the v1 AML
+  semantics. The HFHE earnings ledger is mock-cleartext but the
+  state-machine transitions match.
 - Mesh primitives: complete (`crates/octravpn-mesh`, 39 unit tests).
 - Data plane: WireGuard via boringtun, onion routing, control plane,
   audit log, rate limiting all wired in.
-- Octra SDK integration: `OctraBackend` trait defined; `RpcBackend`
-  wires real chain calls; `PlaceholderBackend` errors loudly when
-  used in production (refuses to answer `is_octra_validator`).
 - Equivocation tooling: `octravpn slash-evidence verify | build`
-  for off-chain workflows; AML `submit_equivocation` for on-chain
-  slashing.
-- Property + integration tests: 294 tests pass. Docker e2e green.
+  for off-chain workflows; v1.1 will add `submit` once Octra exposes
+  the necessary primitives.
+- Property + integration tests: 54 test groups passing.
+  `cargo clippy --workspace --all-targets -- -D warnings` clean.
+- Formal proofs: Lean + TLA+ updated for the v1 model; Tamarin
+  theory retained as the v1.1+ target guarantee.
 
 ## 7. Where it stops being decentralised
 

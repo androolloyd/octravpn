@@ -176,7 +176,19 @@ that pays out the locked amount.
 
 There is exactly one third-party-provable form of operator malice:
 **equivocation**. The operator signs two distinct claims with the
-same `(domain, ref)` pair. The slashable claim types:
+same `(domain, ref)` pair.
+
+**v1 enforcement:** off-chain evidence verification +
+governance-slash. The program owner submits a slash after running
+`octravpn slash-evidence verify` on the two contradictory receipts.
+Trust-the-owner gates the action; the owner is itself accountable
+via the chain trail.
+
+**v1.1 target:** cryptographic on-chain enforcement once Octra
+exposes `verify_ed25519` in AML (see
+`docs/security-roadmap.md §0.1`).
+
+The slashable claim types (v1.1 target):
 
 | Claim type           | `(domain, ref)`                          | Distinct means                           |
 | -------------------- | ---------------------------------------- | ---------------------------------------- |
@@ -490,13 +502,18 @@ typical OCT prices that's prohibitive for any non-legitimate actor.
 **Attack.** Operator signs two contradictory claims with same
 `(domain, ref)`.
 
-**Defense.** `submit_equivocation(ev)` is permissionless. AML
-verifies signatures and distinctness, slashes the stake atomically.
-Bounty incentivizes submission.
+**v1 defense.** Off-chain evidence verification +
+governance-slash. Anyone can run `octravpn slash-evidence verify` on
+the two receipts; the program owner submits the slash tx based on
+the verified bundle.
+
+**v1.1 defense (target).** Permissionless `submit_equivocation(ev)`
+once Octra exposes `verify_ed25519` in AML.
 
 **Economics.** Marginal gain from a single fraudulent claim ≤ one
-session deposit / batch (≤ 100 OU). Marginal cost = full stake (1B
-OU). Ratio: 10⁷:1 against defection.
+session deposit (≤ client's max-pay). Marginal cost = full stake
+(1B OU at default). Ratio: 10⁷:1 against defection — holds whether
+slashing is on-chain (v1.1) or owner-mediated (v1).
 
 ### 10.2 Treasury drain via owner-operator collusion
 

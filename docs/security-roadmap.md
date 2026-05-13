@@ -13,6 +13,99 @@ Status legend: 🟢 = planned for v1.1, 🟡 = v1.x, 🔴 = research/v2.
 
 ---
 
+## 0. Octra-team asks (highest priority, blocks v1.1)
+
+Per `docs/aml-gap-analysis.md` our AML can only use confirmed Octra
+host calls. The following AML extensions would unlock the
+properties we currently can't enforce on-chain. Each item is a
+discrete ask to the Octra core team.
+
+### 0.1 🟢 `verify_ed25519(pubkey, msg, sig) -> bool` host call
+
+**Unlocks:**
+- Dual-signed receipt verification in `settle_session` →
+  cryptographic non-repudiation of `bytes_used`.
+- `submit_equivocation(operator, evidence)` permissionless slashing.
+- `redeem_join_token` pre-auth tokens.
+- Quorum-signed ACL updates (`§2.3`).
+
+**Rationale:** Ed25519 is already in Octra's tx-signing pipeline
+(`docs/octra-research.md §3`); the primitive exists at the chain
+runtime. Exposing it to AML is a thin host-binding.
+
+**Estimated cost:** ~1 week of Octra-team work.
+
+### 0.2 🟢 Native `op_type="vpn_settle"` extension
+
+**Unlocks:** Dual-signed bandwidth receipts verified by the native-tx
+runtime BEFORE AML executes. AML sees pre-validated data.
+
+**Mechanism:** Extend Octra's `op_type` set with `"vpn_settle"` that
+carries `(session_id, bytes_used, blind, client_sig, node_sig)` in
+`encrypted_data`. Runtime verifies both signatures + dual-sig
+construction; rejected txs never reach AML.
+
+**Rationale:** Mirrors the existing `op_type="stealth"` model where
+range proofs + Pedersen commitments are runtime-verified.
+
+**Estimated cost:** ~3 weeks of Octra-team work.
+
+### 0.3 🟡 `verify_bulletproof(commit, proof) -> bool` host call
+
+**Unlocks:**
+- Encrypted bandwidth volumes in settle (`docs/security-roadmap.md
+  §6.2`).
+- Range-proofed FHE-encrypted balances (prevent over-claim before
+  the chain even runs `fhe_verify_zero`).
+
+**Rationale:** Octra's stealth path uses bulletproof-shaped range
+proofs at the native-tx layer (`pvac_make_range_proof`). Lifting to
+AML lets programs adopt the same primitive.
+
+**Estimated cost:** ~2-4 weeks (depends on the existing libpvac
+bindings).
+
+### 0.4 🟡 Linkable ring signature host call
+
+**Unlocks:**
+- Plausible-deniability join (`§6.1`).
+- Multi-device unlinkability (a device proves it's "one of my
+  registered devices" without revealing which).
+
+**Rationale:** No existing Octra primitive; net-new.
+
+**Estimated cost:** ~2 months including reference impl.
+
+### 0.5 🟡 Schnorr DLEQ proof host call
+
+**Unlocks:**
+- Forward-secure receipt key rotation (`§2.1`) — proves a new key
+  is derived from the old key's secret without revealing the old
+  secret.
+
+**Estimated cost:** ~3 weeks.
+
+### 0.6 🟡 General SNARK verifier (`verify_groth16` or `verify_plonk`)
+
+**Unlocks:** Arbitrary zk statements about hidden witnesses. Range
+proofs, ring sigs, DLEQ all subsume into a single verifier. Best
+long-term answer to the "encrypted everything" privacy goal.
+
+**Estimated cost:** ~3-6 months upstream + trusted setup ceremony.
+
+### 0.7 🟢 `octra_isValidator(addr)` AML host call
+
+**Unlocks:** OctraVPN can require operators to ALSO be Octra
+validators (hybrid model from earlier design discussions). Currently
+this is callable from RPC but not from AML.
+
+**Mechanism:** Expose `is_octra_validator(addr) -> bool` as a host
+call (the chain already knows; just lacks the AML binding).
+
+**Estimated cost:** ~1 week.
+
+---
+
 ## 1. Identity & device attestation
 
 ### 1.1 🟢 Hardware-backed wallet keys

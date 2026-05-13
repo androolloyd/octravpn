@@ -1,10 +1,17 @@
 /-!
-# State of the OctraVPN program — Lean 4 model (tailnet edition).
+# State of the OctraVPN program — Lean 4 model (v1).
 
-Endpoints (paid relays/exits) carry no bond inside this program — bond
-and liveness are delegated to the Octra protocol layer, modeled as the
-external predicate `isOctraValidator`. Tailnets are member groups with
-shared treasuries that fund sessions.
+Tracks the post-refactor state machine. Per `docs/aml-gap-analysis.md`:
+
+- Operators stake OU in-program (`endpointStake`), unbond via grace
+  (`endpointUnbonding`), and are permanently flagged when slashed
+  by governance (`endpointSlashed`).
+- Sessions are single-hop with a single exit operator (no route).
+- Encrypted earnings (HFHE on real Octra) modeled as a plaintext
+  `Nat` counter — the lemmas about additivity carry over to the
+  ciphertext layer under the homomorphism axiom.
+- Program treasury (Tier 2 protocol fee + burn share of slashed
+  stakes) is plaintext-owner-controlled.
 -/
 
 namespace OctraVPN
@@ -22,12 +29,12 @@ inductive SessionStatus where
 
 /-- On-chain endpoint record under `endpoints[addr]`. -/
 structure EndpointRecord where
-  active           : Bool
-  endpoint         : String
-  region           : String
-  pricePerMb       : Nat
-  registeredAt     : Epoch
-  reputation       : Int
+  active         : Bool
+  endpoint       : String
+  region         : String
+  pricePerMb     : Nat
+  registeredAt   : Epoch
+  reputation     : Int
   deriving Repr
 
 def EndpointRecord.empty : EndpointRecord :=
@@ -46,18 +53,25 @@ structure Tailnet where
 def Tailnet.empty : Tailnet :=
   { owner := 0, treasury := 0, members := [], exits := [], createdAt := 0 }
 
-/-- A session record. -/
+/-- A single-hop session record. -/
 structure Session where
   tailnetId       : Bytes
+  exit            : Addr
   deposit         : OctRaw
   openedAt        : Epoch
-  receiptSeq      : Nat
   status          : SessionStatus
-  /-- Hops are a list of (endpoint address, split bps) pairs. -/
-  route           : List (Addr × Nat)
-  /-- Plaintext "view" of bytes paid for, for proof purposes only. -/
+  /-- Plaintext view of bytes paid for, for proof purposes only. -/
   paidBytes       : Nat
   deriving Repr
+
+/-- In-flight unbonding record. `stake = 0` represents "no
+    unbonding in progress". -/
+structure Unbonding where
+  stake       : OctRaw
+  unlockEpoch : Epoch
+  deriving Repr
+
+def Unbonding.empty : Unbonding := { stake := 0, unlockEpoch := 0 }
 
 abbrev Map (α : Type) (β : Type) := α → β
 
@@ -71,16 +85,30 @@ structure Params where
   sessionGraceEpochs   : Nat
   sweepGraceMultiplier : Nat
   sweepBountyBps       : Nat
+  minEndpointStake     : OctRaw
+  unbondGraceEpochs    : Nat
+  slashBurnBps         : Nat
+  slashBountyBps       : Nat
+  protocolFeeBps       : Nat
   deriving Repr
 
 structure ProgramState where
-  /-- External oracle: is `addr` currently an Octra protocol validator?
-      The program's `register_endpoint` gate checks this. -/
-  isOctraValidator : Addr → Bool
+  /-- Program owner (governance wallet). -/
+  programOwner     : Addr
   endpoints        : Map Addr EndpointRecord
+  /-- Live operator stake. -/
+  endpointStake    : Map Addr OctRaw
+  /-- Unbonding requests. -/
+  endpointUnbonding : Map Addr Unbonding
+  /-- Permanently slashed addresses. -/
+  endpointSlashed  : Map Addr Bool
   tailnets         : Map Bytes Tailnet
   sessions         : Map Bytes (Option Session)
+  /-- Encrypted earnings (modeled as plaintext for proof purposes;
+      real Octra holds HFHE ciphertext). -/
   encEarn          : Map Addr Nat
+  /-- Program treasury: Tier 2 fee + burn share of slashed stakes. -/
+  programTreasury  : OctRaw
   burned           : OctRaw
   params           : Params
   currentEpoch     : Epoch
