@@ -1,15 +1,17 @@
-//! Chain integration for the node daemon.
+//! Chain integration for the node daemon (v1).
 //!
-//! Wraps `octravpn-core::rpc::RpcClient` with the dVPN endpoint actions:
-//! pre-flight Octra-validator check, register endpoint, claim earnings,
-//! observe current epoch. Bonding/attestation/slashing live on the Octra
-//! protocol layer — this module does not duplicate them.
+//! Wraps `octravpn-core::rpc::RpcClient` with v1 OctraVPN actions:
+//! bond/unbond/finalize-unbond, register/claim endpoint, claim
+//! earnings, observe current epoch. The v1 AML gates registration on
+//! in-program stake (not Octra-validator status).
+//!
+//! The claim_earnings call is two-step: this module issues the AML
+//! call which verifies an FHE zero-proof and transfers plaintext OU;
+//! the operator's wallet is responsible for the follow-up native
+//! op_type="stealth" tx if they want unlinkable payout.
 
-use anyhow::{anyhow, Context, Result};
-use octravpn_core::{
-    address::Address, rpc::RpcClient, sig::KeyPair,
-    validator_oracle::ValidatorOracle,
-};
+use anyhow::{Context, Result};
+use octravpn_core::{address::Address, rpc::RpcClient, sig::KeyPair};
 use serde_json::{json, Value};
 use tracing::{debug, info};
 
@@ -18,20 +20,20 @@ pub(crate) struct ChainCtx {
     pub program_addr: Address,
     pub validator_addr: Address,
     pub wallet: KeyPair,
-    /// Wraps `RpcClient::is_octra_validator` with a graceful fallback
-    /// to a bulk-listing cache when the direct RPC isn't available.
-    pub validator_oracle: ValidatorOracle,
 }
 
-/// Inputs to `register_endpoint`. Borrowed so call sites don't have to
-/// clone every byte slice they hold.
+/// Inputs to `register_endpoint`. Borrowed so call sites don't have
+/// to clone every slice. Per v1 AML signature.
 pub(crate) struct RegisterEndpointParams<'a> {
     pub endpoint: &'a str,
-    /// X25519 noise pubkey (used by clients to wrap onion layers).
-    pub wg_pubkey: &'a [u8; 32],
-    /// ed25519 receipt-signing pubkey.
-    pub receipt_pubkey: &'a [u8; 32],
-    pub view_pubkey: &'a [u8; 32],
+    /// X25519 noise pubkey (hex, used by clients to wrap onion layers).
+    pub wg_pubkey_hex: &'a str,
+    /// HFHE pubkey (string). Real Octra clients generate via libpvac;
+    /// for v1 testnet operators may use a placeholder until the SDK
+    /// surfaces real HFHE keygen.
+    pub hfhe_pubkey: &'a str,
+    /// Pre-computed enc_pk(0) ciphertext (string).
+    pub initial_enc_zero: &'a str,
     pub region: &'a str,
     pub price_per_mb: u64,
     pub fee: u64,
@@ -45,21 +47,41 @@ impl ChainCtx {
         Ok(s.epoch)
     }
 
-    /// Returns true iff the configured wallet is currently an Octra
-    /// protocol validator. The program-side gate enforces this at
-    /// registration; we pre-check so the node can fail fast with a
-    /// clear error message instead of waiting for the tx to revert.
-    pub(crate) async fn is_octra_validator(&self) -> Result<bool> {
-        self.validator_oracle
-            .is_validator(&self.validator_addr)
+    /// Read the operator's in-program stake. The v1 AML gate requires
+    /// `endpoint_stake >= MIN_ENDPOINT_STAKE`. Pre-checked here so
+    /// the node can fail fast with a clear error before submitting
+    /// a register tx that would revert.
+    pub(crate) async fn read_endpoint_stake(&self) -> Result<u64> {
+        let v = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_endpoint_stake",
+                &[json!(self.validator_addr.display())],
+                Some(&self.validator_addr),
+            )
             .await
-            .context("validator_oracle")
-            .map_err(|e| anyhow!(e))
+            .context("get_endpoint_stake")?;
+        Ok(v.as_u64().unwrap_or(0))
     }
 
-    /// Read the current endpoint record for this validator, if any.
-    /// `None` indicates "not registered yet" (the program returns a
-    /// zeroed record where `active == 0`).
+    /// Returns true iff the operator is marked permanently slashed.
+    pub(crate) async fn read_endpoint_slashed(&self) -> Result<bool> {
+        let v = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "is_endpoint_slashed",
+                &[json!(self.validator_addr.display())],
+                Some(&self.validator_addr),
+            )
+            .await
+            .context("is_endpoint_slashed")?;
+        Ok(v.as_bool().unwrap_or(false))
+    }
+
+    /// Read the current endpoint record for this operator, if any.
+    /// `None` indicates "not registered yet".
     pub(crate) async fn read_endpoint_record(&self) -> Result<Option<Value>> {
         let v = self
             .rpc
@@ -84,7 +106,6 @@ impl ChainCtx {
         Ok(Some(v))
     }
 
-    /// Build a `register_endpoint` call.
     pub(crate) fn build_register_endpoint_call(
         &self,
         p: &RegisterEndpointParams<'_>,
@@ -96,9 +117,9 @@ impl ChainCtx {
             "method": "register_endpoint",
             "params": [
                 p.endpoint,
-                hex::encode(p.wg_pubkey),
-                hex::encode(p.receipt_pubkey),
-                hex::encode(p.view_pubkey),
+                p.wg_pubkey_hex,
+                p.hfhe_pubkey,
+                p.initial_enc_zero,
                 p.region,
                 p.price_per_mb,
             ],
@@ -108,11 +129,55 @@ impl ChainCtx {
         })
     }
 
+    /// `bond_endpoint()` — value-bearing call. The `amount` becomes
+    /// the locked operator stake.
+    pub(crate) fn build_bond_call(&self, amount: u64, fee: u64, nonce: u64) -> Value {
+        json!({
+            "kind": "contract_call",
+            "from": self.validator_addr.display(),
+            "to": self.program_addr.display(),
+            "method": "bond_endpoint",
+            "params": [],
+            "value": amount,
+            "fee": fee,
+            "nonce": nonce,
+        })
+    }
+
+    /// `unbond_endpoint()` — starts the grace period.
+    pub(crate) fn build_unbond_call(&self, fee: u64, nonce: u64) -> Value {
+        json!({
+            "kind": "contract_call",
+            "from": self.validator_addr.display(),
+            "to": self.program_addr.display(),
+            "method": "unbond_endpoint",
+            "params": [],
+            "value": 0,
+            "fee": fee,
+            "nonce": nonce,
+        })
+    }
+
+    /// `finalize_unbond()` — claims the unbonded stake after grace.
+    pub(crate) fn build_finalize_unbond_call(&self, fee: u64, nonce: u64) -> Value {
+        json!({
+            "kind": "contract_call",
+            "from": self.validator_addr.display(),
+            "to": self.program_addr.display(),
+            "method": "finalize_unbond",
+            "params": [],
+            "value": 0,
+            "fee": fee,
+            "nonce": nonce,
+        })
+    }
+
+    /// `claim_earnings(amount, proof)`. The `proof` is the FHE
+    /// zero-proof opening produced by the operator's HFHE library.
     pub(crate) fn build_claim_call(
         &self,
         claimed_amount: u64,
-        claimed_blind: &[u8; 32],
-        stealth_output: &[u8; 32],
+        proof_hex: &str,
         fee: u64,
         nonce: u64,
     ) -> Value {
@@ -123,8 +188,7 @@ impl ChainCtx {
             "method": "claim_earnings",
             "params": [
                 claimed_amount,
-                hex::encode(claimed_blind),
-                hex::encode(stealth_output),
+                proof_hex,
             ],
             "value": 0,
             "fee": fee,

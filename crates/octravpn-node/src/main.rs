@@ -1,14 +1,18 @@
-//! `octravpn-node` — OctraVPN endpoint daemon.
+//! `octravpn-node` — OctraVPN endpoint daemon (v1).
 //!
 //! Responsibilities:
-//!   1. Verify the configured wallet is an Octra protocol validator and
-//!      register a paid endpoint (relay or exit) on the OctraVPN program.
-//!   2. Run a userspace WireGuard endpoint (boringtun) for connecting
-//!      tailnet clients.
-//!   3. Track per-session bandwidth, accept signed receipts, retain the
+//!   1. Bond OU into the OctraVPN program (`bond_endpoint`) — required
+//!      before registering. The v1 AML no longer gates on Octra-validator
+//!      status; it requires the operator's in-program stake to be
+//!      >= MIN_ENDPOINT_STAKE.
+//!   2. Register a paid endpoint (relay or exit) on the OctraVPN program.
+//!   3. Run a userspace WireGuard endpoint (boringtun) for tailnet clients.
+//!   4. Track per-session bandwidth, accept signed receipts, retain the
 //!      latest receipt per session for settlement / equivocation defense.
-//!   4. Periodically re-verify Octra-validator membership; warn if lost.
-//!   5. On request, claim accumulated encrypted earnings via stealth payout.
+//!   5. Periodically verify operator stake is above the AML's minimum.
+//!   6. On request, claim accumulated encrypted earnings (two-step:
+//!      AML `claim_earnings` with FHE zero-proof + native stealth payout
+//!      by the operator's wallet).
 
 use std::sync::Arc;
 
@@ -44,17 +48,31 @@ struct Cli {
 enum Cmd {
     /// Run the daemon in long-lived mode.
     Run,
-    /// Register endpoint on chain (idempotent: skips if already registered).
-    /// Caller must have at least `MIN_ENDPOINT_STAKE` bonded — see
-    /// `bond_endpoint` in the AML program.
+    /// Deposit OU as operator stake. Required before `register`.
+    /// Use `--amount` in raw OU (1 OCT = 1_000_000 OU; default min
+    /// stake is 1000 OCT = 10^9 OU).
+    Bond {
+        #[arg(long)]
+        amount: u64,
+    },
+    /// Begin unbonding the operator stake. Starts the grace timer;
+    /// the endpoint becomes inactive immediately.
+    Unbond,
+    /// After the unbond grace elapses, claim the stake back.
+    FinalizeUnbond,
+    /// Register endpoint on chain (idempotent: skips if already
+    /// registered). Caller must have at least MIN_ENDPOINT_STAKE
+    /// bonded — run `bond` first.
     Register,
-    /// Claim accumulated earnings via stealth payout.
+    /// Claim accumulated earnings. Two-step: AML verifies an FHE
+    /// zero-proof and transfers plaintext OU; the operator's wallet
+    /// then wraps it in a native stealth tx for unlinkable payout.
     ClaimEarnings,
     /// Print derived addresses / pubkeys without changing on-chain state.
     Identity,
     /// Add (delta_amount, delta_blind) to the local earnings accumulator.
-    /// Used by reconciliation tooling that watches `SessionSettled` events
-    /// and tells the node which Pedersen contributions are theirs.
+    /// Used by reconciliation tooling that watches `SessionSettled`
+    /// events and tells the node which contributions are theirs.
     AccumulatorAdd {
         #[arg(long)]
         delta_amount: u64,
@@ -85,6 +103,9 @@ async fn main() -> Result<()> {
             hub.print_identity();
             Ok(())
         }
+        Cmd::Bond { amount } => hub.bond_endpoint(amount).await,
+        Cmd::Unbond => hub.unbond_endpoint().await,
+        Cmd::FinalizeUnbond => hub.finalize_unbond().await,
         Cmd::Register => hub.register_endpoint().await,
         Cmd::ClaimEarnings => hub.claim_earnings().await,
         Cmd::AccumulatorAdd {

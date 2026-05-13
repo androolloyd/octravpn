@@ -56,8 +56,13 @@ fn decode_record(addr: Address, v: &Value) -> Result<EndpointRecord> {
         .unwrap_or_default()
         .to_string();
     let wg = decode_hex_32(m.get("wg_pubkey"), "wg_pubkey")?;
-    let receipt = decode_hex_32(m.get("receipt_pubkey"), "receipt_pubkey")?;
-    let view = decode_hex_32(m.get("view_pubkey"), "view_pubkey")?;
+    // v1 AML no longer stores receipt_pubkey / view_pubkey on chain.
+    // Clients fetch those via the operator's REST control plane
+    // (`/identity` endpoint). We default to zero here so the struct
+    // shape stays stable; downstream code that needs the real key
+    // hits the operator's REST surface.
+    let receipt = decode_hex_32(m.get("receipt_pubkey"), "receipt_pubkey").unwrap_or([0u8; 32]);
+    let view = decode_hex_32(m.get("view_pubkey"), "view_pubkey").unwrap_or([0u8; 32]);
     Ok(EndpointRecord {
         addr,
         active,

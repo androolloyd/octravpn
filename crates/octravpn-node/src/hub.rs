@@ -7,7 +7,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Result};
 use octravpn_core::{
     address::Address,
-    earnings::{self, scalar_from_bytes, scalar_to_bytes},
+    earnings::{scalar_from_bytes, scalar_to_bytes},
     rpc::RpcClient,
     sig::KeyPair,
     stealth,
@@ -50,14 +50,11 @@ impl Hub {
             read_secret_32(&cfg.chain.wallet_secret_path).context("read wallet secret")?;
         let wallet = KeyPair::from_secret_bytes(&wallet_secret);
 
-        let validator_oracle =
-            octravpn_core::validator_oracle::ValidatorOracle::new(rpc.clone());
         let chain = ChainCtx {
             rpc,
             program_addr,
             validator_addr,
             wallet,
-            validator_oracle,
         };
 
         // The on-disk file holds a single 32-byte master secret. Two
@@ -129,27 +126,49 @@ impl Hub {
         println!("public endpoint  = {}", self.cfg.tunnel.public_endpoint);
     }
 
+    /// Per-operator stake required for `register_endpoint` to
+    /// succeed. Mirrors `Params.min_endpoint_stake` in the AML
+    /// (1000 OCT = 1B OU by default). Kept local so the node can
+    /// fail fast without first reading params.
+    pub(crate) const MIN_ENDPOINT_STAKE_DEFAULT: u64 = 1_000_000_000;
+
     pub(crate) async fn register_endpoint(self: &Arc<Self>) -> Result<()> {
         if self.chain.read_endpoint_record().await?.is_some() {
             info!("endpoint already registered on chain; skipping");
             return Ok(());
         }
-        if !self.chain.is_octra_validator().await? {
+        if self.chain.read_endpoint_slashed().await? {
             return Err(anyhow!(
-                "{} is not an Octra protocol validator — register on Octra before \
-                 advertising a dVPN endpoint",
+                "{} is permanently slashed; cannot re-register at this address",
                 self.chain.validator_addr.display()
+            ));
+        }
+        let stake = self.chain.read_endpoint_stake().await?;
+        if stake < Self::MIN_ENDPOINT_STAKE_DEFAULT {
+            return Err(anyhow!(
+                "{} has only {stake} OU bonded (need >= {}). \
+                 Run `octravpn-node bond --amount <OU>` first.",
+                self.chain.validator_addr.display(),
+                Self::MIN_ENDPOINT_STAKE_DEFAULT
             ));
         }
         let nonce = self.chain.nonce().await?;
         let fee = self.chain.fee("contract_call").await?;
         let wg_pub_x25519 = X25519Pub::from(&self.wg_static_secret).to_bytes();
-        let receipt_pub = self.wg_kp.public.0;
+        let wg_pub_hex = hex::encode(wg_pub_x25519);
+        // v1 placeholder HFHE values: real Octra clients generate via
+        // libpvac. The node stores the placeholder on chain; clients
+        // discovering this endpoint use the operator-side REST
+        // surface to fetch the real HFHE pubkey for any FHE flows.
+        // Once libpvac bindings are wired this will be replaced with
+        // a deterministic per-operator HFHE keygen.
+        let hfhe_placeholder = self.hfhe_pubkey_placeholder();
+        let initial_enc_zero_placeholder = self.hfhe_initial_enc_zero_placeholder();
         let params = crate::chain::RegisterEndpointParams {
             endpoint: &self.cfg.tunnel.public_endpoint,
-            wg_pubkey: &wg_pub_x25519,
-            receipt_pubkey: &receipt_pub,
-            view_pubkey: &self.view_pubkey,
+            wg_pubkey_hex: &wg_pub_hex,
+            hfhe_pubkey: &hfhe_placeholder,
+            initial_enc_zero: &initial_enc_zero_placeholder,
             region: &self.cfg.pricing.region,
             price_per_mb: self.cfg.pricing.price_per_mb,
             fee,
@@ -162,43 +181,90 @@ impl Hub {
         Ok(())
     }
 
-    /// Claim accumulated Pedersen earnings via stealth payout.
+    /// `bond_endpoint(amount)` — deposit OU into the operator's stake.
+    pub(crate) async fn bond_endpoint(self: &Arc<Self>, amount: u64) -> Result<()> {
+        if amount == 0 {
+            return Err(anyhow!("bond amount must be > 0"));
+        }
+        let nonce = self.chain.nonce().await?;
+        let fee = self.chain.fee("contract_call").await?;
+        let call = self.chain.build_bond_call(amount, fee, nonce);
+        let signed = self.chain.sign_call(call)?;
+        let hash = self.chain.submit_signed_tx(&signed).await?;
+        info!(%hash, amount, "bond_endpoint submitted");
+        Ok(())
+    }
+
+    /// `unbond_endpoint()` — start the grace period.
+    pub(crate) async fn unbond_endpoint(self: &Arc<Self>) -> Result<()> {
+        let nonce = self.chain.nonce().await?;
+        let fee = self.chain.fee("contract_call").await?;
+        let call = self.chain.build_unbond_call(fee, nonce);
+        let signed = self.chain.sign_call(call)?;
+        let hash = self.chain.submit_signed_tx(&signed).await?;
+        info!(%hash, "unbond_endpoint submitted");
+        Ok(())
+    }
+
+    /// `finalize_unbond()` — claim the unbonded stake.
+    pub(crate) async fn finalize_unbond(self: &Arc<Self>) -> Result<()> {
+        let nonce = self.chain.nonce().await?;
+        let fee = self.chain.fee("contract_call").await?;
+        let call = self.chain.build_finalize_unbond_call(fee, nonce);
+        let signed = self.chain.sign_call(call)?;
+        let hash = self.chain.submit_signed_tx(&signed).await?;
+        info!(%hash, "finalize_unbond submitted");
+        Ok(())
+    }
+
+    /// Per-operator placeholder HFHE pubkey. Replaced when the libpvac
+    /// SDK lands.
+    fn hfhe_pubkey_placeholder(&self) -> String {
+        // Deterministic per-operator string so the on-chain record is
+        // stable across restarts; just a tag + the wallet's hex pubkey.
+        format!(
+            "hfhe_v1|placeholder|{}",
+            hex::encode(self.chain.wallet.public.0)
+        )
+    }
+
+    /// Per-operator placeholder enc(0). Same caveat as
+    /// `hfhe_pubkey_placeholder`.
+    fn hfhe_initial_enc_zero_placeholder(&self) -> String {
+        format!(
+            "hfhe_v1|enc0|{}",
+            hex::encode(self.chain.wallet.public.0)
+        )
+    }
+
+    /// Claim accumulated earnings. v1 two-step: AML verifies FHE
+    /// zero-proof + transfers plaintext OU; the operator's wallet is
+    /// responsible for any follow-up native stealth payout.
     pub(crate) async fn claim_earnings(self: &Arc<Self>) -> Result<()> {
-        let raw_point = self
-            .chain
-            .rpc
-            .contract_call(
-                &self.chain.program_addr,
-                "get_encrypted_earnings",
-                &[serde_json::json!(self.chain.validator_addr.display())],
-                Some(&self.chain.validator_addr),
-            )
-            .await?;
-        let point_hex = raw_point
-            .as_str()
-            .ok_or_else(|| anyhow!("ledger not string"))?;
-        let point_bytes = hex::decode(point_hex).context("decode ledger point")?;
-        if point_bytes.len() != earnings::POINT_LEN {
-            return Err(anyhow!("ledger point wrong length"));
+        // Read locally-tracked accumulator (we keep it for parity
+        // with the old flow even though the on-chain side moved to
+        // HFHE — operator still needs to know the amount).
+        let acc = AccumulatorStore::load(&self.cfg.chain.wallet_secret_path)?;
+        if acc.amount == 0 {
+            return Err(anyhow!("local accumulator is zero — nothing to claim"));
         }
 
-        // Read locally-tracked accumulator.
-        let acc = AccumulatorStore::load(&self.cfg.chain.wallet_secret_path)?;
-
-        // Real ECDH stealth: pick an ephemeral secret, run X25519 DH
-        // against our own view pubkey, get the tag. The ephemeral
-        // secret is dropped immediately after `build_fresh_output`.
-        let (stealth_out, _shared) =
-            stealth::build_fresh_output(&self.view_pubkey)
-                .map_err(|e| anyhow!("derive stealth output: {e}"))?;
-        let stealth_target = stealth_out.tag;
+        // v1 placeholder proof: real Octra clients generate an HFHE
+        // zero-proof via libpvac for the `enc_earnings - enc(amount)
+        // = enc(0)` check. Until libpvac binding lands, the node
+        // submits a placeholder; the mock chain treats this as a
+        // direct equality check.
+        let proof_placeholder = format!(
+            "hfhe_v1|zero_proof|{}|{}",
+            acc.amount,
+            hex::encode(self.chain.wallet.public.0)
+        );
 
         let nonce = self.chain.nonce().await?;
         let fee = self.chain.fee("contract_call").await?;
         let call = self.chain.build_claim_call(
             acc.amount,
-            &scalar_to_bytes(&acc.blind_sum),
-            &stealth_target,
+            &proof_placeholder,
             fee,
             nonce,
         );
@@ -208,13 +274,20 @@ impl Hub {
 
         // Reset the local accumulator.
         AccumulatorStore::save(&self.cfg.chain.wallet_secret_path, &Accumulator::zero())?;
+
+        // Mirror the wallet's responsibility comment: real operators
+        // submit a native op_type="stealth" tx here paying themselves
+        // at a fresh address for unlinkable receipt. Out of scope for
+        // the daemon — happens at the wallet layer.
+        let _ = stealth::build_fresh_output(&self.view_pubkey);
+
         Ok(())
     }
 
-    /// Background loop that periodically verifies our Octra-validator
-    /// membership is still good. If we get jailed/unbonded on Octra,
-    /// the program-side gate will refuse to serve our endpoint — so
-    /// we log a clear warning here for operators.
+    /// Background loop that periodically verifies our operator stake
+    /// is above the AML's minimum. If we get slashed or unbonded, the
+    /// program-side `endpoint_is_active` check will fail, so we log
+    /// a clear warning here for operators.
     pub(crate) fn spawn_validator_health_loop(self: Arc<Self>) -> JoinHandle<Result<()>> {
         let poll = std::time::Duration::from_secs(
             self.cfg.attestation.poll_interval_secs.max(30),
@@ -222,17 +295,27 @@ impl Hub {
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(poll).await;
-                match self.chain.is_octra_validator().await {
-                    Ok(true) => {
+                let slashed = self.chain.read_endpoint_slashed().await;
+                let stake = self.chain.read_endpoint_stake().await;
+                match (slashed, stake) {
+                    (Ok(true), _) => {
+                        warn!("operator is permanently slashed — endpoint will be rejected");
+                    }
+                    (Ok(false), Ok(stake)) if stake >= Self::MIN_ENDPOINT_STAKE_DEFAULT => {
                         self.metrics.last_attestation_unix.store(
                             octravpn_core::util::now_unix_secs(),
                             std::sync::atomic::Ordering::Relaxed,
                         );
                     }
-                    Ok(false) => {
-                        warn!("no longer an Octra protocol validator — dVPN endpoint will be rejected");
+                    (Ok(false), Ok(stake)) => {
+                        warn!(
+                            stake,
+                            min = Self::MIN_ENDPOINT_STAKE_DEFAULT,
+                            "operator stake below MIN — endpoint will be rejected"
+                        );
                     }
-                    Err(e) => warn!(error = %e, "is_octra_validator check failed"),
+                    (Err(e), _) => warn!(error = %e, "endpoint_slashed check failed"),
+                    (_, Err(e)) => warn!(error = %e, "endpoint_stake check failed"),
                 }
             }
         })

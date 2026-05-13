@@ -152,6 +152,17 @@ impl Client {
         let _ = stealth_out.ephemeral_pubkey; // would be published in v2 wire shape
 
         // 4. Submit `open_session` on chain.
+        //
+        // v1 AML requires (tailnet_id: int, exit_addr: address,
+        // max_pay: int). The standalone `connect` flow doesn't pre-
+        // bind a tailnet, so it can't actually settle on v1 — kept
+        // here only so the wire format compiles. Real client use
+        // goes through `octravpn tailnet up`.
+        let _ = (route_commit.as_slice(), session_kp.public.0, refund_stealth_output);
+        let exit_addr = route
+            .last()
+            .map(|h| h.validator.addr.display().to_string())
+            .unwrap_or_default();
         let bal = self.rpc.balance(&self.wallet_addr).await?;
         let nonce = bal.pending_nonce.max(bal.nonce);
         let fee = self
@@ -165,11 +176,11 @@ impl Client {
             "to": self.program_addr.display(),
             "method": "open_session",
             "params": [
-                route_commit.iter().map(hex::encode).collect::<Vec<_>>(),
-                hex::encode(session_kp.public.0),
-                hex::encode(refund_stealth_output),
+                0u64,                  // tailnet_id (v1 requires tailnet — see `tailnet up`)
+                exit_addr,
+                deposit,
             ],
-            "value": deposit,
+            "value": 0u64,
             "fee": fee,
             "nonce": nonce,
         });
