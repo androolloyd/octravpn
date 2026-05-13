@@ -36,6 +36,21 @@ jobs:
       - uses: ./.github/actions/setup-rust
       - run: cargo test --workspace --all-features
 
+  aml-compile:
+    name: AML compile-gate (real Octra)
+    runs-on: ubuntu-latest
+    # Stays advisory: don't block CI on a transient Octra RPC outage,
+    # but always run and surface the result.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install python3 + curl
+        run: |
+          sudo apt-get update -y >/dev/null
+          sudo apt-get install -y python3 curl >/dev/null
+      - name: Compile program/main.aml on https://octra.network/rpc
+        run: ./scripts/compile-check.sh
+
   tla:
     name: TLC model check
     runs-on: ubuntu-latest
