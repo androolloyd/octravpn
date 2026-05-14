@@ -53,62 +53,100 @@ add_bond() / request_unbond() / complete_unbond()
 
 ### 1.2 Session lifecycle
 
-```
-open_session(route_commit[1..3], client_session_pubkey, fhe_blob)
-    requires:
-        len(route_commit) in 1..3
-        len(client_session_pubkey) == 32
-        each commitment well-formed (32B)
-        value >= min_session_deposit
-    effects:
-        nonce++
-        session_id = sha256(self_addr || epoch || nonce || client_session_pubkey)
-        sessions[session_id] = Session{
-            client_session_pubkey,
-            route_commit,
-            deposit: value,
-            opened_at: epoch,
-            receipt_seq: 0,
-            status: open,
-            refund_stealth_output: fhe_blob
-        }
+The v1 AML uses a **two-tx settle**: operator submits `settle_claim`,
+client submits `settle_confirm`. Settlement only applies when both
+agree on `bytes_used`. Equivocation (operator claims twice with
+different values) triggers an in-AML slash; client/operator
+disagreement records a public `SettleDispute` event and leaves the
+session open for governance.
 
-settle_session(session_id, seq, route_open[*], final_receipt_ct, client_sig)
+The earlier signature-aggregated `settle_session` design is gone:
+the AML cannot call `verify_ed25519` at compile time, so we couldn't
+cryptographically verify a dual-signed receipt inside the program.
+Both `settle_claim` and `settle_confirm` are themselves
+ed25519-verified at the tx layer by the Octra runtime — the AML
+just trusts that `caller` is who they say they are.
+
+```
+open_session(tailnet_id, exit_addr, max_pay)
+    requires:
+        is_member(tailnet_id, caller)
+        endpoints[exit_addr].active == 1
+        tailnet_exits[tailnet_id][exit_addr] == 1
+        max_pay >= min_session_deposit
+        tailnets[tailnet_id].treasury >= max_pay
+    effects:
+        tailnet.treasury -= max_pay
+        session_count++
+        sessions[session_count] = Session{
+            tailnet_id,
+            exit: exit_addr,
+            opener: caller,
+            deposit: max_pay,
+            opened_at: epoch,
+            status: open
+        }
+        emit SessionOpened(...)
+
+settle_claim(session_id, bytes_used)
+    // Operator-side first half.
     requires:
         sessions[session_id].status == open
-        seq > sessions[session_id].receipt_seq
-        len(route_open) == len(route_commit)
-        each commitment opens to a registered + active validator
-        sum(split_bps) == 10000
-        verify_ed25519(client_session_pubkey,
-                       sha256(tag_receipt || session_id || seq || ct), client_sig)
-        fhe_ciphertext_valid(final_receipt_ct, exit.fhe_pubkey)
-        fhe_verify_le(final_receipt_ct, claimed_max, exit.fhe_pubkey, le_proof)
+        sessions[session_id].exit == caller
+        endpoints[caller].active && stake[caller] >= MIN_STAKE
+        !slashed[caller]
     effects:
-        for each hop:
-            ct_for_hop = fhe_derive_per_hop_ct(...)
-            credit = fhe_mul_const(ct_for_hop, hop.price * hop.split_bps / 10000)
-            enc_earnings[hop.addr] = fhe_add(enc_earnings[hop.addr], credit)
-            validators[hop.addr].reputation += 1
-        if claimed_max < deposit:
-            emit_private_transfer(stealth_target_from(refund_stealth_output),
-                                  deposit - claimed_max)
-        sessions[session_id].status = settled
-        sessions[session_id].receipt_seq = seq
+        if operator_claims[session_id].set:
+            if same bytes_used: no-op (idempotent retry)
+            else: SLASH operator + refund deposit + status=refunded
+        else:
+            operator_claims[session_id] = {bytes_used, claimed_at}
+            emit SettleClaimed(...)
+
+settle_confirm(session_id, bytes_used)
+    // Client-side second half. Only opener can call.
+    requires:
+        sessions[session_id].status == open
+        sessions[session_id].opener == caller
+        operator_claims[session_id].set
+    effects:
+        if operator_claims[session_id].bytes_used != bytes_used:
+            client_confirms[session_id] = {bytes_used, claimed_at}
+            emit SettleDispute(...)   // session stays open
+        else:
+            total = bytes_used * endpoints[exit].price_per_mb
+            require total <= deposit
+            protocol_fee = total * fee_bps / 10000
+            net_pay = total - protocol_fee
+            refund = deposit - total
+            enc_earnings[exit] += net_pay   // HFHE add_const
+            treasury += protocol_fee
+            tailnet.treasury += refund
+            sessions[session_id].status = settled
+            emit SettleConfirmed(...) ; emit SessionSettled(...)
 
 claim_no_show(session_id)
     requires:
         sessions[session_id].status == open
         epoch >= opened_at + session_grace_epochs
-        receipt_seq == 0
+        !operator_claims[session_id].set
     effects:
-        emit_private_transfer(stealth_target, deposit)
+        tailnet.treasury += deposit
         sessions[session_id].status = refunded
 
-slash_no_show_with_open(session_id, entry_addr, entry_blind)
-    optional follow-up: client reveals the entry hop and slashes a
-    fraction of bond.
+sweep_expired_session(session_id)
+    long-tail cleanup if neither side closes the session: 1% bounty
+    to the sweeper, rest returned to tailnet treasury.
 ```
+
+#### Hash-precommit join tokens
+
+Tailnet owners pre-publish `sha256(preimage)` via
+`precommit_join_token`; anyone holding the preimage redeems via
+`redeem_join_token`, which `sha256`-checks and joins them. No
+signature verification needed — the preimage IS the capability.
+This replaced the earlier "signed-token" design that needed
+`verify_ed25519`.
 
 ### 1.3 Earnings claim (validator)
 
