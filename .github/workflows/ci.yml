@@ -104,7 +104,7 @@ jobs:
           echo "$HOME/.elan/bin" >> $GITHUB_PATH
       - name: lake build
         run: |
-          cd proofs/lean && lake build || echo "::warning::Lean build failed; treated as advisory."
+          cd proofs/lean && lake build
 
   kani:
     name: Kani harnesses

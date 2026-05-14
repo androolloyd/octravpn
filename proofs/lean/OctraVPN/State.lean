@@ -20,6 +20,10 @@ abbrev Addr := Nat
 abbrev Bytes := List UInt8
 abbrev Epoch := Nat
 abbrev OctRaw := Nat
+/-- v1 AML uses int counters for tailnet and session IDs (matches
+    `tailnet_count`, `session_count` in `program/main.aml`). -/
+abbrev TailnetId := Nat
+abbrev SessionId := Nat
 
 inductive SessionStatus where
   | open      : SessionStatus
@@ -55,7 +59,7 @@ def Tailnet.empty : Tailnet :=
 
 /-- A single-hop session record. -/
 structure Session where
-  tailnetId       : Bytes
+  tailnetId       : TailnetId
   exit            : Addr
   deposit         : OctRaw
   openedAt        : Epoch
@@ -102,8 +106,8 @@ structure ProgramState where
   endpointUnbonding : Map Addr Unbonding
   /-- Permanently slashed addresses. -/
   endpointSlashed  : Map Addr Bool
-  tailnets         : Map Bytes Tailnet
-  sessions         : Map Bytes (Option Session)
+  tailnets         : Map TailnetId Tailnet
+  sessions         : Map SessionId (Option Session)
   /-- Encrypted earnings (modeled as plaintext for proof purposes;
       real Octra holds HFHE ciphertext). -/
   encEarn          : Map Addr Nat

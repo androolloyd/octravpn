@@ -1,3 +1,5 @@
+import OctraVPN.State
+
 /-!
 # Entrypoints, modeled as state-transition functions (v1).
 
@@ -15,11 +17,9 @@ The v1 model is single-hop with validator-only `settleSession`:
   verification).
 -/
 
-import OctraVPN.State
-
 namespace OctraVPN
 
-variable [DecidableEq Bytes]
+-- Nat has DecidableEq built-in; no auxiliary variable needed.
 
 -- ============================================================
 -- Operator stake lifecycle
@@ -43,13 +43,13 @@ def unbondEndpoint (s : ProgramState) (caller : Addr) : Option ProgramState :=
   else
     let unlock := s.currentEpoch + s.params.unbondGraceEpochs
     let unb : Unbonding := { stake := amt, unlockEpoch := unlock }
-    let rec := s.endpoints caller
+    let epRec := s.endpoints caller
     let s1 := { s with
                 endpointUnbonding := s.endpointUnbonding.update caller unb,
                 endpointStake := s.endpointStake.update caller 0 }
-    if rec.active then
-      let rec' := { rec with active := false }
-      some { s1 with endpoints := s1.endpoints.update caller rec' }
+    if epRec.active then
+      let recPrime := { epRec with active := false }
+      some { s1 with endpoints := s1.endpoints.update caller recPrime }
     else
       some s1
 
@@ -78,15 +78,15 @@ def govSlashOperator (s : ProgramState) (caller op : Addr) :
     if total = 0 then none
     else
       let burnAmt := total * s.params.slashBurnBps / 10000
-      let rec := s.endpoints op
+      let epRec := s.endpoints op
       let s1 := { s with
                   endpointStake := s.endpointStake.update op 0,
                   endpointUnbonding := s.endpointUnbonding.update op Unbonding.empty,
                   endpointSlashed := s.endpointSlashed.update op true,
                   programTreasury := s.programTreasury + burnAmt }
-      if rec.active then
-        let rec' := { rec with active := false }
-        some { s1 with endpoints := s1.endpoints.update op rec' }
+      if epRec.active then
+        let recPrime := { epRec with active := false }
+        some { s1 with endpoints := s1.endpoints.update op recPrime }
       else
         some s1
 
@@ -104,29 +104,29 @@ def registerEndpoint
   else if s.endpointStake caller < s.params.minEndpointStake then none
   else if price = 0 then none
   else
-    let rec : EndpointRecord :=
+    let epRec : EndpointRecord :=
       { EndpointRecord.empty with
         active := true,
         endpoint := endpoint,
         region := region,
         pricePerMb := price,
         registeredAt := s.currentEpoch }
-    some { s with endpoints := s.endpoints.update caller rec }
+    some { s with endpoints := s.endpoints.update caller epRec }
 
 /-- Retire an endpoint. -/
 def retireEndpoint (s : ProgramState) (caller : Addr) : Option ProgramState :=
-  let rec := s.endpoints caller
-  if ¬ rec.active then none
+  let epRec := s.endpoints caller
+  if ¬ epRec.active then none
   else
-    let rec' := { rec with active := false }
-    some { s with endpoints := s.endpoints.update caller rec' }
+    let recPrime := { epRec with active := false }
+    some { s with endpoints := s.endpoints.update caller recPrime }
 
 -- ============================================================
 -- Tailnet lifecycle
 -- ============================================================
 
 def createTailnet
-    (s : ProgramState) (owner : Addr) (tailnetId : Bytes) (deposit : Nat) :
+    (s : ProgramState) (owner : Addr) (tailnetId : TailnetId) (deposit : Nat) :
     Option ProgramState :=
   let existing := s.tailnets tailnetId
   if existing.owner ≠ 0 then none
@@ -141,7 +141,7 @@ def createTailnet
     some { s with tailnets := s.tailnets.update tailnetId t }
 
 def addMember
-    (s : ProgramState) (tailnetId : Bytes) (caller member : Addr) :
+    (s : ProgramState) (tailnetId : TailnetId) (caller member : Addr) :
     Option ProgramState :=
   let t := s.tailnets tailnetId
   if t.owner ≠ caller then none
@@ -151,7 +151,7 @@ def addMember
     some { s with tailnets := s.tailnets.update tailnetId t' }
 
 def depositToTailnet
-    (s : ProgramState) (tailnetId : Bytes) (amount : Nat) :
+    (s : ProgramState) (tailnetId : TailnetId) (amount : Nat) :
     Option ProgramState :=
   if amount = 0 then none
   else
@@ -162,7 +162,7 @@ def depositToTailnet
       some { s with tailnets := s.tailnets.update tailnetId t' }
 
 def configureTailnetExit
-    (s : ProgramState) (tailnetId : Bytes) (caller exit : Addr) :
+    (s : ProgramState) (tailnetId : TailnetId) (caller exit : Addr) :
     Option ProgramState :=
   let t := s.tailnets tailnetId
   if t.owner ≠ caller then none
@@ -177,7 +177,7 @@ def configureTailnetExit
 
 /-- Open a single-hop session against a configured exit. -/
 def openSession
-    (s : ProgramState) (caller : Addr) (tailnetId sid : Bytes)
+    (s : ProgramState) (caller : Addr) (tailnetId : TailnetId) (sid : SessionId)
     (exit : Addr) (maxPay : Nat) : Option ProgramState :=
   let t := s.tailnets tailnetId
   if caller ∉ t.members then none
@@ -202,7 +202,7 @@ def openSession
     rest. Earnings credit is plaintext-modeled here; the FHE
     homomorphism makes the chain operation equivalent. -/
 def settleSession
-    (s : ProgramState) (sid : Bytes) (caller : Addr) (bytesUsed : Nat) :
+    (s : ProgramState) (sid : SessionId) (caller : Addr) (bytesUsed : Nat) :
     Option ProgramState :=
   match s.sessions sid with
   | none => none
@@ -210,8 +210,8 @@ def settleSession
     if sess.status ≠ SessionStatus.open then none
     else if caller ≠ sess.exit then none
     else
-      let rec := s.endpoints caller
-      let totalPaid := rec.pricePerMb * bytesUsed
+      let epRec := s.endpoints caller
+      let totalPaid := epRec.pricePerMb * bytesUsed
       if totalPaid > sess.deposit then none
       else
         let fee := totalPaid * s.params.protocolFeeBps / 10000
@@ -224,7 +224,7 @@ def settleSession
             status := SessionStatus.settled,
             paidBytes := bytesUsed }
         let curEarn := s.encEarn caller
-        let recBumped := { rec with reputation := rec.reputation + 1 }
+        let recBumped := { epRec with reputation := epRec.reputation + 1 }
         some { s with
           sessions := s.sessions.update sid (some upd),
           tailnets := s.tailnets.update sess.tailnetId t',
@@ -234,7 +234,7 @@ def settleSession
 
 /-- No-show refund: after grace, the deposit returns to the
     tailnet treasury. -/
-def claimNoShow (s : ProgramState) (sid : Bytes) : Option ProgramState :=
+def claimNoShow (s : ProgramState) (sid : SessionId) : Option ProgramState :=
   match s.sessions sid with
   | none => none
   | some sess =>

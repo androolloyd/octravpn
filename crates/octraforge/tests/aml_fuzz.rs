@@ -24,6 +24,7 @@ use serde_json::json;
 
 const N_VALIDATORS: usize = 3;
 const N_CLIENTS: usize = 2;
+const OWNER_ADDR: &str = "octGOVOWNERfuzz0000000000000000000000000001";
 
 fn validator_addr(i: usize) -> String {
     format!("octV{i:040x}")
@@ -59,7 +60,11 @@ fn fuzz_random_aml_call_sequences_preserve_invariants() {
     let mut rng = StdRng::seed_from_u64(seed);
 
     let mut ctx = ForgeCtx::new();
-    // Pre-promote N validators on the mock chain.
+    // Set a program owner so gov_slash_operator is callable.
+    ctx.set_program_owner(OWNER_ADDR);
+    // Pre-bond all candidate validators so register_endpoint passes
+    // the stake gate. Tests that want to explore the un-bonded
+    // failure path do so via op_unbond_endpoint below.
     for i in 0..N_VALIDATORS {
         ctx.become_octra_validator(&validator_addr(i));
     }
@@ -71,7 +76,7 @@ fn fuzz_random_aml_call_sequences_preserve_invariants() {
     };
 
     for step in 0..budget {
-        let op = rng.gen_range(0..7);
+        let op = rng.gen_range(0..10);
         let _ = run_one_op(&mut ctx, &mut fz, &mut rng, op);
         // Verify all invariants hold after every step.
         aml_invariants::check_all(&ctx).unwrap_or_else(|e| {
@@ -96,6 +101,9 @@ fn run_one_op(
         4 => op_open_session(ctx, fz, rng),
         5 => op_settle_session(ctx, fz, rng),
         6 => op_deposit_to_tailnet(ctx, fz, rng),
+        7 => op_bond_endpoint(ctx, fz, rng),
+        8 => op_unbond_endpoint(ctx, fz, rng),
+        9 => op_gov_slash_operator(ctx, fz, rng),
         _ => Ok(()),
     }
 }
@@ -231,5 +239,59 @@ fn op_deposit_to_tailnet(
     let amount = 1 + rng.gen_range(0..200);
     ctx.prank(&depositor);
     let _ = ctx.call_deposit_to_tailnet(tid, amount);
+    Ok(())
+}
+
+/// Try to bond more stake for a random validator. Exercises the
+/// bond invariants (slashed + already-unbonding rejections).
+fn op_bond_endpoint(
+    ctx: &mut ForgeCtx,
+    _fz: &mut FuzzState,
+    rng: &mut StdRng,
+) -> Result<(), String> {
+    let idx = rng.gen_range(0..N_VALIDATORS);
+    let addr = validator_addr(idx);
+    let amount = 1 + rng.gen_range(0..(octravpn_mock_rpc::MIN_ENDPOINT_STAKE / 2));
+    ctx.prank(&addr);
+    let _ = ctx.call_bond_endpoint(amount);
+    Ok(())
+}
+
+/// Try to unbond a random validator. Exercises the unbonding-state
+/// invariants (active → inactive, stake → 0).
+fn op_unbond_endpoint(
+    ctx: &mut ForgeCtx,
+    fz: &mut FuzzState,
+    rng: &mut StdRng,
+) -> Result<(), String> {
+    let idx = rng.gen_range(0..N_VALIDATORS);
+    let addr = validator_addr(idx);
+    ctx.prank(&addr);
+    if ctx.call_unbond_endpoint().is_ok() {
+        // Drop from `registered` so subsequent ops know this
+        // operator's endpoint is no longer serving.
+        fz.registered.retain(|a| a != &addr);
+    }
+    Ok(())
+}
+
+/// Owner submits gov_slash_operator. Exercises slash invariants
+/// (stake → 0, slashed flag, endpoint deactivation).
+fn op_gov_slash_operator(
+    ctx: &mut ForgeCtx,
+    fz: &mut FuzzState,
+    rng: &mut StdRng,
+) -> Result<(), String> {
+    if fz.registered.is_empty() {
+        return Ok(());
+    }
+    let target = fz.registered[rng.gen_range(0..fz.registered.len())].clone();
+    ctx.prank(OWNER_ADDR);
+    if ctx
+        .call_gov_slash_operator(&target, "fuzz-evidence")
+        .is_ok()
+    {
+        fz.registered.retain(|a| a != &target);
+    }
     Ok(())
 }

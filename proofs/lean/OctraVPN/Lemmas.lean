@@ -1,3 +1,6 @@
+import OctraVPN.State
+import OctraVPN.Entrypoints
+
 /-!
 # Structural lemmas about the OctraVPN spec (v1).
 
@@ -27,12 +30,9 @@ Claim lemmas:
 - `claim_requires_exact_match` — only an exact-match claim succeeds.
 -/
 
-import OctraVPN.State
-import OctraVPN.Entrypoints
-
 namespace OctraVPN
 
-variable [DecidableEq Bytes]
+-- Nat has DecidableEq built-in; no auxiliary variable needed.
 
 theorem Map.update_eq {α β} [DecidableEq α]
     (m : Map α β) (k : α) (v : β) : (m.update k v) k = v := by
@@ -60,8 +60,7 @@ theorem register_requires_stake
   · simp [h1, h2] at h
   by_cases h3 : s.endpointStake caller < s.params.minEndpointStake
   · simp [h1, h2, h3] at h
-  · push_neg at h3
-    exact h3
+  · exact Nat.le_of_not_lt h3
 
 /-- A successful `registerEndpoint` cannot come from a slashed addr. -/
 theorem register_not_slashed
@@ -168,8 +167,8 @@ theorem slash_requires_owner
   unfold govSlashOperator at h
   by_cases h1 : caller ≠ s.programOwner
   · simp [h1] at h
-  · push_neg at h1
-    exact h1
+  · -- h1 : ¬ (a ≠ b) ⇒ a = b. Decidable equality on Addr (Nat).
+    exact Decidable.of_not_not h1
 
 -- ============================================================
 -- Session lemmas
@@ -178,7 +177,7 @@ theorem slash_requires_owner
 /-- A successful `settleSession` requires the caller to match the
     session's recorded exit operator. -/
 theorem settle_requires_caller_is_exit
-    (s s' : ProgramState) (sid : Bytes) (caller : Addr) (bytes : Nat)
+    (s s' : ProgramState) (sid : SessionId) (caller : Addr) (bytes : Nat)
     (h : settleSession s sid caller bytes = some s') :
     ∀ prev, s.sessions sid = some prev → caller = prev.exit := by
   intro prev hprev
@@ -188,12 +187,11 @@ theorem settle_requires_caller_is_exit
   · simp [h1] at h
   by_cases h2 : caller ≠ prev.exit
   · simp [h1, h2] at h
-  · push_neg at h2
-    exact h2
+  · exact Decidable.of_not_not h2
 
 /-- After `settleSession`, the session is `settled`. -/
 theorem settle_finalizes
-    (s s' : ProgramState) (sid : Bytes) (caller : Addr) (bytes : Nat)
+    (s s' : ProgramState) (sid : SessionId) (caller : Addr) (bytes : Nat)
     (h : settleSession s sid caller bytes = some s') :
     ∃ sess', s'.sessions sid = some sess' ∧
              sess'.status = SessionStatus.settled := by
@@ -210,13 +208,15 @@ theorem settle_finalizes
     · simp [h1, h2, h3] at h
     · simp [h1, h2, h3] at h
       subst h
-      refine ⟨_, ?_, rfl⟩
-      unfold Map.update
-      simp
+      -- Witness: the updated session record built by settleSession.
+      refine ⟨{ prev with status := SessionStatus.settled,
+                          paidBytes := bytes }, ?_, ?_⟩
+      · unfold Map.update; simp
+      · rfl
 
 /-- The total payment from settle is bounded by the session deposit. -/
 theorem settle_bounded_by_deposit
-    (s s' : ProgramState) (sid : Bytes) (caller : Addr) (bytes : Nat)
+    (s s' : ProgramState) (sid : SessionId) (caller : Addr) (bytes : Nat)
     (h : settleSession s sid caller bytes = some s') :
     ∀ prev, s.sessions sid = some prev →
       (s.endpoints caller).pricePerMb * bytes ≤ prev.deposit := by
@@ -229,12 +229,11 @@ theorem settle_bounded_by_deposit
   · simp [h1, h2] at h
   by_cases h3 : (s.endpoints caller).pricePerMb * bytes > prev.deposit
   · simp [h1, h2, h3] at h
-  · push_neg at h3
-    exact h3
+  · exact Nat.le_of_not_lt h3
 
 /-- The refund from settle returns to the tailnet treasury. -/
 theorem settle_returns_refund_to_treasury
-    (s s' : ProgramState) (sid : Bytes) (caller : Addr) (bytes : Nat)
+    (s s' : ProgramState) (sid : SessionId) (caller : Addr) (bytes : Nat)
     (h : settleSession s sid caller bytes = some s') :
     ∀ prev, s.sessions sid = some prev →
       let total := (s.endpoints caller).pricePerMb * bytes
@@ -251,8 +250,9 @@ theorem settle_returns_refund_to_treasury
   by_cases h3 : (s.endpoints caller).pricePerMb * bytes > prev.deposit
   · simp [h1, h2, h3] at h
   · simp [h1, h2, h3] at h
-    push_neg at h3
-    refine ⟨h3, ?_⟩
+    -- h3 : ¬ a > b ⇒ a ≤ b. omega closes the bound side; subst
+    -- + simp closes the treasury equality.
+    refine ⟨by omega, ?_⟩
     subst h
     unfold Map.update
     simp
@@ -262,7 +262,7 @@ theorem settle_returns_refund_to_treasury
 -- ============================================================
 
 theorem create_tailnet_seeds_treasury
-    (s s' : ProgramState) (owner : Addr) (tid : Bytes) (deposit : Nat)
+    (s s' : ProgramState) (owner : Addr) (tid : TailnetId) (deposit : Nat)
     (h : createTailnet s owner tid deposit = some s') :
     (s'.tailnets tid).treasury = deposit ∧
     (s'.tailnets tid).owner = owner ∧
@@ -310,8 +310,10 @@ theorem claim_requires_exact_match
   · simp [h1, h2, h3] at h
   by_cases h4 : s.encEarn caller ≠ amount
   · simp [h1, h2, h3, h4] at h
-  · push_neg at h4
-    exact h4
+  · -- `h4 : ¬ s.encEarn caller ≠ amount`. We don't have Mathlib's
+    -- push_neg here; the explicit double-negation elimination via
+    -- `Decidable.of_not_not` works on `Nat` equality (decidable).
+    exact Decidable.of_not_not h4
 
 /-- After a successful claim, the earnings ledger is reset to zero. -/
 theorem claim_resets_encEarn

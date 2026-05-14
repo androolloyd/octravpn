@@ -220,25 +220,40 @@ ClaimEarnings(v) ==
                     members, exits, program_treasury, sessions, nextSession,
                     refunded >>
 
+\* Next-actions choose canonical values from each domain to keep
+\* the state space tractable for TLC. The interesting variation is
+\* the action sequencing + (paid_amount vs deposit), not value
+\* combinatorics, so we fix amounts to one or two canonical points.
 Next ==
     \/ \E e \in Endpoints: BondEndpoint(e, MinEndpointStake)
     \/ \E e \in Endpoints: RegisterEndpoint(e)
     \/ \E e \in Endpoints: RetireEndpoint(e)
     \/ \E e \in Endpoints: GovSlashOperator(e)
-    \/ \E t \in Tailnets, c \in Clients, d \in {MinTailnetDeposit, MinTailnetDeposit + 1}:
-            CreateTailnet(t, c, d)
+    \/ \E t \in Tailnets, c \in Clients: CreateTailnet(t, c, MinTailnetDeposit)
     \/ \E t \in Tailnets, c \in Clients: AddMember(t, c)
     \/ \E t \in Tailnets, e \in Endpoints: ConfigureTailnetExit(t, e)
-    \/ \E t \in Tailnets, a \in {1, 2}: DepositToTailnet(t, a)
-    \/ \E sid \in {nextSession}, t \in Tailnets, c \in Clients, e \in Endpoints,
-          d \in {MinDeposit, MinDeposit + 1}:
-            OpenSession(sid, t, c, e, d)
-    \/ \E sid \in DOMAIN sessions, caller \in Endpoints, paid \in 0..MinDeposit + 1:
+    \/ \E t \in Tailnets: DepositToTailnet(t, 1)
+    \/ \E sid \in {nextSession}, t \in Tailnets, c \in Clients, e \in Endpoints:
+            OpenSession(sid, t, c, e, MinDeposit)
+    \/ \E sid \in DOMAIN sessions, caller \in Endpoints, paid \in {0, MinDeposit}:
             SettleSession(sid, caller, paid)
     \/ \E sid \in DOMAIN sessions: ClaimNoShow(sid)
     \/ \E v \in Endpoints: ClaimEarnings(v)
 
 Spec == Init /\ [][Next]_vars
+
+\* CONSTRAINT bound for TLC: cap the action count so model-checking
+\* terminates. With MaxSeq sessions and Endpoints * Endpoints bond
+\* combinations the state space is still combinatorial; this
+\* bounds the exploration to the interesting safety properties.
+StateBound ==
+    /\ nextSession <= MaxSeq
+    /\ refunded <= MaxSeq * MinDeposit * 4
+    /\ paid_out <= MaxSeq * MinDeposit * 4
+    /\ program_treasury <= MaxSeq * MinDeposit * 4
+    /\ \A t \in Tailnets: treasury[t] <= MinTailnetDeposit + MaxSeq * MinDeposit
+    /\ \A e \in Endpoints: enc_earn[e] <= MaxSeq * MinDeposit
+    /\ \A e \in Endpoints: endpoint_stake[e] <= MinEndpointStake * 2
 
 (* ---------------------------- INVARIANTS ---------------------------- *)
 
@@ -293,9 +308,13 @@ Invariants ==
 (* ---------------------------- LIVENESS ---------------------------- *)
 
 \* Every open session eventually transitions to settled or refunded.
+\* The right-hand side guards against `sid` no longer being in the
+\* domain (which shouldn't happen, but TLC evaluates eagerly so we
+\* defend against an unguarded tuple-access).
 Liveness_SettleOrRefund ==
     \A sid \in 0..MaxSeq:
         (sid \in DOMAIN sessions /\ sessions[sid].status = "open")
-            ~> sessions[sid].status \in {"settled", "refunded"}
+            ~> (sid \notin DOMAIN sessions
+                \/ sessions[sid].status \in {"settled", "refunded"})
 
 =============================================================================
