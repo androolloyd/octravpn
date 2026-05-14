@@ -142,7 +142,7 @@ pub fn doctor() -> Result<()> {
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(target_os = "macos")]
 fn is_root() -> bool {
     // libc::geteuid is unsafe to call without a crate; check $USER/$UID
     // env vars and the existence of /var/run/sudo as proxies.
