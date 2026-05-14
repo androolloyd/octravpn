@@ -68,6 +68,16 @@ enum Cmd {
     /// zero-proof and transfers plaintext OU; the operator's wallet
     /// then wraps it in a native stealth tx for unlinkable payout.
     ClaimEarnings,
+    /// Submit `settle_claim(session_id, bytes_used)` for a closed
+    /// session. The operator MUST submit the same bytes_used per
+    /// session for life — equivocation slashes the operator bond
+    /// in-AML.
+    SettleClaim {
+        #[arg(long)]
+        session_id: u64,
+        #[arg(long)]
+        bytes_used: u64,
+    },
     /// Print derived addresses / pubkeys without changing on-chain state.
     Identity,
     /// Add (delta_amount, delta_blind) to the local earnings accumulator.
@@ -108,6 +118,10 @@ async fn main() -> Result<()> {
         Cmd::FinalizeUnbond => hub.finalize_unbond().await,
         Cmd::Register => hub.register_endpoint().await,
         Cmd::ClaimEarnings => hub.claim_earnings().await,
+        Cmd::SettleClaim {
+            session_id,
+            bytes_used,
+        } => hub.settle_claim(session_id, bytes_used).await,
         Cmd::AccumulatorAdd {
             delta_amount,
             delta_blind_hex,

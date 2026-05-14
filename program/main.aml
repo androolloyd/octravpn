@@ -53,9 +53,18 @@ contract OctraVPN {
   struct Session {
     tailnet_id: int
     exit: address              // single configured exit (v1: single-hop)
+    opener: address            // wallet that called open_session; only it can confirm settlement
     deposit: int               // locked from tailnet treasury at open
     opened_at: int
     status: int                // 0=open, 1=settled, 2=refunded
+  }
+
+  /// Operator's or client's settlement claim for a session. Two
+  /// of these (one from each side) gate `settle` — see §settle.
+  struct ClaimRecord {
+    set: int                   // 1 if a claim has been recorded
+    bytes_used: int
+    claimed_at: int
   }
 
   // ============================================================
@@ -80,9 +89,14 @@ contract OctraVPN {
   event TailnetAclUpdated(tailnet_id: int, acl_policy: string)
 
   event SessionOpened(session_id: int, tailnet_id: int, exit: address, deposit: int, opened_at: int)
+  event SettleClaimed(session_id: int, exit: address, bytes_used: int)
+  event SettleConfirmed(session_id: int, opener: address, bytes_used: int)
+  event SettleDispute(session_id: int, operator_bytes: int, client_bytes: int)
   event SessionSettled(session_id: int, exit: address, bytes_used: int, total_paid: int, refund: int)
   event SessionRefunded(session_id: int, reason: string)
   event SessionSwept(session_id: int)
+  event JoinTokenPrecommitted(tailnet_id: int, token_hash: bytes)
+  event JoinTokenRedeemed(tailnet_id: int, member: address, token_hash: bytes)
 
   event EarningsClaimed(operator: address, amount: int)
 
@@ -139,6 +153,19 @@ contract OctraVPN {
     // Sessions
     session_count: int
     sessions: map[int]Session
+
+    // Two-tx settlement: operator's claim + client's confirmation.
+    // Settlement only applies when both agree on `bytes_used`. A
+    // mismatch records a public dispute (both claims stay on chain).
+    operator_claims: map[int]ClaimRecord
+    client_confirms: map[int]ClaimRecord
+
+    // Pre-auth join tokens (hash-precommit pattern: owner pre-
+    // publishes sha256(preimage); anyone with the preimage redeems).
+    // join_token_commits[tid][hash] = 1 means owner published it.
+    // join_token_redeemed[hash] = 1 means it's been used once.
+    join_token_commits: map[int]map[bytes]int
+    join_token_redeemed: map[bytes]int
 
     // Devices
     device_owner: map[address]address
@@ -464,6 +491,52 @@ contract OctraVPN {
   }
 
   // ============================================================
+  // Pre-auth join tokens (hash-precommit pattern).
+  // ============================================================
+  //
+  // We can't verify an off-chain Ed25519 signature inside AML, so
+  // we substitute a hash-precommit: the tailnet owner publishes
+  // `sha256(token_preimage)` on chain via `precommit_join_token`;
+  // anyone holding the preimage redeems via `redeem_join_token`.
+  //
+  // Trade-off vs the v0 design: the token hash is publicly visible
+  // on chain at issue time (chain observers see "this tailnet has
+  // a pending invite"), but no signature verification is needed.
+  // The preimage is shared off-chain (out-of-band) with the
+  // intended joiner.
+  //
+  // Tokens are one-shot: once redeemed, the hash is marked spent
+  // and can't be redeemed again.
+
+  fn precommit_join_token(tailnet_id: int, token_hash: bytes): bool {
+    require_not_paused()
+    require(tailnet_id < self.tailnet_count, "tailnet not found")
+    require(self.tailnets[tailnet_id].owner == caller, "not tailnet owner")
+    require(len(token_hash) == 32, "token hash must be 32B (sha256)")
+    require(self.join_token_commits[tailnet_id][token_hash] == 0, "already committed")
+    require(self.join_token_redeemed[token_hash] == 0, "hash already used")
+    self.join_token_commits[tailnet_id][token_hash] = 1
+    emit JoinTokenPrecommitted(tailnet_id, token_hash)
+    return true
+  }
+
+  fn redeem_join_token(tailnet_id: int, token_preimage: bytes): bool {
+    require_not_paused()
+    require(tailnet_id < self.tailnet_count, "tailnet not found")
+    require(len(token_preimage) > 0, "preimage required")
+    let h = sha256(token_preimage)
+    require(self.join_token_commits[tailnet_id][h] == 1, "unknown token")
+    require(self.join_token_redeemed[h] == 0, "already redeemed")
+    require(self.members[tailnet_id][caller] == 0, "already member")
+    self.members[tailnet_id][caller] = 1
+    self.tailnets[tailnet_id].member_count = self.tailnets[tailnet_id].member_count + 1
+    self.join_token_redeemed[h] = 1
+    emit TailnetMemberAdded(tailnet_id, caller)
+    emit JoinTokenRedeemed(tailnet_id, caller, h)
+    return true
+  }
+
+  // ============================================================
   // Device registry
   // ============================================================
 
@@ -534,6 +607,7 @@ contract OctraVPN {
 
     self.sessions[sid].tailnet_id = tailnet_id
     self.sessions[sid].exit = exit_addr
+    self.sessions[sid].opener = caller
     self.sessions[sid].deposit = max_pay
     self.sessions[sid].opened_at = epoch
     self.sessions[sid].status = 0
@@ -542,11 +616,33 @@ contract OctraVPN {
     return sid
   }
 
-  // Validator-only settle. The exit operator reports bytes served;
-  // AML caps payment at the client's pre-deposited ceiling and
-  // refunds the remainder. Receipt integrity is economic
-  // (the deposit cap), not cryptographic.
-  fn settle_session(session_id: int, bytes_used: int): bool {
+  // ============================================================
+  // Two-tx settle: operator claims, client confirms.
+  // ============================================================
+  //
+  // Octra's runtime ed25519-verifies every tx before AML sees it,
+  // so when `settle_claim` fires we know the operator's signature
+  // is good, and when `settle_confirm` fires we know the client's
+  // signature is good. Two on-chain txs give us cryptographic
+  // dual-sig without an in-AML `verify_ed25519` host call.
+  //
+  // The state machine:
+  //   1. Operator calls `settle_claim(sid, bytes_used)`. AML records
+  //      the claim. If the operator already claimed a DIFFERENT
+  //      value for this session, that's equivocation and the
+  //      operator is slashed atomically right here.
+  //   2. Client (the session opener) calls
+  //      `settle_confirm(sid, bytes_used)` matching the operator's
+  //      claim → settlement applies (FHE earnings credit, refund,
+  //      fee). Mismatch → a public `SettleDispute` event with both
+  //      values; settlement does NOT apply.
+  //   3. If the client never confirms within grace, `claim_no_show`
+  //      refunds the deposit and the operator gets nothing.
+  //
+  // The dispute records (both signed txs) stay on chain as evidence
+  // for off-chain reputation / dispute-resolution systems.
+
+  fn settle_claim(session_id: int, bytes_used: int): bool {
     require_not_paused()
     require(session_id < self.session_count, "session not found")
     require(self.sessions[session_id].status == 0, "session not open")
@@ -554,7 +650,78 @@ contract OctraVPN {
     require(caller == self.sessions[session_id].exit, "not session exit")
     require(endpoint_is_active(caller), "operator inactive")
 
-    let price = self.endpoints[caller].price_per_mb
+    let prev_set = self.operator_claims[session_id].set
+    if prev_set == 1 {
+      let prev_bytes = self.operator_claims[session_id].bytes_used
+      if prev_bytes == bytes_used {
+        // Idempotent re-claim (network retry etc.): no-op.
+        return true
+      }
+      // Equivocation: same operator, same session, different bytes.
+      // Slash atomically using the same logic as gov_slash_operator
+      // (90 % burn, 10 % bounty to submitter, permanent flag).
+      let live = self.endpoint_stake[caller]
+      let unb = self.endpoint_unbonding_stake[caller]
+      let total = live + unb
+      let burn_amt = total * self.slash_burn_bps / BPS_DENOM
+      let bounty_amt = total - burn_amt
+      self.endpoint_stake[caller] = 0
+      self.endpoint_unbonding_stake[caller] = 0
+      self.endpoint_unbonding_unlock[caller] = 0
+      self.endpoint_slashed[caller] = 1
+      if self.endpoints[caller].active != 0 {
+        self.endpoints[caller].active = 0
+      }
+      self.treasury = self.treasury + burn_amt
+      // No bounty transfer here — caller IS the operator. The
+      // bounty is forfeited (it stays in self.treasury via burn).
+      self.treasury = self.treasury + bounty_amt
+      emit OperatorSlashed(caller, total, burn_amt + bounty_amt, 0)
+      // Force-refund the session deposit to the tailnet treasury;
+      // the session can't be settled by a slashed operator.
+      self.sessions[session_id].status = 2
+      let tid_eq = self.sessions[session_id].tailnet_id
+      let dep_eq = self.sessions[session_id].deposit
+      self.tailnets[tid_eq].treasury = self.tailnets[tid_eq].treasury + dep_eq
+      emit SessionRefunded(session_id, "operator-equivocation")
+      return false
+    }
+
+    self.operator_claims[session_id].set = 1
+    self.operator_claims[session_id].bytes_used = bytes_used
+    self.operator_claims[session_id].claimed_at = epoch
+    emit SettleClaimed(session_id, caller, bytes_used)
+    return true
+  }
+
+  // Client-side confirmation. The session opener (whoever called
+  // open_session) is the only address that can confirm.
+  fn settle_confirm(session_id: int, bytes_used: int): bool {
+    require_not_paused()
+    require(session_id < self.session_count, "session not found")
+    require(self.sessions[session_id].status == 0, "session not open")
+    require(bytes_used >= 0, "bytes >= 0")
+    require(caller == self.sessions[session_id].opener, "not session opener")
+
+    let op_set = self.operator_claims[session_id].set
+    require(op_set == 1, "operator has not claimed yet")
+    let op_bytes = self.operator_claims[session_id].bytes_used
+
+    if op_bytes != bytes_used {
+      // Disagreement. Record the dispute publicly. Settlement does
+      // NOT apply — either party can later call claim_no_show after
+      // grace to refund the deposit (operator gets nothing).
+      self.client_confirms[session_id].set = 1
+      self.client_confirms[session_id].bytes_used = bytes_used
+      self.client_confirms[session_id].claimed_at = epoch
+      emit SettleDispute(session_id, op_bytes, bytes_used)
+      return false
+    }
+
+    // Match — apply the settlement.
+    let exit_addr = self.sessions[session_id].exit
+    require(endpoint_is_active(exit_addr), "operator inactive")
+    let price = self.endpoints[exit_addr].price_per_mb
     let total_paid = bytes_used * price
     let deposit = self.sessions[session_id].deposit
     require(total_paid <= deposit, "claim exceeds escrow")
@@ -563,20 +730,21 @@ contract OctraVPN {
     let net_pay = total_paid - protocol_fee
     let refund = deposit - total_paid
 
-    // Mark settled.
     self.sessions[session_id].status = 1
+    self.client_confirms[session_id].set = 1
+    self.client_confirms[session_id].bytes_used = bytes_used
+    self.client_confirms[session_id].claimed_at = epoch
 
-    // Credit operator's encrypted earnings via FHE addition.
     if net_pay > 0 {
-      let pk = fhe_load_pk(caller)
-      let zero_ct = fhe_deser(self.op_zero_ct[caller])
+      let pk = fhe_load_pk(exit_addr)
+      let zero_ct = fhe_deser(self.op_zero_ct[exit_addr])
       let pay_ct = fhe_add_const(pk, zero_ct, net_pay)
-      let cur = fhe_deser(self.enc_earnings[caller])
+      let cur = fhe_deser(self.enc_earnings[exit_addr])
       let new_enc = fhe_add(pk, cur, pay_ct)
-      self.enc_earnings[caller] = fhe_ser(new_enc)
+      self.enc_earnings[exit_addr] = fhe_ser(new_enc)
     }
 
-    self.endpoints[caller].reputation = self.endpoints[caller].reputation + 1
+    self.endpoints[exit_addr].reputation = self.endpoints[exit_addr].reputation + 1
     if protocol_fee > 0 {
       self.treasury = self.treasury + protocol_fee
     }
@@ -586,7 +754,8 @@ contract OctraVPN {
       self.tailnets[tid].treasury = self.tailnets[tid].treasury + refund
     }
 
-    emit SessionSettled(session_id, caller, bytes_used, total_paid, refund)
+    emit SettleConfirmed(session_id, caller, bytes_used)
+    emit SessionSettled(session_id, exit_addr, bytes_used, total_paid, refund)
     return true
   }
 

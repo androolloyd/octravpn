@@ -217,6 +217,25 @@ impl Hub {
         Ok(())
     }
 
+    /// `settle_claim(session_id, bytes_used)` — operator-side half
+    /// of the two-tx settle. Submit once per session at session
+    /// close (or when the receipt rate crosses a threshold worth
+    /// settling). Equivocation slashes us in-AML, so callers must
+    /// commit to a single bytes_used per session.
+    pub(crate) async fn settle_claim(
+        self: &Arc<Self>,
+        session_id: u64,
+        bytes_used: u64,
+    ) -> Result<()> {
+        let nonce = self.chain.nonce().await?;
+        let fee = self.chain.fee("contract_call").await?;
+        let call = self.chain.build_settle_claim_call(session_id, bytes_used, fee, nonce);
+        let signed = self.chain.sign_call(call)?;
+        let hash = self.chain.submit_signed_tx(&signed).await?;
+        info!(%hash, session_id, bytes_used, "settle_claim submitted");
+        Ok(())
+    }
+
     /// Per-operator placeholder HFHE pubkey. Replaced when the libpvac
     /// SDK lands.
     fn hfhe_pubkey_placeholder(&self) -> String {

@@ -1,11 +1,20 @@
-//! Settlement and reclaim handlers.
+//! Client-side settlement handler.
 //!
-//! Flow:
-//!   1. GET /session/{id} on the exit node's control plane.
-//!   2. Take the exit's signed receipt proposal.
-//!   3. Verify the node sig.
-//!   4. Add the client's session-key signature.
-//!   5. Submit `settle_session` on chain with the dual-signed payload.
+//! Two-tx flow (v1 AML):
+//!   1. GET /session/{id} on the exit's control plane to learn the
+//!      exit's claimed `bytes_used` (informational; the AML does not
+//!      look at the receipt signatures).
+//!   2. Verify the exit's sig over its proposed receipt — that's
+//!      our local sanity check, not a chain-side enforcement.
+//!   3. Submit `settle_confirm(session_id, bytes_used)` on chain.
+//!      If our local count matches the exit's, settlement applies.
+//!      If we want to dispute, we submit a different value: the AML
+//!      records `SettleDispute` and leaves the session open.
+//!
+//! Equivocation: the exit is responsible for submitting its own
+//! `settle_claim`. If the exit ever submits two different claims
+//! for the same session, the AML slashes the operator's bond
+//! automatically. The client never has to do anything about it.
 
 use std::sync::Arc;
 
@@ -13,7 +22,7 @@ use anyhow::{anyhow, Context, Result};
 use octravpn_core::{
     control::{ProposedReceipt, SessionStateResponse},
     receipt::SignedReceipt,
-    session::{RouteOpening, SessionId},
+    session::SessionId,
     sig::verify,
 };
 use serde_json::json;
@@ -22,27 +31,22 @@ use tracing::info;
 use crate::runner::{ActiveSession, Client};
 
 pub(crate) async fn settle_active(client: &Arc<Client>, active: ActiveSession) -> Result<()> {
-    let openings: Vec<RouteOpening> = active
-        .route
-        .iter()
-        .map(|h| RouteOpening {
-            node_addr: h.validator.addr.clone(),
-            blind: octravpn_core::session::Blind::new(h.blind),
-            split_bps: h.split_bps,
-        })
-        .collect();
-
     let exit = active.route.last().ok_or_else(|| anyhow!("empty route"))?;
     let proposed = fetch_proposed_receipt(client, &exit.validator.endpoint, &active.session_id)
         .await
         .context("fetch proposed receipt from exit")?;
 
-    // Verify the exit's signature first.
+    // Local sanity: verify the exit's signature over its proposed
+    // receipt. The AML doesn't see this signature, but if the exit
+    // is sending us garbage we want to know before we submit a
+    // confirm against bogus bytes.
     let payload = proposed.receipt.signing_payload();
     verify(&proposed.node_pubkey, &payload, &proposed.node_sig)
         .context("verify exit's proposed-receipt signature")?;
 
-    // Client adds its session-key signature.
+    // The session-key signature is still useful for off-chain
+    // dispute resolution; build the full signed receipt and stash
+    // it locally even though we don't submit it.
     let client_sig = active.session_kp.sign(&payload);
     let signed = SignedReceipt {
         receipt: proposed.receipt,
@@ -53,7 +57,7 @@ pub(crate) async fn settle_active(client: &Arc<Client>, active: ActiveSession) -
     };
     signed.verify().context("dual-sig self-verify")?;
 
-    submit_settle(client, &active, &openings, &signed).await
+    submit_settle_confirm(client, &active, signed.receipt.bytes_used).await
 }
 
 pub(crate) async fn settle(_client: &Arc<Client>, _session_id: &str) -> Result<()> {
@@ -87,11 +91,10 @@ pub(crate) async fn reclaim(client: &Arc<Client>, session_id_hex: &str) -> Resul
     Ok(())
 }
 
-async fn submit_settle(
+async fn submit_settle_confirm(
     client: &Arc<Client>,
     active: &ActiveSession,
-    openings: &[RouteOpening],
-    signed: &SignedReceipt,
+    bytes_used: u64,
 ) -> Result<()> {
     let bal = client.rpc().balance(client.wallet_addr()).await?;
     let nonce = bal.pending_nonce.max(bal.nonce);
@@ -100,31 +103,23 @@ async fn submit_settle(
         .recommended_fee(Some("contract_call"))
         .await?
         .recommended;
+    let sid_u64 = active
+        .session_id
+        .as_u64()
+        .ok_or_else(|| anyhow!("v1 session ids are u64; got something else"))?;
     let call = json!({
         "kind": "contract_call",
         "from": client.wallet_addr().display(),
         "to": client.program_addr().display(),
-        "method": "settle_session",
-        "params": [
-            hex::encode(active.session_id.as_bytes()),
-            signed.receipt.seq,
-            signed.receipt.bytes_used,
-            hex::encode(signed.receipt.blind.as_bytes()),
-            hex::encode(signed.client_sig.0),
-            hex::encode(signed.node_sig.0),
-            openings.iter().map(|o| json!({
-                "node_addr": o.node_addr.display(),
-                "blind": hex::encode(o.blind.as_bytes()),
-                "split_bps": o.split_bps,
-            })).collect::<Vec<_>>(),
-        ],
+        "method": "settle_confirm",
+        "params": [sid_u64, bytes_used],
         "value": 0,
         "fee": fee,
         "nonce": nonce,
     });
     let signed_tx = crate::runner::sign_call(client.wallet_kp(), call)?;
     let r = client.rpc().submit(&signed_tx).await?;
-    info!(hash = %r.hash, "settle_session submitted");
+    info!(hash = %r.hash, session = sid_u64, bytes_used, "settle_confirm submitted");
     Ok(())
 }
 

@@ -281,9 +281,14 @@ async fn poll_session_id(rpc: &RpcClient, tx_hash: &str) -> Result<SessionId> {
         if let Some(events) = v.get("events").and_then(|x| x.as_array()) {
             for e in events {
                 if e.get("name").and_then(|x| x.as_str()) == Some("SessionOpened") {
-                    if let Some(id_hex) = e.get("session_id").and_then(|x| x.as_str()) {
-                        return SessionId::from_hex(id_hex)
-                            .ok_or_else(|| anyhow!("bad session id"));
+                    if let Some(sid) = e.get("session_id") {
+                        if let Some(id_u64) = sid.as_u64() {
+                            return Ok(SessionId::from_u64(id_u64));
+                        }
+                        if let Some(id_hex) = sid.as_str() {
+                            return SessionId::from_hex(id_hex)
+                                .ok_or_else(|| anyhow!("bad session id hex"));
+                        }
                     }
                 }
             }

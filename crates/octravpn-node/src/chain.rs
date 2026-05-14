@@ -196,6 +196,28 @@ impl ChainCtx {
         })
     }
 
+    /// `settle_claim(session_id, bytes_used)` — operator-side first
+    /// half of the two-tx settlement. The AML enforces caller =
+    /// session's exit and slashes on equivocation.
+    pub(crate) fn build_settle_claim_call(
+        &self,
+        session_id: u64,
+        bytes_used: u64,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        json!({
+            "kind": "contract_call",
+            "from": self.validator_addr.display(),
+            "to": self.program_addr.display(),
+            "method": "settle_claim",
+            "params": [session_id, bytes_used],
+            "value": 0,
+            "fee": fee,
+            "nonce": nonce,
+        })
+    }
+
     pub(crate) async fn submit_signed_tx(&self, signed: &Value) -> Result<String> {
         let r = self.rpc.submit(signed).await?;
         debug!(hash = %r.hash, "submitted tx");

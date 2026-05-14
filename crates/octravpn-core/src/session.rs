@@ -19,12 +19,35 @@ impl SessionId {
         Self(bytes)
     }
 
+    /// Wrap a v1 chain-side u64 session id as a 32-byte id by
+    /// big-endian encoding into the first 8 bytes, zero-padding the
+    /// rest. Cryptographic uses of `SessionId` (onion-stream key
+    /// derivation, replay tags) keep working — the extra 24 bytes
+    /// are just deterministic padding.
+    pub fn from_u64(id: u64) -> Self {
+        let mut buf = [0u8; 32];
+        buf[..8].copy_from_slice(&id.to_be_bytes());
+        Self(buf)
+    }
+
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
 
     pub fn into_bytes(self) -> [u8; 32] {
         self.0
+    }
+
+    /// Decode this id as the v1 AML's u64 form. Returns `None` if
+    /// the trailing 24 bytes are non-zero — i.e. if this id was not
+    /// constructed by `from_u64`.
+    pub fn as_u64(&self) -> Option<u64> {
+        if self.0[8..].iter().any(|b| *b != 0) {
+            return None;
+        }
+        let mut head = [0u8; 8];
+        head.copy_from_slice(&self.0[..8]);
+        Some(u64::from_be_bytes(head))
     }
 
     pub fn from_hex(s: &str) -> Option<Self> {

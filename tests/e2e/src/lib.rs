@@ -30,7 +30,7 @@ mod tests {
         let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
         let prog = program.to_string();
         tokio::spawn(async move {
-            octravpn_mock_rpc::serve(addr, prog).await.ok();
+            octra_mock_rpc::serve(addr, prog).await.ok();
         });
         sleep(Duration::from_millis(150)).await;
         Arc::new(())
@@ -169,19 +169,45 @@ mod tests {
             .and_then(|e| e["session_id"].as_u64())
             .unwrap();
 
-        // 7. Settle (validator-only): bytes_used=2 → 200 gross, 1 fee,
-        //    199 net pay, 800 refund.
-        let settle_tx = json!({
+        // 7. Two-tx settle. Operator claims bytes_used=2 first.
+        let claim_tx = json!({
             "kind": "contract_call",
             "from": val,
             "to": "octPROG",
-            "method": "settle_session",
+            "method": "settle_claim",
             "params": [sid, 2u64],
             "value": 0u64,
             "fee": 10u64,
             "nonce": 1u64,
         });
-        let r = rpc.submit(&settle_tx).await.unwrap();
+        let r = rpc.submit(&claim_tx).await.unwrap();
+        let tx = rpc.transaction(&r.hash).await.unwrap();
+        let names: Vec<_> = tx["events"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|e| e["name"].as_str().map(String::from))
+            .collect();
+        assert!(names.iter().any(|n| n == "SettleClaimed"));
+        assert!(
+            !names.iter().any(|n| n == "SessionSettled"),
+            "settlement must not apply on the claim tx alone"
+        );
+
+        // 8. Client confirms with matching bytes — settlement applies:
+        //    bytes_used=2 → 200 gross, 1 fee, 199 net pay, 800 refund.
+        let confirm_tx = json!({
+            "kind": "contract_call",
+            "from": client,
+            "to": "octPROG",
+            "method": "settle_confirm",
+            "params": [sid, 2u64],
+            "value": 0u64,
+            "fee": 10u64,
+            "nonce": 2u64,
+        });
+        let r = rpc.submit(&confirm_tx).await.unwrap();
         let tx = rpc.transaction(&r.hash).await.unwrap();
         let event = tx["events"]
             .as_array()
