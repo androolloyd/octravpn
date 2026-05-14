@@ -251,11 +251,15 @@ jobs:
     name: Update Homebrew tap
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+    # GitHub Actions forbids `secrets.*` in job-level `if`; gate the
+    # tap update at step level via env instead.
+    env:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - name: Update tap
+        if: env.HOMEBREW_TAP_TOKEN != ''
         run: |
-          echo "Homebrew formula update would happen here using ${{ secrets.HOMEBREW_TAP_TOKEN }}."
+          echo "Homebrew formula update would happen here using $HOMEBREW_TAP_TOKEN."
           # In practice: git clone the homebrew-tap repo, run a sed against
           # Formula/octravpn.rb to bump url+sha256, commit, push.
