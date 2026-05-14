@@ -1748,9 +1748,9 @@ dependencies = [
  "clap",
  "clap_complete",
  "hex",
+ "octra-mock-rpc",
  "octraforge",
  "octravpn-core",
- "octravpn-mock-rpc",
  "parking_lot",
  "predicates",
  "rand 0.8.6",
@@ -1765,22 +1765,55 @@ dependencies = [
 ]
 
 [[package]]
+name = "octra-core"
+version = "0.1.0"
+dependencies = [
+ "bs58",
+ "ed25519-dalek",
+ "parking_lot",
+ "rand 0.8.6",
+ "serde",
+ "serde_with",
+ "sha2",
+ "thiserror 1.0.69",
+ "zeroize",
+]
+
+[[package]]
+name = "octra-mock-rpc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "clap",
+ "curve25519-dalek",
+ "hex",
+ "octra-core",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "octraforge"
 version = "0.1.0"
 dependencies = [
  "curve25519-dalek",
  "hex",
- "octravpn-core",
- "octravpn-mock-rpc",
+ "octra-core",
+ "octra-mock-rpc",
  "parking_lot",
  "proptest",
  "rand 0.8.6",
  "serde",
  "serde_json",
  "sha2",
- "tempfile",
  "thiserror 1.0.69",
- "tokio",
  "tracing",
 ]
 
@@ -1866,6 +1899,7 @@ dependencies = [
  "num-bigint-dig",
  "num-integer",
  "num-traits",
+ "octra-core",
  "parking_lot",
  "pbkdf2",
  "proptest",
@@ -1892,8 +1926,8 @@ dependencies = [
  "anyhow",
  "curve25519-dalek",
  "hex",
+ "octra-mock-rpc",
  "octravpn-core",
- "octravpn-mock-rpc",
  "rand 0.8.6",
  "serde_json",
  "sha2",
@@ -1925,26 +1959,6 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
-]
-
-[[package]]
-name = "octravpn-mock-rpc"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "clap",
- "curve25519-dalek",
- "hex",
- "octravpn-core",
- "parking_lot",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "tower-http",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

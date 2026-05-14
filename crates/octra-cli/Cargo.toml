@@ -17,8 +17,8 @@ path = "src/lib.rs"
 
 [dependencies]
 octravpn-core      = { path = "../octravpn-core" }
-octravpn-mock-rpc  = { path = "../../tests/mocks" }
-octraforge         = { path = "../octraforge" }
+octra-mock-rpc     = { path = "../../../octra-foundry/crates/octra-mock-rpc" }
+octraforge         = { path = "../../../octra-foundry/crates/octraforge" }
 
 anyhow             = { workspace = true }
 base64             = { workspace = true }

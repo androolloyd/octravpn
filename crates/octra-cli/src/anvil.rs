@@ -1,6 +1,6 @@
 //! `octra anvil` — local devnet.
 //!
-//! Today this is a thin wrapper over `octravpn_mock_rpc::serve`. Forking
+//! Today this is a thin wrapper over `octra_mock_rpc::serve`. Forking
 //! is best-effort: at boot we snapshot a small set of state-shaped
 //! endpoints (`node_status`, `octra_listContracts`) from the remote
 //! URL into the in-memory mock. A real fork mode that mirrors arbitrary
@@ -51,7 +51,7 @@ pub fn run(args: &AnvilArgs) -> Result<()> {
     println!("anvil listening on http://{addr}/rpc");
     println!("  program addr: {}", args.program_addr);
     let program_addr = args.program_addr.clone();
-    rt.block_on(octravpn_mock_rpc::serve(addr, program_addr))?;
+    rt.block_on(octra_mock_rpc::serve(addr, program_addr))?;
     Ok(())
 }
 

@@ -6,7 +6,7 @@
 //!   - `octraforge::ForgeCtx` (in-process, no IO)
 //!   - `octra_cli::rpc_client` against `inprocess://` (in-process via
 //!      the CLI's rpc shim)
-//!   - HTTP `octravpn_mock_rpc::serve` (the same code anvil runs)
+//!   - HTTP `octra_mock_rpc::serve` (the same code anvil runs)
 //!
 //! Drift between any of these is a behavioral bug — `cast call` users
 //! should see the same answer as `forge` test runners.
@@ -21,7 +21,7 @@ async fn spawn_anvil(port: u16, prog: &str) -> Arc<()> {
     let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
     let p = prog.to_string();
     tokio::spawn(async move {
-        let _ = octravpn_mock_rpc::serve(addr, p).await;
+        let _ = octra_mock_rpc::serve(addr, p).await;
     });
     sleep(Duration::from_millis(150)).await;
     Arc::new(())

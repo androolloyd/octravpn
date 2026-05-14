@@ -4,18 +4,20 @@
 //! depend on a single coherent surface. Everything that goes onto the wire
 //! between client/node/chain lives here so types only get defined once.
 
-pub mod address;
+// Thin Octra primitives (address codec, ed25519 sig, branch-coverage
+// hooks) now live in the `octra-core` crate inside `octra-foundry/`.
+// We re-export them here so existing call sites keep working unchanged.
+pub use octra_core::{address, coverage, sig, CoreError, CoreResult};
+
 pub mod backend;
 pub mod bounded;
 pub mod commit;
 pub mod control;
-pub mod coverage;
 pub mod earnings;
 pub mod onion;
 pub mod receipt;
 pub mod rpc;
 pub mod session;
-pub mod sig;
 pub mod stealth;
 pub mod tx;
 pub mod util;
@@ -31,19 +33,3 @@ pub use session::{
     EndpointRecord, OpenSessionParams, RouteOpening, SessionId, SessionState, ValidatorRecord,
 };
 pub use sig::{KeyPair, PublicKey, Signature};
-
-/// Library-wide error type. Crates downstream return their own errors;
-/// this is just for shared utilities that don't already use `anyhow`.
-#[derive(Debug, thiserror::Error)]
-pub enum CoreError {
-    #[error("invalid length: expected {expected}, got {actual}")]
-    InvalidLength { expected: usize, actual: usize },
-    #[error("invalid encoding: {0}")]
-    InvalidEncoding(String),
-    #[error("crypto failure: {0}")]
-    Crypto(String),
-    #[error("rpc error: {0}")]
-    Rpc(String),
-}
-
-pub type CoreResult<T> = std::result::Result<T, CoreError>;

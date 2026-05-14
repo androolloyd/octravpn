@@ -7,9 +7,7 @@ members = [
     "crates/octravpn-tun",
     "crates/octravpn-mesh",
     "crates/octravpn-admin-ui",
-    "crates/octraforge",
     "crates/octra-cli",
-    "tests/mocks",
     "tests/e2e",
 ]
 

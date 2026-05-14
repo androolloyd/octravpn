@@ -8,6 +8,8 @@ rust-version.workspace = true
 description = "Shared types, Octra JSON-RPC client, crypto, and receipt formats for OctraVPN."
 
 [dependencies]
+octra-core  = { path = "../../../octra-foundry/crates/octra-core" }
+
 anyhow      = { workspace = true }
 async-trait = { workspace = true }
 base64      = { workspace = true }

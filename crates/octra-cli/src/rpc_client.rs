@@ -6,7 +6,7 @@
 //!      only the typed surface in `octravpn-core`. We dispatch raw
 //!      `(method, params)` pairs and return raw `Value`.
 //!   2. We want the same code path for integration tests, which run
-//!      against the in-process `octravpn_mock_rpc` without any network.
+//!      against the in-process `octra_mock_rpc` without any network.
 //!      `Endpoint::InProcess` carries an `AppState` we can poke
 //!      directly via `submit_tx` / `contract_call`-equivalent reads.
 //!
@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use octravpn_mock_rpc::AppState;
+use octra_mock_rpc::AppState;
 use parking_lot::RwLock;
 use serde_json::{json, Value};
 
@@ -34,7 +34,7 @@ pub enum Endpoint {
 /// with epoch=1 and the given program address.
 pub fn in_process(program_addr: impl Into<String>) -> Endpoint {
     let app = AppState {
-        state: Arc::new(RwLock::new(octravpn_mock_rpc::ChainState {
+        state: Arc::new(RwLock::new(octra_mock_rpc::ChainState {
             epoch: 1,
             ..Default::default()
         })),
@@ -130,7 +130,7 @@ fn call_in_process(app: &AppState, method: &str, params: &Value) -> Result<Value
         "octra_submit" => {
             let arr = params.as_array().ok_or_else(|| anyhow!("params not array"))?;
             let tx = arr.first().ok_or_else(|| anyhow!("tx missing"))?;
-            let (hash, _events) = octravpn_mock_rpc::submit_tx(app, tx)
+            let (hash, _events) = octra_mock_rpc::submit_tx(app, tx)
                 .map_err(|e| anyhow!("submit failed: {e}"))?;
             Ok(json!({"hash": hash, "status": "confirmed"}))
         }
@@ -161,7 +161,7 @@ fn call_in_process(app: &AppState, method: &str, params: &Value) -> Result<Value
                 .ok_or_else(|| anyhow!("method missing"))?;
             let p = arr.get(2).cloned().unwrap_or_else(|| json!([]));
             let p_arr = p.as_array().cloned().unwrap_or_default();
-            octravpn_mock_rpc::read_call(app, method, &p_arr)
+            octra_mock_rpc::read_call(app, method, &p_arr)
                 .map_err(|e| anyhow!("read failed: {e}"))
         }
         "octra_listContracts" => Ok(json!([{
@@ -211,7 +211,7 @@ fn call_in_process(app: &AppState, method: &str, params: &Value) -> Result<Value
             let amount = arr
                 .get(1)
                 .and_then(serde_json::Value::as_u64)
-                .unwrap_or(octravpn_mock_rpc::MIN_ENDPOINT_STAKE);
+                .unwrap_or(octra_mock_rpc::MIN_ENDPOINT_STAKE);
             app.seed_endpoint_stake(addr, amount);
             Ok(Value::Bool(true))
         }
