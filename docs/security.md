@@ -34,28 +34,40 @@ no toxic-waste ceremony).
 
 ## 3. Per-component guarantees
 
-### 3.1 Validator registration
+### 3.1 Operator registration
 
-- **Sybil cost = stake**: registration requires `bond ≥ min_bond` of OCT
-  bonded into the program. No alternative path. To create N fake VPN
-  identities an attacker bonds N × min_bond OCT.
-- **Attestation binds to identity**: `register_validator` requires an
-  ed25519 signature over `H(self_addr || "octravpn-validator-bond" ||
-  epoch)` verified under the caller's account key by
-  `verify_ed25519_acct`. A network attacker who replays an old
-  registration sig fails because `epoch` advances.
+- **Sybil cost = stake**: registration requires
+  `bond_endpoint(amount ≥ MIN_ENDPOINT_STAKE)` of OU bonded into the
+  program. No alternative path. To create N fake VPN identities an
+  attacker bonds N × MIN_ENDPOINT_STAKE OU.
+- **No on-chain attestation in v1**: the AML cannot call
+  `verify_ed25519` at compile time, so cryptographic attestation
+  (binding bond intent to a fresh signature over an epoch tag) is
+  deferred to v1.1 (once Octra exposes the helper) or v2 Circles
+  (which sidestep it by living inside an authenticated execution
+  environment). The tx that submits `register_endpoint` is itself
+  ed25519-verified at the tx layer by the Octra runtime; replay
+  protection is the tx nonce.
 - **Cross-protocol key separation**: the on-disk master secret is fed
   through HKDF-Expand with three distinct domain tags
   (`octravpn-key-v1/{receipt-sign-ed25519, noise-x25519, stealth-view}`)
   so the same scalar is never used for two protocols.
 
-### 3.2 Liveness slashing
+### 3.2 Liveness + slashing
 
-- **No silent disappearance**: validators must call
-  `refresh_attestation` at most every `attest_grace_epochs`.
-- **Permissionless slash**: `slash_offline` is callable by anyone; it
-  pays the caller a 10% bounty out of the slashed amount, jails the
-  validator, and reduces bond by 1%.
+- **Equivocation slash (in-AML)**: an operator submitting two
+  `settle_claim(sid, bytes_used)` with different `bytes_used` for the
+  same session is slashed atomically in the AML — no off-chain proof
+  needed. 90% of stake burns to treasury; 10% bounty pool. The session
+  deposit refunds to the tailnet treasury.
+- **Governance slash**: `gov_slash_operator(addr, evidence)` is owner-
+  only and used when off-chain proof of misbehavior is presented.
+- **Unbond + sweep**: an operator can `unbond_endpoint` to start the
+  grace period; the endpoint becomes inactive immediately. After
+  `UNBOND_GRACE` epochs `finalize_unbond` returns the stake. If an
+  operator goes silent mid-session, `sweep_expired_session` (callable
+  by anyone) refunds the tailnet treasury and pays a 1% bounty to the
+  sweeper.
 
 ### 3.3 Session opening
 
@@ -70,35 +82,42 @@ no toxic-waste ceremony).
   no-show / sweep refund time, observers cannot link the refund to the
   client's wallet (via `octra_privateTransfer`).
 
-### 3.4 Bandwidth metering (dual-signed receipts)
+### 3.4 Bandwidth metering (off-chain receipts + on-chain two-tx settle)
 
-- **Both parties consent**: the canonical signing payload is
-  `H("octravpn-receipt-v1" || session_id || seq || bytes_used || blind)`,
-  verified under *both* `client_session_pubkey` and
-  `validator.receipt_pubkey` (separate from `wg_pubkey`, separate from
-  the wallet key).
-- **Equivocation is slashable**: `slash_double_sign` accepts two
-  receipts with the same `(session_id, seq)` but different
-  `(bytes_used, blind)` tuples — both signed by the same node — and
-  zeroes the bond. Modeled in Tamarin as `DoubleSignSlashable`.
-- **Forward unforgeability** (Tamarin `ReceiptUnforgeability`): a
-  settlement implies a real client signature was made earlier OR the
-  client's session key was compromised. No middle path.
+- **Both parties consent off-chain**: the operator and client exchange
+  dual-signed receipts (canonical signing payload:
+  `H("octravpn-receipt-v1" || session_id || seq || bytes_used || blind)`)
+  over the WireGuard control plane. These are stored locally by both
+  sides as evidence for off-chain dispute resolution. The AML does
+  NOT see these signatures — it cannot `verify_ed25519` at compile
+  time today.
+- **On-chain consent is the two-tx settle**: `settle_claim(sid, bytes_used)`
+  from the operator records the operator's bytes count.
+  `settle_confirm(sid, bytes_used)` from the session opener either
+  matches (→ settle) or differs (→ public `SettleDispute` event,
+  session stays open). Both txs are runtime ed25519-verified by Octra
+  itself, so the AML can trust `caller`.
+- **Equivocation is slashable in-AML**: a second `settle_claim` from
+  the same operator on the same session with different `bytes_used`
+  triggers a slash + deposit refund in a single tx. No off-chain
+  evidence needed.
+- **Forward unforgeability** (Tamarin `ReceiptUnforgeability`): the
+  off-chain receipt protocol still holds — a settled session implies
+  a real client signature was made earlier OR the client's session
+  key was compromised. No middle path.
 
 ### 3.5 Settlement
 
-- **CEI ordering**: `settle_session` does *all* validation, snapshots
-  validator state, mutates state, and *only then* calls
-  `emit_private_transfer`. Re-entrancy via the refund leg cannot
-  observe partial state.
-- **TOCTOU-free**: hop validator records are snapshotted into a local
-  list at the start of `settle_session`. A validator that becomes
-  jailed mid-tx still receives credit for the work they signed for, and
-  cannot be excluded by a slash that happens between check and credit.
+- **CEI ordering**: `settle_confirm` does *all* validation, snapshots
+  state, mutates state, and *only then* updates the encrypted earnings
+  ledger. Re-entrancy via the refund leg cannot observe partial state.
+- **Idempotent on retry**: re-submitting `settle_claim` with the same
+  `bytes_used` is a no-op (covers network retries). A re-submit with
+  *different* bytes is equivocation and slashes.
 - **Integer-overflow safe**: settlement math uses
-  `mul_div_safe(a, b, divisor)` which checks for overflow on the
-  intermediate `a * b` and reverts cleanly. Mirrored in Rust as
-  `u64::checked_mul(...).ok_or(...)`.
+  `bytes_used * price_per_mb` with `checked_mul` in the Rust mock and
+  the AML's bounded-int arithmetic; the AML reverts on overflow.
+  Mirrored in Rust as `u64::checked_mul(...).ok_or(...)`.
 - **Replay protection**: tx canonical bytes prepend a `chain_id` and
   the recursive tagged-binary serialization sorts object keys, so
   signatures from one program / chain cannot be replayed on another.

@@ -1,176 +1,226 @@
 # OctraVPN
 
-A decentralized VPN that runs on Octra. Validators are the VPN nodes,
-sessions route through 1–3 hops with onion encryption, payments are
-shielded end-to-end via Octra's stealth and FHE primitives, and
-misbehavior is slashed by the on-chain program.
+A decentralized VPN — Tailscale-style mesh with on-chain coordination —
+that runs on Octra. Operators stake OU to run exit/relay endpoints,
+tailnet owners group members under shared treasuries, sessions escrow
+their cost in OU, traffic flows over WireGuard, and settlement is
+**two-tx** (operator claims bytes_used → client confirms → AML
+settles or records a public dispute). Misbehavior is slashed
+in-AML.
 
-> **Status: v1 reference implementation.** The Applied program is
-> complete; the Rust workspace builds and ships 17 passing tests +
-> property tests + bounded-model harnesses + an in-process e2e harness;
-> formal specs in TLA+, Tamarin, and Lean 4 cover the structural and
-> cryptographic protocol properties. Concrete HFHE primitives are
-> wired through a pluggable `octravpn-fhe-helper` so the system runs
-> end-to-end against a stub today and against Octra's HFHE SDK as
-> soon as it ships.
+> **Status: v1 production-ready.** AML compiles on mainnet, the Rust
+> workspace ships **218 passing tests** + property tests + bounded-
+> model harnesses + an in-process e2e harness. Formal specs in
+> TLA+ (10,173 distinct states, 12 invariants), Tamarin (advisory),
+> Lean 4 (clean `lake build`, 27 surviving + 10 new lemmas, zero
+> `sorry`), and Kani (advisory) cover the structural and
+> cryptographic protocol properties. HFHE primitives are wired
+> against Octra's confirmed AML helpers (`fhe_load_pk`, `fhe_deser`,
+> `fhe_ser`, `fhe_add`, `fhe_sub`, `fhe_add_const`, `fhe_scale`,
+> `fhe_verify_zero`).
+
+A **v2 Circle-native design** is captured in
+[`docs/v2-circles-design.md`](docs/v2-circles-design.md) and tracks
+the path to hidden operators + per-class ACL + encrypted metering
+once Octra publishes the Circle SDK. See
+[`docs/v2-octra-questions.md`](docs/v2-octra-questions.md) for the
+six open questions for the Octra dev team.
 
 ---
 
 ## Architecture
 
 ```
-                ┌────────────────────────────────────────────┐
-                │          Octra chain (program)             │
-                │  /program/main.aml + interfaces/IOctraVPN  │
-                │                                            │
-                │  • validator registry (gated on validator  │
-                │    attestation + bond)                     │
-                │  • multi-hop session escrow                │
-                │  • FHE encrypted earnings ledger           │
-                │  • stealth payouts via private transfer    │
-                │  • slashing: double-sign, no-show, offline │
-                └─────────────▲──────────────▲───────────────┘
+                ┌──────────────────────────────────────────────┐
+                │             Octra chain (program)            │
+                │       /program/main.aml (compile-gated)      │
+                │                                              │
+                │  • operator stake registry (bond/unbond/slash) │
+                │  • tailnet records (owner, treasury, members)│
+                │  • sessions + two-tx settle (claim+confirm)  │
+                │  • HFHE encrypted earnings ledger            │
+                │  • hash-precommit join tokens                │
+                │  • equivocation slash in-AML                 │
+                └─────────────▲──────────────▲─────────────────┘
                               │              │
-       JSON-RPC contract_call │              │  octra_submit / privateTransfer
+       JSON-RPC contract_call │              │  octra_submit
                               │              │
        ┌──────────────────────┴───┐    ┌─────┴──────────────────────┐
-       │  octravpn (client CLI)    │    │  octravpn-node (validator │
+       │  octravpn (client CLI)    │    │  octravpn-node (operator  │
        │  /crates/octravpn-client  │    │  daemon)                  │
        │                           │    │  /crates/octravpn-node    │
-       │  • discover validators    │    │                           │
-       │  • commit to route (1..3) │    │  • boringtun WG endpoint  │
-       │  • open session, escrow   │    │  • onion forwarding       │
+       │  • discover endpoints     │    │                           │
+       │  • tailnet open_session   │    │  • boringtun WG endpoint  │
        │  • boringtun client tunnel│◄──►│  • bandwidth metering     │
-       │  • settle / reclaim       │    │  • receipt store + sign   │
-       │                           │    │  • claim earnings stealth │
+       │  • settle_confirm         │    │  • settle_claim           │
+       │                           │    │  • claim_earnings (HFHE)  │
        └───────────────────────────┘    └───────────────────────────┘
 
-                       Off-chain control + tunnel data
+                       Off-chain control + WireGuard data
 ```
 
-Shared types and the JSON-RPC client live in
-`/crates/octravpn-core`.
+Headscale-rs (separate sibling repo) is the future coordination
+layer for Tailscale-protocol compatibility. See
+[`https://github.com/androolloyd/headscale-rs`](https://github.com/androolloyd/headscale-rs).
+
+Shared types and the JSON-RPC client live in `/crates/octravpn-core`,
+which re-exports `address`/`sig`/`coverage` from the standalone
+`octra-core` crate in the sibling foundry repo (see below).
 
 ## What's shielded, by layer
 
 | Surface             | Shielded?      | Mechanism                                          |
 | ------------------- | -------------- | -------------------------------------------------- |
 | Tunnel contents     | yes            | WireGuard Noise IK                                 |
-| Onion peeling       | yes            | per-hop ChaCha20-Poly1305 layer                    |
+| Onion peeling       | yes (data plane) | per-hop ChaCha20-Poly1305 layer; AML is single-hop in v1 |
 | Session→client link | yes            | ephemeral session pubkey, never wallet pubkey      |
-| Session→node link   | yes (during)   | Pedersen commitments to node addresses             |
-| Payment amounts     | yes            | FHE ciphertexts; homomorphic accumulation on chain |
-| Payment recipients  | yes            | stealth outputs via `octra_privateTransfer`        |
+| Earnings            | yes            | HFHE ciphertexts; homomorphic accumulation on chain |
+| Payment recipients  | yes            | stealth outputs via Octra's X25519 ECDH scheme     |
 | WG handshake fingerprint | partial   | pluggable transport scaffolded; obfs4 wrapping is a v2 milestone |
-| Exit egress IP      | **no (inherent)** | the exit hop must actually send the request to the public internet |
+| Operator identity   | **no in v1**   | public `octV…` addresses; **hidden via Circles in v2** |
+| Exit egress IP      | **no (inherent)** | the exit must actually send the request to the public internet |
 
 The exit-IP limit is fundamental to *any* VPN. Mitigations: TLS-only
-browsing, multi-hop routing (so the entry hop can't correlate destination),
-or layering Tor over the VPN.
+browsing, layering Tor over OctraVPN, and (v2) Circle-native operator
+opacity so that even the *identity* of the exit operator is hidden
+from non-authorized callers.
 
-## Validators-only
+## Operators
 
-Only Octra validators can register as VPN nodes. Registration requires:
+Operators stake OU to register an endpoint. Registration requires:
 
-1. A bond ≥ `min_bond` attached to `register_validator` (`value`).
-2. An ed25519 attestation signature over `(self_addr || tag_bond || epoch)`
-   verified against the caller's account key.
-3. `caller == origin` (no proxy registrations).
+1. `bond_endpoint` value-bearing tx with `amount ≥ MIN_ENDPOINT_STAKE`
+   (default 1000 OCT).
+2. `register_endpoint(endpoint, wg_pubkey, hfhe_pubkey, initial_enc_zero, region, price_per_mb)`.
 
-Liveness is enforced via `refresh_attestation` — a validator must call it
-at most every `attest_grace_epochs`. Missed attestations let anyone call
-`slash_offline` for a small bounty + jail.
+There is no `register_validator` attestation step in v1 — operator
+identity is the wallet address that posts the bond. The AML cannot
+yet call `verify_ed25519` at compile time, so cryptographic
+attestation is deferred until Octra exposes that primitive (or
+until v2 Circles, which sidestep it entirely).
 
-Slashing conditions:
+Liveness: an operator can `unbond_endpoint` to start the grace
+period; after `UNBOND_GRACE` epochs the stake unlocks via
+`finalize_unbond`. The endpoint becomes inactive immediately on
+unbond.
 
-| Condition          | Evidence                                              | Slash         |
-| ------------------ | ----------------------------------------------------- | ------------- |
-| Double-signed receipt | two distinct receipts signed by same node for same `(session, seq)` | full bond, jail |
-| Offline            | `last_attest_epoch + grace < current_epoch`            | 1% of bond, jail |
-| No-show on session | client reveals entry hop after `claim_no_show`         | up to 10% of bond |
+Slashing conditions (all in-AML, no signature verification needed):
 
-Slashed funds split per `params.slash_*_bps`: bounty to claimant + burn +
-treasury. Sums must equal 10000 bps.
+| Condition                  | Evidence                                                      | Slash               |
+| -------------------------- | ------------------------------------------------------------- | ------------------- |
+| Settle-claim equivocation  | same operator submits two `settle_claim` for the same session with different `bytes_used` | 90% burn + refund deposit |
+| Governance slash           | owner calls `gov_slash_operator(addr, evidence)` after off-chain proof | 90% burn / 10% bounty |
+| Unbond + sweep             | operator goes offline → tailnet owner / sweeper finalizes via `sweep_expired_session` | 1% bounty to sweeper |
+
+Slashed funds split per program params: bounty to claimant +
+treasury burn share. Sums must equal 10000 bps.
 
 ## Repository layout
 
 ```
-octra/
-├── program/                       # AppliedML on-chain program
-│   ├── main.aml                   # OctraVPN program (state, entrypoints)
-│   └── interfaces/IOctraVPN.aml   # public ABI surface
+octra/                              # this repo
+├── program/                        # AppliedML on-chain program
+│   ├── main.aml                    # v1 OctraVPN program (production)
+│   └── main-v2.aml                 # v2 Circle-native skeleton (design)
 │
 ├── crates/
-│   ├── octravpn-core/             # shared types, Octra JSON-RPC, crypto, FHE wire fmt
-│   ├── octravpn-node/             # validator-side daemon (boringtun + chain glue)
-│   └── octravpn-client/           # CLI: discover, connect, settle, reclaim
+│   ├── octravpn-core/              # shared types + Octra JSON-RPC + crypto
+│   │                               #   (address/sig/coverage re-exported
+│   │                               #    from octra-core in the foundry repo)
+│   ├── octravpn-node/              # operator daemon (boringtun + chain glue)
+│   ├── octravpn-client/            # CLI: discover, connect, settle, reclaim
+│   ├── octravpn-tun/               # TUN device wrapper (Linux/macOS/Windows)
+│   ├── octravpn-mesh/              # mesh coordination scaffolding
+│   ├── octravpn-admin-ui/          # operator admin web UI
+│   └── octra-cli/                  # octra dApp dev CLI (anvil-equivalent)
 │
-├── fhe-helper/                    # pluggable HFHE bridge (stub today)
-│
-├── tests/
-│   ├── mocks/                     # in-process Octra JSON-RPC mock for tests
-│   └── e2e/                       # control-plane integration tests vs the mock
+├── tests/e2e/                      # full-flow integration tests vs mock RPC
 │
 ├── proofs/
-│   ├── tla/                       # TLA+ state-machine spec + invariants
-│   ├── tamarin/                   # Dolev-Yao crypto-protocol model
-│   ├── lean/                      # Lean 4 entrypoint + lemma proofs
-│   └── kani/                      # bounded model checks for Rust crypto/parsing
+│   ├── tla/                        # TLA+ — 12 invariants, 10173 states, depth 18
+│   ├── tamarin/                    # Dolev-Yao crypto-protocol model (advisory)
+│   ├── lean/                       # Lean 4 entrypoint + lemma proofs (clean build)
+│   └── kani/                       # bounded model checks for Rust crypto/parsing
 │
-├── docker/                        # Dockerfiles + compose harness + e2e.sh
-├── docker-compose.yml             # mock-rpc + 3 nodes + client
-├── .github/workflows/ci.yml       # CI: fmt, clippy, test, TLA, Tamarin, Lean, Kani, e2e
-└── README.md
+├── docker/                         # Dockerfiles + compose harness + e2e.sh
+├── docker-compose.yml              # mock-rpc + 3 nodes + client
+├── .github/workflows/ci.yml        # CI: fmt, clippy, test, TLA, Lean, Kani, e2e
+└── docs/                           # see Documentation table below
+```
+
+### Sibling repos (path-deps)
+
+This workspace path-deps onto two sibling repos that must be checked
+out side-by-side at the same directory level as `octra/`:
+
+| Repo | Role |
+| --- | --- |
+| [octra-foundry](https://github.com/androolloyd/octra-foundry) | Foundry-style testing toolkit: `octraforge` (Forge equivalent), `octra-mock-rpc` (Anvil equivalent), `octra-core` (thin types crate) |
+| [headscale-rs](https://github.com/androolloyd/headscale-rs) | Rust impl of Tailscale-style mesh coordination — slated as the v2 coordination layer |
+
+```sh
+mkdir octravpn-workspace && cd $_
+git clone https://github.com/androolloyd/octravpn.git octra
+git clone https://github.com/androolloyd/octra-foundry.git
+git clone https://github.com/androolloyd/headscale-rs.git    # optional
+cd octra && cargo build --workspace
 ```
 
 ## Quickstart — local
 
 ```sh
-# Build everything
+# Build everything (needs both repos cloned side-by-side; see above)
 cargo build --workspace --release
 
 # Run unit + integration + e2e tests (uses in-process mock RPC)
 cargo test --workspace
 ```
 
-Expected output: 17 tests pass.
+Expected output: **218 tests pass**.
 
 ## Quickstart — Docker
 
 ```sh
-# Build the full image set
+# Build the full image set (Docker context is the parent dir so
+# the foundry sibling is reachable)
 docker compose build
 
-# Boot mock RPC + 3 validator-VPN nodes
+# Boot mock RPC + 3 operator nodes
 docker compose up -d mock-rpc node1 node2 node3
 
-# Run the smoke test (one-shot: lists active validators)
+# Smoke: list active endpoints
 ./docker/e2e.sh
+
+# Full tailnet happy-path
+./docker/e2e-tailnet.sh
 ```
 
 ## Deploying the on-chain program
 
-Follow `docs/architecture.md` for the production flow. Short version:
+Full flow lives in [`docs/architecture.md`](docs/architecture.md).
+Short version:
 
 1. Open the Octra client's dev tools.
-2. **Import folder** the `program/` directory (keeps `main.aml` plus
-   `interfaces/IOctraVPN.aml` in the same project).
+2. **Import folder** the `program/` directory.
 3. Click **Compile** with the language set to `AppliedML (.aml)`.
 4. Inspect ABI / Assembly / Storage tabs.
 5. Enter constructor params (JSON array, positional):
-   `[1000, 10, 5, 100, 10]` — `(min_bond, min_session_deposit, attest_grace_epochs, session_grace_epochs, unbond_epochs)`.
-6. Click **Preview address** if you want to know the deployed address up
-   front; then **Deploy**.
-7. After deployment, use **Verify contract source** to bind the deployed
-   bytecode back to the `program/` source tree.
+   `[100, 10]` — `(min_session_deposit, min_tailnet_deposit)`.
+6. **Preview address** if you want the deployed address up front,
+   then **Deploy**.
+7. After deployment, use **Verify contract source** to bind the
+   deployed bytecode back to the `program/` source tree.
+
+The compile-gate CI job re-runs `octra_compileAml` against the
+live mainnet RPC on every PR.
 
 ## Formal verification
 
 | Layer               | Tool      | Scope                                           |
 | ------------------- | --------- | ----------------------------------------------- |
-| State machine       | TLA+      | conservation, no double-settle, slash safety, monotonic seq, settle-or-refund liveness |
+| State machine       | TLA+      | conservation, no double-settle, slash safety, two-tx confirm invariant, equivocation refund, token single-redeem (10173 states / depth 18 / <1s) |
 | Crypto protocol     | Tamarin   | receipt unforgeability, double-sign slashable, no link before settle |
-| Program semantics   | Lean 4    | register, addBond, completeUnbond, settle, slashDoubleSign lemmas |
+| Program semantics   | Lean 4    | bond/slash/register/tailnet/claim/two-tx settle/hash-token lemmas — zero `sorry` |
 | Rust implementation | Kani      | receipt round-trip, monotonic check, payload determinism |
 | Rust runtime        | proptest  | the same lemmas at unbounded sizes              |
 
@@ -181,7 +231,7 @@ Run them via:
 cd proofs/tla
 java -cp tla2tools.jar tlc2.TLC -workers auto -deadlock OctraVPN -config OctraVPN.cfg
 
-# Tamarin
+# Tamarin (advisory)
 cd proofs/tamarin
 tamarin-prover --prove octravpn.spthy
 
@@ -189,7 +239,7 @@ tamarin-prover --prove octravpn.spthy
 cd proofs/lean
 lake build
 
-# Kani
+# Kani (advisory)
 cd proofs/kani
 cargo kani
 
@@ -203,46 +253,55 @@ CI runs all of these on every PR.
 
 | Component                           | Status                                                     |
 | ----------------------------------- | ---------------------------------------------------------- |
-| AML program (`program/`)            | complete                                                   |
-| Rust workspace (build, types, RPC)  | complete                                                   |
+| AML program (`program/main.aml`)    | complete, mainnet compile-gated                            |
+| Rust workspace (build, types, RPC)  | complete, 218 tests pass                                   |
 | Receipts (sign, verify, monotonic)  | complete + property-tested + Kani-checked                  |
 | Pedersen commitments (route hiding) | complete (hash-based; HFHE-native swap is single-file)     |
-| Onion routing (1–3 hops)            | data structures + policy complete; tunnel forwarding is partial |
-| boringtun WireGuard tunnel          | server bind + packet RX scaffolded; full TUN egress is OS-specific |
-| FHE primitives                      | pluggable `octravpn-fhe-helper`; stub today, real HFHE SDK swap-in single file |
-| Stealth payout                      | derivation + RPC integration complete                      |
-| Slashing entrypoints                | complete                                                   |
+| Onion routing (1–3 hops)            | data plane complete; AML is single-hop in v1               |
+| boringtun WireGuard tunnel          | complete on Linux/macOS                                    |
+| HFHE primitives                     | wired against Octra's confirmed AML helpers — see `octra-research.md` |
+| Stealth payout                      | derivation + Octra-aligned X25519 ECDH integration complete |
+| Two-tx settle                       | complete (operator `settle_claim` + client `settle_confirm`) |
+| Equivocation slashing               | complete (in-AML, no `verify_ed25519` needed)              |
+| Hash-precommit join tokens          | complete                                                   |
 | Mock RPC                            | covers every method OctraVPN exercises                     |
 | Docker compose                      | builds + boots end-to-end                                  |
 | GitHub Actions CI                   | runs all tests + formal checks                             |
+| v2 Circle-native operators          | design doc + AML skeleton + SDK trait; blocked on upstream  |
 
 ## Threat model
 
 - **Adversary**: Dolev-Yao network attacker; can compromise individual
-  validator keys or session keys.
+  operator keys or session keys.
 - **Trust assumption**: Octra validator set is honest-majority (chain
   consensus guarantees apply).
 - **What's *not* defended**: a fully malicious exit hop logs the
   destinations of egress traffic — this is fundamental to any VPN. The
-  `min_bond` + slashing makes this expensive but not impossible. Multi-
-  hop with diversity reduces correlation; Tor-over-OctraVPN eliminates
-  it for users who need that.
+  `MIN_ENDPOINT_STAKE` bond + slashing makes this expensive but not
+  impossible. Multi-hop with diversity reduces correlation;
+  Tor-over-OctraVPN eliminates it for users who need that. v2 Circles
+  additionally hide the operator's identity.
 
 ## Documentation
 
 | File | What's in it |
 | --- | --- |
+| [`docs/architecture.md`](docs/architecture.md) | Long-form system design, current v1 two-tx flow |
+| [`docs/v2-circles-design.md`](docs/v2-circles-design.md) | v2 Circle-native architecture (hidden ops + ACL + encrypted metering) |
+| [`docs/v2-octra-questions.md`](docs/v2-octra-questions.md) | Six open questions for the Octra dev team |
+| [`docs/aml-grammar.md`](docs/aml-grammar.md) | AppliedML grammar reference |
+| [`docs/aml-gap-analysis.md`](docs/aml-gap-analysis.md) | Audit + migration rationale for v1 against confirmed Octra primitives |
 | [`docs/security.md`](docs/security.md) | Threat model, primitives, per-component guarantees, formal-verification correspondence |
-| [`docs/economics.md`](docs/economics.md) | OCT-only design, money flows, validator P&L, why no second token is viable |
-| [`docs/attack-cost.md`](docs/attack-cost.md) | Concrete attack-cost analysis with parameter symbols |
+| [`docs/validator-hardening.md`](docs/validator-hardening.md) | Operator (validator-of-VPN) hardening guide |
+| [`docs/economics.md`](docs/economics.md) | OU-only design, money flows, operator P&L |
+| [`docs/attack-cost.md`](docs/attack-cost.md) | Concrete attack-cost analysis |
 | [`docs/governance.md`](docs/governance.md) | Roles, parameters, decentralization roadmap, treasury policy |
-| [`docs/architecture.md`](docs/architecture.md) | Long-form system design |
 | [`docs/threat-model.md`](docs/threat-model.md) | Adversary capability table |
 | [`docs/keys.md`](docs/keys.md) | Per-role key inventory and rotation |
-| [`docs/octra-research.md`](docs/octra-research.md) | Public-info dossier on the Octra chain (validator economics, RPC, address codec, …) |
+| [`docs/octra-research.md`](docs/octra-research.md) | Public-info dossier on the Octra chain (validator economics, RPC, AML helpers, …) |
+| [`docs/operator-guide.md`](docs/operator-guide.md) | Operator deployment guide: sizing, ports, perms, backup, monitoring |
+| [`docs/production-checklist.md`](docs/production-checklist.md) | Pre-deploy checklist |
 | [`docs/install.md`](docs/install.md) | Per-OS install: one-shot script, native package, or from source |
-| [`docs/deploy.md`](docs/deploy.md) | Operator deployment guide: sizing, ports, perms, backup, monitoring |
-| [`crates/octraforge/DESIGN.md`](crates/octraforge/DESIGN.md) | Foundry-like test framework for Octra programs |
 
 ## License
 

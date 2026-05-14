@@ -264,15 +264,19 @@ fresh.
 
 ### 5.1 Relay (Tier 3a)
 
-Per-byte through paid hops. On `settle_session`:
+Per-byte to the exit operator. On `settle_confirm` (after the
+matching `settle_claim`):
 
 ```
-hop_pay  = bytes_used × price_per_mb × split_bps / 10000
-total    = sum_i(hop_pay_i)
-fee      = total × protocol_fee_bps / 10000
-to_hops  = total − fee
-refund   = deposit − total       // returns to treasury
+total    = bytes_used × endpoints[exit].price_per_mb
+fee      = total × PROTOCOL_FEE_BPS / 10000
+net_pay  = total − fee                              // → exit operator (HFHE)
+refund   = deposit − total                          // → tailnet treasury
 ```
+
+v1 is single-hop in the AML; the multi-hop onion data plane is
+already implemented in `octravpn-core::onion` and lights up in v2
+once the AML schema also records per-hop splits.
 
 Defaults: `min_price_per_mb = 1 OU`, governance can raise but not
 lower below the constructor floor.
@@ -412,7 +416,7 @@ Every locked OU has a path home:
 
 | Locked at        | Returns via                          | Conditions                                   |
 | ---------------- | ------------------------------------ | -------------------------------------------- |
-| `open_session`   | `settle_session`                     | refund = deposit − total_paid                |
+| `open_session`   | `settle_claim` + `settle_confirm`    | refund = deposit − total_paid                |
 | `open_session`   | `claim_no_show`                      | No progress receipt, grace elapsed           |
 | `open_session`   | `sweep_expired_session`              | `K × session_grace` elapsed; 1 % bounty paid |
 | `bond_endpoint`  | `unbond_endpoint` → finalise         | `UNBOND_GRACE` elapsed with no slash         |
