@@ -1,0 +1,61 @@
+# Testnet / mainnet-alpha overlay for the OctraVPN docker harness.
+#
+# Use:
+#   cd octra
+#   docker compose -f docker-compose.yml -f docker/testnet/docker-compose.testnet.yml \
+#                  --profile testnet up -d node1 node2 node3
+#
+# Differences vs the default in-process mock harness:
+#   * `mock-rpc` is disabled (profile-gated to "mock-only").
+#   * node1/node2/node3 talk to the real Octra RPC via OCTRA_RPC_URL.
+#   * Configs come from docker/testnet/.env + rendered templates in
+#     docker/testnet/render-configs.sh; you must set OCTRA_RPC_URL,
+#     PROGRAM_ADDR, and the per-node VALIDATOR_ADDR / wallet keys.
+#   * Wallet + WG keys are mounted from the host (no docker secrets
+#     since the keys must persist on-chain registration).
+#
+# DO NOT use this overlay against the in-process mock — the mock-rpc
+# service is profile-gated out and there's no localhost fallback.
+
+services:
+  # Disable the mock by reassigning it to a profile that's never
+  # selected. Bringing up `--profile testnet` won't start it.
+  mock-rpc:
+    profiles: ["mock-only"]
+
+  node1:
+    profiles: ["testnet"]
+    # Real RPC — no mock-rpc to depend on. Override the base map.
+    depends_on: !reset []
+    environment:
+      OCTRA_RPC_URL: "${OCTRA_RPC_URL:?set OCTRA_RPC_URL — see docker/testnet/.env.example}"
+      PROGRAM_ADDR: "${PROGRAM_ADDR:?set PROGRAM_ADDR — see docker/testnet/.env.example}"
+    volumes: !reset
+      - ${HOST_TESTNET_DIR:-./docker/testnet/state}/node1:/etc/octravpn:ro
+
+  node2:
+    profiles: ["testnet"]
+    depends_on: !reset []
+    environment:
+      OCTRA_RPC_URL: "${OCTRA_RPC_URL:?}"
+      PROGRAM_ADDR: "${PROGRAM_ADDR:?}"
+    volumes: !reset
+      - ${HOST_TESTNET_DIR:-./docker/testnet/state}/node2:/etc/octravpn:ro
+
+  node3:
+    profiles: ["testnet"]
+    depends_on: !reset []
+    environment:
+      OCTRA_RPC_URL: "${OCTRA_RPC_URL:?}"
+      PROGRAM_ADDR: "${PROGRAM_ADDR:?}"
+    volumes: !reset
+      - ${HOST_TESTNET_DIR:-./docker/testnet/state}/node3:/etc/octravpn:ro
+
+  client:
+    profiles: ["testnet"]
+    depends_on: !reset []
+    environment:
+      OCTRA_RPC_URL: "${OCTRA_RPC_URL:?}"
+      PROGRAM_ADDR: "${PROGRAM_ADDR:?}"
+    volumes: !reset
+      - ${HOST_TESTNET_DIR:-./docker/testnet/state}/client:/etc/octravpn:ro

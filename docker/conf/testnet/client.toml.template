@@ -1,0 +1,7 @@
+[chain]
+rpc_url      = "${OCTRA_RPC_URL}"
+program_addr = "${PROGRAM_ADDR}"
+
+[wallet]
+addr        = "${CLIENT_ADDR}"
+secret_path = "/etc/octravpn/wallet.key"
