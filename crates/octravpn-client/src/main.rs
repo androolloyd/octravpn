@@ -9,6 +9,7 @@ use tracing::info;
 mod commands;
 mod config;
 mod discover;
+mod operator_backend;
 mod runner;
 mod settler;
 mod tailnet;
