@@ -65,8 +65,7 @@ pub(crate) fn run(config_path: &str, out_path: Option<&str>) -> Result<()> {
             "uname": sys.uname,
         }
     });
-    let state_bytes =
-        serde_json::to_vec_pretty(&state).context("serialise state.json")?;
+    let state_bytes = serde_json::to_vec_pretty(&state).context("serialise state.json")?;
     entries.push(("state.json".into(), state_bytes));
 
     // Collect logs from each candidate directory. Entries are namespaced by
@@ -80,7 +79,9 @@ pub(crate) fn run(config_path: &str, out_path: Option<&str>) -> Result<()> {
                 continue;
             }
             let name = ent.file_name();
-            let Some(name_str) = name.to_str() else { continue };
+            let Some(name_str) = name.to_str() else {
+                continue;
+            };
             let arc_name = format!("recent-logs/{label}/{name_str}");
             // Skip anything containing "secret" or "wallet" in the file name
             // out of paranoia — these dirs should only hold logs, but we
@@ -97,13 +98,16 @@ pub(crate) fn run(config_path: &str, out_path: Option<&str>) -> Result<()> {
     // Deterministic ordering.
     entries.sort_by(|a, b| a.0.cmp(&b.0));
 
-    write_archive(Path::new(out), &entries)
-        .with_context(|| format!("write archive {out}"))?;
+    write_archive(Path::new(out), &entries).with_context(|| format!("write archive {out}"))?;
 
     println!("wrote {out}");
     println!(
         "  config:  {} (secrets redacted)",
-        if config_obj.is_some() { config_path } else { "<not loaded>" }
+        if config_obj.is_some() {
+            config_path
+        } else {
+            "<not loaded>"
+        }
     );
     println!("  entries: {}", entries.len());
     Ok(())
@@ -219,12 +223,10 @@ fn home_dir() -> Option<PathBuf> {
 fn write_archive(out: &Path, entries: &[(String, Vec<u8>)]) -> Result<()> {
     if let Some(parent) = out.parent() {
         if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("mkdir {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
         }
     }
-    let file = fs::File::create(out)
-        .with_context(|| format!("create {}", out.display()))?;
+    let file = fs::File::create(out).with_context(|| format!("create {}", out.display()))?;
     let gz = GzEncoder::new(file, Compression::default());
     let mut tar = tar::Builder::new(gz);
     // Don't follow symlinks — safer when scraping log dirs.

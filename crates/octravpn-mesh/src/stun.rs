@@ -169,7 +169,10 @@ fn decode_xor_mapped(value: &[u8], tx_id: &[u8; 12]) -> Result<SocketAddr, StunE
             for i in 0..16 {
                 addr_bytes[i] = value[4 + i] ^ xor_pad[i];
             }
-            Ok(SocketAddr::new(IpAddr::V6(Ipv6Addr::from(addr_bytes)), port))
+            Ok(SocketAddr::new(
+                IpAddr::V6(Ipv6Addr::from(addr_bytes)),
+                port,
+            ))
         }
         other => Err(StunError::UnsupportedFamily(other)),
     }
@@ -248,7 +251,10 @@ mod tests {
         let tx_id = [1u8; 12];
         let mut buf = build_response(&tx_id, "10.0.0.1:1".parse().unwrap());
         buf[8] ^= 0xff;
-        assert!(matches!(parse_xor_mapped(&buf, &tx_id), Err(StunError::TxidMismatch)));
+        assert!(matches!(
+            parse_xor_mapped(&buf, &tx_id),
+            Err(StunError::TxidMismatch)
+        ));
     }
 
     #[test]
@@ -256,7 +262,10 @@ mod tests {
         let tx_id = [1u8; 12];
         let mut buf = build_response(&tx_id, "10.0.0.1:1".parse().unwrap());
         buf[4] ^= 0xff;
-        assert!(matches!(parse_xor_mapped(&buf, &tx_id), Err(StunError::MagicMismatch)));
+        assert!(matches!(
+            parse_xor_mapped(&buf, &tx_id),
+            Err(StunError::MagicMismatch)
+        ));
     }
 
     /// End-to-end round-trip against a tiny in-process STUN responder.

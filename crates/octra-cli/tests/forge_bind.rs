@@ -14,10 +14,7 @@ fn cmd() -> Command {
 fn bind_generates_compileable_file() {
     let out_dir = tempdir().unwrap();
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let workspace_root = std::path::Path::new(&manifest)
-        .ancestors()
-        .nth(2)
-        .unwrap();
+    let workspace_root = std::path::Path::new(&manifest).ancestors().nth(2).unwrap();
 
     // 1. Build OctraVPN first to get the ABI.
     let build_out = tempdir().unwrap();
@@ -45,7 +42,10 @@ fn bind_generates_compileable_file() {
     assert!(rs_path.exists());
     let body = fs::read_to_string(&rs_path).unwrap();
     // Spot-check: register_endpoint and a view method are wired up.
-    assert!(body.contains("pub fn call_register_endpoint"), "got: {body}");
+    assert!(
+        body.contains("pub fn call_register_endpoint"),
+        "got: {body}"
+    );
     assert!(body.contains("pub fn view_get_endpoint"), "got: {body}");
 
     // 3. Compile the generated file against a synthetic Cargo project

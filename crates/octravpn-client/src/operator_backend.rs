@@ -26,6 +26,7 @@ use crate::runner::Client;
 
 /// Settlement backend for an operator. Used by `settler::settle_active`.
 #[async_trait]
+#[allow(dead_code)]
 pub(crate) trait OperatorBackend: Send + Sync {
     /// Submit `settle_confirm(session_id, bytes_used)` to the chain.
     /// The chain decides whether settlement applies (bytes match
@@ -41,6 +42,7 @@ pub(crate) trait OperatorBackend: Send + Sync {
 /// v1 operator: a public address with a session row on the OctraVPN
 /// main-net program. The opaque-to-callers "proxy address" doesn't
 /// exist; the address in the session row IS the operator.
+#[allow(dead_code)]
 pub(crate) struct MainnetOperator;
 
 #[async_trait]

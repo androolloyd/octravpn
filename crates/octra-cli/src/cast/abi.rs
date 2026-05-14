@@ -18,12 +18,11 @@ use serde_json::Value;
 use crate::io::dump_json;
 
 pub fn abi_decode_cmd(abi_file: &Path, method: &str, hex_input: &str) -> Result<()> {
-    let abi_bytes = std::fs::read(abi_file)
-        .with_context(|| format!("read abi: {}", abi_file.display()))?;
-    let abi: Value =
-        serde_json::from_slice(&abi_bytes).context("abi file is not valid JSON")?;
-    let method_def = find_method(&abi, method)
-        .ok_or_else(|| anyhow!("method `{method}` not found in ABI"))?;
+    let abi_bytes =
+        std::fs::read(abi_file).with_context(|| format!("read abi: {}", abi_file.display()))?;
+    let abi: Value = serde_json::from_slice(&abi_bytes).context("abi file is not valid JSON")?;
+    let method_def =
+        find_method(&abi, method).ok_or_else(|| anyhow!("method `{method}` not found in ABI"))?;
     let stripped = hex_input.trim().trim_start_matches("0x");
     let bytes = hex::decode(stripped).context("input is not hex")?;
     let payload: Value = serde_json::from_slice(&bytes)
@@ -34,8 +33,11 @@ pub fn abi_decode_cmd(abi_file: &Path, method: &str, hex_input: &str) -> Result<
 }
 
 fn find_method<'a>(abi: &'a Value, method: &str) -> Option<&'a Value> {
-    let arr = abi.as_array().or_else(|| abi.get("abi").and_then(|v| v.as_array()))?;
-    arr.iter().find(|item| item["name"].as_str() == Some(method))
+    let arr = abi
+        .as_array()
+        .or_else(|| abi.get("abi").and_then(|v| v.as_array()))?;
+    arr.iter()
+        .find(|item| item["name"].as_str() == Some(method))
 }
 
 fn align_to_method(method_def: &Value, payload: &Value) -> Value {

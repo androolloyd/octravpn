@@ -30,11 +30,7 @@ pub fn encrypt_secret(secret: &[u8; 32], passphrase: &str) -> Vec<u8> {
     encrypt_secret_with_iters(secret, passphrase, DEFAULT_PBKDF2_ITERS)
 }
 
-pub fn encrypt_secret_with_iters(
-    secret: &[u8; 32],
-    passphrase: &str,
-    iters: u32,
-) -> Vec<u8> {
+pub fn encrypt_secret_with_iters(secret: &[u8; 32], passphrase: &str, iters: u32) -> Vec<u8> {
     let mut salt = [0u8; SALT_LEN];
     OsRng.fill_bytes(&mut salt);
     let mut nonce = [0u8; NONCE_LEN];
@@ -83,9 +79,7 @@ pub fn decrypt_secret(envelope: &[u8], passphrase: &str) -> CoreResult<[u8; 32]>
     let plain = cipher
         .decrypt(Nonce::from_slice(nonce), ciphertext)
         .map_err(|_| {
-            CoreError::Crypto(
-                "wallet decryption failed (wrong passphrase or corrupt file)".into(),
-            )
+            CoreError::Crypto("wallet decryption failed (wrong passphrase or corrupt file)".into())
         })?;
     if plain.len() != 32 {
         return Err(CoreError::InvalidLength {
@@ -109,7 +103,6 @@ fn derive_kek(passphrase: &str, salt: &[u8], iters: u32) -> [u8; 32] {
     pbkdf2::pbkdf2_hmac::<Sha256>(passphrase.as_bytes(), salt, iters, &mut out);
     out
 }
-
 
 #[cfg(test)]
 mod tests {

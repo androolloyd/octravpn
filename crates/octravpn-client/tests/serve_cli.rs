@@ -101,8 +101,20 @@ fn funnel_add_marks_entry_as_funnel() {
     assert_eq!(entries.len(), 1, "expected exactly one entry");
 
     let entry = &entries[0];
-    assert_eq!(entry.get("local_port").and_then(toml::Value::as_integer), Some(8080));
-    assert_eq!(entry.get("local_proto").and_then(toml::Value::as_str), Some("tcp"));
-    assert_eq!(entry.get("external_path").and_then(toml::Value::as_str), Some("/pub"));
-    assert_eq!(entry.get("funnel").and_then(toml::Value::as_bool), Some(true));
+    assert_eq!(
+        entry.get("local_port").and_then(toml::Value::as_integer),
+        Some(8080)
+    );
+    assert_eq!(
+        entry.get("local_proto").and_then(toml::Value::as_str),
+        Some("tcp")
+    );
+    assert_eq!(
+        entry.get("external_path").and_then(toml::Value::as_str),
+        Some("/pub")
+    );
+    assert_eq!(
+        entry.get("funnel").and_then(toml::Value::as_bool),
+        Some(true)
+    );
 }

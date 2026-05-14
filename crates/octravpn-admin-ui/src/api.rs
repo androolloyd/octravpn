@@ -47,10 +47,15 @@ fn err(status: StatusCode, msg: impl Into<String>) -> axum::response::Response {
 }
 
 #[allow(clippy::result_large_err)]
-fn require_wallet(s: &AdminState) -> Result<&octravpn_core::sig::KeyPair, axum::response::Response> {
-    s.wallet
-        .as_ref()
-        .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "no wallet configured; UI is read-only"))
+fn require_wallet(
+    s: &AdminState,
+) -> Result<&octravpn_core::sig::KeyPair, axum::response::Response> {
+    s.wallet.as_ref().ok_or_else(|| {
+        err(
+            StatusCode::UNAUTHORIZED,
+            "no wallet configured; UI is read-only",
+        )
+    })
 }
 
 async fn submit_signed(
@@ -272,12 +277,7 @@ mod tests {
     use tower::ServiceExt;
 
     fn ctx() -> Arc<AdminState> {
-        AdminState::new(
-            "inprocess://octPROG",
-            "octPROG",
-            None,
-            None,
-        )
+        AdminState::new("inprocess://octPROG", "octPROG", None, None)
     }
 
     #[tokio::test]

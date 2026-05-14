@@ -42,17 +42,18 @@ fn contract_call_list_active_endpoints() {
 fn compile_aml_produces_artifact() {
     let url = "inprocess://octPROG";
     let ep = octra_cli::rpc_client::endpoint_from_url(url);
-    let src = "program Demo { fn foo(): bool { return true } view fn bar(): bool { return false } }";
-    let v: Value = octra_cli::rpc_client::call(
-        &ep,
-        "octra_compileAml",
-        json!([src, "Demo"]),
-    )
-    .unwrap();
+    let src =
+        "program Demo { fn foo(): bool { return true } view fn bar(): bool { return false } }";
+    let v: Value =
+        octra_cli::rpc_client::call(&ep, "octra_compileAml", json!([src, "Demo"])).unwrap();
     assert_eq!(v["name"], json!("Demo"));
     let abi = v["abi"].as_array().unwrap();
-    assert!(abi.iter().any(|m| m["name"] == "foo" && m["kind"] == "call"));
-    assert!(abi.iter().any(|m| m["name"] == "bar" && m["kind"] == "view"));
+    assert!(abi
+        .iter()
+        .any(|m| m["name"] == "foo" && m["kind"] == "call"));
+    assert!(abi
+        .iter()
+        .any(|m| m["name"] == "bar" && m["kind"] == "view"));
 }
 
 #[test]

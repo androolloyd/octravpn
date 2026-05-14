@@ -91,8 +91,7 @@ fn discover_aml(root: &Path) -> Result<Vec<(String, String)>> {
 }
 
 fn walk_dir(root: &Path, dir: &Path, out: &mut Vec<(String, String)>) -> Result<()> {
-    let rd = std::fs::read_dir(dir)
-        .with_context(|| format!("read_dir {}", dir.display()))?;
+    let rd = std::fs::read_dir(dir).with_context(|| format!("read_dir {}", dir.display()))?;
     for entry in rd {
         let entry = entry?;
         let path = entry.path();
@@ -120,7 +119,10 @@ pub fn write_artifact(out_dir: &Path, name: &str, artifact: &Value) -> Result<()
     )?;
     let abi = artifact.get("abi").cloned().unwrap_or(Value::Array(vec![]));
     let abi_path = out_dir.join(format!("{name}.abi"));
-    write_to(&abi_path, &serde_json::to_string_pretty(&abi).unwrap_or_default())?;
+    write_to(
+        &abi_path,
+        &serde_json::to_string_pretty(&abi).unwrap_or_default(),
+    )?;
     let bin = artifact
         .get("bytecode")
         .and_then(|v| v.as_str())

@@ -72,7 +72,10 @@ secret_path = "{wallet}"
     println!("wallet address: {}", addr.display());
     if program_addr.is_none() {
         println!();
-        println!("⚠  program_addr is a placeholder. Edit {} and replace", config_path.display());
+        println!(
+            "⚠  program_addr is a placeholder. Edit {} and replace",
+            config_path.display()
+        );
         println!("   `program_addr` with the deployed OctraVPN program address.");
     }
     Ok(())
@@ -131,10 +134,7 @@ pub(crate) fn doctor(config_path: &str) -> Result<()> {
     }
 
     // 3. TUN preflight.
-    ok(
-        "TUN device subsystem present",
-        octravpn_tun::doctor(),
-    );
+    ok("TUN device subsystem present", octravpn_tun::doctor());
 
     // 4. Platform-specific quick checks.
     #[cfg(target_os = "linux")]

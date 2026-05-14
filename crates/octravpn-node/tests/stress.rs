@@ -5,10 +5,7 @@
 //! the locks are correct under contention: no panics, monotonic
 //! counters, audit-log lines well-formed.
 
-use std::{
-    sync::Arc,
-    thread,
-};
+use std::{sync::Arc, thread};
 
 // Pull in the binary crate as a path-style mod so we can test the
 // internal modules. Cargo doesn't expose private bin modules to
@@ -98,9 +95,7 @@ fn snap(tid: &str, addr: &str, cands: Vec<PeerCandidate>) -> PeerSnapshot {
 #[test]
 fn mesh_manager_tick_is_safe_under_concurrent_publish() {
     let mgr = Arc::new(MeshManager::new("octSELF", [1u8; 32]));
-    mgr.set_self_candidates(vec![PeerCandidate::Lan(
-        "10.0.0.1:51820".parse().unwrap(),
-    )]);
+    mgr.set_self_candidates(vec![PeerCandidate::Lan("10.0.0.1:51820".parse().unwrap())]);
 
     let writer = {
         let m = mgr.clone();
@@ -110,7 +105,11 @@ fn mesh_manager_tick_is_safe_under_concurrent_publish() {
                 let snap = snap(
                     "t",
                     &addr,
-                    vec![PeerCandidate::Lan(format!("10.0.{}.{}:51820", i / 256, i % 256).parse().unwrap())],
+                    vec![PeerCandidate::Lan(
+                        format!("10.0.{}.{}:51820", i / 256, i % 256)
+                            .parse()
+                            .unwrap(),
+                    )],
                 );
                 m.peers().publish_unverified(snap);
             }

@@ -38,16 +38,15 @@ pub struct CreateArgs {
 pub fn run(args: &CreateArgs) -> Result<()> {
     let source = std::fs::read_to_string(&args.file)?;
     let name = compile::infer_program_name(
-        args.file.file_name().and_then(|s| s.to_str()).unwrap_or("Program"),
+        args.file
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Program"),
         &source,
     );
     let endpoint = rpc_client::endpoint_from_url(&args.rpc_url);
-    let artifact = rpc_client::call(
-        &endpoint,
-        "octra_compileAml",
-        json!([source, &name]),
-    )
-    .unwrap_or_else(|_| compile::synthesize_artifact(&name, &source));
+    let artifact = rpc_client::call(&endpoint, "octra_compileAml", json!([source, &name]))
+        .unwrap_or_else(|_| compile::synthesize_artifact(&name, &source));
     let bytecode = artifact["bytecode"]
         .as_str()
         .ok_or_else(|| anyhow!("missing bytecode in compile result"))?;
@@ -55,7 +54,11 @@ pub fn run(args: &CreateArgs) -> Result<()> {
     let secret = read_secret_hex(&args.key)?;
     let kp = KeyPair::from_secret_bytes(&secret);
     let from_addr = Address::from_pubkey(&kp.public.0).display().to_string();
-    let args_values: Vec<Value> = args.constructor_args.iter().map(|s| parse_arg_token(s)).collect();
+    let args_values: Vec<Value> = args
+        .constructor_args
+        .iter()
+        .map(|s| parse_arg_token(s))
+        .collect();
 
     // Synthetic deploy address used by the in-process backend; real
     // Octra returns the address in the submit response. We compute the
@@ -74,8 +77,7 @@ pub fn run(args: &CreateArgs) -> Result<()> {
         "nonce": 0u64,
         "timestamp": current_timestamp(),
     });
-    let signed = octravpn_core::tx::sign_call(&kp, call)
-        .map_err(|e| anyhow!("sign_call: {e}"))?;
+    let signed = octravpn_core::tx::sign_call(&kp, call).map_err(|e| anyhow!("sign_call: {e}"))?;
     let res = rpc_client::call(&endpoint, "octra_submit", json!([signed]))?;
     dump_json(&json!({
         "address": res

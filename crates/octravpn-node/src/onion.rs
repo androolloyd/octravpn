@@ -86,8 +86,7 @@ impl OnionRouter {
 
     /// Cumulative bytes (in + out) across all sessions ever served.
     pub(crate) fn total_bytes(&self) -> u64 {
-        self.bytes_total_in.load(Ordering::Relaxed)
-            + self.bytes_total_out.load(Ordering::Relaxed)
+        self.bytes_total_in.load(Ordering::Relaxed) + self.bytes_total_out.load(Ordering::Relaxed)
     }
 }
 

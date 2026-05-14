@@ -62,7 +62,12 @@ impl MagicDns {
     }
 
     /// Register a peer's `hostname` in `tailnet_id` mapped to its allocated IP.
-    pub fn register(&self, tailnet_id: impl Into<String>, hostname: impl Into<String>, ip: Ipv4Addr) {
+    pub fn register(
+        &self,
+        tailnet_id: impl Into<String>,
+        hostname: impl Into<String>,
+        ip: Ipv4Addr,
+    ) {
         let mut m = self.inner.write();
         m.entry(tailnet_id.into())
             .or_default()
@@ -124,13 +129,29 @@ impl MagicDns {
     pub fn respond(&self, req: &[u8]) -> Option<Vec<u8>> {
         let (id, flags, qname, qtype, qclass) = parse_query(req)?;
         if qclass != QCLASS_IN {
-            return Some(build_response(id, flags, &qname, qtype, qclass, RCODE_REFUSED, None));
+            return Some(build_response(
+                id,
+                flags,
+                &qname,
+                qtype,
+                qclass,
+                RCODE_REFUSED,
+                None,
+            ));
         }
         // Names look like "<hostname>.<tailnet>.octra" — split off the
         // zone suffix and pass the rest to the registry.
         let parts: Vec<&str> = qname.split('.').collect();
         if parts.len() < 3 || parts.last() != Some(&ZONE) {
-            return Some(build_response(id, flags, &qname, qtype, qclass, RCODE_REFUSED, None));
+            return Some(build_response(
+                id,
+                flags,
+                &qname,
+                qtype,
+                qclass,
+                RCODE_REFUSED,
+                None,
+            ));
         }
         let hostname = parts[0];
         let tailnet_id = parts[1..parts.len() - 1].join(".");
@@ -164,9 +185,7 @@ impl MagicDns {
         // Decide whether this query is for our zone. We mirror the
         // shape used in `respond`.
         let parts: Vec<&str> = qname.split('.').collect();
-        let in_zone = qclass == QCLASS_IN
-            && parts.len() >= 3
-            && parts.last() == Some(&ZONE);
+        let in_zone = qclass == QCLASS_IN && parts.len() >= 3 && parts.last() == Some(&ZONE);
         if in_zone {
             return self.respond(req);
         }
@@ -291,7 +310,7 @@ fn build_response(
     out.extend_from_slice(&ancount.to_be_bytes());
     out.extend_from_slice(&0u16.to_be_bytes()); // NSCOUNT
     out.extend_from_slice(&0u16.to_be_bytes()); // ARCOUNT
-    // Question section: name + qtype + qclass.
+                                                // Question section: name + qtype + qclass.
     encode_name(&mut out, qname);
     out.extend_from_slice(&qtype.to_be_bytes());
     out.extend_from_slice(&qclass.to_be_bytes());
@@ -379,7 +398,10 @@ mod tests {
         let dns = MagicDns::new();
         dns.register_tailnet_members(
             "tid",
-            [("alice".into(), "octA".into()), ("bob".into(), "octB".into())],
+            [
+                ("alice".into(), "octA".into()),
+                ("bob".into(), "octB".into()),
+            ],
         );
         assert!(dns.resolve("tid", "alice").is_some());
         assert!(dns.resolve("tid", "bob").is_some());
@@ -396,7 +418,9 @@ mod tests {
         tokio::spawn(async move {
             let mut buf = [0u8; 1500];
             loop {
-                let Ok((n, from)) = sock.recv_from(&mut buf).await else { break };
+                let Ok((n, from)) = sock.recv_from(&mut buf).await else {
+                    break;
+                };
                 let req_id = u16::from_be_bytes([buf[0], buf[1]]);
                 let mut reply = reply_bytes.clone();
                 if reply.len() >= 2 {

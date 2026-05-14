@@ -183,8 +183,8 @@ mod tests {
     #[tokio::test]
     async fn static_allowlist_short_circuits() {
         let rpc = RpcClient::new("http://unreachable.test/rpc");
-        let oracle = ValidatorOracle::new(rpc)
-            .with_static_allowlist(["octSTATICVALIDATOR0".into()]);
+        let oracle =
+            ValidatorOracle::new(rpc).with_static_allowlist(["octSTATICVALIDATOR0".into()]);
         let addr = Address::from_display("octSTATICVALIDATOR0");
         assert!(oracle.is_validator(&addr).await.unwrap());
     }

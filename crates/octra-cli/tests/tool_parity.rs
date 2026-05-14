@@ -89,22 +89,14 @@ fn forge_submit_matches_cast_inprocess_submit() {
     let mut forge2 = ForgeCtx::with_program("octPROG");
     forge2.become_octra_validator("octV");
     let ep = octra_cli::rpc_client::endpoint_from_url("inprocess://octPROG");
-    let _ = octra_cli::rpc_client::call(
-        &ep,
-        "octra_test_grantValidator",
-        json!(["octV"]),
-    );
+    let _ = octra_cli::rpc_client::call(&ep, "octra_test_grantValidator", json!(["octV"]));
     // Seed operator stake on this fresh AppState so register_endpoint
     // passes the bond check on the cast path too.
-    let _ = octra_cli::rpc_client::call(
-        &ep,
-        "octra_test_bondEndpoint",
-        json!(["octV"]),
-    );
+    let _ = octra_cli::rpc_client::call(&ep, "octra_test_bondEndpoint", json!(["octV"]));
     let cast_submit = octra_cli::rpc_client::call(&ep, "octra_submit", json!([tx])).unwrap();
     let cast_hash = cast_submit["hash"].as_str().unwrap().to_string();
-    let cast_tx = octra_cli::rpc_client::call(&ep, "octra_transaction", json!([cast_hash]))
-        .unwrap();
+    let cast_tx =
+        octra_cli::rpc_client::call(&ep, "octra_transaction", json!([cast_hash])).unwrap();
     let cast_event_names: Vec<String> = cast_tx["events"]
         .as_array()
         .cloned()
@@ -126,9 +118,7 @@ async fn http_anvil_matches_inprocess_view() {
 
     // In-process forge.
     let forge = ForgeCtx::with_program("octPROG");
-    let forge_view = forge
-        .view("get_params", vec![])
-        .unwrap();
+    let forge_view = forge.view("get_params", vec![]).unwrap();
 
     // HTTP via the core RPC client.
     let rpc = octravpn_core::rpc::RpcClient::new(http_url(18301));
@@ -142,7 +132,10 @@ async fn http_anvil_matches_inprocess_view() {
         .await
         .unwrap();
 
-    assert_eq!(forge_view, http_view, "forge vs http view drift on get_params");
+    assert_eq!(
+        forge_view, http_view,
+        "forge vs http view drift on get_params"
+    );
 }
 
 /// HTTP anvil mode, when seeded with a validator and an endpoint, returns

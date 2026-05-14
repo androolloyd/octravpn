@@ -60,8 +60,8 @@ impl PeerCandidate {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PeerSnapshot {
     pub tailnet_id: String,
-    pub addr: String,                 // Octra address (e.g. "oct...")
-    pub wg_pubkey: [u8; 32],          // WireGuard static public key
+    pub addr: String,        // Octra address (e.g. "oct...")
+    pub wg_pubkey: [u8; 32], // WireGuard static public key
     pub candidates: Vec<PeerCandidate>,
     /// Optional hostname that magic DNS will resolve to this peer's
     /// allocated tailnet IP.
@@ -109,9 +109,7 @@ mod serde_sig_bytes {
         Wrap(*b).serialize(s)
     }
 
-    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
-        d: D,
-    ) -> Result<[u8; 64], D::Error> {
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<[u8; 64], D::Error> {
         Wrap::deserialize(d).map(|w| w.0)
     }
 }
@@ -190,11 +188,7 @@ impl SignedPeerSnapshot {
     /// Verify both the Ed25519 signature and that the snapshot was
     /// produced within `max_age_secs` of now. Returns the specific
     /// [`MeshError`] variant the registry should surface.
-    pub fn verify(
-        &self,
-        expected_pubkey: &PublicKey,
-        max_age_secs: u64,
-    ) -> Result<(), MeshError> {
+    pub fn verify(&self, expected_pubkey: &PublicKey, max_age_secs: u64) -> Result<(), MeshError> {
         let now = now_unix_secs();
         // saturating_sub so clock skew (slightly future ts) doesn't
         // wrap around and accidentally pass the freshness check.
@@ -283,9 +277,7 @@ impl PeerRegistry {
     }
 
     pub fn remove(&self, tailnet_id: &str, addr: &str) {
-        self.inner
-            .write()
-            .remove(&(tailnet_id.into(), addr.into()));
+        self.inner.write().remove(&(tailnet_id.into(), addr.into()));
     }
 
     /// Bounded count for observability.
@@ -330,7 +322,11 @@ mod tests {
     fn stale_entries_get_evicted_on_lookup() {
         let r = PeerRegistry::new();
         let mut snap = fake_snapshot("t1", "octStale", "host");
-        snap.last_refresh = Instant::now().checked_sub(Peer::TTL).unwrap().checked_sub(Duration::from_secs(1)).unwrap();
+        snap.last_refresh = Instant::now()
+            .checked_sub(Peer::TTL)
+            .unwrap()
+            .checked_sub(Duration::from_secs(1))
+            .unwrap();
         r.publish_unverified(snap);
         let peers = r.peers_in("t1", "self");
         assert!(peers.is_empty(), "expected stale peer to be evicted");
@@ -372,7 +368,8 @@ mod tests {
             .expect("verify should pass for unmodified signed snapshot");
         // Goes into the registry.
         let r = PeerRegistry::new();
-        r.publish(signed, &kp.public).expect("publish should accept");
+        r.publish(signed, &kp.public)
+            .expect("publish should accept");
         assert_eq!(r.len(), 1);
     }
 

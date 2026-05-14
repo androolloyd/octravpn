@@ -90,9 +90,8 @@ impl AuditLog {
     /// daily file inside it will be created on first write.
     pub(crate) fn open(dir: impl AsRef<Path>) -> Result<Self> {
         let dir = dir.as_ref().to_path_buf();
-        std::fs::create_dir_all(&dir).with_context(|| {
-            format!("create audit dir {}", dir.display())
-        })?;
+        std::fs::create_dir_all(&dir)
+            .with_context(|| format!("create audit dir {}", dir.display()))?;
         let key = load_or_create_key(&dir)?;
         Ok(Self {
             inner: Arc::new(Mutex::new(Inner {
@@ -136,13 +135,9 @@ impl AuditLog {
             prev_mac: hex::encode(inner.prev_mac),
             mac: hex::encode(line_mac),
         };
-        let line =
-            serde_json::to_string(&chained).context("serialize chained audit line")?;
+        let line = serde_json::to_string(&chained).context("serialize chained audit line")?;
 
-        let f = inner
-            .current_file
-            .as_mut()
-            .expect("file just opened");
+        let f = inner.current_file.as_mut().expect("file just opened");
         f.write_all(line.as_bytes()).context("write audit line")?;
         f.write_all(b"\n").context("write audit newline")?;
         f.flush().context("flush audit log")?;
@@ -154,8 +149,7 @@ impl AuditLog {
     /// `Ok(line_count)` if every line's MAC chain checks out, or an
     /// error describing the first broken position.
     pub(crate) fn verify_file(key: &[u8; 32], path: &Path) -> Result<usize> {
-        let f = std::fs::File::open(path)
-            .with_context(|| format!("open {}", path.display()))?;
+        let f = std::fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
         let reader = std::io::BufReader::new(f);
         let mut prev_mac = [0u8; 32];
         let mut count = 0usize;
@@ -187,8 +181,8 @@ impl AuditLog {
                 .and_then(|x| x.as_str())
                 .ok_or_else(|| anyhow::anyhow!("line {} missing record_json", i + 1))?
                 .to_string();
-            let mut mac = <HmacSha256 as hmac::Mac>::new_from_slice(key)
-                .expect("HMAC accepts any key");
+            let mut mac =
+                <HmacSha256 as hmac::Mac>::new_from_slice(key).expect("HMAC accepts any key");
             mac.update(&prev_mac);
             mac.update(canonical.as_bytes());
             let expect: [u8; 32] = mac.finalize().into_bytes().into();
@@ -226,8 +220,7 @@ impl AuditLog {
 fn load_or_create_key(dir: &Path) -> Result<[u8; 32]> {
     let p = dir.join(".audit.key");
     if p.exists() {
-        let raw = std::fs::read(&p)
-            .with_context(|| format!("read {}", p.display()))?;
+        let raw = std::fs::read(&p).with_context(|| format!("read {}", p.display()))?;
         if raw.len() != 32 {
             anyhow::bail!(
                 "audit key file {} has wrong size ({}); expected 32",
@@ -241,16 +234,12 @@ fn load_or_create_key(dir: &Path) -> Result<[u8; 32]> {
     } else {
         let mut k = [0u8; 32];
         OsRng.fill_bytes(&mut k);
-        std::fs::write(&p, k)
-            .with_context(|| format!("write {}", p.display()))?;
+        std::fs::write(&p, k).with_context(|| format!("write {}", p.display()))?;
         // Best-effort chmod 0600 on Unix.
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(
-                &p,
-                std::fs::Permissions::from_mode(0o600),
-            );
+            let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600));
         }
         Ok(k)
     }
@@ -311,7 +300,10 @@ mod tests {
             .map(|e| e.unwrap().file_name().into_string().unwrap())
             .collect();
         // 2 audit lines + 1 .audit.key file = 2 files in dir.
-        assert!(files.iter().any(|f| f.starts_with("audit-")), "no audit file: {files:?}");
+        assert!(
+            files.iter().any(|f| f.starts_with("audit-")),
+            "no audit file: {files:?}"
+        );
         let audit_file = files.iter().find(|f| f.starts_with("audit-")).unwrap();
         let body = std::fs::read_to_string(dir.path().join(audit_file)).unwrap();
         assert_eq!(body.lines().count(), 2);

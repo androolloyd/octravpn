@@ -105,10 +105,7 @@ fn run(op: Op, funnel_flag: bool) -> Result<()> {
         }
         Op::List => {
             let map = load_as_map(&path)?;
-            let filtered: Vec<_> = map
-                .values()
-                .filter(|e| e.funnel == funnel_flag)
-                .collect();
+            let filtered: Vec<_> = map.values().filter(|e| e.funnel == funnel_flag).collect();
             if filtered.is_empty() {
                 println!("no {label} entries");
             } else {
@@ -163,20 +160,17 @@ fn load_file(path: &Path) -> Result<ServeFile> {
     if !path.exists() {
         return Ok(ServeFile::default());
     }
-    let s = fs::read_to_string(path)
-        .with_context(|| format!("read {}", path.display()))?;
-    let f: ServeFile = toml::from_str(&s)
-        .with_context(|| format!("parse {}", path.display()))?;
+    let s = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    let f: ServeFile = toml::from_str(&s).with_context(|| format!("parse {}", path.display()))?;
     Ok(f)
 }
 
 fn save_file(path: &Path, file: &ServeFile) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("mkdir {}", parent.display()))?;
+        fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
     }
-    let s = toml::to_string_pretty(file)
-        .with_context(|| format!("serialise {}", path.display()))?;
+    let s =
+        toml::to_string_pretty(file).with_context(|| format!("serialise {}", path.display()))?;
     fs::write(path, s).with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }

@@ -172,7 +172,11 @@ mod acl_sig_bytes {
 
 impl SignedAclDoc {
     /// Produce a SignedAclDoc by signing canonical_bytes with `kp`.
-    pub fn sign(doc: AclDoc, owner_addr: impl Into<String>, kp: &octravpn_core::sig::KeyPair) -> Self {
+    pub fn sign(
+        doc: AclDoc,
+        owner_addr: impl Into<String>,
+        kp: &octravpn_core::sig::KeyPair,
+    ) -> Self {
         let canonical = doc.canonical_bytes();
         let sig = kp.sign(&canonical);
         Self {
@@ -204,7 +208,6 @@ impl SignedAclDoc {
 // Empty `impl` to keep the file's top-level structure compiling; the
 // previous `impl AclDoc { ... }` block ends above.
 impl AclDoc {
-
     /// Evaluate a (src, dst, port) tuple. Returns the action of the
     /// first matching rule, or `Deny` if no rule matched (default-deny).
     pub fn decide(&self, src: &str, dst: &str, port: PortRef<'_>) -> AclAction {
@@ -349,11 +352,8 @@ mod tests {
     fn group_expansion_matches_member() {
         let doc = AclDoc {
             version: 1,
-            groups: std::iter::once((
-                "admins".to_string(),
-                vec!["octA".into(), "octB".into()],
-            ))
-            .collect(),
+            groups: std::iter::once(("admins".to_string(), vec!["octA".into(), "octB".into()]))
+                .collect(),
             tags: BTreeMap::default(),
             rules: vec![AclRule {
                 action: AclAction::Accept,
@@ -362,8 +362,14 @@ mod tests {
                 ports: vec![],
             }],
         };
-        assert_eq!(doc.decide("octA", "anything", PortRef::any()), AclAction::Accept);
-        assert_eq!(doc.decide("octC", "anything", PortRef::any()), AclAction::Deny);
+        assert_eq!(
+            doc.decide("octA", "anything", PortRef::any()),
+            AclAction::Accept
+        );
+        assert_eq!(
+            doc.decide("octC", "anything", PortRef::any()),
+            AclAction::Deny
+        );
     }
 
     #[test]
@@ -388,7 +394,10 @@ mod tests {
             ],
         };
         assert_eq!(doc.decide("octA", "octB", PortRef::any()), AclAction::Deny);
-        assert_eq!(doc.decide("octZ", "octB", PortRef::any()), AclAction::Accept);
+        assert_eq!(
+            doc.decide("octZ", "octB", PortRef::any()),
+            AclAction::Accept
+        );
     }
 
     #[test]

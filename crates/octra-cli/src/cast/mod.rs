@@ -69,14 +69,10 @@ pub enum CastCmd {
     Wallet(wallet::WalletCmd),
     /// sha256 helper. Octra uses sha256 for hashes; `keccak` is an alias
     /// so `cast keccak <hex>` keeps muscle memory from Ethereum tooling.
-    Sha256 {
-        hex: String,
-    },
+    Sha256 { hex: String },
     /// Alias of `sha256`. Octra uses sha256 for hashing; this name only
     /// exists for muscle memory with Foundry's `cast keccak`.
-    Keccak {
-        hex: String,
-    },
+    Keccak { hex: String },
     /// Decode a hex-encoded params blob against a compiled ABI.
     #[command(name = "abi-decode")]
     AbiDecode {
@@ -175,16 +171,7 @@ fn cast_send(
     //   - `--from` only      → unsigned (mock-friendly).
     //   - `--key`            → derive `from` from the key.
     //   - both               → use given `from`, sign with the key.
-    let (from_str, signed) = build_envelope(
-        addr,
-        method,
-        &parsed,
-        value,
-        fee,
-        nonce,
-        from,
-        key,
-    )?;
+    let (from_str, signed) = build_envelope(addr, method, &parsed, value, fee, nonce, from, key)?;
     let endpoint = rpc_client::endpoint_from_url(rpc_url);
     let result = rpc_client::call(&endpoint, "octra_submit", json!([signed]))?;
     println!("submitted from: {from_str}");
@@ -225,8 +212,8 @@ fn build_envelope(
         if let Some(obj) = call.as_object_mut() {
             obj.insert("from".into(), json!(from_value));
         }
-        let signed = octravpn_core::tx::sign_call(&kp, call)
-            .map_err(|e| anyhow!("sign_call: {e}"))?;
+        let signed =
+            octravpn_core::tx::sign_call(&kp, call).map_err(|e| anyhow!("sign_call: {e}"))?;
         Ok((from_value, signed))
     } else {
         let from_value = from

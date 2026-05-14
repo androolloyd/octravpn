@@ -107,8 +107,7 @@ fn load_snapshot(path: &std::path::Path) -> Result<BTreeMap<String, u64>> {
     if !path.exists() {
         return Ok(out);
     }
-    let body = std::fs::read_to_string(path)
-        .with_context(|| format!("read {}", path.display()))?;
+    let body = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     for line in body.lines() {
         if let Some((name, n)) = line.rsplit_once(": ") {
             if let Ok(n) = n.trim().parse::<u64>() {

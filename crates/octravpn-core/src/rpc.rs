@@ -203,7 +203,8 @@ impl RpcClient {
     /// protocol validator. Used by `register_endpoint` callers as a
     /// pre-check (the program-side gate is the authoritative one).
     pub async fn is_octra_validator(&self, addr: &Address) -> CoreResult<bool> {
-        self.call("octra_isValidator", json!([addr.display()])).await
+        self.call("octra_isValidator", json!([addr.display()]))
+            .await
     }
 }
 

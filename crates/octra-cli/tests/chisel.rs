@@ -16,9 +16,7 @@ fn chisel_quits_on_eof() {
     // shorthand and the `:quit` meta command.
     {
         let stdin = child.stdin.as_mut().unwrap();
-        stdin
-            .write_all(b"list_active_endpoints\n:quit\n")
-            .unwrap();
+        stdin.write_all(b"list_active_endpoints\n:quit\n").unwrap();
     }
     let out = child.wait_with_output().unwrap();
     assert!(out.status.success(), "chisel exited non-zero: {out:?}");

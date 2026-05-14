@@ -163,11 +163,7 @@ pub fn tag16(tag: &[u8; 32]) -> [u8; 16] {
 /// Wire format of the returned blob: `nonce(12) || ciphertext(40)`
 /// — i.e. 12 bytes ChaCha20-Poly1305 nonce followed by
 /// `Encrypt(key=shared, plaintext = u64 amount || 32B blind)`.
-pub fn seal_payload(
-    shared: &[u8; 32],
-    amount: u64,
-    blind: &[u8; 32],
-) -> CoreResult<Vec<u8>> {
+pub fn seal_payload(shared: &[u8; 32], amount: u64, blind: &[u8; 32]) -> CoreResult<Vec<u8>> {
     let key = derive_payload_key(shared);
     let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
     let mut nonce_bytes = [0u8; 12];
@@ -286,8 +282,7 @@ mod tests {
         let vp = view_pubkey_from_secret(&vs);
 
         let (out, sender_shared) = build_fresh_output(&vp).unwrap();
-        let (receiver_shared, receiver_tag) =
-            scan_with_view_secret(&vs, &out.ephemeral_pubkey);
+        let (receiver_shared, receiver_tag) = scan_with_view_secret(&vs, &out.ephemeral_pubkey);
         assert_eq!(sender_shared, receiver_shared);
         assert_eq!(out.tag, receiver_tag);
     }
@@ -308,8 +303,10 @@ mod tests {
         h.update(vp);
         h.update(out.ephemeral_pubkey);
         let attacker_guess: [u8; 32] = h.finalize().into();
-        assert_ne!(out.tag, attacker_guess,
-                   "old hash-based scheme must not equal new ECDH tag");
+        assert_ne!(
+            out.tag, attacker_guess,
+            "old hash-based scheme must not equal new ECDH tag"
+        );
 
         // Try recomputing without view_secret using random scalars:
         for _ in 0..10 {
@@ -392,8 +389,7 @@ mod tests {
         let blob = seal_payload(&sender_shared, 5_000, &[0xAA; 32]).unwrap();
 
         // Receiver side.
-        let (receiver_shared, receiver_tag) =
-            scan_with_view_secret(&vs, &out.ephemeral_pubkey);
+        let (receiver_shared, receiver_tag) = scan_with_view_secret(&vs, &out.ephemeral_pubkey);
         assert_eq!(out.tag, receiver_tag);
         let (amount, blind) = open_payload(&receiver_shared, &blob).unwrap();
         assert_eq!(amount, 5_000);

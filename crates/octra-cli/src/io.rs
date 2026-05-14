@@ -11,8 +11,8 @@ use serde_json::Value;
 
 /// Read a 32-byte hex-encoded secret from `path` (with optional `0x` prefix).
 pub fn read_secret_hex(path: &Path) -> Result<[u8; 32]> {
-    let s = fs::read_to_string(path)
-        .with_context(|| format!("read key file: {}", path.display()))?;
+    let s =
+        fs::read_to_string(path).with_context(|| format!("read key file: {}", path.display()))?;
     let stripped = s.trim().trim_start_matches("0x");
     let bytes = hex::decode(stripped).context("key file is not hex")?;
     if bytes.len() != 32 {
@@ -34,11 +34,9 @@ pub fn dump_json(v: &Value) {
 /// Convenience: write a string to a path, creating parent dirs.
 pub fn write_to(path: &Path, contents: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("create dir: {}", parent.display()))?;
+        fs::create_dir_all(parent).with_context(|| format!("create dir: {}", parent.display()))?;
     }
-    fs::write(path, contents)
-        .with_context(|| format!("write {}", path.display()))?;
+    fs::write(path, contents).with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }
 

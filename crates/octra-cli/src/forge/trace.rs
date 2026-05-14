@@ -80,7 +80,11 @@ pub fn render_test_output(stdout: &str, stderr: &str) {
             "{} {}{}",
             icon(t.status),
             t.name,
-            if ou > 0 { format!(" ({ou} OU)") } else { String::new() }
+            if ou > 0 {
+                format!(" ({ou} OU)")
+            } else {
+                String::new()
+            }
         );
         if t.status == TestStatus::Fail {
             if let Some(body) = run.captures.get(&t.name) {

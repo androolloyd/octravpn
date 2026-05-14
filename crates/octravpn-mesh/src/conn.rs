@@ -37,7 +37,7 @@ pub enum ConnState {
 
 #[derive(Clone, Debug)]
 pub struct Connection {
-    pub peer_addr: String,           // Octra address of the remote peer
+    pub peer_addr: String, // Octra address of the remote peer
     pub state: ConnState,
     pub direct_via: Option<SocketAddr>,
     pub relay_validator: Option<String>,
@@ -96,7 +96,9 @@ impl ConnectionManager {
     pub fn step(&self, tailnet_id: &str, peer_addr: &str) -> ConnState {
         let key = (tailnet_id.to_string(), peer_addr.to_string());
         let mut conns = self.inner.write();
-        let conn = conns.entry(key).or_insert_with(|| Connection::new(peer_addr));
+        let conn = conns
+            .entry(key)
+            .or_insert_with(|| Connection::new(peer_addr));
 
         let Some(peer) = self.peers.get(tailnet_id, peer_addr) else {
             // Peer dropped out of the registry — tear down.
@@ -311,7 +313,7 @@ mod tests {
         let cm = ConnectionManager::new(reg.clone());
         cm.step("t", "octB"); // Probing
         cm.step("t", "octB"); // Direct
-        // Peer republishes with no usable candidates.
+                              // Peer republishes with no usable candidates.
         reg.publish_unverified(snap("t", "octB", vec![]));
         let s = cm.step("t", "octB");
         assert_eq!(s, ConnState::Probing);

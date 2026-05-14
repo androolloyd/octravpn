@@ -227,6 +227,9 @@ mod tests {
         let b = PlaceholderBackend;
         let addr = Address::from_display("octABC");
         let r = b.is_octra_validator(&addr).await;
-        assert!(r.is_err(), "placeholder must refuse to answer authoritatively");
+        assert!(
+            r.is_err(),
+            "placeholder must refuse to answer authoritatively"
+        );
     }
 }

@@ -229,7 +229,9 @@ impl Hub {
     ) -> Result<()> {
         let nonce = self.chain.nonce().await?;
         let fee = self.chain.fee("contract_call").await?;
-        let call = self.chain.build_settle_claim_call(session_id, bytes_used, fee, nonce);
+        let call = self
+            .chain
+            .build_settle_claim_call(session_id, bytes_used, fee, nonce);
         let signed = self.chain.sign_call(call)?;
         let hash = self.chain.submit_signed_tx(&signed).await?;
         info!(%hash, session_id, bytes_used, "settle_claim submitted");
@@ -250,10 +252,7 @@ impl Hub {
     /// Per-operator placeholder enc(0). Same caveat as
     /// `hfhe_pubkey_placeholder`.
     fn hfhe_initial_enc_zero_placeholder(&self) -> String {
-        format!(
-            "hfhe_v1|enc0|{}",
-            hex::encode(self.chain.wallet.public.0)
-        )
+        format!("hfhe_v1|enc0|{}", hex::encode(self.chain.wallet.public.0))
     }
 
     /// Claim accumulated earnings. v1 two-step: AML verifies FHE
@@ -281,12 +280,9 @@ impl Hub {
 
         let nonce = self.chain.nonce().await?;
         let fee = self.chain.fee("contract_call").await?;
-        let call = self.chain.build_claim_call(
-            acc.amount,
-            &proof_placeholder,
-            fee,
-            nonce,
-        );
+        let call = self
+            .chain
+            .build_claim_call(acc.amount, &proof_placeholder, fee, nonce);
         let signed = self.chain.sign_call(call)?;
         let hash = self.chain.submit_signed_tx(&signed).await?;
         info!(%hash, claimed = acc.amount, "claim_earnings submitted");
@@ -308,9 +304,7 @@ impl Hub {
     /// program-side `endpoint_is_active` check will fail, so we log
     /// a clear warning here for operators.
     pub(crate) fn spawn_validator_health_loop(self: Arc<Self>) -> JoinHandle<Result<()>> {
-        let poll = std::time::Duration::from_secs(
-            self.cfg.attestation.poll_interval_secs.max(30),
-        );
+        let poll = std::time::Duration::from_secs(self.cfg.attestation.poll_interval_secs.max(30));
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(poll).await;

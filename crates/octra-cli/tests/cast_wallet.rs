@@ -45,7 +45,9 @@ fn wallet_new_and_addr_roundtrip() {
     let mut k = [0u8; 32];
     k.copy_from_slice(&secret);
     let kp = octravpn_core::sig::KeyPair::from_secret_bytes(&k);
-    let expected = octravpn_core::address::Address::from_pubkey(&kp.public.0).display().to_string();
+    let expected = octravpn_core::address::Address::from_pubkey(&kp.public.0)
+        .display()
+        .to_string();
     assert_eq!(addr, expected);
 }
 

@@ -3,11 +3,7 @@
 
 use std::sync::Arc;
 
-use octravpn_core::{
-    address::Address,
-    rpc::RpcClient,
-    sig::KeyPair,
-};
+use octravpn_core::{address::Address, rpc::RpcClient, sig::KeyPair};
 
 pub struct AdminState {
     pub rpc: RpcClient,

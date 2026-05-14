@@ -18,11 +18,7 @@ use std::{net::SocketAddr, path::PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use octravpn_admin_ui::{router, state::AdminState};
-use octravpn_core::{
-    address::Address,
-    rpc::RpcClient,
-    sig::KeyPair,
-};
+use octravpn_core::{address::Address, rpc::RpcClient, sig::KeyPair};
 use serde_json::{json, Value};
 use tracing::info;
 
@@ -106,12 +102,7 @@ async fn main() -> Result<()> {
         bind: "127.0.0.1:8088".into(),
     }) {
         Cmd::Serve { bind } => {
-            let state = AdminState::new(
-                cli.rpc_url,
-                cli.program,
-                wallet,
-                cli.node_url,
-            );
+            let state = AdminState::new(cli.rpc_url, cli.program, wallet, cli.node_url);
             let addr: SocketAddr = bind.parse().context("parse bind addr")?;
             let listener = tokio::net::TcpListener::bind(addr).await?;
             info!(
@@ -124,7 +115,12 @@ async fn main() -> Result<()> {
         }
         Cmd::ListTailnets => {
             let v = rpc
-                .contract_call(&program, "list_tailnets", &[json!(0u64), json!(500u64)], None)
+                .contract_call(
+                    &program,
+                    "list_tailnets",
+                    &[json!(0u64), json!(500u64)],
+                    None,
+                )
                 .await?;
             print_list(&v);
         }
@@ -136,14 +132,26 @@ async fn main() -> Result<()> {
         }
         Cmd::AddMember { tailnet, addr } => {
             let kp = wallet.context("--wallet required for write ops")?;
-            let r = submit(&rpc, &program, &kp, "add_member", vec![json!(tailnet), json!(addr)], 0).await?;
+            let r = submit(
+                &rpc,
+                &program,
+                &kp,
+                "add_member",
+                vec![json!(tailnet), json!(addr)],
+                0,
+            )
+            .await?;
             println!("tx {r}");
         }
         Cmd::RemoveMember { tailnet, addr } => {
             let kp = wallet.context("--wallet required")?;
             let r = submit(
-                &rpc, &program, &kp, "remove_member",
-                vec![json!(tailnet), json!(addr)], 0,
+                &rpc,
+                &program,
+                &kp,
+                "remove_member",
+                vec![json!(tailnet), json!(addr)],
+                0,
             )
             .await?;
             println!("tx {r}");
@@ -151,8 +159,12 @@ async fn main() -> Result<()> {
         Cmd::TopUp { tailnet, amount } => {
             let kp = wallet.context("--wallet required")?;
             let r = submit(
-                &rpc, &program, &kp, "deposit_to_tailnet",
-                vec![json!(tailnet)], amount,
+                &rpc,
+                &program,
+                &kp,
+                "deposit_to_tailnet",
+                vec![json!(tailnet)],
+                amount,
             )
             .await?;
             println!("tx {r}");
@@ -161,8 +173,12 @@ async fn main() -> Result<()> {
             let kp = wallet.context("--wallet required")?;
             let hash = compute_acl_hash(&file)?;
             let r = submit(
-                &rpc, &program, &kp, "update_acl",
-                vec![json!(tailnet), json!(hex::encode(hash))], 0,
+                &rpc,
+                &program,
+                &kp,
+                "update_acl",
+                vec![json!(tailnet), json!(hex::encode(hash))],
+                0,
             )
             .await?;
             println!("tx {r}");
@@ -172,19 +188,36 @@ async fn main() -> Result<()> {
             let hash = compute_acl_hash(&file)?;
             let hash_hex = hex::encode(hash);
             let list = rpc
-                .contract_call(&program, "list_tailnets", &[json!(0u64), json!(500u64)], None)
+                .contract_call(
+                    &program,
+                    "list_tailnets",
+                    &[json!(0u64), json!(500u64)],
+                    None,
+                )
                 .await?;
             let ids: Vec<String> = list
                 .as_array()
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
-            println!("broadcasting ACL hash {} to {} tailnet(s)", hash_hex, ids.len());
+            println!(
+                "broadcasting ACL hash {} to {} tailnet(s)",
+                hash_hex,
+                ids.len()
+            );
             let mut ok = 0u32;
             let mut fail = 0u32;
             for id in &ids {
                 match submit(
-                    &rpc, &program, &kp, "update_acl",
-                    vec![json!(id), json!(hash_hex)], 0,
+                    &rpc,
+                    &program,
+                    &kp,
+                    "update_acl",
+                    vec![json!(id), json!(hash_hex)],
+                    0,
                 )
                 .await
                 {
@@ -216,9 +249,8 @@ async fn main() -> Result<()> {
 }
 
 fn load_wallet(path: &std::path::Path) -> Result<KeyPair> {
-    let secret = octravpn_core::util::read_secret_32(
-        path.to_str().context("non-utf8 wallet path")?,
-    )?;
+    let secret =
+        octravpn_core::util::read_secret_32(path.to_str().context("non-utf8 wallet path")?)?;
     Ok(KeyPair::from_secret_bytes(&secret))
 }
 
@@ -247,10 +279,8 @@ async fn submit(
 }
 
 fn compute_acl_hash(path: &std::path::Path) -> Result<[u8; 32]> {
-    let body = std::fs::read_to_string(path)
-        .with_context(|| format!("read {}", path.display()))?;
-    let doc = octravpn_mesh::AclDoc::from_toml(&body)
-        .map_err(|e| anyhow::anyhow!("parse: {e}"))?;
+    let body = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    let doc = octravpn_mesh::AclDoc::from_toml(&body).map_err(|e| anyhow::anyhow!("parse: {e}"))?;
     Ok(doc.policy_hash())
 }
 

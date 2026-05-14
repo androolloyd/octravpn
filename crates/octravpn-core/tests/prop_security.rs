@@ -4,21 +4,17 @@
 //!   - stealth ECDH + sealed payload
 //!   - validator oracle static-allowlist guarantee
 
-use octravpn_core::{
-    address::Address,
-    sig::KeyPair,
-    stealth, tx,
-};
+use octravpn_core::{address::Address, sig::KeyPair, stealth, tx};
 use proptest::prelude::*;
 use serde_json::json;
 
 fn arb_call() -> impl Strategy<Value = serde_json::Value> {
     (
-        any::<u64>(),                       // value
-        any::<u64>(),                       // fee
-        any::<u64>(),                       // nonce
-        "[a-z0-9_]{3,30}",                  // method
-        "oct[a-z0-9]{1,20}",                // to
+        any::<u64>(),        // value
+        any::<u64>(),        // fee
+        any::<u64>(),        // nonce
+        "[a-z0-9_]{3,30}",   // method
+        "oct[a-z0-9]{1,20}", // to
     )
         .prop_map(|(value, fee, nonce, method, to)| {
             json!({

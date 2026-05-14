@@ -146,8 +146,7 @@ pub fn doctor() -> Result<()> {
 fn is_root() -> bool {
     // libc::geteuid is unsafe to call without a crate; check $USER/$UID
     // env vars and the existence of /var/run/sudo as proxies.
-    std::env::var("USER").is_ok_and(|u| u == "root")
-        || std::env::var("UID").is_ok_and(|u| u == "0")
+    std::env::var("USER").is_ok_and(|u| u == "root") || std::env::var("UID").is_ok_and(|u| u == "0")
 }
 
 #[cfg(test)]

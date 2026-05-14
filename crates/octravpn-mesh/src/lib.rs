@@ -32,8 +32,7 @@ pub use ip_alloc::TailnetIpAllocator;
 pub use magic_dns::MagicDns;
 pub use manager::{MeshAction, MeshManager};
 pub use peer::{
-    Peer, PeerCandidate, PeerRegistry, PeerSnapshot, SignedPeerSnapshot,
-    PEER_SNAPSHOT_MAX_AGE_SECS,
+    Peer, PeerCandidate, PeerRegistry, PeerSnapshot, SignedPeerSnapshot, PEER_SNAPSHOT_MAX_AGE_SECS,
 };
 pub use serve::{ServeEntry, ServeRegistry};
 pub use stun::{stun_binding_request, StunError};

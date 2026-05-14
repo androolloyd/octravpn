@@ -37,6 +37,11 @@ pub(crate) struct ActiveSession {
 #[derive(Clone)]
 pub(crate) struct RouteHop {
     pub validator: ValidatorRecord,
+    /// Pedersen blinding scalar for this hop. Currently only written
+    /// (committed to in `open_session`) and read off-chain by the
+    /// slash-on-equivocation flow; kept here so the route record can
+    /// reconstruct receipts for dispute proofs.
+    #[allow(dead_code)]
     pub blind: [u8; 32],
     pub split_bps: u16,
 }
@@ -100,10 +105,7 @@ impl Client {
 
         // 1. Choose `hops` validators.
         let candidates = discover::list(self, 0, 200).await?;
-        let mut filtered: Vec<_> = candidates
-            .into_iter()
-            .filter(|v| v.active)
-            .collect();
+        let mut filtered: Vec<_> = candidates.into_iter().filter(|v| v.active).collect();
         if let Some(r) = region {
             filtered.sort_by_key(|v| u8::from(v.region != r));
         }
@@ -144,8 +146,7 @@ impl Client {
         // the receiver here is the wallet itself, so we publish the
         // resulting tag and discard the secret.
         let session_kp = KeyPair::generate();
-        let view_pubkey =
-            stealth::view_pubkey_from_wallet(&self.wallet_kp.secret_bytes());
+        let view_pubkey = stealth::view_pubkey_from_wallet(&self.wallet_kp.secret_bytes());
         let (stealth_out, _shared) = stealth::build_fresh_output(&view_pubkey)
             .map_err(|e| anyhow!("derive stealth output: {e}"))?;
         let refund_stealth_output = stealth_out.tag;
@@ -158,7 +159,11 @@ impl Client {
         // bind a tailnet, so it can't actually settle on v1 — kept
         // here only so the wire format compiles. Real client use
         // goes through `octravpn tailnet up`.
-        let _ = (route_commit.as_slice(), session_kp.public.0, refund_stealth_output);
+        let _ = (
+            route_commit.as_slice(),
+            session_kp.public.0,
+            refund_stealth_output,
+        );
         let exit_addr = route
             .last()
             .map(|h| h.validator.addr.display().to_string())

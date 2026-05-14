@@ -13,11 +13,7 @@ use anyhow::{anyhow, Result};
 use clap::Args;
 use serde_json::{json, Value};
 
-use crate::{
-    forge::compile,
-    io::dump_json,
-    rpc_client,
-};
+use crate::{forge::compile, io::dump_json, rpc_client};
 
 #[derive(Args, Debug)]
 pub struct InspectArgs {
@@ -50,10 +46,22 @@ pub fn run(args: &InspectArgs) -> Result<()> {
     match args.field.as_str() {
         "abi" => dump_json(artifact.get("abi").unwrap_or(&Value::Null)),
         "bytecode" | "bin" => {
-            println!("{}", artifact.get("bytecode").and_then(|v| v.as_str()).unwrap_or("0x"));
+            println!(
+                "{}",
+                artifact
+                    .get("bytecode")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("0x")
+            );
         }
         "assembly" | "asm" => {
-            println!("{}", artifact.get("assembly").and_then(|v| v.as_str()).unwrap_or(""));
+            println!(
+                "{}",
+                artifact
+                    .get("assembly")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+            );
         }
         "storage" => dump_json(artifact.get("storage").unwrap_or(&Value::Null)),
         _ => dump_json(&artifact),

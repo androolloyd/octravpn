@@ -67,7 +67,9 @@ impl RateLimiter {
             last_refill: now,
         });
         let elapsed = now.duration_since(bucket.last_refill).as_secs_f64();
-        bucket.tokens = elapsed.mul_add(self.refill_per_sec, bucket.tokens).min(self.capacity);
+        bucket.tokens = elapsed
+            .mul_add(self.refill_per_sec, bucket.tokens)
+            .min(self.capacity);
         bucket.last_refill = now;
         if bucket.tokens >= 1.0 {
             bucket.tokens -= 1.0;
@@ -89,11 +91,7 @@ pub(crate) async fn rate_limit_layer(
     if rl.try_acquire(addr.ip()) {
         next.run(req).await
     } else {
-        (
-            StatusCode::TOO_MANY_REQUESTS,
-            "rate limit exceeded",
-        )
-            .into_response()
+        (StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded").into_response()
     }
 }
 

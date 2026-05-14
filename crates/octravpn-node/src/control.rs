@@ -179,7 +179,9 @@ impl ControlState {
         // middleware. The endpoint is read-only (subscribers cannot
         // publish), and the bus itself caps memory via its broadcast
         // capacity, so the abuse surface is bounded.
-        let unlimited = Router::new().route("/events", get(events_sse)).with_state(self);
+        let unlimited = Router::new()
+            .route("/events", get(events_sse))
+            .with_state(self);
 
         limited.merge(unlimited)
     }

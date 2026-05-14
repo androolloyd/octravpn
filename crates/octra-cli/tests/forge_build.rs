@@ -19,10 +19,7 @@ fn build_offline_against_program_dir() {
     // we don't clobber a developer's local build.
     let dir = tempdir().unwrap();
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let workspace_root = std::path::Path::new(&manifest)
-        .ancestors()
-        .nth(2)
-        .unwrap();
+    let workspace_root = std::path::Path::new(&manifest).ancestors().nth(2).unwrap();
     let program_root = workspace_root.join("program");
     cmd()
         .args(["forge", "build", "--offline", "--root"])
@@ -33,11 +30,19 @@ fn build_offline_against_program_dir() {
         .success()
         .stdout(contains("compiled"));
     let octravpn_json = dir.path().join("OctraVPN.json");
-    assert!(octravpn_json.exists(), "expected {} to exist", octravpn_json.display());
+    assert!(
+        octravpn_json.exists(),
+        "expected {} to exist",
+        octravpn_json.display()
+    );
     let body = fs::read_to_string(&octravpn_json).unwrap();
     let v: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(v["name"].as_str(), Some("OctraVPN"));
-    assert!(v["abi"].as_array().unwrap().iter().any(|m| m["name"] == "register_endpoint"));
+    assert!(v["abi"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|m| m["name"] == "register_endpoint"));
     // Companion files exist too.
     assert!(dir.path().join("OctraVPN.abi").exists());
     assert!(dir.path().join("OctraVPN.bin").exists());
@@ -61,10 +66,13 @@ fn build_offline_synthetic_aml_file() {
         .arg(out_dir.path())
         .assert()
         .success();
-    let v: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(out_dir.path().join("MyProg.json")).unwrap(),
-    )
-    .unwrap();
+    let v: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.path().join("MyProg.json")).unwrap())
+            .unwrap();
     assert_eq!(v["name"].as_str(), Some("MyProg"));
-    assert!(v["abi"].as_array().unwrap().iter().any(|m| m["name"] == "foo"));
+    assert!(v["abi"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|m| m["name"] == "foo"));
 }

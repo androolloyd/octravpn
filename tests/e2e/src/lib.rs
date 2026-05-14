@@ -411,16 +411,29 @@ mod tests {
 
         let onion = build_onion(
             &[
-                HopBuildInput { static_pubkey: p1, endpoint: "n1:51820".into() },
-                HopBuildInput { static_pubkey: p2, endpoint: "n2:51820".into() },
-                HopBuildInput { static_pubkey: p3, endpoint: "n3:51820".into() },
+                HopBuildInput {
+                    static_pubkey: p1,
+                    endpoint: "n1:51820".into(),
+                },
+                HopBuildInput {
+                    static_pubkey: p2,
+                    endpoint: "n2:51820".into(),
+                },
+                HopBuildInput {
+                    static_pubkey: p3,
+                    endpoint: "n3:51820".into(),
+                },
             ],
             b"final-payload",
         )
         .unwrap();
 
         let l1 = peel_layer(&s1, &onion).unwrap();
-        let HopAction::Forward { endpoint, next_static_pubkey } = l1.action.clone() else {
+        let HopAction::Forward {
+            endpoint,
+            next_static_pubkey,
+        } = l1.action.clone()
+        else {
             panic!("hop1 must forward")
         };
         assert_eq!(endpoint, "n2:51820");
@@ -445,8 +458,17 @@ mod tests {
         let c1 = commit::commit(&v, &b1);
         let c2 = commit::commit(&v, &b2);
         assert_ne!(c1, c2);
-        assert!(commit::verify_open(&c1, &commit::Opening { addr: v.clone(), blind: b1 }));
-        assert!(commit::verify_open(&c2, &commit::Opening { addr: v, blind: b2 }));
+        assert!(commit::verify_open(
+            &c1,
+            &commit::Opening {
+                addr: v.clone(),
+                blind: b1
+            }
+        ));
+        assert!(commit::verify_open(
+            &c2,
+            &commit::Opening { addr: v, blind: b2 }
+        ));
     }
 
     #[test]

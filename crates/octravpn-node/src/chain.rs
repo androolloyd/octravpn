@@ -106,10 +106,7 @@ impl ChainCtx {
         Ok(Some(v))
     }
 
-    pub(crate) fn build_register_endpoint_call(
-        &self,
-        p: &RegisterEndpointParams<'_>,
-    ) -> Value {
+    pub(crate) fn build_register_endpoint_call(&self, p: &RegisterEndpointParams<'_>) -> Value {
         json!({
             "kind": "contract_call",
             "from": self.validator_addr.display(),

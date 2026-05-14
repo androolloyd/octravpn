@@ -10,10 +10,7 @@ fn cmd() -> Command {
 #[test]
 fn inspect_aml_file_dumps_abi() {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let workspace_root = std::path::Path::new(&manifest)
-        .ancestors()
-        .nth(2)
-        .unwrap();
+    let workspace_root = std::path::Path::new(&manifest).ancestors().nth(2).unwrap();
     cmd()
         .args(["forge", "inspect"])
         .arg(workspace_root.join("program").join("main.aml"))
@@ -27,10 +24,7 @@ fn inspect_aml_file_dumps_abi() {
 #[test]
 fn inspect_aml_file_dumps_bytecode() {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let workspace_root = std::path::Path::new(&manifest)
-        .ancestors()
-        .nth(2)
-        .unwrap();
+    let workspace_root = std::path::Path::new(&manifest).ancestors().nth(2).unwrap();
     cmd()
         .args(["forge", "inspect"])
         .arg(workspace_root.join("program").join("main.aml"))

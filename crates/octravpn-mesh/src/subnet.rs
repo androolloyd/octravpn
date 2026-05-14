@@ -6,10 +6,7 @@
 //! data-plane (kernel routes / WG `AllowedIPs`) is wired by the
 //! consumer.
 
-use std::{
-    collections::HashMap,
-    net::Ipv4Addr,
-};
+use std::{collections::HashMap, net::Ipv4Addr};
 
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -35,9 +32,7 @@ impl Cidr {
             .parse()
             .map_err(|e| MeshError::InvalidSubnet(format!("bad prefix: {e}")))?;
         if prefix_len > 32 {
-            return Err(MeshError::InvalidSubnet(format!(
-                "prefix>32: {prefix_len}"
-            )));
+            return Err(MeshError::InvalidSubnet(format!("prefix>32: {prefix_len}")));
         }
         // Canonicalize: zero out host bits.
         let raw = u32::from_be_bytes(network.octets());

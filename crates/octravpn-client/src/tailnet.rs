@@ -7,13 +7,7 @@
 //! (boringtun tunnels per peer) lives in the `up` long-running task;
 //! everything else is synchronous chain ops.
 
-use std::{
-    fs,
-    net::SocketAddr,
-    path::PathBuf,
-    sync::Arc,
-    time::Duration,
-};
+use std::{fs, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::{anyhow, Context, Result};
 use octravpn_core::{address::Address, sig::KeyPair, util, wallet_enc};
@@ -180,9 +174,8 @@ fn load_bookmark(name: &str) -> Result<TailnetBookmark> {
         });
     }
     let p = bookmark_path(name)?;
-    let body = fs::read_to_string(&p).with_context(|| {
-        format!("read {} — tailnet '{name}' not found locally", p.display())
-    })?;
+    let body = fs::read_to_string(&p)
+        .with_context(|| format!("read {} — tailnet '{name}' not found locally", p.display()))?;
     toml::from_str(&body).context("decode bookmark")
 }
 
@@ -228,7 +221,9 @@ pub(crate) async fn dispatch(client: &Client, cfg: &ClientConfig, cmd: TailnetCm
         }
         TailnetCmd::RegisterDevice { device } => register_device(client, cfg, &device).await,
         TailnetCmd::RevokeDevice { device } => revoke_device(client, cfg, &device).await,
-        TailnetCmd::IssueToken { tailnet, hours } => issue_token(client, cfg, &tailnet, hours).await,
+        TailnetCmd::IssueToken { tailnet, hours } => {
+            issue_token(client, cfg, &tailnet, hours).await
+        }
         TailnetCmd::RedeemToken { token } => redeem_token(client, cfg, &token).await,
     }
 }
@@ -241,12 +236,7 @@ pub(crate) async fn dispatch(client: &Client, cfg: &ClientConfig, cmd: TailnetCm
 /// ```
 ///
 /// Signature covers `sha256("octravpn-join-v1" || tailnet_id || expiry || nonce)`.
-async fn issue_token(
-    client: &Client,
-    cfg: &ClientConfig,
-    tailnet: &str,
-    hours: u64,
-) -> Result<()> {
+async fn issue_token(client: &Client, cfg: &ClientConfig, tailnet: &str, hours: u64) -> Result<()> {
     let bm = load_bookmark(tailnet)?;
     let tid_bytes = hex::decode(&bm.tailnet_id_hex).context("decode tailnet_id")?;
     if tid_bytes.len() != 32 {
@@ -372,18 +362,15 @@ async fn revoke_device(client: &Client, cfg: &ClientConfig, device: &str) -> Res
 // ----------------------- helpers ------------------------------------
 
 fn load_wallet_keypair(cfg: &ClientConfig) -> Result<KeyPair> {
-    let raw = util::read_secret_32(&cfg.wallet.secret_path)
-        .context("read wallet secret")?;
+    let raw = util::read_secret_32(&cfg.wallet.secret_path).context("read wallet secret")?;
     // If the file is encrypted, read_secret_32 already decrypted it.
     let _ = wallet_enc::looks_like_envelope(&raw); // silences unused-import warning
     Ok(KeyPair::from_secret_bytes(&raw))
 }
 
 fn acl_canonical_hash(path: &std::path::Path) -> Result<[u8; 32]> {
-    let body = fs::read_to_string(path)
-        .with_context(|| format!("read ACL {}", path.display()))?;
-    let doc = octravpn_mesh::AclDoc::from_toml(&body)
-        .map_err(|e| anyhow!("parse ACL: {e}"))?;
+    let body = fs::read_to_string(path).with_context(|| format!("read ACL {}", path.display()))?;
+    let doc = octravpn_mesh::AclDoc::from_toml(&body).map_err(|e| anyhow!("parse ACL: {e}"))?;
     Ok(doc.policy_hash())
 }
 
@@ -524,7 +511,11 @@ async fn set_acl(
     });
     let signed = octravpn_core::tx::sign_call(&kp, call)?;
     let r = client.rpc().submit(&signed).await?;
-    println!("acl hash updated to {} (tx {})", hex::encode(policy), r.hash);
+    println!(
+        "acl hash updated to {} (tx {})",
+        hex::encode(policy),
+        r.hash
+    );
     Ok(())
 }
 
@@ -571,15 +562,21 @@ async fn info(client: &Client, tailnet: &str) -> Result<()> {
     );
     println!(
         "treasury (OU)  : {}",
-        v.get("treasury").and_then(serde_json::Value::as_u64).unwrap_or(0)
+        v.get("treasury")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0)
     );
     println!(
         "members        : {}",
-        v.get("member_count").and_then(serde_json::Value::as_u64).unwrap_or(0)
+        v.get("member_count")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0)
     );
     println!(
         "exit endpoints : {}",
-        v.get("exit_count").and_then(serde_json::Value::as_u64).unwrap_or(0)
+        v.get("exit_count")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0)
     );
     println!(
         "acl policy     : {}",
@@ -587,7 +584,9 @@ async fn info(client: &Client, tailnet: &str) -> Result<()> {
     );
     println!(
         "created at ep  : {}",
-        v.get("created_at").and_then(serde_json::Value::as_u64).unwrap_or(0)
+        v.get("created_at")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0)
     );
     Ok(())
 }
@@ -596,12 +595,7 @@ async fn list(client: &Client) -> Result<()> {
     let prog = client.program_addr();
     let v = client
         .rpc()
-        .contract_call(
-            prog,
-            "list_tailnets",
-            &[json!(0u64), json!(200u64)],
-            None,
-        )
+        .contract_call(prog, "list_tailnets", &[json!(0u64), json!(200u64)], None)
         .await?;
     if let Some(arr) = v.as_array() {
         for t in arr {
@@ -647,8 +641,7 @@ async fn advertise_subnet(
 ) -> Result<()> {
     let _ = (client, cfg, tailnet);
     let bm = load_bookmark(tailnet)?;
-    let cidr =
-        Cidr::parse(cidr_str).map_err(|e| anyhow!("parse cidr: {e}"))?;
+    let cidr = Cidr::parse(cidr_str).map_err(|e| anyhow!("parse cidr: {e}"))?;
     // Subnet advertisements are off-chain (mesh peer-snapshot field).
     // We persist them locally so the next `up` picks them up.
     let path = bookmark_path(&format!("{tailnet}.subnets"))?;
@@ -658,9 +651,8 @@ async fn advertise_subnet(
     if !current.contains(&line) {
         current.push(line);
     }
-    fs::write(&path, current.join("\n")).with_context(|| {
-        format!("write subnet advertisements {}", path.display())
-    })?;
+    fs::write(&path, current.join("\n"))
+        .with_context(|| format!("write subnet advertisements {}", path.display()))?;
     println!(
         "advertising {cidr} on tailnet {} (next `up` will publish)",
         bm.tailnet_id_hex
@@ -696,10 +688,8 @@ async fn up(
 
     // Derive a device WG pubkey from the wallet master via HKDF so a
     // peer with our wallet pubkey can compute our WG pubkey too.
-    let wg_secret = octravpn_core::util::derive_subkey(
-        &kp.public.0,
-        octravpn_core::util::DOMAIN_NOISE,
-    );
+    let wg_secret =
+        octravpn_core::util::derive_subkey(&kp.public.0, octravpn_core::util::DOMAIN_NOISE);
     let wg_kp_for_pubkey_only = KeyPair::from_secret_bytes(&wg_secret);
     let wg_pubkey = wg_kp_for_pubkey_only.public.0;
 
@@ -715,8 +705,7 @@ async fn up(
     // so the local resolver still works for testing.
     let dns_bind: SocketAddr = SocketAddr::new(alloc.router_ip().into(), 53);
     let dns = mgr.dns();
-    let dns_with_upstream =
-        octravpn_mesh::MagicDns::default().with_upstream(dns_addr);
+    let dns_with_upstream = octravpn_mesh::MagicDns::default().with_upstream(dns_addr);
     // Combine: registrations done via mgr.dns(); we run the *new* one
     // for actual serving. For pragmatic local-dev we keep using mgr.dns()
     // and add upstream to a fresh local instance below.
@@ -736,9 +725,7 @@ async fn up(
     };
 
     // Load advertised subnets (from `advertise-subnet`).
-    if let Ok(subs_body) =
-        fs::read_to_string(bookmark_path(&format!("{tailnet}.subnets"))?)
-    {
+    if let Ok(subs_body) = fs::read_to_string(bookmark_path(&format!("{tailnet}.subnets"))?) {
         for line in subs_body.lines() {
             if let Some(cidr_str) = line.split_whitespace().nth(1) {
                 if let Ok(cidr) = Cidr::parse(cidr_str) {

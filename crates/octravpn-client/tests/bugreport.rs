@@ -16,8 +16,7 @@ use flate2::read::GzDecoder;
 use tar::Archive;
 use tempfile::TempDir;
 
-const SENSITIVE_SECRET: &str =
-    "deadbeefcafebabe0011223344556677deadbeefcafebabe0011223344556677";
+const SENSITIVE_SECRET: &str = "deadbeefcafebabe0011223344556677deadbeefcafebabe0011223344556677";
 
 fn octravpn_binary() -> PathBuf {
     // `CARGO_BIN_EXE_octravpn` is set by Cargo when running integration
@@ -56,11 +55,7 @@ fn read_archive(path: &Path) -> Vec<(String, Vec<u8>)> {
     let mut out = Vec::new();
     for entry in ar.entries().expect("entries") {
         let mut e = entry.expect("entry");
-        let name = e
-            .path()
-            .expect("entry path")
-            .to_string_lossy()
-            .into_owned();
+        let name = e.path().expect("entry path").to_string_lossy().into_owned();
         let mut buf = Vec::new();
         e.read_to_end(&mut buf).expect("read entry");
         out.push((name, buf));
@@ -114,8 +109,7 @@ fn bugreport_creates_archive_with_expected_entries() {
         .iter()
         .find(|(n, _)| n == "state.json")
         .expect("state.json entry");
-    let v: serde_json::Value =
-        serde_json::from_slice(state_bytes).expect("parse state.json");
+    let v: serde_json::Value = serde_json::from_slice(state_bytes).expect("parse state.json");
     assert!(v.get("timestamp").is_some(), "state.json missing timestamp");
     assert_eq!(
         v.get("config_path").and_then(|s| s.as_str()),
@@ -166,9 +160,7 @@ fn bugreport_redacts_secret_contents() {
     for (name, bytes) in &entries {
         // Look for the secret as a substring of the raw bytes.
         let needle = SENSITIVE_SECRET.as_bytes();
-        let leaked = bytes
-            .windows(needle.len())
-            .any(|w| w == needle);
+        let leaked = bytes.windows(needle.len()).any(|w| w == needle);
         assert!(
             !leaked,
             "entry {name} leaked the wallet secret ({} bytes)",

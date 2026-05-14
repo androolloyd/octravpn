@@ -55,12 +55,8 @@ fn two_managers_progress_init_to_direct_via_lan() {
     let a = MeshManager::new("octA", [0xAA; 32]);
     let b = MeshManager::new("octB", [0xBB; 32]);
 
-    a.set_self_candidates(vec![PeerCandidate::Lan(
-        "10.0.0.1:51820".parse().unwrap(),
-    )]);
-    b.set_self_candidates(vec![PeerCandidate::Lan(
-        "10.0.0.2:51820".parse().unwrap(),
-    )]);
+    a.set_self_candidates(vec![PeerCandidate::Lan("10.0.0.1:51820".parse().unwrap())]);
+    b.set_self_candidates(vec![PeerCandidate::Lan("10.0.0.2:51820".parse().unwrap())]);
 
     // Exchange candidates so each registry has the other peer.
     propagate(&a, &b);
@@ -85,8 +81,14 @@ fn two_managers_progress_init_to_direct_via_lan() {
         "b should open direct to a; got {actions_b:?}"
     );
 
-    assert_eq!(a.conns().state(TID, "octB").unwrap().state, ConnState::Direct);
-    assert_eq!(b.conns().state(TID, "octA").unwrap().state, ConnState::Direct);
+    assert_eq!(
+        a.conns().state(TID, "octB").unwrap().state,
+        ConnState::Direct
+    );
+    assert_eq!(
+        b.conns().state(TID, "octA").unwrap().state,
+        ConnState::Direct
+    );
 }
 
 #[test]
@@ -108,13 +110,16 @@ fn relay_fallback_when_no_direct_candidates() {
     a.tick(TID); // Probing
     let actions = a.tick(TID); // Relay
     assert!(
-        actions
-            .iter()
-            .any(|x| matches!(x, MeshAction::OpenRelay { peer_addr, relay_validator, .. }
-                              if peer_addr == "octB" && relay_validator == "octV1")),
+        actions.iter().any(
+            |x| matches!(x, MeshAction::OpenRelay { peer_addr, relay_validator, .. }
+                              if peer_addr == "octB" && relay_validator == "octV1")
+        ),
         "expected OpenRelay; got {actions:?}"
     );
-    assert_eq!(a.conns().state(TID, "octB").unwrap().state, ConnState::Relay);
+    assert_eq!(
+        a.conns().state(TID, "octB").unwrap().state,
+        ConnState::Relay
+    );
 }
 
 #[test]
@@ -122,22 +127,24 @@ fn network_migration_demotes_then_re_promotes() {
     let a = MeshManager::new("octA", [0xAA; 32]);
     let b = MeshManager::new("octB", [0xBB; 32]);
 
-    a.set_self_candidates(vec![PeerCandidate::Lan(
-        "10.0.0.1:51820".parse().unwrap(),
-    )]);
-    b.set_self_candidates(vec![PeerCandidate::Lan(
-        "10.0.0.2:51820".parse().unwrap(),
-    )]);
+    a.set_self_candidates(vec![PeerCandidate::Lan("10.0.0.1:51820".parse().unwrap())]);
+    b.set_self_candidates(vec![PeerCandidate::Lan("10.0.0.2:51820".parse().unwrap())]);
     propagate(&a, &b);
     propagate(&b, &a);
     a.tick(TID);
     a.tick(TID);
-    assert_eq!(a.conns().state(TID, "octB").unwrap().state, ConnState::Direct);
+    assert_eq!(
+        a.conns().state(TID, "octB").unwrap().state,
+        ConnState::Direct
+    );
 
     // Simulate wifi → cellular on `a`. Connections drop to Probing.
     let n = a.on_network_change(TID);
     assert!(n >= 1);
-    assert_eq!(a.conns().state(TID, "octB").unwrap().state, ConnState::Probing);
+    assert_eq!(
+        a.conns().state(TID, "octB").unwrap().state,
+        ConnState::Probing
+    );
 
     // Re-discover: new public address; re-publish; tick.
     a.set_self_candidates(vec![PeerCandidate::Stun(
@@ -158,12 +165,8 @@ fn network_migration_demotes_then_re_promotes() {
 fn peer_departure_emits_close_action() {
     let a = MeshManager::new("octA", [0xAA; 32]);
     let b = MeshManager::new("octB", [0xBB; 32]);
-    a.set_self_candidates(vec![PeerCandidate::Lan(
-        "10.0.0.1:51820".parse().unwrap(),
-    )]);
-    b.set_self_candidates(vec![PeerCandidate::Lan(
-        "10.0.0.2:51820".parse().unwrap(),
-    )]);
+    a.set_self_candidates(vec![PeerCandidate::Lan("10.0.0.1:51820".parse().unwrap())]);
+    b.set_self_candidates(vec![PeerCandidate::Lan("10.0.0.2:51820".parse().unwrap())]);
     propagate(&a, &b);
     propagate(&b, &a); // a learns about b
     a.tick(TID);
@@ -188,9 +191,7 @@ fn shared_registry_visibility() {
     // another's. (If this ever changes, our `propagate` helper is wrong.)
     let a = MeshManager::new("octA", [0xAA; 32]);
     let b = MeshManager::new("octB", [0xBB; 32]);
-    a.set_self_candidates(vec![PeerCandidate::Lan(
-        "10.0.0.1:51820".parse().unwrap(),
-    )]);
+    a.set_self_candidates(vec![PeerCandidate::Lan("10.0.0.1:51820".parse().unwrap())]);
     let s = a.self_snapshot(TID, Some("h-a".into()));
     a.peers().publish_unverified(s);
     assert_eq!(a.peers().len(), 1);
@@ -201,9 +202,7 @@ fn shared_registry_visibility() {
 #[test]
 fn allowed_ips_includes_peer_tailnet_ip() {
     let a = MeshManager::new("octA", [0xAA; 32]);
-    a.set_self_candidates(vec![PeerCandidate::Lan(
-        "10.0.0.1:51820".parse().unwrap(),
-    )]);
+    a.set_self_candidates(vec![PeerCandidate::Lan("10.0.0.1:51820".parse().unwrap())]);
     a.peers().publish_unverified(snap(
         "octB",
         vec![PeerCandidate::Lan("10.0.0.2:51820".parse().unwrap())],

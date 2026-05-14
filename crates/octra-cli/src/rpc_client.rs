@@ -128,14 +128,18 @@ fn call_in_process(app: &AppState, method: &str, params: &Value) -> Result<Value
             "min": 1u64, "base": 5u64, "recommended": 10u64, "fast": 25u64
         })),
         "octra_submit" => {
-            let arr = params.as_array().ok_or_else(|| anyhow!("params not array"))?;
+            let arr = params
+                .as_array()
+                .ok_or_else(|| anyhow!("params not array"))?;
             let tx = arr.first().ok_or_else(|| anyhow!("tx missing"))?;
-            let (hash, _events) = octra_mock_rpc::submit_tx(app, tx)
-                .map_err(|e| anyhow!("submit failed: {e}"))?;
+            let (hash, _events) =
+                octra_mock_rpc::submit_tx(app, tx).map_err(|e| anyhow!("submit failed: {e}"))?;
             Ok(json!({"hash": hash, "status": "confirmed"}))
         }
         "octra_transaction" => {
-            let arr = params.as_array().ok_or_else(|| anyhow!("params not array"))?;
+            let arr = params
+                .as_array()
+                .ok_or_else(|| anyhow!("params not array"))?;
             let hash = arr
                 .first()
                 .and_then(|x| x.as_str())
@@ -154,15 +158,16 @@ fn call_in_process(app: &AppState, method: &str, params: &Value) -> Result<Value
             }))
         }
         "contract_call" => {
-            let arr = params.as_array().ok_or_else(|| anyhow!("params not array"))?;
+            let arr = params
+                .as_array()
+                .ok_or_else(|| anyhow!("params not array"))?;
             let method = arr
                 .get(1)
                 .and_then(|x| x.as_str())
                 .ok_or_else(|| anyhow!("method missing"))?;
             let p = arr.get(2).cloned().unwrap_or_else(|| json!([]));
             let p_arr = p.as_array().cloned().unwrap_or_default();
-            octra_mock_rpc::read_call(app, method, &p_arr)
-                .map_err(|e| anyhow!("read failed: {e}"))
+            octra_mock_rpc::read_call(app, method, &p_arr).map_err(|e| anyhow!("read failed: {e}"))
         }
         "octra_listContracts" => Ok(json!([{
             "address": app.program_addr,
@@ -275,7 +280,10 @@ fn mock_compile_multi(params: &Value) -> Result<Value> {
     for (path, val) in files {
         let source = val.as_str().unwrap_or_default();
         let name = crate::forge::compile::infer_program_name(path, source);
-        out.insert(path.clone(), crate::forge::compile::synthesize_artifact(&name, source));
+        out.insert(
+            path.clone(),
+            crate::forge::compile::synthesize_artifact(&name, source),
+        );
     }
     Ok(Value::Object(out))
 }

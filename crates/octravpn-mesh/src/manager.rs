@@ -7,11 +7,7 @@
 //! crate test-only-deps + lets the same logic run in `octravpn-node`
 //! and `octravpn-client` without duplicating WG plumbing.
 
-use std::{
-    collections::HashSet,
-    net::SocketAddr,
-    sync::Arc,
-};
+use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -274,7 +270,9 @@ mod tests {
         ));
         mgr.tick("t");
         let acts = mgr.tick("t");
-        assert!(acts.iter().any(|a| matches!(a, MeshAction::OpenRelay { .. })));
+        assert!(acts
+            .iter()
+            .any(|a| matches!(a, MeshAction::OpenRelay { .. })));
     }
 
     #[test]
@@ -308,9 +306,7 @@ mod tests {
     #[test]
     fn on_network_change_demotes_connections() {
         let mgr = MeshManager::new("octSELF", [1u8; 32]);
-        mgr.set_self_candidates(vec![PeerCandidate::Lan(
-            "10.0.0.99:51820".parse().unwrap(),
-        )]);
+        mgr.set_self_candidates(vec![PeerCandidate::Lan("10.0.0.99:51820".parse().unwrap())]);
         mgr.peers().publish_unverified(snap(
             "t",
             "octB",

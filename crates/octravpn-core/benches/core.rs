@@ -132,9 +132,7 @@ fn bench_wallet_enc(c: &mut Criterion) {
 
     // 1k iter to keep the benchmark sub-second; production uses 200k.
     c.bench_function("wallet_encrypt_1k_iters", |b| {
-        b.iter(|| {
-            black_box(wallet_enc::encrypt_secret_with_iters(&secret, pass, 1000))
-        });
+        b.iter(|| black_box(wallet_enc::encrypt_secret_with_iters(&secret, pass, 1000)));
     });
     c.bench_function("wallet_decrypt_1k_iters", |b| {
         b.iter(|| black_box(wallet_enc::decrypt_secret(&enc, pass).unwrap()));

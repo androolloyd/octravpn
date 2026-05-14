@@ -114,8 +114,14 @@ fn render(program: &str, module: &str, abi: &[Value]) -> String {
             .map(|arr| {
                 arr.iter()
                     .filter_map(|inp| {
-                        let n = inp.get("name").and_then(|x| x.as_str()).map(str::to_string)?;
-                        let t = inp.get("type").and_then(|x| x.as_str()).map(str::to_string)?;
+                        let n = inp
+                            .get("name")
+                            .and_then(|x| x.as_str())
+                            .map(str::to_string)?;
+                        let t = inp
+                            .get("type")
+                            .and_then(|x| x.as_str())
+                            .map(str::to_string)?;
                         Some((n, t))
                     })
                     .collect()
@@ -227,16 +233,25 @@ fn pascal(snake: &str) -> String {
 
 fn sanitize_ident(s: &str) -> String {
     const RUST_KW: &[&str] = &[
-        "type", "match", "move", "mut", "ref", "self", "Self", "impl", "trait",
-        "where", "while", "for", "let", "const", "fn", "if", "else", "loop", "in",
-        "pub", "mod", "use", "as",
+        "type", "match", "move", "mut", "ref", "self", "Self", "impl", "trait", "where", "while",
+        "for", "let", "const", "fn", "if", "else", "loop", "in", "pub", "mod", "use", "as",
     ];
     let cleaned: String = s
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     let starts_digit = cleaned.chars().next().is_some_and(|c| c.is_ascii_digit());
-    let base = if starts_digit { format!("_{cleaned}") } else { cleaned };
+    let base = if starts_digit {
+        format!("_{cleaned}")
+    } else {
+        cleaned
+    };
     if RUST_KW.contains(&base.as_str()) {
         format!("r#{base}")
     } else {

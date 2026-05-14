@@ -59,11 +59,9 @@ fn discover_program(rpc_url: &str) -> Result<String> {
     use serde_json::Value;
     let endpoint = crate::rpc_client::endpoint_from_url(rpc_url);
     let list = crate::rpc_client::call(&endpoint, "octra_listContracts", serde_json::json!([]))?;
-    let first: &Value = list.as_array().and_then(|a| a.first()).ok_or_else(|| {
-        anyhow::anyhow!("upstream returned no contracts")
-    })?;
-    Ok(first["address"]
-        .as_str()
-        .unwrap_or("octFORKED")
-        .to_string())
+    let first: &Value = list
+        .as_array()
+        .and_then(|a| a.first())
+        .ok_or_else(|| anyhow::anyhow!("upstream returned no contracts"))?;
+    Ok(first["address"].as_str().unwrap_or("octFORKED").to_string())
 }

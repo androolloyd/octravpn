@@ -40,8 +40,8 @@ pub fn run(args: &CoverageArgs) -> Result<()> {
         .with_context(|| format!("read AML source {}", args.source.display()))?;
     let rec: octraforge::aml_coverage::Recorder = match &args.hits {
         Some(p) => {
-            let raw = fs::read_to_string(p)
-                .with_context(|| format!("read hits file {}", p.display()))?;
+            let raw =
+                fs::read_to_string(p).with_context(|| format!("read hits file {}", p.display()))?;
             let parsed: serde_json::Value =
                 serde_json::from_str(&raw).context("parse hits JSON")?;
             recorder_from_json(&parsed)

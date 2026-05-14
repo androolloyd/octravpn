@@ -105,18 +105,28 @@ fn meta(s: &mut Session, rest: &str) -> Result<Value> {
                 .into(),
         )),
         "addr" => {
-            let v = parts.next().ok_or_else(|| anyhow::anyhow!("usage: :addr <oct...>"))?;
+            let v = parts
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("usage: :addr <oct...>"))?;
             s.program_addr = v.to_string();
             Ok(Value::String(format!("addr = {}", s.program_addr)))
         }
         "from" => {
-            let v = parts.next().ok_or_else(|| anyhow::anyhow!("usage: :from <oct...>"))?;
+            let v = parts
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("usage: :from <oct...>"))?;
             s.from = v.to_string();
             Ok(Value::String(format!("from = {}", s.from)))
         }
         "rpc" => {
-            let method = parts.next().ok_or_else(|| anyhow::anyhow!("usage: :rpc <method> [json]"))?;
-            let json_args = rest.trim_start_matches("rpc").trim_start().trim_start_matches(method).trim();
+            let method = parts
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("usage: :rpc <method> [json]"))?;
+            let json_args = rest
+                .trim_start_matches("rpc")
+                .trim_start()
+                .trim_start_matches(method)
+                .trim();
             let params: Value = if json_args.is_empty() {
                 Value::Array(vec![])
             } else {
