@@ -22,8 +22,13 @@ Lemmas proved here (see `Lemmas.lean` for the full list):
   - register_requires_stake, register_not_slashed, register_sets_active
   - bond_increases_stake, slash_burns_stake, slash_marks_terminal,
     slash_requires_owner
-  - settle_requires_caller_is_exit, settle_finalizes,
-    settle_bounded_by_deposit, settle_returns_refund_to_treasury
+  - settleClaim_requires_caller_is_exit, settleClaim_records_claim,
+    settleClaim_idempotent_on_same_bytes,
+    settleClaim_equivocation_refunds
+  - settleConfirm_only_opener, settleConfirm_match_settles,
+    settleConfirm_mismatch_disputes
+  - joinToken_preimage_match, joinToken_uniqueness,
+    joinToken_no_double_redeem
   - claim_requires_exact_match, claim_resets_encEarn
   - create_tailnet_seeds_treasury, retire_clears_active
 -/

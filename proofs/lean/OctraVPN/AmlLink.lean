@@ -22,9 +22,12 @@ def specToAml : List (String × String) :=
     ("depositToTailnet",     "deposit_to_tailnet"),
     ("configureTailnetExit", "configure_tailnet_exit"),
     ("openSession",          "open_session"),
-    ("settleSession",        "settle_session"),
+    ("settleClaim",          "settle_claim"),
+    ("settleConfirm",        "settle_confirm"),
     ("claimNoShow",          "claim_no_show"),
-    ("claimEarnings",        "claim_earnings") ]
+    ("claimEarnings",        "claim_earnings"),
+    ("precommitJoinToken",   "precommit_join_token"),
+    ("redeemJoinToken",      "redeem_join_token") ]
 
 /-- Returns `true` iff `xs` has no duplicate elements. Walks the
     list once with an accumulator of "already-seen" keys. -/

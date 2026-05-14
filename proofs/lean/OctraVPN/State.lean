@@ -57,15 +57,26 @@ structure Tailnet where
 def Tailnet.empty : Tailnet :=
   { owner := 0, treasury := 0, members := [], exits := [], createdAt := 0 }
 
-/-- A single-hop session record. -/
+/-- A single-hop session record. v1 two-tx settlement adds the
+    opener (only address allowed to confirm) plus per-side claim
+    records. -/
 structure Session where
   tailnetId       : TailnetId
   exit            : Addr
+  /-- The account that called `open_session`. Only this address can
+      submit `settle_confirm`. -/
+  opener          : Addr
   deposit         : OctRaw
   openedAt        : Epoch
   status          : SessionStatus
   /-- Plaintext view of bytes paid for, for proof purposes only. -/
   paidBytes       : Nat
+  /-- Operator's `settle_claim` record: `some (bytes_used, claimed_at)`
+      after the operator submits. -/
+  operatorClaim   : Option (Nat × Nat)
+  /-- Client's `settle_confirm` record. Recorded on both match (final
+      settlement) and mismatch (dispute). -/
+  clientConfirm   : Option (Nat × Nat)
   deriving Repr
 
 /-- In-flight unbonding record. `stake = 0` represents "no
@@ -114,7 +125,21 @@ structure ProgramState where
   /-- Program treasury: Tier 2 fee + burn share of slashed stakes. -/
   programTreasury  : OctRaw
   burned           : OctRaw
+  /-- Pre-auth join tokens: `(tailnet, sha256(preimage)) ↦ committed`. -/
+  joinTokenCommits  : Map (TailnetId × Bytes) Bool
+  /-- Spent join-token hashes: once redeemed, `true` forever. -/
+  joinTokenRedeemed : Map Bytes Bool
   params           : Params
   currentEpoch     : Epoch
+
+instance : DecidableEq (TailnetId × Bytes) := by
+  intro a b
+  rcases a with ⟨t₁, h₁⟩
+  rcases b with ⟨t₂, h₂⟩
+  by_cases ht : t₁ = t₂
+  · by_cases hh : h₁ = h₂
+    · exact isTrue (by subst ht; subst hh; rfl)
+    · exact isFalse (by intro he; cases he; exact hh rfl)
+  · exact isFalse (by intro he; cases he; exact ht rfl)
 
 end OctraVPN

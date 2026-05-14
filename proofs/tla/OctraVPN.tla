@@ -7,9 +7,16 @@
 (*                                                                           *)
 (*   1. Operator stake lives in-program (`endpoint_stake`); slashing is     *)
 (*      governance-driven (`gov_slash_operator`).                            *)
-(*   2. Sessions are single-hop with a single configured exit.              *)
-(*   3. Settlement is validator-only — only `sess.exit` can call            *)
-(*      `settle_session(bytes_used)`.                                        *)
+(*   2. Sessions are single-hop with a single configured exit; settlement   *)
+(*      is a TWO-TX flow:                                                    *)
+(*        - operator submits `settle_claim(bytes)` first;                   *)
+(*        - session opener submits `settle_confirm(bytes)`;                 *)
+(*        - matching bytes apply settlement, mismatching emit a dispute,    *)
+(*          repeated claim with different bytes triggers in-AML slashing.   *)
+(*   3. Pre-auth join tokens use a hash-precommit pattern: the tailnet      *)
+(*      owner publishes `sha256(preimage)` via `precommit_join_token` and   *)
+(*      any preimage holder joins via `redeem_join_token`. Hashes are       *)
+(*      one-shot.                                                            *)
 (*                                                                           *)
 (* Properties:                                                                *)
 (*   ConservationOfFunds                                                      *)
@@ -19,6 +26,9 @@
 (*   EarningsNonNegative                                                      *)
 (*   ActiveEndpointsAreBonded                                                 *)
 (*   SlashedHaveZeroStake                                                     *)
+(*   Inv_SettlementOnlyOnConfirm                                              *)
+(*   Inv_EquivocationCausesRefund                                             *)
+(*   Inv_TokenSinglyRedeemed                                                  *)
 (*   StakeUnlockReachable (liveness)                                          *)
 (*   Liveness_SettleOrRefund                                                  *)
 (*****************************************************************************)
@@ -33,7 +43,8 @@ CONSTANTS
     MinDeposit,         \* >= 1
     MinTailnetDeposit,  \* >= 1
     MinEndpointStake,   \* operator bond floor
-    MaxSeq
+    MaxSeq,
+    TokenHashes         \* abstract set of `sha256(preimage)` values
 
 VARIABLES
     registered,          \* [Endpoint -> BOOLEAN]
@@ -47,28 +58,46 @@ VARIABLES
     sessions,            \* [SessionId -> Session]
     nextSession,         \* Nat
     paid_out,            \* Nat — total claimed via claim_earnings
-    refunded             \* Nat — total refunded (back to treasury)
+    refunded,            \* Nat — total refunded (back to treasury)
+    \* Pre-auth join tokens:
+    join_token_commits,  \* [Tailnet -> SUBSET TokenHashes]
+    join_token_redeemed, \* SUBSET TokenHashes
+    \* Audit trail: which sessions emitted a SessionSettled event.
+    settled_sids,        \* SUBSET Nat
+    \* Audit trail: which hashes have been redeemed at least once
+    \* (separate from `join_token_redeemed` for invariant phrasing).
+    redeem_count         \* [TokenHash -> Nat]
 
 vars == << registered, endpoint_stake, endpoint_slashed, treasury,
            members, exits, enc_earn, program_treasury, sessions,
-           nextSession, paid_out, refunded >>
+           nextSession, paid_out, refunded,
+           join_token_commits, join_token_redeemed,
+           settled_sids, redeem_count >>
 
 SessionStatus == {"open", "settled", "refunded"}
 SessionId == Nat
 
+\* Sentinel for "no claim yet" — TLC has no records-with-options,
+\* so we encode "unset" as bytes_used = -1.
+NoClaim == [set |-> FALSE, bytes |-> 0]
+
 Init ==
-    /\ registered       = [e \in Endpoints |-> FALSE]
-    /\ endpoint_stake   = [e \in Endpoints |-> 0]
-    /\ endpoint_slashed = [e \in Endpoints |-> FALSE]
-    /\ treasury         = [t \in Tailnets |-> 0]
-    /\ members          = [t \in Tailnets |-> {}]
-    /\ exits            = [t \in Tailnets |-> {}]
-    /\ enc_earn         = [e \in Endpoints |-> 0]
-    /\ program_treasury = 0
-    /\ sessions         = << >>
-    /\ nextSession      = 0
-    /\ paid_out         = 0
-    /\ refunded         = 0
+    /\ registered          = [e \in Endpoints |-> FALSE]
+    /\ endpoint_stake      = [e \in Endpoints |-> 0]
+    /\ endpoint_slashed    = [e \in Endpoints |-> FALSE]
+    /\ treasury            = [t \in Tailnets |-> 0]
+    /\ members             = [t \in Tailnets |-> {}]
+    /\ exits               = [t \in Tailnets |-> {}]
+    /\ enc_earn            = [e \in Endpoints |-> 0]
+    /\ program_treasury    = 0
+    /\ sessions            = << >>
+    /\ nextSession         = 0
+    /\ paid_out            = 0
+    /\ refunded            = 0
+    /\ join_token_commits  = [t \in Tailnets |-> {}]
+    /\ join_token_redeemed = {}
+    /\ settled_sids        = {}
+    /\ redeem_count        = [h \in TokenHashes |-> 0]
 
 (* ---- Operator stake ---- *)
 
@@ -78,7 +107,8 @@ BondEndpoint(e, amount) ==
     /\ endpoint_stake' = [endpoint_stake EXCEPT ![e] = endpoint_stake[e] + amount]
     /\ UNCHANGED << registered, endpoint_slashed, treasury, members, exits,
                     enc_earn, program_treasury, sessions, nextSession,
-                    paid_out, refunded >>
+                    paid_out, refunded, join_token_commits,
+                    join_token_redeemed, settled_sids, redeem_count >>
 
 GovSlashOperator(op) ==
     /\ ~endpoint_slashed[op]
@@ -90,7 +120,8 @@ GovSlashOperator(op) ==
            /\ registered'       = [registered EXCEPT ![op] = FALSE]
            /\ program_treasury' = program_treasury + burn_amt
     /\ UNCHANGED << treasury, members, exits, enc_earn, sessions,
-                    nextSession, paid_out, refunded >>
+                    nextSession, paid_out, refunded, join_token_commits,
+                    join_token_redeemed, settled_sids, redeem_count >>
 
 (* ---- Endpoint registration (stake-gated) ---- *)
 
@@ -101,14 +132,16 @@ RegisterEndpoint(e) ==
     /\ registered' = [registered EXCEPT ![e] = TRUE]
     /\ UNCHANGED << endpoint_stake, endpoint_slashed, treasury, members,
                     exits, enc_earn, program_treasury, sessions,
-                    nextSession, paid_out, refunded >>
+                    nextSession, paid_out, refunded, join_token_commits,
+                    join_token_redeemed, settled_sids, redeem_count >>
 
 RetireEndpoint(e) ==
     /\ registered[e]
     /\ registered' = [registered EXCEPT ![e] = FALSE]
     /\ UNCHANGED << endpoint_stake, endpoint_slashed, treasury, members,
                     exits, enc_earn, program_treasury, sessions,
-                    nextSession, paid_out, refunded >>
+                    nextSession, paid_out, refunded, join_token_commits,
+                    join_token_redeemed, settled_sids, redeem_count >>
 
 (* ---- Tailnet lifecycle ---- *)
 
@@ -120,7 +153,8 @@ CreateTailnet(t, owner, amount) ==
     /\ members'  = [members  EXCEPT ![t] = {owner}]
     /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed, exits,
                     enc_earn, program_treasury, sessions, nextSession,
-                    paid_out, refunded >>
+                    paid_out, refunded, join_token_commits,
+                    join_token_redeemed, settled_sids, redeem_count >>
 
 AddMember(t, c) ==
     /\ c \in Clients
@@ -129,7 +163,8 @@ AddMember(t, c) ==
     /\ members' = [members EXCEPT ![t] = members[t] \cup {c}]
     /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed, treasury,
                     exits, enc_earn, program_treasury, sessions, nextSession,
-                    paid_out, refunded >>
+                    paid_out, refunded, join_token_commits,
+                    join_token_redeemed, settled_sids, redeem_count >>
 
 ConfigureTailnetExit(t, e) ==
     /\ treasury[t] > 0
@@ -138,7 +173,8 @@ ConfigureTailnetExit(t, e) ==
     /\ exits' = [exits EXCEPT ![t] = exits[t] \cup {e}]
     /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed, treasury,
                     members, enc_earn, program_treasury, sessions, nextSession,
-                    paid_out, refunded >>
+                    paid_out, refunded, join_token_commits,
+                    join_token_redeemed, settled_sids, redeem_count >>
 
 DepositToTailnet(t, amount) ==
     /\ amount > 0
@@ -146,9 +182,38 @@ DepositToTailnet(t, amount) ==
     /\ treasury' = [treasury EXCEPT ![t] = treasury[t] + amount]
     /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed, members,
                     exits, enc_earn, program_treasury, sessions, nextSession,
-                    paid_out, refunded >>
+                    paid_out, refunded, join_token_commits,
+                    join_token_redeemed, settled_sids, redeem_count >>
 
-(* ---- Session lifecycle (single-hop, validator-only settle) ---- *)
+(* ---- Pre-auth join tokens (hash-precommit) ---- *)
+
+PrecommitJoinToken(t, h) ==
+    /\ treasury[t] > 0
+    /\ h \notin join_token_commits[t]
+    /\ h \notin join_token_redeemed
+    /\ join_token_commits' = [join_token_commits EXCEPT
+                                 ![t] = join_token_commits[t] \cup {h}]
+    /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed, treasury,
+                    members, exits, enc_earn, program_treasury, sessions,
+                    nextSession, paid_out, refunded,
+                    join_token_redeemed, settled_sids, redeem_count >>
+
+\* Redeem a join token. The actor is any client who is not already
+\* a member of the tailnet. Adds them to the tailnet and marks the
+\* hash spent so it can never be redeemed again.
+RedeemJoinToken(t, c, h) ==
+    /\ c \in Clients
+    /\ h \in join_token_commits[t]
+    /\ h \notin join_token_redeemed
+    /\ c \notin members[t]
+    /\ members'             = [members             EXCEPT ![t] = members[t] \cup {c}]
+    /\ join_token_redeemed' = join_token_redeemed \cup {h}
+    /\ redeem_count'        = [redeem_count EXCEPT ![h] = redeem_count[h] + 1]
+    /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed, treasury,
+                    exits, enc_earn, program_treasury, sessions, nextSession,
+                    paid_out, refunded, join_token_commits, settled_sids >>
+
+(* ---- Session lifecycle (single-hop, two-tx settle) ---- *)
 
 OpenSession(sid, t, c, e, deposit) ==
     /\ sid = nextSession
@@ -158,41 +223,117 @@ OpenSession(sid, t, c, e, deposit) ==
     /\ treasury[t] >= deposit
     /\ treasury' = [treasury EXCEPT ![t] = treasury[t] - deposit]
     /\ sessions' = sessions @@ (sid :> [
-            status      |-> "open",
-            tailnet     |-> t,
-            exit        |-> e,
-            deposit     |-> deposit,
-            paid_amount |-> 0
+            status         |-> "open",
+            tailnet        |-> t,
+            exit           |-> e,
+            opener         |-> c,
+            deposit        |-> deposit,
+            paid_amount    |-> 0,
+            operator_claim |-> NoClaim,
+            client_confirm |-> NoClaim
        ])
     /\ nextSession' = nextSession + 1
     /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed, members,
-                    exits, enc_earn, program_treasury, paid_out, refunded >>
+                    exits, enc_earn, program_treasury, paid_out, refunded,
+                    join_token_commits, join_token_redeemed,
+                    settled_sids, redeem_count >>
 
-\* Validator-only settle: only `sess.exit` can call. The protocol fee
-\* (0.5 %) goes to the program treasury; the operator gets the rest;
-\* the unspent deposit refunds to the tailnet treasury.
-SettleSession(sid, caller, paid) ==
+\* settle_claim: operator-only. First valid call records the claim;
+\* idempotent on same bytes; re-claim with DIFFERENT bytes is
+\* equivocation → slash operator, refund deposit.
+SettleClaim(sid, caller, bytes) ==
     /\ sid \in DOMAIN sessions
     /\ sessions[sid].status = "open"
     /\ caller = sessions[sid].exit
     /\ registered[caller]
     /\ ~endpoint_slashed[caller]
-    /\ paid <= sessions[sid].deposit
-    /\ LET t == sessions[sid].tailnet
-           fee == (paid * 50) \div 10000  \* 0.5%
-           net_pay == paid - fee
-           extra_refund == sessions[sid].deposit - paid
-       IN  /\ sessions' = [sessions EXCEPT ![sid] = [
-                sessions[sid] EXCEPT
-                !.status      = "settled",
-                !.paid_amount = paid
-              ]]
-           /\ enc_earn'         = [enc_earn EXCEPT ![caller] = enc_earn[caller] + net_pay]
-           /\ treasury'         = [treasury EXCEPT ![t] = treasury[t] + extra_refund]
-           /\ program_treasury' = program_treasury + fee
-           /\ refunded'         = refunded + extra_refund
-    /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed, members,
-                    exits, nextSession, paid_out >>
+    /\ IF ~sessions[sid].operator_claim.set
+        \* First claim: record it, no flow.
+        THEN /\ sessions' = [sessions EXCEPT
+                ![sid] = [sessions[sid] EXCEPT
+                    !.operator_claim = [set |-> TRUE, bytes |-> bytes]
+                ]]
+             /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed,
+                             treasury, members, exits, enc_earn,
+                             program_treasury, nextSession, paid_out,
+                             refunded, join_token_commits,
+                             join_token_redeemed, settled_sids, redeem_count >>
+        ELSE IF sessions[sid].operator_claim.bytes = bytes
+            \* Idempotent retry — nothing changes.
+            THEN /\ UNCHANGED vars
+            \* Equivocation: slash + force refund.
+            ELSE LET t        == sessions[sid].tailnet
+                     dep      == sessions[sid].deposit
+                     total    == endpoint_stake[caller]
+                     burn_amt == (total * 9000) \div 10000
+                 IN  /\ sessions'         = [sessions EXCEPT
+                            ![sid] = [sessions[sid] EXCEPT
+                                !.status = "refunded"
+                            ]]
+                     /\ treasury'         = [treasury EXCEPT
+                            ![t] = treasury[t] + dep]
+                     /\ refunded'         = refunded + dep
+                     /\ endpoint_stake'   = [endpoint_stake EXCEPT
+                            ![caller] = 0]
+                     /\ endpoint_slashed' = [endpoint_slashed EXCEPT
+                            ![caller] = TRUE]
+                     /\ registered'       = [registered EXCEPT
+                            ![caller] = FALSE]
+                     \* All slashed stake (burn + bounty forfeited)
+                     \* flows to the program treasury when caller
+                     \* IS the operator (no external bounty).
+                     /\ program_treasury' = program_treasury + total
+                     /\ UNCHANGED << members, exits, enc_earn,
+                                     nextSession, paid_out,
+                                     join_token_commits,
+                                     join_token_redeemed,
+                                     settled_sids, redeem_count >>
+
+\* settle_confirm: opener-only. Requires the operator to have
+\* claimed. Matching bytes apply settlement; mismatch records the
+\* client confirm and leaves the session open.
+SettleConfirm(sid, caller, bytes) ==
+    /\ sid \in DOMAIN sessions
+    /\ sessions[sid].status = "open"
+    /\ caller = sessions[sid].opener
+    /\ sessions[sid].operator_claim.set
+    /\ IF sessions[sid].operator_claim.bytes # bytes
+        \* Mismatch: dispute, no value flow.
+        THEN /\ sessions' = [sessions EXCEPT
+                ![sid] = [sessions[sid] EXCEPT
+                    !.client_confirm = [set |-> TRUE, bytes |-> bytes]
+                ]]
+             /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed,
+                             treasury, members, exits, enc_earn,
+                             program_treasury, nextSession, paid_out,
+                             refunded, join_token_commits,
+                             join_token_redeemed, settled_sids, redeem_count >>
+        \* Match: apply settlement.
+        ELSE /\ registered[sessions[sid].exit]
+             /\ ~endpoint_slashed[sessions[sid].exit]
+             /\ bytes <= sessions[sid].deposit
+             /\ LET op  == sessions[sid].exit
+                    t   == sessions[sid].tailnet
+                    fee == (bytes * 50) \div 10000  \* 0.5%
+                    net_pay      == bytes - fee
+                    extra_refund == sessions[sid].deposit - bytes
+                IN  /\ sessions' = [sessions EXCEPT
+                            ![sid] = [sessions[sid] EXCEPT
+                                !.status         = "settled",
+                                !.paid_amount    = bytes,
+                                !.client_confirm = [set |-> TRUE, bytes |-> bytes]
+                            ]]
+                    /\ enc_earn'         = [enc_earn EXCEPT
+                            ![op] = enc_earn[op] + net_pay]
+                    /\ treasury'         = [treasury EXCEPT
+                            ![t] = treasury[t] + extra_refund]
+                    /\ program_treasury' = program_treasury + fee
+                    /\ refunded'         = refunded + extra_refund
+                    /\ settled_sids'     = settled_sids \cup {sid}
+             /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed,
+                             members, exits, nextSession, paid_out,
+                             join_token_commits, join_token_redeemed,
+                             redeem_count >>
 
 ClaimNoShow(sid) ==
     /\ sid \in DOMAIN sessions
@@ -205,7 +346,9 @@ ClaimNoShow(sid) ==
            /\ treasury' = [treasury EXCEPT ![t] = treasury[t] + sessions[sid].deposit]
            /\ refunded' = refunded + sessions[sid].deposit
     /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed, members,
-                    exits, enc_earn, program_treasury, nextSession, paid_out >>
+                    exits, enc_earn, program_treasury, nextSession, paid_out,
+                    join_token_commits, join_token_redeemed,
+                    settled_sids, redeem_count >>
 
 (* ---- Earnings claim (FHE-zero-proof abstracted) ---- *)
 
@@ -218,7 +361,8 @@ ClaimEarnings(v) ==
     /\ paid_out'  = paid_out + enc_earn[v]
     /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed, treasury,
                     members, exits, program_treasury, sessions, nextSession,
-                    refunded >>
+                    refunded, join_token_commits, join_token_redeemed,
+                    settled_sids, redeem_count >>
 
 \* Next-actions choose canonical values from each domain to keep
 \* the state space tractable for TLC. The interesting variation is
@@ -233,10 +377,15 @@ Next ==
     \/ \E t \in Tailnets, c \in Clients: AddMember(t, c)
     \/ \E t \in Tailnets, e \in Endpoints: ConfigureTailnetExit(t, e)
     \/ \E t \in Tailnets: DepositToTailnet(t, 1)
+    \/ \E t \in Tailnets, h \in TokenHashes: PrecommitJoinToken(t, h)
+    \/ \E t \in Tailnets, c \in Clients, h \in TokenHashes:
+            RedeemJoinToken(t, c, h)
     \/ \E sid \in {nextSession}, t \in Tailnets, c \in Clients, e \in Endpoints:
             OpenSession(sid, t, c, e, MinDeposit)
-    \/ \E sid \in DOMAIN sessions, caller \in Endpoints, paid \in {0, MinDeposit}:
-            SettleSession(sid, caller, paid)
+    \/ \E sid \in DOMAIN sessions, caller \in Endpoints,
+            bytes \in {0, MinDeposit}: SettleClaim(sid, caller, bytes)
+    \/ \E sid \in DOMAIN sessions, caller \in Clients,
+            bytes \in {0, MinDeposit}: SettleConfirm(sid, caller, bytes)
     \/ \E sid \in DOMAIN sessions: ClaimNoShow(sid)
     \/ \E v \in Endpoints: ClaimEarnings(v)
 
@@ -250,7 +399,7 @@ StateBound ==
     /\ nextSession <= MaxSeq
     /\ refunded <= MaxSeq * MinDeposit * 4
     /\ paid_out <= MaxSeq * MinDeposit * 4
-    /\ program_treasury <= MaxSeq * MinDeposit * 4
+    /\ program_treasury <= MaxSeq * MinDeposit * 4 + MinEndpointStake * 2
     /\ \A t \in Tailnets: treasury[t] <= MinTailnetDeposit + MaxSeq * MinDeposit
     /\ \A e \in Endpoints: enc_earn[e] <= MaxSeq * MinDeposit
     /\ \A e \in Endpoints: endpoint_stake[e] <= MinEndpointStake * 2
@@ -295,6 +444,42 @@ SessionExitsAreConfigured ==
         sessions[sid].status # "refunded" =>
             sessions[sid].exit \in exits[sessions[sid].tailnet]
 
+\* TWO-TX SAFETY: a session can only be `settled` if BOTH the
+\* operator's `settle_claim` and the client's `settle_confirm` were
+\* recorded AND their bytes_used values agree.
+Inv_SettlementOnlyOnConfirm ==
+    \A sid \in DOMAIN sessions:
+        sessions[sid].status = "settled" =>
+            /\ sessions[sid].operator_claim.set
+            /\ sessions[sid].client_confirm.set
+            /\ sessions[sid].operator_claim.bytes
+                 = sessions[sid].client_confirm.bytes
+
+\* TWO-TX SAFETY: a session in `settled_sids` (i.e. one that emitted
+\* a SessionSettled event) must currently have status "settled" —
+\* settlement is monotonic.
+Inv_SettledEventMatchesState ==
+    \A sid \in settled_sids:
+        /\ sid \in DOMAIN sessions
+        /\ sessions[sid].status = "settled"
+
+\* TWO-TX SAFETY: if a session is refunded (status = "refunded") AND
+\* the operator had a prior claim, no settlement event was ever
+\* emitted for it (settle_claim equivocation forces refund).
+Inv_EquivocationCausesRefund ==
+    \A sid \in DOMAIN sessions:
+        ( /\ sessions[sid].status = "refunded"
+          /\ sessions[sid].operator_claim.set ) =>
+              sid \notin settled_sids
+
+\* JOIN TOKEN SAFETY: every hash in `join_token_redeemed` was a
+\* commitment first (was in some `join_token_commits[t]`), and the
+\* redeem-count for it is exactly 1.
+Inv_TokenSinglyRedeemed ==
+    \A h \in join_token_redeemed:
+        /\ \E t \in Tailnets: h \in join_token_commits[t]
+        /\ redeem_count[h] = 1
+
 Invariants ==
     /\ ConservationOfFunds
     /\ NoDoubleSettle
@@ -304,6 +489,10 @@ Invariants ==
     /\ ActiveEndpointsAreBonded
     /\ SlashedHaveZeroStake
     /\ SessionExitsAreConfigured
+    /\ Inv_SettlementOnlyOnConfirm
+    /\ Inv_SettledEventMatchesState
+    /\ Inv_EquivocationCausesRefund
+    /\ Inv_TokenSinglyRedeemed
 
 (* ---------------------------- LIVENESS ---------------------------- *)
 

@@ -14,16 +14,37 @@ Stake / slash lemmas:
 - `slash_burns_stake` — after a successful slash, stake = 0.
 - `slash_marks_terminal` — after slash, the slashed flag is true.
 
-Session lemmas:
-- `settle_requires_caller_is_exit` — only the configured exit
-  operator can settle.
-- `settle_finalizes` — settle moves status to `settled`.
-- `settle_returns_refund_to_treasury` — refund flows back.
-- `settle_bounded_by_deposit` — total payment ≤ deposit.
+Two-tx settlement lemmas (claim side):
+- `settleClaim_requires_caller_is_exit` — only the configured exit
+  operator can submit `settle_claim`.
+- `settleClaim_records_claim` — first claim sets
+  `operatorClaim = some (bytes, epoch)`.
+- `settleClaim_idempotent_on_same_bytes` — re-claim with the same
+  bytes is a no-op.
+- `settleClaim_equivocation_refunds` — re-claim with DIFFERENT
+  bytes slashes the operator and refunds the session deposit to
+  the tailnet treasury; operator's earnings ledger is untouched.
+
+Two-tx settlement lemmas (confirm side):
+- `settleConfirm_only_opener` — only the session opener can
+  confirm.
+- `settleConfirm_match_settles` — matching bytes → status =
+  settled, FHE earnings credited.
+- `settleConfirm_mismatch_disputes` — mismatch → status stays
+  open, `clientConfirm` recorded, no value flows.
+
+Pre-auth join-token lemmas:
+- `joinToken_preimage_match` — successful redeem requires the hash
+  was previously committed.
+- `joinToken_uniqueness` — after redeem,
+  `joinTokenRedeemed[h] = true`.
+- `joinToken_no_double_redeem` — once redeemed, the same hash can
+  never be redeemed again.
 
 Treasury / accounting lemmas:
-- `treasury_monotone_on_no_show` — no-show refunds the full deposit.
-- `program_treasury_grows_on_settle` — fee accrues to program.
+- `create_tailnet_seeds_treasury` — `create_tailnet` puts the
+  deposit into the treasury and adds the owner as the first member.
+- `retire_clears_active` — retire flips active = false.
 
 Claim lemmas:
 - `claim_resets_encEarn` — successful claim zeros the ledger.
@@ -174,14 +195,18 @@ theorem slash_requires_owner
 -- Session lemmas
 -- ============================================================
 
-/-- A successful `settleSession` requires the caller to match the
-    session's recorded exit operator. -/
-theorem settle_requires_caller_is_exit
-    (s s' : ProgramState) (sid : SessionId) (caller : Addr) (bytes : Nat)
-    (h : settleSession s sid caller bytes = some s') :
+-- ----- Two-tx settlement: claim side -----
+
+/-- A successful `settleClaim` requires the caller to match the
+    session's recorded exit operator. (Generalisation of the old
+    `settle_requires_caller_is_exit`.) -/
+theorem settleClaim_requires_caller_is_exit
+    (s s' : ProgramState) (sid : SessionId) (bytes : Nat)
+    (caller : Addr) (epoch : Nat)
+    (h : settleClaim s sid bytes caller epoch = some s') :
     ∀ prev, s.sessions sid = some prev → caller = prev.exit := by
   intro prev hprev
-  unfold settleSession at h
+  unfold settleClaim at h
   rw [hprev] at h
   by_cases h1 : prev.status ≠ SessionStatus.open
   · simp [h1] at h
@@ -189,73 +214,268 @@ theorem settle_requires_caller_is_exit
   · simp [h1, h2] at h
   · exact Decidable.of_not_not h2
 
-/-- After `settleSession`, the session is `settled`. -/
-theorem settle_finalizes
-    (s s' : ProgramState) (sid : SessionId) (caller : Addr) (bytes : Nat)
-    (h : settleSession s sid caller bytes = some s') :
-    ∃ sess', s'.sessions sid = some sess' ∧
-             sess'.status = SessionStatus.settled := by
-  unfold settleSession at h
-  cases hprev : s.sessions sid with
-  | none => rw [hprev] at h; simp at h
-  | some prev =>
-    rw [hprev] at h
-    by_cases h1 : prev.status ≠ SessionStatus.open
-    · simp [h1] at h
-    by_cases h2 : caller ≠ prev.exit
-    · simp [h1, h2] at h
-    by_cases h3 : (s.endpoints caller).pricePerMb * bytes > prev.deposit
-    · simp [h1, h2, h3] at h
-    · simp [h1, h2, h3] at h
-      subst h
-      -- Witness: the updated session record built by settleSession.
-      refine ⟨{ prev with status := SessionStatus.settled,
-                          paidBytes := bytes }, ?_, ?_⟩
-      · unfold Map.update; simp
-      · rfl
+/-- First `settleClaim` records `operatorClaim = some (bytes, epoch)`
+    on the session. -/
+theorem settleClaim_records_claim
+    (s s' : ProgramState) (sid : SessionId) (bytes : Nat)
+    (caller : Addr) (epoch : Nat)
+    (prev : Session)
+    (hsess : s.sessions sid = some prev)
+    (hopen : prev.status = SessionStatus.open)
+    (hcaller : caller = prev.exit)
+    (hnoprior : prev.operatorClaim = none)
+    (h : settleClaim s sid bytes caller epoch = some s') :
+    ∃ upd, s'.sessions sid = some upd ∧
+           upd.operatorClaim = some (bytes, epoch) := by
+  unfold settleClaim at h
+  rw [hsess] at h
+  -- Outer `match some prev` reduces; the inner `match sess.operatorClaim`
+  -- needs hnoprior to commit to the `none` branch.
+  simp only at h
+  have hopen' : ¬ prev.status ≠ SessionStatus.open := by simp [hopen]
+  have hcaller' : ¬ caller ≠ prev.exit := by simp [hcaller]
+  simp [hopen', hcaller', hnoprior] at h
+  subst h
+  refine ⟨{ prev with operatorClaim := some (bytes, epoch) }, ?_, rfl⟩
+  unfold Map.update; simp
 
-/-- The total payment from settle is bounded by the session deposit. -/
-theorem settle_bounded_by_deposit
-    (s s' : ProgramState) (sid : SessionId) (caller : Addr) (bytes : Nat)
-    (h : settleSession s sid caller bytes = some s') :
-    ∀ prev, s.sessions sid = some prev →
-      (s.endpoints caller).pricePerMb * bytes ≤ prev.deposit := by
-  intro prev hprev
-  unfold settleSession at h
-  rw [hprev] at h
-  by_cases h1 : prev.status ≠ SessionStatus.open
-  · simp [h1] at h
-  by_cases h2 : caller ≠ prev.exit
-  · simp [h1, h2] at h
-  by_cases h3 : (s.endpoints caller).pricePerMb * bytes > prev.deposit
-  · simp [h1, h2, h3] at h
-  · exact Nat.le_of_not_lt h3
+/-- Re-claim with the *same* bytes is a no-op: returns the original
+    state unchanged. -/
+theorem settleClaim_idempotent_on_same_bytes
+    (s s' : ProgramState) (sid : SessionId) (bytes : Nat)
+    (caller : Addr) (epoch claimedAt : Nat)
+    (prev : Session)
+    (hsess : s.sessions sid = some prev)
+    (hopen : prev.status = SessionStatus.open)
+    (hcaller : caller = prev.exit)
+    (hprior : prev.operatorClaim = some (bytes, claimedAt))
+    (h : settleClaim s sid bytes caller epoch = some s') :
+    s' = s := by
+  unfold settleClaim at h
+  rw [hsess] at h
+  have hopen' : ¬ prev.status ≠ SessionStatus.open := by simp [hopen]
+  have hcaller' : ¬ caller ≠ prev.exit := by simp [hcaller]
+  simp only at h  -- reduce `match some prev`
+  -- Now the match on `prev.operatorClaim` can be rewritten.
+  rw [hprior] at h
+  simp [hopen', hcaller'] at h
+  exact h.symm
 
-/-- The refund from settle returns to the tailnet treasury. -/
-theorem settle_returns_refund_to_treasury
-    (s s' : ProgramState) (sid : SessionId) (caller : Addr) (bytes : Nat)
-    (h : settleSession s sid caller bytes = some s') :
-    ∀ prev, s.sessions sid = some prev →
-      let total := (s.endpoints caller).pricePerMb * bytes
-      total ≤ prev.deposit ∧
-      (s'.tailnets prev.tailnetId).treasury =
-        (s.tailnets prev.tailnetId).treasury + (prev.deposit - total) := by
-  intro prev hprev
-  unfold settleSession at h
-  rw [hprev] at h
-  by_cases h1 : prev.status ≠ SessionStatus.open
-  · simp [h1] at h
-  by_cases h2 : caller ≠ prev.exit
-  · simp [h1, h2] at h
-  by_cases h3 : (s.endpoints caller).pricePerMb * bytes > prev.deposit
-  · simp [h1, h2, h3] at h
-  · simp [h1, h2, h3] at h
-    -- h3 : ¬ a > b ⇒ a ≤ b. omega closes the bound side; subst
-    -- + simp closes the treasury equality.
-    refine ⟨by omega, ?_⟩
+/-- Equivocation: a second `settleClaim` with *different* bytes
+    refunds the deposit to the tailnet treasury, marks the session
+    refunded, slashes the operator (`endpointSlashed` becomes
+    `true`, `endpointStake` becomes 0), and leaves the FHE earnings
+    ledger of the operator untouched. -/
+theorem settleClaim_equivocation_refunds
+    (s s' : ProgramState) (sid : SessionId) (bytes prevBytes : Nat)
+    (caller : Addr) (epoch claimedAt : Nat)
+    (prev : Session)
+    (hsess : s.sessions sid = some prev)
+    (hopen : prev.status = SessionStatus.open)
+    (hcaller : caller = prev.exit)
+    (hprior : prev.operatorClaim = some (prevBytes, claimedAt))
+    (hdiff : prevBytes ≠ bytes)
+    (h : settleClaim s sid bytes caller epoch = some s') :
+    (∃ upd, s'.sessions sid = some upd ∧
+            upd.status = SessionStatus.refunded) ∧
+    (s'.tailnets prev.tailnetId).treasury =
+      (s.tailnets prev.tailnetId).treasury + prev.deposit ∧
+    s'.endpointSlashed caller = true ∧
+    s'.endpointStake caller = 0 ∧
+    s'.encEarn caller = s.encEarn caller := by
+  unfold settleClaim at h
+  rw [hsess] at h
+  have hopen' : ¬ prev.status ≠ SessionStatus.open := by simp [hopen]
+  have hcaller' : ¬ caller ≠ prev.exit := by simp [hcaller]
+  have hdiff' : ¬ prevBytes = bytes := hdiff
+  -- Reduce the outer `match some prev`, then rewrite the inner
+  -- match on `prev.operatorClaim` with hprior.
+  simp only at h
+  rw [hprior] at h
+  simp [hopen', hcaller', hdiff'] at h
+  -- Split on whether the endpoint is currently active.
+  by_cases hact : (s.endpoints caller).active
+  · simp [hact] at h
     subst h
-    unfold Map.update
-    simp
+    refine ⟨?_, ?_, ?_, ?_, ?_⟩
+    · -- The stored session reuses `sess.operatorClaim` (the match-
+      -- substituted value `some (prevBytes, claimedAt)`); the witness
+      -- form `{ prev with status := refunded }` carries
+      -- `prev.operatorClaim`, so we discharge the equality with hprior.
+      refine ⟨{ prev with status := SessionStatus.refunded }, ?_, rfl⟩
+      unfold Map.update; simp [hprior]
+    · unfold Map.update; simp
+    · unfold Map.update; simp
+    · unfold Map.update; simp
+    · rfl
+  · simp [hact] at h
+    subst h
+    refine ⟨?_, ?_, ?_, ?_, ?_⟩
+    · refine ⟨{ prev with status := SessionStatus.refunded }, ?_, rfl⟩
+      unfold Map.update; simp [hprior]
+    · unfold Map.update; simp
+    · unfold Map.update; simp
+    · unfold Map.update; simp
+    · rfl
+
+-- ----- Two-tx settlement: confirm side -----
+
+/-- `settleConfirm` may only be submitted by the session opener. If
+    the caller is not the opener, the call returns `none`, so the
+    state is unchanged (we phrase this as: every successful confirm
+    has `caller = opener`). -/
+theorem settleConfirm_only_opener
+    (s s' : ProgramState) (sid : SessionId) (bytes : Nat)
+    (caller : Addr) (epoch : Nat)
+    (h : settleConfirm s sid bytes caller epoch = some s') :
+    ∀ prev, s.sessions sid = some prev → caller = prev.opener := by
+  intro prev hprev
+  unfold settleConfirm at h
+  rw [hprev] at h
+  by_cases h1 : prev.status ≠ SessionStatus.open
+  · simp [h1] at h
+  by_cases h2 : caller ≠ prev.opener
+  · simp [h1, h2] at h
+  · exact Decidable.of_not_not h2
+
+/-- When the client's bytes match the operator's claim, the session
+    moves to `settled` and the FHE-earnings ledger gains
+    `bytesUsed * pricePerMb − fee` for the exit operator. -/
+theorem settleConfirm_match_settles
+    (s s' : ProgramState) (sid : SessionId) (bytes : Nat)
+    (caller : Addr) (epoch claimedAt : Nat)
+    (prev : Session)
+    (hsess : s.sessions sid = some prev)
+    (hopen : prev.status = SessionStatus.open)
+    (hcaller : caller = prev.opener)
+    (hclaim : prev.operatorClaim = some (bytes, claimedAt))
+    (h : settleConfirm s sid bytes caller epoch = some s') :
+    let price := (s.endpoints prev.exit).pricePerMb
+    let total := price * bytes
+    total ≤ prev.deposit ∧
+    (∃ upd, s'.sessions sid = some upd ∧
+            upd.status = SessionStatus.settled ∧
+            upd.paidBytes = bytes) ∧
+    let fee := total * s.params.protocolFeeBps / 10000
+    s'.encEarn prev.exit = s.encEarn prev.exit + (total - fee) := by
+  unfold settleConfirm at h
+  rw [hsess] at h
+  have hopen' : ¬ prev.status ≠ SessionStatus.open := by simp [hopen]
+  have hcaller' : ¬ caller ≠ prev.opener := by simp [hcaller]
+  have hbytes_eq : ¬ bytes ≠ bytes := by simp
+  simp only at h
+  rw [hclaim] at h
+  simp [hopen', hcaller', hbytes_eq] at h
+  by_cases h3 : (s.endpoints prev.exit).pricePerMb * bytes > prev.deposit
+  · simp [h3] at h
+  · simp [h3] at h
+    refine ⟨by omega, ?_, ?_⟩
+    · subst h
+      refine ⟨{ prev with
+                  status := SessionStatus.settled,
+                  paidBytes := bytes,
+                  clientConfirm := some (bytes, epoch) }, ?_, rfl, rfl⟩
+      unfold Map.update; simp [hclaim]
+    · subst h
+      -- The encEarn update is at key `prev.exit`. We rewrite using
+      -- update_eq.
+      unfold Map.update; simp
+
+/-- When the client's bytes mismatch the operator's claim, the
+    session stays `open`, `clientConfirm` is recorded, and no
+    settlement event fires (treasury, encEarn untouched). -/
+theorem settleConfirm_mismatch_disputes
+    (s s' : ProgramState) (sid : SessionId) (bytes opBytes : Nat)
+    (caller : Addr) (epoch claimedAt : Nat)
+    (prev : Session)
+    (hsess : s.sessions sid = some prev)
+    (hopen : prev.status = SessionStatus.open)
+    (hcaller : caller = prev.opener)
+    (hclaim : prev.operatorClaim = some (opBytes, claimedAt))
+    (hdiff : opBytes ≠ bytes)
+    (h : settleConfirm s sid bytes caller epoch = some s') :
+    (∃ upd, s'.sessions sid = some upd ∧
+            upd.status = SessionStatus.open ∧
+            upd.clientConfirm = some (bytes, epoch)) ∧
+    s'.tailnets = s.tailnets ∧
+    s'.encEarn = s.encEarn ∧
+    s'.programTreasury = s.programTreasury := by
+  unfold settleConfirm at h
+  rw [hsess] at h
+  have hopen' : ¬ prev.status ≠ SessionStatus.open := by simp [hopen]
+  have hcaller' : ¬ caller ≠ prev.opener := by simp [hcaller]
+  simp only at h
+  rw [hclaim] at h
+  simp [hopen', hcaller', hdiff] at h
+  subst h
+  refine ⟨?_, rfl, rfl, rfl⟩
+  refine ⟨{ prev with clientConfirm := some (bytes, epoch) }, ?_, ?_, rfl⟩
+  · unfold Map.update; simp [hclaim]
+  · -- status field of the record-update is `prev.status`, which is open.
+    simp [hopen]
+
+-- ============================================================
+-- Pre-auth join token lemmas
+-- ============================================================
+
+/-- A hash `h` flagged as redeemed must have been a commitment for
+    SOME tailnet. (`redeemJoinToken` is the only entrypoint that
+    sets `joinTokenRedeemed[h] := true`, and it requires
+    `joinTokenCommits[(tid, h)] = true`.) -/
+theorem joinToken_preimage_match
+    (s s' : ProgramState) (tid : TailnetId) (preimage : Bytes)
+    (caller : Addr)
+    (h : redeemJoinToken s tid preimage caller = some s') :
+    s.joinTokenCommits (tid, sha256 preimage) = true := by
+  unfold redeemJoinToken at h
+  by_cases h1 : (s.tailnets tid).owner = 0
+  · simp [h1] at h
+  by_cases h2 : ¬ s.joinTokenCommits (tid, sha256 preimage)
+  · simp [h1, h2] at h
+  · -- h2 : ¬ ¬ commits ⇒ commits = true
+    have := Decidable.of_not_not h2
+    -- coerce Bool to "= true"
+    cases hcomm : s.joinTokenCommits (tid, sha256 preimage) with
+    | false => exact (h2 (by simp [hcomm])).elim
+    | true  => rfl
+
+/-- A redeemed hash can never be redeemed again: after a successful
+    redeem, `joinTokenRedeemed[sha256 preimage] = true`, and the
+    function's own guard rules out a second redeem of the same
+    hash. -/
+theorem joinToken_uniqueness
+    (s s' : ProgramState) (tid : TailnetId) (preimage : Bytes)
+    (caller : Addr)
+    (h : redeemJoinToken s tid preimage caller = some s') :
+    s'.joinTokenRedeemed (sha256 preimage) = true := by
+  unfold redeemJoinToken at h
+  by_cases h1 : (s.tailnets tid).owner = 0
+  · simp [h1] at h
+  by_cases h2 : ¬ s.joinTokenCommits (tid, sha256 preimage)
+  · simp [h1, h2] at h
+  by_cases h3 : s.joinTokenRedeemed (sha256 preimage)
+  · simp [h1, h2, h3] at h
+  by_cases h4 : caller ∈ (s.tailnets tid).members
+  · simp [h1, h2, h3, h4] at h
+  · simp [h1, h2, h3, h4] at h
+    subst h
+    unfold Map.update; simp
+
+/-- Once `joinTokenRedeemed[h] = true`, no further call of
+    `redeemJoinToken` with a preimage hashing to `h` can succeed
+    (the second redeem hits the `already redeemed` guard). -/
+theorem joinToken_no_double_redeem
+    (s s' : ProgramState) (tid : TailnetId) (preimage : Bytes)
+    (caller : Addr)
+    (hred : s.joinTokenRedeemed (sha256 preimage) = true)
+    (h : redeemJoinToken s tid preimage caller = some s') :
+    False := by
+  unfold redeemJoinToken at h
+  by_cases h1 : (s.tailnets tid).owner = 0
+  · simp [h1] at h
+  by_cases h2 : ¬ s.joinTokenCommits (tid, sha256 preimage)
+  · simp [h1, h2] at h
+  · simp [h1, h2, hred] at h
 
 -- ============================================================
 -- Tailnet lemmas
