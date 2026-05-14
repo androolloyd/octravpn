@@ -1,5 +1,20 @@
 name: Set up Rust
-description: Checks out the repo and installs a Rust toolchain with cargo build cache.
+description: |
+  Checks out the repo and installs a Rust toolchain with cargo build
+  cache.
+
+  NOTE: This workspace path-deps onto a sibling repo `octra-foundry`
+  (which owns `octraforge` + `octra-mock-rpc`). Until that repo is
+  published, the Rust-using CI jobs will fail to resolve those deps.
+  Once published, add the following step BEFORE the toolchain install:
+
+      - uses: actions/checkout@v4
+        with:
+          repository: <owner>/octra-foundry
+          path: ../octra-foundry
+
+  and switch this action's own checkout to `path: octra` so the two
+  repos sit side-by-side at `$GITHUB_WORKSPACE`.
 inputs:
   toolchain:
     description: "Toolchain channel (stable, nightly, etc.)"

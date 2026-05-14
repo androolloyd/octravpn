@@ -123,14 +123,30 @@ jobs:
   docker-e2e:
     name: docker-compose e2e
     runs-on: ubuntu-latest
+    # The docker build context is the parent of this repo so the
+    # sibling octra-foundry checkout is visible. The repo isn't
+    # published yet, so checkout-by-URL won't work in CI; mark
+    # advisory until then.
+    continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out octra
+        uses: actions/checkout@v4
+        with:
+          path: octra
+      # When octra-foundry is published, uncomment + point at the
+      # canonical URL. Until then the e2e steps will bail at the
+      # foundry-presence precheck.
+      # - name: Check out octra-foundry
+      #   uses: actions/checkout@v4
+      #   with:
+      #     repository: <org>/octra-foundry
+      #     path: octra-foundry
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Endpoint-registration smoke
-        run: ./docker/e2e.sh
+        run: cd octra && ./docker/e2e.sh
       - name: Full tailnet happy-path
-        run: ./docker/e2e-tailnet.sh
+        run: cd octra && ./docker/e2e-tailnet.sh
 
   coverage:
     name: cargo tarpaulin (coverage)
