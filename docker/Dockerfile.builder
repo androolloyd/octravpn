@@ -1,4 +1,9 @@
 # Shared builder stage. Each runtime image FROM this layer for cargo build.
+#
+# Build context: PARENT of the octra repo, so both `octra/` and the
+# sibling `octra-foundry/` (which owns the `octraforge` +
+# `octra-mock-rpc` crates that octra/ path-deps into) are visible.
+# `docker-compose.yml` already sets `context: ..` for this.
 FROM rust:1.88-bookworm AS builder
 
 WORKDIR /work
@@ -8,11 +13,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config libssl-dev ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-# Cache deps separately from sources for fast rebuilds.
-COPY Cargo.toml Cargo.lock* ./
-COPY rust-toolchain.toml* ./
-COPY crates ./crates
-COPY tests ./tests
-COPY program ./program
+# Mirror the host layout: /work/octra + /work/octra-foundry side-by-side.
+COPY octra-foundry ./octra-foundry
+COPY octra/Cargo.toml octra/Cargo.lock* ./octra/
+COPY octra/rust-toolchain.toml* ./octra/
+COPY octra/crates ./octra/crates
+COPY octra/tests ./octra/tests
+COPY octra/program ./octra/program
 
+WORKDIR /work/octra
 RUN cargo build --release --workspace

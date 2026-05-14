@@ -15,14 +15,14 @@ services:
   builder:
     image: octravpn-builder:latest
     build:
-      context: .
-      dockerfile: docker/Dockerfile.builder
+      context: ..
+      dockerfile: octra/docker/Dockerfile.builder
 
   mock-rpc:
     image: octravpn-mock-rpc:latest
     build:
-      context: .
-      dockerfile: docker/Dockerfile.mock-rpc
+      context: ..
+      dockerfile: octra/docker/Dockerfile.mock-rpc
     depends_on:
       - builder
     ports:
@@ -38,8 +38,8 @@ services:
   node1: &node-template
     image: octravpn-node:latest
     build:
-      context: .
-      dockerfile: docker/Dockerfile.node
+      context: ..
+      dockerfile: octra/docker/Dockerfile.node
     depends_on:
       mock-rpc:
         condition: service_started
@@ -63,8 +63,8 @@ services:
   client:
     image: octravpn-client:latest
     build:
-      context: .
-      dockerfile: docker/Dockerfile.client
+      context: ..
+      dockerfile: octra/docker/Dockerfile.client
     depends_on:
       mock-rpc:
         condition: service_started

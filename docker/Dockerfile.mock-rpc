@@ -4,11 +4,11 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /work/target/release/octravpn-mock-rpc /usr/local/bin/octravpn-mock-rpc
+COPY --from=builder /work/octra/target/release/octra-mock-rpc /usr/local/bin/octra-mock-rpc
 
 RUN useradd -r -s /bin/false octravpn
 USER octravpn
 
 EXPOSE 18080/tcp
-ENTRYPOINT ["/usr/local/bin/octravpn-mock-rpc"]
+ENTRYPOINT ["/usr/local/bin/octra-mock-rpc"]
 CMD ["--listen", "0.0.0.0:18080", "--program-addr", "octPROGmockaddress0000000000000000000000"]

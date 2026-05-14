@@ -15,6 +15,17 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# Foundry split: the docker build context is the PARENT of this repo,
+# so the sibling `octra-foundry` checkout must exist there. Fail
+# fast rather than letting `docker compose build` puke on a missing
+# COPY.
+if [[ ! -d "../octra-foundry" ]]; then
+  echo "error: ../octra-foundry not found" >&2
+  echo "the docker harness expects octra-foundry to be checked out" >&2
+  echo "as a sibling of this repo. clone it before running e2e." >&2
+  exit 1
+fi
+
 cleanup() { docker compose down -v --remove-orphans >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
