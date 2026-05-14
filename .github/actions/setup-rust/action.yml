@@ -1,20 +1,12 @@
 name: Set up Rust
 description: |
-  Checks out the repo and installs a Rust toolchain with cargo build
-  cache.
-
-  NOTE: This workspace path-deps onto a sibling repo `octra-foundry`
-  (which owns `octraforge` + `octra-mock-rpc`). Until that repo is
-  published, the Rust-using CI jobs will fail to resolve those deps.
-  Once published, add the following step BEFORE the toolchain install:
-
-      - uses: actions/checkout@v4
-        with:
-          repository: <owner>/octra-foundry
-          path: ../octra-foundry
-
-  and switch this action's own checkout to `path: octra` so the two
-  repos sit side-by-side at `$GITHUB_WORKSPACE`.
+  Checks out this repo into `octra/` AND the sibling `octra-foundry/`
+  (which owns the `octraforge` + `octra-mock-rpc` crates this
+  workspace path-deps into), then installs a Rust toolchain with
+  cargo build cache. Both repos end up side-by-side at
+  `$GITHUB_WORKSPACE` so the `../../../octra-foundry/...` path deps
+  resolve. Jobs using this action should `cd octra` (or set
+  `working-directory: octra`) before running `cargo`.
 inputs:
   toolchain:
     description: "Toolchain channel (stable, nightly, etc.)"
@@ -32,11 +24,22 @@ inputs:
     description: "Whether to enable Swatinem/rust-cache (true/false)"
     required: false
     default: "true"
+  foundry-ref:
+    description: "Branch/tag/sha of octra-foundry to check out"
+    required: false
+    default: main
 
 runs:
   using: composite
   steps:
     - uses: actions/checkout@v4
+      with:
+        path: octra
+    - uses: actions/checkout@v4
+      with:
+        repository: androolloyd/octra-foundry
+        ref: ${{ inputs.foundry-ref }}
+        path: octra-foundry
     - uses: dtolnay/rust-toolchain@master
       with:
         toolchain: ${{ inputs.toolchain }}
@@ -44,3 +47,5 @@ runs:
         targets: ${{ inputs.targets }}
     - if: inputs.cache == 'true'
       uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: octra
