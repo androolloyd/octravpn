@@ -8,6 +8,7 @@ members = [
     "crates/octravpn-mesh",
     "crates/octravpn-admin-ui",
     "crates/octra-cli",
+    "crates/octra-circle-sim",
     "tests/e2e",
 ]
 

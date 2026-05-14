@@ -1738,6 +1738,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "octra-circle-sim"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "hex",
+ "octravpn-core",
+ "parking_lot",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "octra-cli"
 version = "0.1.0"
 dependencies = [

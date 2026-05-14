@@ -1,0 +1,29 @@
+[package]
+name = "octra-circle-sim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Rust simulator for an OctraVPN v2 Circle: ACL, encrypted byte metering, proxy-shaped chain surface."
+
+[dependencies]
+octravpn-core    = { path = "../octravpn-core" }
+
+anyhow      = { workspace = true }
+async-trait = { workspace = true }
+hex         = { workspace = true }
+parking_lot = { workspace = true }
+rand        = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+sha2        = { workspace = true }
+tokio       = { workspace = true }
+tracing     = { workspace = true }
+thiserror   = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
