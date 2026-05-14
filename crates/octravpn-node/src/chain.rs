@@ -36,6 +36,10 @@ pub(crate) struct RegisterEndpointParams<'a> {
     pub initial_enc_zero: &'a str,
     pub region: &'a str,
     pub price_per_mb: u64,
+    /// Ed25519 pubkey the operator will sign off-chain receipts with
+    /// (the same key referenced by `slash_double_sign` on chain).
+    /// Per v1.1 AML; required.
+    pub receipt_pubkey_hex: &'a str,
     pub fee: u64,
     pub nonce: u64,
 }
@@ -119,6 +123,7 @@ impl ChainCtx {
                 p.initial_enc_zero,
                 p.region,
                 p.price_per_mb,
+                p.receipt_pubkey_hex,
             ],
             "value": 0,
             "fee": p.fee,

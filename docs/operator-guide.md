@@ -111,7 +111,13 @@ The register step:
    `>= MIN_ENDPOINT_STAKE`. Bails out with a clear message if your
    bond is short.
 2. Submits `register_endpoint(endpoint, wg_pub, hfhe_pub,
-   initial_enc_zero, region, price_per_mb)` to the program.
+   initial_enc_zero, region, price_per_mb, receipt_pubkey)` to the
+   program. The 7th param is your **ed25519 receipt-signing pubkey**
+   (HKDF-derived from `wg_secret` at startup) and is what the v1.1
+   `slash_double_sign` entrypoint will verify against if you ever
+   sign two contradictory receipts for the same `(session, seq)`.
+   Lose your `wg_secret` and an attacker can sign on your behalf →
+   bond is at risk; treat the file as 0600 and back it up.
 3. Logs the resulting tx hash.
 
 `register` is idempotent; you can re-run it safely. The chain

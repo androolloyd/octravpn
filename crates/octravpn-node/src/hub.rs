@@ -164,6 +164,11 @@ impl Hub {
         // a deterministic per-operator HFHE keygen.
         let hfhe_placeholder = self.hfhe_pubkey_placeholder();
         let initial_enc_zero_placeholder = self.hfhe_initial_enc_zero_placeholder();
+        // The receipt-signing key is HKDF'd from the master secret
+        // under DOMAIN_RECEIPT_SIGN (see Hub::new). Its public half
+        // is published on chain so `slash_double_sign` can verify
+        // off-chain dual-signed receipts (v1.1 AML).
+        let receipt_pub_hex = hex::encode(self.wg_kp.public.0);
         let params = crate::chain::RegisterEndpointParams {
             endpoint: &self.cfg.tunnel.public_endpoint,
             wg_pubkey_hex: &wg_pub_hex,
@@ -171,6 +176,7 @@ impl Hub {
             initial_enc_zero: &initial_enc_zero_placeholder,
             region: &self.cfg.pricing.region,
             price_per_mb: self.cfg.pricing.price_per_mb,
+            receipt_pubkey_hex: &receipt_pub_hex,
             fee,
             nonce,
         };

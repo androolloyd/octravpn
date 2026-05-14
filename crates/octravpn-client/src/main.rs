@@ -163,7 +163,12 @@ async fn main() -> Result<()> {
             return commands::funnel(cmd.clone().into_inner());
         }
         Cmd::SlashEvidence { op } => {
-            return commands::slash_evidence(op.clone());
+            // Verify + Build don't touch the chain; dispatch early. Submit
+            // needs the client + wallet, so it falls through to the
+            // post-Client::new() arm below.
+            if !matches!(op, commands::SlashCmd::Submit { .. }) {
+                return commands::slash_evidence(op.clone());
+            }
         }
         _ => {}
     }
@@ -201,13 +206,13 @@ async fn main() -> Result<()> {
         Cmd::Settle { session_id } => settler::settle(&client, &session_id).await,
         Cmd::Reclaim { session_id } => settler::reclaim(&client, &session_id).await,
         Cmd::Tailnet { op } => tailnet::dispatch(&client, &cfg, op).await,
+        Cmd::SlashEvidence { op } => commands::slash_submit(&client, op.clone()).await,
         // Already handled above.
         Cmd::Init { .. }
         | Cmd::Keygen { .. }
         | Cmd::Doctor
         | Cmd::BugReport { .. }
         | Cmd::Serve { .. }
-        | Cmd::Funnel { .. }
-        | Cmd::SlashEvidence { .. } => unreachable!(),
+        | Cmd::Funnel { .. } => unreachable!(),
     }
 }
