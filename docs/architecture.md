@@ -166,16 +166,73 @@ The stealth output is a one-time token derived client-side from the
 validator's view pubkey + a fresh nonce. Observers cannot link the
 payout to the registered validator.
 
-### 1.4 Slashing
+### 1.4 Off-chain receipt equivocation slashing (`slash_double_sign`)
+
+The v1 AML carries two independent equivocation-slash paths, both
+mirroring the same 90% burn / 10% bounty split:
+
+1. **In-AML equivocation slash** (inside `settle_claim`): a second
+   `settle_claim` from the same operator on the same session with
+   different `bytes_used` is detected by comparing against the stored
+   first claim. No cryptography needed — the chain witnesses both
+   txs.
+2. **Off-chain dual-sig equivocation slash** (`slash_double_sign`):
+   the off-chain dual-signed-receipt protocol in
+   `crates/octravpn-core/src/receipt.rs` makes the operator's
+   `receipt_pubkey` (stored in `EndpointRecord`, registered via
+   `register_endpoint`) a non-repudiation anchor. Canonical payload:
+
+   ```text
+   H("octravpn-receipt-v1" || session_id (8B BE) || seq (8B BE)
+                            || bytes_used (8B BE) || blind (32B))
+   ```
+
+   The slasher submits two distinct signed payloads + sigs; AML's
+   `ed25519_ok(receipt_pubkey, payload, sig)` (confirmed 2026-05-14
+   by the Octra dev team, mainnet reference
+   `octBDvZSiTqdEBAyFSp79CHeoLMR9MzHugX9YkHtuQ57MRB`) verifies both.
+   Two distinct signed payloads under one receipt key are evidence
+   of equivocation regardless of what the payloads encode, so AML
+   doesn't have to parse them.
 
 ```
-slash_double_sign(session_id, seq, receipt_a, sig_a, receipt_b, sig_b)
-    -> if both verify under same node's wg pubkey for same (session_id, seq)
-       and receipts differ: zero bond, jail, distribute slash.
-
-slash_offline(node_addr)
-    -> permissionless; slashes 1% of bond if last_attest_epoch is too old.
+slash_double_sign(operator, session_id, payload_a, sig_a, payload_b, sig_b)
+    requires:
+        endpoints[operator].active != 0  (operator was registered)
+        !endpoint_slashed[operator]
+        payload_a != payload_b
+        ed25519_ok(endpoints[operator].receipt_pubkey, payload_a, sig_a)
+        ed25519_ok(endpoints[operator].receipt_pubkey, payload_b, sig_b)
+    effects:
+        total = endpoint_stake[op] + endpoint_unbonding_stake[op]
+        burn = total * slash_burn_bps / BPS_DENOM   (90%)
+        bounty = total - burn                       (10%)
+        endpoint_stake[op] = 0
+        endpoint_unbonding_stake[op] = 0
+        endpoint_slashed[op] = 1
+        endpoints[op].active = 0
+        treasury += burn
+        transfer(caller, bounty)
+        emit OperatorSlashed(op, total, burn, bounty)
 ```
+
+Use cases:
+- An off-chain dispute resolver that holds two contradictory
+  receipts (e.g. for the same `(session_id, seq)`) can land both
+  on-chain via `slash_double_sign` and earn the bounty.
+- A client whose node-side counterparty signed two different
+  `bytes_used` values for the same `seq` has direct recourse.
+- Governance slash (`gov_slash_operator`) remains for cases without
+  cryptographic evidence (e.g. censoring traffic).
+
+The Lean lemmas `slashDoubleSign_slashes_stake`,
+`slashDoubleSign_pays_bounty`,
+`slashDoubleSign_idempotent_when_already_slashed`,
+`slashDoubleSign_distinct_payloads_required` in
+`proofs/lean/OctraVPN/Lemmas.lean` model the post-slash state
+shape. The TLA `SlashDoubleSign` action and `Inv_DoubleSignSlashable`
+invariant in `proofs/tla/OctraVPN.tla` cover the model-checking
+side (40K+ distinct states, terminates in <1s).
 
 ## 2. Off-chain components
 

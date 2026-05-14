@@ -197,6 +197,7 @@ async fn http_anvil_register_then_list_matches_forge() {
             &"bb".repeat(32),
             "eu-west",
             100,
+            "",
         )
         .unwrap();
     let forge_active = forge

@@ -31,9 +31,11 @@
 pub mod acl;
 pub mod chain;
 pub mod meter;
+pub mod rpc_chain;
 pub mod sim;
 
 pub use acl::{AclRule, ExitClass, MemberTag};
 pub use chain::{ChainError, MockChain};
 pub use meter::{ByteMeter, EncryptedCounter};
+pub use rpc_chain::RpcChain;
 pub use sim::{CircleConfig, CircleSim, OpenSessionRequest, SessionRecord};

@@ -62,6 +62,21 @@ no toxic-waste ceremony).
   deposit refunds to the tailnet treasury.
 - **Governance slash**: `gov_slash_operator(addr, evidence)` is owner-
   only and used when off-chain proof of misbehavior is presented.
+- **Cryptographic equivocation slash via off-chain dual-sig
+  receipts (`slash_double_sign`)**: the receipt-signing protocol in
+  `crates/octravpn-core/src/receipt.rs` makes the operator's
+  `receipt_pubkey` (registered via `register_endpoint`, stored in
+  `EndpointRecord`) a non-repudiation anchor. Anyone presenting two
+  distinct signed payloads under that key can slash the operator
+  on-chain — AML's `ed25519_ok` host call verifies both signatures
+  in-program (confirmed by the Octra dev team 2026-05-14, mainnet
+  reference `octBDvZSiTqdEBAyFSp79CHeoLMR9MzHugX9YkHtuQ57MRB`).
+  Same 90 / 10 split as the in-AML equivocation slash, paid to the
+  caller. This complements the `settle_claim`-internal slash by
+  catching equivocations that never reach the chain (e.g. an
+  operator who signs receipts off-chain but never submits
+  `settle_claim`, or who signs two contradictory off-chain
+  attestations for the same `(session_id, seq)`).
 - **Unbond + sweep**: an operator can `unbond_endpoint` to start the
   grace period; the endpoint becomes inactive immediately. After
   `UNBOND_GRACE` epochs `finalize_unbond` returns the stake. If an

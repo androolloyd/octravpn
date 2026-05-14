@@ -235,14 +235,12 @@ contract OctraVPN_V2 {
     require(value >= self.min_tailnet_deposit, "deposit below minimum")
     let tid = self.tailnet_count + 1
     self.tailnet_count = tid
-    self.tailnets[tid] = Tailnet{
-      owner: caller,
-      treasury: value,
-      member_count: 1,
-      acl_policy: acl_policy,
-      created_at: epoch,
-      charge_internal_traffic: 0  // intra-tailnet free by default
-    }
+    self.tailnets[tid].owner = caller
+    self.tailnets[tid].treasury = value
+    self.tailnets[tid].member_count = 1
+    self.tailnets[tid].acl_policy = acl_policy
+    self.tailnets[tid].created_at = epoch
+    self.tailnets[tid].charge_internal_traffic = 0  // intra-tailnet free by default
     self.members[tid][caller] = 1
     emit TailnetCreated(tid, caller)
     return true
@@ -251,56 +249,46 @@ contract OctraVPN_V2 {
   fn deposit_to_tailnet(tailnet_id: int): bool {
     require(self.paused == 0, "paused")
     require(value > 0, "no deposit")
-    let t = self.tailnets[tailnet_id]
-    require(t.owner == caller || self.members[tailnet_id][caller] == 1, "not a member")
-    t.treasury = t.treasury + value
-    self.tailnets[tailnet_id] = t
-    emit TailnetDeposit(tailnet_id, value, t.treasury)
+    require(self.tailnets[tailnet_id].owner == caller || self.members[tailnet_id][caller] == 1, "not a member")
+    self.tailnets[tailnet_id].treasury = self.tailnets[tailnet_id].treasury + value
+    emit TailnetDeposit(tailnet_id, value, self.tailnets[tailnet_id].treasury)
     return true
   }
 
   fn add_member(tailnet_id: int, member: address): bool {
-    let t = self.tailnets[tailnet_id]
-    require(t.owner == caller, "not tailnet owner")
+    require(self.tailnets[tailnet_id].owner == caller, "not tailnet owner")
     require(is_address(member), "invalid member")
     if self.members[tailnet_id][member] == 1 {
       return true   // idempotent
     }
     self.members[tailnet_id][member] = 1
-    t.member_count = t.member_count + 1
-    self.tailnets[tailnet_id] = t
+    self.tailnets[tailnet_id].member_count = self.tailnets[tailnet_id].member_count + 1
     emit TailnetMemberAdded(tailnet_id, member)
     return true
   }
 
   fn remove_member(tailnet_id: int, member: address): bool {
-    let t = self.tailnets[tailnet_id]
-    require(t.owner == caller, "not tailnet owner")
+    require(self.tailnets[tailnet_id].owner == caller, "not tailnet owner")
     require(self.members[tailnet_id][member] == 1, "not a member")
     self.members[tailnet_id][member] = 0
-    if t.member_count > 0 {
-      t.member_count = t.member_count - 1
+    if self.tailnets[tailnet_id].member_count > 0 {
+      self.tailnets[tailnet_id].member_count = self.tailnets[tailnet_id].member_count - 1
     }
-    self.tailnets[tailnet_id] = t
     emit TailnetMemberRemoved(tailnet_id, member)
     return true
   }
 
   fn update_acl(tailnet_id: int, acl_policy: string): bool {
-    let t = self.tailnets[tailnet_id]
-    require(t.owner == caller, "not tailnet owner")
-    t.acl_policy = acl_policy
-    self.tailnets[tailnet_id] = t
+    require(self.tailnets[tailnet_id].owner == caller, "not tailnet owner")
+    self.tailnets[tailnet_id].acl_policy = acl_policy
     emit TailnetAclUpdated(tailnet_id, acl_policy)
     return true
   }
 
   fn set_charge_internal_traffic(tailnet_id: int, charge: int): bool {
-    let t = self.tailnets[tailnet_id]
-    require(t.owner == caller, "not tailnet owner")
+    require(self.tailnets[tailnet_id].owner == caller, "not tailnet owner")
     require(charge == 0 || charge == 1, "charge must be 0 or 1")
-    t.charge_internal_traffic = charge
-    self.tailnets[tailnet_id] = t
+    self.tailnets[tailnet_id].charge_internal_traffic = charge
     emit TailnetChargeInternalSet(tailnet_id, charge)
     return true
   }
@@ -310,8 +298,7 @@ contract OctraVPN_V2 {
   // ============================================================
 
   fn authorize_proxy(tailnet_id: int, proxy: address): bool {
-    let t = self.tailnets[tailnet_id]
-    require(t.owner == caller, "not tailnet owner")
+    require(self.tailnets[tailnet_id].owner == caller, "not tailnet owner")
     require(is_address(proxy), "invalid proxy")
     self.authorized_proxies[tailnet_id][proxy] = 1
     emit ProxyAuthorized(tailnet_id, proxy)
@@ -319,8 +306,7 @@ contract OctraVPN_V2 {
   }
 
   fn revoke_proxy(tailnet_id: int, proxy: address): bool {
-    let t = self.tailnets[tailnet_id]
-    require(t.owner == caller, "not tailnet owner")
+    require(self.tailnets[tailnet_id].owner == caller, "not tailnet owner")
     self.authorized_proxies[tailnet_id][proxy] = 0
     emit ProxyRevoked(tailnet_id, proxy)
     return true
@@ -344,23 +330,19 @@ contract OctraVPN_V2 {
     require(price_per_mb >= 0, "negative price")
     require(max_pay >= self.min_session_deposit, "deposit below minimum")
 
-    let t = self.tailnets[tailnet_id]
-    require(t.treasury >= max_pay, "tailnet treasury insufficient")
-    t.treasury = t.treasury - max_pay
-    self.tailnets[tailnet_id] = t
+    require(self.tailnets[tailnet_id].treasury >= max_pay, "tailnet treasury insufficient")
+    self.tailnets[tailnet_id].treasury = self.tailnets[tailnet_id].treasury - max_pay
 
     let sid = self.session_count + 1
     self.session_count = sid
-    self.sessions[sid] = Session{
-      tailnet_id: tailnet_id,
-      proxy: proxy,
-      opener: caller,
-      deposit: max_pay,
-      opened_at: epoch,
-      class: class,
-      price_per_mb: price_per_mb,
-      status: 0
-    }
+    self.sessions[sid].tailnet_id = tailnet_id
+    self.sessions[sid].proxy = proxy
+    self.sessions[sid].opener = caller
+    self.sessions[sid].deposit = max_pay
+    self.sessions[sid].opened_at = epoch
+    self.sessions[sid].class = class
+    self.sessions[sid].price_per_mb = price_per_mb
+    self.sessions[sid].status = 0
     emit SessionOpened(sid, tailnet_id, proxy, class, price_per_mb, max_pay, epoch)
     return true
   }
@@ -372,33 +354,32 @@ contract OctraVPN_V2 {
     require(self.paused == 0, "paused")
     require(bytes_used >= 0, "negative bytes")
 
-    let s = self.sessions[session_id]
-    require(s.status == 0, "session not open")
-    require(s.proxy == caller, "caller is not the session proxy")
-    require(self.authorized_proxies[s.tailnet_id][caller] == 1, "proxy not authorized")
+    require(self.sessions[session_id].status == 0, "session not open")
+    require(self.sessions[session_id].proxy == caller, "caller is not the session proxy")
+    let tid = self.sessions[session_id].tailnet_id
+    require(self.authorized_proxies[tid][caller] == 1, "proxy not authorized")
 
-    let prev = self.operator_claims[session_id]
-    if prev.set == 1 {
-      if prev.bytes_used == bytes_used {
+    let prev_set = self.operator_claims[session_id].set
+    if prev_set == 1 {
+      let prev_bytes = self.operator_claims[session_id].bytes_used
+      if prev_bytes == bytes_used {
         return true   // idempotent retry
       }
       // Equivocation: ask the proxy contract to slash its own bond.
       // Refund the session deposit; settlement does not apply.
-      emit ProxyBondSlashed(caller, s.deposit, "equivocation")
-      // NOTE: real `proxy.slash_bond(s.deposit, "equivocation")`
+      let dep = self.sessions[session_id].deposit
+      emit ProxyBondSlashed(caller, dep, "equivocation")
+      // NOTE: real `proxy.slash_bond(dep, "equivocation")`
       // dispatch is a deferred upstream concern (open Q5).
-      s.status = 2
-      self.sessions[session_id] = s
-      let t = self.tailnets[s.tailnet_id]
-      t.treasury = t.treasury + s.deposit
-      self.tailnets[s.tailnet_id] = t
+      self.sessions[session_id].status = 2
+      self.tailnets[tid].treasury = self.tailnets[tid].treasury + dep
       emit SessionRefunded(session_id, "operator-equivocation")
       return true
     }
 
-    self.operator_claims[session_id] = ClaimRecord{
-      set: 1, bytes_used: bytes_used, claimed_at: epoch
-    }
+    self.operator_claims[session_id].set = 1
+    self.operator_claims[session_id].bytes_used = bytes_used
+    self.operator_claims[session_id].claimed_at = epoch
     emit SettleClaimed(session_id, caller, bytes_used)
     return true
   }
@@ -410,77 +391,80 @@ contract OctraVPN_V2 {
     require(self.paused == 0, "paused")
     require(bytes_used >= 0, "negative bytes")
 
-    let s = self.sessions[session_id]
-    require(s.status == 0, "session not open")
-    require(s.opener == caller, "not session opener")
+    require(self.sessions[session_id].status == 0, "session not open")
+    require(self.sessions[session_id].opener == caller, "not session opener")
 
-    let oc = self.operator_claims[session_id]
-    require(oc.set == 1, "proxy has not claimed yet")
+    let oc_set = self.operator_claims[session_id].set
+    require(oc_set == 1, "proxy has not claimed yet")
+    let oc_bytes = self.operator_claims[session_id].bytes_used
 
-    if oc.bytes_used != bytes_used {
-      self.client_confirms[session_id] = ClaimRecord{
-        set: 1, bytes_used: bytes_used, claimed_at: epoch
-      }
-      emit SettleDispute(session_id, oc.bytes_used, bytes_used)
+    if oc_bytes != bytes_used {
+      self.client_confirms[session_id].set = 1
+      self.client_confirms[session_id].bytes_used = bytes_used
+      self.client_confirms[session_id].claimed_at = epoch
+      emit SettleDispute(session_id, oc_bytes, bytes_used)
       return true
     }
 
-    // Internal-class + tailnet says don't charge → enforce.
-    let t = self.tailnets[s.tailnet_id]
-    let total_paid: int
-    if s.class == CLASS_INTERNAL && t.charge_internal_traffic == 0 {
-      total_paid = 0
-    } else {
-      total_paid = bytes_used * s.price_per_mb
+    let tid = self.sessions[session_id].tailnet_id
+    let s_class = self.sessions[session_id].class
+    let s_price = self.sessions[session_id].price_per_mb
+    let s_deposit = self.sessions[session_id].deposit
+    let s_proxy = self.sessions[session_id].proxy
+
+    // Internal-class + tailnet says don't charge → enforce by zeroing
+    // the effective price.  AML lacks if-expressions / uninitialized
+    // `let`, so we precompute a 0/1 multiplier instead.
+    let charge_mult = 1
+    if s_class == CLASS_INTERNAL && self.tailnets[tid].charge_internal_traffic == 0 {
+      charge_mult = 0
     }
-    require(total_paid <= s.deposit, "claim exceeds escrow")
+    let total_paid = bytes_used * s_price * charge_mult
+    require(total_paid <= s_deposit, "claim exceeds escrow")
 
     let protocol_fee = total_paid * self.protocol_fee_bps / BPS_DENOM
     let net_pay = total_paid - protocol_fee
-    let refund = s.deposit - total_paid
+    let refund = s_deposit - total_paid
 
-    s.status = 1
-    self.sessions[session_id] = s
-    self.client_confirms[session_id] = ClaimRecord{
-      set: 1, bytes_used: bytes_used, claimed_at: epoch
-    }
+    self.sessions[session_id].status = 1
+    self.client_confirms[session_id].set = 1
+    self.client_confirms[session_id].bytes_used = bytes_used
+    self.client_confirms[session_id].claimed_at = epoch
 
     if protocol_fee > 0 {
       self.treasury = self.treasury + protocol_fee
     }
     if refund > 0 {
-      t.treasury = t.treasury + refund
-      self.tailnets[s.tailnet_id] = t
+      self.tailnets[tid].treasury = self.tailnets[tid].treasury + refund
     }
 
-    if net_pay > 0 && self.proxy_pk_set[s.proxy] == 1 {
+    if net_pay > 0 && self.proxy_pk_set[s_proxy] == 1 {
       // Add net_pay (as constant) to the proxy's encrypted ledger.
       // The proxy claims via fhe_verify_zero against its own key.
-      let cur = self.enc_earnings[s.proxy]
+      let cur = self.enc_earnings[s_proxy]
       let cur_ct = fhe_deser(cur)
-      let pk = fhe_load_pk(self.proxy_pk[s.proxy])
+      let pk = fhe_load_pk(self.proxy_pk[s_proxy])
       let new_ct = fhe_add_const(pk, cur_ct, net_pay)
-      self.enc_earnings[s.proxy] = fhe_ser(new_ct)
+      self.enc_earnings[s_proxy] = fhe_ser(new_ct)
     }
 
     emit SettleConfirmed(session_id, caller, bytes_used)
-    emit SessionSettled(session_id, s.proxy, s.class, bytes_used, total_paid, refund)
+    emit SessionSettled(session_id, s_proxy, s_class, bytes_used, total_paid, refund)
     return true
   }
 
   fn sweep_expired_session(session_id: int): bool {
-    let s = self.sessions[session_id]
-    require(s.status == 0, "session not open")
+    require(self.sessions[session_id].status == 0, "session not open")
+    let opened = self.sessions[session_id].opened_at
     let grace = self.session_grace_epochs * SWEEP_GRACE_MULT_DEFAULT
-    require(epoch > s.opened_at + grace, "not yet sweepable")
+    require(epoch > opened + grace, "not yet sweepable")
 
-    let bounty = s.deposit * SWEEP_BOUNTY_DEFAULT_BPS / BPS_DENOM
-    let returned = s.deposit - bounty
-    s.status = 2
-    self.sessions[session_id] = s
-    let t = self.tailnets[s.tailnet_id]
-    t.treasury = t.treasury + returned
-    self.tailnets[s.tailnet_id] = t
+    let dep = self.sessions[session_id].deposit
+    let tid = self.sessions[session_id].tailnet_id
+    let bounty = dep * SWEEP_BOUNTY_DEFAULT_BPS / BPS_DENOM
+    let returned = dep - bounty
+    self.sessions[session_id].status = 2
+    self.tailnets[tid].treasury = self.tailnets[tid].treasury + returned
     if bounty > 0 {
       transfer(caller, bounty)
     }
@@ -503,18 +487,20 @@ contract OctraVPN_V2 {
     return true
   }
 
-  // Two-step claim: proxy submits `amount` and proof_ct =
-  // (enc_earnings - amount). AML verifies proof_ct decrypts to
-  // zero (it does iff the encrypted balance equals `amount`), then
-  // resets the ledger to a fresh zero and transfers OU.
-  fn claim_earnings(amount: int, proof_ct: string): bool {
+  // Two-step claim: proxy submits `amount` and a zero-knowledge
+  // proof string that (enc_earnings - enc(amount)) decrypts to 0.
+  // AML calls fhe_verify_zero against the proxy's own key; on pass,
+  // the ledger is reset and OU is transferred.
+  fn claim_earnings(amount: int, proof: string): bool {
     require(self.proxy_pk_set[caller] == 1, "no keys registered")
     require(amount > 0, "amount must be > 0")
+    require(len(proof) > 0, "proof required")
     let pk = fhe_load_pk(self.proxy_pk[caller])
+    let zero_ct = fhe_deser(self.proxy_zero_ct[caller])
+    let claim_ct = fhe_add_const(pk, zero_ct, amount)
     let cur = fhe_deser(self.enc_earnings[caller])
-    let diff = fhe_sub(pk, cur, fhe_add_const(pk, fhe_deser(self.proxy_zero_ct[caller]), amount))
-    let proof = fhe_deser(proof_ct)
-    require(fhe_verify_zero(pk, fhe_sub(pk, diff, proof)) == 1, "proof not zero")
+    let delta = fhe_sub(pk, cur, claim_ct)
+    require(fhe_verify_zero(pk, delta, proof), "proof not zero")
     self.enc_earnings[caller] = self.proxy_zero_ct[caller]
     transfer(caller, amount)
     emit EarningsClaimed(caller, amount)

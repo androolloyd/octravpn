@@ -15,6 +15,7 @@ def specToAml : List (String × String) :=
     ("unbondEndpoint",       "unbond_endpoint"),
     ("finalizeUnbond",       "finalize_unbond"),
     ("govSlashOperator",     "gov_slash_operator"),
+    ("slashDoubleSign",      "slash_double_sign"),
     ("registerEndpoint",     "register_endpoint"),
     ("retireEndpoint",       "retire_endpoint"),
     ("createTailnet",        "create_tailnet"),

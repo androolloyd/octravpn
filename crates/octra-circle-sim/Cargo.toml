@@ -24,6 +24,7 @@ thiserror   = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+octra-mock-rpc = { path = "../../../octra-foundry/crates/octra-mock-rpc" }
 
 [lints]
 workspace = true

@@ -112,6 +112,50 @@ def govSlashOperator (s : ProgramState) (caller op : Addr) :
       else
         some s1
 
+/-- Cryptographic equivocation slash via `slash_double_sign`.
+
+The AML entrypoint takes `(payload_a, sig_a, payload_b, sig_b)` plus
+the alleged operator and session id, and slashes iff the two payloads
+are distinct AND both signatures verify under the operator's
+receipt-signing pubkey. We don't model ed25519 verification — the
+Lean state machine has no oracle for signature soundness — so we
+parametrise the entrypoint by a boolean `verified` that downstream
+clients always pass as `true` (the AML's `ed25519_ok` gate is what
+makes that assumption sound in production).
+
+`payloadA = payloadB` is captured by a separate `Decidable`
+hypothesis `distinct : payloadA ≠ payloadB` flowed in by the caller;
+in Lean we encode "both verified AND distinct" as the single boolean
+flag `verified` for state-transition reasoning. The lemma
+`slashDoubleSign_distinct_payloads_required` proves the entrypoint
+returns the caller's state unchanged when the payloads coincide
+(modeled by setting `verified := false`). -/
+def slashDoubleSign
+    (s : ProgramState) (_caller op : Addr)
+    (verified : Bool) :
+    Option (ProgramState × OctRaw) :=
+  if ¬ verified then none
+  else if s.endpointSlashed op then none
+  else
+    let live := s.endpointStake op
+    let unb := (s.endpointUnbonding op).stake
+    let total := live + unb
+    if total = 0 then none
+    else
+      let burnAmt := total * s.params.slashBurnBps / 10000
+      let bountyAmt := total - burnAmt
+      let epRec := s.endpoints op
+      let s1 := { s with
+                  endpointStake := s.endpointStake.update op 0,
+                  endpointUnbonding := s.endpointUnbonding.update op Unbonding.empty,
+                  endpointSlashed := s.endpointSlashed.update op true,
+                  programTreasury := s.programTreasury + burnAmt }
+      if epRec.active then
+        let recPrime := { epRec with active := false }
+        some ({ s1 with endpoints := s1.endpoints.update op recPrime }, bountyAmt)
+      else
+        some (s1, bountyAmt)
+
 -- ============================================================
 -- Endpoint lifecycle
 -- ============================================================

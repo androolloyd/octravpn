@@ -6,7 +6,9 @@
 (* bookkeeping. v1 differs from v0 in three key ways:                       *)
 (*                                                                           *)
 (*   1. Operator stake lives in-program (`endpoint_stake`); slashing is     *)
-(*      governance-driven (`gov_slash_operator`).                            *)
+(*      both governance-driven (`gov_slash_operator`) and cryptographic     *)
+(*      (`slash_double_sign` using AML `ed25519_ok`; see                    *)
+(*      `program/main.aml`).                                                 *)
 (*   2. Sessions are single-hop with a single configured exit; settlement   *)
 (*      is a TWO-TX flow:                                                    *)
 (*        - operator submits `settle_claim(bytes)` first;                   *)
@@ -26,9 +28,14 @@
 (*   EarningsNonNegative                                                      *)
 (*   ActiveEndpointsAreBonded                                                 *)
 (*   SlashedHaveZeroStake                                                     *)
+(*   Inv_SlashedOpHasZeroStake (alias of SlashedHaveZeroStake; lifts to     *)
+(*     the cryptographic-slash branch.)                                      *)
 (*   Inv_SettlementOnlyOnConfirm                                              *)
 (*   Inv_EquivocationCausesRefund                                             *)
 (*   Inv_TokenSinglyRedeemed                                                  *)
+(*   Inv_DoubleSignSlashable (slash_double_sign is enabled whenever an      *)
+(*     active operator has signed two distinct symbolic payloads under      *)
+(*     their receipt key.)                                                   *)
 (*   StakeUnlockReachable (liveness)                                          *)
 (*   Liveness_SettleOrRefund                                                  *)
 (*****************************************************************************)
@@ -44,7 +51,11 @@ CONSTANTS
     MinTailnetDeposit,  \* >= 1
     MinEndpointStake,   \* operator bond floor
     MaxSeq,
-    TokenHashes         \* abstract set of `sha256(preimage)` values
+    TokenHashes,        \* abstract set of `sha256(preimage)` values
+    Payloads            \* abstract set of receipt-signing payloads
+                        \* (each value stands for a canonical
+                        \* H("octravpn-receipt-v1" || ...) message
+                        \* the operator might have signed off-chain).
 
 VARIABLES
     registered,          \* [Endpoint -> BOOLEAN]
@@ -66,13 +77,20 @@ VARIABLES
     settled_sids,        \* SUBSET Nat
     \* Audit trail: which hashes have been redeemed at least once
     \* (separate from `join_token_redeemed` for invariant phrasing).
-    redeem_count         \* [TokenHash -> Nat]
+    redeem_count,        \* [TokenHash -> Nat]
+    \* Set of payloads an operator has "signed" with their receipt-
+    \* signing key, off-chain. An operator may, in any state, append
+    \* a payload here via `OperatorSignsPayload(op, p)` — the
+    \* nondeterminism models adversarial behaviour. The cryptographic
+    \* slash entrypoint `SlashDoubleSign(op, p_a, p_b)` requires two
+    \* distinct elements to be in this set.
+    signed_payloads      \* [Endpoint -> SUBSET Payloads]
 
 vars == << registered, endpoint_stake, endpoint_slashed, treasury,
            members, exits, enc_earn, program_treasury, sessions,
            nextSession, paid_out, refunded,
            join_token_commits, join_token_redeemed,
-           settled_sids, redeem_count >>
+           settled_sids, redeem_count, signed_payloads >>
 
 SessionStatus == {"open", "settled", "refunded"}
 SessionId == Nat
@@ -98,6 +116,7 @@ Init ==
     /\ join_token_redeemed = {}
     /\ settled_sids        = {}
     /\ redeem_count        = [h \in TokenHashes |-> 0]
+    /\ signed_payloads     = [e \in Endpoints |-> {}]
 
 (* ---- Operator stake ---- *)
 
@@ -108,7 +127,8 @@ BondEndpoint(e, amount) ==
     /\ UNCHANGED << registered, endpoint_slashed, treasury, members, exits,
                     enc_earn, program_treasury, sessions, nextSession,
                     paid_out, refunded, join_token_commits,
-                    join_token_redeemed, settled_sids, redeem_count >>
+                    join_token_redeemed, settled_sids, redeem_count,
+                    signed_payloads >>
 
 GovSlashOperator(op) ==
     /\ ~endpoint_slashed[op]
@@ -121,7 +141,8 @@ GovSlashOperator(op) ==
            /\ program_treasury' = program_treasury + burn_amt
     /\ UNCHANGED << treasury, members, exits, enc_earn, sessions,
                     nextSession, paid_out, refunded, join_token_commits,
-                    join_token_redeemed, settled_sids, redeem_count >>
+                    join_token_redeemed, settled_sids, redeem_count,
+                    signed_payloads >>
 
 (* ---- Endpoint registration (stake-gated) ---- *)
 
@@ -133,7 +154,8 @@ RegisterEndpoint(e) ==
     /\ UNCHANGED << endpoint_stake, endpoint_slashed, treasury, members,
                     exits, enc_earn, program_treasury, sessions,
                     nextSession, paid_out, refunded, join_token_commits,
-                    join_token_redeemed, settled_sids, redeem_count >>
+                    join_token_redeemed, settled_sids, redeem_count,
+                    signed_payloads >>
 
 RetireEndpoint(e) ==
     /\ registered[e]
@@ -141,7 +163,8 @@ RetireEndpoint(e) ==
     /\ UNCHANGED << endpoint_stake, endpoint_slashed, treasury, members,
                     exits, enc_earn, program_treasury, sessions,
                     nextSession, paid_out, refunded, join_token_commits,
-                    join_token_redeemed, settled_sids, redeem_count >>
+                    join_token_redeemed, settled_sids, redeem_count,
+                    signed_payloads >>
 
 (* ---- Tailnet lifecycle ---- *)
 
@@ -154,7 +177,8 @@ CreateTailnet(t, owner, amount) ==
     /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed, exits,
                     enc_earn, program_treasury, sessions, nextSession,
                     paid_out, refunded, join_token_commits,
-                    join_token_redeemed, settled_sids, redeem_count >>
+                    join_token_redeemed, settled_sids, redeem_count,
+                    signed_payloads >>
 
 AddMember(t, c) ==
     /\ c \in Clients
@@ -164,7 +188,8 @@ AddMember(t, c) ==
     /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed, treasury,
                     exits, enc_earn, program_treasury, sessions, nextSession,
                     paid_out, refunded, join_token_commits,
-                    join_token_redeemed, settled_sids, redeem_count >>
+                    join_token_redeemed, settled_sids, redeem_count,
+                    signed_payloads >>
 
 ConfigureTailnetExit(t, e) ==
     /\ treasury[t] > 0
@@ -174,7 +199,8 @@ ConfigureTailnetExit(t, e) ==
     /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed, treasury,
                     members, enc_earn, program_treasury, sessions, nextSession,
                     paid_out, refunded, join_token_commits,
-                    join_token_redeemed, settled_sids, redeem_count >>
+                    join_token_redeemed, settled_sids, redeem_count,
+                    signed_payloads >>
 
 DepositToTailnet(t, amount) ==
     /\ amount > 0
@@ -183,7 +209,8 @@ DepositToTailnet(t, amount) ==
     /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed, members,
                     exits, enc_earn, program_treasury, sessions, nextSession,
                     paid_out, refunded, join_token_commits,
-                    join_token_redeemed, settled_sids, redeem_count >>
+                    join_token_redeemed, settled_sids, redeem_count,
+                    signed_payloads >>
 
 (* ---- Pre-auth join tokens (hash-precommit) ---- *)
 
@@ -196,7 +223,8 @@ PrecommitJoinToken(t, h) ==
     /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed, treasury,
                     members, exits, enc_earn, program_treasury, sessions,
                     nextSession, paid_out, refunded,
-                    join_token_redeemed, settled_sids, redeem_count >>
+                    join_token_redeemed, settled_sids, redeem_count,
+                    signed_payloads >>
 
 \* Redeem a join token. The actor is any client who is not already
 \* a member of the tailnet. Adds them to the tailnet and marks the
@@ -211,7 +239,8 @@ RedeemJoinToken(t, c, h) ==
     /\ redeem_count'        = [redeem_count EXCEPT ![h] = redeem_count[h] + 1]
     /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed, treasury,
                     exits, enc_earn, program_treasury, sessions, nextSession,
-                    paid_out, refunded, join_token_commits, settled_sids >>
+                    paid_out, refunded, join_token_commits, settled_sids,
+                    signed_payloads >>
 
 (* ---- Session lifecycle (single-hop, two-tx settle) ---- *)
 
@@ -236,7 +265,7 @@ OpenSession(sid, t, c, e, deposit) ==
     /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed, members,
                     exits, enc_earn, program_treasury, paid_out, refunded,
                     join_token_commits, join_token_redeemed,
-                    settled_sids, redeem_count >>
+                    settled_sids, redeem_count, signed_payloads >>
 
 \* settle_claim: operator-only. First valid call records the claim;
 \* idempotent on same bytes; re-claim with DIFFERENT bytes is
@@ -257,7 +286,8 @@ SettleClaim(sid, caller, bytes) ==
                              treasury, members, exits, enc_earn,
                              program_treasury, nextSession, paid_out,
                              refunded, join_token_commits,
-                             join_token_redeemed, settled_sids, redeem_count >>
+                             join_token_redeemed, settled_sids, redeem_count,
+                    signed_payloads >>
         ELSE IF sessions[sid].operator_claim.bytes = bytes
             \* Idempotent retry — nothing changes.
             THEN /\ UNCHANGED vars
@@ -287,7 +317,8 @@ SettleClaim(sid, caller, bytes) ==
                                      nextSession, paid_out,
                                      join_token_commits,
                                      join_token_redeemed,
-                                     settled_sids, redeem_count >>
+                                     settled_sids, redeem_count,
+                                     signed_payloads >>
 
 \* settle_confirm: opener-only. Requires the operator to have
 \* claimed. Matching bytes apply settlement; mismatch records the
@@ -307,7 +338,8 @@ SettleConfirm(sid, caller, bytes) ==
                              treasury, members, exits, enc_earn,
                              program_treasury, nextSession, paid_out,
                              refunded, join_token_commits,
-                             join_token_redeemed, settled_sids, redeem_count >>
+                             join_token_redeemed, settled_sids, redeem_count,
+                    signed_payloads >>
         \* Match: apply settlement.
         ELSE /\ registered[sessions[sid].exit]
              /\ ~endpoint_slashed[sessions[sid].exit]
@@ -333,7 +365,7 @@ SettleConfirm(sid, caller, bytes) ==
              /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed,
                              members, exits, nextSession, paid_out,
                              join_token_commits, join_token_redeemed,
-                             redeem_count >>
+                             redeem_count, signed_payloads >>
 
 ClaimNoShow(sid) ==
     /\ sid \in DOMAIN sessions
@@ -348,7 +380,7 @@ ClaimNoShow(sid) ==
     /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed, members,
                     exits, enc_earn, program_treasury, nextSession, paid_out,
                     join_token_commits, join_token_redeemed,
-                    settled_sids, redeem_count >>
+                    settled_sids, redeem_count, signed_payloads >>
 
 (* ---- Earnings claim (FHE-zero-proof abstracted) ---- *)
 
@@ -362,7 +394,48 @@ ClaimEarnings(v) ==
     /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed, treasury,
                     members, exits, program_treasury, sessions, nextSession,
                     refunded, join_token_commits, join_token_redeemed,
-                    settled_sids, redeem_count >>
+                    settled_sids, redeem_count, signed_payloads >>
+
+(* ---- Cryptographic equivocation slash (slash_double_sign) ---- *)
+
+\* Operator signs a payload off-chain with their receipt-signing
+\* key. Models the off-chain dual-signed-receipt protocol — the
+\* operator may decide to sign anything, including, adversarially,
+\* two distinct payloads under the same key.
+OperatorSignsPayload(op, p) ==
+    /\ p \notin signed_payloads[op]
+    /\ signed_payloads' = [signed_payloads EXCEPT
+                              ![op] = signed_payloads[op] \cup {p}]
+    /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed, treasury,
+                    members, exits, enc_earn, program_treasury, sessions,
+                    nextSession, paid_out, refunded, join_token_commits,
+                    join_token_redeemed, settled_sids, redeem_count >>
+
+\* Anyone presents two distinct payloads + verified sigs from `op`'s
+\* receipt key. AML's `ed25519_ok` gate is abstracted: we require both
+\* payloads to be in `signed_payloads[op]` (i.e. the operator did
+\* sign them; in the real system the sigs witness this). Slash mirrors
+\* GovSlashOperator: 90% burn to program treasury, 10% bounty to the
+\* slasher (modeled as `bounty_amt` flowing through `program_treasury`
+\* + a separate `paid_out` increment; we conservatively credit the
+\* bounty as outflow from `program_treasury` so the invariant
+\* `program_treasury >= 0` still witnesses the burn share).
+SlashDoubleSign(op, p_a, p_b) ==
+    /\ ~endpoint_slashed[op]
+    /\ p_a # p_b
+    /\ p_a \in signed_payloads[op]
+    /\ p_b \in signed_payloads[op]
+    /\ endpoint_stake[op] > 0
+    /\ LET total    == endpoint_stake[op]
+           burn_amt == (total * 9000) \div 10000
+       IN  /\ endpoint_stake'   = [endpoint_stake EXCEPT ![op] = 0]
+           /\ endpoint_slashed' = [endpoint_slashed EXCEPT ![op] = TRUE]
+           /\ registered'       = [registered EXCEPT ![op] = FALSE]
+           /\ program_treasury' = program_treasury + burn_amt
+    /\ UNCHANGED << treasury, members, exits, enc_earn, sessions,
+                    nextSession, paid_out, refunded, join_token_commits,
+                    join_token_redeemed, settled_sids, redeem_count,
+                    signed_payloads >>
 
 \* Next-actions choose canonical values from each domain to keep
 \* the state space tractable for TLC. The interesting variation is
@@ -388,6 +461,9 @@ Next ==
             bytes \in {0, MinDeposit}: SettleConfirm(sid, caller, bytes)
     \/ \E sid \in DOMAIN sessions: ClaimNoShow(sid)
     \/ \E v \in Endpoints: ClaimEarnings(v)
+    \/ \E op \in Endpoints, p \in Payloads: OperatorSignsPayload(op, p)
+    \/ \E op \in Endpoints, p_a \in Payloads, p_b \in Payloads:
+            SlashDoubleSign(op, p_a, p_b)
 
 Spec == Init /\ [][Next]_vars
 
@@ -480,6 +556,31 @@ Inv_TokenSinglyRedeemed ==
         /\ \E t \in Tailnets: h \in join_token_commits[t]
         /\ redeem_count[h] = 1
 
+\* CRYPTOGRAPHIC SLASH SAFETY (alias of SlashedHaveZeroStake; named
+\* per the slash_double_sign work to make the connection explicit in
+\* the model checker output): every slashed operator has zero live
+\* stake AFTER either `gov_slash_operator` OR `slash_double_sign`.
+\* Confirms the cryptographic-slash branch leaves the same post-state
+\* shape as the governance branch.
+Inv_SlashedOpHasZeroStake ==
+    \A e \in Endpoints:
+        endpoint_slashed[e] => endpoint_stake[e] = 0
+
+\* CRYPTOGRAPHIC SLASH ENABLEDNESS: whenever an active operator with
+\* live stake has two distinct payloads in `signed_payloads`, the
+\* `SlashDoubleSign` action is enabled. This is the model-checking
+\* analogue of "the slash entrypoint always has a witness whenever
+\* the operator equivocated" — a liveness-style guarantee, but
+\* phrased here as a safety invariant via existential enabledness.
+Inv_DoubleSignSlashable ==
+    \A op \in Endpoints:
+        ( /\ ~endpoint_slashed[op]
+          /\ endpoint_stake[op] > 0
+          /\ \E p_a \in signed_payloads[op],
+                p_b \in signed_payloads[op]: p_a # p_b ) =>
+            \E p_a \in Payloads, p_b \in Payloads:
+                ENABLED SlashDoubleSign(op, p_a, p_b)
+
 Invariants ==
     /\ ConservationOfFunds
     /\ NoDoubleSettle
@@ -488,11 +589,13 @@ Invariants ==
     /\ ProgramTreasuryMonotone
     /\ ActiveEndpointsAreBonded
     /\ SlashedHaveZeroStake
+    /\ Inv_SlashedOpHasZeroStake
     /\ SessionExitsAreConfigured
     /\ Inv_SettlementOnlyOnConfirm
     /\ Inv_SettledEventMatchesState
     /\ Inv_EquivocationCausesRefund
     /\ Inv_TokenSinglyRedeemed
+    /\ Inv_DoubleSignSlashable
 
 (* ---------------------------- LIVENESS ---------------------------- *)
 

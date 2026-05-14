@@ -1,15 +1,44 @@
 # AML Gap Analysis: OctraVPN vs. Confirmed Octra Primitives
 
-**Date**: 2026-05-12. **Octra status**: live mainnet, v3.0.0-irmin,
-~10s epochs, $44.5M mcap. **OctraVPN status**: AML compiles against
-our mock interpreter, has never been deployed against the real Octra
-chain.
+**Date**: 2026-05-12, refreshed 2026-05-14. **Octra status**: live
+mainnet, v3.0.0-irmin, ~10s epochs, $44.5M mcap. **OctraVPN status**:
+AML compiles against `octra_compileAml` and the cryptographic
+equivocation slash now lives in-program (see §3 and `program/main.aml`).
 
 This document audits every host call our `program/main.aml` makes
 against the confirmed Octra AML surface (from
 `docs/octra-research.md §6`) and specifies the migration path for
 each gap. The goal is a fully-audited, formally-verifiable AML that
 uses only primitives Octra actually exposes today.
+
+## 0. 2026-05-14 dev-team announcement (status update)
+
+The Octra dev team announced that the AML compiler exposes:
+
+- `ed25519_ok(pk, msg, sig) -> bool` — **confirmed**. Replaces our
+  previously-deferred `verify_ed25519`. Used in
+  `program/main.aml::slash_double_sign` and (logically) anywhere else
+  we previously had to defer cryptographic checks.
+- `digest_sha256(bytes) -> bytes` — **confirmed** as the canonical
+  spelling. `sha256` is presumably an alias since the v1 AML still
+  compiles using the bare `sha256(token_preimage)` form.
+- `digest_keccak256(bytes) -> bytes` — **confirmed**. Not used by v1
+  yet; available for Ethereum-bridge-style features.
+- `current_tx_hash() -> bytes` — **confirmed**. Not used by v1 yet;
+  potentially useful for replay-bounding nested calls.
+- Native `bool` type — **confirmed** (entrypoint return types in
+  `program/main.aml` already use it).
+
+Reference deployment: `octBDvZSiTqdEBAyFSp79CHeoLMR9MzHugX9YkHtuQ57MRB`
+(its AML is readable via `vm_contract` / `contract_source`).
+
+This resolves the headline gap in this document (§2.2's
+`verify_ed25519` row, §7's "stays off-chain for v1" decision, and
+the deferred items in §10's table). The cryptographic equivocation
+slash branch is now `program/main.aml::slash_double_sign`. The
+`settle_claim`-internal equivocation slash (which detects two
+on-chain claims) and the new off-chain dual-sig slash now run side
+by side; both Lean and TLA proofs exercise both branches.
 
 ---
 
@@ -51,8 +80,8 @@ cryptographic slashing → off-chain evidence + Octra-team escalation).
 
 | Call                                                       | Where we use it                                        | Replacement                                                                                                                       |
 | ---------------------------------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| `verify_ed25519(pk, msg, sig)`                             | `settle_session` (dual-sig); `submit_equivocation` (2x) | Drop from AML. Receipt integrity becomes economic (client max-deposit bound). Equivocation moves off-chain. See §3.               |
-| `verify_ed25519_acct(addr, msg, sig)`                      | `redeem_join_token`                                    | Drop. Pre-auth tokens replaced by direct owner `add_member` calls. See §4.                                                        |
+| `verify_ed25519(pk, msg, sig)`                             | `settle_session` (dual-sig); `submit_equivocation` (2x) | **Resolved 2026-05-14**: confirmed as `ed25519_ok(pk, msg, sig) -> bool`. Mainnet reference `octBDvZSiTqdEBAyFSp79CHeoLMR9MzHugX9YkHtuQ57MRB`. Cryptographic equivocation slash is live in `program/main.aml::slash_double_sign`. |
+| `verify_ed25519_acct(addr, msg, sig)`                      | `redeem_join_token`                                    | Drop. Pre-auth tokens replaced by direct owner `add_member` calls (and hash-precommit `precommit_join_token` / `redeem_join_token`). The newly-confirmed `ed25519_ok` could revive a signed-token variant in v1.2 if a real product use surfaces. See §4. |
 | `pedersen_add(a, b)`                                       | `settle_session` earnings credit                       | `fhe_add(pk_op, cur, new)` where `pk_op = fhe_load_pk(op_addr)`.                                                                  |
 | `pedersen_mul_scalar_g(k)`                                 | `settle_session` earnings credit                       | `fhe_scale(pk_op, enc_one, k)` — or pre-stored `enc(1)` per pk.                                                                   |
 | `pedersen_mul_scalar_h(k)`                                 | `settle_session` blind component                       | Not needed — HFHE doesn't use blinding factors the same way; ciphertext-randomness is baked in by fhe-encrypt.                    |
@@ -63,9 +92,11 @@ cryptographic slashing → off-chain evidence + Octra-team escalation).
 
 ### 2.3 ⚠ Probably AML-internal, verify with Octra team
 
-| Call                  | Where                                  | Assumption                                                                            |
+| Call                  | Where                                  | Status (2026-05-14)                                                                   |
 | --------------------- | -------------------------------------- | ------------------------------------------------------------------------------------- |
-| `sha256(bytes)`       | id derivation; receipt msg              | Likely available given SHA-256 use throughout Octra. Cheap to confirm.                |
+| `sha256(bytes)`       | id derivation; receipt msg              | **Confirmed** as `digest_sha256(bytes) -> bytes` (canonical name); the bare `sha256(...)` form in v1 still compiles via the live `octra_compileAml` RPC, so it's presumably an alias. |
+| `digest_keccak256(b)` | (new) Ethereum-bridge / EVM compat     | **Confirmed 2026-05-14**. Not used by v1 yet.                                          |
+| `current_tx_hash()`   | (new) replay-bounding nested calls     | **Confirmed 2026-05-14**. Not used by v1 yet.                                          |
 | `addr_bytes(addr)`    | `pedersen_verify_open` route opening   | Likely AML-internal type conversion. Verify.                                          |
 | `is_address(v)`       | `register_device`, `transfer_ownership` | Likely AML-internal. Verify.                                                          |
 | `address_zero()`      | Null checks                            | Likely AML-internal. Verify.                                                          |
@@ -228,48 +259,43 @@ the very next block.
 
 ---
 
-## 7. Equivocation slashing: stays off-chain for v1
+## 7. Equivocation slashing: now on-chain (cryptographic)
 
-**Current design**: `submit_equivocation(operator, session_id, seq,
-bytes_a, blind_a, sig_a, bytes_b, blind_b, sig_b)` verifies both
-signatures in AML and slashes.
+**Resolved 2026-05-14.** AML's `ed25519_ok(pk, msg, sig) -> bool` is
+confirmed, and the corresponding entrypoint
+`slash_double_sign(operator_addr, session_id, payload_a, sig_a,
+payload_b, sig_b)` is live in `program/main.aml`. The Lean and TLA
+proofs cover the post-state shape (`endpointStake = 0`,
+`endpointSlashed = true`, 90 % burn / 10 % bounty to the slasher).
 
-**Problem**: AML can't verify ed25519.
+### 7.1 Two complementary slash paths
 
-**Replacement options**:
+| Path                                | Trigger                                                          | Catches                                                                                          |
+| ----------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `settle_claim` in-AML equivocation | Two `settle_claim(sid, bytes_used)` calls from the same operator with different `bytes_used`. | Operator who tries to bill different amounts on chain.                                          |
+| `slash_double_sign`                 | Two distinct signed payloads under the operator's `receipt_pubkey`. | Operator who signs two contradictory off-chain receipts (e.g. for the same `(session_id, seq)`). |
+
+Both paths share the 90 / 10 split and mark `endpoint_slashed[op] = 1`
+permanently (the `require(endpoint_slashed[op] == 0, "already
+slashed")` gate makes the entrypoint idempotent post-slash).
+
+### 7.2 Historical alternatives (no longer needed)
+
+The pre-2026-05-14 plan had three options:
 
 **7a. Off-chain slash escalation**: Anyone with evidence verifies it
 locally (`octravpn slash-evidence verify` already works), publishes
 the verified bundle, and escalates to the Octra team for
-protocol-level action. Slow, social.
+protocol-level action. **Superseded** by `slash_double_sign`.
 
 **7b. Native-tx wrapper for slash evidence**: Octra adds an
 `op_type="vpn_slash_evidence"` that the runtime verifies. AML sees a
-boolean "slash succeeded" and burns the stake. Requires Octra
-cooperation.
+boolean "slash succeeded" and burns the stake. **Superseded**.
 
-**7c. Self-revealing**: Equivocation evidence is presented as two
-`settle_session` calls for the same session. AML can detect a second
-settle attempt: status must be `open` to settle. So a dup-settle is
-just rejected, not slashable. Doesn't catch off-chain equivocation.
-
-**v1 decision**: Use 7a — off-chain evidence verifier
-(`octravpn slash-evidence verify` exists), reputation downgrade for
-operators with confirmed equivocation evidence, market exit by
-clients. Slashing remains a v1.1 feature pending Octra additions.
-
-**Implication**: Remove `submit_equivocation` from AML. The
-slashable-stake exists in the program state but is only burned by
-the owner via a governance call (`gov_slash_operator(addr,
-evidence_url)`) — single point of governance. Trade-off but
-verifiable on-chain.
-
-Actually — better: keep `endpoint_slashed` writable only by
-`set_operator_slashed(operator, slashed: int)`, gated on
-`require_owner()`. The owner is the program deployer (governance).
-External slash evidence triggers a governance proposal which the
-owner signs. This is single-point-of-trust slashing but it's a real
-mechanism.
+**7c. Governance-only slash**: `gov_slash_operator(addr,
+evidence_url)` is still in place as a backstop for cases without
+cryptographic evidence (e.g. an operator refuses to serve traffic or
+censors specific clients).
 
 ---
 
@@ -377,9 +403,9 @@ In order, each step independently testable:
 | Treasury accounting                 | ✓         | AML state, TLA+/Lean verified                   |
 | **Single-hop sessions**             | ✓         | Validator-only settle, economic ceiling          |
 | **Multi-hop privacy routing**       | ✗ → v1.1  | Needs Octra extension (§5)                       |
-| **Dual-sig receipt integrity**      | ✗         | Replaced by economic ceiling — see §3           |
-| **In-AML equivocation slash**       | ✗ → v1.1  | Replaced by governance slash — see §7           |
-| **Pre-auth join tokens**            | ✗ → v1.1  | Replaced by direct add_member — see §4          |
+| **Dual-sig receipt integrity**      | ✓         | Off-chain dual-sig + on-chain `slash_double_sign` via `ed25519_ok` (confirmed 2026-05-14, see §0 / §7). |
+| **In-AML equivocation slash**       | ✓         | `settle_claim` (on-chain dup) AND `slash_double_sign` (off-chain dup). See §7. |
+| **Pre-auth join tokens**            | ✓ (hash)  | Hash-precommit pattern; signed-token variant possible in v1.2 via `ed25519_ok`. See §4. |
 | **HMAC-chained audit log**          | ✓         | Off-chain operator log; on-chain ACL hash       |
 
 ---
@@ -397,18 +423,20 @@ What we can prove with the new design:
 | FHE earnings ledger is additive under settle                   | Lean (with FHE axioms) |
 | `claim_earnings` requires valid `fhe_verify_zero` proof        | Lean      |
 | Governance-slash is single-shot terminal                       | TLA+      |
+| Cryptographic equivocation slash is single-shot terminal       | Lean (`slashDoubleSign_slashes_stake`, `slashDoubleSign_idempotent_when_already_slashed`), TLA+ (`Inv_SlashedOpHasZeroStake`) |
+| `slash_double_sign` is enabled iff operator has two distinct signed payloads | TLA+ (`Inv_DoubleSignSlashable`) |
 | No path exists where an unbonded address registers             | TLA+      |
 
 What we CAN'T prove without Octra cooperation:
 
 - "Bandwidth receipts are unforgeable" — moves to native-tx layer,
   not formally verified by Octra (no public formal proofs of their
-  runtime).
-- "Stealth payouts are unlinkable" — same.
-- "Cryptographic equivocation slashing" — needs verify_ed25519.
-
-These are honestly documented in `docs/whitepaper.md §6` rather than
-claimed via formal proof.
+  runtime). The off-chain dual-sig protocol's EUF-CMA reduction is
+  in `proofs/tamarin/octravpn.spthy` but the AML layer's reduction
+  hinges on the `ed25519_ok` host call (confirmed 2026-05-14, so the
+  reduction is now sound; the formal AML model still treats
+  `ed25519_ok` as an oracle).
+- "Stealth payouts are unlinkable" — same (native-tx layer).
 
 ---
 

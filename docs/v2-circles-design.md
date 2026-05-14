@@ -190,14 +190,23 @@ We do not migrate v1 → v2 in-place. v1 is its own deployment on main-net. v2 d
 
 ## 9. Open questions / upstream dependencies
 
-The following must be answered by Octra before v2 can be implemented:
+The following must be answered by Octra before v2 can be implemented.
 
-1. **Circle DSL.** What language and tooling do we use to author the Circle's internal logic? The litepaper says Rust / C++ / OCaml / WASM; we need the SDK and the compiler path. Today neither is published (as of 2026-05-14, `octra-labs/program-examples` ships no Circle examples).
+Resolved on the public AML side as of the **2026-05-14** Octra dev-team announcement (reference deployment `octBDvZSiTqdEBAyFSp79CHeoLMR9MzHugX9YkHtuQ57MRB`):
+
+- `ed25519_ok(pk, msg, sig) -> bool` — confirmed. Unblocks the cryptographic equivocation slash on the public AML side (see `program/main.aml::slash_double_sign`, `docs/security.md §3.2`).
+- `digest_sha256`, `digest_keccak256` — confirmed.
+- `current_tx_hash` — confirmed.
+- Native `bool` type — confirmed (already used in v1 entrypoint returns).
+
+These resolve the public-AML slice of the original §9 (in particular, the cryptographic-slash piece of dependency 4). The questions below are what remains for the Circle / proxy / access-contract layer:
+
+1. **Circle DSL + SDK.** What language and tooling do we use to author the Circle's internal logic? The litepaper says Rust / C++ / OCaml / WASM; we need the SDK and the compiler path. As of 2026-05-14, `octra-labs/program-examples` ships no Circle examples.
 2. **Proxy contract grammar.** Is the proxy contract authored in AML with special pragmas, or in its own DSL? How do we declare the "predefined callers" allowlist?
-3. **Access contract.** Same: AML-with-pragmas, or separate? What's the function-table syntax?
-4. **HFHE arithmetic on the proxy side.** Can the proxy call `fhe_scale(price_per_mb, bytes_used_ct)` directly, or must scaling happen inside the Circle and only the resulting cleartext (or transciphered ct) crosses the proxy?
-5. **Bond escrow at deployment.** Litepaper says the Circle's proxy is "deployed with a pre-allocated resource address." Can we attach a slashable OU bond to the proxy address at deployment? What's the slash interface?
-6. **Discovery.** If only authorized callers can enumerate a proxy, how does a tailnet owner discover available operators to add to their authorized-proxy set in the first place? Some out-of-band channel? An opt-in public directory Circle?
+3. **Access contract grammar.** Same: AML-with-pragmas, or separate? What's the function-table syntax? Are there hooks for tag-based routing?
+4. **Circle-internal HFHE primitive availability.** The public AML side of HFHE is now confirmed (we already use `fhe_add`, `fhe_sub`, `fhe_add_const`, `fhe_scale`, `fhe_verify_zero` in `program/main.aml`, and the AML side of cryptographic primitives is locked in by the 2026-05-14 announcement). What we still need: are the HFHE primitives also available inside the Circle's logic, or only at the proxy boundary? What's the supported path for **decrypting a Circle-internal ciphertext into a main-net cleartext value** at settle time?
+5. **Bond escrow at proxy deployment.** Litepaper says the Circle's proxy is "deployed with a pre-allocated resource address." Can we attach a slashable OU bond to the proxy address at deployment? What's the slash interface? (We could otherwise hold the bond in our v2 AML program keyed by proxy address — workable but it splits authority across two contracts.)
+6. **Operator discovery.** If only authorized callers can enumerate a proxy, how does a tailnet owner discover available operators to add to their authorized-proxy set in the first place? Some out-of-band channel? An opt-in public directory Circle?
 
 Until these are answered we cannot write `main-v2.aml` against Octra's actual primitives. The work blocked on upstream:
 

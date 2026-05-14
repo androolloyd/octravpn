@@ -13,6 +13,17 @@ Stake / slash lemmas:
   `endpointStake ≥ minEndpointStake`.
 - `slash_burns_stake` — after a successful slash, stake = 0.
 - `slash_marks_terminal` — after slash, the slashed flag is true.
+- `slashDoubleSign_slashes_stake` — after a successful
+  `slashDoubleSign`, `endpointStake[op] = 0` and
+  `endpointSlashed[op] = true`.
+- `slashDoubleSign_pays_bounty` — successful `slashDoubleSign`
+  returns `total_stake - burn_amt` to the caller as bounty.
+- `slashDoubleSign_idempotent_when_already_slashed` — a second
+  `slashDoubleSign` on an already-slashed operator returns `none`
+  (mirrors AML revert "already slashed").
+- `slashDoubleSign_distinct_payloads_required` — when the alleged
+  payloads coincide (`verified := false`), the entrypoint returns
+  `none`, i.e. no state change.
 
 Two-tx settlement lemmas (claim side):
 - `settleClaim_requires_caller_is_exit` — only the configured exit
@@ -190,6 +201,89 @@ theorem slash_requires_owner
   · simp [h1] at h
   · -- h1 : ¬ (a ≠ b) ⇒ a = b. Decidable equality on Addr (Nat).
     exact Decidable.of_not_not h1
+
+-- ----- Cryptographic equivocation slash (`slashDoubleSign`) -----
+
+/-- After a successful `slashDoubleSign`, the operator's live stake
+    is zero AND the slashed flag is set. -/
+theorem slashDoubleSign_slashes_stake
+    (s s' : ProgramState) (caller op : Addr) (verified : Bool)
+    (bounty : OctRaw)
+    (h : slashDoubleSign s caller op verified = some (s', bounty)) :
+    s'.endpointStake op = 0 ∧ s'.endpointSlashed op = true := by
+  unfold slashDoubleSign at h
+  by_cases h1 : ¬ verified
+  · simp [h1] at h
+  by_cases h2 : s.endpointSlashed op
+  · simp [h1, h2] at h
+  by_cases h3 : s.endpointStake op + (s.endpointUnbonding op).stake = 0
+  · simp [h1, h2, h3] at h
+  · simp [h1, h2, h3] at h
+    by_cases h4 : (s.endpoints op).active
+    · simp [h4] at h
+      obtain ⟨hs, _⟩ := h
+      subst hs
+      refine ⟨?_, ?_⟩
+      · unfold Map.update; simp
+      · unfold Map.update; simp
+    · simp [h4] at h
+      obtain ⟨hs, _⟩ := h
+      subst hs
+      refine ⟨?_, ?_⟩
+      · unfold Map.update; simp
+      · unfold Map.update; simp
+
+/-- After a successful `slashDoubleSign`, the caller's bounty is
+    `total - burn_amt`, where `total = endpointStake[op] +
+    endpointUnbonding[op].stake`. The Lean model returns the bounty
+    explicitly in the entrypoint's tuple (AML's `transfer(caller,
+    bounty_amt)` is opaque to the state machine). -/
+theorem slashDoubleSign_pays_bounty
+    (s s' : ProgramState) (caller op : Addr) (verified : Bool)
+    (bounty : OctRaw)
+    (h : slashDoubleSign s caller op verified = some (s', bounty)) :
+    let total := s.endpointStake op + (s.endpointUnbonding op).stake
+    let burnAmt := total * s.params.slashBurnBps / 10000
+    bounty = total - burnAmt := by
+  unfold slashDoubleSign at h
+  by_cases h1 : ¬ verified
+  · simp [h1] at h
+  by_cases h2 : s.endpointSlashed op
+  · simp [h1, h2] at h
+  by_cases h3 : s.endpointStake op + (s.endpointUnbonding op).stake = 0
+  · simp [h1, h2, h3] at h
+  · simp [h1, h2, h3] at h
+    by_cases h4 : (s.endpoints op).active
+    · simp [h4] at h
+      obtain ⟨_, hb⟩ := h
+      exact hb.symm
+    · simp [h4] at h
+      obtain ⟨_, hb⟩ := h
+      exact hb.symm
+
+/-- `slashDoubleSign` on an already-slashed operator returns `none`
+    (no state change). Mirrors the AML's `require(endpoint_slashed[op]
+    == 0, "already slashed")`. -/
+theorem slashDoubleSign_idempotent_when_already_slashed
+    (s : ProgramState) (caller op : Addr) (verified : Bool)
+    (halr : s.endpointSlashed op = true) :
+    slashDoubleSign s caller op verified = none := by
+  unfold slashDoubleSign
+  by_cases h1 : ¬ verified
+  · simp [h1]
+  · simp [h1, halr]
+
+/-- When the two payloads are identical (or any sig fails to verify
+    — the AML's `require` aborts the call), the entrypoint returns
+    `none`. In the Lean model that's the `verified := false` arm,
+    standing for "either payloads collide or one of the sigs is bad".
+    The lemma's content is: `verified = false ⇒ slashDoubleSign = none`,
+    so no state mutates and no bounty is paid. -/
+theorem slashDoubleSign_distinct_payloads_required
+    (s : ProgramState) (caller op : Addr) :
+    slashDoubleSign s caller op false = none := by
+  unfold slashDoubleSign
+  simp
 
 -- ============================================================
 -- Session lemmas

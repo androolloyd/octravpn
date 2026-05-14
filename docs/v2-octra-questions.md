@@ -2,7 +2,20 @@
 
 > Compiled from `docs/v2-circles-design.md` §9. Send this verbatim (or close to it) to the dev team via the Discord development channel or `dev@octra.org`. Answers gate the v2 implementation work in tasks #141–#143.
 
-We're building **OctraVPN**, a decentralized Tailscale-compatible mesh on Octra. v1 ships against current main-net primitives (AML + HFHE ledger + stealth payments). For v2 you mentioned that Circles let us hide operators while still offering clear-internet egress — *"you can build a VPN on this."* We took that as a hint and designed a v2 architecture where each operator is a Circle, the proxy contract is the public face on main-net, and the access contract gates membership / class / pricing.
+## Status (2026-05-14)
+
+The Octra dev team announced on **2026-05-14** that the AML compiler exposes:
+
+- `ed25519_ok(pk, msg, sig) -> bool`
+- `digest_sha256`, `digest_keccak256`
+- `current_tx_hash`
+- native `bool` type
+
+Reference deployment: `octBDvZSiTqdEBAyFSp79CHeoLMR9MzHugX9YkHtuQ57MRB` (its AML is readable via `vm_contract` / `contract_source`).
+
+This resolves the public-AML slice of the original §9. The cryptographic equivocation slash is now in `program/main.aml::slash_double_sign` and is compile-gated against mainnet. Earnings-claim / receipt-hashing primitives are confirmed. The questions below cover the **Circle-side** dependencies that are still blocked.
+
+We're building **OctraVPN**, a decentralized Tailscale-compatible mesh on Octra. v1 ships against current main-net primitives (AML + HFHE ledger + stealth payments + cryptographic equivocation slash, now that `ed25519_ok` is confirmed). For v2 you mentioned that Circles let us hide operators while still offering clear-internet egress — *"you can build a VPN on this."* We took that as a hint and designed a v2 architecture where each operator is a Circle, the proxy contract is the public face on main-net, and the access contract gates membership / class / pricing.
 
 Before we author any Circle-shaped code we need to ground six things. Numbered for easy reply.
 
@@ -22,16 +35,16 @@ The litepaper (§2.3, §4.2) says Circles run logic in Rust, C++, OCaml, or WASM
 - How is the *allowlist of predefined callers* declared? (We need an interface that says "only these tailnet members can enumerate / call methods on this proxy.")
 - Can the proxy receive callbacks from main-net AML programs (e.g. "main-net says: this session was confirmed; release X OU to the operator wallet"), and how is that callback declared/dispatched?
 
-## 3. Access contract syntax
+## 3. Access contract grammar
 
 §4.2 says "access is defined during Circle deployment through an access contract, which includes the necessary functions for interface exchange."
 
 - Same question as 2: AML-with-pragmas or separate DSL?
 - Is the function table declared inline or in a separate manifest? Are there hooks for tag-based routing (we want: "members tagged `internal-only` route to the `internal` class; members tagged `user` route to `shared`")?
 
-## 4. HFHE on the proxy side
+## 4. Circle-internal HFHE primitive availability
 
-We currently use `fhe_add`, `fhe_sub`, `fhe_add_const`, `fhe_scale`, `fhe_verify_zero` inside `program/main.aml` (the v1 AML). For v2, the natural place to compute `total_paid = bytes_used * price_per_mb` is in the Circle (so byte counts stay encrypted), but the resulting amount has to escape to main-net for OU transfer.
+We currently use `fhe_add`, `fhe_sub`, `fhe_add_const`, `fhe_scale`, `fhe_verify_zero` inside `program/main.aml` (the public v1 AML). With the 2026-05-14 announcement we have confirmed access to those primitives on the main-net AML side. For v2, the natural place to compute `total_paid = bytes_used * price_per_mb` is in the Circle (so byte counts stay encrypted), but the resulting amount has to escape to main-net for OU transfer.
 
 - Are the HFHE primitives available inside the Circle's logic, or only at the proxy boundary?
 - What's the supported path for **decrypting a Circle-internal ciphertext into a main-net cleartext value** at settle time? Is `fhe_verify_zero` (which we already use for plaintext earnings claim) the right pattern, or is there a richer transcipher primitive?
