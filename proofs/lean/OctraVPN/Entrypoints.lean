@@ -187,6 +187,36 @@ def retireEndpoint (s : ProgramState) (caller : Addr) : Option ProgramState :=
     let recPrime := { epRec with active := false }
     some { s with endpoints := s.endpoints.update caller recPrime }
 
+/-- Update an endpoint's mutable fields (URI, region, price). Caller
+    must own an `active` registration. Mirrors AML `update_endpoint`. -/
+def updateEndpoint
+    (s : ProgramState) (caller : Addr)
+    (endpoint region : String) (price : Nat) : Option ProgramState :=
+  let epRec := s.endpoints caller
+  if ¬ epRec.active then none
+  else if price = 0 then none
+  else
+    let recPrime := { epRec with
+                      endpoint := endpoint,
+                      region := region,
+                      pricePerMb := price }
+    some { s with endpoints := s.endpoints.update caller recPrime }
+
+/-- Rotate WG and HFHE keys. AML requires `enc_earnings == enc_zero`,
+    i.e. the operator's earnings ledger is currently zero. We model
+    that precondition directly on `encEarn`. -/
+def rotateKeys
+    (s : ProgramState) (caller : Addr)
+    (newWgPk newHfhePk : String) : Option ProgramState :=
+  let epRec := s.endpoints caller
+  if ¬ epRec.active then none
+  else if s.encEarn caller ≠ 0 then none
+  else
+    let recPrime := { epRec with
+                      wgPubkey := newWgPk,
+                      hfhePubkey := newHfhePk }
+    some { s with endpoints := s.endpoints.update caller recPrime }
+
 -- ============================================================
 -- Tailnet lifecycle
 -- ============================================================
@@ -214,6 +244,31 @@ def addMember
   else if member ∈ t.members then none
   else
     let t' := { t with members := member :: t.members }
+    some { s with tailnets := s.tailnets.update tailnetId t' }
+
+/-- Remove a member from a tailnet. Owner-only and may never remove
+    the owner themselves. Matches AML `remove_member`. -/
+def removeMember
+    (s : ProgramState) (tailnetId : TailnetId) (caller member : Addr) :
+    Option ProgramState :=
+  let t := s.tailnets tailnetId
+  if t.owner ≠ caller then none
+  else if member = t.owner then none
+  else if member ∉ t.members then none
+  else
+    let t' := { t with members := t.members.filter (· ≠ member) }
+    some { s with tailnets := s.tailnets.update tailnetId t' }
+
+/-- Update the off-chain ACL doc hash on a tailnet. Owner-only. -/
+def updateAcl
+    (s : ProgramState) (tailnetId : TailnetId) (caller : Addr)
+    (newPolicy : String) : Option ProgramState :=
+  let t := s.tailnets tailnetId
+  if t.owner = 0 then none
+  else if t.owner ≠ caller then none
+  else if newPolicy = "" then none
+  else
+    let t' := { t with aclPolicy := newPolicy }
     some { s with tailnets := s.tailnets.update tailnetId t' }
 
 def depositToTailnet
@@ -391,6 +446,35 @@ def claimNoShow (s : ProgramState) (sid : SessionId) : Option ProgramState :=
         sessions := s.sessions.update sid (some upd),
         tailnets := s.tailnets.update sess.tailnetId t' }
 
+/-- Permissionless sweep after the extended grace
+    (`sessionGraceEpochs * sweepGraceMultiplier`). Sends a
+    `sweepBountyBps / BPS_DENOM` bounty to the caller and refunds
+    the remainder to the tailnet treasury. The Lean model returns
+    the bounty in the result tuple (AML's `transfer` is opaque). -/
+def sweepExpiredSession
+    (s : ProgramState) (sid : SessionId) (_caller : Addr) :
+    Option (ProgramState × OctRaw) :=
+  match s.sessions sid with
+  | none => none
+  | some sess =>
+    if sess.status ≠ SessionStatus.open then none
+    else
+      let sweepGrace :=
+        sess.openedAt + s.params.sessionGraceEpochs * s.params.sweepGraceMultiplier
+      if s.currentEpoch < sweepGrace then none
+      else
+        let dep := sess.deposit
+        let bounty := dep * s.params.sweepBountyBps / 10000
+        let refund := dep - bounty
+        let upd := { sess with status := SessionStatus.refunded }
+        let t := s.tailnets sess.tailnetId
+        let t' := { t with treasury := t.treasury + refund }
+        some
+          ({ s with
+              sessions := s.sessions.update sid (some upd),
+              tailnets := s.tailnets.update sess.tailnetId t' },
+           bounty)
+
 -- ============================================================
 -- Pre-auth join tokens (hash-precommit pattern)
 -- ============================================================
@@ -449,5 +533,58 @@ def claimEarnings
   else if s.encEarn caller ≠ claimedAmount then none
   else
     some { s with encEarn := s.encEarn.update caller 0 }
+
+-- ============================================================
+-- Device registry
+-- ============================================================
+
+/-- Bind a device address to the caller's wallet. Idempotent on
+    `existing = caller`. Fails if the device is bound to someone
+    else. AML uses `0` as the sentinel for "no owner". -/
+def registerDevice
+    (s : ProgramState) (caller device : Addr) : Option ProgramState :=
+  let existing := s.deviceOwner device
+  if existing = caller then some s
+  else if existing ≠ 0 then none
+  else some { s with deviceOwner := s.deviceOwner.update device caller }
+
+/-- Revoke a device the caller owns. -/
+def revokeDevice
+    (s : ProgramState) (caller device : Addr) : Option ProgramState :=
+  if s.deviceOwner device ≠ caller then none
+  else some { s with deviceOwner := s.deviceOwner.update device 0 }
+
+-- ============================================================
+-- Governance
+-- ============================================================
+
+/-- Pause / unpause the program. Owner-only. -/
+def setPaused
+    (s : ProgramState) (caller : Addr) (v : Bool) : Option ProgramState :=
+  if caller ≠ s.programOwner then none
+  else some { s with paused := v }
+
+/-- Transfer program ownership. Owner-only. -/
+def transferOwnership
+    (s : ProgramState) (caller newOwner : Addr) : Option ProgramState :=
+  if caller ≠ s.programOwner then none
+  else some { s with programOwner := newOwner }
+
+/-- Withdraw OU from the program treasury to a destination. Owner-
+    only AND gated on pause (so an emergency-stop can freeze treasury
+    drain even if the owner key is compromised). Capped at the
+    available balance. Returns the new state and the amount
+    transferred (AML's `transfer` is opaque). -/
+def withdrawProgramTreasury
+    (s : ProgramState) (caller _to : Addr) (amount : OctRaw) :
+    Option (ProgramState × OctRaw) :=
+  if s.paused then none
+  else if caller ≠ s.programOwner then none
+  else if amount = 0 then none
+  else if s.programTreasury < amount then none
+  else
+    some
+      ({ s with programTreasury := s.programTreasury - amount },
+       amount)
 
 end OctraVPN

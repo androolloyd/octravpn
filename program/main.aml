@@ -437,6 +437,12 @@ contract OctraVPN {
     return true
   }
 
+  // PROOF GAP (TLA only): `update_endpoint` is modeled as an
+  // identity transition in the TLA spec because none of its mutated
+  // fields (endpoint URI, region, price_per_mb) are tracked in the
+  // abstract state machine. The Lean lemma
+  // `update_endpoint_active_only` proves the AML postconditions
+  // (price update, active-only gating, stake/slashed untouched).
   fn update_endpoint(endpoint: string, region: string, price_per_mb: int): bool {
     require_not_paused()
     require(self.endpoints[caller].active != 0, "not registered")
@@ -451,6 +457,13 @@ contract OctraVPN {
   // Rotating HFHE keys requires the operator to have claimed all
   // outstanding earnings first — the existing ciphertext is
   // encrypted under the OLD key and won't decrypt under the new.
+  //
+  // PROOF GAP (TLA only): WireGuard / HFHE pubkeys are not tracked
+  // in the abstract TLA state, so `rotate_keys` is modeled as an
+  // identity transition gated on `enc_earn[e] = 0`. The Lean lemma
+  // `rotate_keys_requires_zero_earnings` proves the AML's
+  // `enc_earnings == op_zero_ct` precondition and that the new pks
+  // are written through to the endpoint record.
   fn rotate_keys(
     new_wg_pubkey: string,
     new_hfhe_pubkey: string,
@@ -553,6 +566,11 @@ contract OctraVPN {
     return true
   }
 
+  // PROOF GAP (TLA only): `update_acl` mutates a hex string field
+  // not carried by the abstract TLA state. Modeled as an owner-gated
+  // identity transition. The Lean lemma `update_acl_owner_only`
+  // proves the AML's owner gate plus the `aclPolicy := newPolicy`
+  // write.
   fn update_acl(tailnet_id: int, new_acl_policy: string): bool {
     require_not_paused()
     require(tailnet_id < self.tailnet_count, "tailnet not found")
@@ -886,6 +904,20 @@ contract OctraVPN {
   //
   // Partial claims are not supported in v1; the operator must
   // claim the exact accumulated total.
+  //
+  // PROOF GAP: `fhe_verify_zero(pk, delta, proof)` is the chain
+  // host call gating soundness. Our Lean model abstracts it as a
+  // `proofOk : Prop` parameter: if `proofOk` is true the call
+  // succeeds, otherwise it reverts. The Lean lemma
+  // `claim_requires_exact_match` proves *if* the chain accepts the
+  // proof, the claimed amount equals the encrypted ledger value —
+  // BUT we don't model the FHE crypto itself (HFHE additivity, the
+  // soundness of the zero-proof opening). The TLA model
+  // `ClaimEarnings(v)` similarly requires `claim_amount = enc_earn[v]`
+  // as a chain-enforced precondition. The crypto-level guarantee is
+  // out of scope for state-machine proofs and lives in
+  // `proofs/tamarin/` (see DoubleSignSlashable, ReceiptUnforgeability
+  // — the FHE zero-proof soundness is not in scope for v1 Tamarin).
   fn claim_earnings(claimed_amount: int, proof: string): bool {
     require_not_paused()
     require(self.endpoint_slashed[caller] == 0, "operator slashed")
@@ -979,6 +1011,17 @@ contract OctraVPN {
   // Governance
   // ============================================================
 
+  // PROOF GAP: `set_params` is a pure parameter setter under the
+  // owner gate. We don't model it in either Lean or TLA because the
+  // `Params` struct in `proofs/lean/OctraVPN/State.lean` is treated
+  // as immutable for the lemmas (they parameterise on the current
+  // `s.params` snapshot, not on a delta). The require-bounds enforce
+  // safe ranges in the AML; a future Lean lemma
+  // `set_params_owner_only_bounded` would prove (a) caller =
+  // programOwner, (b) every output field satisfies the lower/upper
+  // bound in the AML's `require()` block. This is straightforward
+  // but adds no safety guarantee not already covered by the AML's
+  // own `require()` checks at call time.
   fn set_params(
     new_min_session_deposit: int,
     new_min_tailnet_deposit: int,
@@ -991,6 +1034,7 @@ contract OctraVPN {
     new_slash_bounty_bps: int,
     new_protocol_fee_bps: int
   ): bool {
+    require_not_paused()
     require_owner()
     require(new_min_session_deposit > 0, "session deposit > 0")
     require(new_min_tailnet_deposit > 0, "tailnet deposit > 0")
@@ -1015,12 +1059,25 @@ contract OctraVPN {
     return true
   }
 
+  // PROOF GAP (TLA partial): `set_paused` is defined as a TLA
+  // action `SetPaused(caller, v)` but intentionally NOT wired into
+  // the `Next` disjunction because flipping `paused` doubles the
+  // explored state space without changing any safety invariant. The
+  // StateBound CONSTRAINT enforces `paused = FALSE` for explored
+  // reachable states; the action's correctness (owner gate, idempotent
+  // write) is proved in the Lean lemma `set_paused_owner_only`.
   fn set_paused(v: int): bool {
     require_owner()
     self.paused = v
     return true
   }
 
+  // PROOF GAP (TLA partial): `transfer_ownership` is defined as a
+  // TLA action `TransferOwnership(caller, new)` but intentionally
+  // NOT wired into `Next` to keep the state space tractable (the
+  // single-client model would make every transfer a no-op anyway).
+  // The Lean lemma `transfer_ownership_rotates` proves the owner
+  // gate + the post-state `programOwner = newOwner`.
   fn transfer_ownership(new_owner: address): bool {
     require_owner()
     require(is_address(new_owner), "bad addr")
@@ -1029,6 +1086,7 @@ contract OctraVPN {
   }
 
   fn withdraw_program_treasury(to: address, amount: int): bool {
+    require_not_paused()
     require_owner()
     require(amount > 0, "amount > 0")
     require(self.treasury >= amount, "treasury insufficient")

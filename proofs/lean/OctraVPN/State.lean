@@ -39,11 +39,17 @@ structure EndpointRecord where
   pricePerMb     : Nat
   registeredAt   : Epoch
   reputation     : Int
+  /-- WireGuard / Noise X25519 public key. Rotated by `rotate_keys`. -/
+  wgPubkey       : String
+  /-- HFHE pubkey for encrypted earnings. Rotated only when
+      earnings are zero (see `rotate_keys` precondition). -/
+  hfhePubkey     : String
   deriving Repr
 
 def EndpointRecord.empty : EndpointRecord :=
   { active := false, endpoint := "", region := "",
-    pricePerMb := 0, registeredAt := 0, reputation := 0 }
+    pricePerMb := 0, registeredAt := 0, reputation := 0,
+    wgPubkey := "", hfhePubkey := "" }
 
 /-- On-chain tailnet record under `tailnets[id]`. -/
 structure Tailnet where
@@ -52,10 +58,13 @@ structure Tailnet where
   members     : List Addr
   exits       : List Addr
   createdAt   : Epoch
+  /-- ACL policy hash hex. Updated by `update_acl`. -/
+  aclPolicy   : String
   deriving Repr
 
 def Tailnet.empty : Tailnet :=
-  { owner := 0, treasury := 0, members := [], exits := [], createdAt := 0 }
+  { owner := 0, treasury := 0, members := [], exits := [], createdAt := 0,
+    aclPolicy := "" }
 
 /-- A single-hop session record. v1 two-tx settlement adds the
     opener (only address allowed to confirm) plus per-side claim
@@ -110,6 +119,8 @@ structure Params where
 structure ProgramState where
   /-- Program owner (governance wallet). -/
   programOwner     : Addr
+  /-- Pause switch; `true` blocks every non-governance entrypoint. -/
+  paused           : Bool
   endpoints        : Map Addr EndpointRecord
   /-- Live operator stake. -/
   endpointStake    : Map Addr OctRaw
@@ -129,6 +140,9 @@ structure ProgramState where
   joinTokenCommits  : Map (TailnetId × Bytes) Bool
   /-- Spent join-token hashes: once redeemed, `true` forever. -/
   joinTokenRedeemed : Map Bytes Bool
+  /-- Device registry: `device_addr ↦ owner_wallet`. Address `0`
+      means "not registered". Matches AML `device_owner`. -/
+  deviceOwner       : Map Addr Addr
   params           : Params
   currentEpoch     : Epoch
 

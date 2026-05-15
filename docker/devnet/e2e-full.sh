@@ -312,33 +312,42 @@ hdr "7/  in-AML equivocation slash on node3"
 
 bold "(node3 will submit two settle_claim values for the same session — auto-slashes)"
 
-TX=$(send_tx "$CLIENT_KEY" configure_tailnet_exit "$TID" "\"$NODE3_VALIDATOR_ADDR\"")
-ok "configure node3 as exit tx: $TX"
-wait_for_tx "$TX" >/dev/null && ok "confirmed" || warn "exit add failed"
-
-TX=$(send_tx "$CLIENT_KEY" open_session "$TID" "\"$NODE3_VALIDATOR_ADDR\"" 200)
-ok "open_session against node3 tx: $TX"
-wait_for_tx "$TX" >/dev/null && ok "confirmed" || { err "tx rejected"; exit 1; }
-SID3=$(($(rpc "contract_call" "[\"$PROGRAM_ADDR\",\"get_tailnet\",[0]]" \
-  | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get("result",{}).get("storage",{}).get("session_count","0"))') - 1))
-ok "third session_id: $SID3"
-
-TX1=$(send_tx "$NODE3_KEY" settle_claim "$SID3" 1)
-ok "node3 settle_claim #1 (bytes=1) tx: $TX1"
-wait_for_tx "$TX1" >/dev/null && ok "confirmed" || warn "first claim failed"
-
-# Equivocation: re-claim with a different bytes value.
-TX2=$(send_tx "$NODE3_KEY" settle_claim "$SID3" 2)
-ok "node3 settle_claim #2 (bytes=2 — equivocation) tx: $TX2"
-status=$(wait_for_tx "$TX2") || true
-ok "equivocation claim status: $status"
-
-NODE3_SLASHED=$(rpc "contract_call" "[\"$PROGRAM_ADDR\",\"is_endpoint_slashed\",[\"$NODE3_VALIDATOR_ADDR\"]]" \
+# Slash phases are destructive: once slashed, the operator stays
+# slashed forever. Skip if a prior run already burned this victim.
+NODE3_PRE_SLASHED=$(rpc "contract_call" "[\"$PROGRAM_ADDR\",\"is_endpoint_slashed\",[\"$NODE3_VALIDATOR_ADDR\"]]" \
   | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get("result",{}).get("result","false"))')
-case "${NODE3_SLASHED,,}" in
-  true|1) ok "node3 is_endpoint_slashed = true — equivocation slash confirmed" ;;
-  *)      warn "node3 not slashed (result=$NODE3_SLASHED) — chain may need a few more blocks" ;;
-esac
+if [[ "${NODE3_PRE_SLASHED,,}" == "true" || "${NODE3_PRE_SLASHED,,}" == "1" ]]; then
+  ok "node3 already slashed from a prior run — skipping phase 7 (idempotent)"
+  say "  to re-run the in-AML equivocation slash, swap in a fresh operator wallet"
+else
+  TX=$(send_tx "$CLIENT_KEY" configure_tailnet_exit "$TID" "\"$NODE3_VALIDATOR_ADDR\"")
+  ok "configure node3 as exit tx: $TX"
+  wait_for_tx "$TX" >/dev/null && ok "confirmed" || warn "exit add failed"
+
+  TX=$(send_tx "$CLIENT_KEY" open_session "$TID" "\"$NODE3_VALIDATOR_ADDR\"" 200)
+  ok "open_session against node3 tx: $TX"
+  wait_for_tx "$TX" >/dev/null && ok "confirmed" || { err "tx rejected"; exit 1; }
+  SID3=$(($(rpc "contract_call" "[\"$PROGRAM_ADDR\",\"get_tailnet\",[0]]" \
+    | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get("result",{}).get("storage",{}).get("session_count","0"))') - 1))
+  ok "third session_id: $SID3"
+
+  TX1=$(send_tx "$NODE3_KEY" settle_claim "$SID3" 1)
+  ok "node3 settle_claim #1 (bytes=1) tx: $TX1"
+  wait_for_tx "$TX1" >/dev/null && ok "confirmed" || warn "first claim failed"
+
+  # Equivocation: re-claim with a different bytes value.
+  TX2=$(send_tx "$NODE3_KEY" settle_claim "$SID3" 2)
+  ok "node3 settle_claim #2 (bytes=2 — equivocation) tx: $TX2"
+  status=$(wait_for_tx "$TX2") || true
+  ok "equivocation claim status: $status"
+
+  NODE3_SLASHED=$(rpc "contract_call" "[\"$PROGRAM_ADDR\",\"is_endpoint_slashed\",[\"$NODE3_VALIDATOR_ADDR\"]]" \
+    | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get("result",{}).get("result","false"))')
+  case "${NODE3_SLASHED,,}" in
+    true|1) ok "node3 is_endpoint_slashed = true — equivocation slash confirmed" ;;
+    *)      warn "node3 not slashed (result=$NODE3_SLASHED) — chain may need a few more blocks" ;;
+  esac
+fi
 
 # ============================================================
 hdr "8/  cryptographic slash via slash_double_sign on node2"
@@ -346,50 +355,55 @@ hdr "8/  cryptographic slash via slash_double_sign on node2"
 
 bold "(slasher = client; signs two contradictory off-chain receipts as node2)"
 
-# Read node2's ed25519 receipt-signing key.
-NODE2_RECEIPT_KEY=docker/devnet/state/node2/wg.key
-SLASHER_KEY=$CLIENT_KEY
-
-# Construct two distinct payloads. The AML's slash_double_sign accepts
-# any two distinct strings signed by the operator's receipt_pubkey;
-# the receipts don't need to be in a specific binary format, just
-# differ + verify.
-PAYLOAD_A="octravpn-receipt-v1|session=$SID2|bytes=100|blind=aa"
-PAYLOAD_B="octravpn-receipt-v1|session=$SID2|bytes=200|blind=bb"
-
-# Sign via `octra cast wallet sign` — produces base64 sig.
-SIG_A_B64=$("$OCTRA_BIN" cast wallet sign --key "$NODE2_RECEIPT_KEY" "$PAYLOAD_A" 2>/dev/null | tail -1)
-SIG_B_B64=$("$OCTRA_BIN" cast wallet sign --key "$NODE2_RECEIPT_KEY" "$PAYLOAD_B" 2>/dev/null | tail -1)
-
-# AML expects hex sigs; convert.
-SIG_A_HEX=$(echo "$SIG_A_B64" | python3 -c 'import sys,base64;print(base64.b64decode(sys.stdin.read().strip()).hex())')
-SIG_B_HEX=$(echo "$SIG_B_B64" | python3 -c 'import sys,base64;print(base64.b64decode(sys.stdin.read().strip()).hex())')
-
-ok "constructed two off-chain receipts + sigs under node2's receipt key"
-say "  payload_a = $PAYLOAD_A"
-say "  payload_b = $PAYLOAD_B"
-
-# slash_double_sign(operator_addr, session_id, payload_a, sig_a, payload_b, sig_b)
-TX=$(send_tx "$SLASHER_KEY" slash_double_sign \
-  "\"$NODE2_VALIDATOR_ADDR\"" "$SID2" \
-  "\"$PAYLOAD_A\"" "\"$SIG_A_HEX\"" \
-  "\"$PAYLOAD_B\"" "\"$SIG_B_HEX\"")
-ok "slash_double_sign tx: $TX"
-wait_for_tx "$TX" >/dev/null && ok "confirmed" || warn "slash tx didn't confirm"
-
-NODE2_SLASHED=$(rpc "contract_call" "[\"$PROGRAM_ADDR\",\"is_endpoint_slashed\",[\"$NODE2_VALIDATOR_ADDR\"]]" \
+# Idempotency: if node2 is already slashed, skip.
+NODE2_PRE_SLASHED=$(rpc "contract_call" "[\"$PROGRAM_ADDR\",\"is_endpoint_slashed\",[\"$NODE2_VALIDATOR_ADDR\"]]" \
   | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get("result",{}).get("result","false"))')
-case "${NODE2_SLASHED,,}" in
-  true|1) ok "node2 is_endpoint_slashed = true — cryptographic slash confirmed" ;;
-  *)      warn "node2 not slashed (result=$NODE2_SLASHED) — note: harness registered receipt_pubkey from the SEED bytes not the derived ed25519 verifying key; slash_double_sign requires a correctly-registered operator. Use 'octra cast wallet pubkey' for new operators." ;;
-esac
+if [[ "${NODE2_PRE_SLASHED,,}" == "true" || "${NODE2_PRE_SLASHED,,}" == "1" ]]; then
+  ok "node2 already slashed from a prior run — skipping phase 8 (idempotent)"
+  say "  to re-run slash_double_sign, register a fresh operator wallet first"
+else
+  # Read node2's ed25519 receipt-signing key.
+  NODE2_RECEIPT_KEY=docker/devnet/state/node2/wg.key
+  SLASHER_KEY=$CLIENT_KEY
+
+  # Construct two distinct payloads. The AML's slash_double_sign accepts
+  # any two distinct strings signed by the operator's receipt_pubkey;
+  # the receipts don't need to be in a specific binary format, just
+  # differ + verify.
+  PAYLOAD_A="octravpn-receipt-v1|session=$SID2|bytes=100|blind=aa"
+  PAYLOAD_B="octravpn-receipt-v1|session=$SID2|bytes=200|blind=bb"
+
+  # Sign via `octra cast wallet sign` — produces base64 sig (AML's
+  # ed25519_ok expects base64 pk + sig, not hex).
+  SIG_A=$("$OCTRA_BIN" cast wallet sign --key "$NODE2_RECEIPT_KEY" "$PAYLOAD_A" 2>/dev/null | tail -1)
+  SIG_B=$("$OCTRA_BIN" cast wallet sign --key "$NODE2_RECEIPT_KEY" "$PAYLOAD_B" 2>/dev/null | tail -1)
+
+  ok "constructed two off-chain receipts + sigs under node2's receipt key"
+  say "  payload_a = $PAYLOAD_A"
+  say "  payload_b = $PAYLOAD_B"
+
+  # slash_double_sign(operator_addr, session_id, payload_a, sig_a, payload_b, sig_b)
+  TX=$(send_tx "$SLASHER_KEY" slash_double_sign \
+    "\"$NODE2_VALIDATOR_ADDR\"" "$SID2" \
+    "\"$PAYLOAD_A\"" "\"$SIG_A\"" \
+    "\"$PAYLOAD_B\"" "\"$SIG_B\"")
+  ok "slash_double_sign tx: $TX"
+  wait_for_tx "$TX" >/dev/null && ok "confirmed" || warn "slash tx didn't confirm"
+
+  NODE2_SLASHED=$(rpc "contract_call" "[\"$PROGRAM_ADDR\",\"is_endpoint_slashed\",[\"$NODE2_VALIDATOR_ADDR\"]]" \
+    | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get("result",{}).get("result","false"))')
+  case "${NODE2_SLASHED,,}" in
+    true|1) ok "node2 is_endpoint_slashed = true — cryptographic slash confirmed" ;;
+    *)      warn "node2 not slashed (result=$NODE2_SLASHED) — check that the operator's receipt_pubkey on chain is base64-encoded (use 'octra cast wallet pubkey' which now defaults to base64)" ;;
+  esac
+fi
 
 # ============================================================
 hdr "A10/  post-slash attack — node3 (slashed) tries to re-register"
 # ============================================================
 
 bold "(slashed operators must be permanently locked out)"
-NODE3_RECEIPT_PK=$(cat docker/devnet/state/node3/wg.key)
+NODE3_RECEIPT_PK=$("$OCTRA_BIN" cast wallet pubkey --key docker/devnet/state/node3/wg.key)
 TX=$(send_tx "$NODE3_KEY" register_endpoint \
   '"node3-resurrected:51820"' \
   "\"$(printf 'de%.0s' {1..32})\"" \

@@ -649,4 +649,448 @@ theorem claim_resets_encEarn
     unfold Map.update
     simp
 
+-- ============================================================
+-- Stake lifecycle — added v1.1 to close coverage gaps.
+-- ============================================================
+
+/-- `unbondEndpoint` zeros the live stake and records the unbonding
+    amount with an unlock-epoch set to `currentEpoch +
+    unbondGraceEpochs`. -/
+theorem unbond_locks_stake
+    (s s' : ProgramState) (caller : Addr)
+    (h : unbondEndpoint s caller = some s') :
+    s'.endpointStake caller = 0 ∧
+    (s'.endpointUnbonding caller).stake = s.endpointStake caller ∧
+    (s'.endpointUnbonding caller).unlockEpoch =
+      s.currentEpoch + s.params.unbondGraceEpochs := by
+  unfold unbondEndpoint at h
+  by_cases h1 : s.endpointStake caller = 0
+  · simp [h1] at h
+  by_cases h2 : (s.endpointUnbonding caller).stake ≠ 0
+  · simp [h1, h2] at h
+  · simp [h1, h2] at h
+    -- Two branches on whether the endpoint is currently active.
+    by_cases h3 : (s.endpoints caller).active
+    · simp [h3] at h
+      subst h
+      refine ⟨?_, ?_, ?_⟩ <;> (unfold Map.update; simp)
+    · simp [h3] at h
+      subst h
+      refine ⟨?_, ?_, ?_⟩ <;> (unfold Map.update; simp)
+
+/-- `finalizeUnbond` succeeds only after the unlock epoch is reached
+    and zeros the unbonding slot, returning the full stake amount.
+    Mirrors AML's `require(epoch >= unlock)`. -/
+theorem finalize_unbond_clears_and_pays
+    (s s' : ProgramState) (caller : Addr) (paid : OctRaw)
+    (h : finalizeUnbond s caller = some (s', paid)) :
+    paid = (s.endpointUnbonding caller).stake ∧
+    paid > 0 ∧
+    s.currentEpoch ≥ (s.endpointUnbonding caller).unlockEpoch ∧
+    (s'.endpointUnbonding caller).stake = 0 := by
+  unfold finalizeUnbond at h
+  by_cases h1 : (s.endpointUnbonding caller).stake = 0
+  · simp [h1] at h
+  by_cases h2 : s.currentEpoch < (s.endpointUnbonding caller).unlockEpoch
+  · simp [h1, h2] at h
+  · simp [h1, h2] at h
+    -- h is `({ s with … }, (s.endpointUnbonding caller).stake) = (s', paid)`
+    obtain ⟨hs, hp⟩ := h
+    refine ⟨?_, ?_, ?_, ?_⟩
+    · exact hp.symm
+    · subst hp; exact Nat.pos_of_ne_zero h1
+    · exact Nat.le_of_not_lt h2
+    · subst hs; subst hp; unfold Map.update; simp [Unbonding.empty]
+
+-- ============================================================
+-- Tailnet / membership lemmas — v1.1 additions.
+-- ============================================================
+
+/-- After `addMember`, the new member is in the tailnet roster. -/
+theorem add_member_grows_roster
+    (s s' : ProgramState) (tid : TailnetId) (caller member : Addr)
+    (h : addMember s tid caller member = some s') :
+    member ∈ (s'.tailnets tid).members ∧
+    (s.tailnets tid).owner = caller := by
+  unfold addMember at h
+  by_cases h1 : (s.tailnets tid).owner ≠ caller
+  · simp [h1] at h
+  by_cases h2 : member ∈ (s.tailnets tid).members
+  · simp [h1, h2] at h
+  · simp [h1, h2] at h
+    subst h
+    refine ⟨?_, ?_⟩
+    · unfold Map.update; simp [List.mem_cons]
+    · exact Decidable.of_not_not h1
+
+/-- `removeMember` requires the caller to be the tailnet owner and
+    the member to be present and not the owner. After the call the
+    member is no longer in the roster (we rely on `List.filter`
+    semantics + decidable equality). -/
+theorem remove_member_drops_from_roster
+    (s s' : ProgramState) (tid : TailnetId) (caller member : Addr)
+    (h : removeMember s tid caller member = some s') :
+    (s.tailnets tid).owner = caller ∧
+    member ≠ (s.tailnets tid).owner ∧
+    member ∉ (s'.tailnets tid).members := by
+  unfold removeMember at h
+  by_cases h1 : (s.tailnets tid).owner ≠ caller
+  · simp [h1] at h
+  by_cases h2 : member = (s.tailnets tid).owner
+  · simp [h1, h2] at h
+  by_cases h3 : member ∉ (s.tailnets tid).members
+  · simp [h1, h2, h3] at h
+  · simp [h1, h2, h3] at h
+    subst h
+    refine ⟨Decidable.of_not_not h1, h2, ?_⟩
+    -- The new `s.tailnets tid` is the let-bound record where
+    -- members is `filter (· ≠ member)`. After `Map.update_eq` and
+    -- `List.mem_filter` the residual would be `decide (member ≠ member)`,
+    -- which is `False`.
+    intro hmem
+    have hgmem :
+        member ∈
+          List.filter (fun x => decide (x ≠ member)) (s.tailnets tid).members := by
+      simpa [Map.update_eq] using hmem
+    have := (List.mem_filter.mp hgmem).2
+    simp at this
+
+/-- `depositToTailnet` adds `amount` to the named tailnet's treasury
+    and leaves every other tailnet unchanged. -/
+theorem deposit_to_tailnet_grows_treasury
+    (s s' : ProgramState) (tid : TailnetId) (amount : Nat)
+    (h : depositToTailnet s tid amount = some s') :
+    (s'.tailnets tid).treasury =
+      (s.tailnets tid).treasury + amount ∧
+    amount > 0 := by
+  unfold depositToTailnet at h
+  by_cases h1 : amount = 0
+  · simp [h1] at h
+  by_cases h2 : (s.tailnets tid).owner = 0
+  · simp [h1, h2] at h
+  · simp [h1, h2] at h
+    subst h
+    refine ⟨?_, Nat.pos_of_ne_zero h1⟩
+    unfold Map.update; simp
+
+/-- `configureTailnetExit` is owner-gated and appends the exit
+    address to the tailnet's exits list. -/
+theorem configure_exit_appends
+    (s s' : ProgramState) (tid : TailnetId) (caller exit : Addr)
+    (h : configureTailnetExit s tid caller exit = some s') :
+    (s.tailnets tid).owner = caller ∧
+    exit ∈ (s'.tailnets tid).exits := by
+  unfold configureTailnetExit at h
+  by_cases h1 : (s.tailnets tid).owner ≠ caller
+  · simp [h1] at h
+  by_cases h2 : exit ∈ (s.tailnets tid).exits
+  · simp [h1, h2] at h
+  · simp [h1, h2] at h
+    subst h
+    refine ⟨Decidable.of_not_not h1, ?_⟩
+    unfold Map.update; simp [List.mem_cons]
+
+/-- `updateAcl` mutates only the named tailnet's `aclPolicy` and is
+    owner-gated. -/
+theorem update_acl_owner_only
+    (s s' : ProgramState) (tid : TailnetId) (caller : Addr)
+    (policy : String)
+    (h : updateAcl s tid caller policy = some s') :
+    (s.tailnets tid).owner = caller ∧
+    (s'.tailnets tid).aclPolicy = policy := by
+  unfold updateAcl at h
+  by_cases h1 : (s.tailnets tid).owner = 0
+  · simp [h1] at h
+  by_cases h2 : (s.tailnets tid).owner ≠ caller
+  · simp [h1, h2] at h
+  by_cases h3 : policy = ""
+  · simp [h1, h2, h3] at h
+  · simp [h1, h2, h3] at h
+    subst h
+    refine ⟨Decidable.of_not_not h2, ?_⟩
+    unfold Map.update; simp
+
+-- ============================================================
+-- Endpoint mutator lemmas — v1.1 additions.
+-- ============================================================
+
+/-- `updateEndpoint` only succeeds for an active endpoint and writes
+    the supplied price. Stake and slashed-flag are untouched. -/
+theorem update_endpoint_active_only
+    (s s' : ProgramState) (caller : Addr)
+    (ep r : String) (price : Nat)
+    (h : updateEndpoint s caller ep r price = some s') :
+    (s.endpoints caller).active = true ∧
+    (s'.endpoints caller).pricePerMb = price ∧
+    s'.endpointStake = s.endpointStake ∧
+    s'.endpointSlashed = s.endpointSlashed := by
+  unfold updateEndpoint at h
+  by_cases h1 : ¬ (s.endpoints caller).active
+  · simp [h1] at h
+  by_cases h2 : price = 0
+  · simp [h1, h2] at h
+  · simp [h1, h2] at h
+    subst h
+    refine ⟨?_, ?_, rfl, rfl⟩
+    · exact Decidable.of_not_not h1
+    · unfold Map.update; simp
+
+/-- `rotateKeys` requires the operator to have a zero earnings
+    balance. Mirrors AML `require(enc_earnings == op_zero_ct)`. -/
+theorem rotate_keys_requires_zero_earnings
+    (s s' : ProgramState) (caller : Addr) (wg hf : String)
+    (h : rotateKeys s caller wg hf = some s') :
+    s.encEarn caller = 0 ∧
+    (s'.endpoints caller).wgPubkey = wg ∧
+    (s'.endpoints caller).hfhePubkey = hf := by
+  unfold rotateKeys at h
+  by_cases h1 : ¬ (s.endpoints caller).active
+  · simp [h1] at h
+  by_cases h2 : s.encEarn caller ≠ 0
+  · simp [h1, h2] at h
+  · simp [h1, h2] at h
+    subst h
+    refine ⟨?_, ?_, ?_⟩
+    · exact Decidable.of_not_not h2
+    · unfold Map.update; simp
+    · unfold Map.update; simp
+
+-- ============================================================
+-- Session lifecycle lemmas — v1.1 additions.
+-- ============================================================
+
+/-- `openSession` locks the deposit from the tailnet treasury and
+    records the caller as the opener. Establishes the precondition
+    for the dispute-resistance lemmas (only `opener` can confirm). -/
+theorem open_session_locks_deposit
+    (s s' : ProgramState) (caller : Addr) (tid : TailnetId)
+    (sid : SessionId) (exit : Addr) (maxPay : Nat)
+    (h : openSession s caller tid sid exit maxPay = some s') :
+    (s.tailnets tid).treasury ≥ maxPay ∧
+    (s'.tailnets tid).treasury =
+      (s.tailnets tid).treasury - maxPay ∧
+    (∃ sess, s'.sessions sid = some sess ∧
+             sess.opener = caller ∧
+             sess.deposit = maxPay ∧
+             sess.status = SessionStatus.open) := by
+  unfold openSession at h
+  by_cases h1 : caller ∉ (s.tailnets tid).members
+  · simp [h1] at h
+  by_cases h2 : exit ∉ (s.tailnets tid).exits
+  · simp [h1, h2] at h
+  by_cases h3 : maxPay < s.params.minSessionDeposit
+  · simp [h1, h2, h3] at h
+  by_cases h4 : (s.tailnets tid).treasury < maxPay
+  · simp [h1, h2, h3, h4] at h
+  · simp [h1, h2, h3, h4] at h
+    subst h
+    refine ⟨Nat.le_of_not_lt h4, ?_, ?_⟩
+    · unfold Map.update; simp
+    · refine
+        ⟨{ tailnetId := tid,
+           exit := exit,
+           opener := caller,
+           deposit := maxPay,
+           openedAt := s.currentEpoch,
+           status := SessionStatus.open,
+           paidBytes := 0,
+           operatorClaim := none,
+           clientConfirm := none }, ?_, rfl, rfl, rfl⟩
+      unfold Map.update; simp
+
+/-- `claimNoShow` returns the deposit to the tailnet treasury and
+    flips the session to `refunded`. -/
+theorem claim_no_show_refunds_to_tailnet
+    (s s' : ProgramState) (sid : SessionId)
+    (prev : Session)
+    (hsess : s.sessions sid = some prev)
+    (h : claimNoShow s sid = some s') :
+    (s'.tailnets prev.tailnetId).treasury =
+      (s.tailnets prev.tailnetId).treasury + prev.deposit ∧
+    (∃ upd, s'.sessions sid = some upd ∧
+            upd.status = SessionStatus.refunded) := by
+  unfold claimNoShow at h
+  rw [hsess] at h
+  by_cases h1 : prev.status ≠ SessionStatus.open
+  · simp [h1] at h
+  by_cases h2 :
+      s.currentEpoch < prev.openedAt + s.params.sessionGraceEpochs
+  · simp [h1, h2] at h
+  · simp [h1, h2] at h
+    subst h
+    refine ⟨?_, ?_⟩
+    · unfold Map.update; simp
+    · refine ⟨{ prev with status := SessionStatus.refunded }, ?_, rfl⟩
+      unfold Map.update; simp
+
+/-- `sweepExpiredSession` requires the extended grace to have
+    elapsed, refunds the residual to the tailnet treasury after a
+    bounty, and marks the session refunded. -/
+theorem sweep_expired_session_refunds
+    (s s' : ProgramState) (sid : SessionId) (caller : Addr)
+    (bounty : OctRaw) (prev : Session)
+    (hsess : s.sessions sid = some prev)
+    (h : sweepExpiredSession s sid caller = some (s', bounty)) :
+    s.currentEpoch ≥
+      prev.openedAt + s.params.sessionGraceEpochs *
+                       s.params.sweepGraceMultiplier ∧
+    bounty = prev.deposit * s.params.sweepBountyBps / 10000 ∧
+    (s'.tailnets prev.tailnetId).treasury =
+      (s.tailnets prev.tailnetId).treasury + (prev.deposit - bounty) ∧
+    (∃ upd, s'.sessions sid = some upd ∧
+            upd.status = SessionStatus.refunded) := by
+  unfold sweepExpiredSession at h
+  rw [hsess] at h
+  by_cases h1 : prev.status ≠ SessionStatus.open
+  · simp [h1] at h
+  by_cases h2 :
+      s.currentEpoch <
+        prev.openedAt + s.params.sessionGraceEpochs *
+                         s.params.sweepGraceMultiplier
+  · simp [h1, h2] at h
+  · simp [h1, h2] at h
+    obtain ⟨hs, hb⟩ := h
+    refine ⟨Nat.le_of_not_lt h2, hb.symm, ?_, ?_⟩
+    · subst hs; subst hb; unfold Map.update; simp
+    · subst hs
+      refine ⟨{ prev with status := SessionStatus.refunded }, ?_, rfl⟩
+      unfold Map.update; simp
+
+-- ============================================================
+-- Pre-auth join token: commit-side lemma.
+-- ============================================================
+
+/-- `precommitJoinToken` records `joinTokenCommits[(tid, h)] = true`
+    and requires the caller to be the tailnet owner. -/
+theorem precommit_records_commit
+    (s s' : ProgramState) (tid : TailnetId) (h : Bytes) (caller : Addr)
+    (hcall : precommitJoinToken s tid h caller = some s') :
+    (s.tailnets tid).owner = caller ∧
+    s'.joinTokenCommits (tid, h) = true := by
+  unfold precommitJoinToken at hcall
+  by_cases h1 : (s.tailnets tid).owner = 0
+  · simp [h1] at hcall
+  by_cases h2 : (s.tailnets tid).owner ≠ caller
+  · simp [h1, h2] at hcall
+  by_cases h3 : s.joinTokenCommits (tid, h) = true
+  · simp [h1, h2, h3] at hcall
+  by_cases h4 : s.joinTokenRedeemed h = true
+  · simp [h1, h2, h3, h4] at hcall
+  · simp [h1, h2, h3, h4] at hcall
+    subst hcall
+    refine ⟨Decidable.of_not_not h2, ?_⟩
+    unfold Map.update; simp
+
+-- ============================================================
+-- Device registry lemmas — v1.1 additions.
+-- ============================================================
+
+/-- `registerDevice` either binds the device to the caller (when
+    previously unbound) or is a no-op (when already bound to the
+    same caller). It can never override a different owner. -/
+theorem register_device_no_steal
+    (s s' : ProgramState) (caller device : Addr)
+    (h : registerDevice s caller device = some s') :
+    s'.deviceOwner device = caller := by
+  unfold registerDevice at h
+  by_cases h1 : s.deviceOwner device = caller
+  · simp [h1] at h
+    subst h
+    exact h1
+  by_cases h2 : s.deviceOwner device ≠ 0
+  · simp [h1, h2] at h
+  · simp [h1, h2] at h
+    subst h
+    unfold Map.update; simp
+
+/-- `revokeDevice` clears the binding only when the caller currently
+    owns the device. -/
+theorem revoke_device_owner_only
+    (s s' : ProgramState) (caller device : Addr)
+    (h : revokeDevice s caller device = some s') :
+    s.deviceOwner device = caller ∧
+    s'.deviceOwner device = 0 := by
+  unfold revokeDevice at h
+  by_cases h1 : s.deviceOwner device ≠ caller
+  · simp [h1] at h
+  · simp [h1] at h
+    subst h
+    refine ⟨Decidable.of_not_not h1, ?_⟩
+    unfold Map.update; simp
+
+-- ============================================================
+-- Governance lemmas — v1.1 additions.
+-- ============================================================
+
+/-- `setPaused` is owner-gated and only flips the pause flag. -/
+theorem set_paused_owner_only
+    (s s' : ProgramState) (caller : Addr) (v : Bool)
+    (h : setPaused s caller v = some s') :
+    caller = s.programOwner ∧
+    s'.paused = v ∧
+    s'.programOwner = s.programOwner ∧
+    s'.programTreasury = s.programTreasury := by
+  unfold setPaused at h
+  by_cases h1 : caller ≠ s.programOwner
+  · simp [h1] at h
+  · simp [h1] at h
+    subst h
+    refine ⟨Decidable.of_not_not h1, rfl, rfl, rfl⟩
+
+/-- `transferOwnership` is owner-gated and rotates `programOwner`. -/
+theorem transfer_ownership_rotates
+    (s s' : ProgramState) (caller newOwner : Addr)
+    (h : transferOwnership s caller newOwner = some s') :
+    caller = s.programOwner ∧
+    s'.programOwner = newOwner := by
+  unfold transferOwnership at h
+  by_cases h1 : caller ≠ s.programOwner
+  · simp [h1] at h
+  · simp [h1] at h
+    subst h
+    exact ⟨Decidable.of_not_not h1, rfl⟩
+
+/-- `withdrawProgramTreasury` is owner-gated, pause-gated, bounded
+    by the available balance, and exactly decrements the treasury by
+    the paid amount. The `¬ s.paused` clause is the security
+    invariant that closes the v1.1 pause bypass: a compromised owner
+    key during a paused defensive posture cannot drain treasury. -/
+theorem withdraw_program_treasury_conserves
+    (s s' : ProgramState) (caller to : Addr) (amount paid : OctRaw)
+    (h : withdrawProgramTreasury s caller to amount = some (s', paid)) :
+    ¬ s.paused ∧
+    caller = s.programOwner ∧
+    paid = amount ∧
+    s'.programTreasury + amount = s.programTreasury ∧
+    s.programTreasury ≥ amount := by
+  unfold withdrawProgramTreasury at h
+  by_cases h0 : s.paused
+  · simp [h0] at h
+  by_cases h1 : caller ≠ s.programOwner
+  · simp [h0, h1] at h
+  by_cases h2 : amount = 0
+  · simp [h0, h1, h2] at h
+  by_cases h3 : s.programTreasury < amount
+  · simp [h0, h1, h2, h3] at h
+  · simp [h0, h1, h2, h3] at h
+    obtain ⟨hs, hp⟩ := h
+    have hge : s.programTreasury ≥ amount := Nat.le_of_not_lt h3
+    refine ⟨h0, Decidable.of_not_not h1, hp.symm, ?_, hge⟩
+    have hpt : s'.programTreasury = s.programTreasury - amount := by
+      rw [← hs]
+    rw [hpt]
+    exact Nat.sub_add_cancel hge
+
+/-- Pause closes treasury withdrawal entirely: when `paused = true`,
+    `withdrawProgramTreasury` returns `none` regardless of caller.
+    This proves the security finding A48 surfaced in
+    `docker/devnet/e2e-adversarial.sh` against deployed v1.1 cannot
+    recur in models / future deploys built from this source. -/
+theorem withdraw_paused_rejected
+    (s : ProgramState) (caller to : Addr) (amount : OctRaw)
+    (hpause : s.paused) :
+    withdrawProgramTreasury s caller to amount = none := by
+  unfold withdrawProgramTreasury
+  simp [hpause]
+
 end OctraVPN
