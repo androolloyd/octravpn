@@ -1,0 +1,90 @@
+# OctraVPN devnet wallet registry.
+#
+# This file records the public addresses of every wallet the devnet
+# docker harness uses, plus their roles + funding requirements. It IS
+# tracked in git so anyone reviving the harness can resume without
+# re-keygenning.
+#
+# Secret keys are NOT in this file — they live in
+# `docker/devnet/state/<role>/wallet.key` with chmod 0600 and are
+# `.gitignore`'d (`*.key`). Treat each secret key as the only
+# authority over its address; losing one means re-running
+# `octravpn keygen --out docker/devnet/state/<role>/wallet.key`
+# and re-funding the new address via https://faucet.octra.network/.
+#
+# Authoritative location:
+#   docker/devnet/wallets.toml             (this file — addresses)
+#   docker/devnet/state/<role>/wallet.key  (secrets, never committed)
+#   docker/devnet/state/<role>/wg.key      (WireGuard noise key, operators only)
+
+[meta]
+# Octra runs two distinct chains:
+#   * Mainnet  — `https://octra.network/rpc`   (real OCT; do NOT test here)
+#                explorer: https://octrascan.io
+#   * Devnet   — `https://devnet.octrascan.io/rpc`   (faucet-funded; safe to test)
+#                explorer: https://devnet.octrascan.io
+# Their epochs are independent (devnet ~700k, mainnet ~857k as of
+# 2026-05-15). Faucet at https://faucet.octra.network drops devnet OCT.
+network    = "devnet"
+rpc_url    = "https://devnet.octrascan.io/rpc"
+explorer   = "https://devnet.octrascan.io"
+faucet     = "https://faucet.octra.network/"
+created_at = "2026-05-15"
+notes      = """
+The deployer wallet funds the OctraVPN program deploy
+(~55 OCT — 50 OCT fee + headroom). The three operator wallets each
+need ≥ 1000 OCT (MIN_ENDPOINT_STAKE) to bond + extra for tx fees.
+The client wallet needs ≥ MIN_TAILNET_DEPOSIT (10 OCT) + session
+deposits. All OCT is devnet OCT — request via the faucet, free.
+"""
+
+[wallets.deployer]
+addr      = "oct8Tdgu4RLbSGah1fVoVHW4T4cLFDmsoKhTyVD8gCndNFm"
+key_path  = "docker/devnet/state/deployer.key"
+role      = "deploy the v1.1 program on chain"
+needs_ou  = 55_000_000     # 55 OCT (50 deploy fee + headroom)
+
+[wallets.node1]
+addr      = "octG15XHxJ15yAAsyrjdTxzPMjhJCwjZrjZMJkvHf76FdYH"
+key_path  = "docker/devnet/state/node1/wallet.key"
+wg_key_path = "docker/devnet/state/node1/wg.key"
+role      = "operator endpoint (EU)"
+needs_ou  = 1_010_000_000  # 1000 OCT stake + 10 OCT tx headroom
+
+[wallets.node2]
+addr      = "octHYjn38hTtT43kDzQFFr5kxN3A4s1kVQZiey343KfRDS7"
+key_path  = "docker/devnet/state/node2/wallet.key"
+wg_key_path = "docker/devnet/state/node2/wg.key"
+role      = "operator endpoint (US)"
+needs_ou  = 1_010_000_000
+
+[wallets.node3]
+addr      = "oct5dVy5bqoxz55Qyw5ELyfvBXV3r33Qsxq6XVwFMChrAZw"
+key_path  = "docker/devnet/state/node3/wallet.key"
+wg_key_path = "docker/devnet/state/node3/wg.key"
+role      = "operator endpoint (AP)"
+needs_ou  = 1_010_000_000
+
+[wallets.client]
+addr      = "oct6ktv5K1qQrQsFR9eZjmckZrFh5XxV6Bndbh5iwenDVGB"
+key_path  = "docker/devnet/state/client/wallet.key"
+role      = "tailnet owner + session opener"
+needs_ou  = 100_000_000    # 100 OCT — enough for tailnet treasury + several sessions
+
+# The deployed OctraVPN v1.1 program (live on devnet, 2026-05-15).
+# `preflight.sh` reads `addr`; bring-up scripts read PROGRAM_ADDR from
+# docker/devnet/.env (already set).
+[program]
+addr             = "oct2YehVLezCi2RCcSkURc3nyyYtzxmspwGHHALm6pjkUvJ"
+constructor_args = [100, 10, 100]   # min_session_deposit, min_tailnet_deposit, session_grace_epochs
+deployer         = "oct8Tdgu4RLbSGah1fVoVHW4T4cLFDmsoKhTyVD8gCndNFm"
+deployed_at      = "2026-05-15"
+deployed_epoch   = 699920
+
+# First on-chain operator. node1 has bonded + registered with a
+# receipt_pubkey (the v1.1 EndpointRecord field that gates
+# `slash_double_sign`).
+[live_state]
+endpoint_count    = 1
+node1_bond_tx     = "b3172e24b3630870e6db5fb44035726e1c9180f2fc54f21633d07a68d0bccaee"
+node1_register_tx = "19a9a4becc9fbc015a645a8a1fa3bd22fd484ff46ecc34d2c2d6ec35519d9443"

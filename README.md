@@ -131,8 +131,11 @@ octra/                              # this repo
 │   ├── octravpn-client/            # CLI: discover, connect, settle, reclaim
 │   ├── octravpn-tun/               # TUN device wrapper (Linux/macOS/Windows)
 │   ├── octravpn-mesh/              # mesh coordination scaffolding
-│   ├── octravpn-admin-ui/          # operator admin web UI
-│   └── octra-cli/                  # octra dApp dev CLI (anvil-equivalent)
+│   └── octravpn-admin-ui/          # operator admin web UI
+│
+│  (The `octra` dApp dev CLI — forge / cast / anvil / chisel — and the
+│   octraforge / octra-mock-rpc / octra-core libraries live in the
+│   sibling `octra-foundry` repo.)
 │
 ├── tests/e2e/                      # full-flow integration tests vs mock RPC
 │

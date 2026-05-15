@@ -1,0 +1,135 @@
+# Testnet / mainnet-alpha overlay for the OctraVPN docker harness.
+#
+# Use:
+#   cd octra
+#   docker compose -f docker-compose.yml -f docker/devnet/docker-compose.devnet.yml \
+#                  --profile devnet up -d node1 node2 node3
+#
+# Differences vs the default in-process mock harness:
+#   * `mock-rpc` is disabled (profile-gated to "mock-only").
+#   * node1/node2/node3 talk to the real Octra RPC via OCTRA_RPC_URL.
+#   * Configs come from docker/devnet/.env + rendered templates in
+#     docker/devnet/render-configs.sh; you must set OCTRA_RPC_URL,
+#     PROGRAM_ADDR, and the per-node VALIDATOR_ADDR / wallet keys.
+#   * Wallet + WG keys are mounted from the host (no docker secrets
+#     since the keys must persist on-chain registration).
+#
+# DO NOT use this overlay against the in-process mock — the mock-rpc
+# service is profile-gated out and there's no localhost fallback.
+
+services:
+  # Disable the mock by reassigning it to a profile that's never
+  # selected. Bringing up `--profile devnet` won't start it.
+  mock-rpc:
+    profiles: ["mock-only"]
+
+  # In dev mode the builder is a long-lived container that recompiles
+  # on demand (target/ lives in a named volume so cargo's incremental
+  # cache survives across runs). After it completes, the node + client
+  # services pick up the resulting binary from the shared bin volume.
+  #
+  # Usage:
+  #   # First time + after any source edit:
+  #   docker compose --env-file docker/devnet/.env \
+  #     -f docker-compose.yml -f docker/devnet/docker-compose.devnet.yml \
+  #     --profile devnet run --rm builder
+  #   # Then start/restart the daemons:
+  #   docker compose --env-file docker/devnet/.env \
+  #     -f docker-compose.yml -f docker/devnet/docker-compose.devnet.yml \
+  #     --profile devnet up -d --force-recreate node1 node2 node3
+  builder:
+    profiles: ["devnet"]
+    image: rust:1.88-bookworm
+    working_dir: /work/octra
+    volumes:
+      - ../octra:/work/octra
+      - ../octra-foundry:/work/octra-foundry
+      - octravpn-target:/work/octra/target
+      - octravpn-foundry-target:/work/octra-foundry/target
+      - octravpn-cargo-registry:/usr/local/cargo/registry
+      - octravpn-cargo-git:/usr/local/cargo/git
+      - octravpn-bin:/out
+    command:
+      - bash
+      - -c
+      - |
+        set -euo pipefail
+        if ! command -v pkg-config >/dev/null; then
+          apt-get update -qq && apt-get install -y --no-install-recommends \
+            pkg-config libssl-dev ca-certificates >/dev/null
+        fi
+        echo "[builder] cargo build (incremental — target volume cached)…"
+        cargo build --release -p octravpn-node -p octravpn-client
+        cp -f target/release/octravpn-node /out/octravpn-node
+        cp -f target/release/octravpn /out/octravpn
+        echo "[builder] OK — binaries in shared 'octravpn-bin' volume"
+
+  # Each node rides the slim debian image + the shared-volume binary
+  # written by the builder. No `cargo build` on the daemon's hot path.
+  node1:
+    profiles: ["devnet"]
+    image: debian:bookworm-slim
+    build: !override {}
+    depends_on: !reset []
+    environment:
+      OCTRA_RPC_URL: "${OCTRA_RPC_URL:?set OCTRA_RPC_URL — see docker/devnet/.env.example}"
+      PROGRAM_ADDR: "${PROGRAM_ADDR:?set PROGRAM_ADDR — see docker/devnet/.env.example}"
+    volumes: !override
+      - octravpn-bin:/bin/octravpn:ro
+      - ${HOST_DEVNET_DIR:-./docker/devnet/state}/node1:/etc/octravpn:ro
+    ports:
+      - "51820:51820/udp"
+      - "51821:51821/tcp"
+    command: ["bash", "-c", "/bin/octravpn/octravpn-node --config /etc/octravpn/node.toml run"]
+
+  node2:
+    profiles: ["devnet"]
+    image: debian:bookworm-slim
+    build: !override {}
+    depends_on: !reset []
+    environment:
+      OCTRA_RPC_URL: "${OCTRA_RPC_URL:?}"
+      PROGRAM_ADDR: "${PROGRAM_ADDR:?}"
+    volumes: !override
+      - octravpn-bin:/bin/octravpn:ro
+      - ${HOST_DEVNET_DIR:-./docker/devnet/state}/node2:/etc/octravpn:ro
+    ports:
+      - "51830:51820/udp"
+      - "51822:51821/tcp"
+    command: ["bash", "-c", "/bin/octravpn/octravpn-node --config /etc/octravpn/node.toml run"]
+
+  node3:
+    profiles: ["devnet"]
+    image: debian:bookworm-slim
+    build: !override {}
+    depends_on: !reset []
+    environment:
+      OCTRA_RPC_URL: "${OCTRA_RPC_URL:?}"
+      PROGRAM_ADDR: "${PROGRAM_ADDR:?}"
+    volumes: !override
+      - octravpn-bin:/bin/octravpn:ro
+      - ${HOST_DEVNET_DIR:-./docker/devnet/state}/node3:/etc/octravpn:ro
+    ports:
+      - "51840:51820/udp"
+      - "51823:51821/tcp"
+    command: ["bash", "-c", "/bin/octravpn/octravpn-node --config /etc/octravpn/node.toml run"]
+
+  client:
+    profiles: ["devnet"]
+    image: debian:bookworm-slim
+    build: !override {}
+    depends_on: !reset []
+    environment:
+      OCTRA_RPC_URL: "${OCTRA_RPC_URL:?}"
+      PROGRAM_ADDR: "${PROGRAM_ADDR:?}"
+    volumes: !override
+      - octravpn-bin:/bin/octravpn:ro
+      - ${HOST_DEVNET_DIR:-./docker/devnet/state}/client:/etc/octravpn:ro
+    command: ["bash", "-c", "/bin/octravpn/octravpn --config /etc/octravpn/client.toml identity"]
+
+volumes:
+  octravpn-target:
+  octravpn-foundry-target:
+  octravpn-cargo-registry:
+  octravpn-cargo-git:
+  octravpn-bin:

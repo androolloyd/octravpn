@@ -482,15 +482,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "clap_complete"
-version = "4.6.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3e962dae2b1e5007fe9e3db363ddc43a8bf25546d279f7a8a4401204690e80c"
-dependencies = [
- "clap",
-]
-
-[[package]]
 name = "clap_derive"
 version = "4.5.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1757,44 +1748,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "octra-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "base64",
- "bs58",
- "clap",
- "clap_complete",
- "hex",
- "octra-mock-rpc",
- "octraforge",
- "octravpn-core",
- "parking_lot",
- "predicates",
- "rand 0.8.6",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "octra-core"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "base64",
  "bs58",
+ "chacha20poly1305",
  "ed25519-dalek",
+ "hex",
+ "hkdf",
  "parking_lot",
+ "pbkdf2",
  "rand 0.8.6",
  "serde",
+ "serde_json",
  "serde_with",
  "sha2",
  "thiserror 1.0.69",
+ "tracing-subscriber",
  "zeroize",
 ]
 
@@ -1818,25 +1790,6 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "octraforge"
-version = "0.1.0"
-dependencies = [
- "curve25519-dalek",
- "ed25519-dalek",
- "hex",
- "octra-core",
- "octra-mock-rpc",
- "parking_lot",
- "proptest",
- "rand 0.8.6",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 1.0.69",
- "tracing",
 ]
 
 [[package]]
@@ -1909,7 +1862,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64",
  "bs58",
  "chacha20poly1305",
  "criterion",
@@ -1917,13 +1869,11 @@ dependencies = [
  "ed25519-dalek",
  "hex",
  "hkdf",
- "hmac",
  "num-bigint-dig",
  "num-integer",
  "num-traits",
  "octra-core",
  "parking_lot",
- "pbkdf2",
  "proptest",
  "rand 0.8.6",
  "reqwest",
@@ -1936,7 +1886,6 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
- "tracing-subscriber",
  "x25519-dalek",
  "zeroize",
 ]

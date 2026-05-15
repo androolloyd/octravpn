@@ -71,8 +71,9 @@ change once the upstream method exists.
    pubkey; the chain may use a different scheme.
 
 4. **`octra_compileAml`** — already mocked. Production deployment of
-   the OctraVPN program needs the real compiler. The forge tool
-   `crates/octra-cli/src/forge/build.rs` already routes through this.
+   the OctraVPN program needs the real compiler. The forge tool lives
+   in the sibling `octra-foundry` repo at
+   `crates/octra-cli/src/forge/build.rs` and already routes through this.
 
 5. **`octra_submit` with real signature verification** — the chain
    must reject transactions whose `from` address didn't sign. Our mock

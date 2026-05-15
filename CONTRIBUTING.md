@@ -31,8 +31,6 @@ cargo fmt --all
 | `crates/octravpn-node/` | Validator-side node daemon |
 | `crates/octravpn-client/` | Client CLI |
 | `crates/octravpn-tun/` | Cross-platform TUN abstraction |
-| `crates/octraforge/` | Foundry-style test harness |
-| `crates/octra-cli/` | Unified `octra` CLI (cast, forge, anvil, chisel) |
 | `tests/mocks/` | In-process Octra RPC mock |
 | `tests/e2e/` | End-to-end integration tests |
 | `proofs/` | TLA+ / Tamarin / Lean / Kani formal specs |

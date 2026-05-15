@@ -1,0 +1,23 @@
+# Template — substitute oct2YehVLezCi2RCcSkURc3nyyYtzxmspwGHHALm6pjkUvJ and octHYjn38hTtT43kDzQFFr5kxN3A4s1kVQZiey343KfRDS7 via
+# `envsubst` before mounting. See docker/devnet/README.md.
+[chain]
+rpc_url             = "https://devnet.octrascan.io/rpc"
+program_addr        = "oct2YehVLezCi2RCcSkURc3nyyYtzxmspwGHHALm6pjkUvJ"
+validator_addr      = "octHYjn38hTtT43kDzQFFr5kxN3A4s1kVQZiey343KfRDS7"
+wallet_secret_path  = "/etc/octravpn/wallet.key"
+
+[tunnel]
+public_endpoint     = "node2.example.com:51821"
+listen              = "0.0.0.0:51820"
+wg_secret_path      = "/etc/octravpn/wg.key"
+
+[pricing]
+price_per_mb        = 100
+region              = "us-test"
+
+[control]
+listen              = "0.0.0.0:51821"
+audit_dir           = "/tmp/octravpn-audit"
+
+[attestation]
+poll_interval_secs  = 60

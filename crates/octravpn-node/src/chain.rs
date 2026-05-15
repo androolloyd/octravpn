@@ -85,11 +85,15 @@ impl ChainCtx {
     }
 
     /// Read the current endpoint record for this operator, if any.
-    /// `None` indicates "not registered yet".
+    /// `None` indicates "not registered yet". Uses the raw RPC
+    /// envelope so it can see the storage block (devnet wraps view
+    /// returns as `{result, storage}`); the mock's bare-value path
+    /// also works since we treat any non-null/non-empty response as
+    /// "registered."
     pub(crate) async fn read_endpoint_record(&self) -> Result<Option<Value>> {
-        let v = self
+        let raw = self
             .rpc
-            .contract_call(
+            .contract_call_raw(
                 &self.program_addr,
                 "get_endpoint",
                 &[json!(self.validator_addr.display())],
@@ -97,9 +101,25 @@ impl ChainCtx {
             )
             .await
             .context("get_endpoint")?;
-        if v.is_null() {
+        if raw.is_null() {
             return Ok(None);
         }
+        let validator = self.validator_addr.display();
+        let active_key = format!("endpoints:{validator}:active");
+        // Real devnet path: look in the storage block.
+        if let Some(storage) = raw.get("storage").and_then(|s| s.as_object()) {
+            let active = storage
+                .get(&active_key)
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(0);
+            if active == 0 {
+                return Ok(None);
+            }
+            return Ok(Some(raw));
+        }
+        // Mock / bare-value path: heuristic.
+        let v = raw;
         if v.get("active")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0)

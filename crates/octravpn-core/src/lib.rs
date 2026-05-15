@@ -5,9 +5,10 @@
 //! between client/node/chain lives here so types only get defined once.
 
 // Thin Octra primitives (address codec, ed25519 sig, branch-coverage
-// hooks) now live in the `octra-core` crate inside `octra-foundry/`.
-// We re-export them here so existing call sites keep working unchanged.
-pub use octra_core::{address, coverage, sig, CoreError, CoreResult};
+// hooks, tx signing, util helpers, passphrase-protected wallet envelope)
+// now live in the `octra-core` crate inside `octra-foundry/`. We
+// re-export them here so existing call sites keep working unchanged.
+pub use octra_core::{address, coverage, sig, tx, util, wallet_enc, CoreError, CoreResult};
 
 pub mod backend;
 pub mod bounded;
@@ -19,10 +20,7 @@ pub mod receipt;
 pub mod rpc;
 pub mod session;
 pub mod stealth;
-pub mod tx;
-pub mod util;
 pub mod validator_oracle;
-pub mod wallet_enc;
 
 pub use backend::{OctraBackend, PlaceholderBackend, RpcBackend};
 

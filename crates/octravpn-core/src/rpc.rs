@@ -158,6 +158,34 @@ impl RpcClient {
         params: &[Value],
         caller: Option<&Address>,
     ) -> CoreResult<Value> {
+        let raw = self
+            .contract_call_raw(program_addr, method, params, caller)
+            .await?;
+        // Real Octra wraps the return as `{ "result": <value>, "storage": {...} }`.
+        // Mock returns bare. Strip + normalise stringified u64 so callers
+        // see one shape.
+        if let Some(inner) = raw.as_object().and_then(|o| o.get("result")) {
+            if let Some(s) = inner.as_str() {
+                if let Ok(n) = s.parse::<u64>() {
+                    return Ok(json!(n));
+                }
+            }
+            return Ok(inner.clone());
+        }
+        Ok(raw)
+    }
+
+    /// Same as `contract_call`, but returns the raw `{result, storage}`
+    /// envelope without unwrapping. Useful when callers need to read
+    /// per-field storage entries (e.g. detecting whether a struct-typed
+    /// record exists).
+    pub async fn contract_call_raw(
+        &self,
+        program_addr: &Address,
+        method: &str,
+        params: &[Value],
+        caller: Option<&Address>,
+    ) -> CoreResult<Value> {
         let mut p = vec![json!(program_addr.display()), json!(method), json!(params)];
         if let Some(c) = caller {
             p.push(json!(c.display()));
@@ -221,18 +249,58 @@ pub struct NodeStatus {
     pub network_version: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+/// Balance result. Devnet returns `{"balance":"99.997000",
+/// "balance_raw":"99997000", "nonce":..., "pending_nonce":...,
+/// "address":"...", "has_public_key":...}`. The in-process mock has
+/// historically used `formatted`/`raw`. Custom deserialize accepts
+/// both.
+#[derive(Debug)]
 pub struct BalanceResult {
     pub formatted: String,
     pub raw: String,
     pub nonce: u64,
-    #[serde(default)]
     pub pending_nonce: u64,
-    #[serde(default)]
     pub public_key: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+impl<'de> Deserialize<'de> for BalanceResult {
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let v = Value::deserialize(d)?;
+        let pick_str = |a: &str, b: &str| -> String {
+            v.get(a)
+                .or_else(|| v.get(b))
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string()
+        };
+        let pick_u64 = |k: &str| -> u64 {
+            v.get(k)
+                .and_then(|x| {
+                    x.as_u64()
+                        .or_else(|| x.as_str().and_then(|s| s.parse::<u64>().ok()))
+                })
+                .unwrap_or(0)
+        };
+        Ok(Self {
+            formatted: pick_str("balance", "formatted"),
+            raw: pick_str("balance_raw", "raw"),
+            nonce: pick_u64("nonce"),
+            pending_nonce: pick_u64("pending_nonce"),
+            public_key: v
+                .get("public_key")
+                .and_then(|x| x.as_str().map(str::to_string)),
+        })
+    }
+}
+
+/// Real Octra's `octra_recommendedFee` returns string fields:
+/// `{"minimum":"1000","recommended":"1000","fast":"2000"}`. The
+/// in-process mock returns `min`/`base`/`recommended`/`fast` as u64.
+/// Accept both via custom parsing in `Deserialize`.
+#[derive(Debug)]
 pub struct FeeResult {
     pub min: u64,
     pub base: u64,
@@ -240,8 +308,45 @@ pub struct FeeResult {
     pub fast: u64,
 }
 
+impl<'de> Deserialize<'de> for FeeResult {
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let v = Value::deserialize(d)?;
+        let pick = |k: &str| -> u64 {
+            v.get(k)
+                .and_then(|x| {
+                    x.as_u64()
+                        .or_else(|| x.as_str().and_then(|s| s.parse::<u64>().ok()))
+                })
+                .unwrap_or(0)
+        };
+        // Devnet uses "minimum"; mock uses "min"/"base".
+        let min = if v.get("min").is_some() {
+            pick("min")
+        } else {
+            pick("minimum")
+        };
+        let base = if v.get("base").is_some() {
+            pick("base")
+        } else {
+            pick("minimum")
+        };
+        Ok(Self {
+            min,
+            base,
+            recommended: pick("recommended"),
+            fast: pick("fast"),
+        })
+    }
+}
+
+/// `octra_submit` returns different field names on the real RPC
+/// (`tx_hash`, `status`) vs the in-process mock (`hash`).
 #[derive(Debug, Deserialize)]
 pub struct SubmitResult {
+    #[serde(alias = "tx_hash")]
     pub hash: String,
     #[serde(default)]
     pub status: Option<String>,

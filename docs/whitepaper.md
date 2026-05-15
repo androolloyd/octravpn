@@ -465,8 +465,8 @@ We're honest about residual centralisation:
 | `crates/octravpn-mesh/`                           | Mesh primitives (STUN, peers, conn, ACL)             |
 | `crates/octravpn-node/`                           | Operator-side daemon                                 |
 | `crates/octravpn-client/`                         | Client CLI                                           |
-| `crates/octraforge/`                              | Foundry-style test harness                           |
-| `crates/octra-cli/`                               | `octra forge\|cast\|anvil\|chisel` toolchain         |
+| (`octra-foundry/crates/octraforge/`)              | Foundry-style test harness (sibling repo)            |
+| (`octra-foundry/crates/octra-cli/`)               | `octra forge\|cast\|anvil\|chisel` toolchain (sibling repo) |
 | `proofs/{tla,tamarin,lean,kani}/`                 | Formal verification artifacts                        |
 | `docs/value.md`                                   | What the system provides, by stakeholder             |
 | `docs/economics.md`                               | Economic model (this whitepaper §4)                  |
