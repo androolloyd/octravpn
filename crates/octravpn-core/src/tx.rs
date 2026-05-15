@@ -3,7 +3,9 @@
 //! Rust `ocs01-test` and Python `octra_pre_client` references).
 //!
 //! The signed bytes are the **UTF-8-encoded JSON string** with fixed,
-//! insertion-order field layout:
+//! insertion-order field layout — and **nothing else**. No domain
+//! prefix, no chain id. Real Octra wallets sign the bare canonical
+//! JSON, and the node verifies over the same bytes:
 //!
 //! ```text
 //! {"from":"<from>","to_":"<to>","amount":"<amt>","nonce":<int>,
@@ -11,7 +13,7 @@
 //!  [,"encrypted_data":"..."][,"message":"..."]}
 //! ```
 //!
-//! Notes captured from the research dossier:
+//! Notes captured from the reference dossier:
 //!   - Recipient field is `"to_"` (trailing underscore), not `"to"`.
 //!   - `amount` and `ou` are quoted *integer* strings (in OU).
 //!   - `nonce` is an unquoted integer.
@@ -20,21 +22,12 @@
 //!   - Optional fields appear only when set, in the order shown.
 //!   - The signature is over the JSON bytes; `signature` and
 //!     `public_key` (base64) are appended *after* signing.
-//!
-//! We also bind a `chain_id` prefix to defeat cross-chain replay
-//! between mainnet / testnet / forks. Real Octra doesn't include a
-//! chain_id today (single mainnet); we add it as a hidden prefix that
-//! the mock RPC cooperates with. When the SDK adds a real chain
-//! identifier this is a one-line change.
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::sig::KeyPair;
-
-pub const TX_DOMAIN: &[u8] = b"octravpn-tx-v1";
-pub const CHAIN_ID_MAINNET: u32 = 0x_0C_72_A0_01;
 
 /// Operation types per `webcli/main.cpp:1054`.
 pub const OP_STANDARD: &str = "standard";
@@ -89,6 +82,32 @@ impl OctraTx {
         s.push('}');
         s
     }
+
+    /// Serialize as a JSON `Value` with the same field shape as
+    /// `to_canonical_json` (i.e. `to_` not `to`, string `amount`/`ou`,
+    /// optional `encrypted_data`/`message` only when present).
+    pub fn to_envelope_value(&self) -> Value {
+        let mut obj = serde_json::Map::with_capacity(10);
+        obj.insert("from".into(), Value::String(self.from.clone()));
+        obj.insert("to_".into(), Value::String(self.to.clone()));
+        obj.insert("amount".into(), Value::String(self.amount.to_string()));
+        obj.insert("nonce".into(), json!(self.nonce));
+        obj.insert("ou".into(), Value::String(self.ou.to_string()));
+        obj.insert("timestamp".into(), json!(self.timestamp));
+        let op = if self.op_type.is_empty() {
+            OP_STANDARD.to_string()
+        } else {
+            self.op_type.clone()
+        };
+        obj.insert("op_type".into(), Value::String(op));
+        if let Some(ed) = &self.encrypted_data {
+            obj.insert("encrypted_data".into(), Value::String(ed.clone()));
+        }
+        if let Some(m) = &self.message {
+            obj.insert("message".into(), Value::String(m.clone()));
+        }
+        Value::Object(obj)
+    }
 }
 
 fn write_kv_str(out: &mut String, k: &str, v: &str, first: bool) {
@@ -141,31 +160,34 @@ fn push_json_str(out: &mut String, s: &str) {
     }
 }
 
-/// Backwards-compatible wrapper used by the rest of the workspace.
+/// Canonical bytes the wallet signs. Real Octra signs the bare
+/// canonical JSON with no envelope prefix; this matches webcli's
+/// `sign_transaction(canonical_json(tx).as_bytes())`.
 ///
-/// Accepts either a JSON object with the OctraTx shape, or our older
-/// "kind: contract_call" envelope (which we translate to a `call`
-/// op_type call-data payload). This keeps the workspace building
-/// while we migrate every site to `OctraTx` directly.
+/// Accepts either an OctraTx-shaped object (the on-the-wire envelope,
+/// optionally with `signature`/`public_key` already appended — they're
+/// stripped before computing canonical bytes) or the legacy
+/// `{"kind":"contract_call","method":...,"params":...,"value":...,"fee":...}`
+/// shape used by callers inside this workspace. Either way the output
+/// is the same bytes a real Octra wallet would sign.
 pub fn canonical_bytes(call: &Value) -> Result<Vec<u8>> {
-    canonical_bytes_with_chain(call, CHAIN_ID_MAINNET)
-}
-
-pub fn canonical_bytes_with_chain(call: &Value, chain_id: u32) -> Result<Vec<u8>> {
-    let json = canonical_json(call)?;
-    let mut out = Vec::with_capacity(TX_DOMAIN.len() + 4 + json.len());
-    out.extend_from_slice(TX_DOMAIN);
-    out.extend_from_slice(&chain_id.to_be_bytes());
-    out.extend_from_slice(json.as_bytes());
-    Ok(out)
+    Ok(canonical_json(call)?.into_bytes())
 }
 
 fn canonical_json(call: &Value) -> Result<String> {
+    let tx = to_octra_tx(call)?;
+    Ok(tx.to_canonical_json())
+}
+
+/// Translate either input shape to an `OctraTx`. The legacy
+/// `kind:contract_call` shape becomes an `op_type=call` tx with
+/// `encrypted_data` carrying `{method, params}`.
+fn to_octra_tx(call: &Value) -> Result<OctraTx> {
     let map = call
         .as_object()
         .ok_or_else(|| anyhow!("tx must be a JSON object"))?;
-    // Recognize either the legacy contract_call shape (kind, method,
-    // params, value, fee, nonce, from, to) or the OctraTx shape.
+
+    // Legacy `{kind: "contract_call", ...}` shape — translate.
     if map.contains_key("kind") {
         let from = map.get("from").and_then(|v| v.as_str()).unwrap_or("");
         let to = map.get("to").and_then(|v| v.as_str()).unwrap_or("");
@@ -185,18 +207,14 @@ fn canonical_json(call: &Value) -> Result<String> {
             .get("timestamp")
             .and_then(serde_json::Value::as_f64)
             .unwrap_or(0.0);
-        let op_type = OP_CALL.to_string();
-        // Encode method+params as the encrypted_data slot per Octra
-        // contract-call convention. Method = first param of the
-        // `call` data; params are JSON-encoded after.
         let method = map.get("method").and_then(|v| v.as_str()).unwrap_or("");
         let params = map
             .get("params")
             .cloned()
             .unwrap_or_else(|| Value::Array(vec![]));
         let payload = json!({"method": method, "params": params}).to_string();
-        let encrypted = Some(payload);
-        let tx = OctraTx {
+        let op_type = OP_CALL.to_string();
+        return Ok(OctraTx {
             from: from.to_string(),
             to: to.to_string(),
             amount,
@@ -204,28 +222,61 @@ fn canonical_json(call: &Value) -> Result<String> {
             ou,
             timestamp,
             op_type,
-            encrypted_data: encrypted,
+            encrypted_data: Some(payload),
             message: None,
-        };
-        return Ok(tx.to_canonical_json());
+        });
     }
-    // Direct OctraTx shape.
-    let tx: OctraTx = serde_json::from_value(call.clone())
+
+    // OctraTx-shaped: support either `to_` (canonical) or `to` (alias).
+    // Strip any pre-existing `signature` / `public_key` before parsing,
+    // because they don't appear in the OctraTx struct.
+    let mut obj = map.clone();
+    obj.remove("signature");
+    obj.remove("public_key");
+    // serde_json's default field name for `to` is `to`. Map `to_` back.
+    if let Some(v) = obj.remove("to_") {
+        obj.insert("to".into(), v);
+    }
+    // `amount` and `ou` may arrive as quoted strings (per the wire
+    // format); accept both that and an unquoted integer.
+    if let Some(v) = obj.get_mut("amount") {
+        if let Some(s) = v.as_str() {
+            let n: u64 = s.parse().map_err(|e| anyhow!("amount parse: {e}"))?;
+            *v = json!(n);
+        }
+    }
+    if let Some(v) = obj.get_mut("ou") {
+        if let Some(s) = v.as_str() {
+            let n: u64 = s.parse().map_err(|e| anyhow!("ou parse: {e}"))?;
+            *v = json!(n);
+        }
+    }
+    let tx: OctraTx = serde_json::from_value(Value::Object(obj))
         .map_err(|e| anyhow!("not an OctraTx envelope: {e}"))?;
-    Ok(tx.to_canonical_json())
+    Ok(tx)
 }
 
 /// Sign a tx envelope and append `signature` + `public_key` (base64).
-pub fn sign_call(kp: &KeyPair, mut call: Value) -> Result<Value> {
-    let bytes = canonical_bytes(&call)?;
-    let sig = kp.sign(&bytes);
-    let map = call
-        .as_object_mut()
-        .ok_or_else(|| anyhow!("tx must be a JSON object"))?;
+///
+/// Always emits the OctraTx wire shape regardless of input. Legacy
+/// `{"kind":"contract_call",...}` callers get auto-translated; the
+/// returned envelope uses `to_`, string-encoded `amount`/`ou`, and
+/// `encrypted_data` carrying `{method, params}` for `op_type="call"`.
+///
+/// `call` is taken by value so existing call sites can pass an
+/// owned `serde_json::json!(...)` literal without an extra `.clone()`.
+#[allow(clippy::needless_pass_by_value)]
+pub fn sign_call(kp: &KeyPair, call: Value) -> Result<Value> {
+    let tx = to_octra_tx(&call)?;
+    let canonical = tx.to_canonical_json();
+    let sig = kp.sign(canonical.as_bytes());
+    let mut envelope = tx.to_envelope_value();
     use base64::{engine::general_purpose::STANDARD, Engine as _};
-    map.insert("signature".into(), json!(STANDARD.encode(sig.0)));
-    map.insert("public_key".into(), json!(STANDARD.encode(kp.public.0)));
-    Ok(call)
+    if let Some(map) = envelope.as_object_mut() {
+        map.insert("signature".into(), json!(STANDARD.encode(sig.0)));
+        map.insert("public_key".into(), json!(STANDARD.encode(kp.public.0)));
+    }
+    Ok(envelope)
 }
 
 /// Verify a signed tx envelope **using only the envelope itself** — no
@@ -343,8 +394,9 @@ mod tests {
         let mut call = sample_call();
         call["from"] = json!(crate::address::Address::from_pubkey(&kp.public.0).display());
         let mut signed = sign_call(&kp, call).unwrap();
-        // Mutate a field after signing — signature was over the old bytes.
-        signed["value"] = json!(999u64);
+        // Mutate the *canonical* `amount` field (which is what the
+        // signed envelope carries) — signature was over the old bytes.
+        signed["amount"] = json!("999");
         assert!(verify_envelope_signature(&signed).is_err());
     }
 
@@ -368,22 +420,146 @@ mod tests {
         assert!(s.ends_with('}'));
     }
 
+    /// `canonical_bytes` must equal `canonical_json(tx).as_bytes()`
+    /// verbatim — no prefix, no envelope, just the JSON. This is what
+    /// real Octra wallets sign and what real Octra nodes verify.
     #[test]
-    fn legacy_contract_call_canonicalizes() {
+    fn canonical_bytes_equals_canonical_json_bytes() {
         let v = json!({
             "kind": "contract_call",
-            "from": "octF",
+            "from": "octF", "to": "octT",
+            "method": "x", "params": [],
+            "value": 0u64, "fee": 1000u64, "nonce": 0u64, "timestamp": 0.0
+        });
+        let bytes = canonical_bytes(&v).unwrap();
+        let s = std::str::from_utf8(&bytes).unwrap();
+        assert!(s.starts_with('{'));
+        assert!(s.ends_with('}'));
+        // No octravpn-tx-v1 prefix — that was incorrect for real Octra.
+        assert!(!s.contains("octravpn-tx-v1"));
+    }
+
+    /// Legacy `kind:contract_call` input must translate to an `op_type=call`
+    /// envelope with `encrypted_data={method,params}` on the wire.
+    #[test]
+    fn legacy_contract_call_translates_to_call_envelope() {
+        let kp = KeyPair::generate();
+        let v = json!({
+            "kind": "contract_call",
+            "from": crate::address::Address::from_pubkey(&kp.public.0).display(),
             "to": "octT",
             "method": "register",
-            "params": [],
+            "params": [1u64, "hello"],
             "value": 100u64,
             "fee": 1000u64,
             "nonce": 1u64,
-            "timestamp": 0.0
+            "timestamp": 0.0,
         });
-        let bytes = canonical_bytes(&v).unwrap();
-        // Domain prefix + chain id are first 18 bytes.
-        assert!(bytes.starts_with(TX_DOMAIN));
+        let signed = sign_call(&kp, v).unwrap();
+        let obj = signed.as_object().unwrap();
+        // OctraTx shape.
+        for k in [
+            "from",
+            "to_",
+            "amount",
+            "nonce",
+            "ou",
+            "timestamp",
+            "op_type",
+            "signature",
+            "public_key",
+        ] {
+            assert!(obj.contains_key(k), "missing key {k}: {signed}");
+        }
+        // No legacy field names.
+        for k in ["to", "value", "fee", "method", "params", "kind"] {
+            assert!(!obj.contains_key(k), "unexpected legacy key {k}: {signed}");
+        }
+        assert_eq!(obj.get("op_type").and_then(|v| v.as_str()), Some("call"));
+        assert_eq!(obj.get("amount").and_then(|v| v.as_str()), Some("100"));
+        assert_eq!(obj.get("ou").and_then(|v| v.as_str()), Some("1000"));
+        let ed = obj.get("encrypted_data").and_then(|v| v.as_str()).unwrap();
+        let payload: Value = serde_json::from_str(ed).unwrap();
+        assert_eq!(payload["method"], json!("register"));
+        assert_eq!(payload["params"], json!([1u64, "hello"]));
+    }
+
+    /// An OctraTx fed in directly survives `sign_call` unchanged in shape.
+    #[test]
+    fn octratx_input_round_trips_envelope() {
+        let kp = KeyPair::generate();
+        let tx = OctraTx {
+            from: crate::address::Address::from_pubkey(&kp.public.0)
+                .display()
+                .to_string(),
+            to: "octRECIPIENT".into(),
+            amount: 7,
+            nonce: 42,
+            ou: 50_000_000,
+            timestamp: 1.0,
+            op_type: OP_STANDARD.into(),
+            encrypted_data: None,
+            message: Some("note".into()),
+        };
+        let v = serde_json::to_value(&tx).unwrap();
+        let signed = sign_call(&kp, v).unwrap();
+        let obj = signed.as_object().unwrap();
+        assert_eq!(
+            obj.get("op_type").and_then(|v| v.as_str()),
+            Some("standard")
+        );
+        assert_eq!(
+            obj.get("to_").and_then(|v| v.as_str()),
+            Some("octRECIPIENT")
+        );
+        assert_eq!(obj.get("amount").and_then(|v| v.as_str()), Some("7"));
+        assert_eq!(obj.get("message").and_then(|v| v.as_str()), Some("note"));
+        // No `encrypted_data` because we didn't set one.
+        assert!(!obj.contains_key("encrypted_data"));
+        // Verify roundtrips.
+        verify_envelope_signature(&signed).unwrap();
+    }
+
+    /// The signed bytes must equal exactly `canonical_json(tx).as_bytes()`.
+    /// This is the property real Octra nodes check against — webcli signs
+    /// with no prefix at all.
+    #[test]
+    fn signed_bytes_match_webcli_algorithm() {
+        let kp = KeyPair::generate();
+        let from: String = crate::address::Address::from_pubkey(&kp.public.0)
+            .display()
+            .to_string();
+        let tx = OctraTx {
+            from,
+            to: "octRECIPIENT".into(),
+            amount: 1_000_000,
+            nonce: 3,
+            ou: 50_000_000,
+            timestamp: 1_700_000_000.123,
+            op_type: OP_STANDARD.into(),
+            encrypted_data: None,
+            message: None,
+        };
+        let canonical = tx.to_canonical_json();
+        let v = serde_json::to_value(&tx).unwrap();
+        let signed = sign_call(&kp, v).unwrap();
+        let obj = signed.as_object().unwrap();
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        let sig = STANDARD.decode(obj["signature"].as_str().unwrap()).unwrap();
+        let pk = STANDARD
+            .decode(obj["public_key"].as_str().unwrap())
+            .unwrap();
+        let mut sig_arr = [0u8; 64];
+        sig_arr.copy_from_slice(&sig);
+        let mut pk_arr = [0u8; 32];
+        pk_arr.copy_from_slice(&pk);
+        // Verify against the bare canonical JSON bytes (no prefix).
+        crate::sig::verify(
+            &crate::sig::PublicKey(pk_arr),
+            canonical.as_bytes(),
+            &crate::sig::Signature(sig_arr),
+        )
+        .expect("signed bytes must equal canonical_json bytes");
     }
 
     #[test]
@@ -391,7 +567,7 @@ mod tests {
         let kp = KeyPair::generate();
         let v = json!({
             "kind": "contract_call",
-            "from": "octF",
+            "from": crate::address::Address::from_pubkey(&kp.public.0).display(),
             "to": "octT",
             "method": "x",
             "params": [],

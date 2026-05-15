@@ -45,8 +45,11 @@ proptest! {
 }
 
 proptest! {
-    /// Any mutation to a signed envelope's `value`/`fee`/`nonce`/`method`
-    /// must break verification (signature was over original bytes).
+    /// Any mutation to a signed envelope's wire fields (`amount`, `nonce`,
+    /// `encrypted_data`, etc.) must break verification — the signature
+    /// was over the original canonical bytes. We tamper `amount` here
+    /// because that's what carries the legacy `value` after translation
+    /// to the OctraTx wire shape.
     #[test]
     fn arbitrary_field_mutations_break_verification(
         call in arb_call(),
@@ -58,7 +61,7 @@ proptest! {
         prop_assume!(new_value != original);
         call["from"] = json!(Address::from_pubkey(&kp.public.0).display());
         let mut signed = tx::sign_call(&kp, call).unwrap();
-        signed["value"] = json!(new_value);
+        signed["amount"] = json!(new_value.to_string());
         prop_assert!(tx::verify_envelope_signature(&signed).is_err());
     }
 }

@@ -133,9 +133,12 @@ no toxic-waste ceremony).
   `bytes_used * price_per_mb` with `checked_mul` in the Rust mock and
   the AML's bounded-int arithmetic; the AML reverts on overflow.
   Mirrored in Rust as `u64::checked_mul(...).ok_or(...)`.
-- **Replay protection**: tx canonical bytes prepend a `chain_id` and
-  the recursive tagged-binary serialization sorts object keys, so
-  signatures from one program / chain cannot be replayed on another.
+- **Replay protection**: tx canonical bytes are exactly
+  `canonical_json(tx).as_bytes()` (per `octra-labs/webcli`), so each
+  account's per-tx `nonce` field disambiguates submissions. Cross-chain
+  replay is currently moot because Octra has a single chain; when
+  multi-chain ships, a chain id field will be added to the canonical
+  layout.
 
 ### 3.6 Earnings claim
 

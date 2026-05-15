@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 12e9194b5f7f7c0e4c68f2fef5e798437dccdef434c5537fec46f1bf8a1c23ac # shrinks to call = Object {"fee": Number(0), "from": String(""), "kind": String("contract_call"), "method": String("0a_"), "nonce": Number(0), "params": Array [], "to": String("oct0"), "value": Number(0)}, new_value = 1

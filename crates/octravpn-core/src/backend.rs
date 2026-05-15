@@ -112,7 +112,11 @@ impl OctraBackend for PlaceholderBackend {
     }
 
     fn tx_chain_id(&self) -> u32 {
-        crate::tx::CHAIN_ID_MAINNET
+        // Real Octra has a single chain today and no on-the-wire chain
+        // id in tx canonical bytes. We keep this method for future
+        // multi-chain awareness; it is no longer load-bearing for
+        // signing (see `tx::canonical_bytes`).
+        0
     }
 
     async fn is_octra_validator(&self, _addr: &Address) -> CoreResult<bool> {
@@ -143,10 +147,7 @@ pub struct RpcBackend {
 
 impl RpcBackend {
     pub fn new(rpc: crate::rpc::RpcClient) -> Self {
-        Self {
-            rpc,
-            chain_id: crate::tx::CHAIN_ID_MAINNET,
-        }
+        Self { rpc, chain_id: 0 }
     }
 
     pub fn with_chain_id(mut self, chain_id: u32) -> Self {

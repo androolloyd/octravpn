@@ -164,10 +164,12 @@ of the sweep, costing them `min(D/10, B/10)` per griefed session.
 Without chain-id binding, a signature for OctraVPN on chain X could be
 replayed on chain Y if the chains share a program address scheme.
 
-**Defense**: `tx::canonical_bytes` prepends a 4-byte `chain_id` and a
-domain tag `octravpn-tx-v1`. A signature for chain X (e.g. mainnet,
-chain_id = 0x0C72A001) does not verify on chain Y (testnet,
-different chain_id).
+**Defense**: today Octra has a single chain and the canonical bytes are
+exactly `canonical_json(tx).as_bytes()` (no domain or chain id), matching
+the reference wallet (`octra-labs/webcli`). When Octra grows multiple
+chains the canonical layout will gain a chain id field; for now replay
+between chains is moot because there is one chain. Per-program replay
+within a chain is prevented by the program's nonce checks.
 
 **Cost to attacker**: must break ed25519 EUF-CMA.
 

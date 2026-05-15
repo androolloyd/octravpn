@@ -33,18 +33,45 @@ verify `slash_double_sign` works end-to-end).
    tailnet treasury (≥ MIN_TAILNET_DEPOSIT = 10 OU) plus session
    deposits.
 
-3. **Deploy `program/main.aml`.** Two options:
+3. **Deploy `program/main.aml`.** Three options:
 
-   a. **Octra web client** (recommended today): open the wallet web
-      client, import the `program/` directory, compile with language
-      = `AppliedML`, enter constructor params
-      `[min_session_deposit=100, min_tailnet_deposit=10]`, deploy. Copy
-      the deployed program address. The CLI deploy path
-      (`octra forge create`) currently targets the in-process mock
-      envelope, not Octra's `op_type: deploy` shape — a CLI testnet
-      deploy is a follow-up.
+   a. **CLI (recommended)** — `octra forge create` now emits a real
+      Octra `op_type=deploy` envelope (signature over the bare
+      canonical JSON, no domain prefix) and uses
+      `octra_computeContractAddress` to predict the deployed program
+      address. The deployer wallet must hold at least ~55 OCT (50 OCT
+      deploy fee + headroom + tx gas):
 
-   b. **Pre-deployed test program.** If someone in your org already
+      ```sh
+      # Bytecode + ABI compile-check (no chain side effect).
+      ./scripts/compile-check.sh
+
+      # Deploy: ~50 OCT fee. The caller wallet must be funded.
+      octra forge create program/main.aml \
+        --constructor-args 100 10 \
+        --key   $(pwd)/docker/testnet/state/deployer.key \
+        --rpc-url https://octra.network/rpc
+      # Output:
+      #   {
+      #     "address":  "oct…",
+      #     "tx_hash":  "…",
+      #     "name":     "OctraVPN",
+      #     "compiler": "OCTB v1 …"
+      #   }
+      ```
+
+      The fee can be overridden with `--ou <OU>` (1 OCT = 1_000_000 OU).
+      Constructor args become the tx's `message` field as a JSON-encoded
+      array. Save the printed `address` for the `PROGRAM_ADDR` setting
+      below.
+
+   b. **Octra web client.** Open the wallet web client, import the
+      `program/` directory, compile with language = `AppliedML`, enter
+      constructor params `[min_session_deposit=100,
+      min_tailnet_deposit=10]`, deploy. Copy the deployed program
+      address. Equivalent to (a); kept here for users who prefer a GUI.
+
+   c. **Pre-deployed test program.** If someone in your org already
       deployed v1.1 to mainnet alpha, reuse their address. Confirm
       with:
 
