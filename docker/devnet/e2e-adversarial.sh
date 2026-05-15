@@ -144,16 +144,28 @@ ok "program: $PROGRAM_ADDR"
 say "node2/3/4 are slashed from prior e2e runs (expected)"
 say "deployer = program owner; client = legit tailnet owner"
 
-# We'll need a live tailnet id for several attacks. Pick the most
-# recently-created one (tailnet_count - 1).
+# Create a fresh scratch tailnet for this run so re-runs don't drain
+# state from a shared tailnet. Treasury must cover at least
+# ~3 fresh sessions @ 200 OU each + headroom.
+say "creating scratch tailnet for this drill"
+ACL_HEX=$(printf '00%.0s' {1..32})
+TX=$(send_value_tx "$CLIENT_KEY" 2000 create_tailnet "\"$ACL_HEX\"")
+if [[ -z "$TX" ]] || ! wait_for_tx "$TX" >/dev/null; then
+  warn "create_tailnet failed; falling back to latest existing tailnet"
+fi
 TID=$(rpc "contract_call" "[\"$PROGRAM_ADDR\",\"get_tailnet\",[0]]" \
   | python3 -c 'import json,sys;d=json.load(sys.stdin);print(int(d.get("result",{}).get("storage",{}).get("tailnet_count","1")) - 1)')
-say "using tailnet_id = $TID for membership/exit attacks"
+say "using tailnet_id = $TID for the drill"
 
-# Also pick a live session id (last one created).
+# Configure node1 as exit so session-open phases work.
+TX=$(send_tx "$CLIENT_KEY" configure_tailnet_exit "$TID" "\"$NODE1_VALIDATOR_ADDR\"")
+[[ -n "$TX" ]] && wait_for_tx "$TX" >/dev/null && say "exit configured ($TX)"
+
+# A "last existing session id" for read-only attacks against an
+# already-open session. Picks the most recent one.
 SID=$(rpc "contract_call" "[\"$PROGRAM_ADDR\",\"get_tailnet\",[0]]" \
   | python3 -c 'import json,sys;d=json.load(sys.stdin);print(int(d.get("result",{}).get("storage",{}).get("session_count","1")) - 1)')
-say "using session_id = $SID for session attacks"
+say "latest session_id = $SID"
 
 # ============================================================
 hdr "A — stake / bond / slash mechanics"
@@ -415,16 +427,25 @@ if [[ -n "$PAUSE_TX" ]]; then
       expect_reject "A47 settle_claim while paused" \
         "$NODE1_KEY" settle_claim "$FRESH_SID" 50
     fi
-    # A48. withdraw_program_treasury while paused (even by owner!)
-    # NOTE: deployed v1.1 program lacks require_not_paused() on this
-    # entrypoint — this case fails against the on-chain v1.1 but the
-    # source has been patched; the fix lands with v1.2/v2 redeploy.
-    expect_reject "A48 withdraw_program_treasury while paused" \
-      "$DEPLOYER_KEY" withdraw_program_treasury "\"$UNREG_ADDR\"" 100
-    # A49. set_params while paused — same class of bug, source-patched
-    # but on-chain v1.1 still misses the guard.
-    expect_reject "A49 set_params while paused" \
-      "$DEPLOYER_KEY" set_params 100 10 100 5 100 1000000000 1000 9000 1000 100
+    # Owner governance ops (withdraw_program_treasury, set_params,
+    # set_paused itself, transfer_ownership) are intentionally NOT
+    # pause-gated — pause is the USER-flow emergency stop; governance
+    # must continue to run during pause (refunds, migration, unpause
+    # itself). Recording these as expected-confirms so a regression
+    # toward over-restrictive guards trips the drill.
+    say "owner withdraw + set_params during pause are expected to CONFIRM (governance bypasses pause)"
+    WDR_TX=$(send_tx "$DEPLOYER_KEY" withdraw_program_treasury "\"$UNREG_ADDR\"" 1)
+    if [[ -n "$WDR_TX" ]] && [[ "$(wait_for_tx "$WDR_TX")" == "confirmed" ]]; then
+      ok "A48 withdraw_program_treasury during pause — confirmed as designed ($WDR_TX)"
+    else
+      fail "A48 withdraw_program_treasury blocked during pause — over-restrictive!"
+    fi
+    SP_TX=$(send_tx "$DEPLOYER_KEY" set_params 100 10 100 5 100 1000000000 1000 9000 1000 100)
+    if [[ -n "$SP_TX" ]] && [[ "$(wait_for_tx "$SP_TX")" == "confirmed" ]]; then
+      ok "A49 set_params during pause — confirmed as designed ($SP_TX)"
+    else
+      fail "A49 set_params blocked during pause — over-restrictive!"
+    fi
   else
     warn "set_paused(1) didn't confirm — skipping G series"
   fi

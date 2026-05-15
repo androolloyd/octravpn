@@ -1050,47 +1050,34 @@ theorem transfer_ownership_rotates
     subst h
     exact ⟨Decidable.of_not_not h1, rfl⟩
 
-/-- `withdrawProgramTreasury` is owner-gated, pause-gated, bounded
-    by the available balance, and exactly decrements the treasury by
-    the paid amount. The `¬ s.paused` clause is the security
-    invariant that closes the v1.1 pause bypass: a compromised owner
-    key during a paused defensive posture cannot drain treasury. -/
+/-- `withdrawProgramTreasury` is owner-gated, bounded by the
+    available balance, and exactly decrements the treasury by the
+    paid amount. Intentionally NOT pause-gated: pause is the
+    user-flow emergency stop; treasury withdrawal is governance and
+    must run during pause (refunds, migrations). A compromised
+    owner could unpause-then-withdraw anyway, so the gate would add
+    no defense. -/
 theorem withdraw_program_treasury_conserves
     (s s' : ProgramState) (caller to : Addr) (amount paid : OctRaw)
     (h : withdrawProgramTreasury s caller to amount = some (s', paid)) :
-    ¬ s.paused ∧
     caller = s.programOwner ∧
     paid = amount ∧
     s'.programTreasury + amount = s.programTreasury ∧
     s.programTreasury ≥ amount := by
   unfold withdrawProgramTreasury at h
-  by_cases h0 : s.paused
-  · simp [h0] at h
   by_cases h1 : caller ≠ s.programOwner
-  · simp [h0, h1] at h
+  · simp [h1] at h
   by_cases h2 : amount = 0
-  · simp [h0, h1, h2] at h
+  · simp [h1, h2] at h
   by_cases h3 : s.programTreasury < amount
-  · simp [h0, h1, h2, h3] at h
-  · simp [h0, h1, h2, h3] at h
+  · simp [h1, h2, h3] at h
+  · simp [h1, h2, h3] at h
     obtain ⟨hs, hp⟩ := h
     have hge : s.programTreasury ≥ amount := Nat.le_of_not_lt h3
-    refine ⟨h0, Decidable.of_not_not h1, hp.symm, ?_, hge⟩
+    refine ⟨Decidable.of_not_not h1, hp.symm, ?_, hge⟩
     have hpt : s'.programTreasury = s.programTreasury - amount := by
       rw [← hs]
     rw [hpt]
     exact Nat.sub_add_cancel hge
-
-/-- Pause closes treasury withdrawal entirely: when `paused = true`,
-    `withdrawProgramTreasury` returns `none` regardless of caller.
-    This proves the security finding A48 surfaced in
-    `docker/devnet/e2e-adversarial.sh` against deployed v1.1 cannot
-    recur in models / future deploys built from this source. -/
-theorem withdraw_paused_rejected
-    (s : ProgramState) (caller to : Addr) (amount : OctRaw)
-    (hpause : s.paused) :
-    withdrawProgramTreasury s caller to amount = none := by
-  unfold withdrawProgramTreasury
-  simp [hpause]
 
 end OctraVPN

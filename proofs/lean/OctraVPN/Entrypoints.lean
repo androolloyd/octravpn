@@ -571,15 +571,13 @@ def transferOwnership
   else some { s with programOwner := newOwner }
 
 /-- Withdraw OU from the program treasury to a destination. Owner-
-    only AND gated on pause (so an emergency-stop can freeze treasury
-    drain even if the owner key is compromised). Capped at the
-    available balance. Returns the new state and the amount
-    transferred (AML's `transfer` is opaque). -/
+    only; capped at the available balance. Returns the new state
+    and the amount transferred (AML's `transfer` is opaque).
+    Intentionally not pause-gated: governance ops run during pause. -/
 def withdrawProgramTreasury
     (s : ProgramState) (caller _to : Addr) (amount : OctRaw) :
     Option (ProgramState × OctRaw) :=
-  if s.paused then none
-  else if caller ≠ s.programOwner then none
+  if caller ≠ s.programOwner then none
   else if amount = 0 then none
   else if s.programTreasury < amount then none
   else

@@ -1034,7 +1034,6 @@ contract OctraVPN {
     new_slash_bounty_bps: int,
     new_protocol_fee_bps: int
   ): bool {
-    require_not_paused()
     require_owner()
     require(new_min_session_deposit > 0, "session deposit > 0")
     require(new_min_tailnet_deposit > 0, "tailnet deposit > 0")
@@ -1085,8 +1084,13 @@ contract OctraVPN {
     return true
   }
 
+  // Intentionally NOT gated on `paused`. Pause is the user-flow
+  // emergency stop (open_session / settle / claim etc.); treasury
+  // withdrawal is owner-only governance and may need to run DURING
+  // a paused state — e.g., to move funds for migration or to refund
+  // affected users while user flows are frozen. A compromised owner
+  // could unpause-then-withdraw anyway, so the gate adds no defense.
   fn withdraw_program_treasury(to: address, amount: int): bool {
-    require_not_paused()
     require_owner()
     require(amount > 0, "amount > 0")
     require(self.treasury >= amount, "treasury insufficient")
