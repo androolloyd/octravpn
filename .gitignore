@@ -13,3 +13,4 @@
 /proofs/tamarin/*.dot
 node_modules/
 .idea/
+.claude/worktrees/
