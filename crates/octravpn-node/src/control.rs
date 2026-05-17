@@ -40,6 +40,7 @@ use octravpn_core::{
         AnnounceSessionRequest, AnnounceSessionResponse, ProposedReceipt, SessionStateResponse,
     },
     receipt::Receipt,
+    receipt_journal::ReceiptJournal,
     session::SessionId,
     sig::KeyPair,
 };
@@ -89,6 +90,14 @@ pub(crate) struct ControlState {
     /// disables the endpoint entirely (requests return 404).
     /// Set via `[control].events_token` in the node TOML.
     pub events_token: Option<Arc<str>>,
+    /// P1-8/9 persistent receipt-seq floor. Every `get_state` call
+    /// consults this BEFORE signing a receipt; the journal is bumped
+    /// atomically to disk, and only then is the receipt signed. A
+    /// daemon restart loads the same file, so the operator can NEVER
+    /// be tricked into signing two receipts at the same
+    /// `(session_id, seq)` even across an OOM-kill or segfault.
+    /// Threat-model ref: docs/v2-threat-model.md §3 P1-8 + P1-9.
+    pub receipt_journal: Arc<ReceiptJournal>,
 }
 
 /// Lightweight counters exposed via the /metrics endpoint. Kept as
@@ -121,19 +130,25 @@ impl ControlState {
         metrics
             .started_at_unix
             .store(octravpn_core::util::now_unix_secs(), Ordering::Relaxed);
-        Self::with_metrics(node_kp, router, allowlist, metrics)
+        // In tests, the journal is in-memory only — no on-disk side
+        // effect. The hub-built ControlState uses an on-disk path
+        // (see Hub::spawn_control_plane).
+        let journal = Arc::new(ReceiptJournal::in_memory());
+        Self::with_metrics(node_kp, router, allowlist, metrics, journal)
             // Tests don't need the auth gate — explicitly leave the
             // token None so /events behaves like a 404 endpoint.
             .with_events_token(None)
     }
 
     /// Construct with an externally-provided `NodeMetrics` so the Hub
-    /// can write attestation timestamps that this handler reads.
+    /// can write attestation timestamps that this handler reads, and
+    /// a `ReceiptJournal` so the seq-floor is durable across restarts.
     pub(crate) fn with_metrics(
         node_kp: Arc<KeyPair>,
         router: Arc<OnionRouter>,
         allowlist: Arc<BoundedMap<[u8; 32], crate::tunnel::AllowedClient>>,
         metrics: Arc<NodeMetrics>,
+        receipt_journal: Arc<ReceiptJournal>,
     ) -> Self {
         // started_at_unix may not have been set by the caller yet; we
         // honour whatever they supply (Hub seeds it; standalone calls
@@ -152,6 +167,7 @@ impl ControlState {
             // bounded even if a few SSE clients are slow.
             events: EventBus::new(256),
             events_token: None,
+            receipt_journal,
         }
     }
 
@@ -481,7 +497,38 @@ async fn get_state(
         return (StatusCode::NOT_FOUND, Json(ApiError::new("not announced"))).into_response();
     };
 
-    let next_seq = entry.last_seq + 1;
+    // P1-8/9: consult the persistent journal floor BEFORE choosing a
+    // seq. After a restart `entry.last_seq` resets to 0; but the
+    // journal preserves the highest seq we ever signed for this
+    // session. Pick a seq that is strictly greater than BOTH the
+    // in-memory tracker and the persistent floor, then atomically
+    // record it via `bump` (fsync inside) — only sign after the journal
+    // is durable. A crash between the journal write and the signature
+    // means we lose this proposal; the client retries with no harm.
+    let journal_floor = s.receipt_journal.floor(&id);
+    let next_seq = std::cmp::max(entry.last_seq, journal_floor) + 1;
+    if let Err(e) = s.receipt_journal.bump(&id, next_seq) {
+        // The only failure mode is `SeqNotMonotonic`, which would
+        // mean another writer raced us. With the BoundedMap holding
+        // per-session state in-process this should never trigger;
+        // surface it loudly if it does so the operator notices the
+        // race condition.
+        tracing::warn!(error = %e, session = %id_hex, "receipt journal bump rejected; refusing to sign");
+        return (
+            StatusCode::CONFLICT,
+            Json(ApiError::new("receipt seq floor violation; refusing to sign")),
+        )
+            .into_response();
+    }
+    // Persist the in-memory tracker too so successive lookups within
+    // this same boot pass advance monotonically. The journal alone
+    // would also do this, but keeping the in-memory mirror saves a
+    // disk read on every receipt fetch — the lock is held by `bump`
+    // for the disk write, but `floor()` is a cheap mutex read.
+    s.sessions.modify(&id, |cs| {
+        cs.last_seq = next_seq;
+    });
+
     let blind = entry.last_blind;
     let r = Receipt {
         session_id: id,
@@ -635,5 +682,166 @@ mod tests {
         let payload = r.signing_payload();
         let sig = node_kp.sign(&payload);
         verify(&node_kp.public, &payload, &sig).unwrap();
+    }
+
+    /// Helper for the journal-wiring tests: take the JSON body off a
+    /// `Response` and deserialize it as a `SessionStateResponse`.
+    /// Skips the empty-body 404 case by panicking — callers must only
+    /// pass it a body that's expected to contain JSON.
+    async fn parse_state(resp: axum::response::Response) -> SessionStateResponse {
+        let status = resp.status();
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        assert_eq!(status, StatusCode::OK, "body = {body:?}");
+        serde_json::from_slice::<SessionStateResponse>(&body).unwrap()
+    }
+
+    /// P1-8/9: a fresh session starts at journal floor 0; the first
+    /// `/session/:id` returns a receipt at seq=1.
+    #[tokio::test]
+    async fn get_state_fresh_session_starts_at_seq_one() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let client_kp = KeyPair::generate();
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let state = Arc::new(ControlState::new(node_kp, router, allowlist));
+        let id = SessionId::new([0x01u8; 32]);
+
+        announce(
+            State(state.clone()),
+            Json(AnnounceSessionRequest {
+                session_id: id.clone(),
+                client_pubkey: client_kp.public,
+                client_wg_pubkey: [9u8; 32],
+            }),
+        )
+        .await;
+
+        let resp = get_state(State(state.clone()), Path(id.to_hex()))
+            .await
+            .into_response();
+        let sr = parse_state(resp).await;
+        let proposed = sr.proposed.expect("proposal present");
+        assert_eq!(proposed.receipt.seq, 1);
+        assert_eq!(state.receipt_journal.floor(&id), 1);
+    }
+
+    /// P1-8/9 core: after the node has signed up to seq=K, an attacker
+    /// who drops the in-memory state (BoundedMap reset → `last_seq=0`)
+    /// MUST NOT be able to coax the node into signing a fresh seq=1.
+    /// We simulate the in-memory reset by clearing the session entry
+    /// out of `sessions` and re-announcing it. With the persistent
+    /// journal in play, the next sign jumps to seq=K+1 (not seq=1).
+    #[tokio::test]
+    async fn get_state_restart_replay_rejected() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let client_kp = KeyPair::generate();
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        // Use a real on-disk journal so the drop+reload simulates a
+        // process restart.
+        let dir = tempfile::tempdir().unwrap();
+        let journal_path = dir.path().join("receipts.bin");
+        let journal = Arc::new(
+            octravpn_core::receipt_journal::ReceiptJournal::open(&journal_path).unwrap(),
+        );
+        let metrics = Arc::new(NodeMetrics::default());
+        metrics
+            .started_at_unix
+            .store(octravpn_core::util::now_unix_secs(), Ordering::Relaxed);
+        let state = Arc::new(
+            ControlState::with_metrics(
+                node_kp.clone(),
+                router.clone(),
+                allowlist.clone(),
+                metrics.clone(),
+                journal,
+            )
+            .with_events_token(None),
+        );
+        let id = SessionId::new([0xABu8; 32]);
+
+        // Sign three receipts (seq 1, 2, 3).
+        announce(
+            State(state.clone()),
+            Json(AnnounceSessionRequest {
+                session_id: id.clone(),
+                client_pubkey: client_kp.public,
+                client_wg_pubkey: [9u8; 32],
+            }),
+        )
+        .await;
+        for expected_seq in 1..=3_u64 {
+            let resp = get_state(State(state.clone()), Path(id.to_hex()))
+                .await
+                .into_response();
+            let sr = parse_state(resp).await;
+            assert_eq!(sr.proposed.unwrap().receipt.seq, expected_seq);
+        }
+        assert_eq!(state.receipt_journal.floor(&id), 3);
+
+        // Simulate restart: drop the entire ControlState (and its
+        // in-memory BoundedMap of sessions), then reopen the journal
+        // from disk into a fresh state.
+        drop(state);
+        let journal2 = Arc::new(
+            octravpn_core::receipt_journal::ReceiptJournal::open(&journal_path).unwrap(),
+        );
+        assert_eq!(
+            journal2.floor(&id),
+            3,
+            "journal must persist across restart"
+        );
+        let state2 = Arc::new(
+            ControlState::with_metrics(node_kp, router, allowlist, metrics, journal2)
+                .with_events_token(None),
+        );
+        // The session has to be re-announced (announce inserts an
+        // in-memory entry with last_seq=0). This is precisely the
+        // scenario that used to let an attacker double-sign.
+        announce(
+            State(state2.clone()),
+            Json(AnnounceSessionRequest {
+                session_id: id.clone(),
+                client_pubkey: client_kp.public,
+                client_wg_pubkey: [9u8; 32],
+            }),
+        )
+        .await;
+        // get_state must skip past the journal floor to seq=4, NOT
+        // sign a fresh seq=1.
+        let resp = get_state(State(state2.clone()), Path(id.to_hex()))
+            .await
+            .into_response();
+        let sr = parse_state(resp).await;
+        let proposed = sr.proposed.unwrap();
+        assert_eq!(
+            proposed.receipt.seq, 4,
+            "post-restart seq must skip past the persistent floor"
+        );
+        assert_eq!(state2.receipt_journal.floor(&id), 4);
+        // And the signature still verifies under the same node pubkey.
+        let payload = proposed.receipt.signing_payload();
+        verify(&proposed.node_pubkey, &payload, &proposed.node_sig).unwrap();
+    }
+
+    /// P1-8/9: the journal file is durable across the
+    /// `ReceiptJournal::open` lifecycle — what the test above
+    /// implicitly relies on, called out explicitly here. Bumping then
+    /// reopening produces the same floor.
+    #[tokio::test]
+    async fn journal_file_is_durable_across_open() {
+        use octravpn_core::receipt_journal::ReceiptJournal;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rj.bin");
+        let sess = SessionId::new([0x12u8; 32]);
+
+        let j1 = ReceiptJournal::open(&path).unwrap();
+        j1.bump(&sess, 99).unwrap();
+        drop(j1);
+
+        let j2 = ReceiptJournal::open(&path).unwrap();
+        assert_eq!(j2.floor(&sess), 99);
     }
 }

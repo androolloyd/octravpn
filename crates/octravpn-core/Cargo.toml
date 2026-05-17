@@ -36,6 +36,10 @@ num-integer     = { workspace = true }
 num-traits      = { workspace = true }
 subtle          = { workspace = true }
 bs58            = { workspace = true }
+# P1-8/9 receipt journal: atomic file writes (tempfile + persist + fsync)
+# so a crash mid-write can't leave us with a partial entry. tempfile is
+# already in the dev-deps; promoting to a normal dep for the journal.
+tempfile        = { workspace = true }
 
 [lints]
 workspace = true

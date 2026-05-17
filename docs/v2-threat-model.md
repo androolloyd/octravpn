@@ -20,7 +20,7 @@
 | 5 | HFHE earnings ledger (placeholder) | `crates/octravpn-core/src/earnings.rs` | Curve25519 Pedersen (Ristretto) commitments; PVAC pending |
 | 6 | Member ACL / acceptance | `program/operator-circle.aml:153-173` | ed25519_ok (base64 pk + sig) |
 | 7 | Coordination / tailnet plane | `crates/octravpn-mesh/src/peer.rs`, `crates/octravpn-node/src/control.rs` | Ed25519-signed gossip snapshots + plaintext HTTP control plane |
-| 8 | Operator-host key storage | `docker/devnet/state/{node*,client,deployer.key}` | None — raw hex on disk |
+| 8 | Operator-host key storage | `docker/devnet/state/{node*,client,deployer.key}` plus per-operator opt-in `*.sealed` files via `octravpn-node seal-keys` | Raw hex on disk by default (devnet/v1 back-compat). P1-6 ships a `wallet_enc` (ChaCha20-Poly1305 + PBKDF2) envelope path for operators that set `[chain].require_sealed_keys = true` and route their secret paths at the `*.sealed` companion files. |
 
 ---
 
@@ -45,7 +45,7 @@ Rows = layers (above). Columns = observer classes:
 | **5. Earnings ledger** | (Pedersen point on chain, public) | same | full ledger view | sees own | sees own | sees own | DLP falls; opens every commitment retroactively. Pedersen hiding goes away; amounts revealed. |
 | **6. Member ACL** | nothing | given cert: receipt_pubkey, acceptance_payload + sig as RPC call args | **everything** — member acceptance carries `member: address` + `receipt_pubkey` + sig in clear → links wallet to circle | sees per-circle member set | sees own commit | sees + controls (owner calls `commit_member`) | retroactive linking of member→circle |
 | **7. Coordination / tailnet** | sees the HTTP `/session/*` traffic in CLEAR (`control.rs:34`). Reads `client_wg_pubkey`, `session_id`, `node_pubkey`, **proposed receipt + bytes_used**. | rewrite + forge proposed receipts before they reach the client. Client only checks the signature on its own; node receipt forgery requires node key | nothing direct | hosts the control plane; sees its own session metadata | sees nothing of others' sessions | sees nothing of others' | retroactive break of any TLS overlay we add |
-| **8. On-disk keys** | nothing | nothing | nothing | reads `wallet.key` (plain hex, `state/node1/wallet.key:1`), `wg.key` (plain hex), `deployer.key` (plain hex). The `wallet_enc` envelope EXISTS (`wallet_enc.rs:29`) but devnet & ops paths do not yet wrap | nothing | nothing | n/a |
+| **8. On-disk keys** | nothing | nothing | nothing | default (back-compat): reads plain-hex `wallet.key` / `wg.key` / `deployer.key`. With P1-6 sealed-mode opt-in (`require_sealed_keys=true` and `*.sealed` paths in TOML): reads only the AEAD envelope; passphrase comes from `OCTRAVPN_KEY_PASSPHRASE` (or legacy `OCTRAVPN_WALLET_PASSPHRASE`). Plaintext-on-disk in strict mode surfaces `CoreError::PlaintextKeyOnDisk` at boot. | nothing | nothing | n/a |
 
 ### 1A. WG static-pubkey leak via `peek_initiator_pubkey`
 
@@ -207,7 +207,8 @@ GOAL: re-use a signed (bytes_used, seq) receipt to settle a different
 │   │         (`commands/serve.rs`); collusion-mint is possible
 │   └── E.1.c monotonic seq check (`receipt.rs:95-103`) is in-memory only
 │             — restart the node → fresh `last_seq=0` (`control.rs:236`),
-│             allowing seq replay  [REAL]
+│             allowing seq replay  [CLOSED by P1-8 — persistent
+│             `receipt_journal.rs` shadowing the BoundedMap]
 ├── E.2 on-chain double-submit
 │   └── `main-v2.aml`'s `settle_confirm` is single-shot per session; the
 │       chain-side replay defense holds. But the operator-circle's
@@ -249,7 +250,8 @@ GOAL: produce two distinct (payload_a, sig_a) and (payload_b, sig_b) under
 │   │         (`control.rs:240` ControlSession last_seq=0 on insert);
 │   │         restart the node mid-session → it'll happily sign a fresh
 │   │         seq=1 receipt with different bytes_used than the previous
-│   │         seq=1  [POSSIBLE — node has no persistent receipt journal]
+│   │         seq=1  [CLOSED by P1-8/9 — `receipt_journal.rs` fsyncs the
+│   │         floor before every signature; restart reloads it]
 │   └── F.2.b clock-skew the operator: the receipt_signing_payload doesn't
 │             include epoch / time, so an attacker that can force the node
 │             to recompute `bytes_used` at two snapshots and produce two
@@ -304,10 +306,10 @@ redeploy). **Hardening** = no wire impact. **Doc** = documentation only.
 | **P1-3** | P1 | S | Doc | `docs/v2-operator-key-hygiene.md` (new) | Document the wallet↔circle binding leak from `from=deployer → to_=circle_id` and prescribe fresh-wallet deploy. Trees A/D mitigation. |
 | **P1-4** | P1 | S | Hardening | `octra-foundry/crates/octra-core/src/circle.rs:256` and `crates/octravpn-client/src/discover_v2.rs:140` | Reject (or loudly warn on) passphrases below an entropy floor (~64 bits). Today a 6-character passphrase compiles and ships. PBKDF2 120k gives ~5k guesses/sec/GPU; a 30-bit passphrase falls in a year. |
 | **P1-5** | P1 | M | Hardening | `crates/octravpn-core/src/receipt.rs:61` | Bind the receipt to (program_addr, chain_id, circle_id) by mixing them into `signing_payload`. Today the same `(session_id, seq, bytes_used, blind)` is valid on any program / any circle that happens to share the session_id. Trees E.1.a and E.1.b mitigation. |
-| **P1-6** | P1 | M | Hardening | `crates/octravpn-node/src/hub.rs:768` (wallet load), `crates/octravpn-node/src/tunnel.rs:60` (WG key load) | Wrap the on-disk WG private key and wallet secret with `wallet_enc` (which already exists at `octra-foundry/crates/octra-core/src/wallet_enc.rs:29` — passphrase-protected ChaCha20-Poly1305). Devnet `state/node1/wg.key` is currently plaintext hex on disk; same for `state/node*/wallet.key` and `state/deployer.key`. |
+| ~~**P1-6**~~ | P1 | M | Hardening | `crates/octravpn-node/src/hub.rs` (`Hub::new`), `crates/octravpn-node/src/seal.rs` (new), `octra-foundry/crates/octra-core/src/util.rs` (`read_secret_32_or_sealed`) | **FIXED (this commit).** New `octravpn-node seal-keys` / `unseal-keys` subcommands wrap the configured wallet + WG keys under the `OCTRA-WALLET-V1` passphrase envelope; atomic write via tempfile + fsync; idempotent re-runs. The daemon loader honours sealed envelopes via `OCTRAVPN_KEY_PASSPHRASE` (fallback: legacy `OCTRAVPN_WALLET_PASSPHRASE`). Strict mode (`[chain].require_sealed_keys = true`) refuses to boot if any configured secret is still plaintext, with the suggested seal-keys CLI quoted in the error. Devnet keys remain plaintext (back-compat with `e2e.sh`); v2 operators opt in via the config flag + `*.sealed` paths described in `docs/v2-operator-key-hygiene.md` §4 and the new `docker/devnet/.env.example` snippet. |
 | **P1-7** | P1 | L | Behavioral | `crates/octravpn-node/src/tunnel.rs:220` | Add periodic WG static-key rotation (currently the WG static is the *circle's* permanent identity). Without rotation a one-time host compromise breaks all past traffic on a quantum-future. Pair with `circle_asset_put_encrypted` to publish the new pubkey under the same resource_key. |
-| **P1-8** | P1 | S | Hardening | `crates/octravpn-node/src/control.rs:236` | Persist `ControlSession.last_seq` across restarts so a node restart can't accept a replayed receipt with seq < pre-restart. Today the BoundedMap is in-memory only. Tree E.1.c. |
-| **P1-9** | P1 | M | Hardening | `crates/octravpn-node/src/control.rs:240-251` | Sign + persist every receipt the node ever issues; reject any new receipt that would shadow a previously-signed `(session_id, seq)`. Closes Tree F.2.a (operator slash from forced re-sign). |
+| ~~**P1-8**~~ | P1 | S | Hardening | `crates/octravpn-core/src/receipt_journal.rs` (new), `crates/octravpn-node/src/control.rs` (`get_state`) | **FIXED (this commit).** New `octravpn_core::receipt_journal::ReceiptJournal` persists `(session_id → last_signed_seq)` to disk. Default file `./state/receipts.bin`; overridable via `[control].receipt_journal_path`. The journal is fsync'd before any `Receipt` is signed (tempfile + persist + sync_all on file and parent dir). Daemon restarts now reload the floor; the in-memory `ControlSession.last_seq` is shadowed by `max(in_mem, journal_floor)` so a fresh in-memory boot can't roll back. Tree E.1.c closed. |
+| ~~**P1-9**~~ | P1 | M | Hardening | `crates/octravpn-core/src/receipt_journal.rs` (new) | **FIXED (this commit, joint with P1-8 — same journal).** Every receipt the node signs bumps the persistent floor atomically; the bump call rejects any `seq <= floor`. A forced restart (OOM / segfault / signal) can no longer trick the daemon into signing two distinct receipts at the same `(session_id, seq)` — the journal is consulted before the signature is computed. Closes Tree F.2.a. Test names that cover the restart-replay path: `receipt_journal::tests::restart_replay_rejection`, `control::tests::get_state_restart_replay_rejected`. |
 | **P1-10** | P1 | S | Hardening | `crates/octravpn-client/src/discover_v2.rs:153` | Zeroize the `sealed_passphrase` config string on drop. Today it sits in a `Vec<u8>` heap chunk; a core dump or page-fault swap could leak. Use `secrecy::SecretString` or `zeroize::Zeroizing<String>`. Tree B.3.b. |
 | **P2-11** | P2 | M | Hardening | `octra-foundry/crates/octra-core/src/circle.rs:256` | Replace PBKDF2-SHA256-120k with Argon2id (memory-hard). Currently aligned with the JS reference, but the JS reference is the bottleneck on quality; moving to argon2 ~5x raises the GPU brute-force cost for the *same* CPU budget on the operator host. |
 | **P2-12** | P2 | S | Hardening | `crates/octravpn-core/src/onion.rs:42` | `MAX_HOPS = 3` is hardcoded. Add per-route random padding so packet size doesn't fingerprint hop-count. Today an observer counting bytes per layer can distinguish 1/2/3-hop circuits. |

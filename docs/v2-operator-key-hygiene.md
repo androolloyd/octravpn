@@ -146,21 +146,62 @@ shred -u /etc/octravpn/wg.key  # then read back via
 # security find-generic-password -a octravpn -s wg-static-2026-Q2 -w
 ```
 
-### Cross-platform fallback (wallet_enc envelope)
+### Cross-platform: the `octravpn-node seal-keys` subcommand (recommended)
 
-Until the keyring loader lands (P1-6 in the threat model), wrap the WG
-key in the existing wallet envelope:
+P1-6 ships an in-daemon sealing path. The flow:
 
 ```bash
-octra cast wallet encrypt \
-    --secret-hex $(cat /etc/octravpn/wg.key) \
-    --out /etc/octravpn/wg.key.enc
-shred -u /etc/octravpn/wg.key
+# 1. Pick a strong passphrase (≥ 64 bits of entropy; the threat model's
+#    Tree B brute-force estimate against PBKDF2-200k assumes this).
+export OCTRAVPN_KEY_PASSPHRASE="$(openssl rand -base64 24)"
+
+# 2. Seal the configured keys in one shot. `seal-keys` reads the
+#    *.key paths the operator's TOML points at and writes parallel
+#    `*.sealed` files atomically; the plaintext sources are kept
+#    until --remove-plaintext is passed.
+octravpn-node --config /etc/octravpn/node.toml seal-keys
+
+# 3. Confirm the sealed file starts with the OCTRA-WALLET-V1 magic.
+xxd /etc/octravpn/wg.key.sealed | head -1
+
+# 4. Point the TOML at the sealed files and enable strict mode:
+#       [chain]
+#       wallet_secret_path = "/etc/octravpn/wallet.key.sealed"
+#       require_sealed_keys = true
+#       [tunnel]
+#       wg_secret_path     = "/etc/octravpn/wg.key.sealed"
+#
+#    The daemon now refuses to boot if any configured secret is
+#    plaintext-on-disk; the error message names the same seal-keys CLI
+#    so an operator who mis-set the paths gets a copy-paste fix.
+
+# 5. Once you've verified the sealed daemon boots cleanly:
+octravpn-node --config /etc/octravpn/node.toml seal-keys --remove-plaintext
 ```
 
-The node loader code today only knows plaintext; track a follow-up to
-teach it to detect the magic prefix and prompt for a passphrase. See
-`octra-foundry/crates/octra-core/src/wallet_enc.rs:97` (`looks_like_envelope`).
+Passphrase resolution order on `seal-keys` / `unseal-keys`:
+`--passphrase` > `--passphrase-file` > `--passphrase-stdin` >
+`OCTRAVPN_KEY_PASSPHRASE` > TTY prompt (only if stdin is a terminal,
+which a systemd-launched daemon isn't). For systemd:
+
+```ini
+# /etc/systemd/system/octravpn-node.service.d/passphrase.conf
+[Service]
+EnvironmentFile=/etc/octravpn/keys.env
+```
+
+with `/etc/octravpn/keys.env` chmod 0600 containing one line:
+
+```
+OCTRAVPN_KEY_PASSPHRASE=<paste-from-secret-manager>
+```
+
+Audit refs:
+`crates/octravpn-node/src/seal.rs` (CLI + atomic write),
+`octra-foundry/crates/octra-core/src/util.rs::read_secret_32_or_sealed`
+(strict-mode loader),
+`octra-foundry/crates/octra-core/src/wallet_enc.rs` (envelope itself —
+untouched in this commit).
 
 ## 5. Sealed-passphrase rotation cadence
 

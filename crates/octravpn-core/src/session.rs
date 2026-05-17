@@ -11,7 +11,12 @@ use crate::{address::Address, sig::PublicKey};
 
 /// 32-byte session id returned from `open_session`. The chain derives it
 /// as `sha256(self_addr || epoch || nonce || client_session_pubkey)`.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// `Ord` / `PartialOrd` use the lexicographic byte order; the only
+/// in-tree consumer is the receipt journal's `BTreeMap` (P1-8/9), where
+/// the ordering is irrelevant (set semantics — we just need a stable
+/// `Eq + Ord`). Don't rely on the ordering for protocol-level decisions.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct SessionId([u8; 32]);
 
 impl SessionId {
