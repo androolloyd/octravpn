@@ -258,11 +258,17 @@ impl ChainCtx {
 
     /// Sign a constructed call payload with the wallet key.
     pub(crate) fn sign_call(&self, call: Value) -> Result<Value> {
+        // Capture the method name BEFORE signing: `tx::sign_call`
+        // translates the legacy `kind:contract_call,method:..` shape
+        // into the OctraTx wire envelope, which uses `encrypted_data`
+        // for the method name. Reading `method` after signing always
+        // produced `"?"` (it was already gone). v2 audit fix.
+        let method = call
+            .get("method")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
         let signed = octravpn_core::tx::sign_call(&self.wallet, call)?;
-        info!(
-            method = %signed.get("method").and_then(serde_json::Value::as_str).unwrap_or("?"),
-            "signed tx"
-        );
+        info!(method = method.as_deref().unwrap_or("?"), "signed tx");
         Ok(signed)
     }
 }

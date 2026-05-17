@@ -764,7 +764,8 @@ impl Hub {
                 self.router.clone(),
                 allowlist,
                 metrics,
-            );
+            )
+            .with_events_token(self.cfg.control.events_token.clone());
             // Open the audit log next to the wallet secret unless a
             // dedicated path is configured.
             let audit_dir = self

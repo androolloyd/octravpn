@@ -145,6 +145,16 @@ pub(crate) struct ControlCfg {
     /// Defaults to `./audit` next to the node's working directory.
     #[serde(default)]
     pub audit_dir: Option<String>,
+    /// Bearer token gating the `/events` SSE endpoint. `None` (the
+    /// default) hides the endpoint entirely (requests return 404
+    /// rather than 401 so external scanners can't tell it exists).
+    /// Set to a long random string when you want to expose the
+    /// stream to a trusted local monitor. v2 hardening fix — the
+    /// endpoint used to broadcast every session_id ↔ client_wg_pubkey
+    /// mapping + per-session bytes_used to any HTTP client; see
+    /// docs/v2-threat-model.md P0-1 and docs/v2-rust-leak-audit.md.
+    #[serde(default)]
+    pub events_token: Option<String>,
 }
 
 impl Default for ControlCfg {
@@ -152,6 +162,7 @@ impl Default for ControlCfg {
         Self {
             listen: default_control_listen(),
             audit_dir: None,
+            events_token: None,
         }
     }
 }

@@ -85,6 +85,10 @@ pub(crate) struct ControlState {
     /// In-process fan-out bus that powers the `/events` SSE stream.
     /// Cloning the bus is cheap (it shares one `broadcast::Sender`).
     pub events: EventBus,
+    /// Bearer token gating the `/events` SSE endpoint. `None`
+    /// disables the endpoint entirely (requests return 404).
+    /// Set via `[control].events_token` in the node TOML.
+    pub events_token: Option<Arc<str>>,
 }
 
 /// Lightweight counters exposed via the /metrics endpoint. Kept as
@@ -118,6 +122,9 @@ impl ControlState {
             .started_at_unix
             .store(octravpn_core::util::now_unix_secs(), Ordering::Relaxed);
         Self::with_metrics(node_kp, router, allowlist, metrics)
+            // Tests don't need the auth gate — explicitly leave the
+            // token None so /events behaves like a 404 endpoint.
+            .with_events_token(None)
     }
 
     /// Construct with an externally-provided `NodeMetrics` so the Hub
@@ -144,12 +151,20 @@ impl ControlState {
             // forcing the bus to drop, small enough to keep memory
             // bounded even if a few SSE clients are slow.
             events: EventBus::new(256),
+            events_token: None,
         }
     }
 
     /// Attach an audit log; every state-changing handler will write to it.
     pub(crate) fn with_audit(mut self, audit: crate::audit::AuditLog) -> Self {
         self.audit = Some(audit);
+        self
+    }
+
+    /// Configure the `/events` SSE bearer token. `None` (the default)
+    /// disables the endpoint entirely. v2 audit gate.
+    pub(crate) fn with_events_token(mut self, token: Option<String>) -> Self {
+        self.events_token = token.map(Arc::from);
         self
     }
 
@@ -370,9 +385,41 @@ async fn metrics(State(s): State<Arc<ControlState>>) -> impl IntoResponse {
 /// errors; we surface them as a `lag` SSE event so an operator can see
 /// it in a `curl` session and reconnect if needed, rather than silently
 /// dropping events.
+///
+/// ## Auth
+///
+/// The endpoint is gated behind a bearer token. Without
+/// `[control].events_token` configured, the endpoint returns 404 —
+/// matching the "endpoint hidden" intent. With the token set, the
+/// request MUST carry `Authorization: Bearer <token>`. Any mismatch
+/// (including a missing header) returns 404 (not 401) so an external
+/// scanner can't tell whether the endpoint exists.
+///
+/// v2 audit gate: without this, the stream broadcasts every
+/// `session_id ↔ client_wg_pubkey` mapping and per-session bytes_used
+/// to any HTTP client reachable on the control-plane port, which
+/// defeats the unlinkability design.
 async fn events_sse(
     State(s): State<Arc<ControlState>>,
-) -> Sse<impl futures_util::Stream<Item = Result<SseEvent, Infallible>>> {
+    headers: axum::http::HeaderMap,
+) -> axum::response::Response {
+    // No token configured ⇒ endpoint disabled. Return 404 so external
+    // observers can't even confirm it exists.
+    let Some(want) = s.events_token.as_deref() else {
+        return (StatusCode::NOT_FOUND, "").into_response();
+    };
+    // Token configured ⇒ require Authorization: Bearer <token>.
+    let got = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "));
+    let authorized = got
+        .map(|got_tok| constant_time_eq_str(got_tok, want))
+        .unwrap_or(false);
+    if !authorized {
+        return (StatusCode::NOT_FOUND, "").into_response();
+    }
+
     let rx = s.events.subscribe();
     let stream = BroadcastStream::new(rx).map(|item| {
         let ev = match item {
@@ -397,7 +444,23 @@ async fn events_sse(
             .unwrap_or_else(|_| SseEvent::default().data(""));
         Ok::<_, Infallible>(sse)
     });
-    Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
+    Sse::new(stream)
+        .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
+        .into_response()
+}
+
+/// Constant-time string equality. Doesn't short-circuit on length, but
+/// strings with different lengths can't be equal — return false
+/// up-front. The remaining comparison is byte-by-byte XOR-and-OR.
+fn constant_time_eq_str(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.as_bytes().iter().zip(b.as_bytes().iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 async fn get_state(
@@ -467,7 +530,79 @@ async fn get_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::HeaderValue;
     use octravpn_core::{control::AnnounceSessionRequest, sig::verify};
+
+    /// `/events` returns 404 when no token is configured, even if the
+    /// caller supplies an `Authorization: Bearer …` header (the
+    /// endpoint must be undetectable from outside in default mode).
+    #[tokio::test]
+    async fn events_sse_default_returns_not_found() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        // `ControlState::new` (test-only) sets events_token = None.
+        let state = Arc::new(ControlState::new(node_kp, router, allowlist));
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer anything"),
+        );
+        let resp = events_sse(State(state), headers).await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// `/events` returns 404 when the token is configured but the
+    /// caller's Authorization header is missing or wrong. (We return
+    /// 404 rather than 401 so external scanners can't confirm the
+    /// endpoint exists.)
+    #[tokio::test]
+    async fn events_sse_rejects_wrong_token() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let state = Arc::new(
+            ControlState::new(node_kp, router, allowlist)
+                .with_events_token(Some("expected".to_string())),
+        );
+        // No header → 404.
+        {
+            let resp = events_sse(State(state.clone()), axum::http::HeaderMap::new()).await;
+            assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        }
+        // Wrong token → 404.
+        {
+            let mut headers = axum::http::HeaderMap::new();
+            headers.insert(
+                axum::http::header::AUTHORIZATION,
+                HeaderValue::from_static("Bearer wrong"),
+            );
+            let resp = events_sse(State(state.clone()), headers).await;
+            assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        }
+        // Right token → OK (SSE stream starts).
+        {
+            let mut headers = axum::http::HeaderMap::new();
+            headers.insert(
+                axum::http::header::AUTHORIZATION,
+                HeaderValue::from_static("Bearer expected"),
+            );
+            let resp = events_sse(State(state), headers).await;
+            assert_eq!(resp.status(), StatusCode::OK);
+        }
+    }
+
+    /// Constant-time string compare returns true iff the strings are
+    /// byte-equal. Property tested via three concrete cases — full
+    /// coverage of the timing channel would need a microbenchmark.
+    #[test]
+    fn constant_time_eq_str_correctness() {
+        assert!(constant_time_eq_str("abc", "abc"));
+        assert!(!constant_time_eq_str("abc", "abd"));
+        // Differing lengths short-circuit (acceptable).
+        assert!(!constant_time_eq_str("abc", "abcd"));
+        assert!(constant_time_eq_str("", ""));
+    }
 
     #[tokio::test]
     async fn announce_then_state_returns_signed_proposal() {
