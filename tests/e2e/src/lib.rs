@@ -17,7 +17,7 @@ mod tests {
         address::Address,
         commit,
         onion::{build_onion, peel_layer, HopAction, HopBuildInput},
-        receipt::{Receipt, SignedReceipt},
+        receipt::{Receipt, ReceiptContext, SignedReceipt, CHAIN_ID_TEST},
         rpc::RpcClient,
         session::SessionId,
         sig::KeyPair,
@@ -480,6 +480,10 @@ mod tests {
         let client = KeyPair::generate();
         let node = KeyPair::generate();
         let r = Receipt {
+            context: ReceiptContext::v1_1(
+                Address::from_pubkey(&[0xABu8; 32]),
+                CHAIN_ID_TEST,
+            ),
             session_id: SessionId::new([1u8; 32]),
             seq: 5,
             bytes_used: 1024,

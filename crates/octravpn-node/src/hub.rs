@@ -519,6 +519,41 @@ impl Hub {
         )
     }
 
+    /// Build the deployment-domain receipt context that gets bound into
+    /// every signed receipt. v1.2 P1-5 hardening: a receipt is now
+    /// non-replayable across programs, chains, and circles.
+    ///
+    /// v1.1 operators leave `circle_id = None`. v2 operators that have
+    /// completed `register_endpoint_v2` will have a `state/circle.toml`
+    /// on disk; we read it best-effort and populate `circle_id =
+    /// Some(addr)` from it. If the circle file is missing (operator
+    /// hasn't called `register` yet) we fall back to `None` — the
+    /// startup path will rewrite the context as soon as the deploy
+    /// completes (operators always run `register` before serving
+    /// traffic).
+    fn build_receipt_context(&self) -> octravpn_core::receipt::ReceiptContext {
+        let chain_id = self.cfg.chain.chain_id;
+        let program_addr = self.chain.program_addr.clone();
+        match self.cfg.chain.protocol_version {
+            ProtocolVersion::V1_1 => {
+                octravpn_core::receipt::ReceiptContext::v1_1(program_addr, chain_id)
+            }
+            ProtocolVersion::V2 => {
+                let circle_id = match CircleState::load(&self.circle_state_path()) {
+                    Ok(Some(s)) if !s.circle_id.is_empty() => {
+                        Some(Address::from_display(&s.circle_id))
+                    }
+                    _ => None,
+                };
+                octravpn_core::receipt::ReceiptContext {
+                    program_addr,
+                    chain_id,
+                    circle_id,
+                }
+            }
+        }
+    }
+
     /// Minimum circle stake to send with the first `register_circle`.
     /// Sourced from a constant for now (the v2 AML's `min_circle_stake`
     /// param). Future work: read the live param from
@@ -752,6 +787,7 @@ impl Hub {
     pub(crate) fn spawn_control_plane(self: Arc<Self>) -> JoinHandle<Result<()>> {
         let allowlist = self.allowlist.clone();
         let metrics = self.metrics.clone();
+        let receipt_context = Arc::new(self.build_receipt_context());
         tokio::spawn(async move {
             let listen: std::net::SocketAddr = self
                 .cfg
@@ -764,6 +800,7 @@ impl Hub {
                 self.router.clone(),
                 allowlist,
                 metrics,
+                receipt_context,
             )
             .with_events_token(self.cfg.control.events_token.clone());
             // Open the audit log next to the wallet secret unless a

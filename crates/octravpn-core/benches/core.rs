@@ -12,7 +12,7 @@ use octravpn_core::{
     commit::{commit, fresh_blind, verify_open, Opening},
     earnings,
     onion::{build_onion, peel_layer, HopBuildInput},
-    receipt::{Receipt, SignedReceipt},
+    receipt::{Receipt, ReceiptContext, SignedReceipt, CHAIN_ID_TEST},
     session::{Blind, SessionId},
     sig::KeyPair,
     tx::{canonical_bytes, sign_call},
@@ -24,7 +24,9 @@ use x25519_dalek::{PublicKey as X25519Pub, StaticSecret};
 fn bench_receipt(c: &mut Criterion) {
     let client = KeyPair::generate();
     let node = KeyPair::generate();
+    let ctx = ReceiptContext::v1_1(Address::from_pubkey(&[7u8; 32]), CHAIN_ID_TEST);
     let r = Receipt {
+        context: ctx,
         session_id: SessionId::new([7u8; 32]),
         seq: 1,
         bytes_used: 1024 * 1024,

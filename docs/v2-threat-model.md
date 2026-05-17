@@ -188,26 +188,26 @@ does not link to the operator's main identity (see
 GOAL: re-use a signed (bytes_used, seq) receipt to settle a different
       session / a different circle
 ├── E.1 receipt signing payload binding
-│   `receipt.rs:61-69`: `sha256("octravpn-receipt-v1" || session_id ||
-│   seq_be || bytes_be || blind_32)`. **DOES NOT bind:**
-│   - circle_id / program_addr
-│   - chain_id / network id
-│   - epoch / time
-│   ├── E.1.a cross-program replay: same session_id on a fork ⇒ same
-│   │         receipt valid  [REAL CONCERN as multi-program / future
-│   │         shards land; today only v2 is live]
-│   ├── E.1.b cross-circle replay: session_id is 32 bytes (`SessionId`),
-│   │         but two operators might assign the same 32B id by collision
-│   │         or by collusion → SignedReceipt verifies against operator's
-│   │         own node_pubkey, so a different operator can't forge, but
-│   │         the *client* could submit the same receipt at two operators
-│   │         IF the session_id matches. With 32B IDs collision is
-│   │         negligible by birthday bound, but operators currently mint
-│   │         session_id at announce time on the client side
-│   │         (`commands/serve.rs`); collusion-mint is possible
-│   └── E.1.c monotonic seq check (`receipt.rs:95-103`) is in-memory only
+│   `receipt.rs`: v1.2 hash is
+│   `sha256("octravpn-receipt-v1" || program_addr || chain_id_be ||
+│   circle_id_canonical || session_id || seq_be || bytes_be || blind_32)`.
+│   **Now binds:**
+│   - program_addr (32 bytes — the v1.1 / v2 program the session lives in)
+│   - chain_id (u32 BE — `CHAIN_ID_DEVNET` / `CHAIN_ID_MAINNET` / …)
+│   - circle_id (32 bytes — v2 only; v1.1 uses 32 zero bytes as the
+│     canonical "None" encoding so the hash domain is fixed-width)
+│   **Still NOT bound:**
+│   - epoch / time (E.1.c below)
+│   ├── E.1.a cross-program replay: same session_id on a fork ⇒ DIFFERENT
+│   │         hash; sig verify fails. [CLOSED v1.2 — receipt.rs P1-5;
+│   │         `cross_program_receipt_rejection` test asserts]
+│   ├── E.1.b cross-circle replay: v2 receipts now bind the circle_id;
+│   │         a receipt minted under circle X cannot be replayed against
+│   │         circle Y. [CLOSED v1.2 — `cross_circle_receipt_rejection`
+│   │         test asserts]
+│   └── E.1.c monotonic seq check (`receipt.rs`) is in-memory only
 │             — restart the node → fresh `last_seq=0` (`control.rs:236`),
-│             allowing seq replay  [REAL]
+│             allowing seq replay  [REAL — pending P1-8]
 ├── E.2 on-chain double-submit
 │   └── `main-v2.aml`'s `settle_confirm` is single-shot per session; the
 │       chain-side replay defense holds. But the operator-circle's
@@ -303,7 +303,7 @@ redeploy). **Hardening** = no wire impact. **Doc** = documentation only.
 | **P1-2** | P1 | M | Behavioral | `crates/octravpn-core/src/onion.rs:128` | Onion AEAD uses a **constant zero nonce** for ChaCha20-Poly1305. Safe today *only because* `wrap_layer` derives a fresh AEAD key per call via `EphemeralSecret::random_from_rng(OsRng)` → HKDF (line 122-150), so the nonce-is-zero rule is the trivial "fresh key per encryption" case. The fragility is that any future change that caches `eph_secret` (e.g. a retry-on-network-error path, or a deterministic-build mode for tests) silently downgrades to nonce-reuse and lets an observer XOR plaintexts of two distinct onion calls. **Use a random 12-byte nonce included in the wire packet** so the invariant is enforced in code, not by convention. |
 | **P1-3** | P1 | S | Doc | `docs/v2-operator-key-hygiene.md` (new) | Document the wallet↔circle binding leak from `from=deployer → to_=circle_id` and prescribe fresh-wallet deploy. Trees A/D mitigation. |
 | **P1-4** | P1 | S | Hardening | `octra-foundry/crates/octra-core/src/circle.rs:256` and `crates/octravpn-client/src/discover_v2.rs:140` | Reject (or loudly warn on) passphrases below an entropy floor (~64 bits). Today a 6-character passphrase compiles and ships. PBKDF2 120k gives ~5k guesses/sec/GPU; a 30-bit passphrase falls in a year. |
-| **P1-5** | P1 | M | Hardening | `crates/octravpn-core/src/receipt.rs:61` | Bind the receipt to (program_addr, chain_id, circle_id) by mixing them into `signing_payload`. Today the same `(session_id, seq, bytes_used, blind)` is valid on any program / any circle that happens to share the session_id. Trees E.1.a and E.1.b mitigation. |
+| **P1-5** | P1 | M | Hardening | `crates/octravpn-core/src/receipt.rs:61` | **FIXED** in commit `<P1-5>` (v1.2 receipt domain binders). `signing_payload` now folds in `(program_addr, chain_id, circle_id)` via a `ReceiptContext` field on `Receipt`. Cross-program, cross-chain, and cross-circle replay all fail signature verification. Operators must set `[chain].chain_id` in their `node.toml` (defaults to `CHAIN_ID_DEVNET = 0x6F637464`); clients mirror via `[chain].chain_id` in `client.toml`. v1.1 receipts canonically encode `circle_id = None` as 32 zero bytes so the hash domain is fixed-width across v1.1/v2. New tests: `cross_program_receipt_rejection`, `cross_chain_receipt_rejection`, `cross_circle_receipt_rejection` in `crates/octravpn-core/src/receipt.rs`; property-based variants in `tests/prop_receipt.rs`; chain-side reference parity in `tests/prop_canonicalization.rs`. |
 | **P1-6** | P1 | M | Hardening | `crates/octravpn-node/src/hub.rs:768` (wallet load), `crates/octravpn-node/src/tunnel.rs:60` (WG key load) | Wrap the on-disk WG private key and wallet secret with `wallet_enc` (which already exists at `octra-foundry/crates/octra-core/src/wallet_enc.rs:29` — passphrase-protected ChaCha20-Poly1305). Devnet `state/node1/wg.key` is currently plaintext hex on disk; same for `state/node*/wallet.key` and `state/deployer.key`. |
 | **P1-7** | P1 | L | Behavioral | `crates/octravpn-node/src/tunnel.rs:220` | Add periodic WG static-key rotation (currently the WG static is the *circle's* permanent identity). Without rotation a one-time host compromise breaks all past traffic on a quantum-future. Pair with `circle_asset_put_encrypted` to publish the new pubkey under the same resource_key. |
 | **P1-8** | P1 | S | Hardening | `crates/octravpn-node/src/control.rs:236` | Persist `ControlSession.last_seq` across restarts so a node restart can't accept a replayed receipt with seq < pre-restart. Today the BoundedMap is in-memory only. Tree E.1.c. |

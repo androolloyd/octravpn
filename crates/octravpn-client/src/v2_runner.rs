@@ -259,6 +259,7 @@ mod tests {
                 rpc_url: "http://x".into(),
                 program_addr: "oct".into(),
                 protocol_version: "v1.1".into(),
+                chain_id: octravpn_core::receipt::CHAIN_ID_TEST,
             },
             wallet: WalletCfg {
                 addr: "oct".into(),

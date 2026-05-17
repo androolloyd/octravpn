@@ -10,7 +10,8 @@ use std::{fs, path::Path};
 
 use anyhow::{Context, Result};
 use octravpn_core::{
-    receipt::Receipt,
+    address::Address,
+    receipt::{Receipt, ReceiptContext, CHAIN_ID_DEVNET},
     session::Blind,
     session::SessionId,
     sig::{self, PublicKey, Signature},
@@ -27,6 +28,21 @@ pub(crate) struct EquivocationEvidence {
     pub seq: u64,
     pub receipt_a: ReceiptBlob,
     pub receipt_b: ReceiptBlob,
+    /// v1.2 P1-5 binders: the deployment domain the two equivocating
+    /// receipts were signed under. Without these, a verifier can't
+    /// reproduce the exact bytes the operator signed, since the
+    /// receipt hash now folds in `(program_addr, chain_id, circle_id)`.
+    /// All three fields are optional in the serialised form so older
+    /// evidence blobs still load — they default to v1.1 / devnet so
+    /// historical receipts keep verifying without rebuild.
+    #[serde(default)]
+    pub program_addr: Option<String>,
+    #[serde(default)]
+    pub chain_id: Option<u32>,
+    /// v2 only. Hex-encoded circle id (canonical 32 bytes / displayed
+    /// `oct…`). v1.1 evidence omits this.
+    #[serde(default)]
+    pub circle_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -38,6 +54,24 @@ pub(crate) struct ReceiptBlob {
 }
 
 impl EquivocationEvidence {
+    /// Reconstruct the `ReceiptContext` the equivocating receipts share.
+    /// Defaults to v1.1 / devnet when the evidence blob omits the
+    /// fields (kept for older evidence files that pre-date the v1.2
+    /// receipt-binding hardening).
+    fn receipt_context(&self) -> ReceiptContext {
+        let program_addr = self.program_addr.as_deref().map_or_else(
+            || Address::from_display(&self.endpoint_addr),
+            Address::from_display,
+        );
+        let chain_id = self.chain_id.unwrap_or(CHAIN_ID_DEVNET);
+        let circle_id = self.circle_id.as_deref().map(Address::from_display);
+        ReceiptContext {
+            program_addr,
+            chain_id,
+            circle_id,
+        }
+    }
+
     /// Reconstruct the two `Receipt` structs that this evidence claims
     /// were signed.
     pub(crate) fn receipts(&self) -> Result<(Receipt, Receipt, [u8; 32], Signature, Signature)> {
@@ -47,13 +81,16 @@ impl EquivocationEvidence {
         let pk = decode_hex_32(&self.receipt_pubkey_hex, "receipt_pubkey")?;
         let sig_a = decode_hex_64(&self.receipt_a.sig_hex, "sig_a")?;
         let sig_b = decode_hex_64(&self.receipt_b.sig_hex, "sig_b")?;
+        let ctx = self.receipt_context();
         let ra = Receipt {
+            context: ctx.clone(),
             session_id: SessionId::new(sid_bytes),
             seq: self.seq,
             bytes_used: self.receipt_a.bytes_used,
             blind: Blind::new(blind_a),
         };
         let rb = Receipt {
+            context: ctx,
             session_id: SessionId::new(sid_bytes),
             seq: self.seq,
             bytes_used: self.receipt_b.bytes_used,
@@ -100,7 +137,14 @@ fn decode_hex_64(s: &str, what: &str) -> Result<Signature> {
 }
 
 /// Subcommand dispatch.
+//
+// `clippy::large_enum_variant`: `Build` carries every flag the user
+// can pass in flat form so clap can derive parsing. Boxing the flat
+// fields would force `clap::Parser` to indirect through `Box<…>`,
+// which it can't derive. The enum is constructed once per CLI
+// invocation, so the size cost is irrelevant.
 #[derive(clap::Parser, Clone, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum SlashCmd {
     /// Load `<blob>.json` and verify both signatures + distinctness.
     Verify { blob: std::path::PathBuf },
@@ -126,6 +170,22 @@ pub(crate) enum SlashCmd {
         blind_b: String,
         #[arg(long)]
         sig_b: String,
+        /// v1.2 binder: the program address that hosts the session. The
+        /// operator's `from_addr` for v1.1 receipts; the v2 program for
+        /// circle-keyed sessions. Required because the receipt hash
+        /// includes this since the v1.2 receipt-binding hardening; old
+        /// evidence blobs without it implicitly bind to `endpoint_addr`
+        /// for back-compat.
+        #[arg(long)]
+        program_addr: Option<String>,
+        /// v1.2 binder: chain id (devnet vs mainnet vs future shards).
+        /// See `octravpn_core::receipt::CHAIN_ID_*`.
+        #[arg(long)]
+        chain_id: Option<u32>,
+        /// v2 binder: hex-encoded circle id. Required iff the
+        /// equivocating receipts were v2 receipts (circle-scoped).
+        #[arg(long)]
+        circle_id: Option<String>,
         #[arg(long)]
         out: std::path::PathBuf,
     },
@@ -173,6 +233,9 @@ pub(crate) fn run(cmd: SlashCmd) -> Result<()> {
             bytes_b,
             blind_b,
             sig_b,
+            program_addr,
+            chain_id,
+            circle_id,
             out,
         } => {
             let ev = EquivocationEvidence {
@@ -190,6 +253,9 @@ pub(crate) fn run(cmd: SlashCmd) -> Result<()> {
                     blind_hex: blind_b,
                     sig_hex: sig_b,
                 },
+                program_addr,
+                chain_id,
+                circle_id,
             };
             // Round-trip verify before writing so we never serialise
             // garbage as "evidence".
@@ -283,14 +349,29 @@ mod tests {
         sig::KeyPair,
     };
 
-    fn signed_receipt_blob(
+    /// Build a `(ReceiptBlob, ReceiptContext, evidence-fields)` quadruple
+    /// where the sig is computed over the v1.2 canonical payload. The
+    /// helper exists so tests stay close to the wire shape — the sig
+    /// must use the same context the evidence-side `receipt_context()`
+    /// reconstructs.
+    fn build_blob(
         kp: &KeyPair,
+        endpoint_addr: &str,
         sid: [u8; 32],
         seq: u64,
         bytes_used: u64,
         blind: [u8; 32],
     ) -> ReceiptBlob {
+        // Evidence with all v1.2 binders omitted uses the legacy
+        // back-compat path: program_addr defaults to endpoint_addr,
+        // chain_id to devnet, circle_id to None. Reproduce that
+        // exactly so the sig matches what `verify()` reconstructs.
+        let ctx = ReceiptContext::v1_1(
+            Address::from_display(endpoint_addr),
+            CHAIN_ID_DEVNET,
+        );
         let r = Receipt {
+            context: ctx,
             session_id: SessionId::new(sid),
             seq,
             bytes_used,
@@ -308,15 +389,20 @@ mod tests {
     fn verify_real_equivocation_returns_true() {
         let kp = KeyPair::generate();
         let sid = [7u8; 32];
-        let a = signed_receipt_blob(&kp, sid, 5, 100, [1u8; 32]);
-        let b = signed_receipt_blob(&kp, sid, 5, 200, [2u8; 32]); // distinct bytes & blind
+        let endpoint =
+            Address::from_pubkey(&[0x11; 32]).display().to_string();
+        let a = build_blob(&kp, &endpoint, sid, 5, 100, [1u8; 32]);
+        let b = build_blob(&kp, &endpoint, sid, 5, 200, [2u8; 32]);
         let ev = EquivocationEvidence {
-            endpoint_addr: "octV".into(),
+            endpoint_addr: endpoint,
             receipt_pubkey_hex: hex::encode(kp.public.0),
             session_id_hex: hex::encode(sid),
             seq: 5,
             receipt_a: a,
             receipt_b: b,
+            program_addr: None,
+            chain_id: None,
+            circle_id: None,
         };
         assert!(ev.verify().unwrap());
     }
@@ -325,15 +411,20 @@ mod tests {
     fn verify_identical_receipts_is_not_equivocation() {
         let kp = KeyPair::generate();
         let sid = [3u8; 32];
-        let a = signed_receipt_blob(&kp, sid, 1, 100, [9u8; 32]);
+        let endpoint =
+            Address::from_pubkey(&[0x22; 32]).display().to_string();
+        let a = build_blob(&kp, &endpoint, sid, 1, 100, [9u8; 32]);
         let b = a.clone();
         let ev = EquivocationEvidence {
-            endpoint_addr: "octV".into(),
+            endpoint_addr: endpoint,
             receipt_pubkey_hex: hex::encode(kp.public.0),
             session_id_hex: hex::encode(sid),
             seq: 1,
             receipt_a: a,
             receipt_b: b,
+            program_addr: None,
+            chain_id: None,
+            circle_id: None,
         };
         assert!(!ev.verify().unwrap(), "identical receipts must not slash");
     }
@@ -343,15 +434,20 @@ mod tests {
         let real = KeyPair::generate();
         let attacker = KeyPair::generate();
         let sid = [4u8; 32];
-        let a = signed_receipt_blob(&attacker, sid, 1, 1, [1u8; 32]);
-        let b = signed_receipt_blob(&attacker, sid, 1, 2, [2u8; 32]);
+        let endpoint =
+            Address::from_pubkey(&[0x33; 32]).display().to_string();
+        let a = build_blob(&attacker, &endpoint, sid, 1, 1, [1u8; 32]);
+        let b = build_blob(&attacker, &endpoint, sid, 1, 2, [2u8; 32]);
         let ev = EquivocationEvidence {
-            endpoint_addr: "octVREAL".into(),
+            endpoint_addr: endpoint,
             receipt_pubkey_hex: hex::encode(real.public.0), // wrong pubkey
             session_id_hex: hex::encode(sid),
             seq: 1,
             receipt_a: a,
             receipt_b: b,
+            program_addr: None,
+            chain_id: None,
+            circle_id: None,
         };
         assert!(ev.verify().is_err());
     }

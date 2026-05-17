@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use octravpn_core::{
+    address::Address,
     control::{ProposedReceipt, SessionStateResponse},
     receipt::SignedReceipt,
     session::SessionId,
@@ -35,6 +36,27 @@ pub(crate) async fn settle_active(client: &Arc<Client>, active: ActiveSession) -
     let proposed = fetch_proposed_receipt(client, &exit.validator.endpoint, &active.session_id)
         .await
         .context("fetch proposed receipt from exit")?;
+
+    // v1.2 P1-5 guard: the receipt the exit sent us must bind the
+    // same `(program_addr, chain_id, circle_id)` we configured locally.
+    // If the operator is on a different program / chain / circle, the
+    // receipt is not one we'd ever want to co-sign — refuse it before
+    // even checking the sig. Catches a misconfigured operator and the
+    // cross-deploy replay attack at the same point.
+    let expected = client.receipt_context();
+    let got = &proposed.receipt.context;
+    if got != expected {
+        return Err(anyhow!(
+            "receipt context mismatch: client expected program={} chain_id={} circle={:?}; \
+             operator sent program={} chain_id={} circle={:?}",
+            expected.program_addr.display(),
+            expected.chain_id,
+            expected.circle_id.as_ref().map(Address::display),
+            got.program_addr.display(),
+            got.chain_id,
+            got.circle_id.as_ref().map(Address::display),
+        ));
+    }
 
     // Local sanity: verify the exit's signature over its proposed
     // receipt. The AML doesn't see this signature, but if the exit
