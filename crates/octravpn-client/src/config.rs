@@ -32,6 +32,14 @@ pub(crate) struct ChainCfg {
     /// P0-2 from docs/v2-threat-model.md.
     #[serde(default)]
     pub pinned_root_paths: Option<Vec<String>>,
+    /// Network identifier the client expects the operator to bind into
+    /// receipts (P1-5 hardening). Must match the operator's
+    /// `node.toml` `[chain].chain_id`; mismatch means the client will
+    /// reject the proposed receipt as cross-chain. Defaults to
+    /// `CHAIN_ID_DEVNET` (devnet); pick the matching mainnet magic
+    /// when operators move.
+    #[serde(default = "default_chain_id")]
+    pub chain_id: u32,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -66,6 +74,14 @@ fn default_protocol_version() -> String {
 
 fn default_key_id() -> String {
     "default".into()
+}
+
+/// Default chain id when the client config omits the field. Mirrors the
+/// node default so a same-host devnet pair just works without explicit
+/// configuration. Operators on a different network must override both
+/// sides in lockstep.
+fn default_chain_id() -> u32 {
+    octravpn_core::receipt::CHAIN_ID_DEVNET
 }
 
 impl ClientConfig {

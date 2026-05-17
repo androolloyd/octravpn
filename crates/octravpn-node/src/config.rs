@@ -13,6 +13,11 @@
 //!                                    # policy, and calls register_circle on
 //!                                    # the slim v2 registry. See
 //!                                    # docs/v2-operator-flow.md.
+//!   chain_id = 1869832804             # u32 network id bound into every
+//!                                    # signed receipt (v1.2). Defaults to
+//!                                    # CHAIN_ID_DEVNET (0x6F637464); pick a
+//!                                    # distinct value for mainnet (see
+//!                                    # `octravpn_core::receipt::CHAIN_ID_*`).
 //!   # v2-only: per-tailnet passphrase used to derive AES-GCM read keys for
 //!   # sealed assets stored inside the operator circle. Operators receive
 //!   # this from their tailnet owner at provisioning. Optional in v1.1.
@@ -90,6 +95,15 @@ pub(crate) struct ChainCfg {
     /// deployed operators keep working unchanged.
     #[serde(default)]
     pub protocol_version: ProtocolVersion,
+    /// Network identifier bound into every signed receipt (v1.2 P1-5
+    /// hardening). Operators on devnet leave this at the default
+    /// (`CHAIN_ID_DEVNET`); mainnet operators set it to
+    /// `CHAIN_ID_MAINNET` (a future config flag). Distinct chain ids
+    /// prevent an attacker who mirrors a v1.1 program from devnet to
+    /// mainnet from replaying receipts. See
+    /// `octravpn_core::receipt::ReceiptContext` for the encoding.
+    #[serde(default = "default_chain_id")]
+    pub chain_id: u32,
     /// v2-only. Per-tailnet shared secret the operator gets at
     /// provisioning time; passed to `encrypt_sealed_bytes` as the
     /// passphrase for the AES-GCM read key. Empty/absent falls back to
@@ -111,6 +125,13 @@ pub(crate) struct ChainCfg {
     /// docs/v2-threat-model.md.
     #[serde(default)]
     pub pinned_root_paths: Option<Vec<String>>,
+}
+
+/// Default chain id when a config omits the field. Devnet today; will
+/// flip to mainnet once the production v2 deploy lands. Operators must
+/// override explicitly to opt into another network.
+fn default_chain_id() -> u32 {
+    octravpn_core::receipt::CHAIN_ID_DEVNET
 }
 
 #[derive(Debug, Deserialize, Clone)]

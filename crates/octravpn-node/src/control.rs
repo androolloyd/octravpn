@@ -39,7 +39,7 @@ use octravpn_core::{
     control::{
         AnnounceSessionRequest, AnnounceSessionResponse, ProposedReceipt, SessionStateResponse,
     },
-    receipt::Receipt,
+    receipt::{Receipt, ReceiptContext},
     session::SessionId,
     sig::KeyPair,
 };
@@ -89,6 +89,11 @@ pub(crate) struct ControlState {
     /// disables the endpoint entirely (requests return 404).
     /// Set via `[control].events_token` in the node TOML.
     pub events_token: Option<Arc<str>>,
+    /// Deployment domain (program / chain / circle) bound into every
+    /// signed receipt. v1.2 P1-5: prevents cross-program / cross-chain
+    /// / cross-circle receipt replay. Populated from `node.toml`'s
+    /// `[chain]` section by the hub at startup.
+    pub receipt_context: Arc<ReceiptContext>,
 }
 
 /// Lightweight counters exposed via the /metrics endpoint. Kept as
@@ -121,19 +126,29 @@ impl ControlState {
         metrics
             .started_at_unix
             .store(octravpn_core::util::now_unix_secs(), Ordering::Relaxed);
-        Self::with_metrics(node_kp, router, allowlist, metrics)
+        // Tests fall back to a fixed v1.1 receipt context with the
+        // test-network chain id. Production callers (hub.rs) override
+        // via `with_metrics` directly.
+        let ctx = ReceiptContext::v1_1(
+            octravpn_core::address::Address::from_pubkey(&[0u8; 32]),
+            octravpn_core::receipt::CHAIN_ID_TEST,
+        );
+        Self::with_metrics(node_kp, router, allowlist, metrics, Arc::new(ctx))
             // Tests don't need the auth gate — explicitly leave the
             // token None so /events behaves like a 404 endpoint.
             .with_events_token(None)
     }
 
     /// Construct with an externally-provided `NodeMetrics` so the Hub
-    /// can write attestation timestamps that this handler reads.
+    /// can write attestation timestamps that this handler reads. The
+    /// `receipt_context` is bound into every signed receipt — see
+    /// `ReceiptContext` for the v1.2 domain-binding rationale.
     pub(crate) fn with_metrics(
         node_kp: Arc<KeyPair>,
         router: Arc<OnionRouter>,
         allowlist: Arc<BoundedMap<[u8; 32], crate::tunnel::AllowedClient>>,
         metrics: Arc<NodeMetrics>,
+        receipt_context: Arc<ReceiptContext>,
     ) -> Self {
         // started_at_unix may not have been set by the caller yet; we
         // honour whatever they supply (Hub seeds it; standalone calls
@@ -152,6 +167,7 @@ impl ControlState {
             // bounded even if a few SSE clients are slow.
             events: EventBus::new(256),
             events_token: None,
+            receipt_context,
         }
     }
 
@@ -484,6 +500,7 @@ async fn get_state(
     let next_seq = entry.last_seq + 1;
     let blind = entry.last_blind;
     let r = Receipt {
+        context: (*s.receipt_context).clone(),
         session_id: id,
         seq: next_seq,
         bytes_used: bytes,
@@ -627,6 +644,7 @@ mod tests {
 
         // Reproduce the get_state body manually (bypass the axum layer).
         let r = Receipt {
+            context: (*state.receipt_context).clone(),
             session_id: id.clone(),
             seq: 1,
             bytes_used: 0,

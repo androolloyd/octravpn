@@ -8,6 +8,7 @@ use octravpn_core::{
     address::Address,
     commit::{commit, fresh_blind},
     onion::MAX_HOPS,
+    receipt::ReceiptContext,
     rpc::RpcClient,
     session::{SessionId, ValidatorRecord},
     sig::KeyPair,
@@ -25,6 +26,12 @@ pub(crate) struct Client {
     program_addr: Address,
     wallet_addr: Address,
     wallet_kp: KeyPair,
+    /// Deployment domain bound into every receipt the client verifies /
+    /// co-signs. v1.2 P1-5: receipt is non-replayable across programs,
+    /// chains, or circles. v1.1 clients leave `circle_id = None`; v2
+    /// clients overwrite it once they've fetched the operator's circle
+    /// (see the v2 discovery path).
+    receipt_context: ReceiptContext,
     pub state: Mutex<Option<ActiveSession>>,
 }
 
@@ -56,14 +63,38 @@ impl Client {
         let program_addr = Address::from_display(&cfg.chain.program_addr);
         let wallet_addr = Address::from_display(&cfg.wallet.addr);
         let wallet_kp = wallet::load_keypair(&cfg.wallet.secret_path)?;
+        // Receipt domain: v1.1 clients leave circle_id = None; v2 clients
+        // discover circle_id from the operator's policy bundle and call
+        // `set_receipt_circle` before opening a session.
+        let receipt_context =
+            ReceiptContext::v1_1(program_addr.clone(), cfg.chain.chain_id);
         Ok(Self {
             rpc,
             http,
             program_addr,
             wallet_addr,
             wallet_kp,
+            receipt_context,
             state: Mutex::new(None),
         })
+    }
+
+    pub(crate) fn receipt_context(&self) -> &ReceiptContext {
+        &self.receipt_context
+    }
+
+    /// Return a receipt context with `circle_id = Some(circle)` so v2
+    /// settle paths can verify against the specific circle they're
+    /// operating in. v1.1 paths use `receipt_context()` directly.
+    /// `Client` itself stays immutable so it can be shared via
+    /// `Arc<Client>` between the runner and the settler.
+    #[allow(dead_code)]
+    pub(crate) fn receipt_context_for_circle(&self, circle_id: Address) -> ReceiptContext {
+        ReceiptContext {
+            program_addr: self.receipt_context.program_addr.clone(),
+            chain_id: self.receipt_context.chain_id,
+            circle_id: Some(circle_id),
+        }
     }
 
     pub(crate) fn rpc(&self) -> &RpcClient {

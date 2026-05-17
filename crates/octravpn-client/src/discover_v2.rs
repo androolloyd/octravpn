@@ -485,17 +485,20 @@ mod tests {
         // Env wins.
         std::env::set_var("OCTRAVPN_SEALED_PASSPHRASE", "env-pp");
         assert_eq!(
-            resolve_passphrase(&cfg, Some("cli-pp")).as_deref(),
+            resolve_passphrase(&cfg, Some("cli-pp")).as_deref().map(|z| z.as_str()),
             Some("env-pp")
         );
         // Without env, CLI wins.
         std::env::remove_var("OCTRAVPN_SEALED_PASSPHRASE");
         assert_eq!(
-            resolve_passphrase(&cfg, Some("cli-pp")).as_deref(),
+            resolve_passphrase(&cfg, Some("cli-pp")).as_deref().map(|z| z.as_str()),
             Some("cli-pp")
         );
         // Without env or CLI, config wins.
-        assert_eq!(resolve_passphrase(&cfg, None).as_deref(), Some("cfg-pp"));
+        assert_eq!(
+            resolve_passphrase(&cfg, None).as_deref().map(|z| z.as_str()),
+            Some("cfg-pp"),
+        );
         // None of the three -> None.
         let empty = V2Cfg::default();
         assert!(resolve_passphrase(&empty, None).is_none());
