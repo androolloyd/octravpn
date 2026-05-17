@@ -1,6 +1,45 @@
 # OctraVPN v2 — Circle-native design
 
-> Status: **design / proposal**. v1 (the program currently in `program/main.aml`) continues to be the shippable MVP on main-net. This document sketches a v2 architecture that uses Octra's native **Circle** primitive as the substrate for operator identity, ACL, and encrypted metering. The Octra dev team flagged this direction as the right way to "build a VPN on Octra where the exits are hidden, like in Tor, with clear-internet access."
+> **Status: live on devnet as of 2026-05-17.** The slim registry (`program/main-v2.aml`) and operator-circle (`program/operator-circle.aml`) programs are committed; the registry is deployed at `oct3fxjrzfqh65ATo31eau8xRFBPiXh2Uzwue56EYkfVSj7`. One operator circle (`octE5x8WvhXB1FStpDmmfxkMmFKdnx5cL1Fr4gnry6aUdqA`) is registered + bonded + has a sealed `/policy.json` asset uploaded + a v2 session opened against it. The v2 adversarial drill (`docker/devnet/e2e-adversarial-v2.sh`) lands 45 / 45.
+>
+> §9 (open questions) below is preserved historically; the **§0 Status snapshot** added at the top of this doc supersedes it.
+
+## 0. Status snapshot (2026-05-17)
+
+What's shipped on chain:
+- `octra cast circle predict|deploy|info|asset|asset-key|key|put-encrypted|encrypt-only|get-encrypted` in `octra-foundry` (commit `ba094dd`+). Wire format mirrors the reference webcli (`octra-labs/webcli` `f9c73e1`).
+- `octra-core::circle` primitive: deterministic `circle_id_of_deploy(deployer, nonce, payload)` (sha256 + base58, `oct` prefix, 47-char), `resource_key`, sealed-envelope encrypt/decrypt (AES-GCM + PBKDF2-SHA256-120k, "OCRS1" magic, padding classes 4k/16k/32k/128k).
+- `program/main-v2.aml` — slim registry. Operators are circles (not wallet addresses). Slashing carries v1.1's `slash_double_sign` (40/40 adversarial-proof) verbatim, re-keyed on circle_id. `register_circle` is `payable` and atomic (catches the chicken-and-egg `bond_endpoint requires owner` issue the live e2e surfaced — see commit `6c3ce5a`).
+- `program/operator-circle.aml` — in-circle program (design + compile target). Holds encrypted policy resource_keys, member ACL, per-session metering counters, accepts member-acceptance signatures, demonstrates the new AML `payable` / `nonreentrant` modifiers shipped in `octra-labs/program-examples`.
+- `docker/devnet/e2e-adversarial-v2.sh` — 45-case drill, all hold (commit `beae338`).
+
+Tx hashes of the canonical v2 e2e:
+- `forge create main-v2` constructor `(100, 10, 1_000_000_000, 100, 1000)` → `oct3fxjrzfqh65ATo31eau8xRFBPiXh2Uzwue56EYkfVSj7`
+- `register_circle` (atomic register + 1 OCT bond) → tx `54d84c02d5a61bfade3122c1abd918f142cd54ace95b2c251aaf11cf49dbc74b`
+- `create_tailnet` → tx `e33463e3f253c6ecd09be1dcdf09397152d852a76645c876cc88cf239f7c879e`
+- `authorize_circle` → tx `e4de76f3ae235efde0fd45a912bd7ec14977526d1128d3e3708f8cff1e0fb41c`
+- `open_session` (class=0 shared, max_pay=200, price auto-stamped from registry) → tx `434ad40cf475dd4f509550daee36362655375d43c40d064b3e8c65aeae8ff7ae`
+- `circle_asset_put_encrypted` (sealed `/policy.json`, 4k-padded AES-GCM) → tx `5811465946323b04de530924825b87ad6c95953dce55b9bbb2416cf2aa1bc494`
+
+What we learned in implementation that this doc didn't predict:
+1. **Circles are addressable like wallets** — `circle_id` is structurally `oct…` (47-char) and shows up in `to_` of normal txs. No separate proxy-contract grammar is needed; the v2 program treats `circle: address` like any other addressable thing.
+2. **CREATE2-style deterministic id** — `(deployer_wallet, nonce, deploy_payload)` ⇒ a unique circle_id, computable BEFORE submitting the deploy tx. Lets us predeclare `to_=circle_id` and lets the registry assert ownership-at-registration without trusting the deployer to disclose the id correctly.
+3. **Sealed-read assets are plain AES-GCM** — no HFHE involvement at this layer. The path-private fetch (`circle_asset_ciphertext_by_resource_key`) is the privacy lever for hidden exits — chain observers can't tell which asset path a client fetched.
+4. **AML `bytes` type is char-length-counted UTF-8** — passing 32 raw bytes requires a 32-character string. Hex (64 chars) and base64 (44 chars) both fail the `len == 32` check. Documented in `~/.claude/projects/-Users-androolloyd-Development-octra/memory/octra_aml_wire_format.md`.
+5. **AML `ed25519_ok` wants base64** for both `pk` and `sig`. Tx canonical bytes are bare canonical-JSON over the envelope (no domain prefix). Same memory file.
+6. **Governance bypasses pause** — `withdraw_program_treasury`, `set_params`, `transfer_ownership`, `set_paused` are owner-only AND intentionally NOT pause-gated. A compromised owner can `set_paused(0)` first anyway, so gating governance on pause adds no defense and breaks emergency-response (refunds, migrations). v1.1 had a brief detour adding the gate; reverted in commit `d7aaa65`.
+
+What's still pending (active subagents, 2026-05-17):
+- Lean + TLA port to v2 entrypoint shape.
+- octravpn-node + client wiring against v2.
+- PVAC integration for real HFHE ciphertexts (unblocks settle/claim).
+- Rust formal verification + leak audit on shared crypto + node infra.
+
+This document is now an architecture map; the canonical source for what's deployed is `program/main-v2.aml` and `docker/devnet/wallets.toml`. The §1–§9 sections below retain the pre-public-circles design reasoning for posterity.
+
+---
+
+> Original status note (pre-public-circles release; preserved for context): v1 (the program currently in `program/main.aml`) continues to be the shippable MVP on main-net. This document sketches a v2 architecture that uses Octra's native **Circle** primitive as the substrate for operator identity, ACL, and encrypted metering. The Octra dev team flagged this direction as the right way to "build a VPN on Octra where the exits are hidden, like in Tor, with clear-internet access."
 
 ## 1. Why v2 — what v1 doesn't give us
 
