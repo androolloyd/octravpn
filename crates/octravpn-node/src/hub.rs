@@ -49,6 +49,12 @@ pub(crate) struct Hub {
     /// Shared metrics surface — both the attestation loop and the
     /// control plane write to this so /health reports real freshness.
     pub metrics: Arc<crate::control::NodeMetrics>,
+    /// P1-8/9 persistent receipt journal. Opened once at boot so a
+    /// bad path (permission denied, magic-mismatch on an existing
+    /// file) fails-fast rather than at the first receipt request.
+    /// Shared with the control plane via an Arc — every `get_state`
+    /// call consults this before signing.
+    pub receipt_journal: Arc<octravpn_core::receipt_journal::ReceiptJournal>,
 }
 
 impl Hub {
@@ -57,8 +63,12 @@ impl Hub {
         let validator_addr = Address::from_display(&cfg.chain.validator_addr);
         let program_addr = Address::from_display(&cfg.chain.program_addr);
 
-        let wallet_secret =
-            read_secret_32(&cfg.chain.wallet_secret_path).context("read wallet secret")?;
+        let wallet_secret = if cfg.chain.require_sealed_keys {
+            *read_secret_32_strict(&cfg.chain.wallet_secret_path)
+                .context("read wallet secret (strict, sealed-only)")?
+        } else {
+            read_secret_32(&cfg.chain.wallet_secret_path).context("read wallet secret")?
+        };
         // KeyPair has no Clone (it zeroizes on drop); reconstruct the
         // same key from the on-disk secret twice — once for the v1.1
         // chain context and once for the v2 chain context. They sign
@@ -89,7 +99,12 @@ impl Hub {
         //          ---HKDF--> X25519 noise static secret (WG handshake)
         //
         // The wallet key (transaction signing) is a separate file already.
-        let master = read_secret_32(&cfg.tunnel.wg_secret_path).context("read wg master secret")?;
+        let master = if cfg.chain.require_sealed_keys {
+            *read_secret_32_strict(&cfg.tunnel.wg_secret_path)
+                .context("read wg master secret (strict, sealed-only)")?
+        } else {
+            read_secret_32(&cfg.tunnel.wg_secret_path).context("read wg master secret")?
+        };
         let receipt_sk =
             octravpn_core::util::derive_subkey(&master, octravpn_core::util::DOMAIN_RECEIPT_SIGN);
         let noise_sk =
@@ -110,6 +125,23 @@ impl Hub {
             std::sync::atomic::Ordering::Relaxed,
         );
 
+        // P1-8/9: open the persistent receipt-seq journal at boot. The
+        // journal is what stops a forced restart from letting the
+        // daemon sign a fresh `seq=1` receipt for a session whose
+        // last legitimate receipt was at seq=K. Default path is
+        // `./state/receipts.bin`; operators on a system-managed
+        // install should override to something under `/var/lib/octravpn/`.
+        let journal_path: std::path::PathBuf = cfg
+            .control
+            .receipt_journal_path
+            .clone()
+            .map_or_else(|| "./state/receipts.bin".into(), std::path::PathBuf::from);
+        let receipt_journal = Arc::new(
+            octravpn_core::receipt_journal::ReceiptJournal::open(&journal_path).with_context(
+                || format!("open receipt journal at {}", journal_path.display()),
+            )?,
+        );
+
         Ok(Self {
             cfg,
             chain,
@@ -120,6 +152,7 @@ impl Hub {
             router: Arc::new(OnionRouter::new()),
             allowlist,
             metrics,
+            receipt_journal,
         })
     }
 
@@ -788,6 +821,7 @@ impl Hub {
         let allowlist = self.allowlist.clone();
         let metrics = self.metrics.clone();
         let receipt_context = Arc::new(self.build_receipt_context());
+        let receipt_journal = self.receipt_journal.clone();
         tokio::spawn(async move {
             let listen: std::net::SocketAddr = self
                 .cfg
@@ -801,6 +835,7 @@ impl Hub {
                 allowlist,
                 metrics,
                 receipt_context,
+                receipt_journal,
             )
             .with_events_token(self.cfg.control.events_token.clone());
             // Open the audit log next to the wallet secret unless a
@@ -909,6 +944,19 @@ impl Hub {
 
 fn read_secret_32(path: &str) -> Result<[u8; 32]> {
     octravpn_core::util::read_secret_32(path).with_context(|| format!("load secret {path}"))
+}
+
+/// Strict variant used when `[chain].require_sealed_keys = true`. Returns
+/// a `Zeroizing<[u8; 32]>` so the caller's intermediate copy is wiped
+/// on drop. Plaintext on disk surfaces as
+/// `CoreError::PlaintextKeyOnDisk` — anyhow renders the suggested
+/// `octravpn-node seal-keys` invocation into the error message so the
+/// operator sees a copy-pasteable next step. Threat model: P1-6.
+fn read_secret_32_strict(
+    path: &str,
+) -> Result<zeroize::Zeroizing<[u8; 32]>> {
+    octravpn_core::util::read_secret_32_or_sealed(path, None)
+        .with_context(|| format!("strict-load secret {path}"))
 }
 
 /// True iff the cached `policy_plaintext_hash` doesn't match the

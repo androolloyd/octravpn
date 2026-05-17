@@ -74,6 +74,10 @@ services:
     environment:
       OCTRA_RPC_URL: "${OCTRA_RPC_URL:?set OCTRA_RPC_URL — see docker/devnet/.env.example}"
       PROGRAM_ADDR: "${PROGRAM_ADDR:?set PROGRAM_ADDR — see docker/devnet/.env.example}"
+      # P1-6: empty in the default plaintext-keys flow; required when
+      # the operator has run `octravpn-node seal-keys` and re-pointed
+      # the TOML at `*.sealed` files.
+      OCTRAVPN_KEY_PASSPHRASE: "${OCTRAVPN_KEY_PASSPHRASE:-}"
     volumes: !override
       - octravpn-bin:/bin/octravpn:ro
       - ${HOST_DEVNET_DIR:-./docker/devnet/state}/node1:/etc/octravpn:ro
@@ -90,6 +94,10 @@ services:
     environment:
       OCTRA_RPC_URL: "${OCTRA_RPC_URL:?}"
       PROGRAM_ADDR: "${PROGRAM_ADDR:?}"
+      # P1-6: empty in the default plaintext-keys flow; required when
+      # the operator has run `octravpn-node seal-keys` and re-pointed
+      # the TOML at `*.sealed` files.
+      OCTRAVPN_KEY_PASSPHRASE: "${OCTRAVPN_KEY_PASSPHRASE:-}"
     volumes: !override
       - octravpn-bin:/bin/octravpn:ro
       - ${HOST_DEVNET_DIR:-./docker/devnet/state}/node2:/etc/octravpn:ro
@@ -106,6 +114,10 @@ services:
     environment:
       OCTRA_RPC_URL: "${OCTRA_RPC_URL:?}"
       PROGRAM_ADDR: "${PROGRAM_ADDR:?}"
+      # P1-6: empty in the default plaintext-keys flow; required when
+      # the operator has run `octravpn-node seal-keys` and re-pointed
+      # the TOML at `*.sealed` files.
+      OCTRAVPN_KEY_PASSPHRASE: "${OCTRAVPN_KEY_PASSPHRASE:-}"
     volumes: !override
       - octravpn-bin:/bin/octravpn:ro
       - ${HOST_DEVNET_DIR:-./docker/devnet/state}/node3:/etc/octravpn:ro
@@ -122,6 +134,10 @@ services:
     environment:
       OCTRA_RPC_URL: "${OCTRA_RPC_URL:?}"
       PROGRAM_ADDR: "${PROGRAM_ADDR:?}"
+      # P1-6: empty in the default plaintext-keys flow; required when
+      # the operator has run `octravpn-node seal-keys` and re-pointed
+      # the TOML at `*.sealed` files.
+      OCTRAVPN_KEY_PASSPHRASE: "${OCTRAVPN_KEY_PASSPHRASE:-}"
     volumes: !override
       - octravpn-bin:/bin/octravpn:ro
       - ${HOST_DEVNET_DIR:-./docker/devnet/state}/client:/etc/octravpn:ro

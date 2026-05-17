@@ -19,6 +19,7 @@ pub mod control;
 pub mod earnings;
 pub mod onion;
 pub mod receipt;
+pub mod receipt_journal;
 pub mod rpc;
 pub mod session;
 pub mod stealth;

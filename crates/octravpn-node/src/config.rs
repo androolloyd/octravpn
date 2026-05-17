@@ -125,6 +125,16 @@ pub(crate) struct ChainCfg {
     /// docs/v2-threat-model.md.
     #[serde(default)]
     pub pinned_root_paths: Option<Vec<String>>,
+    /// P1-6 strict mode. When `true`, the operator daemon refuses to
+    /// boot if any of the configured secret files
+    /// (`wallet_secret_path`, `tunnel.wg_secret_path`) is plaintext on
+    /// disk. The error message names the `octravpn-node seal-keys`
+    /// subcommand. When `false` (the default, for back-compat with
+    /// v1.1 / devnet harnesses), the daemon transparently reads either
+    /// shape — sealed envelopes resolve via `OCTRAVPN_KEY_PASSPHRASE`
+    /// and plaintext files are accepted as-is.
+    #[serde(default)]
+    pub require_sealed_keys: bool,
 }
 
 /// Default chain id when a config omits the field. Devnet today; will
@@ -186,6 +196,18 @@ pub(crate) struct ControlCfg {
     /// docs/v2-threat-model.md P0-1 and docs/v2-rust-leak-audit.md.
     #[serde(default)]
     pub events_token: Option<String>,
+    /// P1-8/9 persistent receipt-seq journal. The node consults this
+    /// file before signing any receipt and refuses to sign at any seq
+    /// that does not strictly exceed the on-disk floor. After a
+    /// daemon restart the journal is re-loaded so an attacker cannot
+    /// force the node to double-sign at a seq it previously committed
+    /// to. `None` (the default) resolves to `./state/receipts.bin`
+    /// next to the working directory. Move this to a host-private
+    /// path (`/var/lib/octravpn/receipts.bin`) for production
+    /// operators. Threat-model ref: docs/v2-threat-model.md §3 P1-8 +
+    /// P1-9.
+    #[serde(default)]
+    pub receipt_journal_path: Option<String>,
 }
 
 impl Default for ControlCfg {
@@ -194,6 +216,7 @@ impl Default for ControlCfg {
             listen: default_control_listen(),
             audit_dir: None,
             events_token: None,
+            receipt_journal_path: None,
         }
     }
 }

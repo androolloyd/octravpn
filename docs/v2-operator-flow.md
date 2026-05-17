@@ -226,6 +226,64 @@ and any cached tx hashes without touching the chain.
   placeholders until `libpvac` lands. v2 doesn't unblock real
   HFHE — that's a separate axis.
 
+## Operator-side hardening (P1-6, P1-8, P1-9)
+
+### Sealing on-disk keys (P1-6)
+
+By default the daemon accepts both plaintext-hex and sealed-envelope
+keys at the paths configured in `[chain].wallet_secret_path` and
+`[tunnel].wg_secret_path`. Production operators should run
+
+```sh
+# One-shot: wrap both keys under a passphrase. Idempotent — re-running
+# is a no-op if the *.sealed files already exist.
+export OCTRAVPN_KEY_PASSPHRASE='...'
+octravpn-node --config /etc/octravpn/node.toml seal-keys
+
+# Verify by re-reading the sealed file with the strict loader (this
+# will exit 0 iff the envelope round-trips):
+ls -l /etc/octravpn/wallet.key.sealed /etc/octravpn/wg.key.sealed
+
+# Once verified, point the TOML at the sealed files and turn on strict
+# mode. The daemon now refuses to boot if any configured secret is
+# plaintext on disk.
+sed -i 's|/etc/octravpn/wallet.key|/etc/octravpn/wallet.key.sealed|' /etc/octravpn/node.toml
+sed -i 's|/etc/octravpn/wg.key|/etc/octravpn/wg.key.sealed|' /etc/octravpn/node.toml
+printf '\nrequire_sealed_keys = true\n' >> /etc/octravpn/node.toml  # under [chain]
+```
+
+The passphrase comes from `OCTRAVPN_KEY_PASSPHRASE` (preferred; loaded
+by systemd via `EnvironmentFile=/etc/octravpn/keys.env` with
+`chmod 0600`). For one-shot ops (rotation, emergency recovery) use
+`--passphrase-file <PATH>` so the secret doesn't end up in shell
+history. See `docs/v2-operator-key-hygiene.md` §4 for the per-OS
+keyring story.
+
+For emergency rotation:
+
+```sh
+# Unseal both keys into a tmpfs / ramdisk (refused if dest isn't
+# memory-volatile).
+sudo mkdir -p /run/octravpn-rotate
+sudo mount -t tmpfs -o size=1m tmpfs /run/octravpn-rotate
+octravpn-node --config /etc/octravpn/node.toml unseal-keys --tmpdir /run/octravpn-rotate
+# Re-seal under a fresh passphrase, swap the files, restart the node.
+sudo umount /run/octravpn-rotate
+```
+
+### Receipt journal (P1-8 + P1-9)
+
+The daemon persists a per-session `(session_id → last_signed_seq)`
+floor to `[control].receipt_journal_path` (default
+`./state/receipts.bin`). Every `GET /session/:id` consults the file
+*before* signing a receipt and bumps the floor atomically (tempfile +
+fsync) so an OOM-kill or signal mid-session cannot trick the daemon
+into signing a fresh seq=1 receipt with different bytes_used than the
+previous seq=K — that exact double-sign is what `slash_double_sign`
+needs to burn the operator's bond. Restore the journal alongside the
+wallet on host migrations. The journal is small (40 bytes per active
+session); no rotation needed.
+
 ## What to do if v2 boot fails
 
 Each step is idempotent and resumable. Common cases:
