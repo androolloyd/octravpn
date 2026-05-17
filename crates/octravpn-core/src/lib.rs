@@ -8,7 +8,9 @@
 // hooks, tx signing, util helpers, passphrase-protected wallet envelope)
 // now live in the `octra-core` crate inside `octra-foundry/`. We
 // re-export them here so existing call sites keep working unchanged.
-pub use octra_core::{address, coverage, sig, tx, util, wallet_enc, CoreError, CoreResult};
+pub use octra_core::{
+    address, circle, coverage, sig, tx, util, wallet_enc, CoreError, CoreResult,
+};
 
 pub mod backend;
 pub mod bounded;

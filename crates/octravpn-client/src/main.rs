@@ -9,10 +9,13 @@ use tracing::info;
 mod commands;
 mod config;
 mod discover;
+mod discover_v2;
 mod operator_backend;
 mod runner;
 mod settler;
 mod tailnet;
+mod v2_cache;
+mod v2_runner;
 mod wallet;
 
 use config::ClientConfig;
@@ -99,6 +102,71 @@ enum Cmd {
     Funnel {
         #[command(subcommand)]
         cmd: ServeOp,
+    },
+    /// v2 substrate: list authorized circles for a tailnet and decrypt
+    /// their sealed `/policy.json`. Members see endpoint/region/price;
+    /// non-members see `[opaque]` and an explanatory message. Gated on
+    /// `[chain].protocol_version = "v2"` in the config.
+    Discover {
+        #[command(subcommand)]
+        op: DiscoverOp,
+    },
+    /// v2 substrate: open a session against an authorized circle and
+    /// print the WG handoff. The v1.1 `connect` path is preserved.
+    ConnectV2 {
+        /// Tailnet id (decimal). Looked up against the v2 program.
+        #[arg(long)]
+        tailnet_id: u64,
+        /// Circle id (an `oct…` address) authorized for the tailnet.
+        /// Leave unset to pick the first decryptable circle.
+        #[arg(long)]
+        circle_id: Option<String>,
+        /// Session class: `shared` (default) or `internal`.
+        #[arg(long, default_value = "shared")]
+        class: String,
+        /// Deposit in raw OU (must be >= chain `min_session_deposit`).
+        #[arg(long)]
+        deposit: u64,
+        /// Sealed-policy passphrase override (env > this > config).
+        #[arg(long)]
+        secret: Option<String>,
+        /// Force a refresh of cached policy even if the hash matches.
+        #[arg(long, default_value_t = false)]
+        refresh: bool,
+    },
+}
+
+/// `octravpn discover ...` — explore the v2 substrate (authorized
+/// circles + sealed policies). v1.1 has `octravpn nodes` instead.
+#[derive(clap::Parser, Debug)]
+pub(crate) enum DiscoverOp {
+    /// List authorized circles for a tailnet and decrypt their sealed
+    /// `/policy.json`. Non-decryptable entries surface as `[opaque]`
+    /// rather than being silently dropped.
+    V2 {
+        /// Tailnet id (decimal).
+        tailnet_id: u64,
+        /// Sealed-policy passphrase override. Precedence:
+        /// env `OCTRAVPN_SEALED_PASSPHRASE` > this flag > `[v2].sealed_passphrase`.
+        #[arg(long)]
+        secret: Option<String>,
+        /// Drop cached entries before fetching (forces full RPC + decrypt).
+        #[arg(long, default_value_t = false)]
+        refresh: bool,
+        /// Output decrypted policies as JSON instead of a human-readable table.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Drop one circle's cached policy. Useful after the operator
+    /// rotates policy out-of-band and you want the next discover to
+    /// re-fetch immediately.
+    Invalidate {
+        /// Circle id whose cached policy to drop. Pass `--all` to
+        /// clear every cached entry instead.
+        #[arg(long)]
+        circle_id: Option<String>,
+        #[arg(long, default_value_t = false)]
+        all: bool,
     },
 }
 
@@ -207,6 +275,27 @@ async fn main() -> Result<()> {
         Cmd::Reclaim { session_id } => settler::reclaim(&client, &session_id).await,
         Cmd::Tailnet { op } => tailnet::dispatch(&client, &cfg, op).await,
         Cmd::SlashEvidence { op } => commands::slash_submit(&client, op.clone()).await,
+        Cmd::Discover { op } => v2_runner::dispatch_discover(&client, &cfg, op).await,
+        Cmd::ConnectV2 {
+            tailnet_id,
+            circle_id,
+            class,
+            deposit,
+            secret,
+            refresh,
+        } => {
+            v2_runner::connect_v2(
+                &client,
+                &cfg,
+                tailnet_id,
+                circle_id.as_deref(),
+                &class,
+                deposit,
+                secret.as_deref(),
+                refresh,
+            )
+            .await
+        }
         // Already handled above.
         Cmd::Init { .. }
         | Cmd::Keygen { .. }
