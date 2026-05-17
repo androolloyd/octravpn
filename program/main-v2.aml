@@ -778,7 +778,16 @@ contract OctraVPN_V2 {
     }
     if net > 0 {
       // Credit HFHE earnings ledger for the operator.
-      let pk = fhe_load_pk(circle)
+      //
+      // CRITICAL: load the pubkey via the circle's OWNER wallet, not
+      // the circle address. Octra's PVAC pubkey registry is populated
+      // by `octra_registerPvacPubkey(addr, pk_b64, sig)` which requires
+      // an ed25519 signature from the wallet that owns `addr` — circles
+      // are contracts with no keypair, so `fhe_load_pk(<circle>)` always
+      // returns null. Owner-routed lookup matches the chain's per-wallet
+      // PVAC registration model.
+      let owner = self.circles[circle].owner
+      let pk = fhe_load_pk(owner)
       let zero_ct = fhe_deser(self.op_zero_ct[circle])
       let add_ct = fhe_add_const(pk, zero_ct, net)
       let cur = fhe_deser(self.enc_earnings[circle])
@@ -844,7 +853,9 @@ contract OctraVPN_V2 {
     require(claimed_amount > 0, "amount > 0")
     require(len(proof) > 0, "proof required")
 
-    let pk = fhe_load_pk(circle)
+    // Owner-routed PVAC pubkey lookup; see settle_confirm for why.
+    let owner = self.circles[circle].owner
+    let pk = fhe_load_pk(owner)
     let zero_ct = fhe_deser(self.op_zero_ct[circle])
     let claim_ct = fhe_add_const(pk, zero_ct, claimed_amount)
     let cur = fhe_deser(self.enc_earnings[circle])
