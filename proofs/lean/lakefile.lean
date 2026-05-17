@@ -8,3 +8,7 @@ package octravpn where
 @[default_target]
 lean_lib OctraVPN where
   roots := #[`OctraVPN]
+
+@[default_target]
+lean_lib OctraVPN_V2 where
+  roots := #[`OctraVPN_V2]

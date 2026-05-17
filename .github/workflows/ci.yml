@@ -86,11 +86,16 @@ jobs:
         run: |
           curl -L -o /tmp/tla2tools.jar \
             https://github.com/tlaplus/tlaplus/releases/latest/download/tla2tools.jar
-      - name: Run TLC
+      - name: Run TLC (v1.1)
         run: |
           cd proofs/tla
           java -cp /tmp/tla2tools.jar tlc2.TLC \
             -workers auto -deadlock OctraVPN -config OctraVPN.cfg
+      - name: Run TLC (v2)
+        run: |
+          cd proofs/tla
+          java -cp /tmp/tla2tools.jar tlc2.TLC \
+            -workers auto -deadlock OctraVPN_V2 -config OctraVPN_V2.cfg
 
   tamarin:
     name: Tamarin prove
