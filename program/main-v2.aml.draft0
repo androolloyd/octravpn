@@ -1,0 +1,537 @@
+// OctraVPN v2 — Circle-native skeleton.
+//
+// STATUS: design draft. This is NOT compile-gated against the live
+// Octra RPC and is NOT shipped. It is the AML-side sketch of the
+// design in `docs/v2-circles-design.md`.
+//
+// Difference from v1 (`program/main.aml`):
+//
+//   * No public operator registry (no `endpoints`, no
+//     `endpoint_stake`, no register_endpoint / bond_endpoint /
+//     update_endpoint / unbond_endpoint). Operators are Circles —
+//     visible to main-net only as proxy contract addresses, and
+//     enumerable only by callers the proxy itself authorizes.
+//
+//   * Tailnets maintain an `authorized_proxies` set instead of an
+//     `exit` field. Owners explicitly grant / revoke proxies.
+//
+//   * Sessions carry `proxy`, `class` (shared|internal), and
+//     `price_per_mb` (stamped at open time). The proxy can serve
+//     two distinct tariffs without on-chain price disclosure for
+//     either class.
+//
+//   * Tailnets carry `charge_internal_traffic`. When 0, any
+//     `internal`-class session whose claim is non-zero reverts.
+//
+//   * Slashing moves to proxy-level: the AML calls
+//     `proxy.slash_bond(amount, reason)`; the proxy contract is
+//     deployed with a pre-allocated bond resource (litepaper §4.4.2).
+//
+//   * Encrypted earnings ledger stays in main-net for the MVP path
+//     (Path A in §4.4 of the design doc). Path B (settle under
+//     HFHE) is a v2.1 extension.
+//
+// Open against Octra (see docs/v2-circles-design.md §9):
+//   - Circle DSL & SDK
+//   - Proxy contract grammar
+//   - Access contract grammar
+//   - HFHE op availability on the proxy side
+//   - Bond escrow at proxy deployment
+//   - Operator discovery model
+
+contract OctraVPN_V2 {
+
+  // ============================================================
+  // Structs
+  // ============================================================
+
+  struct Tailnet {
+    owner: address
+    treasury: int                 // OU available for paid traffic
+    member_count: int
+    acl_policy: string            // hex of off-chain ACL doc hash
+    created_at: int
+
+    // Set to 0 to make `internal`-class traffic free at settle time;
+    // a non-zero internal claim against such a tailnet reverts.
+    charge_internal_traffic: int  // 1 = bill internal, 0 = free
+  }
+
+  // A session attaches to a proxy address. The class + price are
+  // stamped at open time so the AML can compute total_paid at
+  // settle without consulting the proxy.
+  struct Session {
+    tailnet_id: int
+    proxy: address                // Circle's proxy contract address
+    opener: address               // wallet that opened; only it confirms
+    deposit: int                  // locked from tailnet treasury at open
+    opened_at: int
+
+    class: int                    // 0 = shared exit, 1 = internal subnet
+    price_per_mb: int             // tariff agreed at open
+
+    status: int                   // 0=open, 1=settled, 2=refunded
+  }
+
+  struct ClaimRecord {
+    set: int
+    bytes_used: int
+    claimed_at: int
+  }
+
+  // ============================================================
+  // Events
+  // ============================================================
+
+  event ProxyAuthorized(tailnet_id: int, proxy: address)
+  event ProxyRevoked(tailnet_id: int, proxy: address)
+
+  event TailnetCreated(tailnet_id: int, owner: address)
+  event TailnetMemberAdded(tailnet_id: int, member: address)
+  event TailnetMemberRemoved(tailnet_id: int, member: address)
+  event TailnetDeposit(tailnet_id: int, amount: int, new_treasury: int)
+  event TailnetAclUpdated(tailnet_id: int, acl_policy: string)
+  event TailnetChargeInternalSet(tailnet_id: int, charge: int)
+
+  event SessionOpened(
+    session_id: int,
+    tailnet_id: int,
+    proxy: address,
+    class: int,
+    price_per_mb: int,
+    deposit: int,
+    opened_at: int
+  )
+
+  event SettleClaimed(session_id: int, proxy: address, bytes_used: int)
+  event SettleConfirmed(session_id: int, opener: address, bytes_used: int)
+  event SettleDispute(session_id: int, operator_bytes: int, client_bytes: int)
+  event SessionSettled(
+    session_id: int,
+    proxy: address,
+    class: int,
+    bytes_used: int,
+    total_paid: int,
+    refund: int
+  )
+  event SessionRefunded(session_id: int, reason: string)
+  event SessionSwept(session_id: int)
+
+  event ProxyBondSlashed(proxy: address, amount: int, reason: string)
+
+  event EarningsClaimed(proxy: address, amount: int)
+
+  event ProgramTreasuryWithdrawn(to: address, amount: int)
+
+  // ============================================================
+  // Constants
+  // ============================================================
+
+  const CLASS_SHARED: int = 0
+  const CLASS_INTERNAL: int = 1
+
+  const PROTOCOL_FEE_DEFAULT_BPS: int = 50      // 0.5 %
+  const BPS_DENOM: int = 10000
+  const SWEEP_GRACE_MULT_DEFAULT: int = 10
+  const SWEEP_BOUNTY_DEFAULT_BPS: int = 100
+
+  // ============================================================
+  // State
+  // ============================================================
+
+  state {
+    owner: address
+    paused: int
+
+    // Authorized proxies per tailnet.
+    //   tid -> proxy_addr -> 1 if owner has authorized this proxy.
+    authorized_proxies: map[int]map[address]int
+
+    // HFHE earnings ledger keyed by proxy address.
+    proxy_pk_set: map[address]int
+    proxy_pk: map[address]string
+    proxy_zero_ct: map[address]string
+    enc_earnings: map[address]string
+
+    // Tailnets
+    tailnet_count: int
+    tailnets: map[int]Tailnet
+    members: map[int]map[address]int
+
+    // Sessions
+    session_count: int
+    sessions: map[int]Session
+    operator_claims: map[int]ClaimRecord
+    client_confirms: map[int]ClaimRecord
+
+    // Program treasury (protocol fee + slash share).
+    treasury: int
+    burned: int
+
+    // Params.
+    min_session_deposit: int
+    min_tailnet_deposit: int
+    session_grace_epochs: int
+    protocol_fee_bps: int
+  }
+
+  // ============================================================
+  // Constructor
+  // ============================================================
+
+  constructor(min_session_deposit: int, min_tailnet_deposit: int) {
+    require(min_session_deposit > 0, "min_session_deposit must be > 0")
+    require(min_tailnet_deposit > 0, "min_tailnet_deposit must be > 0")
+    self.owner = caller
+    self.paused = 0
+    self.tailnet_count = 0
+    self.session_count = 0
+    self.treasury = 0
+    self.burned = 0
+    self.min_session_deposit = min_session_deposit
+    self.min_tailnet_deposit = min_tailnet_deposit
+    self.session_grace_epochs = 100
+    self.protocol_fee_bps = PROTOCOL_FEE_DEFAULT_BPS
+  }
+
+  // ============================================================
+  // Governance (owner-only)
+  // ============================================================
+
+  private fn only_owner() {
+    require(caller == self.owner, "not owner")
+  }
+
+  fn transfer_ownership(new_owner: address): bool {
+    only_owner()
+    require(is_address(new_owner), "invalid owner")
+    self.owner = new_owner
+    return true
+  }
+
+  fn set_paused(p: int): bool {
+    only_owner()
+    self.paused = p
+    return true
+  }
+
+  fn withdraw_program_treasury(to: address, amount: int): bool {
+    only_owner()
+    require(is_address(to), "invalid to")
+    require(amount > 0, "amount must be > 0")
+    require(self.treasury >= amount, "treasury insufficient")
+    self.treasury = self.treasury - amount
+    transfer(to, amount)
+    emit ProgramTreasuryWithdrawn(to, amount)
+    return true
+  }
+
+  // ============================================================
+  // Tailnets
+  // ============================================================
+
+  fn create_tailnet(acl_policy: string): bool {
+    require(self.paused == 0, "paused")
+    require(value >= self.min_tailnet_deposit, "deposit below minimum")
+    let tid = self.tailnet_count + 1
+    self.tailnet_count = tid
+    self.tailnets[tid].owner = caller
+    self.tailnets[tid].treasury = value
+    self.tailnets[tid].member_count = 1
+    self.tailnets[tid].acl_policy = acl_policy
+    self.tailnets[tid].created_at = epoch
+    self.tailnets[tid].charge_internal_traffic = 0  // intra-tailnet free by default
+    self.members[tid][caller] = 1
+    emit TailnetCreated(tid, caller)
+    return true
+  }
+
+  fn deposit_to_tailnet(tailnet_id: int): bool {
+    require(self.paused == 0, "paused")
+    require(value > 0, "no deposit")
+    require(self.tailnets[tailnet_id].owner == caller || self.members[tailnet_id][caller] == 1, "not a member")
+    self.tailnets[tailnet_id].treasury = self.tailnets[tailnet_id].treasury + value
+    emit TailnetDeposit(tailnet_id, value, self.tailnets[tailnet_id].treasury)
+    return true
+  }
+
+  fn add_member(tailnet_id: int, member: address): bool {
+    require(self.tailnets[tailnet_id].owner == caller, "not tailnet owner")
+    require(is_address(member), "invalid member")
+    if self.members[tailnet_id][member] == 1 {
+      return true   // idempotent
+    }
+    self.members[tailnet_id][member] = 1
+    self.tailnets[tailnet_id].member_count = self.tailnets[tailnet_id].member_count + 1
+    emit TailnetMemberAdded(tailnet_id, member)
+    return true
+  }
+
+  fn remove_member(tailnet_id: int, member: address): bool {
+    require(self.tailnets[tailnet_id].owner == caller, "not tailnet owner")
+    require(self.members[tailnet_id][member] == 1, "not a member")
+    self.members[tailnet_id][member] = 0
+    if self.tailnets[tailnet_id].member_count > 0 {
+      self.tailnets[tailnet_id].member_count = self.tailnets[tailnet_id].member_count - 1
+    }
+    emit TailnetMemberRemoved(tailnet_id, member)
+    return true
+  }
+
+  fn update_acl(tailnet_id: int, acl_policy: string): bool {
+    require(self.tailnets[tailnet_id].owner == caller, "not tailnet owner")
+    self.tailnets[tailnet_id].acl_policy = acl_policy
+    emit TailnetAclUpdated(tailnet_id, acl_policy)
+    return true
+  }
+
+  fn set_charge_internal_traffic(tailnet_id: int, charge: int): bool {
+    require(self.tailnets[tailnet_id].owner == caller, "not tailnet owner")
+    require(charge == 0 || charge == 1, "charge must be 0 or 1")
+    self.tailnets[tailnet_id].charge_internal_traffic = charge
+    emit TailnetChargeInternalSet(tailnet_id, charge)
+    return true
+  }
+
+  // ============================================================
+  // Proxy authorization (the v2 replacement for configure_exit)
+  // ============================================================
+
+  fn authorize_proxy(tailnet_id: int, proxy: address): bool {
+    require(self.tailnets[tailnet_id].owner == caller, "not tailnet owner")
+    require(is_address(proxy), "invalid proxy")
+    self.authorized_proxies[tailnet_id][proxy] = 1
+    emit ProxyAuthorized(tailnet_id, proxy)
+    return true
+  }
+
+  fn revoke_proxy(tailnet_id: int, proxy: address): bool {
+    require(self.tailnets[tailnet_id].owner == caller, "not tailnet owner")
+    self.authorized_proxies[tailnet_id][proxy] = 0
+    emit ProxyRevoked(tailnet_id, proxy)
+    return true
+  }
+
+  // ============================================================
+  // Sessions
+  // ============================================================
+
+  fn open_session(
+    tailnet_id: int,
+    proxy: address,
+    class: int,
+    price_per_mb: int,
+    max_pay: int
+  ): bool {
+    require(self.paused == 0, "paused")
+    require(self.members[tailnet_id][caller] == 1, "not a tailnet member")
+    require(self.authorized_proxies[tailnet_id][proxy] == 1, "proxy not authorized")
+    require(class == CLASS_SHARED || class == CLASS_INTERNAL, "invalid class")
+    require(price_per_mb >= 0, "negative price")
+    require(max_pay >= self.min_session_deposit, "deposit below minimum")
+
+    require(self.tailnets[tailnet_id].treasury >= max_pay, "tailnet treasury insufficient")
+    self.tailnets[tailnet_id].treasury = self.tailnets[tailnet_id].treasury - max_pay
+
+    let sid = self.session_count + 1
+    self.session_count = sid
+    self.sessions[sid].tailnet_id = tailnet_id
+    self.sessions[sid].proxy = proxy
+    self.sessions[sid].opener = caller
+    self.sessions[sid].deposit = max_pay
+    self.sessions[sid].opened_at = epoch
+    self.sessions[sid].class = class
+    self.sessions[sid].price_per_mb = price_per_mb
+    self.sessions[sid].status = 0
+    emit SessionOpened(sid, tailnet_id, proxy, class, price_per_mb, max_pay, epoch)
+    return true
+  }
+
+  // The proxy submits the operator's claim. Equivocation (same
+  // proxy re-claims with a different bytes_used) triggers a
+  // proxy-bond slash via the proxy's own slash interface.
+  fn settle_claim(session_id: int, bytes_used: int): bool {
+    require(self.paused == 0, "paused")
+    require(bytes_used >= 0, "negative bytes")
+
+    require(self.sessions[session_id].status == 0, "session not open")
+    require(self.sessions[session_id].proxy == caller, "caller is not the session proxy")
+    let tid = self.sessions[session_id].tailnet_id
+    require(self.authorized_proxies[tid][caller] == 1, "proxy not authorized")
+
+    let prev_set = self.operator_claims[session_id].set
+    if prev_set == 1 {
+      let prev_bytes = self.operator_claims[session_id].bytes_used
+      if prev_bytes == bytes_used {
+        return true   // idempotent retry
+      }
+      // Equivocation: ask the proxy contract to slash its own bond.
+      // Refund the session deposit; settlement does not apply.
+      let dep = self.sessions[session_id].deposit
+      emit ProxyBondSlashed(caller, dep, "equivocation")
+      // NOTE: real `proxy.slash_bond(dep, "equivocation")`
+      // dispatch is a deferred upstream concern (open Q5).
+      self.sessions[session_id].status = 2
+      self.tailnets[tid].treasury = self.tailnets[tid].treasury + dep
+      emit SessionRefunded(session_id, "operator-equivocation")
+      return true
+    }
+
+    self.operator_claims[session_id].set = 1
+    self.operator_claims[session_id].bytes_used = bytes_used
+    self.operator_claims[session_id].claimed_at = epoch
+    emit SettleClaimed(session_id, caller, bytes_used)
+    return true
+  }
+
+  // The client confirms. On match → settle; on mismatch → record
+  // a public dispute and leave the session open for governance /
+  // sweep.
+  fn settle_confirm(session_id: int, bytes_used: int): bool {
+    require(self.paused == 0, "paused")
+    require(bytes_used >= 0, "negative bytes")
+
+    require(self.sessions[session_id].status == 0, "session not open")
+    require(self.sessions[session_id].opener == caller, "not session opener")
+
+    let oc_set = self.operator_claims[session_id].set
+    require(oc_set == 1, "proxy has not claimed yet")
+    let oc_bytes = self.operator_claims[session_id].bytes_used
+
+    if oc_bytes != bytes_used {
+      self.client_confirms[session_id].set = 1
+      self.client_confirms[session_id].bytes_used = bytes_used
+      self.client_confirms[session_id].claimed_at = epoch
+      emit SettleDispute(session_id, oc_bytes, bytes_used)
+      return true
+    }
+
+    let tid = self.sessions[session_id].tailnet_id
+    let s_class = self.sessions[session_id].class
+    let s_price = self.sessions[session_id].price_per_mb
+    let s_deposit = self.sessions[session_id].deposit
+    let s_proxy = self.sessions[session_id].proxy
+
+    // Internal-class + tailnet says don't charge → enforce by zeroing
+    // the effective price.  AML lacks if-expressions / uninitialized
+    // `let`, so we precompute a 0/1 multiplier instead.
+    let charge_mult = 1
+    if s_class == CLASS_INTERNAL && self.tailnets[tid].charge_internal_traffic == 0 {
+      charge_mult = 0
+    }
+    let total_paid = bytes_used * s_price * charge_mult
+    require(total_paid <= s_deposit, "claim exceeds escrow")
+
+    let protocol_fee = total_paid * self.protocol_fee_bps / BPS_DENOM
+    let net_pay = total_paid - protocol_fee
+    let refund = s_deposit - total_paid
+
+    self.sessions[session_id].status = 1
+    self.client_confirms[session_id].set = 1
+    self.client_confirms[session_id].bytes_used = bytes_used
+    self.client_confirms[session_id].claimed_at = epoch
+
+    if protocol_fee > 0 {
+      self.treasury = self.treasury + protocol_fee
+    }
+    if refund > 0 {
+      self.tailnets[tid].treasury = self.tailnets[tid].treasury + refund
+    }
+
+    if net_pay > 0 && self.proxy_pk_set[s_proxy] == 1 {
+      // Add net_pay (as constant) to the proxy's encrypted ledger.
+      // The proxy claims via fhe_verify_zero against its own key.
+      let cur = self.enc_earnings[s_proxy]
+      let cur_ct = fhe_deser(cur)
+      let pk = fhe_load_pk(self.proxy_pk[s_proxy])
+      let new_ct = fhe_add_const(pk, cur_ct, net_pay)
+      self.enc_earnings[s_proxy] = fhe_ser(new_ct)
+    }
+
+    emit SettleConfirmed(session_id, caller, bytes_used)
+    emit SessionSettled(session_id, s_proxy, s_class, bytes_used, total_paid, refund)
+    return true
+  }
+
+  fn sweep_expired_session(session_id: int): bool {
+    require(self.sessions[session_id].status == 0, "session not open")
+    let opened = self.sessions[session_id].opened_at
+    let grace = self.session_grace_epochs * SWEEP_GRACE_MULT_DEFAULT
+    require(epoch > opened + grace, "not yet sweepable")
+
+    let dep = self.sessions[session_id].deposit
+    let tid = self.sessions[session_id].tailnet_id
+    let bounty = dep * SWEEP_BOUNTY_DEFAULT_BPS / BPS_DENOM
+    let returned = dep - bounty
+    self.sessions[session_id].status = 2
+    self.tailnets[tid].treasury = self.tailnets[tid].treasury + returned
+    if bounty > 0 {
+      transfer(caller, bounty)
+    }
+    emit SessionSwept(session_id)
+    return true
+  }
+
+  // ============================================================
+  // Proxy HFHE pubkey + earnings claim
+  // ============================================================
+
+  // A proxy registers its HFHE pubkey + zero-ciphertext so the
+  // earnings ledger can accumulate. Caller must be the proxy.
+  fn proxy_register_keys(hfhe_pubkey: string, initial_enc_zero: string): bool {
+    require(self.proxy_pk_set[caller] == 0, "already registered")
+    self.proxy_pk[caller] = hfhe_pubkey
+    self.proxy_zero_ct[caller] = initial_enc_zero
+    self.enc_earnings[caller] = initial_enc_zero
+    self.proxy_pk_set[caller] = 1
+    return true
+  }
+
+  // Two-step claim: proxy submits `amount` and a zero-knowledge
+  // proof string that (enc_earnings - enc(amount)) decrypts to 0.
+  // AML calls fhe_verify_zero against the proxy's own key; on pass,
+  // the ledger is reset and OU is transferred.
+  fn claim_earnings(amount: int, proof: string): bool {
+    require(self.proxy_pk_set[caller] == 1, "no keys registered")
+    require(amount > 0, "amount must be > 0")
+    require(len(proof) > 0, "proof required")
+    let pk = fhe_load_pk(self.proxy_pk[caller])
+    let zero_ct = fhe_deser(self.proxy_zero_ct[caller])
+    let claim_ct = fhe_add_const(pk, zero_ct, amount)
+    let cur = fhe_deser(self.enc_earnings[caller])
+    let delta = fhe_sub(pk, cur, claim_ct)
+    require(fhe_verify_zero(pk, delta, proof), "proof not zero")
+    self.enc_earnings[caller] = self.proxy_zero_ct[caller]
+    transfer(caller, amount)
+    emit EarningsClaimed(caller, amount)
+    return true
+  }
+
+  // ============================================================
+  // Views
+  // ============================================================
+
+  view fn get_tailnet(tailnet_id: int): Tailnet {
+    return self.tailnets[tailnet_id]
+  }
+
+  view fn get_session(session_id: int): Session {
+    return self.sessions[session_id]
+  }
+
+  view fn is_proxy_authorized(tailnet_id: int, proxy: address): int {
+    return self.authorized_proxies[tailnet_id][proxy]
+  }
+
+  view fn is_member(tailnet_id: int, addr: address): int {
+    return self.members[tailnet_id][addr]
+  }
+
+  view fn get_program_treasury(): int {
+    return self.treasury
+  }
+
+  view fn get_encrypted_earnings(proxy: address): string {
+    return self.enc_earnings[proxy]
+  }
+}
