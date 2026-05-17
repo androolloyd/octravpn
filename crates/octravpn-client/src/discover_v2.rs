@@ -137,23 +137,30 @@ impl SessionClass {
 /// Resolve the sealed-policy passphrase from env > config > caller-arg.
 /// Returns `None` when none of the three are present; the caller decides
 /// whether to bail or prompt.
-pub(crate) fn resolve_passphrase(cfg: &V2Cfg, cli_override: Option<&str>) -> Option<String> {
+///
+/// The return is wrapped in `zeroize::Zeroizing<String>` so the heap
+/// buffer that holds the passphrase wipes on drop instead of sitting
+/// in the allocator's free list. P1-10 from docs/v2-threat-model.md.
+pub(crate) fn resolve_passphrase(
+    cfg: &V2Cfg,
+    cli_override: Option<&str>,
+) -> Option<zeroize::Zeroizing<String>> {
     if let Ok(s) = std::env::var("OCTRAVPN_SEALED_PASSPHRASE") {
         let trimmed = s.trim();
         if !trimmed.is_empty() {
-            return Some(trimmed.to_string());
+            return Some(zeroize::Zeroizing::new(trimmed.to_string()));
         }
     }
     if let Some(s) = cli_override {
         let trimmed = s.trim();
         if !trimmed.is_empty() {
-            return Some(trimmed.to_string());
+            return Some(zeroize::Zeroizing::new(trimmed.to_string()));
         }
     }
     if let Some(s) = cfg.sealed_passphrase.as_ref() {
         let trimmed = s.trim();
         if !trimmed.is_empty() {
-            return Some(trimmed.to_string());
+            return Some(zeroize::Zeroizing::new(trimmed.to_string()));
         }
     }
     None

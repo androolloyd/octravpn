@@ -101,6 +101,16 @@ pub(crate) struct ChainCfg {
     /// `./state/circle.toml` next to the working directory.
     #[serde(default)]
     pub circle_state_path: Option<String>,
+    /// Pin the TLS trust roots for `rpc_url` to these PEM bundle
+    /// files. Defeats CA-compromise MITM on the chain endpoint
+    /// (corporate proxy installing a rogue CA, malicious MDM,
+    /// compromised public CA). Empty / unset → use the system trust
+    /// store (default for back-compat). Each path must point at a
+    /// PEM-encoded cert blob; bundle multiple certs (full chain to
+    /// the issuer root) into one file. P0-2 from
+    /// docs/v2-threat-model.md.
+    #[serde(default)]
+    pub pinned_root_paths: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

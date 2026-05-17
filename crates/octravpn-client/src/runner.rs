@@ -48,7 +48,7 @@ pub(crate) struct RouteHop {
 
 impl Client {
     pub(crate) async fn new(cfg: Arc<ClientConfig>) -> Result<Self> {
-        let rpc = RpcClient::new(&cfg.chain.rpc_url);
+        let rpc = build_rpc(&cfg.chain)?;
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(10))
             .build()
@@ -324,4 +324,23 @@ fn print_wg_config(client: &Client) -> Result<()> {
 
 pub(crate) fn sign_call(kp: &KeyPair, call: serde_json::Value) -> Result<serde_json::Value> {
     octravpn_core::tx::sign_call(kp, call)
+}
+
+/// Build the RPC client honoring `[chain].pinned_root_paths`. Empty
+/// or unset → system trust store (current behaviour). Set → only the
+/// supplied PEM bundles are trusted. P0-2 from the v2 threat model.
+fn build_rpc(chain: &crate::config::ChainCfg) -> Result<RpcClient> {
+    let paths = chain.pinned_root_paths.as_ref();
+    let paths = paths.map(Vec::as_slice).unwrap_or(&[]);
+    if paths.is_empty() {
+        return Ok(RpcClient::new(&chain.rpc_url));
+    }
+    let mut blobs = Vec::with_capacity(paths.len());
+    for p in paths {
+        let pem = std::fs::read(p)
+            .with_context(|| format!("read pinned root {p}"))?;
+        blobs.push(pem);
+    }
+    RpcClient::new_with_pinned_roots(&chain.rpc_url, &blobs)
+        .map_err(|e| anyhow::anyhow!("pinned tls: {e}"))
 }

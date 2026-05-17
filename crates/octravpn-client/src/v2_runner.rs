@@ -79,8 +79,14 @@ async fn run_discover_v2(
              Set OCTRAVPN_SEALED_PASSPHRASE, pass --secret, or fill `[v2].sealed_passphrase`.",
         );
     }
-    let listings =
-        discover_v2::list(client, tailnet_id, &cfg.v2, passphrase.as_deref(), cache).await?;
+    let listings = discover_v2::list(
+        client,
+        tailnet_id,
+        &cfg.v2,
+        passphrase.as_deref().map(|z| z.as_str()),
+        cache,
+    )
+    .await?;
     if listings.is_empty() {
         println!(
             "no authorized circles found for tailnet {tailnet_id}.\n\
@@ -163,7 +169,7 @@ pub(crate) async fn connect_v2(
     // decryptable entry.
     let (chosen_id, policy) = if let Some(id) = circle_id_arg {
         let listing =
-            discover_v2::fetch_one(client, id, &cfg.v2, Some(&passphrase), &mut cache).await;
+            discover_v2::fetch_one(client, id, &cfg.v2, Some(passphrase.as_str()), &mut cache).await;
         match listing {
             CircleListing::Open { circle_id, policy, .. } => (circle_id, policy),
             CircleListing::Opaque { reason, .. } => bail!("can't decrypt policy for {id}: {reason}"),
@@ -171,7 +177,7 @@ pub(crate) async fn connect_v2(
             CircleListing::Error { error, .. } => bail!("circle {id} fetch error: {error}"),
         }
     } else {
-        pick_first_open(client, cfg, tailnet_id, &passphrase, &mut cache).await?
+        pick_first_open(client, cfg, tailnet_id, passphrase.as_str(), &mut cache).await?
     };
 
     info!(

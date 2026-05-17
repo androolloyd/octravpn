@@ -53,7 +53,7 @@ pub(crate) struct Hub {
 
 impl Hub {
     pub(crate) async fn new(cfg: NodeConfig) -> Result<Self> {
-        let rpc = RpcClient::new(&cfg.chain.rpc_url);
+        let rpc = build_rpc(&cfg.chain)?;
         let validator_addr = Address::from_display(&cfg.chain.validator_addr);
         let program_addr = Address::from_display(&cfg.chain.program_addr);
 
@@ -891,4 +891,25 @@ fn wallet_view_pubkey(wallet_secret: &[u8; 32]) -> [u8; 32] {
     // public key would let anyone with the on-chain address recompute
     // stealth tags — see `octravpn_core::stealth` module docs.
     octravpn_core::stealth::view_pubkey_from_wallet(wallet_secret)
+}
+
+/// Build the RPC client honoring `[chain].pinned_root_paths` if any.
+/// Empty / absent → system trust store (current behaviour). Set →
+/// only the supplied PEM bundles are trusted, defeating
+/// CA-compromise MITM on the chain endpoint. P0-2 from the v2 threat
+/// model.
+fn build_rpc(chain: &crate::config::ChainCfg) -> Result<RpcClient> {
+    let paths = chain.pinned_root_paths.as_ref();
+    let paths = paths.map(Vec::as_slice).unwrap_or(&[]);
+    if paths.is_empty() {
+        return Ok(RpcClient::new(&chain.rpc_url));
+    }
+    let mut blobs = Vec::with_capacity(paths.len());
+    for p in paths {
+        let pem = std::fs::read(p)
+            .with_context(|| format!("read pinned root {p}"))?;
+        blobs.push(pem);
+    }
+    RpcClient::new_with_pinned_roots(&chain.rpc_url, &blobs)
+        .map_err(|e| anyhow::anyhow!("pinned tls: {e}"))
 }

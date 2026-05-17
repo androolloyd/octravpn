@@ -23,6 +23,15 @@ pub(crate) struct ChainCfg {
     /// the v1.1 path is preserved unchanged.
     #[serde(default = "default_protocol_version")]
     pub protocol_version: String,
+    /// Pin the TLS trust roots for `rpc_url` to these PEM bundle files.
+    /// Empty / unset → use the system trust store (default). When set,
+    /// every chain RPC call must terminate at a cert signed by one of
+    /// the supplied roots, even if the OS trust store would otherwise
+    /// accept a different chain. Defeats CA-compromise MITM — a
+    /// corporate proxy installing a rogue CA, a malicious MDM, etc.
+    /// P0-2 from docs/v2-threat-model.md.
+    #[serde(default)]
+    pub pinned_root_paths: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

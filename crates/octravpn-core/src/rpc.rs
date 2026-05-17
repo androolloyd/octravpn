@@ -80,6 +80,42 @@ impl RpcClient {
         }
     }
 
+    /// Construct an RPC client whose TLS trust roots are *exactly* the
+    /// supplied PEM blobs — system trust store is disabled. Use this
+    /// when you want to pin to a specific issuer chain (e.g.
+    /// LetsEncrypt's ISRG Root X1 for `devnet.octrascan.io`) so that
+    /// a compromised CA in the OS / corporate-proxy trust store can't
+    /// MITM the chain RPC. Each PEM blob may carry multiple
+    /// certificates; an empty `pem_roots` vec falls back to system
+    /// trust (caller probably wants `new` in that case).
+    ///
+    /// P0-2 from docs/v2-threat-model.md.
+    pub fn new_with_pinned_roots(
+        endpoint: impl Into<String>,
+        pem_roots: &[Vec<u8>],
+    ) -> CoreResult<Self> {
+        let mut builder = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .tls_built_in_root_certs(false);
+        for blob in pem_roots {
+            // `from_pem_bundle` parses any number of certs from a single
+            // PEM blob — operators can ship the whole issuer chain as
+            // one file.
+            let certs = reqwest::Certificate::from_pem_bundle(blob)
+                .map_err(|e| CoreError::Rpc(format!("pinned cert parse: {e}")))?;
+            for cert in certs {
+                builder = builder.add_root_certificate(cert);
+            }
+        }
+        let http = builder
+            .build()
+            .map_err(|e| CoreError::Rpc(format!("build pinned tls client: {e}")))?;
+        Ok(Self {
+            endpoint: endpoint.into(),
+            http,
+        })
+    }
+
     async fn call<T: DeserializeOwned>(&self, method: &str, params: Value) -> CoreResult<T> {
         // Exponential backoff with jitter on transient failures (5xx,
         // network errors). Up to 4 attempts, capped at ~3s total wait.
