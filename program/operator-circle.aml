@@ -211,23 +211,32 @@ contract OctraVPNOperatorCircle {
     return sid
   }
 
-  // Operator self-meters: claims an additive byte delta. The
-  // signature must include the per-session nonce so the same
-  // delta can't be replayed across sessions.
+  // Operator self-meters: claims an additive byte delta. Authorized
+  // by `caller == self.owner` — Octra's chain runtime ed25519-verifies
+  // every tx envelope at submit, so when this entrypoint fires we
+  // already know the owner's wallet signed it; an additional in-AML
+  // sig check would only re-verify what the runtime already proved.
+  //
+  // Note: an earlier draft did `ed25519_ok(self.policy.wg_pubkey_resource_key,
+  // delta_payload, owner_sig)` to "verify the operator co-signed the
+  // delta"  — but `wg_pubkey_resource_key` is a sha256 hash, not a
+  // pubkey, so that call ALWAYS returns false. Auth then silently
+  // collapsed to the `caller == self.owner` fallback, which is what
+  // we explicitly assert below. Surfaced by docs/v2-threat-model.md
+  // (P0-3).
   fn meter_bytes(
     session_id: int,
     bytes_delta: int,
-    delta_payload: string,
-    owner_sig: string
+    delta_payload: string
   ): bool {
     require_not_paused()
     require(self.sessions[session_id].settled == 0, "session settled")
     require(bytes_delta > 0, "non-positive delta")
-    // delta_payload should encode (session_id, bytes_delta,
-    // session_nonce). Off-chain client verifies it; on-chain we
-    // only verify the owner sig under the circle owner's address.
-    require(ed25519_ok(self.policy.wg_pubkey_resource_key, delta_payload, owner_sig)
-      || caller == self.owner, "metering sig invalid")
+    require(caller == self.owner, "only owner can meter")
+    // delta_payload encodes (session_id, bytes_delta, session_nonce)
+    // and stays on chain in the SessionMetered event for off-chain
+    // auditors / dispute reconstruction. We don't parse it here.
+    require(len(delta_payload) > 0, "empty delta payload")
     self.sessions[session_id].bytes_used = self.sessions[session_id].bytes_used + bytes_delta
     self.sessions[session_id].last_update_epoch = epoch
     emit SessionMetered(session_id, bytes_delta, self.sessions[session_id].bytes_used)
