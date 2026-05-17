@@ -4,9 +4,23 @@
 //!
 //!   [chain]
 //!   rpc_url = "..."
-//!   program_addr = "oct..."          # OctraVPN program address
-//!   validator_addr = "oct..."        # this node's Octra validator address
+//!   program_addr = "oct..."          # OctraVPN program address (v1.1 or v2)
+//!   validator_addr = "oct..."        # this node's Octra wallet address
 //!   wallet_secret_path = "/keys/..." # used to sign transactions
+//!   protocol_version = "v1.1"        # "v1.1" (default) or "v2" — selects
+//!                                    # which registration flow runs at boot.
+//!                                    # v2 deploys a Circle, uploads sealed
+//!                                    # policy, and calls register_circle on
+//!                                    # the slim v2 registry. See
+//!                                    # docs/v2-operator-flow.md.
+//!   # v2-only: per-tailnet passphrase used to derive AES-GCM read keys for
+//!   # sealed assets stored inside the operator circle. Operators receive
+//!   # this from their tailnet owner at provisioning. Optional in v1.1.
+//!   sealed_passphrase = "..."        # OR set OCTRAVPN_SEALED_PASSPHRASE env
+//!   # v2-only: where to cache the predicted/deployed circle id so the
+//!   # operator doesn't re-derive on every restart. Default
+//!   # "./state/circle.toml".
+//!   circle_state_path = "./state/circle.toml"
 //!
 //!   [tunnel]
 //!   public_endpoint = "1.2.3.4:51820"
@@ -14,14 +28,18 @@
 //!   wg_secret_path = "/keys/wg.key"  # master from which WG + receipt keys derive
 //!
 //!   [pricing]
-//!   price_per_mb = 100               # raw OU per MB
+//!   price_per_mb = 100               # raw OU per MB (v1.1)
 //!   region = "eu-west"
+//!   # v2-only: separate tariffs per traffic class. Falls back to
+//!   # `price_per_mb` when missing.
+//!   price_per_mb_shared = 100        # what the chain stamps on shared sessions
+//!   price_per_mb_internal = 0        # intra-tailnet (often free)
 //!
 //!   [control]
 //!   listen = "0.0.0.0:51821"
 //!
 //!   [attestation]
-//!   poll_interval_secs = 30          # how often to recheck Octra-validator status
+//!   poll_interval_secs = 30          # how often to recheck operator stake
 
 use std::fs;
 use std::path::Path;
@@ -40,12 +58,49 @@ pub(crate) struct NodeConfig {
     pub attestation: AttestationCfg,
 }
 
+/// Which on-chain program shape the operator is talking to.
+///
+/// `V1_1` is the existing operator-wallet-as-identity flow against
+/// `program/main.aml`. `V2` is the Circle-native flow against
+/// `program/main-v2.aml`: a circle is deployed, an encrypted policy
+/// bundle is uploaded as a sealed asset, and `register_circle` is
+/// called with `value = MIN_CIRCLE_STAKE` (atomic register+bond).
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum ProtocolVersion {
+    #[serde(rename = "v1.1", alias = "v1")]
+    V1_1,
+    #[serde(rename = "v2")]
+    V2,
+}
+
+impl Default for ProtocolVersion {
+    fn default() -> Self {
+        Self::V1_1
+    }
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub(crate) struct ChainCfg {
     pub rpc_url: String,
     pub program_addr: String,
     pub validator_addr: String,
     pub wallet_secret_path: String,
+    /// Which AML program shape to talk to. Defaults to v1.1 so existing
+    /// deployed operators keep working unchanged.
+    #[serde(default)]
+    pub protocol_version: ProtocolVersion,
+    /// v2-only. Per-tailnet shared secret the operator gets at
+    /// provisioning time; passed to `encrypt_sealed_bytes` as the
+    /// passphrase for the AES-GCM read key. Empty/absent falls back to
+    /// the `OCTRAVPN_SEALED_PASSPHRASE` env var.
+    #[serde(default)]
+    pub sealed_passphrase: Option<String>,
+    /// v2-only. Where to persist the predicted/deployed circle id so
+    /// the operator doesn't re-derive on every restart. Defaults to
+    /// `./state/circle.toml` next to the working directory.
+    #[serde(default)]
+    pub circle_state_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -59,6 +114,26 @@ pub(crate) struct TunnelCfg {
 pub(crate) struct PricingCfg {
     pub price_per_mb: u64,
     pub region: String,
+    /// v2-only. Shared (public-internet exit) tariff. Falls back to
+    /// `price_per_mb` if missing so v1 configs still parse.
+    #[serde(default)]
+    pub price_per_mb_shared: Option<u64>,
+    /// v2-only. Internal (intra-tailnet) tariff. Default 0 — most
+    /// tailnets don't bill internal traffic.
+    #[serde(default)]
+    pub price_per_mb_internal: Option<u64>,
+}
+
+impl PricingCfg {
+    /// v2 shared tariff. Defaults to `price_per_mb` for back-compat.
+    pub(crate) fn shared_price(&self) -> u64 {
+        self.price_per_mb_shared.unwrap_or(self.price_per_mb)
+    }
+
+    /// v2 internal tariff. Defaults to 0 (intra-tailnet traffic free).
+    pub(crate) fn internal_price(&self) -> u64 {
+        self.price_per_mb_internal.unwrap_or(0)
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]

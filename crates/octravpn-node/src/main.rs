@@ -22,6 +22,7 @@ use tracing::{info, warn};
 
 mod audit;
 mod chain;
+mod chain_v2;
 mod config;
 mod control;
 mod events;
