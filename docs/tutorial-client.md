@@ -1,7 +1,23 @@
 # Your first OctraVPN session (5 minutes)
 
-This tutorial walks a brand-new user from a clean machine to a
-3-hop session running through the OctraVPN testnet.
+This tutorial walks a brand-new user from a clean machine to a working
+OctraVPN session. There are two flavours of session today, both shippable:
+
+- **v1.1 (public registry)** — a 3-hop onion session through validators
+  listed in a public on-chain registry. Use this if you just want
+  internet-anonymising traffic.
+- **v2 (circle-native tailnet)** — a session opened against an operator
+  circle that's been authorized into a tailnet you're a member of. The
+  operator's endpoint, WG pubkey, region and tariff are sealed under a
+  per-tailnet passphrase. Use this when you want hidden-exit semantics
+  and class-based routing (shared vs internal).
+
+Both paths are live on devnet today and gated by
+`[chain].protocol_version` in `client.toml` (`"v1.1"` or `"v2"`). The v2
+program is live at `oct3fxjrzfqh65ATo31eau8xRFBPiXh2Uzwue56EYkfVSj7`.
+The full v2 client walkthrough lives at
+[`docs/v2-client-flow.md`](v2-client-flow.md) — this tutorial only
+covers the smallest concrete example.
 
 ## What you'll need
 
@@ -152,11 +168,74 @@ Sample output:
 2026-05-10T08:37:43  INFO  settle_session submitted hash=88a2…
 ```
 
+## Step 7 — (v2 path) Join your first tailnet
+
+The v2 flow opens a session inside a tailnet against an operator circle
+the tailnet owner has authorized. Concretely, on devnet:
+
+1. Switch your `client.toml` to v2:
+
+   ```toml
+   [chain]
+   rpc_url          = "https://devnet.octrascan.io/rpc"
+   program_addr     = "oct3fxjrzfqh65ATo31eau8xRFBPiXh2Uzwue56EYkfVSj7"
+   protocol_version = "v2"
+   [v2]
+   key_id = "default"
+   ```
+
+2. Tailnet owner runs `precommit_join_token` and sends you, out-of-band
+   (PGP, Signal, vault): the token preimage and the per-tailnet sealed
+   passphrase. Full member-side flow in `docs/tailnet-user-guide.md` § 9.
+
+3. Redeem the token; owner authorizes a circle for you:
+
+   ```sh
+   octra cast call $PROGRAM redeem_join_token 0 <preimage_hex>
+   # owner: authorize_circle 0 <circle_id>
+   ```
+
+4. Set the passphrase and discover:
+
+   ```sh
+   export OCTRAVPN_SEALED_PASSPHRASE='correct horse battery staple'
+   octravpn discover v2 0
+   ```
+
+   Decryptable rows render region + shared/internal tariffs:
+
+   ```
+   octE5x…dqA  us-east  shared=10  internal=0  policy_v=7
+   ```
+
+   `[opaque]` = wrong passphrase / key_id; `[no policy yet]` = operator
+   hasn't sealed `/policy.json`.
+
+5. Open the session:
+
+   ```sh
+   octravpn connect-v2 \
+       --tailnet-id 0 \
+       --circle-id octE5x8WvhXB1FStpDmmfxkMmFKdnx5cL1Fr4gnry6aUdqA \
+       --class shared \
+       --deposit 200
+   ```
+
+   `shared` routes to the public internet; `internal` stays intra-tailnet.
+   Pricing is stamped at session-open from the registry — a later
+   `update_circle` won't move the goalposts on a live session.
+
+Bust a cached policy with `octravpn discover invalidate --circle-id <id>`
+(or `--all`).
+
 ## What to try next
 
-- `octravpn connect --hops 1` — fastest, least private.
-- `octravpn connect --region eu-west` — pin the exit region.
+- `octravpn connect --hops 1` — fastest, least private (v1.1).
+- `octravpn connect --region eu-west` — pin the exit region (v1.1).
+- `octravpn connect-v2 --class internal` — intra-tailnet routing.
 - `octravpn doctor` — diagnose any failure.
+- `docs/v2-client-flow.md` — the canonical v2 walkthrough.
+- `docs/tailnet-user-guide.md` — owner & member tailnet operations.
 - `docs/economics.md` § Live mainnet snapshot — see current fee/ou
   parameters.
 - `docs/tutorial-validator.md` — run your own node.

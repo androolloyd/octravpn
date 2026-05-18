@@ -252,3 +252,117 @@ all.
 Yes — `octravpn tailnet peers` lists them. Tailnet membership is
 intentionally public on the chain. The traffic patterns
 (who-talks-to-whom) are private; the membership graph is not.
+
+## 9. v2 substrate (circle-native tailnets)
+
+Everything above assumes v1.1 — the original public-registry flow. v2
+is the circle-native substrate that's live on devnet (program addr
+`oct3fxjrzfqh65ATo31eau8xRFBPiXh2Uzwue56EYkfVSj7`). It's gated on
+`[chain].protocol_version = "v2"` in `client.toml`; v1.1 configs are
+untouched. The canonical client walkthrough is
+[`docs/v2-client-flow.md`](v2-client-flow.md); this section covers the
+member-side operational flow.
+
+### 9.1 Provisioning a member (owner-side)
+
+In v2, operators are **circles** (not wallet addresses) and the set of
+operators a member can see is per-tailnet. The provisioning flow:
+
+1. Owner pre-commits a **join token** so the member can self-redeem
+   without exposing their address in a DM:
+
+   ```sh
+   PREIMAGE=$(openssl rand -hex 16)
+   HASH=$(printf '%s' "$PREIMAGE" | sha256sum | cut -d' ' -f1)
+   octra cast call $PROGRAM precommit_join_token 0 0x$HASH
+   ```
+
+2. Owner sends the member, **out-of-band** (PGP, Signal, vault): the
+   token preimage and the tailnet's **sealed-policy passphrase** (the
+   secret used to encrypt every authorized circle's `/policy.json`).
+
+3. Member redeems on chain (adds them to `tailnets[tid].members[]`):
+
+   ```sh
+   octra cast call $PROGRAM redeem_join_token 0 0x$PREIMAGE
+   ```
+
+4. Owner authorizes an operator circle for the tailnet:
+
+   ```sh
+   octra cast call $PROGRAM authorize_circle 0 octE5x…dqA
+   ```
+
+After step 4, `octravpn discover v2 0` shows the operator row
+decrypted and `octravpn connect-v2` can open a session against it.
+
+### 9.2 Why one passphrase per tailnet (caveat)
+
+The sealed-policy passphrase is **tailnet-wide today**, not per-member.
+Every authorized circle's `/policy.json` is sealed under it, and every
+member uses the same secret to decrypt. Trade-offs:
+
+- **Pro**: provisioning a new member is one on-chain call plus an
+  out-of-band passphrase share. No re-sealing of any asset.
+- **Con**: any current member can defect — leak the passphrase and
+  every authorized operator in the tailnet is decryptable by the
+  recipient. Removing the leaker on chain doesn't fix this.
+
+See [`docs/v2-threat-model.md`](v2-threat-model.md) §P1-3 for the full
+defection analysis. The roadmap entry is **per-member encrypted
+wraps** (each member gets their own AES key, owner rotates by reissuing
+wraps and bumping `policy_version`); that lands after v2 GA.
+
+### 9.3 Removing a member
+
+```sh
+octra cast call $PROGRAM remove_member 0 octABCDEF…
+```
+
+What the removed member loses, **going forward**:
+- They can no longer call `open_session` against any circle in this
+  tailnet — `register_session` rejects non-members.
+- The next `policy_version` bump (rotated WG keys / new endpoint) is
+  re-sealed; if you also rotate the **passphrase**, the removed member
+  can't decrypt new policies.
+
+What they keep, **retroactively**:
+- Any sealed policy they already cached locally is still decryptable
+  under the old passphrase. If you don't rotate the passphrase, they
+  could continue resolving the operator's endpoint + WG pubkey for as
+  long as those values don't change.
+
+Practical removal flow: `remove_member` → ask each operator to
+re-`circle_asset_put_encrypted /policy.json` under a freshly-picked
+passphrase → distribute the new passphrase to the remaining members.
+
+### 9.4 Per-class routing (shared vs internal)
+
+A v2 session is opened with a **class**:
+
+- `shared` — operator routes egress onto the public internet, charges
+  `price_per_mb_shared`.
+- `internal` — operator only routes intra-tailnet traffic, charges
+  `price_per_mb_internal` (often 0).
+
+Class is a member-side choice at `connect-v2 --class shared|internal`.
+The operator's policy advertises both prices; the AML enforces that
+the class you open under matches the class you pay for at settlement.
+
+### 9.5 Pricing transparency
+
+Prices are **stamped at session-open time** from the on-chain circle
+registry, not read fresh on every settle. An operator who calls
+`update_circle` mid-session to raise the tariff does **not** affect
+any session already open — those settle at the snapshotted price in
+`sessions[sid]`. Inspect live registry prices with
+`octra cast circle info <circle_id>`. `octravpn discover v2 <tid>`
+shows the **sealed policy's** prices; if those drift from the
+registry, the registry wins at settlement.
+
+### 9.6 Backwards compat
+
+If `[chain].protocol_version` is `"v1.1"` (the default) the v2 commands
+return a clear error and §§1–8 above keep working unchanged. To run
+both flows side by side, keep two `client.toml` files and select with
+`--config`.

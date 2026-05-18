@@ -192,6 +192,115 @@ The Windows MSI doesn't bundle wintun.dll due to license
 constraints. Install it separately from
 https://www.wireguard.com/install/.
 
+## v2 troubleshooting
+
+Everything in this section assumes `[chain].protocol_version = "v2"`
+in `client.toml`. The full v2 walkthrough is in
+[`docs/v2-client-flow.md`](v2-client-flow.md).
+
+### `octravpn discover v2` says "no sealed-policy passphrase available"
+
+The client looked in this precedence order and found nothing:
+`OCTRAVPN_SEALED_PASSPHRASE` env > `--secret <…>` flag >
+`[v2].sealed_passphrase` in `client.toml`. Set one. Prefer the env in
+production; the config field is fine for single-user dev if the file
+is `chmod 0600`. The CLI never prompts.
+
+### Every circle row shows `[opaque]`
+
+You decrypted nothing. AES-GCM derives the read key from three things
+baked into the envelope: **passphrase**, **key_id**, **circle_id**. A
+typo in any of them produces an indistinguishable failure (the GCM tag
+just won't verify). Check:
+
+- The passphrase the tailnet owner gave you is the one they passed to
+  `cast circle put-encrypted --passphrase …` when sealing.
+- `[v2].key_id` in your config matches the `--key-id` the operator
+  used at seal time (default: `default`).
+- The `circle_id` you're looking at is the one the owner authorized
+  for this tailnet — `octra cast circle info <id>` should show the
+  same circle.
+
+### `discover v2 <tid>` says "no authorized circles found for tailnet"
+
+The tailnet owner hasn't called `authorize_circle(tid, circle_addr)`
+yet, or you have the wrong tailnet id. Confirm with:
+
+```sh
+octra cast call $PROGRAM get_tailnet <tid>
+```
+
+The response surfaces the authorized circle set. If empty, ping the
+owner.
+
+### "circle inactive" at `connect-v2`
+
+The operator's circle is no longer eligible to register sessions. Two
+common reasons:
+
+- The operator was slashed (`gov_slash_operator` / `slash_double_sign`)
+  past the active threshold.
+- The operator voluntarily retired (`unbond_endpoint` →
+  `finalize_unbond`).
+
+Inspect status:
+
+```sh
+octra cast circle info <circle_id>
+```
+
+Pick a different authorized circle from `discover v2`.
+
+### Policy version mismatch / stale endpoint
+
+Decrypted policies live at `$XDG_CACHE_HOME/octravpn/policies/<id>.json`
+keyed on `plaintext_hash`. The cache busts automatically when the
+operator publishes a new sealed asset. For out-of-band rotations
+(CDN caching, manual passphrase rotation, key_id change):
+
+```sh
+octravpn discover invalidate --circle-id <id>   # or --all
+octravpn discover v2 <tid> --refresh            # force fresh fetch
+```
+
+### Operator side: `register_circle` fails / "circle deploy failed"
+
+v2 `register_circle` is **atomic** (deploy + bond in one call) and
+`payable`. The most common failure is under-funding: the program
+requires `value ≥ min_circle_stake` (currently `100_000_000` OU = 1
+OCT on devnet). Fund the deploy wallet from the faucet, retry. See
+[`docs/v2-operator-key-hygiene.md`](v2-operator-key-hygiene.md) for the
+fresh-wallet hygiene rule before you run the deploy.
+
+### HFHE / `settle_confirm` reverts
+
+The PVAC HFHE path is the known v1 gap that survived into v2: the
+encrypted-earnings settlement currently can't post a valid
+`settle_confirm` on devnet because the PVAC pubkey registration tx
+exceeds the devnet nginx RPC body cap (~1 MiB; pubkey blob is ~4 MiB).
+Mainnet accepts the full body. See
+[`docs/v2-threat-model.md`](v2-threat-model.md) §P0 and the
+`octra_devnet_rpc_body_cap` memo. Until the cap is raised on devnet:
+
+- Sessions open and meter fine.
+- `settle_confirm` reverts at the HFHE-verify step.
+- Use `claim_no_show` (post-grace) to recover deposit on devnet.
+
+### Operator daemon won't boot — `PlaintextKeyOnDisk`
+
+`[chain].require_sealed_keys = true` was set but a configured secret
+path still points at plaintext. Run the sealing flow:
+
+```sh
+export OCTRAVPN_KEY_PASSPHRASE='<strong passphrase>'
+octravpn-node --config /etc/octravpn/node.toml seal-keys
+# update node.toml to point at the *.sealed paths, then:
+octravpn-node --config /etc/octravpn/node.toml seal-keys --remove-plaintext
+```
+
+See [`docs/v2-operator-key-hygiene.md`](v2-operator-key-hygiene.md)
+§ "the `seal-keys` subcommand" for the full procedure.
+
 ## Performance issues
 
 ### High CPU on the node

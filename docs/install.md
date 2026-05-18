@@ -89,10 +89,39 @@ installer. Then from an elevated PowerShell:
 ```sh
 git clone https://github.com/octra-labs/octravpn
 cd octravpn
-cargo build --release -p octravpn-client -p octravpn-node
+
+# Client (octravpn). This is the v1.1 + v2 user binary.
+cargo build --release -p octravpn
+
+# Operator daemon (octravpn-node).
+cargo build --release -p octravpn-node
 ```
 
-Binaries land at `target/release/octravpn` and `target/release/octravpn-node`.
+Binaries land at `target/release/octravpn` and
+`target/release/octravpn-node`.
+
+For chain-side operations (deploying operator circles, sealing
+policy, posting tx envelopes against the v2 program) you also need
+`octra cast` from the sibling [`octra-foundry`](https://github.com/octra-labs/octra-foundry)
+repo:
+
+```sh
+git clone https://github.com/octra-labs/octra-foundry ../octra-foundry
+cargo build --release --manifest-path ../octra-foundry/Cargo.toml -p octra-cast
+# Binary at ../octra-foundry/target/release/octra-cast — symlink onto $PATH as `octra`.
+```
+
+For the encrypted-earnings settlement path you need the **pvac-sidecar**
+daemon. It's GPL-isolated; build via docker:
+
+```sh
+docker build -t octravpn/pvac-sidecar -f pvac-sidecar/Dockerfile .
+```
+
+The sidecar exposes a local gRPC surface that `octravpn-node` consumes
+for HFHE pubkey registration and the per-session encrypted-bytes
+accumulator. See `docker-compose.yml` for how the devnet harness wires
+it in.
 
 ## Provisioning
 
@@ -114,6 +143,23 @@ sudo octravpn-node init --config /etc/octravpn/node.toml \
                         --rpc-url https://octra.network/rpc
 sudo systemctl enable --now octravpn-node
 ```
+
+## Environment variables for v2
+
+The v2 substrate reads two passphrase env vars. Neither is prompted
+for at runtime — set them in the shell that launches the binary (or
+in your service unit's `Environment=` block):
+
+| Variable | Used by | Purpose |
+| --- | --- | --- |
+| `OCTRAVPN_SEALED_PASSPHRASE` | client | Decrypts each operator circle's sealed `/policy.json`. Tailnet-wide; the same value across every member of a given tailnet. |
+| `OCTRAVPN_KEY_PASSPHRASE` | node (operator) | Unwraps `*.sealed` wallet/WG secrets when `[chain].require_sealed_keys = true`. Per-operator. |
+
+Both fall back to legacy / config-file paths for back-compat (see the
+v2 client flow + key hygiene docs); production deployments should use
+the env vars. Storing either in a plaintext `.env` defeats the point —
+prefer your platform keyring (macOS Keychain, Linux kernel keyring,
+GNOME secret-service, KeepassXC, AWS/GCP secret manager).
 
 ## Permissions cheat sheet
 

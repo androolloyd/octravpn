@@ -148,6 +148,62 @@ connect).
 
 See `SECURITY.md`. **Don't** open a public GitHub issue.
 
+## What's the difference between v1.1 and v2?
+
+v1.1 is the public-registry flow: validators register endpoints on a
+single global map, anyone can list them with `octravpn nodes`, and
+clients open sessions against an address picked from that list. v2 is
+the circle-native substrate: each operator is a **Circle** (Octra's
+deterministic-id sub-environment), the operator's endpoint / WG pubkey
+/ region / tariff are AES-GCM-sealed inside the circle under a
+per-tailnet passphrase, and only tailnet members with that passphrase
+can decrypt the row. The two paths live side by side in the same
+binary and are selected by `[chain].protocol_version` in `client.toml`
+(`"v1.1"` or `"v2"`). The v2 program is live on devnet at
+`oct3fxjrzfqh65ATo31eau8xRFBPiXh2Uzwue56EYkfVSj7`. See
+[`docs/v2-circles-design.md`](v2-circles-design.md) §0 for the live
+status snapshot.
+
+## Are operator identities really hidden in v2?
+
+**Conditionally.** The sealed `/policy.json` keeps the endpoint URL,
+WG pubkey, region, and tariff invisible to non-members. But the
+`deploy_circle` and `register_circle` transactions are normal Octra
+txs with `from = <deployer_wallet>` and `to_ = <circle_id>`; that
+binding is permanent on chain, scrapable by octrascan, and re-stated
+by every owner action (`bond_endpoint`, `update_circle`,
+`finalize_unbond`, every slash). So the public can map
+`circle_id ↔ deploy_wallet`. **Hidden-exit semantics only hold if the
+deploy wallet is fresh, single-purpose, and never touches anything
+else.** The full hygiene rules + funding patterns live at
+[`docs/v2-operator-key-hygiene.md`](v2-operator-key-hygiene.md), and
+the threat-model layer-by-layer analysis is in
+[`docs/v2-threat-model.md`](v2-threat-model.md) §1B.
+
+## Can a member be removed retroactively?
+
+No. Removing a member (`remove_member`) blocks them from opening new
+sessions in this tailnet immediately, but anything they cached locally
+remains decryptable under the passphrase they already hold. The
+operational fix is **rotate the sealed-policy passphrase**:
+re-`circle_asset_put_encrypted` every authorized circle's
+`/policy.json` under a new passphrase and distribute it only to the
+remaining members. Live sessions are unaffected — pricing is stamped
+at session-open time from the on-chain registry. See
+[`docs/tailnet-user-guide.md`](tailnet-user-guide.md) §9.3.
+
+## Why is the sealed passphrase per-tailnet, not per-member?
+
+Trade-off. Per-tailnet keeps provisioning cheap (one new-member call
++ one out-of-band passphrase share) and keeps the sealed assets small
+(one ciphertext per circle, not N). The cost is that any member can
+defect — leaking the passphrase reveals every authorized operator in
+the tailnet, and removing the leaker doesn't undo that. See
+[`docs/v2-threat-model.md`](v2-threat-model.md) §P1-3. The roadmap
+upgrade is **per-member encrypted wraps**: each member gets their own
+AES key, the owner rotates by reissuing wraps and bumping
+`policy_version`. That lands after v2 GA.
+
 ## Where's the roadmap?
 
 `docs/gap-analysis.md` § Tier A–F is the prioritized backlog.
