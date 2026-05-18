@@ -1,322 +1,380 @@
 # OctraVPN architecture
 
-This document is the long-form companion to the README. It walks through
-each subsystem's responsibilities, the wire formats between them, and
-the security argument tying them to the formal specs.
+This document is the long-form companion to the README. It walks
+through each subsystem's responsibilities, the wire formats between
+them, and the security argument tying them to the formal specs.
 
-## 1. The on-chain program (`program/main.aml`)
+Two AML programs are live on devnet in parallel and selected by the
+node/client `protocol_version` config flag:
 
-OctraVPN's on-chain program holds:
+- **v1.1** — `program/main.aml`, deployed at
+  `oct2YehVLezCi2RCcSkURc3nyyYtzxmspwGHHALm6pjkUvJ`. Public operator
+  registry, two-tx settle, cryptographic `slash_double_sign`.
+- **v2** — `program/main-v2.aml`, deployed at
+  `oct3fxjrzfqh65ATo31eau8xRFBPiXh2Uzwue56EYkfVSj7`. Slim registry
+  keyed by `circle_id`; identity + ACL + policy live in each
+  operator's Octra Circle.
 
-- **Validator registry**: `validators: map[address]ValidatorRecord`.
-  Each record stores bond, endpoint, WG pubkey, FHE pubkey, stealth
-  view pubkey, region, price, attestation epoch, jail state.
-- **Sessions**: `sessions: map[bytes]Session`. Each session stores the
-  client's ephemeral session pubkey, route commitments (1–3), deposit,
-  open epoch, last accepted seq, status, and the client-supplied refund
-  blob.
-- **Encrypted earnings ledger**: `enc_earnings: map[address]bytes`. Each
-  validator's running balance is held as an FHE ciphertext under
-  *their own* public key, so only they can decrypt.
+§1 below covers v1.1 (production shape); §2 covers v2 (current
+substrate); §3-§5 cover shared off-chain components, wire formats,
+and the safety argument.
 
-The constructor sets governance parameters (`min_bond`, deposit,
-grace windows, slash split). Owner can `set_params`, `set_paused`, and
-transfer ownership. The owner cannot move funds; everything goes
-through the explicit transfer/private-transfer paths.
+## 1. v1.1 — public registry (`program/main.aml`)
 
-### 1.1 Validator lifecycle
+OctraVPN v1.1's on-chain program holds:
+
+- **Endpoint registry**: `endpoints: map[address]EndpointRecord`.
+  Each record stores bond, endpoint URL, WG pubkey, HFHE pubkey,
+  view pubkey, region, `price_per_mb`, attestation epoch, jail
+  state, and (v1.1) `receipt_pubkey` for cryptographic slashing.
+- **Sessions**: `sessions: map[u64]Session` — opener, exit, deposit,
+  open epoch, status, two-tx claim/confirm slots.
+- **Encrypted earnings ledger**: `enc_earnings: map[address]bytes`.
+  Each operator's running balance is held as an HFHE ciphertext
+  under *their own* pubkey, so only they can decrypt.
+
+### 1.1 Endpoint lifecycle
 
 ```
-register_validator(endpoint, wg_pk, fhe_pk, view_pk, region, price, attest_sig)
-    requires:
-        caller == origin
-        not registered
-        value >= min_bond
-        verify_ed25519_acct(caller, sha256(self_addr || tag_bond || epoch), attest_sig)
-    effects:
-        validators[caller] = ValidatorRecord{...}
-        enc_earnings[caller] = fhe_zero(fhe_pk)
-        active_index.append(caller)
+bond_endpoint() (payable)
+    requires value >= MIN_ENDPOINT_STAKE
+    effects  endpoint_stake[caller] += value
 
-refresh_attestation(attest_sig)
-    requires:
-        caller == origin
-        verify_ed25519_acct(caller, sha256(self_addr || tag_attest || epoch), attest_sig)
-    effects:
-        validators[caller].last_attest_epoch = epoch
-        if validators[caller].bond >= min_bond:
-            validators[caller].jailed_at = 0   // un-jail offline jails
+register_endpoint(endpoint, wg_pk, fhe_pk, view_pk, region,
+                  price_per_mb, receipt_pubkey)
+    requires endpoint_stake[caller] >= MIN_ENDPOINT_STAKE
+    effects  endpoints[caller] = EndpointRecord{...}
 
-add_bond() / request_unbond() / complete_unbond()
+unbond_endpoint() / finalize_unbond()
     standard timer-based unbonding.
 ```
 
-### 1.2 Session lifecycle
+### 1.2 Session lifecycle — two-tx settle
 
-The v1 AML uses a **two-tx settle**: operator submits `settle_claim`,
+The v1.1 AML uses a **two-tx settle**: operator submits `settle_claim`,
 client submits `settle_confirm`. Settlement only applies when both
-agree on `bytes_used`. Equivocation (operator claims twice with
-different values) triggers an in-AML slash; client/operator
+agree on `bytes_used`. Equivocation triggers an in-AML slash;
 disagreement records a public `SettleDispute` event and leaves the
 session open for governance.
 
-The earlier signature-aggregated `settle_session` design is gone:
-the AML cannot call `verify_ed25519` at compile time, so we couldn't
-cryptographically verify a dual-signed receipt inside the program.
-Both `settle_claim` and `settle_confirm` are themselves
-ed25519-verified at the tx layer by the Octra runtime — the AML
-just trusts that `caller` is who they say they are.
-
 ```
 open_session(tailnet_id, exit_addr, max_pay)
-    requires:
-        is_member(tailnet_id, caller)
-        endpoints[exit_addr].active == 1
-        tailnet_exits[tailnet_id][exit_addr] == 1
-        max_pay >= min_session_deposit
-        tailnets[tailnet_id].treasury >= max_pay
-    effects:
-        tailnet.treasury -= max_pay
-        session_count++
-        sessions[session_count] = Session{
-            tailnet_id,
-            exit: exit_addr,
-            opener: caller,
-            deposit: max_pay,
-            opened_at: epoch,
-            status: open
-        }
-        emit SessionOpened(...)
+    requires is_member(tailnet_id, caller)
+             endpoints[exit_addr].active == 1
+             max_pay >= min_session_deposit
+    effects  tailnet.treasury -= max_pay
+             sessions[++session_count] = Session{tailnet, exit, opener, deposit, open}
 
-settle_claim(session_id, bytes_used)
-    // Operator-side first half.
-    requires:
-        sessions[session_id].status == open
-        sessions[session_id].exit == caller
-        endpoints[caller].active && stake[caller] >= MIN_STAKE
-        !slashed[caller]
-    effects:
-        if operator_claims[session_id].set:
-            if same bytes_used: no-op (idempotent retry)
-            else: SLASH operator + refund deposit + status=refunded
-        else:
-            operator_claims[session_id] = {bytes_used, claimed_at}
-            emit SettleClaimed(...)
+settle_claim(session_id, bytes_used)        // operator first
+    if operator_claims[s].set && claim.bytes_used != bytes_used:
+        SLASH operator (in-AML equivocation)
+    else: record claim
 
-settle_confirm(session_id, bytes_used)
-    // Client-side second half. Only opener can call.
-    requires:
-        sessions[session_id].status == open
-        sessions[session_id].opener == caller
-        operator_claims[session_id].set
-    effects:
-        if operator_claims[session_id].bytes_used != bytes_used:
-            client_confirms[session_id] = {bytes_used, claimed_at}
-            emit SettleDispute(...)   // session stays open
-        else:
-            total = bytes_used * endpoints[exit].price_per_mb
-            require total <= deposit
-            protocol_fee = total * fee_bps / 10000
-            net_pay = total - protocol_fee
-            refund = deposit - total
-            enc_earnings[exit] += net_pay   // HFHE add_const
-            treasury += protocol_fee
-            tailnet.treasury += refund
-            sessions[session_id].status = settled
-            emit SettleConfirmed(...) ; emit SessionSettled(...)
+settle_confirm(session_id, bytes_used)      // client second
+    if claim.bytes_used != bytes_used:
+        emit SettleDispute  (session stays open)
+    else:
+        total = bytes_used * endpoints[exit].price_per_mb
+        protocol_fee = total * fee_bps / 10000
+        enc_earnings[exit] += (total - protocol_fee)   // HFHE add_const
+        treasury += protocol_fee
+        tailnet.treasury += deposit - total            // refund
+        sessions[s].status = settled
 
-claim_no_show(session_id)
-    requires:
-        sessions[session_id].status == open
-        epoch >= opened_at + session_grace_epochs
-        !operator_claims[session_id].set
-    effects:
-        tailnet.treasury += deposit
-        sessions[session_id].status = refunded
-
-sweep_expired_session(session_id)
-    long-tail cleanup if neither side closes the session: 1% bounty
-    to the sweeper, rest returned to tailnet treasury.
+claim_no_show / sweep_expired_session       // long-tail cleanup
 ```
 
 #### Hash-precommit join tokens
 
 Tailnet owners pre-publish `sha256(preimage)` via
 `precommit_join_token`; anyone holding the preimage redeems via
-`redeem_join_token`, which `sha256`-checks and joins them. No
-signature verification needed — the preimage IS the capability.
-This replaced the earlier "signed-token" design that needed
-`verify_ed25519`.
+`redeem_join_token`. No signature verification needed — the
+preimage IS the capability.
 
-### 1.3 Earnings claim (validator)
+### 1.3 Earnings claim
 
 ```
 claim_earnings(amount_proof, claimed_amount, stealth_output)
-    requires:
-        validators[caller].bond > 0
-        claimed_amount > 0
-        fhe_verify_decrypt(enc_earnings[caller], claimed_amount, amount_proof,
-                           validators[caller].fhe_pubkey)
-    effects:
-        enc_earnings[caller] = fhe_zero(fhe_pubkey)
-        emit_private_transfer(stealth_output, claimed_amount)
+    fhe_load_pk(caller) → operator's PVAC pubkey
+    fhe_verify_decrypt(enc_earnings[caller], claimed_amount, proof, pk)
+    enc_earnings[caller] = fhe_zero(pk)
+    emit_private_transfer(stealth_output, claimed_amount)
 ```
 
-The stealth output is a one-time token derived client-side from the
-validator's view pubkey + a fresh nonce. Observers cannot link the
-payout to the registered validator.
+### 1.4 Cryptographic equivocation slash — `slash_double_sign`
 
-### 1.4 Off-chain receipt equivocation slashing (`slash_double_sign`)
-
-The v1 AML carries two independent equivocation-slash paths, both
-mirroring the same 90% burn / 10% bounty split:
-
-1. **In-AML equivocation slash** (inside `settle_claim`): a second
-   `settle_claim` from the same operator on the same session with
-   different `bytes_used` is detected by comparing against the stored
-   first claim. No cryptography needed — the chain witnesses both
-   txs.
-2. **Off-chain dual-sig equivocation slash** (`slash_double_sign`):
-   the off-chain dual-signed-receipt protocol in
-   `crates/octravpn-core/src/receipt.rs` makes the operator's
-   `receipt_pubkey` (stored in `EndpointRecord`, registered via
-   `register_endpoint`) a non-repudiation anchor. Canonical payload:
-
-   ```text
-   H("octravpn-receipt-v1" || session_id (8B BE) || seq (8B BE)
-                            || bytes_used (8B BE) || blind (32B))
-   ```
-
-   The slasher submits two distinct signed payloads + sigs; AML's
-   `ed25519_ok(receipt_pubkey, payload, sig)` (confirmed 2026-05-14
-   by the Octra dev team, mainnet reference
-   `octBDvZSiTqdEBAyFSp79CHeoLMR9MzHugX9YkHtuQ57MRB`) verifies both.
-   Two distinct signed payloads under one receipt key are evidence
-   of equivocation regardless of what the payloads encode, so AML
-   doesn't have to parse them.
+The 2026-05-14 Octra dev-team announcement confirmed
+`ed25519_ok(pk, msg, sig) -> bool`. v1.1 stores the operator's
+`receipt_pubkey` in `EndpointRecord` and exposes:
 
 ```
 slash_double_sign(operator, session_id, payload_a, sig_a, payload_b, sig_b)
-    requires:
-        endpoints[operator].active != 0  (operator was registered)
-        !endpoint_slashed[operator]
-        payload_a != payload_b
-        ed25519_ok(endpoints[operator].receipt_pubkey, payload_a, sig_a)
-        ed25519_ok(endpoints[operator].receipt_pubkey, payload_b, sig_b)
-    effects:
-        total = endpoint_stake[op] + endpoint_unbonding_stake[op]
-        burn = total * slash_burn_bps / BPS_DENOM   (90%)
-        bounty = total - burn                       (10%)
-        endpoint_stake[op] = 0
-        endpoint_unbonding_stake[op] = 0
-        endpoint_slashed[op] = 1
-        endpoints[op].active = 0
-        treasury += burn
-        transfer(caller, bounty)
-        emit OperatorSlashed(op, total, burn, bounty)
+    requires endpoints[operator].active && !slashed
+             payload_a != payload_b
+             ed25519_ok(receipt_pubkey, payload_a, sig_a)
+             ed25519_ok(receipt_pubkey, payload_b, sig_b)
+    effects  burn = total_stake * slash_burn_bps / 10000     (90%)
+             bounty = total_stake - burn                       (10%)
+             zero stake, mark slashed, transfer bounty to caller
 ```
 
-Use cases:
-- An off-chain dispute resolver that holds two contradictory
-  receipts (e.g. for the same `(session_id, seq)`) can land both
-  on-chain via `slash_double_sign` and earn the bounty.
-- A client whose node-side counterparty signed two different
-  `bytes_used` values for the same `seq` has direct recourse.
-- Governance slash (`gov_slash_operator`) remains for cases without
-  cryptographic evidence (e.g. censoring traffic).
+Two distinct signed payloads under one receipt key are evidence of
+equivocation regardless of what the payloads encode, so the AML
+doesn't have to parse them.
 
-The Lean lemmas `slashDoubleSign_slashes_stake`,
-`slashDoubleSign_pays_bounty`,
-`slashDoubleSign_idempotent_when_already_slashed`,
-`slashDoubleSign_distinct_payloads_required` in
-`proofs/lean/OctraVPN/Lemmas.lean` model the post-slash state
-shape. The TLA `SlashDoubleSign` action and `Inv_DoubleSignSlashable`
-invariant in `proofs/tla/OctraVPN.tla` cover the model-checking
-side (40K+ distinct states, terminates in <1s).
+The Lean lemmas `slashDoubleSign_*` and the TLA `SlashDoubleSign`
+action + `Inv_DoubleSignSlashable` invariant cover the chain-side
+formal argument.
 
-## 2. Off-chain components
+## 2. v2 — circle-keyed, slim registry (`program/main-v2.aml`)
 
-### 2.1 `octravpn-core`
+v2 splits the operator's identity, policy, ACL, and metering into a
+per-operator Octra **Circle** (an Isolated Execution Environment)
+and keeps only money, sessions, and slashing on the main program.
+
+### 2.1 Slim registry shape
+
+`program/main-v2.aml` (28 entrypoints) keeps:
+
+- `circles: map[address]CircleRecord` — owner wallet,
+  `receipt_pubkey` (base64), region, `price_per_mb_shared`,
+  `price_per_mb_internal`, `active`, registration epoch.
+- `tailnets: map[u64]Tailnet` — owner, treasury, member count,
+  ACL policy ref, `charge_internal_traffic` toggle.
+- `authorized_circles: map[u64]map[address]int` — per-tailnet
+  ACL of which circles can be `open_session`'d against.
+- `sessions: map[u64]Session` — `circle: address` replaces the v1.1
+  `exit: address`; stamp the per-class `price_per_mb` at open time
+  so live sessions are immune to mid-session price changes.
+- `enc_earnings: map[address]bytes` — keyed on `circle_id`,
+  HFHE-accumulated.
+
+It drops: `endpoints`, `update_endpoint`, `rotate_keys` — those
+move into the circle, since redeploying a circle changes its
+`circle_id` and the operator re-registers under the new id.
+
+### 2.2 Operator boot sequence in v2
+
+`octravpn-node` (`crates/octravpn-node/src/chain_v2.rs`) automates:
+
+1. **Predict** `circle_id` deterministically via
+   `octra_core::circle::circle_id_of_deploy(deployer, nonce, deploy_payload)`.
+   Output is a 47-char `oct…` address (sha256 + base58 over
+   `(deployer, nonce, payload)`).
+2. **Check** the registry: `circle_info(circle_id)` — skip the rest
+   if already deployed + registered.
+3. `deploy_circle` (normal Octra tx, `from=deployer → to_=circle_id`).
+4. `circle_asset_put_encrypted` — uploads the sealed
+   `/policy.json` keyed on `resource_key(circle_id, "/policy.json")`.
+   Envelope format below (§4.4).
+5. `register_circle(circle, receipt_pubkey_b64, region, price_shared, price_internal)`
+   carrying `value = MIN_CIRCLE_STAKE`. In v2 this entrypoint is
+   declared `payable` (`main-v2.aml:455`) so registration and the
+   initial bond are **atomic** in one tx — the chicken-and-egg
+   that surfaced in the live e2e (`bond_endpoint` required an
+   already-registered circle; `register_circle` required an
+   already-bonded circle) is fixed by making register-with-bond
+   the only entrypoint.
+
+PVAC pubkey registration is a separate per-wallet step (run once
+per deployer wallet, not per-circle) because Octra's PVAC registry
+is wallet-keyed: `octra cast register-pvac` (foundry sibling)
+signs `"register_pvac|<addr>|<sha256_hex(pk)>"` and submits
+`octra_registerPvacPubkey`. v2 looks up the HFHE pubkey via
+`fhe_load_pk(circles[c].owner)` rather than `fhe_load_pk(circle)`
+because circles are contracts with no keypair.
+
+### 2.3 Client discovery in v2
+
+`octravpn discover v2 <tailnet_id>` and `octravpn connect-v2`
+(`crates/octravpn-client/src/discover_v2.rs`):
+
+1. List `authorized_circles[tailnet_id]` from the registry → set
+   of `circle_id` values approved by the tailnet owner.
+2. For each, fetch the sealed asset by
+   `circle_asset_ciphertext_by_resource_key(circle_id, "/policy.json")`.
+   This RPC is **path-private**: the chain only sees that some
+   resource_key was fetched, not which logical path.
+3. Decrypt with the shared tailnet passphrase (PBKDF2-SHA256-120k
+   → AES-GCM-256). The plaintext carries the operator's WG endpoint,
+   pubkey, region, and tariffs.
+4. `open_session(tailnet_id, circle, class, max_pay)` —
+   `class ∈ {CLASS_SHARED=0, CLASS_INTERNAL=1}`, tariff stamped from
+   the registry at open time.
+
+### 2.4 Receipt context binding (P1-5)
+
+Every receipt now binds the deployment context, so a receipt minted
+under v1.1 / circle X / chain A cannot be replayed against v2 /
+circle Y / chain B. `crates/octravpn-core/src/receipt.rs` defines
+the v1.2 signing payload as
+
+```
+sha256("octravpn-receipt-v1" ||
+       program_addr (32B) ||
+       chain_id (u32 BE) ||
+       circle_id_canonical (32B) ||      // 32 zero bytes in v1.1
+       session_id (u64 BE) ||
+       seq (u64 BE) ||
+       bytes_used (u64 BE) ||
+       blind (32B))
+```
+
+Operators set `[chain].chain_id` in `node.toml` (defaults to
+`CHAIN_ID_DEVNET = 0x6F637464`); clients mirror via
+`[chain].chain_id` in `client.toml`. Tests
+`cross_program_receipt_rejection`, `cross_chain_receipt_rejection`,
+`cross_circle_receipt_rejection` in `receipt.rs` and proptest
+variants in `tests/prop_receipt.rs` assert the binding.
+
+### 2.5 Receipt journal (P1-8 / P1-9)
+
+`crates/octravpn-core/src/receipt_journal.rs` persists
+`(session_id → last_signed_seq)` to disk. The journal is fsync'd
+(tempfile + persist + sync_all on both the file and the parent dir)
+**before** any `Receipt` is signed. Daemon restarts reload the floor
+and shadow `ControlSession.last_seq = max(in_mem, journal_floor)`,
+so an OOM / segfault / signal between two receipts can no longer
+trick the daemon into signing two distinct receipts at the same
+`(session_id, seq)`. Default path `./state/receipts.bin`, overridable
+via `[control].receipt_journal_path`.
+
+### 2.6 Sealed key storage (P1-6)
+
+`crates/octravpn-node/src/seal.rs` adds the
+`octravpn-node seal-keys` / `unseal-keys` subcommands. They wrap
+the configured wallet + WG keys under the
+`OCTRA-WALLET-V1` passphrase envelope
+(ChaCha20-Poly1305 + PBKDF2-SHA256-120k), atomic-write via tempfile
++ fsync, idempotent on re-runs. Strict mode
+(`[chain].require_sealed_keys = true`) refuses to boot if any
+configured secret is still plaintext, surfacing
+`CoreError::PlaintextKeyOnDisk` with the suggested `seal-keys`
+CLI quoted in the error. Passphrase comes from
+`OCTRAVPN_KEY_PASSPHRASE`. Devnet keys remain plaintext by default
+for back-compat with the existing `e2e.sh` harness.
+
+### 2.7 HFHE settlement routing
+
+The HFHE ledger in v2 stores ciphertexts under `circle_id`, but
+PVAC pubkey registration is **per-wallet** (Octra's PVAC registry
+shape). Both `settle_confirm` and `claim_earnings` route through
+the circle's owner:
+
+```
+let pk = fhe_load_pk(circles[c].owner)   // main-v2.aml:790, :858
+```
+
+The PVAC sidecar (`pvac-sidecar/`, GPL-2+, isolated as a separate
+process) produces chain-compatible PVAC pubkey, ciphertext and
+zero-proof blobs from the upstream `octra-labs/webcli` PVAC
+reference. The Rust workspace talks to it over JSON-over-stdio; no
+GPL symbols cross into the MIT/Apache crates.
+
+### 2.8 Operator-circle (per-operator program)
+
+`program/operator-circle.aml` is the in-circle program each operator
+deploys. It compiles against the AML grammar (verified via
+`octra_compileAml`) and carries:
+
+- **Sealed policy resource_keys** — the encrypted `/policy.json`
+  is stored by `resource_key` so non-members can't enumerate it.
+- **Member ACL** — `commit_member(member, receipt_pk_b64, sig_b64)`
+  verifies the acceptance signature via `ed25519_ok` and binds the
+  member's wallet to the circle's ACL.
+- **Per-session metering counters** — `meter_bytes` accepts deltas
+  signed by the circle owner (P0-3 fixed in commit `b9aedf7` — the
+  earlier broken `ed25519_ok` call used a resource_key hash as the
+  pubkey arg; the dead branch was dropped, caller-auth is now the
+  documented + enforced contract).
+
+### 2.9 Pause semantics
+
+`pause` halts USER flows only (`open_session`, `settle_*`,
+`bond_endpoint`, etc.). Governance entrypoints
+(`withdraw_program_treasury`, `set_params`, `transfer_ownership`,
+`set_paused`) intentionally bypass pause — a compromised owner can
+`set_paused(0)` first anyway, so gating governance on pause adds no
+defense and breaks emergency-response (refunds, migrations). v1.1
+had a brief detour gating these on pause; reverted in commit
+`d7aaa65`.
+
+## 3. Off-chain components (shared)
+
+### 3.1 `octravpn-core`
 
 Shared crate. Defines `Address`, `KeyPair`, `Receipt`, `SignedReceipt`,
-`Commitment`, `Onion`, `SessionId`, `ValidatorRecord`, plus the `RpcClient`
-covering every Octra RPC method we touch.
+`Commitment`, `Onion`, `SessionId`, `EndpointRecord` (v1.1) /
+`CircleRecord` (v2), plus the `RpcClient` covering every Octra RPC
+method the workspace touches. Critical invariants:
 
-Critical invariants encoded here:
-
-- Receipt canonical signing payload = `sha256(tag || session || seq || len || ct)`.
-  Identical Rust↔AML serialization is property-checked by
+- Receipt canonical signing payload is the v1.2 hash described in §2.4.
+  Identical Rust ↔ AML serialization is property-checked in
   `prop_canonicalization.rs`.
-- `SignedReceipt::check_monotonic` rejects equal seqs.
-- Pedersen commitment is hiding under random blinds and binding by hash.
+- `SignedReceipt::check_monotonic` rejects equal seqs; the receipt
+  journal (§2.5) makes the check survive restart.
+- Pedersen commitment is hiding under random blinds and binding by
+  hash.
 
-### 2.2 `octravpn-node`
+### 3.2 `octravpn-node`
 
-Validator-side daemon. Subcommands:
+Operator daemon. Subcommands:
 
-- `register` — submit `register_validator` once per validator key.
-- `attest` — push a `refresh_attestation`. The long-running daemon
-  schedules this every `refresh_every_epochs` (default 5).
-- `claim-earnings` — fetch encrypted ledger, decrypt locally via the
-  FHE helper, prove decryption, submit `claim_earnings` with a fresh
-  stealth output.
-- `run` — the main loop: register if needed, schedule attestations, run
-  the boringtun server, accept onion-wrapped traffic, sign receipts.
+- `register` (v1.1) — submit `register_endpoint`.
+- `v2 register` — predict circle_id → deploy → asset_put → atomic
+  `register_circle` (§2.2).
+- `seal-keys` / `unseal-keys` — sealed-mode key envelope (§2.6).
+- `attest` — push `refresh_attestation` (v1.1 only).
+- `claim-earnings` — fetch ciphertext, decrypt via the PVAC sidecar,
+  prove decryption, submit `claim_earnings`.
+- `run` — the main loop: register if needed, schedule attestations
+  (v1.1), run the boringtun server, accept WG traffic, sign receipts.
 
-### 2.3 `octravpn-client`
+### 3.3 `octravpn-client`
 
-End-user CLI. Subcommands:
+End-user CLI. Subcommands include:
 
-- `nodes` — list active validators (`list_active_validators`).
-- `connect --hops 3 --deposit 200` — choose a route, build commitments,
-  publish FHE equality blob, open the session, bring up the tunnel,
-  hold until ctrl-c, then settle.
-- `settle <id>` — settle a session that was previously opened.
-- `reclaim <id>` — call `claim_no_show` past grace.
+- `nodes` (v1.1) — list active endpoints.
+- `discover v2 <tailnet_id>` — enumerate authorized circles + fetch
+  sealed `/policy.json` for each.
+- `connect-v2` — discover + decrypt + `open_session` + bring up the
+  tunnel + settle.
+- `connect --hops 3 --deposit 200` (v1.1) — same for the v1.1 path.
+- `settle <id>` — settle a previously-opened session.
+- `slash-evidence verify|build|submit` — landing a
+  `slash_double_sign` on chain for a bounty.
 
-### 2.4 `octravpn-fhe-helper`
+### 3.4 `pvac-sidecar`
 
-Standalone binary the node and client shell out to for ciphertext ops.
-The v1 shipped here is a deterministic stub (so the system runs end-to-
-end against the mock today). Replacing it with the real HFHE SDK is a
-single-file change once the bindings are public.
+JSON-over-stdio C++ daemon producing chain-compatible PVAC blobs.
+Past the AES KAT gate on mainnet (commit `9e16868`). The Rust crates
+shell out to it; no GPL symbols are linked.
 
-## 3. Wire formats
+## 4. Wire formats
 
-### 3.1 Receipt
-
-```
-Domain tag : "octravpn-receipt"  (16 ASCII bytes)
-Payload    : tag || session_id (32B) || seq (u64 BE) || ct_len (u32 BE) || ct
-Signing    : ed25519(client_session_secret_key, sha256(payload))
-```
-
-### 3.2 Pedersen commitment (v1)
+### 4.1 Receipt (v1.2)
 
 ```
-Domain tag : "octravpn-commit-v1"  (18 ASCII bytes)
+Domain tag : "octravpn-receipt-v1"
+Payload    : tag || program_addr (32B) || chain_id (u32 BE) ||
+             circle_id_canonical (32B) ||
+             session_id (u64 BE) || seq (u64 BE) ||
+             bytes_used (u64 BE) || blind (32B)
+Signing    : ed25519(receipt_secret_key, sha256(payload))
+```
+
+`circle_id_canonical = 32 zero bytes` for v1.1 receipts (no circle),
+so the hash domain is fixed-width across v1.1 + v2.
+
+### 4.2 Pedersen commitment
+
+```
+Domain tag : "octravpn-commit-v1"
 Commit     : sha256(tag || addr_raw (32B) || blind (32B))
 Open       : (addr, blind) — verified by recomputing
 ```
 
-The HFHE-native Pedersen swap-in keeps the same struct; only the
-`commit` / `verify_open` functions change.
-
-### 3.3 Equality blob
-
-JSON-encoded for now; binary in v2:
-
-```
-{
-  per_hop_cts:    [bytes...],   // one ciphertext per hop, each under hop.fhe_pubkey
-  equality_proof: bytes,         // proves all encrypt the same plaintext
-  claimed_max:    u64,           // upper bound on bytes_used
-  le_proof:       bytes,         // proves ct <= claimed_max
-  refund_stealth: [u8; 32]       // refund target
-}
-```
-
-### 3.4 Onion header
+### 4.3 Onion header
 
 ```
 HopHeader {
@@ -326,37 +384,85 @@ HopHeader {
 }
 ```
 
-`Onion = { layers: [HopHeader; N], inner: bytes }`. Built client-side:
-each hop's symmetric session key is derived via Curve25519 ECDH between
-the client session ephemeral and the hop's static WG pubkey.
+`Onion = { layers: [HopHeader; N], inner: bytes }`. Each hop's
+symmetric session key is derived via Curve25519 ECDH between the
+client session ephemeral and the hop's static WG pubkey.
 
-## 4. Safety and verification arguments
+### 4.4 Sealed asset envelope (`"OCRS1"`)
+
+The format used by `circle_asset_put_encrypted` /
+`circle_asset_ciphertext_by_resource_key`
+(`octra-foundry/crates/octra-core/src/circle.rs`):
+
+```
+"OCRS1" (magic) || version (u8=1) || padding_class (u8) ||
+salt (32B) || nonce (12B) || aes_gcm_ciphertext(plaintext_padded)
+
+key   = PBKDF2-HMAC-SHA256(passphrase, salt, 120_000) → 32B AES key
+salt  = "octra:circle:sealed_read:v1:" || circle_id || ":" || key_id
+nonce = fresh random 12B per call (no AES-GCM nonce reuse)
+pad   = plaintext zero-padded up to padding_class ∈ {4k, 16k, 32k, 128k}
+```
+
+Padding classes leak coarse plaintext size by design — most
+`/policy.json` blobs fit in the 4k class so they're indistinguishable
+from each other.
+
+### 4.5 Sealed-key envelope (`OCTRA-WALLET-V1`)
+
+Used by `octravpn-node seal-keys` (`crates/octravpn-node/src/seal.rs`):
+
+```
+"OCTRA-WALLET-V1" || version || salt (32B) || nonce (24B) ||
+chacha20poly1305_ciphertext(secret_key_32B)
+
+key = PBKDF2-HMAC-SHA256(passphrase, salt, 120_000)
+```
+
+## 5. Safety and verification arguments
 
 | Property                            | Where it's argued / checked          |
 | ----------------------------------- | ------------------------------------ |
 | Receipt signatures unforgeable      | Tamarin `ReceiptUnforgeability`      |
-| Double-sign always slashable        | Tamarin `DoubleSignSlashable`        |
-| Route hidden during open session    | Tamarin `NoLinkBeforeSettle`         |
-| No double-settle, monotonic seq     | TLA+ `NoDoubleSettle`, `MonotonicSeq` |
+| Cross-program / cross-chain / cross-circle replay rejected | `receipt.rs` tests `cross_*_receipt_rejection` (P1-5) |
+| Restart-replay rejected             | `receipt_journal::tests::restart_replay_rejection` (P1-8/9) |
+| Plaintext-on-disk rejected in strict mode | `seal.rs` returns `CoreError::PlaintextKeyOnDisk` (P1-6) |
+| No double-settle, monotonic seq     | TLA+ `NoDoubleSettle`, `MonotonicSeq` (v1.1 + v2) |
+| Conservation of funds               | TLA+ `ConservationOfFunds` (v1.1 + v2) |
+| Atomic register-bond invariant      | TLA+ v2 `Inv_CircleAtomicRegisterBond` |
+| Authorized circle is registered     | TLA+ v2 `Inv_AuthorizedCircleIsActive` |
+| Stamped price immutable in open session | TLA+ v2 `Inv_StampedPriceImmutableInOpenSession` |
 | Bond never negative                 | TLA+ `SlashLeBond`, Lean `slash_double_sign_zeros_bond` |
-| Conservation of funds               | TLA+ `ConservationOfFunds`           |
-| Settle-or-refund eventually         | TLA+ `Liveness_SettleOrRefund` (under fairness) |
 | `register; complete_unbond` returns full bond | Lean `completeUnbond_returns_full_bond` |
 | Receipt round-trip is sound         | Kani `round_trip_signed_receipt`, proptest |
+| 45 v2 adversarial cases (S/F/R/E/etc) | `docker/devnet/e2e-adversarial-v2.sh` |
+| 49 v1.1 adversarial cases             | `docker/devnet/e2e-adversarial.sh`    |
 
-The Tamarin model is single-hop; the multi-hop generalization is
-structural (each hop adds an independent commit + sig path).
+TLC runs:
 
-## 5. Operational notes
+- v1.1: 2,756,874 states / 223,118 distinct / depth 26 / 0 violations.
+- v2:  52,676,571 states / 3,805,681 distinct / depth 31 / 0 violations.
 
-- Validators MUST keep their attestation refresh well within
-  `attest_grace_epochs`. The reference daemon refreshes every 5 epochs
-  with a 2-epoch margin.
-- Clients SHOULD maintain a local cache of in-flight session bookkeeping
-  so the standalone `settle <id>` subcommand can reconstruct a route
-  after process death. v1 keeps state in memory only — a SIGKILL
-  between `connect` and clean shutdown forfeits the deposit (or
-  triggers `claim_no_show` once grace elapses).
-- Multi-hop forwarding adds latency. A 3-hop session is best for
-  privacy-critical sessions; single-hop suffices for casual use and
-  retains payment shielding.
+## 6. Operational notes
+
+- v1.1 operators MUST refresh attestations within
+  `attest_grace_epochs`. Reference daemon refreshes every 5 epochs.
+- v2 operators have no per-epoch attestation — the circle's
+  `active = 1` flag at registration is the liveness signal.
+- Clients SHOULD maintain a local cache of in-flight session
+  bookkeeping so `settle <id>` can reconstruct a session after
+  process death.
+- For mainnet deploys: `require_sealed_keys = true`, sealed
+  `*.sealed` paths in TOML, and a fresh wallet for each circle
+  deploy — see [`docs/v2-operator-key-hygiene.md`](v2-operator-key-hygiene.md).
+- HFHE end-to-end settlement on devnet is blocked behind the
+  RPC body cap (`client_max_body_size`); see README's "What's
+  blocked" section.
+
+## 7. Migration
+
+v1.1 and v2 are separate deployments. There is no in-place
+migration inside a program instance — the on-chain registry shape
+is fundamentally different (`address`-keyed vs `circle_id`-keyed).
+Operators may run both in parallel and clients pick by config flag.
+Tailnets are single-version.
