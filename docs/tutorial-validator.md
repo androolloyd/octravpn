@@ -248,3 +248,74 @@ expiry. Without the accumulator, you'll need to run `reconcile`
 - `docs/economics.md` — pricing strategy, slashing math.
 - `docs/deploy.md` — full operator guide.
 - `docs/troubleshooting.md` — when things go sideways.
+
+---
+
+## Appendix — v2 (Circle-native) quickstart
+
+Steps 1, 2, 5–10 above are unchanged for v2. Deltas: config (one flag,
+a sealed passphrase, per-class pricing), register (3-tx boot replaces
+bond + register), verify (`get_circle` instead of
+`list_active_validators`). Same binary, same keys, same systemd unit.
+Source of truth: `docs/v2-operator-flow.md`.
+
+### v2 TOML deltas
+
+Layer these onto the Step 2 v1.1 TOML:
+
+```toml
+[chain]
+rpc_url             = "https://devnet.octrascan.io/rpc"
+program_addr        = "oct3fxjrzfqh65ATo31eau8xRFBPiXh2Uzwue56EYkfVSj7"
+validator_addr      = "oct1x...FRESH_DEPLOYER..."   # single-purpose wallet
+protocol_version    = "v2"
+chain_id            = 1869832804                    # CHAIN_ID_DEVNET
+sealed_passphrase   = "shared-with-tailnet-members" # or env var
+circle_state_path   = "/var/lib/octravpn/circle.toml"
+wallet_secret_path  = "/etc/octravpn/wallet.key.sealed"
+require_sealed_keys = true
+
+[tunnel]
+wg_secret_path      = "/etc/octravpn/wg.key.sealed"
+
+[pricing]
+price_per_mb_shared   = 100        # CLASS_SHARED
+price_per_mb_internal = 0          # CLASS_INTERNAL (intra-tailnet)
+
+[control]
+receipt_journal_path  = "/var/lib/octravpn/receipts.bin"
+# events_token unset → /events 404 (recommended)
+```
+
+The v2 `validator_addr` must be a **fresh, single-purpose, zero-
+history wallet** (`docs/v2-operator-key-hygiene.md` §1).
+
+### Step 3' — v2 register
+
+No separate `bond`. `octravpn-node run` walks the 3-tx flow on first
+boot — expect log lines `v2 deploy_circle submitted` → `v2 policy
+bundle uploaded` → `v2 register_circle submitted hash=… stake=1000000000`
+→ `v2 endpoint active`. Fund the wallet ≥ `MIN_CIRCLE_STAKE` (1000 OCT)
++ fees first, else `register_circle` reverts `"initial stake below
+minimum"`.
+
+### Step 6' — verify a v2 operator
+
+```sh
+sudo octravpn-node identity --config /etc/octravpn/node.toml | grep circle_id
+octra --rpc $RPC cast call $V2_PROG get_circle       '["<circle-id>"]'
+octra --rpc $RPC cast call $V2_PROG get_circle_stake '["<circle-id>"]'
+# Expect: active==1, stake >= 1000000000.
+```
+
+The slim registry has no public list — discovery fetches sealed
+`/policy.json` by `resource_key`.
+
+### Common v2 pitfalls
+
+- **"v2 sealed-asset passphrase required"** — set
+  `[chain].sealed_passphrase` or `OCTRAVPN_SEALED_PASSPHRASE`.
+- **`PlaintextKeyOnDisk` at boot** — strict mode is on but paths point
+  at plaintext; run `seal-keys` (see `validator-hardening.md` §2.1).
+- **`circle … is permanently slashed`** — delete `circle.toml` and
+  restart; next boot derives a fresh `circle_id`. Prior bond is gone.

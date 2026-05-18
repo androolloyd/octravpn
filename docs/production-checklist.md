@@ -127,3 +127,41 @@ Strict prerequisites for actually serving traffic on mainnet:
 
 Without all six, mainnet is premature. With any subset, testnet
 deploys are fine — and useful for items 3 + 4.
+
+---
+
+## H. v2 substrate gates
+
+Applies to `[chain].protocol_version = "v2"` operators (v2 program
+`oct3fxjrzfqh65ATo31eau8xRFBPiXh2Uzwue56EYkfVSj7` on devnet). Tickets
+cross-link to `docs/v2-threat-model.md`.
+
+| Item | Ticket | Why |
+| ---- | ------ | --- |
+| `[control].events_token` set OR unset (404 default) | P0-1 | Without it, `/events` SSE broadcasts `(session_id → wg_pubkey)` + per-session `bytes_used` |
+| `[chain].pinned_root_paths` = issuer chain for `rpc_url` | P0-2 | Defeats CA-compromise MITM (corporate proxy, rogue CA, MDM) |
+| `[chain].require_sealed_keys = true` + `*.sealed` paths | P1-6 | Strict mode refuses plaintext on-disk; pair with `seal-keys` + `OCTRAVPN_KEY_PASSPHRASE` |
+| `[chain].chain_id` set explicitly | P1-5 | Folded into receipt signing payload — devnet ↔ mainnet replay fails. Default `CHAIN_ID_DEVNET = 1 869 832 804` is a mainnet footgun |
+| `[chain].sealed_passphrase` ≥ diceware-6 (rule of thumb) | P1-4 | **Not enforced today.** Diceware-6 (≈77 bits) for sealed-asset; ≥64 random bytes for `OCTRAVPN_KEY_PASSPHRASE`. PBKDF2-200k can't save a 30-bit passphrase |
+| `[chain].circle_state_path` on durable backed-up storage | — | Loss = re-deploy circle, re-bond from scratch |
+| `[control].receipt_journal_path` on durable backed-up storage | P1-8/9 | `(session → last_seq)` floor fsync'd pre-sign; loss = unknown-seq → can't safely sign. Critical state |
+| `[pricing].price_per_mb_shared` + `_internal` set explicitly | — | Otherwise v1.1 `price_per_mb` is the only tariff |
+
+### H.1 Pre-flight smoke
+
+```sh
+# 1. Strict-mode boot under sealed keys succeeds.
+octravpn-node run --config /etc/octravpn/node.toml
+
+# 2. /events 404s (or 401 with bad token).
+curl -sS http://your.fqdn:51821/events
+
+# 3. Chain sees the circle active + bonded.
+octra cast call $PROG get_circle '["<circle>"]'
+
+# 4. Kill -9 mid-session; restart; next signed seq strictly exceeds
+#    the on-disk receipts.bin floor.
+```
+
+P1-5 / P1-6 / P1-8 / P1-9 are FIXED as of `d6b3930`; open items
+(notably P0-2) tracked in `docs/v2-threat-model.md`.

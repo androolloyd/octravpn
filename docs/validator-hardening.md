@@ -106,19 +106,69 @@ with `make -f /usr/share/selinux/devel/Makefile` and load via
 | File                                | What                          | Recommended ACL |
 | ----------------------------------- | ----------------------------- | --------------- |
 | `/etc/octravpn/wallet.key`          | Wallet secret (32B raw / hex) | `0400 root:octravpn` |
-| `/etc/octravpn/wallet.enc`          | Passphrase-encrypted wallet   | `0400 root:octravpn` |
+| `/etc/octravpn/wallet.key.sealed`   | Passphrase-encrypted wallet (P1-6) | `0400 root:octravpn` |
+| `/etc/octravpn/wallet.enc`          | (legacy v1.1 envelope)        | `0400 root:octravpn` |
 | `/etc/octravpn/wg.key`              | WG master (HKDF parent)       | `0400 root:octravpn` |
+| `/etc/octravpn/wg.key.sealed`       | Passphrase-encrypted WG master (P1-6) | `0400 root:octravpn` |
+| `/var/lib/octravpn/circle.toml`     | v2 circle state cache         | `0400 root:octravpn` |
+| `/var/lib/octravpn/receipts.bin`    | Persistent receipt-seq journal (P1-8/9) | `0600 octravpn:octravpn` |
 | `/var/log/octravpn/audit/.audit.key`| HMAC chain key                | `0400 octravpn:octravpn` |
 
-For the wallet specifically, prefer the encrypted-envelope form:
+### 2.1 The `seal-keys` flow (P1-6)
+
+In-daemon subcommand that wraps both the wallet secret and the WG
+master under one passphrase via the `OCTRA-WALLET-V1` envelope
+(ChaCha20-Poly1305 + PBKDF2-HMAC-SHA256 200k). Supersedes v1.1
+`wallet-encrypt`. Full walkthrough: `docs/v2-operator-key-hygiene.md`
+§4 / `docs/v2-operator-flow.md` §"Sealing on-disk keys".
 
 ```sh
-OCTRAVPN_WALLET_PASSPHRASE=$(systemd-creds decrypt wallet.cred) \
-  octravpn wallet-encrypt --in plain.hex --out wallet.enc
+# 1. Seal both configured key files.
+export OCTRAVPN_KEY_PASSPHRASE='...'
+octravpn-node --config /etc/octravpn/node.toml seal-keys
+# Produces wallet.key.sealed + wg.key.sealed atomically.
+
+# 2. Point the TOML at the sealed files + enable strict mode:
+[chain]
+wallet_secret_path  = "/etc/octravpn/wallet.key.sealed"
+require_sealed_keys = true
+[tunnel]
+wg_secret_path      = "/etc/octravpn/wg.key.sealed"
+
+# 3. Once boot succeeds, shred the plaintext originals:
+octravpn-node --config /etc/octravpn/node.toml seal-keys --remove-plaintext
 ```
 
-Then unlock at boot via `systemd-creds` or HashiCorp Vault — never
-ship the passphrase via env file on disk.
+Emergency rotation — `unseal-keys --tmpdir <PATH>` decrypts onto a
+tmpfs / ramdisk (refused on non-memory-volatile mounts on Linux). Mount
+tmpfs, unseal, re-seal under a fresh passphrase, swap, restart, umount.
+
+### 2.2 Passphrase resolution
+
+`seal-keys` / `unseal-keys` (`crates/octravpn-node/src/seal.rs`):
+`--passphrase` > `--passphrase-file` > `--passphrase-stdin` >
+`OCTRAVPN_KEY_PASSPHRASE` > TTY prompt (interactive only). The daemon
+at boot reads sealed files using `OCTRAVPN_KEY_PASSPHRASE` (legacy
+`OCTRAVPN_WALLET_PASSPHRASE` honoured for back-compat). For systemd:
+
+```ini
+# /etc/systemd/system/octravpn-node.service.d/passphrase.conf
+[Service]
+EnvironmentFile=/etc/octravpn/keys.env       # chmod 0600
+```
+
+Better: fetch the passphrase from `systemd-creds` / Vault / AWS
+Secrets Manager at deploy time and write the EnvironmentFile to a
+tmpfs mount the daemon unmounts after boot. Never ship a long-lived
+plaintext passphrase in `/etc/`.
+
+### 2.3 Strict mode (P1-6 closed)
+
+`[chain].require_sealed_keys = true` refuses to boot if any
+configured secret is plaintext-on-disk. Error
+`CoreError::PlaintextKeyOnDisk` names the offending path and quotes
+the `seal-keys` invocation. Devnet harnesses leave it off;
+production v2 turns it on unconditionally.
 
 ## 3. Control-plane exposure
 
@@ -285,3 +335,39 @@ immediately, in-flight sessions still settle against the old keys
 | **Process**                     | systemd hardening, AppArmor/SELinux, non-root + read-only FS               |
 | **Operational**                 | Per-key backups, regular rotation, Prometheus alerts on every failure mode |
 | **Forensic**                    | Append-only HMAC-chained audit log + scheduled `verify-audit-log`          |
+
+## 10. WG private-key passphrase wrapping
+
+`wg.key` is the HKDF parent of the noise static key AND the receipt-
+signing key — compromise = ability to forge receipts that feed
+`slash_double_sign`. `seal-keys` §2.1 wraps it under the same envelope
+as the wallet (both go through `read_secret_32_or_sealed` in
+`octra-foundry/crates/octra-core/src/util.rs`).
+
+Per-OS keyring alternatives in `docs/v2-operator-key-hygiene.md` §4:
+
+- **`seal-keys` (default).** Pair with a kernel-keyring or Keychain-
+  backed `EnvironmentFile` so the passphrase isn't long-lived on disk.
+- **Linux kernel keyring.** `keyctl padd user OCTRAVPN_KEY_PASSPHRASE
+  @u` + ExecStartPre helper. Cleared on reboot.
+- **macOS Keychain.** `security find-generic-password -w` at
+  ExecStartPre. Survives reboot; protected by login password.
+
+Either way the on-disk artefact is useless without the passphrase; an
+exfiltrator is reduced to offline PBKDF2-200k brute force — hence the
+entropy floor (`docs/v2-threat-model.md` P1-4).
+
+## 11. Audit cross-links
+
+- `docs/v2-rust-leak-audit.md` — daemon leak surface; `/events` SSE
+  auth (P0-1) is the highest-impact item closed.
+- `docs/v2-threat-model.md` §1 row 8 + `v2-operator-key-hygiene.md`
+  §4 — `seal-keys` (P1-6) closes plaintext-on-disk; strict mode is
+  the production gate.
+- P1-5 — `chain_id` + `program_addr` + `circle_id` folded into the
+  receipt signing payload; v1.1 ↔ v2 ↔ devnet ↔ mainnet replay fails.
+- P1-8 / P1-9 — persistent `receipt_journal.rs` floor closes the
+  restart-replay double-sign window (§6).
+
+Open items (notably P0-2 RPC cert pinning) tracked in
+`docs/v2-threat-model.md`.

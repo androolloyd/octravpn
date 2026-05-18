@@ -306,3 +306,94 @@ fees apply at the transaction layer as usual.
 - Source: `crates/octravpn-node/`
 - Issue tracker: https://github.com/anthropic/octravpn/issues
 - Security: `SECURITY.md`
+
+---
+
+## 12. Running a v2 operator
+
+The v2 substrate replaces the v1.1 `endpoints` map with an Octra
+**Circle** (IEE) as the unit of operator identity. Pick the protocol
+version with one flag; both are live on devnet and the same binary
+serves both. **Source of truth: `docs/v2-operator-flow.md`** — this
+section is orientation only.
+
+### 12.1 v1.1 vs v2
+
+```toml
+[chain]
+protocol_version = "v1.1"   # default; legacy bond + register path
+protocol_version = "v2"     # opt in; 3-tx Circle-native boot
+```
+
+Devnet v2 program: `oct3fxjrzfqh65ATo31eau8xRFBPiXh2Uzwue56EYkfVSj7`.
+
+### 12.2 The 3-tx v2 boot
+
+`octravpn-node run` walks, persisting state after each step:
+
+1. **`deploy_circle`** — submits an Octra tx with the canonical
+   payload (`runtime=octb`, `privacy_class=sealed`); the resulting
+   `circle_id` is content-addressed and predictable from `(deployer,
+   nonce, payload)`.
+2. **`circle_asset_put_encrypted /policy.json`** — encrypts the
+   operator's runtime policy (endpoint URL, WG pubkey, region,
+   tariffs, receipt pubkey) and uploads it. The chain sees only
+   AES-GCM ciphertext + `key_id` + `plaintext_hash` + `resource_key`.
+3. **`register_circle`** — payable contract call carrying
+   `value = MIN_CIRCLE_STAKE` (default 1000 OCT). The single tx both
+   registers the circle in the slim registry AND deposits the bond;
+   v2 collapsed the v1.1 chicken-and-egg `bond + register` pair.
+
+Logs prefix `v2 <step> submitted hash=…`.
+
+### 12.3 Sealed-passphrase plumbing
+
+The per-tailnet sealed-asset passphrase resolves in this order
+(`hub.rs::sealed_passphrase`):
+
+1. `[chain].sealed_passphrase` in the operator's TOML.
+2. `OCTRAVPN_SEALED_PASSPHRASE` env var.
+
+Daemon refuses to start v2 with `"v2 sealed-asset passphrase
+required"` if neither is set. For rotation cadence see
+`docs/v2-operator-key-hygiene.md` §5.
+
+### 12.4 Circle state cache + idempotent restarts
+
+`[chain].circle_state_path` (default `./state/circle.toml`) caches
+`circle_id`, `deploy_nonce`, the three tx hashes, and the policy
+plaintext hash. Restarts skip whatever the cache + chain say is
+already done. Force re-derivation (e.g. prior circle slashed) by
+deleting the cache. Inspect without RPC: `octravpn-node identity`.
+
+### 12.5 Per-class pricing
+
+```toml
+[pricing]
+price_per_mb          = 100   # v1.1 fallback if shared/internal omitted
+price_per_mb_shared   = 100   # CLASS_SHARED (public-internet exit)
+price_per_mb_internal = 0     # CLASS_INTERNAL (intra-tailnet; usually free)
+```
+
+Tariffs are stamped onto each `Session` at open time, so an operator
+can serve multiple tiers without re-registering.
+
+### 12.6 Receipt journal (P1-8 / P1-9)
+
+A persistent `(session_id → last_signed_seq)` floor is fsync'd
+**before** any receipt is signed. Default `./state/receipts.bin`;
+override via `[control].receipt_journal_path`. After an OOM/SIGKILL
+the floor reloads from disk and shadows the in-memory `last_seq` —
+the daemon cannot be tricked into signing two distinct receipts at
+the same `(session, seq)`, which is exactly what `slash_double_sign`
+burns the bond for. Put the journal on durable storage you back up
+with the wallet; ≈ 40 bytes per active session, no rotation needed.
+
+### 12.7 Further reading
+
+- `docs/v2-operator-flow.md` — full 4-step walkthrough + error cases.
+- `docs/v2-operator-key-hygiene.md` — fresh-wallet rule, sealed-key
+  storage, passphrase rotation.
+- `docs/v2-threat-model.md` — P0/P1 fix queue.
+- `docs/validator-hardening.md` §2.1 — `seal-keys` flow + strict mode.
+- `docs/production-checklist.md` §H — v2 production gate items.
