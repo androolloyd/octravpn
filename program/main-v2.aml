@@ -167,14 +167,40 @@ contract OctraVPN_V2 {
     circle_unbonding_unlock: map[address]int
     circle_slashed: map[address]int
 
-    // HFHE earnings ledger keyed by circle_id. Operators publish
-    // their HFHE pubkey + a zero ciphertext at register-time; the
-    // chain adds settlement amounts under fhe_add_const at confirm
-    // and the operator claims via claim_earnings(...).
+    // Earnings ledger — plaintext-running-total with sha256
+    // hash-chain audit fingerprint.
+    //
+    // Confirmed on devnet 2026-05-18: every AML `fhe_*` host call
+    // reverts at runtime for newly-deployed contracts (including
+    // Octra's own `program-examples/private_ml`). See
+    // `memory/octra_aml_fhe_load_pk_blocked.md`. Until the chain's
+    // AML→HFHE bridge ships, we cannot hide per-settle amounts
+    // from chain observers — `bytes_used × price` is plaintext-
+    // derivable from the settle_confirm tx body.
+    //
+    // What this design DOES give us:
+    //   * Tamper-evident running total: every settle folds a
+    //     client-provided 32-byte blinding into a sha256 hash chain.
+    //     The chain stores `running = sha256(prev || sha256(r_i))`.
+    //     An attacker who later forges a fake settle history can't
+    //     produce a matching chain head without forging sha256.
+    //   * Bounded payout: chain knows the running total exactly
+    //     (each settle accumulates `net` plaintext). Operator can
+    //     only claim up to what accrued. No HFHE proof required at
+    //     the payout gate.
+    //   * Storage-cap-compliant: every value here is ≤32 bytes for
+    //     hashes or a plain int. No 56 KB ciphertexts.
+    //
+    // Migration to HFHE-on-chain (when ready): `earnings_running_total`
+    // becomes the encrypted ledger's commitment, settle_confirm folds
+    // via `fhe_add_const` instead of `+ net`, claim_earnings adds a
+    // `fhe_verify_zero` gate. State schema is identical — only the
+    // primitives change.
     op_pk_set: map[address]int
-    op_pk: map[address]string
-    op_zero_ct: map[address]string
-    enc_earnings: map[address]string
+    earnings_running_total:    map[address]int
+    earnings_claimed_total:    map[address]int
+    earnings_chain_head:       map[address]string
+    earnings_settle_count:     map[address]int
 
     // Tailnets.
     tailnet_count: int
@@ -452,14 +478,20 @@ contract OctraVPN_V2 {
   // initial stake atomically. Avoids the chicken-and-egg where
   // `bond_endpoint` requires an owner that only `register_circle`
   // sets. Subsequent stake top-ups go through `bond_endpoint`.
+  // Atomic register + initial bond. `initial_chain_seed` is a 32-byte
+  // string the operator picks (off-chain randomness). The chain stores
+  // `sha256(initial_chain_seed)` as the genesis chain head; every
+  // subsequent settle_confirm folds a fresh blinding into the chain.
+  // The seed itself is never read back — only its hash matters — so
+  // it can be any 32-byte value the operator wants to commit to at
+  // register time.
   payable fn register_circle(
     circle: address,
     region: string,
     price_per_mb_shared: int,
     price_per_mb_internal: int,
     receipt_pubkey: string,
-    op_pk_hfhe: string,
-    op_zero_ct_hfhe: string
+    initial_chain_seed: string
   ): bool {
     require_not_paused()
     require(is_address(circle), "invalid circle id")
@@ -468,8 +500,7 @@ contract OctraVPN_V2 {
     require(price_per_mb_shared >= 0, "negative price")
     require(price_per_mb_internal >= 0, "negative price")
     require(len(receipt_pubkey) > 0, "receipt pubkey required")
-    require(len(op_pk_hfhe) > 0, "hfhe pubkey required")
-    require(len(op_zero_ct_hfhe) > 0, "hfhe zero ct required")
+    require(len(initial_chain_seed) > 0, "initial chain seed required")
     require(
       self.circle_stake[circle] + value >= self.min_circle_stake,
       "initial stake below minimum"
@@ -485,10 +516,17 @@ contract OctraVPN_V2 {
     self.circles[circle].price_per_mb_shared = price_per_mb_shared
     self.circles[circle].price_per_mb_internal = price_per_mb_internal
 
+    // Hash-chain commit ledger genesis. The chain head starts at
+    // sha256(initial_chain_seed); every settle_confirm folds a fresh
+    // blinding via sha256(prev || sha256(r_i)). Operator can later
+    // present the chain of blindings to prove the settled set, but
+    // earnings_running_total is what bounds claim payouts (the chain
+    // computes it directly).
     self.op_pk_set[circle] = 1
-    self.op_pk[circle] = op_pk_hfhe
-    self.op_zero_ct[circle] = op_zero_ct_hfhe
-    self.enc_earnings[circle] = op_zero_ct_hfhe
+    self.earnings_running_total[circle] = 0
+    self.earnings_claimed_total[circle] = 0
+    self.earnings_chain_head[circle] = sha256(initial_chain_seed)
+    self.earnings_settle_count[circle] = 0
 
     emit CircleRegistered(circle, caller, region)
     if value > 0 {
@@ -730,7 +768,17 @@ contract OctraVPN_V2 {
     return true
   }
 
-  nonreentrant fn settle_confirm(session_id: int, bytes_used: int): bool {
+  // `settle_blinding` is a 32-byte client-supplied random string
+  // that folds into the operator's hash-chain audit fingerprint at
+  // each settle. Earnings math is plaintext (chain knows `net`
+  // directly from `bytes_used * price`) until the chain's AML→HFHE
+  // bridge ships; the blinding gives tamper-evident accumulation
+  // even in the plaintext-amount regime.
+  nonreentrant fn settle_confirm(
+    session_id: int,
+    bytes_used: int,
+    settle_blinding: string
+  ): bool {
     require_not_paused()
     require(session_id < self.session_count, "session not found")
     require(self.sessions[session_id].status == 0, "session not open")
@@ -777,22 +825,17 @@ contract OctraVPN_V2 {
       self.tailnets[tid].treasury = self.tailnets[tid].treasury + refund
     }
     if net > 0 {
-      // Credit HFHE earnings ledger for the operator.
-      //
-      // CRITICAL: load the pubkey via the circle's OWNER wallet, not
-      // the circle address. Octra's PVAC pubkey registry is populated
-      // by `octra_registerPvacPubkey(addr, pk_b64, sig)` which requires
-      // an ed25519 signature from the wallet that owns `addr` — circles
-      // are contracts with no keypair, so `fhe_load_pk(<circle>)` always
-      // returns null. Owner-routed lookup matches the chain's per-wallet
-      // PVAC registration model.
-      let owner = self.circles[circle].owner
-      let pk = fhe_load_pk(owner)
-      let zero_ct = fhe_deser(self.op_zero_ct[circle])
-      let add_ct = fhe_add_const(pk, zero_ct, net)
-      let cur = fhe_deser(self.enc_earnings[circle])
-      let new_ct = fhe_add(pk, cur, add_ct)
-      self.enc_earnings[circle] = fhe_ser(new_ct)
+      // Plaintext running total + hash-chain audit fingerprint.
+      // Operator (client really, signing this tx) supplies a fresh
+      // 32-byte blinding per settle. The blinding's `sha256` folds
+      // into the running chain head. Operator can later prove
+      // "these N blindings produced this chain head" to audit a
+      // disputed payout history.
+      require(len(settle_blinding) > 0, "settle_blinding required")
+      self.earnings_running_total[circle] = self.earnings_running_total[circle] + net
+      self.earnings_chain_head[circle] =
+        sha256(self.earnings_chain_head[circle] + sha256(settle_blinding))
+      self.earnings_settle_count[circle] = self.earnings_settle_count[circle] + 1
     }
     emit SettleConfirmed(session_id, caller, bytes_used)
     emit SessionSettled(session_id, circle, class, bytes_used, total_paid, refund)
@@ -841,29 +884,41 @@ contract OctraVPN_V2 {
   // Earnings claim (FHE zero-proof gate)
   // ============================================================
 
-  view fn get_encrypted_earnings(circle: address): string {
-    return self.enc_earnings[circle]
+  view fn get_earnings_running_total(circle: address): int {
+    return self.earnings_running_total[circle]
   }
 
-  nonreentrant fn claim_earnings(circle: address, claimed_amount: int, proof: string): bool {
+  view fn get_earnings_claimed_total(circle: address): int {
+    return self.earnings_claimed_total[circle]
+  }
+
+  view fn get_earnings_chain_head(circle: address): string {
+    return self.earnings_chain_head[circle]
+  }
+
+  view fn get_earnings_settle_count(circle: address): int {
+    return self.earnings_settle_count[circle]
+  }
+
+  // claim_earnings: owner-only, bounded by (running_total - claimed)
+  // already accumulated on chain. No HFHE proof required; the chain
+  // computed `net` plaintext at each settle so the running total is
+  // chain-authoritative. The hash chain head is unchanged by claims
+  // (it records the SETTLE history, not the CLAIM history).
+  //
+  // When the chain ships its AML→HFHE bridge, this entrypoint adds
+  // a `fhe_verify_zero` gate on the claim amount against an HFHE
+  // ledger; the storage shape stays the same.
+  nonreentrant fn claim_earnings(circle: address, claimed_amount: int): bool {
     require_not_paused()
     require(self.circles[circle].owner == caller, "not circle owner")
     require(self.circle_slashed[circle] == 0, "operator slashed")
-    require(self.op_pk_set[circle] == 1, "no hfhe pubkey")
     require(claimed_amount > 0, "amount > 0")
-    require(len(proof) > 0, "proof required")
-
-    // Owner-routed PVAC pubkey lookup; see settle_confirm for why.
-    let owner = self.circles[circle].owner
-    let pk = fhe_load_pk(owner)
-    let zero_ct = fhe_deser(self.op_zero_ct[circle])
-    let claim_ct = fhe_add_const(pk, zero_ct, claimed_amount)
-    let cur = fhe_deser(self.enc_earnings[circle])
-    let delta = fhe_sub(pk, cur, claim_ct)
-    require(fhe_verify_zero(pk, delta, proof), "zero-proof rejected")
-
-    // Reset ledger to zero ciphertext + pay out plaintext.
-    self.enc_earnings[circle] = self.op_zero_ct[circle]
+    let total = self.earnings_running_total[circle]
+    let already = self.earnings_claimed_total[circle]
+    let unpaid = total - already
+    require(claimed_amount <= unpaid, "claim exceeds accrued unpaid earnings")
+    self.earnings_claimed_total[circle] = already + claimed_amount
     require(transfer(caller, claimed_amount), "transfer failed")
     return true
   }

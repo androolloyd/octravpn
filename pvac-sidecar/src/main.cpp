@@ -392,6 +392,23 @@ json process_request(const std::string& line) {
         if (op == "add")             return op_add(req);
         if (op == "ping")            return json{{"pong", true}};
         if (op == "version")         return json{{"sidecar", "octra-pvac-sidecar/0.1"}};
+        if (op == "aes_kat") {
+            // Companion of webcli's compute_aes_kat_hex() — runs
+            // pvac_aes_kat() (a build-time KAT of the pvac AES) and
+            // hex-encodes the 16-byte result. The chain's
+            // octra_registerPvacPubkey RPC requires this in the 5th
+            // (kat_hex) param; without it the chain rejects with
+            // "AES implementation incompatible — KAT mismatch".
+            uint8_t buf[16];
+            pvac_aes_kat(buf);
+            static const char* HX = "0123456789abcdef";
+            std::string hex(32, '0');
+            for (int i = 0; i < 16; i++) {
+                hex[i*2]   = HX[(buf[i] >> 4) & 0xF];
+                hex[i*2+1] = HX[buf[i] & 0xF];
+            }
+            return json{{"kat_hex", hex}};
+        }
         return json{{"error", std::string("unknown op: ") + op}};
     } catch (const std::exception& e) {
         return json{{"error", e.what()}};
