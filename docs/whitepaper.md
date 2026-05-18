@@ -391,6 +391,34 @@ provisions planned by category:
 
 Prioritised by phase (v1.1, v1.x, v2/research) in the roadmap doc.
 
+## 5.1 v2 on Circles (since 2026-05-17, devnet)
+
+The v2 design has been live on Octra **devnet** since 2026-05-17. It
+uses the public Circles primitive (released by Octra on 2026-05-15)
+to convert operators from public wallet addresses to **circle-shaped
+entities** whose identity, IP, WireGuard key, ACL, and per-class
+pricing live inside the circle and are fetched by clients via path-
+private sealed reads. The main-net side becomes a **slim registry**
+that binds OU bond to `circle_id` and carries the v1.1 cryptographic
+slash (`slash_double_sign`) verbatim.
+
+Three properties v1 cannot offer:
+
+1. **Hidden operator exits** — chain observers see registered
+   circle_ids but not operator IPs, WG keys, or policies.
+2. **Per-class routing + per-class pricing** — `shared` internet
+   egress vs `internal` intra-tailnet routing, with class-specific
+   prices set inside the circle.
+3. **Encrypted metering** — `bytes_used` stays encrypted inside the
+   circle; only the settled OU amount escapes to main-net.
+
+See `docs/v2-circles-design.md` for the full design map, including
+the slim registry program (`program/main-v2.aml`, deployed at
+`oct3fxjrzfqh65ATo31eau8xRFBPiXh2Uzwue56EYkfVSj7` on devnet) and the
+operator-circle program (`program/operator-circle.aml`). Mainnet
+bring-up is gated on the Octra-side devnet RPC body-cap fix — see
+`docs/v2-octra-questions.md §7`.
+
 ## 6. Implementation status
 
 - AML program: v1 surface complete, built against confirmed Octra
@@ -471,6 +499,9 @@ We're honest about residual centralisation:
 | `docs/value.md`                                   | What the system provides, by stakeholder             |
 | `docs/economics.md`                               | Economic model (this whitepaper §4)                  |
 | `docs/security-roadmap.md`                        | Additional security/identity provisions (this §5)    |
+| `docs/v2-circles-design.md`                       | v2 architecture map: slim registry + operator circles |
+| `docs/v2-octra-questions.md`                      | Open / resolved questions for the Octra dev team     |
+| `docs/aml-grammar.md`                             | AML language reference (incl. `payable`, `nonreentrant`) |
 | `docs/tailnet-user-guide.md`                      | How to use a tailnet                                 |
 | `docs/operator-guide.md`                          | How to run a paid endpoint                           |
 | `docs/deployment-runbook.md`                      | Operator playbook for staging → mainnet → incidents  |

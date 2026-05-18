@@ -1,9 +1,11 @@
 # Real AML Grammar — Reverse-Engineered Reference
 
-Captured 2026-05-13 by compiling our placeholder AML against live
-mainnet `octra_compileAml` (no auth, no fee, public RPC) and reading
-the canonical `octra-labs/contract-examples/example_1.aml` (the only
-public AML source). All claims below are tested.
+Captured 2026-05-13, refreshed 2026-05-17 against the public Circles
+release. Built by compiling our placeholder AML against live mainnet
+`octra_compileAml` (no auth, no fee, public RPC) and reading
+`octra-labs/contract-examples/example_1.aml` and (since 2026-05-15)
+`octra-labs/program-examples/*.aml` plus `octra-labs/webcli` commit
+`f9c73e1`. All claims below are tested.
 
 This is the authoritative reference for what `program/main.aml` must
 look like to compile. Our previous AML used `program`/`implements`/
@@ -33,7 +35,7 @@ contract Name {
 | `address`      | Confirmed. Built-in.                                                   |
 | `string`       | Confirmed. Used for FHE ciphertexts, names, etc.                       |
 | `bool`         | Confirmed as a return type. `true`/`false` literals.                   |
-| `bytes`        | NOT confirmed in example_1.aml. May not exist.                         |
+| `bytes`        | Confirmed (2026-05-17). **Length-counted UTF-8 string**, not raw octets. `len(b) == 32` matches a 32-character string; hex of a 32-byte hash (64 chars) and base64 (44 chars) BOTH fail that predicate. See §7.1. |
 | `map[K]V`      | Confirmed. K = int/address/string; V = any type including struct or nested map. |
 | `map[K1]map[K2]V` | Confirmed. Nested maps work directly.                              |
 | `list[T]`      | NOT confirmed in example. Avoid; use `map[int]T` + counter.            |
@@ -117,6 +119,37 @@ view fn get_owner(): address {
 
 `view fn` indicates a read-only function; `fn` mutates state.
 `private fn` — NOT confirmed in example.
+
+### Function modifiers (confirmed 2026-05-17)
+
+`octra-labs/program-examples` added two modifiers used in widespread
+production AML after the 2026-05-15 Circles release. Both work
+against the live `octra_compileAml`.
+
+```aml
+fn register_circle(circle_id: address) payable {
+  require(value >= self.min_circle_stake, "bond too low")
+  // value is the OU attached to this call
+  self.circle_stake[circle_id] = value
+  // ...
+}
+
+fn settle_session(sid: bytes, bytes_used: int) nonreentrant {
+  // re-entrancy guard: contract-to-contract calls inside this fn
+  // cannot re-enter the contract via any path.
+  let pay = bytes_used * self.circles[sid].price_per_mb
+  transfer(self.circles[sid].owner, pay)
+  // ...
+}
+```
+
+- `payable` — entrypoint can accept `value > 0`. Non-payable
+  entrypoints reject any tx with `value != 0`.
+- `nonreentrant` — guards against re-entry via callbacks. Combined
+  with `checkpoint`/`commit`/`rollback` (§6) this is the canonical
+  CEI-pattern construction.
+
+Modifiers stack: `fn foo() payable nonreentrant { ... }` is valid.
 
 ## 4. Statements & expressions
 
@@ -238,7 +271,29 @@ Our v0 AML referenced these — none exist in example_1.aml:
 | `is_address(x)`                           | ❌ NOT SEEN | Drop these checks.                            |
 | `len(s)`                                  | ❌ NOT SEEN | Track counts manually; for strings use `parse_ints` + count. |
 | `list[T]`                                 | ❌ NOT SEEN | Use `map[int]T` + a count field.              |
-| `bytes` type                              | ❓ UNTESTED  | Use `string` for ciphertexts/hashes. Test before relying on `bytes`. |
+| `bytes` type                              | ✅ CONFIRMED (2026-05-17) — but it's UTF-8 length-counted, not raw octets. See §7.1. |
+
+### 7.1 The `bytes` type — what it actually is
+
+`bytes` is **a length-counted UTF-8 string**, not raw octets. The
+runtime checks character count via `len()`. Practical consequences:
+
+- A 32-byte hash has NO single canonical representation that passes
+  `require(len(h) == 32, ...)` for arbitrary hash values. Hex
+  (64 chars) and base64 (44 chars) both fail. A 32-char ASCII string
+  passes but represents a different value.
+- For receipt hashes, pass `digest_sha256(...)` output directly
+  (which yields the right `bytes` value internally) and never
+  round-trip through hex/base64 inside the contract.
+- For values that MUST be transmitted as hex (e.g. an off-chain-
+  produced signature), pass the hex as `string` and check
+  `len(s) == 64` for a 32-byte hash, `len(s) == 128` for a 64-byte
+  signature, etc.
+- `ed25519_ok(pk, msg, sig)` wants **base64** for `pk` and `sig`,
+  not hex (see §9 below). The `bytes` length predicate is a
+  separate concern from the encoding the host call expects.
+
+Saved memory `octra_aml_wire_format.md` has the full forensic log.
 
 ## 8. Compiling against real Octra
 
@@ -280,9 +335,117 @@ The v1 AML rewrite must:
 8. `fhe_load_pk` takes a **string**, not an `address` — adapt the
    operator-pubkey storage accordingly.
 
-## 10. Open questions to confirm with Octra team
+## 9.1 `ed25519_ok` wire format (confirmed 2026-05-17)
 
-1. Is `bytes` a valid type? Or must everything use `string`?
+```aml
+fn slash_double_sign(
+  op: address,
+  sid: bytes,
+  payload_a: bytes,
+  sig_a: bytes,    // base64-encoded 64-byte signature
+  payload_b: bytes,
+  sig_b: bytes,    // base64-encoded 64-byte signature
+) {
+  let pk = self.receipt_pk[op]  // bytes — base64-encoded 32-byte pk
+  require(ed25519_ok(pk, payload_a, sig_a), "sig_a bad")
+  require(ed25519_ok(pk, payload_b, sig_b), "sig_b bad")
+  // ...
+}
+```
+
+Both `pk` and `sig` are **base64** strings, not hex. Earlier drafts
+that passed hex failed verification silently (no error — just
+`false`). This contradicts the convention in `pvac_hfhe_cpp` (which
+uses hex) but matches `octra_pre_client/cli.py` for native tx
+signatures.
+
+## 10. Tx envelope canonical form (confirmed 2026-05-17)
+
+The bytes signed for tx authentication are **bare canonical JSON**
+over the envelope — no domain prefix, no length tag, no binary
+framing. Insertion-ordered fields:
+
+```json
+{"from":"<from>","to_":"<to>","amount":"<amt>","nonce":<int>,"ou":"<ou>","timestamp":<float>,"op_type":"<op>"[,"encrypted_data":"<...>"][,"message":"<...>"]}
+```
+
+`amount` and `ou` are JSON strings (integer micro-units); `nonce` is
+unquoted int; `timestamp` is unquoted float. `signature` and
+`public_key` are base64 of 64-byte / 32-byte values and added AFTER
+signing, never part of the signed blob.
+
+Aux signed messages (encrypted-balance auth, PVAC register,
+view-pubkey register) DO use literal-string domain prefixes — see
+`docs/octra-research.md §3`. The tx envelope is the exception.
+
+## 10.1 `deploy_circle` op-type wire format
+
+For Circles deployment (the public 2026-05-15 release), the tx
+envelope is:
+
+| Field           | Value                                                                           |
+| --------------- | ------------------------------------------------------------------------------- |
+| `from`          | deployer wallet address                                                          |
+| `to_`           | **predicted** `circle_id` (CREATE2-style, see below)                             |
+| `amount`        | `"0"`                                                                            |
+| `nonce`         | deployer's next nonce                                                            |
+| `ou`            | recommended fee                                                                  |
+| `timestamp`     | `now()` as float                                                                 |
+| `op_type`       | `"deploy_circle"`                                                                |
+| `message`       | canonical JSON of the deploy payload (see below)                                 |
+
+Required fields in the `message` payload: `runtime`, `privacy_class`,
+`browser_mode`, `resource_mode`, `limits`, `code_b64`, `policy_hash`,
+`members_root`, `export_policy`. Optional: vendor-specific extensions
+under a `_ext` key (ignored by chain).
+
+Deterministic `circle_id`:
+
+```
+seed       = digest_sha256("octra:circle_deploy_id:v1" || deployer_addr_bytes || u64be(nonce) || payload_hash_hex_bytes)
+circle_id  = "oct" + base58(seed)[:44]
+```
+
+Computable before submission — registries can predeclare `to_=
+circle_id` and assert ownership atomically at registration. Reference
+impl: `octra-foundry/crates/octra-core/src/circle.rs`; original
+JavaScript: `octra-labs/webcli/static/circles.html` (`f9c73e1`).
+
+### 10.2 `circle_asset_put_encrypted` wire format
+
+For sealed-asset publish:
+
+| Field           | Value                                                                                                     |
+| --------------- | --------------------------------------------------------------------------------------------------------- |
+| `to_`           | circle_id                                                                                                   |
+| `op_type`       | `"circle_asset_put_encrypted"`                                                                              |
+| `message`       | `{ "resource_key": <hex32>, "ciphertext": <b64>, "padding_class": 0\|1\|2\|3 }`                              |
+| `encrypted_data`| (none — ciphertext is in `message`)                                                                          |
+
+Sealed envelope: AES-GCM-256, PBKDF2-SHA256 with 120k iters, "OCRS1"
+magic header, padded to 4k / 16k / 32k / 128k buckets
+(`padding_class` 0..3). Key derivation: per-circle, per-path. Path
+itself never escapes the client — only `resource_key =
+digest_sha256(circle_id || path)` is on chain.
+
+### 10.3 Required vs optional fields summary
+
+For typical contract calls (`op_type = "call"`):
+
+- Required: `from, to_, amount, nonce, ou, timestamp, op_type, message`.
+- Optional: `encrypted_data` (for HFHE bundles).
+
+For `deploy_circle`:
+- Required (envelope): all of the above PLUS predicted `to_=circle_id`.
+- Required (`message` payload): the 9 fields in §10.1.
+
+For `circle_asset_put_encrypted`:
+- Required: `resource_key`, `ciphertext`, `padding_class` inside
+  `message`.
+
+## 11. Open questions to confirm with Octra team
+
+1. ~~Is `bytes` a valid type?~~ **Resolved 2026-05-17** (§7.1).
 2. Does `list[T]` exist? The example uses `map[int]T` + counter.
 3. Does `while` exist? The example only uses `for i in 0..n`.
 4. Is `private fn` valid for contract-internal helpers?
@@ -291,6 +454,9 @@ The v1 AML rewrite must:
 6. Is there a way to "delete" a map entry, or do we just write zero?
 7. Are there string ops besides `concat`/`to_string` (length, slice,
    compare)?
+8. ~~Are `payable` / `nonreentrant` modifiers valid?~~ **Resolved
+   2026-05-15** via `octra-labs/program-examples` (§ "Function
+   modifiers").
 
 Filing as GitHub issues against the Octra dev-docs repo is the
 right next step.

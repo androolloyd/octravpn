@@ -93,6 +93,24 @@ still settle/refund. Funds are never stuck behind pause because
 `claim_no_show`, `sweep_expired_session`, and `complete_unbond` do
 not check `paused`.
 
+**Owner-only governance ops intentionally bypass pause.** This
+includes `set_params`, `set_paused` itself, `transfer_ownership`,
+and (in v2) `withdraw_program_treasury`. The reasoning:
+
+1. A compromised owner can always call `set_paused(0)` to unpause
+   themselves first, so gating governance on pause adds no defense.
+2. Emergency response (migrations, treasury rescue, ownership
+   transfer to a multisig under attack) MUST work while paused.
+3. `transfer_ownership` in particular needs to be callable under
+   pause — this is the "hand off the keys before they leak further"
+   escape hatch.
+
+v1.1 briefly experimented with gating governance on pause; reverted
+because of (1) and (2). Tracked as P0-3-adjacent in
+`security-roadmap.md`. The pause flag therefore halts **user flows
+only** (`open_session`, `register_endpoint`, etc.) and never the
+small set of owner-only emergency entrypoints.
+
 Once Stage 1 is reached (multisig), pause becomes a quick-acting tool
 for any k-of-n signers; once Stage 2 is reached, an emergency
 multisig can be retained as a delegated subset of the DAO with

@@ -1,9 +1,11 @@
 # AML Gap Analysis: OctraVPN vs. Confirmed Octra Primitives
 
-**Date**: 2026-05-12, refreshed 2026-05-14. **Octra status**: live
-mainnet, v3.0.0-irmin, ~10s epochs, $44.5M mcap. **OctraVPN status**:
-AML compiles against `octra_compileAml` and the cryptographic
-equivocation slash now lives in-program (see §3 and `program/main.aml`).
+**Date**: 2026-05-12, refreshed 2026-05-14, 2026-05-17. **Octra
+status**: live mainnet, v3.0.0-irmin, ~10s epochs, $44.5M mcap;
+public Circles primitive shipped 2026-05-15. **OctraVPN status**: v1
+AML compiles against `octra_compileAml` with cryptographic
+equivocation slash in-program (see §3 and `program/main.aml`); v2
+slim-registry + operator-circle AML deployed on devnet (see §13).
 
 This document audits every host call our `program/main.aml` makes
 against the confirmed Octra AML surface (from
@@ -440,7 +442,111 @@ What we CAN'T prove without Octra cooperation:
 
 ---
 
-## 12. Sources
+## 12. v2 / Circles learnings (2026-05-17)
+
+After the public Circles release on 2026-05-15, we deployed
+`program/main-v2.aml` (slim registry) and `program/operator-circle.aml`
+to devnet. The integration surfaced five AML grammar / wire-format
+details that this document originally got wrong.
+
+### 12.1 `bytes` is a length-counted UTF-8 string
+
+`bytes` is **not** raw octets — it's UTF-8 with a character-count
+predicate. `require(len(h) == 32, ...)` accepts a 32-character ASCII
+string (good for ASCII-encoded 32-byte handles); it rejects hex (64
+chars) and base64 (44 chars) of a real 32-byte value. Our earlier
+draft of `register_circle` failed `len() == 32` until we stopped
+passing hex/b64-encoded hashes through `bytes`-typed parameters.
+
+For raw 32-byte values (hashes, member roots), pass the canonical
+hex-encoded form and parse with the AML caller's own decoder, OR pass
+the 32 raw bytes as a 32-char string (only works if every byte is
+ASCII-printable, which they generally aren't for hashes).
+
+Documented in saved memory `octra_aml_wire_format.md`.
+
+### 12.2 `ed25519_ok` wants base64, not hex
+
+Both `pk` and `sig` arguments to `ed25519_ok(pk, msg, sig)` are
+base64-encoded byte strings. Earlier drafts that passed hex
+silently failed verification (no error — just `false`). This matches
+the convention used in `octra_pre_client/cli.py` for native tx
+signatures but contradicts the natural assumption from
+`pvac_hfhe_cpp` (which uses hex internally). Cross-referenced and
+confirmed via the live devnet `slash_double_sign` path.
+
+### 12.3 Canonical-JSON tx envelopes have NO domain prefix
+
+The bytes signed for tx authentication are **bare canonical JSON**
+over the envelope — no `"octra_tx_v1|"` prefix, no length tag, no
+binary framing. Field order matters (insertion order, matching the
+v1 reference): `{from, to_, amount, nonce, ou, timestamp, op_type,
+[encrypted_data], [message]}`. We hit `malformed-tx` errors twice
+before discovering that a domain prefix (which feels right from
+`tx_builder.hpp` aux-message conventions) is actively wrong for the
+envelope itself.
+
+Auxiliary signed messages (encrypted-balance auth, PVAC register,
+view-pubkey register) DO use literal-string domain prefixes — see
+`docs/octra-research.md §3`. The envelope is the exception.
+
+### 12.4 `payable` and `nonreentrant` modifiers are confirmed
+
+The AML modifiers used in `octra-labs/program-examples` after
+2026-05-15 are now part of our active surface:
+
+- `fn register_circle(...) payable { ... }` — entrypoint can accept
+  `value > 0`.
+- `fn settle_session(...) nonreentrant { ... }` — re-entrancy guard
+  per call; transitively blocks `transfer(...)` callbacks from
+  re-entering.
+
+Both compile against the live `octra_compileAml`. `payable` resolves
+the chicken-and-egg in §13.5 below.
+
+### 12.5 `register_circle` must be atomic + payable
+
+Earlier drafts had operators call `bond_endpoint(circle_id, amount)`
+after `register_circle(...)`. This failed because `bond_endpoint`
+required `caller == circle.owner`, but `circle.owner` is only set
+inside `register_circle`. Resolved by collapsing register + bond
+into a single `payable` entrypoint (commit `6c3ce5a`). This is now
+the canonical v2 pattern and is replicated in the operator-circle
+program for member-acceptance + payment-on-join.
+
+### 12.6 HFHE pubkeys are per-wallet, not per-contract
+
+The biggest v2-side surprise: `fhe_load_pk(addr)` requires `addr` to
+have a PVAC pubkey registered via `octra_registerPvacPubkey`.
+Circles are addresses derived from a deploy seed (not signing
+accounts), so they CANNOT register a PVAC pubkey. Operator-circle
+contracts must route HFHE lookups through `circle.owner` (the
+deploying wallet) rather than `self_addr`.
+
+Implications:
+- The operator wallet (not the circle) owns the encrypted-earnings
+  ciphertext. Slashing keyed on `circle_id` zeroes the bond in the
+  registry but the wallet still controls the encrypted ledger — by
+  design, since the wallet is the only entity that can prove
+  zero-knowledge openings of its own ciphertext.
+- A compromised operator wallet still gates the encrypted ledger,
+  which is why the per-circle key hygiene doc (`docs/v2-operator-key-hygiene.md`)
+  treats the deploy wallet as the "high-value" key.
+
+Documented in saved memory `octra_hfhe_pubkey_per_wallet.md`.
+
+### 12.7 Devnet RPC body cap blocks PVAC registration
+
+Operational, not grammar: `https://devnet.octrascan.io/rpc` has
+nginx `client_max_body_size ≈ 1 MiB`. PVAC pubkeys base64-encode to
+~4 MB. **Devnet cannot exercise real HFHE end-to-end** until the
+cap is raised. Mainnet RPC accepts ≥8 MB bodies. Filed as an Octra-
+team ask in `docs/v2-octra-questions.md §7`. Memory:
+`octra_devnet_rpc_body_cap.md`.
+
+---
+
+## 13. Sources
 
 - `docs/octra-research.md` (this repo, 2026-05-10) — primary source.
 - `octra-labs/contract-examples/example_1.aml` (GitHub) — only public AML.

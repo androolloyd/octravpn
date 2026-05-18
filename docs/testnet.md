@@ -166,6 +166,62 @@ If step 3 succeeds, the chain accepted `create_tailnet`. If steps 5–7
 succeed, the chain accepted device + pre-auth flows. Step 8 doesn't
 need chain at all once the tailnet exists.
 
+## v2 on devnet (since 2026-05-17)
+
+The v2 slim-registry + operator-circle path runs against Octra
+**devnet** (`https://devnet.octrascan.io/rpc`) since 2026-05-17.
+
+### v2 program addresses (devnet)
+
+| Component                          | Address                                                       |
+| ---------------------------------- | -------------------------------------------------------------- |
+| Slim registry (`main-v2.aml`)      | `oct3fxjrzfqh65ATo31eau8xRFBPiXh2Uzwue56EYkfVSj7`              |
+| Reference operator circle           | `octE5x8WvhXB1FStpDmmfxkMmFKdnx5cL1Fr4gnry6aUdqA`              |
+
+### v2 adversarial harness
+
+```sh
+docker/devnet/e2e-adversarial-v2.sh   # 45 / 45 cases pass against live devnet
+```
+
+The harness exercises: atomic register + bond (`register_circle`
+payable), circle membership ACL, sealed `/policy.json` round-trip,
+slim-registry `slash_double_sign` (carried over verbatim from
+v1.1), pause-bypass for governance ops, and adversarial mutations
+across each entrypoint.
+
+### Opting into v2 in the devnet config
+
+In `docker/devnet/config.toml`:
+
+```toml
+[chain]
+rpc_url       = "https://devnet.octrascan.io/rpc"
+program_addr  = "oct3fxjrzfqh65ATo31eau8xRFBPiXh2Uzwue56EYkfVSj7"  # v2
+protocol_version = 2
+```
+
+`protocol_version = 2` switches the client/node to v2 wire calls
+(`register_circle`, `authorize_circle`, `open_session` with class
+arg, etc.). `protocol_version = 1` falls back to v1.1 mainnet.
+
+### Devnet limitation: PVAC pubkey body cap
+
+`https://devnet.octrascan.io/rpc` enforces `client_max_body_size ≈
+1 MiB` at the nginx edge. A PVAC pubkey base64-encodes to ~4 MB, so
+`octra_registerPvacPubkey` is unreachable on devnet today. **End-to-
+end HFHE (encrypted metering, encrypted earnings) is mock-only on
+devnet** until the cap is raised. Mainnet RPC accepts the body.
+
+Saved memory: `octra_devnet_rpc_body_cap.md`. Filed with Octra dev
+team in `docs/v2-octra-questions.md §7`.
+
+Workarounds for current v2 dev:
+- Run the PVAC sidecar locally with `RPC_OVERRIDE=mainnet` for HFHE
+  smoke tests (slow but works).
+- Run the rest of the v2 surface (registry, sealed assets, ACL,
+  slashing) on devnet without the HFHE round-trip.
+
 ## What the Docker harness proves
 
 The `docker/e2e.sh` and `docker/e2e-tailnet.sh` scripts run the same

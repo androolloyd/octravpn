@@ -161,6 +161,102 @@ Channels: https://x.com/octra, https://discord.com/invite/octra, https://t.me/oc
 
 ---
 
+## 9.1 Circles primitive — 2026-05-15 public release
+
+Octra shipped Circles publicly on **2026-05-15** via `octra-labs/webcli`
+commit `f9c73e1` (`static/circles.html` + supporting wallet code). The
+`octra-labs/program-examples` repo simultaneously demonstrated the
+`payable` / `nonreentrant` AML modifiers used in real circle code. Our
+v2 integration landed on devnet by 2026-05-17 (`docker/devnet/e2e-
+adversarial-v2.sh` 45 / 45).
+
+### Wire format
+
+A circle deploys via the standard tx envelope with `op_type="deploy_circle"`,
+`to_=<predicted circle_id>`, and a JSON `message` payload containing
+nine fields: `runtime, privacy_class, browser_mode, resource_mode,
+limits, code_b64, policy_hash, members_root, export_policy`. See
+`docs/aml-grammar.md §10.1` for the full schema.
+
+### Deterministic id derivation (CREATE2-style)
+
+```
+seed       = digest_sha256("octra:circle_deploy_id:v1" || deployer_addr_bytes || u64be(nonce) || payload_hash_hex_bytes)
+circle_id  = "oct" + base58(seed)[:44]
+```
+
+The id is computable BEFORE submitting the deploy tx, enabling main-net
+programs to assert ownership at registration without trusting deployer-
+disclosed metadata. Reference impl: `octra-foundry/crates/octra-core/src/circle.rs`.
+
+### Sealed-asset envelope crypto
+
+For path-private resources (`/policy.json`, `/manifest.json`, etc.):
+
+- AES-GCM-256 over plaintext payload.
+- Key = PBKDF2-SHA256(password, salt, **120 000 iters**, 32 bytes).
+- Magic header `"OCRS1"` (5 bytes); version byte; 12-byte nonce;
+  16-byte tag.
+- Padding to one of four buckets: 4 KiB / 16 KiB / 32 KiB / 128 KiB
+  (so size doesn't leak content type).
+- On-chain `resource_key = digest_sha256(circle_id || path)`; path
+  never escapes the client.
+
+Fetched via `circle_asset_ciphertext_by_resource_key(circle_id,
+resource_key)` (read-only) and published via
+`circle_asset_put_encrypted` (`op_type="circle_asset_put_encrypted"`).
+
+### AES KAT gate
+
+Devnet chain-side runtime enforces an AES Known-Answer-Test on first
+sealed-asset access; programs hang for ~1s on first call per worker
+while the KAT runs. PVAC sidecar code that previously bypassed this
+caused intermittent failures; observed in `pvac-sidecar` development
+(commit `9e16868`).
+
+### Tx hashes — canonical v2 e2e (devnet)
+
+Captured 2026-05-17 against `https://devnet.octrascan.io/rpc`:
+
+| Step                                             | tx hash                                                            |
+| ------------------------------------------------ | ------------------------------------------------------------------ |
+| `forge create main-v2` → registry deployed        | (deploy tx; registry at `oct3fxjrzfqh65ATo31eau8xRFBPiXh2Uzwue56EYkfVSj7`) |
+| `register_circle` (atomic register + 1 OCT bond) | `54d84c02d5a61bfade3122c1abd918f142cd54ace95b2c251aaf11cf49dbc74b`   |
+| `create_tailnet`                                  | `e33463e3f253c6ecd09be1dcdf09397152d852a76645c876cc88cf239f7c879e`   |
+| `authorize_circle`                                | `e4de76f3ae235efde0fd45a912bd7ec14977526d1128d3e3708f8cff1e0fb41c`   |
+| `open_session` (class=0 shared, max_pay=200)      | `434ad40cf475dd4f509550daee36362655375d43c40d064b3e8c65aeae8ff7ae`   |
+| `circle_asset_put_encrypted` (4k-padded sealed `/policy.json`) | `5811465946323b04de530924825b87ad6c95953dce55b9bbb2416cf2aa1bc494` |
+
+Reference operator circle: `octE5x8WvhXB1FStpDmmfxkMmFKdnx5cL1Fr4gnry6aUdqA`.
+
+### Mainnet vs devnet behaviour
+
+| Surface                              | Mainnet                                            | Devnet (`devnet.octrascan.io`)                       |
+| ------------------------------------ | -------------------------------------------------- | ----------------------------------------------------- |
+| `deploy_circle` op-type accepted     | Yes                                                | Yes                                                   |
+| `circle_asset_put_encrypted` accepted | Yes                                               | Yes                                                   |
+| `octra_registerPvacPubkey` body cap   | ≥8 MB (accepts a 4 MB base64 PVAC pk)              | **~1 MiB** at nginx edge — blocks PVAC registration   |
+| AES KAT on first sealed-asset access  | Yes (one-time per worker)                          | Yes                                                   |
+| `ed25519_ok` accepts base64           | Yes                                                | Yes                                                   |
+
+The devnet body cap is the blocker for end-to-end HFHE on devnet —
+see `docs/v2-octra-questions.md §7` and saved memory
+`octra_devnet_rpc_body_cap.md`. Filed with the Octra dev team.
+
+### HFHE inside circles
+
+The chain-side HFHE ops (`fhe_load_pk`, `fhe_deser`, `fhe_add`,
+`fhe_add_const`, `fhe_verify_zero`, etc.) work inside any AML
+program, including those deployed to circles. **Critical**:
+`fhe_load_pk(addr)` requires `addr` to have a per-wallet PVAC
+pubkey registered via the off-chain RPC `octra_registerPvacPubkey`.
+Circles have no keypair (they're addresses derived from a deploy
+seed), so contracts must route HFHE lookups through `circle.owner`
+(the wallet that submitted the deploy tx) rather than `self_addr`.
+Saved memory: `octra_hfhe_pubkey_per_wallet.md`.
+
+---
+
 ## 10. Gaps — must ask the team
 
 1. Validator min stake (OCT) — none published; onboarding paused.
@@ -172,9 +268,10 @@ Channels: https://x.com/octra, https://discord.com/invite/octra, https://t.me/oc
 7. Full AML host-call reference — only FHE primitives shown in the public example. `verify_ed25519`, `pedersen_verify`, `emit_private_transfer` are **not confirmed**.
 8. Production HFHE parameters — pvac_hfhe_cpp is a 2024 PoC; production security level / ring dim / plaintext modulus unstated.
 9. DK reset cadence and "indirect pointer" semantics — deferred to "subsequent articles."
-10. Extensibility of `op_type` beyond `standard, encrypt, decrypt, stealth, claim, deploy, call`.
+10. ~~Extensibility of `op_type` beyond `standard, encrypt, decrypt, stealth, claim, deploy, call`.~~ **Partially resolved 2026-05-15**: `deploy_circle`, `circle_asset_put_encrypted` (and read-only `circle_asset_ciphertext_by_resource_key`) are now public. Extensibility for app-specific op-types still open.
 11. Multi-validator quorum at decentralization — single-validator today; will it stay Algorand-style or become a `chiefs` set (litepaper §3.6)? Changes how programs prove witness counts.
 12. Octra SDK and full paper — promised in litepaper §7, not published. 2026-Q1 EVM-compat upgrade slipped.
+13. **NEW**: devnet RPC `client_max_body_size` is ~1 MiB at the nginx edge, blocking `octra_registerPvacPubkey` (~4 MB body). Mainnet accepts. Ask: raise devnet to ≥8 MB. See `docs/v2-octra-questions.md §7`.
 
 ---
 

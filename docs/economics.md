@@ -690,6 +690,31 @@ Set in the `OctraVPN` constructor (`program/main.aml`). Governance
 
 ---
 
+## 14.1 v2 / Circles parameters (since 2026-05-17)
+
+The v2 slim-registry (`program/main-v2.aml`) adds the following
+parameters on top of the v1 set. Defaults are constructor-set on the
+devnet deployment at `oct3fxjrzfqh65ATo31eau8xRFBPiXh2Uzwue56EYkfVSj7`.
+
+| Parameter                  | Default       | Bound          | Rationale                                                                                  |
+| -------------------------- | ------------- | -------------- | ------------------------------------------------------------------------------------------ |
+| `min_circle_stake`         | 1 000 000 OU (1 OCT) | ≥ 100 000 OU (0.1 OCT) | Lower than `MIN_ENDPOINT_STAKE` because circles bond per-circle, not per-operator. Multiple circles per operator allowed; total at-risk is N × stake. |
+| `sealing_fee_per_put`      | 5 000 OU      | > 0            | Per `circle_asset_put_encrypted` tx, on top of base gas. Pays for resource_key storage and AES KAT amortization on devnet/mainnet runtimes. |
+| `price_per_mb_shared`      | per-circle     | ≥ `min_price_per_mb` | Class-0 (shared exit) price. Set by the operator inside the circle program. Snapshotted at session open.                  |
+| `price_per_mb_internal`    | per-circle     | ≥ `min_price_per_mb` | Class-1 (intra-tailnet) price. Operators MAY set to 0 to grant free intra-tailnet routing; main-net registry permits this. |
+| `class_count`              | 2             | ≤ 16           | Number of routing classes per circle. Class IDs are dense `int`.                                                          |
+
+Per-class pricing replaces v1's single `price_per_mb` per endpoint.
+A single circle can offer (shared-internet, 50 OU/MB) and (internal-
+subnet, 0 OU/MB) simultaneously; clients pick a class at session
+open.
+
+Sealing fee economics: at 5 000 OU per put, an operator publishing a
+new `/policy.json` once per epoch costs ≈ 5 000 OU × (3 600 / 10) ≈
+1.8M OU/hour ≈ 1.8 OCT/hour. Operators in practice publish on policy
+change, not per-epoch — typical real cost is 5 000 OU × handful of
+updates per day = under 0.05 OCT/day.
+
 ## 15. Formal-verification anchor
 
 The economic model rests on these properties; the properties are
