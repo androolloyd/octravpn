@@ -1,7 +1,18 @@
 // OctraVPN v3 — Circle-resident, chain-minimal AML.
 //
-// STATUS: design + compile target. Not yet on devnet. Sibling to
-// main.aml (v1.1) and main-v2.aml (v2.x); those stay as references.
+// STATUS: deployed on devnet 2026-05-18 (see commit log for address).
+// Sibling to main.aml (v1.1) and main-v2.aml (v2.x); those stay as
+// references.
+//
+// NOTE on the `bytes` type at the RPC boundary: AML accepts `bytes`
+// params as JSON strings and applies `len()` to the raw char count
+// without decoding. The chain's own `sha256()` builtin returns a
+// 64-char hex string. So all "32-byte sha256" anchors below require
+// `len() == 64` — they are stored verbatim as 64-char hex digests,
+// not as raw 32-byte buffers. The chain doesn't crypto-verify the
+// value; integrity is enforced by off-chain verifiers fetching the
+// canonical source (state-root.json, members.json) and comparing
+// `sha256_hex(source) == anchor`.
 //
 // Design thesis (full version in docs/v3-circle-resident-architecture.md):
 //   * 4 KiB cap on map[address]string => no large inline blobs.
@@ -268,7 +279,7 @@ contract OctraVPN_V3 {
     require(is_address(circle), "invalid circle id")
     require(self.circle_active[circle] == 0, "circle already active")
     require(self.circle_slashed[circle] == 0, "previously slashed")
-    require(len(state_root) == 32, "state_root must be 32B sha256")
+    require(len(state_root) == 64, "state_root must be 64-char hex sha256")
     require(len(receipt_pubkey) > 0, "receipt pubkey required")
     require(
       self.circle_bond[circle] + value >= self.min_circle_stake,
@@ -281,9 +292,15 @@ contract OctraVPN_V3 {
     self.circle_state_root[circle] = state_root
     self.circle_state_version[circle] = 1
     self.circle_active[circle] = 1
-    // Earnings ledger starts empty.
+    // Earnings ledger starts empty. Initialize the hash chain head to
+    // sha256(state_root) so audit replay doesn't depend on the AML
+    // default-value quirk (unset `bytes` reads back as the literal
+    // string "0", not the empty string). Anchoring the chain genesis
+    // to the operator's first state_root also ties the earnings log
+    // to a known commitment from epoch 0.
     self.circle_earnings_total[circle] = 0
     self.circle_earnings_claimed[circle] = 0
+    self.circle_earnings_chain[circle] = sha256(state_root)
 
     emit CircleRegistered(circle, caller, state_root)
     if value > 0 {
@@ -299,7 +316,7 @@ contract OctraVPN_V3 {
     require(self.circle_owner[circle] == caller, "not circle owner")
     require(self.circle_active[circle] == 1, "circle not active")
     require(self.circle_slashed[circle] == 0, "previously slashed")
-    require(len(new_state_root) == 32, "state_root must be 32B")
+    require(len(new_state_root) == 64, "state_root must be 64-char hex sha256")
     self.circle_state_root[circle] = new_state_root
     self.circle_state_version[circle] = self.circle_state_version[circle] + 1
     emit CircleStateUpdated(circle, new_state_root, self.circle_state_version[circle])
@@ -403,7 +420,7 @@ contract OctraVPN_V3 {
   payable fn create_tailnet(members_root: bytes): int {
     require_not_paused()
     require(value >= self.min_tailnet_deposit, "deposit below minimum")
-    require(len(members_root) == 32, "members_root must be 32B")
+    require(len(members_root) == 64, "members_root must be 64-char hex sha256")
     let tid = self.tailnet_count
     self.tailnet_count = tid + 1
     self.tailnet_owner[tid] = caller
@@ -431,7 +448,7 @@ contract OctraVPN_V3 {
     require_not_paused()
     require(tailnet_id < self.tailnet_count, "tailnet not found")
     require(self.tailnet_owner[tailnet_id] == caller, "not tailnet owner")
-    require(len(new_members_root) == 32, "members_root must be 32B")
+    require(len(new_members_root) == 64, "members_root must be 64-char hex sha256")
     self.tailnet_members_root[tailnet_id] = new_members_root
     self.tailnet_root_version[tailnet_id] = self.tailnet_root_version[tailnet_id] + 1
     emit TailnetMembersRootUpdated(tailnet_id, new_members_root)
@@ -573,7 +590,7 @@ contract OctraVPN_V3 {
       // head' = sha256(head || sha256(blinding))
       let bh = sha256(settle_blinding)
       let prev_head = self.circle_earnings_chain[circle]
-      let new_head = sha256(concat(prev_head, bh))
+      let new_head = sha256(prev_head + bh)
       self.circle_earnings_chain[circle] = new_head
       emit EarningsCommitted(circle, self.circle_earnings_total[circle], new_head)
     }

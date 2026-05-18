@@ -1,8 +1,25 @@
 # OctraVPN v3 — Circle-Resident Architecture
 
-Status: design proposal. Sibling to `docs/v2-circles-design.md`. The
-artifact this doc anchors is `program/main-v3.aml` (compiles via the
-public `octra_compileAml` RPC; not yet deployed on devnet).
+Status: deployed on devnet 2026-05-18 at
+`oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3`. Sibling to
+`docs/v2-circles-design.md`. End-to-end lifecycle verified
+(register_circle → create_tailnet → open_session → settle_claim →
+settle_confirm → claim_earnings); hash-chain replay matches on-chain
+head byte-for-byte. Smoke script: `docker/devnet/v3-smoke.sh`.
+
+### Encoding note: sha256 anchors are 64-char hex strings
+
+The AML runtime does not decode `bytes` params at the RPC boundary —
+`len(bytes_arg)` returns the JSON-string character count. AML's own
+`sha256()` builtin emits a 64-char hex string. So every "32-byte
+sha256 anchor" below is stored as a 64-char hex digest
+(`len() == 64`), not a raw 32-byte buffer. The chain doesn't
+crypto-verify the value; integrity comes from off-chain verifiers
+fetching the canonical source (state-root.json, members.json) and
+comparing `sha256_hex(source) == anchor`. The earnings hash chain is
+likewise initialized at `register_circle` to `sha256(state_root)`
+(see `circle_earnings_chain` init) so replayers don't depend on the
+AML default-value quirk that makes unset `bytes` read back as `"0"`.
 
 ## 1. Why v3 exists
 
@@ -316,5 +333,8 @@ runtime.
 - [x] Two-tx settle (operator claim + opener confirm).
 - [x] `register_circle` is payable; initial bond is atomic.
 - [x] Redeploy = operator re-anchor with one tx each.
-- [ ] Devnet deploy + 40-case adversarial drill (deferred to a
-  separate spike; the user wants to review the design first).
+- [x] Devnet deploy: 2026-05-18 at
+  `oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3`. End-to-end
+  lifecycle confirmed; hash-chain replay matches byte-for-byte.
+- [ ] 40-case adversarial drill on v3 (next spike — patterned after
+  `docker/devnet/e2e-adversarial-v2.sh`).
