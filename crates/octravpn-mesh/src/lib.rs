@@ -18,6 +18,7 @@
 
 pub mod acl;
 pub mod conn;
+pub mod headscale_bridge;
 pub mod ip_alloc;
 pub mod magic_dns;
 pub mod manager;
@@ -32,7 +33,8 @@ pub use ip_alloc::TailnetIpAllocator;
 pub use magic_dns::MagicDns;
 pub use manager::{MeshAction, MeshManager};
 pub use peer::{
-    Peer, PeerCandidate, PeerRegistry, PeerSnapshot, SignedPeerSnapshot, PEER_SNAPSHOT_MAX_AGE_SECS,
+    Peer, PeerCandidate, PeerRegistry, PeerSnapshot, SignedPeerSnapshot, PEER_SNAPSHOT_DOMAIN,
+    PEER_SNAPSHOT_FRAME_MAGIC, PEER_SNAPSHOT_MAX_AGE_SECS,
 };
 pub use serve::{ServeEntry, ServeRegistry};
 pub use stun::{stun_binding_request, StunError};
@@ -52,6 +54,8 @@ pub enum MeshError {
     SnapshotExpired { age_secs: u64 },
     #[error("snapshot signature did not verify")]
     SignatureMismatch,
+    #[error("old peer snapshot format (pre-v2 unframed encoding)")]
+    OldPeerSnapshotFormat,
 }
 
 pub type MeshResult<T> = std::result::Result<T, MeshError>;

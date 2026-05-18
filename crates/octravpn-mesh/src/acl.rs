@@ -54,7 +54,11 @@ pub enum AclAction {
 /// (`group:<name>`), explicit addresses (`oct...`), or the wildcard `*`.
 /// Ports follow the `<proto>/<port>` form (`tcp/22`, `udp/*`, `*/*`,
 /// also accepted: `*:tcp/22` for backward-compat).
+///
+/// `#[serde(deny_unknown_fields)]`: a misspelled rule field is a
+/// loud error, not a silently permissive ACL.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AclRule {
     pub action: AclAction,
     pub src: Vec<String>,
@@ -63,7 +67,13 @@ pub struct AclRule {
     pub ports: Vec<String>,
 }
 
+/// Top-level ACL document.
+///
+/// `#[serde(deny_unknown_fields)]`: unknown top-level keys are
+/// rejected. Forward-compat is handled explicitly via the `version`
+/// field — bump that and the parser plus this struct in lockstep.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AclDoc {
     pub version: u32,
     #[serde(default)]
@@ -75,7 +85,13 @@ pub struct AclDoc {
 }
 
 impl AclDoc {
-    /// Parse a TOML document. Rejects unknown top-level fields.
+    /// Parse a TOML document.
+    ///
+    /// Unknown top-level fields **and** unknown rule fields are
+    /// rejected — see `#[serde(deny_unknown_fields)]` on [`AclDoc`]
+    /// and [`AclRule`]. A misspelled `action` or stray `accept_all`
+    /// flag will fail this call with a parse error rather than
+    /// silently becoming a permissive policy.
     pub fn from_toml(input: &str) -> Result<Self, MeshError> {
         toml::from_str(input).map_err(|e| MeshError::InvalidPeer(format!("ACL parse: {e}")))
     }
@@ -478,6 +494,62 @@ mod tests {
             ports: vec![],
         });
         assert!(signed.verify(&kp.public).is_err());
+    }
+
+    #[test]
+    fn rejects_unknown_top_level_field() {
+        let src = r#"
+            version = 1
+            policy_owner = "octATTACKER"
+            [[rules]]
+            action = "accept"
+            src = ["*"]
+            dst = ["*"]
+        "#;
+        let err = AclDoc::from_toml(src).expect_err("unknown top-level key must reject");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("policy_owner") || msg.contains("unknown field"),
+            "error should name the offending field, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_rule_field() {
+        let src = r#"
+            version = 1
+            [[rules]]
+            action = "accept"
+            src = ["*"]
+            dst = ["*"]
+            permit_all = true
+        "#;
+        let err = AclDoc::from_toml(src).expect_err("unknown rule key must reject");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("permit_all") || msg.contains("unknown field"),
+            "error should name the offending field, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn rejects_misspelled_action_field() {
+        // `actoin` (typo) is rejected as an unknown field. The
+        // required `action` is then missing — either error is fine
+        // as long as the parse fails.
+        let src = r#"
+            version = 1
+            [[rules]]
+            actoin = "accept"
+            src = ["*"]
+            dst = ["*"]
+        "#;
+        let err = AclDoc::from_toml(src).expect_err("typo'd action must reject");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("actoin") || msg.contains("action") || msg.contains("unknown field"),
+            "error should reference the typo or missing field, got: {msg}"
+        );
     }
 
     #[test]

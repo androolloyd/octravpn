@@ -36,6 +36,20 @@ use crate::MeshError;
 /// of stale candidate sets gossiped on the control plane.
 pub const PEER_SNAPSHOT_MAX_AGE_SECS: u64 = 120;
 
+/// Domain-separation tag for the v2 canonical peer-snapshot
+/// encoding. Every variable-length field is length-prefixed; the
+/// signature commits to this tag + frame, not the raw concatenation.
+///
+/// Bump this constant on any incompatible change to the encoding.
+pub const PEER_SNAPSHOT_DOMAIN: &str = "octravpn-peer-snapshot-v2";
+
+/// First byte of every v2 canonical message. Old (unframed) v1
+/// snapshots cannot reach this prefix because their first bytes are
+/// the UTF-8 of the `tailnet_id`. Receivers MAY use this byte to
+/// reject v1 with a clear "old peer snapshot format" error before
+/// signature verification ever runs.
+pub const PEER_SNAPSHOT_FRAME_MAGIC: u8 = 0x02;
+
 /// A reachability candidate for a peer.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum PeerCandidate {
@@ -76,19 +90,37 @@ pub struct PeerSnapshot {
 /// a wall-clock timestamp and a 64-byte signature over the canonical
 /// message bytes.
 ///
-/// The canonical message format is:
-///   tailnet_id || addr || wg_pubkey || candidates || hostname_or_empty || ts_unix_be
-/// where `candidates` is the length-prefixed concatenation defined in
-/// [`canonical_candidates`] and each string field is concatenated as
-/// UTF-8 bytes (no separators — the surrounding fields are
-/// fixed-length or length-prefixed, so there is no ambiguity for the
-/// fields that are not).
+/// ## Canonical v2 framing
 ///
-/// Note: `tailnet_id`/`addr`/`hostname` are not themselves
-/// length-prefixed because the production gossip envelope already binds
-/// each field separately. Within the mesh crate every snapshot is
-/// produced and consumed in lock-step, so a simple concatenation is
-/// sufficient and matches the existing serde representation.
+/// The canonical message is built as:
+///
+/// ```text
+/// PEER_SNAPSHOT_FRAME_MAGIC (0x02)
+///   || PEER_SNAPSHOT_DOMAIN (utf-8)
+///   || 0x00 (domain terminator)
+///   || u32be(len(tailnet_id)) || tailnet_id
+///   || u32be(len(addr))       || addr
+///   || u32be(32)              || wg_pubkey (32 bytes)
+///   || u32be(len(candidates)) || candidates
+///   || u32be(len(hostname))   || hostname
+///   || u32be(8)               || ts_unix_be (8 bytes)
+/// ```
+///
+/// Every variable-length field is length-prefixed. Fixed-size
+/// fields are length-prefixed too: defense-in-depth costs nothing
+/// here and lets a future format do tagged decoding.
+///
+/// `candidates` is the [`canonical_candidates`] byte encoding,
+/// itself length-prefixed.
+///
+/// **Old (v1) format**: previous releases concatenated
+/// `tailnet_id || addr || wg_pubkey || candidates || hostname || ts_unix_be`
+/// without length prefixes. That permitted ambiguity such as
+/// `("aa", "bb")` and `("a", "abb")` collapsing to the same bytes.
+/// The v2 encoding is incompatible by construction (different
+/// leading byte); receivers that need to detect a v1 producer can
+/// inspect the first byte and reject with
+/// [`MeshError::OldPeerSnapshotFormat`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SignedPeerSnapshot {
     pub snapshot: PeerSnapshot,
@@ -118,13 +150,14 @@ mod serde_sig_bytes {
 /// candidate is a 1-byte discriminator followed by:
 ///
 /// - `Lan` (0x00) / `Stun` (0x01): 16 bytes of the IP in v4-mapped-into-v6
-///   form, then 2 bytes of port in big-endian.
-/// - `Relay` (0x02): 4 bytes of `validator_addr` length in big-endian,
-///   then the UTF-8 bytes.
+///   form (length-prefixed `u32be(16)`), then `u32be(2) || port_be`.
+/// - `Relay` (0x02): `u32be(len(validator_addr)) || validator_addr`.
+///
+/// Every variable field carries its own length. The list itself
+/// gets a length prefix when embedded in the outer
+/// [`canonical_message`].
 fn canonical_candidates(cands: &[PeerCandidate]) -> Vec<u8> {
-    // Per-candidate cost is at most 19 bytes for Lan/Stun, plus the
-    // variable Relay strings. Preallocate generously to avoid reallocs.
-    let mut out = Vec::with_capacity(cands.len() * 20);
+    let mut out = Vec::with_capacity(cands.len() * 28);
     for c in cands {
         match c {
             PeerCandidate::Lan(sa) => {
@@ -137,9 +170,7 @@ fn canonical_candidates(cands: &[PeerCandidate]) -> Vec<u8> {
             }
             PeerCandidate::Relay { validator_addr } => {
                 out.push(2u8);
-                let bytes = validator_addr.as_bytes();
-                out.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
-                out.extend_from_slice(bytes);
+                push_lp(&mut out, validator_addr.as_bytes());
             }
         }
     }
@@ -151,22 +182,45 @@ fn push_socket_addr(out: &mut Vec<u8>, sa: &SocketAddr) {
         IpAddr::V4(v4) => v4.to_ipv6_mapped(),
         IpAddr::V6(v6) => v6,
     };
-    out.extend_from_slice(&ip6.octets()); // 16 bytes
-    out.extend_from_slice(&sa.port().to_be_bytes()); // 2 bytes
+    // Length-prefix the 16-byte IP and 2-byte port — fixed sizes,
+    // but the framing is uniform.
+    push_lp(out, &ip6.octets());
+    push_lp(out, &sa.port().to_be_bytes());
 }
 
+fn push_lp(out: &mut Vec<u8>, bytes: &[u8]) {
+    let len = u32::try_from(bytes.len()).expect("part length fits in u32");
+    out.extend_from_slice(&len.to_be_bytes());
+    out.extend_from_slice(bytes);
+}
+
+/// Build the v2 canonical message signed by [`SignedPeerSnapshot`].
+/// See the type-level docstring for the byte-by-byte layout.
 fn canonical_message(snap: &PeerSnapshot, ts_unix: u64) -> Vec<u8> {
     let cands = canonical_candidates(&snap.candidates);
     let host = snap.hostname.as_deref().unwrap_or("");
+    let domain = PEER_SNAPSHOT_DOMAIN.as_bytes();
+    // 1 magic + domain + 0x00 + 6 × (4-byte len) + each part.
     let mut out = Vec::with_capacity(
-        snap.tailnet_id.len() + snap.addr.len() + 32 + cands.len() + host.len() + 8,
+        1 + domain.len()
+            + 1
+            + snap.tailnet_id.len()
+            + snap.addr.len()
+            + 32
+            + cands.len()
+            + host.len()
+            + 8
+            + 24,
     );
-    out.extend_from_slice(snap.tailnet_id.as_bytes());
-    out.extend_from_slice(snap.addr.as_bytes());
-    out.extend_from_slice(&snap.wg_pubkey);
-    out.extend_from_slice(&cands);
-    out.extend_from_slice(host.as_bytes());
-    out.extend_from_slice(&ts_unix.to_be_bytes());
+    out.push(PEER_SNAPSHOT_FRAME_MAGIC);
+    out.extend_from_slice(domain);
+    out.push(0x00);
+    push_lp(&mut out, snap.tailnet_id.as_bytes());
+    push_lp(&mut out, snap.addr.as_bytes());
+    push_lp(&mut out, &snap.wg_pubkey);
+    push_lp(&mut out, &cands);
+    push_lp(&mut out, host.as_bytes());
+    push_lp(&mut out, &ts_unix.to_be_bytes());
     out
 }
 
@@ -398,6 +452,81 @@ mod tests {
             other => panic!("expected publish to reject, got {other:?}"),
         }
         assert_eq!(r.len(), 0);
+    }
+
+    #[test]
+    fn canonical_framing_prevents_field_boundary_ambiguity() {
+        // Two snapshots that would have been bit-identical under the
+        // old unframed encoding (concat of tailnet_id || addr || ...):
+        //   left: tailnet_id = "aa", addr = "bb", hostname = ""
+        //   right: tailnet_id = "a",  addr = "abb", hostname = ""
+        // and similarly the swap on hostname:
+        //   left: addr = "x", hostname = "yz"
+        //   right: addr = "xy", hostname = "z"
+        let mk = |tid: &str, addr: &str, host: Option<&str>| PeerSnapshot {
+            tailnet_id: tid.into(),
+            addr: addr.into(),
+            wg_pubkey: [0u8; 32],
+            candidates: vec![],
+            hostname: host.map(str::to_owned),
+            last_refresh: Instant::now(),
+        };
+        let tid_left = canonical_message(&mk("aa", "bb", None), 0);
+        let tid_right = canonical_message(&mk("a", "abb", None), 0);
+        assert_ne!(
+            tid_left, tid_right,
+            "tailnet_id/addr boundary must be unambiguous"
+        );
+
+        let host_left = canonical_message(&mk("t", "x", Some("yz")), 0);
+        let host_right = canonical_message(&mk("t", "xy", Some("z")), 0);
+        assert_ne!(
+            host_left, host_right,
+            "addr/hostname boundary must be unambiguous"
+        );
+
+        // And one more: candidates list vs an "empty list immediately
+        // followed by data that looks like a candidate".
+        let cands = vec![PeerCandidate::Relay {
+            validator_addr: "octV".into(),
+        }];
+        let with_cands = canonical_message(
+            &PeerSnapshot {
+                tailnet_id: "t".into(),
+                addr: "a".into(),
+                wg_pubkey: [0u8; 32],
+                candidates: cands,
+                hostname: Some("x".into()),
+                last_refresh: Instant::now(),
+            },
+            0,
+        );
+        let without_cands = canonical_message(
+            &PeerSnapshot {
+                tailnet_id: "t".into(),
+                addr: "a".into(),
+                wg_pubkey: [0u8; 32],
+                candidates: vec![],
+                hostname: Some("x".into()),
+                last_refresh: Instant::now(),
+            },
+            0,
+        );
+        assert_ne!(
+            with_cands, without_cands,
+            "candidates list length must be unambiguous"
+        );
+    }
+
+    #[test]
+    fn canonical_frame_begins_with_magic_and_domain() {
+        let snap = fake_snapshot("t1", "octA", "alice");
+        let msg = canonical_message(&snap, 1234);
+        assert_eq!(msg[0], PEER_SNAPSHOT_FRAME_MAGIC);
+        let dom = PEER_SNAPSHOT_DOMAIN.as_bytes();
+        let dom_end = 1 + dom.len();
+        assert_eq!(&msg[1..dom_end], dom);
+        assert_eq!(msg[dom_end], 0x00);
     }
 
     #[test]

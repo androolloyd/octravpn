@@ -14,3 +14,7 @@
 node_modules/
 .idea/
 .claude/worktrees/
+
+# fuzz build artifacts
+fuzz/target/
+fuzz/Cargo.lock
