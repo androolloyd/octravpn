@@ -4,8 +4,13 @@
 //! valid input.
 
 use std::net::Ipv4Addr;
+use std::time::Instant;
 
-use octravpn_mesh::{AclDoc, MagicDns, TailnetIpAllocator};
+use octravpn_mesh::{
+    AclDoc, MagicDns, PeerCandidate, PeerSnapshot, SignedPeerSnapshot, TailnetIpAllocator,
+    PEER_SNAPSHOT_MAX_AGE_SECS,
+};
+use octravpn_core::sig::KeyPair;
 use proptest::prelude::*;
 
 // ---------- DNS parser robustness ----------
@@ -123,28 +128,48 @@ proptest! {
 proptest! {
     /// For any tailnet id and an arbitrary set of distinct member
     /// addresses (≤ 200), every allocated IP is inside the CGNAT
-    /// range and within the tailnet's /22.
+    /// /10 range and never collides with the router IP. v2 of the
+    /// allocator no longer carves out a per-tailnet /22 — the full
+    /// /10 is the host space.
     #[test]
-    fn ip_allocator_stays_in_cgnat_and_per_tailnet_subnet(
+    fn ip_allocator_stays_in_cgnat(
         tid in "[a-z0-9]{1,30}",
         members in proptest::collection::hash_set("oct[a-z0-9]{1,10}", 1..200)
     ) {
         let alloc = TailnetIpAllocator::new(&tid);
         let router = alloc.router_ip();
-        let mut prefixes = std::collections::HashSet::new();
         for m in &members {
             let ip = alloc.allocate(m);
             let oct = ip.octets();
             // CGNAT /10: 100.64.0.0 to 100.127.255.255.
             prop_assert!(oct[0] == 100 && (oct[1] & 0xC0) == 0x40,
                          "ip {ip} outside 100.64/10");
-            // Same /22 prefix for every member of this tailnet.
-            let prefix = u32::from_be_bytes(oct) & 0xFFFF_FC00;
-            prefixes.insert(prefix);
             // Never equal to the router.
             prop_assert_ne!(ip, router);
         }
-        prop_assert_eq!(prefixes.len(), 1, "members landed across multiple /22s");
+    }
+}
+
+proptest! {
+    /// ip_salt bumping must change the IP for at least *some*
+    /// members. (For any given member there's a 1/capacity chance
+    /// of accidentally re-hashing to the same slot; we test the
+    /// population property.)
+    #[test]
+    fn ip_allocator_salt_reshuffles_population(
+        tid in "[a-z0-9]{1,30}",
+        members in proptest::collection::hash_set("oct[a-z0-9]{1,10}", 5..50)
+    ) {
+        let a0 = TailnetIpAllocator::with_salt(&tid, 0);
+        let a1 = TailnetIpAllocator::with_salt(&tid, 1);
+        let mut changed = 0;
+        for m in &members {
+            if a0.allocate(m) != a1.allocate(m) {
+                changed += 1;
+            }
+        }
+        prop_assert!(changed >= members.len() - 1,
+            "salt bump barely moved anyone: {changed}/{}", members.len());
     }
 }
 
@@ -159,5 +184,94 @@ proptest! {
         let a: Ipv4Addr = alloc.allocate(&m);
         let b: Ipv4Addr = alloc.allocate(&m);
         prop_assert_eq!(a, b);
+    }
+}
+
+// ---------- ACL canonical-bytes stability ----------
+
+proptest! {
+    /// `canonical_bytes` is a function of the document — same parse
+    /// twice, identical bytes both times.
+    #[test]
+    fn acl_canonical_bytes_stable(doc in arb_acl_doc()) {
+        let Ok(parsed) = AclDoc::from_toml(&doc) else { return Ok(()); };
+        prop_assert_eq!(parsed.canonical_bytes(), parsed.canonical_bytes());
+    }
+}
+
+// ---------- SignedPeerSnapshot verify success + tamper rejection ----------
+
+fn arb_candidate() -> impl Strategy<Value = PeerCandidate> {
+    prop_oneof![
+        any::<u8>().prop_map(|p| PeerCandidate::Lan(
+            format!("10.0.0.1:{}", u16::from(p) + 1).parse().unwrap()
+        )),
+        any::<u16>().prop_map(|p| PeerCandidate::Stun(
+            format!("203.0.113.4:{}", p.saturating_add(1)).parse().unwrap()
+        )),
+        "[a-z0-9]{4,16}".prop_map(|v| PeerCandidate::Relay { validator_addr: v }),
+    ]
+}
+
+prop_compose! {
+    fn arb_snapshot()(
+        tid in "[a-z0-9]{1,30}",
+        addr in "oct[a-z0-9]{1,10}",
+        host in proptest::option::of("[a-z]{1,12}"),
+        wg in any::<[u8; 32]>(),
+        cands in proptest::collection::vec(arb_candidate(), 0..4),
+    ) -> PeerSnapshot {
+        PeerSnapshot {
+            tailnet_id: tid,
+            addr,
+            wg_pubkey: wg,
+            candidates: cands,
+            hostname: host,
+            last_refresh: Instant::now(),
+        }
+    }
+}
+
+proptest! {
+    #[test]
+    fn signed_peer_snapshot_round_trip_verifies(snap in arb_snapshot()) {
+        let kp = KeyPair::generate();
+        let signed = SignedPeerSnapshot::sign(snap, &kp);
+        prop_assert!(signed.verify(&kp.public, PEER_SNAPSHOT_MAX_AGE_SECS).is_ok());
+    }
+}
+
+proptest! {
+    /// Tamper path 1: flip a byte in `wg_pubkey`.
+    #[test]
+    fn signed_peer_snapshot_rejects_wg_tamper(snap in arb_snapshot(), idx in 0usize..32) {
+        let kp = KeyPair::generate();
+        let mut signed = SignedPeerSnapshot::sign(snap, &kp);
+        signed.snapshot.wg_pubkey[idx] ^= 0xFF;
+        prop_assert!(signed.verify(&kp.public, PEER_SNAPSHOT_MAX_AGE_SECS).is_err());
+    }
+}
+
+proptest! {
+    /// Tamper path 2: mutate `addr`.
+    #[test]
+    fn signed_peer_snapshot_rejects_addr_tamper(snap in arb_snapshot()) {
+        let kp = KeyPair::generate();
+        let mut signed = SignedPeerSnapshot::sign(snap, &kp);
+        signed.snapshot.addr.push('!');
+        prop_assert!(signed.verify(&kp.public, PEER_SNAPSHOT_MAX_AGE_SECS).is_err());
+    }
+}
+
+proptest! {
+    /// Tamper path 3: swap the candidate list.
+    #[test]
+    fn signed_peer_snapshot_rejects_candidate_tamper(snap in arb_snapshot()) {
+        let kp = KeyPair::generate();
+        let mut signed = SignedPeerSnapshot::sign(snap, &kp);
+        signed.snapshot.candidates.push(PeerCandidate::Relay {
+            validator_addr: "octINJECTED".into(),
+        });
+        prop_assert!(signed.verify(&kp.public, PEER_SNAPSHOT_MAX_AGE_SECS).is_err());
     }
 }
