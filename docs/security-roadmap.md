@@ -7,9 +7,34 @@ mitigates, the proposed mechanism, and the rough cost.
 
 For what's already in the protocol see `docs/whitepaper.md §1`
 (threat model), `docs/economics.md §10` (adversarial scenarios),
-and the formal proofs in `proofs/`.
+the formal proofs in `proofs/`, and **`docs/v2-threat-model.md §3`**
+(canonical prioritized fix queue — the closed items in §-1 below all
+link back into it).
 
-Status legend: 🟢 = planned for v1.1, 🟡 = v1.x, 🔴 = research/v2.
+Status legend: green = closed (this pass); planned = v1.1 / v2.1;
+yellow = v1.x; red = research / v2+.
+
+---
+
+## -1. Closed since the v2 hardening pass
+
+These items shipped between commits `374ba49` (v2 threat model doc)
+and `dfc016e` (P1-6/P1-8/P1-9). They are listed here for traceability;
+see `docs/v2-threat-model.md §3` for the full diagnostic and tests.
+
+| Item | Commit | What landed |
+| --- | --- | --- |
+| **P0-1** plaintext `/events` SSE | `f4f5e65` | events_token gate on `/events`; per-session metadata no longer leaks to passive observers on the operator's HTTP control plane. |
+| **P0-2** RPC cert pinning | `2d933fc` | `[chain].pinned_root_paths` config in both node + client TOML; rogue / corporate / OS-installed CAs can no longer MITM `devnet.octrascan.io`. **Operator-side enablement is still on operators** — the lib + config is wired, but operators must add the pinned root path to their config to activate it. |
+| **P0-3** `meter_bytes` always-false `ed25519_ok` | `b9aedf7` | Removed the dead `ed25519_ok(resource_key, …)` branch in `operator-circle.aml`; auth is now `caller == self.owner` explicitly (no silent fall-through). |
+| **P1-5** receipt cross-program / chain / circle replay | `060903d` | `ReceiptContext` field on `Receipt`; signing payload binds `(program_addr, chain_id, circle_id)`. Tests: `cross_program_receipt_rejection`, `cross_chain_receipt_rejection`, `cross_circle_receipt_rejection`, plus property-based variants. |
+| **P1-6** sealed on-disk keys | `dfc016e` | `octravpn-node seal-keys` / `unseal-keys` subcommands; ChaCha20-Poly1305 + PBKDF2 envelope; atomic write + fsync; strict mode (`[chain].require_sealed_keys = true`) refuses to boot on plaintext keys. |
+| **P1-8 / P1-9** restart resets `last_seq = 0` | `dfc016e` | Persistent fsync'd `receipt_journal.rs`; floor consulted before every signature; closes Tree F.2.a (restart-replay) in the v2 threat model. |
+| **P1-10** sealed-passphrase not zeroized | `2d933fc` | `Zeroizing<String>` on the `discover_v2.rs` config path; core-dump / swap leak window closed. |
+| **45/45 v2 adversarial drill** | `beae338` | All 45 cases hold under the v2 substrate. |
+| **95 Lean theorems** (45 v1.1 + 50 v2) | — | TLC parity: 17 invariants, 3.8 M distinct states, 0 violations. |
+| **30 Rust proptest harnesses** | — | Crypto, tx, wallet_enc, receipt-domain coverage. |
+| **PVAC sidecar past the AES KAT gate on mainnet** | `9e16868` | GPL-isolated daemon; dummy / non-fork pubkeys reject before sig-verify; sidecar pubkeys accepted. |
 
 ---
 
@@ -20,22 +45,26 @@ host calls. The following AML extensions would unlock the
 properties we currently can't enforce on-chain. Each item is a
 discrete ask to the Octra core team.
 
-### 0.1 🟢 `verify_ed25519(pubkey, msg, sig) -> bool` host call
+### 0.1 (planned) `verify_ed25519(pubkey, msg, sig) -> bool` host call
+
+**Status note:** the runtime contract is now `ed25519_ok` accepting
+**base64-encoded** pubkey + sig (not hex — `docs/octra-aml-wire-format.md`
+documents this). Both substrates already use it for receipt-pubkey
+attestation and `slash_double_sign`. This ask is retained for
+edge-case AML programs that want a verbose constant-time variant.
 
 **Unlocks:**
 - Dual-signed receipt verification in `settle_session` →
   cryptographic non-repudiation of `bytes_used`.
-- `submit_equivocation(operator, evidence)` permissionless slashing.
+- `submit_equivocation(operator, evidence)` permissionless slashing
+  (already wired for the operator-attestation key path; receipt-pubkey
+  path still pending).
 - `redeem_join_token` pre-auth tokens.
 - Quorum-signed ACL updates (`§2.3`).
 
-**Rationale:** Ed25519 is already in Octra's tx-signing pipeline
-(`docs/octra-research.md §3`); the primitive exists at the chain
-runtime. Exposing it to AML is a thin host-binding.
-
 **Estimated cost:** ~1 week of Octra-team work.
 
-### 0.2 🟢 Native `op_type="vpn_settle"` extension
+### 0.2 (planned) Native `op_type="vpn_settle"` extension
 
 **Unlocks:** Dual-signed bandwidth receipts verified by the native-tx
 runtime BEFORE AML executes. AML sees pre-validated data.
@@ -50,11 +79,10 @@ range proofs + Pedersen commitments are runtime-verified.
 
 **Estimated cost:** ~3 weeks of Octra-team work.
 
-### 0.3 🟡 `verify_bulletproof(commit, proof) -> bool` host call
+### 0.3 (v1.x) `verify_bulletproof(commit, proof) -> bool` host call
 
 **Unlocks:**
-- Encrypted bandwidth volumes in settle (`docs/security-roadmap.md
-  §6.2`).
+- Encrypted bandwidth volumes in settle (`§6.2`).
 - Range-proofed FHE-encrypted balances (prevent over-claim before
   the chain even runs `fhe_verify_zero`).
 
@@ -65,611 +93,395 @@ AML lets programs adopt the same primitive.
 **Estimated cost:** ~2-4 weeks (depends on the existing libpvac
 bindings).
 
-### 0.4 🟡 Linkable ring signature host call
+### 0.4 (v1.x) Linkable ring signature host call
 
 **Unlocks:**
 - Plausible-deniability join (`§6.1`).
 - Multi-device unlinkability (a device proves it's "one of my
   registered devices" without revealing which).
 
-**Rationale:** No existing Octra primitive; net-new.
-
 **Estimated cost:** ~2 months including reference impl.
 
-### 0.5 🟡 Schnorr DLEQ proof host call
+### 0.5 (v1.x) Schnorr DLEQ proof host call
 
 **Unlocks:**
-- Forward-secure receipt key rotation (`§2.1`) — proves a new key
-  is derived from the old key's secret without revealing the old
-  secret.
+- Forward-secure receipt key rotation (`§2.1`).
 
 **Estimated cost:** ~3 weeks.
 
-### 0.6 🟡 General SNARK verifier (`verify_groth16` or `verify_plonk`)
+### 0.6 (v1.x) General SNARK verifier (`verify_groth16` / `verify_plonk`)
 
 **Unlocks:** Arbitrary zk statements about hidden witnesses. Range
-proofs, ring sigs, DLEQ all subsume into a single verifier. Best
-long-term answer to the "encrypted everything" privacy goal.
+proofs, ring sigs, DLEQ all subsume into a single verifier.
 
 **Estimated cost:** ~3-6 months upstream + trusted setup ceremony.
 
-### 0.7 🟢 `octra_isValidator(addr)` AML host call
+### 0.7 (planned) `octra_isValidator(addr)` AML host call
 
-**Unlocks:** OctraVPN can require operators to ALSO be Octra
-validators (hybrid model from earlier design discussions). Currently
-this is callable from RPC but not from AML.
-
-**Mechanism:** Expose `is_octra_validator(addr) -> bool` as a host
-call (the chain already knows; just lacks the AML binding).
+**Unlocks:** Hybrid validator-as-operator model.
 
 **Estimated cost:** ~1 week.
+
+### 0.8 (planned) **Devnet RPC body cap lift to ≥ 8 MiB**
+
+The devnet nginx in front of `devnet.octrascan.io` returns
+`413 Request Entity Too Large` on POST bodies above 1 MiB. The PVAC
+sidecar's pubkey registration `fhe_load_pk` transaction is ~4 MiB
+(11k-coefficient lattice key). Mainnet has no such cap and accepts.
+End-to-end `settle_confirm` on HFHE byte counters on devnet is blocked
+on this. See `memory/octra_devnet_rpc_body_cap.md`.
+
+**Estimated cost:** trivial nginx config bump on octra-team
+infrastructure.
 
 ---
 
 ## 1. Identity & device attestation
 
-### 1.1 🟢 Hardware-backed wallet keys
+### 1.1 (planned) Hardware-backed wallet keys
 
 **Want.** Wallet private keys never exist in plaintext on disk; all
 signing happens inside a hardware module.
 
-**Threatens.** Wallet exfiltration via filesystem read, memory dump,
-or stolen backup tape.
+**Now partially covered.** P1-6 (commit `dfc016e`) ships
+passphrase-encrypted at-rest storage via `octravpn-node seal-keys`
+(ChaCha20-Poly1305 + PBKDF2 envelope). HSM-backed signing (YubiKey /
+Ledger / SE / TPM2) is the next step beyond passphrase wrap; see
+table below.
 
 **Mechanism.** Client + node daemons gain an `identity.backend`
 option:
 
-| Backend         | Where the key lives                  | Sign latency    |
-| --------------- | ------------------------------------ | --------------- |
-| `file` (today)  | Encrypted at rest, plaintext in RAM  | < 1 ms          |
-| `yubikey-pgp`   | YubiKey PIV / OpenPGP applet         | ~50 ms          |
-| `ledger`        | Ledger Nano via APDU                 | ~200 ms + UI    |
-| `secure-enclave` | Apple Secure Enclave (macOS / iOS)  | < 5 ms          |
-| `tpm2`          | TPM 2.0 (Linux / Windows)            | ~10 ms          |
+| Backend | Where the key lives | Sign latency |
+| --- | --- | --- |
+| `file` (today) | plaintext or sealed (P1-6); plaintext in RAM | < 1 ms |
+| `yubikey-pgp` | YubiKey PIV / OpenPGP applet | ~50 ms |
+| `ledger` | Ledger Nano via APDU | ~200 ms + UI |
+| `secure-enclave` | Apple Secure Enclave (macOS / iOS) | < 5 ms |
+| `tpm2` | TPM 2.0 (Linux / Windows) | ~10 ms |
 
-The `KeyPair` trait in `crates/octravpn-core/src/sig.rs` becomes the
+The `KeyPair` trait in `crates/octravpn-core/src/sig.rs` is the
 extension point; each backend implements `sign(&self, msg: &[u8]) ->
-Signature`. The signed-envelope format is unchanged.
+Signature`.
 
-**Cost.** ~2 weeks per backend. Most of the work is making the
-re-key flow ergonomic (the existing AML already supports key rotation
-via `set_view_pubkey` + `set_receipt_pubkey`).
+**Cost.** ~2 weeks per backend.
 
-### 1.2 🟢 WebAuthn / passkeys for tailnet membership
+### 1.2 (planned) WebAuthn / passkeys for tailnet membership
 
 **Want.** A user can be a tailnet member without managing a
-long-lived wallet key on every device — passkey on phone + browser
-+ laptop.
+long-lived wallet key on every device.
 
-**Threatens.** Wallet-key sprawl, phishing of user wallets, the
-"how do I get this key onto my Chromebook" friction.
+**Mechanism.** Two-key separation: a stable wallet identity (HSM-backed
+per §1.1) signs the on-chain `register_device(passkey_pubkey)` once;
+afterwards the passkey signs all session-level operations on that
+device. Revocation is `revoke_device(passkey_pubkey)`.
 
-**Mechanism.** Two-key separation:
+**Cost.** ~3 weeks. WebAuthn verification via `webauthn-rs`.
 
-- **Stable user identity**: a wallet key (could be hardware-backed
-  per §1.1).
-- **Per-device session key**: a WebAuthn credential created via the
-  user's browser/OS passkey provider; bound on chain via
-  `register_device(passkey_pubkey)`.
+### 1.3 (v1.x) DID anchoring (W3C did:octra)
 
-The wallet key signs the on-chain `register_device` once; afterwards
-the passkey signs all session-level operations on that device.
-Revocation is `revoke_device(passkey_pubkey)`.
+**Mechanism.** A `did:octra:<chain>:<address>` method spec; DID
+Document published in AML at `did_documents[address]`.
 
-**Cost.** ~3 weeks. WebAuthn assertion verification is supported via
-`webauthn-rs`; the wire format for our signed-call envelope needs a
-new `pubkey_kind: enum { Ed25519, WebAuthn }` field.
+**Cost.** ~6 weeks.
 
-### 1.3 🟡 DID anchoring (W3C did:octra)
-
-**Want.** Tailnet members + endpoints expose a portable, resolvable
-identifier compatible with existing decentralized-identity
-ecosystems.
-
-**Threatens.** Vendor lock-in of identity to OctraVPN; inability to
-prove tailnet membership outside the protocol (e.g., to an external
-SSO).
-
-**Mechanism.** A `did:octra` method spec:
-
-```
-did:octra:<chain>:<address>
-  → DID Document published in AML at did_documents[address]
-```
-
-The document contains verification methods (wallet pubkey, current
-passkey credentials), service endpoints (tailnet membership list,
-preferred contact addresses), and a revocation index. Updates are
-on-chain txs signed by the wallet.
-
-**Cost.** ~6 weeks including the DID-resolver crate and a reference
-verifier.
-
-### 1.4 🟡 Device attestation via TPM/SE measured-boot
-
-**Want.** When a member joins a tailnet from a device, the tailnet
-can require evidence that the device booted a known-good OS image.
-
-**Threatens.** Compromised devices joining via stolen passkeys; APT
-persistence through bootkits.
+### 1.4 (v1.x) Device attestation via TPM/SE measured-boot
 
 **Mechanism.** `register_device` optionally accepts a
-`MeasuredBootProof` — a signed TPM 2.0 quote attesting PCR values
-matching a tailnet-configured allowlist. The ACL evaluator gains a
-`require_attestation: bool` clause.
+`MeasuredBootProof` (signed TPM 2.0 quote attesting PCR values).
 
-**Cost.** ~4 weeks. The hard part is keeping the PCR allowlist
-maintainable across OS updates; we'll publish a public attestation-key
-service that signs known-good PCR sets per `(os, version, kernel)`.
+**Cost.** ~4 weeks.
 
-### 1.5 🟡 Per-session PSK for post-quantum hedge
+### 1.5 (v1.x) Per-session PSK for post-quantum hedge
 
 **Want.** Resistance against an adversary with a future quantum
-computer who recorded today's WireGuard handshakes.
+computer who recorded today's WireGuard handshakes (Tree A.5 / C.2.b
+in `docs/v2-threat-model.md`).
 
-**Threatens.** "Harvest now, decrypt later" attacks against
-recorded session traffic.
+**Mechanism.** Per-session pre-shared key derived via Kyber768 KEM
+anchored to a per-member long-term Kyber public key on chain
+(`kyber_pubkey: bytes`). Combined key: `BLAKE3(WG_classic || Kyber)`.
 
-**Mechanism.** WireGuard supports a per-session pre-shared key
-(`PresharedKey`) added to the handshake. We derive the PSK via a
-Kyber768 KEM exchange anchored to a per-member long-term Kyber
-public key published on chain (`kyber_pubkey: bytes`). The combined
-key is `BLAKE3(WG_classic_handshake || Kyber_secret)`.
-
-**Cost.** ~3 weeks. Kyber implementation is available via
-`pqcrypto-kyber`; the AML surface gains a single byte field per
-endpoint.
+**Cost.** ~3 weeks. `pqcrypto-kyber` available; AML surface gains a
+single bytes field per endpoint.
 
 ---
 
 ## 2. Operator security
 
-### 2.1 🟢 Forward-secure receipt key rotation
+### 2.1 (planned) Forward-secure receipt key rotation
 
 **Want.** Compromise of an operator's receipt-signing key today does
 not expose the validity of receipts they signed yesterday.
 
-**Threatens.** Operator key compromise leading to retroactive
-equivocation evidence forgery (against an honest historical operator).
+**Pair with** §1.5 (PQ PSK) and §1.1 (HSM destruction of old subkeys).
 
-**Mechanism.** `receipt_pubkey` becomes a Merkle root of N
-generation-specific subkeys. Each settled receipt batch advances the
-generation. Old subkeys are *destroyed* (not merely rotated) at the
-operator side after their epoch closes. Forging a receipt from
-epoch K requires the subkey for epoch K — which physically no longer
-exists.
+**Cost.** ~4 weeks.
 
-A protocol-level slash-on-future-key-leak would require a
-forward-secure construction the operator can attest to. Initial
-version: rely on the operator's HSM (§1.1) for destruction.
+### 2.2 (planned) Reputation-tiered rate limits
 
-**Cost.** ~4 weeks. Forward-secure signature schemes (Bellare-Miner
-or similar) are available in `crates/octravpn-core` already; the AML
-surface adds an `epoch` field to the equivocation-evidence reference.
-
-### 2.2 🟢 Reputation-tiered rate limits
-
-**Want.** Established operators get higher rate-limit ceilings; fresh
-operators are throttled to limit damage from a stake-then-burn
-attack.
-
-**Threatens.** Operator-side flooding — a freshly-bonded operator
-floods the control plane with malformed requests, gets slashed, but
-extracts disruption value first.
-
-**Mechanism.** The node daemon's `control-plane` rate limit is
+**Mechanism.** Node daemon's `control-plane` rate limit is
 parameterized by `EndpointRecord.reputation`:
 
 ```
 limit = base_rate × min(1 + log10(reputation + 1), TIER_MAX)
 ```
 
-Default: fresh operator gets 100 req/s, 1k-reputation operator gets
-~400 req/s, 1M-reputation operator gets ~700 req/s.
-
 **Cost.** ~1 week.
 
-### 2.3 🟡 Quorum-signed ACL updates
-
-**Want.** Tailnet ACL changes require N-of-M owner signatures, not
-just a single wallet signature.
-
-**Threatens.** Single-owner key compromise leading to silent ACL
-relaxation; insider risk for shared tailnets.
+### 2.3 (v1.x) Quorum-signed ACL updates
 
 **Mechanism.** `Tailnet.owner` becomes a `MultiSigPolicy { signers:
-Vec<Address>, threshold: u8 }`. `update_acl` requires a
-`SignedAclDoc` with ≥ `threshold` valid signatures from `signers`.
-Membership changes (`add_member` / `remove_member`) gain the same
-gate at the owner's option.
-
-This composes with §1.1 — each signer can be hardware-key-backed.
+Vec<Address>, threshold: u8 }`. Composes with §1.1.
 
 **Cost.** ~2 weeks.
 
-### 2.4 🟡 Per-hop attestation receipts (path verification)
+### 2.4 (v1.x) Per-hop attestation receipts (path verification)
 
-**Want.** A client can prove their traffic actually traversed the
-hops they paid for, not a shorter cheaper subset.
+**Cost.** ~4 weeks.
 
-**Threatens.** Path-shortening — a multi-hop session where some
-"hops" are colluding to skip real relay work and split the savings.
+### 2.5 (research) Trusted-Execution-Environment receipts
 
-**Mechanism.** Each hop signs a per-batch path-attestation receipt
-that includes:
+**Cost.** ~3 months.
 
-- The hop's own pubkey
-- The previous hop's pubkey (from the path commit)
-- A hash of the encrypted onion layer they unwrapped
+### 2.6 (v2.2 — NEW) Per-member encrypted wrap of sealed policy
 
-A client receiving the full set can verify the chain matches their
-path commit; a mismatch is provable evidence to slash via
-`submit_equivocation(domain: Path, ref: session_id||epoch)`.
+**Want.** Replace the per-tailnet shared sealed-policy passphrase with
+a per-member encrypted wrap. Today the passphrase is shared OOB to
+every tailnet member; any member defection / phone-loss / coercion
+hands the full plaintext `/policy.json` to the attacker, and the only
+recovery is owner-driven re-key (rotate passphrase + re-upload + tell
+everyone, on a side channel).
 
-**Cost.** ~4 weeks. Onion-routing receipt protocol extension.
+**Threatens.** **Defection fragility.** The current sealed-policy
+scheme has no per-member revocation; one leaked passphrase is one
+leaked tailnet.
 
-### 2.5 🔴 Trusted-Execution-Environment receipts
+**Mechanism.** Replace
+`sealed = AES-GCM(PBKDF2(passphrase, circle_id||key_id), plaintext)`
+with a hybrid scheme:
 
-**Want.** Receipts are signed inside an SGX / SEV enclave so the
-operator's plaintext OS cannot fabricate receipts.
+```
+content_key  := random 32-byte ChaCha20-Poly1305 key
+ciphertext   := XChaCha20-Poly1305(content_key, policy_json)
+for each member m in tailnet:
+    wraps[m]  := X25519-ECIES(m.recv_pubkey, content_key)
+sealed       := { ciphertext, wraps: Vec<(member_addr, wrap)> }
+```
 
-**Threatens.** OS-level operator compromise (root on the box) that
-allows arbitrary receipt forgery without operator knowledge.
+Each member decrypts only their own wrap. Member revocation is a
+re-wrap of `content_key` against the surviving member set (no
+ciphertext re-encryption needed unless the revoked member is the
+threat). The owner drives this via `circle_asset_put_encrypted` as
+today; the wrap-table is on-chain alongside the ciphertext.
 
-**Mechanism.** Receipt signing moves into a TEE enclave; the
-enclave's attestation key signs all receipts; the chain verifies the
-attestation key's certificate chain via Intel's / AMD's PKI.
+**Tradeoff.** Sealed-asset size grows ≈ 96 bytes per member. The
+existing 4k / 16k / 32k / 128k padding classes still apply.
 
-**Cost.** ~3 months. TEE supply-chain risk is real (multiple
-vulnerabilities per year); we'd ship this as an *option*, not a
-requirement, and recommend it for high-value tailnets only.
+**Cost.** ~3 weeks. Pairs with §2.3 quorum-signed ACL.
+
+### 2.7 (v2.3 — NEW) AES-GCM → XChaCha20-Poly1305 migration
+
+**Want.** Replace AES-256-GCM with XChaCha20-Poly1305 for sealed
+assets and any future sealed envelope. AES-GCM's 96-bit nonce is the
+fragile path (see P2-11 / Tree B.4 in `docs/v2-threat-model.md`); a
+random-nonce collision is 2^48 by birthday bound, far below the
+sealed-asset lifetime if a tailnet accumulates many policy updates.
+XChaCha20-Poly1305's 192-bit random nonce makes the collision
+infeasible without needing a counter or KDF gymnastic.
+
+**Cost.** ~2 weeks. RustCrypto `chacha20poly1305::XChaCha20Poly1305`
+is available; envelope format gains a version byte for back-compat
+with existing AES-GCM sealed blobs.
+
+### 2.8 (v2.3 — NEW) PBKDF2-SHA256 → Argon2id migration
+
+**Want.** Replace PBKDF2-SHA256-120k with Argon2id (memory-hard,
+~5× higher GPU cost for the same operator-CPU budget). Tracks P2-11
+in `docs/v2-threat-model.md §3`.
+
+**Mechanism.** New envelope version byte; old PBKDF2-derived sealed
+blobs continue to decrypt via the back-compat path. New seals use
+Argon2id with parameters chosen to land at ≈ 250 ms on a typical
+operator host (`m=64 MiB`, `t=3`, `p=4`).
+
+**Cost.** ~2 weeks.
+
+### 2.9 (planned — NEW) Operator daemon ↔ PVAC sidecar wire integration
+
+**Want.** The PVAC sidecar (commit `9e16868`, GPL-isolated, AES-KAT
+green on mainnet) is built and `cast register-pvac` works end-to-end.
+What's not done: the operator daemon (`octravpn-node`) does not yet
+spawn the sidecar as a subprocess and route HFHE encrypt / decrypt
+through the defined JSON IPC contract. Today the sidecar is operated
+manually via `octra cast`.
+
+**Mechanism.** `octravpn-node` gains a `[pvac]` config block pointing
+at the sidecar binary; on startup the daemon spawns it under its own
+session, opens the JSON IPC socket, and routes `fhe_load_pk` /
+`fhe_encrypt` / `fhe_decrypt` through. Crash semantics: if the sidecar
+dies, the daemon restarts it with backoff and surfaces a metric.
+
+**Cost.** ~2 weeks once the daemon + sidecar are on the same release
+train.
 
 ---
 
 ## 3. Audit & forensics
 
-### 3.1 🟢 Audit log shipping to write-once storage
+### 3.1 (planned) Audit log shipping to write-once storage
 
-**Want.** The HMAC-chained audit log is mirrored in real-time to
-external storage that cannot be retroactively modified.
+**Cost.** ~2 weeks for the sidecar; ~1 week per sink.
 
-**Threatens.** Operator-side log tampering: an operator who
-compromises root on the box could replace the audit log + key,
-making post-hoc forensics impossible despite the chain.
-
-**Mechanism.** A new `audit-shipper` sidecar reads the audit JSONL
-stream and POSTs each line to one or more configured sinks:
-
-| Sink                | Write-once?                                | Cost            |
-| ------------------- | ------------------------------------------ | --------------- |
-| S3 Object Lock      | Yes (compliance-mode retention)            | $$              |
-| IPFS via Pinata     | Yes (content-addressed)                    | $               |
-| Octra chain         | Hash-only (full body would bloat state)    | gas             |
-| Signed-redis WORM   | Self-hosted append-only key-value          | self-host       |
-
-**Cost.** ~2 weeks for the sidecar; ~1 week per sink integration.
-
-### 3.2 🟢 Signed audit-log export with verification chain
-
-**Want.** When operators ship the audit log to an external auditor,
-the auditor can verify the chain without trusting the operator's
-shipping process.
-
-**Threatens.** Tampering in transit between operator and auditor.
-
-**Mechanism.** Export bundles include `.audit.key`, the JSONL chain,
-a root-MAC signed by the operator's wallet key, and a chain proof
-referencing the most recent on-chain tx hash for cross-anchoring.
-Auditor's verifier (`octravpn-node verify-audit-export`) checks all
-three.
+### 3.2 (planned) Signed audit-log export with verification chain
 
 **Cost.** ~1 week.
 
-### 3.3 🟡 Receipt expiry epochs
+### 3.3 (v1.x) Receipt expiry epochs
 
-**Want.** A receipt held by a client for years cannot be settled
-arbitrarily late; settlement must happen within a bounded window.
+**Mechanism.** `settle_session` gains
+`require(now - session.opened_at_epoch <= SETTLE_EXPIRY_EPOCHS)`.
 
-**Threatens.** Late-settle attacks where a client holds receipts and
-settles them after the operator's reputation/stake context has
-changed in a way that disadvantages the operator.
-
-**Mechanism.** `settle_session` gains a check:
-
-```
-require(now - session.opened_at_epoch <= SETTLE_EXPIRY_EPOCHS)
-```
-
-Default: `SETTLE_EXPIRY_EPOCHS = 30 days`. Expired sessions can be
-swept (refund-only, no operator pay) via `sweep_expired_session`.
-
-**Cost.** ~1 week. Already partially implemented; needs param + test
-coverage.
+**Cost.** ~1 week.
 
 ---
 
 ## 4. Network layer hardening
 
-### 4.1 🟢 Anti-MEV ordering at settlement
-
-**Want.** Settlement transactions cannot be reordered or
-sandwich-attacked to drain treasuries.
-
-**Threatens.** A block producer (or someone with mempool privilege)
-who sees a settle tx coming and front-runs with an `update_endpoint`
-or competing settle.
-
-**Mechanism.** Two protocol changes:
-
-1. `settle_session` includes a `commit_epoch` in its signing payload;
-   the AML rejects settles whose `commit_epoch` is older than `now -
-   N` (forces the client to commit to a recent state).
-2. Critical entrypoints (`settle_session`, `submit_equivocation`)
-   use commit-reveal — client posts `hash(call_payload)` in block N,
-   reveals the payload in block N+1. Reorders are detectable.
+### 4.1 (planned) Anti-MEV ordering at settlement
 
 **Cost.** ~3 weeks.
 
-### 4.2 🟢 Tor-routed control plane (operator option)
-
-**Want.** Operators can publish their control plane over a Tor hidden
-service, hiding their public IP from rate-limiting / DDoS adversaries.
-
-**Threatens.** IP-layer DDoS against operators that the on-chain
-slashing model can't help with.
-
-**Mechanism.** `EndpointRecord.endpoint` can be a `.onion` address;
-clients with Tor support connect via SOCKS5. Onion service is
-operator-side; clients reach via Tor.
-
-Note: this hides the operator's IP, *not* the existence of the
-service. Tor hidden services have well-known traffic patterns.
+### 4.2 (planned) Tor-routed control plane (operator option)
 
 **Cost.** ~2 weeks.
 
-### 4.3 🟡 STUN provider attestation
+### 4.3 (v1.x) STUN provider attestation
 
-**Want.** The STUN servers used for public-address discovery are
-themselves accountable, not arbitrary internet hosts.
+**Cost.** ~2 weeks.
 
-**Threatens.** A malicious STUN server returns false public-IPs to
-clients, breaking direct connectivity and forcing fallback to a
-specific colluding operator.
+### 4.4 (v1.x) Encrypted member metadata
 
-**Mechanism.** STUN responses include a chain-epoch + signature from
-an operator's `receipt_pubkey`. STUN service joins the unified
-operator role (relay + directory + signaling + STUN). Slashable on
-equivocation: two contradictory STUN responses for the same client
-IP at the same epoch.
+**Cost.** ~3 weeks; pairs with §2.6 per-member wrap.
 
-**Cost.** ~2 weeks; partially overlaps with signaling-fee work.
+### 4.5 (v1.x — NEW) Onion AEAD random nonce hardening
 
-### 4.4 🟡 Encrypted member metadata
+**Tracks P1-2 in `docs/v2-threat-model.md §3`.** The onion AEAD
+(`onion.rs:128`) uses a constant zero nonce. Safe today because
+`wrap_layer` derives a fresh AEAD key per call, so it's the trivial
+"fresh key per encryption" case — but any future caching of
+`eph_secret` (retry-on-error, deterministic test mode) silently
+downgrades to nonce-reuse and XOR's plaintexts. Use a random 12-byte
+nonce included in the wire packet so the invariant is enforced in
+code, not by convention.
 
-**Want.** A tailnet's member list is on chain but the human-readable
-metadata (display names, device descriptions, contact info) is
-encrypted.
-
-**Threatens.** Tailnet membership doxxing — chain observers can
-enumerate member addresses today; if they can also see `device_name`
-fields, social-engineering becomes much cheaper.
-
-**Mechanism.** Per-tailnet metadata stored as ChaCha20-Poly1305
-ciphertext keyed by a tailnet-wide symmetric key distributed to
-members via stealth outputs at join time. Owner can re-key on member
-removal.
-
-**Cost.** ~3 weeks including the key-rotation flow.
+**Cost.** ~3 days.
 
 ---
 
 ## 5. Operational
 
-### 5.1 🟢 Signed releases via cosign + transparency log
-
-**Want.** Every released binary is signed by a hardware-backed key,
-the signature is logged in a public transparency log (Sigstore /
-Rekor), and the verification process is documented for operators.
-
-**Threatens.** Supply-chain attacks: a backdoored binary distributed
-to operators.
-
-**Mechanism.** CI signs releases via `cosign sign-blob` with a
-keyless OIDC flow; verification command is in
-`docs/deployment-runbook.md §2`. SBOMs (CycloneDX) attached to every
-release. Reproducible build flags for the node binary.
+### 5.1 (planned) Signed releases via cosign + transparency log
 
 **Cost.** ~1 week + ongoing CI maintenance.
 
-### 5.2 🟢 Public bug bounty program
-
-**Want.** External researchers have a clear path to report
-vulnerabilities and get paid for impact.
-
-**Mechanism.** Hosted via Immunefi or HackerOne, scoped to the
-on-chain program + the node daemon. Funded from the Tier 2 program
-treasury. Severity table tied to OWASP Top 10 + crypto-specific
-classes (slashing-bypass, stealth-tag-correlation, key-recovery).
+### 5.2 (planned) Public bug bounty program
 
 **Cost.** ~2 weeks to set up; ongoing payout budget.
 
-### 5.3 🟡 Independent external audit
+### 5.3 (v1.x) Independent external audit
 
-**Want.** A third-party security firm audits the AML program +
-crypto-critical Rust crates before mainnet.
+**Cost.** ~$150-300k.
 
-**Mechanism.** Engage Trail of Bits, Spearbit, or similar.
-Deliverable: a published report with all findings + remediation
-notes.
+### 5.4 (v1.x) Formal-verification expansion
 
-**Cost.** ~$150-300k via Tier 2 treasury or external grant.
+**Status note:** the v2 Lean port (50 theorems) and TLC 17-invariant
+expansion landed in the v2 hardening pass. Still open: Lean coverage
+of the `nonreentrant` modifier paths in `main-v2.aml` (drill case 46
+for re-entrancy attempts is the missing twin).
 
-### 5.4 🟡 Formal-verification expansion
+**Cost.** ~1 month residual.
 
-**Want.** Coverage of the formal proofs in `proofs/` extends from
-"safety properties of settle" to "safety properties of the entire
-state machine, including bonding, slashing, and key rotation."
-
-**Mechanism.** Continue Lean / TLA+ / Tamarin work; specifically:
-
-- Lean: add slashing module with `slash_burns_stake`,
-  `slash_pays_bounty`, `slash_terminal` lemmas.
-- TLA+: extend spec with bonding/unbonding states; model-check
-  `EquivocationDetected ⇒ <>StakeSlashed`.
-- Tamarin: extend protocol model to cover directory + signaling
-  equivocation alongside receipt equivocation.
-
-**Cost.** ~2 months engineering + 1 month research-collaboration
-budget.
-
-### 5.5 🔴 Side-channel resistance review
-
-**Want.** Constant-time guarantees on every crypto operation that
-touches secret material; cache-timing audit of stealth-tag
-computation.
-
-**Threatens.** Co-location attacks where an attacker on the same
-host reads secret-key bits via cache timing.
-
-**Mechanism.** Audit by a crypto firm; convert any non-constant-time
-operations (BIGNUM math, table lookups) to their constant-time
-equivalents. Add fuzzing against `dudect`.
+### 5.5 (research) Side-channel resistance review
 
 **Cost.** ~$50k audit + ~1 month engineering.
+
+### 5.6 (planned — NEW) Wire `cargo audit` + `cargo deny` into CI
+
+`deny.toml` exists; no GitHub Actions wiring on the workflows I see.
+Most of the value of `docs/v2-threat-model.md §4` evaporates if a
+future bump silently regresses.
+
+**Cost.** ~2 days.
 
 ---
 
 ## 6. Privacy enhancements
 
-### 6.1 🟡 Plausible-deniability join
-
-**Want.** A device's join transaction is not publicly linkable to
-the user's primary wallet identity.
-
-**Threatens.** Join-time deanonymisation: someone watching the chain
-sees `register_device(passkey)` from a wallet they can identify and
-links the device to the human.
-
-**Mechanism.** Two-stage join: (1) the owner creates a one-time
-`JoinIntent` ticket; (2) the device claims the ticket from a fresh
-wallet address funded via a stealth output. The chain sees a fresh
-address join the tailnet, not the user's primary wallet.
+### 6.1 (v1.x) Plausible-deniability join
 
 **Cost.** ~3 weeks.
 
-### 6.2 🟡 Sealed bandwidth metadata
+### 6.2 (v1.x — partially) Sealed bandwidth metadata
 
-**Want.** A tailnet's per-month bandwidth profile is not visible to
-chain observers.
+**Status note:** the v2 `operator-circle.aml` design has HFHE
+byte-counter fields (`docs/v2-circles-design.md §4.4`), but the
+deployed program still uses plaintext counters with a comment
+admitting the gap (P3-17). HFHE settle is wired end-to-end on
+mainnet (PVAC sidecar, AES-KAT green); devnet is blocked on the
+RPC body-cap ask (§0.8).
 
-**Threatens.** Bandwidth-profile correlation: a 1 TB/month tailnet
-in a region with one notable user is identifiable.
+**Cost.** ~2 weeks once §0.8 ships.
 
-**Mechanism.** `settle_session` emits an event whose `bytes_used`
-field is encrypted under the tailnet's symmetric metadata key.
-On-chain aggregation still works (only the operator and the tailnet
-members can decrypt; the program just sums Pedersen commitments).
+### 6.3 (research) Mix-network mode
 
-**Cost.** ~2 weeks.
-
-### 6.3 🔴 Mix-network mode
-
-**Want.** Multi-hop relay sessions include cover-traffic + timing
-obfuscation, providing actual anonymity against a global passive
-adversary (not just confidentiality).
-
-**Threatens.** Traffic-analysis deanonymisation against a global
-passive adversary who observes both ingress + egress.
-
-**Mechanism.** Per-hop fixed-rate batching with Poisson timing
-(à la Loopix). Significant bandwidth overhead.
-
-**Cost.** ~3 months. Likely deferred indefinitely unless a sponsor
-needs it; the bandwidth-overhead cost makes it unattractive for the
-target user.
+**Cost.** ~3 months.
 
 ---
 
 ## 7. Anti-abuse
 
-### 7.1 🟢 Per-tailnet capabilities & quota
-
-**Want.** A misconfigured or compromised member can't drain the
-tailnet treasury via runaway sessions.
-
-**Threatens.** Loose-cannon members (e.g., a child's phone) burning
-through the family treasury.
-
-**Mechanism.** ACL gains `capabilities: { max_session_deposit:
-Option<u64>, max_daily_spend: Option<u64> }` per member. Enforced
-at `open_session` by the on-chain ACL evaluator.
+### 7.1 (planned) Per-tailnet capabilities & quota
 
 **Cost.** ~2 weeks.
 
-### 7.2 🟢 Reputation-weighted client penalty
-
-**Want.** A client who repeatedly opens-and-abandons sessions is
-de-prioritised by operators.
-
-**Threatens.** Operator-side resource exhaustion from no-show grief.
-
-**Mechanism.** Operators publish a `min_client_reputation_for_open`
-threshold; clients below the bar get rejected at handshake time.
-Client reputation increments at every settled session.
+### 7.2 (planned) Reputation-weighted client penalty
 
 **Cost.** ~1 week.
 
-### 7.3 🟡 Slashed-operator denylist propagation
-
-**Want.** A slashed operator can't immediately re-register under a
-new wallet to keep operating.
-
-**Threatens.** "Identity-rotation" attacks where a slashed operator
-spins up a fresh address with fresh stake and keeps misbehaving.
-
-**Mechanism.** Same as today: re-registering costs another full
-`MIN_ENDPOINT_STAKE`, so the attack is at least linear in capital.
-Plus: clients can opt-in to a community-curated denylist (off-chain
-list of IPs / known-operator clusters) for additional friction. The
-denylist is purely advisory — protocol enforcement is via the stake
-floor.
+### 7.3 (v1.x) Slashed-operator denylist propagation
 
 **Cost.** ~1 week.
 
 ---
 
-## Priority groupings
+## Roadmap milestones
 
-**v1.1 (next 3 months)** — operator hardening + audit baseline:
-- §1.1 hardware-backed wallet keys
+**v2.1** — re-deploy with end-to-end hardening:
+- §2.9 operator daemon ↔ PVAC sidecar wired (subprocess spawn + JSON IPC)
+- §0.8 devnet RPC body cap lifted (Octra-team ask)
+- Owner-routed `fhe_load_pk` registration via `circle.owner` (already
+  shipped per `memory/octra_hfhe_pubkey_per_wallet.md`)
+- Drill case 46: re-entrancy attempt against `nonreentrant` paths
+
+**v2.2** — defection-fragility fix:
+- §2.6 per-member encrypted wrap of sealed policy
+- §2.3 quorum-signed ACL (composes with the wrap-table)
+- §4.4 encrypted member metadata (composes with §2.6)
+
+**v2.3** — crypto-primitive uplift:
+- §2.7 AES-GCM → XChaCha20-Poly1305 (with version byte for back-compat)
+- §2.8 PBKDF2 → Argon2id (with version byte for back-compat)
+- §4.5 onion AEAD random nonce hardening (P1-2)
+- §1.5 per-session PQ PSK (Kyber768)
+
+**v1.x parallel track** — operator hardening + audit baseline:
+- §1.1 HSM-backed wallet keys (beyond P1-6's passphrase wrap)
 - §1.2 WebAuthn / passkeys
-- §2.1 forward-secure receipt keys
-- §2.2 reputation-tiered rate limits
-- §3.1 audit log shipping
-- §3.2 signed audit export
-- §4.1 anti-MEV ordering
-- §4.2 Tor control plane
-- §5.1 signed releases (in progress)
-- §5.2 bug bounty (kickoff)
-- §7.1 per-tailnet quotas
-- §7.2 client reputation
+- §3.1 / §3.2 audit log shipping + signed export
+- §5.1 / §5.2 / §5.3 / §5.6 release engineering and external audit
 
-**v1.x (months 4-12)** — identity ecosystem + privacy:
-- §1.3 DID anchoring
-- §1.4 measured-boot attestation
-- §1.5 post-quantum PSK
-- §2.3 quorum-signed ACL
-- §2.4 per-hop attestation receipts
-- §3.3 receipt expiry epochs
-- §4.3 STUN provider attestation
-- §4.4 encrypted member metadata
-- §5.3 external audit
-- §5.4 formal-verification expansion
-- §6.1 plausible-deniability join
-- §6.2 sealed bandwidth metadata
-- §7.3 slashed-operator friction
-
-**v2 / research** — high-cost, high-uncertainty:
+**Research** — high-cost, high-uncertainty:
 - §2.5 TEE receipts
 - §5.5 side-channel resistance
 - §6.3 mix-network mode
