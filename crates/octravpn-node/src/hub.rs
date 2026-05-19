@@ -988,6 +988,12 @@ impl Hub {
                         ip_allocator: Arc::new(TailnetIpAllocator::new(tailnet_id)),
                         machines: Arc::new(MachineRegistry::new()),
                         derp_map: Arc::new(derp_map),
+                        // Empty policy store — wire layer falls back
+                        // to the open allow-all packet filter when
+                        // `is_loaded()` is false. Operator-provided
+                        // policy comes in via a separate admin PUT
+                        // (not wired up yet in this crate).
+                        policy: Arc::new(Default::default()),
                     },
                     shared_minter,
                 ))
@@ -1005,7 +1011,8 @@ impl Hub {
             .with_events_token(self.cfg.control.events_token.clone())
             .with_metrics_token(self.cfg.control.metrics_token.clone())
             .with_admin_token(admin_token)
-            .with_wire_state(wire_state.as_ref().map(|(ws, _)| ws.clone()));
+            .with_wire_state(wire_state.as_ref().map(|(ws, _)| ws.clone()))
+            .with_rate_limit_cfg(self.cfg.control.rate_limit.clone());
             // If the wire surface is enabled, swap the auto-constructed
             // preauth minter for the one shared with the wire router so
             // both paths see the same store.

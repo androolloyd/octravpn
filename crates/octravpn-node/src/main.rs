@@ -474,6 +474,8 @@ async fn run_mesh_serve(
         ip_allocator: Arc::new(TailnetIpAllocator::new(tailnet_id)),
         machines: Arc::new(MachineRegistry::new()),
         derp_map: Arc::new(derp_map),
+        // Empty policy store — see hub.rs analogue for rationale.
+        policy: Arc::new(Default::default()),
     };
 
     eprintln!(
