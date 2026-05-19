@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "repo": "octra (OctraVPN)",
+  "commit": "599b1adf442095f833c741c53da047be1f848a40",
+  "branch": "main",
+  "generated_at": "2026-05-19T22:44:52Z",
+  "generator": "scripts/security/redteam.sh + docs/audit/* (manual snapshot)",
+  "hash_algorithm": "sha256",
+  "files": [
+    {
+      "path": "docs/audit/README.md",
+      "sha256": "68388b0a29d272f210f5d5b883310480a1c50de5291cfe2515a1c6bb11f9396d",
+      "size_bytes": 8464
+    },
+    {
+      "path": "docs/audit/file-index.md",
+      "sha256": "e61457370099ae134a02c4226774c4f32de41de6a99e94e5cb727a1d4877452b",
+      "size_bytes": 15682
+    },
+    {
+      "path": "docs/audit/security-properties.md",
+      "sha256": "8df0593147da2f2586bf6259c406d141718b144dc1c66ef7d6744fad4f1e9f7e",
+      "size_bytes": 14604
+    },
+    {
+      "path": "docs/audit/known-limitations.md",
+      "sha256": "b562b25b1b37a3445f9c3f2e92473e01f4fdc72c32857927fd10749696127095",
+      "size_bytes": 9723
+    },
+    {
+      "path": "docs/audit/dependency-audit.md",
+      "sha256": "35e848373847d4b7d5fbf27928d1be24dc1090b62779d6063749f07825c50465",
+      "size_bytes": 7394
+    },
+    {
+      "path": "docs/audit/threat-model-summary.md",
+      "sha256": "f912824af37437634104efaf1ba3b3dd0fb6e9a14d41e5154975aa4804af511e",
+      "size_bytes": 9048
+    }
+  ],
+  "companion_artifacts": [
+    {
+      "path": "docs/security/pentest-runbook.md",
+      "purpose": "Manual + automated red-team recipes per attack class"
+    },
+    {
+      "path": "scripts/security/redteam.sh",
+      "purpose": "Automated red-team driver (adversarial drills + fuzz + RPC fuzzer)"
+    }
+  ],
+  "verify_recipe": "for f in docs/audit/*.md; do shasum -a 256 \"$f\"; done"
+}
