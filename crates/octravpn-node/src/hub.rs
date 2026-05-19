@@ -988,12 +988,12 @@ impl Hub {
                         ip_allocator: Arc::new(TailnetIpAllocator::new(tailnet_id)),
                         machines: Arc::new(MachineRegistry::new()),
                         derp_map: Arc::new(derp_map),
-                        // Empty policy store — wire layer falls back
-                        // to the open allow-all packet filter when
-                        // `is_loaded()` is false. Operator-provided
-                        // policy comes in via a separate admin PUT
-                        // (not wired up yet in this crate).
-                        policy: Arc::new(Default::default()),
+                        // P1-policy: live ACL store, shared with the
+                        // admin surface (when mounted). The default
+                        // empty store keeps the wire layer's
+                        // `allow_all_packet_filter` fallback in play
+                        // until an operator pushes a doc.
+                        policy: Arc::new(octravpn_mesh::policy::PolicyStore::new()),
                     },
                     shared_minter,
                 ))
@@ -1011,8 +1011,7 @@ impl Hub {
             .with_events_token(self.cfg.control.events_token.clone())
             .with_metrics_token(self.cfg.control.metrics_token.clone())
             .with_admin_token(admin_token)
-            .with_wire_state(wire_state.as_ref().map(|(ws, _)| ws.clone()))
-            .with_rate_limit_cfg(self.cfg.control.rate_limit.clone());
+            .with_wire_state(wire_state.as_ref().map(|(ws, _)| ws.clone()));
             // If the wire surface is enabled, swap the auto-constructed
             // preauth minter for the one shared with the wire router so
             // both paths see the same store.
@@ -1027,10 +1026,77 @@ impl Hub {
                 .audit_dir
                 .clone()
                 .unwrap_or_else(|| "./audit".into());
-            match crate::audit::AuditLog::open(&audit_dir) {
-                Ok(audit) => {
+            // Task #231: if the [analytics] block is enabled, spawn the
+            // indexer + bind it to the audit-log live tap so new
+            // events fan out into the in-memory time-buckets.
+            let analytics_tap = if self.cfg.analytics.enabled {
+                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<
+                    octravpn_analytics::AnalyticsEvent,
+                >();
+                let indexer = octravpn_analytics::Indexer::new();
+                // Boot-time backfill: replay everything already on
+                // disk so the dashboards have history immediately.
+                // Errors are non-fatal — a missing audit dir on first
+                // boot is normal.
+                match octravpn_analytics::load_audit_key(std::path::Path::new(&audit_dir)) {
+                    Ok(key) => match indexer
+                        .ingest_audit_dir(&key, std::path::Path::new(&audit_dir))
+                    {
+                        Ok(scans) => info!(
+                            files = scans.len(),
+                            "analytics: replayed audit log at boot"
+                        ),
+                        Err(e) => warn!(error = %e, "analytics: audit replay failed"),
+                    },
+                    Err(e) => warn!(error = %e, "analytics: no audit key (cold start)"),
+                }
+                // Live stream: drain the unbounded channel into the
+                // indexer state. The audit-log tap publishes here on
+                // every successful write.
+                let state_clone = indexer.state.clone();
+                tokio::spawn(async move {
+                    while let Some(ev) = rx.recv().await {
+                        state_clone.ingest(&ev);
+                    }
+                });
+                let http_state = octravpn_analytics::HttpState::new(
+                    indexer.state.clone(),
+                    self.cfg.analytics.bearer_token.clone(),
+                );
+                let listen_addr = self.cfg.analytics.listen_addr.clone();
+                let listen_for_log = listen_addr.clone();
+                tokio::spawn(async move {
+                    if let Err(e) =
+                        octravpn_analytics::serve(&listen_addr, http_state, None).await
+                    {
+                        warn!(error = %e, "analytics: http server stopped");
+                    }
+                });
+                info!(
+                    listen = %listen_for_log,
+                    gated = self.cfg.analytics.bearer_token.is_some(),
+                    "analytics indexer spawned"
+                );
+                Some(tx)
+            } else {
+                None
+            };
+            match crate::audit::AuditLog::open_batched(
+                &audit_dir,
+                crate::audit::DEFAULT_BATCH_SIZE,
+                crate::audit::DEFAULT_BATCH_INTERVAL_MS,
+            ) {
+                Ok(mut audit) => {
+                    if let Some(tap) = analytics_tap {
+                        audit = audit.with_analytics_tap(tap);
+                    }
                     state = state.with_audit(audit);
-                    info!(dir = %audit_dir, "audit log open");
+                    info!(
+                        dir = %audit_dir,
+                        batch_size = crate::audit::DEFAULT_BATCH_SIZE,
+                        batch_interval_ms = crate::audit::DEFAULT_BATCH_INTERVAL_MS,
+                        "audit log open (batched fsync)"
+                    );
                 }
                 Err(e) => warn!(error = %e, dir = %audit_dir, "audit log disabled"),
             }

@@ -1,0 +1,39 @@
+[package]
+name = "octravpn-analytics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "OctraVPN historical analytics indexer: audit-log -> in-memory time-bucketed counters + Prometheus / JSON time-series."
+
+[lib]
+name = "octravpn_analytics"
+path = "src/lib.rs"
+
+[[bin]]
+name = "octravpn-analytics"
+path = "src/main.rs"
+
+[dependencies]
+anyhow      = { workspace = true }
+axum        = { workspace = true }
+hex         = { workspace = true }
+hmac        = "0.12"
+parking_lot = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+sha2        = { workspace = true }
+thiserror   = { workspace = true }
+tokio       = { workspace = true }
+tracing     = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+tempfile    = { workspace = true }
+tokio       = { version = "1", features = ["full", "test-util"] }
+tower       = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+
+[lints]
+workspace = true

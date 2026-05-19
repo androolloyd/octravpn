@@ -116,6 +116,25 @@ pub(crate) struct AuditLog {
     /// dropped (last sender goes), the receiver side terminates and
     /// the flusher exits after a final fsync.
     sender: Option<mpsc::UnboundedSender<FlusherCmd>>,
+    /// Optional live-event tap for task #231 (`octravpn-analytics`).
+    /// Every successful write fans an [`octravpn_analytics::
+    /// AnalyticsEvent`] out to this channel; the indexer side
+    /// (spawned by `hub.rs`) drains it and folds into in-memory
+    /// time-bucketed counters. `None` (the default) is a no-op —
+    /// existing operators see no behaviour change.
+    ///
+    /// Design notes:
+    ///   - **On-disk format is untouched.** The tap is a side-effect
+    ///     of the in-memory record path, not part of the JSONL
+    ///     envelope.
+    ///   - **Send is best-effort.** If the analytics task has
+    ///     terminated (`send` returns `Err`), the audit write still
+    ///     succeeds — observability MUST NOT block forensics.
+    ///   - **Unbounded** channel: the indexer is in-process and
+    ///     consumes synchronously; backpressure isn't a concern.
+    ///     Bounded would risk losing audit ⇄ analytics correlation
+    ///     under burst load.
+    analytics_tap: Option<mpsc::UnboundedSender<octravpn_analytics::AnalyticsEvent>>,
 }
 
 struct Inner {
@@ -190,7 +209,21 @@ impl AuditLog {
                 prev_mac: [0u8; 32],
             })),
             sender,
+            analytics_tap: None,
         })
+    }
+
+    /// Install a live analytics tap. The returned `AuditLog` is the
+    /// same handle (cheap `Arc<Mutex>` clone) — calling this twice
+    /// replaces the previous tap. Used by `hub.rs` when the
+    /// `[analytics]` block is enabled.
+    #[must_use]
+    pub(crate) fn with_analytics_tap(
+        mut self,
+        tap: mpsc::UnboundedSender<octravpn_analytics::AnalyticsEvent>,
+    ) -> Self {
+        self.analytics_tap = Some(tap);
+        self
     }
 
     /// Synchronous write — always direct (writes + fsyncs inline,
@@ -199,7 +232,37 @@ impl AuditLog {
     /// code should prefer [`Self::write_async`].
     pub(crate) fn write(&self, rec: &AuditRecord) -> Result<()> {
         let mut inner = self.inner.lock();
-        write_inner_direct(&mut inner, rec, /*fsync=*/ true)
+        let r = write_inner_direct(&mut inner, rec, /*fsync=*/ true);
+        drop(inner);
+        // Fan out to the analytics indexer on successful write. Mirror
+        // of `write_async`'s tap below; we publish here so callers that
+        // bypass the async path still hit the indexer.
+        if r.is_ok() {
+            self.tap_publish(rec);
+        }
+        r
+    }
+
+    /// Fan out one record to the analytics tap (best-effort). Pulled
+    /// out of `write` / `write_async` so the conversion lives in one
+    /// place. Public-to-crate for the off chance a future caller
+    /// needs to publish without going through the write path.
+    fn tap_publish(&self, rec: &AuditRecord) {
+        let Some(tap) = self.analytics_tap.as_ref() else {
+            return;
+        };
+        // Re-serialize through JSON so the conversion sees the exact
+        // bytes the verifier would. Conservative; `AuditRecord` is
+        // small enough that the round-trip is irrelevant.
+        let Ok(json) = serde_json::to_string(rec) else {
+            return;
+        };
+        let Some(ev) = octravpn_analytics::AnalyticsEvent::from_audit_record_json(&json) else {
+            return;
+        };
+        // Best-effort: if the indexer task has died, drop the event.
+        // Audit writes MUST NOT block on observability.
+        let _ = tap.send(ev);
     }
 
     /// Async write. In batched mode this is fire-and-forget: returns
@@ -215,6 +278,11 @@ impl AuditLog {
     /// observability — this trade-off is intentional.
     pub(crate) async fn write_async(&self, rec: AuditRecord) -> Result<()> {
         if let Some(tx) = &self.sender {
+            // Publish to the analytics tap BEFORE moving `rec` into
+            // the flusher channel. The flusher does the disk write
+            // asynchronously; the indexer credit doesn't need to wait
+            // on fsync.
+            self.tap_publish(&rec);
             // Fire-and-forget. Channel send only fails if the flusher
             // task has terminated.
             tx.send(FlusherCmd::Write(rec))

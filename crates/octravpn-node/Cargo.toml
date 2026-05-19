@@ -18,6 +18,11 @@ octravpn-core = { path = "../octravpn-core" }
 # `tailscale_interop` module + `crates/octravpn-mesh/src/headscale_bridge.rs`
 # for the contract.
 octravpn-mesh = { path = "../octravpn-mesh" }
+# In-process historical analytics indexer (task #231). The node spawns
+# the indexer + HTTP surface alongside the control plane when the
+# `[analytics]` config block is present. Path dep (workspace member);
+# no transitive heavy deps — the analytics crate is in-memory only.
+octravpn-analytics = { path = "../octravpn-analytics" }
 
 anyhow      = { workspace = true }
 async-trait = { workspace = true }
@@ -53,9 +58,22 @@ zeroize     = { workspace = true }
 # receipt journal). Used to write the sealed envelope + journal via
 # tempfile + rename so a crash mid-write can't corrupt the destination.
 tempfile    = { workspace = true }
+# #232: `cli_ops::probe_remote_health` hits `GET /health` on the running
+# daemon's localhost listener as a curl-free replacement for the
+# runbook's `curl -sS http://localhost:51821/health | jq` step. The
+# workspace reqwest is already built with `rustls-tls`; pulling it in
+# here is a no-op for the lockfile (reqwest is already in the resolved
+# graph via other workspace members).
+reqwest     = { workspace = true }
 
 [dev-dependencies]
 octravpn-mesh = { path = "../octravpn-mesh", features = ["test-helpers"] }
+# `policy_e2e.rs` exercises the admin CRUD surface, which lives behind
+# the `admin` feature in `headscale-api`. The mesh crate links to
+# `headscale-api` with `default-features = false` (it only wants the
+# wire layer); we activate the admin feature here as a dev-dep so the
+# integration test can reach `admin::router` / `admin::AdminState`.
+headscale-api = { path = "../../../headscale-rs/headscale-api", default-features = false, features = ["admin"] }
 # `tower::ServiceExt::oneshot` drives the merged axum::Router in the
 # `tailscale_wire_integration` test without binding a real port.
 tower = { version = "0.5", features = ["util"] }

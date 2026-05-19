@@ -74,6 +74,41 @@ pub(crate) struct NodeConfig {
     pub control: ControlCfg,
     #[serde(default)]
     pub attestation: AttestationCfg,
+    /// Task #231 historical-analytics indexer. Optional — when absent
+    /// (the default) the indexer is not spawned. Purely observational;
+    /// the audit log + receipt journal remain authoritative.
+    #[serde(default)]
+    pub analytics: AnalyticsCfg,
+}
+
+/// `[analytics]` block. Bearer-gated like `[control].metrics_token`:
+/// the HTTP surface returns 503 unless `bearer_token` is set, so a
+/// misconfigured operator gets a clear "endpoint disabled" rather
+/// than an open Prometheus endpoint.
+#[derive(Debug, Deserialize, Clone, Default)]
+pub(crate) struct AnalyticsCfg {
+    /// Spawn the indexer in-process. Defaults to `false` so existing
+    /// operators upgrade without surprise. Set `true` + supply
+    /// `bearer_token` + `listen_addr` to enable.
+    #[serde(default)]
+    pub enabled: bool,
+    /// HTTP listen for the indexer's `/metrics`, `/analytics/series`,
+    /// `/analytics/health` endpoints. Defaults to `127.0.0.1:51823`
+    /// — bound to loopback because the indexer is intended as an
+    /// in-process side-car the local Prometheus scrapes.
+    #[serde(default = "default_analytics_listen")]
+    pub listen_addr: String,
+    /// Bearer token gating `/metrics` and `/analytics/series`. `None`
+    /// (the default) renders both endpoints 503 — set this for the
+    /// indexer to serve. Pick a long random secret (≥32 bytes); the
+    /// same value goes into your scrape config's
+    /// `authorization.credentials` field.
+    #[serde(default)]
+    pub bearer_token: Option<String>,
+}
+
+fn default_analytics_listen() -> String {
+    "127.0.0.1:51823".into()
 }
 
 /// Which on-chain program shape the operator is talking to.
@@ -307,15 +342,6 @@ pub(crate) struct ControlCfg {
     /// operators should set this to a long stable string.
     #[serde(default)]
     pub tailscale_tailnet_id: Option<String>,
-    /// Per-IP token-bucket rate limit applied to the control-plane
-    /// HTTP surface. Defaults to a sane production profile (see
-    /// `crate::rate_limit`); set `enabled = false` to disable
-    /// entirely. The `[control.rate_limit.routes.<class>]` sub-tables
-    /// override per-class `rps` / `burst` — known classes today are
-    /// `preauth`, `receipt`, `v3_calls`, `other`. `/health` and
-    /// `/metrics` always bypass the layer.
-    #[serde(default)]
-    pub rate_limit: crate::rate_limit::RateLimitCfg,
 }
 
 impl Default for ControlCfg {
@@ -329,7 +355,6 @@ impl Default for ControlCfg {
             admin_token: None,
             tailscale_wire_state_dir: None,
             tailscale_tailnet_id: None,
-            rate_limit: crate::rate_limit::RateLimitCfg::default(),
         }
     }
 }

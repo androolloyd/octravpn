@@ -1,0 +1,208 @@
+{
+  "__inputs": [],
+  "__requires": [
+    {"type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.0.0"},
+    {"type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "2.x"}
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {"type": "datasource", "uid": "grafana"},
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Task #231 historical analytics — fed by the octravpn-analytics indexer (in-process side-car spawned by the node when [analytics].enabled = true). Every panel pulls a tumbling-bucket counter exposed by the indexer's /metrics endpoint. The {window=\"5m\"} series is the canonical rate-of-change view; use {window=\"1d\"} for the headline running total. See crates/octravpn-analytics/src/bucket.rs for the retention policy.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "row",
+      "id": 1,
+      "title": "Session lifecycle",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Sessions opened /s (5m window)",
+      "description": "rate of octravpn_analytics_sessions_opened{window=\"5m\"} — fed by the audit log's announce / session_open events.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 1},
+      "targets": [
+        {
+          "expr": "rate(octravpn_analytics_sessions_opened{window=\"5m\"}[5m])",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Settle claims /s (5m window)",
+      "description": "rate of octravpn_analytics_settle_claims{window=\"5m\"} — on-chain settle_claim dispatches captured from the audit log.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 1},
+      "targets": [
+        {
+          "expr": "rate(octravpn_analytics_settle_claims{window=\"5m\"}[5m])",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "id": 4,
+      "title": "Receipts & treasury",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 9},
+      "panels": []
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Receipts signed /s (5m window)",
+      "description": "rate of octravpn_analytics_receipts_signed{window=\"5m\"} — every receipt the node signed, regardless of whether the client returned to redeem it.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 10},
+      "targets": [
+        {
+          "expr": "rate(octravpn_analytics_receipts_signed{window=\"5m\"}[5m])",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "ops"},
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Treasury bytes (1d window total)",
+      "description": "octravpn_analytics_bytes_settled{window=\"1d\"} — cumulative bytes credited across the retention window. The indexer dedups receipt high-watermarks per session, so this is the true settled-bytes count, not the sum of every receipt.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 10},
+      "targets": [
+        {
+          "expr": "sum(octravpn_analytics_bytes_settled{window=\"1d\"})",
+          "legendFormat": "fleet bytes",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "bytes"},
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "id": 7,
+      "title": "Preauth & slashing",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 18},
+      "panels": []
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Preauth churn (mint - redeem, 5m window)",
+      "description": "Difference between preauth_minted and preauth_redeemed rates over the 5m window. Positive ⇒ minting outpacing redemption (keys piling up); negative ⇒ stale keys being burned faster than minted.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 19},
+      "targets": [
+        {
+          "expr": "rate(octravpn_analytics_preauth_minted{window=\"5m\"}[5m]) - rate(octravpn_analytics_preauth_redeemed{window=\"5m\"}[5m])",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "ops"},
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Slash events (1d window)",
+      "description": "octravpn_analytics_slash_double_sign{window=\"1d\"} — count of slash_double_sign audit events over the last 24h. Any non-zero value is alert-worthy; a sustained > 0 means the network is detecting equivocation.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 19},
+      "targets": [
+        {
+          "expr": "sum(octravpn_analytics_slash_double_sign{window=\"1d\"})",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["octravpn", "analytics", "task-231"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timepicker": {},
+  "timezone": "",
+  "title": "OctraVPN Analytics (historical)",
+  "uid": "octravpn-analytics",
+  "version": 1,
+  "weekStart": ""
+}
