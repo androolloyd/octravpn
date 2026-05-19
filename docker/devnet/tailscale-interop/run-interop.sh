@@ -278,11 +278,11 @@ for peer in tsi-peer-a tsi-peer-b; do
     # `tailscale up` blocks forever waiting for the coordination
     # server when there's nothing on the other end of the
     # login-server URL — wrap the call in `timeout` so the test
-    # terminates cleanly. 20s is generous: a working coordination
-    # plane completes `up` in well under 5s in this docker harness;
-    # anything longer is a stall.
+    # terminates cleanly. 60 s is plenty for the
+    # post-Wall-5 register → netmap → Running transition; a healthy
+    # control plane lands in well under 30 s.
     if ! docker exec "${peer}" sh -c \
-        "/usr/bin/timeout 20 tailscale --socket=/var/run/tailscale/tailscaled.sock up \
+        "/usr/bin/timeout 60 tailscale --socket=/var/run/tailscale/tailscaled.sock up \
             --login-server '${LOGIN_SERVER}' \
             --authkey '${PREAUTH_KEY}' \
             --hostname ${peer} \

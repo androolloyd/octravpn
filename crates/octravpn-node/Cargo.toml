@@ -88,6 +88,12 @@ rand = { workspace = true }
 # headscale-api; we re-declare here so the dev-dep resolves the same
 # feature set).
 snow = { version = "0.9.6", features = ["risky-raw-split"] }
+# `tailscale_wire_integration::stream_true_emits_chunk_on_registry_change`
+# decodes the `Stream=true` MapResponse stream the same way upstream
+# does: `binary.LittleEndian.Uint32(siz[:4])` then
+# `zstdframe.AppendDecode`. Wall 5 fix — see
+# `docs/tailscale-interop-blocker.md` 2026-05-19 §"Wall 5 closed".
+zstd = { version = "0.13", default-features = false }
 
 [lints]
 workspace = true

@@ -403,13 +403,19 @@ async fn stream_true_emits_chunk_on_registry_change() {
     assert_eq!(resp.status(), axum::http::StatusCode::OK);
 
     let mut body = resp.into_body();
-    // First chunk = initial MapResponse with 0 peers.
+    // First chunk = initial MapResponse with 0 peers. Stream:true now
+    // uses `[u32 LE size][zstd(JSON)]` framing (closing Wall 5; see
+    // `docs/tailscale-interop-blocker.md` and the unit-level coverage
+    // in `headscale-api::tailscale_wire::map`). Decode the chunk the
+    // same way upstream `controlclient/direct.go::decodeMsg` does.
     let frame = BodyExt::frame(&mut body).await.unwrap().unwrap();
     let chunk = frame.into_data().unwrap();
-    assert!(chunk.ends_with(b"\n"));
-    let trimmed = &chunk[..chunk.len() - 1];
+    let size = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]) as usize;
+    assert_eq!(chunk.len(), 4 + size, "framed chunk size mismatch");
+    let json_bytes = zstd::bulk::decompress(&chunk[4..], 16 * 1024 * 1024)
+        .expect("zstd-framed chunk decompresses");
     let first: octravpn_mesh::tailscale_wire::MapResponse =
-        serde_json::from_slice(trimmed).unwrap();
+        serde_json::from_slice(&json_bytes).unwrap();
     assert_eq!(first.peers.len(), 0);
 
     // `Notify::notify_waiters` only wakes *current* waiters — it
@@ -438,9 +444,12 @@ async fn stream_true_emits_chunk_on_registry_change() {
     let frame = BodyExt::frame(&mut body).await.unwrap().unwrap();
     spawn.await.unwrap();
     let chunk = frame.into_data().unwrap();
-    let trimmed = &chunk[..chunk.len() - 1];
+    let size = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]) as usize;
+    assert_eq!(chunk.len(), 4 + size);
+    let json_bytes = zstd::bulk::decompress(&chunk[4..], 16 * 1024 * 1024)
+        .expect("zstd-framed chunk decompresses");
     let second: octravpn_mesh::tailscale_wire::MapResponse =
-        serde_json::from_slice(trimmed).unwrap();
+        serde_json::from_slice(&json_bytes).unwrap();
     assert_eq!(
         second.peers.len(),
         1,

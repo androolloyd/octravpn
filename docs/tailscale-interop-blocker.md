@@ -1052,3 +1052,243 @@ state-machine contract on top.
 | `octravpn-node` | 100 (87 lib + 13 across 4 integration files) |
 | `headscale-api` (no-default-features) | 55 lib (1 pre-existing failure in `map::tests::stream_true_emits_mapresponse_chunk_on_registry_change` unrelated to this batch) |
 | `be_transport` module | 13 (round-trip, BE-nonce pin, counter increments, replay rejection, out-of-order rejection, cross-check vs raw `chacha20poly1305`, short-ciphertext + empty-plaintext edge cases, snow→BeTransport handshake integration, `BeNoiseStream` duplex round-trip, large-write chunking) |
+
+## 2026-05-19 — Wall 5 closed — Wall 6 surfaced: post-control-plane DERP/datapath
+
+`bash docker/devnet/tailscale-interop/run-interop.sh` no longer stalls
+inside the coordination plane. Stock `tailscale up` v1.78+ now:
+
+1. Opens `/key`, `/ts2021`, and (over h2-in-noise) `/machine/register` +
+   `/machine/map` — all return successfully with no `PollNetMap:` or
+   `decrypt error` warnings.
+2. Receives the streaming MapResponse, parses it into a NetworkMap,
+   binds the assigned tailnet IPv4 (`100.x.y.z/32`).
+3. Transitions through the state machine:
+   `NeedsLogin → NeedsMachineAuth → Starting`.
+
+`tailscale status --json` reports `BackendState=Starting`,
+`Self.InNetworkMap=true`, `TailscaleIPs=["100.x.y.z"]`. The control
+plane is functionally complete.
+
+**The new wall (Wall 6) is the DERP / WireGuard datapath, not the
+control plane.** With `Health=["Tailscale could not connect to any
+relay server"]` the daemon never advances past `Starting` — magicsock
+needs a DERP relay to bootstrap the peer-to-peer datapath, even on
+docker's bridge network where peers can route to each other directly.
+
+Per the prompt's risk paragraph: "If you DO close Wall 5 but tailscale
+ping still fails (peers register but never converge to each other's
+tailnet IPs), that's a different problem entirely (likely WG datapath,
+not control plane). Document it as a 'post-control-plane' wall and
+stop." We are exactly in that case.
+
+### How we closed Wall 5
+
+The original "3 candidate causes" from the prior agent's blocker-doc
+write-up were ranked correctly easiest-first. We found bugs in TWO of
+them (5-B framing and 5-C dispatch) plus a third (state-machine field
+content) the prior agent didn't predict. All three had to be fixed —
+none alone would have moved the state machine past `Starting`.
+
+#### Symptom: daemon-log lines that pinned each cause
+
+| Pre-fix daemon log | Symptom |
+| ------------------ | ------- |
+| `(no log past 'split keys extracted')` | h2 dispatch buffered the body before sending — long-poll-on-empty-tailnet held the response head 30 s. |
+| `PollNetMap: response: json: cannot unmarshal number 11529792538040508190 into Go struct field Node.Node.ID of type tailcfg.NodeID` | `MapNode.ID` was a u64 over `i64::MAX`. |
+| `PollNetMap: response: key hex has the wrong size, got 0 want 64` | `MapNode.Machine` was emitted as a literal `"mkey:"` (zero-length hex) when the machine-key wasn't known. |
+| `(none — but `tailscale status` stuck at NeedsLogin)` | `MapResponse.KeepAlive=true` on full payloads caused upstream's `controlclient/direct.go::sendMapRequest` to `continue` past `HandleNonKeepAliveMapResponse`. |
+| `(none — but `tailscale status` stuck at NeedsMachineAuth)` | `Node.MachineAuthorized` was missing from the netmap; `netmap.NetworkMap.GetMachineStatus()` returned `MachineUnauthorized` even after a successful register. |
+
+#### Cause 5-B (the most subtle): framing was newline-delimited JSON,
+upstream wants length-prefixed zstd
+
+Upstream
+`tailscale/control/controlclient/direct.go::sendMapRequest` reads
+streaming-map responses with:
+
+```go
+var siz [4]byte
+io.ReadFull(res.Body, siz[:])
+size := binary.LittleEndian.Uint32(siz[:])
+io.ReadFull(res.Body, msg)
+// msg is then `zstdframe.AppendDecode`'d before json.Unmarshal.
+```
+
+Our `map.rs` was emitting raw `<JSON>\n` chunks with `\n` keepalives.
+Fixed in `headscale-api::tailscale_wire::map::build_framed_chunk` +
+`build_keepalive_chunk`: every chunk is now
+`[u32 LE size][zstd(JSON)]`, and keepalives carry the literal
+`{"KeepAlive":true}` payload upstream caches against. New
+`zstd = "0.13"` dep on `headscale-api`; same dep added to
+`octravpn-node` dev-deps so the integration test can decode chunks the
+same way the client does.
+
+#### Cause 5-C: h2 dispatch buffered the response body before send
+
+`headscale-api::tailscale_wire::noise::dispatch_h2_request` was
+calling `BodyExt::collect().await` on the response body before
+calling `respond.send_response()`. For the long-poll `/machine/map`
+body — a `futures_util::stream::unfold` that never terminates
+naturally — this blocked forever. The client timed out 20 s into its
+first map call.
+
+Fixed by polling `http_body::Body::poll_frame` and forwarding each
+data frame onto `h2::server::SendResponse::send_data(..., false)` as
+it arrives. `send_response(head, false)` goes out immediately so the
+client can advance its state machine while later frames stream in.
+New direct `http-body = "1"` dep on `headscale-api`.
+
+We also discovered the long-poll-for-2-peers in `map_inner` was firing
+on the Stream=true path; clamped to `!req.stream && !req.omit_peers`
+so the immediate-response paths land inside <1 ms.
+
+#### Cause 5-A (a hybrid): the field set wasn't sufficient AND two
+fields had wire-format errors that the upstream Go decoder couldn't
+reconcile
+
+1. `MapNode.User` was missing — upstream `tailcfg.Node.User` is
+   non-`omitempty`, and the netmap builder dereferences it. Added.
+2. `MapNode.StableID` was missing — required, non-`omitempty`. Added
+   (`"n{ID}"` convention from headscale-go).
+3. `MapNode.ID` overflowed `i64` — Go's `tailcfg.NodeID` is signed.
+   Fixed by clearing the top bit of the FNV-1a hash; `stable_id_from_key`
+   now returns at most `i64::MAX`.
+4. `MapNode.Machine` was emitted as `"mkey:"` (no hex) for machines
+   whose Noise IK static key we hadn't captured. Upstream's
+   `MachinePublic.UnmarshalText` rejects with "key hex has the wrong
+   size, got 0 want 64". Changed to `Option<String>` with
+   `skip_serializing_if = Option::is_none` so the field is OMITTED
+   instead.
+5. `MapResponse.KeepAlive` was hard-coded to `true` on every full
+   payload. The Go decoder treats `KeepAlive=true` as "skip the
+   netmap update handler entirely" (`continue` past
+   `HandleNonKeepAliveMapResponse`). Inverted to `false`; dedicated
+   keepalive frames carry the bit via `build_keepalive_chunk`.
+6. `MapNode.MachineAuthorized` (the per-node bit) was missing.
+   Upstream's `netmap.NetworkMap.GetMachineStatus()` reads it off
+   `SelfNode`; without it the daemon stalls in `NeedsMachineAuth`
+   (BackendState 3) even after `RegisterResponse.MachineAuthorized`
+   returned true. Added; defaults to `true` for any record that made
+   it through `PreauthRedeemer::redeem`.
+
+(Several JSON tag-name discrepancies — `DnsConfig` → `DNSConfig`,
+`DerpMap` → `DERPMap`, `Os` → `OS`, `AllowedIps` → `AllowedIPs`,
+`AuthUrl` → `AuthURL`, `i_pv4` → `IPv4` — were also fixed for
+correctness, but Go's `encoding/json` is case-insensitive on decode so
+none of those were load-bearing. They're pinned by a wire-format
+regression test in `map::tests::two_peer_map_includes_both`.)
+
+### Daemon-log proof of Wall 5 closure
+
+Captured after the patch lands (peer-a only, before tailscale up's 60 s
+wrapper times out on the data-plane wall):
+
+```
+2026/05/19 18:39:03 control: RegisterReq: got response;
+  nodeKeyExpired=false, machineAuthorized=true; authURL=false
+2026/05/19 18:39:03 control: NetMap: got map with 0 peers, ...
+2026/05/19 18:39:03 wgengine: Reconfig: configuring userspace
+  WireGuard config (with 0/0 peers)
+2026/05/19 18:39:03 wgengine: Reconfig: configuring DNS
+2026/05/19 18:39:03 peerapi: serving on http://100.80.80.8:41668
+2026/05/19 18:39:07 health(warnable=warming-up): ok
+2026/05/19 18:39:43 health(warnable=no-derp-home): error:
+  Tailscale could not connect to any relay server.
+```
+
+`tailscale status --json` (peer-a) at 45 s into the run:
+
+```json
+{
+  "BackendState": "Starting",
+  "AuthURL": "",
+  "TailscaleIPs": ["100.80.80.8"],
+  "Self": {
+    "PublicKey": "nodekey:e3f278...",
+    "TailscaleIPs": ["100.80.80.8"],
+    "InNetworkMap": true,
+    ...
+  },
+  "Health": ["Tailscale could not connect to any relay server. ..."]
+}
+```
+
+### Wall 6: post-control-plane DERP requirement
+
+Even on a docker bridge network where peers should reach each other
+directly, stock `tailscale` v1.78+ refuses to advance past
+`Starting` without a reachable DERP relay. The
+`magicsock: 0 active derp conns` + `no-derp-home` health warning
+gates the transition.
+
+This is **not** a control-plane wall — register, netmap, IP
+allocation, and the noise-h2 dispatch are all healthy. The remaining
+work is one of:
+
+1. **Stand up an in-process DERP** — `tailscale/derp` is BSD-3
+   licensed, importable as a Go binary. Add a sidecar to
+   `docker-compose.yml` and serve a minimal one-region `DerpMap` from
+   `/machine/map`.
+2. **Patch magicsock for direct-only mode** — out of scope; would
+   diverge from stock client semantics.
+3. **Accept the test's `Starting`-state floor as PASSING for
+   control-plane interop** — modify `run-interop.sh` to assert
+   `BackendState=Starting && InNetworkMap=true && TailscaleIPs!=null`
+   as success for Wall-5-closed validation. The current ping-based
+   success criterion was always going to require a DERP relay or
+   manual `tailscale set --direct-only`.
+
+Per the prompt's stop-condition ("clear-eyed handoff beats a
+half-shipped fix"), the right next step is option (1) — DERP sidecar
+— filed as Wall 6.
+
+### Exit-code progression as of this PR batch
+
+| State | Exit code |
+| ----- | --------- |
+| Pre-Wall-5 (newline-delimited JSON map, no MachineAuthorized) | 30 (`tailscale up` timed out before register-response landed) |
+| **Post-Wall-5 (this commit batch)** | **30** (`tailscale up` advances NeedsLogin → NeedsMachineAuth → Starting, then stalls waiting for DERP) |
+| + DERP sidecar (Wall 6) | expect 0 |
+
+### Files touched this batch
+
+`headscale-rs`:
+- `headscale-api/src/tailscale_wire/map.rs` — `build_framed_chunk` +
+  `build_keepalive_chunk`; long-poll clamped to `!stream && !omit_peers`;
+  `KeepAlive=false` on full MapResponse; 3 new tests
+  (`framed_chunk_matches_upstream_decoder_shape`,
+  `stream_true_first_chunk_carries_node_with_user`, and updated
+  `stream_true_emits_keepalive` / `stream_true_emits_mapresponse_chunk_on_registry_change`
+  for framed decode).
+- `headscale-api/src/tailscale_wire/noise.rs::dispatch_h2_request` —
+  frame-by-frame forwarding via `http_body::Body::poll_frame` instead
+  of `BodyExt::collect`; added per-request tracing.
+- `headscale-api/src/tailscale_wire/register.rs::record_to_map_node` —
+  populates `User`, `StableID`, omits `Machine` when unknown, sets
+  `MachineAuthorized=true`.
+- `headscale-api/src/tailscale_wire/wire.rs::MapNode` — new
+  `stable_id`, `user`, `machine_authorized` fields; `machine` is now
+  `Option<String>`; `stable_id_from_key` clears the top bit. Pinned
+  JSON tag names: `DNSConfig`, `DERPMap`, `AllowedIPs`, `AuthURL`,
+  `OS`, `IPv4`.
+- `headscale-api/Cargo.toml` — `zstd = "0.13"`, `http-body = "1"` added.
+
+`octra`:
+- `crates/octravpn-node/tests/tailscale_wire_integration.rs::stream_true_emits_chunk_on_registry_change`
+  — updated to decode framed chunks via `zstd::bulk::decompress`.
+- `crates/octravpn-node/Cargo.toml` — `zstd = "0.13"` dev-dep.
+- `docker/devnet/tailscale-interop/run-interop.sh` — `timeout 20` →
+  `timeout 60` for the `tailscale up` wrapper. Healthy register +
+  netmap convergence completes well inside 30 s post-fix; the extra
+  headroom lets the daemon's state-machine settle so log captures
+  show the final `Starting` state instead of mid-handshake.
+- `docs/tailscale-interop-blocker.md` — this section.
+
+### Test counts after Wall 5 closure
+
+| Crate | Tests passing |
+| ----- | ------------- |
+| `octravpn-mesh` (with `test-helpers`) | 89 (71 lib + 6 + 12 integration) |
+| `octravpn-node` | 121 (101 lib + 7 + 2 + 3 + 5 + 3 across integration files) |
+| `headscale-api` (no-default-features) | 58 lib (all green; the pre-existing `stream_true_emits_mapresponse_chunk_on_registry_change` failure is now closed) |
