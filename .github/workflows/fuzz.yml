@@ -58,6 +58,15 @@ jobs:
           - fuzz_acl_parse
           - fuzz_peer_snapshot_decode
           - fuzz_ip_alloc
+          # Validator-hardening targets — see
+          # docs/security/validator-hardening.md. Each one models a
+          # specific adversarial path against a validator's hot RPC +
+          # auth + chain-anchor surface.
+          - fuzz_validator_rpc_envelope
+          - fuzz_v3_settle_claim_double_spend
+          - fuzz_validator_health_oracle
+          - fuzz_circle_state_root_replay
+          - fuzz_preauth_redeem
     permissions:
       contents: read
       issues: write

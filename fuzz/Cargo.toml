@@ -50,3 +50,33 @@ name = "fuzz_ip_alloc"
 path = "fuzz_targets/fuzz_ip_alloc.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "fuzz_validator_rpc_envelope"
+path = "fuzz_targets/fuzz_validator_rpc_envelope.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_v3_settle_claim_double_spend"
+path = "fuzz_targets/fuzz_v3_settle_claim_double_spend.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_validator_health_oracle"
+path = "fuzz_targets/fuzz_validator_health_oracle.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_circle_state_root_replay"
+path = "fuzz_targets/fuzz_circle_state_root_replay.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_preauth_redeem"
+path = "fuzz_targets/fuzz_preauth_redeem.rs"
+test = false
+doc = false
