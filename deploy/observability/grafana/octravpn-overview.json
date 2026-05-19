@@ -27,7 +27,7 @@
       }
     ]
   },
-  "description": "Operator-level overview of an OctraVPN node fleet. Every panel pulls from a real NodeMetrics field exposed by /metrics. Panels marked TODO depend on metrics that are not yet plumbed into NodeMetrics in crates/octravpn-node/src/control.rs — see deploy/observability/README.md for the inventory.",
+  "description": "Operator-level overview of an OctraVPN node fleet. Every panel pulls from a real NodeMetrics field exposed by /metrics. The slash / preauth / RPC / WireGuard / session-lifecycle panels were filled in by the metrics-plumbing PR; any remaining TODO text panels depend on histograms (audit_flush_seconds, RPC latency) that the hand-rolled exposition format can't carry today.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -183,15 +183,26 @@
     },
     {
       "id": 13,
-      "type": "text",
-      "title": "TODO — settlement settled-vs-no-show ratio",
-      "description": "",
-      "gridPos": {"h": 4, "w": 12, "x": 0, "y": 15},
-      "options": {
-        "mode": "markdown",
-        "content": "**Settled vs no-show ratio** is not exposed today.\n\nThe node only tracks `receipts_signed_total` (proposals). Whether a client returned a countersigned receipt and the operator successfully settled it on-chain lives on the settlement bot, not on the node. Add `settled_total` and `no_show_total` to `NodeMetrics` (control.rs) or, better, scrape the settlement bot directly."
-      },
-      "type": "text"
+      "type": "timeseries",
+      "title": "Session no-shows /s",
+      "description": "rate(octravpn_session_no_shows_total[5m]). NOTE: the counter exists but no node-side path increments it yet — settlement-side data (settled vs unsettled) lives on the settlement bot. Flat-zero plot today is expected; bumping starts when the settlement-bot scrape lands.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 15},
+      "targets": [
+        {
+          "expr": "rate(octravpn_session_no_shows_total[5m])",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineInterpolation": "linear", "fillOpacity": 10},
+          "unit": "ops"
+        }
+      }
     },
     {
       "id": 14,
@@ -201,7 +212,7 @@
       "gridPos": {"h": 4, "w": 12, "x": 12, "y": 15},
       "options": {
         "mode": "markdown",
-        "content": "The audit log calls `f.flush()` after each line but does **not** record histograms. From the perf-bench-doc finding, flush ≈ buffer-flush only (microseconds) — true fsync latency would require `f.sync_data()` plus an observation hook. Add `audit_flush_seconds` (histogram) to `NodeMetrics`."
+        "content": "The audit log calls `f.flush()` after each line but does **not** record histograms. From the perf-bench-doc finding, flush ≈ buffer-flush only (microseconds) — true fsync latency would require `f.sync_data()` plus an observation hook. Add `audit_flush_seconds` (histogram) to `NodeMetrics`. NOTE: the hand-rolled Prometheus exposition format used by `/metrics` does not support histograms; landing this metric requires migrating to either a prometheus_client crate or a custom histogram serializer."
       },
       "type": "text"
     },
@@ -215,15 +226,61 @@
     },
     {
       "id": 21,
-      "type": "text",
-      "title": "TODO — peer & WireGuard metrics",
-      "description": "",
-      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 20},
-      "options": {
-        "mode": "markdown",
-        "content": "Metrics not yet exposed by `NodeMetrics`:\n\n- `tailscale_peers_reachable` (gauge)\n- `wireguard_handshake_success_total` / `wireguard_handshake_fail_total` (counter)\n- `derp_relays_in_use` (gauge) — DERP not wired into v0 anyway\n\nThe data already exists inside `boringtun::Tunn` and the `WireState`; add an aggregator that ticks every 30s and updates the corresponding `AtomicU64`s on `NodeMetrics`. Until then this row is intentionally empty."
-      },
-      "type": "text"
+      "type": "timeseries",
+      "title": "WireGuard handshakes /s (success vs fail)",
+      "description": "rate(octravpn_wg_handshake_success_total[5m]) is bumped on every `TunnResult::WriteToNetwork` (the typed handshake-reply signal boringtun emits — over-counts keepalives but is the best proxy). `_fail_total` increments on `TunnResult::Err`.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 20},
+      "targets": [
+        {
+          "expr": "rate(octravpn_wg_handshake_success_total[5m])",
+          "legendFormat": "{{instance}} success",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        },
+        {
+          "expr": "rate(octravpn_wg_handshake_fail_total[5m])",
+          "legendFormat": "{{instance}} fail",
+          "refId": "B",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineInterpolation": "linear", "fillOpacity": 10},
+          "unit": "ops"
+        }
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Session opens / closes /s",
+      "description": "rate(octravpn_session_opens_total[5m]) is bumped at every accepted POST /session; `_closes_total` increments by N each time the idle sweeper evicts N sessions.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 20},
+      "targets": [
+        {
+          "expr": "rate(octravpn_session_opens_total[5m])",
+          "legendFormat": "{{instance}} opens",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        },
+        {
+          "expr": "rate(octravpn_session_closes_total[5m])",
+          "legendFormat": "{{instance}} closes",
+          "refId": "B",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineInterpolation": "linear", "fillOpacity": 10},
+          "unit": "ops"
+        }
+      }
     },
     {
       "type": "row",
@@ -235,15 +292,69 @@
     },
     {
       "id": 31,
-      "type": "text",
-      "title": "TODO — preauth mints, redemptions, slash events",
-      "description": "",
-      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 27},
-      "options": {
-        "mode": "markdown",
-        "content": "None of the following are exposed by `/metrics`:\n\n- `preauth_mints_total` — increment in `mint_preauth` (control.rs:691)\n- `preauth_redemptions_total` — increment where `PreauthMinter::redeem` is called\n- `slash_double_sign_total` — surfaced from the chain attestation loop\n\nEach one is a one-line `AtomicU64` addition to `NodeMetrics` plus a `fetch_add` at the call site. Filed as a follow-up; the observability stack is wired so these panels can drop in without dashboard changes."
+      "type": "timeseries",
+      "title": "Preauth mints & redemptions /s",
+      "description": "rate(octravpn_preauth_mints_total[5m]) is bumped at every successful POST /admin/preauth (auth-gated). `_redemptions_total` is bumped by the wire-side redeem path through the MetricsSink trait (octravpn-mesh::headscale_bridge).",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 27},
+      "targets": [
+        {
+          "expr": "rate(octravpn_preauth_mints_total[5m])",
+          "legendFormat": "{{instance}} mint",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        },
+        {
+          "expr": "rate(octravpn_preauth_redemptions_total[5m])",
+          "legendFormat": "{{instance}} redeem",
+          "refId": "B",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineInterpolation": "linear", "fillOpacity": 10},
+          "unit": "ops"
+        }
+      }
+    },
+    {
+      "id": 32,
+      "type": "stat",
+      "title": "Slash events (lifetime)",
+      "description": "octravpn_slash_double_sign_total. Any non-zero value is a critical incident — see OctravpnSlashEvent alert.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 27},
+      "targets": [
+        {
+          "expr": "sum(octravpn_slash_double_sign_total)",
+          "legendFormat": "slash events",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          },
+          "unit": "short"
+        }
       },
-      "type": "text"
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center"
+      }
     },
     {
       "type": "row",
@@ -255,13 +366,42 @@
     },
     {
       "id": 41,
+      "type": "timeseries",
+      "title": "Chain RPC requests & error rate",
+      "description": "rate(octravpn_rpc_requests_total[5m]) plotted alongside `rate(rpc_errors_total[5m])/rate(rpc_requests_total[5m])` for the error fraction. The counters are bumped by the hub's validator-health loop; one-shot bond/unbond/claim calls are not yet instrumented.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 34},
+      "targets": [
+        {
+          "expr": "rate(octravpn_rpc_requests_total[5m])",
+          "legendFormat": "{{instance}} requests/s",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        },
+        {
+          "expr": "rate(octravpn_rpc_errors_total[5m]) / rate(octravpn_rpc_requests_total[5m])",
+          "legendFormat": "{{instance}} error fraction",
+          "refId": "B",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineInterpolation": "linear", "fillOpacity": 10},
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "id": 42,
       "type": "text",
       "title": "TODO — RPC body size & latency histograms",
       "description": "",
-      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 34},
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 34},
       "options": {
         "mode": "markdown",
-        "content": "`/metrics` only ships `AtomicU64` counters today; no histograms. To plot p50/p99 of:\n\n- RPC body size, and\n- control-plane HTTP handler latency,\n\nthe simplest path is `prometheus::HistogramVec` recorded inside the axum middleware. The rate-limit middleware already has a per-request hook point. Note: keep label cardinality bounded — route templates (`/session/:id`) not concrete paths."
+        "content": "Per-request *latency* and *body-size* p50/p99 still require histograms; the hand-rolled Prometheus exposition format in `control.rs::metrics` only carries counters and gauges. To plot percentiles, migrate the serializer (or add a side-car histogram serializer) before introducing `prometheus::HistogramVec` in the axum middleware. Note: keep label cardinality bounded — route templates (`/session/:id`) not concrete paths."
       },
       "type": "text"
     },

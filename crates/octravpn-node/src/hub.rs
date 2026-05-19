@@ -850,7 +850,9 @@ impl Hub {
             loop {
                 tokio::time::sleep(poll).await;
                 let slashed = self.chain.read_endpoint_slashed().await;
+                self.metrics.record_rpc(slashed.is_ok());
                 let stake = self.chain.read_endpoint_stake().await;
+                self.metrics.record_rpc(stake.is_ok());
                 match (slashed, stake) {
                     (Ok(true), _) => {
                         warn!("operator is permanently slashed — endpoint will be rejected");
@@ -891,7 +893,8 @@ impl Hub {
                     self.router.clone(),
                     allowlist,
                 )
-                .await?,
+                .await?
+                .with_metrics(self.metrics.clone()),
             );
             info!(?listen, "tunnel listening");
             server.run().await
@@ -936,8 +939,12 @@ impl Hub {
                 .map(std::path::PathBuf::from)
             {
                 use octravpn_mesh::{
-                    ip_alloc::TailnetIpAllocator, tailscale_wire::MachineRegistry, PreauthMinter,
-                    ServerNoiseKey, WireState,
+                    ip_alloc::TailnetIpAllocator,
+                    tailscale_wire::{
+                        derp_config::{empty_derp_map, load_derp_map},
+                        MachineRegistry,
+                    },
+                    PreauthMinter, ServerNoiseKey, WireState,
                 };
                 let server_noise_key = Arc::new(
                     ServerNoiseKey::load_or_generate(&dir)
@@ -957,13 +964,30 @@ impl Hub {
                 // The wire layer (now in headscale-api) sees the
                 // minter only through the `PreauthRedeemer` trait —
                 // implemented in `octravpn_mesh::headscale_bridge`.
-                let shared_minter = PreauthMinter::new();
+                // Attach the node's metrics sink so the wire-side
+                // `redeem` path bumps `preauth_redemptions_total`
+                // without round-tripping through the control plane.
+                // Mints from `/admin/preauth` are bumped at the
+                // handler instead (control.rs::mint_preauth); the
+                // sink path is for redemptions issued from the
+                // headscale-api wire register handler.
+                let metrics_sink: Arc<dyn octravpn_mesh::MetricsSink> = self.metrics.clone();
+                let shared_minter = PreauthMinter::new().with_metrics_sink(metrics_sink);
+                // Wall 6: optionally load a DERP-map fixture from the
+                // path advertised in OCTRAVPN_DERP_MAP_PATH. Unset ⇒
+                // empty map ⇒ matches pre-Wall-6 behaviour.
+                let derp_map = match std::env::var("OCTRAVPN_DERP_MAP_PATH") {
+                    Ok(path) if !path.is_empty() => load_derp_map(std::path::Path::new(&path))
+                        .with_context(|| format!("load DERP map from {path}"))?,
+                    _ => empty_derp_map(),
+                };
                 Some((
                     WireState {
                         server_noise_key,
                         preauth: Arc::new(shared_minter.clone()),
                         ip_allocator: Arc::new(TailnetIpAllocator::new(tailnet_id)),
                         machines: Arc::new(MachineRegistry::new()),
+                        derp_map: Arc::new(derp_map),
                     },
                     shared_minter,
                 ))

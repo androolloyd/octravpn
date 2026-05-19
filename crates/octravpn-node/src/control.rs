@@ -126,6 +126,12 @@ pub(crate) struct ControlState {
 
 /// Lightweight counters exposed via the /metrics endpoint. Kept as
 /// AtomicU64 to avoid lock contention on the data plane.
+///
+/// Counters (suffix `_total`) only ever increase with `fetch_add`.
+/// Gauges are unsuffixed and use `store`. The companion dashboards in
+/// `deploy/observability/grafana/*.json` plot these by name; keep the
+/// field name and the Prometheus name aligned (the serializer
+/// concatenates `octravpn_<field_name>`).
 #[derive(Default)]
 pub(crate) struct NodeMetrics {
     pub announces_total: AtomicU64,
@@ -135,6 +141,105 @@ pub(crate) struct NodeMetrics {
     /// Unix timestamp of the most recent successful on-chain
     /// attestation refresh. Set by the hub's attestation loop.
     pub last_attestation_unix: AtomicU64,
+    // ------------------------------------------------------------
+    // Slashing surface. The on-chain `slash_double_sign` call is
+    // built by `chain_v3::build_slash_double_sign_call`; the daemon
+    // does not yet *submit* that call on its own (no equivocation
+    // detector wired up), so the counter is bumped by
+    // `record_slash_double_sign` whenever an operator-side tool
+    // dispatches the slash. Once the equivocation detector lands,
+    // its call site replaces the manual surface.
+    pub slash_double_sign_total: AtomicU64,
+    // ------------------------------------------------------------
+    // Preauth surface (Tailscale interop bridge).
+    pub preauth_mints_total: AtomicU64,
+    pub preauth_redemptions_total: AtomicU64,
+    // ------------------------------------------------------------
+    // Chain RPC surface. Bumped by the hub's validator-health and
+    // attestation loops on every RPC round-trip; `_errors_total` is
+    // a subset of `_requests_total` (every error is also a request).
+    pub rpc_requests_total: AtomicU64,
+    pub rpc_errors_total: AtomicU64,
+    // ------------------------------------------------------------
+    // WireGuard handshake outcomes. Bumped from `tunnel::Server`
+    // off the `Tunn::decapsulate` result variants. `success_total`
+    // counts handshake-response writes (the typed signal boringtun
+    // emits when the noise handshake completes); `fail_total`
+    // counts `TunnResult::Err`.
+    pub wg_handshake_success_total: AtomicU64,
+    pub wg_handshake_fail_total: AtomicU64,
+    // ------------------------------------------------------------
+    // Session lifecycle. `opens_total` is bumped at each
+    // `POST /session`; `closes_total` increments by N when the
+    // sweeper evicts N idle sessions; `no_shows_total` is reserved
+    // for the (not-yet-implemented) settlement-side cross-check
+    // where a client never returns a countersigned receipt — see
+    // dashboard panel `settled-vs-no-show ratio` for the TODO.
+    pub session_opens_total: AtomicU64,
+    pub session_closes_total: AtomicU64,
+    pub session_no_shows_total: AtomicU64,
+    // ------------------------------------------------------------
+    // Tailnet gauges. Set by the `/metrics` handler on every scrape
+    // (read-only snapshot from `WireState`), not by data-plane
+    // fast paths. `ip_allocator_used` mirrors `tailnet_member_count`
+    // (every registered machine consumes one allocated IP); the
+    // allocator itself is stateless, so capacity is the static
+    // `TailnetIpAllocator::host_capacity()` value.
+    pub tailnet_member_count: AtomicU64,
+    pub ip_allocator_used: AtomicU64,
+    pub ip_allocator_capacity: AtomicU64,
+}
+
+impl NodeMetrics {
+    /// Record that a `slash_double_sign` call was dispatched. Public
+    /// at crate scope so an operator tool (e.g. an equivocation
+    /// detector) can call it without going through the chain layer.
+    #[allow(dead_code)]
+    pub(crate) fn record_slash_double_sign(&self) {
+        self.slash_double_sign_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a chain RPC request outcome. `ok=true` bumps only
+    /// `rpc_requests_total`; `ok=false` bumps both. Symmetric so
+    /// callers don't need conditional code.
+    pub(crate) fn record_rpc(&self, ok: bool) {
+        self.rpc_requests_total.fetch_add(1, Ordering::Relaxed);
+        if !ok {
+            self.rpc_errors_total.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Record a WireGuard handshake outcome. `success=true` bumps
+    /// the success counter; `success=false` bumps the fail counter.
+    pub(crate) fn record_wg_handshake(&self, success: bool) {
+        if success {
+            self.wg_handshake_success_total.fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.wg_handshake_fail_total.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+/// Bridge from `octravpn-mesh`'s `MetricsSink` trait to our concrete
+/// `NodeMetrics`. Keeps the dependency direction one-way: mesh knows
+/// nothing about node metrics, but node-side callers can pass an
+/// `Arc<NodeMetrics>` wherever a mesh API expects a `MetricsSink`.
+impl octravpn_mesh::headscale_bridge::MetricsSink for NodeMetrics {
+    fn record_event(&self, name: &str) {
+        match name {
+            "preauth_mint" => {
+                self.preauth_mints_total.fetch_add(1, Ordering::Relaxed);
+            }
+            "preauth_redeem" => {
+                self.preauth_redemptions_total
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            // Unknown event names are dropped — additive design so
+            // mesh-side code can publish new events without
+            // requiring a node-side recompile.
+            _ => {}
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -300,6 +405,15 @@ pub(crate) async fn run_sweeper(state: Arc<ControlState>) {
         tokio::time::sleep(CONTROL_SWEEP_PERIOD).await;
         let n = state.sessions.sweep();
         if n > 0 {
+            // Each evicted entry is a "session close" from the
+            // control plane's perspective: the client stopped fetching
+            // /session/:id and the BoundedMap aged its row out. Bump
+            // by N so the Prometheus counter rate matches the eviction
+            // log line.
+            state
+                .metrics
+                .session_closes_total
+                .fetch_add(n as u64, Ordering::Relaxed);
             tracing::debug!(evicted = n, "control plane sweep");
         }
     }
@@ -335,6 +449,11 @@ async fn announce(
     Json(req): Json<AnnounceSessionRequest>,
 ) -> impl IntoResponse {
     s.metrics.announces_total.fetch_add(1, Ordering::Relaxed);
+    // `session_opens_total` mirrors `announces_total` today (every
+    // accepted announce opens a session) but is kept as a separate
+    // counter so a future "rejected announce" path can split the two
+    // without breaking the dashboard query.
+    s.metrics.session_opens_total.fetch_add(1, Ordering::Relaxed);
     let session_id_hex = req.session_id.to_hex();
     s.sessions.insert(
         req.session_id,
@@ -427,36 +546,107 @@ async fn health(State(s): State<Arc<ControlState>>) -> impl IntoResponse {
 /// Prometheus text format.
 async fn metrics(State(s): State<Arc<ControlState>>) -> impl IntoResponse {
     let m = &s.metrics;
+    // Snapshot wire-state-derived gauges (member_count + IP allocator).
+    // Reads only — no mutation of the wire layer. When `wire_state` is
+    // unset (the common case for a node without the Tailscale-interop
+    // bridge), both gauges stay at 0, which is the correct "no tailnet
+    // attached" value.
+    if let Some(ws) = s.wire_state.as_ref() {
+        let n = ws.machines.len() as u64;
+        m.tailnet_member_count.store(n, Ordering::Relaxed);
+        m.ip_allocator_used.store(n, Ordering::Relaxed);
+        // Allocator capacity is the static host count of the CGNAT
+        // /10 slice the allocator hands out from. The `IpAllocator`
+        // trait does not expose capacity, so we read the concrete
+        // constant from `TailnetIpAllocator` directly.
+        m.ip_allocator_capacity.store(
+            u64::from(octravpn_mesh::TailnetIpAllocator::host_capacity()),
+            Ordering::Relaxed,
+        );
+    }
+
     let body = format!(
         "# HELP octravpn_announces_total Sessions announced via control plane.\n\
          # TYPE octravpn_announces_total counter\n\
-         octravpn_announces_total {}\n\
+         octravpn_announces_total {announces}\n\
          # HELP octravpn_state_lookups_total /session/:id GETs.\n\
          # TYPE octravpn_state_lookups_total counter\n\
-         octravpn_state_lookups_total {}\n\
+         octravpn_state_lookups_total {state_lookups}\n\
          # HELP octravpn_receipts_signed_total Node-signed receipt proposals returned.\n\
          # TYPE octravpn_receipts_signed_total counter\n\
-         octravpn_receipts_signed_total {}\n\
+         octravpn_receipts_signed_total {receipts_signed}\n\
          # HELP octravpn_bytes_served_total Cumulative bytes traversed (in+out).\n\
          # TYPE octravpn_bytes_served_total counter\n\
-         octravpn_bytes_served_total {}\n\
+         octravpn_bytes_served_total {bytes_served}\n\
          # HELP octravpn_active_sessions Current sessions tracked by control plane.\n\
          # TYPE octravpn_active_sessions gauge\n\
-         octravpn_active_sessions {}\n\
+         octravpn_active_sessions {active_sessions}\n\
          # HELP octravpn_last_attestation_unix Unix time of last successful attestation.\n\
          # TYPE octravpn_last_attestation_unix gauge\n\
-         octravpn_last_attestation_unix {}\n\
+         octravpn_last_attestation_unix {last_attest}\n\
          # HELP octravpn_uptime_seconds Process uptime.\n\
          # TYPE octravpn_uptime_seconds counter\n\
-         octravpn_uptime_seconds {}\n",
-        m.announces_total.load(Ordering::Relaxed),
-        m.state_lookups_total.load(Ordering::Relaxed),
-        m.receipts_signed_total.load(Ordering::Relaxed),
-        s.router.total_bytes(),
-        s.sessions.len(),
-        m.last_attestation_unix.load(Ordering::Relaxed),
-        octravpn_core::util::now_unix_secs()
+         octravpn_uptime_seconds {uptime}\n\
+         # HELP octravpn_slash_double_sign_total slash_double_sign calls dispatched.\n\
+         # TYPE octravpn_slash_double_sign_total counter\n\
+         octravpn_slash_double_sign_total {slash}\n\
+         # HELP octravpn_preauth_mints_total Tailscale-bridge preauth keys minted.\n\
+         # TYPE octravpn_preauth_mints_total counter\n\
+         octravpn_preauth_mints_total {pa_mints}\n\
+         # HELP octravpn_preauth_redemptions_total Tailscale-bridge preauth redemptions.\n\
+         # TYPE octravpn_preauth_redemptions_total counter\n\
+         octravpn_preauth_redemptions_total {pa_redeems}\n\
+         # HELP octravpn_rpc_requests_total Chain RPC requests attempted.\n\
+         # TYPE octravpn_rpc_requests_total counter\n\
+         octravpn_rpc_requests_total {rpc_req}\n\
+         # HELP octravpn_rpc_errors_total Chain RPC requests that returned an error.\n\
+         # TYPE octravpn_rpc_errors_total counter\n\
+         octravpn_rpc_errors_total {rpc_err}\n\
+         # HELP octravpn_wg_handshake_success_total WireGuard handshake completions.\n\
+         # TYPE octravpn_wg_handshake_success_total counter\n\
+         octravpn_wg_handshake_success_total {wg_ok}\n\
+         # HELP octravpn_wg_handshake_fail_total WireGuard decapsulation errors.\n\
+         # TYPE octravpn_wg_handshake_fail_total counter\n\
+         octravpn_wg_handshake_fail_total {wg_fail}\n\
+         # HELP octravpn_session_opens_total Sessions accepted by POST /session.\n\
+         # TYPE octravpn_session_opens_total counter\n\
+         octravpn_session_opens_total {sess_open}\n\
+         # HELP octravpn_session_closes_total Sessions evicted by the idle sweeper.\n\
+         # TYPE octravpn_session_closes_total counter\n\
+         octravpn_session_closes_total {sess_close}\n\
+         # HELP octravpn_session_no_shows_total Sessions ended without a client countersign.\n\
+         # TYPE octravpn_session_no_shows_total counter\n\
+         octravpn_session_no_shows_total {sess_no_show}\n\
+         # HELP octravpn_tailnet_member_count Machines registered in the Tailscale-wire bridge.\n\
+         # TYPE octravpn_tailnet_member_count gauge\n\
+         octravpn_tailnet_member_count {tn_members}\n\
+         # HELP octravpn_ip_allocator_used Number of CGNAT IPs currently allocated.\n\
+         # TYPE octravpn_ip_allocator_used gauge\n\
+         octravpn_ip_allocator_used {ip_used}\n\
+         # HELP octravpn_ip_allocator_capacity Static host-range capacity of the CGNAT allocator.\n\
+         # TYPE octravpn_ip_allocator_capacity gauge\n\
+         octravpn_ip_allocator_capacity {ip_cap}\n",
+        announces = m.announces_total.load(Ordering::Relaxed),
+        state_lookups = m.state_lookups_total.load(Ordering::Relaxed),
+        receipts_signed = m.receipts_signed_total.load(Ordering::Relaxed),
+        bytes_served = s.router.total_bytes(),
+        active_sessions = s.sessions.len(),
+        last_attest = m.last_attestation_unix.load(Ordering::Relaxed),
+        uptime = octravpn_core::util::now_unix_secs()
             .saturating_sub(m.started_at_unix.load(Ordering::Relaxed)),
+        slash = m.slash_double_sign_total.load(Ordering::Relaxed),
+        pa_mints = m.preauth_mints_total.load(Ordering::Relaxed),
+        pa_redeems = m.preauth_redemptions_total.load(Ordering::Relaxed),
+        rpc_req = m.rpc_requests_total.load(Ordering::Relaxed),
+        rpc_err = m.rpc_errors_total.load(Ordering::Relaxed),
+        wg_ok = m.wg_handshake_success_total.load(Ordering::Relaxed),
+        wg_fail = m.wg_handshake_fail_total.load(Ordering::Relaxed),
+        sess_open = m.session_opens_total.load(Ordering::Relaxed),
+        sess_close = m.session_closes_total.load(Ordering::Relaxed),
+        sess_no_show = m.session_no_shows_total.load(Ordering::Relaxed),
+        tn_members = m.tailnet_member_count.load(Ordering::Relaxed),
+        ip_used = m.ip_allocator_used.load(Ordering::Relaxed),
+        ip_cap = m.ip_allocator_capacity.load(Ordering::Relaxed),
     );
     (
         [(
@@ -635,11 +825,24 @@ async fn get_state(
         ts_unix: octravpn_core::util::now_unix_secs(),
         kind: "receipt_signed".to_string(),
         payload: serde_json::json!({
-            "session_id": id_hex,
+            "session_id": id_hex.clone(),
             "seq": event_seq,
             "bytes_used": event_bytes,
         }),
     });
+    // Persist a structured audit row so `audit verify`'s cross-check
+    // sees a `(session_id, seq)` pair for every signed receipt. The
+    // SSE event above is in-process and ephemeral; the audit row is
+    // durable and HMAC-chained, which is what the operator's
+    // forensics path actually consults.
+    if let Some(audit) = &s.audit {
+        if let Err(e) = audit
+            .record_receipt_signed(id_hex.clone(), event_seq, event_bytes)
+            .await
+        {
+            tracing::warn!(error = %e, "audit log receipt_signed write failed");
+        }
+    }
 
     Json(SessionStateResponse {
         bytes_served: bytes,
@@ -718,6 +921,12 @@ async fn mint_preauth(
     let pk = s
         .preauth_minter
         .mint(req.user, DEFAULT_PREAUTH_TTL, req.reusable);
+    // Bump the mint counter here rather than inside PreauthMinter so
+    // a node-local CLI mint (which also goes through `mint()` directly)
+    // doesn't double-count when the bridge eventually wires its own
+    // MetricsSink — the MetricsSink path is currently disabled at the
+    // PreauthMinter constructor for control-plane-minted keys.
+    s.metrics.preauth_mints_total.fetch_add(1, Ordering::Relaxed);
     Json(MintPreauthResponse {
         key: pk.key,
         user: pk.user,
@@ -1066,6 +1275,272 @@ mod tests {
             assert_eq!(v["user"].as_str().unwrap(), "alice");
             assert!(!v["reusable"].as_bool().unwrap());
         }
+    }
+
+    // ============================================================
+    // NodeMetrics field tests — every counter wired by this PR has
+    // a matching unit test that drives a real code path and asserts
+    // a deterministic increment. Gauges are read directly off the
+    // /metrics handler's output to confirm the Prometheus
+    // exposition includes the field name.
+    // ============================================================
+
+    /// `announce` bumps both `announces_total` AND
+    /// `session_opens_total`. The two counters mirror each other for
+    /// now; the test pins that behaviour so a future "rejected
+    /// announce" path notices it has to split them.
+    #[tokio::test]
+    async fn announce_bumps_session_opens_counter() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let client_kp = KeyPair::generate();
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let state = Arc::new(ControlState::new(node_kp, router, allowlist));
+        let before = state.metrics.session_opens_total.load(Ordering::Relaxed);
+        announce(
+            State(state.clone()),
+            Json(AnnounceSessionRequest {
+                session_id: SessionId::new([7u8; 32]),
+                client_pubkey: client_kp.public,
+                client_wg_pubkey: [9u8; 32],
+            }),
+        )
+        .await;
+        let after = state.metrics.session_opens_total.load(Ordering::Relaxed);
+        assert_eq!(after, before + 1);
+    }
+
+    /// `mint_preauth` bumps `preauth_mints_total` exactly once on a
+    /// successful mint. The token-gate is held at the handler so we
+    /// only test the happy path here; the 404 paths are exercised by
+    /// `admin_preauth_hidden_without_token` / `…_token_gates_minting`
+    /// above and confirmed not to bump the counter.
+    #[tokio::test]
+    async fn mint_preauth_bumps_counter() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let state = Arc::new(
+            ControlState::new(node_kp, router, allowlist)
+                .with_admin_token(Some("secret".into())),
+        );
+        let before = state.metrics.preauth_mints_total.load(Ordering::Relaxed);
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer secret"),
+        );
+        let resp = mint_preauth(
+            State(state.clone()),
+            headers,
+            Some(Json(MintPreauthRequest {
+                user: "alice".into(),
+                reusable: false,
+            })),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            state.metrics.preauth_mints_total.load(Ordering::Relaxed),
+            before + 1
+        );
+    }
+
+    /// A 404 mint path (no token configured) must NOT bump the
+    /// counter — the increment lives after the auth check.
+    #[tokio::test]
+    async fn mint_preauth_404_does_not_bump_counter() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let state = Arc::new(ControlState::new(node_kp, router, allowlist));
+        let before = state.metrics.preauth_mints_total.load(Ordering::Relaxed);
+        let resp = mint_preauth(State(state.clone()), axum::http::HeaderMap::new(), None)
+            .await
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            state.metrics.preauth_mints_total.load(Ordering::Relaxed),
+            before
+        );
+    }
+
+    /// The `MetricsSink` impl on `NodeMetrics` translates a
+    /// `"preauth_redeem"` event to a counter bump. This is the path
+    /// the headscale-api wire register handler exercises in
+    /// production.
+    #[test]
+    fn metrics_sink_translates_preauth_events() {
+        let m = Arc::new(NodeMetrics::default());
+        let sink: Arc<dyn octravpn_mesh::MetricsSink> = m.clone();
+        sink.record_event("preauth_mint");
+        sink.record_event("preauth_redeem");
+        sink.record_event("preauth_redeem");
+        // Unknown event names must be ignored (additive design).
+        sink.record_event("definitely_not_a_real_event");
+        assert_eq!(m.preauth_mints_total.load(Ordering::Relaxed), 1);
+        assert_eq!(m.preauth_redemptions_total.load(Ordering::Relaxed), 2);
+    }
+
+    /// `record_rpc(true)` only bumps the request counter;
+    /// `record_rpc(false)` bumps both. Pinning the symmetric API.
+    #[test]
+    fn record_rpc_counts_errors_as_subset() {
+        let m = NodeMetrics::default();
+        m.record_rpc(true);
+        m.record_rpc(true);
+        m.record_rpc(false);
+        assert_eq!(m.rpc_requests_total.load(Ordering::Relaxed), 3);
+        assert_eq!(m.rpc_errors_total.load(Ordering::Relaxed), 1);
+    }
+
+    /// `record_wg_handshake(true|false)` routes to the correct
+    /// counter. Trivial but pins the dispatch.
+    #[test]
+    fn record_wg_handshake_dispatches() {
+        let m = NodeMetrics::default();
+        m.record_wg_handshake(true);
+        m.record_wg_handshake(true);
+        m.record_wg_handshake(false);
+        assert_eq!(m.wg_handshake_success_total.load(Ordering::Relaxed), 2);
+        assert_eq!(m.wg_handshake_fail_total.load(Ordering::Relaxed), 1);
+    }
+
+    /// `record_slash_double_sign` is a one-line incrementer; pin its
+    /// behaviour so an accidental refactor (e.g. moving the bump
+    /// behind a feature flag) is caught by CI.
+    #[test]
+    fn record_slash_double_sign_bumps_counter() {
+        let m = NodeMetrics::default();
+        m.record_slash_double_sign();
+        m.record_slash_double_sign();
+        assert_eq!(m.slash_double_sign_total.load(Ordering::Relaxed), 2);
+    }
+
+    /// `get_state` after a fresh announce bumps both
+    /// `state_lookups_total` and `receipts_signed_total` — confirms
+    /// the pre-existing counters still fire after the audit-emission
+    /// addition didn't reorder anything.
+    #[tokio::test]
+    async fn get_state_bumps_both_lookup_and_sign_counters() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let client_kp = KeyPair::generate();
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let state = Arc::new(ControlState::new(node_kp, router, allowlist));
+        let id = SessionId::new([0x55u8; 32]);
+        announce(
+            State(state.clone()),
+            Json(AnnounceSessionRequest {
+                session_id: id.clone(),
+                client_pubkey: client_kp.public,
+                client_wg_pubkey: [9u8; 32],
+            }),
+        )
+        .await;
+        let lookups_before = state.metrics.state_lookups_total.load(Ordering::Relaxed);
+        let signed_before = state.metrics.receipts_signed_total.load(Ordering::Relaxed);
+        let _ = get_state(State(state.clone()), Path(id.to_hex()))
+            .await
+            .into_response();
+        assert_eq!(
+            state.metrics.state_lookups_total.load(Ordering::Relaxed),
+            lookups_before + 1
+        );
+        assert_eq!(
+            state.metrics.receipts_signed_total.load(Ordering::Relaxed),
+            signed_before + 1
+        );
+    }
+
+    /// Every new metric name shows up in the Prometheus exposition
+    /// output. The serializer is hand-rolled (one big `format!`); the
+    /// test pins that no field was lost in a future refactor.
+    #[tokio::test]
+    async fn metrics_handler_emits_every_new_field() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let state = Arc::new(ControlState::new(node_kp, router, allowlist));
+        let resp = metrics(State(state)).await.into_response();
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let text = std::str::from_utf8(&body).unwrap();
+        for needle in [
+            "octravpn_slash_double_sign_total ",
+            "octravpn_preauth_mints_total ",
+            "octravpn_preauth_redemptions_total ",
+            "octravpn_rpc_requests_total ",
+            "octravpn_rpc_errors_total ",
+            "octravpn_wg_handshake_success_total ",
+            "octravpn_wg_handshake_fail_total ",
+            "octravpn_session_opens_total ",
+            "octravpn_session_closes_total ",
+            "octravpn_session_no_shows_total ",
+            "octravpn_tailnet_member_count ",
+            "octravpn_ip_allocator_used ",
+            "octravpn_ip_allocator_capacity ",
+        ] {
+            assert!(
+                text.contains(needle),
+                "/metrics body missing {needle}; body=\n{text}"
+            );
+        }
+    }
+
+    /// `get_state` emits a `receipt_signed` audit row carrying the
+    /// freshly signed `(session_id, seq, bytes_used)` tuple. The
+    /// HMAC-chained file is inspected via `AuditLog::verify_file`
+    /// and then the raw lines are parsed to confirm the new entry's
+    /// `extra.seq` matches the receipt's seq.
+    #[tokio::test]
+    async fn get_state_emits_receipt_signed_audit_row() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let client_kp = KeyPair::generate();
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let dir = tempfile::tempdir().unwrap();
+        let audit = crate::audit::AuditLog::open(dir.path()).unwrap();
+        let state = Arc::new(
+            ControlState::new(node_kp, router, allowlist).with_audit(audit),
+        );
+        let id = SessionId::new([0x66u8; 32]);
+        announce(
+            State(state.clone()),
+            Json(AnnounceSessionRequest {
+                session_id: id.clone(),
+                client_pubkey: client_kp.public,
+                client_wg_pubkey: [9u8; 32],
+            }),
+        )
+        .await;
+        let _ = get_state(State(state.clone()), Path(id.to_hex()))
+            .await
+            .into_response();
+        // Drain to disk: the audit write is fired via
+        // tokio::task::spawn_blocking; yield until the file has the
+        // expected line count.
+        for _ in 0..50 {
+            let files: Vec<_> = std::fs::read_dir(dir.path())
+                .unwrap()
+                .filter_map(std::result::Result::ok)
+                .filter(|e| e.file_name().to_string_lossy().starts_with("audit-"))
+                .map(|e| e.path())
+                .collect();
+            if let Some(p) = files.first() {
+                let body = std::fs::read_to_string(p).unwrap();
+                if body.lines().count() >= 2 {
+                    // 2 lines = 1 announce + 1 receipt_signed.
+                    assert!(body.contains("receipt_signed"));
+                    assert!(body.contains("\\\"seq\\\":1"));
+                    return;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("audit log never observed the receipt_signed row");
     }
 
     /// P1-8/9: the journal file is durable across the

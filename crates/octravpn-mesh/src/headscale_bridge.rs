@@ -100,14 +100,45 @@ impl PreauthKey {
     }
 }
 
+/// Minimal observability hook the bridge layer exposes to upper
+/// crates without taking a hard dependency on a metrics library.
+///
+/// Implementors map an event name to a counter / log line / whatever.
+/// The bridge ships exactly two event names today —
+/// `"preauth_mint"` and `"preauth_redeem"` — both bumped from
+/// `PreauthMinter`. Additional events may be added; sinks are
+/// expected to ignore unknown names so a mesh-side bump doesn't
+/// require a lock-step node-side recompile.
+///
+/// The trait is intentionally `Sync` (no `&mut self`) so the same
+/// sink can be shared across threads behind an `Arc`; the
+/// node-side `impl MetricsSink for NodeMetrics` in
+/// `octravpn-node/src/control.rs` uses `AtomicU64::fetch_add`,
+/// which is the right primitive for that pattern.
+pub trait MetricsSink: Send + Sync {
+    /// Record an event. `name` is a short ASCII string; sinks
+    /// match on it and bump the corresponding counter. Unknown
+    /// names are dropped silently.
+    fn record_event(&self, name: &str);
+}
+
 /// In-process preauth-key store + minter.
 ///
 /// Cheap to clone: state is held in an `Arc<Mutex<…>>` so the same
 /// minter can be shared between the daemon's HTTP control plane and
 /// the (anticipated) Tailscale wire-protocol handler.
+///
+/// An optional [`MetricsSink`] can be attached via
+/// [`PreauthMinter::with_metrics_sink`]; when set, `mint` and
+/// `redeem` publish `"preauth_mint"` / `"preauth_redeem"` events
+/// against it. The sink is held by `Arc` so the minter stays cheap
+/// to clone.
 #[derive(Clone, Default)]
 pub struct PreauthMinter {
     inner: Arc<Mutex<PreauthState>>,
+    /// Optional sink for `preauth_mint` / `preauth_redeem` events.
+    /// `None` (the default) is a zero-cost no-op on the data path.
+    metrics: Option<Arc<dyn MetricsSink>>,
 }
 
 #[derive(Default)]
@@ -126,6 +157,15 @@ impl PreauthMinter {
     /// every run).
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Attach a [`MetricsSink`]. Returns a fresh minter with the
+    /// sink wired; the original state map is shared (the `Arc`
+    /// clone behaviour) so call sites can pre-mint a key before
+    /// attaching metrics without losing it.
+    pub fn with_metrics_sink(mut self, sink: Arc<dyn MetricsSink>) -> Self {
+        self.metrics = Some(sink);
+        self
     }
 
     /// Mint a fresh preauth key for `user`.
@@ -147,8 +187,13 @@ impl PreauthMinter {
             expires_at: now.saturating_add(ttl.as_secs()),
             reusable,
         };
-        let mut st = self.inner.lock();
-        st.by_key.insert(key, pk.clone());
+        {
+            let mut st = self.inner.lock();
+            st.by_key.insert(key, pk.clone());
+        }
+        if let Some(sink) = self.metrics.as_deref() {
+            sink.record_event("preauth_mint");
+        }
         pk
     }
 
@@ -167,24 +212,26 @@ impl PreauthMinter {
     /// Returns the bound user on success.
     pub fn redeem(&self, token: &str) -> Result<String, RedeemError> {
         let now = now_unix();
-        let mut st = self.inner.lock();
-        let pk = st
-            .by_key
-            .get(token)
-            .ok_or(RedeemError::Unknown)?
-            .clone();
-        if pk.is_expired(now) {
-            // Expired keys also get removed so a slow client doesn't
-            // hold a stale token forever.
-            st.by_key.remove(token);
-            return Err(RedeemError::Expired);
+        let user = {
+            let mut st = self.inner.lock();
+            let pk = st.by_key.get(token).ok_or(RedeemError::Unknown)?.clone();
+            if pk.is_expired(now) {
+                // Expired keys also get removed so a slow client doesn't
+                // hold a stale token forever.
+                st.by_key.remove(token);
+                return Err(RedeemError::Expired);
+            }
+            let count = st.redemptions.entry(token.to_string()).or_insert(0);
+            *count += 1;
+            if !pk.reusable {
+                st.by_key.remove(token);
+            }
+            pk.user
+        };
+        if let Some(sink) = self.metrics.as_deref() {
+            sink.record_event("preauth_redeem");
         }
-        let count = st.redemptions.entry(token.to_string()).or_insert(0);
-        *count += 1;
-        if !pk.reusable {
-            st.by_key.remove(token);
-        }
-        Ok(pk.user)
+        Ok(user)
     }
 
     /// Number of currently live (unredeemed-and-unexpired) keys.
@@ -351,6 +398,58 @@ mod tests {
         let k = m.mint("x", Duration::from_secs(0), false);
         assert!(m.lookup(&k.key).is_none());
         assert_eq!(m.redeem(&k.key), Err(RedeemError::Expired));
+    }
+
+    /// Test-only sink that records every event name it observes.
+    #[derive(Default)]
+    struct RecordingSink {
+        events: Mutex<Vec<String>>,
+    }
+
+    impl MetricsSink for RecordingSink {
+        fn record_event(&self, name: &str) {
+            self.events.lock().push(name.to_string());
+        }
+    }
+
+    /// `mint` publishes `preauth_mint` on the attached sink. Wiring
+    /// pin: a future refactor that moves the bump elsewhere will
+    /// break this test.
+    #[test]
+    fn mint_publishes_preauth_mint_event() {
+        let sink = Arc::new(RecordingSink::default());
+        let m = PreauthMinter::new().with_metrics_sink(sink.clone());
+        m.mint("u", DEFAULT_PREAUTH_TTL, false);
+        assert_eq!(sink.events.lock().as_slice(), &["preauth_mint".to_string()]);
+    }
+
+    /// `redeem` publishes `preauth_redeem` on success but NOT on the
+    /// unknown-token rejection path (a redeem that never finds a key
+    /// isn't a redemption).
+    #[test]
+    fn redeem_publishes_preauth_redeem_only_on_success() {
+        let sink = Arc::new(RecordingSink::default());
+        let m = PreauthMinter::new().with_metrics_sink(sink.clone());
+        let k = m.mint("u", DEFAULT_PREAUTH_TTL, false);
+        assert!(m.redeem(&k.key).is_ok());
+        assert!(m.redeem("nonexistent").is_err());
+        let events = sink.events.lock().clone();
+        let redeems = events
+            .iter()
+            .filter(|n| n.as_str() == "preauth_redeem")
+            .count();
+        assert_eq!(redeems, 1, "events: {events:?}");
+    }
+
+    /// A minter with no sink attached is a zero-cost no-op on the
+    /// data path — `mint`/`redeem` proceed exactly as before. This
+    /// preserves backwards-compat for callers that don't construct
+    /// via `with_metrics_sink`.
+    #[test]
+    fn no_sink_default_path_unchanged() {
+        let m = PreauthMinter::new();
+        let k = m.mint("u", DEFAULT_PREAUTH_TTL, false);
+        assert_eq!(m.redeem(&k.key).unwrap(), "u");
     }
 
     #[test]

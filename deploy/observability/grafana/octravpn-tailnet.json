@@ -5,7 +5,7 @@
     {"type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "2.x"}
   ],
   "annotations": {"list": []},
-  "description": "Per-tailnet view of an OctraVPN node. NOTE: most tailnet-scoped metrics (member count, IP allocator utilization, join/leave rate, magic-DNS query rate) are not yet exposed by NodeMetrics. This dashboard is wired so those panels drop in once the metrics land — until then most panels are TODO placeholders.",
+  "description": "Per-tailnet view of an OctraVPN node. Member count + IP allocator utilization land off the WireState snapshot taken at /metrics scrape time; preauth mints/redemptions come from the NodeMetrics counters wired through the MetricsSink trait. Magic-DNS / per-tailnet join-leave rate panels remain TODO because the underlying signals aren't surfaced by the wire layer yet.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -33,25 +33,72 @@
     },
     {
       "id": 2,
-      "type": "text",
-      "title": "TODO — tailnet member count",
+      "type": "stat",
+      "title": "Tailnet members",
+      "description": "octravpn_tailnet_member_count — snapshot of `WireState::machines.len()` taken at every /metrics scrape. NOTE: not yet labelled by tailnet_id (single tailnet per node today); per-tailnet labels would require carrying the id through `MachineRegistry`.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
       "gridPos": {"h": 6, "w": 12, "x": 0, "y": 1},
-      "options": {
-        "mode": "markdown",
-        "content": "Expose `octravpn_tailnet_members{tailnet_id=...}` (gauge) by reading from `WireState`'s member registry once per scrape interval. **DO NOT** label by member node-key — cardinality blow-up; the spec correctly forbids high-cardinality session-id-style labels.\n\nWiring point: control.rs `metrics()` handler — extend to consult `wire_state.as_ref().map(|ws| ws.member_count())`."
+      "targets": [
+        {
+          "expr": "octravpn_tailnet_member_count",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+          "unit": "short"
+        }
       },
-      "type": "text"
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
     },
     {
       "id": 3,
-      "type": "text",
-      "title": "TODO — IP allocator utilization",
+      "type": "stat",
+      "title": "IP allocator utilization",
+      "description": "octravpn_ip_allocator_used / octravpn_ip_allocator_capacity. Used mirrors member count today (every machine consumes one IP); capacity is the static `TailnetIpAllocator::host_capacity()` of the CGNAT /10 slice.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
       "gridPos": {"h": 6, "w": 12, "x": 12, "y": 1},
-      "options": {
-        "mode": "markdown",
-        "content": "Expose `octravpn_tailnet_ip_allocator_used` and `octravpn_tailnet_ip_allocator_capacity` (gauges) from `WireState`'s allocator. Useful both as a single-node utilization gauge and (in this dashboard) as a per-tailnet view via `tailnet_id` label.\n\nLow priority for v0 — the interop test uses a /24 with two machines, so utilization is effectively 0."
+      "targets": [
+        {
+          "expr": "octravpn_ip_allocator_used / octravpn_ip_allocator_capacity",
+          "legendFormat": "{{instance}} utilization",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 0.5},
+              {"color": "red", "value": 0.9}
+            ]
+          },
+          "unit": "percentunit"
+        }
       },
-      "type": "text"
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
     },
     {
       "type": "row",
@@ -93,14 +140,32 @@
     },
     {
       "id": 21,
-      "type": "text",
-      "title": "TODO — preauth mints & redemptions",
+      "type": "timeseries",
+      "title": "Preauth mints & redemptions /s",
+      "description": "rate(octravpn_preauth_mints_total[5m]) is bumped at every successful POST /admin/preauth. rate(octravpn_preauth_redemptions_total[5m]) is bumped by the headscale-api wire register handler via the MetricsSink trait. Not yet labelled by tailnet_id (single-tailnet bridge).",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
       "gridPos": {"h": 6, "w": 24, "x": 0, "y": 15},
-      "options": {
-        "mode": "markdown",
-        "content": "Wiring is one-line at the `mint_preauth` handler (control.rs:691) and wherever `PreauthMinter::redeem` lands. Two counters:\n\n- `preauth_mints_total{tailnet_id}`\n- `preauth_redemptions_total{tailnet_id,result}`\n\nUntil then, the `/admin/preauth` endpoint is invisible to monitoring — only the audit log records it."
-      },
-      "type": "text"
+      "targets": [
+        {
+          "expr": "rate(octravpn_preauth_mints_total[5m])",
+          "legendFormat": "{{instance}} mint",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        },
+        {
+          "expr": "rate(octravpn_preauth_redemptions_total[5m])",
+          "legendFormat": "{{instance}} redeem",
+          "refId": "B",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineInterpolation": "linear", "fillOpacity": 10},
+          "unit": "ops"
+        }
+      }
     },
     {
       "type": "row",

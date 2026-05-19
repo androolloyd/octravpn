@@ -55,6 +55,11 @@ pub(crate) struct Server {
     /// Whitelist of permitted peer pubkeys, populated by the control
     /// plane when a client announces a session.
     allowlist: Arc<octravpn_core::bounded::BoundedMap<[u8; 32], AllowedClient>>,
+    /// Optional metrics handle. When set, the decapsulate loop bumps
+    /// `wg_handshake_success_total` / `wg_handshake_fail_total` off
+    /// the boringtun result variants. `None` is the test-default and
+    /// is a zero-cost no-op on the data path.
+    metrics: Option<Arc<crate::control::NodeMetrics>>,
 }
 
 impl Server {
@@ -71,7 +76,16 @@ impl Server {
             router,
             peers: octravpn_core::bounded::BoundedMap::new(PEERS_CAP, PEER_IDLE_TTL),
             allowlist,
+            metrics: None,
         })
+    }
+
+    /// Attach a metrics handle. Builder-style so existing callers
+    /// (chiefly the unit test below) don't need to pass `None`.
+    #[allow(dead_code)]
+    pub(crate) fn with_metrics(mut self, metrics: Arc<crate::control::NodeMetrics>) -> Self {
+        self.metrics = Some(metrics);
+        self
     }
 
     /// Run the UDP receive loop forever.
@@ -108,6 +122,17 @@ impl Server {
         match res {
             TunnResult::WriteToNetwork(bytes) => {
                 // Handshake response or keepalive — send back to the source.
+                // boringtun returns this variant when the noise handshake
+                // produces a wire reply (initiator-response or response-
+                // confirm). Bumping on every `WriteToNetwork` over-counts
+                // keepalives, but the boringtun API does not expose a
+                // "handshake-complete" signal, so a conservative proxy is
+                // the best we can do without forking the crate.
+                // TODO: instrument exact handshake completion when
+                // boringtun surfaces it.
+                if let Some(m) = self.metrics.as_ref() {
+                    m.record_wg_handshake(true);
+                }
                 let n = bytes.len();
                 if let Err(e) = self.sock.send_to(bytes, src).await {
                     warn!(error = %e, "send_to failed");
@@ -122,6 +147,9 @@ impl Server {
             }
             TunnResult::Done => {}
             TunnResult::Err(e) => {
+                if let Some(m) = self.metrics.as_ref() {
+                    m.record_wg_handshake(false);
+                }
                 debug!(?src, ?e, "boringtun decap error");
             }
         }

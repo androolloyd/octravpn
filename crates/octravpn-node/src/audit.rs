@@ -215,6 +215,37 @@ impl AuditLog {
             .await
             .context("spawn_blocking audit write")?
     }
+
+    /// Emit a `receipt_signed` entry for the audit-replay tool's
+    /// cross-check pass. Mirrors the `kind="announce"` emission shape
+    /// (per-session) but carries the freshly bumped seq + bytes_used
+    /// in the `extra` blob. The audit_cli verifier harvests these
+    /// `(session_id, seq)` pairs to confirm every journal floor was
+    /// preceded by a sign event.
+    ///
+    /// Convenience wrapper around `write_async`; failures are
+    /// returned to the caller so the receipt sign path can decide
+    /// whether to suppress (it currently logs and continues — losing
+    /// an audit row is preferable to refusing to sign a valid
+    /// receipt).
+    pub(crate) async fn record_receipt_signed(
+        &self,
+        session_id_hex: String,
+        seq: u64,
+        bytes_used: u64,
+    ) -> Result<()> {
+        self.write_async(AuditRecord {
+            ts_unix: octravpn_core::util::now_unix_secs(),
+            kind: "receipt_signed",
+            source: None,
+            session_id: Some(session_id_hex),
+            extra: serde_json::json!({
+                "seq": seq,
+                "bytes_used": bytes_used,
+            }),
+        })
+        .await
+    }
 }
 
 fn load_or_create_key(dir: &Path) -> Result<[u8; 32]> {
@@ -379,6 +410,58 @@ mod tests {
         let key = log.key();
         let n = AuditLog::verify_file(&key, &audit_file).unwrap();
         assert_eq!(n, 5);
+    }
+
+    /// `record_receipt_signed` writes a `kind="receipt_signed"` row
+    /// whose `extra` blob carries the seq + bytes_used. Round-trip
+    /// the file through the JSONL parser to confirm the schema.
+    #[tokio::test]
+    async fn receipt_signed_entry_round_trips() {
+        let dir = tempdir().unwrap();
+        let log = AuditLog::open(dir.path()).unwrap();
+        log.record_receipt_signed("a1b2c3".to_string(), 7, 1024)
+            .await
+            .unwrap();
+        let audit_file = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .find(|e| e.file_name().to_string_lossy().starts_with("audit-"))
+            .unwrap()
+            .path();
+        let body = std::fs::read_to_string(&audit_file).unwrap();
+        // Outer ChainedLine envelope.
+        let chained: Value = serde_json::from_str(body.lines().next().unwrap()).unwrap();
+        let canonical = chained.get("record_json").unwrap().as_str().unwrap();
+        let rec: Value = serde_json::from_str(canonical).unwrap();
+        assert_eq!(rec["kind"], "receipt_signed");
+        assert_eq!(rec["session_id"], "a1b2c3");
+        assert_eq!(rec["extra"]["seq"], 7);
+        assert_eq!(rec["extra"]["bytes_used"], 1024);
+        // Whole file verifies — the new row is chained correctly.
+        let n = AuditLog::verify_file(&log.key(), &audit_file).unwrap();
+        assert_eq!(n, 1);
+    }
+
+    /// Multiple `record_receipt_signed` calls form a contiguous HMAC
+    /// chain — confirming the new helper goes through the same
+    /// `write` path as the announce emission.
+    #[tokio::test]
+    async fn multiple_receipt_signed_entries_chain_correctly() {
+        let dir = tempdir().unwrap();
+        let log = AuditLog::open(dir.path()).unwrap();
+        for seq in 1..=4u64 {
+            log.record_receipt_signed("sess".to_string(), seq, seq * 100)
+                .await
+                .unwrap();
+        }
+        let audit_file = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .find(|e| e.file_name().to_string_lossy().starts_with("audit-"))
+            .unwrap()
+            .path();
+        let n = AuditLog::verify_file(&log.key(), &audit_file).unwrap();
+        assert_eq!(n, 4, "all four receipt_signed rows chain cleanly");
     }
 
     #[test]

@@ -114,15 +114,95 @@ groups:
             sweeper is wedged (sessions are supposed to evict at
             CONTROL_SESSION_TTL = 1h).
 
+  - name: octravpn-slash-and-rpc
+    interval: 30s
+    rules:
+
+      # Slash event observed. The counter is bumped via
+      # `NodeMetrics::record_slash_double_sign` when an operator-side
+      # detector dispatches a `slash_double_sign` AML call (or, in
+      # future, when the chain-side equivocation detector fires).
+      # Any non-zero rate is a critical incident — page immediately.
+      - alert: OctravpnSlashEvent
+        expr: rate(octravpn_slash_double_sign_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          component: slashing
+        annotations:
+          summary: "Double-sign slash event observed on {{ $labels.instance }}"
+          description: >
+            A `slash_double_sign` call was dispatched in the last 5m.
+            Inspect the audit log for the matching `receipt_signed`
+            entries to identify the equivocating circle.
+          runbook_url: https://github.com/octra/octra/blob/main/docs/observability.md#octravpnslashevent
+
+      # RPC error rate exceeding 5% over a 5-minute window. The
+      # validator-health loop bumps both `rpc_requests_total` and
+      # (on failure) `rpc_errors_total`; one-shot bond/unbond/claim
+      # calls are not yet instrumented, so this alert reflects the
+      # background polling path only.
+      - alert: OctravpnRPCErrorRate
+        expr: |
+          rate(octravpn_rpc_errors_total[5m])
+            / rate(octravpn_rpc_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: control-plane
+        annotations:
+          summary: "RPC error rate > 5% on {{ $labels.instance }}"
+          description: >
+            The validator-health loop is observing >5% RPC errors
+            against the Octra RPC endpoint. Check connectivity to
+            `[chain].rpc_url` and the node's nonce / fee paths.
+          runbook_url: https://github.com/octra/octra/blob/main/docs/observability.md#octravpnrpcerrorrate
+
+      # Preauth-mint burst. >100 mints/s sustained over 5 minutes is
+      # either an operator workflow change or an attacker who has
+      # captured `OCTRAVPN_ADMIN_TOKEN`. Warn so an operator can
+      # cross-check against expected request volume.
+      - alert: OctravpnPreauthMintsBurst
+        expr: rate(octravpn_preauth_mints_total[5m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: preauth
+        annotations:
+          summary: "Preauth-mint rate > 100/s on {{ $labels.instance }}"
+          description: >
+            `/admin/preauth` is minting tokens at an unusual rate.
+            If this isn't planned automation, rotate
+            `OCTRAVPN_ADMIN_TOKEN` immediately and audit the log for
+            the source IP.
+
+      # WireGuard handshake failure rate. boringtun returns
+      # `TunnResult::Err` on a malformed / replayed / late handshake;
+      # a sustained >0.1 fail/s indicates either a misbehaving
+      # client or a UDP-source-spoof DoS probe.
+      - alert: OctravpnWgHandshakeFailures
+        expr: rate(octravpn_wg_handshake_fail_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: tunnel
+        annotations:
+          summary: "WireGuard handshake failures on {{ $labels.instance }}"
+          description: >
+            boringtun is rejecting >0.1 handshakes/s. Inspect the
+            tunnel logs for `boringtun decap error` lines to identify
+            the source.
+
   # ----------------------------------------------------------------
-  # Rules requiring metrics not yet exposed by the node. These are
-  # left as documentation of what we'd alert on once the underlying
-  # NodeMetrics fields exist. DO NOT uncomment until the metric is
-  # plumbed through — Prometheus will report `unknown metric` and the
-  # rule will never fire.
+  # Rules still pending metrics not yet exposed. The hand-rolled
+  # Prometheus exposition format in control.rs::metrics() only emits
+  # counters and gauges; histograms (latency, fsync) need a
+  # serializer upgrade first.
   # ----------------------------------------------------------------
   #
   # TODO(node): add `audit_log_fsync_queue_depth` to NodeMetrics.
+  # Depends on a histogram serializer; the hand-rolled format
+  # supports only counters/gauges today.
   # - alert: OctravpnAuditLogFsyncBacklog
   #   expr: octravpn_audit_log_fsync_queue_depth > 100
   #   for: 2m
@@ -130,27 +210,3 @@ groups:
   #   annotations:
   #     summary: "Audit log fsync queue backing up on {{ $labels.instance }}"
   #     runbook_url: https://github.com/octra/octra/blob/main/docs/observability.md#octravpnauditlogfsyncbacklog
-  #
-  # TODO(node): add `slash_double_sign_total` to NodeMetrics. The
-  # underlying event exists on-chain; the node just doesn't surface a
-  # counter today.
-  # - alert: OctravpnSlashEvent
-  #   expr: rate(octravpn_slash_double_sign_total[5m]) > 0
-  #   for: 0m
-  #   labels: {severity: critical, component: slashing}
-  #   annotations:
-  #     summary: "Double-sign slash event observed on {{ $labels.instance }}"
-  #     runbook_url: https://github.com/octra/octra/blob/main/docs/observability.md#octravpnslashevent
-  #
-  # TODO(node): add `rpc_requests_total{result="ok|err"}` to
-  # NodeMetrics. Today we have no per-endpoint counters, so a 5%
-  # error-rate page is impossible to compute.
-  # - alert: OctravpnRPCFailureRate
-  #   expr: |
-  #     rate(octravpn_rpc_requests_total{result="err"}[5m])
-  #       / rate(octravpn_rpc_requests_total[5m]) > 0.05
-  #   for: 5m
-  #   labels: {severity: warning, component: control-plane}
-  #   annotations:
-  #     summary: "RPC error rate > 5% on {{ $labels.instance }}"
-  #     runbook_url: https://github.com/octra/octra/blob/main/docs/observability.md#octravpnrpcfailurerate

@@ -1176,6 +1176,46 @@ mod tests {
         }
     }
 
+    /// With both an audit-log `receipt_signed` row and a journal
+    /// entry for the SAME session, the cross-check returns `Ok`
+    /// (not `Warn`). This is the path the new `get_state` audit
+    /// emission unlocks: every floor in the journal now has at
+    /// least one matching audit row.
+    #[test]
+    fn verify_cross_check_passes_when_receipt_signed_entries_match() {
+        let dir = tempdir().unwrap();
+        let log = AuditLog::open(dir.path()).unwrap();
+        let sid = sid_hex(0xAA);
+        // Audit row carrying a real seq, mirroring what
+        // `control.rs::get_state` now writes.
+        log.write(&AuditRecord {
+            ts_unix: 1_700_000_000,
+            kind: "receipt_signed",
+            source: None,
+            session_id: Some(sid),
+            extra: json!({ "seq": 1, "bytes_used": 0 }),
+        })
+        .unwrap();
+        // Journal floor for the same session.
+        let journal_path = dir.path().join("receipts.bin");
+        let j = octravpn_core::receipt_journal::ReceiptJournal::open(&journal_path).unwrap();
+        j.bump(&SessionId::new([0xAA; 32]), 1).unwrap();
+
+        let args = VerifyArgs {
+            audit_path: dir.path().to_path_buf(),
+            journal_path,
+            hmac_key: None,
+        };
+        let mut buf = Vec::new();
+        let report = run_verify(&args, &mut buf).unwrap();
+        assert!(
+            matches!(report.cross_check, CheckResult::Ok { .. }),
+            "expected Ok cross-check; got {:?}",
+            report.cross_check
+        );
+        assert!(report.overall_pass);
+    }
+
     #[test]
     fn verify_cross_check_warns_on_orphan() {
         // Audit log says session 0xAA exists; journal has session 0xBB.
