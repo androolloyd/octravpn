@@ -80,6 +80,14 @@ criterion = { version = "0.5", features = ["html_reports"] }
 # Tunn instances (those are module-private).
 chacha20poly1305 = { workspace = true }
 rand = { workspace = true }
+# `tailscale_wire_integration::ts2021_be_transport_round_trips_record`
+# drives a full snow IK handshake in-process so it can extract the
+# split keys and feed them to `BeTransport` from the consumer side.
+# The `risky-raw-split` feature exposes
+# `HandshakeState::dangerously_get_raw_split` (already enabled in
+# headscale-api; we re-declare here so the dev-dep resolves the same
+# feature set).
+snow = { version = "0.9.6", features = ["risky-raw-split"] }
 
 [lints]
 workspace = true

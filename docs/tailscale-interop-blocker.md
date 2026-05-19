@@ -788,3 +788,267 @@ P0 items from the gap analysis are:
 3. **EarlyNoise content validation** — once a real client gets to
    read the EarlyNoise JSON, confirm `NodeKeyChallenge` shape +
    value are accepted.
+
+## 2026-05-19 — Wall 4 closed (BE-nonce post-handshake transport)
+
+The Noise transport nonce-encoding deviation flagged in the prior
+"Wall 4 (OPEN)" section is now closed. Stock `tailscale up` v1.78+
+successfully decrypts our `/ts2021` Records, reads the EarlyNoise
+frame, drives an `h2-over-noise` register call to completion, and
+receives `RegisterReq: got response; nodeKeyExpired=false,
+machineAuthorized=true`. The wall has moved one layer up.
+
+### How we closed Wall 4
+
+**Architectural choice: Option B from the prompt.** Keep `snow` for
+the IK handshake (well-tested by other Rust users); own the
+post-handshake transport (where Tailscale deviates from the Noise
+spec via big-endian nonces). Mirrors upstream Go-headscale, which
+uses `flynn/noise` for the handshake + `crypto/chacha20poly1305` for
+the transport.
+
+**Key-extraction path: `snow`'s built-in `risky-raw-split` feature.**
+No vendoring required. `snow::HandshakeState::dangerously_get_raw_split()`
+is a public method behind the `risky-raw-split` Cargo feature
+(`snow/Cargo.toml:156`). Enabling it on the `headscale-api`
+dependency exposes the `(k1, k2)` pair produced by the Noise spec's
+`Split()` call. We call it on the *responder*'s `HandshakeState`
+*before* `into_transport_mode()` — `dangerously_get_raw_split` takes
+`&mut HandshakeState`, not `&mut TransportState`. Per the Noise spec,
+`k1 = initiator-egress` and `k2 = responder-egress`; the `/ts2021`
+server is the responder, so `send_key = k2` and `recv_key = k1`.
+[`BeTransport::from_split_responder`](../../headscale-rs/headscale-api/src/tailscale_wire/be_transport.rs)
+wraps the swap so callers don't have to reason about it.
+
+This is the FIRST option the prompt listed (snow patch + vendor) —
+turns out snow already shipped the accessor, just gated behind a
+feature. We did not need to vendor or fork.
+
+**Wire-format match-up.** Upstream
+`tailscale/control/controlbase/conn.go` defines the post-handshake
+record format precisely:
+
+| Constant | Value | Derivation |
+| -------- | ----- | ---------- |
+| `maxMessageSize` | 4096 | Total bytes on the wire per frame |
+| `maxCiphertextSize` | 4093 | `= maxMessageSize - 3` |
+| `maxPlaintextSize` | 4077 | `= maxCiphertextSize - chp.Overhead` (16) |
+
+Frame layout: `[msg_type=4:u8][len:u16 BE][ciphertext]` where
+`ciphertext = plaintext || poly1305_tag`. Nonce encoding: 12 bytes,
+first 4 = 0, last 8 = `counter.to_be_bytes()`.
+
+The original prompt suggested `maxPlaintextSize = 4080`; the actual
+upstream value is `4077`. The unit test
+`be_transport::tests::cross_check_vs_chacha20poly1305_directly`
+includes a `[0xAB; MAX_PLAINTEXT_PER_RECORD]` payload at exactly
+4077 bytes to pin the boundary.
+
+**Replay window.** Spec asked for a 32-bit sliding window; upstream
+implements **strict monotonic counter** with no window (`conn.go`
+comment: "Once a decryption has failed, our Conn is no longer
+synchronized with our peer"). We mirror upstream — sliding windows
+are for lossy datagram transports (WireGuard), not the
+strictly-ordered TCP+TLS stream `/ts2021` rides on. Two regression
+tests pin this: `replay_rejects_seen_record` and
+`out_of_order_rejected`.
+
+### Files shipped
+
+`headscale-rs`:
+- `headscale-api/src/tailscale_wire/be_transport.rs` — new module
+  (~970 lines incl. 13 unit tests + the `BeNoiseStream`
+  AsyncRead/AsyncWrite wrapper).
+- `headscale-api/src/tailscale_wire/mod.rs` — register the module.
+- `headscale-api/src/tailscale_wire/noise.rs` — new
+  `drive_ts2021_be` + `drive_ts2021_be_with_init` siblings of the
+  snow-backed `drive_ts2021*`; `handle_ts2021_post` now calls the BE
+  variant. Inner router gained the v1.78+ flat
+  `/machine/{register,map}` routes (the client posts here through
+  h2-over-noise, not through the keyed `/machine/:node_key/...`
+  shape).
+- `headscale-api/src/tailscale_wire/raw_tls.rs` — switch
+  `/ts2021` dispatch from `drive_ts2021_with_init` to
+  `drive_ts2021_be_with_init`. Closes Wall 4.
+- `headscale-api/src/tailscale_wire/register.rs` +
+  `tailscale_wire/map.rs` — switch from `Json<...>` extractors to
+  `Bytes` + manual `serde_json::from_slice`. The stock client posts
+  through the noise tunnel without a `Content-Type` header set;
+  axum's `Json` 415s those requests with
+  `"Expected request with Content-Type: application/json"`.
+- `headscale-api/Cargo.toml` — `snow = { features = [
+  "risky-raw-split"] }`, `chacha20poly1305 = "0.10"` (new direct
+  dep).
+
+`octra`:
+- `crates/octravpn-node/tests/tailscale_wire_integration.rs` — new
+  `ts2021_be_transport_round_trips_record` integration test. Drives
+  a full snow IK handshake in-process, extracts split keys, builds
+  the two-sided `BeTransport`s, round-trips a Record through
+  `BeNoiseStream` over a duplex pipe.
+- `crates/octravpn-node/Cargo.toml` — `snow = { features = [
+  "risky-raw-split"] }` dev-dep so the integration test can extract
+  the split keys directly.
+- This document — final section (the one you're reading).
+
+### EarlyNoise format fix (rolled into this batch)
+
+Once Wall 4 was closed, the next 3 seconds of client log surfaced an
+EarlyNoise content bug we hadn't been able to see before (because
+the client never reached the JSON parse step). Stock `tailscale up`
+errored out with:
+
+```
+register request: Post "https://tsi-mesh-control/machine/register":
+  json: cannot unmarshal object into Go struct field
+  EarlyNoise.nodeKeyChallenge of type key.ChallengePublic
+```
+
+We were sending the EarlyNoise as
+`{"NodeKeyChallenge": {"Public": "nodekey:<hex>"}}` — an *object*.
+The upstream type
+[`tailscale/types/key/chal.go::ChallengePublic`](https://github.com/tailscale/tailscale/blob/main/types/key/chal.go)
+is a `[32]byte` with `MarshalText` → `"chalpub:<hex>"` (NOT
+`"nodekey:<hex>"` — different prefix entirely). JSON encodes as a
+bare string via Go's default `MarshalText` plumbing.
+
+Fixed in `noise.rs::drive_ts2021_be_with_init` (and the legacy
+`drive_ts2021_with_init` sibling for symmetry):
+
+```rust
+let early_json = serde_json::json!({
+    "NodeKeyChallenge": format!("chalpub:{}", hex::encode(challenge_pub))
+}).to_string();
+```
+
+### Current exit code: still 30, but failure mode is post-register
+
+After all the above, `bash docker/devnet/tailscale-interop/run-interop.sh`
+exits **30**, but the failure mode is qualitatively different from
+before:
+
+| Step                                          | Pre-Wall-4 | Post-Wall-4 |
+| --------------------------------------------- | ---------- | ----------- |
+| Client opens `/ts2021` over rustls            | OK         | OK          |
+| Server reads Initiation (header fast-start)   | OK         | OK          |
+| IK handshake completes                        | OK         | OK          |
+| EarlyNoise frame parses on client             | n/a (decrypt-error before reach) | **OK** |
+| `/machine/register` over h2-in-noise          | n/a        | **`RegisterReq: got response; machineAuthorized=true`** |
+| `/machine/map` over h2-in-noise               | n/a        | hangs — see below |
+| `tailscale up` exit code                      | 30         | 30 (20s wrapper timeout) |
+
+Mesh-control log for a successful peer-a flow:
+
+```
+INFO  tailscale_wire::serve: wire surface listening (HTTPS) addr=0.0.0.0:443
+DEBUG tailscale_wire::raw_tls: peek complete request_line=GET /key?v=133 HTTP/1.1
+DEBUG tailscale_wire::raw_tls: peek complete request_line=POST /ts2021 HTTP/1.1
+DEBUG tailscale_wire::raw_tls: dispatching /ts2021 to drive_ts2021_be (BE-nonce transport)
+DEBUG tailscale_wire::noise: ts2021/be using pre-decoded Initiation from X-Tailscale-Handshake header len=101
+DEBUG tailscale_wire::noise: ts2021/be received initiation proto_version=133 len=96
+DEBUG tailscale_wire::noise: ts2021/be split keys extracted; switching to BE-nonce transport
+# (no errors, no warnings, no further log lines — the connection
+#  is kept open by the client for h2-multiplexed long-polling)
+```
+
+Peer-a daemon log (the success line):
+```
+control: control server key from https://tsi-mesh-control: ts2021=[CwyPr], legacy=
+control: Generating a new nodekey.
+control: RegisterReq: onode= node=[CuoRD] fup=false nks=false
+control: RegisterReq: got response; nodeKeyExpired=false, machineAuthorized=true; authURL=false
+```
+
+After this point the daemon stalls at
+`health(warnable=warming-up): ok` and never transitions to "Up".
+`tailscale status` reports `Logged out` / `NeedsLogin`. There are no
+further `WARN`s on the server side and no further error log lines on
+the client side — the daemon is presumably waiting for the first
+streaming `/map` chunk to set its `wantRunning` state.
+
+### New wall (Wall 5): post-register the daemon never reaches "Up"
+
+The remaining wall isn't a wire-format error any more (no more 404s,
+415s, JSON unmarshal errors, or decrypt failures). It's a daemon-
+state-machine issue:
+
+- Register completes; the client gets `machineAuthorized=true`.
+- The h2-over-noise connection stays open (we see no `h2 accept
+  failed` warnings any more — the cipher swap works).
+- But `tailscale up --reset` blocks for the full 20s timeout
+  wrapper, and the daemon never moves from `NeedsLogin` to
+  `Running`.
+
+Three candidate causes:
+
+1. **MapResponse content insufficient.** The client may parse the
+   first MapResponse chunk and reject it because some required field
+   is missing or malformed (e.g. `NodeID`, `User.ID`, `DERPMap`,
+   `Domain`). Stock client wants a non-empty `DERPMap` to know how to
+   start the disco loop — we ship a stub with one fake region; that
+   may not pass validation.
+2. **`Stream=true` framing mismatch.** Our map handler emits
+   `<MapResponse>\n` chunks with 30s `\n` keepalives. Upstream's
+   wire is documented as length-prefixed JSON chunks, not newline-
+   delimited (
+   `tailscale/control/controlclient/direct.go::sendMapRequest`'s
+   read loop calls `decoder.Decode` on a streaming JSON decoder).
+   Newline-delimited may still parse via the streaming JSON decoder
+   (it tolerates whitespace) but is worth verifying.
+3. **First `/map` request never reaches the server.** The client
+   may keep the existing h2 stream open and try to send a new
+   request multiplexed over it, and our `dispatch_h2_request` loop
+   may be serving one request and then unable to process the next
+   (e.g. because we hold the response stream open with a long-poll
+   that never returns).
+
+In particular #3 is the most likely culprit — looking at the
+mesh-control log, the second `/ts2021` connection from peer-b at
+17:23:42 reaches `split keys extracted` and then there are NO
+further dispatch logs even after a long delay. The `h2_conn.accept()`
+loop should keep firing for every new request the client makes; if
+the server is hanging in `dispatch_h2_request` for the register
+response (rather than returning it), subsequent requests can't be
+processed.
+
+### What unblocks exit 30 → exit 0 from here
+
+In priority order:
+
+1. **Verify the h2 dispatch is non-blocking per-request.** Each call
+   to `dispatch_h2_request` is `tokio::spawn`'d
+   ([`noise.rs::drive_ts2021_be_with_init` step 6](../../headscale-rs/headscale-api/src/tailscale_wire/noise.rs)),
+   so a slow `/map` long-poll shouldn't block subsequent register
+   calls. Confirm with a direct trace: log every accepted h2 request
+   and the time it took to dispatch.
+2. **Capture the first /map RTT.** Add a tcpdump (or just more
+   tracing) so we can see whether the client sends a `/machine/map`
+   request after register completes, and what response we deliver.
+3. **Smaller test: drive `tailscale up` against a hand-crafted
+   single-shot MapResponse with minimum-viable
+   `{User, Login, DERPMap, Domain, Node, PrivateKey}` fields.**
+   If that gets the client to "Up", the wall is just the field set;
+   if it stalls at the same place, the wall is the streaming
+   framing.
+
+Estimated effort: 1-3 days for an iterative debug-and-pin cycle.
+The wire layer below register is now solid; what remains is the
+state-machine contract on top.
+
+### Exit-code progression as of this PR batch
+
+| State | Exit code |
+| ----- | --------- |
+| Pre-Wall-4 (snow LE-nonce transport)               | 30 (decrypt error on first record) |
+| **Post-Wall-4 (this commit batch)**                | **30** (register succeeds; map post-register stalls) |
+| + h2 dispatch trace + MapResponse field-set fix    | expect 30, 40, or 0 |
+| + `Stream=true` framing verified against client    | expect 0 |
+
+### Test counts after this batch
+
+| Crate | Tests passing |
+| ----- | ------------- |
+| `octravpn-mesh` (with `test-helpers`) | 89 (71 lib + 6 + 12 integration) |
+| `octravpn-node` | 100 (87 lib + 13 across 4 integration files) |
+| `headscale-api` (no-default-features) | 55 lib (1 pre-existing failure in `map::tests::stream_true_emits_mapresponse_chunk_on_registry_change` unrelated to this batch) |
+| `be_transport` module | 13 (round-trip, BE-nonce pin, counter increments, replay rejection, out-of-order rejection, cross-check vs raw `chacha20poly1305`, short-ciphertext + empty-plaintext edge cases, snow→BeTransport handshake integration, `BeNoiseStream` duplex round-trip, large-write chunking) |

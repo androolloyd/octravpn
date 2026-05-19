@@ -273,6 +273,94 @@ async fn flat_register_path_works_via_octravpn_node_router() {
     assert_eq!(mr.peers.len(), 1);
 }
 
+/// Wall-4 acceptance: drive the IK handshake to completion, swap to
+/// the BE-nonce [`BeTransport`], write one Tailscale Record frame
+/// from the client side, read it back on the server side through the
+/// same `BeTransport` plumbing the production `drive_ts2021_be`
+/// callers use.
+///
+/// This is the in-process proof that the cipher swap (snow → owned
+/// BE-nonce transport) round-trips a record cleanly. The real
+/// in-the-wild verification is `docker/devnet/tailscale-interop/run-interop.sh`.
+#[tokio::test]
+async fn ts2021_be_transport_round_trips_record() {
+    use octravpn_mesh::tailscale_wire::be_transport::{
+        BeNoiseStream, BeTransport, MAX_PLAINTEXT_PER_RECORD,
+    };
+    use snow::{params::NoiseParams, Builder};
+    use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt};
+
+    // Drive a snow IK handshake in-process so both sides have a
+    // matched (k1, k2) pair to feed BeTransport.
+    let params: NoiseParams = "Noise_IK_25519_ChaChaPoly_BLAKE2s".parse().unwrap();
+    let resp_static = Builder::new(params.clone()).generate_keypair().unwrap();
+    let init_static = Builder::new(params.clone()).generate_keypair().unwrap();
+
+    let mut init = Builder::new(params.clone())
+        .local_private_key(&init_static.private)
+        .remote_public_key(&resp_static.public)
+        .build_initiator()
+        .unwrap();
+    let mut resp = Builder::new(params.clone())
+        .local_private_key(&resp_static.private)
+        .build_responder()
+        .unwrap();
+
+    let mut m1 = [0u8; 1024];
+    let n1 = init.write_message(b"", &mut m1).unwrap();
+    let mut throw = [0u8; 1024];
+    resp.read_message(&m1[..n1], &mut throw).unwrap();
+    let mut m2 = [0u8; 1024];
+    let n2 = resp.write_message(b"", &mut m2).unwrap();
+    init.read_message(&m2[..n2], &mut throw).unwrap();
+    assert!(init.is_handshake_finished());
+    assert!(resp.is_handshake_finished());
+
+    let (i_k1, i_k2) = init.dangerously_get_raw_split();
+    let (r_k1, r_k2) = resp.dangerously_get_raw_split();
+    assert_eq!(i_k1, r_k1);
+    assert_eq!(i_k2, r_k2);
+
+    // Build the two BeTransports + BeNoiseStreams over a duplex.
+    let init_xport = BeTransport::from_split_initiator(i_k1, i_k2);
+    let resp_xport = BeTransport::from_split_responder(r_k1, r_k2);
+    let (a, b) = duplex(64 * 1024);
+    let mut client = BeNoiseStream::new(a, init_xport);
+    let mut server = BeNoiseStream::new(b, resp_xport);
+
+    // Client writes one record; server reads it.
+    let payload = b"ts2021-be: hello via Record frame";
+    client.write_all(payload).await.unwrap();
+    client.flush().await.unwrap();
+
+    let mut got = vec![0u8; payload.len()];
+    server.read_exact(&mut got).await.unwrap();
+    assert_eq!(got, payload);
+
+    // Server writes back; client reads.
+    let reply = b"ts2021-be: ack";
+    server.write_all(reply).await.unwrap();
+    server.flush().await.unwrap();
+    let mut got2 = vec![0u8; reply.len()];
+    client.read_exact(&mut got2).await.unwrap();
+    assert_eq!(got2, reply);
+
+    // Sanity: a larger payload that crosses the per-record boundary
+    // still reassembles cleanly.
+    let big: Vec<u8> = (0..(MAX_PLAINTEXT_PER_RECORD + 200))
+        .map(|i| (i % 251) as u8)
+        .collect();
+    let big_clone = big.clone();
+    let writer = tokio::spawn(async move {
+        client.write_all(&big_clone).await.unwrap();
+        client.flush().await.unwrap();
+    });
+    let mut buf = vec![0u8; big.len()];
+    server.read_exact(&mut buf).await.unwrap();
+    writer.await.unwrap();
+    assert_eq!(buf, big);
+}
+
 /// PR 3 acceptance: Stream:true on `/machine/map` emits a fresh
 /// `MapResponse` chunk when a second peer registers. Drives the
 /// registry's `Notify::notify_waiters` path end-to-end against the
