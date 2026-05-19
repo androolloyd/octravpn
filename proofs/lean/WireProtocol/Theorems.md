@@ -194,6 +194,64 @@ exercises this end-to-end.
 
 ---
 
+## 6. `WireProtocol.V3Members`
+
+The v3 members-list anchor. Mirrors the on-chain
+`(tailnet_id, epoch, members)` commitment built alongside
+`v3_state_root` and `v3_policy`. Same modelling strategy as
+`V3Canonical.lean`: opaque `sortByAddr` with its two load-bearing
+properties (sortedness + reorder-invariance) axiomatised; opaque
+`sha256_32` with collision-resistance axiomatised; opaque
+`encodeFields` with injectivity on the three-field triple.
+
+| Theorem                                       | Plain-English statement                                                                                                  |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `members_anchor_deterministic`                | Same input ⇒ same anchor bytes.                                                                                          |
+| `members_anchor_field_reorder_invariant`      | Rearranging the top-level `(tailnet_id, epoch, members)` fields does not change the anchor.                              |
+| `members_anchor_member_reorder_invariant`     | Rearranging the members list (which the encoder sorts by address) does not change the anchor.                            |
+| `members_anchor_collision_resistant`          | Different `(tailnet_id, epoch)` ⇒ different anchor, modulo SHA-256 collision resistance.                                 |
+| `members_anchor_size_bounded`                 | The anchor is exactly 32 bytes (the raw SHA-256 digest size).                                                            |
+| `example` (anchor size on empty list)         | An empty members list still produces a 32-byte digest.                                                                   |
+
+Axioms introduced in `V3Members.lean`:
+
+- `sortByAddr_isSorted`, `sortByAddr_sameMembers` — standard
+  sort-stability properties (Lean 4 core does not ship a packaged
+  `Sorted` proof at this level of generality without Mathlib; same
+  axiom style as `sortByKey_isSorted` in `V3Canonical.lean`).
+- `sha256_32_length`, `sha256_32_injective` — SHA-256 standard
+  cryptographic properties; same axiom style as
+  `sha256_hex_injective` in `V3Canonical.lean` and `Sha256.injective`
+  in `OctraVPN_Rust/Spec.lean`.
+- `encodeFields_injective` — the underlying three-field encoder is
+  injective on its `(tailnet_id, epoch, members_bytes)` triple
+  (matches `serde_json::to_string` on the schema's three keys).
+
+---
+
+## 7. `WireProtocol.V3Policy`
+
+The v3 policy anchor — `(acl_doc, effective_epoch)`. Same modelling
+strategy as `V3Members.lean`.
+
+| Theorem                                       | Plain-English statement                                                                                                  |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `policy_anchor_deterministic`                 | Same input ⇒ same anchor bytes.                                                                                          |
+| `policy_anchor_field_reorder_invariant`       | Rearranging the top-level `(acl_doc, effective_epoch)` fields does not change the anchor.                                |
+| `policy_anchor_collision_resistant_on_epoch`  | Same `acl_doc`, different `effective_epoch` ⇒ different anchor.                                                          |
+| `policy_anchor_includes_acl_hash`             | Any change to the canonical ACL doc bytes shifts the anchor.                                                             |
+| `policy_anchor_size`                          | The anchor is exactly 32 bytes (raw SHA-256 digest).                                                                     |
+| `example` (anchor size on empty doc)          | An empty ACL doc at epoch 0 still produces a 32-byte digest.                                                             |
+
+Axioms introduced in `V3Policy.lean`:
+
+- `sha256_32_length`, `sha256_32_injective` — SHA-256 standard
+  cryptographic properties.
+- `encodePolicyFields_injective` — the underlying two-field encoder
+  is injective on its `(acl_doc, effective_epoch)` pair.
+
+---
+
 ## Theorem count
 
 | Module                  | Theorems | Examples (anchors) |
@@ -203,11 +261,15 @@ exercises this end-to-end.
 | `HmacToken`             | 7        | 1                  |
 | `PortalCache`           | 10       | 1                  |
 | `V3Canonical`           | 14       | 3                  |
-| **Total (this module)** | **50**   | **8**              |
+| `V3Members`             | 5        | 1                  |
+| `V3Policy`              | 5        | 1                  |
+| **Total (this module)** | **60**   | **10**             |
 
-Combined with the 54 theorems in `OctraVPN_Rust/`, the deductive proof
-surface now stands at **104 mechanically-checked theorems** (54 Rust
-security primitives + 50 wire-protocol primitives).
+Combined with the 72 theorems in `OctraVPN_Rust/` (5 in
+`Spec.lean` + 54 in `Lemmas.lean` + 5 in `MachineRegistry.lean` +
+8 in `ACL.lean`), the deductive proof surface now stands at
+**132 mechanically-checked theorems** (72 Rust security
+primitives + 60 wire-protocol primitives).
 
 ---
 

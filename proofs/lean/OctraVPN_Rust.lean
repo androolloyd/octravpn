@@ -1,5 +1,7 @@
 import OctraVPN_Rust.Spec
 import OctraVPN_Rust.Lemmas
+import OctraVPN_Rust.MachineRegistry
+import OctraVPN_Rust.ACL
 
 /-!
 # OctraVPN — Rust security primitives, Lean 4 specification.
