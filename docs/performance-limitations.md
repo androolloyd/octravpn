@@ -14,14 +14,14 @@ fixes — that's the next ticket.
 
 | # | Layer                  | Current ceiling                                 | Bottleneck                                                       | Measured?                |
 |---|------------------------|-------------------------------------------------|------------------------------------------------------------------|--------------------------|
-| 1 | Data plane (WireGuard) | userspace boringtun 0.7.1 + onion peel per pkt  | per-packet decap + onion peel (`tunnel.rs`, `onion.rs:163`)      | no — qualitative only    |
-| 2 | Mesh control plane     | 300 s peer-TTL, 60 s upgrade tick               | `peer.rs:270` TTL, `conn.rs:76` upgrade period                   | concurrency stress only  |
-| 3 | IP allocator           | O(1) SHA-256 per allocation, ~4.19 M hosts/tnet | `ip_alloc.rs:118` (`hashed_host`)                                | yes — unit + birthday   |
+| 1 | Data plane (WireGuard) | ~1.2 Gbps/core relay-hop (chacha+onion)         | per-packet decap + onion peel (`tunnel.rs`, `onion.rs:163`)      | yes — primitives, §1     |
+| 2 | Mesh control plane     | ~2.3M publishes/s; tick ~1 µs/peer              | `peer.rs:270` TTL, `conn.rs:76` upgrade period                   | yes — §2                 |
+| 3 | IP allocator           | O(1) SHA-256 per allocation, ~4.19 M hosts/tnet | `ip_alloc.rs:118` (`hashed_host`)                                | yes — unit + birthday    |
 | 4 | Chain interactions     | one tx per ~10 s mainnet epoch per wallet       | nonce serialization through one wallet; epoch finality           | epoch length empirical   |
-| 5 | Operator settle freq   | ≥1 epoch (~10 s) per session per wallet         | same as #4 + audit-log flush; sessions through one proxy wallet  | no                       |
-| 6 | Client connect time    | ≥1 epoch (~10 s) for `SessionOpened` event      | `runner.rs:311` poll backoff (100 ms→2 s, ≤30 s budget)          | no — bounded by chain    |
-| 7 | Cryptography costs     | ed25519 + sha256 + AES-GCM (per receipt/asset)  | none individually dominant                                       | bench harness exists; snapshot not committed |
-| 8 | Storage                | journal fsync per receipt sign; 4 KiB AML cap   | `receipt_journal.rs:186` (`atomic_write`); AML string truncation | qualitative; cap verified |
+| 5 | Operator settle freq   | ~100 signed receipts/s/node (journal fsync)     | `receipt_journal.rs:186` fsync; audit log flush nearly free      | yes — §5                 |
+| 6 | Client connect time    | epoch + ≤2 s poll-overhead tail                 | `runner.rs:311` poll backoff (100 ms→2 s, ≤30 s budget)          | yes — §6                 |
+| 7 | Cryptography costs     | snapshot committed (`bench-snapshots/core.json`)| none individually dominant                                       | yes — §7                 |
+| 8 | Storage                | journal fsync per receipt sign; 4 KiB AML cap   | `receipt_journal.rs:186` (`atomic_write`); AML string truncation | yes — §5 + cap verified  |
 
 ## 1. Data plane (WireGuard)
 
@@ -40,13 +40,24 @@ model (`docs/v2-threat-model.md:41`) and `docs/troubleshooting.md:308`
 both call out the per-packet boringtun decap + onion peel as the
 expected CPU cost.
 
-**No throughput number is committed.** The bench in
-`crates/octravpn-core/benches/core.rs` exists but covers crypto
-primitives only — there is no end-to-end Mbps measurement, no `iperf3`
-harness, and no committed snapshot under `bench-snapshots/`. The
-gap-analysis doc (`docs/gap-analysis.md:215`) flags this explicitly:
-"D1. No performance benchmarks" / "No `criterion` benches" — written
-before the primitives bench landed and still accurate for end-to-end.
+**Primitive-level numbers** (committed; end-to-end Mbps with two
+real `Tunn` instances isn't reachable without expanding the node's
+public API — see the bench docstring). Host: Darwin arm64 / Apple
+M3 Max / macOS 26.1, `--release`. Bench:
+`crates/octravpn-node/benches/wireguard_throughput.rs`.
+
+| Primitive                          | Mean      | Implied single-core ceiling |
+|------------------------------------|-----------|------------------------------|
+| ChaCha20-Poly1305 seal (1380 B)    | 4.43 µs   | 2.49 Gbps (encap only)       |
+| ChaCha20-Poly1305 open (1380 B)    | 4.53 µs   | 2.44 Gbps (decap only)       |
+| X25519 ECDH (handshake)            | 29.3 µs   | 34 k handshakes/s/core       |
+
+Extrapolated WG-relay-hop budget per core: one decap + one encap
+per packet ≈ 8.96 µs/pkt → ~1.23 Gbps. Add one `onion_peel_layer`
+(31.7 µs, `bench-snapshots/core.json`) and the budget falls to
+~270 Mbps/core/hop. Live tunnels run on real UDP sockets with
+~80 B header; these are upper-bound crypto-cost numbers, not
+wire-rate.
 
 ## 2. Mesh control plane
 
@@ -69,13 +80,24 @@ Concurrency under load is exercised in `crates/octravpn-node/tests/stress.rs:96`
 200 publishers + a ticker thread, 50 ticks at 100 µs spacing, asserting
 "no panic" only. That's a correctness test, not a throughput number.
 
-The mesh layer hands `MeteringSnapshot` to the chain via
-`headscale_bridge.rs:32` (the integration point with `headscale-rs`).
-The bridge is the boundary; no per-snapshot publish rate is encoded
-here — it's whatever cadence the host daemon picks.
+**Measured** (`crates/octravpn-mesh/benches/peer_publish.rs`, same host
+as §1, run with `--features test-helpers`):
 
-**Not measured**: max peers per tailnet before tick latency degrades;
-publish-snapshot bandwidth at the control-plane HTTP layer.
+| Scale         | publish_unverified | tick                 |
+|---------------|--------------------|----------------------|
+| 10 peers      | 432 ns / insert    | 8.96 µs / tick       |
+| 100 peers     | 433 ns / insert    | 88.1 µs / tick       |
+| 1 000 peers   | 446 ns / insert    | 936 µs / tick        |
+| 10 000 peers  | 442 ns / insert    | 9.93 ms / tick       |
+
+`publish_unverified` is HashMap-flat across the range (one RwLock
+write + one alloc per snapshot). `tick` scales linearly: ~0.9 µs
+per peer of registry walk + per-peer FSM step (the inner cost
+matches the per-peer crypto-free path through `manager.rs:135`).
+At 10 k peers in one tailnet, a tick is still under 10 ms — well
+inside the 1 s cadence the host daemon currently runs at. The
+control-plane HTTP publish rate isn't covered here (no public API
+on the bridge layer); the **registry-side** rate is not the gate.
 
 ## 3. IP allocator
 
@@ -150,28 +172,39 @@ from one operator wallet is therefore:
   per-tailnet-policy change is the documented cost shape, not a
   per-settle one.
 
-A second cost is the **audit-log write** that wraps every receipt
-event. `crates/octravpn-node/src/audit.rs:111` uses `OpenOptions::new().append(true)`
-+ `write_all` + `flush` (line 143). **`flush` is libc-level buffer
-flush, not `fsync`** — durability across power loss is not guaranteed
-by the audit log alone. The HMAC chain (line 127-131) sequentializes
-writes through one `parking_lot::Mutex`, so concurrent receipt events
-on the same node settle through that lock.
+Two storage costs wrap every receipt: (a) **audit-log append +
+`flush`** (`audit.rs:143`) — libc buffer flush, not fsync,
+HMAC-chained through one mutex; (b) **receipt-journal `bump`**
+(`receipt_journal.rs:164`) — full rewrite + tempfile + `sync_all`
++ rename + parent dir `sync_all`, lock held across disk I/O. The
+per-receipt-signing ceiling is one journal-fsync round-trip.
 
-The **receipt journal** (`crates/octravpn-core/src/receipt_journal.rs`)
-*does* fsync — `atomic_write` (line 269-286) calls `File::sync_all` on
-the tempfile then best-effort `sync_all` on the parent directory after
-the rename. Every receipt-sign decision goes through `bump` (line 164),
-which holds the journal lock across disk I/O (acknowledged in the
-module comment at line 179-185 as a deliberate serialization trade-off
-on grounds that "a tailnet's worth of sessions per node" is low).
+**Measured** (`crates/octravpn-node/benches/settle_throughput.rs`,
+same host, APFS-on-NVMe tempdir):
 
-So the per-receipt-signing ceiling per node is roughly: one
-journal-fsync round-trip per signed receipt. On a healthy SSD that is
-sub-millisecond; on networked storage it is whatever fsync costs there.
+| Operation                                | Mean      | Implied rate                |
+|------------------------------------------|-----------|------------------------------|
+| `ReceiptJournal::bump` (1 session)       | 10.4 ms   | 96 signed receipts/s/node    |
+| `ReceiptJournal::bump` (64 sessions)     | 9.88 ms   | 101 receipts/s/node          |
+| `ReceiptJournal::bump` (1 024 sessions)  | 11.7 ms   | 85 receipts/s/node           |
+| Audit append + `flush()` (libc)          | 2.41 µs   | 414 k lines/s (~143 MiB/s)   |
+| Audit append + `sync_all()` (real fsync) | 4.89 ms   | 204 lines/s                  |
 
-**Not measured**: fsync rate, audit-log appended-line rate, max
-sustained signed-receipts per second.
+Two findings worth flagging:
+
+- **Receipt-signing ceiling is ~100/s/node** on this storage,
+  set by the journal's tempfile + rename + double fsync per call
+  (`receipt_journal.rs:269-286`). The 1 024-session run is only
+  ~15% slower than the 1-session run, so the per-bump-rewrite cost
+  of the (small) journal is irrelevant — the fsync round-trip
+  dominates. Networked storage will be worse.
+- **Audit-log flush-vs-fsync gap is ~2 000×.** `audit.rs:143` calls
+  `flush()` which is libc buffer flush, sub-3 µs per line. Upgrading
+  to `sync_all` would cap audit-log lines at ~200/s and collapse
+  signed-receipts/s by an order of magnitude on a busy operator.
+  That's an intentional trade — the journal carries the
+  fault-tolerance guarantee for the slashable invariant
+  (receipt_journal.rs:1-36); the audit log is best-effort forensics.
 
 ## 6. Client connect time
 
@@ -197,38 +230,58 @@ won't be visible until the open-session tx lands in a finalized epoch,
 which is **≥1 epoch (~10 s)** on mainnet (`docs/octra-research.md:15`).
 Step 6 adds one HTTP RTT; steps 1, 5 add their own.
 
-**Not measured end-to-end.** The poll backoff implies the client gives
-up at ~30 s; we don't have an `iperf-style` wall-clock distribution.
+**Measured** — *poll-overhead component only*. The full `connect`
+path can't be cleanly benched (binary-crate `pub(crate)` API +
+ctrl-c-driven shutdown). The bench reproduces the verbatim backoff
+schedule from `runner.rs:311-336` against an in-process mock that
+flips "ready" after a configurable target delay. Bench:
+`crates/octravpn-client/benches/cold_connect.rs`, same host.
+
+| Target chain-finality delay | Observed wall-clock | Poll overhead |
+|------------------------------|---------------------|---------------|
+| 0 ms (instant)               | 49.5 ns             | 0             |
+| 1 000 ms                     | 1 510 ms            | +510 ms       |
+| 5 000 ms                     | 5 130 ms            | +130 ms       |
+| 10 000 ms (mainnet epoch)    | 11 140 ms           | +1 140 ms     |
+
+Bounded overhead: at the steady-state cap of 2 s between polls, the
+worst-case extra wait between "tx finalized" and "client observes
+`SessionOpened`" is ≤ 2 s. The 0 ms case isolates the in-process
+overhead at ~50 ns. The remaining wall-clock budget for a v2 connect
+on mainnet is therefore approximately `epoch (~10 s) + ≤2 s poll +
+HTTP RTT (announce) + WG handshake (29 µs ECDH, negligible)`.
 
 ## 7. Cryptography costs
 
 Per-primitive criterion benches live in
-`crates/octravpn-core/benches/core.rs`:
+`crates/octravpn-core/benches/core.rs` (covers receipt sign/verify,
+pedersen + earnings commit/open, onion build/peel, tx canonical +
+sign, wallet enc/dec at 1 k PBKDF2 iters — production uses 200 k).
 
-- `receipt_build_sign` / `receipt_verify_dual` (line 36, 44) — dual
-  ed25519 sign + verify around a `SignedReceipt`.
-- `pedersen_commit` / `pedersen_verify_open` (line 56, 59).
-- `earnings_commit` / `earnings_verify_claim` (line 76, 79).
-- `onion_build_3hop` / `onion_peel_layer` (line 96, 99) — X25519 ECDH
-  + ChaCha20-Poly1305 per hop.
-- `tx_canonical_bytes` / `tx_sign_call` (line 118, 121).
-- `wallet_encrypt_1k_iters` / `wallet_decrypt_1k_iters` (line 136, 139)
-  — runs PBKDF2-style KDF at 1 000 iterations to keep the bench
-  sub-second; the docstring at line 135 notes "production uses 200k".
+**Committed snapshot**: `bench-snapshots/core.json` (host: Darwin
+arm64 / Apple M3 Max / macOS 26.1, release build, criterion
+`--sample-size 20 --warm-up-time 1 --measurement-time 2`):
 
-**No committed snapshot** — `bench-snapshots/core.json` is referenced
-in the bench docstring at line 5 but is gitignored output. Numbers
-exist only when someone runs `cargo bench -p octravpn-core --bench
-core` locally. There's no CI run-tracker.
+| Primitive                  | Mean      |
+|----------------------------|-----------|
+| `receipt_build_sign`       | 22.3 µs   |
+| `receipt_verify_dual`      | 58.0 µs   |
+| `pedersen_commit`          | 41.8 µs   |
+| `pedersen_verify_open`     | 42.0 µs   |
+| `earnings_commit`          | 36.7 µs   |
+| `earnings_verify_claim`    | 36.1 µs   |
+| `onion_build_3hop`         | 125 µs    |
+| `onion_peel_layer`         | 31.7 µs   |
+| `tx_canonical_bytes`       | 1.81 µs   |
+| `tx_sign_call`             | 14.7 µs   |
+| `wallet_encrypt_1k_iters`  | 292 µs    |
+| `wallet_decrypt_1k_iters`  | 299 µs    |
 
-AES-GCM seal/unseal of sealed assets is not directly benched here;
-the receipt path covers ed25519 + sha256, the wallet path covers PBKDF2
-+ AES-GCM (via the `wallet_enc` symbol the bench imports). Sealed-asset
-throughput per-circle is bounded by the 4 KiB AML cap (§8) before it
-ever hits the cipher.
-
-**Measured**: harness exists, snapshot not committed. Treat all
-crypto-primitive numbers as "knowable on-demand but not recorded".
+Re-run with `cargo bench -p octravpn-core --bench core --release`.
+A CI diff against the committed JSON is a separate ticket. AES-GCM
+on sealed assets isn't a standalone primitive here — the wallet
+path covers PBKDF2 + AES-GCM; sealed-asset throughput per-circle is
+bounded by the 4 KiB AML cap (§8) before it hits the cipher.
 
 ## 8. Storage
 
@@ -254,54 +307,40 @@ sha256-commitment-on-chain + ciphertext-as-sealed-asset pattern. The
 sealed-asset path itself has a 32 MiB cap (per the memory note).
 
 **Measured**: 4 KiB cap empirically (memory file); receipt-journal
-correctness is unit-tested (`receipt_journal.rs:310-450`) but fsync
-rate is not benched.
+fsync rate ~100 ops/s (§5,
+`crates/octravpn-node/benches/settle_throughput.rs`); audit-log
+flush 414 k lines/s (same bench).
 
 ## Suspected limits not yet measured
 
-- WireGuard data-plane Mbps per peer, with and without onion overhead,
-  on a representative box. No end-to-end harness exists.
-- Max concurrent sessions a single operator can sign for before the
-  receipt-journal mutex starves new sessions.
-- Mesh `tick` latency at 1k+ peers in one tailnet.
-- Mesh peer-publish HTTP bandwidth at the control-plane.
+- End-to-end WG Mbps with two real `Tunn` instances on loopback.
+  Primitive ceilings are §1; live-tunnel numbers would require
+  exposing `Tunn`-construction past `octravpn-node`'s private API.
 - Per-wallet chain-tx throughput under sustained submit (nonce
-  serialization vs `pending_nonce` race).
-- Audit-log lines/second sustained.
-- Cold-open client connect time end-to-end (chain epoch dominates;
-  WG + announce add an unknown tail).
-- AES-GCM throughput on sealed-asset put/get.
-- PBKDF2 wallet-decrypt latency at the production 200k iterations
-  (bench only covers 1k for sub-second runs).
+  serialization vs `pending_nonce` race) — requires a real or
+  mocked chain at scale; not in this bench batch.
+- AES-GCM throughput on sealed-asset put/get (covered indirectly
+  via the wallet-enc bench, not as a standalone primitive).
+- PBKDF2 wallet-decrypt latency at the production 200 k iterations
+  (bench only covers 1 k for sub-second runs; extrapolate × 200).
+- Audit-log throughput against `AuditLog` itself (the type is
+  `pub(crate)`; this PR benches the underlying primitive). Same
+  shape applies to `connect`-path full wall-clock.
 
 ## What we know vs. what we assume
 
-**Measured (code or memory backs the number):**
-- IP allocator capacity + birthday bounds — `ip_alloc.rs` tests.
-- TUN MTU default of 1380 B — `octravpn-tun/src/lib.rs:58`.
-- Peer TTL 300 s, conn upgrade period 60 s — `peer.rs:270`,
-  `conn.rs:76`.
-- Mainnet epoch length ~10.0 s — `docs/octra-research.md:15` from
-  live `epoch_summaries` sampling.
-- AML map-string truncation at 4096 B — `memory/octra_aml_string_cap_4kb.md`.
-- Devnet RPC body cap was 1 MiB, now raised — `memory/octra_devnet_rpc_body_cap.md`.
-- Client poll backoff 100 ms→2 s, ~30 s ceiling — `runner.rs:311-333`.
-- Audit log uses `flush` not `fsync`; journal uses `sync_all` —
-  `audit.rs:143`, `receipt_journal.rs:276`.
+**Measured**: §§1–3, 5–7 (each section cites its bench file:line
+above); plus epoch length (`docs/octra-research.md:15`), AML cap
+(`memory/octra_aml_string_cap_4kb.md`), poll backoff
+(`runner.rs:311-333`).
 
-**Extrapolated (number derives from a measured one plus an obvious
-chain rule):**
-- "≥1 epoch per settle per wallet" — follows from epoch length + nonce
-  serialization, not benched.
-- "~30 s connect-time ceiling" — that's the poll budget, not an
-  observed median.
-- Birthday bounds at exact member counts beyond the documented table
-  rows.
+**Extrapolated** (number derives from a measured one plus chain rule):
+- "≥1 epoch per settle per wallet" — epoch length + nonce serialization.
+- WG relay-hop ~1.2 Gbps/core (~270 Mbps with onion) — §1 primitives
+  × packet count, not a live tunnel.
+- Birthday bounds at member counts beyond `ip_alloc.rs:229-294`.
 
-**Assumed (we have a story but no number):**
-- WireGuard data-plane Mbps.
-- Crypto-primitive throughput (bench exists, no snapshot committed).
-- Tick / publish-snapshot scaling beyond the correctness-only stress
-  test in `octravpn-node/tests/stress.rs`.
+**Assumed** (we have a story but no number):
+- Real WG-over-UDP throughput (kernel scheduler, NIC offload, MTU).
 - AML `fhe_*` runtime cost on chain — moot until the chain-side
   bridge is wired (`memory/octra_aml_fhe_load_pk_blocked.md`).
