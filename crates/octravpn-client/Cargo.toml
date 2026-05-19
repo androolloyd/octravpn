@@ -52,6 +52,8 @@ flate2      = "1"
 tar         = "0.4"
 serde_json  = { workspace = true }
 toml        = { workspace = true }
+# v3 integration test — mock JSON-RPC server.
+axum        = { workspace = true }
 
 [lints]
 workspace = true

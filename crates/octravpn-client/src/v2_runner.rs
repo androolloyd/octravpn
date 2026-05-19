@@ -257,7 +257,7 @@ fn require_v2(cfg: &ClientConfig) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{ChainCfg, V2Cfg, WalletCfg};
+    use crate::config::{ChainCfg, V2Cfg, V3Cfg, WalletCfg};
 
     fn cfg_v1() -> ClientConfig {
         ClientConfig {
@@ -273,6 +273,7 @@ mod tests {
                 secret_path: "/dev/null".into(),
             },
             v2: V2Cfg::default(),
+            v3: V3Cfg::default(),
         }
     }
 

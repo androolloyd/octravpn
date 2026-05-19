@@ -6,6 +6,7 @@ use anyhow::Result;
 use clap::Parser;
 use tracing::info;
 
+mod chain_v3;
 mod commands;
 mod config;
 mod discover;
@@ -16,9 +17,10 @@ mod settler;
 mod tailnet;
 mod v2_cache;
 mod v2_runner;
+mod v3_runner;
 mod wallet;
 
-use config::ClientConfig;
+use config::{ClientConfig, ProtocolVersion};
 
 #[derive(Parser, Debug)]
 #[command(name = "octravpn", version, about = "OctraVPN client")]
@@ -110,6 +112,33 @@ enum Cmd {
     Discover {
         #[command(subcommand)]
         op: DiscoverOp,
+    },
+    /// v3 substrate: open a session against the configured operator
+    /// circle (`[v3].circle_id`) on the v3 chain-minimal program
+    /// (`program/main-v3.aml`). Reads `[v3]` config + falls back to
+    /// `[wallet].secret_path` when `[v3].wallet_key_path` is unset.
+    /// Gated on `[chain].protocol_version = "v3"`.
+    ConnectV3 {
+        /// Override `[v3].tailnet_id`.
+        #[arg(long)]
+        tailnet_id: Option<u64>,
+        /// Override `[v3].circle_id`.
+        #[arg(long)]
+        circle_id: Option<String>,
+        /// Override `[v3].max_pay` (raw OU credit ceiling).
+        #[arg(long)]
+        max_pay: Option<u64>,
+        /// Skip the normal `settle_confirm` and submit `claim_no_show`
+        /// instead. Used by the integration tests + manual smoke tests
+        /// when the operator deliberately stalls.
+        #[arg(long, default_value_t = false)]
+        no_show: bool,
+        /// Plumb a deterministic `bytes_used` figure into the settle
+        /// path. Only useful for tests; production clients leave this
+        /// unset and read the value from session counters (deferred —
+        /// real bring-up is the WG follow-up).
+        #[arg(long)]
+        bytes_used: Option<u64>,
     },
     /// v2 substrate: open a session against an authorized circle and
     /// print the WG handoff. The v1.1 `connect` path is preserved.
@@ -295,6 +324,39 @@ async fn main() -> Result<()> {
                 refresh,
             )
             .await
+        }
+        Cmd::ConnectV3 {
+            tailnet_id,
+            circle_id,
+            max_pay,
+            no_show,
+            bytes_used,
+        } => {
+            // Per-protocol dispatch — v3 is the only variant routed
+            // through `protocol_version()` for now; v1.1 and v2 keep
+            // their own connect subcommands untouched.
+            match cfg.protocol_version()? {
+                ProtocolVersion::V3 => {
+                    let mut effective_cfg = (*cfg).clone();
+                    if let Some(t) = tailnet_id {
+                        effective_cfg.v3.tailnet_id = t;
+                    }
+                    if let Some(c) = circle_id {
+                        effective_cfg.v3.circle_id = c;
+                    }
+                    if let Some(m) = max_pay {
+                        effective_cfg.v3.max_pay = m;
+                    }
+                    let cfg_arc = Arc::new(effective_cfg);
+                    v3_runner::connect_v3(&client, &cfg_arc, bytes_used, no_show).await
+                }
+                ProtocolVersion::V1_1 | ProtocolVersion::V2 => {
+                    anyhow::bail!(
+                        "`connect-v3` requires `[chain].protocol_version = \"v3\"` (currently `{}`)",
+                        cfg.chain.protocol_version,
+                    )
+                }
+            }
         }
         // Already handled above.
         Cmd::Init { .. }
