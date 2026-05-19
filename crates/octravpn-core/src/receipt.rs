@@ -463,4 +463,233 @@ mod tests {
             "Some(zero_circle) and None must serialise to the same 32 bytes"
         );
     }
+
+    /// Forging the client signature alone (with attacker-controlled pk)
+    /// surfaces `BadClientSig`, not `BadNodeSig` — failure ordering must
+    /// be stable for diags.
+    #[test]
+    fn forged_client_sig_fails_with_correct_variant() {
+        let client = fresh_kp();
+        let node = fresh_kp();
+        let attacker = fresh_kp();
+        let r = Receipt::new(
+            ctx_v1(0xAA),
+            SessionId::new([1u8; 32]),
+            2,
+            10,
+            Blind::new([0u8; 32]),
+        );
+        let mut sr = SignedReceipt::build(r, &client, &node);
+        sr.client_pubkey = attacker.public;
+        assert!(matches!(sr.verify().unwrap_err(), ReceiptError::BadClientSig));
+    }
+
+    /// Tampering with the blind scalar (without re-signing) rejects.
+    /// Blind is part of the signing payload.
+    #[test]
+    fn tampered_blind_rejects() {
+        let c = fresh_kp();
+        let n = fresh_kp();
+        let r = Receipt::new(
+            ctx_v1(0xAA),
+            SessionId::new([0u8; 32]),
+            3,
+            42,
+            Blind::new([0xAA; 32]),
+        );
+        let mut sr = SignedReceipt::build(r, &c, &n);
+        sr.receipt.blind = Blind::new([0xBB; 32]);
+        assert!(sr.verify().is_err());
+    }
+
+    /// Tampering with seq alone (seq rewind) rejects.
+    #[test]
+    fn tampered_seq_rejects() {
+        let c = fresh_kp();
+        let n = fresh_kp();
+        let r = Receipt::new(
+            ctx_v1(0xAA),
+            SessionId::new([0u8; 32]),
+            5,
+            10,
+            Blind::new([0; 32]),
+        );
+        let mut sr = SignedReceipt::build(r, &c, &n);
+        sr.receipt.seq = 6;
+        assert!(sr.verify().is_err());
+    }
+
+    /// Tampering with session_id rejects (cross-session replay
+    /// rejection).
+    #[test]
+    fn tampered_session_id_rejects() {
+        let c = fresh_kp();
+        let n = fresh_kp();
+        let r = Receipt::new(
+            ctx_v1(0xAA),
+            SessionId::new([0u8; 32]),
+            1,
+            10,
+            Blind::new([0; 32]),
+        );
+        let mut sr = SignedReceipt::build(r, &c, &n);
+        sr.receipt.session_id = SessionId::new([0xFF; 32]);
+        assert!(sr.verify().is_err());
+    }
+
+    /// `check_monotonic` boundary: prev=0 rejects seq=0.
+    #[test]
+    fn check_monotonic_zero_boundary() {
+        let r = Receipt::new(
+            ctx_v1(0xAA),
+            SessionId::new([0u8; 32]),
+            0,
+            0,
+            Blind::new([0; 32]),
+        );
+        let sr = SignedReceipt::build(r, &fresh_kp(), &fresh_kp());
+        assert!(matches!(
+            sr.check_monotonic(0).unwrap_err(),
+            ReceiptError::NonMonotonicSeq { prev: 0, next: 0 }
+        ));
+    }
+
+    /// `check_monotonic` near u64::MAX: no overflow shenanigans.
+    #[test]
+    fn check_monotonic_u64_max_edge() {
+        let r = Receipt::new(
+            ctx_v1(0xAA),
+            SessionId::new([0u8; 32]),
+            u64::MAX,
+            0,
+            Blind::new([0; 32]),
+        );
+        let sr = SignedReceipt::build(r, &fresh_kp(), &fresh_kp());
+        assert!(sr.check_monotonic(u64::MAX - 1).is_ok());
+        assert!(sr.check_monotonic(u64::MAX).is_err());
+    }
+
+    /// `canonical_payload` helper agrees with `Receipt::signing_payload`
+    /// — chain and client hash the same bytes.
+    #[test]
+    fn canonical_payload_helper_matches_receipt_payload() {
+        let ctx = ctx_v1(0x42);
+        let sid = SessionId::new([7u8; 32]);
+        let blind = Blind::new([3u8; 32]);
+        let receipt = Receipt::new(ctx.clone(), sid.clone(), 100, 9999, blind);
+        let helper = canonical_payload(&ctx, &sid, 100, 9999, &blind).unwrap();
+        assert_eq!(helper, receipt.signing_payload());
+    }
+
+    /// Distinct `bytes_used` yields distinct signing payload (metering
+    /// is genuinely covered).
+    #[test]
+    fn distinct_bytes_used_distinct_payload() {
+        let ctx = ctx_v1(0xAA);
+        let sid = SessionId::new([0u8; 32]);
+        let blind = Blind::new([0u8; 32]);
+        let a = Receipt::new(ctx.clone(), sid.clone(), 1, 100, blind).signing_payload();
+        let b = Receipt::new(ctx, sid, 1, 200, blind).signing_payload();
+        assert_ne!(a, b);
+    }
+
+    /// JSON round-trip preserves verifiability — chain-side JSON
+    /// readers reach the same verdict as in-memory.
+    #[test]
+    fn signed_receipt_json_round_trip_preserves_verify() {
+        let c = fresh_kp();
+        let n = fresh_kp();
+        let r = Receipt::new(
+            ctx_v1(0xCC),
+            SessionId::new([4u8; 32]),
+            7,
+            512,
+            Blind::new([5u8; 32]),
+        );
+        let sr = SignedReceipt::build(r, &c, &n);
+        let j = serde_json::to_string(&sr).unwrap();
+        let parsed: SignedReceipt = serde_json::from_str(&j).unwrap();
+        parsed.verify().unwrap();
+        assert_eq!(sr, parsed);
+    }
+
+    /// Single-bit chain_id flip changes the signing payload (cross-
+    /// chain replay rejection mechanic).
+    #[test]
+    fn chain_id_bit_flip_changes_payload() {
+        let prog = Address::from_pubkey(&[0xAA; 32]);
+        let ctx_a = ReceiptContext::v1_1(prog.clone(), 0x1234_5678);
+        let ctx_b = ReceiptContext::v1_1(prog, 0x1234_5679);
+        let sid = SessionId::new([0u8; 32]);
+        let blind = Blind::new([0u8; 32]);
+        let a = Receipt::new(ctx_a, sid.clone(), 1, 0, blind).signing_payload();
+        let b = Receipt::new(ctx_b, sid, 1, 0, blind).signing_payload();
+        assert_ne!(a, b);
+    }
+
+    /// Signing payload is 32 bytes (SHA-256). Catches accidental codec
+    /// drift if the type ever loosens.
+    #[test]
+    fn signing_payload_is_thirty_two_bytes() {
+        let r = Receipt::new(
+            ctx_v1(0),
+            SessionId::new([0u8; 32]),
+            0,
+            0,
+            Blind::new([0u8; 32]),
+        );
+        assert_eq!(r.signing_payload().len(), 32);
+    }
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
+
+        /// Property: any well-formed receipt signed with any keypair
+        /// pair verifies.
+        #[test]
+        fn prop_any_well_formed_receipt_verifies(
+            sid in prop::array::uniform32(any::<u8>()),
+            blind in prop::array::uniform32(any::<u8>()),
+            seq in any::<u64>(),
+            bytes in any::<u64>(),
+            prog_byte in any::<u8>(),
+            chain in any::<u32>(),
+        ) {
+            let prog = Address::from_pubkey(&[prog_byte; 32]);
+            let ctx = ReceiptContext::v1_1(prog, chain);
+            let r = Receipt::new(ctx, SessionId::new(sid), seq, bytes, Blind::new(blind));
+            let sr = SignedReceipt::build(r, &fresh_kp(), &fresh_kp());
+            sr.verify().expect("well-formed receipt must verify");
+        }
+
+        /// Property: changing the session_id yields distinct payload.
+        #[test]
+        fn prop_session_id_change_yields_distinct_payload(
+            sid_a in prop::array::uniform32(any::<u8>()),
+            sid_b in prop::array::uniform32(any::<u8>()),
+            blind in prop::array::uniform32(any::<u8>()),
+            seq in any::<u64>(),
+            bytes in any::<u64>(),
+        ) {
+            prop_assume!(sid_a != sid_b);
+            let ctx = ctx_v1(0xAA);
+            let a = Receipt::new(
+                ctx.clone(),
+                SessionId::new(sid_a),
+                seq,
+                bytes,
+                Blind::new(blind),
+            ).signing_payload();
+            let b = Receipt::new(
+                ctx,
+                SessionId::new(sid_b),
+                seq,
+                bytes,
+                Blind::new(blind),
+            ).signing_payload();
+            prop_assert_ne!(a, b);
+        }
+    }
 }

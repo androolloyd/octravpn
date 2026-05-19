@@ -130,6 +130,60 @@ mod tests {
         assert_ne!(c1, c2);
     }
 
+    /// Malformed commit bytes (32-byte point that isn't a valid
+    /// Ristretto encoding) surface as `verify_open == false`, not
+    /// panic. Catches the "decompress returns None" branch.
+    #[test]
+    fn malformed_commit_bytes_reject_safely() {
+        let a = Address::from_display("octABC123");
+        let b = fresh_blind();
+        let bogus = Commitment([0xFFu8; COMMIT_LEN]);
+        assert!(!verify_open(&bogus, &Opening { addr: a, blind: b }));
+    }
+
+    /// All-zero commit (identity point compressed) is valid but must
+    /// not open to a random (addr, blind). Confirms point-equality
+    /// semantics, not byte-pattern matching.
+    #[test]
+    fn identity_commit_does_not_open_random_addr() {
+        use curve25519_dalek::traits::Identity;
+        let identity = Commitment(
+            curve25519_dalek::ristretto::RistrettoPoint::identity()
+                .compress()
+                .to_bytes(),
+        );
+        let a = Address::from_display("octRANDOM");
+        let b = fresh_blind();
+        assert!(!verify_open(
+            &identity,
+            &Opening { addr: a, blind: b }
+        ));
+    }
+
+    /// Zero blind: still a valid scalar. Catches a regression where
+    /// empty-bytes paths special-cased to "no commit".
+    #[test]
+    fn zero_blind_round_trips() {
+        let a = Address::from_display("octABC");
+        let zero = [0u8; BLIND_LEN];
+        let c = commit(&a, &zero);
+        assert!(verify_open(
+            &c,
+            &Opening {
+                addr: a,
+                blind: zero
+            }
+        ));
+    }
+
+    /// `fresh_blind` returns exactly 32 bytes. Guards against a
+    /// regression to a different RNG fill width.
+    #[test]
+    fn fresh_blind_length() {
+        let b = fresh_blind();
+        assert_eq!(b.len(), BLIND_LEN);
+    }
+
     #[test]
     fn additive_homomorphism_property() {
         // c(a, r1) + c(a', r2) should equal c(a + a', r1 + r2) — verifying

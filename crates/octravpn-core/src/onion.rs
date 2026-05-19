@@ -317,4 +317,155 @@ mod tests {
         let too_short = vec![0u8; 16];
         assert!(peel_layer(&sk, &too_short).is_err());
     }
+
+    /// Boundary: exactly the minimum length (32+16 = 48 bytes) passes
+    /// the length check and the AEAD fails on the garbage ciphertext.
+    /// Confirms the off-by-one direction is `< 48` rejects.
+    #[test]
+    fn minimum_length_packet_passes_length_check() {
+        let (_pk, sk) = fresh_static();
+        let just_enough = vec![0u8; 48];
+        match peel_layer(&sk, &just_enough) {
+            Err(OnionError::Aead(_)) => {}
+            other => panic!("expected Aead error, got {other:?}"),
+        }
+    }
+
+    /// 47-byte packets (one below the floor) reject as Malformed.
+    #[test]
+    fn just_below_min_length_rejects_malformed() {
+        let (_pk, sk) = fresh_static();
+        let one_short = vec![0u8; 47];
+        assert!(matches!(
+            peel_layer(&sk, &one_short).unwrap_err(),
+            OnionError::Malformed
+        ));
+    }
+
+    /// Appended garbage breaks AEAD (truncation-vs-extension attacks).
+    #[test]
+    fn appended_garbage_rejects_aead() {
+        let (pk, sk) = fresh_static();
+        let mut onion = build_onion(
+            &[HopBuildInput {
+                static_pubkey: pk,
+                endpoint: "x".into(),
+            }],
+            b"payload",
+        )
+        .unwrap();
+        onion.extend_from_slice(b"GARBAGE");
+        match peel_layer(&sk, &onion).unwrap_err() {
+            OnionError::Aead(_) => {}
+            other => panic!("expected Aead error, got {other:?}"),
+        }
+    }
+
+    /// Dropping the trailing byte breaks the AEAD tag.
+    #[test]
+    fn truncation_rejects_aead() {
+        let (pk, sk) = fresh_static();
+        let mut onion = build_onion(
+            &[HopBuildInput {
+                static_pubkey: pk,
+                endpoint: "x".into(),
+            }],
+            b"payload",
+        )
+        .unwrap();
+        onion.pop();
+        assert!(matches!(
+            peel_layer(&sk, &onion).unwrap_err(),
+            OnionError::Aead(_)
+        ));
+    }
+
+    /// Two hops with the same static key (operator mis-config) still
+    /// round-trip. Defends against an assumption that hop secrets are
+    /// distinct.
+    #[test]
+    fn duplicate_hop_secrets_round_trip() {
+        let (pk, sk) = fresh_static();
+        let onion = build_onion(
+            &[
+                HopBuildInput {
+                    static_pubkey: pk,
+                    endpoint: "first:1".into(),
+                },
+                HopBuildInput {
+                    static_pubkey: pk,
+                    endpoint: "second:2".into(),
+                },
+            ],
+            b"x",
+        )
+        .unwrap();
+        let p1 = peel_layer(&sk, &onion).unwrap();
+        match p1.action {
+            HopAction::Forward { endpoint, .. } => assert_eq!(endpoint, "second:2"),
+            HopAction::Egress => panic!("expected Forward at hop 1"),
+        }
+        let p2 = peel_layer(&sk, &p1.inner).unwrap();
+        assert_eq!(p2.action, HopAction::Egress);
+    }
+
+    /// `build_onion` accepts MAX_HOPS exactly (boundary; `<` vs `<=`).
+    #[test]
+    fn build_at_max_hops_is_accepted() {
+        let mut hops = Vec::with_capacity(MAX_HOPS);
+        let mut secrets = Vec::with_capacity(MAX_HOPS);
+        for _ in 0..MAX_HOPS {
+            let (pk, sk) = fresh_static();
+            hops.push(HopBuildInput {
+                static_pubkey: pk,
+                endpoint: "x".into(),
+            });
+            secrets.push(sk);
+        }
+        let onion = build_onion(&hops, b"payload").unwrap();
+        let mut cur = onion;
+        for sk in &secrets {
+            cur = peel_layer(sk, &cur).unwrap().inner;
+        }
+        assert!(!cur.is_empty());
+    }
+
+    /// Empty inner payload still produces a well-formed onion. Edge
+    /// case for `bytes_used == 0` control-plane messages.
+    #[test]
+    fn empty_inner_payload_round_trips() {
+        let (pk, sk) = fresh_static();
+        let onion = build_onion(
+            &[HopBuildInput {
+                static_pubkey: pk,
+                endpoint: "x".into(),
+            }],
+            b"",
+        )
+        .unwrap();
+        let peeled = peel_layer(&sk, &onion).unwrap();
+        assert_eq!(peeled.action, HopAction::Egress);
+        assert_eq!(peeled.inner, b"");
+    }
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 32, ..ProptestConfig::default() })]
+
+        /// Property: any payload up to 256 bytes round-trips through
+        /// a single-hop onion intact.
+        #[test]
+        fn prop_round_trip_random_payload(
+            payload in prop::collection::vec(any::<u8>(), 0..256),
+        ) {
+            let (pk, sk) = fresh_static();
+            let onion = build_onion(
+                &[HopBuildInput { static_pubkey: pk, endpoint: "x".into() }],
+                &payload,
+            ).unwrap();
+            let peeled = peel_layer(&sk, &onion).unwrap();
+            prop_assert_eq!(peeled.inner, payload);
+        }
+    }
 }

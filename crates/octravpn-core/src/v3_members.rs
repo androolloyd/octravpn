@@ -945,6 +945,91 @@ mod tests {
             prop_assert_ne!(bytes_a, bytes_b);
             prop_assert_ne!(hash_a, hash_b);
         }
+
+        /// Cross-field non-aliasing: `ip_salt` is in the canonical
+        /// hash. Otherwise a chain observer who learns the salt can
+        /// re-derive tailnet IPs without anchor change.
+        #[test]
+        fn prop_ip_salt_in_hash(
+            mut m in arb_members(),
+            sa in any::<[u8; 32]>(),
+            sb in any::<[u8; 32]>(),
+        ) {
+            prop_assume!(sa != sb);
+            m.ip_salt = ip_salt_from(&sa);
+            let ha = m.hash_hex().expect("ha");
+            m.ip_salt = ip_salt_from(&sb);
+            let hb = m.hash_hex().expect("hb");
+            prop_assert_ne!(ha, hb);
+        }
+
+        /// Removing a member changes the hash. Defends against a
+        /// regression that hash-caches on member count only.
+        #[test]
+        fn prop_member_removal_changes_hash(m in arb_members()) {
+            prop_assume!(!m.members.is_empty());
+            let original = m.hash_hex().expect("original");
+            let mut shorter = m;
+            shorter.members.pop();
+            let trimmed = shorter.hash_hex().expect("trimmed");
+            prop_assert_ne!(original, trimmed);
+        }
+
+        /// Adding a new (non-duplicate) member changes the hash.
+        #[test]
+        fn prop_member_addition_changes_hash(
+            m in arb_members(),
+            new_suffix in "[a-z]{8,16}",
+            new_key in any::<[u8; 32]>(),
+            joined in any::<u64>(),
+        ) {
+            let wallet = format!("oct{new_suffix}");
+            prop_assume!(!m.members.iter().any(|x| x.wallet == wallet));
+            let original = m.hash_hex().expect("original");
+            let mut bigger = m;
+            bigger.members.push(Member {
+                wallet,
+                wg_pubkey_b64: BASE64_STD.encode(new_key),
+                joined_epoch: joined,
+            });
+            bigger.validate().expect("addition validates");
+            let with_new = bigger.hash_hex().expect("with new");
+            prop_assert_ne!(original, with_new);
+        }
+
+        /// `joined_epoch` is part of the canonical encoding. Catches
+        /// "members compress to wallet+pubkey only" regressions.
+        #[test]
+        fn prop_joined_epoch_in_hash(
+            m in arb_members(),
+            a in any::<u64>(),
+            b in any::<u64>(),
+        ) {
+            prop_assume!(!m.members.is_empty());
+            prop_assume!(a != b);
+            let mut va = m.clone();
+            va.members[0].joined_epoch = a;
+            let mut vb = m;
+            vb.members[0].joined_epoch = b;
+            prop_assert_ne!(va.hash_hex().unwrap(), vb.hash_hex().unwrap());
+        }
+
+        /// Cross-field non-aliasing: `effective_epoch` is in the
+        /// canonical hash. Otherwise two member sets at different
+        /// epochs would share an anchor.
+        #[test]
+        fn prop_effective_epoch_in_hash(
+            mut m in arb_members(),
+            a in any::<u64>(),
+            b in any::<u64>(),
+        ) {
+            prop_assume!(a != b);
+            m.effective_epoch = a;
+            let ha = m.hash_hex().expect("ha");
+            m.effective_epoch = b;
+            let hb = m.hash_hex().expect("hb");
+            prop_assert_ne!(ha, hb);
+        }
     }
 
     #[test]

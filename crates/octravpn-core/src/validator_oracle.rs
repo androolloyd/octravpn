@@ -201,4 +201,56 @@ mod tests {
         // bubbles up as Err; the test asserts we don't panic.
         let _ = oracle.is_validator(&addr).await;
     }
+
+    /// Static allowlist with multiple entries: every entry resolves to
+    /// true without touching the network. Catches a regression where
+    /// the allowlist only honoured the first insertion.
+    #[tokio::test]
+    async fn static_allowlist_handles_multiple_entries() {
+        let rpc = RpcClient::new("http://unreachable.test/rpc");
+        let oracle = ValidatorOracle::new(rpc).with_static_allowlist([
+            "octA".into(),
+            "octB".into(),
+            "octC".into(),
+        ]);
+        for s in ["octA", "octB", "octC"] {
+            assert!(oracle.is_validator(&Address::from_display(s)).await.unwrap());
+        }
+    }
+
+    /// `with_refresh` works in combination with the allowlist. Smoke
+    /// test for the builder chain.
+    #[tokio::test]
+    async fn refresh_duration_does_not_affect_static_path() {
+        let rpc = RpcClient::new("http://unreachable.test/rpc");
+        let oracle = ValidatorOracle::new(rpc)
+            .with_refresh(Duration::from_secs(1))
+            .with_static_allowlist(["octX".into()]);
+        assert!(oracle.is_validator(&Address::from_display("octX")).await.unwrap());
+    }
+
+    /// An address NOT in the allowlist and not in any RPC-bulk set
+    /// answers `Ok(false)` — graceful fallback, no panic.
+    #[tokio::test]
+    async fn unknown_address_with_allowlist_returns_false() {
+        let rpc = RpcClient::new("http://127.0.0.1:1/rpc");
+        let oracle = ValidatorOracle::new(rpc)
+            .with_static_allowlist(["octKNOWN".into()]);
+        let unknown = Address::from_display("octOTHER");
+        let res = oracle.is_validator(&unknown).await.unwrap();
+        assert!(!res, "unknown address must NOT be considered a validator");
+    }
+
+    /// Repeated calls on an allowlisted address stay true (no caching
+    /// regression that flips it to false).
+    #[tokio::test]
+    async fn static_allowlist_is_idempotent() {
+        let rpc = RpcClient::new("http://unreachable.test/rpc");
+        let oracle = ValidatorOracle::new(rpc)
+            .with_static_allowlist(["octIDEMP".into()]);
+        let a = Address::from_display("octIDEMP");
+        for _ in 0..5 {
+            assert!(oracle.is_validator(&a).await.unwrap());
+        }
+    }
 }

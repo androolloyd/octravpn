@@ -160,4 +160,83 @@ mod tests {
         let r2 = scalar_from_bytes(&bytes).unwrap();
         assert_eq!(r, r2);
     }
+
+    /// Decoding a 32-byte slot that is NOT a canonical curve point must
+    /// produce `CoreError::Crypto`, not panic.
+    #[test]
+    fn malformed_point_bytes_reject() {
+        let bogus = LedgerPoint([0xFFu8; POINT_LEN]);
+        let err = bogus.to_point().unwrap_err();
+        assert!(matches!(err, CoreError::Crypto(_)));
+    }
+
+    /// Non-canonical scalar bytes must reject — defends against
+    /// malleability where two encodings open to the same point.
+    #[test]
+    fn non_canonical_scalar_rejected() {
+        let bytes = [0xFFu8; 32];
+        assert!(scalar_from_bytes(&bytes).is_err());
+    }
+
+    /// Property: malformed point ⇒ `verify_claim` returns false rather
+    /// than propagating the underlying decode error.
+    #[test]
+    fn verify_claim_on_malformed_point_returns_false() {
+        let bogus = LedgerPoint([0xFFu8; POINT_LEN]);
+        assert!(!verify_claim(bogus, 0, &Scalar::ZERO));
+    }
+
+    /// Identity (zero point) opens to (0, 0). Critical invariant: an
+    /// empty ledger MUST NOT verify any non-zero amount.
+    #[test]
+    fn identity_opens_only_to_zero_amount() {
+        let zero = LedgerPoint::zero();
+        assert!(verify_claim(zero, 0, &Scalar::ZERO));
+        assert!(!verify_claim(zero, 1, &Scalar::ZERO));
+    }
+
+    /// Adding zero to a ledger point preserves the opening.
+    #[test]
+    fn addition_with_zero_is_identity() {
+        let r = fresh_blind();
+        let c = commit(42, &r);
+        let sum = add(c, LedgerPoint::zero()).unwrap();
+        assert!(verify_claim(sum, 42, &r));
+    }
+
+    /// `commit(0, 0)` is the identity point. Guards against accidental
+    /// drift to a non-identity "zero" encoding.
+    #[test]
+    fn commit_zero_amount_zero_blind_is_identity() {
+        let c = commit(0, &Scalar::ZERO);
+        assert_eq!(c, LedgerPoint::zero());
+    }
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
+
+        /// Property: any u64 amount round-trips through commit/open.
+        #[test]
+        fn prop_commit_open_round_trip(amount in any::<u64>()) {
+            let r = fresh_blind();
+            let c = commit(amount, &r);
+            prop_assert!(verify_claim(c, amount, &r));
+        }
+
+        /// Property: different amounts under the same blind do not
+        /// yield the same commit (binding under fixed blind).
+        #[test]
+        fn prop_distinct_amounts_distinct_points(
+            a in any::<u64>(),
+            b in any::<u64>(),
+        ) {
+            prop_assume!(a != b);
+            let r = fresh_blind();
+            let ca = commit(a, &r);
+            let cb = commit(b, &r);
+            prop_assert_ne!(ca, cb);
+        }
+    }
 }

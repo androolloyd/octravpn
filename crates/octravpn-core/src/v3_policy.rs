@@ -769,6 +769,73 @@ mod tests {
             prop_assert_ne!(bytes_a, bytes_b);
             prop_assert_ne!(hash_a, hash_b);
         }
+
+        /// Cross-field non-aliasing: swapping `price_per_mb_shared`
+        /// and `price_per_mb_internal` yields a different hash —
+        /// defends against the chain charging the wrong tier silently.
+        #[test]
+        fn prop_price_tiers_do_not_alias(
+            mut p in arb_policy(),
+            shared in any::<u64>(),
+            internal in any::<u64>(),
+        ) {
+            prop_assume!(shared != internal);
+            p.price_per_mb_shared = shared;
+            p.price_per_mb_internal = internal;
+            let h1 = p.hash_hex().expect("h1");
+            p.price_per_mb_shared = internal;
+            p.price_per_mb_internal = shared;
+            let h2 = p.hash_hex().expect("h2");
+            prop_assert_ne!(h1, h2);
+        }
+
+        /// Cross-field non-aliasing: changing `endpoint` changes the
+        /// hash. Otherwise an operator could rotate the dial target
+        /// without anchor proof.
+        #[test]
+        fn prop_endpoint_in_hash(
+            mut p in arb_policy(),
+            a in "[a-z]{4,16}",
+            b in "[a-z]{4,16}",
+        ) {
+            prop_assume!(a != b);
+            p.endpoint = a;
+            let h_a = p.hash_hex().expect("ha");
+            p.endpoint = b;
+            let h_b = p.hash_hex().expect("hb");
+            prop_assert_ne!(h_a, h_b);
+        }
+
+        /// Cross-field non-aliasing: two distinct WG keys with
+        /// otherwise identical policy MUST produce distinct hashes —
+        /// the chain's only path to detect WG key rotation.
+        #[test]
+        fn prop_wg_pubkey_in_hash(
+            mut p in arb_policy(),
+            ka in any::<[u8; 32]>(),
+            kb in any::<[u8; 32]>(),
+        ) {
+            prop_assume!(ka != kb);
+            p.wg_pubkey_b64 = wg_b64_from(&ka);
+            let h_a = p.hash_hex().expect("ha");
+            p.wg_pubkey_b64 = wg_b64_from(&kb);
+            let h_b = p.hash_hex().expect("hb");
+            prop_assert_ne!(h_a, h_b);
+        }
+
+        /// `attestation_url = None` MUST be distinct from
+        /// `Some(non-empty)`. Otherwise None collides with `Some("")`.
+        #[test]
+        fn prop_attestation_none_distinct_from_some(
+            mut p in arb_policy(),
+            url in ".{1,32}",
+        ) {
+            p.attestation_url = None;
+            let none_h = p.hash_hex().expect("none");
+            p.attestation_url = Some(url);
+            let some_h = p.hash_hex().expect("some");
+            prop_assert_ne!(none_h, some_h);
+        }
     }
 
     #[test]

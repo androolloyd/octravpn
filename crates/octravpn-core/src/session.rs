@@ -158,3 +158,109 @@ impl SessionState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every documented chain-side session state decodes to its named
+    /// Rust variant. Catches drift between AML constants and this enum.
+    #[test]
+    fn session_state_decodes_each_known_value() {
+        assert_eq!(SessionState::from_u8(0), Some(SessionState::Open));
+        assert_eq!(SessionState::from_u8(1), Some(SessionState::Settled));
+        assert_eq!(SessionState::from_u8(2), Some(SessionState::Refunded));
+        assert_eq!(SessionState::from_u8(3), Some(SessionState::Slashed));
+    }
+
+    /// Out-of-range bytes produce `None` — an unknown state must NOT
+    /// silently coerce to `Open` (which would let settlement run on a
+    /// bogus state).
+    #[test]
+    fn session_state_unknown_returns_none() {
+        for v in 4u8..=255u8 {
+            assert!(SessionState::from_u8(v).is_none());
+        }
+    }
+
+    /// `SessionId::from_u64` puts the u64 in the first 8 bytes (BE),
+    /// zero-pads the rest, and `as_u64` recovers it.
+    #[test]
+    fn session_id_u64_round_trip() {
+        let id = SessionId::from_u64(0xCAFE_F00D_DEAD_BEEF);
+        assert_eq!(id.as_u64(), Some(0xCAFE_F00D_DEAD_BEEF));
+        let bytes = id.as_bytes();
+        assert_eq!(&bytes[..8], &0xCAFE_F00D_DEAD_BEEFu64.to_be_bytes());
+        assert!(bytes[8..].iter().all(|&b| b == 0));
+    }
+
+    /// A SessionId whose trailing 24 bytes are NOT zero must NOT be
+    /// claimed as a v1 u64-encoded id (cross-namespace defence).
+    #[test]
+    fn session_id_as_u64_rejects_padded_value() {
+        let mut bytes = [0u8; 32];
+        bytes[0] = 1;
+        bytes[31] = 1;
+        let id = SessionId::new(bytes);
+        assert_eq!(id.as_u64(), None);
+    }
+
+    /// Hex round-trip: encode then decode yields the same SessionId.
+    #[test]
+    fn session_id_hex_round_trip() {
+        let id = SessionId::new([0xAB; 32]);
+        let h = id.to_hex();
+        assert_eq!(h.len(), 64);
+        assert_eq!(SessionId::from_hex(&h), Some(id));
+    }
+
+    /// Hex parsing rejects wrong-length input and non-hex chars
+    /// — catches silent acceptance of malformed RPC params.
+    #[test]
+    fn session_id_from_hex_rejects_malformed() {
+        assert!(SessionId::from_hex("00").is_none());
+        assert!(SessionId::from_hex(&"g".repeat(64)).is_none());
+        assert!(SessionId::from_hex(&"00".repeat(33)).is_none());
+    }
+
+    /// `as_bytes` and `into_bytes` agree byte-for-byte (no codec
+    /// drift between borrow / consume forms).
+    #[test]
+    fn session_id_as_bytes_matches_into_bytes() {
+        let id = SessionId::new([7u8; 32]);
+        let borrowed = *id.as_bytes();
+        let owned = id.into_bytes();
+        assert_eq!(borrowed, owned);
+    }
+
+    /// `Blind::to_hex` is lowercase (wire format depends on this).
+    #[test]
+    fn blind_hex_encoding_is_lowercase() {
+        let b = Blind::new([0xAB; 32]);
+        assert_eq!(b.to_hex(), "ab".repeat(32));
+    }
+
+    /// `SessionState` JSON is snake_case (matches RPC).
+    #[test]
+    fn session_state_json_is_snake_case() {
+        let j = serde_json::to_string(&SessionState::Refunded).unwrap();
+        assert_eq!(j, "\"refunded\"");
+        let back: SessionState = serde_json::from_str(&j).unwrap();
+        assert_eq!(back, SessionState::Refunded);
+    }
+
+    /// Boundary: `from_u64(0)` round-trips to 0.
+    #[test]
+    fn session_id_from_u64_zero_round_trips() {
+        let id = SessionId::from_u64(0);
+        assert_eq!(id.as_u64(), Some(0));
+        assert_eq!(id.as_bytes(), &[0u8; 32]);
+    }
+
+    /// Boundary: `from_u64(u64::MAX)` round-trips (no overflow).
+    #[test]
+    fn session_id_from_u64_max_round_trips() {
+        let id = SessionId::from_u64(u64::MAX);
+        assert_eq!(id.as_u64(), Some(u64::MAX));
+    }
+}

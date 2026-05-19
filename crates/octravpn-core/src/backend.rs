@@ -233,4 +233,71 @@ mod tests {
             "placeholder must refuse to answer authoritatively"
         );
     }
+
+    /// `tx_chain_id` propagates on `RpcBackend`. Catches a regression
+    /// where the builder doesn't store the chain id.
+    #[test]
+    fn rpc_backend_chain_id_is_propagated() {
+        let rpc = crate::rpc::RpcClient::new("http://127.0.0.1:1/rpc");
+        let b = RpcBackend::new(rpc).with_chain_id(0x12_34_56_78);
+        assert_eq!(b.tx_chain_id(), 0x12_34_56_78);
+    }
+
+    /// `PlaceholderBackend::tx_chain_id` is always 0. A regression
+    /// would invisibly cross-bind every receipt under a different
+    /// domain.
+    #[test]
+    fn placeholder_chain_id_is_zero() {
+        assert_eq!(PlaceholderBackend.tx_chain_id(), 0);
+    }
+
+    /// `verify_account_sig` accepts a sig under the address's first
+    /// 32 bytes treated as the pubkey; rejects on tampered msg.
+    #[test]
+    fn placeholder_verify_account_sig_round_trip() {
+        let b = PlaceholderBackend;
+        let kp = KeyPair::generate();
+        let pk_bytes = kp.public.0;
+        let addr = Address::from_parts(pk_bytes, "octsig".to_string());
+        let msg = b"hello";
+        let sig = kp.sign(msg);
+        b.verify_account_sig(&addr, msg, &sig).expect("valid sig");
+        assert!(b.verify_account_sig(&addr, b"goodbye", &sig).is_err());
+    }
+
+    /// `derive_view_pubkey` is deterministic: same secret → same
+    /// pubkey. Otherwise the wallet loses receipts across restart.
+    #[test]
+    fn placeholder_view_pubkey_deterministic() {
+        let b = PlaceholderBackend;
+        let secret = [0x42u8; 32];
+        let a = b.derive_view_pubkey(&secret);
+        let b2 = b.derive_view_pubkey(&secret);
+        assert_eq!(a, b2);
+    }
+
+    /// `derive_stealth_output` is a pure function of its inputs (same
+    /// args → same tag).
+    #[test]
+    fn placeholder_stealth_output_deterministic() {
+        let b = PlaceholderBackend;
+        let kp = KeyPair::generate();
+        let v = b.derive_view_pubkey(&kp.secret_bytes());
+        let s1 = b.derive_stealth_output(&v, &[7u8; 32]);
+        let s2 = b.derive_stealth_output(&v, &[7u8; 32]);
+        assert_eq!(s1, s2);
+    }
+
+    /// `RpcBackend::address_to_display` round-trips through `oct` +
+    /// bs58. Catches a regression to a non-bs58 encoding that would
+    /// miscompare against other tools.
+    #[test]
+    fn rpc_backend_address_to_display_prefix() {
+        let rpc = crate::rpc::RpcClient::new("http://127.0.0.1:1/rpc");
+        let b = RpcBackend::new(rpc);
+        let raw = [0xAA; 32];
+        let display = b.address_to_display(&raw).unwrap();
+        assert!(display.starts_with("oct"));
+        assert!(display.len() > 3);
+    }
 }

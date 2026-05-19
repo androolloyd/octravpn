@@ -659,6 +659,91 @@ mod tests {
             prop_assert_ne!(bytes_a, bytes_b);
             prop_assert_ne!(anchor_a, anchor_b);
         }
+
+        /// Cross-field non-aliasing: swapping `policy_hash` and
+        /// `wg_pubkey_hash` produces a different anchor. Catches
+        /// regression where the encoder collapses two hex fields.
+        #[test]
+        fn prop_policy_hash_and_wg_hash_do_not_alias(
+            mut sr in arb_state_root(),
+            ph in any::<[u8; 32]>(),
+            wgh in any::<[u8; 32]>(),
+        ) {
+            prop_assume!(ph != wgh);
+            sr.policy_hash = hex::encode(ph);
+            sr.wg_pubkey_hash = hex::encode(wgh);
+            let anchor_a = sr.anchor_hex().expect("anchor a");
+            sr.policy_hash = hex::encode(wgh);
+            sr.wg_pubkey_hash = hex::encode(ph);
+            let anchor_b = sr.anchor_hex().expect("anchor b");
+            prop_assert_ne!(anchor_a, anchor_b);
+        }
+
+        /// Cross-field non-aliasing: changing `circle_id` while keeping
+        /// every other field constant changes the anchor (a verifier
+        /// that fetches state-root.json from circle X and finds
+        /// `circle_id != X` MUST reject — anchor MUST cover it).
+        #[test]
+        fn prop_circle_id_changes_anchor(
+            mut sr in arb_state_root(),
+            cid_a in "[a-z]{4,16}",
+            cid_b in "[a-z]{4,16}",
+        ) {
+            prop_assume!(cid_a != cid_b);
+            sr.circle_id = cid_a;
+            let a = sr.anchor_hex().expect("anchor a");
+            sr.circle_id = cid_b;
+            let b = sr.anchor_hex().expect("anchor b");
+            prop_assert_ne!(a, b);
+        }
+
+        /// Cross-field non-aliasing: `member_count` changes the anchor
+        /// (defends "unused fields aren't in the hash" regression).
+        #[test]
+        fn prop_member_count_in_anchor(
+            mut sr in arb_state_root(),
+            a in any::<u32>(),
+            b in any::<u32>(),
+        ) {
+            prop_assume!(a != b);
+            sr.member_count = a;
+            let h_a = sr.anchor_hex().expect("h a");
+            sr.member_count = b;
+            let h_b = sr.anchor_hex().expect("h b");
+            prop_assert_ne!(h_a, h_b);
+        }
+
+        /// Cross-field non-aliasing: `timestamp_secs` changes the
+        /// anchor. Together with the epoch invariant this nails down
+        /// that observers can't replace the observed time silently.
+        #[test]
+        fn prop_timestamp_in_anchor(
+            mut sr in arb_state_root(),
+            a in any::<u64>(),
+            b in any::<u64>(),
+        ) {
+            prop_assume!(a != b);
+            sr.timestamp_secs = a;
+            let h_a = sr.anchor_hex().expect("h a");
+            sr.timestamp_secs = b;
+            let h_b = sr.anchor_hex().expect("h b");
+            prop_assert_ne!(h_a, h_b);
+        }
+
+        /// `attestation_hash = None` produces a distinct anchor from
+        /// `Some(any hex)`. Otherwise None could collide with
+        /// `Some([0;32])`.
+        #[test]
+        fn prop_attestation_none_distinct_from_some(
+            mut sr in arb_state_root(),
+            h in any::<[u8; 32]>(),
+        ) {
+            sr.attestation_hash = None;
+            let none_anchor = sr.anchor_hex().expect("none anchor");
+            sr.attestation_hash = Some(hex::encode(h));
+            let some_anchor = sr.anchor_hex().expect("some anchor");
+            prop_assert_ne!(none_anchor, some_anchor);
+        }
     }
 
     #[test]

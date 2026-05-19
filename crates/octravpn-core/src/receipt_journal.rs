@@ -1507,4 +1507,146 @@ mod tests {
             assert_eq!(j.floor(&sess), bumps_per_task + 1);
         }
     }
+
+    /// `FsyncPolicy::Periodic(0)` always fsyncs (`elapsed >= 0`).
+    /// Boundary check — a regression to `>` would skip every fsync.
+    #[test]
+    fn periodic_zero_duration_fsyncs_every_call() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("zero-dur.bin");
+        let j = ReceiptJournal::open(&path).unwrap();
+        j.set_fsync_policy(FsyncPolicy::Periodic(Duration::from_secs(0)));
+        j.bump(&id(0xAA), 1).unwrap();
+        drop(j);
+        let j2 = ReceiptJournal::open(&path).unwrap();
+        assert_eq!(j2.floor(&id(0xAA)), 1);
+    }
+
+    /// CRC32 differs for every single-bit flip in a 40-byte input.
+    /// Discriminates torn-tail from corruption.
+    #[test]
+    fn crc32_sensitive_to_single_bit_flips() {
+        let base = [0u8; 40];
+        let baseline = crc32_ieee(&base);
+        for byte_idx in 0..40 {
+            for bit in 0..8 {
+                let mut mutated = base;
+                mutated[byte_idx] ^= 1 << bit;
+                let c = crc32_ieee(&mutated);
+                assert_ne!(c, baseline, "CRC32 collision: byte {byte_idx} bit {bit}");
+            }
+        }
+    }
+
+    /// A freshly-opened in-memory journal returns 0 for every byte.
+    #[test]
+    fn in_memory_journal_starts_clean() {
+        let j = ReceiptJournal::in_memory();
+        for b in 0u8..=255u8 {
+            assert_eq!(j.floor(&id(b)), 0);
+        }
+    }
+
+    /// In-memory mode never writes to disk.
+    #[test]
+    fn in_memory_bump_does_not_create_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let before_count = fs::read_dir(dir.path()).unwrap().count();
+        let j = ReceiptJournal::in_memory();
+        for s in 1..=100u64 {
+            j.bump(&id(0xAA), s).unwrap();
+        }
+        let after_count = fs::read_dir(dir.path()).unwrap().count();
+        assert_eq!(before_count, after_count, "in-memory mode wrote files");
+    }
+
+    /// `compact()` on an in-memory journal is a no-op.
+    #[test]
+    fn compact_in_memory_is_noop() {
+        let j = ReceiptJournal::in_memory();
+        j.bump(&id(1), 5).unwrap();
+        j.compact().unwrap();
+        assert_eq!(j.floor(&id(1)), 5);
+    }
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 32, ..ProptestConfig::default() })]
+
+        /// Property: a strictly-monotonic bump sequence lands at the
+        /// highest seq value.
+        #[test]
+        fn prop_monotonic_sequence_lands_at_max(
+            session_byte in any::<u8>(),
+            seqs in prop::collection::vec(1u64..1000, 1..50),
+        ) {
+            let j = ReceiptJournal::in_memory();
+            let sess = id(session_byte);
+            let mut sorted = seqs;
+            sorted.sort_unstable();
+            sorted.dedup();
+            let max = *sorted.last().unwrap();
+            for s in sorted {
+                j.bump(&sess, s).unwrap();
+            }
+            prop_assert_eq!(j.floor(&sess), max);
+        }
+
+        /// Property: any bump with `proposed <= floor` rejects.
+        #[test]
+        fn prop_non_monotonic_bumps_always_reject(
+            session_byte in any::<u8>(),
+            floor in 1u64..1000,
+            proposed in 0u64..1000,
+        ) {
+            prop_assume!(proposed <= floor);
+            let j = ReceiptJournal::in_memory();
+            let sess = id(session_byte);
+            j.bump(&sess, floor).unwrap();
+            let err = j.bump(&sess, proposed).unwrap_err();
+            let is_nm = matches!(err, JournalError::SeqNotMonotonic { .. });
+            prop_assert!(is_nm);
+            prop_assert_eq!(j.floor(&sess), floor);
+        }
+
+        /// Property: bumping session A never affects session B.
+        #[test]
+        fn prop_per_session_isolation(
+            a_byte in any::<u8>(),
+            b_byte in any::<u8>(),
+            a_seq in 1u64..1000,
+            b_seq in 1u64..1000,
+        ) {
+            prop_assume!(a_byte != b_byte);
+            let j = ReceiptJournal::in_memory();
+            j.bump(&id(a_byte), a_seq).unwrap();
+            j.bump(&id(b_byte), b_seq).unwrap();
+            prop_assert_eq!(j.floor(&id(a_byte)), a_seq);
+            prop_assert_eq!(j.floor(&id(b_byte)), b_seq);
+        }
+
+        /// Property: any torn tail (1..RECORD_SIZE-1 bytes) drops
+        /// silently on replay.
+        #[test]
+        fn prop_torn_tail_is_silently_dropped(
+            tail_len in 1usize..RECORD_SIZE,
+        ) {
+            use std::io::Write as _;
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("torn-prop.bin");
+            let j = ReceiptJournal::open(&path).unwrap();
+            j.bump(&id(0x11), 1).unwrap();
+            j.bump(&id(0x22), 2).unwrap();
+            drop(j);
+
+            let mut f = OpenOptions::new().append(true).open(&path).unwrap();
+            f.write_all(&vec![0xFFu8; tail_len]).unwrap();
+            drop(f);
+
+            let r = ReceiptJournal::open(&path).unwrap();
+            prop_assert_eq!(r.floor(&id(0x11)), 1);
+            prop_assert_eq!(r.floor(&id(0x22)), 2);
+        }
+    }
 }
