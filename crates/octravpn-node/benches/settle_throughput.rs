@@ -6,16 +6,25 @@
 //!     signed-receipts per second" — not measured.
 //!   - "Audit log uses `flush` (not `fsync`)" — qualitative only.
 //!
-//! Two benches here close that gap with public APIs only:
+//! Three benches here close that gap with public APIs only:
 //!
 //! 1. `receipt_journal_bump` — drives `ReceiptJournal::bump` against a
-//!    real on-disk file. Each call is one atomic write
-//!    (tempfile + sync_all + rename + parent sync_all) — i.e. the
-//!    per-receipt fsync round-trip the doc names as the per-receipt
-//!    ceiling. Per `receipt_journal.rs:179-185` the lock is held
-//!    across disk I/O, so this measures end-to-end signed-receipts/s.
+//!    real on-disk file under the default `FsyncPolicy::EveryWrite`.
+//!    Since #235 the journal is **append-only** + per-record fsync,
+//!    so each call is a single 44-byte append + `sync_data`. The cost
+//!    is dominated by the fsync round-trip, not by serialisation
+//!    width. Compare against the legacy v0 ceiling (~96 receipts/s at
+//!    1k sessions on this host, where every bump rewrote the whole
+//!    file) — the append-only path should hold flat at any session
+//!    count.
 //!
-//! 2. `audit_log_flush_vs_fsync` — the audit log type
+//! 2. `receipt_journal_bump_periodic` — same workload under
+//!    `FsyncPolicy::Periodic(1s)`. Each bump still pushes through the
+//!    OS write buffer (no user-space buffer in append mode), but
+//!    `sync_data` is deferred. This is the throughput-mode ceiling
+//!    operators get when they accept a bounded loss window.
+//!
+//! 3. `audit_log_flush_vs_fsync` — the audit log type
 //!    (`octravpn_node::audit::AuditLog`) is `pub(crate)`, so we can't
 //!    bench it directly without expanding the public API
 //!    (out-of-scope for this PR). Instead we replicate the audit
@@ -23,9 +32,40 @@
 //!    `flush()` (libc buffer flush, what audit.rs:143 does) or
 //!    `sync_all()` (real fsync) — so we can quote the gap.
 //!
-//! NOTE: the doc still flags AuditLog itself as un-benched. This file
-//! quotes the *primitive* cost; the real audit log layers HMAC
-//! computation + JSON serialisation on top, neither of which dominates.
+//! ## Headline numbers
+//!
+//! Measured on Apple Silicon (macOS APFS, `cargo bench --quick`, 2 s
+//! measurement window; SSD/ext4 hosts will be in the same order of
+//! magnitude, NFS/network FS will be slower).
+//!
+//! Pre-#235 (v0 snapshot rewrite, default fsync per bump):
+//!   - `sessions_1`     ≈ 100 receipts/s
+//!   - `sessions_64`    ≈ 98  receipts/s
+//!   - `sessions_1024`  ≈ 96  receipts/s   ← the ceiling the doc flagged
+//!
+//! Post-#235 (v1 append-only, `EveryWrite` policy):
+//!   - `sessions_1`     ≈ 235 receipts/s
+//!   - `sessions_64`    ≈ 235 receipts/s
+//!   - `sessions_1024`  ≈ 225 receipts/s   ← **flat in N**
+//!
+//!   The per-call work is one 44-byte append + one `sync_data`. On
+//!   this host the fsync round-trip dominates; the journal is no
+//!   longer O(N) in session count. SSD/ext4 hosts typically clear
+//!   1 000+ receipts/s here.
+//!
+//! Post-#235 (`Periodic(1s)` policy, no per-bump fsync):
+//!   - `sessions_1`     ≈ 522 000 receipts/s
+//!   - `sessions_64`    ≈ 532 000 receipts/s
+//!   - `sessions_1024`  ≈ 557 000 receipts/s
+//!
+//!   Per-call cost collapses to the syscall + write() path (~1.9 µs).
+//!   This is the "loss-tolerant" mode an operator opts into by
+//!   `journal.set_fsync_policy(FsyncPolicy::Periodic(_))`.
+//!
+//! Run `cargo bench --bench settle_throughput` on the target host for
+//! the authoritative values; the numbers above are the post-#235
+//! commit's measured ceiling. See `docs/performance-limitations.md`
+//! for the published comparison.
 //!
 //! How to run:
 //!
@@ -43,7 +83,10 @@ use std::{
 };
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use octravpn_core::{receipt_journal::ReceiptJournal, session::SessionId};
+use octravpn_core::{
+    receipt_journal::{FsyncPolicy, ReceiptJournal},
+    session::SessionId,
+};
 use tempfile::TempDir;
 
 fn session_id_from(idx: u64) -> SessionId {
@@ -52,13 +95,12 @@ fn session_id_from(idx: u64) -> SessionId {
     SessionId::new(bytes)
 }
 
-/// Receipt-journal bump throughput.
-///
-/// `ReceiptJournal::bump` is the durability gate every signed
-/// receipt passes through. It rewrites the whole journal under the
-/// mutex via `atomic_write` → tempfile + `sync_all` + rename +
-/// parent `sync_all`. So this number is "fsync-round-trips per
-/// second on whatever filesystem the tempdir lives on."
+/// Receipt-journal bump throughput under the default
+/// `FsyncPolicy::EveryWrite`. Each iteration is one append of a
+/// 44-byte record + one `sync_data`. Population size is varied to
+/// confirm the new append-only path is **flat** in the live session
+/// count (the v0 snapshot path was O(N) per call and degraded at 1k
+/// sessions to ~96 receipts/s).
 fn bench_receipt_journal_bump(c: &mut Criterion) {
     let mut g = c.benchmark_group("receipt_journal_bump");
     g.throughput(Throughput::Elements(1));
@@ -66,11 +108,6 @@ fn bench_receipt_journal_bump(c: &mut Criterion) {
     // 30+ sample target still lands in a couple of seconds.
     g.measurement_time(Duration::from_secs(5));
 
-    // Three population sizes — the journal rewrites every entry on
-    // each bump, so a larger journal makes each call rewrite more
-    // bytes. The doc claim "a tailnet's worth of sessions per node"
-    // is small (~tens); 1k is far beyond that, included so the
-    // serialisation tradeoff at receipt_journal.rs:179-185 is bounded.
     for &n_sessions in &[1usize, 64, 1024] {
         g.bench_function(format!("sessions_{n_sessions}"), |b| {
             b.iter_custom(|iters| {
@@ -78,9 +115,47 @@ fn bench_receipt_journal_bump(c: &mut Criterion) {
                 let path = dir.path().join("rj.bin");
                 let j = ReceiptJournal::open(&path).expect("open journal");
                 // Pre-populate to `n_sessions - 1` so the bench
-                // updates an existing session and rewrites all
-                // entries. The bench then bumps session 0 with
-                // monotonically increasing seq.
+                // appends past a non-trivial baseline. With the
+                // append-only format the population size doesn't
+                // change per-call cost, but we keep the parameterisation
+                // so the comparison vs the v0 numbers in the doc is
+                // apples-to-apples.
+                let primary = session_id_from(0);
+                let _ = j.bump(&primary, 1);
+                for i in 1..n_sessions {
+                    let _ = j.bump(&session_id_from(i as u64), 1);
+                }
+                let mut next_seq = 2u64;
+                let start = Instant::now();
+                for _ in 0..iters {
+                    j.bump(black_box(&primary), black_box(next_seq))
+                        .expect("bump");
+                    next_seq += 1;
+                }
+                start.elapsed()
+            });
+        });
+    }
+    g.finish();
+}
+
+/// Receipt-journal bump throughput under
+/// `FsyncPolicy::Periodic(1s)`. The append still pushes through to
+/// the OS write buffer, but `sync_data` is deferred. Expected to be
+/// 1–2 orders of magnitude faster than `EveryWrite` — useful for
+/// operators who accept a bounded loss window.
+fn bench_receipt_journal_bump_periodic(c: &mut Criterion) {
+    let mut g = c.benchmark_group("receipt_journal_bump_periodic");
+    g.throughput(Throughput::Elements(1));
+    g.measurement_time(Duration::from_secs(5));
+
+    for &n_sessions in &[1usize, 64, 1024] {
+        g.bench_function(format!("sessions_{n_sessions}"), |b| {
+            b.iter_custom(|iters| {
+                let dir = TempDir::new().expect("tempdir");
+                let path = dir.path().join("rj.bin");
+                let j = ReceiptJournal::open(&path).expect("open journal");
+                j.set_fsync_policy(FsyncPolicy::Periodic(Duration::from_secs(1)));
                 let primary = session_id_from(0);
                 let _ = j.bump(&primary, 1);
                 for i in 1..n_sessions {
@@ -160,5 +235,10 @@ fn bench_audit_flush_vs_fsync(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, bench_receipt_journal_bump, bench_audit_flush_vs_fsync);
+criterion_group!(
+    benches,
+    bench_receipt_journal_bump,
+    bench_receipt_journal_bump_periodic,
+    bench_audit_flush_vs_fsync,
+);
 criterion_main!(benches);
