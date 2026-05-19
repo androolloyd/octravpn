@@ -28,11 +28,12 @@
 //!     and fail-fast with a clear error if it's absent. Operators
 //!     deploy the circle once out-of-band (via the wallet CLI or by
 //!     reusing a v2 circle they own) and configure the id here.
-//!   * **`policy_hash`**: the v3 policy schema is still under design.
-//!     For now we hash the serialised tunnel + pricing config bytes —
-//!     deterministic per operator, deterministic across restarts.
-//!     When the canonical v3 policy schema lands, swap this for the
-//!     real one in `policy_bytes_for_v3`.
+//!   * **`policy_hash`**: derived from the canonical v3
+//!     `OperatorPolicy` (PR #191 schema, see
+//!     `octravpn_core::v3_policy::OperatorPolicy`). The boot fn builds
+//!     the policy struct from operator config + WG state + best-effort
+//!     epoch + wall-clock timestamp, then commits
+//!     `OperatorPolicy::hash_hex()` into the state-root.
 //!   * **`epoch`**: best-effort fetch via `octra_node_status`. Falls
 //!     back to 0 if the chain RPC is unreachable. The state-root
 //!     schema treats `epoch` as monotonic *per anchor*, so a 0 → real
@@ -43,6 +44,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+use octravpn_core::v3_policy::OperatorPolicy;
 use octravpn_core::v3_state_root::StateRoot;
 use sha2::{Digest, Sha256};
 use tracing::{info, warn};
@@ -87,14 +89,29 @@ pub(crate) async fn run_v3_boot(inputs: &V3BootInputs<'_>) -> Result<V3BootOutco
     // --- Step 1: build the canonical state-root commitment ----------
     let wg_pub = X25519Pub::from(inputs.wg_static_secret).to_bytes();
     let wg_pubkey_hash = sha256_hex(&wg_pub);
-
-    let policy_bytes = policy_bytes_for_v3(inputs.cfg);
-    let policy_hash = sha256_hex(&policy_bytes);
+    let wg_pubkey_b64 = B64.encode(wg_pub);
 
     // Epoch is best-effort. The state-root schema documents that it's
     // informational; a verifier doesn't reject a 0 → real jump.
     let epoch = inputs.chain_v3.current_epoch().await.unwrap_or(0);
     let timestamp_secs = octravpn_core::util::now_unix_secs();
+
+    // Build the canonical `OperatorPolicy` (PR #191 schema). Its
+    // `hash_hex()` is what flows into `state-root.policy_hash` — the
+    // chain anchors `sha256_hex(canonical_bytes(state-root.json))`,
+    // and state-root.json embeds this hash.
+    let policy = build_operator_policy_for_v3(
+        inputs.cfg,
+        &wg_pubkey_b64,
+        epoch,
+        timestamp_secs,
+    );
+    policy
+        .validate()
+        .map_err(|e| anyhow!("v3 operator-policy validation: {e}"))?;
+    let policy_hash = policy
+        .hash_hex()
+        .map_err(|e| anyhow!("v3 operator-policy hash: {e}"))?;
 
     let state_root = StateRoot::new_v1(
         circle_id,
@@ -299,37 +316,54 @@ fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
 
-/// Bytes we feed into `policy_hash`. Until the canonical v3 policy
-/// schema is defined, we hash the deterministic-enough subset of the
-/// operator's config: endpoint, region, prices. Same key set the v2
-/// policy bundle exposes, but emitted in a fixed order so the hash
-/// doesn't drift across restarts. When the v3 policy schema lands,
-/// replace the body of this fn with a canonical serializer; the
-/// `state-root.json` schema treats the hash as opaque.
-fn policy_bytes_for_v3(cfg: &NodeConfig) -> Vec<u8> {
-    // Sorted-key JSON via serde_json::to_vec on a Value::Object built
-    // with a `BTreeMap` for deterministic ordering. Avoids needing to
-    // pull in a JCS crate just for this placeholder.
-    use serde_json::{Map, Value};
-    let mut m: Map<String, Value> = Map::new();
-    m.insert(
-        "endpoint".to_string(),
-        Value::String(cfg.tunnel.public_endpoint.clone()),
-    );
-    m.insert("region".to_string(), Value::String(cfg.pricing.region.clone()));
-    m.insert(
-        "price_per_mb_shared".to_string(),
-        Value::from(cfg.pricing.shared_price()),
-    );
-    m.insert(
-        "price_per_mb_internal".to_string(),
-        Value::from(cfg.pricing.internal_price()),
-    );
-    // Sort keys for canonicality — serde_json's Map preserves
-    // insertion order so we re-walk.
-    let sorted: std::collections::BTreeMap<_, _> = m.into_iter().collect();
-    let canon = Value::Object(sorted.into_iter().collect());
-    serde_json::to_vec(&canon).unwrap_or_default()
+/// Construct the canonical v3 `OperatorPolicy` (PR #191 schema) from
+/// operator config + WG state + chain epoch + wall-clock timestamp.
+///
+/// `wg_pubkey_b64` MUST be the 44-char base64 of the operator's 32-byte
+/// X25519/WireGuard public key (i.e. `base64(X25519Pub::from(static))`).
+/// The boot fn already derives this bytestring above.
+///
+/// This does NOT call `validate()` — callers do that before sealing the
+/// policy / committing the hash, so an error surfaces with a clear
+/// `anyhow!` context rather than at the canonical-bytes step.
+fn build_operator_policy_for_v3(
+    cfg: &NodeConfig,
+    wg_pubkey_b64: &str,
+    epoch: u64,
+    timestamp_secs: u64,
+) -> OperatorPolicy {
+    OperatorPolicy::new_v1(
+        cfg.tunnel.public_endpoint.clone(),
+        wg_pubkey_b64.to_string(),
+        cfg.pricing.region.clone(),
+        cfg.pricing.shared_price(),
+        cfg.pricing.internal_price(),
+        epoch,
+        timestamp_secs,
+        cfg.chain
+            .attestation_url
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .cloned(),
+    )
+}
+
+/// Canonical bytes of the v3 `OperatorPolicy` for this operator —
+/// `sha256_hex` of this output is the value flowing into
+/// `state-root.policy_hash`. Thin wrapper over
+/// `build_operator_policy_for_v3` + `OperatorPolicy::canonical_bytes()`
+/// so tests can pin both the bytes AND the round-tripped policy.
+#[cfg(test)]
+fn policy_bytes_for_v3(
+    cfg: &NodeConfig,
+    wg_pubkey_b64: &str,
+    epoch: u64,
+    timestamp_secs: u64,
+) -> Result<Vec<u8>> {
+    let policy = build_operator_policy_for_v3(cfg, wg_pubkey_b64, epoch, timestamp_secs);
+    policy
+        .canonical_bytes()
+        .map_err(|e| anyhow!("v3 operator-policy canonical_bytes: {e}"))
 }
 
 #[cfg(test)]
@@ -357,6 +391,7 @@ mod tests {
                 v3_initial_stake: None,
                 pinned_root_paths: None,
                 require_sealed_keys: false,
+                attestation_url: None,
             },
             tunnel: TunnelCfg {
                 public_endpoint: "1.2.3.4:51820".into(),
@@ -399,10 +434,21 @@ mod tests {
         assert!(required_circle_id(&cfg).is_err());
     }
 
+    /// Deterministic 32-byte WG pubkey + its base64 form, for tests that
+    /// pin the canonical policy bytes / hash. All-`0x11` bytes —
+    /// matches the worked example in `docs/v3-policy-schema.md` so the
+    /// hand-built expected string below is easy to cross-reference.
+    fn sample_wg_pubkey_b64() -> String {
+        use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+        B64.encode([0x11_u8; 32])
+    }
+
     #[test]
     fn policy_bytes_are_stable() {
-        let a = policy_bytes_for_v3(&min_cfg(Some("oct…")));
-        let b = policy_bytes_for_v3(&min_cfg(Some("oct…")));
+        let a =
+            policy_bytes_for_v3(&min_cfg(Some("oct…")), &sample_wg_pubkey_b64(), 0, 0).unwrap();
+        let b =
+            policy_bytes_for_v3(&min_cfg(Some("oct…")), &sample_wg_pubkey_b64(), 0, 0).unwrap();
         assert_eq!(a, b);
         // And contain the region we set.
         let s = std::str::from_utf8(&a).unwrap();
@@ -415,9 +461,110 @@ mod tests {
         let cfg_a = min_cfg(Some("oct…"));
         let mut cfg_b = min_cfg(Some("oct…"));
         cfg_b.pricing.price_per_mb_shared = Some(2000);
-        let a = policy_bytes_for_v3(&cfg_a);
-        let b = policy_bytes_for_v3(&cfg_b);
+        let a = policy_bytes_for_v3(&cfg_a, &sample_wg_pubkey_b64(), 0, 0).unwrap();
+        let b = policy_bytes_for_v3(&cfg_b, &sample_wg_pubkey_b64(), 0, 0).unwrap();
         assert_ne!(a, b);
+    }
+
+    /// Build a Cfg, derive an OperatorPolicy, canonical-encode, compare
+    /// to a hand-built expected canonical string. Locks the wiring
+    /// between operator config → `OperatorPolicy` fields → canonical
+    /// bytes. If `OperatorPolicy::canonical_bytes()` changes shape (e.g.
+    /// new sort, escape rules) the v3_policy test suite will catch it
+    /// first; this test catches a regression in the operator-side
+    /// adapter (wrong field plumbing in `build_operator_policy_for_v3`).
+    #[test]
+    fn policy_bytes_round_trip_through_operator_policy() {
+        let cfg = min_cfg(Some("oct…"));
+        let wg = sample_wg_pubkey_b64();
+        let epoch = 12345_u64;
+        let ts = 1_705_000_000_u64;
+
+        // Canonical bytes via the boot path.
+        let got = policy_bytes_for_v3(&cfg, &wg, epoch, ts).unwrap();
+        let json = std::str::from_utf8(&got).unwrap();
+
+        // Hand-built expected canonical form: sorted keys, no
+        // whitespace. Mirrors the worked-example test in v3_policy.rs
+        // but parameterised on the operator config fixture.
+        let expected = format!(
+            concat!(
+                "{{",
+                "\"effective_epoch\":12345,",
+                "\"endpoint\":\"1.2.3.4:51820\",",
+                "\"price_per_mb_internal\":0,",
+                "\"price_per_mb_shared\":1000,",
+                "\"region\":\"eu-west\",",
+                "\"timestamp_secs\":1705000000,",
+                "\"v\":1,",
+                "\"wg_pubkey_b64\":\"{wg}\"",
+                "}}",
+            ),
+            wg = wg
+        );
+        assert_eq!(json, expected);
+
+        // And the OperatorPolicy round-trips bytes → struct → bytes.
+        let back = OperatorPolicy::decode(&got).expect("decode");
+        let again = back.canonical_bytes().expect("re-encode");
+        assert_eq!(got, again);
+    }
+
+    /// Smoke: `OperatorPolicy::hash_hex()` is exactly 64 lowercase hex
+    /// chars. This is the value `state-root.policy_hash` carries.
+    #[test]
+    fn policy_hash_is_64_char_lowercase_hex() {
+        let cfg = min_cfg(Some("oct…"));
+        let policy = build_operator_policy_for_v3(
+            &cfg,
+            &sample_wg_pubkey_b64(),
+            12345,
+            1_705_000_000,
+        );
+        let hash = policy.hash_hex().unwrap();
+        assert_eq!(hash.len(), 64, "hash not 64 chars: {hash}");
+        assert!(
+            hash.bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()),
+            "hash not lowercase hex: {hash}"
+        );
+    }
+
+    /// `attestation_url = Some(…)` flows through the canonical bytes
+    /// and changes the hash, while `attestation_url = None` is omitted
+    /// (not serialised as `null`).
+    #[test]
+    fn attestation_url_round_trips() {
+        let cfg_none = min_cfg(Some("oct…"));
+        let mut cfg_some = min_cfg(Some("oct…"));
+        cfg_some.chain.attestation_url =
+            Some("https://op.example/attestation".to_string());
+
+        let bytes_none =
+            policy_bytes_for_v3(&cfg_none, &sample_wg_pubkey_b64(), 1, 2).unwrap();
+        let bytes_some =
+            policy_bytes_for_v3(&cfg_some, &sample_wg_pubkey_b64(), 1, 2).unwrap();
+
+        // `None` must not emit the key at all (no `null`).
+        let s_none = std::str::from_utf8(&bytes_none).unwrap();
+        assert!(!s_none.contains("attestation_url"));
+        assert!(!s_none.contains("null"));
+
+        // `Some` emits the URL verbatim.
+        let s_some = std::str::from_utf8(&bytes_some).unwrap();
+        assert!(s_some.contains("\"attestation_url\":\"https://op.example/attestation\""));
+
+        // And the hashes differ.
+        assert_ne!(bytes_none, bytes_some);
+
+        // Empty-string attestation_url is treated as None (defensive: an
+        // operator who clears the field in TOML shouldn't poison the
+        // hash with an empty URL).
+        let mut cfg_empty = min_cfg(Some("oct…"));
+        cfg_empty.chain.attestation_url = Some(String::new());
+        let bytes_empty =
+            policy_bytes_for_v3(&cfg_empty, &sample_wg_pubkey_b64(), 1, 2).unwrap();
+        assert_eq!(bytes_empty, bytes_none);
     }
 
     #[test]

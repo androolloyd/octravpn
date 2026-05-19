@@ -187,6 +187,16 @@ pub(crate) struct ChainCfg {
     /// and plaintext files are accepted as-is.
     #[serde(default)]
     pub require_sealed_keys: bool,
+    /// v3-only. Optional URL pointing at a remote-attestation bundle
+    /// the operator publishes for its host. When set, the URL is
+    /// emitted in the operator's canonical `policy.json`
+    /// (`OperatorPolicy::attestation_url`); when unset, the field is
+    /// omitted from the canonical JSON (NOT serialised as `null`). The
+    /// bundle's SHA-256 is committed separately via the state-root's
+    /// `attestation_hash` once remote-attestation lands. Defaults to
+    /// `None`; most devnet operators do not advertise attestation yet.
+    #[serde(default)]
+    pub attestation_url: Option<String>,
 }
 
 /// Default chain id when a config omits the field. Devnet today; will
