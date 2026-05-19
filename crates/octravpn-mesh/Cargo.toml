@@ -63,6 +63,7 @@ http        = "1"
 tower       = { version = "0.5", features = ["util"] }
 
 [dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
 proptest = { workspace = true }
 tempfile = { workspace = true }
 # `time::pause`/`advance` for the Stream:true keepalive test in
@@ -71,3 +72,12 @@ tokio    = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true
+
+# Bench gating: `publish_unverified` lives behind `test-helpers`. The
+# bench enables it via `required-features` so a casual
+# `cargo bench --workspace` doesn't try to compile it without the flag.
+[[bench]]
+name = "peer_publish"
+harness = false
+path = "benches/peer_publish.rs"
+required-features = ["test-helpers"]

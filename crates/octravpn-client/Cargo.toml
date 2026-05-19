@@ -61,6 +61,12 @@ toml        = { workspace = true }
 # v3 integration test + portal route unit tests use ServiceExt::oneshot
 # to dispatch synthetic requests without a real TCP listener.
 tower       = { version = "0.5", features = ["util"] }
+criterion   = { version = "0.5", features = ["html_reports"] }
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "cold_connect"
+harness = false
+path = "benches/cold_connect.rs"

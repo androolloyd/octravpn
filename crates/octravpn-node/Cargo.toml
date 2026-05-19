@@ -59,9 +59,24 @@ octravpn-mesh = { path = "../octravpn-mesh", features = ["test-helpers"] }
 # `tower::ServiceExt::oneshot` drives the merged axum::Router in the
 # `tailscale_wire_integration` test without binding a real port.
 tower = { version = "0.5", features = ["util"] }
+criterion = { version = "0.5", features = ["html_reports"] }
+# wireguard_throughput.rs benches WG primitives without standing up
+# Tunn instances (those are module-private).
+chacha20poly1305 = { workspace = true }
+rand = { workspace = true }
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "settle_throughput"
+harness = false
+path = "benches/settle_throughput.rs"
+
+[[bench]]
+name = "wireguard_throughput"
+harness = false
+path = "benches/wireguard_throughput.rs"
 
 # cargo-deb metadata: `cargo deb -p octravpn-node` produces an installable .deb.
 [package.metadata.deb]
