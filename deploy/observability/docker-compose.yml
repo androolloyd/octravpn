@@ -1,0 +1,83 @@
+# Standalone observability stack for OctraVPN operators.
+#
+# Usage:
+#
+#   cp targets.json.example targets.json
+#   # edit targets.json to point at your nodes; for a node running on
+#   # the same host as docker, use host.docker.internal:51821
+#   docker compose -f deploy/observability/docker-compose.yml up
+#
+# Then open:
+#   Prometheus    http://localhost:9090
+#   Grafana       http://localhost:3000   (admin / admin on first login)
+#   Alertmanager  http://localhost:9093
+#
+# All three are official upstream images — no private registries.
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    container_name: octravpn-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts.yml:/etc/prometheus/alerts.yml:ro
+      # `targets.json` is read by file_sd_configs at runtime; operators
+      # edit this file in-place to add/remove nodes without restarting
+      # Prometheus. Fall back to the example if the operator hasn't
+      # created targets.json yet.
+      - ./targets.json:/etc/prometheus/targets.json:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    extra_hosts:
+      # Lets Prometheus inside the container reach a node running on
+      # the host at host.docker.internal:51821 on Linux as well as
+      # macOS / Windows. (Docker Desktop maps this automatically; on
+      # native Linux this `extra_hosts` line is what makes it work.)
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - alertmanager
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: octravpn-grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      # The provisioning dashboards.yml points at /var/lib/grafana/dashboards
+      # — mount our two dashboards there so they auto-load on startup.
+      - ./grafana:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: octravpn-alertmanager
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - "9093:9093"
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  alertmanager-data:

@@ -1,0 +1,57 @@
+# Prometheus scrape config for an OctraVPN node fleet.
+#
+# Wire this into your existing Prometheus by either:
+#   - copying this file into /etc/prometheus/prometheus.yml, or
+#   - merging the `scrape_configs` block into an existing config.
+#
+# The control plane listens on port 51821 by default (see
+# crates/octravpn-node/src/config.rs::default_control_listen). The
+# /metrics endpoint is NOT auth-gated today; it sits behind the
+# rate-limit middleware but accepts unauthenticated GETs. If you need
+# auth, terminate TLS + bearer-token in front of the node (caddy, nginx,
+# envoy) and uncomment the `authorization` block below.
+#
+# Targets are loaded from targets.json via file_sd_config so operators
+# can add/remove nodes by editing one file without restarting
+# Prometheus.
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: octravpn
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+scrape_configs:
+  - job_name: octravpn-nodes
+    metrics_path: /metrics
+    scheme: http
+    # File discovery — drop new nodes into targets.json and Prometheus
+    # picks them up within `refresh_interval` without a reload.
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets.json
+        refresh_interval: 30s
+    # If you front the metrics endpoint with a reverse proxy that
+    # requires a bearer token, set OCTRAVPN_METRICS_TOKEN and uncomment.
+    # The token must be readable by the Prometheus process; do NOT bake
+    # it into the image.
+    #
+    # authorization:
+    #   type: Bearer
+    #   credentials_file: /etc/prometheus/metrics.token
+
+  # Prometheus itself — useful for sanity-checking the scrape pipeline.
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090

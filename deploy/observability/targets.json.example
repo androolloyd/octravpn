@@ -1,0 +1,26 @@
+[
+  {
+    "targets": ["node-a.example:51821"],
+    "labels": {
+      "region": "us-east",
+      "operator": "alice",
+      "env": "prod"
+    }
+  },
+  {
+    "targets": ["node-b.example:51821"],
+    "labels": {
+      "region": "eu-west",
+      "operator": "alice",
+      "env": "prod"
+    }
+  },
+  {
+    "targets": ["host.docker.internal:51821"],
+    "labels": {
+      "region": "local",
+      "operator": "dev",
+      "env": "local"
+    }
+  }
+]

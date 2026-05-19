@@ -1,0 +1,36 @@
+# Minimal Alertmanager config for the local validation stack.
+#
+# Production operators should replace `receivers` with a real route
+# (Slack webhook, PagerDuty integration key, email SMTP, etc.). The
+# default `null` receiver simply drops alerts — useful for local
+# dashboard validation, useless for paging.
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ["alertname", "instance"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: "null"
+  routes:
+    - matchers:
+        - severity = "critical"
+      receiver: "null"
+      continue: true
+    - matchers:
+        - severity = "warning"
+      receiver: "null"
+      continue: true
+
+receivers:
+  - name: "null"
+
+inhibit_rules:
+  # If the node is down, suppress noisy attestation-stale alerts from
+  # the same instance — they're a symptom, not a cause.
+  - source_matchers:
+      - alertname = "OctravpnNodeDown"
+    target_matchers:
+      - alertname = "OctravpnAttestationStale"
+    equal: ["instance"]

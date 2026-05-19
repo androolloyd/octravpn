@@ -1,0 +1,10 @@
+[
+  {
+    "targets": ["host.docker.internal:51821"],
+    "labels": {
+      "region": "local",
+      "operator": "dev",
+      "env": "local"
+    }
+  }
+]

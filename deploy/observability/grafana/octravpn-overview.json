@@ -1,0 +1,424 @@
+{
+  "__inputs": [],
+  "__requires": [
+    {
+      "type": "grafana",
+      "id": "grafana",
+      "name": "Grafana",
+      "version": "10.0.0"
+    },
+    {
+      "type": "datasource",
+      "id": "prometheus",
+      "name": "Prometheus",
+      "version": "2.x"
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {"type": "datasource", "uid": "grafana"},
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Operator-level overview of an OctraVPN node fleet. Every panel pulls from a real NodeMetrics field exposed by /metrics. Panels marked TODO depend on metrics that are not yet plumbed into NodeMetrics in crates/octravpn-node/src/control.rs — see deploy/observability/README.md for the inventory.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "row",
+      "id": 1,
+      "title": "Sessions",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Active sessions (fleet)",
+      "description": "octravpn_active_sessions — current entries in the control-plane BoundedMap. Hard cap = CONTROL_SESSIONS_CAP (10000) per node; sessions evict at CONTROL_SESSION_TTL (1h) of idleness.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 1},
+      "targets": [
+        {
+          "expr": "sum(octravpn_active_sessions)",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 5000},
+              {"color": "red", "value": 9000}
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Session announces /s",
+      "description": "rate(octravpn_announces_total) — POST /session calls per second, per node.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 6, "w": 9, "x": 6, "y": 1},
+      "targets": [
+        {
+          "expr": "rate(octravpn_announces_total[5m])",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineInterpolation": "linear", "fillOpacity": 10, "drawStyle": "line"},
+          "unit": "ops"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Session state lookups /s",
+      "description": "rate(octravpn_state_lookups_total) — GET /session/:id calls per second. Each is one potential receipt-signing.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 6, "w": 9, "x": 15, "y": 1},
+      "targets": [
+        {
+          "expr": "rate(octravpn_state_lookups_total[5m])",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineInterpolation": "linear", "fillOpacity": 10},
+          "unit": "ops"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "id": 10,
+      "title": "Settlement",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 7},
+      "panels": []
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Receipts signed /s",
+      "description": "rate(octravpn_receipts_signed_total). Every signed receipt has already had its seq bumped in the persistent receipt journal (P1-8/9), so this is also the rate of durable journal writes.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {
+          "expr": "rate(octravpn_receipts_signed_total[5m])",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineInterpolation": "linear", "fillOpacity": 10},
+          "unit": "ops"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Cumulative bytes served (fleet)",
+      "description": "octravpn_bytes_served_total — cumulative bytes routed through the onion-router (in + out). Counter; expect monotonic growth.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {
+          "expr": "sum(rate(octravpn_bytes_served_total[5m])) by (instance)",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineInterpolation": "linear", "fillOpacity": 10},
+          "unit": "Bps"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "text",
+      "title": "TODO — settlement settled-vs-no-show ratio",
+      "description": "",
+      "gridPos": {"h": 4, "w": 12, "x": 0, "y": 15},
+      "options": {
+        "mode": "markdown",
+        "content": "**Settled vs no-show ratio** is not exposed today.\n\nThe node only tracks `receipts_signed_total` (proposals). Whether a client returned a countersigned receipt and the operator successfully settled it on-chain lives on the settlement bot, not on the node. Add `settled_total` and `no_show_total` to `NodeMetrics` (control.rs) or, better, scrape the settlement bot directly."
+      },
+      "type": "text"
+    },
+    {
+      "id": 14,
+      "type": "text",
+      "title": "TODO — audit log fsync vs flush latency",
+      "description": "",
+      "gridPos": {"h": 4, "w": 12, "x": 12, "y": 15},
+      "options": {
+        "mode": "markdown",
+        "content": "The audit log calls `f.flush()` after each line but does **not** record histograms. From the perf-bench-doc finding, flush ≈ buffer-flush only (microseconds) — true fsync latency would require `f.sync_data()` plus an observation hook. Add `audit_flush_seconds` (histogram) to `NodeMetrics`."
+      },
+      "type": "text"
+    },
+    {
+      "type": "row",
+      "id": 20,
+      "title": "Peer connectivity",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 19},
+      "panels": []
+    },
+    {
+      "id": 21,
+      "type": "text",
+      "title": "TODO — peer & WireGuard metrics",
+      "description": "",
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 20},
+      "options": {
+        "mode": "markdown",
+        "content": "Metrics not yet exposed by `NodeMetrics`:\n\n- `tailscale_peers_reachable` (gauge)\n- `wireguard_handshake_success_total` / `wireguard_handshake_fail_total` (counter)\n- `derp_relays_in_use` (gauge) — DERP not wired into v0 anyway\n\nThe data already exists inside `boringtun::Tunn` and the `WireState`; add an aggregator that ticks every 30s and updates the corresponding `AtomicU64`s on `NodeMetrics`. Until then this row is intentionally empty."
+      },
+      "type": "text"
+    },
+    {
+      "type": "row",
+      "id": 30,
+      "title": "ACL / Auth",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 26},
+      "panels": []
+    },
+    {
+      "id": 31,
+      "type": "text",
+      "title": "TODO — preauth mints, redemptions, slash events",
+      "description": "",
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 27},
+      "options": {
+        "mode": "markdown",
+        "content": "None of the following are exposed by `/metrics`:\n\n- `preauth_mints_total` — increment in `mint_preauth` (control.rs:691)\n- `preauth_redemptions_total` — increment where `PreauthMinter::redeem` is called\n- `slash_double_sign_total` — surfaced from the chain attestation loop\n\nEach one is a one-line `AtomicU64` addition to `NodeMetrics` plus a `fetch_add` at the call site. Filed as a follow-up; the observability stack is wired so these panels can drop in without dashboard changes."
+      },
+      "type": "text"
+    },
+    {
+      "type": "row",
+      "id": 40,
+      "title": "Resource",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 33},
+      "panels": []
+    },
+    {
+      "id": 41,
+      "type": "text",
+      "title": "TODO — RPC body size & latency histograms",
+      "description": "",
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 34},
+      "options": {
+        "mode": "markdown",
+        "content": "`/metrics` only ships `AtomicU64` counters today; no histograms. To plot p50/p99 of:\n\n- RPC body size, and\n- control-plane HTTP handler latency,\n\nthe simplest path is `prometheus::HistogramVec` recorded inside the axum middleware. The rate-limit middleware already has a per-request hook point. Note: keep label cardinality bounded — route templates (`/session/:id`) not concrete paths."
+      },
+      "type": "text"
+    },
+    {
+      "type": "row",
+      "id": 50,
+      "title": "Health",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 40},
+      "panels": []
+    },
+    {
+      "id": 51,
+      "type": "stat",
+      "title": "Time since last attestation",
+      "description": "time() - octravpn_last_attestation_unix. /health goes 503 at >300s (HEALTH_ATTESTATION_FRESHNESS_S in control.rs).",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 7, "w": 8, "x": 0, "y": 41},
+      "targets": [
+        {
+          "expr": "time() - octravpn_last_attestation_unix",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 120},
+              {"color": "red", "value": 300}
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 52,
+      "type": "stat",
+      "title": "Process uptime",
+      "description": "octravpn_uptime_seconds. Sudden dip = restart.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 7, "w": 8, "x": 8, "y": 41},
+      "targets": [
+        {
+          "expr": "octravpn_uptime_seconds",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "s", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}}
+      },
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 53,
+      "type": "stat",
+      "title": "Nodes up",
+      "description": "Number of /metrics targets currently reachable. Backs the OctravpnNodeDown alert.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 7, "w": 8, "x": 16, "y": 41},
+      "targets": [
+        {
+          "expr": "sum(up{job=\"octravpn-nodes\"})",
+          "legendFormat": "up",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        },
+        {
+          "expr": "count(up{job=\"octravpn-nodes\"})",
+          "legendFormat": "total",
+          "refId": "B",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}, "unit": "short"}
+      },
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 54,
+      "type": "timeseries",
+      "title": "Last attestation unix (per node)",
+      "description": "octravpn_last_attestation_unix. Should advance steadily; a flat line means the hub attestation loop is stuck.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 7, "w": 24, "x": 0, "y": 48},
+      "targets": [
+        {
+          "expr": "octravpn_last_attestation_unix",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineInterpolation": "linear", "fillOpacity": 0},
+          "unit": "dateTimeAsIso"
+        }
+      }
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["octravpn", "operator"],
+  "templating": {
+    "list": [
+      {
+        "name": "instance",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+        "query": {"query": "label_values(octravpn_uptime_seconds, instance)", "refId": "Prometheus-instance-Variable-Query"},
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {"text": "All", "value": "$__all"},
+        "sort": 1
+      }
+    ]
+  },
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "",
+  "title": "OctraVPN — Overview",
+  "uid": "octravpn-overview",
+  "version": 1,
+  "weekStart": ""
+}

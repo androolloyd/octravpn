@@ -1,0 +1,156 @@
+# Alertmanager rules for OctraVPN nodes.
+#
+# Mount alongside prometheus.yml as /etc/prometheus/alerts.yml.
+#
+# Only rules backed by metrics the node ACTUALLY exposes today are
+# active. Rules requiring metrics not-yet-implemented in the node are
+# present but commented out, with a TODO referencing the field that
+# would need to be added to NodeMetrics in
+# crates/octravpn-node/src/control.rs.
+#
+# Runbook entries live at docs/observability.md#<anchor>.
+
+groups:
+  - name: octravpn-node-health
+    interval: 30s
+    rules:
+
+      # Node unreachable. Prometheus `up` is synthetic — 1 when the
+      # scrape succeeded, 0 otherwise. Two minutes of failure is enough
+      # to filter routine restarts but short enough to page on a real
+      # outage.
+      - alert: OctravpnNodeDown
+        expr: up{job="octravpn-nodes"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: control-plane
+        annotations:
+          summary: "OctraVPN node {{ $labels.instance }} is down"
+          description: >
+            Prometheus has been unable to scrape /metrics on
+            {{ $labels.instance }} for >2 minutes. Either the process
+            crashed or the control plane port (51821) is unreachable.
+          runbook_url: https://github.com/octra/octra/blob/main/docs/observability.md#octravpnnodedown
+
+      # Attestation staleness. The hub's attestation loop bumps
+      # `last_attestation_unix` on every successful on-chain check; the
+      # /health endpoint goes 503 once this is >5m old. We fire a page
+      # at the same threshold so operators see the alert BEFORE
+      # downstream health checks start failing scheduled probes.
+      - alert: OctravpnAttestationStale
+        expr: time() - octravpn_last_attestation_unix > 300
+        for: 1m
+        labels:
+          severity: warning
+          component: attestation
+        annotations:
+          summary: "Node {{ $labels.instance }} attestation is stale"
+          description: >
+            Last successful on-chain validator attestation was
+            {{ $value | humanizeDuration }} ago (threshold 5m). The hub
+            attestation loop has either stopped or every recent RPC
+            call failed. /health will return 503 to load balancers
+            until this recovers.
+          runbook_url: https://github.com/octra/octra/blob/main/docs/observability.md#octravpnattestationstale
+
+      # Process restart detection. If `octravpn_uptime_seconds` jumps
+      # backward (or stays under 5m for several scrapes) the node
+      # restarted. Not a page-worthy event on its own; surface it as
+      # info so it shows up next to the dashboard during incidents.
+      - alert: OctravpnNodeRestarted
+        expr: octravpn_uptime_seconds < 300
+        for: 0m
+        labels:
+          severity: info
+          component: control-plane
+        annotations:
+          summary: "Node {{ $labels.instance }} restarted recently"
+          description: >
+            Process uptime is {{ $value | humanizeDuration }}. Expected
+            during deploys; investigate if unexpected.
+
+  - name: octravpn-traffic
+    interval: 30s
+    rules:
+
+      # Receipt-signing has gone quiet on a node that's serving bytes.
+      # If bytes_served keeps climbing but receipts_signed stops, the
+      # receipt journal or signing keypair is wedged.
+      - alert: OctravpnReceiptSigningStalled
+        expr: |
+          rate(octravpn_bytes_served_total[5m]) > 1024
+          and
+          rate(octravpn_receipts_signed_total[5m]) == 0
+        for: 5m
+        labels:
+          severity: warning
+          component: receipts
+        annotations:
+          summary: "Node {{ $labels.instance }} is serving traffic but signing no receipts"
+          description: >
+            bytes_served is climbing (>1 KiB/s avg over 5m) but the
+            receipt-signing counter is flat. Either /session/:id is
+            failing (check the receipt journal — P1-8/9 floor
+            violations return 409) or the node's signing key is
+            missing. Run `audit verify` against today's audit log to
+            confirm chain integrity.
+          runbook_url: https://github.com/octra/octra/blob/main/docs/observability.md#octravpnreceiptsigningstalled
+
+      # Session-tracker hitting its CONTROL_SESSIONS_CAP (10_000). At
+      # that point the BoundedMap evicts the oldest entries; clients
+      # see "session not announced" and have to re-announce.
+      - alert: OctravpnSessionMapNearCap
+        expr: octravpn_active_sessions > 9000
+        for: 5m
+        labels:
+          severity: warning
+          component: control-plane
+        annotations:
+          summary: "Node {{ $labels.instance }} session map near eviction cap"
+          description: >
+            Tracking {{ $value }} sessions (cap 10000 in
+            CONTROL_SESSIONS_CAP). Either real load is up, or the
+            sweeper is wedged (sessions are supposed to evict at
+            CONTROL_SESSION_TTL = 1h).
+
+  # ----------------------------------------------------------------
+  # Rules requiring metrics not yet exposed by the node. These are
+  # left as documentation of what we'd alert on once the underlying
+  # NodeMetrics fields exist. DO NOT uncomment until the metric is
+  # plumbed through — Prometheus will report `unknown metric` and the
+  # rule will never fire.
+  # ----------------------------------------------------------------
+  #
+  # TODO(node): add `audit_log_fsync_queue_depth` to NodeMetrics.
+  # - alert: OctravpnAuditLogFsyncBacklog
+  #   expr: octravpn_audit_log_fsync_queue_depth > 100
+  #   for: 2m
+  #   labels: {severity: warning, component: audit}
+  #   annotations:
+  #     summary: "Audit log fsync queue backing up on {{ $labels.instance }}"
+  #     runbook_url: https://github.com/octra/octra/blob/main/docs/observability.md#octravpnauditlogfsyncbacklog
+  #
+  # TODO(node): add `slash_double_sign_total` to NodeMetrics. The
+  # underlying event exists on-chain; the node just doesn't surface a
+  # counter today.
+  # - alert: OctravpnSlashEvent
+  #   expr: rate(octravpn_slash_double_sign_total[5m]) > 0
+  #   for: 0m
+  #   labels: {severity: critical, component: slashing}
+  #   annotations:
+  #     summary: "Double-sign slash event observed on {{ $labels.instance }}"
+  #     runbook_url: https://github.com/octra/octra/blob/main/docs/observability.md#octravpnslashevent
+  #
+  # TODO(node): add `rpc_requests_total{result="ok|err"}` to
+  # NodeMetrics. Today we have no per-endpoint counters, so a 5%
+  # error-rate page is impossible to compute.
+  # - alert: OctravpnRPCFailureRate
+  #   expr: |
+  #     rate(octravpn_rpc_requests_total{result="err"}[5m])
+  #       / rate(octravpn_rpc_requests_total[5m]) > 0.05
+  #   for: 5m
+  #   labels: {severity: warning, component: control-plane}
+  #   annotations:
+  #     summary: "RPC error rate > 5% on {{ $labels.instance }}"
+  #     runbook_url: https://github.com/octra/octra/blob/main/docs/observability.md#octravpnrpcfailurerate
