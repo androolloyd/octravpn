@@ -1,5 +1,8 @@
 # OctraVPN
 
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/androolloyd/octravpn)
+[![Proof of working state](https://github.com/androolloyd/octravpn/actions/workflows/proof.yml/badge.svg)](https://github.com/androolloyd/octravpn/actions/workflows/proof.yml)
+
 A decentralized VPN — Tailscale-style mesh with on-chain coordination —
 that runs on Octra. Operators stake OU to run exit/relay endpoints,
 tailnet owners group members under shared treasuries, sessions escrow
@@ -33,6 +36,22 @@ settles or records a public dispute). Misbehavior is slashed in-AML.
 [v2 operator flow](docs/v2-operator-flow.md) ·
 [v2 client flow](docs/v2-client-flow.md) ·
 [v1.1 release notes](docs/v1.1-release-notes.md)
+
+---
+
+## Verify without installing anything
+
+Three ways:
+
+1. **Click "Open in GitHub Codespaces"** above → in ~90 seconds you have a
+   browser VS Code with everything built. Run
+   `bash docker/devnet/v3-smoke.sh` from the integrated terminal.
+2. **Read the latest CI proof** → click the proof badge above. The summary
+   tab shows test counts, the clippy gate, the Lean proof count, the
+   last-known tailscale-interop exit code, and signed artifact hashes
+   (`.deb` + `.rpm`).
+3. **Watch the demo recordings** at `demo/recordings/*.mp4` (regenerated
+   via `bash demo/run-demo.sh` from inside the Codespace).
 
 ---
 

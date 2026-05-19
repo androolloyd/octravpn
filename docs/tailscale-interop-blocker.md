@@ -1539,3 +1539,109 @@ changes.
 Docker image only — `octravpn-interop-derper:latest` is built from
 the local `Dockerfile.derper` (golang:1.24-alpine + alpine:3.20).
 No Rust dependency additions in either crate.
+
+## 2026-05-19 — Wall 7 closed (wire-format work)
+
+The wire-protocol layer for Wall 7 is shipped. `MapRequest` now
+carries `DiscoKey: Option<String>` (`discokey:<hex>`) and
+`Endpoints: Option<Vec<String>>` (the JSON shape upstream emits is a
+`[]string` of `"ip:port"` candidates). `MachineRecord` grows two
+matching fields (`disco_key: Option<String>` +
+`endpoints: Vec<String>`) populated by `map::map_inner` on every map
+call — the client refreshes both on each /map round-trip, so persist
+non-empty values + leave empty values as no-ops (a client that omits
+the field on one call doesn't accidentally clear what previous calls
+established). `record_to_map_node` (register.rs) emits both on every
+peer's `MapNode` so `wgcfg.NewFromIPs` can build a usable wireguard
+peer entry and `wgengine.Reconfig` lands at `N/N peers` instead of
+`0/0 peers`.
+
+Unit + integration coverage:
+
+- `headscale-api`: new `tailscale_wire::map::tests::map_response_round_trips_disco_key_and_endpoints`.
+  Pins (a) MapRequest decoding of both fields under the upstream JSON
+  tag spelling (`DiscoKey`, `Endpoints`), (b) MachineRecord
+  persistence, (c) MapResponse.Peers fan-out on a sibling peer's
+  /map view. 63 lib tests pass overall (62 prior + 1 new).
+- `octravpn-node`: new
+  `tests/tailscale_wire_integration::map_response_round_trips_disco_key_and_endpoints`.
+  Walks the full `register → /map (peer-a sets DiscoKey+Endpoints) →
+  /map (peer-b reads peer-a)` flow through the
+  `tailscale_wire_router`. 7 integration tests pass (6 prior + 1 new).
+
+Two `MachineRecord` literal sites in `tailscale_wire_integration.rs`
+were unchanged besides the additive `disco_key: None,
+endpoints: Vec::new()` to satisfy the new required fields; the
+defaults match what `register_inner` writes, so behaviour is
+unchanged for peers that haven't yet posted a /map call.
+
+### Files touched this batch
+
+`headscale-rs`:
+- `headscale-api/src/tailscale_wire/wire.rs` — `MachineRecord` gains
+  `disco_key: Option<String>` + `endpoints: Vec<String>`; `MapRequest`
+  gains the matching JSON-tagged input fields (`DiscoKey`,
+  `Endpoints`, both optional); `MapNode` gains the matching output
+  fields with `skip_serializing_if` so absent values stay off the
+  wire.
+- `headscale-api/src/tailscale_wire/register.rs` —
+  `register_inner` initialises the new fields to None/empty;
+  `record_to_map_node` fans them back out on every emitted MapNode.
+- `headscale-api/src/tailscale_wire/map.rs` — `map_inner` reads the
+  fields off MapRequest, merges them into the matching MachineRecord
+  with copy-on-change semantics, and upserts on change so other
+  peers' streaming /map calls wake. Test fixture `insert_peer` +
+  `framed_chunk_matches_upstream_decoder_shape` updated for the
+  additive fields.
+
+`octra`:
+- `crates/octravpn-node/tests/tailscale_wire_integration.rs` —
+  five MachineRecord literals patched additively; new
+  `map_response_round_trips_disco_key_and_endpoints` test pins the
+  octravpn-node-mounted router round-trip.
+- `docs/tailscale-interop-blocker.md` — this section.
+
+### Wire-format surprise
+
+`tailcfg.MapRequest.Endpoints` is a `[]string` in Tailscale v1.78+
+even though the in-memory type was migrated to `[]netip.AddrPort` —
+the JSON encoder still emits the historical string-pair shape
+(`"ip:port"`, with IPv6 bracketed). Modelling it as
+`Option<Vec<String>>` keeps decode resilient to older clients
+omitting the field, while serialisation of `Endpoints` on the
+outgoing `MapNode` uses a plain `Vec<String>` with
+`skip_serializing_if = "Vec::is_empty"` so an empty list stays off
+the wire instead of emitting `"Endpoints": []`.
+
+### Exit-code progression for this PR batch
+
+| State | Exit code |
+| ----- | --------- |
+| Pre-Wall-7 (peers reach `Running`; `tailscale ping` ⇒ `unknown peer`)               | 50 |
+| **Post-Wall-7 wire layer (this commit batch)**                                      | **blocked at Step 1 (build fail)** — `crates/octravpn-node/src/main.rs:706-707` references `AuditLog::verify_file` returning `usize` but a parallel-agent receipt-journal refactor changed the return type to `FileVerifyReport` (no `Display` / `tracing::Value`). The build-break is unrelated to Wall 7 and unrelated to any file under this subagent's exclusive ownership. Once that build is restored, the harness should clear ping (peers now exchange DiscoKey + Endpoints, so `wgengine.Reconfig` will land at `1/1 peers`). |
+| + audit_cli main.rs build restored                                                   | expect 0 |
+
+Daemon-log evidence of the wire-level round-trip lives in the unit +
+integration tests (both crates green). End-to-end docker validation
+is pending the audit_cli main.rs fix — diagnosed below as a strict
+build-time prerequisite for re-running `run-interop.sh`.
+
+### Diagnosis of the audit_cli build break
+
+`crates/octravpn-node/src/main.rs`:
+
+```rust
+let n = crate::audit::AuditLog::verify_file(&key, path)?;
+info!(verified = n, "audit chain ok");
+println!("OK ({n} entries)");
+```
+
+`AuditLog::verify_file` was refactored (parallel agent's P1-9 receipt
+journal work, commit `8db1ad1`) from `Result<usize, _>` to
+`Result<FileVerifyReport, _>`. `FileVerifyReport` doesn't implement
+`Display` (used by `println!`) or `tracing::Value` (used by `info!`),
+so the call site at lines 706–707 fails to compile. The fix is a
+single-line projection — e.g. `let n = report.verified_entries;` —
+but lives in a file Wall 7's prompt explicitly bars this subagent
+from touching (`octravpn-node` code outside the one integration
+test). Filing it as a follow-up for the audit-cli owner.

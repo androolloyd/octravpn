@@ -1,0 +1,49 @@
+// OctraVPN — GitHub Codespaces / VS Code Dev Containers definition.
+//
+// Goal: a stranger clicks "Open in GitHub Codespaces", waits ~90s, and
+// gets a browser VS Code with the workspace already built and the
+// devnet ports forwarded. The postCreate script does the cargo warm-up
+// and seeds docker/devnet/.env from the example.
+//
+// Forwarded ports follow `docker/devnet/docker-compose.devnet.yml` +
+// `deploy/observability/`. Labels are illustrative — the actual
+// service bound to each port depends on which compose file is up.
+{
+  "name": "OctraVPN",
+  "image": "mcr.microsoft.com/devcontainers/rust:1-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "forwardPorts": [
+    51820,
+    51821,
+    51822,
+    51823,
+    443,
+    3000,
+    9090,
+    9093
+  ],
+  "portsAttributes": {
+    "51820": { "label": "WireGuard (node1 UDP)" },
+    "51821": { "label": "node1 admin/control (TCP)" },
+    "51822": { "label": "node2 admin/control (TCP)" },
+    "51823": { "label": "node3 admin/control (TCP) / oct:// portal" },
+    "443":   { "label": "TLS (tailscale-interop control plane)" },
+    "3000":  { "label": "Grafana (deploy/observability)" },
+    "9090":  { "label": "Prometheus (deploy/observability)" },
+    "9093":  { "label": "Alertmanager (deploy/observability)" }
+  },
+  "postCreateCommand": "bash .devcontainer/postCreate.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "vadimcn.vscode-lldb",
+        "tamasfe.even-better-toml",
+        "ms-azuretools.vscode-docker"
+      ]
+    }
+  }
+}

@@ -1,0 +1,360 @@
+# OctraVPN — public "proof of working state" workflow.
+#
+# Goal: produce a single, linkable record of the repo's working state on
+# every push to `main` so a stranger can verify the project compiles,
+# tests pass, clippy is clean, the Lean proof set built, the cached
+# tailscale-interop exit code is known, and binary artifacts (.deb/.rpm)
+# can be built — without installing anything locally.
+#
+# Output:
+#   1. A markdown summary on the workflow run's "Summary" tab.
+#   2. A machine-readable `proof.json` artifact (consumable by external
+#      dashboards / shields.io endpoint).
+#   3. Build artifacts (.deb + .rpm) attached to the workflow run.
+#
+# Note (interop step): `docker/devnet/tailscale-interop/run-interop.sh`
+# needs Docker-in-Docker with kernel WireGuard. GitHub-hosted runners
+# can run nested docker but not load `wireguard` kernel modules, so we
+# cannot execute it here. Instead we parse the last "Wall N closed"
+# entry from `docs/tailscale-interop-blocker.md` and read the most
+# recently recorded interop exit code from that progression table.
+# When a future commit lands a green interop run on a self-hosted
+# runner, swap step `interop_cached_exit` for the real invocation.
+#
+# All `actions/*` versions are pinned (matching the existing
+# `.github/workflows/ci.yml` stance).
+name: Proof of working state
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  proof:
+    name: build + test + emit proof
+    runs-on: ubuntu-latest
+    # Don't fail-fast — we want the summary to render even if one of the
+    # later "informational" steps (Lean, deb/rpm) hiccups. Hard gates
+    # (clippy, test, workspace build) are still load-bearing.
+    steps:
+      # --- 1. Checkout (octra + sibling repos) ------------------------------
+      - name: Checkout octra
+        uses: actions/checkout@v4
+        with:
+          path: octra
+          fetch-depth: 0
+
+      - name: Checkout sibling headscale-rs
+        uses: actions/checkout@v4
+        with:
+          repository: androolloyd/headscale-rs
+          path: headscale-rs
+        # Sibling repo is optional — some downstream forks may not have
+        # access. Falling back to a missing dir lets the workflow still
+        # try the build (it'll fail with a clear path-dep error if the
+        # repo is required).
+        continue-on-error: true
+
+      - name: Checkout sibling octra-foundry
+        uses: actions/checkout@v4
+        with:
+          repository: androolloyd/octra-foundry
+          path: octra-foundry
+
+      # --- 2. Rust toolchain + cache ----------------------------------------
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cargo build cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: octra
+
+      # --- 3. Build + test the lot ------------------------------------------
+      - name: cargo build --workspace
+        id: build
+        working-directory: octra
+        run: cargo build --workspace
+
+      - name: cargo test --workspace
+        id: test_workspace
+        working-directory: octra
+        run: |
+          set -o pipefail
+          cargo test --workspace 2>&1 | tee /tmp/test-workspace.log
+          # Pull out the "N passed" count from cargo's summary lines.
+          # cargo emits one "test result: ok. N passed; ..." per test
+          # binary; sum them.
+          passed=$(grep -E "^test result: ok\. [0-9]+ passed" /tmp/test-workspace.log \
+                   | awk '{ s += $4 } END { print s+0 }')
+          echo "passed=${passed}" >> "$GITHUB_OUTPUT"
+
+      - name: cargo test -p octravpn-mesh --features test-helpers
+        working-directory: octra
+        run: cargo test -p octravpn-mesh --features test-helpers
+
+      - name: cargo test -p headscale-api --no-default-features
+        working-directory: octra
+        # Sibling-checked-out headscale-rs is path-deped from
+        # crates/octravpn-node; the headscale-api crate itself is in
+        # the sibling repo, so cargo test runs against that path.
+        run: |
+          if [ -d "../headscale-rs/headscale-api" ]; then
+            (cd ../headscale-rs && cargo test -p headscale-api --no-default-features)
+          else
+            echo "::warning::headscale-rs sibling not checked out; skipping headscale-api test"
+          fi
+
+      # --- 4. Clippy gate ---------------------------------------------------
+      - name: cargo clippy --workspace --tests --features test-helpers
+        id: clippy
+        working-directory: octra
+        run: cargo clippy --workspace --tests --features test-helpers -- -D warnings
+
+      # --- 5. Lean proofs ---------------------------------------------------
+      - name: Lean — lake build + theorem count
+        id: lean
+        working-directory: octra
+        # Best-effort: install elan if not present, then lake build.
+        # Theorem count is a simple grep of `^theorem` across all .lean
+        # files in proofs/lean. We don't gate on lake exit code here;
+        # the dedicated `lean` job in ci.yml is the hard gate.
+        run: |
+          theorems=$(find proofs/lean -name '*.lean' -exec grep -h '^theorem' {} + 2>/dev/null | wc -l | tr -d ' ')
+          echo "theorems=${theorems}" >> "$GITHUB_OUTPUT"
+          if ! command -v lake >/dev/null 2>&1; then
+            curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+              | sh -s -- -y --default-toolchain none
+            echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.elan/bin:$PATH"
+          fi
+          if command -v lake >/dev/null 2>&1; then
+            (cd proofs/lean && lake build) && lake_status=ok || lake_status=fail
+          else
+            lake_status=skipped
+          fi
+          echo "lake_status=${lake_status}" >> "$GITHUB_OUTPUT"
+        continue-on-error: true
+
+      # --- 6. Cached interop exit code --------------------------------------
+      # The real interop script needs Docker-in-Docker + kernel WG and
+      # can't run on github-hosted runners. We read the last recorded
+      # exit code from docs/tailscale-interop-blocker.md by finding the
+      # most recent "Wall N closed" heading and the "Post-Wall-N" row in
+      # the Exit-code-progression table beneath it. Documented inline so
+      # a future contributor can swap this for a real run on a
+      # self-hosted runner with kernel WG access.
+      - name: Cached tailscale-interop exit code
+        id: interop
+        working-directory: octra
+        run: |
+          doc=docs/tailscale-interop-blocker.md
+          # Find the most recent "Wall N closed" heading (line N tracks
+          # the progression). If multiple match, take the last (deepest
+          # in the file = most recent in append-only doc).
+          latest_wall=$(grep -E '^## .*Wall [0-9]+ closed' "$doc" | tail -n1 || true)
+          # The progression table after that heading has rows like:
+          #   | Post-Wall-N (this commit batch) | NN (...) |
+          # We parse the integer following the last "Post-Wall-" row.
+          latest_exit=$(awk '
+            /^## .*Wall [0-9]+ closed/ { capture=1; exit_code=""; next }
+            capture && /Post-Wall-[0-9]+/ {
+              # extract first integer in cells 2/3 of the row
+              line=$0
+              n=split(line, cells, "|")
+              for (i=2; i<=n; i++) {
+                if (match(cells[i], /\*\*?[0-9]+\*?\*?/)) {
+                  s=substr(cells[i], RSTART, RLENGTH)
+                  gsub(/\*/, "", s)
+                  if (s+0 == s) { exit_code=s }
+                }
+              }
+            }
+            END { print exit_code }
+          ' "$doc")
+          # Fall back to the top-of-doc "Current exit code" line if the
+          # table parser didn't find anything.
+          if [ -z "${latest_exit:-}" ]; then
+            latest_exit=$(grep -E '^\`?[0-9]+\`?' "$doc" | head -n1 | tr -d '`' | awk '{print $1}')
+          fi
+          # Date of the latest wall heading (YYYY-MM-DD in the heading).
+          latest_date=$(echo "$latest_wall" | grep -Eo '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -n1)
+          echo "latest_wall=${latest_wall}" >> "$GITHUB_OUTPUT"
+          echo "latest_exit=${latest_exit:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "latest_date=${latest_date:-unknown}" >> "$GITHUB_OUTPUT"
+
+      # --- 7. Bench snapshot age --------------------------------------------
+      - name: Bench snapshot age
+        id: bench
+        working-directory: octra
+        run: |
+          snap=bench-snapshots/core.json
+          if [ -f "$snap" ]; then
+            # Use the last git commit that touched the snapshot.
+            last_commit_iso=$(git log -1 --format=%cI -- "$snap")
+            last_commit_sha=$(git log -1 --format=%h -- "$snap")
+            echo "snapshot_iso=${last_commit_iso}" >> "$GITHUB_OUTPUT"
+            echo "snapshot_sha=${last_commit_sha}" >> "$GITHUB_OUTPUT"
+            echo "snapshot_present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "snapshot_present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # --- 8. Build artifacts (.deb + .rpm) ---------------------------------
+      - name: Install cargo-deb + cargo-generate-rpm
+        run: |
+          cargo install --locked cargo-deb || true
+          cargo install --locked cargo-generate-rpm || true
+
+      - name: cargo deb -p octravpn-node
+        id: deb
+        working-directory: octra
+        continue-on-error: true
+        run: |
+          if cargo deb -p octravpn-node; then
+            deb_path=$(ls target/debian/*.deb 2>/dev/null | head -n1)
+            if [ -n "$deb_path" ]; then
+              deb_size=$(du -h "$deb_path" | awk '{print $1}')
+              echo "deb_path=${deb_path}" >> "$GITHUB_OUTPUT"
+              echo "deb_size=${deb_size}" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: cargo generate-rpm -p octravpn-node
+        id: rpm
+        working-directory: octra
+        continue-on-error: true
+        run: |
+          # generate-rpm needs a release binary already built.
+          cargo build -p octravpn-node --release || true
+          if cargo generate-rpm -p octravpn-node; then
+            rpm_path=$(ls target/generate-rpm/*.rpm 2>/dev/null | head -n1)
+            if [ -n "$rpm_path" ]; then
+              rpm_size=$(du -h "$rpm_path" | awk '{print $1}')
+              echo "rpm_path=${rpm_path}" >> "$GITHUB_OUTPUT"
+              echo "rpm_size=${rpm_size}" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Upload .deb artifact
+        if: steps.deb.outputs.deb_path != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: octravpn-node-deb
+          path: octra/${{ steps.deb.outputs.deb_path }}
+          if-no-files-found: warn
+
+      - name: Upload .rpm artifact
+        if: steps.rpm.outputs.rpm_path != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: octravpn-node-rpm
+          path: octra/${{ steps.rpm.outputs.rpm_path }}
+          if-no-files-found: warn
+
+      # --- 9. Emit machine-readable proof.json ------------------------------
+      - name: Emit proof.json
+        id: proof_json
+        working-directory: octra
+        run: |
+          commit_sha=$(git rev-parse HEAD)
+          commit_subj=$(git log -1 --format=%s)
+          verified_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          # JSON write via printf so we don't depend on jq being present
+          # (it usually is on ubuntu-latest, but no need to require it).
+          cat > /tmp/proof.json <<JSON
+          {
+            "commit": "${commit_sha}",
+            "commit_subject": "${commit_subj}",
+            "verified_at": "${verified_at}",
+            "workflow_run_url": "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}",
+            "tests": {
+              "workspace_passed": "${{ steps.test_workspace.outputs.passed }}",
+              "clippy_status": "${{ steps.clippy.outcome }}"
+            },
+            "lean": {
+              "theorem_count": "${{ steps.lean.outputs.theorems }}",
+              "lake_build": "${{ steps.lean.outputs.lake_status }}"
+            },
+            "interop": {
+              "last_known_exit": "${{ steps.interop.outputs.latest_exit }}",
+              "last_known_date": "${{ steps.interop.outputs.latest_date }}",
+              "source": "docs/tailscale-interop-blocker.md",
+              "note": "github-hosted runners cannot exec the interop script (needs kernel WireGuard); value cached from doc"
+            },
+            "artifacts": {
+              "deb": {
+                "path": "${{ steps.deb.outputs.deb_path }}",
+                "size": "${{ steps.deb.outputs.deb_size }}"
+              },
+              "rpm": {
+                "path": "${{ steps.rpm.outputs.rpm_path }}",
+                "size": "${{ steps.rpm.outputs.rpm_size }}"
+              }
+            },
+            "bench_snapshot": {
+              "present": "${{ steps.bench.outputs.snapshot_present }}",
+              "last_updated_iso": "${{ steps.bench.outputs.snapshot_iso }}",
+              "last_updated_commit": "${{ steps.bench.outputs.snapshot_sha }}"
+            }
+          }
+          JSON
+          cp /tmp/proof.json proof.json
+          cat proof.json
+
+      - name: Upload proof.json artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: proof-json
+          path: octra/proof.json
+
+      # --- 10. Markdown summary --------------------------------------------
+      - name: Write run summary
+        working-directory: octra
+        run: |
+          tests_passed='${{ steps.test_workspace.outputs.passed }}'
+          clippy_outcome='${{ steps.clippy.outcome }}'
+          lean_count='${{ steps.lean.outputs.theorems }}'
+          lake_status='${{ steps.lean.outputs.lake_status }}'
+          interop_exit='${{ steps.interop.outputs.latest_exit }}'
+          interop_date='${{ steps.interop.outputs.latest_date }}'
+          deb_path='${{ steps.deb.outputs.deb_path }}'
+          deb_size='${{ steps.deb.outputs.deb_size }}'
+          rpm_path='${{ steps.rpm.outputs.rpm_path }}'
+          rpm_size='${{ steps.rpm.outputs.rpm_size }}'
+          snap_iso='${{ steps.bench.outputs.snapshot_iso }}'
+          snap_sha='${{ steps.bench.outputs.snapshot_sha }}'
+          commit_sha=$(git rev-parse --short HEAD)
+          commit_subj=$(git log -1 --format=%s)
+          verified_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          tick() { [ "$1" = "success" ] && echo "✓" || echo "✗"; }
+
+          {
+            echo "# OctraVPN — proof of working state"
+            echo ""
+            echo "- $(tick "${{ steps.test_workspace.outcome }}") \`cargo test --workspace\`: ${{ steps.test_workspace.outcome }} (${tests_passed:-?} tests)"
+            echo "- $(tick "${clippy_outcome}") \`cargo clippy --workspace -- -D warnings\`: ${clippy_outcome}"
+            echo "- Lean proofs: ${lean_count} theorems counted; \`lake build\` ${lake_status}"
+            echo "- Tailscale-interop exit code: ${interop_exit} (last known, ${interop_date})"
+            if [ -n "${deb_path}" ]; then
+              echo "- Build artifacts: \`$(basename "${deb_path}")\` (${deb_size}), \`$(basename "${rpm_path:-unknown.rpm}")\` (${rpm_size:-?})"
+            else
+              echo "- Build artifacts: deb/rpm step did not produce a file (see job log)"
+            fi
+            if [ "${{ steps.bench.outputs.snapshot_present }}" = "true" ]; then
+              echo "- Performance snapshot: \`bench-snapshots/core.json\` committed ${snap_iso} (\`${snap_sha}\`)"
+            else
+              echo "- Performance snapshot: missing"
+            fi
+            echo ""
+            echo "Latest commit: \`${commit_sha}\` \"${commit_subj}\""
+            echo "Verified at: ${verified_at}"
+          } >> "$GITHUB_STEP_SUMMARY"

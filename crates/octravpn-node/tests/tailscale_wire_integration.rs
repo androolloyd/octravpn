@@ -132,6 +132,8 @@ async fn key_then_register_then_map_round_trip() {
             user: "bob".into(),
             hostname: "peer-b".into(),
             ipv4: std::net::Ipv4Addr::new(100, 64, 0, 99),
+        disco_key: None,
+        endpoints: Vec::new(),
         },
     );
 
@@ -247,6 +249,8 @@ async fn flat_register_path_works_via_octravpn_node_router() {
             user: "bob".into(),
             hostname: "peer-b".into(),
             ipv4: std::net::Ipv4Addr::new(100, 64, 0, 99),
+        disco_key: None,
+        endpoints: Vec::new(),
         },
     );
 
@@ -383,6 +387,8 @@ async fn stream_true_emits_chunk_on_registry_change() {
             user: "alice".into(),
             hostname: "peer-a".into(),
             ipv4: std::net::Ipv4Addr::new(100, 64, 0, 10),
+        disco_key: None,
+        endpoints: Vec::new(),
         },
     );
 
@@ -438,6 +444,8 @@ async fn stream_true_emits_chunk_on_registry_change() {
                 user: "bob".into(),
                 hostname: "peer-b".into(),
                 ipv4: std::net::Ipv4Addr::new(100, 64, 0, 11),
+            disco_key: None,
+            endpoints: Vec::new(),
             },
         );
     });
@@ -547,6 +555,8 @@ async fn map_response_includes_derp_map_when_configured() {
             user: "bob".into(),
             hostname: "peer-b".into(),
             ipv4: std::net::Ipv4Addr::new(100, 64, 0, 99),
+        disco_key: None,
+        endpoints: Vec::new(),
         },
     );
 
@@ -593,3 +603,120 @@ async fn map_response_includes_derp_map_when_configured() {
     assert_eq!(node.derp_port, 443);
     assert!(node.insecure_for_tests);
 }
+
+/// Wall 7 — DiscoKey + Endpoints must round-trip through the
+/// `octravpn-node`-mounted router. Mock a `/map` request from peer-a
+/// carrying both fields, then poll peer-b's `/map` view and assert
+/// peer-a's `MapNode` carries the same DiscoKey + Endpoints. Without
+/// this round-trip, stock `tailscale`'s `wgengine.Reconfig` runs at
+/// `0/0 peers` and `tailscale ping` returns `unknown peer` — the
+/// docker-network end-to-end failure mode that closed at exit code 50
+/// pre-fix.
+#[tokio::test]
+async fn map_response_round_trips_disco_key_and_endpoints() {
+    let (state, minter, _dir) = build_state();
+    let app = tailscale_wire_router(state.clone());
+
+    // Register peer-a + peer-b via the wire router so the registry
+    // sees the same MachineRecord shape stock `tailscale up` produces.
+    let pk_a = minter.mint("alice", DEFAULT_PREAUTH_TTL, true);
+    let pk_b = minter.mint("bob", DEFAULT_PREAUTH_TTL, true);
+    let a_hex = "a1".repeat(32);
+    let b_hex = "b2".repeat(32);
+
+    for (hex, pk, host) in [
+        (&a_hex, &pk_a.key, "peer-a"),
+        (&b_hex, &pk_b.key, "peer-b"),
+    ] {
+        let body = serde_json::json!({
+            "NodeKey": format!("nodekey:{hex}"),
+            "Auth": { "AuthKey": pk },
+            "Hostinfo": { "Hostname": host, "OS": "linux", "OSVersion": "6.6" },
+        });
+        let resp = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri(format!("/machine/nodekey:{hex}/register"))
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(serde_json::to_vec(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            axum::http::StatusCode::OK,
+            "register {host} ok"
+        );
+    }
+
+    // Peer-a's /map call carries DiscoKey + Endpoints — the moment
+    // upstream stock-client crosses the post-handshake boundary.
+    let disco_a = format!("discokey:{}", "1a".repeat(32));
+    let endpoints_a = vec![
+        "10.0.0.10:41641".to_string(),
+        "[fe80::1]:41641".to_string(),
+    ];
+    let map_req_a = serde_json::json!({
+        "Version": 39,
+        "DiscoKey": &disco_a,
+        "Endpoints": &endpoints_a,
+    });
+    let resp = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri(format!("/machine/nodekey:{a_hex}/map"))
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(&map_req_a).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::OK);
+
+    // MachineRecord on the registry must now carry the fields.
+    let rec_a = state.machines.get(&a_hex).expect("peer-a registered");
+    assert_eq!(rec_a.disco_key.as_deref(), Some(disco_a.as_str()));
+    assert_eq!(rec_a.endpoints, endpoints_a);
+
+    // Peer-b polls /map; its MapResponse.Peers[0] (== peer-a) must
+    // carry DiscoKey + Endpoints byte-identical to what peer-a sent.
+    let map_req_b = serde_json::json!({ "Version": 39 });
+    let resp = app
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri(format!("/machine/nodekey:{b_hex}/map"))
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(&map_req_b).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::OK);
+    let raw = to_bytes(resp.into_body(), 32 * 1024).await.unwrap();
+    let raw_str = std::str::from_utf8(&raw).unwrap();
+    assert!(
+        raw_str.contains("\"DiscoKey\""),
+        "DiscoKey tag present: {raw_str}"
+    );
+    assert!(
+        raw_str.contains("\"Endpoints\""),
+        "Endpoints tag present: {raw_str}"
+    );
+    let mr: octravpn_mesh::tailscale_wire::MapResponse =
+        serde_json::from_slice(&raw).unwrap();
+    assert_eq!(mr.peers.len(), 1, "peer-a visible to peer-b");
+    let peer_a = &mr.peers[0];
+    assert_eq!(peer_a.disco_key.as_deref(), Some(disco_a.as_str()));
+    assert_eq!(peer_a.endpoints, endpoints_a);
+}
+
