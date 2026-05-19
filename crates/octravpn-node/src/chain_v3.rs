@@ -23,14 +23,20 @@
 //!
 //! Each `build_*` method here returns the legacy
 //! `{"kind":"contract_call",...}` shape that `octra_core::tx::sign_call`
-//! translates to the on-wire OctraTx envelope. Method names + param
-//! ordering mirror the JSON shape sent by `docker/devnet/v3-smoke.sh`
-//! and `docker/devnet/e2e-adversarial-v3.sh` so a unit test can
-//! cross-check the wire bytes against the shell harness without
-//! re-implementing the cast tool here.
+//! translates to the on-wire OctraTx envelope. The JSON envelope
+//! construction itself lives in [`octravpn_core::v3_calls`] so the
+//! client crate gets the same shape verbatim; each `build_*_call`
+//! wrapper below simply forwards its inputs to the shared builder.
+//! Method names + param ordering mirror the JSON shape sent by
+//! `docker/devnet/v3-smoke.sh` and `docker/devnet/e2e-adversarial-v3.sh`
+//! so a unit test can cross-check the wire bytes against the shell
+//! harness without re-implementing the cast tool here.
 
 use anyhow::{anyhow, Context, Result};
-use octravpn_core::{address::Address, rpc::RpcClient, sig::KeyPair, tx as octra_tx};
+use octravpn_core::{
+    address::Address, rpc::RpcClient, sig::KeyPair, tx as octra_tx,
+    v3_calls::ContractCallBuilder,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tracing::debug;
@@ -84,6 +90,15 @@ impl ChainCtxV3 {
             wallet_addr,
             wallet,
         }
+    }
+
+    /// Construct the shared `ContractCallBuilder` bound to this
+    /// daemon's program addr + wallet addr. All `build_*_call`
+    /// methods below delegate through this so the JSON wire shape is
+    /// owned by `octravpn_core::v3_calls` rather than re-hand-rolled
+    /// here.
+    fn call_builder(&self) -> ContractCallBuilder {
+        ContractCallBuilder::new(self.program_addr.clone(), self.wallet_addr.clone())
     }
 
     pub(crate) async fn nonce(&self) -> Result<u64> {
@@ -214,20 +229,16 @@ impl ChainCtxV3 {
     /// `receipt_pubkey` is the base64-encoded ed25519 pubkey the chain
     /// uses to verify `slash_double_sign` signatures.
     pub(crate) fn build_register_circle_call(&self, p: &RegisterCircleParams<'_>) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "register_circle",
-            "params": [
-                p.circle_id,
-                p.state_root_hex,
-                p.receipt_pubkey_b64,
+        self.call_builder().register_circle_call(
+            &[
+                json!(p.circle_id),
+                json!(p.state_root_hex),
+                json!(p.receipt_pubkey_b64),
             ],
-            "value": p.stake_amount,
-            "fee": p.fee,
-            "nonce": p.nonce,
-        })
+            p.stake_amount,
+            p.fee,
+            p.nonce,
+        )
     }
 
     /// `update_circle_state(circle, new_state_root)` — bump the on-chain
@@ -242,16 +253,12 @@ impl ChainCtxV3 {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "update_circle_state",
-            "params": [circle_id, new_state_root_hex],
-            "value": 0,
-            "fee": fee,
-            "nonce": nonce,
-        })
+        self.call_builder().update_circle_state_call(
+            &[json!(circle_id), json!(new_state_root_hex)],
+            0,
+            fee,
+            nonce,
+        )
     }
 
     /// `rotate_receipt_pubkey(circle, new_pubkey)` — swap the on-chain
@@ -265,16 +272,12 @@ impl ChainCtxV3 {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "rotate_receipt_pubkey",
-            "params": [circle_id, new_pubkey_b64],
-            "value": 0,
-            "fee": fee,
-            "nonce": nonce,
-        })
+        self.call_builder().rotate_receipt_pubkey_call(
+            &[json!(circle_id), json!(new_pubkey_b64)],
+            0,
+            fee,
+            nonce,
+        )
     }
 
     /// `retire_circle(circle)` — flip `circle_active[circle] = 0`. The
@@ -286,16 +289,8 @@ impl ChainCtxV3 {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "retire_circle",
-            "params": [circle_id],
-            "value": 0,
-            "fee": fee,
-            "nonce": nonce,
-        })
+        self.call_builder()
+            .retire_circle_call(&[json!(circle_id)], 0, fee, nonce)
     }
 
     // ============================================================
@@ -313,16 +308,8 @@ impl ChainCtxV3 {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "bond_endpoint",
-            "params": [circle_id],
-            "value": amount,
-            "fee": fee,
-            "nonce": nonce,
-        })
+        self.call_builder()
+            .bond_endpoint_call(&[json!(circle_id)], amount, fee, nonce)
     }
 
     /// `unbond_endpoint(circle)` — start the grace period. The full
@@ -335,16 +322,8 @@ impl ChainCtxV3 {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "unbond_endpoint",
-            "params": [circle_id],
-            "value": 0,
-            "fee": fee,
-            "nonce": nonce,
-        })
+        self.call_builder()
+            .unbond_endpoint_call(&[json!(circle_id)], 0, fee, nonce)
     }
 
     /// `nonreentrant finalize_unbond(circle)` — claim the unbonded
@@ -355,16 +334,8 @@ impl ChainCtxV3 {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "finalize_unbond",
-            "params": [circle_id],
-            "value": 0,
-            "fee": fee,
-            "nonce": nonce,
-        })
+        self.call_builder()
+            .finalize_unbond_call(&[json!(circle_id)], 0, fee, nonce)
     }
 
     // ============================================================
@@ -380,22 +351,18 @@ impl ChainCtxV3 {
         &self,
         p: &SlashDoubleSignParams<'_>,
     ) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "slash_double_sign",
-            "params": [
-                p.circle_id,
-                p.payload_a,
-                p.sig_a_b64,
-                p.payload_b,
-                p.sig_b_b64,
+        self.call_builder().slash_double_sign_call(
+            &[
+                json!(p.circle_id),
+                json!(p.payload_a),
+                json!(p.sig_a_b64),
+                json!(p.payload_b),
+                json!(p.sig_b_b64),
             ],
-            "value": 0,
-            "fee": p.fee,
-            "nonce": p.nonce,
-        })
+            0,
+            p.fee,
+            p.nonce,
+        )
     }
 
     // ============================================================
@@ -415,16 +382,8 @@ impl ChainCtxV3 {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "create_tailnet",
-            "params": [members_root_hex],
-            "value": deposit,
-            "fee": fee,
-            "nonce": nonce,
-        })
+        self.call_builder()
+            .create_tailnet_call(&[json!(members_root_hex)], deposit, fee, nonce)
     }
 
     /// `update_members_root(tailnet_id, new_members_root)` — bump the
@@ -436,16 +395,12 @@ impl ChainCtxV3 {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "update_members_root",
-            "params": [tailnet_id, new_members_root_hex],
-            "value": 0,
-            "fee": fee,
-            "nonce": nonce,
-        })
+        self.call_builder().update_members_root_call(
+            &[json!(tailnet_id), json!(new_members_root_hex)],
+            0,
+            fee,
+            nonce,
+        )
     }
 
     /// `retire_tailnet(tailnet_id)` — flip `tailnet_retired = 1`.
@@ -455,16 +410,8 @@ impl ChainCtxV3 {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "retire_tailnet",
-            "params": [tailnet_id],
-            "value": 0,
-            "fee": fee,
-            "nonce": nonce,
-        })
+        self.call_builder()
+            .retire_tailnet_call(&[json!(tailnet_id)], 0, fee, nonce)
     }
 
     /// `payable deposit_to_tailnet(tailnet_id)` — top up the tailnet
@@ -476,16 +423,8 @@ impl ChainCtxV3 {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "deposit_to_tailnet",
-            "params": [tailnet_id],
-            "value": amount,
-            "fee": fee,
-            "nonce": nonce,
-        })
+        self.call_builder()
+            .deposit_to_tailnet_call(&[json!(tailnet_id)], amount, fee, nonce)
     }
 
     /// `withdraw_tailnet_treasury(tailnet_id, amount)` — owner-only
@@ -498,16 +437,12 @@ impl ChainCtxV3 {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "withdraw_tailnet_treasury",
-            "params": [tailnet_id, amount],
-            "value": 0,
-            "fee": fee,
-            "nonce": nonce,
-        })
+        self.call_builder().withdraw_tailnet_treasury_call(
+            &[json!(tailnet_id), json!(amount)],
+            0,
+            fee,
+            nonce,
+        )
     }
 
     // ============================================================
@@ -525,16 +460,12 @@ impl ChainCtxV3 {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "open_session",
-            "params": [tailnet_id, circle_id, max_pay],
-            "value": 0,
-            "fee": fee,
-            "nonce": nonce,
-        })
+        self.call_builder().open_session_call(
+            &[json!(tailnet_id), json!(circle_id), json!(max_pay)],
+            0,
+            fee,
+            nonce,
+        )
     }
 
     /// `settle_claim(session_id, bytes_used)` — operator-side first
@@ -549,16 +480,12 @@ impl ChainCtxV3 {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "settle_claim",
-            "params": [session_id, bytes_used],
-            "value": 0,
-            "fee": fee,
-            "nonce": nonce,
-        })
+        self.call_builder().settle_claim_call(
+            &[json!(session_id), json!(bytes_used)],
+            0,
+            fee,
+            nonce,
+        )
     }
 
     /// `nonreentrant settle_confirm(session_id, bytes_used, net,
@@ -570,21 +497,17 @@ impl ChainCtxV3 {
         &self,
         p: &SettleConfirmParams<'_>,
     ) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "settle_confirm",
-            "params": [
-                p.session_id,
-                p.bytes_used,
-                p.net,
-                p.settle_blinding,
+        self.call_builder().settle_confirm_call(
+            &[
+                json!(p.session_id),
+                json!(p.bytes_used),
+                json!(p.net),
+                json!(p.settle_blinding),
             ],
-            "value": 0,
-            "fee": p.fee,
-            "nonce": p.nonce,
-        })
+            0,
+            p.fee,
+            p.nonce,
+        )
     }
 
     /// `claim_no_show(session_id)` — opener-side abort path. Fires once
@@ -597,16 +520,8 @@ impl ChainCtxV3 {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "claim_no_show",
-            "params": [session_id],
-            "value": 0,
-            "fee": fee,
-            "nonce": nonce,
-        })
+        self.call_builder()
+            .claim_no_show_call(&[json!(session_id)], 0, fee, nonce)
     }
 
     /// `nonreentrant sweep_expired_session(session_id)` — any caller
@@ -620,16 +535,8 @@ impl ChainCtxV3 {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "sweep_expired_session",
-            "params": [session_id],
-            "value": 0,
-            "fee": fee,
-            "nonce": nonce,
-        })
+        self.call_builder()
+            .sweep_expired_session_call(&[json!(session_id)], 0, fee, nonce)
     }
 
     // ============================================================
@@ -648,16 +555,12 @@ impl ChainCtxV3 {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "claim_earnings",
-            "params": [circle_id, amount],
-            "value": 0,
-            "fee": fee,
-            "nonce": nonce,
-        })
+        self.call_builder().claim_earnings_call(
+            &[json!(circle_id), json!(amount)],
+            0,
+            fee,
+            nonce,
+        )
     }
 
     // ============================================================

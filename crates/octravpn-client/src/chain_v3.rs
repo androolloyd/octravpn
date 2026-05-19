@@ -12,11 +12,17 @@
 //! Each `build_*` method returns the legacy `{"kind":"contract_call",
 //! ...}` shape that `octravpn_core::tx::sign_call` translates into the
 //! on-wire OctraTx envelope — the same path the v2 runner uses for
-//! `open_session_v2`. Method names and param ordering mirror
+//! `open_session_v2`. The JSON envelope construction itself lives in
+//! [`octravpn_core::v3_calls`] so the node crate emits identical bytes;
+//! each `build_*_call` wrapper below just forwards its inputs to the
+//! shared builder. Method names and param ordering mirror
 //! `docker/devnet/v3-smoke.sh`; unit tests at the bottom pin both.
 
 use anyhow::{anyhow, Context, Result};
-use octravpn_core::{address::Address, rpc::RpcClient, sig::KeyPair, tx as octra_tx};
+use octravpn_core::{
+    address::Address, rpc::RpcClient, sig::KeyPair, tx as octra_tx,
+    v3_calls::ContractCallBuilder,
+};
 use serde_json::{json, Value};
 
 /// Default contract-call fee fallback when the chain's
@@ -47,6 +53,14 @@ impl<'a> ChainCtxV3<'a> {
     #[allow(dead_code)] // referenced by integration tests + future status display.
     pub(crate) fn wallet_addr(&self) -> &Address {
         &self.wallet_addr
+    }
+
+    /// Construct the shared `ContractCallBuilder` bound to this
+    /// client's program addr + wallet addr. All `build_*_call` methods
+    /// below delegate through this so the JSON wire shape is owned by
+    /// `octravpn_core::v3_calls`.
+    fn call_builder(&self) -> ContractCallBuilder {
+        ContractCallBuilder::new(self.program_addr.clone(), self.wallet_addr.clone())
     }
 
     pub(crate) async fn nonce(&self) -> Result<u64> {
@@ -240,16 +254,12 @@ impl<'a> ChainCtxV3<'a> {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "open_session",
-            "params": [tailnet_id, circle_id, max_pay],
-            "value": 0,
-            "fee": fee,
-            "nonce": nonce,
-        })
+        self.call_builder().open_session_call(
+            &[json!(tailnet_id), json!(circle_id), json!(max_pay)],
+            0,
+            fee,
+            nonce,
+        )
     }
 
     /// `nonreentrant settle_confirm(session_id, bytes_used, net,
@@ -258,16 +268,17 @@ impl<'a> ChainCtxV3<'a> {
     /// `settle_blinding` is a freshly-generated 32-byte hex string
     /// fed into the earnings hash chain.
     pub(crate) fn build_settle_confirm_call(&self, p: &SettleConfirmParams<'_>) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "settle_confirm",
-            "params": [p.session_id, p.bytes_used, p.net, p.settle_blinding],
-            "value": 0,
-            "fee": p.fee,
-            "nonce": p.nonce,
-        })
+        self.call_builder().settle_confirm_call(
+            &[
+                json!(p.session_id),
+                json!(p.bytes_used),
+                json!(p.net),
+                json!(p.settle_blinding),
+            ],
+            0,
+            p.fee,
+            p.nonce,
+        )
     }
 
     /// `claim_no_show(session_id)` — opener-side abort path. Fires
@@ -280,16 +291,8 @@ impl<'a> ChainCtxV3<'a> {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "claim_no_show",
-            "params": [session_id],
-            "value": 0,
-            "fee": fee,
-            "nonce": nonce,
-        })
+        self.call_builder()
+            .claim_no_show_call(&[json!(session_id)], 0, fee, nonce)
     }
 
     /// `nonreentrant sweep_expired_session(session_id)` — any caller
@@ -303,16 +306,8 @@ impl<'a> ChainCtxV3<'a> {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        json!({
-            "kind": "contract_call",
-            "from": self.wallet_addr.display(),
-            "to": self.program_addr.display(),
-            "method": "sweep_expired_session",
-            "params": [session_id],
-            "value": 0,
-            "fee": fee,
-            "nonce": nonce,
-        })
+        self.call_builder()
+            .sweep_expired_session_call(&[json!(session_id)], 0, fee, nonce)
     }
 
     // ============================================================

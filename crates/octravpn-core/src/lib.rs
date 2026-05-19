@@ -23,6 +23,7 @@ pub mod receipt_journal;
 pub mod rpc;
 pub mod session;
 pub mod stealth;
+pub mod v3_calls;
 pub mod v3_canonical;
 pub mod v3_members;
 pub mod v3_policy;
