@@ -30,6 +30,13 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/../../.." && pwd)
 COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
 
+# Shared state directory for the mesh-control container + the peer
+# containers (cert distribution). Created idempotently — the compose
+# file bind-mounts ./state into /work/state on mesh-control and
+# /mnt/mesh-control-state on each peer. The TLS cert + Noise static
+# key land under tailscale-wire/.
+mkdir -p "${SCRIPT_DIR}/state/tailscale-wire"
+
 # Pretty-prints a step header so the operator can tell which exit code
 # corresponds to which failure point.
 step() {
@@ -71,6 +78,16 @@ if [[ ! -d "${OCTRA_FOUNDRY}" ]]; then
     exit 10
 fi
 
+# The `headscale-rs` sibling provides the `headscale-api` crate which
+# hosts the Tailscale-wire layer (migrated 2026-05-19). octravpn-mesh
+# depends on it via `path = "../../../headscale-rs/headscale-api"`, so
+# the builder container needs both repos mounted side-by-side.
+HEADSCALE_RS="${REPO_ROOT}/../headscale-rs"
+if [[ ! -d "${HEADSCALE_RS}" ]]; then
+    echo "BUILD FAIL: ../headscale-rs not found next to repo root" >&2
+    exit 10
+fi
+
 # Prefer the project's own builder image (which already has the
 # system deps, the rust toolchain, and a warm cargo cache); fall
 # back to a stock rust:1.88-bookworm if it hasn't been built locally
@@ -89,6 +106,7 @@ mkdir -p "${LINUX_TARGET_DIR}" \
 docker run --rm \
     -v "${REPO_ROOT}":/work/octra \
     -v "${OCTRA_FOUNDRY}":/work/octra-foundry \
+    -v "${HEADSCALE_RS}":/work/headscale-rs \
     -v "${LINUX_TARGET_DIR}":/work/octra/target \
     -v "${LINUX_TARGET_DIR}/cargo-registry":/usr/local/cargo/registry \
     -v "${LINUX_TARGET_DIR}/cargo-git":/usr/local/cargo/git \
@@ -202,9 +220,59 @@ PREAUTH_KEY="${HTTP_KEY:-${CLI_KEY}}"
 # remaining gap.
 # ---------------------------------------------------------------------------
 
-step "Step 4: tailscale up on both peers"
+step "Step 4: install self-signed cert into peer trust stores"
 
-LOGIN_SERVER="http://tsi-mesh-control:51821"
+# Wait for mesh-control to have minted the TLS cert under its state
+# dir (the wire-layer's `tls::load_or_generate` writes it on first
+# bind to :443). The cert is shared into each peer via a read-only
+# bind mount at /mnt/mesh-control-state. We then copy it into
+# /usr/local/share/ca-certificates/ and run `update-ca-certificates`
+# so `tailscale up`'s forced-443 dial doesn't fail TLS verification.
+CERT_HOST_PATH="${SCRIPT_DIR}/state/tailscale-wire/tls.crt"
+for _ in $(seq 1 30); do
+    if [[ -s "${CERT_HOST_PATH}" ]]; then
+        break
+    fi
+    sleep 1
+done
+if [[ ! -s "${CERT_HOST_PATH}" ]]; then
+    echo "TLS CERT MISSING: ${CERT_HOST_PATH} not present after 30s" >&2
+    docker compose -f "${COMPOSE_FILE}" logs mesh-control >&2 || true
+    exit 10
+fi
+echo "TLS cert minted at ${CERT_HOST_PATH}" >&2
+
+for peer in tsi-peer-a tsi-peer-b; do
+    # The tailscale/tailscale image is alpine-based; it ships with
+    # `update-ca-certificates` from `ca-certificates`. Reversible:
+    # the cert lands at a well-known path and the script is
+    # idempotent (re-running on a warm container is a no-op).
+    docker exec "${peer}" sh -c '
+        set -e
+        if [ -s /mnt/mesh-control-state/tailscale-wire/tls.crt ]; then
+            mkdir -p /usr/local/share/ca-certificates
+            cp /mnt/mesh-control-state/tailscale-wire/tls.crt \
+               /usr/local/share/ca-certificates/octravpn-mesh-control.crt
+            if command -v update-ca-certificates >/dev/null 2>&1; then
+                update-ca-certificates >/dev/null 2>&1 || true
+            elif command -v c_rehash >/dev/null 2>&1; then
+                # Alpine path: append + rehash.
+                cat /mnt/mesh-control-state/tailscale-wire/tls.crt \
+                    >> /etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
+            fi
+        fi
+    ' || {
+        echo "WARN: cert install failed in ${peer}; continuing" >&2
+    }
+done
+
+step "Step 4b: tailscale up on both peers"
+
+# Stock `tailscale up` v1.78+ forces an HTTPS-on-443 dial regardless
+# of the login-server scheme. Point at https:// up front so the
+# initial /key probe goes over TLS too — we have one less code path
+# to debug.
+LOGIN_SERVER="https://tsi-mesh-control"
 TS_UP_OK=1
 for peer in tsi-peer-a tsi-peer-b; do
     # `tailscale up` blocks forever waiting for the coordination

@@ -39,17 +39,6 @@ services:
       # by changing only the command line.
       OCTRAVPN_ADMIN_TOKEN: "interop-test-token"
       RUST_LOG: "info,octravpn_node=debug"
-    volumes:
-      # Bind-mount the Linux-built binary read-only. `run-interop.sh`
-      # builds this inside `octravpn-builder` (or `rust:1.88-bookworm`
-      # as a fallback) and drops the artefact under
-      # `target/linux-debug/debug/octravpn-node` so a macOS host's
-      # native cargo cache stays untouched. The path is relative to
-      # this compose file: `../../../target/linux-debug/debug/...`
-      - type: bind
-        source: ../../../target/linux-debug/debug/octravpn-node
-        target: /usr/local/bin/octravpn-node
-        read_only: true
     # Run the Tailscale-wire control plane (Hub-free).
     # `octravpn-node mesh serve` brings up:
     #   - /admin/preauth — preauth-key minter (token-gated by
@@ -64,6 +53,12 @@ services:
       - "mesh"
       - "serve"
       - "--listen=0.0.0.0:51821"
+      - "--https-listen=0.0.0.0:443"
+      # SAN hostname has to match what the peer container resolves
+      # the login-server URL to. We use the docker-compose service
+      # name (`tsi-mesh-control`) since both peers join the same
+      # bridge network.
+      - "--cert-hostname=tsi-mesh-control"
       - "--state-dir=/work/state/tailscale-wire"
       - "--tailnet-id=interop-test"
     ports:
@@ -72,6 +67,23 @@ services:
       # docker-network DNS (`http://tsi-mesh-control:51821`) and
       # don't need the host port.
       - "51821:51821"
+      # Publish 443 so curl from the host can verify the TLS
+      # listener too. Stock `tailscale up` v1.78+ forces a parallel
+      # HTTPS-on-443 dial after the initial /key probe — see
+      # `docs/tailscale-interop-blocker.md` 2026-05-19 §"Wire-format
+      # surprise".
+      - "8443:443"
+    # The TLS cert is minted under /work/state/tailscale-wire/tls.crt.
+    # Expose that path to the peer containers via a shared bind mount
+    # below so `run-interop.sh` can copy it into their trust stores.
+    volumes:
+      - type: bind
+        source: ../../../target/linux-debug/debug/octravpn-node
+        target: /usr/local/bin/octravpn-node
+        read_only: true
+      - type: bind
+        source: ./state
+        target: /work/state
     networks:
       - tsi-net
 
@@ -85,6 +97,15 @@ services:
       - /dev/net/tun:/dev/net/tun
     volumes:
       - tsi-peer-a-state:/var/lib/tailscale
+      # Read-only access to the mesh-control state dir so the peer
+      # can pick up the self-signed cert and install it into its
+      # trust store. `run-interop.sh` does the `cp` +
+      # `update-ca-certificates` dance once the mesh-control has
+      # minted the cert.
+      - type: bind
+        source: ./state
+        target: /mnt/mesh-control-state
+        read_only: true
     environment:
       TS_HOSTNAME: peer-a
       TS_STATE_DIR: /var/lib/tailscale
@@ -96,7 +117,30 @@ services:
       - sh
       - -c
       - |
-        tailscaled --statedir=/var/lib/tailscale --tun=userspace-networking \
+        # Install the mesh-control self-signed cert into the system
+        # trust store BEFORE tailscaled starts — `tailscaled` reads the
+        # root cert set once at boot. Wait briefly for the cert to
+        # appear (the mesh-control container mints it on first :443
+        # bind, which happens in parallel with this startup).
+        for _ in $(seq 1 30); do
+            if [ -s /mnt/mesh-control-state/tailscale-wire/tls.crt ]; then
+                break
+            fi
+            sleep 1
+        done
+        if [ -s /mnt/mesh-control-state/tailscale-wire/tls.crt ]; then
+            mkdir -p /usr/local/share/ca-certificates
+            cp /mnt/mesh-control-state/tailscale-wire/tls.crt \
+               /usr/local/share/ca-certificates/octravpn-mesh-control.crt
+            update-ca-certificates 2>&1 | tail -3 || true
+        else
+            echo "WARN: TLS cert not present; tailscaled may fail TLS verification" >&2
+        fi
+        # TS_DEBUG_NOISE=1 dumps EarlyNoise traffic into the
+        # tailscaled stderr stream — used by P0-4 / PR 4 to
+        # capture real client bytes against our challenge payload.
+        TS_DEBUG_NOISE=1 \
+          tailscaled --statedir=/var/lib/tailscale --tun=userspace-networking \
                     --socket=/var/run/tailscale/tailscaled.sock &
         # Keep PID 1 alive; the daemon runs in the background.
         wait $!
@@ -112,6 +156,10 @@ services:
       - /dev/net/tun:/dev/net/tun
     volumes:
       - tsi-peer-b-state:/var/lib/tailscale
+      - type: bind
+        source: ./state
+        target: /mnt/mesh-control-state
+        read_only: true
     environment:
       TS_HOSTNAME: peer-b
       TS_STATE_DIR: /var/lib/tailscale
@@ -123,7 +171,30 @@ services:
       - sh
       - -c
       - |
-        tailscaled --statedir=/var/lib/tailscale --tun=userspace-networking \
+        # Install the mesh-control self-signed cert into the system
+        # trust store BEFORE tailscaled starts — `tailscaled` reads the
+        # root cert set once at boot. Wait briefly for the cert to
+        # appear (the mesh-control container mints it on first :443
+        # bind, which happens in parallel with this startup).
+        for _ in $(seq 1 30); do
+            if [ -s /mnt/mesh-control-state/tailscale-wire/tls.crt ]; then
+                break
+            fi
+            sleep 1
+        done
+        if [ -s /mnt/mesh-control-state/tailscale-wire/tls.crt ]; then
+            mkdir -p /usr/local/share/ca-certificates
+            cp /mnt/mesh-control-state/tailscale-wire/tls.crt \
+               /usr/local/share/ca-certificates/octravpn-mesh-control.crt
+            update-ca-certificates 2>&1 | tail -3 || true
+        else
+            echo "WARN: TLS cert not present; tailscaled may fail TLS verification" >&2
+        fi
+        # TS_DEBUG_NOISE=1 dumps EarlyNoise traffic into the
+        # tailscaled stderr stream — used by P0-4 / PR 4 to
+        # capture real client bytes against our challenge payload.
+        TS_DEBUG_NOISE=1 \
+          tailscaled --statedir=/var/lib/tailscale --tun=userspace-networking \
                     --socket=/var/run/tailscale/tailscaled.sock &
         # Keep PID 1 alive; the daemon runs in the background.
         wait $!

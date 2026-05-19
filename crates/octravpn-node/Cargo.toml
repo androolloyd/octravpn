@@ -59,6 +59,14 @@ octravpn-mesh = { path = "../octravpn-mesh", features = ["test-helpers"] }
 # `tower::ServiceExt::oneshot` drives the merged axum::Router in the
 # `tailscale_wire_integration` test without binding a real port.
 tower = { version = "0.5", features = ["util"] }
+# `BodyExt::frame` for incremental streaming-body reads in the PR 3
+# `stream_true_emits_chunk_on_registry_change` integration test.
+http-body-util = "0.1"
+# `tokio::time::pause`/`advance` for the PR 3 streaming test —
+# workspace `tokio = { features = ["full"] }` would include this, but
+# integration tests need the feature surfaced via dev-deps to keep
+# the unification reliable.
+tokio = { version = "1", features = ["full", "test-util"] }
 criterion = { version = "0.5", features = ["html_reports"] }
 # wireguard_throughput.rs benches WG primitives without standing up
 # Tunn instances (those are module-private).

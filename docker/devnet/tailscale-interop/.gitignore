@@ -1,0 +1,5 @@
+# Runtime state for the mesh-control container's shared bind mount.
+# Holds the Noise long-term static key + the self-signed TLS cert
+# minted at first :443 bind. Regenerated automatically by
+# `run-interop.sh`; safe to wipe between runs.
+state/

@@ -432,3 +432,149 @@ only changes if a wire-policy hook needs a new trait method. The
 trait surfaces are intentionally small (`PreauthRedeemer::redeem` +
 `IpAllocator::allocate`) — growing them is a conscious design
 decision, not a default.
+
+## 2026-05-19 P0 batch (PRs 1–4) shipped, exit code still 30 — new wall: HTTP/1.1 Upgrade through axum-server+rustls
+
+The P0 batch from `docs/headscale-gap-analysis.md` landed:
+
+| PR | What shipped | Wire-layer evidence |
+| -- | ------------ | ------------------- |
+| 1  | `tailscale_wire::tls` (rcgen + rustls), `tailscale_wire::serve` (dual-bind `:51821` plain + `:443` rustls), `mesh serve --https-listen` + `--cert-hostname` flags | TLS cert cached at `<state_dir>/tls.{crt,key}`; SAN includes the configured hostname + `localhost` + loopback. Client logs: `tlsdial: warning: server cert for "tsi-mesh-control" passed x509 validation but is self-signed by "CN=headscale.local"`. |
+| 2  | `POST /machine/register` + `POST /machine/map` (flat, NodeKey-in-body); keyed `/machine/{node_key}/{register,map}` routes preserved. `register::handle_register_flat` / `map::handle_map_flat` share `register_inner` / `map_inner` with the keyed variants. | Direct probe via `wget` returns 200 with a `RegisterResponse` JSON. Tests: `register::tests::flat_register_extracts_node_key_from_body`, `map::tests::flat_map_extracts_node_key_from_body`, octra-side `flat_register_path_works_via_octravpn_node_router`. |
+| 3  | Per-chunk `MapResponse` streaming on `Stream=true`: `Notify::notify_waiters` on registry change emits a fresh `MapResponse` chunk on the existing stream; idle ticks emit `\n` keepalives every 30s. Stream never terminates naturally. | Tests: `map::tests::stream_true_emits_mapresponse_chunk_on_registry_change` (paused tokio time), octra-side `stream_true_emits_chunk_on_registry_change`. |
+| 4  | EarlyNoise payload upgraded from `{"NodeKeyChallenge":{"Public":"nodekey:00…"}}` (all-zero, degenerate X25519) to a freshly-generated X25519 challenge pubkey via `snow::Builder::generate_keypair`. Tracks upstream `key.NewChallenge()` semantics. | In-process unit test of the noise round-trip still passes; client never reaches EarlyNoise (see below). |
+
+**Exit code: 30.** The harness clears step 3 (preauth surface) and reaches step 4 with a working TLS handshake on :443; `tailscale up` exits non-zero before step 5.
+
+### What the wall is
+
+Client log on a fresh `tailscale up`:
+
+```
+control: control server key from https://tsi-mesh-control: ts2021=[EB6rw], legacy=
+control: Generating a new nodekey.
+control: RegisterReq: onode= node=[…] fup=false nks=false
+control: controlhttp: forcing port 443 dial due to recent noise dial
+tlsdial: warning: server cert for "tsi-mesh-control" passed x509 validation but is self-signed by "CN=headscale.local"
+Received error: register request: Post "https://tsi-mesh-control/machine/register": connection attempts aborted by context: context deadline exceeded
+```
+
+Mesh-control log for the same connection:
+
+```
+WARN headscale_api::tailscale_wire::noise: ts2021 connection ended with error error=noise handshake: read initiation frame: early eof
+```
+
+What's happening, beat-by-beat:
+
+1. Client opens HTTPS to `tsi-mesh-control:443`. TLS handshake completes.
+2. Client `GET /key` returns the server's `mkey:` — fine.
+3. Client opens a second HTTPS connection and sends `POST /ts2021` with `Upgrade: tailscale-control-protocol` + `Connection: upgrade`. **Our handler returns `101 Switching Protocols`.**
+4. The client should now send the Noise IK Initiation frame on the same TCP socket. Instead it **closes the socket** — `early eof` on our side.
+5. The client's parallel "register over noise-tunnelled h2" flow times out, register fails, tailscale up exits.
+
+The `/ts2021` upgrade path works fine on plain HTTP (the existing
+`octravpn-node` integration test `ts2021_framing_responds_to_initiation`
+proves the framing + h2-over-Noise dispatch). It does NOT work through
+the rustls-terminated path that PR 1 added.
+
+### Hypothesis: `axum-server::bind_rustls` + hyper Upgrade
+
+Stock `axum_server::bind_rustls(addr, cfg).serve(router)` runs hyper's
+HTTP/1.1+H2 stack on top of a `tokio_rustls::server::TlsStream`. When
+the client requests `Upgrade: tailscale-control-protocol` over that
+stream, hyper *does* produce a `hyper::upgrade::OnUpgrade` in the
+request extensions (our handler picks it up, returns 101). After the
+101, the underlying `Upgraded` value carries the TLS-wrapped socket —
+but it appears that the client is either:
+
+(a) Negotiating HTTP/2 via TLS ALPN, in which case the `Upgrade:` header
+is silently ignored (RFC 7540 §3.2 forbids it). We set
+`alpn_protocols = vec![b"http/1.1".to_vec()]` in PR 1 to avoid this,
+but the EOF persisted — suggesting ALPN may not be the root cause.
+
+(b) Treating the `101` response as malformed (e.g. expecting no body
+flush between 101 and the upgraded stream) — Go's `controlhttp` client
+uses `httputil.ClientUpgradeConn` which has its own quirks around how
+the response body is read before the TCP socket is reclaimed.
+
+(c) The `hyper::upgrade::Upgraded` future, when wrapped by `TokioIo`
+and handed to our framing reader, is reading from the TLS connection
+buffer that hyper-rustls has already drained — the Noise Initiation
+frame the client sent on the wire may have been consumed by hyper's
+read-ahead before we got the socket back.
+
+(c) is the most likely culprit. Upstream's headscale-Go uses the
+`Conn` returned by `http.Hijacker.Hijack()` which guarantees the
+underlying TCP socket is handed back with the read buffer drained. The
+Rust equivalent for hyper 1.x is `hyper::upgrade::on(request).await`
+which yields an `Upgraded` — but `Upgraded` doesn't promise the same
+guarantee when the underlying transport is TLS-buffered.
+
+### What unblocks exit 30 → exit 0 from here
+
+Two paths, in increasing order of cost:
+
+1. **Bypass axum-server for `/ts2021`.** Run a parallel rustls listener
+   on `:443` that special-cases the `/ts2021` POST: do the TLS handshake
+   manually with `tokio-rustls::TlsAcceptor`, peek the first HTTP request
+   line, and if it's `POST /ts2021` with the upgrade header, write the
+   `101 Switching Protocols` response by hand and hand the raw
+   `TlsStream<TcpStream>` to `noise::drive_ts2021`. All other requests
+   go to the axum router as today. ~200 lines of code; the framing
+   already works (existing integration test).
+
+2. **Reach into hyper for the upgrade socket.** Replace
+   `axum_server::bind_rustls` with a manual `hyper::server::conn` setup
+   that calls `hyper::upgrade::on(req)` and is careful about read
+   buffering. Higher risk because hyper's upgrade contract over TLS
+   isn't documented.
+
+Path (1) is the cleaner ship. The framing + h2-over-noise + EarlyNoise
+content are all correct (verified by direct-noise tests); the only thing
+missing is the socket-hijack semantics on the TLS path.
+
+### Exit-code progression as of this PR batch
+
+| State | Exit code |
+| ----- | --------- |
+| Pre-PR-1 (no TLS) | 30 (`forcing port 443 dial` fails) |
+| **Post PRs 1–4 (this commit batch)** | **30** (TLS works, /key works, /ts2021 upgrade fails through axum-server+rustls) |
+| + raw rustls listener for `/ts2021` (the path above) | expect 0 or 40 |
+| + flat-path register over h2-in-noise verified | expect 0 |
+
+### New deps added (PR 1)
+
+- `rcgen` 0.13 (with `pem` + `aws_lc_rs` features) — self-signed cert minting at startup.
+- `axum-server` 0.7 (`tls-rustls` feature) — the rustls bridge for axum 0.7.
+- `rustls` 0.23 (`aws-lc-rs` feature) — the TLS server itself.
+- `rustls-pemfile` 2 — parsing the cached PEM back into rustls types.
+
+All four land under `headscale-api/Cargo.toml` (not the workspace
+`Cargo.toml`). Pre-existing wedge (#210, boringtun ↔ curve25519-dalek)
+unchanged.
+
+### Build.rs gate
+
+`headscale-api/build.rs` now skips `tonic_build` unless `CARGO_FEATURE_FULL`
+is set. Wire-layer-only consumers (octravpn-mesh, the docker builder)
+no longer need `protoc` installed. Host builds with default features
+remain unchanged.
+
+### Acceptance probe (manual, confirms PRs 1 + 2 from inside a peer)
+
+```
+$ docker exec tsi-peer-a sh -c '\
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    wget -qO- https://tsi-mesh-control/key'
+{"PublicKey":"mkey:101eabc31b16aa58c74d1938eada471a613c7429468d795f316a556ab7ad146e"}
+
+$ docker exec tsi-peer-a sh -c '\
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    wget --post-data="{...flat-register body...}" -qO- \
+        https://tsi-mesh-control/machine/register'
+{"User":{...},"Login":{...},"MachineAuthorized":true}
+```
+
+Both return `200 OK` with a valid response. The wire surface is correct;
+the upgrade-through-TLS path is the wall.

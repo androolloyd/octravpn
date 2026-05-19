@@ -216,9 +216,24 @@ enum MeshCmd {
     /// Both surfaces share one `PreauthMinter` so a key minted over
     /// HTTP is immediately redeemable through `register`.
     Serve {
-        /// `host:port` to listen on. Defaults to `0.0.0.0:51821`.
+        /// `host:port` to listen on for plain HTTP. Defaults to
+        /// `0.0.0.0:51821`. Used by the harness's curl probes and by
+        /// older Tailscale clients that don't force the 443 dial.
         #[arg(long, default_value = "0.0.0.0:51821")]
         listen: String,
+        /// `host:port` for the rustls-terminated HTTPS listener. Stock
+        /// `tailscale up` v1.78+ forces a parallel HTTPS-on-443 dial
+        /// after its initial /key probe; absent a TLS terminator the
+        /// flow stalls before reaching `/machine/register`. Pass the
+        /// empty string to disable (useful for hosts that can't bind
+        /// :443).
+        #[arg(long, default_value = "0.0.0.0:443")]
+        https_listen: String,
+        /// SAN hostname embedded in the self-signed cert. Should match
+        /// whatever the client resolves the login-server to (typically
+        /// the docker service name, e.g. `tsi-mesh-control`).
+        #[arg(long, default_value = "localhost")]
+        cert_hostname: String,
         /// Directory for the Noise long-term static key + future wire
         /// state. Defaults to `./state/tailscale-wire`.
         #[arg(long, default_value = "./state/tailscale-wire")]
@@ -357,10 +372,22 @@ async fn run_mesh_cmd(sub: MeshCmd) -> Result<()> {
         }
         MeshCmd::Serve {
             listen,
+            https_listen,
+            cert_hostname,
             state_dir,
             tailnet_id,
             admin_token,
-        } => run_mesh_serve(listen, state_dir, tailnet_id, admin_token).await,
+        } => {
+            run_mesh_serve(
+                listen,
+                https_listen,
+                cert_hostname,
+                state_dir,
+                tailnet_id,
+                admin_token,
+            )
+            .await
+        }
     }
 }
 
@@ -368,6 +395,8 @@ async fn run_mesh_cmd(sub: MeshCmd) -> Result<()> {
 /// rationale.
 async fn run_mesh_serve(
     listen: String,
+    https_listen: String,
+    cert_hostname: String,
     state_dir: String,
     tailnet_id: String,
     admin_token: Option<String>,
@@ -380,7 +409,12 @@ async fn run_mesh_serve(
         Json, Router,
     };
     use octravpn_mesh::{
-        ip_alloc::TailnetIpAllocator, tailscale_wire::MachineRegistry, tailscale_wire_router,
+        ip_alloc::TailnetIpAllocator,
+        tailscale_wire::{
+            serve::{serve as wire_serve, ServeConfig},
+            tls::SanConfig,
+            MachineRegistry,
+        },
         PreauthMinter, ServerNoiseKey, WireState, DEFAULT_PREAUTH_TTL,
     };
     use serde::{Deserialize, Serialize};
@@ -467,13 +501,60 @@ async fn run_mesh_serve(
         .route("/admin/preauth", post(mint_handler))
         .with_state(admin_ctx);
 
-    let app = admin_router.merge(tailscale_wire_router(ws));
-    let addr: SocketAddr = listen.parse().context("parse listen addr")?;
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    eprintln!("mesh serve: listening on {addr}");
-    axum::serve(listener, app)
+    // Dual-bind: plain HTTP on `listen` for /admin/preauth + curl
+    // probes; rustls-terminated HTTPS on `https_listen` for the
+    // forced-443 dial stock Tailscale clients make. Pass an empty
+    // string to https_listen to skip TLS (useful on hosts that can't
+    // bind 443).
+    let http_addr: SocketAddr = listen.parse().context("parse http listen addr")?;
+    let https_addr: Option<SocketAddr> = if https_listen.is_empty() {
+        None
+    } else {
+        Some(https_listen.parse().context("parse https listen addr")?)
+    };
+
+    let cfg = ServeConfig {
+        http_addr,
+        https_addr,
+        state_dir: std::path::PathBuf::from(&state_dir),
+        sans: SanConfig::with_hostname(&cert_hostname),
+    };
+    let handle = wire_serve(ws, cfg, admin_router)
         .await
-        .context("mesh serve: axum::serve")?;
+        .context("mesh serve: bind wire surface")?;
+    if let Some(tls) = handle.tls.as_ref() {
+        eprintln!(
+            "mesh serve: HTTPS listening on {} (cert={}, key={})",
+            https_addr.unwrap(),
+            tls.cert_path.display(),
+            tls.key_path.display()
+        );
+        eprintln!(
+            "mesh serve: trust the cert in peer containers with `update-ca-certificates`"
+        );
+    }
+    eprintln!("mesh serve: HTTP listening on {http_addr}");
+
+    // Wait for whichever listener exits first. Either bubbling up an
+    // error is fine — the harness teardown handles container restart.
+    let http_fut = handle.http;
+    let https_fut = handle.https;
+    match https_fut {
+        Some(https_fut) => {
+            tokio::select! {
+                r = http_fut => r.context("mesh serve: http listener")?
+                    .context("mesh serve: http accept")?,
+                r = https_fut => r.context("mesh serve: https listener")?
+                    .context("mesh serve: https accept")?,
+            };
+        }
+        None => {
+            http_fut
+                .await
+                .context("mesh serve: http listener")?
+                .context("mesh serve: http accept")?;
+        }
+    }
     Ok(())
 }
 

@@ -205,3 +205,158 @@ async fn ts2021_framing_responds_to_initiation() {
     drop(framed);
     let _ = server_task.await;
 }
+
+/// Flat v1.78+ path: `POST /machine/register` with NodeKey in the body.
+/// Exercises the wire-layer addition that closes P0-2.
+#[tokio::test]
+async fn flat_register_path_works_via_octravpn_node_router() {
+    let (state, minter, _dir) = build_state();
+    let pk = minter.mint("alice", DEFAULT_PREAUTH_TTL, false);
+    let app = tailscale_wire_router(state.clone());
+
+    let node_hex = "1a".repeat(32);
+    let reg_body = serde_json::json!({
+        "NodeKey": format!("nodekey:{node_hex}"),
+        "Auth": { "AuthKey": pk.key },
+        "Hostinfo": { "Hostname": "peer-a", "OS": "linux", "OSVersion": "6.6" },
+    });
+    let resp = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/machine/register")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(&reg_body).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::OK);
+
+    // Flat /machine/map with NodeKey in body.
+    let other_hex = "2b".repeat(32);
+    state.machines.upsert(
+        other_hex.clone(),
+        octravpn_mesh::MachineRecord {
+            node_key_hex: other_hex.clone(),
+            machine_key_hex: String::new(),
+            user: "bob".into(),
+            hostname: "peer-b".into(),
+            ipv4: std::net::Ipv4Addr::new(100, 64, 0, 99),
+        },
+    );
+
+    let map_body = serde_json::json!({
+        "NodeKey": format!("nodekey:{node_hex}"),
+        "Version": 39,
+    });
+    let resp = app
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/machine/map")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(&map_body).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::OK);
+    let raw = to_bytes(resp.into_body(), 32 * 1024).await.unwrap();
+    let mr: octravpn_mesh::tailscale_wire::MapResponse =
+        serde_json::from_slice(&raw).unwrap();
+    assert_eq!(mr.peers.len(), 1);
+}
+
+/// PR 3 acceptance: Stream:true on `/machine/map` emits a fresh
+/// `MapResponse` chunk when a second peer registers. Drives the
+/// registry's `Notify::notify_waiters` path end-to-end against the
+/// router `octravpn-node` actually mounts.
+#[tokio::test(start_paused = true)]
+async fn stream_true_emits_chunk_on_registry_change() {
+    use http_body_util::BodyExt;
+    use std::time::Duration;
+
+    let (state, _minter, _dir) = build_state();
+    let a_hex = "aa".repeat(32);
+    let b_hex = "bb".repeat(32);
+    // Seed peer-a so the `/map` handler doesn't 404.
+    state.machines.upsert(
+        a_hex.clone(),
+        octravpn_mesh::MachineRecord {
+            node_key_hex: a_hex.clone(),
+            machine_key_hex: String::new(),
+            user: "alice".into(),
+            hostname: "peer-a".into(),
+            ipv4: std::net::Ipv4Addr::new(100, 64, 0, 10),
+        },
+    );
+
+    let app = tailscale_wire_router(state.clone());
+    let req_body = serde_json::json!({ "Stream": true, "Version": 39 });
+    let resp = app
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri(format!("/machine/nodekey:{a_hex}/map"))
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(&req_body).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::OK);
+
+    let mut body = resp.into_body();
+    // First chunk = initial MapResponse with 0 peers.
+    let frame = BodyExt::frame(&mut body).await.unwrap().unwrap();
+    let chunk = frame.into_data().unwrap();
+    assert!(chunk.ends_with(b"\n"));
+    let trimmed = &chunk[..chunk.len() - 1];
+    let first: octravpn_mesh::tailscale_wire::MapResponse =
+        serde_json::from_slice(trimmed).unwrap();
+    assert_eq!(first.peers.len(), 0);
+
+    // `Notify::notify_waiters` only wakes *current* waiters — it
+    // doesn't store permits. So we have to register the second-chunk
+    // waiter *before* we upsert peer-b. Spawn the upsert from a
+    // background task that wakes after a short virtual-time delay
+    // (we're running under `tokio::time::pause`), then poll the
+    // body. The stream's select! will be parked on `notified()`
+    // when peer-b's `notify_waiters` fires.
+    let state_for_spawn = state.clone();
+    let b_hex_for_spawn = b_hex.clone();
+    let spawn = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        state_for_spawn.machines.upsert(
+            b_hex_for_spawn.clone(),
+            octravpn_mesh::MachineRecord {
+                node_key_hex: b_hex_for_spawn,
+                machine_key_hex: String::new(),
+                user: "bob".into(),
+                hostname: "peer-b".into(),
+                ipv4: std::net::Ipv4Addr::new(100, 64, 0, 11),
+            },
+        );
+    });
+
+    let frame = BodyExt::frame(&mut body).await.unwrap().unwrap();
+    spawn.await.unwrap();
+    let chunk = frame.into_data().unwrap();
+    let trimmed = &chunk[..chunk.len() - 1];
+    let second: octravpn_mesh::tailscale_wire::MapResponse =
+        serde_json::from_slice(trimmed).unwrap();
+    assert_eq!(
+        second.peers.len(),
+        1,
+        "stream should emit a fresh MapResponse on registry change"
+    );
+    assert_eq!(second.peers[0].addresses[0], "100.64.0.11/32");
+}
