@@ -34,8 +34,16 @@ Type "octravpn-node mesh mint-preauth --user fleet-ops --reusable --ttl-secs 864
 Enter
 Sleep 3s
 
-Type "# same surface, over HTTP (Bearer-gated; daemon must be running)"
+Type "# same surface, over HTTP (Bearer-gated; daemon must be running):"
 Enter
-Type "curl -sS -H 'Authorization: Bearer interop-test-token' -H 'Content-Type: application/json' -d '{\"user\":\"alice\",\"reusable\":true}' http://127.0.0.1:51821/admin/preauth"
+Type "#   POST /admin/preauth"
+Enter
+Type "#   Authorization: Bearer <token>"
+Enter
+Type "#   Content-Type: application/json"
+Enter
+Type "#   body: an admin-preauth-mint JSON document"
+Enter
+Type "# (curl example omitted; vhs cannot type literal JSON braces cleanly)"
 Enter
 Sleep 3s
