@@ -38,18 +38,23 @@ Before touching any host:
 - [ ] Monitoring stack (Prometheus + Grafana + Loki) collecting from
       the textfile collector path you'll point the alerts at.
 
-Smoke probe the Octra side:
+Smoke-probe the config + the Octra side in one shot (#232):
 
 ```sh
-RPC=https://testnet.octra.network/rpc
-PROG=oct<deployed-OctraVPN-program-addr>
-
-octra cast rpc node_status   --rpc-url "$RPC"
-octra cast call "$PROG" get_params       --rpc-url "$RPC"
-octra cast call "$PROG" list_tailnets    --rpc-url "$RPC"
+octravpn-node config validate /etc/octravpn/node.toml
+# Exits 0 on a clean validation; non-zero with the first failure
+# surfaced. Probes schema, wallet/WG key file readability, audit dir
+# writability, receipt-journal path, RPC reachability, and the
+# program's `get_params` view.
+#
+# Pass `--offline` in air-gapped CI to skip the RPC + program probes.
+# Pass `--json` to feed downstream tooling a structured report.
 ```
 
-All three should succeed before you start the node.
+This single command replaces the legacy `octra cast rpc node_status`
++ `octra cast call $PROG get_params` smoke probe and adds local
+checks (key files, audit/journal paths, schema) the legacy probe
+missed.
 
 ## 2. Staging deploy
 
@@ -87,11 +92,16 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now octravpn-node
 ```
 
-Verify within 60s:
+Verify within 60s (#232):
 
 ```sh
-curl -sS http://localhost:51821/health | jq
-# expect: { "status": "ok", ... }
+sudo -u octravpn octravpn-node health \
+  --config /etc/octravpn/node.toml \
+  --remote http://localhost:51821
+# Reads on-chain stake / slashed / unbonding state, confirms the
+# local audit log + receipt journal are openable, and hits the
+# running daemon's /health endpoint. Exits 0 on a fully-green probe;
+# non-zero with the first failure surfaced.
 
 journalctl -u octravpn-node -n 100 --no-pager
 # expect: "register_endpoint submitted", "control plane listening",
@@ -194,23 +204,18 @@ Cause: the operator's `endpoint_stake` has fallen below
 governance slashed the operator.
 
 ```sh
-# Step 1 — read the on-chain stake for your address.
-octra cast call <octravpn-program> get_endpoint_stake \
-  --params '["<your-operator-addr>"]' --rpc-url <RPC_URL>
-
-# Step 2 — is the slashed flag set?
-octra cast call <octravpn-program> is_endpoint_slashed \
-  --params '["<your-operator-addr>"]' --rpc-url <RPC_URL>
-# If true → you have been governance-slashed (permanent at this
-#           address). Recovery is impossible at the same wallet.
-#           File a dispute via the governance channel.
-
-# Step 3 — if not slashed but stake is 0, check unbonding state.
-octra cast call <octravpn-program> get_endpoint_unbonding \
-  --params '["<your-operator-addr>"]' --rpc-url <RPC_URL>
-# Non-zero stake here means you started an unbond. Either complete
-# it (finalize_unbond after grace) or re-bond:
-#   octravpn-node bond --amount 1000000000
+# One shot (#232) — reads stake + slashed flag + unbonding state in a
+# single command. Same probe a cron job can use to surface
+# stake-degraded operators automatically.
+sudo -u octravpn octravpn-node health \
+  --config /etc/octravpn/node.toml
+# - `endpoint stake` row prints the on-chain stake (raw OU).
+# - `endpoint slashed` row flips to FAIL if governance has marked the
+#   operator permanently slashed — recovery is impossible at the
+#   same wallet; file a dispute via the governance channel.
+# - `endpoint unbonding` row prints the in-flight unbond if any.
+#   Clear it with `finalize_unbond` after grace or re-bond:
+#       octravpn-node bond --amount 1000000000
 ```
 
 While the endpoint is inactive, **don't** restart the node
@@ -242,9 +247,19 @@ If they're attackers: front-line nftables drop (see hardening §4.3).
 ### 7.3 Audit chain break detected
 
 ```sh
-# Step 1 — confirm the break point.
-octravpn-node verify-audit-log <file>
-# → "audit chain break at line N: ..."
+# Step 1 — confirm the break point (#232: prefer the richer
+# `audit verify` form over the legacy `verify-audit-log` alias).
+octravpn-node audit verify \
+  --audit-path /var/log/octravpn/audit
+# → "audit log: FAIL ... line N: ..."
+
+# Step 1b — live-tail the audit log to confirm the break is current
+#           rather than a stale rotated file. Stops with a non-zero
+#           exit and a clear marker the moment HMAC verification
+#           catches the next bad line.
+octravpn-node audit-tail \
+  --audit-path /var/log/octravpn/audit \
+  --follow
 
 # Step 2 — exfiltrate the entire file + .audit.key + journalctl logs
 #          since N to off-host storage for forensics.
@@ -252,13 +267,22 @@ sudo tar czf /tmp/audit-incident-$(date -u +%F-%H%M).tgz \
   /var/log/octravpn/audit/ \
   /var/log/octravpn/audit/.audit.key
 
-# Step 3 — assume host compromise. Stop the node, rebuild from
+# Step 3 — for any session that was active around the break, confirm
+#          the receipt-journal floor hasn't drifted from the audit
+#          record. Flags the P1-8/9 "audit carries a signed seq above
+#          the journal floor" invariant break — that's host compromise
+#          unless proven otherwise.
+octravpn-node receipt-verify <session-id-hex> \
+  --journal-path /var/lib/octravpn/receipts.bin \
+  --audit-path /var/log/octravpn/audit
+
+# Step 4 — assume host compromise. Stop the node, rebuild from
 #          known-good base image, restore wallet/wg keys from your
 #          offline backup, regenerate audit key.
 sudo systemctl stop octravpn-node
 # rebuild ...
 
-# Step 4 — investigate. If breakage tracks to a specific tx hash,
+# Step 5 — investigate. If breakage tracks to a specific tx hash,
 #          the chain has the authoritative copy of that event.
 ```
 

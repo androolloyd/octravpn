@@ -370,8 +370,8 @@ fn policy_bytes_for_v3(
 mod tests {
     use super::*;
     use crate::config::{
-        AttestationCfg, ChainCfg, ControlCfg, NodeConfig, PricingCfg, ProtocolVersion,
-        TunnelCfg,
+        AnalyticsCfg, AttestationCfg, ChainCfg, ControlCfg, NodeConfig, PricingCfg,
+        ProtocolVersion, TunnelCfg,
     };
     use std::path::Path;
 
@@ -406,6 +406,10 @@ mod tests {
             },
             control: ControlCfg::default(),
             attestation: AttestationCfg::default(),
+            // #232: `analytics` was added to `NodeConfig` after this
+            // fixture was written; the indexer defaults to disabled, so
+            // the v3_boot tests are unaffected by the new field.
+            analytics: AnalyticsCfg::default(),
         }
     }
 

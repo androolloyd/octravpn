@@ -25,6 +25,7 @@ mod audit_cli;
 mod chain;
 mod chain_v2;
 mod chain_v3;
+mod cli_ops;
 mod config;
 mod control;
 mod events;
@@ -183,6 +184,32 @@ enum Cmd {
         #[command(subcommand)]
         sub: MeshCmd,
     },
+    /// #232: schema-check + key + RPC + program reachability against a
+    /// `node.toml`. Replaces the manual `octra cast rpc node_status`
+    /// + `octra cast call $PROG get_params` smoke probe + ad-hoc TOML
+    /// diffing dance from `docs/deployment-runbook.md` §1.
+    Config {
+        #[command(subcommand)]
+        cmd: cli_ops::ConfigCmd,
+    },
+    /// #232: one-shot operator health probe. Reads on-chain stake /
+    /// slashed / unbonding state, validates local audit log + receipt
+    /// journal are openable, and (when `--remote` is set) hits the
+    /// running daemon's `GET /health`. Replaces the manual `octra
+    /// cast call` triple and `curl … | jq` step from the runbook §7.1
+    /// + §2.
+    Health(cli_ops::HealthArgs),
+    /// #232: live-tail the audit log with per-line HMAC verification.
+    /// `--follow` keeps reading appended lines (similar to `tail -F`);
+    /// without `--follow` it prints existing lines and exits. A chain
+    /// break interrupts output with a clear marker and a non-zero exit
+    /// code so cron pipelines surface tampering immediately.
+    AuditTail(cli_ops::AuditTailArgs),
+    /// #232: report the receipt-journal floor for a session id plus
+    /// every audit-log entry that names the same session. Cross-checks
+    /// the P1-8/9 invariant (no signed seq above the journal floor).
+    /// Useful as a quick forensic probe after an alert.
+    ReceiptVerify(cli_ops::ReceiptVerifyArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -322,6 +349,28 @@ async fn main() -> Result<()> {
             // collapse to 0 regardless of the verify result.
             std::process::exit(code);
         }
+        // #232: new operator-facing surfaces. None of them need the
+        // Hub — `config validate` and `health` build their own short-
+        // lived `RpcClient`; `audit-tail` and `receipt-verify` are
+        // pure local-file inspectors (same shape as `audit`). Dispatch
+        // pre-Hub so an operator can run them against a `node.toml`
+        // whose daemon is offline (incident response shape).
+        Cmd::Config { cmd: cfg_cmd } => {
+            let code = cli_ops::run_config(cfg_cmd)?;
+            std::process::exit(code);
+        }
+        Cmd::Health(args) => {
+            let code = cli_ops::run_health(args)?;
+            std::process::exit(code);
+        }
+        Cmd::AuditTail(args) => {
+            let code = cli_ops::run_audit_tail(args)?;
+            std::process::exit(code);
+        }
+        Cmd::ReceiptVerify(args) => {
+            let code = cli_ops::run_receipt_verify(args)?;
+            std::process::exit(code);
+        }
         // Everything else needs the Hub: dispatch below.
         rest => {
             let cfg = NodeConfig::load(&config)?;
@@ -350,10 +399,14 @@ async fn main() -> Result<()> {
                 | Cmd::UnsealKeys { .. }
                 | Cmd::V3 { .. }
                 | Cmd::Mesh { .. }
-                | Cmd::Audit { .. } => {
+                | Cmd::Audit { .. }
+                | Cmd::Config { .. }
+                | Cmd::Health(_)
+                | Cmd::AuditTail(_)
+                | Cmd::ReceiptVerify(_) => {
                     // Handled above the Hub::new boundary.
                     unreachable!(
-                        "seal-keys / unseal-keys / v3 / mesh / audit dispatched pre-Hub::new"
+                        "seal-keys / unseal-keys / v3 / mesh / audit / config / health / audit-tail / receipt-verify dispatched pre-Hub::new"
                     )
                 }
             };
@@ -474,8 +527,12 @@ async fn run_mesh_serve(
         ip_allocator: Arc::new(TailnetIpAllocator::new(tailnet_id)),
         machines: Arc::new(MachineRegistry::new()),
         derp_map: Arc::new(derp_map),
-        // Empty policy store — see hub.rs analogue for rationale.
-        policy: Arc::new(Default::default()),
+        // P1-policy: empty store ⇒ wire layer falls back to
+        // `allow_all_packet_filter`. The admin surface (when
+        // mounted) holds an `Arc` clone of this store and uses
+        // PUT to push hujson docs; the store's `Notify` wakes
+        // parked `/map` long-pollers within ~1 ms.
+        policy: Arc::new(octravpn_mesh::policy::PolicyStore::new()),
     };
 
     eprintln!(
