@@ -50,13 +50,17 @@ use std::{
 };
 
 use axum::{
-    extract::State,
-    http::StatusCode,
+    body::Body,
+    extract::{Request, State},
+    http::{header, HeaderValue, Response, StatusCode},
     response::IntoResponse,
+    Router,
 };
+use hyper_util::rt::TokioIo;
 use parking_lot::Mutex;
 use snow::{params::NoiseParams, Builder};
 
+use super::controlbase::{Framed, FrameHeader, MsgType};
 use super::{WireError, WireState};
 
 /// The Tailscale capability version we advertise in the Noise
@@ -263,27 +267,293 @@ fn noise_err<E: std::fmt::Display>(e: E) -> WireError {
     WireError::Noise(e.to_string())
 }
 
-/// Stub `/ts2021` handler. Returns 501 Not Implemented today.
+/// HTTP header the client sends to request the TS2021 upgrade.
+pub const UPGRADE_PROTOCOL: &str = "tailscale-control-protocol";
+
+/// Magic prefix on the EarlyNoise frame. Sourced from
+/// `tailscale/tailcfg/early.go`: the framing is
+/// `[\xff\xff\xff TS] [json_len:u32 be] [json]`, sent **inside** the
+/// Noise transport stream before HTTP/2 starts.
 ///
-/// A real implementation would:
-///   1. Verify `Upgrade: tailscale-control-protocol` header.
-///   2. Hijack the TCP connection.
-///   3. Read the 5-byte initiation header
-///      (`type=1, len, protocolVersion:u16be`), then `len` bytes of
-///      Noise IK initiation message.
-///   4. Run snow as IK responder, write the 3-byte response header +
-///      Noise response.
-///   5. Hand the hijacked socket to an HTTP/2 server with `read_record`
-///      / `write_record` framing applied.
+/// Stock `tailscale` discards this if absent for older protocolVersions,
+/// but newer clients (post protocolVersion 28) require it as a sign that
+/// the server understands the new wire revision. We send it
+/// unconditionally — empty `NodeKeyChallenge` works for the interop
+/// test path.
+const EARLY_NOISE_MAGIC: [u8; 5] = [0xff, 0xff, 0xff, b'T', b'S'];
+
+/// `/ts2021` upgrade handler.
 ///
-/// Step 5 is the wall: tokio's `h2` crate doesn't take a pre-hijacked
-/// connection cleanly. Tracked in the blocker doc.
+/// Verifies the `Upgrade: tailscale-control-protocol` header, returns
+/// `101 Switching Protocols`, and on the hijacked socket performs:
+///
+///   1. Read a 5-byte Initiation frame off the wire.
+///   2. Drive the Noise IK responder to completion (single round-trip).
+///   3. Write the 3-byte Reply frame.
+///   4. Wrap the socket in [`NoiseStream`] (encrypts each Record frame).
+///   5. Send the EarlyNoise prefix + JSON inside the encrypted stream.
+///   6. Hand the socket to `h2::server::handshake` and dispatch each
+///      request to the existing `axum::Router` via `tower::ServiceExt::oneshot`.
+///
+/// Step 6 is undocumented territory: tailscale's actual HTTP/2-over-Noise
+/// frame shapes are inferred from headscale-Go and may need tweaks.
+/// See `docs/tailscale-interop-blocker.md` 2026-05-19 continuation
+/// section for what we observed in practice.
+pub async fn handle_ts2021_post(
+    State(state): State<WireState>,
+    req: Request,
+) -> Response<Body> {
+    // Verify the upgrade header before we commit to the hijack path.
+    let wants_upgrade = req
+        .headers()
+        .get(header::UPGRADE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|s| s.eq_ignore_ascii_case(UPGRADE_PROTOCOL));
+    if !wants_upgrade {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(
+                "expected Upgrade: tailscale-control-protocol header",
+            ))
+            .unwrap();
+    }
+
+    let on_upgrade = match req.extensions().get::<hyper::upgrade::OnUpgrade>() {
+        Some(_) => req
+            .into_parts()
+            .0
+            .extensions
+            .remove::<hyper::upgrade::OnUpgrade>(),
+        None => None,
+    };
+    let Some(on_upgrade) = on_upgrade else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from(
+                "ts2021: hyper OnUpgrade extension missing — not an upgradable connection",
+            ))
+            .unwrap();
+    };
+
+    let state_for_task = state;
+    tokio::spawn(async move {
+        match on_upgrade.await {
+            Ok(upgraded) => {
+                let io = TokioIo::new(upgraded);
+                if let Err(e) = drive_ts2021(state_for_task, io).await {
+                    tracing::warn!(target = "tailscale_wire::noise", error = %e, "ts2021 connection ended with error");
+                }
+            }
+            Err(e) => {
+                tracing::warn!(target = "tailscale_wire::noise", error = %e, "ts2021 upgrade future failed");
+            }
+        }
+    });
+
+    Response::builder()
+        .status(StatusCode::SWITCHING_PROTOCOLS)
+        .header(header::CONNECTION, HeaderValue::from_static("upgrade"))
+        .header(header::UPGRADE, HeaderValue::from_static(UPGRADE_PROTOCOL))
+        .body(Body::empty())
+        .unwrap()
+}
+
+/// The actual handshake + h2 dispatch driver. Pulled out of the axum
+/// handler so we can unit-test it against a pair of `tokio::io::duplex`
+/// sockets without spinning up a real listener.
+pub async fn drive_ts2021<T>(state: WireState, io: T) -> Result<(), WireError>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    let mut framed = Framed::new(io);
+
+    // Step 1: read Initiation.
+    let (hdr, init_body) = framed
+        .read_frame()
+        .await
+        .map_err(|e| WireError::Noise(format!("read initiation frame: {e}")))?;
+    let proto_version = match hdr {
+        FrameHeader::Initiation { protocol_version, .. } => protocol_version,
+        other @ FrameHeader::Regular { .. } => {
+            return Err(WireError::Noise(format!(
+                "expected Initiation frame first, got {other:?}"
+            )));
+        }
+    };
+    tracing::debug!(
+        target = "tailscale_wire::noise",
+        proto_version,
+        len = init_body.len(),
+        "ts2021 received initiation"
+    );
+
+    // Step 2: drive Noise IK responder.
+    let mut responder = state.server_noise_key.build_responder()?;
+    let mut payload_buf = vec![0u8; 65535];
+    let _payload_len = responder
+        .read_message(&init_body, &mut payload_buf)
+        .map_err(noise_err)?;
+
+    // Step 3: write Reply.
+    let mut reply_body = vec![0u8; 65535];
+    let reply_len = responder
+        .write_message(&[], &mut reply_body)
+        .map_err(noise_err)?;
+    reply_body.truncate(reply_len);
+    framed
+        .write_frame(MsgType::Reply, &reply_body)
+        .await
+        .map_err(|e| WireError::Noise(format!("write reply frame: {e}")))?;
+
+    let transport = responder.into_transport_mode().map_err(noise_err)?;
+    let mut noise_stream = framed.into_transport(transport);
+
+    // Step 5: send the EarlyNoise frame before HTTP/2 starts. Format:
+    // [0xff 0xff 0xff 'T' 'S'] [json_len:u32be] [json].
+    // Newer Tailscale clients ignore the body if the magic is absent
+    // but newer ones require it; we ship a minimal `NodeKeyChallenge`
+    // payload (32 zero bytes hex-encoded) — the client never validates
+    // the challenge for stock-up flow.
+    let early_json = serde_json::json!({
+        "NodeKeyChallenge": {
+            "Public": "nodekey:0000000000000000000000000000000000000000000000000000000000000000"
+        }
+    })
+    .to_string();
+    let early_bytes = early_json.as_bytes();
+    let mut early = Vec::with_capacity(5 + 4 + early_bytes.len());
+    early.extend_from_slice(&EARLY_NOISE_MAGIC);
+    early.extend_from_slice(&(early_bytes.len() as u32).to_be_bytes());
+    early.extend_from_slice(early_bytes);
+    use tokio::io::AsyncWriteExt;
+    noise_stream
+        .write_all(&early)
+        .await
+        .map_err(|e| WireError::Noise(format!("write early-noise: {e}")))?;
+    noise_stream
+        .flush()
+        .await
+        .map_err(|e| WireError::Noise(format!("flush early-noise: {e}")))?;
+
+    // Step 6: h2 handshake + per-request dispatch.
+    let mut h2_conn = h2::server::handshake(noise_stream)
+        .await
+        .map_err(|e| WireError::Noise(format!("h2 handshake: {e}")))?;
+
+    // Build the router we'll dispatch to on every request. We reuse
+    // the same handlers `/key`, `/register`, `/map` get on the
+    // plaintext side — they're already axum services and don't care
+    // whether they're behind h2 or plain http.
+    let router = inner_router(state.clone());
+
+    while let Some(result) = h2_conn.accept().await {
+        let (req, mut respond) = match result {
+            Ok(pair) => pair,
+            Err(e) => {
+                tracing::warn!(target = "tailscale_wire::noise", error = %e, "h2 accept failed");
+                break;
+            }
+        };
+        let router_for_req = router.clone();
+        tokio::spawn(async move {
+            if let Err(e) = dispatch_h2_request(router_for_req, req, &mut respond).await {
+                tracing::warn!(target = "tailscale_wire::noise", error = %e, "h2 dispatch failed");
+            }
+        });
+    }
+    Ok(())
+}
+
+/// Drain an h2 request body, hand it to `router.oneshot(...)`, send
+/// the response back via the h2 SendResponse.
+async fn dispatch_h2_request(
+    router: Router,
+    req: http::Request<h2::RecvStream>,
+    respond: &mut h2::server::SendResponse<bytes::Bytes>,
+) -> Result<(), WireError> {
+    use bytes::{Bytes, BytesMut};
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    let (parts, mut body) = req.into_parts();
+
+    // Drain the request body into a Bytes — the existing handlers all
+    // expect a fully-buffered body anyway (`Json<...>` extractor).
+    let mut body_bytes = BytesMut::new();
+    while let Some(chunk) = body.data().await {
+        let chunk = chunk
+            .map_err(|e| WireError::Noise(format!("h2 body read: {e}")))?;
+        let n = chunk.len();
+        body_bytes.extend_from_slice(&chunk);
+        let _ = body.flow_control().release_capacity(n);
+    }
+    let body_bytes = body_bytes.freeze();
+
+    // Build the axum Request to drive through oneshot.
+    let axum_body = Body::from(body_bytes);
+    let axum_req = http::Request::from_parts(parts, axum_body);
+
+    let resp = router
+        .oneshot(axum_req)
+        .await
+        .map_err(|e| WireError::Noise(format!("router oneshot: {e}")))?;
+
+    let (resp_parts, resp_body) = resp.into_parts();
+    let mut head = http::Response::builder().status(resp_parts.status);
+    {
+        let hdrs = head.headers_mut().expect("builder is valid");
+        for (k, v) in &resp_parts.headers {
+            hdrs.append(k.clone(), v.clone());
+        }
+    }
+    let head: http::Response<()> = head.body(()).unwrap();
+
+    // Collect the response body fully — register/map all return
+    // small bodies; long-poll `map` is up to a single MapResponse JSON
+    // (no streaming yet — Stream=true follow-up tracked).
+    let collected = resp_body
+        .collect()
+        .await
+        .map_err(|e| WireError::Noise(format!("collect axum body: {e}")))?
+        .to_bytes();
+    let chunk: Bytes = collected;
+
+    let mut send = respond
+        .send_response(head, false)
+        .map_err(|e| WireError::Noise(format!("h2 send_response: {e}")))?;
+    send.send_data(chunk, true)
+        .map_err(|e| WireError::Noise(format!("h2 send_data: {e}")))?;
+    Ok(())
+}
+
+/// Construct an inner router that maps just the per-machine endpoints
+/// served behind /ts2021. The `/key` and `/ts2021` routes deliberately
+/// aren't mounted here — they live on the outer plaintext router.
+fn inner_router(state: WireState) -> Router {
+    use axum::routing::post;
+    Router::new()
+        .route(
+            "/machine/:node_key/register",
+            post(super::register::handle_register),
+        )
+        .route(
+            "/machine/:node_key/map",
+            post(super::map::handle_map),
+        )
+        .with_state(state)
+}
+
+/// Compatibility alias for the old `handle_ts2021_stub` name. Returns
+/// 501 if invoked via a non-upgrading client; the upgrade-aware handler
+/// is `handle_ts2021_post`. Kept so external integration tests that
+/// still POST without Upgrade headers can see a deterministic status.
 pub async fn handle_ts2021_stub(State(_s): State<WireState>) -> impl IntoResponse {
     (
         StatusCode::NOT_IMPLEMENTED,
         "ts2021 upgrade not yet wired; see docs/tailscale-interop-blocker.md",
     )
 }
+
 
 #[cfg(test)]
 mod tests {

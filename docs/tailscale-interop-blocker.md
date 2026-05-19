@@ -278,6 +278,118 @@ crates are the helpful prior art:
 - `crates/octravpn-mesh/src/headscale_bridge.rs` — preauth
   minter, no wire-protocol handlers.
 
+## Update 2026-05-19 (PR 2 continuation): controlbase + h2-over-Noise wired, exit still 30
+
+The `/ts2021` stub is gone. `crates/octravpn-mesh/src/tailscale_wire/` now
+ships:
+
+| File | What it does | Status |
+| ---- | ------------ | ------ |
+| `controlbase.rs` | 3/5-byte controlbase framing + `NoiseStream` (`AsyncRead+AsyncWrite` over snow transport) | shipped, 6 unit tests |
+| `noise.rs::handle_ts2021_post` | Upgrade handler — verifies header, hijacks via `hyper::upgrade::OnUpgrade`, runs IK responder, sends EarlyNoise prefix, hands `NoiseStream` to `h2::server::handshake`, dispatches per-request via `tower::ServiceExt::oneshot` against the inner axum router | shipped |
+| `noise.rs::drive_ts2021` | Pulled out as a generic `T: AsyncRead+AsyncWrite` driver so tests can pair it against an in-process `tokio::io::duplex` socket | shipped |
+| `map.rs` Stream:true | Streaming response: initial `MapResponse\n`, then `"\n"` keepalives every 30s | shipped with `tokio::time::pause`/`advance` test |
+
+Direct probe of the surface confirms the upgrade path works:
+
+```
+$ curl -sv -X POST \
+    -H "Upgrade: tailscale-control-protocol" -H "Connection: upgrade" \
+    http://127.0.0.1:51821/ts2021
+< HTTP/1.1 101 Switching Protocols
+< connection: upgrade
+< upgrade: tailscale-control-protocol
+```
+
+…and the socket then waits for an Initiation frame, exactly as
+expected. The in-process integration test
+`crates/octravpn-node/tests/tailscale_wire_integration.rs::ts2021_framing_responds_to_initiation`
+drives the full handshake against a hand-crafted snow initiator and
+confirms the responder writes a valid Reply frame.
+
+### Wire-format surprise: newer `tailscale` never hits `/ts2021`
+
+Stock `tailscale/tailscale:latest` (v1.78+) **does not call `/ts2021`
+the way the blocker doc described**. The actual flow on a fresh
+`tailscale up`:
+
+1. `GET http://tsi-mesh-control:51821/key` ✓ (we serve, returns
+   `{"PublicKey":"mkey:…"}`).
+2. Client logs:
+   ```
+   control: control server key from http://tsi-mesh-control:51821:
+     ts2021=[hlMBk], legacy=
+   control: RegisterReq: onode= node=[JUvg6] fup=false nks=false
+   control: controlhttp: forcing port 443 dial due to recent noise dial
+   ```
+3. Client then POSTs to **`https://tsi-mesh-control:51821/machine/register`**
+   on **port 443 over TLS** — `/machine/register` (no `nodekey:<hex>` in
+   the path, contrary to the upstream `tailcfg.go` shape we modelled),
+   and a forced HTTPS-on-443 dial.
+4. Connection refused (we don't listen on 443, and we're plain HTTP),
+   client retries, eventually gives up.
+
+Two new gaps surfaced by the probe:
+
+| Gap | Detail | Impact |
+| --- | ------ | ------ |
+| **Forced TLS on 443** | `controlhttp: forcing port 443 dial due to recent noise dial` — the client races a parallel HTTPS-on-443 dial *even if the login server URL is plain HTTP*. With no TLS terminator on 443 the dial fails and the whole flow stalls. | Blocks exit 0 regardless of how complete our wire surface is on 51821. |
+| **`/machine/register` path** | The newer client uses a flat `/machine/register` (and presumably `/machine/map`) — *not* `/machine/{node_key}/register`. Our handlers route on `{node_key}` in the path. | Even if TLS were terminated, the path wouldn't match. |
+
+The `/ts2021` handler we shipped this PR is correct but irrelevant to
+the current client until those two gaps close. The `tailscale up` daemon
+never reaches `/ts2021` in this run because the failure happens earlier,
+on the `/machine/register` forced-443 dial.
+
+### EarlyNoise frame status
+
+We send EarlyNoise unconditionally inside the Noise transport stream
+right before HTTP/2 starts:
+
+```
+[0xff 0xff 0xff 'T' 'S'][json_len:u32be][json]
+```
+
+with a minimal `{"NodeKeyChallenge":{"Public":"nodekey:00…"}}` payload.
+Because stock `tailscale` never reaches our `/ts2021` handler (see
+above), this is **unverified in-the-wild**. The in-process unit tests
+confirm we *send* the prefix and that h2 starts on top, but we don't
+yet know whether the real client requires a specific challenge
+encoding.
+
+### What unblocks exit 0 from here
+
+In priority order:
+
+1. **TLS termination on port 443.** Add an nginx (or rustls-axum) front
+   that terminates HTTPS on 443 with a self-signed cert; trust the cert
+   inside the peer containers. Without this, the forced-443 dial keeps
+   failing.
+2. **Add `/machine/register` and `/machine/map`** (no path parameter)
+   to the inner router; resolve the node-key from the request body
+   instead of the path. The existing handlers' core logic stays the
+   same; just add the new entry points.
+3. **Verify the EarlyNoise frame** by capturing real client bytes
+   through a tcpdump-on-loopback once steps 1+2 land.
+
+Estimated effort: **3-5 days** for the TLS shim + path-shape
+refactor + EarlyNoise validation, after which `run-interop.sh` should
+clear exit 30 → either 0 or 40 depending on whether the long-poll
+`/map` semantics match the client's expectations.
+
+### Exit-code progression as of this PR
+
+| State | Exit code |
+| ----- | --------- |
+| Pre-PR 2 (stub `/ts2021`) | 30 (`/ts2021` returns 501) |
+| **Post-PR 2 (this commit)** | **30** (`/ts2021` works, but client doesn't reach it; forced-443 TLS dial blocks) |
+| + TLS-on-443 + flat `/machine/{register,map}` paths | expect 30 or 40 |
+| + EarlyNoise validation + map streaming verified | expect 0 |
+
+The framing layer + handshake + h2 wire-up are all unit-tested and
+ready behind the upgrade boundary; what remains is the front-door
+plumbing (TLS + path shapes).
+
 ## Sanity check: do the Tailscale containers actually need a
 ## working server, or can the test be relaxed?
 

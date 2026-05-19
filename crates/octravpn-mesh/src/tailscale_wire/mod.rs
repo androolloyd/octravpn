@@ -67,6 +67,7 @@ use tokio::sync::Notify;
 
 use crate::{ip_alloc::TailnetIpAllocator, headscale_bridge::PreauthMinter};
 
+pub mod controlbase;
 pub mod key_handler;
 pub mod map;
 pub mod noise;
@@ -182,7 +183,7 @@ impl MachineRegistry {
 pub fn router(state: WireState) -> Router {
     Router::new()
         .route("/key", get(key_handler::handle_key))
-        .route("/ts2021", post(noise::handle_ts2021_stub))
+        .route("/ts2021", post(noise::handle_ts2021_post))
         .route(
             "/machine/:node_key/register",
             post(register::handle_register),

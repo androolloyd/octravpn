@@ -1095,6 +1095,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "h2"
+version = "0.4.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "171fefbc92fe4a4de27e0698d6a5b392d6a0e333506bc49133760b3bcf948733"
+dependencies = [
+ "atomic-waker",
+ "bytes",
+ "fnv",
+ "futures-core",
+ "futures-sink",
+ "http",
+ "indexmap 2.14.0",
+ "slab",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1966,7 +1985,13 @@ dependencies = [
  "async-trait",
  "axum",
  "bytes",
+ "futures-util",
+ "h2",
  "hex",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "octravpn-core",
  "parking_lot",
  "proptest",

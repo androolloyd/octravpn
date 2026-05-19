@@ -26,9 +26,10 @@
 use std::{sync::Arc, time::Duration};
 
 use axum::{
+    body::Body,
     extract::{Path, State},
     http::StatusCode,
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     Json,
 };
 use serde::Serialize;
@@ -43,6 +44,12 @@ use super::WireState;
 /// empty-peers `MapResponse`.
 pub const MAP_LONGPOLL_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Interval between newline keepalives when the client requested
+/// `Stream: true`. Stock `tailscale` daemon accepts a keepalive of any
+/// length as long as it arrives within its idle timeout (60s upstream);
+/// 30s leaves headroom for slow links.
+pub const MAP_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
+
 /// MagicDNS domain emitted on every map response. Static for the
 /// interop test.
 const TAILNET_DOMAIN: &str = "octra.test";
@@ -56,8 +63,8 @@ pub async fn handle_map(
     State(state): State<WireState>,
     Path(node_key_path): Path<String>,
     body: Option<Json<MapRequest>>,
-) -> impl IntoResponse {
-    let Json(_req) = body.unwrap_or(Json(MapRequest::default()));
+) -> Response {
+    let Json(req) = body.unwrap_or(Json(MapRequest::default()));
 
     let node_key_hex = match strip_key_prefix(&node_key_path) {
         Some(h) => h.to_string(),
@@ -117,7 +124,51 @@ pub async fn handle_map(
         keep_alive: true,
     };
     let _ = stable_id_from_key(&node_key_hex); // tickle import-used assertion
-    Json(resp).into_response()
+
+    if req.stream {
+        // Stream:true: emit the MapResponse JSON immediately + a
+        // newline keepalive every [`MAP_KEEPALIVE_INTERVAL`]. Stock
+        // `tailscale` requires *something* to land on the stream
+        // periodically or it tears the connection down.
+        let first = match serde_json::to_vec(&resp) {
+            Ok(mut v) => {
+                v.push(b'\n');
+                v
+            }
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorBody {
+                        error: format!("encode map response: {e}"),
+                    }),
+                )
+                    .into_response();
+            }
+        };
+        // Build the stream by hand to avoid an `async_stream` dep.
+        // `unfold` carries a small state machine: `None` ⇒ emit the
+        // first MapResponse chunk; `Some(())` ⇒ wait one keepalive
+        // interval then emit `"\n"`. The stream never terminates —
+        // axum will drop it when the client disconnects.
+        let stream = futures_util::stream::unfold(
+            (Some(first), false),
+            |(first, _ever_woke): (Option<Vec<u8>>, bool)| async move {
+                if let Some(initial) = first {
+                    Some((Ok::<_, std::io::Error>(initial), (None, true)))
+                } else {
+                    tokio::time::sleep(MAP_KEEPALIVE_INTERVAL).await;
+                    Some((Ok(b"\n".to_vec()), (None, true)))
+                }
+            },
+        );
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "application/json")
+            .body(Body::from_stream(stream))
+            .unwrap()
+    } else {
+        Json(resp).into_response()
+    }
 }
 
 async fn wait_for_change(notify: Arc<tokio::sync::Notify>) {
@@ -252,5 +303,54 @@ mod tests {
         let raw = to_bytes(resp.into_body(), 32 * 1024).await.unwrap();
         let mr: MapResponse = serde_json::from_slice(&raw).unwrap();
         assert_eq!(mr.peers.len(), 1, "long-poll should have woken on B's register");
+    }
+
+    /// Stream:true: the response body emits the first MapResponse
+    /// chunk immediately, then a `"\n"` keepalive after
+    /// [`MAP_KEEPALIVE_INTERVAL`]. We drive `tokio::time::pause` so the
+    /// test doesn't actually wait 30s.
+    #[tokio::test(start_paused = true)]
+    async fn stream_true_emits_keepalive() {
+        let (state, _dir) = fixture();
+        let a = "aa".repeat(32);
+        let b = "bb".repeat(32);
+        insert_peer(&state, &a, "peer-a", 10);
+        insert_peer(&state, &b, "peer-b", 11);
+
+        let app = router(state);
+        let req_body = serde_json::json!({ "Stream": true, "Version": 39 });
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri(format!("/machine/nodekey:{a}/map"))
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        serde_json::to_vec(&req_body).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // First chunk should be the MapResponse JSON + newline. We
+        // read it via the streaming body interface so we can stop
+        // before the test would otherwise block on the keepalive.
+        let mut body = resp.into_body();
+        let frame = http_body_util::BodyExt::frame(&mut body).await.unwrap().unwrap();
+        let chunk = frame.into_data().unwrap();
+        assert!(chunk.ends_with(b"\n"), "first chunk should be newline-terminated");
+        // The first chunk is a complete JSON document.
+        let trimmed = &chunk[..chunk.len() - 1];
+        let mr: MapResponse = serde_json::from_slice(trimmed).unwrap();
+        assert_eq!(mr.peers.len(), 1);
+
+        // Advance virtual time past one keepalive interval and confirm
+        // the next chunk is the `"\n"` keepalive.
+        tokio::time::advance(MAP_KEEPALIVE_INTERVAL + Duration::from_millis(1)).await;
+        let frame = http_body_util::BodyExt::frame(&mut body).await.unwrap().unwrap();
+        let chunk = frame.into_data().unwrap();
+        assert_eq!(&chunk[..], b"\n");
     }
 }
