@@ -271,6 +271,12 @@ latency.
 
 ## 7. Devnet RPC body cap
 
+**RESOLVED 2026-05-18 (devnet nginx cap raised) — partial.** The
+original devnet 1 MiB block is gone; `octra_registerPvacPubkey` with a
+~4.1 MB body now confirms on devnet. The residual asks below (mainnet
+ceiling, target upper bound for tx construction) are still open and
+have been forwarded to the email summary as a non-blocking item.
+
 ### Observed
 
 Before 2026-05-18, `https://devnet.octrascan.io/rpc` rejected POST
