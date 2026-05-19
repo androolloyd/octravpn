@@ -578,3 +578,213 @@ $ docker exec tsi-peer-a sh -c '\
 
 Both return `200 OK` with a valid response. The wire surface is correct;
 the upgrade-through-TLS path is the wall.
+
+## 2026-05-19 — P1 batch (Post-/ts2021-drain fix)
+
+The hyper-rustls read-buffer drain wall described in the prior
+"2026-05-19 P0 batch shipped" entry is closed. Three deeper walls
+surfaced in sequence as the client got further into the handshake; the
+first two are also closed in this batch. **Exit code remains 30**;
+the open wall is in the post-handshake Noise transport cipher's nonce
+encoding.
+
+### Wall 1 (closed) — hyper-rustls drains the Initiation
+
+**Fix:** `headscale-api/src/tailscale_wire/raw_tls.rs` (new). The
+HTTPS-on-`:443` bind is now a raw `tokio_rustls::TlsAcceptor` accept
+loop. Each connection is peeked one buffered read at a time until the
+`\r\n\r\n` header terminator; if the request is `POST /ts2021` with
+`Upgrade: tailscale-control-protocol`, the listener writes the
+`101 Switching Protocols` response by hand and hands the unbuffered
+`TlsStream<TcpStream>` directly to `noise::drive_ts2021_with_init`.
+All other traffic flows through `hyper::server::conn::http1` into the
+same axum router that the plain-HTTP `:51821` listener serves.
+
+`serve.rs::serve` no longer references `axum_server::bind_rustls`; the
+`axum-server` dep was dropped from `headscale-api/Cargo.toml`. The
+single new dep is `tokio-rustls = "0.26"` (matches the pinned
+`rustls = "0.23"`).
+
+Test coverage: 9 unit tests in
+`tailscale_wire::raw_tls::tests` (peek/header/upgrade-detection round
+trips) + 2 end-to-end integration tests in
+`crates/octravpn-node/tests/raw_tls_integration.rs`:
+
+  - `non_ts2021_post_dispatches_to_router` — `GET /key` over real
+    `tokio-rustls` to an ephemeral port; asserts the inner router
+    returns the same JSON shape as on `:51821`.
+  - `ts2021_post_dispatches_to_drive_ts2021_over_tls` — the
+    regression test for the original drain: posts an upgrade request
+    with the Initiation frame **in the same TLS record as the
+    headers**, asserts the responder writes a valid Reply frame
+    within 5 s. Used to hang at `read_frame()` before the raw-tls
+    fix.
+
+### Wall 2 (closed) — `X-Tailscale-Handshake` header carries the Initiation
+
+Stock `tailscale/tailscale:latest` (capability version 133 as of
+2026-05) sends the Initiation frame **base64-encoded in the
+`X-Tailscale-Handshake` request header**, with an empty request body
+(`Content-Length: 0`). The pipelined-body path the prior PR
+implemented never triggers; without the header path the server hangs
+at `read_initiation_frame: early eof` ~10 s in.
+
+**Fix:** `raw_tls::handle_one` extracts the header value, base64-
+StdEncoding-decodes it, and passes the bytes via the new
+`noise::drive_ts2021_with_init(state, io, Some(init_bytes))` entry
+point. `drive_ts2021_with_init` either uses the pre-decoded
+Initiation or, when absent, falls back to reading the frame off the
+wire — so legacy pipelined clients keep working.
+
+Upstream source: `tailscale/control/controlhttp/controlhttpcommon/controlhttpcommon.go`
+(`HandshakeHeaderName = "X-Tailscale-Handshake"`) and
+`tailscale/control/controlhttp/controlhttpserver/controlhttpserver.go`
+(`acceptHTTP`).
+
+New dep: `base64 = "0.22"` (already in the workspace via transitive
+deps; we just declare it explicitly).
+
+### Wall 3 (closed) — controlbase Initiation byte order + msg-type
+table off-by-one
+
+The original `headscale-api::tailscale_wire::controlbase` had the
+Initiation frame header laid out as `[type=1:u8][version:u16be][len:u16be]`.
+Upstream
+(`tailscale/control/controlbase/messages.go::initiationMessage`) has
+**`[version:u16be][type=1:u8][len:u16be]`** — version *first*, then
+the type byte at offset 2.
+
+The `MsgType` enum also had `Record = 3`; upstream's
+`msgTypeRecord = 4` (with `msgTypeError = 3` in between). The
+self-consistent round-trip tests passed even though the wire was
+upstream-incompatible. Stock `tailscale` rejects the malformed
+Initiation with a "decrypt error" once the prologue is mixed in.
+
+**Fix:** `controlbase.rs::MsgType` now has the upstream layout
+(`Initiation=1, Reply=2, Error=3, Record=4`); `Framed::write_initiation`
+emits the version-first 5-byte header; `Framed::read_frame`
+disambiguates Initiation (first byte = version high byte, always 0
+for protocolVersion < 256) from regular frames (first byte = type
+2/3/4). The `parse_initiation_frame` helper in `noise.rs` does the
+same decode for the `X-Tailscale-Handshake` fast-start path.
+
+Also fixed: the Noise prologue uses the **client-advertised
+protocolVersion**, not a server-side constant. Upstream's
+`controlbase/handshake.go::Server` calls
+`s.MixHash(protocolVersionPrologue(clientVersion))`. We now build the
+responder via `ServerNoiseKey::build_responder_for_version(proto)`
+where `proto` is the version from the just-read Initiation header.
+With this in place the IK handshake completes against stock
+`tailscale` (mesh-control log: `ts2021 received initiation
+proto_version=133 len=96`, no decrypt error on the Initiation read).
+
+### Wall 4 (OPEN) — Noise transport cipher uses non-standard nonce
+
+After the IK handshake completes the connection moves into transport
+mode. The first encrypted Record arriving from the client fails to
+decrypt:
+
+```
+WARN tailscale_wire::noise: h2 accept failed
+  error=noise decrypt: decrypt error
+```
+
+Root cause: upstream `tailscale/control/controlbase/conn.go` uses
+**big-endian nonces** (`binary.BigEndian.PutUint64(n[4:], counter)`)
+for ChaCha20Poly1305 transport records. The Noise spec mandates
+little-endian; `snow` follows the spec. So our `snow::TransportState`
+produces ciphertexts with the wrong AAD/keystream against the same
+counter value, and decryption fails on the first record after the
+handshake.
+
+This is a Tailscale-specific deviation from the Noise spec — see
+upstream `controlbase/conn.go::nonce`. `snow` doesn't expose a
+nonce-encoding hook; the proper fix is to extract the per-direction
+ChaCha20Poly1305 keys after `Split()` and run the transport
+encrypt/decrypt manually with the big-endian nonce convention.
+`snow`'s public API doesn't expose key extraction either — so this
+needs either:
+
+  1. A `snow` patch / fork that adds a `dangerously_get_cipher_keys`
+     accessor on `TransportState`; or
+  2. Replace `snow` for the transport-mode side with a hand-rolled
+     ChaCha20Poly1305 wrapper (handshake stays on `snow`). We already
+     depend on `chacha20poly1305 = "0.10"` transitively.
+
+Option 2 is cleaner and lets us pin behaviour to the upstream byte
+layout one place.
+
+### Exit-code progression as of this PR batch
+
+| State | Exit code |
+| ----- | --------- |
+| Pre-P0 batch (no /ts2021 over TLS) | 30 |
+| Post-P0 batch (hyper-rustls drain) | 30 |
+| **Post-P1 batch (this commit)** | **30** (noise transport nonce wall, see Wall 4 above) |
+| + Post-handshake nonce encoding fixed | expect 30 or 0 — depends on whether the inner h2 + register flow lands cleanly |
+| + Inner /machine/register over noise-h2 verified | expect 0 |
+
+### What in-the-wild behaviour we observed (full trace, peer-a → mesh-control)
+
+1. Client opens TLS to `:443`. ALPN selects `http/1.1`.
+2. `GET /key?v=133` → `200 {"PublicKey":"mkey:..."}`. Reaches the
+   inner axum router via hyper http1.
+3. Client opens a *second* TLS connection.
+4. `POST /ts2021 HTTP/1.1` with
+   `X-Tailscale-Handshake: <base64 101-byte Initiation>`, body length 0.
+5. Server peek detects `/ts2021`, decodes the handshake header,
+   writes `101 Switching Protocols`, runs Noise IK responder with the
+   pre-decoded Initiation + prologue version 133, writes the Reply
+   frame. Handshake completes (no errors).
+6. Server writes the EarlyNoise frame (5-byte magic + 4-byte JSON
+   length + `NodeKeyChallenge` JSON) as the first transport-mode
+   Record.
+7. `h2::server::handshake` starts. First read off the noise stream
+   fails: `noise decrypt: decrypt error` (wall 4).
+8. Client treats the connection as broken, retries with a new TLS
+   dial, same failure mode. Eventually `tailscale up` times out at
+   the 20 s `timeout` wrapper.
+
+### Files touched this batch
+
+`headscale-rs`:
+- `headscale-api/src/tailscale_wire/raw_tls.rs` — new module (~400
+  lines incl. 9 tests).
+- `headscale-api/src/tailscale_wire/mod.rs` — register `pub mod
+  raw_tls`.
+- `headscale-api/src/tailscale_wire/serve.rs` — route `:443` through
+  `raw_tls::serve_raw_tls` instead of `axum_server::bind_rustls`.
+- `headscale-api/src/tailscale_wire/noise.rs` — add
+  `drive_ts2021_with_init`, `build_responder_for_version`,
+  `parse_initiation_frame`. Existing `drive_ts2021` is a thin wrapper
+  around `_with_init(None)` so prior callers keep compiling.
+- `headscale-api/src/tailscale_wire/controlbase.rs` — fix `MsgType`
+  values + Initiation header layout to match upstream.
+- `headscale-api/Cargo.toml` — drop `axum-server`, add `tokio-rustls`,
+  declare `base64`.
+
+`octra`:
+- `crates/octravpn-node/tests/raw_tls_integration.rs` — new
+  integration test file (TLS-via-rustls smoke + the drain regression).
+- `crates/octravpn-node/Cargo.toml` — add `tokio-rustls`, `rustls`,
+  `rustls-pemfile` dev-deps.
+- `docker/devnet/tailscale-interop/docker-compose.yml` — surface
+  `headscale_api::tailscale_wire=debug` in `RUST_LOG` for the
+  connection-by-connection trace operators need while wall 4 is
+  open.
+
+### Next P1 priorities (per `docs/headscale-gap-analysis.md`)
+
+After closing wall 4 (Noise transport nonce encoding), the remaining
+P0 items from the gap analysis are:
+
+1. **Inner h2-over-noise dispatch ergonomics** — once decrypt works,
+   confirm `/machine/register` and `/machine/map` actually reach the
+   inner router through the h2 layer (the same router already serves
+   them on the outer plaintext + raw_tls non-/ts2021 paths, so this
+   is expected to "just work").
+2. **Streaming `/map` long-poll under the noise tunnel** — verify the
+   `Stream=true` ndjson keepalive cadence works through h2.
+3. **EarlyNoise content validation** — once a real client gets to
+   read the EarlyNoise JSON, confirm `NodeKeyChallenge` shape +
+   value are accepted.

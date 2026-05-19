@@ -38,7 +38,13 @@ services:
       # here so the test can switch over to the running-daemon path
       # by changing only the command line.
       OCTRAVPN_ADMIN_TOKEN: "interop-test-token"
-      RUST_LOG: "info,octravpn_node=debug"
+      # `headscale_api::tailscale_wire=debug` surfaces the raw_tls
+      # peek/dispatch decisions + the /ts2021 noise handshake state
+      # transitions. Keep it on while the post-/ts2021 noise transport
+      # wall (see docs/tailscale-interop-blocker.md 2026-05-19
+      # §"Post-/ts2021-drain fix") is still open so operators get a
+      # connection-by-connection trace.
+      RUST_LOG: "info,octravpn_node=debug,headscale_api::tailscale_wire=debug"
     # Run the Tailscale-wire control plane (Hub-free).
     # `octravpn-node mesh serve` brings up:
     #   - /admin/preauth — preauth-key minter (token-gated by
