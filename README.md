@@ -365,8 +365,9 @@ all FIXED in source as of `d6b3930`**).
 | [`docs/security.md`](docs/security.md) | v1.1 threat model + formal-verification correspondence |
 | [`docs/economics.md`](docs/economics.md) | OU-only design, money flows, operator P&L |
 | [`docs/governance.md`](docs/governance.md) | Roles, parameters, decentralization roadmap |
-| [`docs/operator-guide.md`](docs/operator-guide.md) | Operator deployment guide |
-| [`docs/install.md`](docs/install.md) | Per-OS install |
+| [`docs/operators/mainnet-deployment.md`](docs/operators/mainnet-deployment.md) | **Mainnet deployment runbook** — clean host → paid v3 node |
+| [`docs/operator-guide.md`](docs/operator-guide.md) | Day-2 operator guide (audit CLI, rotation, etc.) |
+| [`docs/install.md`](docs/install.md) | Per-OS install (general / try-it-out) |
 | [`docs/octra-research.md`](docs/octra-research.md) | Public-info dossier on the Octra chain |
 
 ## License
