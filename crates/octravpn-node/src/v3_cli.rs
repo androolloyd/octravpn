@@ -24,13 +24,6 @@
 //!
 //! ### Judgement calls flagged for review
 //!
-//!   * **withdraw_tailnet_treasury**: the v3 AML at `program/main-v3.aml`
-//!     exposes `withdraw_tailnet_treasury(tailnet_id, amount)`, but
-//!     `chain_v3.rs` does NOT yet have a `build_withdraw_tailnet_treasury_call`
-//!     builder (the task constraint forbids modifying chain_v3.rs). So
-//!     the CLI builds the `kind:contract_call` JSON shape inline,
-//!     mirroring the chain_v3 builder style verbatim.  When a v3 builder
-//!     is added later, swap the inline `json!` block for it.
 //!   * **slash signing UX**: ops shouldn't construct base64 ed25519
 //!     sigs by hand. The `slash` subcommand takes a path to the
 //!     receipt-signing private key (`--receipt-key`, 32-byte secret,
@@ -457,7 +450,7 @@ async fn run_deposit_tailnet(ctx: &ChainCtxV3, a: &DepositArgs) -> Result<()> {
 
 async fn run_withdraw_tailnet(ctx: &ChainCtxV3, a: &WithdrawArgs) -> Result<()> {
     let (nonce, fee) = nonce_and_fee(ctx).await?;
-    let call = build_withdraw_tailnet_treasury_call(ctx, a.tailnet_id, a.amount, fee, nonce);
+    let call = ctx.build_withdraw_tailnet_treasury_call(a.tailnet_id, a.amount, fee, nonce);
     submit_and_log(ctx, "withdraw_tailnet_treasury", call, None).await
 }
 
@@ -513,31 +506,6 @@ async fn nonce_and_fee(ctx: &ChainCtxV3) -> Result<(u64, u64)> {
     let nonce = ctx.nonce().await?;
     let fee = ctx.fee_or_fallback("contract_call").await;
     Ok((nonce, fee))
-}
-
-/// Inline builder for `withdraw_tailnet_treasury(tailnet_id, amount)`.
-/// Mirrors the shape of every other `chain_v3::build_*_call` builder so
-/// the existing wire-format invariants (`kind:contract_call`, `from` /
-/// `to` / `method` / `params` / `value` / `fee` / `nonce`) hold. See
-/// module-level judgement-call note for why this lives here rather
-/// than in chain_v3.rs.
-fn build_withdraw_tailnet_treasury_call(
-    ctx: &ChainCtxV3,
-    tailnet_id: u64,
-    amount: u64,
-    fee: u64,
-    nonce: u64,
-) -> Value {
-    serde_json::json!({
-        "kind": "contract_call",
-        "from": ctx.wallet_addr.display(),
-        "to": ctx.program_addr.display(),
-        "method": "withdraw_tailnet_treasury",
-        "params": [tailnet_id, amount],
-        "value": 0,
-        "fee": fee,
-        "nonce": nonce,
-    })
 }
 
 /// What kind of return value to try to parse out of
@@ -797,11 +765,8 @@ mod tests {
 
     #[test]
     fn withdraw_tailnet_args_build_expected_call() {
-        // Inline builder (no chain_v3.rs equivalent yet — see judgement
-        // call). Mirrors the wire shape every other v3 contract call
-        // uses.
         let c = ctx();
-        let call = build_withdraw_tailnet_treasury_call(&c, 2, 100_000, 500, 11);
+        let call = c.build_withdraw_tailnet_treasury_call(2, 100_000, 500, 11);
         assert_eq!(call["method"], "withdraw_tailnet_treasury");
         assert_eq!(call["value"], 0);
         assert_eq!(call["fee"], 500);

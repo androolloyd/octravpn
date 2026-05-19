@@ -362,7 +362,7 @@ pub(crate) fn sign_call(kp: &KeyPair, call: serde_json::Value) -> Result<serde_j
 /// supplied PEM bundles are trusted. P0-2 from the v2 threat model.
 fn build_rpc(chain: &crate::config::ChainCfg) -> Result<RpcClient> {
     let paths = chain.pinned_root_paths.as_ref();
-    let paths = paths.map(Vec::as_slice).unwrap_or(&[]);
+    let paths = paths.map_or(&[][..], Vec::as_slice);
     if paths.is_empty() {
         return Ok(RpcClient::new(&chain.rpc_url));
     }

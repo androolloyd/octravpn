@@ -83,7 +83,7 @@ async fn run_discover_v2(
         client,
         tailnet_id,
         &cfg.v2,
-        passphrase.as_deref().map(|z| z.as_str()),
+        passphrase.as_deref().map(String::as_str),
         cache,
     )
     .await?;

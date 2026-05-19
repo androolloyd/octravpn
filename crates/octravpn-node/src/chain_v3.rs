@@ -488,6 +488,28 @@ impl ChainCtxV3 {
         })
     }
 
+    /// `withdraw_tailnet_treasury(tailnet_id, amount)` — owner-only
+    /// withdrawal from a tailnet's treasury back to the tailnet owner's
+    /// wallet. Mirrors the AML signature at `program/main-v3.aml:466`.
+    pub(crate) fn build_withdraw_tailnet_treasury_call(
+        &self,
+        tailnet_id: u64,
+        amount: u64,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        json!({
+            "kind": "contract_call",
+            "from": self.wallet_addr.display(),
+            "to": self.program_addr.display(),
+            "method": "withdraw_tailnet_treasury",
+            "params": [tailnet_id, amount],
+            "value": 0,
+            "fee": fee,
+            "nonce": nonce,
+        })
+    }
+
     // ============================================================
     // Sessions
     // ============================================================
@@ -947,6 +969,25 @@ mod tests {
         let params = call["params"].as_array().unwrap();
         assert_eq!(params.len(), 1);
         assert_eq!(params[0], 2);
+    }
+
+    #[test]
+    fn withdraw_tailnet_treasury_call_shape() {
+        let c = ctx();
+        let call = c.build_withdraw_tailnet_treasury_call(2, 100_000, 500, 11);
+        assert_eq!(call["method"], "withdraw_tailnet_treasury");
+        assert_eq!(call["to"], c.program_addr.display());
+        assert_eq!(call["from"], c.wallet_addr.display());
+        assert_eq!(call["value"], 0);
+        assert_eq!(call["fee"], 500);
+        assert_eq!(call["nonce"], 11);
+        let params = call["params"].as_array().unwrap();
+        // [tailnet_id, amount] — matches AML
+        // `withdraw_tailnet_treasury(tailnet_id, amount)` at
+        // program/main-v3.aml:466.
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0], 2);
+        assert_eq!(params[1], 100_000);
     }
 
     #[test]
