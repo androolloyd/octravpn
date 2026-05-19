@@ -67,7 +67,7 @@ use crate::{
     commands::open_url::parse_oct_url,
     portal::{
         chain::{AssetCache, FetchAssetError, PassphraseSource, PortalChain},
-        mime::{sniff, SniffedMime},
+        mime::SniffedMime,
         static_assets::{INDEX_BODY, PAGE_SHELL},
     },
 };
