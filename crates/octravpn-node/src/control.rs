@@ -44,7 +44,9 @@ use octravpn_core::{
     session::SessionId,
     sig::KeyPair,
 };
-use octravpn_mesh::{PreauthMinter, DEFAULT_PREAUTH_TTL};
+use octravpn_mesh::{
+    tailscale_wire_router, PreauthMinter, WireState, DEFAULT_PREAUTH_TTL,
+};
 use serde::{Deserialize, Serialize};
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::info;
@@ -111,6 +113,15 @@ pub(crate) struct ControlState {
     /// Bearer token gating `POST /admin/preauth`. `None` hides the
     /// endpoint (any request returns 404, matching `/events`).
     pub admin_token: Option<Arc<str>>,
+    /// Optional Tailscale-wire surface state. When `Some`, the
+    /// control router mounts `GET /key`, `POST /ts2021`,
+    /// `POST /machine/:node_key/{register,map}`. When `None` (the
+    /// default for tests + nodes that haven't enabled the wire), the
+    /// routes are absent — a stock `tailscale up` reaches them only
+    /// once an operator opts in by populating
+    /// `[control].tailscale_wire_state_dir` in node.toml. See
+    /// `docs/tailscale-interop-blocker.md`.
+    pub wire_state: Option<WireState>,
 }
 
 /// Lightweight counters exposed via the /metrics endpoint. Kept as
@@ -193,6 +204,7 @@ impl ControlState {
             receipt_journal,
             preauth_minter: PreauthMinter::new(),
             admin_token: None,
+            wire_state: None,
         }
     }
 
@@ -206,6 +218,15 @@ impl ControlState {
     /// disables the endpoint entirely. v2 audit gate.
     pub(crate) fn with_events_token(mut self, token: Option<String>) -> Self {
         self.events_token = token.map(Arc::from);
+        self
+    }
+
+    /// Attach a Tailscale-wire surface. When set, the control router
+    /// mounts `/key`, `/ts2021`, `/machine/:node_key/{register,map}`.
+    /// Wired by `Hub::spawn_control_plane` when
+    /// `[control].tailscale_wire_state_dir` is configured.
+    pub(crate) fn with_wire_state(mut self, ws: Option<WireState>) -> Self {
+        self.wire_state = ws;
         self
     }
 
@@ -255,9 +276,21 @@ impl ControlState {
         // capacity, so the abuse surface is bounded.
         let unlimited = Router::new()
             .route("/events", get(events_sse))
-            .with_state(self);
+            .with_state(self.clone());
 
-        limited.merge(unlimited)
+        let mut merged = limited.merge(unlimited);
+
+        // Tailscale-wire surface (PRs 1-4). Mounted unconditionally
+        // when `wire_state` is populated; absent otherwise so the
+        // routes don't reply to unrelated probes. Same `merge` pattern
+        // as `/events` because the wire router doesn't share state
+        // with `ControlState` — it owns its own `Arc`-shared
+        // `WireState` constructed at Hub init.
+        if let Some(ws) = self.wire_state.clone() {
+            merged = merged.merge(tailscale_wire_router(ws));
+        }
+
+        merged
     }
 }
 

@@ -26,6 +26,7 @@ pub mod peer;
 pub mod serve;
 pub mod stun;
 pub mod subnet;
+pub mod tailscale_wire;
 
 pub use acl::{AclAction, AclDoc, AclRule, PortRef, SignedAclDoc};
 pub use conn::{ConnState, Connection, ConnectionManager};
@@ -40,6 +41,10 @@ pub use peer::{
 pub use serve::{ServeEntry, ServeRegistry};
 pub use stun::{stun_binding_request, StunError};
 pub use subnet::{SubnetAdvertisement, SubnetRouter};
+pub use tailscale_wire::{
+    router as tailscale_wire_router, MachineRecord, MachineRegistry, ServerNoiseKey, WireError,
+    WireState,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum MeshError {

@@ -56,6 +56,9 @@ tempfile    = { workspace = true }
 
 [dev-dependencies]
 octravpn-mesh = { path = "../octravpn-mesh", features = ["test-helpers"] }
+# `tower::ServiceExt::oneshot` drives the merged axum::Router in the
+# `tailscale_wire_integration` test without binding a real port.
+tower = { version = "0.5", features = ["util"] }
 
 [lints]
 workspace = true

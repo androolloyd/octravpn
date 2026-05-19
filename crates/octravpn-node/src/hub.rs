@@ -922,6 +922,50 @@ impl Hub {
                 .admin_token
                 .clone()
                 .or_else(|| std::env::var("OCTRAVPN_ADMIN_TOKEN").ok());
+            // Construct the Tailscale-wire surface state if a
+            // `[control].tailscale_wire_state_dir` is configured. Absent
+            // configuration ⇒ wire router is not mounted at all
+            // (matching the `/events` "endpoint hidden" design). The
+            // PreauthMinter is shared with `/admin/preauth` so a key
+            // minted via that endpoint is redeemable through `register`.
+            let wire_state = if let Some(dir) = self
+                .cfg
+                .control
+                .tailscale_wire_state_dir
+                .as_ref()
+                .map(std::path::PathBuf::from)
+            {
+                use octravpn_mesh::{
+                    ip_alloc::TailnetIpAllocator, tailscale_wire::MachineRegistry, PreauthMinter,
+                    ServerNoiseKey, WireState,
+                };
+                let server_noise_key = Arc::new(
+                    ServerNoiseKey::load_or_generate(&dir)
+                        .context("load tailscale_wire noise static key")?,
+                );
+                let tailnet_id = self
+                    .cfg
+                    .control
+                    .tailscale_tailnet_id
+                    .clone()
+                    .unwrap_or_else(|| "octravpn-interop".to_string());
+                // PreauthMinter is constructed *here* and then shared
+                // into ControlState below. Reusing the same Arc<Mutex>
+                // means an `/admin/preauth`-minted key is visible to
+                // the wire `register` handler.
+                let shared_minter = PreauthMinter::new();
+                Some((
+                    WireState {
+                        server_noise_key,
+                        preauth: shared_minter.clone(),
+                        ip_allocator: Arc::new(TailnetIpAllocator::new(tailnet_id)),
+                        machines: Arc::new(MachineRegistry::new()),
+                    },
+                    shared_minter,
+                ))
+            } else {
+                None
+            };
             let mut state = ControlState::with_metrics(
                 self.wg_kp.clone(),
                 self.router.clone(),
@@ -931,7 +975,14 @@ impl Hub {
                 receipt_journal,
             )
             .with_events_token(self.cfg.control.events_token.clone())
-            .with_admin_token(admin_token);
+            .with_admin_token(admin_token)
+            .with_wire_state(wire_state.as_ref().map(|(ws, _)| ws.clone()));
+            // If the wire surface is enabled, swap the auto-constructed
+            // preauth minter for the one shared with the wire router so
+            // both paths see the same store.
+            if let Some((_, shared)) = wire_state {
+                state.preauth_minter = shared;
+            }
             // Open the audit log next to the wallet secret unless a
             // dedicated path is configured.
             let audit_dir = self

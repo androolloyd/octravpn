@@ -149,6 +149,108 @@ PR 3 alone may stall at "peer never sent a map response" (exit
 when it gets a successful register but a stalled map. PR 4 is the
 unblocker.
 
+## Update 2026-05-19: PRs 1+2 shipped, plus PR 3/4 scaffolding
+
+`crates/octravpn-mesh/src/tailscale_wire/` now contains:
+
+| File | What it does | Status |
+| ---- | ------------ | ------ |
+| `mod.rs` | Router root, `WireState`, `MachineRegistry` | shipped |
+| `noise.rs` | Persistent server X25519 keypair + `snow` IK round-trip + (stubbed) `/ts2021` handler | PR 1 + half of PR 2 shipped |
+| `key_handler.rs` | `GET /key` returns `OverTLSPublicKeyResponse` | PR 1 shipped |
+| `wire.rs` | `MapRequest`/`MapResponse`/`RegisterRequest`/`RegisterResponse` JSON shapes pinned to upstream `tailcfg.go` field names | PR 3+4 shapes shipped |
+| `register.rs` | `POST /machine/{node_key}/register` with PreauthMinter wiring + IP allocation | PR 3 plaintext path shipped |
+| `map.rs` | `POST /machine/{node_key}/map` with `Notify`-driven long-poll | PR 4 plaintext path shipped |
+
+`octravpn-node` integration:
+- `[control].tailscale_wire_state_dir` + `[control].tailscale_tailnet_id`
+  added to `node.toml`; when set, `Hub::spawn_control_plane` mounts the
+  wire router next to `/admin/preauth` and shares the same
+  `PreauthMinter` across both surfaces.
+- New `octravpn-node mesh serve --listen … --state-dir … --tailnet-id …`
+  subcommand runs the wire router + a token-gated `/admin/preauth`
+  shim WITHOUT a Hub. Used by `docker/devnet/tailscale-interop`.
+- `docker-compose.yml` now invokes `mesh serve` instead of
+  `sleep infinity`, so port 51821 is *actually listening* during the
+  test (it never was before).
+
+### What that gets us
+| Probe | Pre-PR | Post-PR |
+| ----- | ------ | ------- |
+| `curl /admin/preauth` (HTTP path of step 3) | timeout (no port bound) | 200 + key |
+| `curl /key` from inside `tsi-peer-a` | `connection refused` | 200 + `{"PublicKey":"mkey:<hex>"}` |
+| `tailscale up` exit code | 30 (no daemon) | 30 (`/ts2021` returns 501) |
+
+Exit code is **still 30**: stock `tailscale/tailscale:latest`
+(capability version >> 39) refuses to fall back to plaintext JSON
+register/map and bails when `/ts2021` doesn't 101-Switching-Protocols.
+The plaintext `register` + `map` handlers we shipped are testable in
+isolation (and proven so by `cargo test -p octravpn-mesh tailscale_wire`)
+but stock `tailscale` never reaches them.
+
+### What's left for exit code 0
+
+The wall is **the TS2021 frame layer + HTTP/2 hijack**, not the JSON
+shapes. Concretely:
+
+1. `/ts2021` must accept the
+   `Upgrade: tailscale-control-protocol` request, hijack the TCP
+   socket, and run a 3/5-byte framed Noise IK handshake
+   (initiation = `[type=1:u8][len:u16be][protocolVersion:u16be]` +
+   Noise body; response = `[type=2:u8][len:u16be]` + Noise body).
+   The `snow` round-trip in `noise.rs::tests::ik_round_trip` proves
+   the cryptographic primitive is right; what's missing is the
+   framing wrapper + the connection-hijack glue.
+2. Once the handshake completes, the SAME socket must speak HTTP/2.
+   The `h2` crate accepts a `tokio::io::AsyncRead+AsyncWrite`, so
+   bolting it on top of the Noise transport (each record `read`
+   does a `noise_t.read_message`, each `write` calls
+   `noise_t.write_message`) is mechanical — but tedious.
+3. With the HTTP/2 inner router up, mount the existing
+   `register`/`map` handlers behind it (they're already
+   `axum::Router`-compatible).
+
+Estimated effort to close: 1-1.5 person-weeks. Two specific Rust
+crates are the helpful prior art:
+
+- `golang.org/x/net/http2` has no clean Rust analogue that takes a
+  pre-hijacked connection; we'd reach for `h2::server::handshake`
+  on top of an `AsyncRead+AsyncWrite` wrapper around the Noise
+  transport.
+- The Tailscale `controlbase` framing (header format above) is
+  source-cited at
+  `tailscale/control/controlbase/messages.go` and
+  `tailscale/control/controlbase/handshake.go`. A pure Rust port is
+  ~200 lines.
+
+### Wire-format ambiguities not resolved in this pass
+
+- The interaction between `EarlyNoise` (`tailscale/tailcfg/early.go`)
+  and the regular Noise frame is unclear from the headscale source
+  alone — we may need to send a 5-byte `\xff\xff\xffTS<len:u32be>`
+  JSON header in the responder's reply for newer clients (post-PR
+  4323). Documented but not implemented.
+- `MapResponse.Streaming` vs single-shot behaviour: stock
+  `tailscale up` sets `Stream: true` and expects newline-delimited
+  JSON chunks of `MapResponse` types. Our handler returns a single
+  body — fine for our isolation tests, wrong for the real client.
+  Tracked as a follow-up in `tailscale_wire::wire::MapRequest`'s
+  doc-comment.
+
+### Decision-log highlights (full notes live in each module)
+
+- `snow = "0.9"` (resolves 0.9.6) pinned per the original blocker
+  spec; the workspace's MSRV satisfies 0.10 too if we ever need to
+  upgrade.
+- `MachineRegistry` keys on hex node-key strings (not `[u8; 32]`)
+  because every consumer of the registry is going through the
+  axum path parameter, which is a `String`. Avoids a redundant
+  hex-decode on every request.
+- The `derive_x25519_public` helper in `noise.rs` round-trips a
+  throwaway IK pair to extract the public from a private. Verbose
+  vs `x25519-dalek::PublicKey::from(&priv)` but the blocker doc
+  forbids any new dep besides `snow`.
+
 ## Files to touch when picking this up
 
 - `crates/octravpn-mesh/src/lib.rs` — add `pub mod tailscale_wire`

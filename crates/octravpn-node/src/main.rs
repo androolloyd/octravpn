@@ -201,6 +201,36 @@ enum MeshCmd {
         #[arg(long)]
         ttl_secs: Option<u64>,
     },
+    /// Run a minimal Tailscale-wire control plane (no chain / wallet
+    /// dependencies). Used by the
+    /// `docker/devnet/tailscale-interop/run-interop.sh` harness so a
+    /// stock `tailscale up` can `GET /key`, `POST /machine/.../register`,
+    /// `POST /machine/.../map` without bringing up the full Hub.
+    ///
+    /// Mounts in one process:
+    ///   - `GET /key` + `POST /machine/.../register` + `POST /machine/.../map`
+    ///     (the Tailscale-wire surface — `tailscale_wire_router`).
+    ///   - `POST /admin/preauth` for minting keys over HTTP (bearer
+    ///     token from `--admin-token` or `OCTRAVPN_ADMIN_TOKEN`).
+    ///
+    /// Both surfaces share one `PreauthMinter` so a key minted over
+    /// HTTP is immediately redeemable through `register`.
+    Serve {
+        /// `host:port` to listen on. Defaults to `0.0.0.0:51821`.
+        #[arg(long, default_value = "0.0.0.0:51821")]
+        listen: String,
+        /// Directory for the Noise long-term static key + future wire
+        /// state. Defaults to `./state/tailscale-wire`.
+        #[arg(long, default_value = "./state/tailscale-wire")]
+        state_dir: String,
+        /// Tailnet identifier (drives the IP allocator).
+        #[arg(long, default_value = "octravpn-interop")]
+        tailnet_id: String,
+        /// Bearer token for `/admin/preauth`. Falls back to the
+        /// `OCTRAVPN_ADMIN_TOKEN` env var when unset.
+        #[arg(long)]
+        admin_token: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -253,7 +283,7 @@ async fn main() -> Result<()> {
         // so the harness can mint a preauth key without a configured
         // RPC endpoint.
         Cmd::Mesh { sub } => {
-            return run_mesh_cmd(&sub);
+            return run_mesh_cmd(sub).await;
         }
         // Everything else needs the Hub: dispatch below.
         rest => {
@@ -301,7 +331,7 @@ async fn main() -> Result<()> {
 /// signature change. The current single arm is infallible — clippy
 /// allow is intentional.
 #[allow(clippy::unnecessary_wraps)]
-fn run_mesh_cmd(sub: &MeshCmd) -> Result<()> {
+async fn run_mesh_cmd(sub: MeshCmd) -> Result<()> {
     match sub {
         MeshCmd::MintPreauth {
             user,
@@ -313,7 +343,7 @@ fn run_mesh_cmd(sub: &MeshCmd) -> Result<()> {
                 .map(std::time::Duration::from_secs)
                 .unwrap_or(DEFAULT_PREAUTH_TTL);
             let minter = PreauthMinter::new();
-            let pk = minter.mint(user, ttl, *reusable);
+            let pk = minter.mint(&user, ttl, reusable);
             // Single-line stdout output so the harness can capture
             // with `KEY=$(octravpn-node mesh mint-preauth --user u)`.
             // Everything else (user, expiry) goes to stderr so it
@@ -325,7 +355,126 @@ fn run_mesh_cmd(sub: &MeshCmd) -> Result<()> {
             println!("{}", pk.key);
             Ok(())
         }
+        MeshCmd::Serve {
+            listen,
+            state_dir,
+            tailnet_id,
+            admin_token,
+        } => run_mesh_serve(listen, state_dir, tailnet_id, admin_token).await,
     }
+}
+
+/// Hub-free wire surface entry point. See `MeshCmd::Serve` for the
+/// rationale.
+async fn run_mesh_serve(
+    listen: String,
+    state_dir: String,
+    tailnet_id: String,
+    admin_token: Option<String>,
+) -> Result<()> {
+    use axum::{
+        extract::State,
+        http::{HeaderMap, StatusCode},
+        response::IntoResponse,
+        routing::post,
+        Json, Router,
+    };
+    use octravpn_mesh::{
+        ip_alloc::TailnetIpAllocator, tailscale_wire::MachineRegistry, tailscale_wire_router,
+        PreauthMinter, ServerNoiseKey, WireState, DEFAULT_PREAUTH_TTL,
+    };
+    use serde::{Deserialize, Serialize};
+    use std::{net::SocketAddr, sync::Arc};
+
+    // Admin token resolution: explicit > env > absent.
+    let admin_token = admin_token.or_else(|| std::env::var("OCTRAVPN_ADMIN_TOKEN").ok());
+
+    let server_noise_key = Arc::new(
+        ServerNoiseKey::load_or_generate(&state_dir)
+            .context("load tailscale_wire noise static key")?,
+    );
+    let minter = PreauthMinter::new();
+    let ws = WireState {
+        server_noise_key: server_noise_key.clone(),
+        preauth: minter.clone(),
+        ip_allocator: Arc::new(TailnetIpAllocator::new(tailnet_id)),
+        machines: Arc::new(MachineRegistry::new()),
+    };
+
+    eprintln!(
+        "mesh serve: noise pubkey mkey:{} listen={listen}",
+        server_noise_key.public_hex()
+    );
+
+    // /admin/preauth shim for the harness. Kept identical to the
+    // ControlState handler's behaviour (404 when no token, 404 on
+    // wrong token, 200+JSON on success) so the run-interop.sh probe
+    // succeeds.
+    #[derive(Clone)]
+    struct AdminCtx {
+        minter: PreauthMinter,
+        token: Option<Arc<str>>,
+    }
+    #[derive(Deserialize, Default)]
+    #[serde(rename_all = "snake_case")]
+    struct AdminReq {
+        #[serde(default = "default_user")]
+        user: String,
+        #[serde(default)]
+        reusable: bool,
+    }
+    fn default_user() -> String {
+        "default".into()
+    }
+    #[derive(Serialize)]
+    struct AdminResp {
+        key: String,
+        user: String,
+        expires_at: u64,
+        reusable: bool,
+    }
+    async fn mint_handler(
+        State(ctx): State<AdminCtx>,
+        headers: HeaderMap,
+        body: Option<Json<AdminReq>>,
+    ) -> impl IntoResponse {
+        let Some(want) = ctx.token.as_deref() else {
+            return (StatusCode::NOT_FOUND, "").into_response();
+        };
+        let got = headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|h| h.strip_prefix("Bearer "));
+        let authed = got.is_some_and(|t| t == want);
+        if !authed {
+            return (StatusCode::NOT_FOUND, "").into_response();
+        }
+        let req = body.map(|Json(b)| b).unwrap_or_default();
+        let pk = ctx.minter.mint(req.user, DEFAULT_PREAUTH_TTL, req.reusable);
+        Json(AdminResp {
+            key: pk.key,
+            user: pk.user,
+            expires_at: pk.expires_at,
+            reusable: pk.reusable,
+        })
+        .into_response()
+    }
+    let admin_ctx = AdminCtx {
+        minter,
+        token: admin_token.map(Arc::from),
+    };
+    let admin_router = Router::new()
+        .route("/admin/preauth", post(mint_handler))
+        .with_state(admin_ctx);
+
+    let app = admin_router.merge(tailscale_wire_router(ws));
+    let addr: SocketAddr = listen.parse().context("parse listen addr")?;
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    eprintln!("mesh serve: listening on {addr}");
+    axum::serve(listener, app)
+        .await
+        .context("mesh serve: axum::serve")?;
+    Ok(())
 }
 
 fn run_seal_keys(

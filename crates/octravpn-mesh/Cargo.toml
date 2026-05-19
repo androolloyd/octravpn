@@ -29,10 +29,24 @@ tokio       = { workspace = true }
 toml        = { workspace = true }
 tracing     = { workspace = true }
 hex         = { workspace = true }
+# Noise IK handshake for the Tailscale-wire compatibility layer
+# (`tailscale_wire::noise`). 0.9 pinned per
+# `docs/tailscale-interop-blocker.md`.
+snow        = "0.9"
+# Tailscale-wire HTTP surface mounts as an axum::Router; pulled in
+# at the mesh layer (rather than only at octravpn-node) so the same
+# router can be unit-tested via `tower::ServiceExt::oneshot` without
+# the node's hub-init dependency.
+axum        = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
 tempfile = { workspace = true }
+# Drives the axum::Router in `oneshot` tests for the tailscale_wire
+# module. Workspace already pulls this in through axum's own dep
+# graph; we name it explicitly so the test compiles in `cargo test
+# -p octravpn-mesh`.
+tower    = { version = "0.5", features = ["util"] }
 
 [lints]
 workspace = true

@@ -50,11 +50,28 @@ services:
         source: ../../../target/linux-debug/debug/octravpn-node
         target: /usr/local/bin/octravpn-node
         read_only: true
-    # Pause forever; the test drives the container via
-    # `docker exec`. `tail -f /dev/null` is the standard idiom; we
-    # use `sleep infinity` so an accidental SIGPIPE doesn't tear
-    # the container down.
-    command: ["sleep", "infinity"]
+    # Run the Tailscale-wire control plane (Hub-free).
+    # `octravpn-node mesh serve` brings up:
+    #   - /admin/preauth — preauth-key minter (token-gated by
+    #     OCTRAVPN_ADMIN_TOKEN).
+    #   - /key + /ts2021 + /machine/.../{register,map} — the
+    #     Tailscale-wire surface (PRs 1-4 in
+    #     docs/tailscale-interop-blocker.md).
+    # No chain / wallet state required. State persists under
+    # /work/state across container restarts.
+    command:
+      - "octravpn-node"
+      - "mesh"
+      - "serve"
+      - "--listen=0.0.0.0:51821"
+      - "--state-dir=/work/state/tailscale-wire"
+      - "--tailnet-id=interop-test"
+    ports:
+      # Publish 51821 so run-interop.sh's curl from the host can
+      # reach /admin/preauth. The peer containers reach it via
+      # docker-network DNS (`http://tsi-mesh-control:51821`) and
+      # don't need the host port.
+      - "51821:51821"
     networks:
       - tsi-net
 

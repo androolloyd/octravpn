@@ -281,6 +281,22 @@ pub(crate) struct ControlCfg {
     /// rather than persisting it in the rendered `node.toml`.
     #[serde(default)]
     pub admin_token: Option<String>,
+    /// Directory to persist the Tailscale-wire Noise long-term static
+    /// key (and any future wire-protocol state). Defaults to
+    /// `./state/tailscale-wire`. The `noise_static.key` file inside is
+    /// 32 raw bytes mode-0600; it must survive across restarts so the
+    /// node's `mkey:` identity doesn't churn.
+    /// See `docs/tailscale-interop-blocker.md` and
+    /// `crates/octravpn-mesh/src/tailscale_wire/noise.rs`.
+    #[serde(default)]
+    pub tailscale_wire_state_dir: Option<String>,
+    /// Tailnet identifier used by `tailscale_wire`'s IP allocator. All
+    /// machines registering against this control plane share one
+    /// tailnet (the interop test only has two). Defaults to
+    /// `"octravpn-interop"` so the harness "just works"; production
+    /// operators should set this to a long stable string.
+    #[serde(default)]
+    pub tailscale_tailnet_id: Option<String>,
 }
 
 impl Default for ControlCfg {
@@ -291,6 +307,8 @@ impl Default for ControlCfg {
             events_token: None,
             receipt_journal_path: None,
             admin_token: None,
+            tailscale_wire_state_dir: None,
+            tailscale_tailnet_id: None,
         }
     }
 }
