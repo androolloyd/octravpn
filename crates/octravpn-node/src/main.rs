@@ -434,6 +434,7 @@ async fn run_mesh_serve(
     use octravpn_mesh::{
         ip_alloc::TailnetIpAllocator,
         tailscale_wire::{
+            derp_config::{empty_derp_map, load_derp_map},
             serve::{serve as wire_serve, ServeConfig},
             tls::SanConfig,
             MachineRegistry,
@@ -451,11 +452,29 @@ async fn run_mesh_serve(
             .context("load tailscale_wire noise static key")?,
     );
     let minter = PreauthMinter::new();
+    // Wall 6: optional DERP-map fixture for the interop harness. The
+    // env var points at a JSON file in the same shape as the on-wire
+    // `DerpMap`. Unset (the production default) ⇒ empty map ⇒ same
+    // behaviour as pre-Wall-6. See
+    // `docs/tailscale-interop-blocker.md` 2026-05-19 §"Wall 6 closed".
+    let derp_map = match std::env::var("OCTRAVPN_DERP_MAP_PATH") {
+        Ok(path) if !path.is_empty() => {
+            let map = load_derp_map(std::path::Path::new(&path))
+                .with_context(|| format!("load DERP map from {path}"))?;
+            eprintln!(
+                "mesh serve: loaded DERP map from {path} ({} region(s))",
+                map.regions.len()
+            );
+            map
+        }
+        _ => empty_derp_map(),
+    };
     let ws = WireState {
         server_noise_key: server_noise_key.clone(),
         preauth: Arc::new(minter.clone()),
         ip_allocator: Arc::new(TailnetIpAllocator::new(tailnet_id)),
         machines: Arc::new(MachineRegistry::new()),
+        derp_map: Arc::new(derp_map),
     };
 
     eprintln!(

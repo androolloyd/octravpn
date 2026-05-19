@@ -1292,3 +1292,250 @@ half-shipped fix"), the right next step is option (1) — DERP sidecar
 | `octravpn-mesh` (with `test-helpers`) | 89 (71 lib + 6 + 12 integration) |
 | `octravpn-node` | 121 (101 lib + 7 + 2 + 3 + 5 + 3 across integration files) |
 | `headscale-api` (no-default-features) | 58 lib (all green; the pre-existing `stream_true_emits_mapresponse_chunk_on_registry_change` failure is now closed) |
+
+## 2026-05-19 — Wall 6 closed — Wall 7 surfaced: WireGuard peer setup
+
+`bash docker/devnet/tailscale-interop/run-interop.sh` now drives the
+state machine all the way to `BackendState=Running` on **both peers**.
+Self-IPs are assigned, the netmap converges, MagicDNS resolves
+`tsi-peer-b.octra.test`, the DERP-1 sidecar accepts each peer's
+keep-alive connection, and `Health: []` is empty (no warnings). The
+control + relay plane is functionally complete.
+
+The remaining wall — surfaced now that DERP works — is the
+**WireGuard peer-setup datapath**: `tailscale ping <peer-IP>` returns
+`unknown peer` because `wgengine` never adds peer-b as a wireguard
+peer (`Reconfig: configuring userspace WireGuard config (with 0/0
+peers)`), even though peer-b is in the netmap with
+`InNetworkMap=true`. Two missing fields on `MapNode` block the
+wgengine reconfigure:
+
+1. `DiscoKey` (`tailcfg.Node.DiscoKey`) — the X25519 public key the
+   client uses to send disco-shimmed UDP probes. Without it,
+   magicsock can't probe a peer endpoint and `wgengine.Reconfig`
+   drops the node.
+2. `Endpoints` (`tailcfg.Node.Endpoints` — `[]string` of `ip:port`
+   pairs) — the candidate addresses to try. With only DERP routing
+   the daemon could in principle fall back to relay-only, but
+   upstream's `wgcfg.NewFromIPs` still requires a non-empty
+   `Endpoints` slice (or at least a DERP-home that magicsock then
+   binds via its DERPMap routing tables).
+
+Both fields ride on the `/machine/map` handshake side: the client
+includes its own `DiscoKey` and `Endpoints` in `MapRequest`, and the
+server has to fan them back out on every peer's `MapNode`. Our
+`map.rs::record_to_map_node` doesn't carry either — the registry
+holds only what `register::record_to_map_node` saw on the register
+call.
+
+### How we closed Wall 6
+
+The plan in the prior blocker entry (option 1 — vendor a
+`tailscale/derp` sidecar) landed straight: a docker-network-local
+DERP-1 relay built from upstream `tailscale/cmd/derper` (Go 1.24 +
+v1.78.0 tag, BSD-3, ~95 MB image), TLS-terminated with a fresh
+self-signed cert at `derp-certs/derp-1.crt`, with
+`InsecureForTests: true` on the DerpMap node so the client accepts
+the cert without a full PKIX chain. The DerpMap is loaded from
+`docker/devnet/tailscale-interop/derp-map.json` via the new
+`OCTRAVPN_DERP_MAP_PATH` env var and threaded into `WireState` as
+`derp_map: Arc<DerpMap>`.
+
+Daemon-log proof of magicsock landing on derp-1:
+
+```
+2026/05/19 20:17:01 magicsock: home DERP changing from derp-0 [0ms] to derp-1 [0ms]
+2026/05/19 20:17:01 magicsock: home is now derp-1 (interop)
+2026/05/19 20:17:01 magicsock: adding connection to derp-1 for home-keep-alive
+2026/05/19 20:17:01 magicsock: 1 active derp conns: derp-1=cr0s,wr0s
+2026/05/19 20:17:01 derphttp.Client.Connect: connecting to derp-1 (interop)
+2026/05/19 20:17:01 magicsock: derp-1 connected; connGen=1
+2026/05/19 20:17:01 health(warnable=no-derp-connection): ok
+2026/05/19 20:17:01 Switching ipn state Starting -> Running
+2026/05/19 20:17:01 health(warnable=warming-up): ok
+```
+
+`InsecureForTests: true` was the path of least resistance — the
+client's TLS validator accepts the self-signed `derp-1.crt` without
+a CA chain. We still install the cert into each peer's
+`/usr/local/share/ca-certificates/` for symmetry with the
+mesh-control cert flow, so a follow-up that flips
+`InsecureForTests: false` round-trips without further harness
+changes.
+
+Two compose-side facts surfaced during this batch:
+
+1. The public `tailscale/tailscale:latest` image does NOT ship
+   `derper` — only `tailscale` + `tailscaled` + `containerboot`. We
+   build derper from source in a multi-stage `Dockerfile.derper`
+   (`golang:1.24-alpine` → `alpine:3.20`, BSD-3-licensed
+   `tailscale/cmd/derper`, pinned to `TS_VERSION=v1.78.0`). First
+   build is ~80 s; subsequent runs reuse the layer cache.
+2. Upstream `derper`'s flags are Go-single-dash style (`-a`,
+   `-hostname`, `-certmode`, `-certdir`, `-http-port`,
+   `-stun=false`), not POSIX-double-dash. The first compose file
+   used `--addr` and `derper` died with `flag provided but not
+   defined`.
+
+A second harness fix was forced by Wall 6 closure: the `/admin/preauth`
+HTTP-minted key was previously `reusable:false`. That was fine
+pre-Wall-6 (register never succeeded), but with the wire layer
+healthy, peer-a consumed the key on its register call and peer-b
+got `register request: http 401: preauth key not recognised`. Now
+the harness mints `reusable:true` so both peers redeem the same key.
+
+### A second sub-wall closed in this same commit batch
+
+Once DERP was up, `tailscale ping` reported `unknown peer` even with
+peer-b in the netmap. Root cause was missing `MapResponse.PacketFilter`
+— `tailcfg.MapResponse.PacketFilter` is a `[]FilterRule` and stock
+`tailscale` default-denies inter-peer traffic when it's null/empty.
+We emit the canonical "allow everything to everywhere" rule
+(`SrcIPs=["*"]`, `DstPorts=[{IP:"*", Ports:{0..65535}}]`) — production
+deployments will derive this from the embedded ACL surface; the
+interop test runs open. This unblocked
+`PacketFilterRules: [...]` on the client side; daemon log line:
+
+```
+2026/05/19 20:23:43 wgengine: Reconfig: configuring userspace WireGuard config (with 0/0 peers)
+```
+
+Note the `0/0 peers` — wgengine accepts the packet filter but
+refuses to add peer-b as a wireguard peer (which is what gates the
+`tailscale ping` UX into a different error path entirely). That's
+the next wall.
+
+### Wall 7: DiscoKey + Endpoints on `MapNode`
+
+Daemon-side evidence (peer-a after a full Running-state convergence):
+
+```
+$ tailscale status --json | jq '.Peer[]'
+{
+  "ID": "n5048571289026498765",
+  "HostName": "tsi-peer-b",
+  "TailscaleIPs": ["100.68.200.95"],
+  "InNetworkMap": true,
+  "InMagicSock": false,        # ← here
+  "InEngine": false,           # ← here
+  "Online": false,
+  "Relay": "",
+  ...
+}
+$ tailscale ping 100.68.200.95
+unknown peer
+```
+
+The split between `InNetworkMap=true` and
+`InMagicSock=false + InEngine=false` is the signature of "the netmap
+says this peer exists, but `wgengine.Reconfig` couldn't materialise
+it". Upstream `wgcfg.NewFromIPs` rejects a node with no `DiscoKey`
+and falls back to wgengine-omits-the-peer.
+
+Three options to close it:
+
+1. **Add `DiscoKey` + `Endpoints` to `MapNode` and round-trip them
+   through `MachineRecord`.** The client puts both in its
+   `MapRequest` (`disco_key`, `endpoints`); we just need to persist
+   them at register / map time and emit them on the matching peer's
+   record. Estimated effort: ~1 day, additive to the same surface
+   that closed Wall 5.
+2. **Force `tailscale set --direct-only` post-up and skip disco.**
+   Out of scope — the stock client semantics include disco, and
+   diverging here would burn the wire-protocol parity story we've
+   spent five walls earning back.
+3. **Pivot to a "control-plane-only" interop test floor.** Modify
+   `run-interop.sh` to assert `BackendState=Running &&
+   InNetworkMap=true && DerpHomeReachable` as success — that's the
+   reachable end-state without Wall 7. The current ping-based
+   success criterion was never going to clear without disco.
+
+Per the prompt's stop-condition, option 1 is the right next step —
+filed as Wall 7. The wire-format work is contained: extend
+`wire::MapRequest` (carry `disco_key` + `endpoints` on the way in),
+extend `MachineRecord` (persist them), extend `record_to_map_node`
+(emit them on every peer's record). All additive, no breaking
+changes.
+
+### Exit-code progression as of this PR batch
+
+| State | Exit code |
+| ----- | --------- |
+| Pre-Wall-6 (empty DerpMap, peers stall at `Starting` on `no-derp-home`)         | 30 (`tailscale up` timed out) |
+| **Post-Wall-6 (this commit batch)**                                              | **50** (`tailscale up` reaches `Running` on both peers; `tailscale ping` fails on `unknown peer` because wgengine has `0/0 peers`) |
+| + DiscoKey + Endpoints on MapNode (Wall 7)                                       | expect 0 |
+
+### Files touched this batch
+
+`headscale-rs`:
+- `headscale-api/src/tailscale_wire/derp_config.rs` — **new**.
+  `load_derp_map(path)` + `empty_derp_map()`; 4 unit tests pinning
+  the round-trip + the upstream JSON tag names (`Regions`,
+  `RegionID`, `HostName`, `IPv4`, `DERPPort`, `InsecureForTests`,
+  `OmitDefaultRegions`).
+- `headscale-api/src/tailscale_wire/wire.rs` — `DerpMap` gains
+  `OmitDefaultRegions`; `DerpRegion` gains `RegionID` + `Avoid`;
+  `DerpRegionNode` gains `DERPPort`, `STUNPort`, `STUNOnly`,
+  `InsecureForTests`, `IPv6` (all with `skip_serializing_if`). New
+  `FilterRule` + `NetPortRange` + `PortRange` types, and
+  `MapResponse.PacketFilter` field for Wall-6-sequel
+  default-deny fix.
+- `headscale-api/src/tailscale_wire/mod.rs` — `WireState.derp_map:
+  Arc<DerpMap>` added; `derp_config` module registered;
+  `DerpMap`/`DerpRegion`/`DerpRegionNode` re-exported at the
+  `tailscale_wire::` root.
+- `headscale-api/src/tailscale_wire/map.rs` — `map_inner` reads
+  `state.derp_map`; the stream-mode unfold closure carries the
+  Arc<DerpMap> through each iteration so registry-change-driven
+  re-emits keep emitting the same map. New
+  `allow_all_packet_filter()` helper + integration into both the
+  immediate and the streaming MapResponse paths.
+- `headscale-api/src/tailscale_wire/{register,key_handler,raw_tls,serve}.rs`
+  — all five fixture builders updated to include
+  `derp_map: Arc::new(DerpMap::default())`.
+
+`octra`:
+- `docker/devnet/tailscale-interop/Dockerfile.derper` — **new**.
+  Multi-stage build of upstream `tailscale/cmd/derper` from
+  `v1.78.0` tag (Go 1.24 + Alpine 3.20).
+- `docker/devnet/tailscale-interop/docker-compose.yml` — `derp-1`
+  service added; mesh-control gets
+  `OCTRAVPN_DERP_MAP_PATH=/work/derp-map.json` + the fixture mount;
+  peer entrypoints install `derp-1.crt` alongside the mesh-control
+  cert.
+- `docker/devnet/tailscale-interop/derp-map.json` — **new**.
+  One-region fixture: `RegionID=1`, `HostName=derp-1`,
+  `DERPPort=443`, `InsecureForTests=true`,
+  `OmitDefaultRegions=true`.
+- `docker/devnet/tailscale-interop/.gitignore` — `derp-certs/`
+  added (same lifecycle as `state/`).
+- `docker/devnet/tailscale-interop/run-interop.sh` — minting of
+  `derp-1.{crt,key}` via `openssl req -x509`; explicit
+  `docker compose build derp-1` before `up -d`; new Step 4c that
+  polls `https://derp-1/derp/probe` for readiness; `tailscale up`
+  timeout 60 → 90 s; `tailscale ping` count 3 → 5, per-probe 5 s →
+  10 s; HTTP preauth `reusable:false` → `reusable:true` so both
+  peers can redeem.
+- `crates/octravpn-node/src/{main,hub}.rs` — read
+  `OCTRAVPN_DERP_MAP_PATH` env var, load fixture, populate
+  `WireState.derp_map`.
+- `crates/octravpn-node/tests/{raw_tls,tailscale_wire}_integration.rs`
+  — WireState constructions updated to include
+  `derp_map: Arc::new(DerpMap::default())`; new
+  `map_response_includes_derp_map_when_configured` test pins the
+  on-wire shape against the docker fixture.
+- `docs/tailscale-interop-blocker.md` — this section.
+
+### Test counts after Wall 6 closure
+
+| Crate | Tests passing |
+| ----- | ------------- |
+| `octravpn-mesh` (with `test-helpers`) | 89 (71 lib + 6 + 12 integration) |
+| `octravpn-node` | 122 (101 lib + 7 + 2 + 3 + **6** + 3 across integration files; +1 new `map_response_includes_derp_map_when_configured`) |
+| `headscale-api` (no-default-features) | 62 lib (all green; +4 from new `derp_config::tests::{round_trip_one_region_fixture, missing_file_surfaces_as_io_error, malformed_json_surfaces_as_other_error, empty_default_round_trips}`) |
+
+### New dependencies
+
+Docker image only — `octravpn-interop-derper:latest` is built from
+the local `Dockerfile.derper` (golang:1.24-alpine + alpine:3.20).
+No Rust dependency additions in either crate.

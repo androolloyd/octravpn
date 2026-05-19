@@ -31,6 +31,7 @@ fn build_state() -> (WireState, PreauthMinter, tempfile::TempDir) {
         preauth: Arc::new(minter.clone()),
         ip_allocator: Arc::new(TailnetIpAllocator::new("interop-test")),
         machines: Arc::new(MachineRegistry::new()),
+        derp_map: Arc::new(octravpn_mesh::tailscale_wire::DerpMap::default()),
     };
     (state, minter, dir)
 }
@@ -456,4 +457,139 @@ async fn stream_true_emits_chunk_on_registry_change() {
         "stream should emit a fresh MapResponse on registry change"
     );
     assert_eq!(second.peers[0].addresses[0], "100.64.0.11/32");
+}
+
+/// Wall 6 regression guard: when `WireState.derp_map` is populated
+/// with a non-empty fixture, the `/machine/map` response carries the
+/// same regions/nodes through to the client. Stock `tailscale` v1.78+
+/// gates `BackendState=Running` on a reachable DERP relay, and the
+/// daemon refuses to advance past `Starting` if `MapResponse.DERPMap`
+/// is empty (see `docs/tailscale-interop-blocker.md` 2026-05-19
+/// §"Wall 6 closed"). This test pins the field-by-field shape.
+#[tokio::test]
+async fn map_response_includes_derp_map_when_configured() {
+    use octravpn_mesh::tailscale_wire::{
+        wire::{DerpMap, DerpRegion, DerpRegionNode},
+        MachineRegistry,
+    };
+    use octravpn_mesh::{
+        ip_alloc::TailnetIpAllocator, PreauthMinter, ServerNoiseKey, WireState,
+    };
+
+    let dir = tempdir().unwrap();
+    let server = Arc::new(ServerNoiseKey::load_or_generate(dir.path()).unwrap());
+    let minter = PreauthMinter::new();
+    // One-region DERP map mirroring the docker fixture
+    // (`docker/devnet/tailscale-interop/derp-map.json`).
+    let mut regions = std::collections::HashMap::new();
+    regions.insert(
+        1u16,
+        DerpRegion {
+            region_id: 1,
+            region_code: "interop".into(),
+            region_name: "Interop test region".into(),
+            avoid: false,
+            nodes: vec![DerpRegionNode {
+                name: "1a".into(),
+                region_id: 1,
+                host_name: "derp-1".into(),
+                ipv4: String::new(),
+                ipv6: String::new(),
+                derp_port: 443,
+                stun_port: 0,
+                stun_only: false,
+                insecure_for_tests: true,
+            }],
+        },
+    );
+    let derp_map = DerpMap {
+        regions,
+        omit_default_regions: true,
+    };
+    let state = WireState {
+        server_noise_key: server,
+        preauth: Arc::new(minter.clone()),
+        ip_allocator: Arc::new(TailnetIpAllocator::new("interop-test")),
+        machines: Arc::new(MachineRegistry::new()),
+        derp_map: Arc::new(derp_map),
+    };
+
+    // Register a single peer and read its `/machine/map` view.
+    let pk = minter.mint("alice", DEFAULT_PREAUTH_TTL, false);
+    let app = tailscale_wire_router(state.clone());
+    let node_hex = "ef".repeat(32);
+    let reg_body = serde_json::json!({
+        "NodeKey": format!("nodekey:{node_hex}"),
+        "Auth": { "AuthKey": pk.key },
+        "Hostinfo": { "Hostname": "peer-a", "OS": "linux", "OSVersion": "6.6" },
+    });
+    let resp = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/machine/register")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(serde_json::to_vec(&reg_body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::OK);
+
+    // Inject a second peer so the long-poll returns immediately.
+    let other_hex = "fe".repeat(32);
+    state.machines.upsert(
+        other_hex.clone(),
+        octravpn_mesh::MachineRecord {
+            node_key_hex: other_hex,
+            machine_key_hex: String::new(),
+            user: "bob".into(),
+            hostname: "peer-b".into(),
+            ipv4: std::net::Ipv4Addr::new(100, 64, 0, 99),
+        },
+    );
+
+    let map_body = serde_json::json!({
+        "NodeKey": format!("nodekey:{node_hex}"),
+        "Version": 39,
+    });
+    let resp = app
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/machine/map")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(serde_json::to_vec(&map_body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::OK);
+    let raw = to_bytes(resp.into_body(), 32 * 1024).await.unwrap();
+
+    // Wire-shape assertions: the JSON must carry the upstream field
+    // names byte-identically so the Go decoder reaches the populated
+    // values (case-insensitive on the wire, but we pin the spelling
+    // anyway).
+    let raw_str = std::str::from_utf8(&raw).unwrap();
+    assert!(raw_str.contains("\"DERPMap\""), "DERPMap field name present");
+    assert!(raw_str.contains("\"Regions\""), "Regions inside DERPMap");
+    assert!(raw_str.contains("\"RegionID\""));
+    assert!(raw_str.contains("\"HostName\""));
+    assert!(raw_str.contains("\"DERPPort\""));
+    assert!(raw_str.contains("\"InsecureForTests\""));
+    assert!(raw_str.contains("\"OmitDefaultRegions\""));
+
+    let mr: octravpn_mesh::tailscale_wire::MapResponse =
+        serde_json::from_slice(&raw).unwrap();
+    assert!(mr.derp_map.omit_default_regions);
+    let region = mr.derp_map.regions.get(&1).expect("region 1 present");
+    assert_eq!(region.region_id, 1);
+    assert_eq!(region.region_code, "interop");
+    assert_eq!(region.nodes.len(), 1);
+    let node = &region.nodes[0];
+    assert_eq!(node.host_name, "derp-1");
+    assert_eq!(node.derp_port, 443);
+    assert!(node.insecure_for_tests);
 }

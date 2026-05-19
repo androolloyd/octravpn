@@ -1,0 +1,19 @@
+{
+  "OmitDefaultRegions": true,
+  "Regions": {
+    "1": {
+      "RegionID": 1,
+      "RegionCode": "interop",
+      "RegionName": "Interop test region",
+      "Nodes": [
+        {
+          "Name": "1a",
+          "RegionID": 1,
+          "HostName": "derp-1",
+          "DERPPort": 443,
+          "InsecureForTests": true
+        }
+      ]
+    }
+  }
+}

@@ -3,3 +3,8 @@
 # minted at first :443 bind. Regenerated automatically by
 # `run-interop.sh`; safe to wipe between runs.
 state/
+
+# Wall 6 (2026-05-19) — derper-1 sidecar's TLS material. Minted by
+# `run-interop.sh` at first run; regenerated on demand if absent.
+# Same lifecycle as `state/` — wipe freely between runs.
+derp-certs/

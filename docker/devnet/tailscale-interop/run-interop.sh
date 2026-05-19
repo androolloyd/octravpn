@@ -37,6 +37,13 @@ COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
 # key land under tailscale-wire/.
 mkdir -p "${SCRIPT_DIR}/state/tailscale-wire"
 
+# Wall 6: derper-1 sidecar's TLS material. The cert is minted by the
+# `gen-derp-cert` step below (run before the compose stack comes up)
+# and mounted read-only into both derp-1 and the peer containers
+# (which install it into their CA trust store). See
+# `docs/tailscale-interop-blocker.md` 2026-05-19 §"Wall 6 closed".
+mkdir -p "${SCRIPT_DIR}/derp-certs"
+
 # Pretty-prints a step header so the operator can tell which exit code
 # corresponds to which failure point.
 step() {
@@ -44,8 +51,13 @@ step() {
 }
 
 # Best-effort teardown. Always run on exit so a Ctrl-C doesn't leak
-# containers across the next run.
+# containers across the next run. Set `OCTRAVPN_INTEROP_KEEP=1` to
+# preserve the stack for post-mortem inspection.
 cleanup() {
+    if [[ -n "${OCTRAVPN_INTEROP_KEEP:-}" ]]; then
+        echo "OCTRAVPN_INTEROP_KEEP set — leaving containers running for inspection" >&2
+        return 0
+    fi
     docker compose -f "${COMPOSE_FILE}" down -v --remove-orphans >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -125,10 +137,60 @@ test -x "${LINUX_BIN}" || {
 echo "linux binary at ${LINUX_BIN}" >&2
 
 # ---------------------------------------------------------------------------
+# Step 1b — mint the derper sidecar's TLS material (Wall 6).
+#
+# `tailscale/cmd/derper` with `--certmode=manual` expects
+# `<certdir>/<hostname>.{crt,key}`. The cert needs `subjectAltName =
+# DNS:derp-1` so the rustls validator on each peer matches the
+# `HostName` field we emit in `MapResponse.DERPMap`. We use `openssl`
+# (already available on the host where the test is invoked) — the
+# resulting cert is bind-mounted into derp-1's /derp-certs/, and
+# each peer's entrypoint installs it into its CA trust store.
+#
+# `InsecureForTests: true` in our DERPMap means the daemon will
+# accept the cert even without trust-store install, but we install
+# anyway for symmetry with the mesh-control cert flow + so the
+# `InsecureForTests=false` configuration can be exercised in a
+# follow-up without touching this harness.
+# ---------------------------------------------------------------------------
+
+step "Step 1b: mint derp-1 self-signed cert"
+
+DERP_CERT="${SCRIPT_DIR}/derp-certs/derp-1.crt"
+DERP_KEY="${SCRIPT_DIR}/derp-certs/derp-1.key"
+if [[ ! -s "${DERP_CERT}" || ! -s "${DERP_KEY}" ]]; then
+    if ! command -v openssl >/dev/null 2>&1; then
+        echo "OPENSSL MISSING: needed to mint derp-1 self-signed cert" >&2
+        exit 10
+    fi
+    openssl req -x509 -newkey rsa:2048 -nodes \
+        -keyout "${DERP_KEY}" \
+        -out "${DERP_CERT}" \
+        -days 30 \
+        -subj "/CN=derp-1" \
+        -addext "subjectAltName=DNS:derp-1" \
+        >/dev/null 2>&1 || {
+            echo "OPENSSL FAIL: could not mint derp-1 cert" >&2
+            exit 10
+        }
+    chmod 0644 "${DERP_CERT}" "${DERP_KEY}"
+    echo "minted derp-1 cert at ${DERP_CERT}" >&2
+else
+    echo "derp-1 cert already present at ${DERP_CERT}; reusing" >&2
+fi
+
+# ---------------------------------------------------------------------------
 # Step 2 — bring up the compose stack.
 # ---------------------------------------------------------------------------
 
 step "Step 2: docker compose up"
+# Build the derper image up front so the long Go-build phase doesn't
+# get rolled into the `up -d` deadline. Subsequent runs reuse the
+# layer cache and complete in <1 s.
+docker compose -f "${COMPOSE_FILE}" build derp-1 >&2 || {
+    echo "DERPER BUILD FAIL: could not build the derper sidecar image (Wall 6)" >&2
+    exit 10
+}
 docker compose -f "${COMPOSE_FILE}" up -d >&2 || {
     echo "COMPOSE FAIL: could not start mesh-control + ts peers" >&2
     exit 10
@@ -182,7 +244,7 @@ HTTP_KEY=""
 HTTP_BODY=$(curl -fsS --max-time 5 \
     -H "Authorization: Bearer interop-test-token" \
     -H "Content-Type: application/json" \
-    -d '{"user":"interop-test","reusable":false}' \
+    -d '{"user":"interop-test","reusable":true}' \
     http://127.0.0.1:51821/admin/preauth 2>/dev/null || true)
 if [[ -n "${HTTP_BODY}" ]]; then
     # The endpoint returns a flat JSON object; grab the value of
@@ -203,10 +265,13 @@ fi
 if [[ -n "${HTTP_KEY}" ]]; then
     echo "preauth via HTTP: ${HTTP_KEY}" >&2
 fi
-# Prefer the HTTP-minted key for the tailscale up step: it's the
-# one that's tied to the running daemon's in-memory store. (When
-# the future coordination plane lands, only that key path is
-# bound into the same MeteringSession.)
+# Prefer the HTTP-minted (reusable) key for the tailscale up step:
+# it's the one tied to the running daemon's in-memory store AND it
+# was minted as `reusable=true` so peer-a + peer-b can both redeem
+# it. (Pre-Wall-6, register never succeeded on the wire, so the
+# `reusable=false` surface here never tripped. Now that the wire
+# layer is healthy, the second peer needs a key it can actually
+# redeem.)
 PREAUTH_KEY="${HTTP_KEY:-${CLI_KEY}}"
 
 # ---------------------------------------------------------------------------
@@ -266,6 +331,29 @@ for peer in tsi-peer-a tsi-peer-b; do
     }
 done
 
+step "Step 4c: wait for derp-1 to accept connections (Wall 6)"
+# `derper`'s health endpoint is `GET /derp/probe`; a 200 means the
+# relay accepted our TLS handshake and the magicsock client will be
+# able to upgrade. We poll from inside one of the peer containers
+# (which sits on the same docker network), bypassing the host-port
+# question entirely.
+DERP_READY=""
+for _ in $(seq 1 30); do
+    if docker exec tsi-peer-a sh -c \
+        'wget -qO- --no-check-certificate https://derp-1/derp/probe 2>/dev/null || \
+         curl -fsSk https://derp-1/derp/probe 2>/dev/null' >/dev/null 2>&1; then
+        DERP_READY=1
+        break
+    fi
+    sleep 1
+done
+if [[ -z "${DERP_READY}" ]]; then
+    echo "DERP-1 NOT READY: probe endpoint never returned 200 (Wall 6 gating signal)" >&2
+    docker compose -f "${COMPOSE_FILE}" logs derp-1 >&2 | tail -30 || true
+    exit 10
+fi
+echo "derp-1 probe endpoint reachable" >&2
+
 step "Step 4b: tailscale up on both peers"
 
 # Stock `tailscale up` v1.78+ forces an HTTPS-on-443 dial regardless
@@ -278,11 +366,11 @@ for peer in tsi-peer-a tsi-peer-b; do
     # `tailscale up` blocks forever waiting for the coordination
     # server when there's nothing on the other end of the
     # login-server URL — wrap the call in `timeout` so the test
-    # terminates cleanly. 60 s is plenty for the
-    # post-Wall-5 register → netmap → Running transition; a healthy
-    # control plane lands in well under 30 s.
+    # terminates cleanly. 90 s is plenty for the post-Wall-6
+    # register → netmap → derp-bootstrap → Running transition; a
+    # healthy control plane + DERP relay lands in well under 45 s.
     if ! docker exec "${peer}" sh -c \
-        "/usr/bin/timeout 60 tailscale --socket=/var/run/tailscale/tailscaled.sock up \
+        "/usr/bin/timeout 90 tailscale --socket=/var/run/tailscale/tailscaled.sock up \
             --login-server '${LOGIN_SERVER}' \
             --authkey '${PREAUTH_KEY}' \
             --hostname ${peer} \
@@ -324,8 +412,12 @@ echo "peer-b tailscale ip: ${PEER_B_IP}" >&2
 # ---------------------------------------------------------------------------
 
 step "Step 6: tailscale ping from peer-a to peer-b"
-if ! docker exec tsi-peer-a tailscale ping --c 3 --timeout 5s "${PEER_B_IP}" >&2; then
+# DERP-relayed ping takes longer than direct; bump the per-probe
+# timeout from 5s → 10s and probe count from 3 → 5 so transient first-
+# packet jitter doesn't fail the whole test.
+if ! docker exec tsi-peer-a tailscale ping --c 5 --timeout 10s "${PEER_B_IP}" >&2; then
     echo "TAILSCALE-PING FAILED despite peers being up" >&2
+    docker compose -f "${COMPOSE_FILE}" logs derp-1 >&2 | tail -20 || true
     exit 50
 fi
 

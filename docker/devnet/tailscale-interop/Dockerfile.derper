@@ -1,0 +1,46 @@
+# DERP relay sidecar for the tailscale-interop test.
+#
+# Wall 6 (closed 2026-05-19): stock `tailscale` v1.78+ refuses to
+# advance past `BackendState=Starting` without a reachable DERP relay,
+# even on the docker bridge where peers could route directly. The fix
+# is a docker-network-local DERP server that the mesh-control points
+# at via `MapResponse.DERPMap`. See
+# `docs/tailscale-interop-blocker.md` 2026-05-19 §"Wall 6 closed".
+#
+# Implementation note: the public `tailscale/tailscale:latest` image
+# does NOT ship `derper` — only `tailscale` + `tailscaled` +
+# `containerboot`. We therefore build the upstream `cmd/derper`
+# binary from source in a multi-stage build. The upstream module is
+# BSD-3 licensed (citation: `tailscale/tailscale/LICENSE` ⇒
+# Tailscale Inc., BSD 3-Clause). The build is reproducible-by-tag —
+# pin to a release tag to lock the bytes; the interop test currently
+# floats with `main` for simplicity.
+
+# Pinned to a Go release that satisfies tailscale's `go.mod` minimum
+# (v1.78.0 requires Go 1.23.1+). Bump in lockstep with the upstream
+# `TS_VERSION` below if a future tag tightens this floor.
+FROM golang:1.24-alpine AS builder
+RUN apk add --no-cache git
+WORKDIR /src
+# Shallow clone of just the tag we need. Locking to v1.78.x keeps the
+# DERP wire format aligned with the client `tailscale/tailscale:latest`
+# already pulled by the harness.
+ARG TS_VERSION=v1.78.0
+RUN git clone --depth=1 --branch ${TS_VERSION} https://github.com/tailscale/tailscale.git .
+# Build with module mode; reproducible flags keep the bytes stable.
+# `TARGETARCH` honours buildx multi-arch invocations (the macOS host
+# runs arm64; the CI runners run amd64). Defaulting to the build
+# host's native arch is correct for the docker-bridge-only network.
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} \
+    go build -trimpath -ldflags="-s -w" -o /derper ./cmd/derper
+
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates openssl
+COPY --from=builder /derper /usr/local/bin/derper
+# /derp-certs is mounted at run time by the compose file. The cert is
+# minted by `run-interop.sh`'s `gen-derp-cert.sh` step using the same
+# self-signed pattern as the mesh-control's TLS material.
+VOLUME ["/derp-certs"]
+EXPOSE 443
+ENTRYPOINT ["/usr/local/bin/derper"]
