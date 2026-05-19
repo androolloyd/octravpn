@@ -26,6 +26,15 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: octravpn
+
+      - name: Checkout sibling repos (octra-foundry, headscale-rs)
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/androolloyd/octra-foundry.git
+          git clone --depth 1 https://github.com/androolloyd/headscale-rs.git
+          ls -la
 
       - name: Install vhs + ttyd + ffmpeg
         run: |
@@ -42,12 +51,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build octravpn binaries needed by tapes
+        working-directory: octravpn
         run: |
           set -euo pipefail
           cargo build --release -p octravpn-client -p octravpn-node
           echo "${PWD}/target/release" >> "$GITHUB_PATH"
 
       - name: Render dependency-light tapes
+        working-directory: octravpn
         run: |
           set -euo pipefail
           mkdir -p demo/recordings
@@ -63,5 +74,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: demo-recordings
-          path: demo/recordings/
+          path: octravpn/demo/recordings/
           if-no-files-found: warn
