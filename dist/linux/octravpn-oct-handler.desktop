@@ -1,0 +1,36 @@
+# Freedesktop `.desktop` file registering `octravpn open-url` as the
+# handler for `oct://` URLs on Linux (XDG-conformant desktops:
+# GNOME, KDE, XFCE, Sway, etc.).
+#
+# This file is a TEMPLATE. `dist/linux/install-handler.sh` renders the
+# real one into `~/.local/share/applications/octravpn-oct-handler.desktop`
+# with the absolute path of the located `octravpn` binary substituted
+# into `Exec=`. The literal `__OCTRAVPN_BIN__` token below is the
+# placeholder.
+#
+# Reference:
+#   https://specifications.freedesktop.org/desktop-entry-spec/latest/
+#   https://specifications.freedesktop.org/shared-mime-info-spec/latest/
+#
+# Notes:
+#   - `MimeType=x-scheme-handler/oct;` is the line that actually binds
+#     the `oct:` URL scheme. The trailing semicolon is required by the
+#     spec (MimeType is a list).
+#   - `NoDisplay=true` keeps this entry out of the application menu —
+#     a URL handler shouldn't be a clickable launcher.
+#   - `Terminal=false` because `octravpn open-url` is a one-shot CLI
+#     that prints to stderr; XDG desktops will not pop a terminal for
+#     a URL-handler dispatch in any case.
+#   - `%u` is the single-URL field code; the OS substitutes the
+#     percent-encoded `oct://...` URL the user clicked.
+#   - Read `docs/oct-url-handler.md` before changing any of this.
+
+[Desktop Entry]
+Type=Application
+Name=OctraVPN URL Handler
+Comment=Handle oct:// URLs by fetching and rendering sealed circle assets
+Exec=__OCTRAVPN_BIN__ open-url %u
+Terminal=false
+NoDisplay=true
+MimeType=x-scheme-handler/oct;
+Categories=Network;

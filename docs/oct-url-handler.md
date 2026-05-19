@@ -3,10 +3,13 @@
 Status: **draft / scaffolding only**. Ships:
 
   - `crates/octravpn-client/src/commands/open_url.rs` — stub subcommand.
-  - `dist/macos/octravpn-oct-handler.plist` — macOS LSHandler fragment.
-  - `dist/macos/install-handler.sh` — `lsregister`-based installer.
+  - `dist/macos/` — `octravpn-oct-handler.plist` + `install-handler.sh`.
+  - `dist/linux/` — `octravpn-oct-handler.desktop` +
+    `install-handler.sh` + `uninstall-handler.sh`.
+  - `dist/windows/` — `octravpn-oct-handler.reg` (UTF-16 LE w/ BOM) +
+    `install-handler.ps1` + `uninstall-handler.ps1`.
 
-Linux + Windows are described here, not shipped.
+Cross-platform install index: `dist/README.md`.
 
 ## What `oct://<addr>/<path>` actually means today
 
@@ -169,20 +172,15 @@ than the webcli — that's the right tradeoff for a system-wide handler.
 
 ## Where the registration lives in the repo
 
-Put the platform-specific glue under `dist/<platform>/`:
-
-  - `dist/macos/octravpn-oct-handler.plist`  — Info.plist fragment.
-  - `dist/macos/install-handler.sh`          — `lsregister` installer.
-  - `dist/linux/octravpn-oct.desktop`        — (not shipped here)
-  - `dist/linux/install-handler.sh`          — (not shipped here)
-  - `dist/windows/install-handler.ps1`       — (not shipped here)
+Per-platform glue under `dist/<platform>/`; see the section per
+platform below for shipped files. See `dist/README.md` for the
+install-quickstart index.
 
 Alternative considered: bake registration into `octravpn doctor` or a
 new `octravpn install-url-handler` subcommand. Rejected for now because
-(a) platform installers (homebrew, MSI, dpkg) already have a notion of
-"post-install scripts", and (b) running platform-protocol registration
-as a side-effect of a CLI command is surprising — the user typed
-`doctor`, not "rewrite my system LaunchServices DB". A subcommand
+running platform-protocol registration as a side-effect of a CLI
+command is surprising — the user typed `doctor`, not "rewrite my
+system LaunchServices DB / mimeapps.list / registry". A subcommand
 called `octravpn install-handler` (no side effects until invoked) is a
 fine follow-up; not in scope here.
 
@@ -190,78 +188,97 @@ fine follow-up; not in scope here.
 
 `dist/macos/octravpn-oct-handler.plist` is an Info.plist FRAGMENT — the
 keys to merge into the host bundle's Info.plist when we ship a real
-`.app`. Until we have an `.app`, the install script registers the bare
-binary via `lsregister -url` and a tiny on-the-fly bundle skeleton.
+`.app`. Until we have an `.app`, `dist/macos/install-handler.sh` builds
+a minimal `OctravpnUrlHandler.app` bundle under
+`~/Library/Application Support/octravpn/handler/` that wraps a shell
+shim doing `exec octravpn open-url "$1"`, then registers it with
+`lsregister -f -R -trusted <bundle>` and verifies via `lsregister -dump`.
 
-`dist/macos/install-handler.sh`:
-
-  - Locates the `octravpn` binary at `target/release/octravpn`.
-  - Builds a minimal `OctravpnUrlHandler.app` bundle in
-    `~/Library/Application Support/octravpn/handler/` that wraps a
-    shell shim doing `exec octravpn open-url "$1"`.
-  - Calls
-    `/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f -R -trusted <bundle>`
-    to register, then
-    `lsregister -dump | grep -A2 'oct:'` to verify.
-
-Manual test (not run during scaffolding):
+Manual test:
 
   1. `cargo build --release -p octravpn-client`
   2. `bash dist/macos/install-handler.sh`
   3. `open "oct://octdeadbeef.../policy.json"`
-  4. Expect: terminal window with `would open oct://octdeadbeef.../policy.json`
+  4. Expect: terminal window with `would open oct://...` (stub).
 
-I did NOT execute step 2 or 3 because this worktree is headless and
-`lsregister` mutates the user's LaunchServices DB — that is the kind of
-side effect we don't run from an agent without an explicit ask.
+None of the install scripts in this commit were executed by the agent
+that wrote them — they all mutate the user's per-session shell state
+(LaunchServices DB / `mimeapps.list` / HKCU registry) and need a real
+GUI session to test.
 
-## Linux registration (described, not shipped)
+## Linux registration (shipped)
 
-`~/.local/share/applications/octravpn-oct.desktop`:
+Files:
+
+  - `dist/linux/octravpn-oct-handler.desktop` — `.desktop` template
+    with `__OCTRAVPN_BIN__` placeholder for the binary path.
+  - `dist/linux/install-handler.sh` — locates `octravpn` (env override,
+    PATH, then `target/release/octravpn`), renders the template into
+    `~/.local/share/applications/octravpn-oct-handler.desktop`, runs
+    `update-desktop-database` (when present), then
+    `xdg-mime default octravpn-oct-handler.desktop x-scheme-handler/oct`
+    and verifies via `xdg-mime query`.
+  - `dist/linux/uninstall-handler.sh` — clears the binding (only if it
+    still points at us) and removes the desktop file.
+
+The desktop entry, rendered:
 
 ```
 [Desktop Entry]
 Type=Application
-Name=OctraVPN oct:// handler
+Name=OctraVPN URL Handler
 Exec=/usr/local/bin/octravpn open-url %u
-MimeType=x-scheme-handler/oct;
-NoDisplay=true
 Terminal=false
+NoDisplay=true
+MimeType=x-scheme-handler/oct;
+Categories=Network;
 ```
 
-Install:
+Manual test:
 
-```
-xdg-mime default octravpn-oct.desktop x-scheme-handler/oct
-update-desktop-database ~/.local/share/applications
-```
+  1. `cargo build --release -p octravpn-client`
+  2. `bash dist/linux/install-handler.sh`
+  3. `xdg-open 'oct://octdeadbeef.../policy.json'`
+  4. Expect: terminal-style invocation that prints `would open oct://...`.
 
-Caveat: KDE/Plasma reads `kbuildsycoca5` cache; GNOME reads
-`update-desktop-database`. Ship both.
+Caveat: KDE reads `kbuildsycoca5/6`; GNOME reads
+`update-desktop-database`. The script handles the latter; KDE usually
+picks the new `.desktop` up on its filesystem watch.
 
-## Windows registration (described, not shipped)
+## Windows registration (shipped)
 
-Per-user registry under `HKCU\Software\Classes\oct\`:
+Files:
+
+  - `dist/windows/octravpn-oct-handler.reg` — UTF-16 LE / BOM registry
+    template with `__OCTRAVPN_EXE__` placeholder. Writes the per-user
+    `HKCU\Software\Classes\oct` subtree only — never HKLM.
+  - `dist/windows/install-handler.ps1` — locates `octravpn.exe`
+    (parameter override, then `Get-Command`, then
+    `target\release\octravpn.exe`), renders the template into a temp
+    `.reg` (with backslashes doubled per `.reg` REG_SZ rules), applies
+    via `reg import`, then reads `HKCU:\Software\Classes\oct` back and
+    asserts the values stuck.
+  - `dist/windows/uninstall-handler.ps1` — `Remove-Item -Recurse`
+    against `HKCU:\Software\Classes\oct`.
+
+The rendered registry layout:
 
 ```
 HKCU\Software\Classes\oct\(Default) = "URL:OctraVPN Protocol"
 HKCU\Software\Classes\oct\URL Protocol = ""
+HKCU\Software\Classes\oct\DefaultIcon\(Default) = "<path-to-octravpn.exe>,0"
 HKCU\Software\Classes\oct\shell\open\command\(Default)
-    = "\"C:\\Program Files\\OctraVPN\\octravpn.exe\" open-url \"%1\""
+    = "\"<path-to-octravpn.exe>\" open-url \"%1\""
 ```
 
-PowerShell installer:
+Manual test:
 
-```powershell
-New-Item -Path "HKCU:\Software\Classes\oct" -Force | Out-Null
-Set-ItemProperty -Path "HKCU:\Software\Classes\oct" -Name "(Default)" `
-    -Value "URL:OctraVPN Protocol"
-Set-ItemProperty -Path "HKCU:\Software\Classes\oct" -Name "URL Protocol" -Value ""
-$cmd = '"C:\Program Files\OctraVPN\octravpn.exe" open-url "%1"'
-New-Item -Path "HKCU:\Software\Classes\oct\shell\open\command" -Force | Out-Null
-Set-ItemProperty -Path "HKCU:\Software\Classes\oct\shell\open\command" `
-    -Name "(Default)" -Value $cmd
-```
+  1. `cargo build --release -p octravpn-client` (cross-compile or
+     build on Windows).
+  2. `powershell -ExecutionPolicy Bypass -File dist\windows\install-handler.ps1`
+  3. `cmd /c start "" "oct://octdeadbeef.../policy.json"`
+  4. Expect: a console window from `octravpn.exe` printing
+     `would open oct://...`.
 
 Edge/Chrome/Firefox each prompt the first time. No way to skip that
 prompt without an installer-signed scheme registration (out of scope).
