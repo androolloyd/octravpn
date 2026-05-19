@@ -1,0 +1,199 @@
+# Nightly cargo-fuzz runs — PR #243.
+#
+# Activates the fuzz harnesses in /fuzz/ for actual time-budgeted runs.
+# The existing fuzz-build job in ci.yml is build-smoke only (`cargo
+# +nightly fuzz build`), so the corpus + crash discovery has been
+# whatever a developer ran locally. This workflow runs each registered
+# target for 5 min nightly + on-demand, caches the corpus across runs,
+# and opens an issue on the first crash.
+#
+# Scope choice: octra is the initial wiring repo (PR #243). headscale-
+# rs has its own 13 fuzz targets that need a similar workflow once the
+# `[workspace.lints]` + CI changes from PR #241 land; that's a follow-
+# up in PR #243-followup.
+
+name: Fuzz (nightly)
+
+on:
+  schedule:
+    # 06:30 UTC daily — off-peak for GH Actions, before EU/US working
+    # hours so an overnight crash is waiting in the inbox.
+    - cron: "30 6 * * *"
+  workflow_dispatch:
+    inputs:
+      max_total_time:
+        description: "Per-target time budget (seconds)"
+        required: false
+        default: "300"
+      target:
+        description: "Single target to run (default: all)"
+        required: false
+        default: ""
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  fuzz:
+    name: cargo fuzz — ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    # Hard ceiling well above the 5-min per-target budget; covers
+    # the build + corpus-load tail. workflow_dispatch with a
+    # custom budget can override the 300s default at dispatch time.
+    timeout-minutes: 30
+    strategy:
+      # Fuzz independently so one crashing target doesn't block the
+      # others. The on-crash issue step still fires for each match.
+      fail-fast: false
+      matrix:
+        # Update this list whenever a new fuzz target lands under
+        # /fuzz/fuzz_targets/. Listing at workflow-time via `cargo
+        # fuzz list` is doable but adds an extra build step; hardcoded
+        # matrix keeps the green/red signal one row per target.
+        target:
+          - receipt_decode
+          - onion_peel
+          - tx_canonical
+          - fuzz_acl_parse
+          - fuzz_peer_snapshot_decode
+          - fuzz_ip_alloc
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            fuzz
+      - name: Install cargo-fuzz
+        run: cargo install --locked cargo-fuzz
+
+      # Skip the matrix row when workflow_dispatch pinned a single
+      # target. We can't dynamically prune the matrix from `inputs`,
+      # so each unselected row exits 0 early.
+      - name: Decide whether to run this target
+        id: gate
+        run: |
+          want="${{ github.event.inputs.target }}"
+          if [ -n "$want" ] && [ "$want" != "${{ matrix.target }}" ]; then
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Restore corpus cache
+        if: steps.gate.outputs.skip == '0'
+        uses: actions/cache@v4
+        with:
+          # Corpus + artifacts persist across runs so the fuzzer
+          # builds on prior coverage rather than restarting cold
+          # every night.
+          path: |
+            fuzz/corpus/${{ matrix.target }}
+            fuzz/artifacts/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-${{ matrix.target }}-
+
+      - name: Run fuzz target
+        if: steps.gate.outputs.skip == '0'
+        id: run
+        # libfuzzer's exit-on-crash is non-zero. Capture it so we
+        # can upload artifacts + file an issue before the step
+        # fails the job.
+        continue-on-error: true
+        env:
+          MAX_TOTAL_TIME: ${{ github.event.inputs.max_total_time || '300' }}
+        run: |
+          set +e
+          cargo +nightly fuzz run "${{ matrix.target }}" -- \
+              -max_total_time="${MAX_TOTAL_TIME}" \
+              -timeout=10
+          rc=$?
+          echo "rc=${rc}" >> "$GITHUB_OUTPUT"
+          # libfuzzer convention: 77 = no crash. Anything else means
+          # a finding (panic / sanitizer / timeout / OOM) and we want
+          # to surface the artifact.
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 77 ]; then
+            echo "::warning::fuzz target ${{ matrix.target }} reported a finding (exit $rc)"
+            echo "found=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=0" >> "$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+      - name: Upload corpus + artifacts
+        if: steps.gate.outputs.skip == '0' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-${{ matrix.target }}-${{ github.run_id }}
+          path: |
+            fuzz/corpus/${{ matrix.target }}
+            fuzz/artifacts/${{ matrix.target }}
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Open issue on crash
+        if: steps.gate.outputs.skip == '0' && steps.run.outputs.found == '1'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const target = "${{ matrix.target }}";
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title = `fuzz: ${target} found a crash (run ${context.runId})`;
+            const body = [
+              `Nightly cargo-fuzz run \`${target}\` reported a finding.`,
+              ``,
+              `- Run: ${runUrl}`,
+              `- Crash artifact: download \`fuzz-${target}-${context.runId}\` from the run page.`,
+              `- Reproduce locally:`,
+              ``,
+              "  ```",
+              `  cd fuzz`,
+              `  cargo +nightly fuzz run ${target} <path-to-artifact>`,
+              "  ```",
+              ``,
+              `- Per-target time budget: 5 min (the default; override via workflow_dispatch).`,
+              ``,
+              `Triage: pull the seed out of the uploaded artifact dir and add it as a`,
+              `regression case under \`crates/octravpn-core/tests/\` (or wherever the`,
+              `target lives) so a future cargo-test run pins the fix.`,
+            ].join("\n");
+            // Avoid spamming: if an issue with the same title already
+            // exists and is open, just comment on it instead.
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: "fuzz-crash",
+            });
+            const match = existing.data.find(i => i.title === title);
+            if (match) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: match.number,
+                body: `Recurred: ${runUrl}`,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ["fuzz-crash", `target/${target}`],
+              });
+            }
+
+      - name: Re-raise on finding
+        if: steps.gate.outputs.skip == '0' && steps.run.outputs.found == '1'
+        # Now that the artifact is uploaded + issue is filed, fail
+        # the matrix row so the workflow status reflects the finding.
+        run: exit 1
