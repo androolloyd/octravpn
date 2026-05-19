@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Info.plist FRAGMENT registering the `oct://` URL scheme handler.
+
+    This is not a standalone Info.plist. It is the set of keys we want
+    merged into the host application bundle's real Info.plist. When we
+    ship a signed `OctraVPN.app` (or a `OctravpnUrlHandler.app` stub),
+    the build system should splice these keys into that bundle's
+    Info.plist via PlistBuddy or by templating.
+
+    For the interim install path used by `dist/macos/install-handler.sh`,
+    the script writes a complete Info.plist that embeds these keys plus
+    the minimum required bundle metadata (CFBundleIdentifier,
+    CFBundleExecutable, etc.).
+
+    Reference:
+      https://developer.apple.com/documentation/bundleresources/information_property_list/cfbundleurltypes
+
+    Notes:
+      - LSHandlerRank=Default tells LaunchServices we want to be the
+        default handler for `oct:` URLs (subject to user override in
+        Settings > General > Default Web Browser-style flow).
+      - CFBundleURLSchemes is a single-element array: macOS dispatches
+        on the URL's scheme component, not on a wildcard.
+      - The team identifier and bundle id placeholders MUST be replaced
+        before code signing. Until we have an Octra developer team id,
+        this fragment is install-only (no notarisation), which means
+        Gatekeeper will warn the first time it is launched.
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>CFBundleURLName</key>
+            <string>xyz.octra.url.oct</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>oct</string>
+            </array>
+            <key>LSHandlerRank</key>
+            <string>Default</string>
+        </dict>
+    </array>
+</dict>
+</plist>
