@@ -121,7 +121,7 @@ Reference Rust encoder/decoder: `crates/octravpn-core/src/v3_state_root.rs`.
 
 ```
 oct://<circle_id>/tailnet-{id}/config.json       # display name, region pinning, charge_internal flag
-oct://<circle_id>/tailnet-{id}/members.json      # sorted [{ wallet, pubkey, joined_epoch }]
+oct://<circle_id>/tailnet-{id}/members.json      # sorted members + ip_salt (schema: docs/v3-members-schema.md)
 oct://<circle_id>/tailnet-{id}/acl-root          # 32B Merkle root over members.json
 oct://<circle_id>/tailnet-{id}/sealed-keys/{member}.bin   # per-member sealed key envelope
 ```
