@@ -32,7 +32,9 @@
 //!   # v2-only: per-tailnet passphrase used to derive AES-GCM read keys for
 //!   # sealed assets stored inside the operator circle. Operators receive
 //!   # this from their tailnet owner at provisioning. Optional in v1.1.
-//!   sealed_passphrase = "..."        # OR set OCTRAVPN_SEALED_PASSPHRASE env
+//!   sealed_passphrase = "..."        # OR (preferred) set OCTRAVPN_SEALED_PASSPHRASE
+//!                                    # — env takes precedence over this field so ops
+//!                                    # can override without editing the TOML.
 //!   # v2-only: where to cache the predicted/deployed circle id so the
 //!   # operator doesn't re-derive on every restart. Default
 //!   # "./state/circle.toml".
@@ -128,8 +130,14 @@ pub(crate) struct ChainCfg {
     pub chain_id: u32,
     /// v2-only. Per-tailnet shared secret the operator gets at
     /// provisioning time; passed to `encrypt_sealed_bytes` as the
-    /// passphrase for the AES-GCM read key. Empty/absent falls back to
-    /// the `OCTRAVPN_SEALED_PASSPHRASE` env var.
+    /// passphrase for the AES-GCM read key.
+    ///
+    /// Precedence at resolve time (matches client `discover_v2`):
+    ///   1. `OCTRAVPN_SEALED_PASSPHRASE` env var (preferred — ops can
+    ///      override without editing TOML).
+    ///   2. This field.
+    ///
+    /// Empty in both ⇒ error.
     #[serde(default)]
     pub sealed_passphrase: Option<String>,
     /// v2-only. Where to persist the predicted/deployed circle id so

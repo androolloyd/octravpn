@@ -583,26 +583,14 @@ impl Hub {
         Ok(())
     }
 
-    /// Resolve the per-tailnet sealed-asset passphrase. Order:
-    ///   1. `cfg.chain.sealed_passphrase` if set.
-    ///   2. `OCTRAVPN_SEALED_PASSPHRASE` env var.
-    ///
-    /// Empty in both ⇒ error.
-    fn sealed_passphrase(&self) -> Result<String> {
-        if let Some(p) = self.cfg.chain.sealed_passphrase.as_ref() {
-            if !p.is_empty() {
-                return Ok(p.clone());
-            }
-        }
-        if let Ok(p) = std::env::var("OCTRAVPN_SEALED_PASSPHRASE") {
-            if !p.is_empty() {
-                return Ok(p);
-            }
-        }
-        Err(anyhow!(
-            "v2 sealed-asset passphrase required: set `[chain].sealed_passphrase` \
-             in the operator's TOML or export OCTRAVPN_SEALED_PASSPHRASE"
-        ))
+    /// Resolve the per-tailnet sealed-asset passphrase.
+    /// Thin wrapper around [`resolve_sealed_passphrase`] that pulls the
+    /// env var + config field for the running hub.
+    fn sealed_passphrase(&self) -> Result<zeroize::Zeroizing<String>> {
+        resolve_sealed_passphrase(
+            std::env::var("OCTRAVPN_SEALED_PASSPHRASE").ok().as_deref(),
+            self.cfg.chain.sealed_passphrase.as_deref(),
+        )
     }
 
     /// Path where the v2 circle state (id + tx hashes) is cached. Picks
@@ -1077,8 +1065,7 @@ fn wallet_view_pubkey(wallet_secret: &[u8; 32]) -> [u8; 32] {
 /// CA-compromise MITM on the chain endpoint. P0-2 from the v2 threat
 /// model.
 fn build_rpc(chain: &crate::config::ChainCfg) -> Result<RpcClient> {
-    let paths = chain.pinned_root_paths.as_ref();
-    let paths = paths.map(Vec::as_slice).unwrap_or(&[]);
+    let paths = chain.pinned_root_paths.as_ref().map_or(&[][..], Vec::as_slice);
     if paths.is_empty() {
         return Ok(RpcClient::new(&chain.rpc_url));
     }
@@ -1090,4 +1077,79 @@ fn build_rpc(chain: &crate::config::ChainCfg) -> Result<RpcClient> {
     }
     RpcClient::new_with_pinned_roots(&chain.rpc_url, &blobs)
         .map_err(|e| anyhow::anyhow!("pinned tls: {e}"))
+}
+
+/// Resolve the v2 sealed-asset passphrase given the env var + config
+/// field. Env-first (matches `octravpn-client::discover_v2::resolve_passphrase`)
+/// so an operator can override the TOML without editing the file.
+/// Empty / whitespace-only values are treated as unset.
+///
+/// Free function (no `&self`) so the precedence is unit-testable without
+/// constructing a Hub. The wrapper method on `Hub` simply pulls live env
+/// + config and delegates here.
+pub(crate) fn resolve_sealed_passphrase(
+    env: Option<&str>,
+    cfg_field: Option<&str>,
+) -> Result<zeroize::Zeroizing<String>> {
+    if let Some(s) = env {
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            return Ok(zeroize::Zeroizing::new(trimmed.to_string()));
+        }
+    }
+    if let Some(s) = cfg_field {
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            return Ok(zeroize::Zeroizing::new(trimmed.to_string()));
+        }
+    }
+    Err(anyhow!(
+        "v2 sealed-asset passphrase required: export OCTRAVPN_SEALED_PASSPHRASE \
+         or set `[chain].sealed_passphrase` in the operator's TOML"
+    ))
+}
+
+#[cfg(test)]
+mod sealed_passphrase_tests {
+    use super::resolve_sealed_passphrase;
+
+    #[test]
+    fn env_wins_over_cfg_field() {
+        let got = resolve_sealed_passphrase(Some("env-val"), Some("cfg-val")).unwrap();
+        assert_eq!(&*got, "env-val");
+    }
+
+    #[test]
+    fn cfg_field_used_when_env_absent() {
+        let got = resolve_sealed_passphrase(None, Some("cfg-val")).unwrap();
+        assert_eq!(&*got, "cfg-val");
+    }
+
+    #[test]
+    fn cfg_field_used_when_env_empty() {
+        let got = resolve_sealed_passphrase(Some(""), Some("cfg-val")).unwrap();
+        assert_eq!(&*got, "cfg-val");
+    }
+
+    #[test]
+    fn cfg_field_used_when_env_whitespace() {
+        let got = resolve_sealed_passphrase(Some("   "), Some("cfg-val")).unwrap();
+        assert_eq!(&*got, "cfg-val");
+    }
+
+    #[test]
+    fn error_when_both_unset() {
+        assert!(resolve_sealed_passphrase(None, None).is_err());
+    }
+
+    #[test]
+    fn error_when_both_empty() {
+        assert!(resolve_sealed_passphrase(Some(""), Some("   ")).is_err());
+    }
+
+    #[test]
+    fn values_are_trimmed() {
+        let got = resolve_sealed_passphrase(Some("  spaced  "), None).unwrap();
+        assert_eq!(&*got, "spaced");
+    }
 }

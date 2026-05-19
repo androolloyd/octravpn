@@ -443,9 +443,7 @@ async fn events_sse(
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.strip_prefix("Bearer "));
-    let authorized = got
-        .map(|got_tok| constant_time_eq_str(got_tok, want))
-        .unwrap_or(false);
+    let authorized = got.is_some_and(|got_tok| constant_time_eq_str(got_tok, want));
     if !authorized {
         return (StatusCode::NOT_FOUND, "").into_response();
     }
