@@ -307,6 +307,15 @@ pub(crate) struct ControlCfg {
     /// operators should set this to a long stable string.
     #[serde(default)]
     pub tailscale_tailnet_id: Option<String>,
+    /// Per-IP token-bucket rate limit applied to the control-plane
+    /// HTTP surface. Defaults to a sane production profile (see
+    /// `crate::rate_limit`); set `enabled = false` to disable
+    /// entirely. The `[control.rate_limit.routes.<class>]` sub-tables
+    /// override per-class `rps` / `burst` — known classes today are
+    /// `preauth`, `receipt`, `v3_calls`, `other`. `/health` and
+    /// `/metrics` always bypass the layer.
+    #[serde(default)]
+    pub rate_limit: crate::rate_limit::RateLimitCfg,
 }
 
 impl Default for ControlCfg {
@@ -320,6 +329,7 @@ impl Default for ControlCfg {
             admin_token: None,
             tailscale_wire_state_dir: None,
             tailscale_tailnet_id: None,
+            rate_limit: crate::rate_limit::RateLimitCfg::default(),
         }
     }
 }

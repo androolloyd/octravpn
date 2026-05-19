@@ -129,6 +129,11 @@ pub(crate) struct ControlState {
     /// `[control].tailscale_wire_state_dir` in node.toml. See
     /// `docs/tailscale-interop-blocker.md`.
     pub wire_state: Option<WireState>,
+    /// Rate-limit config applied by `router_axum`. Populated from
+    /// `[control.rate_limit]` in `node.toml`. When `enabled = false`
+    /// the layer is omitted from the router entirely (no per-request
+    /// overhead). See `crate::rate_limit`.
+    pub rate_limit_cfg: crate::rate_limit::RateLimitCfg,
 }
 
 /// Lightweight counters exposed via the /metrics endpoint. Kept as
@@ -318,7 +323,20 @@ impl ControlState {
             preauth_minter: PreauthMinter::new(),
             admin_token: None,
             wire_state: None,
+            rate_limit_cfg: crate::rate_limit::RateLimitCfg::default(),
         }
+    }
+
+    /// Override the rate-limit config (defaults are the documented
+    /// production profile in `crate::rate_limit`). Hub wires this from
+    /// `[control.rate_limit]` in `node.toml`; tests use the default.
+    #[allow(dead_code)]
+    pub(crate) fn with_rate_limit_cfg(
+        mut self,
+        cfg: crate::rate_limit::RateLimitCfg,
+    ) -> Self {
+        self.rate_limit_cfg = cfg;
+        self
     }
 
     /// Attach an audit log; every state-changing handler will write to it.
@@ -364,10 +382,15 @@ impl ControlState {
 
     pub(crate) fn router_axum(self: Arc<Self>) -> Router {
         use axum::middleware;
-        let rate_limiter = crate::rate_limit::RateLimiter::default_for_control_plane();
 
         // Rate-limited surface: the regular request/response endpoints.
-        let limited = Router::new()
+        // `/health` and `/metrics` are mounted inside this router but
+        // are bypassed at the middleware level by
+        // `crate::rate_limit::classify` (so they reply under load even
+        // when an attacker has drained a per-class bucket). When
+        // `[control.rate_limit].enabled = false` the layer is omitted
+        // entirely — no per-request overhead.
+        let limited_routes = Router::new()
             .route("/session", post(announce))
             .route("/session/:id", get(get_state))
             .route("/health", get(health))
@@ -378,12 +401,19 @@ impl ControlState {
             // See `docs/tailscale-interop-blocker.md` for what this
             // does *not* (yet) deliver — chiefly the real Tailscale
             // wire protocol behind `/key` + `/machine/{node_key}/…`.
-            .route("/admin/preauth", post(mint_preauth))
-            .layer(middleware::from_fn_with_state(
-                rate_limiter,
-                crate::rate_limit::rate_limit_layer,
-            ))
-            .with_state(self.clone());
+            .route("/admin/preauth", post(mint_preauth));
+        let limited = if self.rate_limit_cfg.enabled {
+            let rate_limiter =
+                crate::rate_limit::RateLimiter::from_cfg(&self.rate_limit_cfg);
+            limited_routes
+                .layer(middleware::from_fn_with_state(
+                    rate_limiter,
+                    crate::rate_limit::rate_limit_layer,
+                ))
+                .with_state(self.clone())
+        } else {
+            limited_routes.with_state(self.clone())
+        };
 
         // SSE surface, mounted on a separate sub-router merged in
         // *outside* the rate-limit layer. Rationale: SSE is a single
