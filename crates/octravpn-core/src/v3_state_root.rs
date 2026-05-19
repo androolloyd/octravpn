@@ -51,7 +51,7 @@
 //! a v2 anchor produced by a newer encoder.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
@@ -203,7 +203,7 @@ impl StateRoot {
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, StateRootError> {
         let value = serde_json::to_value(self)?;
         let mut out = Vec::with_capacity(256);
-        canonical_write(&value, &mut out);
+        crate::v3_canonical::canonical_write(&value, &mut out);
         Ok(out)
     }
 
@@ -271,92 +271,27 @@ impl StateRoot {
 }
 
 fn check_hash(field: &'static str, value: &str) -> Result<(), StateRootError> {
-    if value.len() != HEX_HASH_LEN {
-        return Err(StateRootError::BadHashLength {
-            field,
-            len: value.len(),
-        });
-    }
-    if !value.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) {
-        // Lowercase-only invariant: AML's sha256() builtin emits
-        // lowercase hex; mixing cases would produce a different SHA-256
-        // when the JSON is re-canonicalised, breaking the anchor.
-        return Err(StateRootError::BadHashEncoding { field });
-    }
-    Ok(())
-}
-
-/// Walk a `serde_json::Value` and write it to `out` with object keys in
-/// lexicographic order, no whitespace, no trailing newline. Numbers
-/// inherit `serde_json`'s default Display impl (which already matches
-/// the rules in the module-level doc).
-fn canonical_write(v: &Value, out: &mut Vec<u8>) {
-    match v {
-        Value::Null => out.extend_from_slice(b"null"),
-        Value::Bool(true) => out.extend_from_slice(b"true"),
-        Value::Bool(false) => out.extend_from_slice(b"false"),
-        Value::Number(n) => out.extend_from_slice(n.to_string().as_bytes()),
-        Value::String(s) => write_json_string(s, out),
-        Value::Array(items) => {
-            out.push(b'[');
-            for (i, item) in items.iter().enumerate() {
-                if i > 0 {
-                    out.push(b',');
-                }
-                canonical_write(item, out);
-            }
-            out.push(b']');
+    let len = value.len();
+    crate::v3_canonical::check_hash(value, || {
+        if len == crate::v3_canonical::HEX_HASH_LEN {
+            StateRootError::BadHashEncoding { field }
+        } else {
+            StateRootError::BadHashLength { field, len }
         }
-        Value::Object(map) => {
-            // Re-sort keys lexicographically. `serde_json::Map` preserves
-            // insertion order, so we have to do this even though our
-            // own `StateRoot` happens to declare fields in roughly the
-            // right order — we cannot rely on serde's field declaration
-            // order, and we MUST sort flattened `unknown` entries.
-            let sorted: Map<String, Value> = {
-                let mut entries: Vec<(&String, &Value)> = map.iter().collect();
-                entries.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
-                entries
-                    .into_iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect()
-            };
-            out.push(b'{');
-            for (i, (k, val)) in sorted.iter().enumerate() {
-                if i > 0 {
-                    out.push(b',');
-                }
-                write_json_string(k, out);
-                out.push(b':');
-                canonical_write(val, out);
-            }
-            out.push(b'}');
-        }
-    }
-}
-
-/// Emit a JSON string literal. Delegated to `serde_json::to_string` so
-/// the escape rules (control chars, quotes, backslash, surrogate pairs)
-/// match exactly what the rest of the JSON ecosystem produces — there
-/// is no shorter / "more canonical" escape form to switch to.
-fn write_json_string(s: &str, out: &mut Vec<u8>) {
-    // `serde_json::to_string` on a `Value::String` always emits the
-    // canonical-enough escape form; we just trust it here. This panics
-    // only on an OOM, which we don't try to handle gracefully.
-    let encoded = serde_json::to_string(&Value::String(s.to_owned()))
-        .expect("serialising a String to JSON cannot fail except on OOM");
-    out.extend_from_slice(encoded.as_bytes());
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Map;
 
     fn h(byte: u8) -> String {
         // Helper: build a 64-char lowercase hex string of `byte` repeated.
+        use std::fmt::Write as _;
         let mut s = String::with_capacity(HEX_HASH_LEN);
         for _ in 0..32 {
-            s.push_str(&format!("{byte:02x}"));
+            write!(s, "{byte:02x}").expect("write to String is infallible");
         }
         s
     }
@@ -543,7 +478,7 @@ mod tests {
         let canonical_v2 = {
             // Independent reference: canonical_write the original Value.
             let mut out = Vec::new();
-            canonical_write(&value, &mut out);
+            crate::v3_canonical::canonical_write(&value, &mut out);
             out
         };
         let anchor_b = hex::encode(Sha256::digest(&canonical_v2));

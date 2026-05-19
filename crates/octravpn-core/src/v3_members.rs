@@ -86,7 +86,7 @@
 use base64::engine::general_purpose::STANDARD as BASE64_STD;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
@@ -304,7 +304,7 @@ impl TailnetMembers {
             .sort_by(|a, b| a.wallet.as_bytes().cmp(b.wallet.as_bytes()));
         let value = serde_json::to_value(&sorted)?;
         let mut out = Vec::with_capacity(256);
-        canonical_write(&value, &mut out);
+        crate::v3_canonical::canonical_write(&value, &mut out);
         Ok(out)
     }
 
@@ -428,75 +428,9 @@ fn check_wg_pubkey(index: usize, value: &str) -> Result<(), V3MembersError> {
     Ok(())
 }
 
-/// Walk a `serde_json::Value` and write it to `out` with object keys in
-/// lexicographic order, no whitespace, no trailing newline. Numbers
-/// inherit `serde_json`'s default Display impl (which already matches
-/// the rules in the module-level doc). This is the same algorithm as
-/// `v3_state_root::canonical_write` and `v3_policy::canonical_write` —
-/// keep all three in lockstep.
-fn canonical_write(v: &Value, out: &mut Vec<u8>) {
-    match v {
-        Value::Null => out.extend_from_slice(b"null"),
-        Value::Bool(true) => out.extend_from_slice(b"true"),
-        Value::Bool(false) => out.extend_from_slice(b"false"),
-        Value::Number(n) => out.extend_from_slice(n.to_string().as_bytes()),
-        Value::String(s) => write_json_string(s, out),
-        Value::Array(items) => {
-            out.push(b'[');
-            for (i, item) in items.iter().enumerate() {
-                if i > 0 {
-                    out.push(b',');
-                }
-                canonical_write(item, out);
-            }
-            out.push(b']');
-        }
-        Value::Object(map) => {
-            // Re-sort keys lexicographically. `serde_json::Map` preserves
-            // insertion order, so we have to do this even though our own
-            // structs happen to declare fields in roughly the right
-            // order — we cannot rely on serde's field declaration
-            // order, and we MUST sort flattened `unknown` entries.
-            let sorted: Map<String, Value> = {
-                let mut entries: Vec<(&String, &Value)> = map.iter().collect();
-                entries.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
-                entries
-                    .into_iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect()
-            };
-            out.push(b'{');
-            for (i, (k, val)) in sorted.iter().enumerate() {
-                if i > 0 {
-                    out.push(b',');
-                }
-                write_json_string(k, out);
-                out.push(b':');
-                canonical_write(val, out);
-            }
-            out.push(b'}');
-        }
-    }
-}
-
-/// Emit a JSON string literal. Delegated to `serde_json::to_string` so
-/// the escape rules (control chars, quotes, backslash, surrogate pairs)
-/// match exactly what the rest of the JSON ecosystem produces.
-fn write_json_string(s: &str, out: &mut Vec<u8>) {
-    // `serde_json::to_string` on a `Value::String` always emits the
-    // canonical-enough escape form; we trust it here. The fallback is
-    // unreachable for any String we can construct in safe Rust, but we
-    // route through a Result to keep this `unwrap`-free.
-    match serde_json::to_string(&Value::String(s.to_owned())) {
-        Ok(encoded) => out.extend_from_slice(encoded.as_bytes()),
-        Err(_) => {
-            // Defensive fallback: emit a JSON empty string. In practice
-            // this branch is unreachable — `Value::String` always
-            // serialises — but we never `unwrap()` outside tests.
-            out.extend_from_slice(b"\"\"");
-        }
-    }
-}
+// canonical_write + write_json_string live in `crate::v3_canonical`.
+// All three v3 schemas (state_root, policy, members) delegate there so
+// the on-chain anchor algorithm has ONE owner.
 
 #[cfg(test)]
 mod tests {
@@ -775,7 +709,7 @@ mod tests {
             // tree (with members already sorted, since the v1 encoder
             // sorted them before producing bytes_v1).
             let mut out = Vec::new();
-            canonical_write(&value, &mut out);
+            crate::v3_canonical::canonical_write(&value, &mut out);
             out
         };
         let hash_b = hex::encode(Sha256::digest(&canonical_v2));
