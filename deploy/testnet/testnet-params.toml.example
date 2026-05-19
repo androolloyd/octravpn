@@ -1,0 +1,109 @@
+# OctraVPN testnet bring-up parameter sheet.
+#
+# scripts/testnet/bootstrap.sh reads this file with the same dumb
+# grep/sed parser ceremony/mainnet-params.toml.example uses. Keep one
+# `key = value` per line, strings double-quoted, integers bare.
+#
+# Copy to deploy/testnet/testnet-params.toml and edit before
+# bootstrapping. The example values produce a working testnet against
+# devnet RPC; harden them before opening to non-trusted operators.
+
+# ---------------------------------------------------------------
+# Tier identity
+# ---------------------------------------------------------------
+# Bootstrap refuses to proceed if this is "mainnet". Testnet stack
+# is explicitly scoped to non-production chains.
+tier = "testnet"
+
+# Cosmetic name baked into Grafana dashboards and the join URL.
+network_name = "octra-testnet-v0"
+
+# ---------------------------------------------------------------
+# Chain target
+# ---------------------------------------------------------------
+# Bootstrap REFUSES any URL that looks like mainnet ("octra.network"
+# without "devnet" / "testnet"). Override with --allow-mainnet for
+# the eventual cutover dry-run.
+rpc_url  = "https://devnet.octrascan.io/rpc"
+chain_id = "octra-testnet"
+
+# Program addr from a prior testnet deploy. Empty on first run;
+# bootstrap.sh will refuse to start the validators until it is set.
+program_addr = ""
+
+# ---------------------------------------------------------------
+# Validator set (3 nodes by default)
+# ---------------------------------------------------------------
+# Roles legend:
+#   signer    — signs settlement receipts (required for any node
+#               that bonds + claims revenue).
+#   observer  — gossips peer-state to mesh-control (required for
+#               permissioned-public discovery).
+#   relay     — advertises as a fallback DERP-augmented relay for
+#               clients behind symmetric NAT. One per testnet is
+#               enough; we put it on validator3.
+#   bridge    — cross-chain bridging. NOT enabled on testnet v0.1.
+#
+# `endpoint` MUST be reachable from the open internet (DNS or
+# routable IP). `region` is purely a Grafana label.
+
+[[validators]]
+name           = "validator1"
+endpoint       = "tn1.example.com:51820"
+region         = "test-eu"
+price_per_mb   = 100
+roles          = "signer,observer"
+
+[[validators]]
+name           = "validator2"
+endpoint       = "tn2.example.com:51830"
+region         = "test-us"
+price_per_mb   = 100
+roles          = "signer,observer"
+
+[[validators]]
+name           = "validator3"
+endpoint       = "tn3.example.com:51840"
+region         = "test-ap"
+price_per_mb   = 100
+roles          = "signer,observer,relay"
+
+# ---------------------------------------------------------------
+# Mesh control plane
+# ---------------------------------------------------------------
+mesh_control_hostname  = "mesh.testnet.example.com"
+mesh_control_port      = 8085
+# Multisig threshold for operator-level actions (revoke a peer,
+# rotate a key, change the roster). Testnet default 2-of-3; mainnet
+# is 3-of-5 (see ceremony/mainnet-params.toml.example).
+multisig_threshold     = 2
+multisig_signer_count  = 3
+
+# ---------------------------------------------------------------
+# DERP relay
+# ---------------------------------------------------------------
+derp_hostname    = "derp.testnet.example.com"
+derp_http_port   = 3340
+derp_stun_port   = 3478
+
+# ---------------------------------------------------------------
+# Observability
+# ---------------------------------------------------------------
+prometheus_port      = 9090
+prometheus_retention = "30d"
+grafana_port         = 3000
+
+# ---------------------------------------------------------------
+# Storage layout
+# ---------------------------------------------------------------
+# All persistent state lives under this dir on the host (named
+# volumes are addressed; the operator-readable mounts — sealed
+# keys, rendered configs, prometheus targets.json — live here).
+config_dir = "./deploy/testnet/state"
+
+# ---------------------------------------------------------------
+# Genesis wallet ceremony
+# ---------------------------------------------------------------
+# scripts/testnet/genesis-wallets.sh writes sealed bundles to
+# this dir, one subdir per role.
+genesis_dir = "./deploy/testnet/state/genesis"

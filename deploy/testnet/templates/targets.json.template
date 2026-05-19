@@ -1,0 +1,29 @@
+[
+  {
+    "targets": ["validator1:51821"],
+    "labels": {
+      "node": "validator1",
+      "region": "${VALIDATOR1_REGION}",
+      "role": "signer,observer",
+      "tier": "testnet"
+    }
+  },
+  {
+    "targets": ["validator2:51821"],
+    "labels": {
+      "node": "validator2",
+      "region": "${VALIDATOR2_REGION}",
+      "role": "signer,observer",
+      "tier": "testnet"
+    }
+  },
+  {
+    "targets": ["validator3:51821"],
+    "labels": {
+      "node": "validator3",
+      "region": "${VALIDATOR3_REGION}",
+      "role": "signer,observer,relay",
+      "tier": "testnet"
+    }
+  }
+]

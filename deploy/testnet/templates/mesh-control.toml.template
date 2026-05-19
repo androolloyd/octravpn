@@ -1,0 +1,26 @@
+# Mesh control plane config. Rendered by bootstrap.sh.
+
+[chain]
+rpc_url            = "${OCTRA_RPC_URL}"
+chain_id           = "${CHAIN_ID}"
+program_addr       = "${PROGRAM_ADDR}"
+
+[control]
+listen             = "0.0.0.0:8085"
+roles              = "mesh-control"
+# Operator multisig that is allowed to mutate the permissioned
+# roster (add operator, revoke operator, rotate keys).
+operator_multisig_addr      = "${OPERATOR_MULTISIG_ADDR}"
+operator_multisig_threshold = ${OPERATOR_MULTISIG_THRESHOLD}
+
+[joins]
+# Sqlite at this path stores: preauth keys, redeemed joins,
+# revocation log. Survives container restart via mesh-control-state
+# named volume.
+db_path            = "/var/lib/octravpn/joins.db"
+# How long an issued preauth key is valid before it must be
+# redeemed (seconds). 24h default.
+preauth_ttl_secs   = 86400
+
+[journal]
+path               = "/var/lib/octravpn/journal"

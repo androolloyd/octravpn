@@ -1,0 +1,38 @@
+# Prometheus config for the testnet stack. Rendered by bootstrap.sh
+# into deploy/testnet/state/prometheus/prometheus.yml.
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: octravpn-testnet
+    network: ${NETWORK_NAME}
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+scrape_configs:
+  - job_name: octravpn-validators
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets.json
+        refresh_interval: 30s
+
+  - job_name: mesh-control
+    static_configs:
+      - targets:
+          - mesh-control:8085
+        labels:
+          role: mesh-control
+          tier: testnet
+
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090

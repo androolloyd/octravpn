@@ -1,0 +1,38 @@
+# Rendered by scripts/testnet/bootstrap.sh from deploy/testnet/.env.testnet.
+# DO NOT edit the rendered copy under deploy/testnet/state/<node>/conf/
+# — edit this template and re-run bootstrap.
+
+[chain]
+rpc_url            = "${OCTRA_RPC_URL}"
+chain_id           = "${CHAIN_ID}"
+program_addr       = "${PROGRAM_ADDR}"
+validator_addr     = "${VALIDATOR_ADDR}"
+# Sealed wallet bundle (P1-6). The unsealed key is never on disk.
+wallet_secret_path = "/etc/octravpn/keys/wallet.key.sealed"
+
+[tunnel]
+public_endpoint    = "${PUBLIC_ENDPOINT}"
+listen             = "0.0.0.0:51820"
+wg_secret_path     = "/etc/octravpn/keys/wg.key.sealed"
+
+[pricing]
+price_per_mb       = ${PRICE_PER_MB}
+region             = "${REGION}"
+
+[control]
+listen             = "0.0.0.0:51821"
+audit_dir          = "/var/log/octravpn-audit"
+
+[mesh]
+control_url        = "${MESH_CONTROL_URL}"
+derp_url           = "${DERP_URL}"
+node_name          = "${NODE_NAME}"
+roles              = "${NODE_ROLE}"
+
+[attestation]
+poll_interval_secs = 60
+
+[journal]
+# P1-8/P1-9 receipt journal; persisted on the named volume so it
+# survives container restart.
+path               = "/var/lib/octravpn/journal"

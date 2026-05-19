@@ -23,6 +23,12 @@ fuzz/Cargo.lock
 pvac-sidecar/build/
 pvac-sidecar/octra-pvac-sidecar
 
+# testnet operator state (sealed keys, rendered configs, ceremony output)
+/deploy/testnet/.env.testnet
+/deploy/testnet/testnet-params.toml
+/deploy/testnet/state/
+/operator-state/
+
 # Bench snapshots are committed (see docs/performance-limitations.md §7).
 # `target/criterion/` (under the already-ignored `/target`) holds
 # per-run criterion output; only the curated JSON under

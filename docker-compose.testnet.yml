@@ -1,0 +1,343 @@
+# OctraVPN public testnet stack.
+#
+# Tier model:
+#   - docker/devnet/        — 100% local, ephemeral, no DNS, mock-friendly.
+#   - docker-compose.testnet.yml (this file) — permissioned-public:
+#       * Peers reach each other over the open internet
+#       * Operator-controlled peer list (mesh-control + preauth keys)
+#       * State survives container restart (named volumes)
+#       * 3 validator nodes + 1 mesh-control + 1 DERP relay
+#       * Observability (Prometheus + Grafana) wired in
+#   - mainnet (future)      — staged from testnet, ceremony-signed.
+#
+# Bring-up:
+#   ./scripts/testnet/bootstrap.sh deploy/testnet/testnet-params.toml
+#
+# Or by hand:
+#   cp deploy/testnet/.env.testnet.example deploy/testnet/.env.testnet
+#   # edit .env.testnet — fill PLACEHOLDER values
+#   docker compose --env-file deploy/testnet/.env.testnet \
+#       -f docker-compose.testnet.yml --profile testnet up -d
+#
+# This compose file deliberately REUSES the devnet Dockerfile build
+# context (docker/Dockerfile.node, docker/Dockerfile.client) so we
+# ship the SAME binary on testnet that devnet exercised — only the
+# runtime config + persistent volumes + networking differ.
+
+x-node-common: &node-common
+  image: octravpn-node:testnet
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.node
+  restart: unless-stopped
+  environment: &node-env
+    RUST_LOG: "${RUST_LOG:-info,octravpn_node=info}"
+    OCTRA_RPC_URL: "${OCTRA_RPC_URL:?set OCTRA_RPC_URL — see deploy/testnet/.env.testnet.example}"
+    PROGRAM_ADDR: "${PROGRAM_ADDR:?set PROGRAM_ADDR — see deploy/testnet/.env.testnet.example}"
+    CHAIN_ID: "${CHAIN_ID:-octra-testnet}"
+    # Sealed-key passphrase (P1-6). Required because testnet uses
+    # sealed wallet bundles by default — see deploy/testnet/README.md
+    # for genesis-wallets.sh which produces the sealed files.
+    OCTRAVPN_KEY_PASSPHRASE: "${OCTRAVPN_KEY_PASSPHRASE:?set OCTRAVPN_KEY_PASSPHRASE — sealed keys require it}"
+    DERP_URL: "${DERP_URL:-http://derp:3340}"
+    MESH_CONTROL_URL: "${MESH_CONTROL_URL:-http://mesh-control:8085}"
+  networks:
+    - testnet-overlay
+
+services:
+  # ------------------------------------------------------------------
+  # Validator nodes
+  # ------------------------------------------------------------------
+  # All three validators have the SAME capabilities by default:
+  #   signer    = true   (signs settlement receipts)
+  #   observer  = true   (gossips peer-state to mesh-control)
+  #   bridge    = false  (no cross-chain bridging on testnet v0.1)
+  # node3 additionally carries `relay = true`, meaning it advertises
+  # itself as a fallback DERP-augmented relay for clients that cannot
+  # reach the dedicated `derp` service (e.g. behind symmetric NAT).
+  # ------------------------------------------------------------------
+
+  validator1:
+    <<: *node-common
+    container_name: octravpn-testnet-validator1
+    hostname: validator1
+    environment:
+      <<: *node-env
+      NODE_NAME: validator1
+      NODE_ROLE: "signer,observer"
+      PUBLIC_ENDPOINT: "${VALIDATOR1_PUBLIC_ENDPOINT:?set VALIDATOR1_PUBLIC_ENDPOINT (e.g. tn1.example.com:51820)}"
+      VALIDATOR_ADDR: "${VALIDATOR1_ADDR:?set VALIDATOR1_ADDR}"
+      REGION: "${VALIDATOR1_REGION:-test-eu}"
+      PRICE_PER_MB: "${VALIDATOR1_PRICE_PER_MB:-100}"
+    volumes:
+      - validator1-state:/var/lib/octravpn
+      - validator1-keys:/etc/octravpn/keys:ro
+      - validator1-audit:/var/log/octravpn-audit
+      - ${TESTNET_CONFIG_DIR:-./deploy/testnet/state}/validator1:/etc/octravpn/conf:ro
+    ports:
+      - "${VALIDATOR1_WG_PORT:-51820}:51820/udp"
+      - "${VALIDATOR1_CONTROL_PORT:-51821}:51821/tcp"
+    depends_on:
+      mesh-control:
+        condition: service_healthy
+    profiles: ["testnet"]
+    labels:
+      octravpn.role: "validator"
+      octravpn.tier: "testnet"
+
+  validator2:
+    <<: *node-common
+    container_name: octravpn-testnet-validator2
+    hostname: validator2
+    environment:
+      <<: *node-env
+      NODE_NAME: validator2
+      NODE_ROLE: "signer,observer"
+      PUBLIC_ENDPOINT: "${VALIDATOR2_PUBLIC_ENDPOINT:?set VALIDATOR2_PUBLIC_ENDPOINT}"
+      VALIDATOR_ADDR: "${VALIDATOR2_ADDR:?set VALIDATOR2_ADDR}"
+      REGION: "${VALIDATOR2_REGION:-test-us}"
+      PRICE_PER_MB: "${VALIDATOR2_PRICE_PER_MB:-100}"
+    volumes:
+      - validator2-state:/var/lib/octravpn
+      - validator2-keys:/etc/octravpn/keys:ro
+      - validator2-audit:/var/log/octravpn-audit
+      - ${TESTNET_CONFIG_DIR:-./deploy/testnet/state}/validator2:/etc/octravpn/conf:ro
+    ports:
+      - "${VALIDATOR2_WG_PORT:-51830}:51820/udp"
+      - "${VALIDATOR2_CONTROL_PORT:-51822}:51821/tcp"
+    depends_on:
+      mesh-control:
+        condition: service_healthy
+    profiles: ["testnet"]
+    labels:
+      octravpn.role: "validator"
+      octravpn.tier: "testnet"
+
+  validator3:
+    <<: *node-common
+    container_name: octravpn-testnet-validator3
+    hostname: validator3
+    environment:
+      <<: *node-env
+      NODE_NAME: validator3
+      # validator3 doubles as a fallback relay (relay=true). This is
+      # the "+1 capability" that differentiates it from v1 and v2 in
+      # the default permissioned-public topology.
+      NODE_ROLE: "signer,observer,relay"
+      PUBLIC_ENDPOINT: "${VALIDATOR3_PUBLIC_ENDPOINT:?set VALIDATOR3_PUBLIC_ENDPOINT}"
+      VALIDATOR_ADDR: "${VALIDATOR3_ADDR:?set VALIDATOR3_ADDR}"
+      REGION: "${VALIDATOR3_REGION:-test-ap}"
+      PRICE_PER_MB: "${VALIDATOR3_PRICE_PER_MB:-100}"
+    volumes:
+      - validator3-state:/var/lib/octravpn
+      - validator3-keys:/etc/octravpn/keys:ro
+      - validator3-audit:/var/log/octravpn-audit
+      - ${TESTNET_CONFIG_DIR:-./deploy/testnet/state}/validator3:/etc/octravpn/conf:ro
+    ports:
+      - "${VALIDATOR3_WG_PORT:-51840}:51820/udp"
+      - "${VALIDATOR3_CONTROL_PORT:-51823}:51821/tcp"
+    depends_on:
+      mesh-control:
+        condition: service_healthy
+    profiles: ["testnet"]
+    labels:
+      octravpn.role: "validator"
+      octravpn.tier: "testnet"
+
+  # ------------------------------------------------------------------
+  # Mesh control plane
+  # ------------------------------------------------------------------
+  # Stateful service that:
+  #   - Holds the permissioned peer list (joins.db).
+  #   - Issues + redeems preauth keys for `scripts/testnet/join.sh`.
+  #   - Pushes peer rosters to validators over /v1/roster.
+  #   - Accepts revocation calls signed by the operator multisig.
+  # We implement this as `octravpn-node` running with the
+  # `--role mesh-control` flag (re-uses the same binary; the role is
+  # a runtime choice). On a single-host testnet this is fine; for HA
+  # later we add a second mesh-control behind a load balancer + a
+  # shared sqlite/postgres for joins.db.
+  # ------------------------------------------------------------------
+  mesh-control:
+    image: octravpn-node:testnet
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.node
+    container_name: octravpn-testnet-mesh-control
+    hostname: mesh-control
+    restart: unless-stopped
+    environment:
+      RUST_LOG: "${RUST_LOG:-info,octravpn_node=info}"
+      OCTRA_RPC_URL: "${OCTRA_RPC_URL:?}"
+      PROGRAM_ADDR: "${PROGRAM_ADDR:?}"
+      CHAIN_ID: "${CHAIN_ID:-octra-testnet}"
+      OCTRAVPN_KEY_PASSPHRASE: "${OCTRAVPN_KEY_PASSPHRASE:?}"
+      NODE_NAME: mesh-control
+      NODE_ROLE: "mesh-control"
+      # The operator multisig pubkey is who is allowed to revoke peers.
+      # PLACEHOLDER in .env.testnet.example; real bundle ships via
+      # genesis-wallets.sh.
+      OPERATOR_MULTISIG_ADDR: "${OPERATOR_MULTISIG_ADDR:?set OPERATOR_MULTISIG_ADDR — operator multisig that signs revocations}"
+      OPERATOR_MULTISIG_THRESHOLD: "${OPERATOR_MULTISIG_THRESHOLD:-2}"
+    volumes:
+      - mesh-control-state:/var/lib/octravpn
+      - mesh-control-keys:/etc/octravpn/keys:ro
+      - ${TESTNET_CONFIG_DIR:-./deploy/testnet/state}/mesh-control:/etc/octravpn/conf:ro
+    ports:
+      - "${MESH_CONTROL_PORT:-8085}:8085/tcp"
+    networks:
+      - testnet-overlay
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:8085/v1/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 30s
+    profiles: ["testnet"]
+    labels:
+      octravpn.role: "mesh-control"
+      octravpn.tier: "testnet"
+
+  # ------------------------------------------------------------------
+  # DERP relay
+  # ------------------------------------------------------------------
+  # Standard tailscale/DERP relay so peers behind symmetric NAT can
+  # still mesh. We use the upstream tailscale derper image — no
+  # private fork. Listens on 3340 (HTTP control) and 3478 (STUN).
+  # If the operator needs TLS, terminate it at a fronting proxy
+  # (caddy / nginx) — the derper image supports embedded TLS only
+  # with a real cert, which we don't bake in.
+  # ------------------------------------------------------------------
+  derp:
+    image: ghcr.io/tailscale/tailscale:v1.66.4
+    container_name: octravpn-testnet-derp
+    hostname: derp
+    restart: unless-stopped
+    command:
+      - /usr/local/bin/derper
+      - --hostname=${DERP_HOSTNAME:-derp.testnet.local}
+      - --certmode=manual
+      - --certdir=/var/lib/derper/certs
+      - -a=:3340
+      - --stun-port=3478
+      - --verify-clients=false
+    environment:
+      DERP_VERIFY_CLIENTS: "false"
+    volumes:
+      - derp-state:/var/lib/derper
+      - ${TESTNET_CONFIG_DIR:-./deploy/testnet/state}/derp/certs:/var/lib/derper/certs:ro
+    ports:
+      - "${DERP_HTTP_PORT:-3340}:3340/tcp"
+      - "${DERP_STUN_PORT:-3478}:3478/udp"
+    networks:
+      - testnet-overlay
+    profiles: ["testnet"]
+    labels:
+      octravpn.role: "derp"
+      octravpn.tier: "testnet"
+
+  # ------------------------------------------------------------------
+  # Observability
+  # ------------------------------------------------------------------
+  # Reuses the upstream prometheus + grafana images. The targets list
+  # is rendered by bootstrap.sh into deploy/testnet/state/prometheus/
+  # so we don't need to mount the whole deploy/observability dir.
+  # ------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    container_name: octravpn-testnet-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-30d}
+      - --web.enable-lifecycle
+    volumes:
+      - ${TESTNET_CONFIG_DIR:-./deploy/testnet/state}/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ${TESTNET_CONFIG_DIR:-./deploy/testnet/state}/prometheus/targets.json:/etc/prometheus/targets.json:ro
+      - ./deploy/observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    networks:
+      - testnet-overlay
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    profiles: ["testnet"]
+    labels:
+      octravpn.role: "observability"
+      octravpn.tier: "testnet"
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: octravpn-testnet-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD — do not ship admin/admin to public testnet}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/observability/grafana:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    networks:
+      - testnet-overlay
+    depends_on:
+      - prometheus
+    profiles: ["testnet"]
+    labels:
+      octravpn.role: "observability"
+      octravpn.tier: "testnet"
+
+networks:
+  testnet-overlay:
+    driver: bridge
+    name: octravpn-testnet
+    ipam:
+      config:
+        - subnet: ${TESTNET_SUBNET:-172.28.0.0/16}
+
+# ----------------------------------------------------------------------
+# Persistent-volume layout
+# ----------------------------------------------------------------------
+#
+# Per validator:
+#   validator<N>-state    chain head cache, peer roster snapshot,
+#                          receipt journal (P1-8/P1-9), settle ledger.
+#                          Maps to /var/lib/octravpn inside the container.
+#   validator<N>-keys     sealed wallet bundle, sealed WG noise key.
+#                          chmod 0400 on the host; mounted read-only.
+#                          Maps to /etc/octravpn/keys inside the container.
+#   validator<N>-audit    append-only audit log (P1-9 journal mirror).
+#                          Useful for slash-evidence collection and
+#                          out-of-band shipping to a SIEM.
+#
+# Shared:
+#   mesh-control-state    sqlite of preauth keys + redeemed joins +
+#                          revocation log. CRITICAL for permissioned
+#                          peer-list integrity; back up out-of-band.
+#   mesh-control-keys     sealed operator multisig + mesh-control
+#                          signing key (separate from validators).
+#   derp-state            STUN endpoint cache; can be regenerated.
+#   prometheus-data       TSDB; retention controlled by
+#                          PROMETHEUS_RETENTION (default 30d).
+#   grafana-data          dashboards, users, alert state.
+# ----------------------------------------------------------------------
+volumes:
+  validator1-state:
+  validator1-keys:
+  validator1-audit:
+  validator2-state:
+  validator2-keys:
+  validator2-audit:
+  validator3-state:
+  validator3-keys:
+  validator3-audit:
+  mesh-control-state:
+  mesh-control-keys:
+  derp-state:
+  prometheus-data:
+  grafana-data:
