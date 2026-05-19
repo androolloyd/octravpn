@@ -38,6 +38,7 @@ pub use headscale_api::tailscale_wire::{
     router as tailscale_wire_router, MachineRecord, MachineRegistry, ServerNoiseKey, WireError,
     WireState,
 };
+pub use headscale_api::policy;
 
 pub use acl::{AclAction, AclDoc, AclRule, PortRef, SignedAclDoc};
 pub use conn::{ConnState, Connection, ConnectionManager};
