@@ -1,0 +1,47 @@
+# Nightly + on-demand regeneration of the demo recordings.
+#
+# This workflow is intentionally separate from ci.yml / fuzz.yml /
+# release.yml — it has different secrets, a different cadence, and
+# different artefacts. Coordinate with #241 + #243 by adding files,
+# never editing the others.
+#
+# The workflow only renders tapes that do not require external services
+# (Docker, the foundry binary, sibling repos). Tapes 05 / 06 are
+# explicitly skipped here and stay in the manual-record set; see
+# `docs/demo.md`.
+
+name: demo
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * *"   # 06:17 UTC nightly
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install vhs
+        uses: charmbracelet/vhs-action@v1
+
+      - name: Render dependency-light tapes
+        run: |
+          set -euo pipefail
+          mkdir -p demo/recordings
+          for tape in demo/tapes/01-*.tape demo/tapes/04-*.tape demo/tapes/07-*.tape; do
+              echo "=== ${tape} ==="
+              vhs "${tape}" || echo "  ! ${tape} failed (non-fatal in nightly)"
+          done
+
+      - name: Upload recordings
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-recordings
+          path: demo/recordings/
+          if-no-files-found: warn
