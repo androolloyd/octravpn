@@ -153,6 +153,20 @@ impl ReceiptJournal {
         g.by_session.get(session_id).copied().unwrap_or(0)
     }
 
+    /// Snapshot of every `(session_id, last_signed_seq)` pair in the
+    /// journal. Used by the operator-facing `audit replay` / `audit
+    /// verify` tooling — the journal is a per-session floor, so each
+    /// session appears at most once.
+    ///
+    /// The lock is held only long enough to clone the in-memory map.
+    pub fn entries(&self) -> Vec<(SessionId, u64)> {
+        let g = self.inner.lock();
+        g.by_session
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect()
+    }
+
     /// Commit `new_seq` as the new floor for `session_id`. The write
     /// is atomic (tempfile + rename) and fsync'd before return. Fails
     /// with `SeqNotMonotonic` if `new_seq <= journal[session_id]` —

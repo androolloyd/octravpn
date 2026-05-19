@@ -269,11 +269,94 @@ sudo systemctl stop octravpn-node
 chain stops listing you for discovery and stops accepting new
 sessions against you.
 
+## 8a. Auditing receipt activity
+
+The daemon writes two persistent forensic artifacts:
+
+  - `audit_dir/audit-YYYY-MM-DD.jsonl` — one HMAC-chained record per
+    state-changing request (announce, receipt_signed, lag, etc.).
+  - `state/receipts.bin` — the per-session receipt-seq floor
+    (P1-8/P1-9). One record per session_id: the highest seq the node
+    has ever committed to signing.
+
+Two operator commands inspect them. They run entirely off local files
+— no chain or wallet access required — so you can run them on a
+backup directory pulled from a hot-swapped host.
+
+### `octravpn-node audit replay`
+
+Pretty-print a merged timeline of every audit entry + every journal
+record:
+
+```sh
+octravpn-node audit replay \
+    --audit-path /var/log/octravpn/audit \
+    --journal-path /var/lib/octravpn/receipts.bin
+```
+
+Output (example):
+
+```
+[2026-05-19T12:00:00Z]  session ab12cd…  announce  (audit)
+[2026-05-19T12:00:03Z]  session ab12cd…  receipt_signed seq=1 bytes=1024  (audit)
+[2026-05-19T12:00:06Z]  session ab12cd…  receipt_signed seq=2 bytes=2048  (audit)
+[2026-05-19T12:00:08Z]  session ab12cd…  session_closed  (audit)
+<no-ts>                 session ab12cd…  journal_floor seq=2  (journal)
+```
+
+Useful flags:
+
+  - `--session <hex|u64>`  scope the timeline to a single session_id
+    (either the 64-char hex form or the legacy v1 decimal u64).
+  - `--since` / `--until`  Unix-seconds range filter.
+  - `--format json`        one structured JSON object per line, for
+    piping into `jq` or shipping to a log collector.
+
+### `octravpn-node audit verify`
+
+Full cryptographic verification:
+
+```sh
+octravpn-node audit verify \
+    --audit-path /var/log/octravpn/audit \
+    --journal-path /var/lib/octravpn/receipts.bin
+```
+
+Three checks run, in order:
+
+  1. **Audit log HMAC chain.** Walks every line, recomputes
+     `HMAC(key, prev_mac || record_json)`, and bails on the first
+     mismatch with the offending line number.
+  2. **Receipt journal monotonicity.** Confirms the on-disk codec
+     parses, has the expected magic, and that no session_id repeats.
+  3. **Cross-check.** Warns (not fails) when a journal record has no
+     matching audit-log session_id, or vice versa. Asymmetry is
+     normal — the audit log carries non-receipt entries like
+     `announce` and `lag` — so this is informational only.
+
+Exit codes are structured for shell harnesses:
+
+  - `0` — all checks passed
+  - `1` — verification failed (one of the strict checks)
+  - `2` — IO or parse error (corrupt file, unreadable disk)
+  - `3` — missing files (audit log absent, key file absent)
+
+Run it nightly from cron; the chain break or duplicate-seq detection
+is your in-the-loop signal that something has tampered with the log
+or that the daemon crashed between journal-flush and journal-write.
+If `verify` ever exits non-zero, snapshot the `audit_dir` and
+`state/` directories before doing anything else — restarting may
+overwrite the evidence.
+
+The `verify-audit-log <path>` subcommand still exists as a deprecated
+alias that runs only check (1); prefer `audit verify` going forward.
+
 ## 9. Operations checklist
 
 - **Monitor `/health`**. Alert on 503 (stale attestation).
 - **Watch the audit log**. It writes one JSONL entry per
-  state-changing request.
+  state-changing request. Run `octravpn-node audit verify` nightly to
+  catch chain breaks (see §8a).
 - **Backup `wallet.hex` + `wg.key` + `<wallet>.acc`**. The accumulator
   file lets you claim earnings even if you lose the chain history.
 - **Mind the rate limiter**. Default 100 req/s sustained, 200 burst

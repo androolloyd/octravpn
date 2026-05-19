@@ -165,6 +165,18 @@ not per-circle) because Octra's PVAC registry is wallet-keyed:
 `octra_registerPvacPubkey`. v2 `fhe_load_pk(circles[c].owner)`
 then resolves to the wallet-registered key.
 
+Forensics tooling: every state-changing request lands in an
+HMAC-chained audit log next to the daemon, and every receipt-signing
+decision flushes through a persistent journal that prevents
+forced-restart double-signing (P1-8/P1-9). Operators inspect both
+with `octravpn-node audit replay --audit-path … --journal-path …`
+(structured timeline; supports `--session`, `--since/--until`, and
+`--format json` for log shipping) and verify integrity with
+`octravpn-node audit verify` (HMAC chain + journal monotonicity +
+cross-check; structured exit codes 0/1/2/3). See
+[`docs/operator-guide.md`](docs/operator-guide.md) §8a "Auditing
+receipt activity" for the runbook.
+
 Slashing (identical 90% burn / 10% bounty in both versions):
 
 | Condition                  | Evidence                                                      |

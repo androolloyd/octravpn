@@ -21,6 +21,7 @@ use clap::Parser;
 use tracing::{info, warn};
 
 mod audit;
+mod audit_cli;
 mod chain;
 mod chain_v2;
 mod chain_v3;
@@ -98,9 +99,20 @@ enum Cmd {
     /// from the configured audit_dir (`.audit.key`) and walks the file
     /// line-by-line. Exits 0 on a clean chain; non-zero with the first
     /// broken line index otherwise.
+    ///
+    /// Deprecated alias for `audit verify --audit-path <path>`; kept
+    /// so existing operator runbooks keep working.
     VerifyAuditLog {
         /// Path to the audit JSONL file to verify.
         path: std::path::PathBuf,
+    },
+    /// Operator-facing audit tooling: pretty-print the audit log +
+    /// receipt journal as a timeline, or run a full crypto
+    /// verification. The artifacts inspected here are the same files
+    /// the daemon writes during normal operation.
+    Audit {
+        #[command(subcommand)]
+        cmd: audit_cli::AuditCmd,
     },
     /// P1-6: wrap the operator's on-disk wallet + WG keys under the
     /// `octra_core::wallet_enc` passphrase envelope (ChaCha20-Poly1305
@@ -300,6 +312,16 @@ async fn main() -> Result<()> {
         Cmd::Mesh { sub } => {
             return run_mesh_cmd(sub).await;
         }
+        // Audit is a pure local-file inspector — no wallet, no chain,
+        // no Hub. Dispatch before `Hub::new` so an operator can run
+        // it on a backup of state/ without a working `node.toml`.
+        Cmd::Audit { cmd: audit_cmd } => {
+            let code = audit_cli::dispatch(audit_cmd);
+            // Exit directly so the structured exit codes (1/2/3) reach
+            // the operator's shell. Returning `Ok(())` here would
+            // collapse to 0 regardless of the verify result.
+            std::process::exit(code);
+        }
         // Everything else needs the Hub: dispatch below.
         rest => {
             let cfg = NodeConfig::load(&config)?;
@@ -327,10 +349,11 @@ async fn main() -> Result<()> {
                 Cmd::SealKeys { .. }
                 | Cmd::UnsealKeys { .. }
                 | Cmd::V3 { .. }
-                | Cmd::Mesh { .. } => {
+                | Cmd::Mesh { .. }
+                | Cmd::Audit { .. } => {
                     // Handled above the Hub::new boundary.
                     unreachable!(
-                        "seal-keys / unseal-keys / v3 / mesh dispatched pre-Hub::new"
+                        "seal-keys / unseal-keys / v3 / mesh / audit dispatched pre-Hub::new"
                     )
                 }
             };
