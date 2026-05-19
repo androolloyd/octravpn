@@ -26,6 +26,21 @@ lake build
 external Mathlib dependency for the v1 proofs above (we only use core
 Lean 4).
 
+## Wire-protocol primitive proofs
+
+`WireProtocol/` adds 36 deductive theorems (+ 5 concrete-value
+anchors) covering the wire-protocol primitives that landed during the
+Tailscale interop work (Walls 1-5): controlbase framing
+(`Controlbase.lean`), BE-nonce composition and replay-window
+correctness (`BeNonce.lean`), per-circle HMAC approval tokens
+(`HmacToken.lean`), and the portal approve+unseal cache lifecycle
+(`PortalCache.lean`). Combined with the 54 Rust security-primitive
+theorems in `OctraVPN_Rust/` (PR #181), the deductive proof surface
+now stands at 90 mechanically-checked theorems. See
+`WireProtocol/Theorems.md` for the plain-English index and
+Rust-signature mapping; `lake build` from this directory builds the
+full set.
+
 ## Relationship to AML source
 
 The spec here is *abstract*. The next milestone is to mechanically link
