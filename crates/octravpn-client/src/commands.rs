@@ -7,17 +7,12 @@ use octravpn_core::{address::Address, sig::KeyPair};
 use rand::RngCore;
 
 mod bugreport;
-// `open_url` is the `oct://` OS-protocol-handler subcommand. Not yet
-// wired into `main.rs` (intentional — see docs/oct-url-handler.md, the
-// dispatcher hookup lands with the follow-up that actually performs the
-// RPC fetch). `pub(crate)` so its tests still compile and so a future
-// main.rs change can dispatch into it without further plumbing.
-#[allow(dead_code)]
 pub(crate) mod open_url;
 pub(crate) mod serve;
 pub(crate) mod slash;
 
 pub(crate) use bugreport::run as bugreport;
+pub(crate) use open_url::{open_url as run_open_url, OpenUrlArgs};
 pub(crate) use serve::{run_funnel as funnel, run_serve as serve, Op as ServeOp};
 pub(crate) use slash::{run as slash_evidence, submit as slash_submit, SlashCmd};
 

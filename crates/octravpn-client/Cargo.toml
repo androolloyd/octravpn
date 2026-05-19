@@ -44,6 +44,12 @@ zeroize     = { workspace = true }
 tar         = "0.4"
 flate2      = "1"
 
+# `oct://` portal: axum local-loopback HTTP, HMAC tokens for the per-circle
+# confirm gate. axum is already a workspace dep; hmac added here (sha2 is
+# already in the dep tree via octravpn-core).
+axum        = { workspace = true }
+hmac        = "0.12"
+
 [dev-dependencies]
 assert_cmd  = "2"
 predicates  = "3"
@@ -52,8 +58,9 @@ flate2      = "1"
 tar         = "0.4"
 serde_json  = { workspace = true }
 toml        = { workspace = true }
-# v3 integration test — mock JSON-RPC server.
-axum        = { workspace = true }
+# v3 integration test + portal route unit tests use ServiceExt::oneshot
+# to dispatch synthetic requests without a real TCP listener.
+tower       = { version = "0.5", features = ["util"] }
 
 [lints]
 workspace = true

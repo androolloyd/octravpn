@@ -12,6 +12,7 @@ mod config;
 mod discover;
 mod discover_v2;
 mod operator_backend;
+mod portal;
 mod runner;
 mod settler;
 mod tailnet;
@@ -163,6 +164,21 @@ enum Cmd {
         #[arg(long, default_value_t = false)]
         refresh: bool,
     },
+
+    /// Resolve an `oct://<circle>/<path>` URL — either render in the
+    /// local browser portal (default), save to disk, or stream to
+    /// stdout. The OS protocol handler (see `dist/`) dispatches here.
+    OpenUrl(commands::OpenUrlArgs),
+
+    /// Run the local `oct://` browser portal. Long-running. Serves
+    /// HTML/JSON fetched over the active VPN session, sandboxes HTML
+    /// inside an iframe, gates first-time circles on an explicit
+    /// confirm. Defaults to `127.0.0.1:51823`; pass `--bind` to override.
+    Portal {
+        /// Loopback bind address. Defaults to 127.0.0.1:51823.
+        #[arg(long)]
+        bind: Option<std::net::SocketAddr>,
+    },
 }
 
 /// `octravpn discover ...` — explore the v2 substrate (authorized
@@ -267,6 +283,23 @@ async fn main() -> Result<()> {
                 return commands::slash_evidence(op.clone());
             }
         }
+        // `open-url` and `portal` are read-only over the chain RPC —
+        // they don't need a session-runner, just a loaded config.
+        Cmd::OpenUrl(args) => {
+            let cfg = ClientConfig::load(&cli.config)?;
+            return commands::run_open_url(&cfg, args.clone()).await;
+        }
+        Cmd::Portal { bind } => {
+            let cfg = ClientConfig::load(&cli.config)?;
+            let chain = portal::chain::PortalChain::from_config(&cfg)?;
+            let bind = bind.unwrap_or_else(|| {
+                std::net::SocketAddr::new(
+                    std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+                    portal::DEFAULT_PORTAL_PORT,
+                )
+            });
+            return portal::run_portal(chain, bind).await;
+        }
         _ => {}
     }
 
@@ -364,6 +397,8 @@ async fn main() -> Result<()> {
         | Cmd::Doctor
         | Cmd::BugReport { .. }
         | Cmd::Serve { .. }
-        | Cmd::Funnel { .. } => unreachable!(),
+        | Cmd::Funnel { .. }
+        | Cmd::OpenUrl(_)
+        | Cmd::Portal { .. } => unreachable!(),
     }
 }
