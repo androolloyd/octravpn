@@ -23,6 +23,7 @@ use tracing::{info, warn};
 mod audit;
 mod chain;
 mod chain_v2;
+mod chain_v3;
 mod config;
 mod control;
 mod events;
@@ -31,6 +32,7 @@ mod onion;
 mod rate_limit;
 mod seal;
 mod tunnel;
+mod v3_boot;
 
 use config::NodeConfig;
 use hub::Hub;

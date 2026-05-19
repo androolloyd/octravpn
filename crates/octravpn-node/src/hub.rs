@@ -22,10 +22,12 @@ use crate::{
         asset_put_fee_fallback, deploy_circle_fee_fallback, ChainCtxV2, CircleState, PolicyBundle,
         RegisterCircleParams, MIN_CIRCLE_STAKE_DEFAULT, POLICY_ASSET_PATH,
     },
+    chain_v3::ChainCtxV3,
     config::{NodeConfig, ProtocolVersion},
     control::{serve as control_serve, ControlState},
     onion::OnionRouter,
     tunnel::Server,
+    v3_boot::{run_v3_boot, V3BootInputs},
 };
 
 pub(crate) struct Hub {
@@ -38,6 +40,13 @@ pub(crate) struct Hub {
     /// same secret-on-disk so both flows can sign independently
     /// without sharing state.
     pub chain_v2: ChainCtxV2,
+    /// v3 chain context. Same RPC + program address as v1.1 / v2 (the
+    /// chain is the same Octra chain; only the AML on the configured
+    /// `program_addr` differs across versions). Constructed
+    /// unconditionally so identity / diagnostic subcommands have it
+    /// available, but only consulted when
+    /// `cfg.chain.protocol_version == V3`.
+    pub chain_v3: ChainCtxV3,
     pub wg_kp: Arc<KeyPair>,
     pub wg_static_secret: StaticSecret,
     pub view_pubkey: [u8; 32],
@@ -75,6 +84,7 @@ impl Hub {
         // independently of each other.
         let wallet = KeyPair::from_secret_bytes(&wallet_secret);
         let wallet_v2 = KeyPair::from_secret_bytes(&wallet_secret);
+        let wallet_v3 = KeyPair::from_secret_bytes(&wallet_secret);
 
         let chain = ChainCtx {
             rpc: rpc.clone(),
@@ -85,7 +95,10 @@ impl Hub {
         // v2 chain context shares the same RPC + program_addr (operators
         // run their v2 program on the same chain, just a different
         // deployed AML). The wallet addr is the deployer.
-        let chain_v2 = ChainCtxV2::new(rpc, program_addr, wallet_v2);
+        let chain_v2 = ChainCtxV2::new(rpc.clone(), program_addr.clone(), wallet_v2);
+        // v3 chain context — same wallet, same RPC, talks to the v3
+        // deployment configured under `program_addr`.
+        let chain_v3 = ChainCtxV3::new(rpc, program_addr, wallet_v3);
 
         // The on-disk file holds a single 32-byte master secret. Two
         // independent subkeys are derived via HKDF-Expand with distinct
@@ -146,6 +159,7 @@ impl Hub {
             cfg,
             chain,
             chain_v2,
+            chain_v3,
             wg_kp,
             wg_static_secret,
             view_pubkey,
@@ -183,8 +197,40 @@ impl Hub {
             match self.cfg.chain.protocol_version {
                 ProtocolVersion::V1_1 => "v1.1",
                 ProtocolVersion::V2 => "v2 (Circle-native)",
+                ProtocolVersion::V3 => "v3 (chain-minimal, circle-resident)",
             }
         );
+        if self.cfg.chain.protocol_version == ProtocolVersion::V3 {
+            if let Some(cid) = self.cfg.chain.circle_id.as_deref() {
+                println!("v3 circle id     = {cid}");
+            } else {
+                println!(
+                    "v3 circle id     = <missing — set [chain].circle_id in node.toml>"
+                );
+            }
+            let p = crate::v3_boot::v3_state_path(&self.cfg);
+            match crate::chain_v3::CircleV3State::load(&p) {
+                Ok(Some(state)) => {
+                    if !state.last_anchor_hex.is_empty() {
+                        println!("v3 last anchor   = {}", state.last_anchor_hex);
+                    }
+                    if !state.register_tx_hash.is_empty() {
+                        println!("v3 register tx   = {}", state.register_tx_hash);
+                    }
+                    if !state.last_update_tx_hash.is_empty() {
+                        println!("v3 last update tx= {}", state.last_update_tx_hash);
+                    }
+                }
+                Ok(None) => {
+                    println!(
+                        "v3 boot state    = <not yet computed; run `octravpn-node register`>"
+                    );
+                }
+                Err(e) => {
+                    println!("v3 boot state    = <error reading {}: {e}>", p.display());
+                }
+            }
+        }
         if self.cfg.chain.protocol_version == ProtocolVersion::V2 {
             // Predict what `register_endpoint` would produce, given the
             // current chain state. Best-effort: if the chain is
@@ -231,7 +277,24 @@ impl Hub {
         match self.cfg.chain.protocol_version {
             ProtocolVersion::V1_1 => self.register_endpoint_v1().await,
             ProtocolVersion::V2 => self.register_endpoint_v2().await,
+            ProtocolVersion::V3 => self.register_endpoint_v3().await,
         }
+    }
+
+    /// v3 / chain-minimal register flow. Delegates to `v3_boot::run_v3_boot`,
+    /// which computes the canonical `StateRoot` anchor, decides
+    /// register / update / no-op, and persists the (anchor, tx_hash)
+    /// pair into `state/circle-v3.toml`. Idempotent across restarts.
+    async fn register_endpoint_v3(self: &Arc<Self>) -> Result<()> {
+        let inputs = V3BootInputs {
+            cfg: &self.cfg,
+            chain_v3: &self.chain_v3,
+            wg_static_secret: &self.wg_static_secret,
+            receipt_kp: &self.wg_kp,
+        };
+        let outcome = run_v3_boot(&inputs).await?;
+        info!(?outcome, "v3 boot complete");
+        Ok(())
     }
 
     /// v1.1 / wallet-as-identity register flow. Bond first, then
@@ -584,6 +647,25 @@ impl Hub {
                     circle_id,
                 }
             }
+            ProtocolVersion::V3 => {
+                // v3 receipt context binds the operator's configured
+                // circle (the same one anchored on-chain via
+                // register_circle). Fall back to None if the operator
+                // hasn't filled it in yet — register_endpoint will
+                // fail-fast at the next boot.
+                let circle_id = self
+                    .cfg
+                    .chain
+                    .circle_id
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .map(Address::from_display);
+                octravpn_core::receipt::ReceiptContext {
+                    program_addr,
+                    chain_id,
+                    circle_id,
+                }
+            }
         }
     }
 
@@ -693,6 +775,17 @@ impl Hub {
                 let signed = self.chain_v2.sign_call(call)?;
                 let hash = self.chain_v2.submit_signed_tx(&signed).await?;
                 info!(%hash, session_id, bytes_used, "settle_claim (v2) submitted");
+                Ok(())
+            }
+            ProtocolVersion::V3 => {
+                let nonce = self.chain_v3.nonce().await?;
+                let fee = self.chain_v3.fee_or_fallback("contract_call").await;
+                let call =
+                    self.chain_v3
+                        .build_settle_claim_call(session_id, bytes_used, fee, nonce);
+                let signed = self.chain_v3.sign_call(call)?;
+                let hash = self.chain_v3.submit_signed_tx(&signed).await?;
+                info!(%hash, session_id, bytes_used, "settle_claim (v3) submitted");
                 Ok(())
             }
         }

@@ -7,12 +7,23 @@
 //!   program_addr = "oct..."          # OctraVPN program address (v1.1 or v2)
 //!   validator_addr = "oct..."        # this node's Octra wallet address
 //!   wallet_secret_path = "/keys/..." # used to sign transactions
-//!   protocol_version = "v1.1"        # "v1.1" (default) or "v2" — selects
-//!                                    # which registration flow runs at boot.
+//!   protocol_version = "v1.1"        # "v1.1" (default), "v2", or "v3" —
+//!                                    # selects which registration flow runs
+//!                                    # at boot.
 //!                                    # v2 deploys a Circle, uploads sealed
 //!                                    # policy, and calls register_circle on
 //!                                    # the slim v2 registry. See
 //!                                    # docs/v2-operator-flow.md.
+//!                                    # v3 talks to the chain-minimal
+//!                                    # `program/main-v3.aml`: the operator
+//!                                    # commits a 32-byte (64-char hex)
+//!                                    # state-root anchor that points at a
+//!                                    # circle-resident `state-root.json`,
+//!                                    # along with an ed25519 receipt
+//!                                    # pubkey. No HFHE; no sealed policy
+//!                                    # blob lives on the registry. See
+//!                                    # `docs/v3-state-root-schema.md` and
+//!                                    # `program/main-v3.aml`.
 //!   chain_id = 1869832804             # u32 network id bound into every
 //!                                    # signed receipt (v1.2). Defaults to
 //!                                    # CHAIN_ID_DEVNET (0x6F637464); pick a
@@ -70,6 +81,15 @@ pub(crate) struct NodeConfig {
 /// `program/main-v2.aml`: a circle is deployed, an encrypted policy
 /// bundle is uploaded as a sealed asset, and `register_circle` is
 /// called with `value = MIN_CIRCLE_STAKE` (atomic register+bond).
+///
+/// `V3` is the chain-minimal flow against `program/main-v3.aml`. The
+/// circle's full policy / WG pubkey / region / member-count live in a
+/// circle-resident `state-root.json`; only the 32-byte sha256 anchor of
+/// that JSON (64-char hex) plus a base64 ed25519 receipt pubkey are
+/// committed on chain via `register_circle(circle, state_root,
+/// receipt_pubkey)`. v3 has no HFHE — settlement uses a sha256 hash
+/// chain of `(prev_head || sha256(settle_blinding))`. See
+/// `docs/v3-state-root-schema.md` and `crates/octravpn-core/src/v3_state_root.rs`.
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum ProtocolVersion {
@@ -77,6 +97,8 @@ pub(crate) enum ProtocolVersion {
     V1_1,
     #[serde(rename = "v2")]
     V2,
+    #[serde(rename = "v3")]
+    V3,
 }
 
 impl Default for ProtocolVersion {
@@ -125,6 +147,28 @@ pub(crate) struct ChainCfg {
     /// docs/v2-threat-model.md.
     #[serde(default)]
     pub pinned_root_paths: Option<Vec<String>>,
+    /// v3-only. The `oct…` circle id this operator commits its
+    /// `state-root.json` under. v3's `register_circle(circle,
+    /// state_root, receipt_pubkey)` requires the circle address as
+    /// input; unlike v2, v3 does not auto-derive it from a
+    /// `deploy_circle` op_type at the same boot pass — operators
+    /// pre-deploy (or reuse) their circle and configure the id here.
+    /// Required when `protocol_version = "v3"`; ignored otherwise.
+    #[serde(default)]
+    pub circle_id: Option<String>,
+    /// v3-only. Where to persist the v3 boot anchor + tx hashes so
+    /// subsequent restarts can detect whether the circle is already
+    /// registered without round-tripping the chain for every detail.
+    /// Defaults to `./state/circle-v3.toml` next to the working
+    /// directory.
+    #[serde(default)]
+    pub circle_v3_state_path: Option<String>,
+    /// v3-only. Initial stake (in OU) submitted with the first
+    /// `register_circle` call. Must clear the v3 program's
+    /// `min_circle_stake` floor (default 100_000_000 OU). Defaults to
+    /// `1_000_000_000` (mirrors v2's `MIN_CIRCLE_STAKE_DEFAULT`).
+    #[serde(default)]
+    pub v3_initial_stake: Option<u64>,
     /// P1-6 strict mode. When `true`, the operator daemon refuses to
     /// boot if any of the configured secret files
     /// (`wallet_secret_path`, `tunnel.wg_secret_path`) is plaintext on

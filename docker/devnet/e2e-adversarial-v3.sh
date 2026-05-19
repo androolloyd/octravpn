@@ -137,6 +137,19 @@ else
   V3=$(echo "$OUT" | python3 -c 'import json,sys;print(json.load(sys.stdin)["address"])' 2>/dev/null)
   if [[ -z "$V3" ]]; then fail "v3 deploy failed: $OUT"; exit 1; fi
   ok "v3 fresh deploy: $V3"
+  # forge create returns the predicted address before the deploy tx
+  # confirms — sending into the contract before then races and the
+  # node refuses with "program not found". Poll a cheap view until
+  # the contract responds.
+  say "waiting for deploy tx to confirm..."
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    sleep 3
+    RESP=$(rpc "contract_call" "[\"$V3\",\"get_circle_state_version\",[\"$V3\"]]")
+    if echo "$RESP" | python3 -c 'import json,sys;d=json.load(sys.stdin);sys.exit(0 if "result" in d else 1)' 2>/dev/null; then
+      ok "deploy tx confirmed; contract is live"
+      break
+    fi
+  done
 fi
 
 # Fixture data
