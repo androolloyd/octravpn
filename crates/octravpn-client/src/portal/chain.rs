@@ -31,10 +31,14 @@
 //! * Non-sealed bytes (no OCRS1 magic) pass through verbatim, which
 //!   keeps us forward-compatible with the future plaintext-view RPC.
 
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use octravpn_core::{
+    bounded::BoundedMap,
     circle::{decrypt_sealed_bytes, resource_key},
     rpc::RpcClient,
 };
@@ -42,7 +46,44 @@ use serde_json::{json, Value};
 use thiserror::Error;
 use zeroize::Zeroizing;
 
-use crate::config::ClientConfig;
+use crate::{
+    config::ClientConfig,
+    portal::mime::{sniff, SniffedMime},
+};
+
+/// Default LRU capacity for the per-`(circle_id, path)` plaintext cache.
+/// Tuned for portal sessions that re-browse the same handful of circles
+/// (a few dozen circles x a few asset paths each).
+pub(crate) const DEFAULT_ASSET_CACHE_CAPACITY: usize = 256;
+
+/// Default TTL for cached plaintext assets. Keeps reads cheap during a
+/// browse session while bounding staleness if the chain anchor moves.
+pub(crate) const DEFAULT_ASSET_CACHE_TTL: Duration = Duration::from_secs(30);
+
+/// One cache entry: the decrypted plaintext + the sniffed MIME (so we
+/// don't re-sniff on every hit) + the moment we materialised it.
+///
+/// `bytes` is wrapped in `Arc` so cache hits clone an Arc instead of the
+/// full payload. Callers that need owned `Vec<u8>` clone once at the
+/// boundary — still avoids the RPC + KDF round-trip.
+#[derive(Clone)]
+pub(crate) struct CachedAsset {
+    pub bytes: Arc<Vec<u8>>,
+    pub mime: SniffedMime,
+    #[allow(dead_code)] // surfaced for future /api/cache/stats
+    pub fetched_at: Instant,
+}
+
+/// Key into the asset cache: `(circle_id, canonical_path)`. The path is
+/// the canonicalised form (`canonical_path()`), so `policy.json` and
+/// `/policy.json` collapse to the same entry.
+pub(crate) type AssetCacheKey = (String, String);
+
+/// Concrete cache type the portal threads through `PortalState` and
+/// `PortalChain`. Wrapped in `Arc` upstream so a single cache is shared
+/// by every clone (the `PortalState` and the per-request handler clones
+/// must all see the same hit set).
+pub(crate) type AssetCache = BoundedMap<AssetCacheKey, CachedAsset>;
 
 /// Resolve the sealed-asset passphrase to try for a given `circle_id`.
 ///
@@ -164,6 +205,14 @@ pub(crate) struct PortalChain {
     /// sealed asset surfaces [`FetchAssetError::MissingPassphrase`].
     /// Wrapped in `Zeroizing` so the heap buffer wipes on drop.
     passphrase: Option<Arc<Zeroizing<String>>>,
+    /// Bounded LRU + TTL cache of decrypted plaintext bytes, keyed by
+    /// `(circle_id, canonical_path)`. Avoids re-fetching + re-decrypting
+    /// frequently-reloaded assets every time the operator's browser
+    /// hits the portal. Invalidation is purely TTL-driven; if the chain
+    /// anchor changes, the operator sees stale plaintext for up to the
+    /// TTL window. See [`DEFAULT_ASSET_CACHE_CAPACITY`] /
+    /// [`DEFAULT_ASSET_CACHE_TTL`] for the defaults.
+    asset_cache: Arc<AssetCache>,
 }
 
 impl PortalChain {
@@ -193,6 +242,10 @@ impl PortalChain {
             chain_id: cfg.chain.chain_id,
             key_id: cfg.v2.key_id.clone(),
             passphrase,
+            asset_cache: Arc::new(BoundedMap::new(
+                DEFAULT_ASSET_CACHE_CAPACITY,
+                DEFAULT_ASSET_CACHE_TTL,
+            )),
         })
     }
 
@@ -207,6 +260,10 @@ impl PortalChain {
             chain_id,
             key_id: "default".into(),
             passphrase: None,
+            asset_cache: Arc::new(BoundedMap::new(
+                DEFAULT_ASSET_CACHE_CAPACITY,
+                DEFAULT_ASSET_CACHE_TTL,
+            )),
         }
     }
 
@@ -260,16 +317,51 @@ impl PortalChain {
         self.passphrase.clone()
     }
 
+    /// Returns an `Arc` to the shared asset cache. `PortalState`
+    /// surfaces this on its public `asset_cache` field so HTTP handlers
+    /// can inspect the cache (e.g. a future `/api/cache/stats`).
+    pub(crate) fn asset_cache(&self) -> Arc<AssetCache> {
+        Arc::clone(&self.asset_cache)
+    }
+
+    /// Test-only constructor that swaps in a custom cache (different
+    /// capacity / TTL than the production defaults). Used by the cache
+    /// unit tests so they don't have to wait 30s for a TTL miss.
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn with_asset_cache(mut self, cache: Arc<AssetCache>) -> Self {
+        self.asset_cache = cache;
+        self
+    }
+
     /// Fetch + decrypt a circle asset using an explicit
     /// [`PassphraseSource`]. The portal uses this to consult its
     /// per-circle unseal cache; CLI callers wire a [`ConfigPassphrase`].
+    ///
+    /// Consults the `(circle_id, path)` plaintext cache before going
+    /// to the chain — a hit skips the RPC + KDF entirely.
     pub(crate) async fn fetch_with_source(
         &self,
         circle_id: &str,
         path: &str,
         source: &dyn PassphraseSource,
     ) -> Result<Vec<u8>, FetchAssetError> {
-        self.fetch_inner(circle_id, path, |cid| source.passphrase_for(cid))
+        self.fetch_cached(circle_id, path, |cid| source.passphrase_for(cid))
+            .await
+            .map(|c| (*c.bytes).clone())
+    }
+
+    /// Cache-aware variant of [`fetch_with_source`] that returns the
+    /// sniffed MIME alongside the bytes, so callers (the routes layer)
+    /// avoid re-sniffing per request. Cache hits share the same
+    /// `SniffedMime` that was stored on first miss.
+    pub(crate) async fn fetch_with_source_sniffed(
+        &self,
+        circle_id: &str,
+        path: &str,
+        source: &dyn PassphraseSource,
+    ) -> Result<CachedAsset, FetchAssetError> {
+        self.fetch_cached(circle_id, path, |cid| source.passphrase_for(cid))
             .await
     }
 
@@ -279,6 +371,12 @@ impl PortalChain {
     /// circle-resource-key fixture. Same single-attempt semantics — no
     /// oracle iteration; the caller is responsible for rate-limiting
     /// submissions.
+    ///
+    /// **Does NOT consult or populate the asset cache.** Unseal must
+    /// always re-fetch + re-decrypt with the operator-supplied
+    /// passphrase; serving cached bytes here would let a stale entry
+    /// satisfy a wrong-passphrase submission (false-positive
+    /// validation).
     pub(crate) async fn try_decrypt_with_passphrase(
         &self,
         circle_id: &str,
@@ -308,12 +406,53 @@ impl PortalChain {
         path: &str,
     ) -> Result<Vec<u8>, FetchAssetError> {
         let pp = self.passphrase.clone();
-        self.fetch_inner(circle_id, path, |_| pp.clone()).await
+        self.fetch_cached(circle_id, path, |_| pp.clone())
+            .await
+            .map(|c| (*c.bytes).clone())
+    }
+
+    /// Cache wrapper around [`Self::fetch_inner`]. On hit, returns the
+    /// stored plaintext + sniffed MIME without touching the chain RPC
+    /// or running a KDF. On miss, performs the fetch + decrypt, sniffs
+    /// the result once, and inserts a [`CachedAsset`] for subsequent
+    /// callers. Errors are never cached — every error path re-attempts
+    /// on the next call so transient chain failures don't pin a
+    /// negative result.
+    async fn fetch_cached<F>(
+        &self,
+        circle_id: &str,
+        path: &str,
+        pick_passphrase: F,
+    ) -> Result<CachedAsset, FetchAssetError>
+    where
+        F: Fn(&str) -> Option<Arc<Zeroizing<String>>>,
+    {
+        let key: AssetCacheKey = (circle_id.to_string(), canonical_path(path));
+        if let Some(hit) = self.asset_cache.get(&key) {
+            return Ok(hit);
+        }
+        let bytes = self.fetch_inner(circle_id, path, pick_passphrase).await?;
+        let mime = sniff(&bytes);
+        let entry = CachedAsset {
+            bytes: Arc::new(bytes),
+            mime,
+            fetched_at: Instant::now(),
+        };
+        // `insert` evicts the oldest entry when at capacity. Concurrent
+        // misses for the same key will both fetch then both insert —
+        // the second insert wins and replaces the first, which is fine
+        // (same plaintext modulo a chain anchor change inside the
+        // race window).
+        self.asset_cache.insert(key, entry.clone());
+        Ok(entry)
     }
 
     /// Common fetch + decrypt pipeline. The `pick_passphrase` closure
     /// is consulted only after the OCRS1 magic confirms the bytes are
     /// sealed; plaintext-passthrough never asks for a passphrase.
+    ///
+    /// This is the **cache-bypass** path. Routes that want caching
+    /// should go through [`Self::fetch_cached`] instead.
     async fn fetch_inner<F>(
         &self,
         circle_id: &str,
@@ -708,6 +847,369 @@ mod tests {
         assert!(
             matches!(err, FetchAssetError::NotPublished { .. }),
             "got: {err:?}",
+        );
+    }
+
+    // ─── asset-cache tests  ───────────────────────────────────────────
+    //
+    // These exercise the bounded LRU + TTL cache layered on
+    // `fetch_circle_asset_bytes` / `fetch_with_source[_sniffed]`. The
+    // shared infrastructure: a counting mock RPC that lets us assert
+    // "this call did NOT hit the chain" (cache hit) vs "this call
+    // produced a fresh roundtrip" (cache miss).
+
+    /// Spawn a stub RPC that returns `result` for every call and
+    /// increments `counter` on each invocation. Returned `addr` is the
+    /// loopback bind; the counter is shared with the caller for
+    /// hit/miss assertions.
+    async fn spawn_counting_rpc(
+        result: serde_json::Value,
+    ) -> (SocketAddr, Arc<std::sync::atomic::AtomicUsize>) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let counter = Arc::new(AtomicUsize::new(0));
+        let counter_for_app = Arc::clone(&counter);
+        let result_arc = Arc::new(result);
+        let app: Router = Router::new().route(
+            "/",
+            post(move |Json(req): Json<serde_json::Value>| {
+                let result = Arc::clone(&result_arc);
+                let counter = Arc::clone(&counter_for_app);
+                async move {
+                    let id = req.get("id").cloned().unwrap_or(json!(1));
+                    let method = req.get("method").and_then(|v| v.as_str()).unwrap_or("");
+                    if method == "circle_asset_ciphertext_by_resource_key" {
+                        counter.fetch_add(1, Ordering::SeqCst);
+                        Json(json!({
+                            "jsonrpc": "2.0",
+                            "id": id,
+                            "result": (*result).clone(),
+                        }))
+                    } else {
+                        Json(json!({
+                            "jsonrpc": "2.0",
+                            "id": id,
+                            "error": { "code": -32601, "message": "method not found" },
+                        }))
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind::<SocketAddr>("127.0.0.1:0".parse().unwrap())
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        (addr, counter)
+    }
+
+    /// Build a chain wired to `addr` with the given cache injected.
+    fn chain_with_cache(addr: SocketAddr, cache: Arc<AssetCache>) -> PortalChain {
+        let rpc = RpcClient::new(format!("http://{addr}/"));
+        PortalChain::from_rpc(rpc, "octPROG".into(), 0).with_asset_cache(cache)
+    }
+
+    #[tokio::test]
+    async fn cache_hit_returns_same_bytes_without_rpc_call() {
+        use std::sync::atomic::Ordering;
+        let plaintext = b"plaintext for cache hit";
+        let b64 = B64.encode(plaintext);
+        let (addr, count) = spawn_counting_rpc(json!({
+            "ciphertext_b64": b64,
+            "plaintext_hash": "0".repeat(64),
+            "key_id": "default",
+        }))
+        .await;
+        let cache: Arc<AssetCache> = Arc::new(BoundedMap::new(16, Duration::from_secs(60)));
+        let chain = chain_with_cache(addr, Arc::clone(&cache));
+
+        // First call: miss → one RPC roundtrip.
+        let got1 = chain
+            .fetch_circle_asset_bytes("circHIT", "/policy.json")
+            .await
+            .expect("first call fetches");
+        assert_eq!(got1, plaintext);
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+
+        // Second + third call: hit → counter stays at 1.
+        let got2 = chain
+            .fetch_circle_asset_bytes("circHIT", "/policy.json")
+            .await
+            .expect("second call is cached");
+        let got3 = chain
+            .fetch_circle_asset_bytes("circHIT", "/policy.json")
+            .await
+            .expect("third call is cached");
+        assert_eq!(got2, plaintext);
+        assert_eq!(got3, plaintext);
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            1,
+            "cache hits must not generate new RPC calls",
+        );
+    }
+
+    #[tokio::test]
+    async fn cache_ttl_expiry_forces_refetch() {
+        use std::sync::atomic::Ordering;
+        let plaintext = b"ttl-expiry bytes";
+        let b64 = B64.encode(plaintext);
+        let (addr, count) = spawn_counting_rpc(json!({
+            "ciphertext_b64": b64,
+            "plaintext_hash": "0".repeat(64),
+            "key_id": "default",
+        }))
+        .await;
+        // Short TTL so the test isn't slow. `BoundedMap::sweep` is what
+        // implements eviction — `get` itself doesn't lazily expire, so
+        // we drive sweep explicitly to model a periodic sweep task.
+        let cache: Arc<AssetCache> = Arc::new(BoundedMap::new(16, Duration::from_millis(20)));
+        let chain = chain_with_cache(addr, Arc::clone(&cache));
+
+        let _ = chain
+            .fetch_circle_asset_bytes("circTTL", "/policy.json")
+            .await
+            .unwrap();
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+
+        // Wait past TTL + sweep → entry is gone.
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        let evicted = cache.sweep();
+        assert_eq!(evicted, 1, "ttl sweep should evict the stale entry");
+
+        // Next fetch must hit the RPC again.
+        let _ = chain
+            .fetch_circle_asset_bytes("circTTL", "/policy.json")
+            .await
+            .unwrap();
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            2,
+            "post-eviction fetch must re-roundtrip",
+        );
+    }
+
+    #[tokio::test]
+    async fn cache_bounded_capacity_evicts_oldest() {
+        use std::sync::atomic::Ordering;
+        let plaintext = b"capacity test bytes";
+        let b64 = B64.encode(plaintext);
+        let (addr, count) = spawn_counting_rpc(json!({
+            "ciphertext_b64": b64,
+            "plaintext_hash": "0".repeat(64),
+            "key_id": "default",
+        }))
+        .await;
+        // Cap = 2; insert 3 distinct keys → the first is evicted.
+        let cache: Arc<AssetCache> = Arc::new(BoundedMap::new(2, Duration::from_secs(60)));
+        let chain = chain_with_cache(addr, Arc::clone(&cache));
+
+        let _ = chain
+            .fetch_circle_asset_bytes("circCAP", "/a.json")
+            .await
+            .unwrap();
+        let _ = chain
+            .fetch_circle_asset_bytes("circCAP", "/b.json")
+            .await
+            .unwrap();
+        let _ = chain
+            .fetch_circle_asset_bytes("circCAP", "/c.json")
+            .await
+            .unwrap();
+        assert_eq!(count.load(Ordering::SeqCst), 3, "three distinct keys, three RPCs");
+        assert_eq!(cache.len(), 2, "capacity must cap at 2");
+
+        // /a.json was the oldest; refetching must miss + roundtrip.
+        // After this insert, the cache holds /c.json + /a.json (the
+        // re-insert of /a.json evicted /b.json — the new oldest).
+        let _ = chain
+            .fetch_circle_asset_bytes("circCAP", "/a.json")
+            .await
+            .unwrap();
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            4,
+            "evicted oldest entry re-fetches",
+        );
+
+        // /c.json was still cached → no new roundtrip.
+        let _ = chain
+            .fetch_circle_asset_bytes("circCAP", "/c.json")
+            .await
+            .unwrap();
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            4,
+            "/c.json was still in cache; no new RPC",
+        );
+    }
+
+    #[tokio::test]
+    async fn cache_key_isolates_circles_and_paths() {
+        use std::sync::atomic::Ordering;
+        let plaintext = b"isolation test bytes";
+        let b64 = B64.encode(plaintext);
+        let (addr, count) = spawn_counting_rpc(json!({
+            "ciphertext_b64": b64,
+            "plaintext_hash": "0".repeat(64),
+            "key_id": "default",
+        }))
+        .await;
+        let cache: Arc<AssetCache> = Arc::new(BoundedMap::new(16, Duration::from_secs(60)));
+        let chain = chain_with_cache(addr, Arc::clone(&cache));
+
+        // Different circles, same path → distinct keys → two RPCs.
+        let _ = chain
+            .fetch_circle_asset_bytes("circA", "/policy.json")
+            .await
+            .unwrap();
+        let _ = chain
+            .fetch_circle_asset_bytes("circB", "/policy.json")
+            .await
+            .unwrap();
+        assert_eq!(count.load(Ordering::SeqCst), 2, "circle id isolates cache");
+
+        // Same circle, different paths → distinct keys → two more RPCs.
+        let _ = chain
+            .fetch_circle_asset_bytes("circA", "/state-root.json")
+            .await
+            .unwrap();
+        let _ = chain
+            .fetch_circle_asset_bytes("circA", "/members.json")
+            .await
+            .unwrap();
+        assert_eq!(count.load(Ordering::SeqCst), 4, "path isolates cache");
+
+        // Canonical-path collapse: `policy.json` and `/policy.json`
+        // share a key, so the second hits the cache.
+        let _ = chain
+            .fetch_circle_asset_bytes("circA", "policy.json")
+            .await
+            .unwrap();
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            4,
+            "canonical path collapses leading-slash variants to the same entry",
+        );
+    }
+
+    #[tokio::test]
+    async fn cache_concurrent_access_does_not_re_roundtrip() {
+        // Concurrent misses for the same key may both hit the RPC
+        // before either inserts (we don't have inflight de-duplication;
+        // `fetch_cached` calls that out). But after the cache is warm,
+        // every subsequent concurrent request must be served from
+        // cache. This test asserts the post-warmup invariant: 100
+        // concurrent gets on a warm cache produce zero new RPCs.
+        use std::sync::atomic::Ordering;
+        let plaintext = b"concurrent access bytes";
+        let b64 = B64.encode(plaintext);
+        let (addr, count) = spawn_counting_rpc(json!({
+            "ciphertext_b64": b64,
+            "plaintext_hash": "0".repeat(64),
+            "key_id": "default",
+        }))
+        .await;
+        let cache: Arc<AssetCache> = Arc::new(BoundedMap::new(16, Duration::from_secs(60)));
+        let chain = chain_with_cache(addr, Arc::clone(&cache));
+
+        // Warm up the cache (single fetch).
+        let _ = chain
+            .fetch_circle_asset_bytes("circCONC", "/policy.json")
+            .await
+            .unwrap();
+        let baseline = count.load(Ordering::SeqCst);
+        assert_eq!(baseline, 1);
+
+        // Fan out 100 concurrent reads of the same key.
+        let mut handles = Vec::with_capacity(100);
+        for _ in 0..100 {
+            let chain = chain.clone();
+            handles.push(tokio::spawn(async move {
+                chain
+                    .fetch_circle_asset_bytes("circCONC", "/policy.json")
+                    .await
+                    .unwrap()
+            }));
+        }
+        for h in handles {
+            let bytes = h.await.unwrap();
+            assert_eq!(bytes, plaintext);
+        }
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            baseline,
+            "warm-cache concurrent reads must not generate new RPCs",
+        );
+    }
+
+    #[tokio::test]
+    async fn cache_errors_are_not_stored() {
+        // A failed fetch must not poison the cache — the next call
+        // re-attempts. Drive this via NotPublished (RPC returns null).
+        use std::sync::atomic::Ordering;
+        let (addr, count) = spawn_counting_rpc(serde_json::Value::Null).await;
+        let cache: Arc<AssetCache> = Arc::new(BoundedMap::new(16, Duration::from_secs(60)));
+        let chain = chain_with_cache(addr, Arc::clone(&cache));
+
+        let err1 = chain
+            .fetch_circle_asset_bytes("circERR", "/missing.json")
+            .await
+            .expect_err("null result must be NotPublished");
+        assert!(matches!(err1, FetchAssetError::NotPublished { .. }));
+        let after_first = count.load(Ordering::SeqCst);
+
+        // Second call: must also roundtrip — not satisfied from cache.
+        let err2 = chain
+            .fetch_circle_asset_bytes("circERR", "/missing.json")
+            .await
+            .expect_err("still not published");
+        assert!(matches!(err2, FetchAssetError::NotPublished { .. }));
+        assert!(
+            count.load(Ordering::SeqCst) > after_first,
+            "failed fetches must not be cached",
+        );
+        assert_eq!(cache.len(), 0, "cache stays empty when fetches fail");
+    }
+
+    #[tokio::test]
+    async fn try_decrypt_with_passphrase_bypasses_cache() {
+        // The unseal flow uses `try_decrypt_with_passphrase`, which
+        // must NEVER serve from cache — serving a previously-cached
+        // plaintext would let a wrong passphrase validate successfully.
+        use std::sync::atomic::Ordering;
+        let plaintext = b"unseal bypass bytes";
+        let (ct_b64, ph_hex) =
+            build_sealed_fixture("circBYPASS", "default", "right-pp", plaintext);
+        let (addr, count) = spawn_counting_rpc(json!({
+            "ciphertext_b64": ct_b64,
+            "plaintext_hash": ph_hex,
+            "key_id": "default",
+        }))
+        .await;
+        let cache: Arc<AssetCache> = Arc::new(BoundedMap::new(16, Duration::from_secs(60)));
+        let chain = chain_with_cache(addr, Arc::clone(&cache)).with_passphrase("right-pp");
+
+        // Warm the cache via the read path.
+        let _ = chain
+            .fetch_circle_asset_bytes("circBYPASS", "/policy.json")
+            .await
+            .unwrap();
+        let warmed = count.load(Ordering::SeqCst);
+        assert_eq!(warmed, 1);
+
+        // Now call `try_decrypt_with_passphrase` — it must NOT serve
+        // from cache; we expect an additional RPC roundtrip.
+        let pp = Arc::new(Zeroizing::new("right-pp".to_string()));
+        let _ = chain
+            .try_decrypt_with_passphrase("circBYPASS", "/policy.json", pp)
+            .await
+            .unwrap();
+        assert!(
+            count.load(Ordering::SeqCst) > warmed,
+            "try_decrypt_with_passphrase must always hit the chain",
         );
     }
 }

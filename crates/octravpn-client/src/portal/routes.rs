@@ -66,7 +66,7 @@ use zeroize::Zeroizing;
 use crate::{
     commands::open_url::parse_oct_url,
     portal::{
-        chain::{FetchAssetError, PassphraseSource, PortalChain},
+        chain::{AssetCache, FetchAssetError, PassphraseSource, PortalChain},
         mime::{sniff, SniffedMime},
         static_assets::{INDEX_BODY, PAGE_SHELL},
     },
@@ -95,6 +95,15 @@ pub(crate) struct PortalState {
     /// Per-circle passphrases collected via the interactive unseal
     /// form. Falls back to `chain.configured_passphrase()` on miss.
     pub unseal_cache: UnsealCache,
+    /// Plaintext-asset cache keyed by `(circle_id, canonical_path)`.
+    /// Shared `Arc` with `PortalChain` — every fetch path consults the
+    /// same map. Capacity / TTL are picked at chain construction; see
+    /// `chain::DEFAULT_ASSET_CACHE_CAPACITY` + `DEFAULT_ASSET_CACHE_TTL`.
+    /// Exposed on the state for future debug surfaces and for tests
+    /// asserting cache hit/miss behavior; production fetch paths read
+    /// it via `chain.asset_cache()`.
+    #[allow(dead_code)]
+    pub asset_cache: Arc<AssetCache>,
 }
 
 /// [`PassphraseSource`] adapter that consults the portal's per-circle
@@ -119,11 +128,13 @@ impl PortalState {
     pub(crate) fn new(chain: PortalChain) -> Self {
         let mut secret = [0u8; 32];
         rand::rngs::OsRng.fill_bytes(&mut secret);
+        let asset_cache = chain.asset_cache();
         Self {
             chain,
             allow_set: Arc::new(Mutex::new(BTreeSet::new())),
             hmac_secret: Arc::new(secret),
             unseal_cache: Arc::new(Mutex::new(BTreeMap::new())),
+            asset_cache,
         }
     }
 
@@ -233,12 +244,12 @@ async fn api_resolve(
                 .into_response();
         }
     };
-    let bytes = match state
+    let cached = match state
         .chain
-        .fetch_with_source(&parsed.circle_id, &parsed.path, &state.passphrase_source())
+        .fetch_with_source_sniffed(&parsed.circle_id, &parsed.path, &state.passphrase_source())
         .await
     {
-        Ok(b) => b,
+        Ok(c) => c,
         Err(e) => {
             let (status, hint) = match &e {
                 FetchAssetError::MissingPassphrase { .. } | FetchAssetError::DecryptFailed { .. } => (
@@ -262,13 +273,12 @@ async fn api_resolve(
                 .into_response();
         }
     };
-    let mime = sniff(&bytes);
     Json(json!({
         "circle_id": parsed.circle_id,
         "path": parsed.path,
-        "size": bytes.len(),
-        "mime": mime.content_type(),
-        "renderable": mime.renderable(),
+        "size": cached.bytes.len(),
+        "mime": cached.mime.content_type(),
+        "renderable": cached.mime.renderable(),
         "allowed": state.is_allowed(&parsed.circle_id),
     }))
     .into_response()
@@ -296,17 +306,18 @@ async fn view_asset(
     }
 
     // Fetch via the cache-aware passphrase source so a prior /unseal
-    // submission for this circle is honored.
-    let bytes = match state
+    // submission for this circle is honored. The sniffed variant
+    // also reuses the cached MIME on hits — no re-sniff per request.
+    let cached = match state
         .chain
-        .fetch_with_source(&parsed.circle_id, &parsed.path, &state.passphrase_source())
+        .fetch_with_source_sniffed(&parsed.circle_id, &parsed.path, &state.passphrase_source())
         .await
     {
-        Ok(b) => b,
+        Ok(c) => c,
         Err(e) => return fetch_error_page(&state, &url, &parsed.circle_id, e),
     };
 
-    render_bytes(&url, bytes)
+    render_bytes(&url, (*cached.bytes).clone(), cached.mime)
 }
 
 #[derive(Deserialize)]
@@ -426,17 +437,20 @@ async fn raw_asset(
             .into_response();
     }
 
-    // Fetch via the cache-aware source so unseal-cached passphrases work.
-    let bytes = match state
+    // Fetch via the cache-aware source so unseal-cached passphrases
+    // work. Sniffed variant keeps the cached MIME so we don't re-sniff
+    // per hit.
+    let cached = match state
         .chain
-        .fetch_with_source(&parsed.circle_id, &parsed.path, &state.passphrase_source())
+        .fetch_with_source_sniffed(&parsed.circle_id, &parsed.path, &state.passphrase_source())
         .await
     {
-        Ok(b) => b,
+        Ok(c) => c,
         Err(e) => return raw_error_response(&parsed.circle_id, &parsed.path, &e),
     };
+    let mime = cached.mime;
+    let bytes = (*cached.bytes).clone();
 
-    let mime = sniff(&bytes);
     let mut builder = Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, mime.content_type())
@@ -789,8 +803,7 @@ fn error_page(status: StatusCode, url: &str, message: &str) -> Response {
     (status, Html(html)).into_response()
 }
 
-fn render_bytes(url: &str, bytes: Vec<u8>) -> Response {
-    let mime = sniff(&bytes);
+fn render_bytes(url: &str, bytes: Vec<u8>, mime: SniffedMime) -> Response {
     match mime {
         SniffedMime::Png
         | SniffedMime::Jpeg
@@ -961,7 +974,8 @@ mod tests {
     #[tokio::test]
     async fn sandbox_html_response_has_sandbox_attribute() {
         let bytes = b"<!DOCTYPE html><html><body>hi</body></html>".to_vec();
-        let resp = render_bytes("oct://circleX/index.html", bytes);
+        let mime = sniff(&bytes);
+        let resp = render_bytes("oct://circleX/index.html", bytes, mime);
         let body = body_string(resp).await;
         assert!(
             body.contains(r#"sandbox="allow-popups""#),
