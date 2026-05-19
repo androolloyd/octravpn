@@ -635,6 +635,142 @@ mod tests {
         assert!(s.contains("Zürich—北京"), "unicode mangled: {s}");
     }
 
+    // -----------------------------------------------------------------
+    // Property-based tests. Probe the encoder against a broad strategy
+    // space: determinism, reorder-invariance, hash stability, and a
+    // weak form of injectivity.
+    // -----------------------------------------------------------------
+    use proptest::collection::btree_map;
+    use proptest::prelude::*;
+
+    /// 32-byte WG pubkey from a seed → 44-char base64 (always valid).
+    fn wg_b64_from(seed: &[u8; 32]) -> String {
+        BASE64_STD.encode(seed)
+    }
+
+    /// Strategy producing arbitrary, well-formed `OperatorPolicy`s.
+    fn arb_policy() -> impl Strategy<Value = OperatorPolicy> {
+        (
+            ".{1,32}",                            // endpoint
+            any::<[u8; 32]>(),                    // wg_pubkey seed
+            ".{1,16}",                            // region
+            any::<u64>(),                         // price_per_mb_shared
+            any::<u64>(),                         // price_per_mb_internal
+            any::<u64>(),                         // effective_epoch
+            any::<u64>(),                         // timestamp_secs
+            proptest::option::of(".{0,32}"),      // attestation_url
+            btree_map(
+                "x_[a-z]{1,8}",
+                prop_oneof![
+                    Just(Value::Null),
+                    any::<bool>().prop_map(Value::Bool),
+                    any::<i64>().prop_map(Value::from),
+                    ".{0,16}".prop_map(Value::String),
+                ],
+                0..4,
+            ),
+        )
+            .prop_map(
+                |(endpoint, wg, region, shared, internal, ep, ts, attest, unknown_map)| {
+                    let mut p = OperatorPolicy::new_v1(
+                        endpoint,
+                        wg_b64_from(&wg),
+                        region,
+                        shared,
+                        internal,
+                        ep,
+                        ts,
+                        attest,
+                    );
+                    let bt: BTreeMap<String, Value> = unknown_map.into_iter().collect();
+                    p.unknown = bt;
+                    p
+                },
+            )
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 256,
+            ..ProptestConfig::default()
+        })]
+
+        /// **Determinism.** Two `canonical_bytes()` calls on the same
+        /// `OperatorPolicy` produce identical bytes.
+        #[test]
+        fn prop_canonical_bytes_deterministic(p in arb_policy()) {
+            let a = p.canonical_bytes().expect("encode a");
+            let b = p.canonical_bytes().expect("encode b");
+            prop_assert_eq!(a, b);
+        }
+
+        /// **Encode → decode → encode round-trip is byte-identical.**
+        #[test]
+        fn prop_round_trip_through_canonical_bytes(p in arb_policy()) {
+            p.validate().expect("constructed policy must validate");
+            let bytes_a = p.canonical_bytes().expect("encode");
+            let decoded = OperatorPolicy::decode(&bytes_a).expect("decode");
+            let bytes_b = decoded.canonical_bytes().expect("re-encode");
+            prop_assert_eq!(bytes_a, bytes_b);
+        }
+
+        /// **Field-reorder invariance.** Shuffling the top-level
+        /// `Map` insertion order of the encoded form yields the same
+        /// hash when fed back through `canonical_bytes()`.
+        #[test]
+        fn prop_field_reorder_invariance(p in arb_policy()) {
+            let original_hash = p.hash_hex().expect("hash");
+            let bytes = p.canonical_bytes().expect("encode");
+            let Value::Object(map) = serde_json::from_slice::<Value>(&bytes)
+                .expect("reparse") else {
+                    return Err(TestCaseError::fail("not an object"));
+                };
+            let mut reversed = Map::new();
+            let mut entries: Vec<_> = map.into_iter().collect();
+            entries.sort_by(|a, b| b.0.cmp(&a.0));
+            for (k, v) in entries {
+                reversed.insert(k, v);
+            }
+            let shuffled = serde_json::to_vec(&Value::Object(reversed))
+                .expect("encode shuffled");
+            let reparsed = OperatorPolicy::decode_lenient(&shuffled)
+                .expect("lenient decode of reordered");
+            let recomputed = reparsed.hash_hex().expect("recompute hash");
+            prop_assert_eq!(original_hash, recomputed);
+        }
+
+        /// **Hash output stability.** `hash_hex()` is deterministic
+        /// and always 64 lowercase hex chars.
+        #[test]
+        fn prop_hash_hex_is_stable_and_well_formed(p in arb_policy()) {
+            let h1 = p.hash_hex().expect("hash 1");
+            let h2 = p.hash_hex().expect("hash 2");
+            prop_assert_eq!(&h1, &h2);
+            prop_assert_eq!(h1.len(), HEX_HASH_LEN);
+            prop_assert!(h1.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+        }
+
+        /// **Weak injectivity.** Two policies that differ in a
+        /// structurally-relevant field (`effective_epoch`) produce
+        /// distinct canonical bytes and distinct hashes.
+        #[test]
+        fn prop_injectivity_on_distinct_epochs(
+            mut p in arb_policy(),
+            ep_a in any::<u64>(),
+            ep_b in any::<u64>(),
+        ) {
+            prop_assume!(ep_a != ep_b);
+            p.effective_epoch = ep_a;
+            let bytes_a = p.canonical_bytes().expect("encode a");
+            let hash_a = p.hash_hex().expect("hash a");
+            p.effective_epoch = ep_b;
+            let bytes_b = p.canonical_bytes().expect("encode b");
+            let hash_b = p.hash_hex().expect("hash b");
+            prop_assert_ne!(bytes_a, bytes_b);
+            prop_assert_ne!(hash_a, hash_b);
+        }
+    }
+
     #[test]
     fn worked_example_hash_is_stable() {
         // Lock down the worked example used in the schema doc. If

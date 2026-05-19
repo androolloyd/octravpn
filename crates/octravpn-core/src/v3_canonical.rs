@@ -193,4 +193,224 @@ mod tests {
         let theirs = hex::encode(h.finalize());
         assert_eq!(mine, theirs);
     }
+
+    // -----------------------------------------------------------------
+    // Property-based tests. The canonical encoder is the single piece
+    // of code that owns the on-chain anchor format; a one-byte
+    // deviation silently desyncs verifiers from producers. We use
+    // proptest to probe a broad strategy space of JSON shapes.
+    //
+    // To keep these fast we cap the case count and bound the
+    // arbitrary-JSON tree depth: deepest realistic v3 nesting is 3,
+    // so depth 4 is plenty of headroom without exploding generation
+    // time.
+    // -----------------------------------------------------------------
+    use proptest::collection::{btree_map, vec as pvec};
+    use proptest::prelude::*;
+
+    /// A proptest strategy over arbitrary `serde_json::Value` trees.
+    ///
+    /// Leaves: null, bool, signed integer numbers (we deliberately
+    /// avoid `f64` here — `Value` does not implement `Eq` for `NaN`
+    /// and `serde_json::Number` itself rejects `NaN`/`Inf`), and
+    /// arbitrary unicode strings. Branches: arrays and objects,
+    /// depth-bounded.
+    fn arb_value() -> impl Strategy<Value = Value> {
+        let leaf = prop_oneof![
+            Just(Value::Null),
+            any::<bool>().prop_map(Value::Bool),
+            any::<i64>().prop_map(Value::from),
+            ".{0,32}".prop_map(Value::String),
+        ];
+        leaf.prop_recursive(
+            4,  // max depth
+            32, // max total nodes
+            8,  // max items per array/object
+            |inner| {
+                prop_oneof![
+                    pvec(inner.clone(), 0..6).prop_map(Value::Array),
+                    btree_map(".{1,12}", inner, 0..6).prop_map(|m| {
+                        let mut map = Map::new();
+                        for (k, v) in m {
+                            map.insert(k, v);
+                        }
+                        Value::Object(map)
+                    }),
+                ]
+            },
+        )
+    }
+
+    /// Wrap a `Value` in a top-level object so the root is always an
+    /// Object (matches the v3 schemas' shape — they all emit `{ ... }`).
+    fn arb_object() -> impl Strategy<Value = Value> {
+        btree_map(".{1,12}", arb_value(), 0..6).prop_map(|m| {
+            let mut map = Map::new();
+            for (k, v) in m {
+                map.insert(k, v);
+            }
+            Value::Object(map)
+        })
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 256,
+            ..ProptestConfig::default()
+        })]
+
+        /// **Idempotence (sort stability).** Applying `canonical_write`
+        /// to its own output (after re-parsing into a `Value`) yields
+        /// identical bytes. Load-bearing: if canonicalisation isn't a
+        /// fixed point, two verifiers can reach different anchors by
+        /// canonicalising at different stages of a pipeline.
+        #[test]
+        fn canonical_write_is_idempotent(v in arb_value()) {
+            let mut bytes_a = Vec::new();
+            canonical_write(&v, &mut bytes_a);
+            let reparsed: Value = serde_json::from_slice(&bytes_a)
+                .expect("canonical output must reparse");
+            let mut bytes_b = Vec::new();
+            canonical_write(&reparsed, &mut bytes_b);
+            prop_assert_eq!(bytes_a, bytes_b);
+        }
+
+        /// **Determinism.** Encoding the same `Value` twice produces
+        /// identical bytes.
+        #[test]
+        fn canonical_write_is_deterministic(v in arb_value()) {
+            let mut a = Vec::new();
+            canonical_write(&v, &mut a);
+            let mut b = Vec::new();
+            canonical_write(&v, &mut b);
+            prop_assert_eq!(a, b);
+        }
+
+        /// **Reorder-invariance at the Value level.** Two objects with
+        /// the same `(key, value)` content but different
+        /// `serde_json::Map` insertion order produce identical
+        /// canonical bytes.
+        #[test]
+        fn object_key_reorder_invariant(
+            entries in pvec((".{1,8}", arb_value()), 0..8),
+        ) {
+            let mut seen = std::collections::BTreeSet::new();
+            let entries: Vec<_> = entries
+                .into_iter()
+                .filter(|(k, _)| seen.insert(k.clone()))
+                .collect();
+            let mut forward = Map::new();
+            for (k, v) in &entries {
+                forward.insert(k.clone(), v.clone());
+            }
+            let mut reversed = Map::new();
+            for (k, v) in entries.iter().rev() {
+                reversed.insert(k.clone(), v.clone());
+            }
+            let mut a = Vec::new();
+            canonical_write(&Value::Object(forward), &mut a);
+            let mut b = Vec::new();
+            canonical_write(&Value::Object(reversed), &mut b);
+            prop_assert_eq!(a, b);
+        }
+
+        /// **No whitespace OUTSIDE quoted string literals.** Walk the
+        /// canonical bytes toggling an in-string flag on unescaped `"`.
+        #[test]
+        fn no_whitespace_outside_strings(v in arb_value()) {
+            let mut out = Vec::new();
+            canonical_write(&v, &mut out);
+            let mut in_string = false;
+            let mut escaped = false;
+            for &b in &out {
+                if in_string {
+                    if escaped {
+                        escaped = false;
+                    } else if b == b'\\' {
+                        escaped = true;
+                    } else if b == b'"' {
+                        in_string = false;
+                    }
+                } else if b == b'"' {
+                    in_string = true;
+                } else {
+                    prop_assert!(
+                        !b" \n\r\t".contains(&b),
+                        "structural whitespace byte 0x{:02x} leaked",
+                        b
+                    );
+                }
+            }
+        }
+
+        /// **`sha256_hex` over canonical bytes is stable + well-formed.**
+        /// Same input → same output → 64 lowercase hex chars.
+        #[test]
+        fn sha256_hex_canonical_is_stable(v in arb_value()) {
+            let mut bytes = Vec::new();
+            canonical_write(&v, &mut bytes);
+            let h1 = sha256_hex(&bytes);
+            let h2 = sha256_hex(&bytes);
+            prop_assert_eq!(&h1, &h2);
+            prop_assert_eq!(h1.len(), HEX_HASH_LEN);
+            prop_assert!(h1.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+        }
+
+        /// **Top-level object keys are sorted in canonical output.**
+        /// Lex-byte order. A regression where we forgot to re-sort
+        /// after a `Map` mutation would trip this.
+        #[test]
+        fn top_level_object_keys_are_sorted(obj in arb_object()) {
+            let mut bytes = Vec::new();
+            canonical_write(&obj, &mut bytes);
+            let v: Value = serde_json::from_slice(&bytes)
+                .expect("must reparse");
+            if let Value::Object(map) = v {
+                let keys: Vec<&String> = map.keys().collect();
+                for w in keys.windows(2) {
+                    prop_assert!(
+                        w[0].as_bytes() <= w[1].as_bytes(),
+                        "keys not in lex-byte order: {:?} then {:?}", w[0], w[1]
+                    );
+                }
+            }
+        }
+
+        /// **`check_hash` accepts every 64-char lowercase-hex string.**
+        /// This is the rule the AML side relies on: chain rejects an
+        /// anchor argument that isn't exactly `HEX_HASH_LEN` lowercase
+        /// hex.
+        #[test]
+        fn check_hash_round_trip(
+            good_chars in pvec(prop_oneof![
+                0_u8..10_u8,
+                10_u8..16_u8,
+            ], HEX_HASH_LEN..=HEX_HASH_LEN),
+        ) {
+            let s: String = good_chars
+                .iter()
+                .map(|&n| {
+                    if n < 10 {
+                        char::from(b'0' + n)
+                    } else {
+                        char::from(b'a' + (n - 10))
+                    }
+                })
+                .collect();
+            prop_assert!(check_hash::<()>(&s, || ()).is_ok());
+        }
+
+        /// **`check_hash` rejects any uppercase letter at any
+        /// position.** Mirrors the AML invariant; mixed-case anchors
+        /// must never round-trip.
+        #[test]
+        fn check_hash_rejects_uppercase_anywhere(
+            pos in 0_usize..HEX_HASH_LEN,
+        ) {
+            let mut chars: Vec<u8> = vec![b'a'; HEX_HASH_LEN];
+            chars[pos] = b'A';
+            let s = String::from_utf8(chars).expect("ascii is valid utf8");
+            prop_assert!(check_hash::<()>(&s, || ()).is_err());
+        }
+    }
 }

@@ -772,6 +772,181 @@ mod tests {
         assert_eq!(expected.len(), HEX_HASH_LEN);
     }
 
+    // -----------------------------------------------------------------
+    // Property-based tests. Probe the encoder against a broad strategy
+    // space: determinism, reorder-invariance (both top-level Map AND
+    // members Vec), hash stability, and a weak form of injectivity.
+    // -----------------------------------------------------------------
+    use proptest::collection::{btree_map, vec as pvec};
+    use proptest::prelude::*;
+    use serde_json::Map;
+
+    /// 32-byte WG pubkey from a seed → 44-char base64 (always valid).
+    fn wg_b64_from(seed: &[u8; 32]) -> String {
+        BASE64_STD.encode(seed)
+    }
+
+    /// 64-char lowercase-hex ip_salt from a 32-byte seed.
+    fn ip_salt_from(seed: &[u8; 32]) -> String {
+        hex::encode(seed)
+    }
+
+    /// Strategy producing arbitrary, well-formed `TailnetMembers`s.
+    /// Members are deduplicated by wallet at strategy-build time so
+    /// `validate()` always succeeds.
+    fn arb_members() -> impl Strategy<Value = TailnetMembers> {
+        (
+            any::<u64>(),                                    // tailnet_id
+            any::<[u8; 32]>(),                               // ip_salt seed
+            pvec("[a-z0-9]{1,16}", 0..8),                    // wallet suffixes
+            pvec(any::<[u8; 32]>(), 8),                      // wg pubkey seeds
+            pvec(any::<u64>(), 8),                           // joined_epochs
+            any::<u64>(),                                    // effective_epoch
+            any::<u64>(),                                    // timestamp_secs
+            btree_map(
+                "x_[a-z]{1,8}",
+                prop_oneof![
+                    Just(Value::Null),
+                    any::<bool>().prop_map(Value::Bool),
+                    any::<i64>().prop_map(Value::from),
+                    ".{0,16}".prop_map(Value::String),
+                ],
+                0..4,
+            ),
+        )
+            .prop_map(
+                |(tid, salt, suffixes, keys, epochs, ep, ts, unknown_map)| {
+                    // Dedup wallet suffixes so we never trip
+                    // DuplicateWallet at validate() time.
+                    let mut seen = std::collections::BTreeSet::new();
+                    let members: Vec<Member> = suffixes
+                        .into_iter()
+                        .filter(|s| seen.insert(s.clone()))
+                        .enumerate()
+                        .map(|(i, suffix)| {
+                            let wallet = format!("oct{suffix}");
+                            let key = wg_b64_from(&keys[i % keys.len()]);
+                            let je = epochs[i % epochs.len()];
+                            Member {
+                                wallet,
+                                wg_pubkey_b64: key,
+                                joined_epoch: je,
+                            }
+                        })
+                        .collect();
+                    let mut m = TailnetMembers::new_v1(
+                        tid,
+                        ip_salt_from(&salt),
+                        members,
+                        ep,
+                        ts,
+                    );
+                    let bt: BTreeMap<String, Value> = unknown_map.into_iter().collect();
+                    m.unknown = bt;
+                    m
+                },
+            )
+            .prop_filter("well-formed members must validate",
+                |m| m.validate().is_ok())
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 192,
+            ..ProptestConfig::default()
+        })]
+
+        /// **Determinism.** Two `canonical_bytes()` calls on the same
+        /// `TailnetMembers` produce identical bytes.
+        #[test]
+        fn prop_canonical_bytes_deterministic(m in arb_members()) {
+            let a = m.canonical_bytes().expect("encode a");
+            let b = m.canonical_bytes().expect("encode b");
+            prop_assert_eq!(a, b);
+        }
+
+        /// **Member-Vec reorder invariance.** Permuting `members`
+        /// changes in-memory order, but `canonical_bytes()` sorts by
+        /// wallet before emitting — so the bytes (and the hash) are
+        /// identical regardless of input order.
+        #[test]
+        fn prop_member_vec_reorder_invariance(
+            m in arb_members(),
+            permutation_seed in any::<u64>(),
+        ) {
+            let bytes_a = m.canonical_bytes().expect("encode a");
+            let hash_a = m.hash_hex().expect("hash a");
+
+            let mut shuffled = m;
+            if !shuffled.members.is_empty() {
+                let rot = (permutation_seed as usize) % shuffled.members.len();
+                shuffled.members.rotate_left(rot);
+            }
+            shuffled.members.reverse();
+
+            let bytes_b = shuffled.canonical_bytes().expect("encode b");
+            let hash_b = shuffled.hash_hex().expect("hash b");
+            prop_assert_eq!(bytes_a, bytes_b);
+            prop_assert_eq!(hash_a, hash_b);
+        }
+
+        /// **Top-level field-reorder invariance.** Shuffling the
+        /// top-level `Map` insertion order of the encoded form yields
+        /// the same hash when fed back through `canonical_bytes()`.
+        #[test]
+        fn prop_field_reorder_invariance(m in arb_members()) {
+            let original_hash = m.hash_hex().expect("hash");
+            let bytes = m.canonical_bytes().expect("encode");
+            let Value::Object(map) = serde_json::from_slice::<Value>(&bytes)
+                .expect("reparse") else {
+                    return Err(TestCaseError::fail("not an object"));
+                };
+            let mut reversed = Map::new();
+            let mut entries: Vec<_> = map.into_iter().collect();
+            entries.sort_by(|a, b| b.0.cmp(&a.0));
+            for (k, v) in entries {
+                reversed.insert(k, v);
+            }
+            let shuffled = serde_json::to_vec(&Value::Object(reversed))
+                .expect("encode shuffled");
+            let reparsed = TailnetMembers::decode_lenient(&shuffled)
+                .expect("lenient decode of reordered");
+            let recomputed = reparsed.hash_hex().expect("recompute hash");
+            prop_assert_eq!(original_hash, recomputed);
+        }
+
+        /// **Hash output stability.** `hash_hex()` is deterministic
+        /// and always 64 lowercase hex chars.
+        #[test]
+        fn prop_hash_hex_is_stable_and_well_formed(m in arb_members()) {
+            let h1 = m.hash_hex().expect("hash 1");
+            let h2 = m.hash_hex().expect("hash 2");
+            prop_assert_eq!(&h1, &h2);
+            prop_assert_eq!(h1.len(), HEX_HASH_LEN);
+            prop_assert!(h1.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+        }
+
+        /// **Weak injectivity.** Two member-sets that differ in
+        /// `tailnet_id` produce distinct canonical bytes and distinct
+        /// hashes.
+        #[test]
+        fn prop_injectivity_on_distinct_tailnet_ids(
+            mut m in arb_members(),
+            tid_a in any::<u64>(),
+            tid_b in any::<u64>(),
+        ) {
+            prop_assume!(tid_a != tid_b);
+            m.tailnet_id = tid_a;
+            let bytes_a = m.canonical_bytes().expect("encode a");
+            let hash_a = m.hash_hex().expect("hash a");
+            m.tailnet_id = tid_b;
+            let bytes_b = m.canonical_bytes().expect("encode b");
+            let hash_b = m.hash_hex().expect("hash b");
+            prop_assert_ne!(bytes_a, bytes_b);
+            prop_assert_ne!(hash_a, hash_b);
+        }
+    }
+
     #[test]
     fn worked_example_hash_is_stable() {
         // Lock down the worked example used in the schema doc. If

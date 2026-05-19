@@ -517,6 +517,150 @@ mod tests {
         assert_eq!(expected, golden, "sha2 crate produced unexpected digest");
     }
 
+    // -----------------------------------------------------------------
+    // Property-based tests. Probe the StateRoot encoder against a broad
+    // strategy space and pin down: determinism, reorder-invariance,
+    // hash stability, and a weak form of injectivity. Goal: surface any
+    // one-byte canonicalisation drift before it ships.
+    // -----------------------------------------------------------------
+    use proptest::collection::btree_map;
+    use proptest::prelude::*;
+
+    /// Build a 64-char lowercase-hex string from a 32-byte seed.
+    fn hex_from(bytes: &[u8; 32]) -> String {
+        hex::encode(bytes)
+    }
+
+    /// Strategy producing arbitrary, well-formed `StateRoot`s. All
+    /// validation invariants (hex hash discipline, non-empty
+    /// circle_id/region, v=1, no `unknown`-vs-declared-field collisions)
+    /// are satisfied by construction.
+    fn arb_state_root() -> impl Strategy<Value = StateRoot> {
+        (
+            ".{1,32}",                                 // circle_id (non-empty)
+            any::<[u8; 32]>(),                         // policy_hash seed
+            any::<[u8; 32]>(),                         // wg_pubkey_hash seed
+            proptest::option::of(any::<[u8; 32]>()),   // attestation_hash seed
+            ".{1,16}",                                 // region (non-empty)
+            any::<u32>(),                              // member_count
+            any::<u64>(),                              // epoch
+            any::<u64>(),                              // timestamp_secs
+            // `unknown` bucket — prefix keys with `x_` to guarantee
+            // disjointness with declared field names. Values are JSON
+            // primitives so we don't tangle with nested-Value Map order.
+            btree_map(
+                "x_[a-z]{1,8}",
+                prop_oneof![
+                    Just(Value::Null),
+                    any::<bool>().prop_map(Value::Bool),
+                    any::<i64>().prop_map(Value::from),
+                    ".{0,16}".prop_map(Value::String),
+                ],
+                0..4,
+            ),
+        )
+            .prop_map(
+                |(cid, ph, wgh, attest, region, mc, ep, ts, unknown_map)| {
+                    let mut sr = StateRoot::new_v1(
+                        cid,
+                        hex_from(&ph),
+                        hex_from(&wgh),
+                        attest.map(|a| hex_from(&a)),
+                        region,
+                        mc,
+                        ep,
+                        ts,
+                    );
+                    let bt: BTreeMap<String, Value> = unknown_map.into_iter().collect();
+                    sr.unknown = bt;
+                    sr
+                },
+            )
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 256,
+            ..ProptestConfig::default()
+        })]
+
+        /// **Determinism.** Two `canonical_bytes()` calls on the same
+        /// `StateRoot` produce identical bytes.
+        #[test]
+        fn prop_canonical_bytes_deterministic(sr in arb_state_root()) {
+            let a = sr.canonical_bytes().expect("encode a");
+            let b = sr.canonical_bytes().expect("encode b");
+            prop_assert_eq!(a, b);
+        }
+
+        /// **Encode → decode → encode round-trip is byte-identical.**
+        /// Two encoders that disagree by even one byte would fail this.
+        #[test]
+        fn prop_round_trip_through_canonical_bytes(sr in arb_state_root()) {
+            sr.validate().expect("constructed StateRoot must validate");
+            let bytes_a = sr.canonical_bytes().expect("encode");
+            let decoded = StateRoot::decode(&bytes_a).expect("decode");
+            let bytes_b = decoded.canonical_bytes().expect("re-encode");
+            prop_assert_eq!(bytes_a, bytes_b);
+        }
+
+        /// **Field-reorder invariance.** Shuffling the top-level
+        /// `serde_json::Map` insertion order of the encoded form yields
+        /// the same anchor when fed back through `canonical_bytes()`.
+        #[test]
+        fn prop_field_reorder_invariance(sr in arb_state_root()) {
+            let original_anchor = sr.anchor_hex().expect("anchor");
+            let bytes = sr.canonical_bytes().expect("encode");
+            let Value::Object(map) = serde_json::from_slice::<Value>(&bytes)
+                .expect("reparse") else {
+                    return Err(TestCaseError::fail("not an object"));
+                };
+            let mut reversed = Map::new();
+            let mut entries: Vec<_> = map.into_iter().collect();
+            entries.sort_by(|a, b| b.0.cmp(&a.0));
+            for (k, v) in entries {
+                reversed.insert(k, v);
+            }
+            let shuffled = serde_json::to_vec(&Value::Object(reversed))
+                .expect("encode shuffled");
+            let reparsed = StateRoot::decode_lenient(&shuffled)
+                .expect("lenient decode of reordered");
+            let recomputed = reparsed.anchor_hex().expect("recompute anchor");
+            prop_assert_eq!(original_anchor, recomputed);
+        }
+
+        /// **Hash output stability.** `anchor_hex()` is deterministic
+        /// and always 64 lowercase hex chars.
+        #[test]
+        fn prop_anchor_hex_is_stable_and_well_formed(sr in arb_state_root()) {
+            let h1 = sr.anchor_hex().expect("anchor 1");
+            let h2 = sr.anchor_hex().expect("anchor 2");
+            prop_assert_eq!(&h1, &h2);
+            prop_assert_eq!(h1.len(), HEX_HASH_LEN);
+            prop_assert!(h1.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+        }
+
+        /// **Weak injectivity.** Two `StateRoot`s that differ in a
+        /// structurally-relevant field (`epoch`) produce distinct
+        /// canonical bytes and distinct anchors.
+        #[test]
+        fn prop_injectivity_on_distinct_epochs(
+            mut sr in arb_state_root(),
+            epoch_a in any::<u64>(),
+            epoch_b in any::<u64>(),
+        ) {
+            prop_assume!(epoch_a != epoch_b);
+            sr.epoch = epoch_a;
+            let bytes_a = sr.canonical_bytes().expect("encode a");
+            let anchor_a = sr.anchor_hex().expect("anchor a");
+            sr.epoch = epoch_b;
+            let bytes_b = sr.canonical_bytes().expect("encode b");
+            let anchor_b = sr.anchor_hex().expect("anchor b");
+            prop_assert_ne!(bytes_a, bytes_b);
+            prop_assert_ne!(anchor_a, anchor_b);
+        }
+    }
+
     #[test]
     fn worked_example_anchor_is_stable() {
         // Lock down the worked example used in the schema doc. If
