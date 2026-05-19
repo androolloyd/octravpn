@@ -55,7 +55,7 @@ use sha2::Sha256;
 use crate::{
     commands::open_url::parse_oct_url,
     portal::{
-        chain::PortalChain,
+        chain::{FetchAssetError, PortalChain},
         mime::{sniff, SniffedMime},
         static_assets::{INDEX_BODY, PAGE_SHELL},
     },
@@ -177,13 +177,23 @@ async fn api_resolve(
     {
         Ok(b) => b,
         Err(e) => {
+            let (status, hint) = match &e {
+                FetchAssetError::MissingPassphrase { .. } | FetchAssetError::DecryptFailed { .. } => (
+                    StatusCode::PRECONDITION_FAILED,
+                    "set OCTRAVPN_SEALED_PASSPHRASE or [v2].sealed_passphrase to decrypt sealed circle assets.",
+                ),
+                _ => (
+                    StatusCode::BAD_GATEWAY,
+                    "is the tunnel up? portal requires the VPN session to reach circle_asset RPC.",
+                ),
+            };
             return (
-                StatusCode::BAD_GATEWAY,
+                status,
                 Json(json!({
                     "error": e.to_string(),
                     "circle_id": parsed.circle_id,
                     "path": parsed.path,
-                    "hint": "is the tunnel up? portal requires the VPN session to reach circle_asset RPC.",
+                    "hint": hint,
                 })),
             )
                 .into_response();
@@ -229,7 +239,7 @@ async fn view_asset(
         .await
     {
         Ok(b) => b,
-        Err(e) => return tunnel_error_page(&url, &e.to_string()),
+        Err(e) => return fetch_error_page(&url, e),
     };
 
     render_bytes(&url, bytes)
@@ -302,6 +312,46 @@ fn confirm_interstitial(state: &PortalState, url: &str, circle_id: &str) -> Resp
         next_path = html_escape(&next_path),
     );
     Html(render_shell("Approve circle?", url, &body)).into_response()
+}
+
+/// Dispatch a [`FetchAssetError`] to the appropriate sandboxed error
+/// page. Sealed-asset decrypt failures get a dedicated 412 page; every
+/// other variant flows through the existing tunnel-down 502 renderer.
+fn fetch_error_page(url: &str, err: FetchAssetError) -> Response {
+    match err {
+        FetchAssetError::MissingPassphrase { .. } | FetchAssetError::DecryptFailed { .. } => {
+            passphrase_error_page(url, &err)
+        }
+        other => tunnel_error_page(url, &other.to_string()),
+    }
+}
+
+/// 412 page for the two passphrase-related decrypt failures. Body text
+/// tells the operator exactly which env var / config field to set, and
+/// deliberately does NOT echo any ciphertext bytes.
+fn passphrase_error_page(url: &str, err: &FetchAssetError) -> Response {
+    let title = match err {
+        FetchAssetError::MissingPassphrase { .. } => "Passphrase not configured",
+        // Default covers DecryptFailed and (unreachable) other variants;
+        // the dispatcher only sends decrypt-related errors here.
+        _ => "Cannot decrypt sealed asset",
+    };
+    let body = format!(
+        r#"<div class="confirm-card">
+<h2 class="error">{title}</h2>
+<p>Cannot decrypt asset: the operator's sealed-policy passphrase isn't configured locally. Set <code>OCTRAVPN_SEALED_PASSPHRASE</code> or <code>[v2].sealed_passphrase</code> in your <code>client.toml</code>.</p>
+<p>If you already set one, it doesn't match the passphrase used to seal this asset.</p>
+<p>Circle: <code>{circle}</code></p>
+<p>Asset: <code>{path}</code></p>
+<p>URL: <code>{url}</code></p>
+</div>"#,
+        title = html_escape(title),
+        circle = html_escape(err.circle_id()),
+        path = html_escape(err.path()),
+        url = html_escape(url),
+    );
+    let html = render_shell(title, url, &body);
+    (StatusCode::PRECONDITION_FAILED, Html(html)).into_response()
 }
 
 fn tunnel_error_page(url: &str, message: &str) -> Response {

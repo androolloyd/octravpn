@@ -17,6 +17,7 @@ use std::{net::SocketAddr, time::Duration};
 
 use axum::{routing::post, Json, Router};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64URL, Engine as _};
+use octravpn_core::circle::{encrypt_sealed_bytes, PaddingClass};
 use serde_json::json;
 
 #[tokio::test]
@@ -226,6 +227,344 @@ secret_path = "{}"
     assert_eq!(v.get("allowed").and_then(serde_json::Value::as_bool), Some(true));
 
     // Shutdown.
+    let _ = child.kill().await;
+}
+
+/// End-to-end: the chain serves a SEALED asset, the portal is booted
+/// with `OCTRAVPN_SEALED_PASSPHRASE` set, and the rendered page contains
+/// the plaintext JSON's distinctive fields — proving the decrypt path
+/// runs before the MIME sniff.
+#[tokio::test]
+async fn portal_decrypts_sealed_asset_with_env_passphrase() {
+    let circle_id = "octCIRCLE_SEALED";
+    let key_id = "default";
+    let passphrase = "integration-test-passphrase";
+    let plaintext = br#"{"endpoint":"vpn-sealed.example:51820","region":"eu-west","distinctive_field":"decrypted_ok"}"#;
+    let (ct_b64, ph_hex) =
+        encrypt_sealed_bytes(circle_id, key_id, passphrase, plaintext, PaddingClass::None)
+            .expect("fixture seal");
+
+    // ─── 1. mock chain RPC, serving the sealed envelope ─────────────
+    let mock_rpc: Router = Router::new().route(
+        "/",
+        post(move |axum::Json(req): axum::Json<serde_json::Value>| {
+            let ct = ct_b64.clone();
+            let ph = ph_hex.clone();
+            async move {
+                let method = req.get("method").and_then(|v| v.as_str()).unwrap_or("");
+                let id = req.get("id").cloned().unwrap_or(json!(1));
+                if method == "circle_asset_ciphertext_by_resource_key" {
+                    Json(json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": {
+                            "ciphertext_b64": ct,
+                            "plaintext_hash": ph,
+                            "key_id": "default",
+                        }
+                    }))
+                } else {
+                    Json(json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "error": { "code": -32601, "message": "method not found" },
+                    }))
+                }
+            }
+        }),
+    );
+    let rpc_listener =
+        tokio::net::TcpListener::bind::<SocketAddr>("127.0.0.1:0".parse().unwrap())
+            .await
+            .unwrap();
+    let rpc_addr = rpc_listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(rpc_listener, mock_rpc).await.unwrap();
+    });
+
+    // ─── 2. build a config + spawn the portal binary ────────────────
+    let bin = env!("CARGO_BIN_EXE_octravpn");
+    let tmp = tempfile::tempdir().unwrap();
+    let wallet = tmp.path().join("wallet.hex");
+    std::fs::write(
+        &wallet,
+        "deadbeefcafebabe0011223344556677deadbeefcafebabe0011223344556677",
+    )
+    .unwrap();
+    let cfg = tmp.path().join("client.toml");
+    std::fs::write(
+        &cfg,
+        format!(
+            r#"
+[chain]
+rpc_url          = "http://{rpc_addr}/"
+program_addr     = "octPROG_TEST"
+protocol_version = "v3"
+
+[wallet]
+addr        = "octADDR_TEST"
+secret_path = "{}"
+"#,
+            wallet.display(),
+        ),
+    )
+    .unwrap();
+
+    let portal_listener =
+        std::net::TcpListener::bind::<SocketAddr>("127.0.0.1:0".parse().unwrap()).unwrap();
+    let portal_addr = portal_listener.local_addr().unwrap();
+    drop(portal_listener);
+
+    let mut child = tokio::process::Command::new(bin)
+        .args([
+            "--config",
+            &cfg.display().to_string(),
+            "portal",
+            "--bind",
+            &portal_addr.to_string(),
+        ])
+        .env("OCTRAVPN_SEALED_PASSPHRASE", passphrase)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("spawn octravpn portal");
+
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let mut up = false;
+    for _ in 0..50 {
+        if let Ok(r) = http
+            .get(format!("http://{portal_addr}/healthz"))
+            .send()
+            .await
+        {
+            if r.status().is_success() {
+                up = true;
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(up, "portal didn't come up on {portal_addr}");
+
+    // ─── 3. approve the circle ──────────────────────────────────────
+    let oct_url = format!("oct://{circle_id}/policy.json");
+    let b64 = B64URL.encode(oct_url.as_bytes());
+    let confirm_body = http
+        .get(format!("http://{portal_addr}/o/{b64}"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let token_marker = "name=\"token\" value=\"";
+    let start = confirm_body.find(token_marker).expect("token field");
+    let after = &confirm_body[start + token_marker.len()..];
+    let end = after.find('"').unwrap();
+    let token = &after[..end];
+    let resp = http
+        .post(format!("http://{portal_addr}/approve"))
+        .form(&[
+            ("circle", circle_id),
+            ("token", token),
+            ("next", &format!("/o/{b64}")),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        resp.status().is_success() || resp.status().is_redirection(),
+        "approve status: {}",
+        resp.status(),
+    );
+
+    // ─── 4. fetch + render → plaintext field appears in the body ────
+    let body = http
+        .get(format!("http://{portal_addr}/o/{b64}"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        body.contains("decrypted_ok"),
+        "expected decrypted plaintext in body: {body}",
+    );
+    assert!(
+        body.contains("vpn-sealed.example:51820"),
+        "expected decrypted endpoint in body: {body}",
+    );
+    // The decrypted JSON went through the JSON arm of the MIME sniffer
+    // (so the body is *not* wrapped in the sandbox iframe).
+    assert!(!body.contains("sandbox=\"allow-popups\""));
+
+    let _ = child.kill().await;
+}
+
+/// Negative end-to-end: no passphrase configured, a sealed asset must
+/// surface the 412 passphrase-config page rather than Save-As.
+#[tokio::test]
+async fn portal_412s_sealed_asset_when_passphrase_missing() {
+    let circle_id = "octCIRCLE_NEEDS_PP";
+    let key_id = "default";
+    let plaintext = br#"{"k":"v"}"#;
+    let (ct_b64, ph_hex) =
+        encrypt_sealed_bytes(circle_id, key_id, "operator-secret", plaintext, PaddingClass::None)
+            .expect("fixture seal");
+
+    let mock_rpc: Router = Router::new().route(
+        "/",
+        post(move |axum::Json(req): axum::Json<serde_json::Value>| {
+            let ct = ct_b64.clone();
+            let ph = ph_hex.clone();
+            async move {
+                let method = req.get("method").and_then(|v| v.as_str()).unwrap_or("");
+                let id = req.get("id").cloned().unwrap_or(json!(1));
+                if method == "circle_asset_ciphertext_by_resource_key" {
+                    Json(json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": {
+                            "ciphertext_b64": ct,
+                            "plaintext_hash": ph,
+                            "key_id": "default",
+                        }
+                    }))
+                } else {
+                    Json(json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "error": { "code": -32601, "message": "method not found" },
+                    }))
+                }
+            }
+        }),
+    );
+    let rpc_listener =
+        tokio::net::TcpListener::bind::<SocketAddr>("127.0.0.1:0".parse().unwrap())
+            .await
+            .unwrap();
+    let rpc_addr = rpc_listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(rpc_listener, mock_rpc).await.unwrap();
+    });
+
+    let bin = env!("CARGO_BIN_EXE_octravpn");
+    let tmp = tempfile::tempdir().unwrap();
+    let wallet = tmp.path().join("wallet.hex");
+    std::fs::write(
+        &wallet,
+        "deadbeefcafebabe0011223344556677deadbeefcafebabe0011223344556677",
+    )
+    .unwrap();
+    let cfg = tmp.path().join("client.toml");
+    std::fs::write(
+        &cfg,
+        format!(
+            r#"
+[chain]
+rpc_url          = "http://{rpc_addr}/"
+program_addr     = "octPROG_TEST"
+protocol_version = "v3"
+
+[wallet]
+addr        = "octADDR_TEST"
+secret_path = "{}"
+"#,
+            wallet.display(),
+        ),
+    )
+    .unwrap();
+
+    let portal_listener =
+        std::net::TcpListener::bind::<SocketAddr>("127.0.0.1:0".parse().unwrap()).unwrap();
+    let portal_addr = portal_listener.local_addr().unwrap();
+    drop(portal_listener);
+
+    let mut child = tokio::process::Command::new(bin)
+        .args([
+            "--config",
+            &cfg.display().to_string(),
+            "portal",
+            "--bind",
+            &portal_addr.to_string(),
+        ])
+        // Deliberately unset; ensure the env isn't inherited from CI.
+        .env_remove("OCTRAVPN_SEALED_PASSPHRASE")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("spawn octravpn portal");
+
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let mut up = false;
+    for _ in 0..50 {
+        if let Ok(r) = http
+            .get(format!("http://{portal_addr}/healthz"))
+            .send()
+            .await
+        {
+            if r.status().is_success() {
+                up = true;
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(up, "portal didn't come up on {portal_addr}");
+
+    // Approve + fetch.
+    let oct_url = format!("oct://{circle_id}/policy.json");
+    let b64 = B64URL.encode(oct_url.as_bytes());
+    let confirm_body = http
+        .get(format!("http://{portal_addr}/o/{b64}"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let token_marker = "name=\"token\" value=\"";
+    let start = confirm_body.find(token_marker).expect("token field");
+    let after = &confirm_body[start + token_marker.len()..];
+    let end = after.find('"').unwrap();
+    let token = &after[..end];
+    let _ = http
+        .post(format!("http://{portal_addr}/approve"))
+        .form(&[
+            ("circle", circle_id),
+            ("token", token),
+            ("next", &format!("/o/{b64}")),
+        ])
+        .send()
+        .await
+        .unwrap();
+
+    let resp = http
+        .get(format!("http://{portal_addr}/o/{b64}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status().as_u16(),
+        412,
+        "expected 412 Precondition Failed when passphrase missing",
+    );
+    let body = resp.text().await.unwrap();
+    assert!(
+        body.contains("OCTRAVPN_SEALED_PASSPHRASE"),
+        "expected env-var name in the error page: {body}",
+    );
+
     let _ = child.kill().await;
 }
 

@@ -170,6 +170,47 @@ Default policy in the stub: **always confirm**, **always
 sandbox-render**, **never auto-open in browser**. This is more annoying
 than the webcli — that's the right tradeoff for a system-wide handler.
 
+## How rendering decides
+
+The portal's `view_asset` handler walks the bytes through a fixed
+pipeline before picking a renderer:
+
+  1. **Fetch.** `PortalChain::fetch_circle_asset_bytes(circle_id, path)`
+     calls the chain's `circle_asset_ciphertext_by_resource_key` view
+     and base64-decodes the result. The fetcher accepts either
+     `bytes_b64` (a future plaintext-view RPC field) or `ciphertext_b64`
+     (today's sealed-view field), preferring the former.
+  2. **Sealed-envelope sniff.** If the decoded bytes start with the
+     OCRS1 magic (`"OCRS1" || nonce[12] || AES-GCM(...)`) the fetcher
+     attempts decryption with the per-tailnet passphrase resolved at
+     portal startup (env `OCTRAVPN_SEALED_PASSPHRASE` > config
+     `[v2].sealed_passphrase`). One decrypt attempt — we never try
+     multiple passphrases (passphrase-oracle risk; see open question
+     #4 below).
+  3. **Decrypt error → structured page.** If no passphrase is
+     configured, the route layer renders a `412 Precondition Failed`
+     page pointing the operator at `OCTRAVPN_SEALED_PASSPHRASE` /
+     `[v2].sealed_passphrase`. Same page if the passphrase is wrong or
+     the envelope is corrupt — the underlying decrypt error is
+     deliberately not leaked through the UI.
+  4. **Non-sealed bytes → pass through.** No OCRS1 magic ⇒ the bytes
+     are returned verbatim. Keeps the renderer forward-compatible with
+     a v3 plaintext-asset RPC.
+  5. **MIME sniff.** The (now-plaintext) bytes hit the small magic
+     table in `portal/mime.rs`: PNG / JPEG / GIF / WebP / PDF by binary
+     magic, then JSON (leading `{` / `[`), then HTML / SVG by tag,
+     then UTF-8-clean text, else `application/octet-stream`.
+  6. **Render dispatch.** Images render inline as a data: URI. JSON
+     gets pretty-printed. HTML lands in an `<iframe sandbox="allow-popups">`
+     with no `allow-scripts` / `allow-same-origin`. Anything that
+     falls to `octet-stream` becomes a Save-As download.
+
+Practical consequence: a circle's sealed `/policy.json` now renders as
+pretty-printed JSON in the portal instead of falling out as Save-As,
+**provided** the operator has configured the per-tailnet passphrase
+locally. Without the passphrase the portal still starts (with a `warn!`
+at boot) and every sealed asset surfaces as the 412 page.
+
 ## Where the registration lives in the repo
 
 Per-platform glue under `dist/<platform>/`; see the section per
