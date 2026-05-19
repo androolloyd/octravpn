@@ -1,0 +1,220 @@
+# OctraVPN v3 mainnet deploy — parameter sheet for the owner-wallet
+# ceremony. This file is committed as the example; copy to
+# `ceremony/mainnet-params.toml` and harden the values before signing
+# any production transactions.
+#
+# The deploy ceremony script (`scripts/ceremony/mainnet-deploy.sh`)
+# reads this file via a deliberately-dumb grep/sed parser (same style
+# as `docker/devnet/preflight.sh`). Keep one `key = value` per line,
+# strings double-quoted, integers bare. Comments survive parsing
+# because the parser ignores anything that does not match the literal
+# `KEY = ` prefix it expects.
+#
+# Rationale for every numeric default appears next to the value. If
+# you change one, update the rationale in the same commit.
+
+# ---------------------------------------------------------------
+# Chain target
+# ---------------------------------------------------------------
+
+# Mainnet RPC. Hard-coded; the script REFUSES to broadcast against any
+# URL that contains "devnet" or "testnet" unless --allow-devnet is
+# passed (which is what the smoke harness uses to point this same
+# script at devnet for the verify-deploy regression test).
+rpc_url = "https://octra.network/rpc"
+
+# Mainnet chain_id. Pin this — receipts emitted post-deploy bind
+# `chain_id` into the signing domain (P1-5, see commit 060903d).
+# Mainnet currently identifies as "octra-mainnet"; verify against
+# `node_status` before the ceremony.
+chain_id = "octra-mainnet"
+
+# Local path (repo-relative) to the contract source. The script
+# refuses to proceed if this file is not byte-identical to the value
+# whose SHA256 is recorded under `contract_source_sha256_expected`
+# below — that is the integrity gate against an unaudited edit being
+# smuggled into the ceremony.
+contract_source_path = "program/main-v3.aml"
+
+# SHA256 of `program/main-v3.aml` at the commit being deployed. The
+# script computes the live hash and compares. If you bump the
+# contract, you also bump this value AND re-run an external audit
+# before signing — bumping this is a security-sensitive change.
+#
+# Generate with:
+#   sha256sum program/main-v3.aml | awk '{print $1}'
+#
+# Devnet smoke uses whatever the current file hashes to (the verify
+# script accepts either the value in this file OR the live file's
+# hash; see scripts/ceremony/verify-deploy.sh --refresh).
+#
+# Currently pinned to the SHA256 of program/main-v3.aml at commit
+# c50f269 (the v3 source deployed on devnet @
+# oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3). Re-pin on any
+# audited source change.
+contract_source_sha256_expected = "ed290ee7d60a37c986d8804d826e7de42d75a973b7c6c3ee03c1102ffe12ff66"
+
+# ---------------------------------------------------------------
+# Constructor args (5 ints, order matches `program/main-v3.aml`
+# line 148):
+#   constructor(min_session_deposit, min_tailnet_deposit,
+#               min_circle_stake, session_grace_epochs,
+#               unbond_grace_epochs)
+# ---------------------------------------------------------------
+
+# Smallest session escrow a client can open. 1 OCT = 10^9 nOCT.
+#
+# Rationale: a session pays per byte; min_session_deposit caps the
+# operator's worst-case "client opens session and abandons it"
+# liability before sweep_grace_multiplier * session_grace_epochs
+# triggers. 1 OCT is large enough to disincentivise spammy
+# half-sessions (each one costs 1 OCT to park) and small enough that
+# a real consumer client opening a few MB session is not asked to
+# escrow tens of dollars worth of OCT up front.
+#
+# Devnet uses 100 nOCT (constructor arg #1 in v3-smoke.sh). That is
+# fine for testing the path but is a footgun on mainnet — a single OU
+# of escrow is meaningless against spam.
+min_session_deposit = 1000000000   # 1 OCT in nOCT
+
+# Smallest deposit to create a tailnet. 10 OCT.
+#
+# Rationale: a tailnet costs storage on chain (one entry in
+# tailnet_members_root, plus the treasury slot) and has no operator
+# behind it to amortise. 10 OCT makes "spin up a tailnet to grief
+# the registry" cost real money. Devnet uses 1000 nOCT (~0.000001
+# OCT) which is appropriate for tests but trivial for an attacker on
+# mainnet.
+min_tailnet_deposit = 10000000000  # 10 OCT in nOCT
+
+# Smallest stake an operator's circle must post to be considered
+# active. 100 OCT.
+#
+# Rationale: this is the lower bound that gates `circle_is_active()`.
+# The AML enforces a floor of 100_000_000 nOCT (0.1 OCT) — see
+# `require(min_circle_stake >= 100000000, ...)` at line 151. Devnet
+# uses exactly that floor. For mainnet we want the bond large enough
+# that a 50% slash (see slash_burn_bps below) is unambiguously
+# painful for the operator and unambiguously recoverable as a bounty
+# for the slasher. 100 OCT is a working v0.1 number; revisit once we
+# have telemetry on operator revenue and slash-incident frequency.
+#
+# TODO(p1.0): tune for mainnet once the first 5 operators have run
+# for ≥ 30 days. Likely target: median weekly operator revenue × 4.
+min_circle_stake = 10000000000     # 10 OCT in nOCT (NOTE: P0 value;
+                                   # raise once telemetry exists)
+
+# Epochs before a session can be swept after settle expiry. Octra
+# epoch ≈ 14 s on mainnet (per docs/economics.md). 100 epochs ≈ 23
+# min — long enough for an operator to recover from a transient
+# outage and submit settle_claim, short enough that an abandoned
+# session does not park an operator's escrow indefinitely.
+session_grace_epochs = 100
+
+# Epochs an unbond request waits before finalize_unbond can pay out.
+# AML floor is `require(unbond_grace_epochs >= 1000, ...)` (line
+# 153). 1000 epochs ≈ 3.9 hours at 14 s/epoch — long enough that
+# governance can slash a misbehaving operator within the window
+# before they exit, short enough that the operator's capital is not
+# locked for days after retirement. Devnet uses the floor; mainnet
+# could go higher but 1000 is the audited number.
+unbond_grace_epochs = 1000
+
+# ---------------------------------------------------------------
+# Post-deploy `set_params` values (10 ints, order matches v3
+# `set_params` at line 235). These are what the script invokes
+# AFTER deploy so the contract's runtime parameters match this
+# file even if the constructor only knew 5 of them.
+# ---------------------------------------------------------------
+
+# Slashed bond split: burn_bps / 10000 burned, the rest paid as
+# slasher bounty. v3 default is 9000 (90% burn). The task brief
+# requests 5000 (50/50) for the first mainnet deploy, on the theory
+# that an external slasher needs enough upside to actually monitor
+# and submit double-sign evidence; once we have a paid auditor
+# pipeline this can move back toward 9000.
+#
+# Constraint: slash_burn_bps + slash_bounty_bps must equal 10000 or
+# the contract reverts.
+slash_burn_bps = 5000              # 50% burn (task brief)
+slash_bounty_bps = 5000            # 50% bounty
+
+# Per-claim protocol fee in bps. v3 default is 50 (0.5%). Keep the
+# audited default; revisit only with a governance proposal.
+protocol_fee_bps = 50
+
+# Sweep grace multiplier — how many `session_grace_epochs` of slack
+# before a stranded session can be swept. v3 default is 10.
+sweep_grace_multiplier = 10
+
+# Sweeper bounty in bps when sweep_expired_session pays out. v3
+# default is 100 (1%). Keep the audited default.
+sweep_bounty_bps = 100
+
+# ---------------------------------------------------------------
+# Multisig signer set
+# ---------------------------------------------------------------
+
+# m-of-n threshold for the deploy + initial-owner transactions.
+#
+# Default: 3-of-5. Justification: 3-of-5 is the smallest threshold
+# that survives loss of one signer key AND coercion of one signer
+# (i.e. 1 key compromise leaves 4 honest, still ≥ threshold; 1 key
+# loss leaves 4 honest, still ≥ threshold; 2 simultaneous failures
+# of either flavour are catastrophic, which is the trade-off we
+# accept against the operational cost of running a 4-of-7).
+#
+# Hardware-wallet variant of this same flow would set hw_signer=true
+# on a signer entry and have the script print the unsigned-tx blob
+# in a form a Ledger/Trezor app can render. v1 of the script does
+# text-mode only (read signature from
+# `signers/<name>.key.sealed.sig`); HW slot is marked TODO in
+# scripts/ceremony/mainnet-deploy.sh.
+multisig_threshold = 3
+multisig_signer_count = 5
+
+# Directory (repo-relative) where the script looks for signer key
+# files and writes / reads signature files. One file per signer:
+#   signers/<name>.pub               — ed25519 public key, base64
+#   signers/<name>.key.sealed        — passphrase-sealed secret key
+#   signers/<name>.unsigned.json     — written by the script
+#   signers/<name>.sig               — written by each signer
+# Names are alphabetised; the threshold counts distinct sig files.
+signers_dir = "ceremony/signers"
+
+# ---------------------------------------------------------------
+# Pinned reference values (verify-deploy.sh consumes these)
+# ---------------------------------------------------------------
+
+# Expected `code_hash` returned by `vm_contract` on the deployed
+# program. Empty until after the ceremony — then populate with the
+# value the script reports as the post-deploy code_hash. Verifiers
+# (anyone, not just the ceremony participants) can then run
+# `scripts/ceremony/verify-deploy.sh <addr>` and confirm parity
+# without needing the source tree.
+#
+# For the devnet smoke regression test, this is the code_hash of
+# `oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3` — see
+# `docker/devnet/wallets.toml` for the live devnet program addr and
+# the verify-deploy --refresh subcommand to fetch the live hash.
+#
+# Note: the example is currently pinned to the DEVNET code_hash so
+# the smoke test `verify-deploy.sh oct7Mofan...` PASSes without
+# additional config. For the real mainnet ceremony, copy this file
+# to ceremony/mainnet-params.toml and replace this with the
+# post-deploy mainnet code_hash before re-running verify-deploy.
+expected_code_hash = "efb88c7ad4840795c550364e4a9d0ecabc6b00ac86eb940da72ef32c17e47459"
+
+# Expected initial owner of the deployed program. After the
+# transfer_ownership(multisig_addr) step in the ceremony, this is
+# the multisig address whose private key shards live in the signer
+# set above. Empty until known.
+expected_owner_addr = ""
+
+# Pinned program addr from a successful prior deploy. The verify
+# script accepts this as a sanity input (the operator can pass the
+# addr on the CLI instead).
+#
+# Default: devnet v3 contract (so the smoke test PASSes out of the
+# box). For mainnet, replace with the post-deploy mainnet addr.
+program_addr = "oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3"

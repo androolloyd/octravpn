@@ -4,6 +4,14 @@ This is the operator-facing playbook for taking OctraVPN from a
 fresh checkout to a running paid endpoint on testnet, then to
 mainnet, and reacting to common incidents.
 
+> **Deploying the v3 AML program itself** (not just bringing up
+> nodes against an already-deployed program) requires the
+> owner-wallet ceremony documented in
+> [`docs/mainnet-ceremony.md`](mainnet-ceremony.md) — m-of-n
+> cold-key signing party plus `scripts/ceremony/{mainnet-deploy,
+> verify-deploy}.sh`. Run that ceremony before §1 of this
+> runbook applies to mainnet.
+
 **v1 model** (per `docs/aml-gap-analysis.md`): Operators stake OU
 in the OctraVPN AML program; you do NOT need to be an Octra
 protocol validator. Equivocation slashing is currently governance
