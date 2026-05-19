@@ -106,15 +106,16 @@ an int** per circle (≈ 60 bytes deterministic).
 
 ```
 oct://<circle_id>/policy.json              # encrypted endpoint URL, WG pubkey, region, price tiers
-oct://<circle_id>/state-root.json          # canonical: { version, policy_hash, acl_root, attestation_hash, member_count, timestamp }
+oct://<circle_id>/state-root.json          # canonical commitment bundle — schema in docs/v3-state-root-schema.md
 oct://<circle_id>/receipts/{epoch}.json    # per-session signed receipt: { sid, bytes, net, class, price, blinding, sig_op, sig_client }
 oct://<circle_id>/enc-state.bin            # operator-only encrypted running state (post-HFHE this holds the ciphertext)
 oct://<circle_id>/attestation.json         # remote-attestation bundle for the box hosting the exit
 ```
 
-`circle_state_root[circle] == sha256(state-root.json)`. Verifiers
-fetch `state-root.json` (plaintext canonical JSON, or sealed and
-gated by attestation), hash, compare.
+`circle_state_root[circle] == sha256_hex(canonical_bytes(state-root.json))`.
+The canonical JSON shape, field semantics, encoding rules, and worked
+example are spelled out in [`docs/v3-state-root-schema.md`](v3-state-root-schema.md).
+Reference Rust encoder/decoder: `crates/octravpn-core/src/v3_state_root.rs`.
 
 ### 3.2 Tailnet-owner circle
 
