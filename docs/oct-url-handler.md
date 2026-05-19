@@ -337,3 +337,170 @@ prompt without an installer-signed scheme registration (out of scope).
   4. Should the handler also accept `oct://<oct_wallet_address>` (no
      path) and open the wallet-explorer? Out of scope for the
      sealed-asset MVP; needs its own design.
+
+## `oct://` as a protocol adapter
+
+`oct://` is not just a browser-handler scheme — it's a system-wide
+adapter, accessible from any tool that follows OS URL-handler
+conventions or that can hit `http://127.0.0.1:51823`. Three entry
+points share one auth model:
+
+| Entry point         | Caller             | Auth surface                     |
+|---------------------|--------------------|----------------------------------|
+| `octravpn open-url` | OS protocol handler | per-circle confirm, env passphrase |
+| `octravpn fetch`    | shell / pipelines  | per-circle confirm, env passphrase, `-i` TTY prompt |
+| portal `/raw`       | curl / wget / scripts | per-circle confirm (HMAC token), per-circle unseal cache |
+| portal `/o/<b64>`   | system browser     | per-circle confirm, per-circle unseal cache (interactive form) |
+
+The portal's HMAC-SHA256 confirm token is the single approval
+primitive. The CLI mints one via `GET /confirm?u=...&accept=cli`
+(JSON), the browser mints one via the existing interstitial. They are
+indistinguishable on the server side — there is no separate CLI
+privilege class.
+
+The sealed-asset passphrase has two source modes:
+
+- **Boot-time configured.** Whatever `OCTRAVPN_SEALED_PASSPHRASE` or
+  `[v2].sealed_passphrase` resolved to when the portal / CLI started.
+  Used as the default for every circle.
+- **Per-circle unseal cache.** Built when the operator submits a
+  passphrase via `POST /unseal` (browser) or supplies one via
+  `octravpn fetch --secret` / `-i`. Lives in portal process memory
+  only; restart re-prompts.
+
+There is no on-disk passphrase database. There is no system-wide DNS
+or SOCKS proxy. The portal is the gateway; this design makes it a
+usable gateway, not a transparent one.
+
+## Using from `curl` / `wget`
+
+Any tool that can speak HTTP loopback can dereference `oct://` URLs.
+The portal exposes a raw-bytes endpoint at `GET /raw?u=<oct-url>`
+that returns the asset body with a `Content-Type` derived from the
+existing MIME sniffer — no HTML wrapping.
+
+### Worked example
+
+```
+# 1. Start the portal in the background.
+$ octravpn portal &
+
+# 2. First fetch returns a 412 with an approve URL.
+$ curl http://127.0.0.1:51823/raw?u=oct://octCircleX/policy.json
+{
+  "error": "circle not approved",
+  "circle_id": "octCircleX",
+  "approve_url": "/confirm?u=oct%3A%2F%2FoctCircleX%2Fpolicy.json&accept=cli",
+  "hint": "GET the approve_url to mint a one-shot token, then retry with &token=<hex>"
+}
+
+# 3. Mint a token (the &accept=cli bypass returns JSON, not HTML).
+$ TOKEN=$(curl -s "http://127.0.0.1:51823/confirm?u=oct://octCircleX/policy.json&accept=cli" | jq -r .token)
+
+# 4. Re-fetch with the token. If the asset is plaintext or the
+#    operator's boot-time passphrase decrypts it, this returns the
+#    body. Otherwise a 412 with a sealed_decrypt_failed code points
+#    at the browser unseal flow.
+$ curl "http://127.0.0.1:51823/raw?u=oct://octCircleX/policy.json&token=$TOKEN"
+{"endpoint": "vpn.example:51820", "region": "us-east", ...}
+
+# 5. wget works the same way:
+$ wget -O policy.json "http://127.0.0.1:51823/raw?u=oct://octCircleX/policy.json&token=$TOKEN&dl=1"
+```
+
+### Optional: a system-wide curl wrapper
+
+For ergonomics, the repo ships a tiny `oct-curl` shim that does the
+token dance for you. macOS + Linux + Windows. See
+`dist/<platform>/oct-curl[.ps1]`. Sample usage:
+
+```
+$ oct-curl oct://octCircleX/policy.json
+{"endpoint": "vpn.example:51820", ...}
+$ oct-curl -o /tmp/policy.json oct://octCircleX/policy.json
+```
+
+The wrapper is **not** installed by `install-handler.sh` — it's
+opt-in. Copy it to `/usr/local/bin/oct-curl` (or wherever) yourself.
+
+### CLI fetch
+
+Operators who prefer not to start the portal can hit the same path
+through `octravpn fetch`:
+
+```
+$ octravpn fetch oct://octCircleX/policy.json                      # bytes → stdout
+$ octravpn fetch -o /tmp/policy.json oct://octCircleX/policy.json  # bytes → file
+$ octravpn fetch --secret PASS oct://octCircleX/policy.json        # one-shot pass
+$ octravpn fetch -i oct://octCircleX/policy.json                   # prompt on TTY
+$ octravpn fetch --headers -o /tmp/x.json oct://octCircleX/x.json  # CT to stderr
+```
+
+Exit codes (so wrapper scripts can branch):
+
+| Code | Meaning                                                    |
+|------|-------------------------------------------------------------|
+| 0    | success                                                    |
+| 2    | bad usage / bad URL / wrong protocol_version               |
+| 3    | fetch failed (transport, RPC, write)                       |
+| 4    | sealed and no passphrase available (env / config / `-i`)   |
+| 5    | wrong passphrase, retry attempts exhausted (3 attempts)    |
+
+## Interactive unseal flow
+
+Sealed assets sometimes need a passphrase the operator didn't have
+when they launched the portal — they only learned it after the
+browser opened. The portal supports an in-browser unseal form so they
+don't have to restart with a new `OCTRAVPN_SEALED_PASSPHRASE`.
+
+### Browser side
+
+When `/o/<b64>` fetches a sealed asset and decryption fails, the
+portal renders an `<form action="/unseal" method="POST">` with a
+single `<input type="password">` and hidden `circle` + `next` fields.
+
+Submitting the form triggers `POST /unseal`. The handler validates
+the candidate passphrase by attempting to decrypt the circle's
+canonical resource-key fixture (`/state-root.json` first, then
+`/policy.json` if state-root isn't published). On success the
+passphrase is cached **per-circle** in process memory and the browser
+is redirected back to `next_url` (the `/o/<b64>` the operator
+originally visited).
+
+On failure (`DecryptFailed`) the form re-renders with "wrong
+passphrase, try again". The operator can retry as many times as they
+like — there is no per-form lockout, but the cache only commits on a
+successful decrypt.
+
+### CLI side
+
+`octravpn fetch -i` prompts on the controlling TTY using
+[`rpassword`] (no-echo). Up to three attempts. The candidate
+passphrase is wrapped in `zeroize::Zeroizing` so the heap buffer
+wipes on drop.
+
+### Cache lifecycle
+
+- **In-memory only.** The `PortalState.unseal_cache` is a
+  `BTreeMap<circle_id, Arc<Zeroizing<String>>>`. Nothing is written
+  to disk. A portal restart re-prompts.
+- **Per-circle.** Submitting a passphrase for `octCircleA` does not
+  unlock `octCircleB`. Different circles are different keys.
+- **Fallback chain.** When the portal needs a passphrase for
+  `circle_id`, it consults the unseal cache first, then the
+  boot-time configured passphrase. Either is sufficient.
+
+### Security: no oracle iteration
+
+The form requires the operator to actively submit a passphrase. The
+server runs **one** decrypt attempt per submission. There is no
+retry loop on the server side, no enumeration of candidates, no
+timing-difference exposure beyond what `aes-gcm` itself provides.
+
+This is identical to the CLI prompt: three attempts is a UX
+convenience, not a security primitive — each attempt is one decrypt
+call, and the cache only commits on success. An attacker who
+controls a malicious oct:// URL still cannot use the portal as a
+passphrase oracle: they would need to convince the operator to type
+the passphrase, and the form's `next_url` is sanitized to
+same-origin portal paths.

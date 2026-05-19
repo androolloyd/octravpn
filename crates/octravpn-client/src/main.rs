@@ -170,6 +170,12 @@ enum Cmd {
     /// stdout. The OS protocol handler (see `dist/`) dispatches here.
     OpenUrl(commands::OpenUrlArgs),
 
+    /// `oct://` fetch surface for shell pipelines: raw bytes to stdout
+    /// or `--output <path>`, optional interactive passphrase prompt
+    /// for sealed assets. Bypasses the HTTP portal entirely. See
+    /// `commands::fetch` for exit-code semantics.
+    Fetch(commands::FetchArgs),
+
     /// Run the local `oct://` browser portal. Long-running. Serves
     /// HTML/JSON fetched over the active VPN session, sandboxes HTML
     /// inside an iframe, gates first-time circles on an explicit
@@ -283,11 +289,16 @@ async fn main() -> Result<()> {
                 return commands::slash_evidence(op.clone());
             }
         }
-        // `open-url` and `portal` are read-only over the chain RPC —
-        // they don't need a session-runner, just a loaded config.
+        // `open-url`, `fetch`, and `portal` are read-only over the
+        // chain RPC — they don't need a session-runner, just a loaded
+        // config.
         Cmd::OpenUrl(args) => {
             let cfg = ClientConfig::load(&cli.config)?;
             return commands::run_open_url(&cfg, args.clone()).await;
+        }
+        Cmd::Fetch(args) => {
+            let cfg = ClientConfig::load(&cli.config)?;
+            return commands::run_fetch(&cfg, args.clone()).await;
         }
         Cmd::Portal { bind } => {
             let cfg = ClientConfig::load(&cli.config)?;
@@ -399,6 +410,7 @@ async fn main() -> Result<()> {
         | Cmd::Serve { .. }
         | Cmd::Funnel { .. }
         | Cmd::OpenUrl(_)
+        | Cmd::Fetch(_)
         | Cmd::Portal { .. } => unreachable!(),
     }
 }

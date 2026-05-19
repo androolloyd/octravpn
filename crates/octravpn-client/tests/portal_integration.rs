@@ -560,9 +560,13 @@ secret_path = "{}"
         "expected 412 Precondition Failed when passphrase missing",
     );
     let body = resp.text().await.unwrap();
+    // Interactive unseal flow: the static "OCTRAVPN_SEALED_PASSPHRASE"
+    // hint is replaced by a form posting to /unseal. Operators set the
+    // passphrase per-circle in the browser without restarting the portal.
     assert!(
-        body.contains("OCTRAVPN_SEALED_PASSPHRASE"),
-        "expected env-var name in the error page: {body}",
+        body.contains(r#"action="/unseal""#)
+            && body.contains(r#"name="passphrase""#),
+        "expected interactive unseal form in the error page: {body}",
     );
 
     let _ = child.kill().await;

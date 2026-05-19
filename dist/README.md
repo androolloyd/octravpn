@@ -48,3 +48,18 @@ Every install script writes only to user-scoped locations
 (`~/Library/...`, `~/.local/share/applications/`,
 `HKCU\Software\Classes\oct`). Nothing touches `/etc/`, `/usr/`, or
 `HKLM\`. Every action is reversible by the matching uninstall script.
+
+## Optional: `oct-curl` shim
+
+For shell users who want `oct://` to work from `curl`-style pipelines
+without typing the portal `/raw` + token dance every time. Not
+installed automatically.
+
+- `dist/macos/oct-curl` — bash; pure POSIX + `jq` (falls back to
+  `sed` if `jq` is absent).
+- `dist/linux/oct-curl` — identical to the macOS copy.
+- `dist/windows/oct-curl.ps1` — PowerShell shim around `curl.exe`.
+
+Drop wherever your `$PATH` resolves it. Requires `octravpn portal`
+running. Override the loopback bind with
+`OCTRAVPN_PORTAL=http://127.0.0.1:NNNN`.

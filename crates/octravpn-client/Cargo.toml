@@ -49,6 +49,10 @@ flate2      = "1"
 # already in the dep tree via octravpn-core).
 axum        = { workspace = true }
 hmac        = "0.12"
+# `octravpn fetch -i` reads sealed-asset passphrases off a controlling
+# TTY without echoing. Small, single-purpose crate (~200 LOC of termios
+# wrappers); no transitive bloat.
+rpassword   = "7"
 
 [dev-dependencies]
 assert_cmd  = "2"

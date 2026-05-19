@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# oct-curl — curl the `oct://` portal's /raw endpoint with auto-token.
+#
+# Usage:
+#   oct-curl oct://<circle>/<path> [extra curl args]
+#
+# Translates the oct-URL into a portal /raw fetch, minting an approval
+# token via /confirm?accept=cli on first use. Requires `octravpn portal`
+# running (default 127.0.0.1:51823). Passes any extra args through to
+# curl verbatim, so `-o`, `-s`, `--fail`, etc. all work.
+
+set -euo pipefail
+
+PORTAL="${OCTRAVPN_PORTAL:-http://127.0.0.1:51823}"
+
+if [ "$#" -lt 1 ]; then
+    echo "usage: oct-curl oct://<circle>/<path> [curl args...]" >&2
+    exit 2
+fi
+
+OCT_URL="$1"
+shift
+
+case "$OCT_URL" in
+    oct://*) : ;;
+    *) echo "oct-curl: not an oct:// URL: $OCT_URL" >&2; exit 2 ;;
+esac
+
+# urlencode the oct:// URL for the query parameter.
+encoded=$(python3 -c "import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=''))" "$OCT_URL")
+
+# Mint a token. JSON; we yank the value with jq if available, else sed.
+TOKEN_JSON=$(curl -fsS "$PORTAL/confirm?u=$encoded&accept=cli")
+if command -v jq >/dev/null 2>&1; then
+    TOKEN=$(printf '%s' "$TOKEN_JSON" | jq -r .token)
+else
+    TOKEN=$(printf '%s' "$TOKEN_JSON" | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+fi
+
+if [ -z "$TOKEN" ]; then
+    echo "oct-curl: could not mint approval token; response was:" >&2
+    echo "$TOKEN_JSON" >&2
+    exit 3
+fi
+
+exec curl "$@" "$PORTAL/raw?u=$encoded&token=$TOKEN"

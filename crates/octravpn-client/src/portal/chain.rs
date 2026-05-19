@@ -44,6 +44,38 @@ use zeroize::Zeroizing;
 
 use crate::config::ClientConfig;
 
+/// Resolve the sealed-asset passphrase to try for a given `circle_id`.
+///
+/// The portal binds an implementation that consults its per-circle
+/// unseal cache first (interactive unseal flow), falling back to the
+/// boot-time configured passphrase. CLI / non-portal callers use the
+/// default ([`ConfigPassphrase`]) which is circle-agnostic.
+///
+/// Returning `None` means "no passphrase available" — the fetch path
+/// will surface [`FetchAssetError::MissingPassphrase`].
+pub(crate) trait PassphraseSource: Send + Sync {
+    fn passphrase_for(&self, circle_id: &str) -> Option<Arc<Zeroizing<String>>>;
+}
+
+/// Circle-agnostic source backed by a single configured passphrase
+/// resolved at boot. Used by the CLI `fetch` / `open-url` paths.
+#[derive(Clone, Default)]
+pub(crate) struct ConfigPassphrase {
+    inner: Option<Arc<Zeroizing<String>>>,
+}
+
+impl ConfigPassphrase {
+    pub(crate) fn new(pp: Option<Arc<Zeroizing<String>>>) -> Self {
+        Self { inner: pp }
+    }
+}
+
+impl PassphraseSource for ConfigPassphrase {
+    fn passphrase_for(&self, _circle_id: &str) -> Option<Arc<Zeroizing<String>>> {
+        self.inner.clone()
+    }
+}
+
 /// Sealed-asset envelope magic prefix. Must match `octra-core::circle`.
 /// Duplicated here as a small constant rather than re-exported so this
 /// module stays self-contained for the magic sniff.
@@ -88,6 +120,7 @@ pub(crate) enum FetchAssetError {
 }
 
 impl FetchAssetError {
+    #[allow(dead_code)] // accessor — used by future error-page renderers
     pub(crate) fn circle_id(&self) -> &str {
         match self {
             Self::Rpc { circle_id, .. }
@@ -97,6 +130,7 @@ impl FetchAssetError {
         }
     }
 
+    #[allow(dead_code)] // accessor — used by future error-page renderers
     pub(crate) fn path(&self) -> &str {
         match self {
             Self::Rpc { path, .. }
@@ -219,6 +253,42 @@ impl PortalChain {
         self.passphrase.is_some()
     }
 
+    /// Returns a clone of the boot-time configured passphrase, if any.
+    /// The portal uses this as the fallback inside its cache-aware
+    /// [`PassphraseSource`] impl.
+    pub(crate) fn configured_passphrase(&self) -> Option<Arc<Zeroizing<String>>> {
+        self.passphrase.clone()
+    }
+
+    /// Fetch + decrypt a circle asset using an explicit
+    /// [`PassphraseSource`]. The portal uses this to consult its
+    /// per-circle unseal cache; CLI callers wire a [`ConfigPassphrase`].
+    pub(crate) async fn fetch_with_source(
+        &self,
+        circle_id: &str,
+        path: &str,
+        source: &dyn PassphraseSource,
+    ) -> Result<Vec<u8>, FetchAssetError> {
+        self.fetch_inner(circle_id, path, |cid| source.passphrase_for(cid))
+            .await
+    }
+
+    /// One-shot attempt to decrypt the asset at `(circle_id, path)`
+    /// with an alternate `passphrase`. Used by `POST /unseal` to
+    /// validate operator-supplied passphrases against the canonical
+    /// circle-resource-key fixture. Same single-attempt semantics — no
+    /// oracle iteration; the caller is responsible for rate-limiting
+    /// submissions.
+    pub(crate) async fn try_decrypt_with_passphrase(
+        &self,
+        circle_id: &str,
+        path: &str,
+        passphrase: Arc<Zeroizing<String>>,
+    ) -> Result<Vec<u8>, FetchAssetError> {
+        self.fetch_inner(circle_id, path, |_| Some(passphrase.clone()))
+            .await
+    }
+
     /// Fetch the bytes of `circle_asset(circle_id, path)`.
     ///
     /// Behaviour:
@@ -237,6 +307,22 @@ impl PortalChain {
         circle_id: &str,
         path: &str,
     ) -> Result<Vec<u8>, FetchAssetError> {
+        let pp = self.passphrase.clone();
+        self.fetch_inner(circle_id, path, |_| pp.clone()).await
+    }
+
+    /// Common fetch + decrypt pipeline. The `pick_passphrase` closure
+    /// is consulted only after the OCRS1 magic confirms the bytes are
+    /// sealed; plaintext-passthrough never asks for a passphrase.
+    async fn fetch_inner<F>(
+        &self,
+        circle_id: &str,
+        path: &str,
+        pick_passphrase: F,
+    ) -> Result<Vec<u8>, FetchAssetError>
+    where
+        F: Fn(&str) -> Option<Arc<Zeroizing<String>>>,
+    {
         let path = canonical_path(path);
         let rkey = resource_key(circle_id, &path);
 
@@ -319,7 +405,7 @@ impl PortalChain {
 
         // From here on, bytes are a sealed envelope. We need a
         // passphrase + the plaintext_hash the chain published.
-        let Some(pp) = self.passphrase.as_ref() else {
+        let Some(pp) = pick_passphrase(circle_id) else {
             return Err(FetchAssetError::MissingPassphrase {
                 circle_id: circle_id.to_string(),
                 path,

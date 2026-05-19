@@ -2,13 +2,23 @@
 //!
 //! Route table:
 //!
-//!   GET  /                — index page with URL bar
-//!   GET  /go?u=<oct-url>  — redirects to /o/<b64> (browser-form action)
-//!   GET  /o/{b64url}      — primary asset viewer
-//!   GET  /api/resolve?u=  — JSON metadata (size + mime) without rendering
-//!   GET  /confirm?u=<…>   — confirm-on-first-fetch interstitial
-//!   POST /approve         — body: `circle=<…>&token=<…>&next=<…>`
-//!   GET  /healthz         — liveness probe (always 200)
+//!   GET  /                  — index page with URL bar
+//!   GET  /go?u=<oct-url>    — redirects to /o/<b64> (browser-form action)
+//!   GET  /o/{b64url}        — primary asset viewer (HTML render)
+//!   GET  /raw?u=<oct-url>   — raw bytes + Content-Type for `curl`/`wget`
+//!                             optional: `&token=<hex>` to bypass the
+//!                             confirm gate; `&dl=1` adds
+//!                             Content-Disposition: attachment
+//!   GET  /api/resolve?u=    — JSON metadata (size + mime) without rendering
+//!   GET  /confirm?u=<…>     — confirm-on-first-fetch interstitial
+//!                             `?accept=cli` issues the token directly
+//!                             as JSON (no browser interstitial)
+//!   POST /approve           — body: `circle=<…>&token=<…>&next=<…>`
+//!   POST /unseal            — interactive unseal: body
+//!                             `circle=<…>&passphrase=<…>&next=<…>`
+//!                             validates once, caches per-circle in
+//!                             process memory, redirects to `next`.
+//!   GET  /healthz           — liveness probe (always 200)
 //!
 //! **Decision log.**
 //! * Sandbox: every `text/html` response is wrapped in
@@ -33,7 +43,7 @@
 //!   underlying RPC error text so the operator can diagnose.
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     sync::{Arc, Mutex},
 };
 
@@ -51,17 +61,29 @@ use rand::RngCore;
 use serde::Deserialize;
 use serde_json::json;
 use sha2::Sha256;
+use zeroize::Zeroizing;
 
 use crate::{
     commands::open_url::parse_oct_url,
     portal::{
-        chain::{FetchAssetError, PortalChain},
+        chain::{FetchAssetError, PassphraseSource, PortalChain},
         mime::{sniff, SniffedMime},
         static_assets::{INDEX_BODY, PAGE_SHELL},
     },
 };
 
 type HmacSha256 = Hmac<Sha256>;
+
+/// Per-circle interactive unseal cache. Built when the operator submits
+/// a passphrase via `POST /unseal` and the chain successfully decrypts
+/// at least one sealed asset for that circle.
+///
+/// **Lifecycle.** In-memory only. Survives only the portal's process
+/// lifetime — same model as the approval `allow_set`. A portal restart
+/// re-prompts. We deliberately do NOT serialize this to disk; persisting
+/// would turn the cache into a key-material file that survives
+/// password-protected user sessions.
+type UnsealCache = Arc<Mutex<BTreeMap<String, Arc<Zeroizing<String>>>>>;
 
 /// Shared portal state. Cheaply cloneable (everything inside is `Arc`
 /// or a small Copy).
@@ -70,6 +92,27 @@ pub(crate) struct PortalState {
     pub chain: PortalChain,
     pub allow_set: Arc<Mutex<BTreeSet<String>>>,
     pub hmac_secret: Arc<[u8; 32]>,
+    /// Per-circle passphrases collected via the interactive unseal
+    /// form. Falls back to `chain.configured_passphrase()` on miss.
+    pub unseal_cache: UnsealCache,
+}
+
+/// [`PassphraseSource`] adapter that consults the portal's per-circle
+/// unseal cache first, then the boot-time configured passphrase.
+pub(crate) struct UnsealCachePassphrase {
+    cache: UnsealCache,
+    fallback: Option<Arc<Zeroizing<String>>>,
+}
+
+impl PassphraseSource for UnsealCachePassphrase {
+    fn passphrase_for(&self, circle_id: &str) -> Option<Arc<Zeroizing<String>>> {
+        if let Ok(guard) = self.cache.lock() {
+            if let Some(pp) = guard.get(circle_id) {
+                return Some(Arc::clone(pp));
+            }
+        }
+        self.fallback.clone()
+    }
 }
 
 impl PortalState {
@@ -80,6 +123,24 @@ impl PortalState {
             chain,
             allow_set: Arc::new(Mutex::new(BTreeSet::new())),
             hmac_secret: Arc::new(secret),
+            unseal_cache: Arc::new(Mutex::new(BTreeMap::new())),
+        }
+    }
+
+    /// Build a cache-aware passphrase source for use with
+    /// [`PortalChain::fetch_with_source`].
+    fn passphrase_source(&self) -> UnsealCachePassphrase {
+        UnsealCachePassphrase {
+            cache: Arc::clone(&self.unseal_cache),
+            fallback: self.chain.configured_passphrase(),
+        }
+    }
+
+    /// Record an unseal cache hit for `circle_id`. Public for tests +
+    /// the `POST /unseal` handler.
+    pub(crate) fn record_unseal(&self, circle_id: &str, pp: Arc<Zeroizing<String>>) {
+        if let Ok(mut g) = self.unseal_cache.lock() {
+            g.insert(circle_id.to_string(), pp);
         }
     }
 
@@ -121,9 +182,11 @@ pub(crate) fn router(state: PortalState) -> Router {
         .route("/", get(index))
         .route("/go", get(go))
         .route("/o/:b64", get(view_asset))
+        .route("/raw", get(raw_asset))
         .route("/api/resolve", get(api_resolve))
         .route("/confirm", get(confirm_page))
         .route("/approve", post(approve))
+        .route("/unseal", post(unseal))
         .route("/healthz", get(healthz))
         .with_state(state)
 }
@@ -172,7 +235,7 @@ async fn api_resolve(
     };
     let bytes = match state
         .chain
-        .fetch_circle_asset_bytes(&parsed.circle_id, &parsed.path)
+        .fetch_with_source(&parsed.circle_id, &parsed.path, &state.passphrase_source())
         .await
     {
         Ok(b) => b,
@@ -232,27 +295,55 @@ async fn view_asset(
         return confirm_interstitial(&state, &url, &parsed.circle_id);
     }
 
-    // Fetch.
+    // Fetch via the cache-aware passphrase source so a prior /unseal
+    // submission for this circle is honored.
     let bytes = match state
         .chain
-        .fetch_circle_asset_bytes(&parsed.circle_id, &parsed.path)
+        .fetch_with_source(&parsed.circle_id, &parsed.path, &state.passphrase_source())
         .await
     {
         Ok(b) => b,
-        Err(e) => return fetch_error_page(&url, e),
+        Err(e) => return fetch_error_page(&state, &url, &parsed.circle_id, e),
     };
 
     render_bytes(&url, bytes)
 }
 
+#[derive(Deserialize)]
+struct ConfirmQuery {
+    u: String,
+    /// When `accept=cli`, issue the approval token directly as JSON
+    /// instead of rendering the browser interstitial. The token has the
+    /// same provenance (HMAC-SHA256 over circle_id) and same privilege
+    /// — there is no separate `cli` scope — so this is a UX shortcut
+    /// for `curl` / `oct-curl` callers, not a privilege escalation.
+    #[serde(default)]
+    accept: Option<String>,
+}
+
 async fn confirm_page(
     State(state): State<PortalState>,
-    Query(q): Query<GoQuery>,
+    Query(q): Query<ConfirmQuery>,
 ) -> Response {
     let parsed = match parse_oct_url(&q.u) {
         Ok(p) => p,
         Err(e) => return error_page(StatusCode::BAD_REQUEST, &q.u, &e.to_string()),
     };
+    if matches!(q.accept.as_deref(), Some("cli")) {
+        // CLI-friendly path: mint + register the approval, return JSON.
+        // The HTML interstitial requires a POST /approve to mutate
+        // allow_set; the CLI path skips that round-trip because the
+        // operator already authenticated by having loopback access.
+        let token = state.token_for(&parsed.circle_id);
+        state.allow(&parsed.circle_id);
+        return Json(json!({
+            "circle_id": parsed.circle_id,
+            "token": token,
+            "approved": true,
+            "note": "approval persists for the lifetime of this portal process",
+        }))
+        .into_response();
+    }
     confirm_interstitial(&state, &q.u, &parsed.circle_id)
 }
 
@@ -272,6 +363,334 @@ async fn approve(
     }
     state.allow(&form.circle);
     Redirect::to(&form.next).into_response()
+}
+
+// ─── /raw  ────────────────────────────────────────────────────────────
+//
+// Raw-bytes gateway for `curl` / `wget` / shell scripts. Same auth
+// surface as `/o/<b64>` — confirm + unseal cache — but the response
+// body is unframed: no PAGE_SHELL, no <iframe>, just the bytes plus a
+// `Content-Type` derived from the existing MIME sniffer.
+
+#[derive(Deserialize)]
+struct RawQuery {
+    u: String,
+    /// Approval token (hex HMAC-SHA256 over `circle_id`). When present
+    /// and valid, the confirm gate is bypassed without mutating the
+    /// in-memory `allow_set`. Useful for short-lived scripts that
+    /// don't want to dirty server state.
+    #[serde(default)]
+    token: Option<String>,
+    /// `?dl=1` forces a `Content-Disposition: attachment` header with
+    /// a filename derived from the URL's last path component.
+    #[serde(default)]
+    dl: Option<String>,
+}
+
+async fn raw_asset(
+    State(state): State<PortalState>,
+    Query(q): Query<RawQuery>,
+) -> Response {
+    let parsed = match parse_oct_url(&q.u) {
+        Ok(p) => p,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": e.to_string(), "url": q.u})),
+            )
+                .into_response();
+        }
+    };
+
+    // Confirm gate. Same logic as `/o/<b64>` but returns a 412 JSON
+    // body rather than the HTML interstitial — tooling needs a
+    // machine-readable hint, not a page to click through.
+    let approved_by_token = match q.token.as_deref() {
+        Some(t) => state.token_valid(&parsed.circle_id, t),
+        None => false,
+    };
+    if !approved_by_token && !state.is_allowed(&parsed.circle_id) {
+        let approve_url = format!(
+            "/confirm?u={}&accept=cli",
+            urlencode_query_value(&q.u),
+        );
+        return (
+            StatusCode::PRECONDITION_FAILED,
+            Json(json!({
+                "error": "circle not approved",
+                "circle_id": parsed.circle_id,
+                "approve_url": approve_url,
+                "hint": "GET the approve_url to mint a one-shot token, then retry with &token=<hex>",
+            })),
+        )
+            .into_response();
+    }
+
+    // Fetch via the cache-aware source so unseal-cached passphrases work.
+    let bytes = match state
+        .chain
+        .fetch_with_source(&parsed.circle_id, &parsed.path, &state.passphrase_source())
+        .await
+    {
+        Ok(b) => b,
+        Err(e) => return raw_error_response(&parsed.circle_id, &parsed.path, &e),
+    };
+
+    let mime = sniff(&bytes);
+    let mut builder = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, mime.content_type())
+        .header(header::CONTENT_LENGTH, bytes.len().to_string());
+
+    // ?dl=1 → force Save-As with a filename pulled from the URL's
+    // last path component. Quotation pattern matches RFC 6266 § 4.1
+    // ABNF for token + quoted-string filenames; we escape inner
+    // double-quotes to avoid header truncation.
+    if matches!(q.dl.as_deref(), Some("1" | "true")) {
+        let filename = last_path_component(&parsed.path);
+        let safe = filename.replace('"', "");
+        builder = builder.header(
+            header::CONTENT_DISPOSITION,
+            format!(r#"attachment; filename="{safe}""#),
+        );
+    } else if matches!(mime, SniffedMime::OctetStream) {
+        // Defensive: octet-stream bytes still get a filename so curl
+        // -OJ pulls a sane name even without `&dl=1`. Don't force the
+        // attachment disposition though — operators who curl into a
+        // pipe still want inline.
+        let filename = last_path_component(&parsed.path);
+        let safe = filename.replace('"', "");
+        builder = builder.header(
+            header::CONTENT_DISPOSITION,
+            format!(r#"inline; filename="{safe}""#),
+        );
+    }
+
+    match builder.body(Body::from(bytes)) {
+        Ok(r) => r,
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("response build: {e}")})),
+        )
+            .into_response(),
+    }
+}
+
+fn raw_error_response(circle_id: &str, path: &str, err: &FetchAssetError) -> Response {
+    let (status, code) = match err {
+        FetchAssetError::MissingPassphrase { .. } | FetchAssetError::DecryptFailed { .. } => {
+            (StatusCode::PRECONDITION_FAILED, "sealed_decrypt_failed")
+        }
+        FetchAssetError::NotPublished { .. } => (StatusCode::NOT_FOUND, "not_published"),
+        FetchAssetError::Rpc { .. } => (StatusCode::BAD_GATEWAY, "rpc"),
+    };
+    (
+        status,
+        Json(json!({
+            "error": err.to_string(),
+            "code": code,
+            "circle_id": circle_id,
+            "path": path,
+            "hint": match err {
+                FetchAssetError::MissingPassphrase { .. } | FetchAssetError::DecryptFailed { .. } =>
+                    "open the URL in a browser to use the interactive unseal form, or set OCTRAVPN_SEALED_PASSPHRASE before launching `octravpn portal`",
+                _ => "is the tunnel up? raw endpoint requires the VPN session to reach circle_asset RPC.",
+            },
+        })),
+    )
+        .into_response()
+}
+
+fn last_path_component(path: &str) -> String {
+    path.rsplit('/')
+        .find(|s| !s.is_empty())
+        .map_or_else(|| "circle-asset.bin".into(), ToString::to_string)
+}
+
+/// Percent-encode a value safely for embedding in a query string.
+/// Used by the `/raw` 412 to construct an `approve_url` the operator
+/// can fetch verbatim with `curl`.
+fn urlencode_query_value(s: &str) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => {
+                let _ = write!(out, "%{b:02X}");
+            }
+        }
+    }
+    out
+}
+
+// ─── /unseal  ─────────────────────────────────────────────────────────
+//
+// Interactive unseal flow. The operator submits a passphrase for a
+// specific circle; we attempt a single decrypt against a known asset
+// (the circle's canonical resource key) and, on success, cache the
+// passphrase in memory keyed by circle_id. Subsequent fetches for the
+// same circle bypass the form.
+//
+// Single-attempt semantics. We do NOT iterate passphrases. The form's
+// `<input type="password">` is operator-driven; nothing here amplifies
+// a guessed passphrase into an oracle. Submission rate-limiting is
+// the operator's concern (loopback access ≈ login).
+//
+// Cache lifecycle. In-memory only, tied to portal process. Restart →
+// re-prompt. Identical to the approval `allow_set`.
+
+#[derive(Deserialize)]
+struct UnsealForm {
+    /// Circle id to unseal. The form posts this verbatim back to the
+    /// server so the cache key matches what `/o/<b64>` would request.
+    circle: String,
+    /// Submitted passphrase. Treated as ASCII-trimmed but otherwise
+    /// opaque; we don't normalize Unicode.
+    passphrase: String,
+    /// Post-unseal redirect target. Typically the `/o/<b64>` URL the
+    /// operator originally visited.
+    next: String,
+}
+
+async fn unseal(
+    State(state): State<PortalState>,
+    Form(form): Form<UnsealForm>,
+) -> Response {
+    let pp_trimmed = form.passphrase.trim();
+    if pp_trimmed.is_empty() {
+        return unseal_form_page(&state, &form.circle, &form.next, Some("passphrase is empty"));
+    }
+    let candidate = Arc::new(Zeroizing::new(pp_trimmed.to_string()));
+
+    // Validate by attempting to decrypt the operator's canonical
+    // resource-key fixture. Falls back to `/policy.json` if that miss
+    // - documented in chain.rs as "the validation fetch is itself
+    // capped at one decrypt try".
+    let validated = state
+        .chain
+        .try_decrypt_with_passphrase(&form.circle, "/state-root.json", Arc::clone(&candidate))
+        .await;
+    let validated = match validated {
+        Ok(_) => Ok(()),
+        Err(FetchAssetError::NotPublished { .. }) => {
+            // No state-root.json published; try /policy.json instead.
+            state
+                .chain
+                .try_decrypt_with_passphrase(
+                    &form.circle,
+                    "/policy.json",
+                    Arc::clone(&candidate),
+                )
+                .await
+                .map(|_| ())
+        }
+        Err(e) => Err(e),
+    };
+
+    match validated {
+        Ok(()) => {
+            state.record_unseal(&form.circle, candidate);
+            // Treat redirect target conservatively — only allow same-origin
+            // /o/<b64> or /raw redirects, fall back to the index otherwise.
+            let target = sanitize_next(&form.next);
+            Redirect::to(&target).into_response()
+        }
+        Err(FetchAssetError::MissingPassphrase { .. }) => {
+            // The asset isn't sealed — we have no way to validate the
+            // submitted passphrase. Still cache it (operator's intent
+            // is clear) and redirect.
+            state.record_unseal(&form.circle, candidate);
+            let target = sanitize_next(&form.next);
+            Redirect::to(&target).into_response()
+        }
+        Err(FetchAssetError::DecryptFailed { .. }) => {
+            unseal_form_page(
+                &state,
+                &form.circle,
+                &form.next,
+                Some("wrong passphrase, try again"),
+            )
+        }
+        Err(other) => {
+            // RPC failure / not published for both anchors — surface
+            // the error without revealing whether the passphrase was
+            // even tried. The operator can re-attempt once the chain
+            // is reachable again.
+            unseal_form_page(
+                &state,
+                &form.circle,
+                &form.next,
+                Some(&format!("could not validate passphrase: {other}")),
+            )
+        }
+    }
+}
+
+/// Render the unseal form, optionally with an error banner. Used both
+/// for the GET-style render (from `passphrase_error_page`) and for the
+/// re-render after a failed `POST /unseal`.
+fn unseal_form_page(
+    state: &PortalState,
+    circle_id: &str,
+    next_url: &str,
+    error: Option<&str>,
+) -> Response {
+    let banner = match error {
+        Some(msg) => format!(
+            r#"<p class="error" role="alert"><strong>Unseal failed:</strong> {}</p>"#,
+            html_escape(msg),
+        ),
+        None => String::new(),
+    };
+    let configured = state.chain.configured_passphrase().is_some();
+    let configured_hint = if configured {
+        r#"<p class="hint">The portal's boot-time passphrase is set but didn't decrypt this circle — try the operator's circle-specific passphrase here.</p>"#
+    } else {
+        r#"<p class="hint">No boot-time passphrase is configured; submit the operator's sealed-policy passphrase to view this circle.</p>"#
+    };
+    let body = format!(
+        r#"<div class="confirm-card">
+<h2>Unlock this circle</h2>
+<p>This circle's assets are sealed. The portal needs the operator's passphrase to decrypt them.</p>
+<p>Circle: <code>{circle}</code></p>
+{configured_hint}
+{banner}
+<form action="/unseal" method="post" autocomplete="off">
+<input type="hidden" name="circle" value="{circle}">
+<input type="hidden" name="next" value="{next}">
+<label for="pp">Passphrase</label>
+<input id="pp" name="passphrase" type="password" autofocus required>
+<button type="submit">Unlock</button>
+</form>
+<p class="hint">The passphrase is cached in memory for the lifetime of this portal process — restart re-prompts. It is never written to disk.</p>
+</div>"#,
+        circle = html_escape(circle_id),
+        next = html_escape(next_url),
+        banner = banner,
+        configured_hint = configured_hint,
+    );
+    let status = if error.is_some() {
+        StatusCode::UNAUTHORIZED
+    } else {
+        StatusCode::PRECONDITION_FAILED
+    };
+    let html = render_shell("Unlock circle", next_url, &body);
+    (status, Html(html)).into_response()
+}
+
+/// Restrict the post-unseal redirect to known-safe in-portal paths.
+/// Anything else (absolute URL, scheme, foreign host) collapses to `/`.
+fn sanitize_next(next: &str) -> String {
+    if next.starts_with("/o/") || next.starts_with("/raw") || next.starts_with("/api/")
+        || next == "/" || next.starts_with("/?")
+    {
+        next.to_string()
+    } else {
+        "/".to_string()
+    }
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────
@@ -315,43 +734,24 @@ fn confirm_interstitial(state: &PortalState, url: &str, circle_id: &str) -> Resp
 }
 
 /// Dispatch a [`FetchAssetError`] to the appropriate sandboxed error
-/// page. Sealed-asset decrypt failures get a dedicated 412 page; every
+/// page. Sealed-asset decrypt failures now route to the interactive
+/// unseal form (POST /unseal) instead of the old static 412 hint; every
 /// other variant flows through the existing tunnel-down 502 renderer.
-fn fetch_error_page(url: &str, err: FetchAssetError) -> Response {
+fn fetch_error_page(
+    state: &PortalState,
+    url: &str,
+    circle_id: &str,
+    err: FetchAssetError,
+) -> Response {
     match err {
         FetchAssetError::MissingPassphrase { .. } | FetchAssetError::DecryptFailed { .. } => {
-            passphrase_error_page(url, &err)
+            // Render the interactive unseal form pre-filled with this
+            // circle id. On submit, the operator's passphrase goes
+            // through `POST /unseal` and we redirect them back here.
+            unseal_form_page(state, circle_id, url, None)
         }
         other => tunnel_error_page(url, &other.to_string()),
     }
-}
-
-/// 412 page for the two passphrase-related decrypt failures. Body text
-/// tells the operator exactly which env var / config field to set, and
-/// deliberately does NOT echo any ciphertext bytes.
-fn passphrase_error_page(url: &str, err: &FetchAssetError) -> Response {
-    let title = match err {
-        FetchAssetError::MissingPassphrase { .. } => "Passphrase not configured",
-        // Default covers DecryptFailed and (unreachable) other variants;
-        // the dispatcher only sends decrypt-related errors here.
-        _ => "Cannot decrypt sealed asset",
-    };
-    let body = format!(
-        r#"<div class="confirm-card">
-<h2 class="error">{title}</h2>
-<p>Cannot decrypt asset: the operator's sealed-policy passphrase isn't configured locally. Set <code>OCTRAVPN_SEALED_PASSPHRASE</code> or <code>[v2].sealed_passphrase</code> in your <code>client.toml</code>.</p>
-<p>If you already set one, it doesn't match the passphrase used to seal this asset.</p>
-<p>Circle: <code>{circle}</code></p>
-<p>Asset: <code>{path}</code></p>
-<p>URL: <code>{url}</code></p>
-</div>"#,
-        title = html_escape(title),
-        circle = html_escape(err.circle_id()),
-        path = html_escape(err.path()),
-        url = html_escape(url),
-    );
-    let html = render_shell(title, url, &body);
-    (StatusCode::PRECONDITION_FAILED, Html(html)).into_response()
 }
 
 fn tunnel_error_page(url: &str, message: &str) -> Response {
@@ -791,5 +1191,355 @@ mod tests {
             body.contains("plain text from the chain RPC"),
             "expected bytes in body: {body}",
         );
+    }
+
+    // ─── /raw + /unseal + /confirm?accept=cli  ────────────────────────
+
+    /// Mock RPC factory that returns a single sealed envelope under
+    /// any resource key — good enough for these route tests because
+    /// the chain RPC layer is exercised by `portal::chain::tests`.
+    async fn spawn_sealed_rpc(
+        circle_id: &str,
+        passphrase: &str,
+        plaintext: &[u8],
+    ) -> (SocketAddr, String, String) {
+        use octravpn_core::circle::{encrypt_sealed_bytes, PaddingClass};
+        let (ct_b64, ph_hex) = encrypt_sealed_bytes(
+            circle_id,
+            "default",
+            passphrase,
+            plaintext,
+            PaddingClass::None,
+        )
+        .unwrap();
+        let result = json!({
+            "ciphertext_b64": ct_b64,
+            "plaintext_hash": ph_hex,
+            "key_id": "default",
+        });
+        let result_arc = Arc::new(result);
+        let app: Router = Router::new().route(
+            "/",
+            post(move |Json(req): Json<serde_json::Value>| {
+                let result = Arc::clone(&result_arc);
+                async move {
+                    let id = req.get("id").cloned().unwrap_or(json!(1));
+                    Json(json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": (*result).clone(),
+                    }))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind::<SocketAddr>("127.0.0.1:0".parse().unwrap())
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        (addr, ct_b64, ph_hex)
+    }
+
+    #[tokio::test]
+    async fn raw_endpoint_gates_on_unapproved_circle_with_412() {
+        let state = state_no_chain();
+        let app = router(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/raw?u={}",
+                        urlenc("oct://circRAW/policy.json")
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::PRECONDITION_FAILED);
+        let body: serde_json::Value =
+            serde_json::from_str(&body_string(resp).await).unwrap();
+        assert_eq!(body.get("error").and_then(|v| v.as_str()), Some("circle not approved"));
+        assert!(body.get("approve_url").is_some());
+    }
+
+    #[tokio::test]
+    async fn confirm_accept_cli_returns_token_json_and_allows_circle() {
+        let state = state_no_chain();
+        let app = router(state.clone());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/confirm?u={}&accept=cli",
+                        urlenc("oct://circCLI/policy.json"),
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body: serde_json::Value =
+            serde_json::from_str(&body_string(resp).await).unwrap();
+        assert!(body.get("token").and_then(|v| v.as_str()).is_some());
+        assert_eq!(body.get("approved").and_then(serde_json::Value::as_bool), Some(true));
+        // Side-effect: circle is now in the allow_set.
+        assert!(state.is_allowed("circCLI"));
+    }
+
+    #[tokio::test]
+    async fn raw_endpoint_serves_bytes_after_token_approval() {
+        let (addr, _ct, _ph) =
+            spawn_sealed_rpc("circRAWAUTH", "open-sesame", b"raw plain bytes").await;
+        let rpc = RpcClient::new(format!("http://{addr}/"));
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0)
+            .with_passphrase("open-sesame");
+        let state = PortalState::new(chain);
+        let token = state.token_for("circRAWAUTH");
+        let app = router(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/raw?u={}&token={}",
+                        urlenc("oct://circRAWAUTH/policy.json"),
+                        urlenc(&token),
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        // Content-Type from sniff — "raw plain bytes" is UTF-8 text.
+        let ct = resp
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(ct.starts_with("text/plain"), "got CT: {ct}");
+        let body = body_string(resp).await;
+        assert_eq!(body, "raw plain bytes");
+    }
+
+    #[tokio::test]
+    async fn raw_endpoint_dl_param_sets_attachment_disposition() {
+        let (addr, _ct, _ph) =
+            spawn_sealed_rpc("circDL", "pp", b"raw download bytes").await;
+        let rpc = RpcClient::new(format!("http://{addr}/"));
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0).with_passphrase("pp");
+        let state = PortalState::new(chain);
+        state.allow("circDL");
+        let app = router(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/raw?u={}&dl=1",
+                        urlenc("oct://circDL/folder/asset.txt"),
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let cd = resp
+            .headers()
+            .get(header::CONTENT_DISPOSITION)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(cd.starts_with("attachment;"), "got CD: {cd}");
+        assert!(cd.contains("asset.txt"), "got CD: {cd}");
+    }
+
+    #[tokio::test]
+    async fn raw_endpoint_412_on_sealed_without_passphrase() {
+        let (addr, _ct, _ph) = spawn_sealed_rpc("circSEAL", "right", b"plain").await;
+        let rpc = RpcClient::new(format!("http://{addr}/"));
+        // No passphrase configured → MissingPassphrase.
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
+        let state = PortalState::new(chain);
+        state.allow("circSEAL");
+        let app = router(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/raw?u={}",
+                        urlenc("oct://circSEAL/policy.json"),
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::PRECONDITION_FAILED);
+        let body: serde_json::Value =
+            serde_json::from_str(&body_string(resp).await).unwrap();
+        assert_eq!(
+            body.get("code").and_then(|v| v.as_str()),
+            Some("sealed_decrypt_failed"),
+        );
+    }
+
+    #[tokio::test]
+    async fn unseal_form_round_trips_with_correct_passphrase() {
+        let (addr, _ct, _ph) =
+            spawn_sealed_rpc("circUNSEAL", "operator-pass", b"decrypted body").await;
+        let rpc = RpcClient::new(format!("http://{addr}/"));
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
+        let state = PortalState::new(chain);
+        state.allow("circUNSEAL"); // pre-approve so we focus on unseal
+        let app = router(state.clone());
+        // Submit the correct passphrase.
+        let form = format!(
+            "circle={c}&passphrase={p}&next={n}",
+            c = urlenc("circUNSEAL"),
+            p = urlenc("operator-pass"),
+            n = urlenc("/o/abc"),
+        );
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/unseal")
+                    .header(
+                        header::CONTENT_TYPE,
+                        "application/x-www-form-urlencoded",
+                    )
+                    .body(Body::from(form))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            resp.status().is_redirection(),
+            "expected redirect, got {}",
+            resp.status(),
+        );
+        // Cache hit: the source returns the cached passphrase.
+        let source = state.passphrase_source();
+        assert!(source.passphrase_for("circUNSEAL").is_some());
+    }
+
+    #[tokio::test]
+    async fn unseal_form_rerenders_with_error_on_wrong_passphrase() {
+        let (addr, _ct, _ph) =
+            spawn_sealed_rpc("circBAD", "right-pass", b"decrypted body").await;
+        let rpc = RpcClient::new(format!("http://{addr}/"));
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
+        let state = PortalState::new(chain);
+        let app = router(state.clone());
+        let form = format!(
+            "circle={c}&passphrase={p}&next={n}",
+            c = urlenc("circBAD"),
+            p = urlenc("wrong-pass"),
+            n = urlenc("/o/abc"),
+        );
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/unseal")
+                    .header(
+                        header::CONTENT_TYPE,
+                        "application/x-www-form-urlencoded",
+                    )
+                    .body(Body::from(form))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        let body = body_string(resp).await;
+        assert!(body.contains("wrong passphrase"), "body: {body}");
+        // Cache miss: nothing got stored.
+        let source = state.passphrase_source();
+        assert!(source.passphrase_for("circBAD").is_none());
+    }
+
+    #[tokio::test]
+    async fn unseal_form_rejects_empty_passphrase() {
+        let state = state_no_chain();
+        let app = router(state);
+        let form = format!(
+            "circle={c}&passphrase=&next={n}",
+            c = urlenc("circEMPTY"),
+            n = urlenc("/o/abc"),
+        );
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/unseal")
+                    .header(
+                        header::CONTENT_TYPE,
+                        "application/x-www-form-urlencoded",
+                    )
+                    .body(Body::from(form))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        let body = body_string(resp).await;
+        assert!(body.contains("passphrase is empty"), "body: {body}");
+    }
+
+    #[tokio::test]
+    async fn sanitize_next_clamps_off_origin_targets() {
+        assert_eq!(sanitize_next("/o/abc"), "/o/abc");
+        assert_eq!(sanitize_next("/raw?u=foo"), "/raw?u=foo");
+        assert_eq!(sanitize_next("/api/resolve?u=foo"), "/api/resolve?u=foo");
+        assert_eq!(sanitize_next("/"), "/");
+        // Off-origin / scheme attacks collapse to root.
+        assert_eq!(sanitize_next("https://evil/"), "/");
+        assert_eq!(sanitize_next("//evil/"), "/");
+        assert_eq!(sanitize_next("javascript:alert(1)"), "/");
+    }
+
+    #[test]
+    fn last_path_component_picks_final_segment() {
+        assert_eq!(last_path_component("/policy.json"), "policy.json");
+        assert_eq!(last_path_component("/a/b/c.txt"), "c.txt");
+        assert_eq!(last_path_component("/"), "circle-asset.bin");
+    }
+
+    #[test]
+    fn passphrase_error_page_renders_interactive_form() {
+        // The sealed-decrypt path now renders the unseal form, not a
+        // static 412. Smoke test that critical pieces are present.
+        let state = state_no_chain();
+        let err = FetchAssetError::MissingPassphrase {
+            circle_id: "circFORM".into(),
+            path: "/policy.json".into(),
+        };
+        let resp = fetch_error_page(&state, "oct://circFORM/policy.json", "circFORM", err);
+        assert_eq!(resp.status(), StatusCode::PRECONDITION_FAILED);
+        let body = futures_executor_block_on(body_string(resp));
+        assert!(body.contains(r#"action="/unseal""#), "body: {body}");
+        assert!(body.contains(r#"name="passphrase""#), "body: {body}");
+        assert!(body.contains("circFORM"));
+    }
+
+    /// Tiny block_on helper for the sync `passphrase_error_page` test.
+    /// Uses a fresh single-thread runtime so it doesn't tangle with
+    /// the outer `#[tokio::test]` runtimes.
+    fn futures_executor_block_on<F: std::future::Future>(f: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(f)
     }
 }
