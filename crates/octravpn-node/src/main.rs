@@ -33,6 +33,7 @@ mod rate_limit;
 mod seal;
 mod tunnel;
 mod v3_boot;
+mod v3_cli;
 
 use config::NodeConfig;
 use hub::Hub;
@@ -149,26 +150,38 @@ enum Cmd {
         #[arg(long)]
         passphrase_stdin: bool,
     },
+    /// v3 chain-minimal entrypoints. Every non-boot v3 method exposed
+    /// by `program/main-v3.aml` is reachable here as a subcommand:
+    /// bond / unbond / finalize / slash / rotate / retire-circle,
+    /// tailnet create / update / retire / deposit / withdraw, session
+    /// open / settle-claim / settle-confirm / claim-no-show / sweep,
+    /// and claim-earnings. The boot flow (`register_circle` /
+    /// `update_circle_state`) still goes through `register` / `run`.
+    V3 {
+        #[command(subcommand)]
+        cmd: v3_cli::V3Cmd,
+    },
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     octravpn_core::util::init_tracing("info,octravpn_node=debug");
 
-    let cli = Cli::parse();
+    let Cli { config, cmd } = Cli::parse();
 
-    // Seal / unseal subcommands must NOT call `Hub::new`: Hub's
-    // constructor reads the wallet + wg keys, which is precisely what
-    // we're about to wrap. Dispatch them on the config (paths only)
-    // without instantiating a hub.
-    match cli.cmd {
+    // Subcommands that do NOT need a Hub. Seal / unseal wrap the wallet
+    // + wg keys (Hub::new would try to read them); v3 only needs a
+    // ChainCtxV3 (RPC + program addr + wallet) that the v3_cli
+    // dispatcher builds itself. Handle these first so we can short-
+    // circuit before the Hub boot path.
+    match cmd {
         Cmd::SealKeys {
-            ref passphrase,
-            ref passphrase_file,
+            passphrase,
+            passphrase_file,
             passphrase_stdin,
             remove_plaintext,
         } => {
-            let cfg = NodeConfig::load(&cli.config)?;
+            let cfg = NodeConfig::load(&config)?;
             return run_seal_keys(
                 &cfg,
                 passphrase.as_deref(),
@@ -178,50 +191,56 @@ async fn main() -> Result<()> {
             );
         }
         Cmd::UnsealKeys {
-            ref tmpdir,
-            ref passphrase,
-            ref passphrase_file,
+            tmpdir,
+            passphrase,
+            passphrase_file,
             passphrase_stdin,
         } => {
-            let cfg = NodeConfig::load(&cli.config)?;
+            let cfg = NodeConfig::load(&config)?;
             return run_unseal_keys(
                 &cfg,
-                tmpdir,
+                &tmpdir,
                 passphrase.as_deref(),
                 passphrase_file.as_deref(),
                 passphrase_stdin,
             );
         }
-        _ => {}
-    }
-
-    let cfg = NodeConfig::load(&cli.config)?;
-    let hub = Arc::new(Hub::new(cfg).await?);
-
-    match cli.cmd {
-        Cmd::Identity => {
-            hub.print_identity();
-            Ok(())
+        Cmd::V3 { cmd: v3cmd } => {
+            return v3_cli::dispatch(std::path::Path::new(&config), v3cmd).await;
         }
-        Cmd::Bond { amount } => hub.bond_endpoint(amount).await,
-        Cmd::Unbond => hub.unbond_endpoint().await,
-        Cmd::FinalizeUnbond => hub.finalize_unbond().await,
-        Cmd::Register => hub.register_endpoint().await,
-        Cmd::ClaimEarnings => hub.claim_earnings().await,
-        Cmd::SettleClaim {
-            session_id,
-            bytes_used,
-        } => hub.settle_claim(session_id, bytes_used).await,
-        Cmd::AccumulatorAdd {
-            delta_amount,
-            delta_blind_hex,
-        } => hub.accumulator_add(delta_amount, &delta_blind_hex),
-        Cmd::VerifyAuditLog { path } => verify_audit_log(&hub, &path),
-        Cmd::Run => run(hub).await,
-        Cmd::SealKeys { .. } | Cmd::UnsealKeys { .. } => {
-            // Handled above the Hub::new boundary; the early-return
-            // matches ensure we never reach here.
-            unreachable!("seal-keys / unseal-keys dispatched pre-Hub::new")
+        // Everything else needs the Hub: dispatch below.
+        rest => {
+            let cfg = NodeConfig::load(&config)?;
+            let hub = Arc::new(Hub::new(cfg).await?);
+            return match rest {
+                Cmd::Identity => {
+                    hub.print_identity();
+                    Ok(())
+                }
+                Cmd::Bond { amount } => hub.bond_endpoint(amount).await,
+                Cmd::Unbond => hub.unbond_endpoint().await,
+                Cmd::FinalizeUnbond => hub.finalize_unbond().await,
+                Cmd::Register => hub.register_endpoint().await,
+                Cmd::ClaimEarnings => hub.claim_earnings().await,
+                Cmd::SettleClaim {
+                    session_id,
+                    bytes_used,
+                } => hub.settle_claim(session_id, bytes_used).await,
+                Cmd::AccumulatorAdd {
+                    delta_amount,
+                    delta_blind_hex,
+                } => hub.accumulator_add(delta_amount, &delta_blind_hex),
+                Cmd::VerifyAuditLog { path } => verify_audit_log(&hub, &path),
+                Cmd::Run => run(hub).await,
+                Cmd::SealKeys { .. }
+                | Cmd::UnsealKeys { .. }
+                | Cmd::V3 { .. } => {
+                    // Handled above the Hub::new boundary.
+                    unreachable!(
+                        "seal-keys / unseal-keys / v3 dispatched pre-Hub::new"
+                    )
+                }
+            };
         }
     }
 }
