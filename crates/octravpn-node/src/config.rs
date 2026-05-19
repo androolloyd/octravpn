@@ -270,6 +270,17 @@ pub(crate) struct ControlCfg {
     /// P1-9.
     #[serde(default)]
     pub receipt_journal_path: Option<String>,
+    /// Bearer token gating the `POST /admin/preauth` endpoint (the
+    /// preauth-key minter the Tailscale-interop harness probes for).
+    /// `None` (the default) hides the endpoint entirely (any request
+    /// returns 404, matching the `/events` design) so a curious
+    /// scanner can't tell whether the surface exists. The
+    /// `OCTRAVPN_ADMIN_TOKEN` environment variable, if set, is used
+    /// as a fallback when this field is unset — handy for ephemeral
+    /// docker containers that load the token from a compose secret
+    /// rather than persisting it in the rendered `node.toml`.
+    #[serde(default)]
+    pub admin_token: Option<String>,
 }
 
 impl Default for ControlCfg {
@@ -279,6 +290,7 @@ impl Default for ControlCfg {
             audit_dir: None,
             events_token: None,
             receipt_journal_path: None,
+            admin_token: None,
         }
     }
 }

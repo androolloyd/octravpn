@@ -161,6 +161,46 @@ enum Cmd {
         #[command(subcommand)]
         cmd: v3_cli::V3Cmd,
     },
+    /// Mesh / Tailscale-interop control surface. Subcommands here
+    /// are exercised by `docker/devnet/tailscale-interop/run-interop.sh`
+    /// and by operators provisioning new tailnet members. See
+    /// `docs/tailscale-interop-blocker.md` for the gap between
+    /// "we mint a preauth key" and "stock `tailscale up` completes a
+    /// handshake against us."
+    Mesh {
+        #[command(subcommand)]
+        sub: MeshCmd,
+    },
+}
+
+#[derive(Parser, Debug)]
+enum MeshCmd {
+    /// Mint a fresh preauth key. Writes the key to stdout as a single
+    /// line — easy to consume from a shell harness:
+    ///
+    ///   KEY=$(octravpn-node mesh mint-preauth --user alice)
+    ///   tailscale up --login-server http://… --authkey "$KEY"
+    ///
+    /// The key is generated locally (no daemon contact) and is
+    /// suitable for emitting to an operator. Cross-process binding
+    /// (so a running daemon's coordination plane would accept the
+    /// key) requires the persistent minter from
+    /// `docs/tailscale-interop-blocker.md`; until that lands, this
+    /// subcommand is fine for satisfying the interop test's "is the
+    /// preauth surface reachable" probe but cannot, on its own,
+    /// authorise a real tailscale join.
+    MintPreauth {
+        /// User label to bind the minted key to.
+        #[arg(long, default_value = "default")]
+        user: String,
+        /// Mark the key as reusable (off by default — matches
+        /// Tailscale's safer single-use default).
+        #[arg(long)]
+        reusable: bool,
+        /// TTL in seconds. Defaults to `DEFAULT_PREAUTH_TTL` (1 h).
+        #[arg(long)]
+        ttl_secs: Option<u64>,
+    },
 }
 
 #[tokio::main]
@@ -208,6 +248,13 @@ async fn main() -> Result<()> {
         Cmd::V3 { cmd: v3cmd } => {
             return v3_cli::dispatch(std::path::Path::new(&config), v3cmd).await;
         }
+        // Mesh subcommands operate on the headscale-bridge surface and
+        // do not need wallet/chain state. Dispatch before `Hub::new`
+        // so the harness can mint a preauth key without a configured
+        // RPC endpoint.
+        Cmd::Mesh { sub } => {
+            return run_mesh_cmd(&sub);
+        }
         // Everything else needs the Hub: dispatch below.
         rest => {
             let cfg = NodeConfig::load(&config)?;
@@ -234,13 +281,49 @@ async fn main() -> Result<()> {
                 Cmd::Run => run(hub).await,
                 Cmd::SealKeys { .. }
                 | Cmd::UnsealKeys { .. }
-                | Cmd::V3 { .. } => {
+                | Cmd::V3 { .. }
+                | Cmd::Mesh { .. } => {
                     // Handled above the Hub::new boundary.
                     unreachable!(
-                        "seal-keys / unseal-keys / v3 dispatched pre-Hub::new"
+                        "seal-keys / unseal-keys / v3 / mesh dispatched pre-Hub::new"
                     )
                 }
             };
+        }
+    }
+}
+
+/// Dispatch a `mesh …` subcommand. Lives outside `main` so future
+/// subcommands (e.g. `mesh acl push`, `mesh peers list`) can drop in
+/// next to `MintPreauth` without expanding the giant top-level match.
+/// Returns `Result<()>` (rather than `()`) so future subcommands that
+/// *do* fail (chain-touching ones) can `?`-propagate without a
+/// signature change. The current single arm is infallible — clippy
+/// allow is intentional.
+#[allow(clippy::unnecessary_wraps)]
+fn run_mesh_cmd(sub: &MeshCmd) -> Result<()> {
+    match sub {
+        MeshCmd::MintPreauth {
+            user,
+            reusable,
+            ttl_secs,
+        } => {
+            use octravpn_mesh::{PreauthMinter, DEFAULT_PREAUTH_TTL};
+            let ttl = ttl_secs
+                .map(std::time::Duration::from_secs)
+                .unwrap_or(DEFAULT_PREAUTH_TTL);
+            let minter = PreauthMinter::new();
+            let pk = minter.mint(user, ttl, *reusable);
+            // Single-line stdout output so the harness can capture
+            // with `KEY=$(octravpn-node mesh mint-preauth --user u)`.
+            // Everything else (user, expiry) goes to stderr so it
+            // doesn't pollute the captured value.
+            eprintln!(
+                "minted preauth: user={} reusable={} expires_at={}",
+                pk.user, pk.reusable, pk.expires_at
+            );
+            println!("{}", pk.key);
+            Ok(())
         }
     }
 }

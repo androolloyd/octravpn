@@ -29,6 +29,7 @@ pub mod subnet;
 
 pub use acl::{AclAction, AclDoc, AclRule, PortRef, SignedAclDoc};
 pub use conn::{ConnState, Connection, ConnectionManager};
+pub use headscale_bridge::{PreauthKey, PreauthMinter, RedeemError, DEFAULT_PREAUTH_TTL};
 pub use ip_alloc::TailnetIpAllocator;
 pub use magic_dns::MagicDns;
 pub use manager::{MeshAction, MeshManager};

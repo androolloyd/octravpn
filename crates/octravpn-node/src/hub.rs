@@ -910,6 +910,18 @@ impl Hub {
                 .listen
                 .parse()
                 .context("parse control listen addr")?;
+            // Admin token resolution order: explicit config field >
+            // OCTRAVPN_ADMIN_TOKEN env var > absent (endpoint
+            // hidden). The env-var path lets the
+            // `docker/devnet/tailscale-interop` harness inject a
+            // token via the compose secret without re-rendering
+            // node.toml.
+            let admin_token = self
+                .cfg
+                .control
+                .admin_token
+                .clone()
+                .or_else(|| std::env::var("OCTRAVPN_ADMIN_TOKEN").ok());
             let mut state = ControlState::with_metrics(
                 self.wg_kp.clone(),
                 self.router.clone(),
@@ -918,7 +930,8 @@ impl Hub {
                 receipt_context,
                 receipt_journal,
             )
-            .with_events_token(self.cfg.control.events_token.clone());
+            .with_events_token(self.cfg.control.events_token.clone())
+            .with_admin_token(admin_token);
             // Open the audit log next to the wallet secret unless a
             // dedicated path is configured.
             let audit_dir = self

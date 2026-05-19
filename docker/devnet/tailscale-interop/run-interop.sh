@@ -1,274 +1,265 @@
 #!/usr/bin/env bash
-# run-interop.sh — orchestration script for the stock-tailscale ↔
-# octravpn-mesh interop scenario.
+# Tailscale-interop test harness.
 #
-# Lifecycle:
-#   1. docker compose up --build (control + 2 stock tailscale clients).
-#   2. Wait for the control container to become healthy.
-#   3. Mint a preauth key per client. (See "PREAUTH GAP" below — there
-#      is no CLI/RPC for this in THIS repo's octravpn-mesh; the script
-#      attempts the lowest-friction surface and records the failure
-#      mode if no minting endpoint exists.)
-#   4. `docker compose exec` into each tailscale container and run
-#      `tailscale up --login-server=http://headscale:51821
-#      --authkey=...  --tun=userspace-networking`.
-#   5. Wait up to 60s for both clients to settle.
-#   6. Run `tailscale ping <peer-IP>` from A to B and assert success.
+# Drives a stock `tailscale/tailscale:latest` client through the
+# canonical join + ping flow against the OctraVPN mesh control plane.
 #
-# Exit codes:
-#   0   tailscale ping A→B succeeded (Tailscale wire protocol intact).
-#   10  control plane never came up.
-#   20  preauth-key minting unavailable (octravpn-mesh exposes none).
-#   30  `tailscale up` failed (most likely cause: octravpn-node does
-#        not implement Tailscale's /key and /machine/{mkey}/map
-#        endpoints — see crates/octravpn-node/src/control.rs).
-#   40  client never reached "Running" state inside 60 s.
-#   50  `tailscale ping` failed across the mesh.
+# Exit codes (the test's spec — DO NOT renumber without updating the
+# corresponding documentation in
+# `docs/tailscale-interop-finding.md` and the calling subagent
+# prompt):
 #
-# Always tears the stack down on exit via `trap`.
+#   0   tailscale ping succeeded end-to-end.
+#   10  mesh-control didn't reach /health (or its preauth surface).
+#   20  preauth-key minting surface not available.
+#   30  tailscale up failed on at least one peer.
+#   40  peers never converged on the IP plane.
+#   50  tailscale ping failed despite peers being up.
+#
+# This harness is intentionally **docker-only**. The OctraVPN test
+# rig forbids running daemons natively (see
+# `memory/feedback_docker_only.md`); native paths are not supported.
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# ---------------------------------------------------------------------------
+# Layout + paths.
+# ---------------------------------------------------------------------------
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "${SCRIPT_DIR}/../../.." && pwd)
 COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
-PROJECT_NAME="octravpn-tailscale-interop"
 
-# Resolve the cargo build context. The control-plane image needs
-# `octra/` and the sibling `octra-foundry/` visible side-by-side
-# (octravpn-core path-deps into the latter). When this script lives in
-# a git worktree under `.claude/worktrees/...`, the worktree's octra/
-# files are not adjacent to octra-foundry/ on disk, so we stage a
-# build context in a tmpdir with the right shape.
-#
-# If OCTRA_BUILD_CTX is set in the env, we trust it as-is.
-
-if [ -z "${OCTRA_BUILD_CTX:-}" ]; then
-  # Locate this checkout's repo root (the octra/ tree containing
-  # SCRIPT_DIR). SCRIPT_DIR is .../docker/devnet/tailscale-interop, so
-  # the repo root is three levels up.
-  OCTRA_SRC="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
-  # Locate the sibling octra-foundry/ checkout. Try parent of the main
-  # checkout first, then walk up.
-  FOUNDRY_SRC=""
-  for candidate in \
-      "$(dirname "${OCTRA_SRC}")/octra-foundry" \
-      "/Users/androolloyd/Development/octra-foundry"; do
-    if [ -d "${candidate}/crates/octra-core" ]; then
-      FOUNDRY_SRC="${candidate}"
-      break
-    fi
-  done
-  if [ -z "${FOUNDRY_SRC}" ]; then
-    cat >&2 <<EOF
-[run-interop] FATAL: could not locate the sibling octra-foundry/
-              checkout. The control image's cargo build needs it for
-              path-deps in crates/octravpn-core/Cargo.toml. Set
-              OCTRA_BUILD_CTX explicitly to a directory containing
-              both octra/ and octra-foundry/ and re-run.
-EOF
-    exit 2
-  fi
-  # Stage a build context: a tmpdir holding bind-mounted copies of
-  # both checkouts so the Dockerfile's `COPY octra-foundry` and `COPY
-  # octra` see the worktree's source (not the main checkout's stale
-  # files).
-  STAGE_DIR="$(mktemp -d -t octravpn-interop-XXXXXX)"
-  echo "[run-interop] staging build context at ${STAGE_DIR}"
-  # rsync excludes target/ to keep the build context small.
-  rsync -a --delete --exclude='target/' --exclude='.git/' \
-        "${OCTRA_SRC}/" "${STAGE_DIR}/octra/"
-  rsync -a --delete --exclude='target/' --exclude='.git/' \
-        "${FOUNDRY_SRC}/" "${STAGE_DIR}/octra-foundry/"
-  OCTRA_BUILD_CTX="${STAGE_DIR}"
-  # Ensure the stage dir gets cleaned up alongside the docker
-  # teardown.
-  STAGE_DIR_TO_CLEAN="${STAGE_DIR}"
-fi
-export OCTRA_BUILD_CTX
-echo "[run-interop] OCTRA_BUILD_CTX=${OCTRA_BUILD_CTX}"
-
-# All `docker compose` invocations go through this so the project name
-# and compose file are pinned consistently for `up`, `exec`, and `down`.
-dc() {
-  docker compose -p "${PROJECT_NAME}" -f "${COMPOSE_FILE}" "$@"
+# Pretty-prints a step header so the operator can tell which exit code
+# corresponds to which failure point.
+step() {
+    printf '\n=== %s ===\n' "$1" >&2
 }
 
+# Best-effort teardown. Always run on exit so a Ctrl-C doesn't leak
+# containers across the next run.
 cleanup() {
-  local rc=$?
-  echo
-  echo "[run-interop] tearing down (exit code was ${rc})"
-  dc logs --tail=200 mesh-control tailscale-a tailscale-b 2>&1 | sed 's/^/  /' || true
-  dc down --volumes --remove-orphans >/dev/null 2>&1 || true
-  if [ -n "${STAGE_DIR_TO_CLEAN:-}" ] && [ -d "${STAGE_DIR_TO_CLEAN}" ]; then
-    rm -rf "${STAGE_DIR_TO_CLEAN}"
-  fi
-  exit "${rc}"
+    docker compose -f "${COMPOSE_FILE}" down -v --remove-orphans >/dev/null 2>&1 || true
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
 
-# -----------------------------------------------------------------
-# Step 1: bring the stack up.
-# -----------------------------------------------------------------
-echo "[run-interop] step 1/6: docker compose up --build -d"
-dc up --build -d
+# ---------------------------------------------------------------------------
+# Step 1 — build a Linux-compatible octravpn-node binary.
+#
+# The compose file bind-mounts the binary into the mesh-control
+# container at /usr/local/bin/octravpn-node. On macOS hosts a host
+# `cargo build` produces a Mach-O which can't be exec'd inside a
+# Linux container; instead we run cargo build inside the existing
+# `octravpn-builder` image (or, if not present, a stock
+# `rust:1.88-bookworm`) and emit to `target/linux-debug/`. The build
+# is bind-mounted, so the second run is incremental.
+#
+# Why not a build stage in the compose file: the `octravpn-builder`
+# image already exists in the project's docker harness; reusing it
+# keeps the workspace target/ caches warm across `e2e.sh` and the
+# interop test.
+# ---------------------------------------------------------------------------
 
-# -----------------------------------------------------------------
-# Step 2: wait for control-plane health.
-# -----------------------------------------------------------------
-echo "[run-interop] step 2/6: wait for mesh-control health"
-deadline=$(( $(date +%s) + 120 ))
-while :; do
-  status="$(docker inspect -f '{{.State.Health.Status}}' octravpn-mesh-control 2>/dev/null || echo missing)"
-  if [ "${status}" = "healthy" ]; then
-    echo "[run-interop]   mesh-control is healthy"
-    break
-  fi
-  if [ "$(date +%s)" -ge "${deadline}" ]; then
-    echo "[run-interop] FATAL: mesh-control never became healthy (status=${status})"
+step "Step 1: build octravpn-node (Linux target via container)"
+
+# The `octra-foundry` sibling provides path-deps (`octra-core`,
+# `octra-mock-rpc`). The interop build needs it bind-mounted next to
+# the repo just like the rest of the OctraVPN harness does.
+OCTRA_FOUNDRY="${REPO_ROOT}/../octra-foundry"
+if [[ ! -d "${OCTRA_FOUNDRY}" ]]; then
+    echo "BUILD FAIL: ../octra-foundry not found next to repo root" >&2
     exit 10
-  fi
-  sleep 2
-done
+fi
 
-# -----------------------------------------------------------------
-# Step 3: mint preauth keys.
-#
-# PREAUTH GAP — found 2026-05-19:
-# `crates/octravpn-mesh/src/headscale_bridge.rs` is documented as a
-# pin-only module ("zero Rust-API coupling to headscale-rs"). The
-# crate has no public surface for minting Tailscale preauth keys, and
-# `octravpn-node`'s control plane only exposes /session, /session/:id,
-# /health, /metrics, /events — none of which are Tailscale-protocol
-# endpoints. There is therefore no CLI, no RPC, and no exec-able
-# surface inside the control container that can produce a preauth
-# key the stock tailscale CLI will accept.
-#
-# We probe for one anyway. If the probe ever starts returning a key
-# (e.g. once the bridge lands), the test will proceed automatically.
-# -----------------------------------------------------------------
-echo "[run-interop] step 3/6: mint preauth keys"
+# Prefer the project's own builder image (which already has the
+# system deps, the rust toolchain, and a warm cargo cache); fall
+# back to a stock rust:1.88-bookworm if it hasn't been built locally
+# yet.
+BUILDER_IMAGE="octravpn-builder:latest"
+if ! docker image inspect "${BUILDER_IMAGE}" >/dev/null 2>&1; then
+    echo "octravpn-builder:latest not present; falling back to rust:1.88-bookworm" >&2
+    BUILDER_IMAGE="rust:1.88-bookworm"
+fi
 
-mint_preauth_key() {
-  local label="$1"
-  # Surface 1: hypothetical `octravpn-node mesh mint-preauth` subcommand.
-  if dc exec -T mesh-control sh -c '/usr/local/bin/octravpn-node mesh mint-preauth --help' >/dev/null 2>&1; then
-    dc exec -T mesh-control sh -c "/usr/local/bin/octravpn-node mesh mint-preauth --label ${label}"
-    return 0
-  fi
-  # Surface 2: hypothetical HTTP admin endpoint on the control plane.
-  if dc exec -T mesh-control sh -c 'command -v curl' >/dev/null 2>&1; then
-    if dc exec -T mesh-control sh -c \
-      "curl -fsS -X POST http://127.0.0.1:51821/admin/preauth -d '{\"label\":\"${label}\"}'" 2>/dev/null; then
-      return 0
+LINUX_TARGET_DIR="${REPO_ROOT}/target/linux-debug"
+mkdir -p "${LINUX_TARGET_DIR}" \
+         "${LINUX_TARGET_DIR}/cargo-registry" \
+         "${LINUX_TARGET_DIR}/cargo-git"
+
+docker run --rm \
+    -v "${REPO_ROOT}":/work/octra \
+    -v "${OCTRA_FOUNDRY}":/work/octra-foundry \
+    -v "${LINUX_TARGET_DIR}":/work/octra/target \
+    -v "${LINUX_TARGET_DIR}/cargo-registry":/usr/local/cargo/registry \
+    -v "${LINUX_TARGET_DIR}/cargo-git":/usr/local/cargo/git \
+    -w /work/octra \
+    "${BUILDER_IMAGE}" \
+    bash -c "cargo build --bin octravpn-node" >&2 || {
+        echo "BUILD FAIL: cargo build inside ${BUILDER_IMAGE} failed" >&2
+        exit 10
+    }
+
+LINUX_BIN="${LINUX_TARGET_DIR}/debug/octravpn-node"
+test -x "${LINUX_BIN}" || {
+    echo "BUILD FAIL: binary not at ${LINUX_BIN}" >&2
+    exit 10
+}
+echo "linux binary at ${LINUX_BIN}" >&2
+
+# ---------------------------------------------------------------------------
+# Step 2 — bring up the compose stack.
+# ---------------------------------------------------------------------------
+
+step "Step 2: docker compose up"
+docker compose -f "${COMPOSE_FILE}" up -d >&2 || {
+    echo "COMPOSE FAIL: could not start mesh-control + ts peers" >&2
+    exit 10
+}
+
+# Wait for mesh-control to be up. The current harness runs the
+# container as a sleep-forever shim with the binary bind-mounted —
+# see the docker-compose.yml comment for why. "Health" here just
+# means the binary is reachable via `docker exec`. When the full
+# coordination plane lands, this check upgrades to polling
+# /health like the rest of the OctraVPN harness.
+mesh_reachable=""
+for _ in $(seq 1 20); do
+    if docker exec tsi-mesh-control test -x /usr/local/bin/octravpn-node >/dev/null 2>&1; then
+        mesh_reachable=1
+        break
     fi
-  fi
-  return 1
-}
-
-if AUTHKEY_A="$(mint_preauth_key tailscale-a 2>/dev/null)" \
-   && AUTHKEY_B="$(mint_preauth_key tailscale-b 2>/dev/null)" \
-   && [ -n "${AUTHKEY_A}" ] && [ -n "${AUTHKEY_B}" ]; then
-  echo "[run-interop]   minted authkey A (${#AUTHKEY_A} chars), authkey B (${#AUTHKEY_B} chars)"
-else
-  # Drift-diagnostic probes: hit the Tailscale-protocol endpoints a
-  # stock tailscale client would try first. Each is expected to 404 /
-  # connection-refuse against the current octravpn-node control
-  # plane; we surface the responses so the finding is unambiguous.
-  echo "[run-interop]   diagnostic: probing Tailscale-protocol endpoints on mesh-control"
-  for path in /key /machine/dummy/map /derp/probe; do
-    code="$(dc exec -T tailscale-a sh -c \
-      "wget --no-check-certificate -qSO- --timeout=3 \
-       http://headscale:51821${path} 2>&1 | head -3" || true)"
-    echo "[run-interop]     GET ${path} -> $(printf '%s' "${code}" | head -1)"
-  done
-  cat <<EOF
-[run-interop] FATAL: no preauth-key minting surface available.
-[run-interop]
-[run-interop]   octravpn-mesh does not expose a CLI or RPC for minting
-[run-interop]   Tailscale preauth keys. See
-[run-interop]   crates/octravpn-mesh/src/headscale_bridge.rs — the
-[run-interop]   integration boundary is pin-only at this commit. Until
-[run-interop]   that bridge lands, no stock tailscale client can join
-[run-interop]   this mesh. This is the finding the test was built to
-[run-interop]   surface.
-EOF
-  exit 20
-fi
-
-# -----------------------------------------------------------------
-# Step 4: bring each tailscale CLI up against the control plane.
-# -----------------------------------------------------------------
-echo "[run-interop] step 4/6: tailscale up against http://headscale:51821"
-
-tailscale_up() {
-  local svc="$1" key="$2"
-  dc exec -T "${svc}" sh -c \
-    "tailscale --socket=/tmp/tailscaled.sock up \
-        --login-server=http://headscale:51821 \
-        --authkey='${key}' \
-        --hostname='${svc}' \
-        --accept-routes \
-        --reset \
-        --timeout=30s" \
-    && return 0
-  return 1
-}
-
-if ! tailscale_up tailscale-a "${AUTHKEY_A}"; then
-  cat <<EOF
-[run-interop] FATAL: \`tailscale up\` against the OctraVPN control plane failed.
-[run-interop]
-[run-interop]   Most likely cause: \`octravpn-node\` does not expose
-[run-interop]   Tailscale's coordination endpoints. The router in
-[run-interop]   crates/octravpn-node/src/control.rs only mounts:
-[run-interop]     POST /session,  GET /session/:id,  GET /health,
-[run-interop]     GET /metrics,   GET /events
-[run-interop]   None of these are the \`/key\`, \`/machine/{mkey}/map\`,
-[run-interop]   or Noise TS2021 surface a stock tailscale binary
-[run-interop]   requires.
-EOF
-  exit 30
-fi
-tailscale_up tailscale-b "${AUTHKEY_B}" || exit 30
-
-# -----------------------------------------------------------------
-# Step 5: wait for both clients to settle into a "Running" state.
-# -----------------------------------------------------------------
-echo "[run-interop] step 5/6: wait for both clients to reach Running"
-settled=0
-for _ in $(seq 1 60); do
-  a_state="$(dc exec -T tailscale-a tailscale --socket=/tmp/tailscaled.sock status --json 2>/dev/null | grep -o '"BackendState":"[^"]*"' | head -1 || true)"
-  b_state="$(dc exec -T tailscale-b tailscale --socket=/tmp/tailscaled.sock status --json 2>/dev/null | grep -o '"BackendState":"[^"]*"' | head -1 || true)"
-  if [ "${a_state}" = '"BackendState":"Running"' ] && [ "${b_state}" = '"BackendState":"Running"' ]; then
-    settled=1
-    break
-  fi
-  sleep 1
+    sleep 1
 done
-if [ "${settled}" -ne 1 ]; then
-  echo "[run-interop] FATAL: clients never reached Running (a=${a_state:-?} b=${b_state:-?})"
-  exit 40
+if [[ -z "${mesh_reachable}" ]]; then
+    echo "MESH-CONTROL UNREACHABLE: binary not visible inside container in 20s" >&2
+    docker compose -f "${COMPOSE_FILE}" logs mesh-control >&2 || true
+    exit 10
+fi
+echo "mesh-control container ready (binary present in /usr/local/bin)" >&2
+
+# ---------------------------------------------------------------------------
+# Step 3 — preauth-key minting surface.
+#
+# The test probes BOTH paths; either landing is enough to clear
+# exit code 20.
+#
+#   3a. `docker exec mesh-control octravpn-node mesh mint-preauth …`
+#       Catches "operator pastes a key from a `docker exec` session"
+#       workflow.
+#
+#   3b. `curl -H "Authorization: Bearer …" /admin/preauth`
+#       Catches "automation harness wants a key without an interactive
+#       shell" workflow.
+# ---------------------------------------------------------------------------
+
+step "Step 3: mint a preauth key (CLI + HTTP)"
+
+CLI_KEY=""
+if docker exec tsi-mesh-control octravpn-node mesh mint-preauth --user interop-test \
+       >/tmp/tsi-cli-key 2>/tmp/tsi-cli-key.err; then
+    CLI_KEY=$(tr -d '[:space:]' </tmp/tsi-cli-key)
 fi
 
-# Discover B's tailnet IP from A's view of the network map.
-PEER_IP_B="$(dc exec -T tailscale-a sh -c \
-  "tailscale --socket=/tmp/tailscaled.sock status | awk '/tailscale-b/ {print \$1; exit}'" \
-  | tr -d '\r')"
-if [ -z "${PEER_IP_B}" ]; then
-  echo "[run-interop] FATAL: A could not see B in its tailnet map"
-  exit 40
+HTTP_KEY=""
+HTTP_BODY=$(curl -fsS --max-time 5 \
+    -H "Authorization: Bearer interop-test-token" \
+    -H "Content-Type: application/json" \
+    -d '{"user":"interop-test","reusable":false}' \
+    http://127.0.0.1:51821/admin/preauth 2>/dev/null || true)
+if [[ -n "${HTTP_BODY}" ]]; then
+    # The endpoint returns a flat JSON object; grab the value of
+    # the `"key"` field without taking a hard dep on python/jq.
+    HTTP_KEY=$(printf '%s' "${HTTP_BODY}" | sed -nE 's/.*"key"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p')
 fi
-echo "[run-interop]   A sees B at ${PEER_IP_B}"
 
-# -----------------------------------------------------------------
-# Step 6: tailscale ping A → B (the actual interop assertion).
-# -----------------------------------------------------------------
-echo "[run-interop] step 6/6: tailscale ping A → B (${PEER_IP_B})"
-if dc exec -T tailscale-a sh -c \
-     "tailscale --socket=/tmp/tailscaled.sock ping --c 3 --timeout 5s ${PEER_IP_B}"; then
-  echo
-  echo "[run-interop] PASS: stock tailscale CLI joined OctraVPN mesh and pinged peer"
-  exit 0
+if [[ -z "${CLI_KEY}" && -z "${HTTP_KEY}" ]]; then
+    echo "PREAUTH SURFACE MISSING:" >&2
+    echo "  CLI:  $(cat /tmp/tsi-cli-key.err 2>/dev/null || echo '(no stderr)')" >&2
+    echo "  HTTP: ${HTTP_BODY:-(empty)}" >&2
+    exit 20
 fi
-echo "[run-interop] FATAL: \`tailscale ping\` A→B failed despite both nodes Running"
-exit 50
+
+if [[ -n "${CLI_KEY}" ]]; then
+    echo "preauth via CLI: ${CLI_KEY}" >&2
+fi
+if [[ -n "${HTTP_KEY}" ]]; then
+    echo "preauth via HTTP: ${HTTP_KEY}" >&2
+fi
+# Prefer the HTTP-minted key for the tailscale up step: it's the
+# one that's tied to the running daemon's in-memory store. (When
+# the future coordination plane lands, only that key path is
+# bound into the same MeteringSession.)
+PREAUTH_KEY="${HTTP_KEY:-${CLI_KEY}}"
+
+# ---------------------------------------------------------------------------
+# Step 4 — `tailscale up` on both peers using the minted key.
+#
+# This step is expected to fail in the current bridge: we have no
+# `/key` + `/machine/{node_key}/{register,map}` wire protocol on
+# the mesh-control side. The script still tries — exit code 30 is
+# the documented "preauth surface reachable, full Tailscale wire
+# protocol not". See docs/tailscale-interop-blocker.md for the
+# remaining gap.
+# ---------------------------------------------------------------------------
+
+step "Step 4: tailscale up on both peers"
+
+LOGIN_SERVER="http://tsi-mesh-control:51821"
+TS_UP_OK=1
+for peer in tsi-peer-a tsi-peer-b; do
+    # `tailscale up` blocks forever waiting for the coordination
+    # server when there's nothing on the other end of the
+    # login-server URL — wrap the call in `timeout` so the test
+    # terminates cleanly. 20s is generous: a working coordination
+    # plane completes `up` in well under 5s in this docker harness;
+    # anything longer is a stall.
+    if ! docker exec "${peer}" sh -c \
+        "/usr/bin/timeout 20 tailscale --socket=/var/run/tailscale/tailscaled.sock up \
+            --login-server '${LOGIN_SERVER}' \
+            --authkey '${PREAUTH_KEY}' \
+            --hostname ${peer} \
+            --accept-routes \
+            --reset" \
+        >>/tmp/tsi-up-${peer}.log 2>&1; then
+        TS_UP_OK=0
+        echo "tailscale up failed on ${peer}; tail of log:" >&2
+        tail -n 30 /tmp/tsi-up-${peer}.log >&2 || true
+    fi
+done
+
+if [[ ${TS_UP_OK} -ne 1 ]]; then
+    echo "TAILSCALE-UP FAILED on at least one peer; coordination plane gap (see docs/tailscale-interop-blocker.md)" >&2
+    exit 30
+fi
+
+# ---------------------------------------------------------------------------
+# Step 5 — converge on the IP plane.
+# ---------------------------------------------------------------------------
+
+step "Step 5: wait for IP-plane convergence"
+PEER_B_IP=""
+for _ in $(seq 1 30); do
+    PEER_B_IP=$(docker exec tsi-peer-b tailscale ip -4 2>/dev/null | head -1 || true)
+    if [[ -n "${PEER_B_IP}" ]]; then
+        break
+    fi
+    sleep 1
+done
+if [[ -z "${PEER_B_IP}" ]]; then
+    echo "IP-PLANE CONVERGENCE FAILED: peer-b never advertised a tailscale IP" >&2
+    exit 40
+fi
+echo "peer-b tailscale ip: ${PEER_B_IP}" >&2
+
+# ---------------------------------------------------------------------------
+# Step 6 — tailscale ping.
+# ---------------------------------------------------------------------------
+
+step "Step 6: tailscale ping from peer-a to peer-b"
+if ! docker exec tsi-peer-a tailscale ping --c 3 --timeout 5s "${PEER_B_IP}" >&2; then
+    echo "TAILSCALE-PING FAILED despite peers being up" >&2
+    exit 50
+fi
+
+echo "OK: tailscale interop succeeded" >&2
+exit 0

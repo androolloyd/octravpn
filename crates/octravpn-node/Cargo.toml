@@ -13,6 +13,11 @@ path = "src/main.rs"
 
 [dependencies]
 octravpn-core = { path = "../octravpn-core" }
+# Used by the Tailscale-interop preauth-minter surface (`mesh
+# mint-preauth` CLI + `POST /admin/preauth` HTTP). See the
+# `tailscale_interop` module + `crates/octravpn-mesh/src/headscale_bridge.rs`
+# for the contract.
+octravpn-mesh = { path = "../octravpn-mesh" }
 
 anyhow      = { workspace = true }
 async-trait = { workspace = true }
