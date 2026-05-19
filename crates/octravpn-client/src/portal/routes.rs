@@ -923,6 +923,7 @@ fn attr_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::portal::mime::sniff;
     use axum::http::Request;
     use octravpn_core::rpc::RpcClient;
     use std::net::SocketAddr;
