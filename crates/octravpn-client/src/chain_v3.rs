@@ -145,6 +145,86 @@ impl<'a> ChainCtxV3<'a> {
         Ok(v.as_u64().unwrap_or(0))
     }
 
+    /// Fetch the raw bytes of a sealed-asset by path inside a circle.
+    ///
+    /// v3 `policy.json` and `state-root.json` are stored as plaintext
+    /// canonical JSON inside the operator circle. The chain hosts them
+    /// via the same `circle_asset` RPC family that v2 uses for sealed
+    /// envelopes; the difference is just that v3's bytes are plaintext
+    /// JSON and the anchor lives on chain (`circle_state_root[circle]`),
+    /// so no key id / passphrase is involved at the fetch boundary.
+    ///
+    /// Returns `Ok(None)` when the RPC reports the asset is absent
+    /// (either a `null` result or an error string carrying "not found"
+    /// / "no such" — matches the discover_v2 distinction between
+    /// `Unpublished` and `Error`). The response shape is one of:
+    ///
+    /// * `null`                               → `Ok(None)`
+    /// * a bare UTF-8 string of the bytes     → `Ok(Some(bytes))`
+    /// * `{"bytes":"<base64>", ...}`          → `Ok(Some(decoded))`
+    /// * `{"plaintext":"<utf8>", ...}`        → `Ok(Some(bytes))`
+    /// * `{"content":"<utf8>", ...}`          → `Ok(Some(bytes))`
+    ///
+    /// Anything else surfaces as a hard error so the caller can flag
+    /// a chain/RPC-schema drift loudly rather than silently fall back.
+    pub(crate) async fn fetch_circle_asset_bytes(
+        &self,
+        circle_id: &str,
+        path: &str,
+    ) -> Result<Option<Vec<u8>>> {
+        let v = match self
+            .rpc
+            .raw_call("circle_asset", json!([circle_id, path]))
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("not found") || msg.contains("no such") {
+                    return Ok(None);
+                }
+                return Err(anyhow!("circle_asset({circle_id}, {path}): {e}"));
+            }
+        };
+        if v.is_null() {
+            return Ok(None);
+        }
+        if let Some(s) = v.as_str() {
+            return Ok(Some(s.as_bytes().to_vec()));
+        }
+        if let Some(obj) = v.as_object() {
+            // Direct UTF-8 / plaintext shapes first — v3 canonical bytes
+            // are plain UTF-8 JSON, so this is the expected fast path
+            // once the chain settles on a field name.
+            for key in ["plaintext", "content", "json"] {
+                if let Some(s) = obj.get(key).and_then(Value::as_str) {
+                    return Ok(Some(s.as_bytes().to_vec()));
+                }
+            }
+            // Base64-encoded byte string fallback (matches the v2
+            // sealed-asset RPC convention).
+            if let Some(s) = obj.get("bytes").and_then(Value::as_str) {
+                use base64::engine::general_purpose::STANDARD as BASE64_STD;
+                use base64::Engine as _;
+                let decoded = BASE64_STD
+                    .decode(s.as_bytes())
+                    .map_err(|e| anyhow!("circle_asset bytes base64: {e}"))?;
+                return Ok(Some(decoded));
+            }
+            if let Some(s) = obj.get("bytes_b64").and_then(Value::as_str) {
+                use base64::engine::general_purpose::STANDARD as BASE64_STD;
+                use base64::Engine as _;
+                let decoded = BASE64_STD
+                    .decode(s.as_bytes())
+                    .map_err(|e| anyhow!("circle_asset bytes_b64 base64: {e}"))?;
+                return Ok(Some(decoded));
+            }
+        }
+        Err(anyhow!(
+            "circle_asset({circle_id}, {path}): unexpected response shape: {v}"
+        ))
+    }
+
     // ============================================================
     // Sessions
     // ============================================================
