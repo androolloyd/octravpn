@@ -2,6 +2,7 @@ import WireProtocol.Controlbase
 import WireProtocol.BeNonce
 import WireProtocol.HmacToken
 import WireProtocol.PortalCache
+import WireProtocol.V3Canonical
 
 /-!
 # OctraVPN — wire-protocol primitive proofs.

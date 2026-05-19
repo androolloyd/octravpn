@@ -136,6 +136,64 @@ No new axioms introduced; reuses `HmacToken.lean`'s axioms.
 
 ---
 
+## 5. `WireProtocol.V3Canonical`
+
+The v3 canonical-JSON encoder + hex-hash discipline. Mirrors
+`crates/octravpn-core/src/v3_canonical.rs`, which is the single owner
+of the on-chain anchor format for the three v3 schemas
+(`v3_state_root`, `v3_policy`, `v3_members`). A one-byte deviation
+between producer and verifier silently desyncs transparency, so the
+encoder's algebraic properties are pinned here.
+
+Rust source: `crates/octravpn-core/src/v3_canonical.rs`.
+
+| Theorem                              | Plain-English statement                                                                                                  | Rust function / constant                          |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------- |
+| `canonical_keys_sorted`              | `canonical` always emits an object's keys in sorted lex-byte order (it calls `sortByKey` before emitting).               | `canonical_write` object branch (`:76-101`)       |
+| `canonical_reorder_invariant`        | **Two objects with the same multiset of (key, value) entries produce identical canonical bytes.** Load-bearing.          | `canonical_write` object branch                   |
+| `canonical_determinism`              | `canonical` is a function — same input, same output.                                                                     | `canonical_write` (whole)                         |
+| `canonical_idempotent`               | Canonicalising a pre-sorted entry list is a no-op for the encoder.                                                       | `canonical_write` + `sortByKey_idempotent`        |
+| `canonical_string_injective`         | Two distinct JSON strings produce distinct canonical bytes.                                                              | `write_json_string` (`:105-109`)                  |
+| `hex_hash_len_is_64`                 | `HEX_HASH_LEN = 64` by definition.                                                                                       | `HEX_HASH_LEN: usize = 64` (`:28`)                |
+| `check_hash_length_required`         | A string whose length is not 64 is rejected by `checkHash`.                                                              | `check_hash` (`:44-52`)                           |
+| `check_hash_rejects_non_hex`         | Any byte outside `[0-9a-f]` causes `checkHash` to return false.                                                          | `check_hash` (`:48`)                              |
+| `check_hash_rejects_uppercase`       | **Specialisation: any uppercase A-F is rejected** (mixed-case anchors must never round-trip).                            | `check_hash` (same)                               |
+| `check_hash_accepts_canonical`       | A 64-byte lowercase-hex string is accepted.                                                                              | `check_hash` (same)                               |
+| `sha256_hex_length_is_64`            | `sha256_hex` always returns 64 bytes (matches the chain rule `len(arg) == HEX_HASH_LEN`).                                | `sha256_hex` (`:32-36`)                           |
+| `sha256_hex_lowercase`               | `sha256_hex` always returns bytes in the lowercase-hex alphabet.                                                         | `sha256_hex` (same)                               |
+| `sha256_hex_deterministic`           | `sha256_hex` is a deterministic function.                                                                                | `sha256_hex` (same)                               |
+| `anchor_distinct_inputs_distinct`    | **Distinct canonical bytes ⇒ distinct on-chain anchors** (under SHA-256 collision-resistance). Verifiers can detect drift. | `sha256_hex ∘ canonical_write`                    |
+| `example` (HEX_HASH_LEN anchor)      | `HEX_HASH_LEN = 64` literally.                                                                                           | concrete                                          |
+| `example` (canonical null anchor)    | `canonical null = b"null"`.                                                                                              | concrete                                          |
+| `example` (canonical bool anchor)    | `canonical (bool true) = b"true"`.                                                                                       | concrete                                          |
+
+Axioms introduced in `V3Canonical.lean`:
+
+- `canonicalString_injective` — distinct input strings produce
+  distinct canonical-string bytes. Matches `serde_json::to_string` on
+  `Value::String`.
+- `sortByKey_isSorted`, `sortByKey_idempotent`, `sortByKey_sameKVs` —
+  standard `List.mergeSort` properties (Lean 4 core does not ship a
+  packaged `Sorted` proof at this level of generality without
+  Mathlib).
+- `sha256_hex_length`, `sha256_hex_lower`, `sha256_hex_injective` —
+  SHA-256 standard cryptographic properties; same axiom style as
+  `Sha256.injective` in `OctraVPN_Rust/Spec.lean`.
+
+**Out of scope (assumed primitive):** RFC 8259 string-escape table
+correctness. That's a property of the audited `serde_json` crate and
+is exercised by the property-based test suite alongside the Lean
+proofs (see `crates/octravpn-core/src/v3_canonical.rs::tests`'s
+`canonical_write_is_idempotent` and `no_whitespace_outside_strings`).
+
+**Out of scope (numerical formatting):** the v3 schemas use only
+`u32` / `u64` integers; we model `JsonValue.number` as `Int` and
+treat the decimal-formatting rule (`serde_json::Number::to_string`)
+as an opaque primitive. The Rust proptest `prop_injectivity_on_distinct_epochs`
+exercises this end-to-end.
+
+---
+
 ## Theorem count
 
 | Module                  | Theorems | Examples (anchors) |
@@ -144,11 +202,12 @@ No new axioms introduced; reuses `HmacToken.lean`'s axioms.
 | `BeNonce`               | 8        | 2                  |
 | `HmacToken`             | 7        | 1                  |
 | `PortalCache`           | 10       | 1                  |
-| **Total (this module)** | **36**   | **5**              |
+| `V3Canonical`           | 14       | 3                  |
+| **Total (this module)** | **50**   | **8**              |
 
 Combined with the 54 theorems in `OctraVPN_Rust/`, the deductive proof
-surface now stands at **90 mechanically-checked theorems** (54 Rust
-security primitives + 36 wire-protocol primitives).
+surface now stands at **104 mechanically-checked theorems** (54 Rust
+security primitives + 50 wire-protocol primitives).
 
 ---
 
