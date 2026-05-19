@@ -1,0 +1,5 @@
+# Bind-mount target for /etc/octravpn inside the mesh-control container.
+# Intentionally empty: this scenario does not start `octravpn-node run`
+# (which needs on-chain RPC config); the entrypoint in
+# docker-compose.yml overrides to a long-running `tail -f` so
+# run-interop.sh can drive probes via `docker compose exec`.

@@ -1,0 +1,37 @@
+# Self-contained build of `octravpn-node` for the tailscale interop
+# scenario.
+#
+# Why a dedicated Dockerfile and not docker/Dockerfile.node?
+#   The repo-root Dockerfile.node does `FROM octravpn-builder:latest`,
+#   which assumes a docker-compose `builder` service was run first.
+#   This scenario is meant to stand alone; we inline the cargo build.
+#
+# Build context: the parent of the octra/ checkout, so both
+# `octra/` and the sibling `octra-foundry/` (which owns
+# `octra-core` + `octra-mock-rpc`) are visible. See the
+# OCTRA_BUILD_CTX wiring in run-interop.sh.
+
+FROM rust:1.88-bookworm AS builder
+
+WORKDIR /work
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config libssl-dev ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# Mirror the host layout: /work/octra + /work/octra-foundry side-by-side.
+COPY octra-foundry ./octra-foundry
+COPY octra ./octra
+
+WORKDIR /work/octra
+RUN cargo build --release -p octravpn-node
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates iproute2 curl jq && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /work/octra/target/release/octravpn-node /usr/local/bin/octravpn-node
+
+EXPOSE 51820/udp 51821/tcp
+ENTRYPOINT ["/usr/local/bin/octravpn-node"]
+CMD ["--config", "/etc/octravpn/node.toml", "run"]

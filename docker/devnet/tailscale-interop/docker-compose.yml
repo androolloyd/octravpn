@@ -1,0 +1,179 @@
+# Tailscale-CLI ↔ OctraVPN-mesh interop scenario.
+#
+# Goal: prove that an unmodified `tailscale` CLI client can join a mesh
+# whose control plane is built from THIS repo's `octravpn-mesh` /
+# `octravpn-node` source. If the test passes, the Tailscale wire
+# protocol is intact across our integration boundary. If it fails, we
+# have drift — see run-interop.sh for the exact assertion that breaks.
+#
+# Bring up:
+#   docker compose -f docker/devnet/tailscale-interop/docker-compose.yml up --build
+#
+# Or just run docker/devnet/tailscale-interop/run-interop.sh, which
+# wires up the lifecycle, mints preauth keys, and asserts `tailscale
+# ping` succeeds.
+#
+# NOTE on scope: this scenario does NOT depend on Octra-chain devnet
+# RPC. The Tailscale wire protocol is its own contract; we are only
+# exercising the headscale-rs integration boundary in
+# `crates/octravpn-mesh/src/headscale_bridge.rs`.
+
+name: octravpn-tailscale-interop
+
+services:
+  # -------------------------------------------------------------------
+  # Control plane: built from THIS repo's octravpn-node source.
+  #
+  # The builder context is the parent of the octra/ repo, mirroring the
+  # convention of docker/Dockerfile.builder + docker-compose.yml at the
+  # repo root (which path-deps into the sibling octra-foundry workspace
+  # for the mock-rpc crate).
+  #
+  # Listening surface (per crates/octravpn-node/src/control.rs):
+  #   POST /session       — announce session + client wg pubkey
+  #   GET  /session/:id   — proposed receipt
+  #   GET  /health
+  #   GET  /metrics
+  #   GET  /events        (SSE, token-gated)
+  #
+  # It does NOT expose Tailscale's /key, /machine/{mkey}/map, or the
+  # Noise TS2021 handshake. The run-interop.sh script asserts the
+  # opposite to surface that drift loud-and-clear.
+  # -------------------------------------------------------------------
+  mesh-control:
+    build:
+      # OCTRA_BUILD_CTX must point at the parent of both `octra/` and
+      # the sibling `octra-foundry/` checkout — `crates/octravpn-core`
+      # path-deps into `../../../octra-foundry/crates/octra-core`. The
+      # run-interop.sh script resolves this automatically; if you're
+      # invoking compose by hand, run from a shell with
+      # OCTRA_BUILD_CTX=/path/to/parent-of-octra set.
+      context: ${OCTRA_BUILD_CTX:?set OCTRA_BUILD_CTX to the parent of the octra/ checkout — see README}
+      dockerfile: octra/docker/devnet/tailscale-interop/Dockerfile.mesh-control
+    image: octravpn-node:interop
+    container_name: octravpn-mesh-control
+    hostname: mesh-control
+    networks:
+      interop:
+        aliases:
+          - mesh-control
+          - headscale          # alias for tailscale up --login-server=http://headscale:51821
+    # Bind 0.0.0.0 inside the container so the tailscale services can reach it.
+    # The repo's default /etc/octravpn/node.toml binds the control plane
+    # to 51821/tcp.
+    ports:
+      - "51821:51821/tcp"      # control HTTP
+      - "51820:51820/udp"      # wireguard data plane
+    volumes:
+      - mesh-state:/var/lib/octravpn
+      - ./mesh-config:/etc/octravpn:ro
+    # No on-chain RPC is required for this scenario; the node is run in
+    # `identity`-only mode by default and the control plane is started
+    # explicitly by run-interop.sh's setup, so this command is a
+    # no-op that keeps the container alive and reachable for `exec`.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        echo "[mesh-control] octravpn-node version:"
+        /usr/local/bin/octravpn-node --help 2>&1 | head -20 || true
+        echo "[mesh-control] container ready for interop probes"
+        # Keep the container up; run-interop.sh exec's in to drive it.
+        tail -f /dev/null
+    healthcheck:
+      # The control plane is HTTP-only; presence of the binary is the
+      # readiness signal the interop script uses.
+      test: ["CMD-SHELL", "test -x /usr/local/bin/octravpn-node"]
+      interval: 2s
+      timeout: 1s
+      retries: 30
+
+  # -------------------------------------------------------------------
+  # Stock Tailscale CLI client A.
+  #
+  # Image: tailscale/tailscale:latest (unmodified; this is the whole
+  # point of the interop test). userspace-networking is required when
+  # Docker has no host wireguard module — true on macOS Desktop, true
+  # in most CI Linux runners.
+  # -------------------------------------------------------------------
+  tailscale-a:
+    image: tailscale/tailscale:latest
+    container_name: tailscale-a
+    hostname: tailscale-a
+    depends_on:
+      mesh-control:
+        condition: service_healthy
+    environment:
+      TS_HOSTNAME: tailscale-a
+      TS_USERSPACE: "true"
+      TS_EXTRA_ARGS: "--login-server=http://headscale:51821 --reset"
+      # AUTHKEY is injected by run-interop.sh via `docker compose exec`
+      # because the OctraVPN control plane has no preauth-mint CLI.
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    networks:
+      interop:
+    volumes:
+      - tailscale-a-state:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    # Don't auto-`tailscale up` — run-interop.sh drives that explicitly
+    # after minting an authkey, so a failed handshake is visible in the
+    # script's stderr and the exit code propagates cleanly.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        echo "[tailscale-a] starting tailscaled in userspace mode"
+        tailscaled --tun=userspace-networking --statedir=/var/lib/tailscale \
+                   --socket=/tmp/tailscaled.sock --state=/var/lib/tailscale/tailscaled.state &
+        # Wait for the local socket then idle; run-interop.sh issues
+        # `tailscale up` via `docker compose exec`.
+        for i in $$(seq 1 30); do
+          [ -S /tmp/tailscaled.sock ] && break
+          sleep 1
+        done
+        echo "[tailscale-a] tailscaled local socket ready"
+        wait
+
+  tailscale-b:
+    image: tailscale/tailscale:latest
+    container_name: tailscale-b
+    hostname: tailscale-b
+    depends_on:
+      mesh-control:
+        condition: service_healthy
+    environment:
+      TS_HOSTNAME: tailscale-b
+      TS_USERSPACE: "true"
+      TS_EXTRA_ARGS: "--login-server=http://headscale:51821 --reset"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    networks:
+      interop:
+    volumes:
+      - tailscale-b-state:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        echo "[tailscale-b] starting tailscaled in userspace mode"
+        tailscaled --tun=userspace-networking --statedir=/var/lib/tailscale \
+                   --socket=/tmp/tailscaled.sock --state=/var/lib/tailscale/tailscaled.state &
+        for i in $$(seq 1 30); do
+          [ -S /tmp/tailscaled.sock ] && break
+          sleep 1
+        done
+        echo "[tailscale-b] tailscaled local socket ready"
+        wait
+
+networks:
+  interop:
+    driver: bridge
+
+volumes:
+  mesh-state:
+  tailscale-a-state:
+  tailscale-b-state:
