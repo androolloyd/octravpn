@@ -953,11 +953,15 @@ impl Hub {
                 // into ControlState below. Reusing the same Arc<Mutex>
                 // means an `/admin/preauth`-minted key is visible to
                 // the wire `register` handler.
+                //
+                // The wire layer (now in headscale-api) sees the
+                // minter only through the `PreauthRedeemer` trait —
+                // implemented in `octravpn_mesh::headscale_bridge`.
                 let shared_minter = PreauthMinter::new();
                 Some((
                     WireState {
                         server_noise_key,
-                        preauth: shared_minter.clone(),
+                        preauth: Arc::new(shared_minter.clone()),
                         ip_allocator: Arc::new(TailnetIpAllocator::new(tailnet_id)),
                         machines: Arc::new(MachineRegistry::new()),
                     },

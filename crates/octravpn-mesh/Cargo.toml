@@ -14,6 +14,13 @@ test-helpers = []
 
 [dependencies]
 octravpn-core = { path = "../octravpn-core" }
+# Tailscale wire-protocol layer lives in headscale-rs (our Rust port
+# of headscale-go). octravpn-mesh implements the wire layer's
+# `PreauthRedeemer` + `IpAllocator` traits over OctraVPN's
+# PreauthMinter + TailnetIpAllocator (see `headscale_bridge.rs`) and
+# re-exports the wire module through `lib.rs` so existing callers
+# keep working.
+headscale-api = { path = "../../../headscale-rs/headscale-api", default-features = false }
 
 anyhow      = { workspace = true }
 async-trait = { workspace = true }
@@ -29,45 +36,11 @@ tokio       = { workspace = true }
 toml        = { workspace = true }
 tracing     = { workspace = true }
 hex         = { workspace = true }
-# Noise IK handshake for the Tailscale-wire compatibility layer
-# (`tailscale_wire::noise`). 0.9 pinned per
-# `docs/tailscale-interop-blocker.md`.
-snow        = "0.9"
-# Tailscale-wire HTTP surface mounts as an axum::Router; pulled in
-# at the mesh layer (rather than only at octravpn-node) so the same
-# router can be unit-tested via `tower::ServiceExt::oneshot` without
-# the node's hub-init dependency.
-axum        = { workspace = true }
-# `/ts2021` TS2021 upgrade: HTTP/2 server over the Noise-wrapped
-# hijacked socket. h2 0.4 takes an `AsyncRead+AsyncWrite` directly,
-# which is exactly what our `NoiseStream<TcpStream>` wrapper exposes.
-h2          = "0.4"
-# Hyper 1 supplies `hyper::upgrade::OnUpgrade` (the extension axum
-# 0.7 places in the request extensions for `Upgrade:` requests) and
-# the `http`/`bytes` types we trade with h2.
-hyper       = { version = "1", features = ["http1"] }
-# `TokioIo` wraps `hyper::upgrade::Upgraded` into a tokio
-# AsyncRead+AsyncWrite — needed to feed the hijacked socket into our
-# Framed controlbase reader.
-hyper-util  = { version = "0.1", features = ["tokio"] }
-# Async futures combinators (`AsyncReadExt::read_exact` etc.) used
-# in the controlbase framing reader. The workspace already pulls in
-# `futures-util` transitively but we name it for explicitness.
-futures-util = "0.3"
-# `BodyExt::collect` and friends — used to buffer the axum router's
-# response body before pushing it onto an h2 SendResponse channel.
-http-body-util = "0.1"
-http        = "1"
-# `ServiceExt::oneshot` — drives the inner axum router from inside
-# the ts2021 h2 dispatcher. Was dev-only before this commit.
-tower       = { version = "0.5", features = ["util"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 proptest = { workspace = true }
 tempfile = { workspace = true }
-# `time::pause`/`advance` for the Stream:true keepalive test in
-# `tailscale_wire::map` — not in `tokio = "full"`.
 tokio    = { workspace = true, features = ["test-util"] }
 
 [lints]

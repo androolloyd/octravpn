@@ -22,22 +22,23 @@ use std::sync::Arc;
 use tempfile::tempdir;
 use tower::ServiceExt;
 
-fn build_state() -> (WireState, tempfile::TempDir) {
+fn build_state() -> (WireState, PreauthMinter, tempfile::TempDir) {
     let dir = tempdir().unwrap();
     let server = Arc::new(ServerNoiseKey::load_or_generate(dir.path()).unwrap());
+    let minter = PreauthMinter::new();
     let state = WireState {
         server_noise_key: server,
-        preauth: PreauthMinter::new(),
+        preauth: Arc::new(minter.clone()),
         ip_allocator: Arc::new(TailnetIpAllocator::new("interop-test")),
         machines: Arc::new(MachineRegistry::new()),
     };
-    (state, dir)
+    (state, minter, dir)
 }
 
 #[tokio::test]
 async fn key_then_register_then_map_round_trip() {
-    let (state, _dir) = build_state();
-    let pk = state.preauth.mint("alice", DEFAULT_PREAUTH_TTL, false);
+    let (state, minter, _dir) = build_state();
+    let pk = minter.mint("alice", DEFAULT_PREAUTH_TTL, false);
     let server_pub = state.server_noise_key.public_hex();
 
     let app = tailscale_wire_router(state.clone());
@@ -167,7 +168,7 @@ async fn key_then_register_then_map_round_trip() {
 async fn ts2021_framing_responds_to_initiation() {
     use tokio::io::duplex;
 
-    let (state, _dir) = build_state();
+    let (state, _minter, _dir) = build_state();
     let server_pub = state.server_noise_key.public_bytes();
 
     let (client_io, server_io) = duplex(64 * 1024);

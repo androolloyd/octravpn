@@ -396,7 +396,7 @@ async fn run_mesh_serve(
     let minter = PreauthMinter::new();
     let ws = WireState {
         server_noise_key: server_noise_key.clone(),
-        preauth: minter.clone(),
+        preauth: Arc::new(minter.clone()),
         ip_allocator: Arc::new(TailnetIpAllocator::new(tailnet_id)),
         machines: Arc::new(MachineRegistry::new()),
     };

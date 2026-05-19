@@ -48,13 +48,20 @@
 
 use std::{
     collections::HashMap,
+    net::Ipv4Addr,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use async_trait::async_trait;
+use headscale_api::tailscale_wire::{
+    AllocError, IpAllocator, PreauthRedeemer, RedeemError as WireRedeemError,
+};
 use parking_lot::Mutex;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
+
+use crate::ip_alloc::TailnetIpAllocator;
 
 /// Default time-to-live for a freshly minted preauth key.
 ///
@@ -206,6 +213,45 @@ fn now_unix() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+// ---------------------------------------------------------------------------
+// Bridge: implement the headscale-api Tailscale-wire traits on top of
+// OctraVPN's PreauthMinter + TailnetIpAllocator.
+//
+// As of 2026-05-19 the Tailscale wire-protocol implementation lives in
+// `headscale-api::tailscale_wire`. The wire layer parameterises on two
+// small traits (`PreauthRedeemer`, `IpAllocator`) so headscale-rs can
+// stay free of OctraVPN-specific policy. The bridge here is the only
+// place those traits meet OctraVPN's PreauthMinter + TailnetIpAllocator.
+// ---------------------------------------------------------------------------
+
+/// Adapter: wrap a `PreauthMinter` so it can be handed to
+/// `headscale_api::tailscale_wire::WireState.preauth` as an
+/// `Arc<dyn PreauthRedeemer>`.
+#[async_trait]
+impl PreauthRedeemer for PreauthMinter {
+    async fn redeem(&self, key: &str) -> Result<String, WireRedeemError> {
+        // Synchronous redeem under the hood; the async signature is for
+        // future-proofing on the wire side. We translate OctraVPN's
+        // RedeemError into the wire crate's identical-shape enum.
+        match PreauthMinter::redeem(self, key) {
+            Ok(user) => Ok(user),
+            Err(RedeemError::Unknown) => Err(WireRedeemError::Unknown),
+            Err(RedeemError::Expired) => Err(WireRedeemError::Expired),
+        }
+    }
+}
+
+/// Adapter: wrap a `TailnetIpAllocator` so it can be handed to
+/// `headscale_api::tailscale_wire::WireState.ip_allocator` as an
+/// `Arc<dyn IpAllocator>`.
+impl IpAllocator for TailnetIpAllocator {
+    fn allocate(&self, node_key_hex: &str) -> Result<Ipv4Addr, AllocError> {
+        // OctraVPN's allocator is infallible (deterministic hash into
+        // CGNAT /10), so the bridge never produces an `AllocError`.
+        Ok(TailnetIpAllocator::allocate(self, node_key_hex))
+    }
 }
 
 // ---------------------------------------------------------------------------

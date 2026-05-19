@@ -402,3 +402,33 @@ already have via `octravpn-client`.
 
 The test exists precisely to keep us honest about that
 distinction.
+
+## 2026-05-19 — tailscale_wire migrated to headscale-rs
+
+The Tailscale wire-protocol implementation (`/key`, `/ts2021`,
+`/machine/{node_key}/{register,map}`, plus the controlbase framing
+and `NoiseStream`) now lives in
+`headscale-rs::headscale-api::tailscale_wire`. That's its proper home
+— `headscale-rs` IS our Rust port of `juanfont/headscale`, and the
+wire protocol is exactly what headscale-go's control plane speaks.
+
+`octravpn-mesh` retains:
+
+- `PreauthMinter` (OctraVPN's preauth-key store).
+- `TailnetIpAllocator` (deterministic CGNAT hashing).
+- `headscale_bridge.rs`: implementations of the wire layer's two
+  injection traits, `PreauthRedeemer` and `IpAllocator`, on top of
+  the above.
+- A re-export of `headscale_api::tailscale_wire` so existing call
+  sites (`octravpn_mesh::tailscale_wire::router`, `WireState`, etc.)
+  keep compiling.
+
+### Where future #207 work lands
+
+The remaining "what unblocks exit 0" items above (TLS-on-443, flat
+`/machine/{register,map}` paths, EarlyNoise frame validation) all
+**land in `headscale-rs`, not in `octravpn-mesh`**. The OctraVPN side
+only changes if a wire-policy hook needs a new trait method. The
+trait surfaces are intentionally small (`PreauthRedeemer::redeem` +
+`IpAllocator::allocate`) — growing them is a conscious design
+decision, not a default.
