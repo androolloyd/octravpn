@@ -1003,6 +1003,7 @@ impl Hub {
                 receipt_journal,
             )
             .with_events_token(self.cfg.control.events_token.clone())
+            .with_metrics_token(self.cfg.control.metrics_token.clone())
             .with_admin_token(admin_token)
             .with_wire_state(wire_state.as_ref().map(|(ws, _)| ws.clone()));
             // If the wire surface is enabled, swap the auto-constructed

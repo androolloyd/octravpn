@@ -93,6 +93,13 @@ pub(crate) struct ControlState {
     /// disables the endpoint entirely (requests return 404).
     /// Set via `[control].events_token` in the node TOML.
     pub events_token: Option<Arc<str>>,
+    /// Bearer token gating the `/metrics` Prometheus endpoint.
+    /// `None` ⇒ endpoint refuses with 503 + a startup log line.
+    /// Operators MUST set `[control].metrics_token` for the endpoint
+    /// to serve scrapes (default-closed, mirrors `/events` semantics
+    /// but with 503 instead of 404 so a misconfigured Prometheus
+    /// surfaces a clear error rather than silently 404'ing).
+    pub metrics_token: Option<Arc<str>>,
     /// Deployment domain (program / chain / circle) bound into every
     /// signed receipt. P1-5: prevents cross-program / cross-chain /
     /// cross-circle receipt replay. Populated from `node.toml`'s
@@ -305,6 +312,7 @@ impl ControlState {
             // bounded even if a few SSE clients are slow.
             events: EventBus::new(256),
             events_token: None,
+            metrics_token: None,
             receipt_context,
             receipt_journal,
             preauth_minter: PreauthMinter::new(),
@@ -323,6 +331,14 @@ impl ControlState {
     /// disables the endpoint entirely. v2 audit gate.
     pub(crate) fn with_events_token(mut self, token: Option<String>) -> Self {
         self.events_token = token.map(Arc::from);
+        self
+    }
+
+    /// Configure the `/metrics` Prometheus bearer token. `None` (the
+    /// default) refuses scrapes with 503 + a startup log line. Set
+    /// via `[control].metrics_token` in the node TOML for production.
+    pub(crate) fn with_metrics_token(mut self, token: Option<String>) -> Self {
+        self.metrics_token = token.map(Arc::from);
         self
     }
 
@@ -543,8 +559,29 @@ async fn health(State(s): State<Arc<ControlState>>) -> impl IntoResponse {
     .into_response()
 }
 
-/// Prometheus text format.
-async fn metrics(State(s): State<Arc<ControlState>>) -> impl IntoResponse {
+/// Prometheus text format. Bearer-gated by default — operators must
+/// set `[control].metrics_token` for the endpoint to serve scrapes.
+/// Returns 503 (not 404) when unconfigured so a misconfigured Prometheus
+/// surfaces a clear "endpoint disabled" error rather than silently
+/// 404'ing.
+async fn metrics(
+    State(s): State<Arc<ControlState>>,
+    headers: axum::http::HeaderMap,
+) -> axum::response::Response {
+    let Some(want) = s.metrics_token.as_deref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "metrics endpoint disabled: set [control].metrics_token in node.toml",
+        )
+            .into_response();
+    };
+    let got = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "));
+    if !got.is_some_and(|got_tok| constant_time_eq_str(got_tok, want)) {
+        return (StatusCode::UNAUTHORIZED, "").into_response();
+    }
     let m = &s.metrics;
     // Snapshot wire-state-derived gauges (member_count + IP allocator).
     // Reads only — no mutation of the wire layer. When `wire_state` is
@@ -999,6 +1036,57 @@ mod tests {
             let resp = events_sse(State(state), headers).await;
             assert_eq!(resp.status(), StatusCode::OK);
         }
+    }
+
+    /// `/metrics` returns 503 when `[control].metrics_token` is unset
+    /// (the default). Operators must configure a token in production.
+    #[tokio::test]
+    async fn metrics_default_returns_503() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let state = Arc::new(ControlState::new(node_kp, router, allowlist));
+        let headers = axum::http::HeaderMap::new();
+        let resp = metrics(State(state), headers).await;
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    /// Token configured + wrong bearer → 401.
+    #[tokio::test]
+    async fn metrics_rejects_wrong_token() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let state = Arc::new(
+            ControlState::new(node_kp, router, allowlist)
+                .with_metrics_token(Some("expected".to_string())),
+        );
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer wrong"),
+        );
+        let resp = metrics(State(state), headers).await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// Token configured + right bearer → 200 with Prometheus exposition.
+    #[tokio::test]
+    async fn metrics_accepts_correct_token() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let state = Arc::new(
+            ControlState::new(node_kp, router, allowlist)
+                .with_metrics_token(Some("expected".to_string())),
+        );
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer expected"),
+        );
+        let resp = metrics(State(state), headers).await;
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 
     /// Constant-time string compare returns true iff the strings are
@@ -1462,8 +1550,16 @@ mod tests {
         let node_kp = Arc::new(KeyPair::generate());
         let router = Arc::new(OnionRouter::new());
         let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
-        let state = Arc::new(ControlState::new(node_kp, router, allowlist));
-        let resp = metrics(State(state)).await.into_response();
+        let state = Arc::new(
+            ControlState::new(node_kp, router, allowlist)
+                .with_metrics_token(Some("test-token".to_string())),
+        );
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer test-token"),
+        );
+        let resp = metrics(State(state), headers).await.into_response();
         let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
             .await
             .unwrap();

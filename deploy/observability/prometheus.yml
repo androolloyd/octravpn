@@ -41,14 +41,14 @@ scrape_configs:
       - files:
           - /etc/prometheus/targets.json
         refresh_interval: 30s
-    # If you front the metrics endpoint with a reverse proxy that
-    # requires a bearer token, set OCTRAVPN_METRICS_TOKEN and uncomment.
-    # The token must be readable by the Prometheus process; do NOT bake
-    # it into the image.
-    #
-    # authorization:
-    #   type: Bearer
-    #   credentials_file: /etc/prometheus/metrics.token
+    # /metrics is bearer-gated by default — the node refuses scrapes
+    # with 503 until `[control].metrics_token` is set in node.toml.
+    # The same token goes here, readable by the Prometheus process.
+    # Generate with `openssl rand -hex 32`; rotate by editing both
+    # node.toml + this file and restarting both.
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/metrics.token
 
   # Prometheus itself — useful for sanity-checking the scrape pipeline.
   - job_name: prometheus

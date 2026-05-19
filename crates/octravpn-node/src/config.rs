@@ -258,6 +258,16 @@ pub(crate) struct ControlCfg {
     /// docs/v2-threat-model.md P0-1 and docs/v2-rust-leak-audit.md.
     #[serde(default)]
     pub events_token: Option<String>,
+    /// Bearer token gating the `/metrics` Prometheus endpoint.
+    /// `None` (the default) refuses scrapes with 503 — operators must
+    /// set this for the endpoint to serve. Set the same value in
+    /// `deploy/observability/prometheus.yml`'s `authorization:` block
+    /// (and any Alertmanager scrape).
+    ///
+    /// Pick a random ≥32-byte secret (e.g. `openssl rand -hex 32`).
+    /// Rotation is operator-driven; restart the node after changing.
+    #[serde(default)]
+    pub metrics_token: Option<String>,
     /// P1-8/9 persistent receipt-seq journal. The node consults this
     /// file before signing any receipt and refuses to sign at any seq
     /// that does not strictly exceed the on-disk floor. After a
@@ -305,6 +315,7 @@ impl Default for ControlCfg {
             listen: default_control_listen(),
             audit_dir: None,
             events_token: None,
+            metrics_token: None,
             receipt_journal_path: None,
             admin_token: None,
             tailscale_wire_state_dir: None,
