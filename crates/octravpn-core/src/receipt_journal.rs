@@ -460,17 +460,18 @@ impl ReceiptJournal {
                     // the spawned task runs to completion. The
                     // `compaction_inflight` flag is cleared by the
                     // task's swap-phase regardless of outcome.
-                    let _: JoinHandle<()> =
+                    let handle: JoinHandle<()> =
                         tokio::task::spawn_blocking(move || {
-                            let _ = compact_async_worker(inner, snapshot, path);
+                            let _ = compact_async_worker(&inner, &snapshot, &path);
                         });
+                    drop(handle);
                 }
                 Err(_) => {
                     // No tokio context — degrade to a synchronous
                     // compaction. This is a maintenance/testing path;
                     // production callers (control plane, hub) always
                     // hold a tokio runtime.
-                    let _ = compact_async_worker(inner, snapshot, path);
+                    let _ = compact_async_worker(&inner, &snapshot, &path);
                 }
             }
         }
@@ -529,7 +530,7 @@ impl ReceiptJournal {
             (g.by_session.clone(), g.path.clone().expect("checked above"))
         };
         let inner = self.inner.clone();
-        tokio::task::spawn_blocking(move || compact_async_worker(inner, snapshot, path))
+        tokio::task::spawn_blocking(move || compact_async_worker(&inner, &snapshot, &path))
     }
 
     /// Current on-disk file size in bytes. Test/inspection helper.
@@ -589,17 +590,17 @@ fn compact_locked(g: &mut Inner) -> JournalResult<()> {
 /// in-mem map is the source of truth and the delta-replay would have
 /// brought it back to consistency on the next compaction).
 fn compact_async_worker(
-    inner: Arc<Mutex<Inner>>,
-    snapshot: BTreeMap<SessionId, u64>,
-    path: PathBuf,
+    inner: &Arc<Mutex<Inner>>,
+    snapshot: &BTreeMap<SessionId, u64>,
+    path: &Path,
 ) -> JournalResult<()> {
     // Phase 2: write the snapshot tempfile with no lock held. This is
     // the slow part — for a 10 MB journal it's ~100 ms of write + a
     // full fsync round-trip. Concurrent `bump()` calls keep appending
     // to the live (pre-compaction) journal file.
-    let tmp_path = compacting_tempfile_path(&path);
+    let tmp_path = compacting_tempfile_path(path);
     let result = (|| -> JournalResult<()> {
-        write_v1_snapshot_at(&tmp_path, &snapshot)?;
+        write_v1_snapshot_at(&tmp_path, snapshot)?;
 
         // Phase 3: atomic swap under the lock. This is bounded by the
         // number of bumps that landed during phase 2 (one extra
@@ -633,7 +634,7 @@ fn compact_async_worker(
         // snapshot at all, gets one fresh record appended. This is
         // bounded by the number of bumps that landed during phase 2,
         // which is small at any realistic compaction frequency.
-        for (id, &cur_seq) in g.by_session.iter() {
+        for (id, &cur_seq) in &g.by_session {
             let snap_seq = snapshot.get(id).copied().unwrap_or(0);
             if cur_seq > snap_seq {
                 let record = encode_record(id, cur_seq);
@@ -670,7 +671,7 @@ fn compact_async_worker(
 fn compacting_tempfile_path(journal_path: &Path) -> PathBuf {
     let mut name = journal_path
         .file_name()
-        .map(|s| s.to_os_string())
+        .map(std::ffi::OsStr::to_os_string)
         .unwrap_or_default();
     name.push(COMPACTING_SUFFIX);
     match journal_path.parent() {
