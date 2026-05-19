@@ -238,6 +238,19 @@ cargo build --workspace --release
 cargo test --workspace
 ```
 
+## Tests
+
+The one-command answer to "did my change break anything" is
+[`./scripts/test-all.sh`](scripts/test-all.sh) — it runs the full
+required gate (workspace build, `cargo test`, `cargo test -p
+octravpn-mesh --features test-helpers`, clippy with `-D warnings`,
+and the bench-regression check against
+[`bench-snapshots/core.json`](bench-snapshots/core.json)). Adversarial
+devnet drills (`OCTRA_RUN_DRILLS=1`) and the v3 smoke
+(`OCTRA_RUN_SMOKE=1`) are opt-in because they need a funded wallet.
+See [`docs/contributing-tests.md`](docs/contributing-tests.md) for the
+full surface-by-surface breakdown.
+
 ## Quickstart — Docker
 
 ```sh

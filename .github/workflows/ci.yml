@@ -42,6 +42,10 @@ jobs:
         with:
           components: clippy
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # publish_unverified lives behind the test-helpers feature; the
+      # mesh tests + bench require it. Run a second clippy pass with
+      # the feature on so the test cfg gets lint-coverage too.
+      - run: cargo clippy --workspace --tests --features test-helpers -- -D warnings
 
   test:
     name: cargo test
@@ -56,6 +60,34 @@ jobs:
         with: { repository: androolloyd/octra-foundry, path: octra-foundry }
       - uses: ./octra/.github/actions/setup-rust
       - run: cargo test --workspace --all-features
+      # Extra explicit run with the mesh test-helpers feature so a
+      # change that builds under --all-features but breaks the
+      # feature-isolated build fails CI here. Matches scripts/test-all.sh.
+      - run: cargo test -p octravpn-mesh --features test-helpers
+
+  bench-regression:
+    # Compares a fresh octravpn-core bench run against the committed
+    # snapshot at bench-snapshots/core.json. Lives in its own job so a
+    # slow / noisy bench run doesn't gate the cargo lane.
+    name: bench regression gate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: octra
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: octra }
+      - uses: actions/checkout@v4
+        with: { repository: androolloyd/octra-foundry, path: octra-foundry }
+      - uses: ./octra/.github/actions/setup-rust
+      - name: Install jq
+        run: sudo apt-get update -y >/dev/null && sudo apt-get install -y jq >/dev/null
+      - name: Compare against bench-snapshots/core.json
+        # Short measurement time so the runner doesn't sit for ~30 min.
+        # The 20% threshold floor is wide enough to absorb the noise.
+        env:
+          BENCH_REGRESSION_QUICK: "1"
+        run: ./scripts/bench-regression.sh
 
   aml-compile:
     name: AML compile-gate (real Octra)
