@@ -1,17 +1,52 @@
 #!/bin/sh
+# Debian maintainer script: post-installation.
+#
+# Idempotent — safe to re-run across upgrades, since each step gates
+# on prior state existing.
 set -e
 
 case "$1" in
   configure)
-    getent group octravpn >/dev/null || groupadd --system octravpn
-    getent passwd octravpn >/dev/null || useradd --system --gid octravpn \
-      --no-create-home --shell /usr/sbin/nologin octravpn
-    install -d -o octravpn -g octravpn -m 0750 /etc/octravpn /var/lib/octravpn /var/log/octravpn
+    # System group + user for the daemon. `nologin` shell + no home
+    # directory: this account should never get an interactive login.
+    getent group octravpn >/dev/null \
+      || groupadd --system octravpn
+    getent passwd octravpn >/dev/null \
+      || useradd --system --gid octravpn \
+                 --no-create-home --shell /usr/sbin/nologin octravpn
+
+    # /etc/octravpn:      0750 — config readable by the daemon group
+    #                            (operator edits via sudoedit).
+    # /var/lib/octravpn:  0700 — state dir, keys + sealed envelopes
+    #                            + receipt journal live here. Strict
+    #                            mode keeps even members of the
+    #                            octravpn group out.
+    # /var/log/octravpn:  0750 — for an operator running `journalctl
+    #                            -u octravpn-node` this is mostly
+    #                            empty; kept for legacy log shippers.
+    install -d -o octravpn -g octravpn -m 0750 /etc/octravpn
+    install -d -o octravpn -g octravpn -m 0700 /var/lib/octravpn
+    install -d -o octravpn -g octravpn -m 0750 /var/log/octravpn
+
+    # Grant CAP_NET_ADMIN (TUN device) + CAP_NET_BIND_SERVICE (low
+    # ports) without needing root at exec time. Belt-and-braces:
+    # the systemd unit also sets Ambient + Bounding capabilities, but
+    # `setcap` lets the binary run usefully outside systemd too
+    # (e.g. operator running it under a debugger).
     if command -v setcap >/dev/null 2>&1; then
-      setcap cap_net_admin,cap_net_bind_service+ep /usr/local/bin/octravpn-node || true
+      setcap cap_net_admin,cap_net_bind_service+ep \
+        /usr/local/bin/octravpn-node || true
     fi
+
     if command -v systemctl >/dev/null 2>&1; then
       systemctl daemon-reload >/dev/null 2>&1 || true
+      # Enable on boot, but DON'T start. The operator needs to write
+      # /etc/octravpn/node.toml (chain endpoint, signer key, etc.)
+      # before the daemon will do anything useful, and a failed
+      # start on a half-configured box is a worse UX than an
+      # explicit `systemctl start octravpn-node` after editing config.
+      systemctl enable octravpn-node.service >/dev/null 2>&1 || true
+      systemctl enable octravpn-attest.timer >/dev/null 2>&1 || true
     fi
     ;;
 esac

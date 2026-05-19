@@ -1,13 +1,38 @@
 [Unit]
 Description=OctraVPN one-shot attestation refresh
+Documentation=https://github.com/octra-labs/octravpn
 After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=oneshot
 User=octravpn
 Group=octravpn
 ExecStart=/usr/local/bin/octravpn-node --config /etc/octravpn/node.toml attest
+
+# Same hardening profile as the long-running node service. Attest
+# pushes a signed attestation receipt to chain; it needs network +
+# read access to the signer key, nothing else.
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
+ReadWritePaths=/var/lib/octravpn /var/log/octravpn
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+# Attest does not bind sockets or touch TUN — it only signs and
+# POSTs an attestation. Keep the bounding set strict so a compromise
+# can't elevate beyond what this surface actually needs.
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=octravpn-attest
+Environment=RUST_LOG=info

@@ -1,0 +1,55 @@
+# OctraVPN release SHA256SUMS
+
+This is the expected layout of the `SHA256SUMS` file the release
+workflow attaches to every GitHub release. Operators verify a
+downloaded artifact like:
+
+```sh
+sha256sum -c SHA256SUMS --ignore-missing
+```
+
+The file is sorted lexicographically by filename so consecutive
+releases produce diffs that highlight what actually changed, not
+ordering noise. Lines are `<hex-hash><two spaces><filename>` —
+the format `sha256sum -c` expects.
+
+## Expected contents — vX.Y.Z
+
+For a release at tag `v0.1.0`, after both matrix targets finish, the
+file looks like:
+
+```
+<sha256>  SHA256SUMS
+<sha256>  octravpn-0.1.0-aarch64-unknown-linux-gnu.tar.gz
+<sha256>  octravpn-0.1.0-x86_64-unknown-linux-gnu.tar.gz
+<sha256>  octravpn-node-0.1.0-1.aarch64.rpm
+<sha256>  octravpn-node-0.1.0-1.x86_64.rpm
+<sha256>  octravpn-node_0.1.0-1_amd64.deb
+<sha256>  octravpn-node_0.1.0-1_arm64.deb
+```
+
+(`SHA256SUMS` itself is in the list with a placeholder value; the
+file is regenerated against itself so the line for `SHA256SUMS`
+shows the hash of the prior CI run. Trust comes from the detached
+`SHA256SUMS.sig` signature, not self-reference.)
+
+If GPG signing is enabled, every artifact will also have a sibling
+`<artifact>.sig` line:
+
+```
+<sha256>  octravpn-0.1.0-x86_64-unknown-linux-gnu.tar.gz
+<sha256>  octravpn-0.1.0-x86_64-unknown-linux-gnu.tar.gz.sig
+```
+
+## Mapping target -> filename
+
+| Workflow target                  | Tarball architecture  | deb arch | rpm arch  |
+| -------------------------------- | --------------------- | -------- | --------- |
+| `x86_64-unknown-linux-gnu`       | `x86_64-unknown-linux-gnu` | `amd64` | `x86_64` |
+| `aarch64-unknown-linux-gnu`      | `aarch64-unknown-linux-gnu` | `arm64` | `aarch64` |
+
+The deb arch labels match Debian's `dpkg --print-architecture`
+output (`amd64` / `arm64`), NOT the Rust target triple. The rpm
+arch labels match `rpm -q --queryformat '%{ARCH}\n'` output.
+`cargo-deb` and `cargo-generate-rpm` both pick these automatically
+from the `--target` flag.

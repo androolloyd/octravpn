@@ -1,0 +1,51 @@
+#!/bin/sh
+# Debian maintainer script: post-removal.
+#
+# Behaviour:
+#   - `remove`:  binary + units gone, but state in /var/lib/octravpn,
+#                config in /etc/octravpn, and the system user/group
+#                are KEPT so an operator can `apt install` again
+#                without losing keys/journal.
+#   - `purge`:   drop everything — including state dir, log dir,
+#                config dir, and the system user/group.
+#
+# DEBHELPER block is appended by dh_installdeb at package build time;
+# leave it in place even though we don't use dh today, so future
+# additions (triggers, conffile fixups, etc.) compose cleanly.
+set -e
+
+case "$1" in
+  purge)
+    # Drop persistent state. /etc/octravpn/node.toml is declared a
+    # conffile in Cargo.toml — dpkg removes it on purge before this
+    # script runs, but the parent /etc/octravpn directory and any
+    # operator-added sibling files (keys, journals) are NOT, so we
+    # do it explicitly here.
+    rm -rf /var/lib/octravpn /var/log/octravpn /etc/octravpn
+
+    # Tear down the system user + group last so any chown'd files
+    # above are gone first. `deluser`/`delgroup` are best-effort:
+    # `|| true` keeps the postrm idempotent if the user was already
+    # removed by hand.
+    if command -v deluser >/dev/null 2>&1; then
+      deluser --system --quiet octravpn >/dev/null 2>&1 || true
+    fi
+    if command -v delgroup >/dev/null 2>&1; then
+      delgroup --system --quiet --only-if-empty octravpn >/dev/null 2>&1 || true
+    fi
+    ;;
+  remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+    # Reload systemd so the now-deleted unit files don't haunt the
+    # daemon's cache. Don't fail on systemd-less containers.
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+    ;;
+  *)
+    echo "postrm called with unknown argument: $1" >&2
+    exit 1
+    ;;
+esac
+
+#DEBHELPER#
+exit 0

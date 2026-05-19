@@ -1,8 +1,33 @@
+# OctraVPN production release pipeline.
+#
+# Triggered on annotated tag pushes matching `v*` (e.g. `v0.1.0`).
+# Builds Linux x86_64 + aarch64 release binaries for octravpn-node +
+# octravpn-client, packages them as signed deb + rpm + tarball
+# artifacts, and publishes a DRAFT GitHub release with all artifacts
+# attached. The draft is published manually after operator review.
+#
+# Out of scope (deferred):
+#   - Windows / macOS artifacts. See deploy/macos-pkg + deploy/windows
+#     for the historical workflow; cross-compile setup is a follow-up.
+#   - OCI container images. ghcr.io publishing lives in a separate
+#     workflow when we want it.
+#   - crates.io publishing. Intentionally not wired — operators install
+#     packages, not crates.
+#
+# GPG signing:
+#   The `sign` block is OFF by default (gated on the RELEASE_GPG_KEY
+#   secret being present). To enable, populate two repo secrets:
+#     - RELEASE_GPG_KEY:        base64-encoded ASCII-armored private key
+#                               (output of `gpg --armor --export-secret-keys $KEY_ID | base64`)
+#     - RELEASE_GPG_PASSPHRASE: passphrase for that key
+#   See docs/release.md for the full procedure.
+
 name: Release
 
 on:
   push:
-    tags: ["v*"]
+    tags:
+      - "v*"
 
 permissions:
   contents: write
@@ -13,253 +38,295 @@ env:
 
 jobs:
   build:
-    name: Build ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
+    name: Build & package ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    env:
+      # Materialise the signing secret at job scope so the per-step
+      # `if:` below can gate on `env.RELEASE_GPG_KEY`. GitHub Actions
+      # forbids `secrets.*` inside `if:` expressions; the workaround
+      # is to bounce through env. The secret value is still masked
+      # in logs — `env:` doesn't change that.
+      RELEASE_GPG_KEY: ${{ secrets.RELEASE_GPG_KEY }}
+      RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            archive: tar.gz
+            cross: false
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            archive: tar.gz
             cross: true
-          - target: x86_64-apple-darwin
-            os: macos-13
-            archive: tar.gz
-          - target: aarch64-apple-darwin
-            os: macos-14
-            archive: tar.gz
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            archive: zip
-          - target: aarch64-pc-windows-msvc
-            os: windows-latest
-            archive: zip
-            cross: true
+
+    # The workspace path-depends on sibling repos. Mirror the cross-
+    # repo checkout layout the project uses elsewhere — `octra/` for
+    # this repo, `octra-foundry/` and `headscale-rs/` alongside — and
+    # run cargo from inside `octra/`. The setup-rust composite action
+    # at `.github/actions/setup-rust` is documented around this same
+    # layout.
+    defaults:
+      run:
+        working-directory: octra
+
     steps:
-      - uses: ./.github/actions/setup-rust
+      - name: Checkout octra
+        uses: actions/checkout@v4
         with:
+          path: octra
+          fetch-depth: 0  # need full history for the changelog step
+      - name: Checkout octra-foundry
+        uses: actions/checkout@v4
+        with:
+          repository: androolloyd/octra-foundry
+          path: octra-foundry
+      - name: Checkout headscale-rs
+        uses: actions/checkout@v4
+        with:
+          repository: androolloyd/headscale-rs
+          path: headscale-rs
+
+      - name: Install Rust toolchain
+        # Matches the existing CI lane (`.github/actions/setup-rust`,
+        # default `toolchain: stable`). When `rust-toolchain.toml`
+        # pins a specific version cargo will pull that version on
+        # first invocation; the `stable` channel installed here just
+        # bootstraps the toolchain manager and the cross target.
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
           targets: ${{ matrix.target }}
 
-      - name: Install cross (aarch64 linux / arm64 windows)
+      - name: Rust build cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+          # Save the cache even on failure so a retry doesn't rebuild
+          # the whole world.
+          save-if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Cache cargo-deb + cargo-generate-rpm binaries
+        id: cargo-tools-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-deb
+            ~/.cargo/bin/cargo-generate-rpm
+          # Versions pinned so a cache rebuild is deterministic; bump
+          # the suffix when upgrading the packagers.
+          key: cargo-tools-deb3.7-rpm0.16
+
+      - name: Install cargo-deb + cargo-generate-rpm
+        if: steps.cargo-tools-cache.outputs.cache-hit != 'true'
+        run: |
+          cargo install cargo-deb --locked --version ^3.7
+          cargo install cargo-generate-rpm --locked --version ^0.16
+
+      - name: Install cross-toolchain (aarch64 only)
         if: matrix.cross
-        run: cargo install cross --locked
-
-      - name: Build (cargo)
-        if: '!matrix.cross'
         run: |
-          cargo build --release --target ${{ matrix.target }} -p octravpn-client
-          cargo build --release --target ${{ matrix.target }} -p octravpn-node
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          mkdir -p .cargo
+          # Tell cargo where the aarch64 linker is. We append rather
+          # than overwrite so a developer's local config keeps working.
+          {
+            echo ""
+            echo "[target.aarch64-unknown-linux-gnu]"
+            echo "linker = \"aarch64-linux-gnu-gcc\""
+          } >> .cargo/config.toml
 
-      - name: Build (cross)
-        if: matrix.cross
+      - name: Compute version
+        id: version
         run: |
-          cross build --release --target ${{ matrix.target }} -p octravpn-client
-          cross build --release --target ${{ matrix.target }} -p octravpn-node
+          # Strip the `v` prefix off the tag for use in artifact names.
+          # GITHUB_REF on a tag push is `refs/tags/v0.1.0`.
+          REF="${GITHUB_REF#refs/tags/}"
+          VERSION="${REF#v}"
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building release for ${REF} (version ${VERSION})"
 
-      - name: Stage artifacts
-        shell: bash
+      - name: cargo build --release
         run: |
-          STAGE="octravpn-${GITHUB_REF##*/v}-${{ matrix.target }}"
-          mkdir -p "$STAGE"
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-              cp "target/${{ matrix.target }}/release/octravpn.exe" "$STAGE/"
-              cp "target/${{ matrix.target }}/release/octravpn-node.exe" "$STAGE/"
-              cp deploy/windows/install-service.ps1 "$STAGE/"
-              cp deploy/windows/uninstall-service.ps1 "$STAGE/"
-          else
-              cp "target/${{ matrix.target }}/release/octravpn" "$STAGE/"
-              cp "target/${{ matrix.target }}/release/octravpn-node" "$STAGE/"
-          fi
-          cp README.md LICENSE* "$STAGE/" 2>/dev/null || true
-          cp -r docs "$STAGE/"
-          echo "STAGE=$STAGE" >> $GITHUB_ENV
+          cargo build --release \
+            --target ${{ matrix.target }} \
+            -p octravpn-node -p octravpn-client
 
-      - name: Package tar.gz
-        if: matrix.archive == 'tar.gz'
-        shell: bash
-        run: tar -C . -czf "$STAGE.tar.gz" "$STAGE"
-
-      - name: Package zip
-        if: matrix.archive == 'zip'
-        shell: pwsh
-        run: Compress-Archive -Path $env:STAGE -DestinationPath "$env:STAGE.zip" -CompressionLevel Optimal
-
-      - name: Hash
-        shell: bash
+      - name: cargo deb (octravpn-node)
         run: |
-          shopt -s nullglob
-          for f in "$STAGE".tar.gz "$STAGE".zip; do
-              if [ "${{ matrix.os }}" = "windows-latest" ]; then
-                  pwsh -c "Get-FileHash -Algorithm SHA256 $f | ForEach-Object Hash" > "$f.sha256"
-              else
-                  shasum -a 256 "$f" | awk '{print $1}' > "$f.sha256"
-              fi
+          cargo deb \
+            -p octravpn-node \
+            --target ${{ matrix.target }} \
+            --no-build
+
+      - name: cargo generate-rpm (octravpn-node)
+        run: |
+          cargo generate-rpm \
+            -p octravpn-node \
+            --target ${{ matrix.target }}
+
+      - name: tarball (node + client binaries)
+        id: tarball
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TARGET="${{ matrix.target }}"
+          STAGE="octravpn-${VERSION}-${TARGET}"
+          mkdir -p "dist/${STAGE}"
+          cp "target/${TARGET}/release/octravpn-node" "dist/${STAGE}/"
+          cp "target/${TARGET}/release/octravpn"      "dist/${STAGE}/octravpn-client"
+          cp README.md LICENSE* "dist/${STAGE}/" 2>/dev/null || true
+          tar -C dist -czf "dist/${STAGE}.tar.gz" "${STAGE}"
+          rm -rf "dist/${STAGE}"
+          echo "tarball=dist/${STAGE}.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Collect artifacts
+        id: collect
+        run: |
+          mkdir -p dist
+          # .deb lives under target/<triple>/debian/ when --target is set;
+          # cargo-deb may also dump into target/debian/ depending on
+          # version. Glob both so we don't care which.
+          find target -path "*/debian/*.deb" -exec cp {} dist/ \;
+          find target -path "*/generate-rpm/*.rpm" -exec cp {} dist/ \;
+          ls -lah dist/
+          echo "Artifacts staged under ./dist/"
+
+      - name: GPG sign artifacts (skipped if no key configured)
+        # `env.RELEASE_GPG_KEY` is the job-scoped materialisation of
+        # `secrets.RELEASE_GPG_KEY` (see the `env:` block at the job
+        # level). When the secret is unset the env var resolves to
+        # an empty string and the entire step is skipped, so the
+        # workflow stays green on a key-less repo.
+        if: ${{ env.RELEASE_GPG_KEY != '' }}
+        run: |
+          set -euo pipefail
+          # Decode the base64'd private key into a temp file and
+          # import. Don't leave the plaintext key on disk after import.
+          KEYFILE="$(mktemp)"
+          trap 'rm -f "$KEYFILE"' EXIT
+          echo "$RELEASE_GPG_KEY" | base64 -d > "$KEYFILE"
+          gpg --batch --yes --import "$KEYFILE"
+          KEYID="$(gpg --list-secret-keys --with-colons | awk -F: '/^sec/ {print $5; exit}')"
+          echo "Signing with key ${KEYID}"
+          for artifact in dist/*; do
+            # Skip already-signed sidecars on a retry.
+            case "$artifact" in *.sig|*.asc|*.sha256) continue ;; esac
+            gpg --batch --yes --pinentry-mode loopback \
+                --passphrase "$RELEASE_GPG_PASSPHRASE" \
+                --local-user "$KEYID" \
+                --detach-sign --armor \
+                --output "${artifact}.sig" \
+                "$artifact"
           done
+          ls -lah dist/
 
-      - name: Upload
-        uses: softprops/action-gh-release@v2
+      - name: Generate SHA256SUMS
+        run: |
+          cd dist
+          # Stable lexicographic ordering matches deploy/CHECKSUMS.md.template.
+          sha256sum $(ls | grep -v '\.sha256$' | sort) > SHA256SUMS-${{ matrix.target }}
+          cat SHA256SUMS-${{ matrix.target }}
+
+      - name: Upload matrix artifacts
+        # `actions/upload-artifact` doesn't honour
+        # `defaults.run.working-directory`, so the path needs to be
+        # explicit relative to the runner's $GITHUB_WORKSPACE root.
+        uses: actions/upload-artifact@v4
         with:
-          files: |
-            ${{ env.STAGE }}.tar.gz
-            ${{ env.STAGE }}.zip
-            ${{ env.STAGE }}.tar.gz.sha256
-            ${{ env.STAGE }}.zip.sha256
+          name: octravpn-${{ matrix.target }}
+          path: octra/dist/
+          if-no-files-found: error
+          retention-days: 7
 
-  deb:
-    name: cargo-deb (linux)
+  publish:
+    name: Publish draft release
     runs-on: ubuntu-latest
     needs: build
     steps:
-      - uses: ./.github/actions/setup-rust
+      - name: Checkout (for changelog)
+        uses: actions/checkout@v4
         with:
-          cache: "false"
-      - run: cargo install cargo-deb --locked
-      - run: cargo deb -p octravpn-node --no-build
-      - run: cargo deb -p octravpn-client --no-build
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: target/debian/*.deb
+          # `fetch-depth: 0` so the changelog step has access to the
+          # previous release tag and the commits between it and HEAD.
+          fetch-depth: 0
 
-  rpm:
-    name: cargo-generate-rpm (linux)
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - uses: ./.github/actions/setup-rust
-        with:
-          cache: "false"
-      - run: cargo install cargo-generate-rpm --locked
-      - run: cargo generate-rpm -p octravpn-node
-      - run: cargo generate-rpm -p octravpn-client
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: target/generate-rpm/*.rpm
-
-  macos-pkg:
-    name: macOS .pkg
-    runs-on: macos-14
-    needs: build
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download macOS artifacts
+      - name: Download all matrix artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: "octravpn-*-apple-darwin*"
-          path: artifacts
-      - name: Stage universal binary
-        run: |
-          mkdir -p target/x86_64-apple-darwin/release target/aarch64-apple-darwin/release
-          tar -xzf artifacts/*x86_64-apple-darwin*/*.tar.gz -C /tmp || true
-          tar -xzf artifacts/*aarch64-apple-darwin*/*.tar.gz -C /tmp || true
-          cp /tmp/octravpn-*/octravpn       target/x86_64-apple-darwin/release/   2>/dev/null || true
-          cp /tmp/octravpn-*/octravpn-node  target/x86_64-apple-darwin/release/   2>/dev/null || true
-      - name: Build pkg
-        env:
-          VERSION: ${{ github.ref_name }}
-          DEVELOPER_ID_INSTALLER: ${{ secrets.DEVELOPER_ID_INSTALLER }}
-          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
-          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
-          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
-        run: ./deploy/macos-pkg/build-pkg.sh
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: dist/octravpn-*.pkg
+          # Merge x86_64 + aarch64 outputs into a single dist/.
+          # Per-target SHA256SUMS-<target> filenames don't collide;
+          # the deb/rpm/tarball filenames embed the target arch.
+          path: dist
+          pattern: octravpn-*
+          merge-multiple: true
 
-  windows-msi:
-    name: Windows .msi
-    runs-on: windows-latest
-    needs: build
-    steps:
-      - uses: ./.github/actions/setup-rust
-      - run: cargo install cargo-wix --locked
-      - run: cargo build --release -p octravpn-client -p octravpn-node
-      - run: cargo wix --no-build --nocapture --package octravpn-client
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: target/wix/*.msi
-
-  sbom:
-    name: Generate SBOM
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - uses: ./.github/actions/setup-rust
-        with:
-          cache: "false"
-      - run: cargo install cargo-cyclonedx --locked
-      - run: cargo cyclonedx --format json --output-pattern package
-      - name: Collect SBOMs
+      - name: Consolidate SHA256SUMS
         run: |
-          mkdir -p sbom
-          find . -name '*.cdx.json' -exec cp {} sbom/ \;
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: sbom/*.cdx.json
+          cd dist
+          # Merge per-target SHA256SUMS into a single file. Each line is
+          # `<hash>  <filename>`; sort by filename for deterministic
+          # output that matches deploy/CHECKSUMS.md.template.
+          cat SHA256SUMS-* | sort -k2 > SHA256SUMS
+          rm -f SHA256SUMS-*
+          echo "=== SHA256SUMS ==="
+          cat SHA256SUMS
+          ls -lah .
 
-  oci:
-    name: OCI container image
-    runs-on: ubuntu-latest
-    needs: build
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build + push (node)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/Dockerfile.node
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/octravpn-node:${{ github.ref_name }}
-            ghcr.io/${{ github.repository_owner }}/octravpn-node:latest
-      - name: Build + push (client)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/Dockerfile.client
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/octravpn:${{ github.ref_name }}
-            ghcr.io/${{ github.repository_owner }}/octravpn:latest
-      - name: Install cosign
-        uses: sigstore/cosign-installer@v3
-      - name: Sign images (keyless via Fulcio)
-        env:
-          COSIGN_EXPERIMENTAL: "1"
+      - name: Draft changelog
+        id: changelog
         run: |
-          cosign sign --yes ghcr.io/${{ github.repository_owner }}/octravpn-node:${{ github.ref_name }}
-          cosign sign --yes ghcr.io/${{ github.repository_owner }}/octravpn:${{ github.ref_name }}
+          # Discover the previous release tag (anything matching v*
+          # that isn't the current one). If none exists this is the
+          # first release and we list every commit.
+          CURRENT_TAG="${GITHUB_REF#refs/tags/}"
+          PREV_TAG="$(git tag --list 'v*' --sort=-version:refname \
+                       | grep -v "^${CURRENT_TAG}$" | head -n1 || true)"
+          {
+            echo "## OctraVPN ${CURRENT_TAG}"
+            echo
+            if [ -n "$PREV_TAG" ]; then
+              echo "Changes since [\`${PREV_TAG}\`](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${PREV_TAG}):"
+              echo
+              git log --no-merges --pretty=format:'- %s (%h)' "${PREV_TAG}..HEAD"
+            else
+              echo "Initial release."
+              echo
+              git log --no-merges --pretty=format:'- %s (%h)' HEAD
+            fi
+            echo
+            echo
+            echo "## Artifacts"
+            echo
+            echo "Linux x86_64 + aarch64 builds: deb, rpm, tarball. See"
+            echo "\`SHA256SUMS\` for hashes and \`docs/release.md\` for"
+            echo "signature verification."
+            echo
+            echo "## Verification"
+            echo
+            echo "\`\`\`"
+            echo "sha256sum -c SHA256SUMS"
+            echo "gpg --verify octravpn-${CURRENT_TAG#v}-x86_64-unknown-linux-gnu.tar.gz.sig"
+            echo "\`\`\`"
+          } > CHANGELOG.md
+          {
+            echo 'body<<EOF_CHANGELOG'
+            cat CHANGELOG.md
+            echo
+            echo 'EOF_CHANGELOG'
+          } >> "$GITHUB_OUTPUT"
 
-  homebrew:
-    name: Update Homebrew tap
-    runs-on: ubuntu-latest
-    needs: build
-    # GitHub Actions forbids `secrets.*` in job-level `if`; gate the
-    # tap update at step level via env instead.
-    env:
-      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Update tap
-        if: env.HOMEBREW_TAP_TOKEN != ''
-        run: |
-          echo "Homebrew formula update would happen here using $HOMEBREW_TAP_TOKEN."
-          # In practice: git clone the homebrew-tap repo, run a sed against
-          # Formula/octravpn.rb to bump url+sha256, commit, push.
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          # Operator manually flips draft=false after reviewing the
+          # generated notes + artifact list.
+          draft: true
+          prerelease: false
+          name: ${{ github.ref_name }}
+          body: ${{ steps.changelog.outputs.body }}
+          files: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.tar.gz
+            dist/*.sig
+            dist/SHA256SUMS

@@ -1,10 +1,35 @@
 #!/bin/sh
+# Debian maintainer script: pre-removal.
+#
+# Stop the running services so the next dpkg step can swap binaries
+# (on upgrade) or delete files (on remove) without "Text file busy"
+# style failures. We DON'T disable on upgrade — the postinst will
+# re-enable after the new binary is in place.
 set -e
 
-if command -v systemctl >/dev/null 2>&1; then
-  systemctl stop octravpn-node >/dev/null 2>&1 || true
-  systemctl disable octravpn-node >/dev/null 2>&1 || true
-fi
+case "$1" in
+  remove|upgrade|deconfigure)
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl stop octravpn-attest.timer   >/dev/null 2>&1 || true
+      systemctl stop octravpn-attest.service >/dev/null 2>&1 || true
+      systemctl stop octravpn-node.service   >/dev/null 2>&1 || true
+      if [ "$1" = "remove" ]; then
+        # Only flip the enabled state to off on actual removal —
+        # upgrades go through stop -> swap -> start, which the
+        # postinst handles via daemon-reload + enable.
+        systemctl disable octravpn-attest.timer >/dev/null 2>&1 || true
+        systemctl disable octravpn-node.service >/dev/null 2>&1 || true
+      fi
+    fi
+    ;;
+  failed-upgrade)
+    # Nothing to do — let dpkg roll back.
+    ;;
+  *)
+    echo "prerm called with unknown argument: $1" >&2
+    exit 1
+    ;;
+esac
 
 #DEBHELPER#
 exit 0
