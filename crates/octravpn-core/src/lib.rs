@@ -23,6 +23,7 @@ pub mod receipt_journal;
 pub mod rpc;
 pub mod session;
 pub mod stealth;
+pub mod v3_policy;
 pub mod v3_state_root;
 pub mod validator_oracle;
 

@@ -12,6 +12,7 @@ octra-core  = { path = "../../../octra-foundry/crates/octra-core" }
 
 anyhow      = { workspace = true }
 async-trait = { workspace = true }
+base64      = { workspace = true }
 ed25519-dalek = { workspace = true }
 hex         = { workspace = true }
 rand        = { workspace = true }

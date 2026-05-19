@@ -105,7 +105,7 @@ an int** per circle (≈ 60 bytes deterministic).
 ### 3.1 Operator circle
 
 ```
-oct://<circle_id>/policy.json              # encrypted endpoint URL, WG pubkey, region, price tiers
+oct://<circle_id>/policy.json              # endpoint URL, WG pubkey, region, price tiers (schema: docs/v3-policy-schema.md)
 oct://<circle_id>/state-root.json          # canonical commitment bundle — schema in docs/v3-state-root-schema.md
 oct://<circle_id>/receipts/{epoch}.json    # per-session signed receipt: { sid, bytes, net, class, price, blinding, sig_op, sig_client }
 oct://<circle_id>/enc-state.bin            # operator-only encrypted running state (post-HFHE this holds the ciphertext)
