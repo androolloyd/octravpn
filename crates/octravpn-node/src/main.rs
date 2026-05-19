@@ -378,8 +378,7 @@ async fn run_mesh_cmd(sub: MeshCmd) -> Result<()> {
         } => {
             use octravpn_mesh::{PreauthMinter, DEFAULT_PREAUTH_TTL};
             let ttl = ttl_secs
-                .map(std::time::Duration::from_secs)
-                .unwrap_or(DEFAULT_PREAUTH_TTL);
+                .map_or(DEFAULT_PREAUTH_TTL, std::time::Duration::from_secs);
             let minter = PreauthMinter::new();
             let pk = minter.mint(&user, ttl, reusable);
             // Single-line stdout output so the harness can capture
@@ -702,7 +701,15 @@ fn verify_audit_log(hub: &Hub, path: &std::path::Path) -> Result<()> {
         .open_audit_log()
         .ok_or_else(|| anyhow::anyhow!("audit_dir not configured"))?;
     let key = audit.key();
-    let n = crate::audit::AuditLog::verify_file(&key, path)?;
+    // #240: `verify_file` returns a rich `FileVerifyReport` (the
+    // shared verifier the new `audit_cli` also calls). Surface any
+    // chain error here so the legacy `verify-audit-log` command stays
+    // usable as a yes/no check.
+    let report = crate::audit::AuditLog::verify_file(&key, path)?;
+    if let Some(err) = report.first_error {
+        anyhow::bail!("{err}");
+    }
+    let n = report.entries;
     info!(verified = n, "audit chain ok");
     println!("OK ({n} entries)");
     Ok(())

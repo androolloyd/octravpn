@@ -41,14 +41,12 @@ use std::{
 
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
-use hmac::Mac;
 use serde::Serialize;
 use serde_json::Value;
-use sha2::Sha256;
 
 use octravpn_core::session::SessionId;
 
-type HmacSha256 = hmac::Hmac<Sha256>;
+use crate::audit::{AuditLog, FileVerifyReport};
 
 /// `octravpn-node audit …` top-level subcommand.
 #[derive(Subcommand, Debug)]
@@ -560,23 +558,42 @@ fn render_verify_report(r: &VerifyReport, out: &mut dyn Write) -> Result<()> {
 /// midnight rotation). Returns the aggregated check result plus a map
 /// of `session_id -> set<seq>` derived from `receipt_signed` audit
 /// entries — used by the cross-check.
+///
+/// #240 / F1: this used to be a hand-rolled walker shadowing
+/// `AuditLog::verify_file`. The reuse review at
+/// `/tmp/simplify-reuse-review.md` flagged the duplication; now this
+/// function is a thin aggregator over per-file `verify_file` calls.
+/// All HMAC math + `(session_id, seq)` harvesting lives in `audit.rs`.
 fn verify_audit_files(
     key: &[u8; 32],
     files: &[PathBuf],
 ) -> (CheckResult, BTreeMap<String, std::collections::BTreeSet<u64>>) {
-    let mut total = 0usize;
+    let mut total: u64 = 0;
     let mut signed_seqs: BTreeMap<String, std::collections::BTreeSet<u64>> = BTreeMap::new();
     for file in files {
-        match verify_audit_file_collect(key, file, &mut signed_seqs) {
-            Ok(n) => total += n,
+        let report: FileVerifyReport = match AuditLog::verify_file(key, file) {
+            Ok(r) => r,
             Err(e) => {
                 return (
                     CheckResult::Fail {
-                        detail: format!("{}: {e}", file.display()),
+                        detail: format!("{}: {e:#}", file.display()),
                     },
                     signed_seqs,
                 );
             }
+        };
+        total += report.entries;
+        // Merge per-file harvested seqs into the aggregate map.
+        for (sid, seqs) in report.signed_seqs {
+            signed_seqs.entry(sid).or_default().extend(seqs);
+        }
+        if let Some(err) = report.first_error {
+            return (
+                CheckResult::Fail {
+                    detail: format!("{}: {err}", file.display()),
+                },
+                signed_seqs,
+            );
         }
     }
     (
@@ -587,150 +604,47 @@ fn verify_audit_files(
     )
 }
 
-fn verify_audit_file_collect(
-    key: &[u8; 32],
-    path: &Path,
-    signed_seqs: &mut BTreeMap<String, std::collections::BTreeSet<u64>>,
-) -> Result<usize> {
-    let f = fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
-    let reader = BufReader::new(f);
-    let mut prev_mac = [0u8; 32];
-    let mut count = 0usize;
-    for (i, line) in reader.lines().enumerate() {
-        let line = line.with_context(|| format!("read line {}", i + 1))?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        let v: Value = serde_json::from_str(&line)
-            .with_context(|| format!("parse line {}", i + 1))?;
-        let claimed_prev = v
-            .get("prev_mac")
-            .and_then(|x| x.as_str())
-            .ok_or_else(|| anyhow::anyhow!("line {} missing prev_mac", i + 1))?;
-        let claimed_mac = v
-            .get("mac")
-            .and_then(|x| x.as_str())
-            .ok_or_else(|| anyhow::anyhow!("line {} missing mac", i + 1))?;
-        if hex::encode(prev_mac) != claimed_prev {
-            anyhow::bail!(
-                "chain break at line {}: prev_mac {} != expected {}",
-                i + 1,
-                claimed_prev,
-                hex::encode(prev_mac)
-            );
-        }
-        let canonical = v
-            .get("record_json")
-            .and_then(|x| x.as_str())
-            .ok_or_else(|| anyhow::anyhow!("line {} missing record_json", i + 1))?
-            .to_string();
-        let mut mac =
-            <HmacSha256 as Mac>::new_from_slice(key).expect("HMAC accepts any key");
-        mac.update(&prev_mac);
-        mac.update(canonical.as_bytes());
-        let expect: [u8; 32] = mac.finalize().into_bytes().into();
-        if hex::encode(expect) != claimed_mac {
-            anyhow::bail!(
-                "MAC mismatch at line {}: log mac {} != recomputed {}",
-                i + 1,
-                claimed_mac,
-                hex::encode(expect)
-            );
-        }
-        prev_mac = expect;
-        count += 1;
-        // Harvest any `(session_id, seq)` pair embedded in the line —
-        // used for the cross-check. The record JSON is canonical; we
-        // re-parse to read it.
-        if let Ok(rec) = serde_json::from_str::<Value>(&canonical) {
-            let ev = audit_record_to_event(&rec);
-            // We only feed the cross-check from entries that look
-            // receipt-related. The current writer emits `kind="announce"`
-            // (no seq) and downstream tooling may emit `receipt_signed`
-            // with a seq — both are accepted here; non-seq entries
-            // contribute the session_id but no seq.
-            if let (Some(sid), Some(seq)) = (ev.session_id, ev.seq) {
-                signed_seqs.entry(sid).or_default().insert(seq);
-            }
-        }
-    }
-    Ok(count)
-}
-
 fn verify_journal(path: &Path) -> Result<CheckResult> {
-    // The on-disk format stores at most one (session_id, last_seq) per
-    // session — i.e. monotonicity within a session is structurally
-    // enforced by the codec (you cannot encode two entries for the
-    // same session_id; the writer keys the map by session_id). So the
-    // monotonicity check is largely a parse-shaped no-op, but we DO
-    // verify:
-    //   * the file decodes cleanly (catches corruption);
-    //   * no session_id appears twice in the on-disk stream (would
-    //     indicate a hand-edited file or a format bug);
-    //   * every recorded floor is > 0 (a floor of 0 is the "never
-    //     seen" sentinel and should never be written).
-    let raw = fs::read(path).with_context(|| format!("read {}", path.display()))?;
-    if raw.is_empty() {
+    // The journal's on-disk format is now append-only with per-record
+    // checksums (see `octravpn_core::receipt_journal` module doc). We
+    // delegate to the public API rather than re-parsing the bytes here
+    // — `ReceiptJournal::open` runs the full replay (magic check,
+    // per-record CRC32, v0 migration) and surfaces every failure mode
+    // we used to hand-roll. The in-memory `entries()` then gives us
+    // the live per-session floor; the codec guarantees one entry per
+    // session.
+    if !path.exists() {
         return Ok(CheckResult::Ok {
             detail: "0 records (empty journal)".into(),
         });
     }
-    // Raw codec check — we know the format from the journal module's
-    // doc comment: 8B magic + u32 BE count + N × (32B id + u64 BE seq).
-    const MAGIC: &[u8; 8] = b"OCRJ1\0\0\0";
-    if raw.len() < MAGIC.len() + 4 {
-        return Ok(CheckResult::Fail {
-            detail: format!("truncated journal ({} bytes)", raw.len()),
+    let metadata = fs::metadata(path).with_context(|| format!("stat {}", path.display()))?;
+    if metadata.len() == 0 {
+        return Ok(CheckResult::Ok {
+            detail: "0 records (empty journal)".into(),
         });
     }
-    if &raw[..MAGIC.len()] != MAGIC {
-        return Ok(CheckResult::Fail {
-            detail: "bad journal magic".into(),
-        });
-    }
-    let mut n_arr = [0u8; 4];
-    n_arr.copy_from_slice(&raw[MAGIC.len()..MAGIC.len() + 4]);
-    let n = u32::from_be_bytes(n_arr) as usize;
-    let entry_size = 32 + 8;
-    let expected = MAGIC.len() + 4 + n * entry_size;
-    if raw.len() != expected {
+    let journal = match octravpn_core::receipt_journal::ReceiptJournal::open(path) {
+        Ok(j) => j,
+        Err(e) => {
+            return Ok(CheckResult::Fail {
+                detail: format!("{e}"),
+            });
+        }
+    };
+    let entries = journal.entries();
+    // Floor=0 is the "never seen" sentinel; the writer enforces seq>=1
+    // on every successful `bump`, so seeing 0 on disk indicates a
+    // hand-edited file or a format bug.
+    if let Some((sid, _)) = entries.iter().find(|(_, seq)| *seq == 0) {
         return Ok(CheckResult::Fail {
             detail: format!(
-                "size mismatch: expected {expected} bytes for {n} entries; got {} bytes",
-                raw.len()
+                "session {} has floor=0 (sentinel; should never be written)",
+                sid.to_hex()
             ),
         });
     }
-    let mut cursor = MAGIC.len() + 4;
-    let mut seen: std::collections::HashSet<[u8; 32]> = std::collections::HashSet::default();
-    let mut sessions = 0usize;
-    for i in 0..n {
-        let mut id = [0u8; 32];
-        id.copy_from_slice(&raw[cursor..cursor + 32]);
-        cursor += 32;
-        let mut seq_arr = [0u8; 8];
-        seq_arr.copy_from_slice(&raw[cursor..cursor + 8]);
-        cursor += 8;
-        let seq = u64::from_be_bytes(seq_arr);
-        if !seen.insert(id) {
-            return Ok(CheckResult::Fail {
-                detail: format!(
-                    "duplicate session_id at record {} ({})",
-                    i + 1,
-                    hex::encode(id)
-                ),
-            });
-        }
-        if seq == 0 {
-            return Ok(CheckResult::Fail {
-                detail: format!(
-                    "record {} has floor=0 (sentinel; should never be written)",
-                    i + 1
-                ),
-            });
-        }
-        sessions += 1;
-    }
+    let sessions = entries.len();
     Ok(CheckResult::Ok {
         detail: format!(
             "{sessions} records, monotonic seq for {sessions} session{}",
@@ -1149,16 +1063,20 @@ mod tests {
     }
 
     #[test]
-    fn verify_fails_on_seq_collision() {
-        // The codec rejects duplicates on encode, so we craft a raw
-        // file with two records sharing the same session_id and
-        // assert verify_journal catches the on-disk shape.
+    fn verify_collapses_duplicate_ids_to_one_entry() {
+        // Since #235 the journal is append-only and replay takes the
+        // max seq per session_id, so a "duplicate id" on disk is a
+        // legitimate shape (a long-running session with many bumps).
+        // Verify reports one entry per live session, not an error.
+        //
+        // We craft a v0 fixture with two same-id entries (which the
+        // old format technically could encode if hand-edited) and
+        // confirm migration + verify treats the file as one session.
         let dir = tempdir().unwrap();
         let path = dir.path().join("rj.bin");
         let mut buf = Vec::new();
         buf.extend_from_slice(b"OCRJ1\0\0\0");
         buf.extend_from_slice(&2u32.to_be_bytes());
-        // Two records with the same id.
         buf.extend_from_slice(&[0xAA; 32]);
         buf.extend_from_slice(&5u64.to_be_bytes());
         buf.extend_from_slice(&[0xAA; 32]);
@@ -1166,13 +1084,13 @@ mod tests {
         fs::write(&path, &buf).unwrap();
         let r = verify_journal(&path).unwrap();
         match r {
-            CheckResult::Fail { detail } => {
+            CheckResult::Ok { detail } => {
                 assert!(
-                    detail.contains("duplicate session_id"),
-                    "got: {detail}"
+                    detail.contains("1 records"),
+                    "expected one collapsed record; got: {detail}"
                 );
             }
-            other => panic!("expected Fail, got {other:?}"),
+            other => panic!("expected Ok, got {other:?}"),
         }
     }
 
