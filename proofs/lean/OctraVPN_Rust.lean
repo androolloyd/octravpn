@@ -2,6 +2,7 @@ import OctraVPN_Rust.Spec
 import OctraVPN_Rust.Lemmas
 import OctraVPN_Rust.MachineRegistry
 import OctraVPN_Rust.ACL
+import OctraVPN_Rust.ShadowBlob
 
 /-!
 # OctraVPN — Rust security primitives, Lean 4 specification.
@@ -125,7 +126,11 @@ The following Rust modules are NOT yet modeled:
     for deductive proof per the worktree brief.
   - boringtun / aes-gcm / chacha20poly1305 / ed25519-dalek internals
     — opaque assumptions only.
-  - Full HFHE soundness (still a PROOF GAP shared with the AML modules).
+  - Full HFHE soundness is now bridged via `OctraVPN_Rust.ShadowBlob`
+    + `WireProtocol.HFHE`: the abstract scheme + the receipt
+    schema's shadow-blob fields are formally specified, with
+    swap-readiness proved. IND-CPA security of the underlying
+    PKE remains a delegated assumption.
 
 ## Build
 

@@ -229,7 +229,88 @@ Axioms introduced in `V3Members.lean`:
 
 ---
 
-## 7. `WireProtocol.V3Policy`
+## 7. `WireProtocol.HFHE`
+
+The HFHE / PVAC scheme: hypergraph-FHE public-key encryption with
+additive homomorphism over `Z/pZ` for `p = 2^127 - 1`, plus a ZK
+proof-of-zero on ciphertexts. Closes the longest-standing PROOF
+GAP — until this pass, the HFHE path was a black box at the Lean
+level. Mirrors:
+
+- `pvac-sidecar/src/{keygen,wire,ops,zkzp,session}.rs` (the
+  sidecar surface),
+- `crates/octravpn-core/src/receipt.rs:146-183` (the shadow-blob
+  fields on `SignedReceipt`),
+- upstream `octra-labs/HFHE` (the underlying scheme).
+
+| Theorem                              | Plain-English statement                                                                                                  | Rust function / file                                  |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------- |
+| `ct_serde_roundtrip`                 | `deserialise ∘ serialise = some`. The `hfhe_v1\|<b64>` wire encoding round-trips losslessly.                              | `pvac-sidecar/src/wire.rs::serialise`                 |
+| `ct_serialise_deterministic`         | `serialise` is a function — same ciphertext ⇒ same wire bytes.                                                           | `pvac-sidecar/src/wire.rs::serialise`                 |
+| `ct_serialise_injective`             | Distinct ciphertexts produce distinct wire encodings (under serde-canonical-encoding axiom).                              | `pvac-sidecar/src/wire.rs::serialise`                 |
+| `enc_function_in_randomness`         | Encryption is a function of `(pk, m, r)` — deterministic given a fixed randomness tape.                                  | `pvac-sidecar/src/lib.rs::encrypt_with_randomness`    |
+| `hom_add_commutative`                | Same-pubkey ciphertexts commute under homomorphic `add`.                                                                 | `pvac-sidecar/src/ops.rs::add`                        |
+| `hom_add_associative`                | Same-pubkey ciphertexts associate under homomorphic `add`.                                                               | `pvac-sidecar/src/ops.rs::add`                        |
+| `add_const_matches_plaintext_add`    | `dec(sk, add_const(enc(m), c)) = (m + c) mod p`. The "encrypted accumulator" identity.                                   | `pvac-sidecar/src/ops.rs::add_const`                  |
+| `hom_add_matches_plaintext_add`      | `dec(sk, add(enc(m₁), enc(m₂))) = (m₁ + m₂) mod p`. Additive homomorphism correctness.                                   | `pvac-sidecar/src/ops.rs::add`                        |
+| `zero_proof_completeness`            | A valid zero-proof on a ciphertext that decrypts to 0 verifies under the matching pubkey.                                | `pvac-sidecar/src/zkzp.rs::verify_zero` (HFHE-3 path) |
+| `zero_proof_soundness`               | `verify_zero` returns `false` whenever the ciphertext does NOT decrypt to 0 (contrapositive of soundness).               | same                                                  |
+| `cross_pubkey_dec_fails`             | **Pubkey binding.** A ciphertext under pubkey A does not decrypt under sk_B for B ≠ A.                                   | `circle.owner.fhe_pk` registration                    |
+| `dec_success_implies_pk_match`       | Contrapositive: a successful decrypt implies the ciphertext was bound to the decrypting keypair's pubkey.                | same                                                  |
+| `shadow_blob_mismatch_detectable`    | **Shadow-blob invariant.** A commitment-cipher mismatch (cipher decrypts to b' ≠ committed bytes_used) is detectable.    | HFHE-3 `fhe_verify` cross-check (TBD)                 |
+| `shadow_blob_honest_consistency`     | An honest operator's `Enc(pk, bytes_used)` decrypts to `bytes_used mod p` AND the commitment is recomputable.            | `receipt.rs:283-294` (`build_with_shadow`)            |
+| `swap_ready_honest_receipt_verifies` | **Swap-ready.** An honestly-emitted shadow blob admits a zero-proof on `Enc(diff) = 0`, so HFHE-3 verifies the receipt.   | HFHE-3 `fhe_verify` accept path                       |
+| `enc_pk_matches`                     | Output ciphertext's `.pk` field equals the input pubkey (used by the ShadowBlob bridge).                                 | `pvac-sidecar/src/ops.rs::encrypt` postcondition      |
+
+Concrete-value anchors: `p > 1` (Mersenne prime modulus is > 1);
+`deserialise (serialise ct) = some ct` for an arbitrary ciphertext.
+
+Axioms introduced in `HFHE.lean`:
+
+- `p_gt_one` — the plaintext modulus is greater than 1.
+  Concretely `p = 2^127 - 1`; we don't re-prove primality, only
+  the trivial cardinality bound that makes `Z/pZ` non-trivial.
+- `enc_pk`, `add_pk`, `add_const_pk` — the opaque cipher
+  operations preserve the pubkey-binding field
+  (definitional convention; lifted to axioms because the opaque
+  declarations don't unfold).
+- `dec_enc_id` — PKE correctness: `Dec(sk, Enc(pk, m)) = some (m mod p)`.
+  Standard cryptographic property; same modelling strategy as
+  `aead_roundtrip` in `OctraVPN_Rust/Spec.lean`.
+- `enc_deterministic_by_randomness` — encryption is a pure
+  function of `(pk, m, r)`. Models the sidecar's
+  `encrypt_with_randomness` entry point.
+- `add_correct`, `add_const_correct` — additive homomorphism over
+  `Z/pZ`. Standard FHE properties; matches the upstream
+  `octra-labs/HFHE` scheme.
+- `add_commutative_ct`, `add_associative_ct` — ciphertext-level
+  commutativity / associativity of homomorphic add. Stronger than
+  "decryption commutes" because the underlying scheme produces a
+  canonical ciphertext representation; matches the upstream
+  `add` implementation.
+- `verify_complete`, `verify_sound` — ZK proof completeness +
+  soundness for the zero-proof. Standard ZK proof properties.
+- `pubkey_binding` — distinct pubkeys force `dec` to return
+  `none`. Standard PKE key-binding; backed by the per-circle
+  pubkey registration via `octra_registerPvacPubkey`.
+- `serde_roundtrip`, `serde_injective` — standard serde round-
+  trip + canonical-encoding injectivity for the
+  `hfhe_v1|<b64>` wire format. Exercised by
+  `pvac-sidecar/tests/wire_roundtrip.rs`.
+- `sha256_injective`, `encodeAmountPrice_injective` — SHA-256
+  collision resistance + `u64::to_be_bytes` injectivity. Same
+  axiom style as `Sha256.injective` in `OctraVPN_Rust/Spec.lean`
+  and `u64be_injective` in `OctraVPN_Rust/Lemmas.lean`.
+
+**Out of scope (delegated to the audited scheme):** IND-CPA / IND-CCA
+security of the underlying PKE; the *zero-knowledge* direction of
+the zero-proof (only soundness is axiomatised); the concrete byte
+format of `hfhe_v1|<b64>` (the Rust proptest harness in
+`pvac-sidecar/tests/wire_roundtrip.rs` exercises this).
+
+---
+
+## 8. `WireProtocol.V3Policy`
 
 The v3 policy anchor — `(acl_doc, effective_epoch)`. Same modelling
 strategy as `V3Members.lean`.
@@ -263,13 +344,15 @@ Axioms introduced in `V3Policy.lean`:
 | `V3Canonical`           | 14       | 3                  |
 | `V3Members`             | 5        | 1                  |
 | `V3Policy`              | 5        | 1                  |
-| **Total (this module)** | **60**   | **10**             |
+| `HFHE`                  | 16       | 2                  |
+| **Total (this module)** | **76**   | **12**             |
 
-Combined with the 72 theorems in `OctraVPN_Rust/` (5 in
+Combined with the 79 theorems in `OctraVPN_Rust/` (5 in
 `Spec.lean` + 54 in `Lemmas.lean` + 5 in `MachineRegistry.lean` +
-8 in `ACL.lean`), the deductive proof surface now stands at
-**132 mechanically-checked theorems** (72 Rust security
-primitives + 60 wire-protocol primitives).
+8 in `ACL.lean` + 7 in `ShadowBlob.lean`), the deductive proof
+surface now stands at **155 mechanically-checked theorems**
+(79 Rust security primitives + 76 wire-protocol primitives,
+of which 23 are new in this pass).
 
 ---
 

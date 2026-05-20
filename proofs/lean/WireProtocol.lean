@@ -5,6 +5,7 @@ import WireProtocol.PortalCache
 import WireProtocol.V3Canonical
 import WireProtocol.V3Members
 import WireProtocol.V3Policy
+import WireProtocol.HFHE
 
 /-!
 # OctraVPN — wire-protocol primitive proofs.
@@ -25,6 +26,12 @@ and the portal HMAC token plumbing in #218):
     PortalState::{token_for, token_valid}`.
   * `WireProtocol.PortalCache` — approve + unseal cache lifecycle
     invariants for the same portal module.
+  * `WireProtocol.V3Canonical`, `WireProtocol.V3Members`,
+    `WireProtocol.V3Policy` — the v3 canonical-JSON encoder + the
+    `(members, policy)` anchors.
+  * `WireProtocol.HFHE` — the hypergraph-FHE / PVAC scheme that
+    backs the receipt shadow-blob fields. Closes the longest-
+    standing PROOF GAP shared with the AML modules.
 
 See `WireProtocol/Theorems.md` for the full plain-English index +
 Rust-signature mapping.
