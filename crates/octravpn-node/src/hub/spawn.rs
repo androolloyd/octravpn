@@ -83,11 +83,14 @@ impl Hub {
             // `docker/devnet/tailscale-interop` harness inject a
             // token via the compose secret without re-rendering
             // node.toml.
+            // Audit-2 CFG-2 / Audit-3 H-6: `admin_token` is now wrapped in
+            // `secrecy::SecretString` on the config struct; materialise it
+            // back to `Option<String>` here for the ControlState builder.
+            // The env-var fallback is unchanged.
             let admin_token = self
                 .cfg
                 .control
-                .admin_token
-                .clone()
+                .admin_token_string()
                 .or_else(|| std::env::var("OCTRAVPN_ADMIN_TOKEN").ok());
             // Construct the Tailscale-wire surface state if a
             // `[control].tailscale_wire_state_dir` is configured. Absent
@@ -186,8 +189,8 @@ impl Hub {
                 receipt_context,
                 receipt_journal,
             )
-            .with_events_token(self.cfg.control.events_token.clone())
-            .with_metrics_token(self.cfg.control.metrics_token.clone())
+            .with_events_token(self.cfg.control.events_token_string())
+            .with_metrics_token(self.cfg.control.metrics_token_string())
             .with_admin_token(admin_token)
             .with_session_verifier(SessionAdmissionVerifier::new(self.chain.rpc.clone()))
             .with_wire_state(wire_state.as_ref().map(|(ws, _)| ws.clone()))
@@ -248,9 +251,14 @@ impl Hub {
                         state_clone.ingest(&ev);
                     }
                 });
+                // Audit-2 CFG-2 / Audit-3 H-6: materialise the SecretString
+                // bearer back to Option<String> for HttpState; the analytics
+                // crate wraps it in Arc<str> + ct-compares on the request path.
+                let bearer = self.cfg.analytics.bearer_token_string();
+                let gated = bearer.is_some();
                 let http_state = octravpn_analytics::HttpState::new(
                     indexer.state.clone(),
-                    self.cfg.analytics.bearer_token.clone(),
+                    bearer,
                 );
                 let listen_addr = self.cfg.analytics.listen_addr.clone();
                 let listen_for_log = listen_addr.clone();
@@ -262,7 +270,7 @@ impl Hub {
                 });
                 info!(
                     listen = %listen_for_log,
-                    gated = self.cfg.analytics.bearer_token.is_some(),
+                    gated = gated,
                     "analytics indexer spawned"
                 );
                 Some(tx)
@@ -357,7 +365,10 @@ fn validate_obfs4_config(cfg: &crate::config::NodeConfig) -> Result<()> {
     })?;
 
     // Bridge-side: validate the secret matches the pubkey.
-    if let Some(secret_hex) = o.bridge_identity_secret.as_ref() {
+    // Audit-2 CFG-2 / Audit-3 H-6: `bridge_identity_secret` is wrapped in
+    // SecretString — call the redaction-safe accessor instead of touching
+    // the raw Option<SecretString> field.
+    if let Some(secret_hex) = o.bridge_identity_secret_expose() {
         let secret_bytes = ::hex::decode(secret_hex)
             .context("[tun.transport.obfs4].bridge_identity_secret hex")?;
         if secret_bytes.len() != 32 {
