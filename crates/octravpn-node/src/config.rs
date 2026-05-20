@@ -79,6 +79,84 @@ pub(crate) struct NodeConfig {
     /// the audit log + receipt journal remain authoritative.
     #[serde(default)]
     pub analytics: AnalyticsCfg,
+    /// Optional UDP-transport-plugin selection. Defaults to a direct
+    /// pass-through (no obfuscation), preserving the today-behaviour of
+    /// every existing deployed node. Operators opt into obfs4 via
+    /// `[tun.transport]` — see `docs/operators/obfs4-bridge.md`.
+    #[serde(default)]
+    pub tun: TunCfg,
+}
+
+/// `[tun]` block. Currently only carries the [`TransportCfg`] selector.
+#[derive(Debug, Deserialize, Clone, Default)]
+pub(crate) struct TunCfg {
+    /// `[tun.transport]` — see [`TransportCfg`].
+    #[serde(default)]
+    pub transport: TransportCfg,
+}
+
+/// `[tun.transport]` block. Pluggable-transport selector for the WG
+/// data plane. Default is `direct` (pass-through UDP) to preserve
+/// today-behaviour. `obfs4` wraps the WG datagram stream in
+/// obfs4-modelled handshakes + framed ciphertext (see
+/// `octravpn-obfs4`).
+///
+/// TOML example:
+///
+/// ```toml
+/// [tun.transport]
+/// kind = "obfs4"
+///
+/// [tun.transport.obfs4]
+/// bridge_node_id  = "0102030405060708090a0b0c0d0e0f1011121314"
+/// bridge_pubkey   = "abcd...ef"   # 64 hex chars
+/// iat_mode        = 1             # 0 off, 1 uniform, 2 Pareto
+/// ```
+///
+/// See `docs/operators/obfs4-bridge.md` for credential minting and
+/// the operational runbook.
+#[derive(Debug, Deserialize, Clone, Default)]
+pub(crate) struct TransportCfg {
+    /// `"direct"` (default) or `"obfs4"`.
+    #[serde(default)]
+    pub kind: TransportKind,
+    /// obfs4-specific parameters; required when `kind = "obfs4"`.
+    #[serde(default)]
+    pub obfs4: Option<Obfs4Cfg>,
+}
+
+/// Selector for the data-plane transport. `Direct` is the no-op
+/// pass-through; `Obfs4` activates the obfs4-modelled wrapper.
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum TransportKind {
+    /// Pass-through UDP. The default; preserves today-behaviour.
+    #[default]
+    Direct,
+    /// obfs4-modelled wrapper. Activates `octravpn-obfs4`.
+    Obfs4,
+}
+
+/// `[tun.transport.obfs4]` block. Required when `kind = "obfs4"`.
+#[derive(Debug, Deserialize, Clone)]
+pub(crate) struct Obfs4Cfg {
+    /// 20-byte bridge `node_id`, hex-encoded (40 hex chars).
+    /// Distributed to authorised clients out of band. Required.
+    pub bridge_node_id: String,
+    /// 32-byte X25519 bridge identity pubkey, hex-encoded (64 hex
+    /// chars). Public half of the long-term bridge keypair; the
+    /// matching secret is held by the bridge operator. Required.
+    pub bridge_pubkey: String,
+    /// Bridge identity *secret*, hex-encoded (64 hex chars). Set only
+    /// on the bridge node; clients leave this unset. The same secret
+    /// must produce the configured `bridge_pubkey`; the bridge will
+    /// refuse to handshake otherwise.
+    #[serde(default)]
+    pub bridge_identity_secret: Option<String>,
+    /// IAT mode: 0 = off (default), 1 = uniform 0..25ms,
+    /// 2 = Pareto-shaped 0..200ms. See `octravpn_obfs4::IatMode`.
+    #[serde(default)]
+    pub iat_mode: u8,
 }
 
 /// `[analytics]` block. Bearer-gated like `[control].metrics_token`:

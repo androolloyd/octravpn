@@ -1,0 +1,32 @@
+[package]
+name = "octravpn-obfs4"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Minimal obfs4-style DPI-evasion wrapper for OctraVPN's UDP transport. Implements an NTOR-like handshake, ChaCha20-Poly1305 frame sealing with length-randomised padding, and optional IAT (inter-arrival timing) chaff. Plug-point under `octravpn_tun::Transport`."
+
+[dependencies]
+octravpn-tun = { path = "../octravpn-tun" }
+
+anyhow            = { workspace = true }
+chacha20poly1305  = { workspace = true }
+hex               = { workspace = true }
+hkdf              = { workspace = true }
+hmac              = "0.12"
+parking_lot       = { workspace = true }
+rand              = { workspace = true }
+serde             = { workspace = true }
+sha2              = { workspace = true }
+subtle            = { workspace = true }
+thiserror         = { workspace = true }
+tracing           = { workspace = true }
+x25519-dalek      = { workspace = true }
+zeroize           = { workspace = true }
+
+[dev-dependencies]
+toml              = { workspace = true }
+
+[lints]
+workspace = true

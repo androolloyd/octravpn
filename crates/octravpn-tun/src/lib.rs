@@ -37,6 +37,12 @@ use tracing::info;
 /// pulling `reqwest` into the upper `octravpn-mesh` layer.
 pub mod derp;
 
+/// Pluggable UDP-shaped transport abstraction. Used by `octravpn-node`
+/// to select between direct-UDP (the default) and the obfs4-modelled
+/// wrapper in `octravpn-obfs4` — see `docs/operators/obfs4-bridge.md`.
+pub mod transport;
+pub use transport::{DirectUdp, Transport};
+
 /// IPv4 address + prefix length for the virtual interface.
 #[derive(Clone, Copy, Debug)]
 pub struct TunAddress {
