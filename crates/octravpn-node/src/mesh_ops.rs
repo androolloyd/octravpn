@@ -137,6 +137,44 @@ fn resolve_token(explicit: Option<&str>) -> Option<String> {
         .or_else(|| std::env::var("OCTRAVPN_ADMIN_TOKEN").ok())
 }
 
+/// Resolve a knock PSK for outbound CLI requests.
+///
+/// Returns the decoded 32-byte secret read from the `OCTRAVPN_KNOCK_PSK`
+/// env var (base64-encoded, per the operator URL convention). When the
+/// env var is unset or empty, returns `None` and the admin request is
+/// sent without a knock header — matching the server's default-off
+/// posture.
+///
+/// Issue #232: `mesh status` / `mesh policy` wrap bearer-gated admin
+/// routes; when the operator opts into the PSK-gated wire surface, the
+/// CLI must knock-authenticate first or the request gets a generic 404
+/// from the knock middleware before the bearer check ever runs.
+fn resolve_knock_psk() -> Option<[u8; 32]> {
+    let raw = std::env::var("OCTRAVPN_KNOCK_PSK").ok()?;
+    if raw.is_empty() {
+        return None;
+    }
+    match octravpn_mesh::knock::decode_psk(raw.trim()) {
+        Ok(psk) => Some(psk),
+        Err(e) => {
+            eprintln!("warning: OCTRAVPN_KNOCK_PSK decode failed ({e}); proceeding without knock");
+            None
+        }
+    }
+}
+
+/// Apply the knock header to `req` if `OCTRAVPN_KNOCK_PSK` is set.
+fn with_knock(mut req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    if let Some(psk) = resolve_knock_psk() {
+        let knock = octravpn_mesh::knock::current_knock(
+            &psk,
+            octravpn_mesh::knock::DEFAULT_WINDOW_SECS,
+        );
+        req = req.header(octravpn_mesh::knock::KNOCK_HEADER, knock);
+    }
+    req
+}
+
 fn build_client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
@@ -160,6 +198,7 @@ async fn get_machines(remote: &str, token: Option<&str>) -> Result<Value> {
     if let Some(t) = token {
         req = req.bearer_auth(t);
     }
+    req = with_knock(req);
     let resp = req.send().await.with_context(|| format!("GET {remote}/api/v1/machines"))?;
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
@@ -175,6 +214,7 @@ async fn get_policy(remote: &str, token: Option<&str>) -> Result<Value> {
     if let Some(t) = token {
         req = req.bearer_auth(t);
     }
+    req = with_knock(req);
     let resp = req.send().await.with_context(|| format!("GET {remote}/api/v1/policy"))?;
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
@@ -197,6 +237,7 @@ async fn put_policy(
     if let Some(t) = token {
         req = req.bearer_auth(t);
     }
+    req = with_knock(req);
     let resp = req.send().await.with_context(|| format!("PUT {remote}/api/v1/policy"))?;
     let status = resp.status();
     let body_text = resp.text().await.unwrap_or_default();
@@ -218,6 +259,7 @@ async fn validate_policy(
     if let Some(t) = token {
         req = req.bearer_auth(t);
     }
+    req = with_knock(req);
     let resp = req
         .send()
         .await
