@@ -47,6 +47,9 @@ Earnings-chain genesis is `sha256(state_root)`, NOT the AML default
 **Source:** [`program/main-v3.aml:314-324`](../../program/main-v3.aml).
 **Caller:** `circle_owner[circle]`.
 **Rust:** node `build_update_circle_state_call` ([`chain_v3.rs:249`](../../crates/octravpn-node/src/chain_v3.rs)).
+**Atomic sidecar:**
+[`crates/octravpn-node/src/circle_update.rs`](../../crates/octravpn-node/src/circle_update.rs)
++ CLI `octravpn-node circle update`.
 
 | Stage           | Detail                                                                              |
 | --------------- | ----------------------------------------------------------------------------------- |
@@ -59,6 +62,28 @@ Earnings-chain genesis is `sha256(state_root)`, NOT the AML default
 
 Verifiers reject anchors whose canonical `epoch` field regresses
 (off-chain; the chain does not enforce monotonic `epoch`).
+
+**Atomic-update sidecar pattern.** Octra has no multi-tx atomicity,
+so any policy/wg/attestation rotation that *also* changes the sealed
+asset bytes must drive **two phases in strict order**:
+
+1. **All blob writes via `circle_asset_put_encrypted`** (one tx per
+   asset, e.g. `/policy.json`, `/wg.pub`, `/attestation.json`).
+2. **One `update_circle_state` tx** binding the new
+   [`StateRoot`](../../crates/octravpn-core/src/v3_state_root.rs) whose
+   `*_hash` fields hash the freshly-uploaded bytes.
+
+If step 2 fails the blobs are orphans — the OLD anchor still points at
+the OLD bytes, so user-visible state is consistent. Recover via
+`octravpn-node circle retry-anchor --circle <id> --anchor <hex>` (the
+helper's `UpdateError::AnchorUpdateFailed` carries the right hex).
+
+The reverse order (anchor first, blobs second) is **forbidden**: a
+verifier polling between the anchor flip and the blob write would see
+a new anchor pointing at hashes the chain can't serve. The
+`circle_update::apply` helper enforces the correct order; operators
+should never hand-roll `update_circle_state` against a circle whose
+sealed bytes also change.
 
 ### 3. `rotate_receipt_pubkey(circle, new_pubkey)`
 

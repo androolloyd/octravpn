@@ -219,23 +219,56 @@ The per-tailnet passphrase that decrypts `/policy.json`,
 
 ### Rotation procedure
 
+> **CHANGED 2026-05-20:** the legacy `octra cast circle put-encrypted`
+> + hand-rolled `update_circle_state` dance is superseded by the
+> atomic `octravpn-node circle update` CLI. The new CLI enforces the
+> blob-first-anchor-second ordering required for a partial failure to
+> leave chain state on the OLD anchor (see
+> `crates/octravpn-node/src/circle_update.rs` for the atomicity
+> contract). Prefer the new CLI for any operator rotation script.
+
 ```bash
 # 1. Pick a new passphrase (≥ 12 random chars, see threat model §3 P1-4)
 NEW_PP=$(openssl rand -base64 16)
 echo "$NEW_PP" | gpg --encrypt -r alice@example.com > new-pp-2026-Q3.gpg
 # Distribute the GPG-encrypted file to each member out-of-band.
 
-# 2. Re-encrypt /policy.json with the new passphrase, same key_id
-octra cast circle put-encrypted \
-    octE5x8WvhXB1FStpDmmfxkMmFKdnx5cL1Fr4gnry6aUdqA \
-    /policy.json \
-    /etc/octravpn/policy.json \
-    --key-id default \
-    --passphrase "$NEW_PP" \
-    --padding-class 4k \
-    --key ~/.octra/op-2026-Q2.wallet
+# 2. Atomic re-encrypt + anchor flip via the new helper. The CLI
+#    drives circle_asset_put_encrypted + update_circle_state in the
+#    correct order; --dry-run is ON by default so the operator can
+#    review the new anchor before broadcasting.
+export OCTRAVPN_SEALED_PASSPHRASE="$NEW_PP"
+
+# 2a. Dry-run: compute the new anchor + describe the txs.
+octravpn-node circle update \
+    --circle octE5x8WvhXB1FStpDmmfxkMmFKdnx5cL1Fr4gnry6aUdqA \
+    --blob /policy.json:/etc/octravpn/policy.json:default:4k
+
+# 2b. Commit (only after reviewing the dry-run output).
+octravpn-node circle update \
+    --circle octE5x8WvhXB1FStpDmmfxkMmFKdnx5cL1Fr4gnry6aUdqA \
+    --blob /policy.json:/etc/octravpn/policy.json:default:4k \
+    --commit
+
+# 2c. If the anchor tx fails after the blob writes succeed, the CLI
+#     prints a `circle retry-anchor --anchor <hex>` command line —
+#     copy/paste it to re-submit just the anchor flip without
+#     re-uploading the blob bytes.
 
 # 3. After confirm, retire the old passphrase from secret stores.
+
+# --- Legacy (pre-2026-05-20) flow, kept for reference ----------------
+# octra cast circle put-encrypted \
+#     octE5x8WvhXB1FStpDmmfxkMmFKdnx5cL1Fr4gnry6aUdqA \
+#     /policy.json \
+#     /etc/octravpn/policy.json \
+#     --key-id default \
+#     --passphrase "$NEW_PP" \
+#     --padding-class 4k \
+#     --key ~/.octra/op-2026-Q2.wallet
+# (followed by a hand-rolled update_circle_state — anchor flip could
+#  land before the blob write, leaving every client polling against a
+#  broken anchor. The new CLI fixes the ordering.)
 ```
 
 ## 6. Don't do these

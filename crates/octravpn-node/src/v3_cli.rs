@@ -312,6 +312,13 @@ pub(crate) async fn dispatch(cfg_path: &Path, cmd: V3Cmd) -> Result<()> {
     }
 }
 
+/// Public re-export so other CLI dispatchers (currently
+/// `Cmd::Circle` in `main.rs`) can reuse the same short-lived
+/// `ChainCtxV3` builder without duplicating the sealed-keys gate.
+pub(crate) fn build_chain_ctx_for_circle(cfg: &NodeConfig) -> Result<ChainCtxV3> {
+    build_chain_ctx(cfg)
+}
+
 /// Build a `ChainCtxV3` directly from a `NodeConfig`. Mirrors the
 /// relevant slice of `Hub::new` but skips everything the one-shot CLI
 /// doesn't need (audit log dir, receipt journal, control plane state).

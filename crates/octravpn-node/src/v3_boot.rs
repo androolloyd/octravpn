@@ -210,14 +210,15 @@ pub(crate) async fn run_v3_boot(inputs: &V3BootInputs<'_>) -> Result<V3BootOutco
         }
     } else if on_chain_anchor.as_deref() != Some(anchor_hex.as_str()) {
         // Registered but anchor drifted — submit `update_circle_state`.
-        let nonce = inputs.chain_v3.nonce().await?;
-        let fee = inputs.chain_v3.fee_or_fallback("contract_call").await;
-        let call =
-            inputs
-                .chain_v3
-                .build_update_circle_state_call(circle_id, &anchor_hex, fee, nonce);
-        let signed = inputs.chain_v3.sign_call(call)?;
-        let hash = inputs.chain_v3.submit_signed_tx(&signed).await?;
+        // This is the SIMPLE-PATH version (anchor-only, no blob
+        // changes). The atomic multi-blob version lives in
+        // `crate::circle_update::apply`; we don't route through that
+        // here because the boot path's drift detection only ever
+        // changes the anchor (the policy bytes are sealed elsewhere
+        // by the operator, e.g. via the `octravpn-node circle update`
+        // CLI).
+        let hash =
+            crate::circle_update::retry_anchor(inputs.chain_v3, circle_id, &anchor_hex).await?;
         info!(
             %hash,
             circle_id,
