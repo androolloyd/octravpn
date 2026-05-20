@@ -1,0 +1,67 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:06.000
+narrator: OctraVPN — a self-hosted, chain-anchored tailnet.
+
+00:00:06.000 --> 00:00:13.000
+narrator: stock Tailscale clients, our control plane, real WireGuard.
+
+00:00:13.000 --> 00:00:21.000
+narrator: operators deploy, settle, and audit on the Octra chain.
+
+00:00:21.000 --> 00:00:30.000
+narrator: act one — the chain side. A contract handles every session.
+
+00:00:30.000 --> 00:00:39.000
+narrator: register, settle, claim, slash — each step is a recorded tx.
+
+00:00:39.000 --> 00:00:48.000
+narrator: an overclaim is rejected — the bond enforces honest payout.
+
+00:00:48.000 --> 00:00:57.000
+narrator: act two — the oct:// portal. URLs resolve against chain state.
+
+00:00:57.000 --> 00:01:06.000
+narrator: policy and sealed assets live on-chain, fetched on demand.
+
+00:01:06.000 --> 00:01:15.000
+narrator: act three — the headscale-rs control plane on Tailscale wire.
+
+00:01:15.000 --> 00:01:24.000
+narrator: users, preauth keys, and nodes — the day-2 admin surface.
+
+00:01:24.000 --> 00:01:33.000
+narrator: act four — the data plane. Three peers, full-mesh WireGuard.
+
+00:01:33.000 --> 00:01:42.000
+narrator: peer-to-peer ping and HTTP rides direct UDP where it can.
+
+00:01:42.000 --> 00:01:51.000
+narrator: DERP relays catch the rest — the operator ships the sidecar.
+
+00:01:51.000 --> 00:02:00.000
+narrator: act five — observability. Prometheus, JSON series, health.
+
+00:02:00.000 --> 00:02:09.000
+narrator: the analytics indexer scans the audit log per minute.
+
+00:02:09.000 --> 00:02:18.000
+narrator: act six — audit. An HMAC-chained log plus the receipt journal.
+
+00:02:18.000 --> 00:02:27.000
+narrator: verify recomputes the chain — a non-zero exit is tamper proof.
+
+00:02:27.000 --> 00:02:36.000
+narrator: act seven — interop. Stock tailscale clients pay the operator.
+
+00:02:36.000 --> 00:02:45.000
+narrator: a real Tailscale CLI joins, pings, and settles on the chain.
+
+00:02:45.000 --> 00:02:54.000
+narrator: the loop closes — install, join, traffic, settlement, audit.
+
+00:02:54.000 --> 00:03:03.000
+narrator: every byte in this demo is reproducible from the source tree.
+
+00:03:03.000 --> 00:03:12.000
+narrator: OctraVPN — open source, chain-anchored, Tailscale-compatible.

@@ -149,6 +149,100 @@ while the voiceover frames the demo.
   the demo bookmarks pinned (`http://127.0.0.1:51823/`,
   `http://127.0.0.1:51822/admin/`, `http://127.0.0.1:3000/d/octravpn`).
 
+## Captions
+
+VHS does not emit a subtitle stream alongside its `.mp4` recordings. To
+make the recordings accessible (and to give the embed-on-the-website
+plan an explicit narrator track), every tape under `demo/tapes/<NN>.tape`
+has a hand-authored sibling at `demo/recordings/<NN>.vtt`.
+
+The `.vtt` files are strict WebVTT — they parse cleanly with
+`webvtt-py`, `vtt.js`, Safari, Chromium, mpv, VLC, and ffmpeg's
+`mov_text` subtitle muxer.
+
+Two facts make captioning command-line recordings slightly tricky:
+
+- **Display latency.** VHS animates each `Type "..."` block at the
+  configured `TypingSpeed` (35-40 ms per character). A 60-character
+  command takes ~2.5 s to appear on screen. The cue starts the moment
+  the command begins typing — viewers see "what is happening" framed
+  before they see the bytes.
+- **What you type ≠ what you see ≠ what you hear.** A line like
+  `bash docker/devnet/v3-smoke.sh` is one terminal command, one
+  on-screen string, and one *intent* ("drive the full v3 contract
+  lifecycle"). We caption the intent, not the keystrokes. The
+  keystrokes are already on screen.
+
+### Enabling captions in a viewer
+
+- **`<video>` tag** (the website embed):
+  ```html
+  <video controls src="01-init-keygen.mp4">
+    <track default kind="subtitles" srclang="en"
+           src="01-init-keygen.vtt" label="English (narrator)">
+  </video>
+  ```
+- **mpv:** `mpv --sub-file=01-init-keygen.vtt 01-init-keygen.mp4`
+- **VLC:** drag the `.vtt` onto the playback window, or
+  `Subtitle → Add Subtitle File…`.
+- **QuickTime / Safari:** muxed-in `mov_text` tracks display
+  automatically when the file is produced via
+  `demo/lib/render-with-captions.sh` (see below).
+
+### Muxing captions into the .mp4
+
+The .vtt files travel as siblings, but for one-file distribution we
+also produce a captioned variant:
+
+```sh
+demo/lib/render-with-captions.sh              # every tape
+demo/lib/render-with-captions.sh 06-tailscale  # one substring filter
+```
+
+The script walks `demo/tapes/*.tape`, finds the matching `.mp4` + `.vtt`
+in `demo/recordings/`, and produces `<NN>-captioned.mp4` with a
+`mov_text` subtitle track embedded.
+
+### Audio (TTS voiceover)
+
+The same .vtt files double as a TTS script. `demo/lib/render-with-audio.sh`
+synthesizes a narrator voice from the cue text, positions each cue's
+audio at the cue's `start` timestamp, and muxes the result onto the
+recording.
+
+```sh
+demo/lib/render-with-audio.sh              # every tape
+demo/lib/render-with-audio.sh 06-tailscale  # one substring filter
+OCTRA_TTS=espeak-ng demo/lib/render-with-audio.sh   # force backend
+```
+
+TTS backend selection:
+
+- **macOS:** `/usr/bin/say` (preinstalled) — used by default.
+- **Linux:** `espeak-ng` (`apt-get install -y espeak-ng`) — what CI
+  uses.
+- **Higher quality:** `piper` + a downloaded voice model
+  (`PIPER_MODEL=/path/to/voice.onnx demo/lib/render-with-audio.sh`).
+  Piper produces neural-network voiceovers that are nearly
+  indistinguishable from a human narrator at 22 kHz mono.
+
+When a `<NN>-captioned.mp4` already exists, the audio script writes
+`<NN>-narrated-captioned.mp4` so the final file carries subtitles and
+voiceover in a single artefact. When only the bare `.mp4` is present
+the output is `<NN>-narrated.mp4`.
+
+### Accessibility tradeoffs
+
+Captioning command-line text is harder than captioning speech. We
+caption the *intent* ("an operator deploys a fresh circle") rather
+than the *keystrokes* ("octravpn init --dir ."). The keystrokes are
+already on screen; reading them aloud would be redundant and would
+push the caption density past the 1.5x comprehension threshold. The
+tradeoff is that screen-reader users on a paused frame cannot
+reconstruct the exact command from the caption alone — they would
+need OCR or a transcript. For now we accept that gap; the .tape files
+in `demo/tapes/` *are* the verbatim transcript.
+
 ## How to regenerate the CLI half
 
 ```sh

@@ -1,0 +1,22 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:05.000
+narrator: the day-2 verification flow — proving the join is healthy.
+
+00:00:05.000 --> 00:00:15.000
+narrator: tailscale status shows every peer plus their connection mode.
+
+00:00:15.000 --> 00:00:25.000
+narrator: direct UDP versus DERP-relayed traffic is visible per-peer.
+
+00:00:25.000 --> 00:00:35.000
+narrator: ping a peer by hostname — magicDNS resolves it locally.
+
+00:00:35.000 --> 00:00:45.000
+narrator: a ping over the tailnet IP confirms reachability.
+
+00:00:45.000 --> 00:00:55.000
+narrator: the operator-tailnet name is visible in tailscale ip output.
+
+00:00:55.000 --> 00:01:05.000
+narrator: a single tailscale logout returns the host to a clean state.

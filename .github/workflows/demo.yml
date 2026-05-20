@@ -36,11 +36,13 @@ jobs:
           git clone --depth 1 https://github.com/androolloyd/headscale-rs.git
           ls -la
 
-      - name: Install vhs + ttyd + ffmpeg
+      - name: Install vhs + ttyd + ffmpeg + espeak-ng
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y ffmpeg ttyd chromium-browser jq
+          # espeak-ng is the TTS backend used by demo/lib/render-with-audio.sh
+          # on linux; on macOS the same script picks up /usr/bin/say.
+          sudo apt-get install -y ffmpeg ttyd chromium-browser jq espeak-ng
           VHS_VERSION=$(curl -sL https://api.github.com/repos/charmbracelet/vhs/releases/latest | jq -r .tag_name)
           curl -sL "https://github.com/charmbracelet/vhs/releases/download/${VHS_VERSION}/vhs_${VHS_VERSION#v}_amd64.deb" -o /tmp/vhs.deb
           sudo dpkg -i /tmp/vhs.deb
@@ -77,6 +79,17 @@ jobs:
               echo "=== ${tape} ==="
               vhs "${tape}" || echo "  ! ${tape} failed (non-fatal in nightly)"
           done
+          ls -la demo/recordings/ || true
+
+      - name: Mux captions + TTS audio onto light recordings
+        working-directory: octravpn
+        run: |
+          set -euo pipefail
+          # The .vtt files live under demo/recordings/ as siblings of
+          # the .mp4 files (hand-authored; see docs/demo.md §Captions).
+          # Mux them in + synthesize a narrator track via espeak-ng.
+          bash demo/lib/render-with-captions.sh || echo "(captioning non-fatal)"
+          bash demo/lib/render-with-audio.sh   || echo "(audio non-fatal)"
           ls -la demo/recordings/ || true
 
       - name: Upload recordings
@@ -130,11 +143,11 @@ jobs:
           git clone --depth 1 https://github.com/androolloyd/headscale-rs.git
           ls -la
 
-      - name: Install vhs + jq + openssl
+      - name: Install vhs + jq + openssl + espeak-ng
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y ffmpeg ttyd chromium-browser jq openssl
+          sudo apt-get install -y ffmpeg ttyd chromium-browser jq openssl espeak-ng
           VHS_VERSION=$(curl -sL https://api.github.com/repos/charmbracelet/vhs/releases/latest | jq -r .tag_name)
           curl -sL "https://github.com/charmbracelet/vhs/releases/download/${VHS_VERSION}/vhs_${VHS_VERSION#v}_amd64.deb" -o /tmp/vhs.deb
           sudo dpkg -i /tmp/vhs.deb
@@ -184,6 +197,14 @@ jobs:
               vhs "${tape}" || echo "  ! ${tape} failed (non-fatal in nightly)"
           done
           bash demo/lib/3node-mesh-teardown.sh >/dev/null 2>&1 || true
+          ls -la demo/recordings/ || true
+
+      - name: Mux captions + TTS audio onto heavy recordings
+        working-directory: octravpn
+        run: |
+          set -euo pipefail
+          bash demo/lib/render-with-captions.sh || echo "(captioning non-fatal)"
+          bash demo/lib/render-with-audio.sh   || echo "(audio non-fatal)"
           ls -la demo/recordings/ || true
 
       - name: Upload heavy recordings

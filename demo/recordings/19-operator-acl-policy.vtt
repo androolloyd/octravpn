@@ -1,0 +1,25 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:05.000
+narrator: ACL policy — who can talk to whom on the tailnet.
+
+00:00:05.000 --> 00:00:15.000
+narrator: the policy file is the Tailscale-format HUJSON document.
+
+00:00:15.000 --> 00:00:25.000
+narrator: tags scope rules to roles — tag:eng, tag:prod, and so on.
+
+00:00:25.000 --> 00:00:35.000
+narrator: a sample rule lets tag:eng reach tag:prod on port 22.
+
+00:00:35.000 --> 00:00:45.000
+narrator: headscale policy set publishes the file to the control plane.
+
+00:00:45.000 --> 00:00:55.000
+narrator: peers receive the new map within seconds — no restart.
+
+00:00:55.000 --> 00:01:05.000
+narrator: a connectivity test from an untagged host shows it is blocked.
+
+00:01:05.000 --> 00:01:15.000
+narrator: ACL drift is recorded in the audit log for later review.

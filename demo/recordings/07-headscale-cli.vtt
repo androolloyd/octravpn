@@ -1,0 +1,16 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:04.000
+narrator: point the headscale CLI at the in-repo demo config.
+
+00:00:04.000 --> 00:00:10.000
+narrator: users create alice — alice is now a namespace owner.
+
+00:00:10.000 --> 00:00:15.000
+narrator: users list shows alice alongside any earlier accounts.
+
+00:00:15.000 --> 00:00:21.000
+narrator: mint a preauth key alice can paste into tailscale up.
+
+00:00:21.000 --> 00:00:26.100
+narrator: nodes list enumerates the machines joined to the tailnet.

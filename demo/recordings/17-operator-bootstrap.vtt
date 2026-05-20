@@ -1,0 +1,25 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:05.000
+narrator: the operator side — bootstrap a tailnet from nothing.
+
+00:00:05.000 --> 00:00:15.000
+narrator: a fresh host runs octravpn-node init for the control plane.
+
+00:00:15.000 --> 00:00:25.000
+narrator: the headscale-rs config is templated from the demo defaults.
+
+00:00:25.000 --> 00:00:35.000
+narrator: bring the control plane up under systemd.
+
+00:00:35.000 --> 00:00:45.000
+narrator: a DERP sidecar boots beside it for NAT-traversal fallback.
+
+00:00:45.000 --> 00:00:55.000
+narrator: mint the first preauth key — the seed for the operator host.
+
+00:00:55.000 --> 00:01:05.000
+narrator: the operator host itself joins, becoming peer-zero.
+
+00:01:05.000 --> 00:01:15.000
+narrator: from here on, new users are one preauth key each.

@@ -1,0 +1,19 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:03.500
+narrator: cold start — a clean scratch directory on disk.
+
+00:00:03.500 --> 00:00:06.500
+narrator: octravpn init writes a config.toml and the node wallet key.
+
+00:00:06.500 --> 00:00:08.400
+narrator: ls confirms the on-disk layout the daemon expects.
+
+00:00:08.400 --> 00:00:11.700
+narrator: keygen mints a second key for the operator bond wallet.
+
+00:00:11.700 --> 00:00:13.500
+narrator: bond.key is now present beside the node key.
+
+00:00:13.500 --> 00:00:17.000
+narrator: identity prints the public key the chain will recognise.

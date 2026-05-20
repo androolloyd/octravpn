@@ -1,0 +1,61 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:04.000
+narrator: this drives the full v3 contract lifecycle end-to-end.
+
+00:00:04.000 --> 00:00:12.000
+narrator: the smoke script deploys the contract and seeds wallets.
+
+00:00:12.000 --> 00:00:22.000
+narrator: register_circle binds a deployed contract to a tailnet ID.
+
+00:00:22.000 --> 00:00:32.000
+narrator: the script sleeps to let the deploy tx confirm on chain.
+
+00:00:32.000 --> 00:00:42.000
+narrator: create_tailnet records the chain-side circle metadata.
+
+00:00:42.000 --> 00:00:52.000
+narrator: open_session anchors a paid session against the contract.
+
+00:00:52.000 --> 00:01:02.000
+narrator: each step waits 18 seconds for the next block.
+
+00:01:02.000 --> 00:01:12.000
+narrator: settle_claim emits a signed earnings record off-chain.
+
+00:01:12.000 --> 00:01:22.000
+narrator: settle_confirm anchors the settlement on-chain.
+
+00:01:22.000 --> 00:01:32.000
+narrator: the chain now mirrors the off-chain hash chain.
+
+00:01:32.000 --> 00:01:42.000
+narrator: a local replay recomputes the chain and matches the anchor.
+
+00:01:42.000 --> 00:01:52.000
+narrator: settlement equality is the contract-side honesty proof.
+
+00:01:52.000 --> 00:02:02.000
+narrator: claim_earnings pulls the operator payout from the contract.
+
+00:02:02.000 --> 00:02:12.000
+narrator: an overclaim is rejected — the bond enforces the cap.
+
+00:02:12.000 --> 00:02:22.000
+narrator: slash would fire here if the bond were exceeded.
+
+00:02:22.000 --> 00:02:32.000
+narrator: anchor rotation begins — the round closes cleanly.
+
+00:02:32.000 --> 00:02:42.000
+narrator: the smoke script verifies every intermediate state.
+
+00:02:42.000 --> 00:02:52.000
+narrator: ok and fail banners are scoped per step.
+
+00:02:52.000 --> 00:03:00.000
+narrator: the smoke prints PASSED — the v3 lifecycle is green.
+
+00:03:00.000 --> 00:03:04.000
+narrator: every contract surface has been exercised.

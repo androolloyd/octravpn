@@ -1,0 +1,31 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:05.000
+narrator: bring a three-peer tailscale mesh up on top of our node.
+
+00:00:05.000 --> 00:00:15.000
+narrator: the bringup script primes docker compose and the derp cert.
+
+00:00:30.000 --> 00:00:40.000
+narrator: cargo build is warm in CI — sub-minute total bringup.
+
+00:01:00.000 --> 00:01:10.000
+narrator: mesh-control plus three stock tailscale peers come online.
+
+00:01:30.000 --> 00:01:40.000
+narrator: each peer runs tailscale up; the script waits for READY.
+
+00:01:55.000 --> 00:02:05.000
+narrator: convergence prints READY when all three peers are visible.
+
+00:02:05.000 --> 00:02:12.000
+narrator: peer-1 lists every machine the control plane has accepted.
+
+00:02:12.000 --> 00:02:20.000
+narrator: the new mesh status CLI probes the admin surface directly.
+
+00:02:20.000 --> 00:02:28.000
+narrator: under the Hub-free shape the admin router is not mounted.
+
+00:02:28.000 --> 00:02:35.000
+narrator: teardown returns the host to a clean state for the next tape.

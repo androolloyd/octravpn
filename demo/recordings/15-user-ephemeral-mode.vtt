@@ -1,0 +1,22 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:05.000
+narrator: ephemeral mode — short-lived joins that vanish on logout.
+
+00:00:05.000 --> 00:00:15.000
+narrator: tailscale up with --ephemeral writes no persistent state.
+
+00:00:15.000 --> 00:00:25.000
+narrator: a build-host CI runner is the canonical use case.
+
+00:00:25.000 --> 00:00:35.000
+narrator: the node still gets a 100.64.x.x while it is live.
+
+00:00:35.000 --> 00:00:45.000
+narrator: ping a peer to confirm the ephemeral peer is full-mesh.
+
+00:00:45.000 --> 00:00:55.000
+narrator: a tailscale logout drops the node from the control plane.
+
+00:00:55.000 --> 00:01:05.000
+narrator: the operator sees the node disappear from headscale nodes list.

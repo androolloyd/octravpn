@@ -1,0 +1,16 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:05.000
+narrator: mint a single-use preauth key for one user.
+
+00:00:05.000 --> 00:00:10.500
+narrator: the key is one-shot — usable by exactly one tailscale up.
+
+00:00:10.500 --> 00:00:17.000
+narrator: a reusable key with a 24-hour TTL suits fleet rollouts.
+
+00:00:17.000 --> 00:00:22.000
+narrator: the same surface is exposed over HTTP for daemon callers.
+
+00:00:22.000 --> 00:00:27.700
+narrator: POST /admin/preauth, Bearer-gated, JSON body — identical shape.
