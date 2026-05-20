@@ -9,9 +9,7 @@
 use octravpn_core::{
     address::Address,
     control::ProposedReceipt,
-    receipt::{
-        Receipt, ReceiptContext, ShadowBlob, SignedReceipt, CHAIN_ID_TEST,
-    },
+    receipt::{Receipt, ReceiptContext, ShadowBlob, SignedReceipt, CHAIN_ID_TEST},
     session::{Blind, SessionId},
     sig::KeyPair,
 };
@@ -154,12 +152,8 @@ fn shadow_blob_commits_to_same_bytes_used() {
         enc_net: Some(format!("hfhe_v1|placeholder|net|{bytes_used_plaintext}")),
         pvac_zero_proof: None,
     };
-    let sr = SignedReceipt::build_with_shadow(
-        r,
-        &KeyPair::generate(),
-        &KeyPair::generate(),
-        shadow,
-    );
+    let sr =
+        SignedReceipt::build_with_shadow(r, &KeyPair::generate(), &KeyPair::generate(), shadow);
     sr.verify().unwrap();
     assert_eq!(sr.receipt.bytes_used, bytes_used_plaintext);
     assert!(sr

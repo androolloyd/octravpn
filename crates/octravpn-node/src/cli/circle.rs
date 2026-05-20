@@ -239,12 +239,10 @@ fn parse_blob_specs(raw: &[String]) -> Result<Vec<circle_update::BlobUpdate>> {
     for spec in raw {
         let parts: Vec<&str> = spec.splitn(4, ':').collect();
         if parts.len() != 4 {
-            anyhow::bail!(
-                "blob spec must be <asset_path>:<file>:<key_id>:<padding>; got {spec:?}"
-            );
+            anyhow::bail!("blob spec must be <asset_path>:<file>:<key_id>:<padding>; got {spec:?}");
         }
-        let plaintext = std::fs::read(parts[1])
-            .with_context(|| format!("read blob plaintext {}", parts[1]))?;
+        let plaintext =
+            std::fs::read(parts[1]).with_context(|| format!("read blob plaintext {}", parts[1]))?;
         let padding = PaddingClass::from_str_opt(parts[3])
             .ok_or_else(|| anyhow::anyhow!("unknown padding class {:?}", parts[3]))?;
         out.push(circle_update::BlobUpdate {
@@ -261,9 +259,7 @@ fn parse_blob_specs(raw: &[String]) -> Result<Vec<circle_update::BlobUpdate>> {
 
 /// Resolve the sealed-asset passphrase: CLI value, then
 /// `OCTRAVPN_SEALED_PASSPHRASE` env var, then error.
-fn resolve_sealed_passphrase(
-    explicit: Option<&str>,
-) -> Result<circle_update::SealedAssetCreds> {
+fn resolve_sealed_passphrase(explicit: Option<&str>) -> Result<circle_update::SealedAssetCreds> {
     if let Some(p) = explicit {
         return Ok(circle_update::SealedAssetCreds::new(p));
     }

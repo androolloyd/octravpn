@@ -6,12 +6,7 @@
 //! that talks to the *network* (live receipts, peer state) is not an
 //! identity concern — give it its own submodule.
 
-use crate::{
-    chain_v2::CircleState,
-    chain_v3,
-    config::ProtocolVersion,
-    v3_boot,
-};
+use crate::{chain_v2::CircleState, chain_v3, config::ProtocolVersion, v3_boot};
 use x25519_dalek::PublicKey as X25519Pub;
 
 use super::Hub;

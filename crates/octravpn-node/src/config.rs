@@ -823,10 +823,7 @@ impl fmt::Debug for ControlCfg {
             .field("metrics_token", &R(&self.metrics_token))
             .field("receipt_journal_path", &self.receipt_journal_path)
             .field("admin_token", &R(&self.admin_token))
-            .field(
-                "tailscale_wire_state_dir",
-                &self.tailscale_wire_state_dir,
-            )
+            .field("tailscale_wire_state_dir", &self.tailscale_wire_state_dir)
             .field("tailscale_tailnet_id", &self.tailscale_tailnet_id)
             .finish()
     }
@@ -939,8 +936,8 @@ region = "eu-west"
     #[test]
     fn unknown_control_token_field_is_rejected() {
         let bad = format!("{MIN_TOML}\n[control]\nmetric_token = \"abc\"\n");
-        let err = ::toml::from_str::<NodeConfig>(&bad)
-            .expect_err("typo'd bearer-token key must fail");
+        let err =
+            ::toml::from_str::<NodeConfig>(&bad).expect_err("typo'd bearer-token key must fail");
         let msg = err.to_string();
         assert!(
             msg.contains("metric_token") || msg.contains("unknown"),

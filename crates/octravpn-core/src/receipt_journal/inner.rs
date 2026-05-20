@@ -4,12 +4,7 @@
 //! authoritative: `bump` appends and then updates the map under the
 //! same lock.
 
-use std::{
-    collections::BTreeMap,
-    fs::File,
-    path::PathBuf,
-    time::Instant,
-};
+use std::{collections::BTreeMap, fs::File, path::PathBuf, time::Instant};
 
 use crate::session::SessionId;
 

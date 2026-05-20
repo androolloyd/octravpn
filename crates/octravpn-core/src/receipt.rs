@@ -765,12 +765,8 @@ mod tests {
         let client = fresh_kp();
         let node = fresh_kp();
         let b = SignedReceipt::build(sample_receipt(), &client, &node);
-        let c = SignedReceipt::build_with_shadow(
-            sample_receipt(),
-            &client,
-            &node,
-            ShadowBlob::empty(),
-        );
+        let c =
+            SignedReceipt::build_with_shadow(sample_receipt(), &client, &node, ShadowBlob::empty());
         assert!(!b.has_shadow());
         assert!(!c.has_shadow());
         assert_eq!(b, c);

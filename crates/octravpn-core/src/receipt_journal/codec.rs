@@ -32,10 +32,7 @@ pub(crate) fn encode_record(session_id: &SessionId, seq: u64) -> [u8; RECORD_SIZ
 /// because the caller fsyncs before signing, so dropping it is the
 /// invariant-preserving choice. A *checksum-failed* record, by
 /// contrast, is a real corruption signal and bubbles up as an error.
-pub(crate) fn replay_v1(
-    raw: &[u8],
-    path: &Path,
-) -> JournalResult<BTreeMap<SessionId, u64>> {
+pub(crate) fn replay_v1(raw: &[u8], path: &Path) -> JournalResult<BTreeMap<SessionId, u64>> {
     debug_assert!(raw.starts_with(MAGIC_V1));
     let body = &raw[MAGIC_V1.len()..];
     let mut out: BTreeMap<SessionId, u64> = BTreeMap::new();

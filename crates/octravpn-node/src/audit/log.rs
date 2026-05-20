@@ -57,10 +57,7 @@ impl AuditLog {
         Self::open_inner(dir.as_ref(), None)
     }
 
-    pub(super) fn open_inner(
-        dir: &Path,
-        sender: Option<mpsc::Sender<FlusherCmd>>,
-    ) -> Result<Self> {
+    pub(super) fn open_inner(dir: &Path, sender: Option<mpsc::Sender<FlusherCmd>>) -> Result<Self> {
         std::fs::create_dir_all(dir)
             .with_context(|| format!("create audit dir {}", dir.display()))?;
         let key = load_or_create_key(dir)?;
@@ -104,11 +101,7 @@ impl AuditLog {
 /// Direct synchronous write — used by both the sync `write()` API and
 /// by the background flusher task. The `fsync` parameter lets the
 /// flusher hold off the fsync until the end of a batch.
-pub(super) fn write_inner_direct(
-    inner: &mut Inner,
-    rec: &AuditRecord,
-    fsync: bool,
-) -> Result<()> {
+pub(super) fn write_inner_direct(inner: &mut Inner, rec: &AuditRecord, fsync: bool) -> Result<()> {
     let canonical = serde_json::to_string(rec).context("serialize audit record")?;
     let date = ymd_utc(rec.ts_unix);
     if inner.current_file.is_none() || inner.current_date != date {

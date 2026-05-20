@@ -672,9 +672,8 @@ impl ChainCtxV3 {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        self.call_builder().claim_earnings_with_shadow_call(
-            circle_id, amount, enc_amount, 0, fee, nonce,
-        )
+        self.call_builder()
+            .claim_earnings_with_shadow_call(circle_id, amount, enc_amount, 0, fee, nonce)
     }
 
     /// HFHE-2: encrypted-amount ciphertext for the claim_earnings

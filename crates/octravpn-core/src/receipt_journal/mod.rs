@@ -32,9 +32,7 @@ use tokio::task::JoinHandle;
 use crate::session::SessionId;
 
 use codec::encode_record;
-use compact::{
-    compact_async_worker, compact_locked, compacting_tempfile_path,
-};
+use compact::{compact_async_worker, compact_locked, compacting_tempfile_path};
 use inner::Inner;
 use migration::{ensure_v1_header, replay_any, write_v1_snapshot};
 

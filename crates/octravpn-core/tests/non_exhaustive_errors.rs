@@ -21,12 +21,8 @@
 #![allow(clippy::needless_pass_by_value)] // intentional: matching consumes the value
 
 use octravpn_core::{
-    onion::OnionError,
-    receipt::ReceiptError,
-    receipt_journal::JournalError,
-    v3_members::V3MembersError,
-    v3_policy::V3PolicyError,
-    v3_state_root::StateRootError,
+    onion::OnionError, receipt::ReceiptError, receipt_journal::JournalError,
+    v3_members::V3MembersError, v3_policy::V3PolicyError, v3_state_root::StateRootError,
 };
 
 /// Sentinel: every public `Error` enum below is matched with a
@@ -71,9 +67,7 @@ fn public_error_enums_are_non_exhaustive() {
         }
     }
     assert_eq!(
-        check_journal(JournalError::BadMagic {
-            path: "/x".into()
-        }),
+        check_journal(JournalError::BadMagic { path: "/x".into() }),
         "magic"
     );
 

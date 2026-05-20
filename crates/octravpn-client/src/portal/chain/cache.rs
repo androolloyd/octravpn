@@ -118,17 +118,29 @@ mod tests {
         let chain = chain_with_cache(addr, Arc::clone(&cache));
 
         // First call: miss → one RPC roundtrip.
-        let got1 = chain.fetch_circle_asset_bytes("circHIT", "/policy.json").await.unwrap();
+        let got1 = chain
+            .fetch_circle_asset_bytes("circHIT", "/policy.json")
+            .await
+            .unwrap();
         assert_eq!(got1, plaintext);
         assert_eq!(count.load(Ordering::SeqCst), 1);
 
         // Second + third call: hit → counter stays at 1.
-        let got2 = chain.fetch_circle_asset_bytes("circHIT", "/policy.json").await.unwrap();
-        let got3 = chain.fetch_circle_asset_bytes("circHIT", "/policy.json").await.unwrap();
+        let got2 = chain
+            .fetch_circle_asset_bytes("circHIT", "/policy.json")
+            .await
+            .unwrap();
+        let got3 = chain
+            .fetch_circle_asset_bytes("circHIT", "/policy.json")
+            .await
+            .unwrap();
         assert_eq!(got2, plaintext);
         assert_eq!(got3, plaintext);
-        assert_eq!(count.load(Ordering::SeqCst), 1,
-            "cache hits must not generate new RPC calls");
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            1,
+            "cache hits must not generate new RPC calls"
+        );
     }
 
     #[tokio::test]
@@ -142,7 +154,10 @@ mod tests {
         let cache: Arc<AssetCache> = Arc::new(BoundedMap::new(16, Duration::from_millis(20)));
         let chain = chain_with_cache(addr, Arc::clone(&cache));
 
-        chain.fetch_circle_asset_bytes("circTTL", "/policy.json").await.unwrap();
+        chain
+            .fetch_circle_asset_bytes("circTTL", "/policy.json")
+            .await
+            .unwrap();
         assert_eq!(count.load(Ordering::SeqCst), 1);
 
         // Wait past TTL + sweep → entry is gone.
@@ -150,8 +165,15 @@ mod tests {
         assert_eq!(cache.sweep(), 1, "ttl sweep should evict the stale entry");
 
         // Next fetch must hit the RPC again.
-        chain.fetch_circle_asset_bytes("circTTL", "/policy.json").await.unwrap();
-        assert_eq!(count.load(Ordering::SeqCst), 2, "post-eviction fetch must re-roundtrip");
+        chain
+            .fetch_circle_asset_bytes("circTTL", "/policy.json")
+            .await
+            .unwrap();
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            2,
+            "post-eviction fetch must re-roundtrip"
+        );
     }
 
     #[tokio::test]
@@ -166,18 +188,36 @@ mod tests {
         for p in ["/a.json", "/b.json", "/c.json"] {
             chain.fetch_circle_asset_bytes("circCAP", p).await.unwrap();
         }
-        assert_eq!(count.load(Ordering::SeqCst), 3, "three distinct keys, three RPCs");
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            3,
+            "three distinct keys, three RPCs"
+        );
         assert_eq!(cache.len(), 2, "capacity must cap at 2");
 
         // /a.json was the oldest; refetching must miss + roundtrip.
         // After this insert, the cache holds /c.json + /a.json (the
         // re-insert of /a.json evicted /b.json — the new oldest).
-        chain.fetch_circle_asset_bytes("circCAP", "/a.json").await.unwrap();
-        assert_eq!(count.load(Ordering::SeqCst), 4, "evicted oldest entry re-fetches");
+        chain
+            .fetch_circle_asset_bytes("circCAP", "/a.json")
+            .await
+            .unwrap();
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            4,
+            "evicted oldest entry re-fetches"
+        );
 
         // /c.json was still cached → no new roundtrip.
-        chain.fetch_circle_asset_bytes("circCAP", "/c.json").await.unwrap();
-        assert_eq!(count.load(Ordering::SeqCst), 4, "/c.json was still in cache; no new RPC");
+        chain
+            .fetch_circle_asset_bytes("circCAP", "/c.json")
+            .await
+            .unwrap();
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            4,
+            "/c.json was still in cache; no new RPC"
+        );
     }
 
     #[tokio::test]
@@ -189,20 +229,38 @@ mod tests {
         let chain = chain_with_cache(addr, Arc::clone(&cache));
 
         // Different circles, same path → distinct keys → two RPCs.
-        chain.fetch_circle_asset_bytes("circA", "/policy.json").await.unwrap();
-        chain.fetch_circle_asset_bytes("circB", "/policy.json").await.unwrap();
+        chain
+            .fetch_circle_asset_bytes("circA", "/policy.json")
+            .await
+            .unwrap();
+        chain
+            .fetch_circle_asset_bytes("circB", "/policy.json")
+            .await
+            .unwrap();
         assert_eq!(count.load(Ordering::SeqCst), 2, "circle id isolates cache");
 
         // Same circle, different paths → distinct keys → two more RPCs.
-        chain.fetch_circle_asset_bytes("circA", "/state-root.json").await.unwrap();
-        chain.fetch_circle_asset_bytes("circA", "/members.json").await.unwrap();
+        chain
+            .fetch_circle_asset_bytes("circA", "/state-root.json")
+            .await
+            .unwrap();
+        chain
+            .fetch_circle_asset_bytes("circA", "/members.json")
+            .await
+            .unwrap();
         assert_eq!(count.load(Ordering::SeqCst), 4, "path isolates cache");
 
         // Canonical-path collapse: `policy.json` and `/policy.json`
         // share a key, so the second hits the cache.
-        chain.fetch_circle_asset_bytes("circA", "policy.json").await.unwrap();
-        assert_eq!(count.load(Ordering::SeqCst), 4,
-            "canonical path collapses leading-slash variants to the same entry");
+        chain
+            .fetch_circle_asset_bytes("circA", "policy.json")
+            .await
+            .unwrap();
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            4,
+            "canonical path collapses leading-slash variants to the same entry"
+        );
     }
 
     #[tokio::test]
@@ -220,7 +278,10 @@ mod tests {
         let chain = chain_with_cache(addr, Arc::clone(&cache));
 
         // Warm up the cache (single fetch).
-        chain.fetch_circle_asset_bytes("circCONC", "/policy.json").await.unwrap();
+        chain
+            .fetch_circle_asset_bytes("circCONC", "/policy.json")
+            .await
+            .unwrap();
         let baseline = count.load(Ordering::SeqCst);
         assert_eq!(baseline, 1);
 
@@ -229,14 +290,20 @@ mod tests {
         for _ in 0..100 {
             let chain = chain.clone();
             handles.push(tokio::spawn(async move {
-                chain.fetch_circle_asset_bytes("circCONC", "/policy.json").await.unwrap()
+                chain
+                    .fetch_circle_asset_bytes("circCONC", "/policy.json")
+                    .await
+                    .unwrap()
             }));
         }
         for h in handles {
             assert_eq!(h.await.unwrap(), plaintext);
         }
-        assert_eq!(count.load(Ordering::SeqCst), baseline,
-            "warm-cache concurrent reads must not generate new RPCs");
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            baseline,
+            "warm-cache concurrent reads must not generate new RPCs"
+        );
     }
 
     #[tokio::test]
@@ -249,16 +316,23 @@ mod tests {
         let chain = chain_with_cache(addr, Arc::clone(&cache));
 
         use crate::portal::chain::FetchAssetError;
-        let err1 = chain.fetch_circle_asset_bytes("circERR", "/missing.json").await
+        let err1 = chain
+            .fetch_circle_asset_bytes("circERR", "/missing.json")
+            .await
             .expect_err("null result must be NotPublished");
         assert!(matches!(err1, FetchAssetError::NotPublished { .. }));
         let after_first = count.load(Ordering::SeqCst);
 
         // Second call: must also roundtrip — not satisfied from cache.
-        let err2 = chain.fetch_circle_asset_bytes("circERR", "/missing.json").await
+        let err2 = chain
+            .fetch_circle_asset_bytes("circERR", "/missing.json")
+            .await
             .expect_err("still not published");
         assert!(matches!(err2, FetchAssetError::NotPublished { .. }));
-        assert!(count.load(Ordering::SeqCst) > after_first, "failed fetches must not be cached");
+        assert!(
+            count.load(Ordering::SeqCst) > after_first,
+            "failed fetches must not be cached"
+        );
         assert_eq!(cache.len(), 0, "cache stays empty when fetches fail");
     }
 
@@ -275,7 +349,10 @@ mod tests {
         let chain = chain_with_cache(addr, Arc::clone(&cache));
         for i in 0..257 {
             let path = format!("/asset-{i}.bin");
-            chain.fetch_circle_asset_bytes("circ257", &path).await.unwrap();
+            chain
+                .fetch_circle_asset_bytes("circ257", &path)
+                .await
+                .unwrap();
         }
         assert_eq!(count.load(Ordering::SeqCst), 257);
         assert_eq!(
@@ -284,8 +361,12 @@ mod tests {
             "cache must clip to its capacity",
         );
         // The very first key was evicted.
-        assert!(cache.get(&("circ257".to_string(), "/asset-0.bin".to_string())).is_none(),
-            "asset-0 must have been evicted as the oldest");
+        assert!(
+            cache
+                .get(&("circ257".to_string(), "/asset-0.bin".to_string()))
+                .is_none(),
+            "asset-0 must have been evicted as the oldest"
+        );
     }
 
     #[tokio::test]
@@ -298,7 +379,10 @@ mod tests {
         let chain = chain_with_cache(addr, Arc::clone(&cache));
         // Pre-warm a few keys so reader hits aren't all misses.
         for i in 0..4 {
-            chain.fetch_circle_asset_bytes("circCONC", &format!("/p{i}.bin")).await.unwrap();
+            chain
+                .fetch_circle_asset_bytes("circCONC", &format!("/p{i}.bin"))
+                .await
+                .unwrap();
         }
         let mut handles = Vec::new();
         // 100 readers over the warm keys.
@@ -335,8 +419,14 @@ mod tests {
         let cache: Arc<AssetCache> = Arc::new(BoundedMap::new(8, Duration::from_secs(60)));
         let chain = chain_with_cache(addr, Arc::clone(&cache));
         let pp_src = crate::portal::chain::ConfigPassphrase::new(None);
-        let a = chain.fetch_with_source_sniffed("circPNG", "/img.png", &pp_src).await.unwrap();
-        let b = chain.fetch_with_source_sniffed("circPNG", "/img.png", &pp_src).await.unwrap();
+        let a = chain
+            .fetch_with_source_sniffed("circPNG", "/img.png", &pp_src)
+            .await
+            .unwrap();
+        let b = chain
+            .fetch_with_source_sniffed("circPNG", "/img.png", &pp_src)
+            .await
+            .unwrap();
         assert_eq!(a.mime, b.mime);
         assert_eq!(a.mime, SniffedMime::Png);
     }
@@ -349,8 +439,14 @@ mod tests {
         let (addr, count) = spawn_counting_rpc(plaintext_payload(plain)).await;
         let cache: Arc<AssetCache> = Arc::new(BoundedMap::new(8, Duration::from_secs(60)));
         let chain = chain_with_cache(addr, Arc::clone(&cache));
-        chain.fetch_circle_asset_bytes("circLEFT", "/p.bin").await.unwrap();
-        chain.fetch_circle_asset_bytes("circRIGHT", "/p.bin").await.unwrap();
+        chain
+            .fetch_circle_asset_bytes("circLEFT", "/p.bin")
+            .await
+            .unwrap();
+        chain
+            .fetch_circle_asset_bytes("circRIGHT", "/p.bin")
+            .await
+            .unwrap();
         assert_eq!(count.load(Ordering::SeqCst), 2);
         assert_eq!(cache.len(), 2);
     }
@@ -363,13 +459,20 @@ mod tests {
         let addr = spawn_mock_rpc(plaintext_payload(plain)).await;
         let cache: Arc<AssetCache> = Arc::new(BoundedMap::new(8, Duration::from_millis(15)));
         let chain = chain_with_cache(addr, Arc::clone(&cache));
-        chain.fetch_circle_asset_bytes("circTTL2", "/p.bin").await.unwrap();
+        chain
+            .fetch_circle_asset_bytes("circTTL2", "/p.bin")
+            .await
+            .unwrap();
         assert_eq!(cache.len(), 1);
         tokio::time::sleep(Duration::from_millis(40)).await;
         let evicted = cache.sweep();
         assert!(evicted >= 1);
-        assert!(cache.get(&("circTTL2".to_string(), "/p.bin".to_string())).is_none(),
-            "post-sweep get must miss");
+        assert!(
+            cache
+                .get(&("circTTL2".to_string(), "/p.bin".to_string()))
+                .is_none(),
+            "post-sweep get must miss"
+        );
     }
 
     #[test]

@@ -102,24 +102,30 @@ say "downloading $URL"
 [ "$DRY_RUN" -eq 1 ] || curl -fsSL "$URL" -o "$TMP/octravpn.tar.gz" || die "download failed"
 [ "$DRY_RUN" -eq 1 ] || tar -C "$TMP" -xzf "$TMP/octravpn.tar.gz"
 
-# Verify GPG signature if minisign / cosign is installed and signature
-# file is present. Lookup-only; install proceeds if signature isn't
-# available (and we warn).
+# Verify GPG signature if gpg is installed and the .sig sidecar is
+# present. Lookup-only; install proceeds if signature isn't available
+# (and we warn). The signature contract is documented in SECURITY.md
+# and produced by .github/workflows/release.yml (gpg --detach-sign
+# --armor → <artifact>.sig). Keep the suffix in sync with that
+# workflow — see the regression check at the bottom of this file.
+SIG_SUFFIX=".sig"
 verify_sig() {
-    SIG_URL="$URL.minisig"
-    if command -v minisign >/dev/null 2>&1 && curl -fsI "$SIG_URL" >/dev/null 2>&1; then
-        say "verifying minisign signature"
-        curl -fsSL "$SIG_URL" -o "$TMP/octravpn.tar.gz.minisig"
-        # The release public key must be installed at $HOME/.minisign/octravpn.pub
-        # or set via $OCTRAVPN_MINISIGN_PUBKEY.
-        pubkey="${OCTRAVPN_MINISIGN_PUBKEY:-$HOME/.minisign/octravpn.pub}"
-        if [ -f "$pubkey" ]; then
-            minisign -V -p "$pubkey" -m "$TMP/octravpn.tar.gz" || die "signature verification failed"
+    SIG_URL="$URL$SIG_SUFFIX"
+    if command -v gpg >/dev/null 2>&1 && curl -fsI "$SIG_URL" >/dev/null 2>&1; then
+        say "verifying GPG signature"
+        curl -fsSL "$SIG_URL" -o "$TMP/octravpn.tar.gz$SIG_SUFFIX"
+        # The release public key must already be imported into the
+        # invoking user's GPG keyring. Bootstrap once with:
+        #   curl -fsSL https://octra.org/keys/octravpn-release.asc | gpg --import
+        # The expected fingerprint is pinned in docs/release.md §5.
+        if gpg --verify "$TMP/octravpn.tar.gz$SIG_SUFFIX" "$TMP/octravpn.tar.gz" 2>&1; then
+            say "GPG signature OK"
         else
-            warn "minisign pubkey not at $pubkey; skipping signature verification"
+            die "signature verification failed — refusing to install"
         fi
     else
-        warn "minisign not installed or signature absent; skipping signature verification"
+        warn "gpg not installed or signature absent; skipping signature verification"
+        warn "see docs/release.md §6 to enable verified installs"
     fi
 }
 [ "$DRY_RUN" -eq 1 ] || verify_sig
@@ -222,3 +228,21 @@ Next steps:
 
 Documentation: https://github.com/octra-labs/octravpn/blob/main/docs/install.md
 EOF
+
+# ----------------------------------------------------------------------
+# Regression check (executes only when this script is invoked with
+# OCTRAVPN_INSTALL_SELFTEST=1; a no-op on the normal curl|sh path).
+# Asserts that $SIG_SUFFIX matches the artifact name produced by
+# .github/workflows/release.yml's `gpg --detach-sign --armor --output
+# "${artifact}.sig"` step. If those two ever drift, signature
+# verification silently breaks and operators land in the unverified
+# branch — exactly the Audit-6 bug this commit closes. Update both
+# this constant AND the workflow output= flag together.
+# ----------------------------------------------------------------------
+if [ "${OCTRAVPN_INSTALL_SELFTEST:-0}" = "1" ]; then
+    expected_suffix=".sig"
+    if [ "$SIG_SUFFIX" != "$expected_suffix" ]; then
+        die "selftest: SIG_SUFFIX=$SIG_SUFFIX does not match release.yml's '$expected_suffix' contract"
+    fi
+    say "selftest: sidecar suffix matches release.yml contract ($SIG_SUFFIX)"
+fi

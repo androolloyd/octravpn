@@ -57,12 +57,7 @@ impl AuditLog {
         batch_size: usize,
         batch_interval_ms: u64,
     ) -> Result<Self> {
-        Self::open_batched_with_cap(
-            dir,
-            batch_size,
-            batch_interval_ms,
-            DEFAULT_BATCH_QUEUE_CAP,
-        )
+        Self::open_batched_with_cap(dir, batch_size, batch_interval_ms, DEFAULT_BATCH_QUEUE_CAP)
     }
 
     /// Like [`Self::open_batched`] but with an explicit queue
@@ -482,10 +477,8 @@ mod tests {
 
         let node_kp = std::sync::Arc::new(KeyPair::generate());
         let router = std::sync::Arc::new(OnionRouter::new());
-        let allowlist = std::sync::Arc::new(BoundedMap::new(
-            16,
-            std::time::Duration::from_secs(60),
-        ));
+        let allowlist =
+            std::sync::Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
         let state = std::sync::Arc::new(
             ControlState::new(node_kp, router, allowlist)
                 .with_audit(log.clone())

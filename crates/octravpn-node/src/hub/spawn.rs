@@ -256,10 +256,7 @@ impl Hub {
                 // crate wraps it in Arc<str> + ct-compares on the request path.
                 let bearer = self.cfg.analytics.bearer_token_string();
                 let gated = bearer.is_some();
-                let http_state = octravpn_analytics::HttpState::new(
-                    indexer.state.clone(),
-                    bearer,
-                );
+                let http_state = octravpn_analytics::HttpState::new(indexer.state.clone(), bearer);
                 let listen_addr = self.cfg.analytics.listen_addr.clone();
                 let listen_for_log = listen_addr.clone();
                 tokio::spawn(async move {

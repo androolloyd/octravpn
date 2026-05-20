@@ -4,12 +4,7 @@
 //! compaction path. `ensure_v1_header` stamps an empty file with the
 //! v1 magic so the append handle sees a well-formed file.
 
-use std::{
-    collections::BTreeMap,
-    fs,
-    io::Write,
-    path::Path,
-};
+use std::{collections::BTreeMap, fs, io::Write, path::Path};
 
 use crate::session::SessionId;
 

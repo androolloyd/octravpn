@@ -366,8 +366,9 @@ pub(crate) fn compute_target_state_root(
         next.member_count = clamped;
     }
 
-    next.validate()
-        .map_err(|e| UpdateError::BundleInvalid(format!("computed StateRoot fails validate: {e}")))?;
+    next.validate().map_err(|e| {
+        UpdateError::BundleInvalid(format!("computed StateRoot fails validate: {e}"))
+    })?;
     Ok(next)
 }
 
@@ -560,15 +561,12 @@ pub(crate) async fn apply(
     // Step 2: write each blob.
     let mut blob_tx_hashes = Vec::with_capacity(bundle.blobs.len());
     for (i, blob) in bundle.blobs.iter().enumerate() {
-        let nonce = ctx
-            .nonce()
-            .await
-            .map_err(|e| UpdateError::BlobPutFailed {
-                asset_path: blob.asset_path.clone(),
-                index: i,
-                committed_so_far: blob_tx_hashes.clone(),
-                source: e,
-            })?;
+        let nonce = ctx.nonce().await.map_err(|e| UpdateError::BlobPutFailed {
+            asset_path: blob.asset_path.clone(),
+            index: i,
+            committed_so_far: blob_tx_hashes.clone(),
+            source: e,
+        })?;
         let fee_q = ctx.fee("circle_asset_put_encrypted").await.ok();
         let fee = fee_q.filter(|f| *f > 0).unwrap_or(ASSET_PUT_FEE_FALLBACK);
         let (signed, plaintext_hash) =
@@ -627,14 +625,14 @@ pub(crate) async fn apply(
         key_id: "default".to_string(),
         padding_class: PaddingClass::None,
     };
-    let nonce =
-        ctx.nonce()
-            .await
-            .map_err(|e| UpdateError::AnchorUpdateFailed {
-                target_anchor_hex: target_anchor_hex.clone(),
-                blob_tx_hashes: blob_tx_hashes.clone(),
-                source: e,
-            })?;
+    let nonce = ctx
+        .nonce()
+        .await
+        .map_err(|e| UpdateError::AnchorUpdateFailed {
+            target_anchor_hex: target_anchor_hex.clone(),
+            blob_tx_hashes: blob_tx_hashes.clone(),
+            source: e,
+        })?;
     let fee = ctx
         .fee("circle_asset_put_encrypted")
         .await
@@ -730,8 +728,14 @@ pub(crate) async fn list_orphaned_blobs(
                 continue;
             }
         };
-        if decrypt_sealed_bytes(circle_id, "default", creds.passphrase(), s.trim(), expected_hex)
-            .is_err()
+        if decrypt_sealed_bytes(
+            circle_id,
+            "default",
+            creds.passphrase(),
+            s.trim(),
+            expected_hex,
+        )
+        .is_err()
         {
             orphans.push((*path).to_string());
         }
@@ -1071,22 +1075,12 @@ mod tests {
 
     #[test]
     fn padding_class_change_changes_envelope_bytes() {
-        let (ct_a, _) = encrypt_sealed_bytes(
-            TEST_CIRCLE,
-            "default",
-            TEST_PASS,
-            b"x",
-            PaddingClass::None,
-        )
-        .unwrap();
-        let (ct_b, _) = encrypt_sealed_bytes(
-            TEST_CIRCLE,
-            "default",
-            TEST_PASS,
-            b"x",
-            PaddingClass::K4,
-        )
-        .unwrap();
+        let (ct_a, _) =
+            encrypt_sealed_bytes(TEST_CIRCLE, "default", TEST_PASS, b"x", PaddingClass::None)
+                .unwrap();
+        let (ct_b, _) =
+            encrypt_sealed_bytes(TEST_CIRCLE, "default", TEST_PASS, b"x", PaddingClass::K4)
+                .unwrap();
         assert_ne!(ct_a, ct_b);
     }
 
@@ -1140,11 +1134,11 @@ mod tests {
             sign_blob_put_tx(&ctx, TEST_CIRCLE, &blob, &creds, 1, ASSET_PUT_FEE_FALLBACK).unwrap();
         let expected = hex::encode(Sha256::digest(b"hello"));
         assert_eq!(ph, expected);
-        let msg = signed
-            .get("message")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        assert!(msg.contains(&expected), "message missing plaintext_hash: {msg}");
+        let msg = signed.get("message").and_then(|v| v.as_str()).unwrap_or("");
+        assert!(
+            msg.contains(&expected),
+            "message missing plaintext_hash: {msg}"
+        );
         assert!(msg.contains("/policy.json"));
     }
 
@@ -1165,8 +1159,8 @@ mod tests {
             PaddingClass::K4,
         )
         .unwrap();
-        let out = decrypt_sealed_bytes(TEST_CIRCLE, "default", TEST_PASS, &ct_b64, &ph)
-            .expect("unseal");
+        let out =
+            decrypt_sealed_bytes(TEST_CIRCLE, "default", TEST_PASS, &ct_b64, &ph).expect("unseal");
         assert_eq!(out, plaintext);
     }
 
@@ -1181,9 +1175,7 @@ mod tests {
             PaddingClass::K4,
         )
         .unwrap();
-        assert!(
-            decrypt_sealed_bytes(TEST_CIRCLE, "default", "wrong-pass", &ct_b64, &ph).is_err()
-        );
+        assert!(decrypt_sealed_bytes(TEST_CIRCLE, "default", "wrong-pass", &ct_b64, &ph).is_err());
     }
 
     #[test]
@@ -1305,7 +1297,11 @@ mod tests {
             }
             "circle_asset" => {
                 let arr = params.as_array().ok_or(StatusCode::BAD_REQUEST)?;
-                let circle = arr.first().and_then(Value::as_str).unwrap_or("").to_string();
+                let circle = arr
+                    .first()
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
                 let path = arr.get(1).and_then(Value::as_str).unwrap_or("").to_string();
                 let g = state.lock();
                 match g.assets.get(&(circle, path)) {
@@ -1321,11 +1317,7 @@ mod tests {
                 match m {
                     "get_circle_state_root" => {
                         let c = args[0].as_str().unwrap_or("");
-                        let v = g
-                            .anchors
-                            .get(c)
-                            .cloned()
-                            .unwrap_or_else(|| "0".to_string());
+                        let v = g.anchors.get(c).cloned().unwrap_or_else(|| "0".to_string());
                         json!({ "result": v, "storage": {} })
                     }
                     _ => json!({ "result": null, "storage": {} }),
@@ -1388,16 +1380,8 @@ mod tests {
                     }
                     let params: Value = serde_json::from_str(msg).unwrap_or(json!([]));
                     let p = params.as_array().cloned().unwrap_or_default();
-                    let circle = p
-                        .first()
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .to_string();
-                    let anchor = p
-                        .get(1)
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .to_string();
+                    let circle = p.first().and_then(Value::as_str).unwrap_or("").to_string();
+                    let anchor = p.get(1).and_then(Value::as_str).unwrap_or("").to_string();
                     if !circle.is_empty() {
                         g.anchors.insert(circle, anchor);
                     }
@@ -1410,7 +1394,9 @@ mod tests {
             }
             _ => json!(null),
         };
-        Ok(Json(json!({ "jsonrpc": "2.0", "id": id, "result": result })))
+        Ok(Json(
+            json!({ "jsonrpc": "2.0", "id": id, "result": result }),
+        ))
     }
 
     async fn spawn_mock() -> (String, SharedMock, oneshot::Sender<()>) {
@@ -1444,16 +1430,17 @@ mod tests {
         let anchor = sr.anchor_hex().expect("anchor");
         let mut g = state.lock();
         g.anchors.insert(circle_id.to_string(), anchor.clone());
-        g.assets
-            .insert((circle_id.to_string(), "/state-root.json".to_string()), bytes);
+        g.assets.insert(
+            (circle_id.to_string(), "/state-root.json".to_string()),
+            bytes,
+        );
         anchor
     }
 
     fn ctx_for(url: &str) -> ChainCtxV3 {
         let secret = [7u8; 32];
         let wallet = KeyPair::from_secret_bytes(&secret);
-        let program_addr =
-            Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+        let program_addr = Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
         let rpc = RpcClient::new(url);
         ChainCtxV3::new(rpc, program_addr, wallet)
     }

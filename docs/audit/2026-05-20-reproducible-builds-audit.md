@@ -79,6 +79,20 @@ runner whose `$HOME=/home/runner` rebuilds the same tag, the
 embedded path becomes `/home/runner/.cargo/registry` → different
 bytes → different SHA-256.
 
+> **Fixed in this commit** (`modularize-4-audit-v2`, "audit: 4
+> launch-critical follow-ups"). `.cargo/config.toml` now sets
+> workspace-wide `RUSTFLAGS` with three `--remap-path-prefix`
+> rewrites collapsing `/Users/`, `/home/`, and `/root/` prefixes
+> to a host-independent `user/` stand-in. This addresses R1+R2
+> at the source level so the same flags fire on local
+> `cargo build --release` and CI alike — no `release.yml`-only
+> override required. The remaining cross-env work (R3 rustc
+> commit string, R4 deb/rpm timestamp, R5 tar gzip header) is
+> still §6 T2.1 follow-up; R3 in particular needs the rustc
+> toolchain path remap which only `release.yml` can plumb
+> through (CARGO_HOME / RUSTUP_HOME are not stable at config-
+> load time on a fresh CI runner).
+
 ### 1.3 The `.deb` + `.rpm` packaging step
 
 `cargo deb` and `cargo generate-rpm` embed a build timestamp

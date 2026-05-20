@@ -159,10 +159,7 @@ pub(crate) fn build_plan(
     let key = load_hmac_key(audit_dir, explicit_key)?;
     let files = discover_audit_files(audit_dir)?;
     if files.is_empty() {
-        anyhow::bail!(
-            "no audit-*.jsonl files found under {}",
-            audit_dir.display()
-        );
+        anyhow::bail!("no audit-*.jsonl files found under {}", audit_dir.display());
     }
     let mut signed: BTreeMap<String, BTreeSet<u64>> = BTreeMap::new();
     let mut total_pairs: u64 = 0;
@@ -225,10 +222,7 @@ pub(crate) fn run_rebuild(args: &RebuildArgs, out: &mut dyn std::io::Write) -> R
     if args.dry_run {
         let elapsed = t0.elapsed().as_secs_f64();
         writeln!(out)?;
-        writeln!(
-            out,
-            "dry-run: no journal written (elapsed {elapsed:.3}s)"
-        )?;
+        writeln!(out, "dry-run: no journal written (elapsed {elapsed:.3}s)")?;
         emit_report_footer(
             out,
             &RebuildReport {
@@ -261,8 +255,8 @@ pub(crate) fn run_rebuild(args: &RebuildArgs, out: &mut dyn std::io::Write) -> R
     let journal = ReceiptJournal::open(&args.output)
         .with_context(|| format!("open output journal {}", args.output.display()))?;
     for (sid_hex, floor) in &plan_vec {
-        let sid = SessionId::from_hex(sid_hex)
-            .with_context(|| format!("decode session id {sid_hex}"))?;
+        let sid =
+            SessionId::from_hex(sid_hex).with_context(|| format!("decode session id {sid_hex}"))?;
         journal
             .bump(&sid, *floor)
             .with_context(|| format!("bump session {sid_hex} to seq {floor}"))?;
@@ -280,7 +274,10 @@ pub(crate) fn run_rebuild(args: &RebuildArgs, out: &mut dyn std::io::Write) -> R
     drop(verify);
 
     if live_floors != plan {
-        writeln!(out, "VERIFY FAILED — rebuilt journal floor map does not match plan")?;
+        writeln!(
+            out,
+            "VERIFY FAILED — rebuilt journal floor map does not match plan"
+        )?;
         // Diff helper: report sessions whose floor differs (or is missing).
         let plan_keys: BTreeSet<&String> = plan.keys().collect();
         let live_keys: BTreeSet<&String> = live_floors.keys().collect();
@@ -359,8 +356,8 @@ fn load_hmac_key(audit_dir: &Path, explicit: Option<&Path>) -> Result<[u8; 32]> 
             candidate.display()
         );
     }
-    let raw = fs::read(&candidate)
-        .with_context(|| format!("read hmac key {}", candidate.display()))?;
+    let raw =
+        fs::read(&candidate).with_context(|| format!("read hmac key {}", candidate.display()))?;
     if raw.len() != 32 {
         anyhow::bail!(
             "hmac key file {} has wrong size ({}); expected 32",
@@ -543,7 +540,10 @@ mod tests {
             txt.contains("HMAC") || txt.contains("tampered"),
             "expected HMAC/tampered diagnostic: {txt}"
         );
-        assert!(!output.exists(), "must not create output on tampered source");
+        assert!(
+            !output.exists(),
+            "must not create output on tampered source"
+        );
     }
 
     /// Existing output without `--force` returns exit 3.

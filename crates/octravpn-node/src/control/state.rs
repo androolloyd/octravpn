@@ -10,13 +10,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use octravpn_core::{
-    bearer::BearerCheck,
-    bounded::BoundedMap,
-    control::AnnounceSessionRequest,
-    receipt::ReceiptContext,
-    receipt_journal::ReceiptJournal,
-    rpc::RpcClient,
-    session::SessionId,
+    bearer::BearerCheck, bounded::BoundedMap, control::AnnounceSessionRequest,
+    receipt::ReceiptContext, receipt_journal::ReceiptJournal, rpc::RpcClient, session::SessionId,
     sig::KeyPair,
 };
 use octravpn_mesh::{PreauthMinter, WireState};
@@ -392,8 +387,8 @@ impl ControlState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use octravpn_core::sig::KeyPair;
     use octravpn_core::bounded::BoundedMap;
+    use octravpn_core::sig::KeyPair;
 
     #[test]
     fn transaction_open_event_matches_u64_and_hex_session_ids() {
@@ -427,10 +422,7 @@ mod tests {
     fn control_state_default_has_no_shadow_signer() {
         let kp = Arc::new(KeyPair::generate());
         let router = Arc::new(crate::onion::OnionRouter::new());
-        let allowlist = Arc::new(BoundedMap::new(
-            10,
-            std::time::Duration::from_secs(60),
-        ));
+        let allowlist = Arc::new(BoundedMap::new(10, std::time::Duration::from_secs(60)));
         let state = ControlState::new(kp, router, allowlist);
         assert!(state.shadow_signer.is_none());
         assert_eq!(state.shadow_price_per_byte, 0);
@@ -459,10 +451,7 @@ mod tests {
     fn with_shadow_signer_none_is_identity() {
         let kp = Arc::new(KeyPair::generate());
         let router = Arc::new(crate::onion::OnionRouter::new());
-        let allowlist = Arc::new(BoundedMap::new(
-            10,
-            std::time::Duration::from_secs(60),
-        ));
+        let allowlist = Arc::new(BoundedMap::new(10, std::time::Duration::from_secs(60)));
         let state = ControlState::new(kp, router, allowlist).with_shadow_signer(None, 42);
         assert!(state.shadow_signer.is_none());
         assert_eq!(state.shadow_price_per_byte, 42);

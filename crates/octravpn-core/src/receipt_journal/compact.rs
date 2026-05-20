@@ -139,10 +139,7 @@ pub(crate) fn compact_async_worker(
         // — it is fully durable, just not yet at the canonical path.
         let mut g = inner.lock();
         let path = g.path.clone().expect("worker only runs with a path");
-        let mut tmp_handle = OpenOptions::new()
-            .append(true)
-            .read(true)
-            .open(&tmp_path)?;
+        let mut tmp_handle = OpenOptions::new().append(true).read(true).open(&tmp_path)?;
         // Iterate the in-mem map: any (id, cur) > snapshot or absent
         // from snapshot becomes a delta record. Bounded by the number
         // of bumps during phase 2.
@@ -222,10 +219,7 @@ pub(crate) fn compacting_tempfile_path(journal_path: &Path) -> PathBuf {
 /// rename — the caller does that). Used by the async compaction
 /// worker, which needs to write to a deterministic sibling path so
 /// `open()` can detect orphans after a crash.
-fn write_v1_snapshot_at(
-    dest: &Path,
-    by_session: &BTreeMap<SessionId, u64>,
-) -> std::io::Result<()> {
+fn write_v1_snapshot_at(dest: &Path, by_session: &BTreeMap<SessionId, u64>) -> std::io::Result<()> {
     // Create / truncate, then write the snapshot.
     let mut handle = OpenOptions::new()
         .create(true)
@@ -452,6 +446,23 @@ mod tests {
     /// task, not under the journal lock. We assert wall-clock + p50
     /// smoke checks rather than a tight p99 (fsync floors on macOS/
     /// network FS hosts make a tight target unstable).
+    ///
+    /// **The p50 budget below (15ms) is deliberately loose.** The
+    /// thing under test is "compaction does not block bumps" — i.e.
+    /// the wall-clock budget at the top of the assertion block,
+    /// which would be `n_tasks × compaction_cost` if compaction
+    /// serialised under the lock. The per-bump p50 is a *secondary*
+    /// signal: a regression that put compaction back under the lock
+    /// would push p50 into the hundreds-of-milliseconds range, not
+    /// the tens. Shared CI runners (especially the GitHub-hosted
+    /// `ubuntu-latest` fleet) see scheduling jitter that pushes
+    /// honest-but-slow runs into the ~15ms p50 range under the
+    /// 4-task contention this test creates; audit-10 R3 measured
+    /// 1/10 fail rate at the old 5ms target on shared runners, and
+    /// the Fix-4 audit independently observed 14.57ms on a contended
+    /// host. Widening the budget keeps the regression signal without
+    /// flaking — a true regression will blow through 15ms by an
+    /// order of magnitude.
     #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
     async fn auto_compaction_does_not_block_bumps() {
         use crate::receipt_journal::FsyncPolicy;
@@ -518,9 +529,11 @@ mod tests {
              p50={p50:?} p99={p99:?} max={max:?}"
         );
         // Smoke check #2: median bump latency below the fsync floor —
-        // most bumps don't touch disk under the lock at all.
+        // most bumps don't touch disk under the lock at all. See the
+        // docstring above for why this budget is 15ms (shared-runner
+        // scheduling jitter) and not a tight per-bump latency target.
         assert!(
-            p50 < Duration::from_millis(5),
+            p50 < Duration::from_millis(15),
             "p50 bump latency {p50:?} too high — even the median \
              bump appears to be blocking on compaction I/O \
              (p99={p99:?}, max={max:?})"
@@ -740,10 +753,9 @@ mod tests {
         for crash_at in crash_points {
             for &acked_floor in &[1u64, 5, 50] {
                 let dir = tempfile::tempdir().unwrap();
-                let path = dir.path().join(format!(
-                    "regress-{:?}-{}.bin",
-                    crash_at, acked_floor
-                ));
+                let path = dir
+                    .path()
+                    .join(format!("regress-{:?}-{}.bin", crash_at, acked_floor));
                 let j = Arc::new(ReceiptJournal::open(&path).unwrap());
                 // Ack the floor.
                 for s in 0..3u8 {

@@ -60,8 +60,11 @@ use crate::config::ClientConfig;
 
 pub(crate) use api::{ConfigPassphrase, PassphraseSource};
 pub(crate) use cache::AssetCache;
-#[allow(unused_imports)] // preserved-surface re-exports: chain.rs exposed these at the crate-internal API path; the route layer references DEFAULT_ASSET_CACHE_* in doc comments and tests reach AssetCacheKey / CachedAsset through cache::*
-pub(crate) use cache::{AssetCacheKey, CachedAsset, DEFAULT_ASSET_CACHE_CAPACITY, DEFAULT_ASSET_CACHE_TTL};
+#[allow(unused_imports)]
+// preserved-surface re-exports: chain.rs exposed these at the crate-internal API path; the route layer references DEFAULT_ASSET_CACHE_* in doc comments and tests reach AssetCacheKey / CachedAsset through cache::*
+pub(crate) use cache::{
+    AssetCacheKey, CachedAsset, DEFAULT_ASSET_CACHE_CAPACITY, DEFAULT_ASSET_CACHE_TTL,
+};
 pub(crate) use errors::FetchAssetError;
 
 /// Long-lived context the portal holds for chain RPC work. Cheaply
@@ -275,10 +278,7 @@ pub(super) mod tests_common {
     /// Spawn a stub axum RPC for `circle_asset_ciphertext_by_resource_key`.
     /// When `counter` is supplied it ticks on every matched call (used by
     /// hit/miss assertions). Non-matching methods return JSON-RPC -32601.
-    async fn spawn_asset_rpc(
-        result: Value,
-        counter: Option<Arc<AtomicUsize>>,
-    ) -> SocketAddr {
+    async fn spawn_asset_rpc(result: Value, counter: Option<Arc<AtomicUsize>>) -> SocketAddr {
         let result_arc = Arc::new(result);
         let app: Router = Router::new().route(
             "/",

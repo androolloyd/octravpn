@@ -18,10 +18,7 @@ use x25519_dalek::StaticSecret;
 
 use super::Hub;
 use crate::{
-    chain::ChainCtx,
-    chain_v2::ChainCtxV2,
-    chain_v3::ChainCtxV3,
-    config::NodeConfig,
+    chain::ChainCtx, chain_v2::ChainCtxV2, chain_v3::ChainCtxV3, config::NodeConfig,
     onion::OnionRouter,
 };
 

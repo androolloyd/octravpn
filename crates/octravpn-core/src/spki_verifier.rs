@@ -228,9 +228,8 @@ impl ServerCertVerifier for SpkiPinVerifier {
         // Extract leaf SPKI. A malformed cert is rejected up front
         // with `BadEncoding` (rustls convention for "the DER didn't
         // parse").
-        let leaf_spki = extract_spki_der(end_entity.as_ref()).map_err(|_| {
-            RustlsError::InvalidCertificate(rustls::CertificateError::BadEncoding)
-        })?;
+        let leaf_spki = extract_spki_der(end_entity.as_ref())
+            .map_err(|_| RustlsError::InvalidCertificate(rustls::CertificateError::BadEncoding))?;
         let mut h = Sha256::new();
         h.update(leaf_spki);
         let mut leaf_hash = [0u8; 32];
@@ -257,13 +256,8 @@ impl ServerCertVerifier for SpkiPinVerifier {
         // system store can NOT pass — its leaf SPKI won't match
         // unless the attacker also stole the private key the pin
         // pinned.
-        self.inner.verify_server_cert(
-            end_entity,
-            intermediates,
-            server_name,
-            ocsp_response,
-            now,
-        )
+        self.inner
+            .verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
     }
 
     fn verify_tls12_signature(
@@ -383,7 +377,9 @@ fn extract_spki_der(cert_der: &[u8]) -> Result<&[u8], SpkiExtractError> {
             offset: cursor.len(),
         })?;
     if cursor.len() < end {
-        return Err(SpkiExtractError::Truncated { offset: cursor.len() });
+        return Err(SpkiExtractError::Truncated {
+            offset: cursor.len(),
+        });
     }
     Ok(&cursor[..end])
 }
@@ -445,9 +441,9 @@ fn peek_tlv(input: &[u8]) -> Result<Option<Tlv<'_>>, SpkiExtractError> {
         }
         (2 + n, body_len)
     };
-    let end = header_len.checked_add(body_len).ok_or(SpkiExtractError::Truncated {
-        offset: header_len,
-    })?;
+    let end = header_len
+        .checked_add(body_len)
+        .ok_or(SpkiExtractError::Truncated { offset: header_len })?;
     if input.len() < end {
         return Err(SpkiExtractError::Truncated { offset: end });
     }
@@ -682,11 +678,7 @@ mod tests {
             ),
             "expected ApplicationVerificationFailure, got {err:?}"
         );
-        assert_eq!(
-            inner.count(),
-            0,
-            "inner must NOT run on a mismatched SPKI",
-        );
+        assert_eq!(inner.count(), 0, "inner must NOT run on a mismatched SPKI",);
     }
 
     /// Test 3 — rotation grace: multiple pins are supported, any one
@@ -704,7 +696,10 @@ mod tests {
         let cert_der = CertificateDer::from(old_cert);
         let name = ServerName::try_from("example.test").unwrap();
         let r = v.verify_server_cert(&cert_der, &[], &name, &[], known_unix_time());
-        assert!(r.is_ok(), "OLD cert under (new, old) pin set must accept: {r:?}");
+        assert!(
+            r.is_ok(),
+            "OLD cert under (new, old) pin set must accept: {r:?}"
+        );
     }
 
     /// Test 4 — empty pins list: every chain is rejected, regardless

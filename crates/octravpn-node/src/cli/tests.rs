@@ -114,8 +114,8 @@ fn unseal_keys_recovers_plaintext_into_tmpdir() {
     let cfg = NodeConfig::load(&toml_path).unwrap();
 
     seal_cli::run_seal_keys(&cfg, Some("pw"), None, false, false).unwrap();
-    let recovery_dir = PathBuf::from(std::env::temp_dir())
-        .join(format!("octravpn-test-{}", std::process::id()));
+    let recovery_dir =
+        PathBuf::from(std::env::temp_dir()).join(format!("octravpn-test-{}", std::process::id()));
     let r = seal_cli::run_unseal_keys(&cfg, &recovery_dir, Some("pw"), None, false);
     if r.is_err() {
         eprintln!("unseal skipped (tmpfs gate): {:?}", r.err());

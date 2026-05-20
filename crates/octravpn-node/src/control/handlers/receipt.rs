@@ -142,15 +142,14 @@ pub(crate) async fn get_state(
     // shadow blob and logs a warning. The chain doesn't verify
     // the blob today — a missing blob is a soft degrade, not a
     // hard fail.
-    let (enc_bytes_used, enc_net, pvac_zero_proof) =
-        match s.shadow_signer.as_ref() {
-            None => (None, None, None),
-            Some(signer) => {
-                let net = event_bytes.saturating_mul(s.shadow_price_per_byte);
-                let seed = shadow_seed_for(&id_hex, event_seq);
-                let seed_b = shadow_subseed(&seed, b"bytes");
-                let seed_n = shadow_subseed(&seed, b"net");
-                let enc_b = signer
+    let (enc_bytes_used, enc_net, pvac_zero_proof) = match s.shadow_signer.as_ref() {
+        None => (None, None, None),
+        Some(signer) => {
+            let net = event_bytes.saturating_mul(s.shadow_price_per_byte);
+            let seed = shadow_seed_for(&id_hex, event_seq);
+            let seed_b = shadow_subseed(&seed, b"bytes");
+            let seed_n = shadow_subseed(&seed, b"net");
+            let enc_b = signer
                     .pvac
                     .encrypt_const(&signer.circle_pk, &signer.circle_sk, event_bytes, &seed_b)
                     .await
@@ -159,8 +158,8 @@ pub(crate) async fn get_state(
                         e
                     })
                     .ok();
-                let enc_n = if enc_b.is_some() {
-                    signer
+            let enc_n = if enc_b.is_some() {
+                signer
                         .pvac
                         .encrypt_const(&signer.circle_pk, &signer.circle_sk, net, &seed_n)
                         .await
@@ -169,14 +168,14 @@ pub(crate) async fn get_state(
                             e
                         })
                         .ok()
-                } else {
-                    None
-                };
-                let proof = if let Some(ct) = enc_b.as_ref() {
-                    use base64::Engine as _;
-                    let blinding_b64 = base64::engine::general_purpose::STANDARD
-                        .encode(blind.as_bytes());
-                    signer
+            } else {
+                None
+            };
+            let proof = if let Some(ct) = enc_b.as_ref() {
+                use base64::Engine as _;
+                let blinding_b64 =
+                    base64::engine::general_purpose::STANDARD.encode(blind.as_bytes());
+                signer
                         .pvac
                         .make_zero_proof(
                             &signer.circle_pk,
@@ -191,12 +190,12 @@ pub(crate) async fn get_state(
                             e
                         })
                         .ok()
-                } else {
-                    None
-                };
-                (enc_b, enc_n, proof)
-            }
-        };
+            } else {
+                None
+            };
+            (enc_b, enc_n, proof)
+        }
+    };
 
     let proposed = ProposedReceipt {
         receipt: r,
@@ -240,12 +239,15 @@ pub(crate) async fn get_state(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::control::handlers::session::tests::signed_announce;
     use crate::control::handlers::session::announce;
+    use crate::control::handlers::session::tests::signed_announce;
     use crate::control::metrics::NodeMetrics;
     use crate::control::state::ControlState;
     use crate::onion::OnionRouter;
-    use octravpn_core::{bounded::BoundedMap, sig::{verify, KeyPair}};
+    use octravpn_core::{
+        bounded::BoundedMap,
+        sig::{verify, KeyPair},
+    };
 
     /// Helper for the journal-wiring tests: take the JSON body off a
     /// `Response` and deserialize it as a `SessionStateResponse`.

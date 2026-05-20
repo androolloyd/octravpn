@@ -117,9 +117,7 @@ pub enum FrameError {
     /// further frame under the current key would risk nonce reuse;
     /// callers MUST tear down the session and re-handshake to obtain a
     /// fresh key + zeroed counter.
-    #[error(
-        "counter exhausted: the 2^64-frame per-key budget has been spent — rotate keys"
-    )]
+    #[error("counter exhausted: the 2^64-frame per-key budget has been spent — rotate keys")]
     CounterExhausted,
 }
 
@@ -190,7 +188,7 @@ impl FrameSealer {
                 },
             )
             .map_err(|_| FrameError::BadTag)?; // encrypt cannot really fail; map for total cover.
-        // audit-1 H-2: counter advance pre-validated above.
+                                               // audit-1 H-2: counter advance pre-validated above.
         self.counter = next_counter;
 
         // Emit: [u16 BE total_len] [ciphertext (incl tag)].
