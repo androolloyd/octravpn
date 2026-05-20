@@ -135,6 +135,33 @@ Theorem count: 8 plus 2 example anchors.
 
 ---
 
+## 4. `OctraVPN_Rust.ShadowBlob`
+
+Bridge from the abstract `WireProtocol.HFHE` module to the concrete
+Rust `SignedReceipt` schema with the HFHE-2 shadow-blob fields.
+Mirrors `crates/octravpn-core/src/receipt.rs:146-183` and the
+`ShadowBlob { enc_bytes_used, enc_net, pvac_zero_proof }` triple
+at lines 235-261. Closes the "what the chain stores looks like vs.
+what the cipher claims" gap with seven theorems.
+
+| Theorem                                | Plain-English statement                                                                                              |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `honest_dec_bytes_used`                | An honestly-emitted shadow blob's `enc_bytes_used` decrypts to the receipt's `bytes_used mod p`.                     |
+| `honest_dec_net`                       | An honestly-emitted shadow blob's `enc_net` decrypts to `bytes_used * price mod p`.                                  |
+| `honest_bytes_used_key_bound`          | An honestly-emitted `enc_bytes_used` is bound to the circle's PVAC pubkey.                                            |
+| `swap_ready_indistinguishable`         | Two receipts with the same `(bytes_used, price)` produce the same sha256 commitment regardless of shadow blob.       |
+| `forged_shadow_detectable`             | A forged shadow blob (cipher decrypts to b' ≠ committed `bytes_used`) is detectable by the HFHE-3 cross-check.       |
+| `honest_emission_wire_stable`          | Honest emission survives wire round-trip — serialise + deserialise preserves the cipher.                              |
+| `no_shadow_legacy_verifier`            | A receipt with no shadow blob (`Option::None` on every field) verifies under today's sha256-only verifier unchanged. |
+
+No new axioms introduced — `ShadowBlob.lean` reuses
+`WireProtocol.HFHE`'s axioms (`dec_enc_id`, `sha256_injective`,
+`encodeAmountPrice_injective`, `pubkey_binding`).
+
+Theorem count: 7.
+
+---
+
 ## Theorem count
 
 | Module                       | Theorems | Examples (anchors) |
@@ -143,8 +170,9 @@ Theorem count: 8 plus 2 example anchors.
 | `Lemmas` (original)          | 54       | (various)          |
 | `MachineRegistry`            | 5        | 1                  |
 | `ACL`                        | 8        | 2                  |
-| **Total (this module)**      | **72**   | 3+                 |
+| `ShadowBlob`                 | 7        | 0                  |
+| **Total (this module)**      | **79**   | 3+                 |
 
-Combined with the 60 theorems in `WireProtocol/`, the deductive
-proof surface now stands at **132 mechanically-checked theorems**
-(72 Rust security primitives + 60 wire-protocol primitives).
+Combined with the 76 theorems in `WireProtocol/`, the deductive
+proof surface now stands at **155 mechanically-checked theorems**
+(79 Rust security primitives + 76 wire-protocol primitives).
