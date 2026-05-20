@@ -333,6 +333,119 @@ Axioms introduced in `V3Policy.lean`:
 
 ---
 
+## 9. `WireProtocol.Shielding`
+
+Probe-resistance / obfuscation layers that wrap the OctraVPN data
+path: AmneziaWG WireGuard shield, obfs4 NTOR+AEAD transport, PSK-knock
+gate, domain-fronted DERP. See module docstring at
+`Shielding.lean`.
+
+Rust sources:
+  * `crates/octravpn-tun/src/amnezia.rs` (AmneziaWG)
+  * `crates/octravpn-obfs4/src/{handshake,frame}.rs` (obfs4)
+  * `crates/octravpn-mesh/src/knock.rs` (PSK-knock)
+  * `crates/octravpn-tun/src/derp/front.rs` (fronted DERP)
+
+| Theorem                                          | Plain-English statement                                                                                                                                                                | Rust function / test                                                                       |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `hmacSha256_function`                            | HMAC-SHA256 is a function of `(key, message)`.                                                                                                                                         | underlying `hmac` crate                                                                    |
+| `WgMsgType.canon_injective`                      | The four canonical WG msg-type bytes (1,2,3,4) are pairwise distinct.                                                                                                                  | `amnezia.rs:67-70`                                                                         |
+| `amnezia_roundtrip_all_mts`                      | **§1.** `wrap_send` then `wrap_recv` round-trips byte-identically for any WG msg-type (init/response/cookie/transport).                                                                | `wrap_send`+`wrap_recv` (`amnezia.rs:258-436`) / `prop_random_wg_payloads_wrap_then_strip` |
+| `amnezia_junk_packets_dropped`                   | **§2.** Junk packets (no matching magic at the s1/s2 offset) are silently dropped on recv (return None).                                                                               | `amnezia.rs:434-435` / `random_garbage_is_bypassed`                                        |
+| `amnezia_h_substitution_preserves_id`            | **§3.** The H-byte substitution preserves WG msg-type identity (h1↔1, h2↔2, h3↔3, h4↔4).                                                                                                | `amnezia.rs:293-297` ↔ `:381-432` / round-trip tests                                       |
+| `amnezia_junk_burst_additive`                    | **§4.** Pre-handshake junk burst (`jc` packets) doesn't interfere with the real handshake — it's strictly additive (junk decodes to None; real packet still recovers).                 | `amnezia.rs:267-283` / `junk_burst_emits_exactly_jc_packets_in_order`                       |
+| `amnezia_identity_when_disabled`                 | **§5.** With `enabled=false`, both wrap functions are identity transforms.                                                                                                              | `amnezia.rs:262-265`, `:346-348` / `disabled_shield_is_transparent_to_stock_wg`             |
+| `obfs4_ntor_matched_keys_iff_same_node_id`       | **§6.** NTOR handshake: client + server derive matched (tx↔rx) keys for matched node_id.                                                                                                | `handshake.rs::{ClientHandshake,ServerHandshake}` / `round_trip_derives_matched_keys`       |
+| `obfs4_seal_open_yields_payload_plus_pad`        | Frame seal+open is a function on `(payload ++ pad)`.                                                                                                                                    | `frame.rs::FrameSealer::seal_into` / `round_trip`                                          |
+| `obfs4_frame_roundtrip`                          | **§7.** Frame round-trip: any plaintext byte sequence under MAX_PAYLOAD → wrap → unwrap = original (modulo the random pad tail).                                                       | `frame.rs:122-239` / `round_trip` (`frame.rs:252-262`)                                     |
+| `obfs4_counter_replay_fails`                     | **§8.** Per-frame nonce: counter monotonicity prevents replay (counter K under counter L AAD fails AEAD verify).                                                                       | `frame.rs::open_from` (`frame.rs:189-239`) / `replay_fails_after_counter_advance`           |
+| `obfs4_frame_size_nondeterministic`              | **§9.** Padding randomization: frame size distribution is non-deterministic given identical plaintext (∃ at least 2 distinct frame sizes for same input).                              | `frame.rs:127-134` / `padding_distribution_covers_range`                                    |
+| `obfs4_probe_resistance_mac1`                    | **§10.** Bridge probe-resistance: a probe without `node_id` cannot forge `mac1` (HMAC-keyed distinctness ⇒ server rejects).                                                            | `handshake.rs:222-225` / `wrong_node_id_fails_silently`                                     |
+| `knock_current_window_matches`                   | **§11.** Window math: `knock(psk, t)` validates against `knockAtWindow psk (t / window_secs)` for `window_secs ≥ 1`.                                                                   | `knock.rs:64-67` / `knock_is_deterministic_for_same_window`                                 |
+| `knock_previous_window_rejected_strict`          | **§12.** Previous-window knocks are rejected in strict mode (replay prevention).                                                                                                       | `knock.rs:73-78` / `knock_changes_per_window`                                               |
+| `knock_byte_stable_404`                          | **§13.** Without knock, every request gets the byte-stable nginx-404 response (probe-resistance).                                                                                      | server-side nginx-404 / sha256-pinning test                                                |
+| `knock_path_and_header_carry_same_value`         | **§14.** Path-prefix variant (`/k/<knock>/ts2021`) and header variant (`X-OctraVPN-Knock`) gate the same inner handler.                                                                | `knock.rs:36`, `:41` + `mesh_ops.rs:162`                                                   |
+| `front_tampered_body_rejected`                   | **§15.** HMAC verification: tampered body byte → HMAC mismatch → 404 returned (same byte-stable response).                                                                              | `front.rs:150-184` / `auth_tag_is_stable_and_verifies` (wrong-body branch)                  |
+| `front_sni_host_split`                           | **§16.** SNI vs Host split: TLS layer carries `front_host` (URL authority); inner request carries `real_host` (Host header).                                                          | `front.rs:189-198`, `:249-269` / `dial_plan_splits_sni_from_host_header`                    |
+| `front_replay_outside_window_rejected`           | **§17.** Replay across timestamp windows: requests with `ts < now - MAX_SKEW_SECS` (or symmetric future) rejected.                                                                      | `front.rs:64` (`MAX_SKEW_SECS = 300`)                                                       |
+
+Axioms introduced in `Shielding.lean`:
+
+- `u32le_length`, `u32le_injective` — `u32::to_le_bytes` is a length-4
+  injection (same style as `u32be_injective` in `OctraVPN_Rust/Lemmas.lean`).
+- `u64be_length`, `u64be_injective`, `u64be_distinct_of_nat` — standard
+  `u64::to_be_bytes` properties.
+- `hmacSha256_length` — HMAC-SHA256 outputs 32 bytes.
+- `hmac_distinct_messages` / `hmac_keyed` / `hmac_message_change` —
+  standard PRF-style collision-resistance (same axiom style as
+  `hmac_distinct_messages` in `HmacToken.lean`).
+- `aead_roundtrip` / `aead_nonce_bind` / `aead_key_bind` —
+  ChaCha20-Poly1305 IND-CCA2 properties (same style as
+  `aead_roundtrip` in `OctraVPN_Rust/Spec.lean`).
+- `amnezia_roundtrip` / `amnezia_identity_send` / `amnezia_identity_decode`
+  / `amnezia_junk_drop` / `amnezia_h_preserves_msgtype` — opaque-layer
+  axioms for the AmneziaWG shield (composition layer; the implementation
+  is exercised by the Rust proptest suite).
+- `ntor_matched_keys` / `ntor_tx_rx_distinct` / `ntor_node_id_binding` —
+  NTOR group-element opacity for the obfs4 handshake.
+- `obfs4_nonce_distinct_of_counter` — distinct counters produce
+  distinct nonces (follows from `u64be_distinct_of_nat` + concat).
+- `obfs4_padding_distribution_existential` — padding RNG produces at
+  least two distinct frame sizes (existential property exercised by
+  `padding_distribution_covers_range`).
+- `natDecBytes_injective` / `knock_take_injective` — decimal-string
+  injectivity + truncated-PRF assumption used by the knock gate.
+- `knock_failure_response_constant` — the server-side nginx-404 is
+  byte-stable regardless of candidate bytes (probe-resistance shape).
+- `frontCanonical_injective_{ts,method,path,body}` — the front-HMAC
+  canonical string is injective in each of its four components
+  (delimiter discipline + SHA-256 of body).
+- `dial_plan_carries_{front_host,real_host}` — the SNI/Host split is
+  preserved through `FrontClient::plan`.
+
+**Out of scope (delegated):** Cryptographic security of HMAC-SHA256,
+ChaCha20-Poly1305, X25519. Standard PRF / AEAD / DH assumptions
+delegated to audited crates.
+
+---
+
+## 10. `WireProtocol.Wire`
+
+Tailscale wire round-trip (Walls 1-7). Companion to `Controlbase.lean`
++ `BeNonce.lean`; this module pins the *streaming* MapResponse
+framing (`[u32 LE size][zstd(JSON)]` chunks), delta peer updates, and
+the Wall-7 disco_key/endpoints propagation.
+
+Rust source: `crates/octravpn-node/tests/tailscale_wire_integration.rs`
++ the `headscale-api::tailscale_wire::router` it exercises.
+
+| Theorem                                  | Plain-English statement                                                                                                                          | Rust function / test                                                                  |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| `u32le_destruct`                         | `u32le n` always evaluates to a 4-element list (helper).                                                                                          | `to_le_bytes`                                                                          |
+| `stream_chunk_roundtrip`                 | **§18.** `MapResponse.Stream=true` framing: `[u32 LE size][zstd(JSON)]` chunks round-trip.                                                       | router zstd-framing branch / `tailscale_wire_integration.rs:438-449`                   |
+| `delta_application_yields_snapshot`      | **§19.** Delta map updates (PeersChanged / PeersChangedPatch / PeersRemoved): applying the delta to the prev view produces the same set as a full snapshot. | `tailscale_wire_integration.rs::stream_true_emits_chunk_on_registry_change`               |
+| `delta_full_replaces`                    | A `.full` delta replaces the prev view entirely.                                                                                                  | (corollary)                                                                            |
+| `delta_removed_shrinks`                  | A `.removed` delta cannot grow the peer set.                                                                                                      | filter-monotonicity                                                                    |
+| `disco_key_and_endpoints_propagate`      | **§20.** Wall 7: `MachineRecord.disco_key` + `endpoints` propagate byte-identically through `register → map → MapNode → peer`.                  | `tailscale_wire_integration.rs::map_response_round_trips_disco_key_and_endpoints` (lines 657-757) |
+| `map_node_function`                      | The `MachineRecord → MapNode` projection is a function.                                                                                            | structural projection                                                                  |
+| `map_node_empty_endpoints`               | An empty `endpoints` list survives the projection.                                                                                                | structural projection                                                                  |
+
+Axioms introduced in `Wire.lean`:
+
+- `u32le_length`, `u32le_injective` — standard `u32::to_le_bytes`.
+- `u32be_length` — standard `u32::to_be_bytes`.
+- `zstd_roundtrip` — zstd lossless round-trip on its valid output
+  range (audited zstd implementation).
+- `delta_consistency` — an honest server emits deltas such that the
+  derived peer set equals the next full snapshot (this is the
+  property the integration test pins empirically).
+
+**Out of scope:** zstd's compression ratio and timing; the Noise +
+controlbase wrappers around the chunks (those have their own modules,
+`BeNonce.lean` + `Controlbase.lean`).
+
+---
+
 ## Theorem count
 
 | Module                  | Theorems | Examples (anchors) |
@@ -345,14 +458,16 @@ Axioms introduced in `V3Policy.lean`:
 | `V3Members`             | 5        | 1                  |
 | `V3Policy`              | 5        | 1                  |
 | `HFHE`                  | 16       | 2                  |
-| **Total (this module)** | **76**   | **12**             |
+| `Shielding`             | 20       | 0                  |
+| `Wire`                  | 8        | 0                  |
+| **Total (this module)** | **104**  | **12**             |
 
 Combined with the 79 theorems in `OctraVPN_Rust/` (5 in
 `Spec.lean` + 54 in `Lemmas.lean` + 5 in `MachineRegistry.lean` +
 8 in `ACL.lean` + 7 in `ShadowBlob.lean`), the deductive proof
-surface now stands at **155 mechanically-checked theorems**
-(79 Rust security primitives + 76 wire-protocol primitives,
-of which 23 are new in this pass).
+surface now stands at **183 mechanically-checked theorems**
+(79 Rust security primitives + 104 wire-protocol primitives,
+of which 28 are new in this pass: 20 shielding + 8 wire).
 
 ---
 

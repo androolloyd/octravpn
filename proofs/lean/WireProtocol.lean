@@ -6,6 +6,8 @@ import WireProtocol.V3Canonical
 import WireProtocol.V3Members
 import WireProtocol.V3Policy
 import WireProtocol.HFHE
+import WireProtocol.Shielding
+import WireProtocol.Wire
 
 /-!
 # OctraVPN — wire-protocol primitive proofs.
@@ -32,6 +34,17 @@ and the portal HMAC token plumbing in #218):
   * `WireProtocol.HFHE` — the hypergraph-FHE / PVAC scheme that
     backs the receipt shadow-blob fields. Closes the longest-
     standing PROOF GAP shared with the AML modules.
+  * `WireProtocol.Shielding` — the four obfuscation / probe-resist
+    layers: AmneziaWG, obfs4 NTOR+AEAD transport, PSK-knock,
+    domain-fronted DERP. 20 theorems covering round-trip,
+    junk-drop, H-byte identity preservation, counter-replay
+    rejection, padding non-determinism, mac1 probe-resistance,
+    knock-window math, byte-stable 404, SNI/Host split, replay-
+    window rejection.
+  * `WireProtocol.Wire` — the Tailscale wire round-trip (Walls 1-7):
+    streamed `MapResponse` chunked framing, delta peer updates
+    (PeersChanged / PeersRemoved / PeersChangedPatch), Wall-7
+    `MachineRecord.disco_key` + `endpoints` propagation.
 
 See `WireProtocol/Theorems.md` for the full plain-English index +
 Rust-signature mapping.
