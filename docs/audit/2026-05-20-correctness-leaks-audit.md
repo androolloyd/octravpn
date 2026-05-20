@@ -126,7 +126,7 @@ from active.
 - Test: `assert!(!format!("{:?}", bundle).contains("my-secret-
   policy"))`.
 - **Fixed** (worktree branch `worktree-agent-ae841e6f290904500`,
-  commit pending): `BlobUpdate.plaintext` is now
+  commit a0347e2): `BlobUpdate.plaintext` is now
   `zeroize::Zeroizing<Vec<u8>>`. Both `BlobUpdate` and `UpdateBundle`
   ship hand-written `Debug` impls (no derive). The
   `debug_does_not_leak_blob_plaintext` unit test
@@ -227,7 +227,7 @@ from active.
   `format!("{:?}", cfg)` does not match `[0-9a-f]{40,}` or
   `r#"Bearer "#`.
 - **Fixed** (worktree branch `worktree-agent-ae841e6f290904500`,
-  commit pending): see Audit-2 CFG-2 entry — all 6 fields now
+  commit a0347e2): see Audit-2 CFG-2 entry — all 6 fields now
   `Option<SecretString>` with redacting Debug impls, and the
   defense-in-depth trace-redaction tests (bare-`Debug` + live
   tracing-subscriber capture) ship in `config.rs::tests`.

@@ -247,7 +247,7 @@ and panic crash dumps.
   `AttestationCfg`, `AnalyticsCfg`, `PvacCfg`, `TunCfg`,
   `TransportCfg`, `Obfs4Cfg`, `AmneziaCfg`. Add a deliberate-typo
   TOML unit test.
-- **Fixed** (worktree branch `worktree-agent-ae841e6f290904500`, commit pending):
+- **Fixed** (worktree branch `worktree-agent-ae841e6f290904500`, commit a0347e2):
   added `#[serde(deny_unknown_fields)]` to all 12 node-side config
   structs and shipped 5 typo-rejection unit tests in
   `crates/octravpn-node/src/config.rs` (top-level block, chain
@@ -270,7 +270,7 @@ and panic crash dumps.
 - Fix: wrap each in `secrecy::SecretString` (min:
   `zeroize::Zeroizing<String>`). Audit `tracing::*` macros in
   `hub.rs`/`main.rs`/`pvac.rs` for `?cfg` emissions.
-- **Fixed** (worktree branch `worktree-agent-ae841e6f290904500`, commit pending):
+- **Fixed** (worktree branch `worktree-agent-ae841e6f290904500`, commit a0347e2):
   all 6 fields now `Option<SecretString>` (`secrecy 0.10` with `serde`
   feature, added to workspace deps). `ChainCfg`, `ControlCfg`,
   `AnalyticsCfg`, `Obfs4Cfg` carry hand-written `Debug` impls that
