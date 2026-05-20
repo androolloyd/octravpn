@@ -21,3 +21,17 @@ audit_dir           = "/tmp/octravpn-audit"
 
 [attestation]
 poll_interval_secs  = 60
+
+# PVAC sidecar (HFHE / encrypted-earnings path). Off by default so
+# existing devnet runs don't need the C++ toolchain. To enable:
+#   1. `cd pvac-sidecar && make` (or use the Dockerfile) so the
+#      binary lands at `octra-pvac-sidecar`.
+#   2. Set `enabled = true` and (if not running from the repo root)
+#      override `binary_path` to the deployed location.
+# If `enabled = true` but the binary is missing, the node logs a
+# warning at boot and continues without HFHE — boot does NOT fail.
+[pvac]
+enabled              = false
+binary_path          = "./pvac-sidecar/octra-pvac-sidecar"
+restart_backoff_ms   = 250
+request_timeout_secs = 30

@@ -64,6 +64,15 @@ pub(crate) struct Hub {
     /// Shared with the control plane via an Arc — every `get_state`
     /// call consults this before signing.
     pub receipt_journal: Arc<octravpn_core::receipt_journal::ReceiptJournal>,
+    /// Managed `octra-pvac-sidecar` subprocess for the HFHE path.
+    /// `Some` iff `cfg.pvac.enabled = true` AND
+    /// `PvacClient::spawn` succeeded at boot. If the operator enabled
+    /// `[pvac]` but the binary path doesn't resolve, this is `None`
+    /// and the node continues without HFHE — boot does NOT fail. See
+    /// `Hub::pvac` for the surfacing accessor used by the v3 settle
+    /// path and the headscale bridge.
+    #[allow(dead_code)] // consumed by v3_calls + headscale_bridge once HFHE rewires off placeholders
+    pub pvac: Option<Arc<crate::pvac::PvacClient>>,
 }
 
 impl Hub {
@@ -155,6 +164,44 @@ impl Hub {
             )?,
         );
 
+        // PVAC sidecar wiring. Opt-in (operator must set `[pvac].enabled
+        // = true`); failure to spawn is *non-fatal* — we log a warning
+        // and run without HFHE. Behaviour rationale:
+        //
+        //   - The HFHE path is still optional in v1.1/v2/v3 (placeholder
+        //     blobs work end-to-end without it; see
+        //     `hfhe_pubkey_placeholder` above).
+        //   - Operators commonly deploy the node before the C++ sidecar
+        //     toolchain lands on their host. Failing boot would force a
+        //     rollback for what is, until claim_earnings is wired through
+        //     the real PVAC, a no-op service.
+        //   - When the binary IS present but later disappears (operator
+        //     `make clean` in the source tree), the supervisor retries on
+        //     its own back-off curve, so transient absences self-heal.
+        let pvac = if cfg.pvac.enabled {
+            match crate::pvac::PvacClient::spawn(cfg.pvac.to_runtime()).await {
+                Ok(client) => {
+                    info!(
+                        binary = %client.binary_path().display(),
+                        "pvac sidecar spawned (HFHE path enabled)"
+                    );
+                    Some(Arc::new(client))
+                }
+                Err(e) => {
+                    warn!(
+                        error = %e,
+                        binary = %cfg.pvac.binary_path,
+                        "pvac sidecar disabled: spawn failed — running without HFHE. \
+                         Check `[pvac].binary_path` and that the binary is built \
+                         (`cd pvac-sidecar && make`).",
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         Ok(Self {
             cfg,
             chain,
@@ -167,7 +214,18 @@ impl Hub {
             allowlist,
             metrics,
             receipt_journal,
+            pvac,
         })
+    }
+
+    /// Accessor for the managed PVAC sidecar. Returns `None` when the
+    /// operator has not enabled the `[pvac]` block, or when the
+    /// subprocess failed to spawn at boot. Callers in the v3 settle
+    /// path and `octravpn-mesh::headscale_bridge` consult this before
+    /// touching the HFHE path.
+    #[allow(dead_code)] // surface for v3 settle + headscale_bridge consumers (forthcoming)
+    pub(crate) fn pvac(&self) -> Option<&Arc<crate::pvac::PvacClient>> {
+        self.pvac.as_ref()
     }
 
     /// Open the audit log configured for this hub (or return `None`

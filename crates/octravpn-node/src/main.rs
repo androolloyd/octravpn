@@ -32,6 +32,7 @@ mod events;
 mod hub;
 mod mesh_ops;
 mod onion;
+mod pvac;
 mod rate_limit;
 mod seal;
 mod tunnel;

@@ -412,6 +412,9 @@ mod tests {
             // the v3_boot tests are unaffected by the new field.
             analytics: AnalyticsCfg::default(),
             tun: TunCfg::default(),
+            // P1-sidecar wiring: `[pvac]` is opt-in; v3_boot fixtures
+            // run without the HFHE sidecar so the default suffices.
+            pvac: crate::config::PvacCfg::default(),
         }
     }
 

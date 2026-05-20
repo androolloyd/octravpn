@@ -1,0 +1,56 @@
+# Canonical `octravpn-node` config template for Docker deployments.
+# Copy this into `/etc/octravpn/node.toml` inside the container (or
+# `docker/conf/<env>/node.toml` for the local devnet) and override the
+# fields you need.
+
+[chain]
+rpc_url             = "https://rpc.example.org/rpc"
+program_addr        = "octPROGreplaceme0000000000000000000000000000"
+validator_addr      = "octVNODEreplaceme00000000000000000000000000000"
+wallet_secret_path  = "/etc/octravpn/wallet.key"
+
+[tunnel]
+public_endpoint     = "node1:51820"
+listen              = "0.0.0.0:51820"
+wg_secret_path      = "/etc/octravpn/wg.key"
+
+[pricing]
+price_per_mb        = 100
+region              = "compose"
+
+[control]
+listen              = "0.0.0.0:51821"
+audit_dir           = "/var/log/octravpn/audit"
+
+[attestation]
+poll_interval_secs  = 30
+
+# ─────────────────────────────────────────────────────────────────────
+# PVAC sidecar (HFHE / encrypted-earnings path).
+#
+# When `enabled = true`, `octravpn-node` spawns the GPL-isolated
+# `octra-pvac-sidecar` as a managed child process and proxies HFHE
+# requests over JSON-over-stdio. The supervisor auto-restarts the
+# subprocess on crash with exponential back-off (`restart_backoff_ms`,
+# doubling per consecutive crash, capped at 60s) and terminates it
+# cleanly on shutdown (stdin EOF then SIGKILL after a grace period).
+#
+# Default is `enabled = false` so existing deployments don't need the
+# C++ toolchain. If `enabled = true` but the binary at `binary_path`
+# doesn't exist, the node logs a warning and starts without HFHE
+# (boot does NOT fail).
+#
+# To enable on this host:
+#   1. Build the sidecar:  cd pvac-sidecar && make
+#      (or use `docker build -t octra-pvac-sidecar pvac-sidecar/`).
+#   2. Flip `enabled` to true here.
+#   3. Adjust `binary_path` if the binary lives elsewhere.
+#
+# See `crates/octravpn-node/src/pvac.rs::PvacClient` for the IPC
+# contract and `pvac-sidecar/README.md` for the wire protocol.
+# ─────────────────────────────────────────────────────────────────────
+[pvac]
+enabled              = false
+binary_path          = "./pvac-sidecar/octra-pvac-sidecar"
+restart_backoff_ms   = 250
+request_timeout_secs = 30
