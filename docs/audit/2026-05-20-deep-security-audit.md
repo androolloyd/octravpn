@@ -147,7 +147,7 @@ and the 2026-05-20 audit-prep package (`docs/audit/`).
   axiom does **not** cover wrap-around. Add a Lean axiom
   `counter_never_wraps` and pin it to the Rust impl.
 
-> **Fixed in commit `<HEAD>` on branch `worktree-agent-a557416bd6d3fba66`.**
+> **Fixed in commit `21df30e` on branch `worktree-agent-a557416bd6d3fba66`.**
 > Both `FrameSealer::seal_into` and `FrameOpener::open_from` now pre-
 > compute `next_counter = self.counter.checked_add(1).ok_or(
 > FrameError::CounterExhausted)?` BEFORE the AEAD seal/open call —

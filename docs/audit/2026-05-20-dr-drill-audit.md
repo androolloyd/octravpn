@@ -244,7 +244,7 @@ no CLI.
 **RTO:** ≥30 min hand-built, OR ≈1 min "delete + accept rollback"
 with chain-side equivocation slash as the only remaining defense.
 
-> **Fixed in commit `<HEAD>` on branch `worktree-agent-a557416bd6d3fba66`.**
+> **Fixed in commit `21df30e` on branch `worktree-agent-a557416bd6d3fba66`.**
 > Drill #6 (H-RTO) is now PASS: the new
 > `octravpn-node journal rebuild --from-audit <dir> --output <path>`
 > CLI (`crates/octravpn-node/src/cli/journal.rs`) walks the HMAC-chained

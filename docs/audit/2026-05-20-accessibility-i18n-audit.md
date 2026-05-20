@@ -299,7 +299,7 @@ These are *not* launch blockers. List for the public roadmap so credibility-chec
 
 ## Audit-end summary
 
-- **Items #1–#3 fixed** in commit `<HEAD>` on branch
+- **Items #1–#3 fixed** in commit `21df30e` on branch
   `worktree-agent-a557416bd6d3fba66`:
   - **#1** ASCII separators replaced with text labels in
     `crates/octravpn-client/src/runner.rs:352-362`
