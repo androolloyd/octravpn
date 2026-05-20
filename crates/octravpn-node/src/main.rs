@@ -30,6 +30,7 @@ mod config;
 mod control;
 mod events;
 mod hub;
+mod mesh_ops;
 mod onion;
 mod rate_limit;
 mod seal;
@@ -285,6 +286,27 @@ enum MeshCmd {
         #[arg(long)]
         admin_token: Option<String>,
     },
+    /// Wrap `GET /api/v1/machines` on the remote mesh-control admin
+    /// surface — prints the current tailnet roster. Same auth posture
+    /// as `mesh serve`'s `--admin-token` (bearer-gated).
+    ///
+    /// Equivalent to `headscale nodes list` from the sibling repo's
+    /// CLI, but bound to octravpn-node so operators don't need the
+    /// sibling repo installed.
+    Status(mesh_ops::MeshStatusArgs),
+    /// Wrap the `/api/v1/policy{,/validate}` admin CRUD surface.
+    /// Subcommands:
+    ///
+    ///   * `get` — fetch the live hujson policy (optionally to file).
+    ///   * `set --file <doc>` — PUT a new policy; takes effect within
+    ///     ~1ms (the policy store's `Notify` wakes parked `/map`
+    ///     long-pollers).
+    ///   * `validate --file <doc>` — parse-only validation; never
+    ///     mutates the live store.
+    Policy {
+        #[command(subcommand)]
+        cmd: mesh_ops::MeshPolicyCmd,
+    },
 }
 
 #[tokio::main]
@@ -462,6 +484,18 @@ async fn run_mesh_cmd(sub: MeshCmd) -> Result<()> {
                 admin_token,
             )
             .await
+        }
+        // Remote control surface. Sync entry points (each builds its
+        // own current-thread runtime) — exit codes propagate via
+        // `std::process::exit` so a non-zero remote response surfaces
+        // to the operator's shell.
+        MeshCmd::Status(args) => {
+            let code = mesh_ops::run_status(args)?;
+            std::process::exit(code);
+        }
+        MeshCmd::Policy { cmd } => {
+            let code = mesh_ops::run_policy(cmd)?;
+            std::process::exit(code);
         }
     }
 }

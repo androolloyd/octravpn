@@ -76,3 +76,72 @@ jobs:
           name: demo-recordings
           path: octravpn/demo/recordings/
           if-no-files-found: warn
+
+  # ---------------------------------------------------------------------
+  # Heavy job: render tapes 08/09/10 which drive the full
+  # docker-compose.mesh-demo.yml stack (3 stock tailscale clients +
+  # mesh-control + derp-1 + analytics). Same docker-compose flow the
+  # tailscale-interop test (Wall 7) drives in CI, scaled to 3 peers.
+  #
+  # The job is intentionally separate from the dependency-light job
+  # above so a docker-daemon hiccup on the runner can't break the
+  # nightly tapes 01/04 rendering.
+  # ---------------------------------------------------------------------
+  render-heavy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: octravpn
+
+      - name: Checkout sibling repos
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/androolloyd/octra-foundry.git
+          git clone --depth 1 https://github.com/androolloyd/headscale-rs.git
+          ls -la
+
+      - name: Install vhs + jq + openssl
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg ttyd chromium-browser jq openssl
+          VHS_VERSION=$(curl -sL https://api.github.com/repos/charmbracelet/vhs/releases/latest | jq -r .tag_name)
+          curl -sL "https://github.com/charmbracelet/vhs/releases/download/${VHS_VERSION}/vhs_${VHS_VERSION#v}_amd64.deb" -o /tmp/vhs.deb
+          sudo dpkg -i /tmp/vhs.deb
+          vhs --version
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build octravpn-node + analytics (release, for host-side CLI invocations in tapes)
+        working-directory: octravpn
+        run: |
+          set -euo pipefail
+          cargo build --release -p octravpn-node -p octravpn-analytics
+          echo "${PWD}/target/release" >> "$GITHUB_PATH"
+
+      - name: Render heavy tapes (each tape's failure is non-fatal)
+        working-directory: octravpn
+        run: |
+          set -euo pipefail
+          mkdir -p demo/recordings
+          for tape in demo/tapes/08-3node-mesh.tape \
+                     demo/tapes/09-traffic-patterns.tape \
+                     demo/tapes/10-metrics-grafana.tape; do
+              echo "=== ${tape} ==="
+              # Best-effort teardown between tapes so a bad bringup
+              # doesn't poison the next tape's container names.
+              bash demo/lib/3node-mesh-teardown.sh >/dev/null 2>&1 || true
+              vhs "${tape}" || echo "  ! ${tape} failed (non-fatal in nightly)"
+          done
+          bash demo/lib/3node-mesh-teardown.sh >/dev/null 2>&1 || true
+          ls -la demo/recordings/ || true
+
+      - name: Upload heavy recordings
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-recordings-heavy
+          path: octravpn/demo/recordings/
+          if-no-files-found: warn

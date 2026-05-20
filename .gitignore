@@ -29,6 +29,10 @@ pvac-sidecar/octra-pvac-sidecar
 /deploy/testnet/state/
 /operator-state/
 
+# 3-node mesh demo runtime state (TLS cert, audit dir; regenerated on
+# every bringup).
+/demo/.mesh-state/
+
 # Bench snapshots are committed (see docs/performance-limitations.md §7).
 # `target/criterion/` (under the already-ignored `/target`) holds
 # per-run criterion output; only the curated JSON under
