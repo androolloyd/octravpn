@@ -7,8 +7,9 @@ Current state (counted at the time of writing, post-v2 hardening pass):
   `oct3fxjrzfqh65ATo31eau8xRFBPiXh2Uzwue56EYkfVSj7`)
 - 11 workspace crates · ≈10.6k LOC Rust + new `pvac-sidecar` crate
 - AML: `main-v1.aml`, `main-v2.aml`, `operator-circle.aml`
-- 49 v1.1 + 45 v2 adversarial-drill cases green; 95 Lean theorems
-  (45 v1.1 + 50 v2); TLC 17 invariants / 3.8 M states / 0 violations
+- 49 v1.1 + 45 v2 adversarial-drill cases green; 232 Lean theorems
+  (OctraVPN 46 + OctraVPN_V2 54 + OctraVPN_Rust 72 + WireProtocol 60);
+  TLC 17 invariants / 3.8 M states / 0 violations
 - 30 Rust proptest harnesses (crypto / tx / wallet_enc / receipt)
 - `cargo audit` clean (1090-advisory RustSec db, one informational
   unmaintained warning on `paste 1.0.15`)

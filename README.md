@@ -24,7 +24,8 @@ settles or records a public dispute). Misbehavior is slashed in-AML.
 >   end-to-end on devnet through `open_session`. HFHE settlement is
 >   the last gate — see "What's blocked" below.
 >
-> Across both programs: **95 Lean 4 theorems** (clean `lake build`,
+> Workspace total: **232 Lean 4 theorems** across OctraVPN (46),
+> OctraVPN_V2 (54), OctraVPN_Rust (72), and WireProtocol (60) — clean `lake build`,
 > zero `sorry`), **TLA+** v1.1 + v2 modules (~4 M distinct states,
 > 17 invariants, 0 violations), 30 Rust proptest harnesses, Kani
 > bounded checks, and a GPL-isolated PVAC sidecar (`pvac-sidecar/`)
@@ -337,7 +338,7 @@ live mainnet RPC on every PR.
 | ------------------- | --------- | ----------------------------------------------- |
 | State machine v1.1  | TLA+      | `OctraVPN.tla` — 12 invariants, 223,118 distinct states, depth 26 |
 | State machine v2    | TLA+      | `OctraVPN_V2.tla` — circle-keyed, atomic register-bond, per-class price-stamp, 3,805,681 distinct states, depth 31 |
-| Program semantics   | Lean 4    | v1.1 + v2 modules in `proofs/lean/OctraVPN[_V2]/` — 95 theorems / 0 `sorry` |
+| Program semantics   | Lean 4    | OctraVPN + OctraVPN_V2 + OctraVPN_Rust + WireProtocol modules in `proofs/lean/` — 232 theorems / 0 `sorry` |
 | Crypto protocol     | Tamarin   | receipt unforgeability, double-sign slashable, no link before settle (advisory) |
 | Rust implementation | Kani      | receipt round-trip, monotonic check, payload determinism |
 | Rust runtime        | proptest  | 30 harnesses across `octravpn-core` + `octravpn-mesh` — canonicalization, monotonic seq, security, receipt context binding, sweep determinism |

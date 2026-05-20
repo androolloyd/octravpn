@@ -101,8 +101,9 @@ a registered, sealed-policy-published operator circle):
   - **Lean 4** v2 module (`proofs/lean/OctraVPN_V2/`) — 50+ new
     theorems covering atomic `register_circle`, per-class price
     stamping, slash carries-over, sealed-asset put/fetch, and member
-    ACL acceptance. Combined v1.1 + v2 totals: **95 theorems / 0
-    `sorry`**, clean `lake build`.
+    ACL acceptance. Workspace total as of 2026-05-20: **232 theorems /
+    0 `sorry`** across OctraVPN (46), OctraVPN_V2 (54), OctraVPN_Rust
+    (72), and WireProtocol (60); clean `lake build`.
   - **TLA+** v2 spec (`proofs/tla/OctraVPN_V2.tla`) — 17 invariants
     including `Inv_CircleAtomicRegisterBond`,
     `Inv_AuthorizedCircleIsActive`, and
