@@ -22,7 +22,7 @@ mod verify;
 #[cfg(test)]
 mod test_util;
 
-pub(crate) use batched::{DEFAULT_BATCH_INTERVAL_MS, DEFAULT_BATCH_QUEUE_CAP, DEFAULT_BATCH_SIZE};
+pub(crate) use batched::{DEFAULT_BATCH_INTERVAL_MS, DEFAULT_BATCH_SIZE};
 pub(crate) use chain::chain_step;
 pub(crate) use log::AuditRecord;
 pub(crate) use verify::FileVerifyReport;
