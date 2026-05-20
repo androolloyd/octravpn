@@ -11,6 +11,7 @@
 pub use octra_core::{address, circle, coverage, sig, tx, util, wallet_enc, CoreError, CoreResult};
 
 pub mod backend;
+pub mod bearer;
 pub mod bounded;
 pub mod commit;
 pub mod control;
