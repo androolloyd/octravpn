@@ -2,6 +2,7 @@
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/androolloyd/octravpn)
 [![Proof of working state](https://github.com/androolloyd/octravpn/actions/workflows/proof.yml/badge.svg)](https://github.com/androolloyd/octravpn/actions/workflows/proof.yml)
+[![HFHE bridge status](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fandroolloyd%2Foctravpn%2Fmain%2Fdocs%2Faudit%2Ffhe-load-pk-status.json)](docs/audit/fhe-load-pk-status.json)
 
 A decentralized VPN — Tailscale-style mesh with on-chain coordination —
 that runs on Octra. Operators stake OU to run exit/relay endpoints,
