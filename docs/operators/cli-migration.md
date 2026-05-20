@@ -22,7 +22,7 @@ install footprint and the per-host attack surface.
 `octravpn-node` now links `headscale-cli` as a library and re-exposes
 the entire admin surface under a single subcommand:
 
-```
+```sh
 octravpn-node headscale [users|nodes|preauthkeys|policy|tailnet] …
 ```
 

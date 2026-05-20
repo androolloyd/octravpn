@@ -17,7 +17,7 @@ circle**. A circle is a key/value container on the Octra chain; each
 entry is keyed by a deterministic `resource_key` derived from the
 circle id and the canonical path:
 
-```
+```text
 oct://<circle_id>/<canonical_path>
             │
             └──→ resource_key = sha256("octra:circle_resource_key:v1"

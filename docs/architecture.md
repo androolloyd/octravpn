@@ -181,7 +181,7 @@ move into the circle, since redeploying a circle changes its
    Envelope format below (§4.4).
 5. `register_circle(circle, receipt_pubkey_b64, region, price_shared, price_internal)`
    carrying `value = MIN_CIRCLE_STAKE`. In v2 this entrypoint is
-   declared `payable` (`main-v2.aml:455`) so registration and the
+   declared `payable` (`main-v2.aml:488`) so registration and the
    initial bond are **atomic** in one tx — the chicken-and-egg
    that surfaced in the live e2e (`bond_endpoint` required an
    already-registered circle; `register_circle` required an
@@ -274,7 +274,7 @@ shape). Both `settle_confirm` and `claim_earnings` route through
 the circle's owner:
 
 ```
-let pk = fhe_load_pk(circles[c].owner)   // main-v2.aml:790, :858
+let pk = fhe_load_pk(circles[c].owner)   // design comment at main-v2.aml:176
 ```
 
 The PVAC sidecar (`pvac-sidecar/`, GPL-2+, isolated as a separate

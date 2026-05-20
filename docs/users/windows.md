@@ -159,7 +159,7 @@ tailscale status
 
 You should see your row plus one row per peer:
 
-```
+```text
 100.64.0.3   andrew@desktop      windows   active; relay "use1"
 100.64.0.7   colleague@laptop    macos     idle
 ```

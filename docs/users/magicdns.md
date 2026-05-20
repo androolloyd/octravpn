@@ -15,7 +15,7 @@ For a quick orientation, see [`using.md`](using.md) §2.
 Every member of the tailnet, by their human-readable hostname,
 under the `.octra` zone suffix:
 
-```
+```text
 <hostname>.<tailnet-id>.octra  →  100.64.x.y
 ```
 

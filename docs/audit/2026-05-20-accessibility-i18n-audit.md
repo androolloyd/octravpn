@@ -299,6 +299,29 @@ These are *not* launch blockers. List for the public roadmap so credibility-chec
 
 ## Audit-end summary
 
+- **Items #1–#3 fixed** in commit `<HEAD>` on branch
+  `worktree-agent-a557416bd6d3fba66`:
+  - **#1** ASCII separators replaced with text labels in
+    `crates/octravpn-client/src/runner.rs:352-362`
+    (`[wireguard-config-begin]` / `[wireguard-config-end]`) and
+    `crates/octravpn-client/src/v2_runner.rs:233-241`
+    (`[wireguard-handoff-begin v2-sealed-policy]` /
+    `[wireguard-handoff-end]`).
+  - **#2** All 17 untagged opening code fences in `docs/users/`,
+    `docs/operators/`, `docs/maintenance/`, `docs/tailnet-owners/`
+    now carry an explicit language tag (mostly `text`, plus `sh`
+    where it improves syntax highlighting); verified by
+    `awk` walker post-fix returning zero hits.
+  - **#3** Each of the four mermaid blocks (`docs/demo.md:23`,
+    `docs/v3/state-machine.md:15,83,124`) now precedes the fence
+    with an `<!-- alt: … -->` HTML comment that names the
+    states + transitions in plain English for screen-reader and
+    non-mermaid-aware renderers.
+  - **Colorblind status prefixes**: the new journal-rebuild CLI's
+    footer emits explicit `[ ok ]` / `[plan]` text prefixes
+    (`crates/octravpn-node/src/cli/journal.rs::emit_report_footer`)
+    so the success / dry-run distinction is conveyed by text not
+    color.
 - **Commit audited:** `62b72da43af388b99cf26ae711f6af3945ee18d9`.
 - **Accessibility readiness:** ~75%. The CLI is already very clean by absence-of-anti-patterns: no color, no spinners, no box-drawing in stdout, flat heading hierarchy in docs, no bad link text, captions on the demo videos with reasonable cue density. Remaining gaps are documentation polish (untagged code fences, mermaid alt-text) and one cosmetic ASCII-separator issue in the CLI.
 - **i18n readiness:** ~15%. English-only by intent, strings inlined as `eprintln!` rather than centralized. Dates are already ISO 8601 across the board, so non-English audiences can read timestamps unaided. No `MM/DD/YYYY` lurking anywhere. Number formatting is locale-neutral by virtue of all current numerics being protocol values, not user-facing currency.

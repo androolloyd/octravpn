@@ -35,10 +35,10 @@ row is labelled:
 | Asset | Location | Confidentiality | Integrity | Availability |
 |-------|----------|-----------------|-----------|--------------|
 | Chain state (registry, stake, anchors) | Octra chain | public | chain-enforced | chain-SLA |
-| Audit log (per-day JSONL) | `${audit_dir}/audit-YYYY-MM-DD.jsonl`, HMAC key at `${audit_dir}/.audit.key` | low (no secrets) | HMAC-chained (`crates/octravpn-node/src/audit.rs:18-19`) | local disk |
-| Preauth keys (in-memory + minted) | `PreauthMinter` in `crates/octravpn-node/src/control.rs:115-119` | high (short-lived bearer tokens) | mint-only by operator | bounded-cap map |
-| Session receipts (signed) | `ReceiptJournal` at `${control.receipt_journal_path}` default `./state/receipts.bin` (`crates/octravpn-node/src/config.rs:271-282`) | low | seq-floor durable across restart (`crates/octravpn-node/src/control.rs:108-114`) | local disk |
-| Receipt-signing key | derived from `tunnel.wg_secret_path` via HKDF (`crates/octravpn-node/src/hub.rs:121-126`) | high | filesystem ownership; sealed-keys mode at `crates/octravpn-node/src/config.rs:180-189` | host |
+| Audit log (per-day JSONL) | `${audit_dir}/audit-YYYY-MM-DD.jsonl`, HMAC key at `${audit_dir}/.audit.key` | low (no secrets) | HMAC-chained (`crates/octravpn-node/src/audit.rs:10-11`) | local disk |
+| Preauth keys (in-memory + minted) | `PreauthMinter` in `crates/octravpn-node/src/control/state.rs:91` + `crates/octravpn-node/src/control/handlers/preauth.rs:64` | high (short-lived bearer tokens) | mint-only by operator | bounded-cap map |
+| Session receipts (signed) | `ReceiptJournal` at `${control.receipt_journal_path}` default `./state/receipts.bin` (`crates/octravpn-node/src/config.rs:579`) | low | seq-floor durable across restart (`crates/octravpn-node/src/control/state.rs:86`) | local disk |
+| Receipt-signing key | derived from `tunnel.wg_secret_path` via HKDF (`crates/octravpn-node/src/hub/boot.rs:64-72`) | high | filesystem ownership; sealed-keys mode at `crates/octravpn-node/src/config.rs:400` | host |
 | Wallet (chain-signing) key | `chain.wallet_secret_path` | high | same sealed-keys mode | host |
 | Treasury (operator earnings) | on-chain balance bound to wallet | public | wallet signature required to move | chain-SLA |
 
@@ -52,24 +52,24 @@ the protocol**. Sub-goals follow.
 | Branch | Status | Mitigation (file:line) |
 |--------|--------|------------------------|
 | 1.a Replay a receipt from a different program / chain / circle | **Mitigated** | `ReceiptContext` binds `(program_addr, chain_id, circle_id)` into every signed receipt (`crates/octravpn-core/src/receipt.rs:15-43`). Theorem: `proofs/lean/OctraVPN_Rust/Lemmas.lean:43` (`ReceiptContext.circleIdCanonical_length`). |
-| 1.b Replay a receipt at an earlier `seq` after a daemon restart | **Mitigated** | `ReceiptJournal` consults a persistent seq-floor before signing (`crates/octravpn-node/src/control.rs:108-114`). Atomic rename + fsync via tempfile (`tempfile` dev-dep). |
-| 1.c Forge an ed25519 signature without the receipt key | **Mitigated** | curve25519-dalek + ed25519-dalek crates, no homebrew crypto. Receipt key is HKDF-derived (`crates/octravpn-node/src/hub.rs:121-126`), zeroized on drop. |
-| 1.d Trick the node into signing for a session it never announced | **Mitigated** | `/session/:id` is gated by the `sessions` map (`crates/octravpn-node/src/control.rs:783`); only sessions that appeared in `POST /session` are signable. |
+| 1.b Replay a receipt at an earlier `seq` after a daemon restart | **Mitigated** | `ReceiptJournal` consults a persistent seq-floor before signing (`crates/octravpn-node/src/control/state.rs:86, 226, 237, 245`). Atomic rename + fsync via tempfile (`tempfile` dev-dep). Disaster-recovery rebuild via `octravpn-node journal rebuild --from-audit` (`crates/octravpn-node/src/cli/journal.rs`). |
+| 1.c Forge an ed25519 signature without the receipt key | **Mitigated** | curve25519-dalek + ed25519-dalek crates, no homebrew crypto. Receipt key is HKDF-derived (`crates/octravpn-node/src/hub/boot.rs:64-72`), zeroized on drop. |
+| 1.d Trick the node into signing for a session it never announced | **Mitigated** | `/session/:id` is gated by the `sessions` map (`crates/octravpn-node/src/control/handlers/session.rs` + `crates/octravpn-node/src/control/state.rs:52`); only sessions that appeared in `POST /session` are signable. |
 
 ### 2. Double-spend / equivocation claim
 
 | Branch | Status | Mitigation (file:line) |
 |--------|--------|------------------------|
-| 2.a Operator signs two distinct receipts at the same `(session_id, seq)` | **Partially Mitigated (with gap)** | In-memory `sessions` map plus the on-disk `ReceiptJournal` make a *single-node* double-sign impossible. Gap: a forked operator running two binaries against the same secret can still equivocate; on-chain `slash_double_sign` detects it post-hoc (`crates/octravpn-node/src/control.rs:152-159`) but the *first* victim is uncompensated. Equivocation-detector wiring is TODO. |
-| 2.b Client double-redeems a preauth key | **Mitigated** | `PreauthMinter` rejects a redeemed key on the second attempt; reusable keys are opt-in per mint (`crates/octravpn-node/src/control.rs:931`). |
+| 2.a Operator signs two distinct receipts at the same `(session_id, seq)` | **Partially Mitigated (with gap)** | In-memory `sessions` map plus the on-disk `ReceiptJournal` make a *single-node* double-sign impossible. Gap: a forked operator running two binaries against the same secret can still equivocate; on-chain `slash_double_sign` detects it post-hoc (slash-payload builder lives in `crates/octravpn-node/src/v3_cli.rs:71-77`) but the *first* victim is uncompensated. Equivocation-detector loop is still TODO. |
+| 2.b Client double-redeems a preauth key | **Mitigated** | `PreauthMinter` rejects a redeemed key on the second attempt; reusable keys are opt-in per mint (`crates/octravpn-node/src/control/handlers/preauth.rs:64-104`). |
 | 2.c Replay a `settle_claim` call from an earlier epoch | **Mitigated** | v3 settlement uses a sha256 hash chain of `(prev_head || sha256(settle_blinding))` (`docs/v3-state-root-schema.md`, `crates/octravpn-core/src/v3_state_root.rs`); the chain rejects any claim whose chain-head does not match. |
 
 ### 3. Validator collusion
 
 | Branch | Status | Mitigation (file:line) |
 |--------|--------|------------------------|
-| 3.a Validator censors the operator's slash-of-its-own-misbehaviour | **Partially Mitigated (with gap)** | Slashing is a chain call; censorship at validator level is mitigated by the operator submitting to multiple validators. Gap: the daemon currently submits to one RPC (`crates/octravpn-core/src/rpc.rs:93`); multi-endpoint failover is on the security roadmap (`docs/security-roadmap.md`). |
-| 3.b Validator MITMs the chain RPC | **Mitigated** | `[chain].pinned_root_paths` pins trust roots independent of the system CA store (`crates/octravpn-node/src/config.rs:148-157`, `crates/octravpn-core/src/rpc.rs:93-112`). Out-of-band CA compromise defeated. |
+| 3.a Validator censors the operator's slash-of-its-own-misbehaviour | **Partially Mitigated (with gap)** | Slashing is a chain call; censorship at validator level is mitigated by the operator submitting to multiple validators. Gap: the daemon currently submits to one RPC (`crates/octravpn-core/src/rpc.rs:71-117`); multi-endpoint failover is on the security roadmap (`docs/security-roadmap.md`). |
+| 3.b Validator MITMs the chain RPC | **Mitigated** | `[chain].pinned_root_paths` pins trust roots independent of the system CA store (`crates/octravpn-node/src/config.rs:368`, `crates/octravpn-core/src/rpc.rs:71-117`). Out-of-band CA compromise defeated. |
 | 3.c Validator stalls the chain to delay slashing | **Out of Scope (operator responsibility)** | Chain liveness is the protocol's responsibility; operators rotate validators per the chain's own SLA. |
 
 ### 4. DERP MITM
@@ -84,18 +84,18 @@ the protocol**. Sub-goals follow.
 
 | Branch | Status | Mitigation (file:line) |
 |--------|--------|------------------------|
-| 5.a Brute-force `/admin/preauth` | **Mitigated** | Bearer-token gated; absent token returns 404 (`crates/octravpn-node/src/control.rs:931`). Rate-limit at 60 rps / burst 120 per IP (`crates/octravpn-node/src/rate_limit.rs::classify`). |
-| 5.b Flood `/session` to exhaust memory | **Mitigated** | `BoundedMap` caps total sessions (`crates/octravpn-node/src/control.rs:304`); rate-limit caps mint rate (60 rps / burst 120). |
-| 5.c Scrape `/metrics` to learn session counts | **Mitigated** | Bearer-token gated; returns 503 when unconfigured (`crates/octravpn-node/src/control.rs:567`). |
-| 5.d Scrape `/events` SSE to learn session metadata | **Mitigated** | Bearer-token gated; returns 404 when unconfigured (`crates/octravpn-node/src/control.rs:332-335`). |
+| 5.a Brute-force `/admin/preauth` | **Mitigated** | Bearer-token gated; absent token returns 404 (`crates/octravpn-node/src/control/handlers/preauth.rs:64-104` + `crates/octravpn-node/src/control/router.rs:45`). Rate-limit at 60 rps / burst 120 per IP (`crates/octravpn-node/src/rate_limit.rs::classify`). |
+| 5.b Flood `/session` to exhaust memory | **Mitigated** | `BoundedMap` caps total sessions (`crates/octravpn-node/src/control/state.rs:31` `CAP` const + `:253` instantiation); rate-limit caps mint rate (60 rps / burst 120). |
+| 5.c Scrape `/metrics` to learn session counts | **Mitigated** | Bearer-token gated; returns 503 when unconfigured (`crates/octravpn-node/src/control/handlers/metrics.rs`). |
+| 5.d Scrape `/events` SSE to learn session metadata | **Mitigated** | Bearer-token gated; returns 404 when unconfigured (`crates/octravpn-node/src/control/handlers/events.rs`). |
 | 5.e Hammer arbitrary route to deny service | **Mitigated** | Per-IP, per-route-class token-bucket layer in `crates/octravpn-node/src/rate_limit.rs`; `/health` and `/metrics` bypass so liveness probes keep working. |
-| 5.f Inject a forged `oct://` URL | **Partially Mitigated (with gap)** | The URL carries an SPKI fingerprint the client pins (`docs/oct-url-handler.md`, `crates/octravpn-client/src/portal/chain.rs:609`). Gap: a phishing URL with an attacker-controlled fingerprint still routes the user to the attacker's exit; defense is end-user awareness + portal-side reputation, both out of scope here. |
+| 5.f Inject a forged `oct://` URL | **Claim retracted — SPKI pinning is NOT implemented** | The URL spec at `docs/oct-url-handler.md` documents an SPKI fingerprint, but `RpcClient::new_with_pinned_roots` (`crates/octravpn-core/src/rpc.rs:71-117`) is CA-bundle pinning only. The client's portal logic (formerly `crates/octravpn-client/src/portal/chain.rs:609`) now lives in `crates/octravpn-client/src/portal/chain/{api,cache,decrypt,errors,fetch,mod}.rs` — and a `grep -rn 'spki\|SPKI' crates/` confirms zero non-comment hits. Tracking item: audit-1 H-1. |
 
 ### 6. Audit-log tamper
 
 | Branch | Status | Mitigation (file:line) |
 |--------|--------|------------------------|
-| 6.a Edit a historical audit JSONL line | **Mitigated** | Each line carries an HMAC chained to the previous line's HMAC (`crates/octravpn-node/src/audit.rs:18-19`). The HMAC key is persisted at mode-0600 alongside the log. Tamper detection: `octravpn-node audit verify` (`crates/octravpn-node/src/audit_cli.rs`). |
+| 6.a Edit a historical audit JSONL line | **Mitigated** | Each line carries an HMAC chained to the previous line's HMAC (`crates/octravpn-node/src/audit.rs:10-11`). The HMAC key is persisted at mode-0600 alongside the log. Tamper detection: `octravpn-node audit verify` (`crates/octravpn-node/src/audit_cli.rs`). |
 | 6.b Truncate the audit log | **Partially Mitigated (with gap)** | HMAC chain detects mid-file truncation. Gap: a full-day file deletion is detectable only by gap-in-filename heuristic (one file per UTC day); operators should ship the logs off-host on a rolling basis. Recommendation tracked in `docs/observability.md`. |
 | 6.c Tamper while the daemon is offline | **Mitigated** | Same HMAC chain — the next boot re-opens the log and emits one entry; verifying from the previous entry's HMAC catches any intervening edit. |
 
@@ -103,8 +103,8 @@ the protocol**. Sub-goals follow.
 
 | Branch | Status | Mitigation (file:line) |
 |--------|--------|------------------------|
-| 7.a Read plaintext wallet/WG secret from disk | **Partially Mitigated (with gap)** | Sealed-keys mode wraps the secret with a passphrase from `OCTRAVPN_KEY_PASSPHRASE` (`crates/octravpn-node/src/config.rs:180-189`). Gap: when `require_sealed_keys = false` (the v1.1 default for back-compat), plaintext is accepted; operators must opt in explicitly. |
-| 7.b Recover the receipt key from a memory dump | **Out of Scope (operator responsibility)** | We `Zeroize` on drop (`crates/octravpn-node/src/hub.rs`) but a live-process memory dump is host-level compromise; out of scope. |
+| 7.a Read plaintext wallet/WG secret from disk | **Partially Mitigated (with gap)** | Sealed-keys mode wraps the secret with a passphrase from `OCTRAVPN_KEY_PASSPHRASE` (`crates/octravpn-node/src/config.rs:400`). Gap: when `require_sealed_keys = false` (the v1.1 default for back-compat), plaintext is accepted; operators must opt in explicitly. |
+| 7.b Recover the receipt key from a memory dump | **Out of Scope (operator responsibility)** | We `Zeroize` on drop (`crates/octravpn-node/src/hub/identity.rs` + `crates/octravpn-node/src/hub/boot.rs`) but a live-process memory dump is host-level compromise; out of scope. |
 | 7.c Use a stolen wallet to settle to attacker's address | **Mitigated** | v3 settle binds the destination to the on-chain wallet identity at `register_circle` time; settlement to a different address fails the AML check. |
 
 ### 8. v3 state-root forgery
@@ -119,11 +119,14 @@ the protocol**. Sub-goals follow.
 
 1. **2.a** — operator-side equivocation across forked binaries. The
    on-chain slash works post-hoc but the first victim is uncompensated.
-   Gap surface: `crates/octravpn-node/src/control.rs:152-159` (the
-   counter exists but no detector loop dispatches it).
-2. **5.f** — phishing `oct://` URLs with attacker-controlled
-   fingerprints. Defense is end-user awareness; surface:
-   `crates/octravpn-client/src/portal/chain.rs:609`.
+   Gap surface: slash payload-builder at
+   `crates/octravpn-node/src/v3_cli.rs:71-77` (the call site exists but
+   no equivocation-detector loop dispatches it).
+2. **5.f** — phishing `oct://` URLs. **The claim of SPKI pinning is
+   retracted** — `crates/octravpn-core/src/rpc.rs:71-117` is CA-bundle
+   pinning only. Defense is end-user awareness + portal-side reputation,
+   both out of scope here. Tracking: audit-1 H-1. Portal logic now in
+   `crates/octravpn-client/src/portal/chain/{api,cache,decrypt,errors,fetch,mod}.rs`.
 3. **4.c** — DERP cert SAN-only pin. A re-issued cert from the same
    CN passes the pin. Surface:
    `docker/devnet/tailscale-interop/run-interop.sh:166-175`.
@@ -147,7 +150,8 @@ Each defense is exercised by one or more of the following:
   in their statement should be treated as a release-blocker.
 - **Rust unit tests** colocated with the module (e.g.
   `crates/octravpn-node/src/rate_limit.rs::tests`,
-  `crates/octravpn-core/src/receipt_journal.rs::tests`).
+  `crates/octravpn-core/src/receipt_journal/proptests.rs` plus the
+  per-submodule tests under `crates/octravpn-core/src/receipt_journal/`).
 - **Rust integration tests** under `crates/octravpn-node/tests/`:
   `tailscale_wire_integration.rs`, `raw_tls_integration.rs`,
   `v3_boot_integration.rs`.
@@ -168,8 +172,8 @@ them.
 | Receipt context binding | Signed bytes in every receipt | Forging an ed25519 signature |
 | Receipt seq-floor | Atomic-rename journal write before sign | Tampering with the on-disk file outside the daemon |
 | Rate limit | axum middleware before handler dispatch (`crates/octravpn-node/src/rate_limit.rs::rate_limit_layer`) | Crashing the daemon |
-| Bearer-token gates | Inside the handler, constant-time compare (`crates/octravpn-node/src/control.rs:772`) | Knowing the token |
-| TLS pin (chain RPC) | rustls trust-store (`crates/octravpn-core/src/rpc.rs:93-112`) | Replacing the pinned bundle on disk |
+| Bearer-token gates | Inside the handler, constant-time compare (`crates/octravpn-core/src/bearer.rs`) | Knowing the token |
+| TLS pin (chain RPC) | rustls trust-store (`crates/octravpn-core/src/rpc.rs:71-117`) | Replacing the pinned bundle on disk |
 | Audit HMAC chain | Computed per-line, persisted at 0600 | Reading the key file |
 | Sealed keys | AEAD over the secret, passphrase-derived | Knowing the passphrase |
 | On-chain slash | Chain consensus | 51% attack on the chain |

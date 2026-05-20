@@ -147,6 +147,23 @@ and the 2026-05-20 audit-prep package (`docs/audit/`).
   axiom does **not** cover wrap-around. Add a Lean axiom
   `counter_never_wraps` and pin it to the Rust impl.
 
+> **Fixed in commit `<HEAD>` on branch `worktree-agent-a557416bd6d3fba66`.**
+> Both `FrameSealer::seal_into` and `FrameOpener::open_from` now pre-
+> compute `next_counter = self.counter.checked_add(1).ok_or(
+> FrameError::CounterExhausted)?` BEFORE the AEAD seal/open call —
+> a sealer at `u64::MAX` rejects the next frame outright without
+> appending bytes to the output buffer (verified by
+> `sealer_at_counter_max_refuses_next_frame`). The new
+> `FrameError::CounterExhausted` variant is also added to the
+> `transport.rs` `server_handle` match (folded in with `BadTag`/
+> `BadInnerLen` to trigger session teardown — a session whose
+> nonce budget is spent must re-handshake to obtain a fresh key +
+> zeroed counter). Boundary pinned by
+> `sealer_one_below_max_still_seals` (last legitimate frame is at
+> `u64::MAX - 1`, so the per-key budget is 2^64 - 1 frames). The
+> module header (`frame.rs:42-62`) documents the budget in plain
+> English so a future shrink to `u32` surfaces in code review.
+
 ### H-3 — No explicit body-size limit on axum control router
 
 - **File:** `crates/octravpn-node/src/control.rs:487-548`

@@ -132,7 +132,7 @@ If the private key is leaked or suspected to be:
 
 ## Verifying the rotation took effect
 
-```
+```sh
 # 1. New cert is served
 openssl s_client -connect <host>:443 -servername <san> </dev/null 2>/dev/null \
   | openssl x509 -noout -dates -fingerprint -sha256
