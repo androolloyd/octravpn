@@ -103,7 +103,7 @@ from active.
 - Proposed fix: unify on `(503, "")` or `(401, "")`. Operator-side
   scrape failure surfaces via the configured-or-not check at scrape
   config time, not by HTTP-body content.
-- **Fixed in commit `__AUDIT3_H1_SHA__`** — `BearerCheck::Strict` and
+- **Fixed in commit `7d016618155c`** — `BearerCheck::Strict` and
   `BearerCheck::Hidden` now share one reject path: `(404,
   NGINX_404_BODY)` for every reject reason (token unset, header
   missing, wrong scheme, wrong token). The 503-with-text body became

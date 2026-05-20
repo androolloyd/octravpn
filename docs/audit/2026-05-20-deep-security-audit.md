@@ -118,7 +118,7 @@ and the 2026-05-20 audit-prep package (`docs/audit/`).
 - **Lean coverage:** No formal proof — fuzz-only coverage. Property
   `pinned_spki_rejects_mismatch` would be the home for a `cargo
   fuzz` target.
-- **Fixed in commit `__AUDIT1_H1_SHA__`** — new module
+- **Fixed in commit `7d016618155c`** — new module
   `crates/octravpn-core/src/spki_verifier.rs` ships a
   `rustls::client::danger::ServerCertVerifier` that extracts the
   leaf cert's `SubjectPublicKeyInfo` via a hand-rolled DER walk
