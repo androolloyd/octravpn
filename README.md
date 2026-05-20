@@ -42,6 +42,14 @@ settles or records a public dispute). Misbehavior is slashed in-AML.
 > bounded checks, and a GPL-isolated PVAC sidecar (`pvac-sidecar/`)
 > producing chain-compatible HFHE blobs.
 
+## Documentation
+
+Start at [`docs/README.md`](docs/README.md) — the "I am a..."
+audience selector (end-user / operator / tailnet-owner / auditor /
+contributor). Time-budget guide: [`docs/READING_PATHS.md`](docs/READING_PATHS.md).
+File index: [`docs/INDEX.md`](docs/INDEX.md). Master demo tour:
+[`demo/recordings/00-master-tour.mp4`](demo/recordings/00-master-tour.mp4).
+
 [v3 design-doc set](docs/v3/) ·
 [v3 circle-resident architecture](docs/v3-circle-resident-architecture.md) ·
 [v3 threat model](docs/security/threat-model-v3.md) ·
