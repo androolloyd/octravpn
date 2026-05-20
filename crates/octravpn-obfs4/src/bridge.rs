@@ -151,4 +151,52 @@ mod tests {
         assert_eq!(back.node_id, creds.node_id);
         assert_eq!(back.identity_pubkey.as_bytes(), creds.identity_pubkey.as_bytes());
     }
+
+    #[test]
+    fn from_bytes_restores_same_keys() {
+        let id = BridgeIdentity::generate();
+        let node_id = id.node_id;
+        let secret_bytes: [u8; 32] = id.identity_secret.to_bytes();
+        let original_pk_bytes = *PublicKey::from(&id.identity_secret).as_bytes();
+        // Restore.
+        let restored = BridgeIdentity::from_bytes(node_id, secret_bytes);
+        assert_eq!(restored.node_id, node_id);
+        assert_eq!(
+            PublicKey::from(&restored.identity_secret).as_bytes(),
+            &original_pk_bytes,
+        );
+    }
+
+    #[test]
+    fn generated_node_ids_are_distinct() {
+        // 64 fresh generations should not collide.
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..64 {
+            let id = BridgeIdentity::generate();
+            assert!(seen.insert(id.node_id), "BridgeIdentity::generate produced a duplicate node_id");
+        }
+    }
+
+    #[test]
+    fn credentials_reject_bad_hex_length() {
+        // Hand-craft a TOML with a too-short node_id hex.
+        let bad = "node_id = \"deadbeef\"\nidentity_pubkey = \"00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\"\n";
+        let res: Result<BridgeCredentials, _> = ::toml::from_str(bad);
+        assert!(res.is_err(), "short node_id hex must be rejected");
+    }
+
+    #[test]
+    fn credentials_reject_bad_pubkey_length() {
+        // Valid node_id, wrong-length pubkey.
+        let bad = "node_id = \"00112233445566778899aabbccddeeff00112233\"\nidentity_pubkey = \"deadbeef\"\n";
+        let res: Result<BridgeCredentials, _> = ::toml::from_str(bad);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn credentials_reject_non_hex_input() {
+        let bad = "node_id = \"this-is-not-hex!!@@##$$%%^^&&\"\nidentity_pubkey = \"00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\"\n";
+        let res: Result<BridgeCredentials, _> = ::toml::from_str(bad);
+        assert!(res.is_err());
+    }
 }

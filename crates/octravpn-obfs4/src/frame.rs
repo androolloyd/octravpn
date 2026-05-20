@@ -337,4 +337,232 @@ mod tests {
         let err = opener.open_from(&[]).unwrap_err();
         assert!(matches!(err, FrameError::Incomplete { .. }));
     }
+
+    // ---------- Length-distribution: chi-squared-style spread ----------
+
+    /// Stronger length-randomisation guard than the existing
+    /// `fixed_input_produces_random_length_output`. Asserts that the
+    /// distribution over a fixed input is not constant AND has at least
+    /// 32 distinct sizes across 10 000 trials, i.e. the padding RNG
+    /// actually spans most of `[MIN_PAD, MAX_PAD]`.
+    #[test]
+    fn padding_distribution_covers_range() {
+        let key = [11u8; 32];
+        let mut sealer = FrameSealer::new(&key, NONCE_PREFIX_C2S);
+        let payload = [0u8; 148];
+        let mut sizes = std::collections::HashMap::new();
+        for _ in 0..10_000 {
+            let mut wire = Vec::new();
+            sealer.seal_into(&payload, &mut wire).unwrap();
+            *sizes.entry(wire.len()).or_insert(0u32) += 1;
+        }
+        assert!(
+            sizes.len() >= 32,
+            "expected ≥32 distinct frame sizes over 10k trials, got {} (RNG seam weak?)",
+            sizes.len()
+        );
+        // Chi-square-ish "not concentrated in one bucket" check: no
+        // single size should dominate (>20% of all samples).
+        let max = sizes.values().copied().max().unwrap();
+        assert!(
+            max < 2_000,
+            "one size dominates ({max}/10000 samples) — padding distribution skewed"
+        );
+    }
+
+    // ---------- Counter replay across 5 frames ----------
+
+    #[test]
+    fn five_counters_yield_five_distinct_ciphertexts() {
+        // Same plaintext under counters 0..5 must produce 5 distinct
+        // wire frames (nonce includes the counter). Random padding
+        // would also produce distinct frames, so we strip pads off by
+        // pinning the seal output bytes for inspection — instead we
+        // assert that the ciphertext bytes after the length prefix
+        // differ on every counter.
+        let key = [0x88u8; 32];
+        let mut sealer = FrameSealer::new(&key, NONCE_PREFIX_C2S);
+        let payload = b"identical-payload-bytes";
+        let mut seen = std::collections::HashSet::new();
+        for i in 0..5 {
+            let mut wire = Vec::new();
+            sealer.seal_into(payload, &mut wire).unwrap();
+            // Skip the 2-byte length prefix.
+            let ct = wire[2..].to_vec();
+            assert!(seen.insert(ct), "counter {i} produced a duplicate ciphertext");
+        }
+    }
+
+    #[test]
+    fn replay_at_higher_counter_fails() {
+        let key = [0x44u8; 32];
+        let mut sealer = FrameSealer::new(&key, NONCE_PREFIX_C2S);
+        let mut opener = FrameOpener::new(&key, NONCE_PREFIX_C2S);
+        let mut frames = Vec::new();
+        for _ in 0..5 {
+            let mut w = Vec::new();
+            sealer.seal_into(b"replay", &mut w).unwrap();
+            frames.push(w);
+        }
+        // Consume frame 0 — opener advances to counter=1.
+        let _ = opener.open_from(&frames[0]).unwrap();
+        // Now replay frame 0 (counter=0 ciphertext) against opener at
+        // counter=1 → AEAD fails.
+        assert!(matches!(opener.open_from(&frames[0]), Err(FrameError::BadTag)));
+        // But frame 1 (counter=1) does open.
+        assert!(opener.open_from(&frames[1]).is_ok());
+    }
+
+    #[test]
+    fn frame_with_truncated_inner_length_field_fails() {
+        // Build a wire frame, then re-encrypt with a too-large inner
+        // length field; the opener's bounds check must reject.
+        // (We can't easily mutate the ciphertext to flip plaintext
+        // bytes deterministically, so this is a structural sanity
+        // check: BadInnerLen surfaces when the inner length claim is
+        // larger than the plaintext.)
+        // Instead, we verify the error path triggers when total_len is
+        // less than tag+inner-len header.
+        let key = [0u8; 32];
+        let mut opener = FrameOpener::new(&key, NONCE_PREFIX_C2S);
+        // Outer length prefix says "3 bytes"; that's smaller than the
+        // 16-byte tag, so open_from must reject as BadTag (we use the
+        // BadTag error to encode "structurally impossible frame").
+        let mut buf = vec![];
+        buf.extend_from_slice(&3u16.to_be_bytes());
+        buf.extend_from_slice(&[0u8; 3]);
+        assert!(matches!(opener.open_from(&buf), Err(FrameError::BadTag)));
+    }
+
+    // ---------- Wrong key rejects ----------
+
+    #[test]
+    fn wrong_key_decryption_fails() {
+        let mut sealer = FrameSealer::new(&[1u8; 32], NONCE_PREFIX_C2S);
+        let mut opener = FrameOpener::new(&[2u8; 32], NONCE_PREFIX_C2S);
+        let mut w = Vec::new();
+        sealer.seal_into(b"hello", &mut w).unwrap();
+        assert!(matches!(opener.open_from(&w), Err(FrameError::BadTag)));
+    }
+
+    // ---------- Max payload accepted; over-max rejected ----------
+
+    #[test]
+    fn max_payload_accepted_round_trip() {
+        let key = [9u8; 32];
+        let mut sealer = FrameSealer::new(&key, NONCE_PREFIX_C2S);
+        let mut opener = FrameOpener::new(&key, NONCE_PREFIX_C2S);
+        // Payload at exactly MAX_PAYLOAD.
+        let payload = vec![0xA5u8; MAX_PAYLOAD];
+        let mut wire = Vec::new();
+        sealer.seal_into(&payload, &mut wire).unwrap();
+        let (got, _) = opener.open_from(&wire).unwrap();
+        assert_eq!(got.len(), payload.len());
+        assert_eq!(got, payload);
+    }
+
+    #[test]
+    fn over_max_payload_rejected() {
+        let key = [0u8; 32];
+        let mut sealer = FrameSealer::new(&key, NONCE_PREFIX_C2S);
+        let payload = vec![0u8; MAX_PAYLOAD + 1];
+        let mut w = Vec::new();
+        let err = sealer.seal_into(&payload, &mut w).unwrap_err();
+        assert!(matches!(err, FrameError::PayloadTooLarge(_)));
+    }
+
+    // ---------- Empty payload still round-trips ----------
+
+    #[test]
+    fn empty_payload_round_trips() {
+        let key = [0xDEu8; 32];
+        let mut sealer = FrameSealer::new(&key, NONCE_PREFIX_C2S);
+        let mut opener = FrameOpener::new(&key, NONCE_PREFIX_C2S);
+        let mut w = Vec::new();
+        sealer.seal_into(b"", &mut w).unwrap();
+        let (got, _) = opener.open_from(&w).unwrap();
+        assert!(got.is_empty());
+    }
+
+    // ---------- Boundary: cross-direction prefix safety ----------
+
+    #[test]
+    fn s2c_frame_does_not_open_as_c2s() {
+        let key = [7u8; 32];
+        let mut server_sealer = FrameSealer::new(&key, NONCE_PREFIX_S2C);
+        let mut client_opener = FrameOpener::new(&key, NONCE_PREFIX_C2S);
+        let mut wire = Vec::new();
+        server_sealer.seal_into(b"reply", &mut wire).unwrap();
+        assert!(matches!(
+            client_opener.open_from(&wire),
+            Err(FrameError::BadTag)
+        ));
+    }
+
+    // ---------- Incomplete frame: partial length prefix ----------
+
+    #[test]
+    fn one_byte_buf_signals_incomplete() {
+        let key = [0u8; 32];
+        let mut opener = FrameOpener::new(&key, NONCE_PREFIX_C2S);
+        let err = opener.open_from(&[0u8]).unwrap_err();
+        match err {
+            FrameError::Incomplete { have, need } => {
+                assert_eq!(have, 1);
+                assert_eq!(need, 2);
+            }
+            other => panic!("expected Incomplete, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn truncated_after_length_prefix_signals_incomplete() {
+        let key = [0u8; 32];
+        let mut opener = FrameOpener::new(&key, NONCE_PREFIX_C2S);
+        let mut buf = vec![];
+        buf.extend_from_slice(&100u16.to_be_bytes());
+        // No body — opener must say "I need 102 bytes."
+        let err = opener.open_from(&buf).unwrap_err();
+        match err {
+            FrameError::Incomplete { need: 102, .. } => {}
+            other => panic!("expected Incomplete{{need=102}}, got {other:?}"),
+        }
+    }
+
+    // ---------- 100 random frames stress ----------
+
+    #[test]
+    fn stress_100_round_trips_under_one_session() {
+        let key = [0xC0u8; 32];
+        let mut sealer = FrameSealer::new(&key, NONCE_PREFIX_C2S);
+        let mut opener = FrameOpener::new(&key, NONCE_PREFIX_C2S);
+        for i in 0..100u64 {
+            let mut payload = Vec::with_capacity(64);
+            payload.extend_from_slice(b"frame#");
+            payload.extend_from_slice(&i.to_le_bytes());
+            let mut wire = Vec::new();
+            sealer.seal_into(&payload, &mut wire).unwrap();
+            let (got, n) = opener.open_from(&wire).unwrap();
+            assert_eq!(n, wire.len());
+            assert_eq!(got, payload, "iter {i}");
+        }
+    }
+
+    // ---------- Test the existing `round_trip` is checking real bytes
+    //            and not silently passing on an empty payload edge. ----
+
+    #[test]
+    fn round_trip_with_inner_zero_bytes_payload() {
+        // Lots of repeated zero bytes — verifies the AEAD isn't masking
+        // a content bug that produces an "empty"-looking payload.
+        let key = [0u8; 32];
+        let mut sealer = FrameSealer::new(&key, NONCE_PREFIX_C2S);
+        let mut opener = FrameOpener::new(&key, NONCE_PREFIX_C2S);
+        let payload = vec![0u8; 1024];
+        let mut wire = Vec::new();
+        sealer.seal_into(&payload, &mut wire).unwrap();
+        let (got, _) = opener.open_from(&wire).unwrap();
+        assert_eq!(got.len(), 1024);
+        assert!(got.iter().all(|&b| b == 0));
+    }
 }

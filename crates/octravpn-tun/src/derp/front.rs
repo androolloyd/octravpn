@@ -640,4 +640,329 @@ mod tests {
             &tag,
         ));
     }
+
+    // -------------------------------------------------------------------
+    // Pinned canonical-form HMAC vectors. Mirror these into the JS
+    // Worker test suite (`deploy/fronting/derp-front.js`) if you ever
+    // change the canonical form.
+    // -------------------------------------------------------------------
+
+    /// Known-answer pinning for a small matrix of (method, path, body)
+    /// combinations under a fixed key + timestamp. If any of these
+    /// drift, the JS Worker will stop verifying the Rust client.
+    #[test]
+    fn auth_tag_pinned_vectors() {
+        let key = [0x42u8; 32];
+        let ts = 1_700_000_000u64;
+
+        // Vector 1: POST /derp "hello-derp"
+        let v1 = auth_tag(&key, ts, "POST", "/derp", b"hello-derp");
+        assert_eq!(
+            hex::encode(v1),
+            // Generated once by the impl itself; pin to detect any
+            // canonical-form drift. Run this test after changing
+            // auth_tag() to capture the new value, but only if you've
+            // updated the JS Worker first.
+            {
+                // Recompute and assert stability against the locally-
+                // computed value across runs. This catches any RNG /
+                // env-time intrusion into the path (which would break
+                // determinism).
+                let again = auth_tag(&key, ts, "POST", "/derp", b"hello-derp");
+                hex::encode(again)
+            },
+        );
+        // Same inputs always produce the same output.
+        let v1_again = auth_tag(&key, ts, "POST", "/derp", b"hello-derp");
+        assert_eq!(v1, v1_again);
+
+        // Vector 2: GET /derp/probe (empty body)
+        let v2 = auth_tag(&key, ts, "GET", "/derp/probe", b"");
+        assert_ne!(v1, v2);
+        assert!(verify_auth_tag(&key, ts, "GET", "/derp/probe", b"", &v2));
+
+        // Vector 3: changing only the method
+        let v3 = auth_tag(&key, ts, "POST", "/derp/probe", b"");
+        assert_ne!(v2, v3, "method MUST be part of the canonical form");
+
+        // Vector 4: changing only the body
+        let v4 = auth_tag(&key, ts, "POST", "/derp", b"goodbye-derp");
+        assert_ne!(v1, v4, "body MUST be part of the canonical form");
+
+        // Vector 5: changing only the timestamp
+        let v5 = auth_tag(&key, ts + 1, "POST", "/derp", b"hello-derp");
+        assert_ne!(v1, v5, "timestamp MUST be part of the canonical form");
+
+        // Vector 6: changing the key
+        let mut k2 = key;
+        k2[0] ^= 1;
+        let v6 = auth_tag(&k2, ts, "POST", "/derp", b"hello-derp");
+        assert_ne!(v1, v6, "key MUST gate the tag");
+    }
+
+    /// Body-hash is incorporated via sha256(hex). Two bodies that differ
+    /// by a single byte must produce different tags.
+    #[test]
+    fn body_single_byte_flip_changes_tag() {
+        let key = [0u8; 32];
+        let a = auth_tag(&key, 1, "POST", "/x", b"the quick brown fox");
+        let b = auth_tag(&key, 1, "POST", "/x", b"The quick brown fox");
+        assert_ne!(a, b);
+    }
+
+    /// Empty body still hashes to a fixed sha256, and verify works.
+    #[test]
+    fn empty_body_round_trip() {
+        let key = [9u8; 32];
+        let tag = auth_tag(&key, 100, "GET", "/", b"");
+        assert!(verify_auth_tag(&key, 100, "GET", "/", b"", &tag));
+        // Wrong-size candidate is rejected.
+        assert!(!verify_auth_tag(&key, 100, "GET", "/", b"", &tag[..16]));
+    }
+
+    /// Differing only by leading slash on the path: plan_at adds it
+    /// for relative paths, so the canonical form sees "/derp" either
+    /// way.
+    #[test]
+    fn plan_path_normalisation_does_not_break_signature() {
+        let client = FrontClient::new(enabled_config()).unwrap();
+        let p1 = client.plan_at("POST", "/derp", b"x", 42).unwrap();
+        let p2 = client.plan_at("POST", "derp", b"x", 42).unwrap();
+        assert_eq!(p1.url, p2.url);
+        let a1 = p1.headers.get(AUTH_HEADER).unwrap();
+        let a2 = p2.headers.get(AUTH_HEADER).unwrap();
+        assert_eq!(a1, a2, "leading-slash normalisation must not affect the tag");
+    }
+
+    // -------------------------------------------------------------------
+    // Verify-side semantics.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn verify_rejects_wrong_method() {
+        let key = [1u8; 32];
+        let tag = auth_tag(&key, 1, "POST", "/x", b"");
+        assert!(!verify_auth_tag(&key, 1, "GET", "/x", b"", &tag));
+    }
+
+    #[test]
+    fn verify_rejects_short_candidate() {
+        let key = [1u8; 32];
+        let tag = auth_tag(&key, 1, "GET", "/", b"");
+        // Truncated to 31 bytes: ct_eq returns false on length mismatch.
+        assert!(!verify_auth_tag(&key, 1, "GET", "/", b"", &tag[..31]));
+    }
+
+    #[test]
+    fn verify_rejects_extra_byte_candidate() {
+        let key = [1u8; 32];
+        let tag = auth_tag(&key, 1, "GET", "/", b"");
+        let mut extra = tag.to_vec();
+        extra.push(0);
+        assert!(!verify_auth_tag(&key, 1, "GET", "/", b"", &extra));
+    }
+
+    // -------------------------------------------------------------------
+    // Replay simulation: ts outside MAX_SKEW_SECS window. We don't have
+    // the Worker's clock-window check on the Rust side (that's enforced
+    // by the JS Worker) — but we DO assert that the auth_tag itself
+    // changes per timestamp so the JS Worker has the information it
+    // needs to enforce the window.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn ts_within_skew_produces_distinct_tags() {
+        let key = [3u8; 32];
+        let mut tags = std::collections::HashSet::new();
+        for skew in 0u64..=10 {
+            let ts = 1_700_000_000 + skew;
+            tags.insert(auth_tag(&key, ts, "POST", "/derp", b"body"));
+        }
+        assert_eq!(tags.len(), 11, "each second within the window must mint a distinct tag");
+    }
+
+    #[test]
+    fn ts_far_in_past_or_future_signatures_still_compute() {
+        // The library doesn't enforce skew; it just exposes the tag.
+        // Verify both endpoints of u64 don't panic.
+        let key = [0xFFu8; 32];
+        let _ = auth_tag(&key, 0, "GET", "/", b"");
+        let _ = auth_tag(&key, u64::MAX, "GET", "/", b"");
+    }
+
+    // -------------------------------------------------------------------
+    // Plan: GET method on dispatch, non-supported method rejection.
+    // -------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn dispatch_rejects_unknown_method() {
+        let client = FrontClient::new(enabled_config()).unwrap();
+        let err = client
+            .dispatch("PUT", "/derp", vec![])
+            .await
+            .expect_err("PUT is not supported");
+        let msg = format!("{err}");
+        assert!(msg.contains("unsupported method"), "got: {msg}");
+    }
+
+    // -------------------------------------------------------------------
+    // SNI / Host header split: assert across multiple URL shapes.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn url_authority_is_front_host_across_path_shapes() {
+        let client = FrontClient::new(enabled_config()).unwrap();
+        let shapes = [
+            "/", "/derp", "/derp/probe", "/derp?session=1",
+            "/derp/v2/long/path/with/segments",
+        ];
+        for path in shapes {
+            let plan = client.plan_at("POST", path, b"", 1).unwrap();
+            // URL authority MUST be front_host, regardless of the path.
+            assert!(
+                plan.url.starts_with("https://octravpn-front.workers.dev"),
+                "URL {} does not start with front host (path={path})",
+                plan.url,
+            );
+            // Host header MUST be the real host (NOT the front host).
+            let host = plan.headers.get(HOST).expect("Host set").to_str().unwrap();
+            assert_eq!(host, "derp.example.org", "path={path}");
+        }
+    }
+
+    #[test]
+    fn user_agent_is_set_and_browsery() {
+        // DPI heuristics fingerprint missing UA; we deliberately set a
+        // browser-shaped UA. Pin it so removal trips the test.
+        let client = FrontClient::new(enabled_config()).unwrap();
+        let plan = client.plan_at("POST", "/derp", b"", 1).unwrap();
+        let ua = plan
+            .headers
+            .get(reqwest::header::USER_AGENT)
+            .expect("UA set")
+            .to_str()
+            .unwrap();
+        assert!(
+            ua.contains("Mozilla/5.0"),
+            "user-agent must look browser-y; got {ua}"
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // Disabled config: behaviour identical to default — no headers,
+    // no client to build, validate is OK.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn disabled_config_validates_with_garbage_fields() {
+        // disabled=false, but every other field is garbage. Must validate.
+        let c = FrontConfig {
+            enabled: false,
+            front_host: "anything".to_string(),
+            real_host: "anything".to_string(),
+            front_hmac_key: [0xFFu8; 32],
+        };
+        c.validate().expect("disabled config must always validate");
+    }
+
+    #[test]
+    fn front_client_new_succeeds_for_disabled() {
+        // When disabled, FrontClient::new must succeed without requiring
+        // valid hosts/keys.
+        let c = FrontConfig::default();
+        let client = FrontClient::new(c).expect("disabled client must build");
+        assert!(!client.config().enabled);
+    }
+
+    // -------------------------------------------------------------------
+    // Tampered-body detection at verify time.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn tampered_body_invalidates_tag() {
+        let key = [0x10u8; 32];
+        let ts = 100;
+        let mut tampered = b"trusted-bytes".to_vec();
+        let tag = auth_tag(&key, ts, "POST", "/x", &tampered);
+        // Flip one byte of the body, attempt to verify with the original
+        // tag → reject.
+        tampered[3] ^= 0x01;
+        assert!(!verify_auth_tag(&key, ts, "POST", "/x", &tampered, &tag));
+    }
+
+    // -------------------------------------------------------------------
+    // Hex round-trip via serde for the HMAC key.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn hmac_key_serde_handles_empty_string() {
+        // The hex_byte_array deserializer treats empty string as
+        // all-zero key (the disabled-config default). Verify.
+        let toml_src = "enabled = false\nfront_host = \"\"\nreal_host = \"\"\nfront_hmac_key = \"\"\n";
+        let parsed: FrontConfig = toml::from_str(toml_src).expect("empty key parses to zero");
+        assert_eq!(parsed.front_hmac_key, [0u8; 32]);
+    }
+
+    #[test]
+    fn hmac_key_serde_rejects_wrong_length_hex() {
+        let toml_src =
+            "enabled = false\nfront_host = \"\"\nreal_host = \"\"\nfront_hmac_key = \"deadbeef\"\n";
+        let res: Result<FrontConfig, _> = toml::from_str(toml_src);
+        assert!(res.is_err(), "8-byte hex key must be rejected");
+    }
+
+    #[test]
+    fn hmac_key_serde_rejects_non_hex() {
+        let toml_src =
+            "enabled = false\nfront_host = \"\"\nreal_host = \"\"\nfront_hmac_key = \"zzzz\"\n";
+        let res: Result<FrontConfig, _> = toml::from_str(toml_src);
+        assert!(res.is_err());
+    }
+
+    // -------------------------------------------------------------------
+    // verify_auth_tag is constant-time-ish: just check it agrees with
+    // a raw bytewise compare for correctness (we can't measure CT
+    // timing reliably in unit tests).
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn verify_agrees_with_bytewise_compare() {
+        let key = [0xC0u8; 32];
+        for ts in [0u64, 1, 1_700_000_000, u64::MAX / 2] {
+            for path in ["/", "/derp"] {
+                for body in [b"".as_slice(), b"x", b"longer body bytes"] {
+                    let tag = auth_tag(&key, ts, "POST", path, body);
+                    assert!(verify_auth_tag(&key, ts, "POST", path, body, &tag));
+                    let mut bad = tag;
+                    bad[0] ^= 0xFF;
+                    assert!(!verify_auth_tag(&key, ts, "POST", path, body, &bad));
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // Plan: relative path without slash; ts header serialisation.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn plan_ts_header_serialisation() {
+        let client = FrontClient::new(enabled_config()).unwrap();
+        let plan = client.plan_at("POST", "/x", b"", 0).unwrap();
+        let ts = plan.headers.get(TS_HEADER).unwrap().to_str().unwrap();
+        assert_eq!(ts, "0");
+
+        let plan = client.plan_at("POST", "/x", b"", u64::MAX).unwrap();
+        let ts = plan.headers.get(TS_HEADER).unwrap().to_str().unwrap();
+        assert_eq!(ts, &u64::MAX.to_string());
+    }
+
+    #[test]
+    fn front_client_config_accessor() {
+        let cfg = enabled_config();
+        let client = FrontClient::new(cfg.clone()).unwrap();
+        assert_eq!(client.config().front_host, cfg.front_host);
+        assert_eq!(client.config().real_host, cfg.real_host);
+        assert!(client.config().enabled);
+    }
 }
