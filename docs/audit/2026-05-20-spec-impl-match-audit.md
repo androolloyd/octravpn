@@ -15,21 +15,35 @@ shape, (c) the call-site flow actually exercises the property.
 | Bucket                                                    | Count |
 | --------------------------------------------------------- | ----- |
 | Theorems indexed across the three `Theorems.md`           | 286   |
-| ✓ Implementation matches Lean axiom shape                 | 252   |
-| ✗ Implementation diverges from Lean claim (bug or fiction) | 6     |
+| ✓ Implementation matches Lean axiom shape                 | 253   |
+| ✗ Implementation diverges from Lean claim (bug or fiction) | 5     |
 | ⚠ Implementation-gap (axiom is true but flow bypasses it)  | 4     |
 | ? Stale file:line cite (function moved or shifted ≥10 LOC) | 24    |
+
+Net change since 2026-05-20: one ✗ → ✓ flip after the P1-5b
+tx-envelope chain-id binding landed (see §3.2 + §2.17). The Rust
+impl now carries `OctraTx::chain_id: Option<String>` and writes it
+into `to_canonical_json`'s output when set, matching the Lean
+`chain_id_binding_rejects_replay` axiom byte-for-byte.
 
 **Headline finding.** The mathematical core is sound: canonical
 encoders, receipt signing payload, HMAC chain, receipt journal,
 knock + obfs4 + amnezia, ACL evaluator, portal tokens — each
 load-bearing axiom maps cleanly to the actual Rust function.
 
-**Where the spec leaves the rails.** Three load-bearing fictions:
-1. `WireProtocol/RpcEnvelope.lean` axiomatises `chain_id_binding`,
+**Where the spec leaves the rails.** Three load-bearing fictions
+(one closed as of this commit; two open):
+1. ~~`WireProtocol/RpcEnvelope.lean` axiomatises `chain_id_binding`,
    but the actual `OctraTx::to_canonical_json` (`octra-foundry`)
    does **not** include a chain_id field at all (module docstring
-   explicitly says "no chain id").
+   explicitly says "no chain id").~~ **✓ CLOSED (P1-5b, 2026-05-20).**
+   `OctraTx` now carries an optional `chain_id: Option<String>`
+   field that participates in `to_canonical_json` when present. The
+   v2 canonical layout inserts `"chain_id":"<id>"` between `op_type`
+   and the optional tail fields; v1 (no `chain_id`) remains accepted
+   on verify so existing chain history continues to verify
+   byte-identically. The Lean axiom now matches impl. See §3.2
+   below for the migration story + tx-format version bump.
 2. `WireProtocol/HFHE.lean` cites `pvac-sidecar/src/{keygen,wire,
    ops,zkzp,session}.rs` — none of these Rust files exist; the
    sidecar is a C++ daemon (`pvac-sidecar/src/main.cpp` +
@@ -213,7 +227,7 @@ zstd-framing is exercised by the named tests at `:438` and `:657-757`.
 | `tx_canonical_deterministic`         | ✓ (`octra-foundry/crates/octra-core/src/tx.rs:173`) |
 | `tx_sign_verify_roundtrip`           | ✓ (`tx.rs:274`, `sign_call`) |
 | `method_binding_rejects_replay`      | ✓ (`tx.rs:61-84` writes `op_type` + `encrypted_data` into canonical bytes — `method` is the `encrypted_data` field for `op_type=call`) |
-| `chain_id_binding_rejects_replay`    | ✗ **diverges** — see §3.2 |
+| `chain_id_binding_rejects_replay`    | ✓ **closed (P1-5b, 2026-05-20)** — see §3.2 (resolution). `OctraTx::chain_id` is now in the canonical bytes when set; the v1 (no `chain_id`) format is still accepted on verify for chain-history back-compat. |
 | `nonce_binding_rejects_replay`       | ✓ (`tx.rs:67`, `write_kv_int(out, "nonce", ...)`) |
 
 ### 2.18 `OctraVPN_V3.Invariants` (53)
@@ -258,39 +272,85 @@ three-step state machine matching the AML, OR weaken the theorem
 to "the receipt is *recorded* on chain (operator_claim_bytes set)
 and may later be settled to ≤ bytes_used * price."
 
-### 3.2 `chain_id_binding_rejects_replay` is fiction at the tx layer
+### 3.2 `chain_id_binding_rejects_replay` — RESOLVED 2026-05-20 (P1-5b)
 
-`WireProtocol/RpcEnvelope.lean` declares a `TxEnvelope` struct
-with a `chainId : Nat` field and axiomatises one-field-injectivity
-in `chainId`. The actual `OctraTx::to_canonical_json` (`octra-foundry/
-crates/octra-core/src/tx.rs:61-84`) writes only:
+**Original finding (left here for traceability):**
+`WireProtocol/RpcEnvelope.lean` declared a `TxEnvelope` struct
+with a `chainId : Nat` field and axiomatised one-field-injectivity
+in `chainId`. The pre-P1-5b `OctraTx::to_canonical_json` wrote only:
 
 ```
 {"from":..., "to_":..., "amount":..., "nonce":..., "ou":...,
  "timestamp":..., "op_type":..., "encrypted_data":..., "message":...}
 ```
 
-The module docstring at `tx.rs:1-23` says explicitly:
+The pre-P1-5b module docstring said explicitly:
 
 > No domain prefix, no chain id. Real Octra wallets sign the bare
 > canonical JSON, and the node verifies over the same bytes.
 
-So a tx signed for devnet **can** be replayed verbatim against
+So a tx signed for devnet could be replayed verbatim against
 mainnet — at the tx-envelope layer. The receipt-payload layer
-(`receipt.rs:217-232`) **does** bind chain_id (`receipt.rs:224`),
-so the cross-chain replay defence holds at the receipt level. The
-Lean theorem's claim is true downstream but false upstream.
+(`receipt.rs:224`) did bind chain_id, but the tx envelope itself
+was free.
 
-**Risk:** a reader assumes the tx envelope itself is chain-id
-bound, e.g. for `register_circle` or `slash_double_sign` admin
-calls. Those have only `nonce` as replay defence.
+**Resolution (P1-5b, 2026-05-20):** Closed at
+`octra-foundry/crates/octra-core/src/tx.rs`. Changes shipped:
 
-**Proposed fix (doc-only here):** rename
-`chain_id_binding_rejects_replay` to
-`receipt_chain_id_binding_rejects_replay` and move it under the
-`OctraVPN_Rust.Lemmas` namespace where receipt-layer chain_id
-binding actually lives. Mark the RpcEnvelope-layer property as
-**not** proven (because not implemented).
+- New `OctraTx::chain_id: Option<String>` field (defaults to `None`
+  for v1 wallet-compat; production callers set `Some("octra-mainnet")`
+  or `Some("octra-devnet")` from `cfg.chain.chain_id`).
+- `to_canonical_json` writes `"chain_id":"<id>"` between `op_type`
+  and the optional `encrypted_data` / `message` tail when the field
+  is set. The v1 byte layout is preserved when `chain_id = None`,
+  so existing chain history continues to verify byte-identically.
+- `canonical_bytes` / `to_octra_tx` reject empty `chain_id` strings
+  at parse time, so the one-field injectivity argument holds over
+  a non-empty domain.
+- `verify_envelope_signature` auto-detects format by inspecting
+  whether the envelope carries `chain_id`. v1 verifiers see the v1
+  bytes; v2 verifiers see the v2 bytes. No format flag in the wire.
+- `TX_FORMAT_VERSION` constant bumped from implicit `1` to explicit
+  `2`. v1 stays accepted on the verify side; new signing callers
+  produce v2.
+- `octra-foundry/crates/octra-mock-rpc` got an optional
+  `AppState::expected_chain_id` gate; mismatches are rejected with
+  `"chain_id mismatch: tx chain_id=X, expected Y"` — pins the Lean
+  acceptance gate at the mock layer.
+- Node-side `chain.rs` / `chain_v2.rs` / `chain_v3.rs` got a
+  `chain_id: String` field on the ctx struct (defaults to `""` for
+  v1 compat) and a `new_with_chain_id` constructor. Boot
+  (`hub/boot.rs`) maps `cfg.chain.chain_id` (u32) → envelope string
+  via `chain_id_to_envelope_string`: mainnet → `"octra-mainnet"`,
+  devnet → `"octra-devnet"`, any other → `"octra-net-<hex>"`.
+- `cast send` / `cast transfer` got a `--chain-id` flag (env
+  `OCTRA_CHAIN_ID`) so operators can opt into v2 from the CLI.
+
+**Tests pinning the resolution** (16 new):
+
+- `tx.rs::tests`: `v1_canonical_bytes_omit_chain_id`,
+  `v2_canonical_bytes_include_chain_id`,
+  `v2_sign_verify_roundtrip`,
+  `chain_id_bit_flip_changes_canonical_bytes`,
+  `cross_chain_replay_rejected_by_verify`,
+  `empty_chain_id_rejected`,
+  `v1_canonical_bytes_hash_stable_across_format_bump`,
+  `mixed_v1_and_v2_envelopes_both_verify`,
+  `legacy_contract_call_propagates_chain_id_to_v2_envelope`,
+  `tx_format_version_is_v2`,
+  `prop_chain_id_binding_rejects_replay` (proptest).
+- `crates/octra-mock-rpc/tests/chain_id_binding.rs`:
+  `no_gate_accepts_any_chain_id`,
+  `cross_chain_replay_rejected_by_mock`,
+  `missing_chain_id_rejected_by_gated_mock`,
+  `matching_chain_id_accepted_by_gated_mock`,
+  `chain_id_gate_precedes_handler_dispatch`.
+
+**Lean impact:** `WireProtocol/RpcEnvelope.lean` was already
+correctly axiomatising chain-id binding; only the Rust impl was
+the gap. The module docstring is updated to point at the new
+`tx.rs::OctraTx.chain_id` field as the impl site. No theorem text
+changes — they were always correct, just unmoored.
 
 ### 3.3 HFHE shadow-blob check is not wired to the chain
 
@@ -399,11 +459,13 @@ Total: 24 entries.
 
 ### 6.2 Relax (axioms the impl can't satisfy as stated)
 
-1. **`tx_envelope::chain_id_binding`** — the impl does not bind
-   chain_id at the tx layer. Either:
-   - Rewrite `OctraTx::to_canonical_json` to include `chain_id`
-     (breaks every existing wallet — UNACCEPTABLE), OR
-   - Remove the theorem and document the gap. **Recommended.**
+1. ~~**`tx_envelope::chain_id_binding`** — the impl does not bind
+   chain_id at the tx layer.~~ **RESOLVED P1-5b (2026-05-20).** The
+   impl now binds `chain_id` via an optional `OctraTx::chain_id`
+   field + v2 canonical-bytes layout. v1 (no `chain_id`) remains
+   accepted on verify so existing wallets continue to interop. See
+   §3.2 for the full migration story and §2.17 for the matrix
+   update.
 2. **`headline_settle_claim_correct`** — relax the conclusion
    from `accepted (bytes_used * price)` to a multi-step
    relation that allows protocol-fee deduction. Match the
@@ -449,7 +511,7 @@ delegation:
 | `V3Policy.policy_anchor_collision_resistant_on_epoch`     | ✓ |
 | `RpcEnvelope.tx_sign_verify_roundtrip`                    | ✓ |
 | `RpcEnvelope.method_binding_rejects_replay`               | ✓ |
-| `RpcEnvelope.chain_id_binding_rejects_replay`             | ✗ tx layer does not bind |
+| `RpcEnvelope.chain_id_binding_rejects_replay`             | ✓ tx-envelope layer binds via `OctraTx::chain_id` (P1-5b, 2026-05-20) — see §2.17 + §3.2 |
 | `RpcEnvelope.nonce_binding_rejects_replay`                | ✓ |
 | `AuditLog.verify_file_accepts_honest`                     | ✓ |
 | `AuditLog.tamper_record_detected`                         | ✓ |

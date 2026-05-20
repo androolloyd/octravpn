@@ -454,7 +454,7 @@ envelope) and `octra-foundry/crates/octra-core/src/tx.rs::canonical_bytes`.
 | `tx_canonical_deterministic`             | `canonical_bytes(tx)` is a function — same tx ⇒ same bytes ⇒ same hash.                                              |
 | `tx_sign_verify_roundtrip`               | An honestly signed envelope verifies under the matching pubkey.                                                       |
 | `method_binding_rejects_replay`          | A tx signed for `method = X` cannot be replayed against `method = Y` under the same nonce.                            |
-| `chain_id_binding_rejects_replay`        | A tx signed for `chain_id = X` cannot be replayed against a different chain (P1-5 at the tx-envelope layer).          |
+| `chain_id_binding_rejects_replay`        | A tx signed for `chain_id = X` cannot be replayed against a different chain — **now bound at the tx-envelope layer too (P1-5b, 2026-05-20)**, not only the receipt-payload layer. `octra-foundry/crates/octra-core/src/tx.rs::to_canonical_json` writes the optional `chain_id` field into the canonical bytes (v2 format); v1 (no `chain_id`) remains accepted on verify so existing chain history continues to verify. Closes the "tx-envelope ✗ diverges" row in `docs/audit/2026-05-20-spec-impl-match-audit.md` §3.2 / §2.17. |
 | `nonce_binding_rejects_replay`           | A tx signed for `nonce = N` cannot be replayed at a different nonce — canonical bytes change.                         |
 
 Axioms introduced in `RpcEnvelope.lean`:
@@ -464,7 +464,10 @@ Axioms introduced in `RpcEnvelope.lean`:
   properties of the `tx::canonical_bytes` encoder.  The Rust
   proptest harness in `tx.rs` exercises each of these by
   random-flipping one field at a time and asserting the canonical
-  bytes change.
+  bytes change. The `chainId` axiom is now matched by the Rust v2
+  tx format introduced in P1-5b (2026-05-20); see
+  `tx.rs::prop_chain_id_binding_rejects_replay` +
+  `crates/octra-mock-rpc/tests/chain_id_binding.rs`.
 
 Theorem count: 5.
 
