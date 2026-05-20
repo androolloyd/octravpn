@@ -21,6 +21,12 @@ octravpn-core = { path = "../octravpn-core" }
 # re-exports the wire module through `lib.rs` so existing callers
 # keep working.
 headscale-api = { path = "../../../headscale-rs/headscale-api", default-features = false }
+# Canonical ACL evaluator — shared with headscale-api as of
+# 2026-05-20. Lives in the headscale-rs workspace alongside
+# headscale-api so neither side has a dep cycle. The OctraVPN-only
+# extension (`SignedAclDoc`, ed25519 owner-signed wrapper) lives in
+# our `acl.rs` and consumes the canonical `AclDoc` from here.
+headscale-api-acl = { path = "../../../headscale-rs/headscale-api-acl" }
 
 anyhow      = { workspace = true }
 async-trait = { workspace = true }
