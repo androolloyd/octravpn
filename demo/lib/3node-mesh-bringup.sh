@@ -55,50 +55,60 @@ step() {
 
 step "Step 1: build octravpn-node + octravpn-analytics (Linux target)"
 
-OCTRA_FOUNDRY="${REPO_ROOT}/../octra-foundry"
-if [[ ! -d "${OCTRA_FOUNDRY}" ]]; then
-    echo "BUILD FAIL: ../octra-foundry not found next to repo root" >&2
-    exit 10
-fi
-HEADSCALE_RS="${REPO_ROOT}/../headscale-rs"
-if [[ ! -d "${HEADSCALE_RS}" ]]; then
-    echo "BUILD FAIL: ../headscale-rs not found next to repo root" >&2
-    exit 10
-fi
-
-BUILDER_IMAGE="octravpn-builder:latest"
-if ! docker image inspect "${BUILDER_IMAGE}" >/dev/null 2>&1; then
-    echo "octravpn-builder:latest not present; falling back to rust:1.88-bookworm" >&2
-    BUILDER_IMAGE="rust:1.88-bookworm"
-fi
-
 LINUX_TARGET_DIR="${REPO_ROOT}/target/linux-debug"
-mkdir -p "${LINUX_TARGET_DIR}" \
-         "${LINUX_TARGET_DIR}/cargo-registry" \
-         "${LINUX_TARGET_DIR}/cargo-git"
+mkdir -p "${LINUX_TARGET_DIR}/debug"
 
-docker run --rm \
-    -v "${REPO_ROOT}":/work/octra \
-    -v "${OCTRA_FOUNDRY}":/work/octra-foundry \
-    -v "${HEADSCALE_RS}":/work/headscale-rs \
-    -v "${LINUX_TARGET_DIR}":/work/octra/target \
-    -v "${LINUX_TARGET_DIR}/cargo-registry":/usr/local/cargo/registry \
-    -v "${LINUX_TARGET_DIR}/cargo-git":/usr/local/cargo/git \
-    -w /work/octra \
-    "${BUILDER_IMAGE}" \
-    bash -c "cargo build --bin octravpn-node && cargo build --bin octravpn-analytics" >&2 || {
-        echo "BUILD FAIL: cargo build inside ${BUILDER_IMAGE} failed" >&2
+# Fast-path: if both Linux binaries already exist at the expected paths,
+# skip the docker-cargo-build entirely. The CI workflow's preceding
+# "Build octravpn-node + analytics" step is expected to drop them here;
+# local operators can build once and re-render tapes without rebuilding.
+if [[ -x "${LINUX_TARGET_DIR}/debug/octravpn-node" \
+   && -x "${LINUX_TARGET_DIR}/debug/octravpn-analytics" ]]; then
+    echo "linux binaries already present under ${LINUX_TARGET_DIR}/debug/ — skipping rebuild" >&2
+else
+    OCTRA_FOUNDRY="${REPO_ROOT}/../octra-foundry"
+    if [[ ! -d "${OCTRA_FOUNDRY}" ]]; then
+        echo "BUILD FAIL: ../octra-foundry not found next to repo root" >&2
+        exit 10
+    fi
+    HEADSCALE_RS="${REPO_ROOT}/../headscale-rs"
+    if [[ ! -d "${HEADSCALE_RS}" ]]; then
+        echo "BUILD FAIL: ../headscale-rs not found next to repo root" >&2
+        exit 10
+    fi
+
+    BUILDER_IMAGE="octravpn-builder:latest"
+    if ! docker image inspect "${BUILDER_IMAGE}" >/dev/null 2>&1; then
+        echo "octravpn-builder:latest not present; falling back to rust:1.88-bookworm" >&2
+        BUILDER_IMAGE="rust:1.88-bookworm"
+    fi
+
+    mkdir -p "${LINUX_TARGET_DIR}/cargo-registry" \
+             "${LINUX_TARGET_DIR}/cargo-git"
+
+    docker run --rm \
+        -v "${REPO_ROOT}":/work/octra \
+        -v "${OCTRA_FOUNDRY}":/work/octra-foundry \
+        -v "${HEADSCALE_RS}":/work/headscale-rs \
+        -v "${LINUX_TARGET_DIR}":/work/octra/target \
+        -v "${LINUX_TARGET_DIR}/cargo-registry":/usr/local/cargo/registry \
+        -v "${LINUX_TARGET_DIR}/cargo-git":/usr/local/cargo/git \
+        -w /work/octra \
+        "${BUILDER_IMAGE}" \
+        bash -c "cargo build --bin octravpn-node && cargo build --bin octravpn-analytics" >&2 || {
+            echo "BUILD FAIL: cargo build inside ${BUILDER_IMAGE} failed" >&2
+            exit 10
+        }
+    test -x "${LINUX_TARGET_DIR}/debug/octravpn-node" || {
+        echo "BUILD FAIL: binary not at ${LINUX_TARGET_DIR}/debug/octravpn-node" >&2
         exit 10
     }
-test -x "${LINUX_TARGET_DIR}/debug/octravpn-node" || {
-    echo "BUILD FAIL: binary not at ${LINUX_TARGET_DIR}/debug/octravpn-node" >&2
-    exit 10
-}
-test -x "${LINUX_TARGET_DIR}/debug/octravpn-analytics" || {
-    echo "BUILD FAIL: binary not at ${LINUX_TARGET_DIR}/debug/octravpn-analytics" >&2
-    exit 10
-}
-echo "linux binaries built under ${LINUX_TARGET_DIR}/debug/" >&2
+    test -x "${LINUX_TARGET_DIR}/debug/octravpn-analytics" || {
+        echo "BUILD FAIL: binary not at ${LINUX_TARGET_DIR}/debug/octravpn-analytics" >&2
+        exit 10
+    }
+    echo "linux binaries built under ${LINUX_TARGET_DIR}/debug/" >&2
+fi
 
 # ---------------------------------------------------------------------------
 # Step 1b — mint the derp-1 TLS cert (shared with the interop fixture).

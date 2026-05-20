@@ -35,7 +35,7 @@ Type "# Bring the 3-peer mesh + analytics indexer up"
 Enter
 Type "bash demo/lib/3node-mesh-bringup.sh"
 Enter
-Sleep 420s
+Sleep 120s
 
 Type "# /metrics — Prometheus exposition (head 30 lines)"
 Enter

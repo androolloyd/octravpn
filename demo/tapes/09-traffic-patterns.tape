@@ -36,7 +36,7 @@ Type "# Bring the 3-peer mesh up (idempotent if already running)"
 Enter
 Type "bash demo/lib/3node-mesh-bringup.sh"
 Enter
-Sleep 420s
+Sleep 120s
 
 Type "# Discover peer-2's tailscale IP from peer-1's status table"
 Enter

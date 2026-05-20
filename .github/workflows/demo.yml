@@ -115,10 +115,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build octravpn-node + analytics (release, for host-side CLI invocations in tapes)
+      - name: Build octravpn-node + analytics (debug for compose mount + release for host CLI)
         working-directory: octravpn
         run: |
           set -euo pipefail
+          # Two builds because the docker-compose.mesh-demo.yml bind-mounts
+          # target/linux-debug/debug/* into the containers, while the host
+          # tape uses target/release/octravpn-node for the `mesh status`
+          # CLI invocation. The release build is faster to cargo-incremental
+          # so we do it second.
+          cargo build -p octravpn-node -p octravpn-analytics
+          mkdir -p target/linux-debug/debug
+          cp target/debug/octravpn-node target/linux-debug/debug/
+          cp target/debug/octravpn-analytics target/linux-debug/debug/
           cargo build --release -p octravpn-node -p octravpn-analytics
           echo "${PWD}/target/release" >> "$GITHUB_PATH"
 
