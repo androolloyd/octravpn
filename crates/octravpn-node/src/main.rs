@@ -186,6 +186,34 @@ enum Cmd {
         #[command(subcommand)]
         sub: MeshCmd,
     },
+    /// Embedded `headscale` admin CLI surface. Every subcommand the
+    /// standalone `headscale` binary's admin surface supports is
+    /// reachable here verbatim. `octravpn-node headscale users list`
+    /// is byte-identical to `headscale users list` — same `--server`,
+    /// `--token`, `--json` flags, same stdout, same stderr `error: …`
+    /// envelope, same exit-code contract (0/3/4/5/6 — see
+    /// `headscale_cli::admin::ExitCode`).
+    ///
+    /// Why: operators used to need two binaries (`octravpn-node` +
+    /// `headscale`) plus juggle bearer tokens between them. With this
+    /// surface folded in, the install footprint drops to one binary.
+    /// The standalone `headscale` binary is still built/published by
+    /// headscale-rs for shops that only need the admin surface (e.g.
+    /// Tailscale-compat operators not running the OctraVPN node).
+    ///
+    /// Replaces the duplicated `mesh status` + `mesh policy {get,set,
+    /// validate}` subcommands (those are now deprecated — see
+    /// `docs/operators/cli-migration.md`).
+    Headscale {
+        /// Shared connection flags (`--server`, `--token`, `--json`)
+        /// — flattened so the same CLI shape as the standalone binary
+        /// works. `HEADSCALE_URL` / `HEADSCALE_ADMIN_TOKEN` env-var
+        /// fallbacks are preserved.
+        #[command(flatten)]
+        connect: headscale_cli::ConnectArgs,
+        #[command(subcommand)]
+        cmd: headscale_cli::AdminCmd,
+    },
     /// #232: schema-check + key + RPC + program reachability against a
     /// `node.toml`. Replaces the manual `octra cast rpc node_status`
     /// + `octra cast call $PROG get_params` smoke probe + ad-hoc TOML
@@ -362,6 +390,17 @@ async fn main() -> Result<()> {
         Cmd::Mesh { sub } => {
             return run_mesh_cmd(sub).await;
         }
+        // Embedded `headscale` admin CLI: pure HTTP client surface, no
+        // wallet / chain / Hub state. Dispatch pre-`Hub::new` so an
+        // operator can drive a remote mesh-control against any
+        // `node.toml` (even an offline one). `headscale_cli::dispatch`
+        // returns a process exit code matching the standalone binary's
+        // contract (0 / 3 / 4 / 5 / 6); exit directly so the contract
+        // reaches the operator's shell.
+        Cmd::Headscale { connect, cmd: hs_cmd } => {
+            let code = headscale_cli::dispatch(connect, hs_cmd).await;
+            std::process::exit(code);
+        }
         // Audit is a pure local-file inspector — no wallet, no chain,
         // no Hub. Dispatch before `Hub::new` so an operator can run
         // it on a backup of state/ without a working `node.toml`.
@@ -422,6 +461,7 @@ async fn main() -> Result<()> {
                 | Cmd::UnsealKeys { .. }
                 | Cmd::V3 { .. }
                 | Cmd::Mesh { .. }
+                | Cmd::Headscale { .. }
                 | Cmd::Audit { .. }
                 | Cmd::Config { .. }
                 | Cmd::Health(_)
@@ -429,7 +469,7 @@ async fn main() -> Result<()> {
                 | Cmd::ReceiptVerify(_) => {
                     // Handled above the Hub::new boundary.
                     unreachable!(
-                        "seal-keys / unseal-keys / v3 / mesh / audit / config / health / audit-tail / receipt-verify dispatched pre-Hub::new"
+                        "seal-keys / unseal-keys / v3 / mesh / headscale / audit / config / health / audit-tail / receipt-verify dispatched pre-Hub::new"
                     )
                 }
             };
@@ -489,11 +529,30 @@ async fn run_mesh_cmd(sub: MeshCmd) -> Result<()> {
         // own current-thread runtime) — exit codes propagate via
         // `std::process::exit` so a non-zero remote response surfaces
         // to the operator's shell.
+        //
+        // DEPRECATED: scheduled for removal 2026-Q3. Use
+        // `octravpn-node headscale nodes list` /
+        // `octravpn-node headscale policy {get,set,check}` — same
+        // backend, byte-identical output. The warning is printed
+        // unconditionally to stderr so cron / harness scripts surface
+        // the migration TODO; stdout remains untouched for byte-diff
+        // compatibility with the pre-deprecation contract. See
+        // `docs/operators/cli-migration.md`.
         MeshCmd::Status(args) => {
+            eprintln!(
+                "WARN: 'octravpn-node mesh status' is deprecated; use \
+                 'octravpn-node headscale nodes list' instead \
+                 (removal scheduled 2026-Q3)"
+            );
             let code = mesh_ops::run_status(args).await?;
             std::process::exit(code);
         }
         MeshCmd::Policy { cmd } => {
+            eprintln!(
+                "WARN: 'octravpn-node mesh policy' is deprecated; use \
+                 'octravpn-node headscale policy {{get|set|check}}' instead \
+                 (removal scheduled 2026-Q3)"
+            );
             let code = mesh_ops::run_policy(cmd).await?;
             std::process::exit(code);
         }

@@ -35,6 +35,15 @@ octravpn-tun = { path = "../octravpn-tun" }
 # when `[tun.transport].kind = "obfs4"`. See
 # `docs/operators/obfs4-bridge.md`.
 octravpn-obfs4 = { path = "../octravpn-obfs4" }
+# Embedded `headscale` admin CLI surface. The sibling repo exposes a
+# `[lib]` (`headscale_cli`) with an `AdminCmd` clap subcommand enum
+# plus a `dispatch(connect, cmd)` entry-point; we link it as a path
+# dep so `octravpn-node headscale [users|nodes|preauthkeys|policy|
+# tailnet] …` produces byte-identical output to the standalone
+# `headscale` binary. The standalone binary is still built/published
+# by headscale-rs — this dep just folds the *operator-facing* surface
+# into our single-binary install. See `docs/operators/cli-migration.md`.
+headscale-cli = { path = "../../../headscale-rs/headscale-cli" }
 
 anyhow      = { workspace = true }
 async-trait = { workspace = true }
@@ -124,6 +133,17 @@ snow = { version = "0.9.6", features = ["risky-raw-split"] }
 # `zstdframe.AppendDecode`. Wall 5 fix — see
 # `docs/tailscale-interop-blocker.md` 2026-05-19 §"Wall 5 closed".
 zstd = { version = "0.13", default-features = false }
+# `headscale_cli_passthrough.rs` drives both the embedded
+# `octravpn-node headscale …` surface and the standalone `headscale`
+# binary through `assert_cmd` so it can diff their stdout/stderr/exit
+# byte-for-byte. assert_cmd 2.x is already in the lock graph (e.g. via
+# octravpn-core dev-deps); pinning the workspace-resolved version here.
+assert_cmd = "2"
+# `headscale_cli_passthrough.rs` needs the path to the standalone
+# `headscale` bin so it can shell out for the byte-diff comparison.
+# `escargot` builds the sibling crate's binary on demand — same
+# technique upstream `clap` uses in its CLI tests.
+escargot = "0.5"
 
 [lints]
 workspace = true

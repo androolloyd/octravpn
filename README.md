@@ -296,9 +296,15 @@ octra/                              # this repo
 mkdir octravpn-workspace && cd $_
 git clone https://github.com/androolloyd/octravpn.git octra
 git clone https://github.com/androolloyd/octra-foundry.git
-git clone https://github.com/androolloyd/headscale-rs.git    # optional
+git clone https://github.com/androolloyd/headscale-rs.git    # path-dep
 cd octra && cargo build --workspace
 ```
+
+> Single-binary install: `octravpn-node` now embeds the entire
+> `headscale` admin CLI under `octravpn-node headscale …`. You no
+> longer need to build / install the standalone `headscale` binary
+> alongside the node — see
+> [`docs/operators/cli-migration.md`](docs/operators/cli-migration.md).
 
 ## Quickstart — local
 
