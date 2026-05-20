@@ -122,8 +122,8 @@ pub(crate) async fn run_fetch(cfg: &crate::config::ClientConfig, args: FetchArgs
 
     // ── 3. resolve a non-interactive passphrase ───────────────────
     // Precedence: env > `--secret` > config.
-    let initial = crate::discover_v2::resolve_passphrase(&cfg.v2, args.secret.as_deref())
-        .map(Arc::new);
+    let initial =
+        crate::discover_v2::resolve_passphrase(&cfg.v2, args.secret.as_deref()).map(Arc::new);
     let source = ConfigPassphrase::new(initial.clone());
 
     // ── 4. one fetch attempt with whatever we have ────────────────

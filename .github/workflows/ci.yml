@@ -280,11 +280,11 @@ jobs:
           cache: "false"
       - name: Install audit + deny
         run: |
-          cargo install --locked cargo-audit cargo-deny || true
+          cargo install --locked cargo-audit cargo-deny
       - name: cargo audit
-        run: cargo audit --deny warnings || true
+        run: cargo audit --deny warnings
       - name: cargo deny check
-        run: cargo deny check || true
+        run: cargo deny check
 
   fuzz-build:
     name: cargo fuzz build (smoke)

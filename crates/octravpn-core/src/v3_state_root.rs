@@ -344,7 +344,9 @@ mod tests {
         // inserting keys in reverse).
         let bytes = sample().canonical_bytes().unwrap();
         let value: Value = serde_json::from_slice(&bytes).unwrap();
-        let Value::Object(map) = value else { panic!("top-level not an object") };
+        let Value::Object(map) = value else {
+            panic!("top-level not an object")
+        };
 
         let mut reversed: Map<String, Value> = Map::new();
         let mut entries: Vec<_> = map.into_iter().collect();
@@ -436,10 +438,7 @@ mod tests {
     fn empty_circle_id_rejected() {
         let mut sr = sample();
         sr.circle_id = String::new();
-        assert!(matches!(
-            sr.validate(),
-            Err(StateRootError::EmptyCircleId)
-        ));
+        assert!(matches!(sr.validate(), Err(StateRootError::EmptyCircleId)));
     }
 
     #[test]
@@ -537,14 +536,14 @@ mod tests {
     /// are satisfied by construction.
     fn arb_state_root() -> impl Strategy<Value = StateRoot> {
         (
-            ".{1,32}",                                 // circle_id (non-empty)
-            any::<[u8; 32]>(),                         // policy_hash seed
-            any::<[u8; 32]>(),                         // wg_pubkey_hash seed
-            proptest::option::of(any::<[u8; 32]>()),   // attestation_hash seed
-            ".{1,16}",                                 // region (non-empty)
-            any::<u32>(),                              // member_count
-            any::<u64>(),                              // epoch
-            any::<u64>(),                              // timestamp_secs
+            ".{1,32}",                               // circle_id (non-empty)
+            any::<[u8; 32]>(),                       // policy_hash seed
+            any::<[u8; 32]>(),                       // wg_pubkey_hash seed
+            proptest::option::of(any::<[u8; 32]>()), // attestation_hash seed
+            ".{1,16}",                               // region (non-empty)
+            any::<u32>(),                            // member_count
+            any::<u64>(),                            // epoch
+            any::<u64>(),                            // timestamp_secs
             // `unknown` bucket — prefix keys with `x_` to guarantee
             // disjointness with declared field names. Values are JSON
             // primitives so we don't tangle with nested-Value Map order.
@@ -559,23 +558,21 @@ mod tests {
                 0..4,
             ),
         )
-            .prop_map(
-                |(cid, ph, wgh, attest, region, mc, ep, ts, unknown_map)| {
-                    let mut sr = StateRoot::new_v1(
-                        cid,
-                        hex_from(&ph),
-                        hex_from(&wgh),
-                        attest.map(|a| hex_from(&a)),
-                        region,
-                        mc,
-                        ep,
-                        ts,
-                    );
-                    let bt: BTreeMap<String, Value> = unknown_map.into_iter().collect();
-                    sr.unknown = bt;
-                    sr
-                },
-            )
+            .prop_map(|(cid, ph, wgh, attest, region, mc, ep, ts, unknown_map)| {
+                let mut sr = StateRoot::new_v1(
+                    cid,
+                    hex_from(&ph),
+                    hex_from(&wgh),
+                    attest.map(|a| hex_from(&a)),
+                    region,
+                    mc,
+                    ep,
+                    ts,
+                );
+                let bt: BTreeMap<String, Value> = unknown_map.into_iter().collect();
+                sr.unknown = bt;
+                sr
+            })
     }
 
     proptest! {
@@ -785,8 +782,7 @@ mod tests {
         // also wrong: update BOTH in lockstep, never just the test.
         let anchor = sr.anchor_hex().unwrap();
         assert_eq!(
-            anchor,
-            "6dc60d262d2f232b3b90d260e789ee5a0b6b00f35637153665b61eadc64a2700",
+            anchor, "6dc60d262d2f232b3b90d260e789ee5a0b6b00f35637153665b61eadc64a2700",
             "worked-example anchor drifted from docs/v3-state-root-schema.md"
         );
         // Sanity: also matches an independent Sha256::digest call.

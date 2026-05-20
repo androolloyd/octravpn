@@ -124,7 +124,10 @@ mod tests {
 
     #[test]
     fn off_yields_zero() {
-        assert_eq!(Iat::new(IatMode::Off).next_delay(&mut rand::thread_rng()), Duration::ZERO);
+        assert_eq!(
+            Iat::new(IatMode::Off).next_delay(&mut rand::thread_rng()),
+            Duration::ZERO
+        );
     }
 
     #[test]

@@ -79,10 +79,10 @@ impl BucketWidth {
     #[must_use]
     pub const fn cap_buckets(self) -> usize {
         match self {
-            Self::OneMinute => 240,    // 4h
-            Self::FiveMinutes => 288,  // 24h
-            Self::OneHour => 720,      // 30d
-            Self::OneDay => 365,       // 1y
+            Self::OneMinute => 240,   // 4h
+            Self::FiveMinutes => 288, // 24h
+            Self::OneHour => 720,     // 30d
+            Self::OneDay => 365,      // 1y
         }
     }
 

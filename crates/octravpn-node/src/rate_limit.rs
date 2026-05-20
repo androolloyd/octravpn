@@ -112,10 +112,14 @@ pub(crate) struct Policy {
 impl Policy {
     fn default_for(class: RouteClass) -> Self {
         match class {
-            RouteClass::Preauth | RouteClass::Receipt | RouteClass::Other => {
-                Self { rps: 60.0, burst: 120.0 }
-            }
-            RouteClass::V3Calls => Self { rps: 10.0, burst: 30.0 },
+            RouteClass::Preauth | RouteClass::Receipt | RouteClass::Other => Self {
+                rps: 60.0,
+                burst: 120.0,
+            },
+            RouteClass::V3Calls => Self {
+                rps: 10.0,
+                burst: 30.0,
+            },
         }
     }
 }
@@ -170,7 +174,10 @@ impl RateLimitCfg {
         // intentionally tighter than preauth), so the `default_*`
         // fallbacks only matter for the `Other` class.
         let mut p = if matches!(class, RouteClass::Other) {
-            Policy { rps: base_rps, burst: base_burst }
+            Policy {
+                rps: base_rps,
+                burst: base_burst,
+            }
         } else {
             Policy::default_for(class)
         };
@@ -264,9 +271,7 @@ impl RateLimiter {
             last_refill: now,
         });
         let elapsed = now.duration_since(bucket.last_refill).as_secs_f64();
-        bucket.tokens = elapsed
-            .mul_add(policy.rps, bucket.tokens)
-            .min(policy.burst);
+        bucket.tokens = elapsed.mul_add(policy.rps, bucket.tokens).min(policy.burst);
         bucket.last_refill = now;
         if bucket.tokens >= 1.0 {
             bucket.tokens -= 1.0;
@@ -352,7 +357,10 @@ mod tests {
         let mut cfg = RateLimitCfg::default();
         cfg.routes.insert(
             "preauth".into(),
-            RouteCfg { rps: Some(5.0), burst: Some(10.0) },
+            RouteCfg {
+                rps: Some(5.0),
+                burst: Some(10.0),
+            },
         );
         let p = cfg.policy_for(RouteClass::Preauth);
         assert_eq!(p.rps, 5.0);
@@ -436,7 +444,12 @@ mod tests {
     // `into_make_service_with_connect_info` would do at serve time).
     // ------------------------------------------------------------
 
-    use axum::{body::Body, extract::ConnectInfo, http::Request, routing::{get, post}};
+    use axum::{
+        body::Body,
+        extract::ConnectInfo,
+        http::Request,
+        routing::{get, post},
+    };
     use tower::ServiceExt;
 
     fn addr(octet: u8) -> SocketAddr {
@@ -444,7 +457,9 @@ mod tests {
     }
 
     fn build_router(cfg: RateLimitCfg) -> axum::Router {
-        async fn ok() -> &'static str { "ok" }
+        async fn ok() -> &'static str {
+            "ok"
+        }
         let routes = axum::Router::new()
             .route("/admin/preauth", post(ok))
             .route("/session", post(ok))
@@ -481,24 +496,39 @@ mod tests {
             burst: None,
             routes: [(
                 "preauth".into(),
-                RouteCfg { rps: Some(0.001), burst: Some(3.0) },
-            )].into_iter().collect(),
+                RouteCfg {
+                    rps: Some(0.001),
+                    burst: Some(3.0),
+                },
+            )]
+            .into_iter()
+            .collect(),
             max_keys: Some(1024),
         };
         let app = build_router(cfg);
         let peer = addr(11);
         for _ in 0..3 {
-            let resp = app.clone().oneshot(req("POST", "/admin/preauth", peer)).await.unwrap();
+            let resp = app
+                .clone()
+                .oneshot(req("POST", "/admin/preauth", peer))
+                .await
+                .unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
         }
-        let resp = app.clone().oneshot(req("POST", "/admin/preauth", peer)).await.unwrap();
+        let resp = app
+            .clone()
+            .oneshot(req("POST", "/admin/preauth", peer))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
         let retry: u64 = resp
             .headers()
             .get(axum::http::header::RETRY_AFTER)
             .expect("Retry-After header must be present on 429")
-            .to_str().unwrap()
-            .parse().unwrap();
+            .to_str()
+            .unwrap()
+            .parse()
+            .unwrap();
         assert!(retry >= 1, "Retry-After must be >= 1, got {retry}");
     }
 
@@ -512,17 +542,30 @@ mod tests {
             burst: None,
             routes: [(
                 "receipt".into(),
-                RouteCfg { rps: Some(0.001), burst: Some(5.0) },
-            )].into_iter().collect(),
+                RouteCfg {
+                    rps: Some(0.001),
+                    burst: Some(5.0),
+                },
+            )]
+            .into_iter()
+            .collect(),
             max_keys: Some(1024),
         };
         let app = build_router(cfg);
         let peer = addr(12);
         for i in 0..5 {
-            let resp = app.clone().oneshot(req("POST", "/session", peer)).await.unwrap();
+            let resp = app
+                .clone()
+                .oneshot(req("POST", "/session", peer))
+                .await
+                .unwrap();
             assert_eq!(resp.status(), StatusCode::OK, "request {i} should pass");
         }
-        let resp = app.clone().oneshot(req("POST", "/session", peer)).await.unwrap();
+        let resp = app
+            .clone()
+            .oneshot(req("POST", "/session", peer))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
     }
 
@@ -536,21 +579,46 @@ mod tests {
             burst: Some(120.0),
             routes: [(
                 "v3_calls".into(),
-                RouteCfg { rps: Some(0.001), burst: Some(3.0) },
-            )].into_iter().collect(),
+                RouteCfg {
+                    rps: Some(0.001),
+                    burst: Some(3.0),
+                },
+            )]
+            .into_iter()
+            .collect(),
             max_keys: Some(1024),
         };
         let app = build_router(cfg);
         let peer = addr(13);
         for _ in 0..3 {
-            let resp = app.clone().oneshot(req("POST", "/v3_calls/foo", peer)).await.unwrap();
+            let resp = app
+                .clone()
+                .oneshot(req("POST", "/v3_calls/foo", peer))
+                .await
+                .unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
         }
-        let resp = app.clone().oneshot(req("POST", "/v3_calls/foo", peer)).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS, "v3_calls override must reject");
+        let resp = app
+            .clone()
+            .oneshot(req("POST", "/v3_calls/foo", peer))
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::TOO_MANY_REQUESTS,
+            "v3_calls override must reject"
+        );
         // Receipt class on same IP unaffected.
-        let resp = app.clone().oneshot(req("POST", "/session", peer)).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK, "receipt bucket independent of v3_calls drain");
+        let resp = app
+            .clone()
+            .oneshot(req("POST", "/session", peer))
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "receipt bucket independent of v3_calls drain"
+        );
     }
 
     /// (4) `enabled = false` bypasses the layer entirely — a flood
@@ -567,7 +635,11 @@ mod tests {
         let app = build_router(cfg);
         let peer = addr(14);
         for i in 0..200 {
-            let resp = app.clone().oneshot(req("POST", "/admin/preauth", peer)).await.unwrap();
+            let resp = app
+                .clone()
+                .oneshot(req("POST", "/admin/preauth", peer))
+                .await
+                .unwrap();
             assert_eq!(
                 resp.status(),
                 StatusCode::OK,
@@ -591,7 +663,11 @@ mod tests {
         let app = build_router(cfg);
         let peer = addr(15);
         // Drain the "other" bucket by hitting /unknown.
-        let _ = app.clone().oneshot(req("GET", "/unknown", peer)).await.unwrap();
+        let _ = app
+            .clone()
+            .oneshot(req("GET", "/unknown", peer))
+            .await
+            .unwrap();
         for path in ["/health", "/metrics"] {
             for _ in 0..10 {
                 let resp = app.clone().oneshot(req("GET", path, peer)).await.unwrap();

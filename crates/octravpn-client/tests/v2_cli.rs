@@ -79,7 +79,11 @@ fn discover_v2_help_renders() {
         .args(["discover", "v2", "--help"])
         .output()
         .expect("spawn");
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("authorized circles"), "got: {stdout}");
     assert!(stdout.contains("--secret"), "got: {stdout}");
@@ -92,7 +96,11 @@ fn connect_v2_help_renders() {
         .args(["connect-v2", "--help"])
         .output()
         .expect("spawn");
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("--tailnet-id"), "got: {stdout}");
     assert!(stdout.contains("--class"), "got: {stdout}");
@@ -131,7 +139,10 @@ fn connect_v2_rejects_v1_config() {
         .env("HOME", tmp.path())
         .output()
         .expect("spawn");
-    assert!(!out.status.success(), "v1.1 config should be rejected by connect-v2");
+    assert!(
+        !out.status.success(),
+        "v1.1 config should be rejected by connect-v2"
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
     let stdout = String::from_utf8_lossy(&out.stdout);
     let combined = format!("{stderr}{stdout}");

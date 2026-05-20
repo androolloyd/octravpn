@@ -375,10 +375,7 @@ mod tests {
         // differs. The signature now does NOT cover the new hash.
         let ctx_b = ctx_v1(0xBB);
         forged.receipt.context = ctx_b;
-        assert!(
-            forged.verify().is_err(),
-            "must reject cross-program replay"
-        );
+        assert!(forged.verify().is_err(), "must reject cross-program replay");
     }
 
     /// Cross-chain replay: same session_id, same program, different
@@ -481,7 +478,10 @@ mod tests {
         );
         let mut sr = SignedReceipt::build(r, &client, &node);
         sr.client_pubkey = attacker.public;
-        assert!(matches!(sr.verify().unwrap_err(), ReceiptError::BadClientSig));
+        assert!(matches!(
+            sr.verify().unwrap_err(),
+            ReceiptError::BadClientSig
+        ));
     }
 
     /// Tampering with the blind scalar (without re-signing) rejects.

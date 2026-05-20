@@ -83,8 +83,14 @@ impl Server {
         router: Arc<OnionRouter>,
         allowlist: Arc<octravpn_core::bounded::BoundedMap<[u8; 32], AllowedClient>>,
     ) -> Result<Self> {
-        Self::bind_with_shield(addr, static_secret, router, allowlist, AmneziaConfig::default())
-            .await
+        Self::bind_with_shield(
+            addr,
+            static_secret,
+            router,
+            allowlist,
+            AmneziaConfig::default(),
+        )
+        .await
     }
 
     /// Construct a `Server` with a non-default Amnezia shield config.
@@ -182,20 +188,17 @@ impl Server {
     }
 
     async fn handle_packet(&self, packet: &[u8], src: SocketAddr, work: &mut [u8]) {
-        // To bring up a fresh peer we need its static pubkey. WG packets
-        // carry a sender index but not a pubkey; we extract a hint from
-        // the WG handshake-initiation message (msg_type = 1, peer pubkey
-        // is encrypted but the sender index lets us look up by initiator).
-        // Until that is wired we attempt a best-effort hint via WG handshake
-        // peeking; if missing, drop the packet.
-        let hint = peek_initiator_pubkey(packet);
-        let Some(peer) = self.get_or_create_peer(src, hint) else {
-            debug!(?src, "dropping packet from unregistered peer");
+        let Some(peer) = self.peers.get(&src) else {
+            self.try_admit_peer(packet, src, work).await;
             return;
         };
 
         // boringtun decapsulation. The Tunn handles handshake + transport.
         let res = peer.tun.lock().decapsulate(None, packet, work);
+        self.handle_tunn_result(res, src).await;
+    }
+
+    async fn handle_tunn_result(&self, res: TunnResult<'_>, src: SocketAddr) {
         match res {
             TunnResult::WriteToNetwork(bytes) => {
                 // Handshake response or keepalive — send back to the source.
@@ -230,6 +233,66 @@ impl Server {
                 debug!(?src, ?e, "boringtun decap error");
             }
         }
+    }
+
+    async fn try_admit_peer(&self, packet: &[u8], src: SocketAddr, work: &mut [u8]) {
+        if !is_wg_handshake_initiation(packet) {
+            debug!(?src, "dropping non-handshake packet from unknown peer");
+            return;
+        }
+
+        for (pk, _) in self.allowlist.snapshot() {
+            let mut tun = Tunn::new(
+                self.static_secret.clone(),
+                X25519Pub::from(pk),
+                None,
+                None,
+                0,
+                None,
+            );
+            match tun.decapsulate(None, packet, work) {
+                TunnResult::WriteToNetwork(bytes) => {
+                    let response = bytes.to_vec();
+                    let peer = Arc::new(Peer {
+                        tun: Mutex::new(tun),
+                    });
+                    self.peers.insert(src, peer);
+                    if let Some(m) = self.metrics.as_ref() {
+                        m.record_wg_handshake(true);
+                    }
+                    let n = response.len();
+                    if let Err(e) = self.shielded_send_to(&response, src).await {
+                        warn!(error = %e, "send_to failed");
+                    }
+                    debug!(?src, n, "wg peer admitted");
+                    return;
+                }
+                TunnResult::WriteToTunnelV4(bytes, _src_ip) => {
+                    let inner = bytes.to_vec();
+                    let peer = Arc::new(Peer {
+                        tun: Mutex::new(tun),
+                    });
+                    self.peers.insert(src, peer);
+                    self.dispatch_inner(&inner, src).await;
+                    return;
+                }
+                TunnResult::WriteToTunnelV6(bytes, _src_ip) => {
+                    let inner = bytes.to_vec();
+                    let peer = Arc::new(Peer {
+                        tun: Mutex::new(tun),
+                    });
+                    self.peers.insert(src, peer);
+                    self.dispatch_inner(&inner, src).await;
+                    return;
+                }
+                TunnResult::Done | TunnResult::Err(_) => {}
+            }
+        }
+
+        if let Some(m) = self.metrics.as_ref() {
+            m.record_wg_handshake(false);
+        }
+        debug!(?src, "dropping handshake from unregistered peer");
     }
 
     /// We received a decapsulated inner packet from the `WireGuard` peer.
@@ -306,59 +369,10 @@ impl Server {
             warn!(?target, error = %e, "egress send_to failed");
         }
     }
-
-    /// Look up an existing peer for `src` (refreshes idle-timer), or
-    /// create one if `src` is registered in the allowlist with a known
-    /// static pubkey. Unsolicited UDP packets from unknown sources are
-    /// dropped — protects against UDP-source spoof DoS.
-    fn get_or_create_peer(
-        &self,
-        src: SocketAddr,
-        peer_pubkey_hint: Option<[u8; 32]>,
-    ) -> Option<Arc<Peer>> {
-        if let Some(p) = self.peers.get(&src) {
-            return Some(p);
-        }
-        // Need a registered peer pubkey to safely construct Tunn.
-        let pk = peer_pubkey_hint?;
-        self.allowlist.get(&pk)?;
-        let tun = Tunn::new(
-            self.static_secret.clone(),
-            X25519Pub::from(pk),
-            None,
-            None,
-            0,
-            None,
-        );
-        let peer = Arc::new(Peer {
-            tun: Mutex::new(tun),
-        });
-        self.peers.insert(src, peer.clone());
-        Some(peer)
-    }
 }
 
-/// Best-effort: peek at a WG handshake-initiation message to surface a
-/// peer pubkey hint. WG message format: 1B msg_type + 3B reserved +
-/// 4B sender_index + 32B unencrypted ephemeral + 48B encrypted static
-/// pubkey + 28B encrypted timestamp + MAC1 + MAC2.
-///
-/// We CANNOT decrypt the static-pubkey blob without doing the WG
-/// handshake; instead the control plane is expected to register the
-/// pubkey out-of-band before any UDP packets arrive. This function
-/// returns the *ephemeral* pubkey (offset 8..40) which the allowlist
-/// can use as a per-handshake binding hint when the control plane
-/// pre-populates the allowlist with `(client_static_pubkey, ephemeral)`
-/// pairs at announce time. If neither is registered, the peer is
-/// dropped.
-fn peek_initiator_pubkey(packet: &[u8]) -> Option<[u8; 32]> {
-    // msg_type 0x01 = handshake initiation.
-    if packet.len() < 40 || packet[0] != 0x01 {
-        return None;
-    }
-    let mut pk = [0u8; 32];
-    pk.copy_from_slice(&packet[8..40]);
-    Some(pk)
+fn is_wg_handshake_initiation(packet: &[u8]) -> bool {
+    packet.len() >= 40 && packet[0] == 0x01
 }
 
 #[cfg(test)]

@@ -154,10 +154,7 @@ mod tests {
         );
         let a = Address::from_display("octRANDOM");
         let b = fresh_blind();
-        assert!(!verify_open(
-            &identity,
-            &Opening { addr: a, blind: b }
-        ));
+        assert!(!verify_open(&identity, &Opening { addr: a, blind: b }));
     }
 
     /// Zero blind: still a valid scalar. Catches a regression where

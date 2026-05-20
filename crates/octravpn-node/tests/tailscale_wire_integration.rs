@@ -12,7 +12,7 @@ use axum::body::to_bytes;
 use octravpn_mesh::{
     ip_alloc::TailnetIpAllocator,
     tailscale_wire::{
-        controlbase::{Framed, FrameHeader, MsgType},
+        controlbase::{FrameHeader, Framed, MsgType},
         key_handler::OverTLSPublicKeyResponse,
         MachineRegistry,
     },
@@ -135,13 +135,13 @@ async fn key_then_register_then_map_round_trip() {
             user: "bob".into(),
             hostname: "peer-b".into(),
             ipv4: std::net::Ipv4Addr::new(100, 64, 0, 99),
-        disco_key: None,
-        endpoints: Vec::new(),
-        expiry: None,
-        last_seen: chrono::Utc::now(),
-        ephemeral: false,
-        created_at: chrono::Utc::now(),
-        forced_tags: vec![],
+            disco_key: None,
+            endpoints: Vec::new(),
+            expiry: None,
+            last_seen: chrono::Utc::now(),
+            ephemeral: false,
+            created_at: chrono::Utc::now(),
+            forced_tags: vec![],
         },
     );
 
@@ -158,8 +158,7 @@ async fn key_then_register_then_map_round_trip() {
         .unwrap();
     assert_eq!(resp.status(), axum::http::StatusCode::OK);
     let raw = to_bytes(resp.into_body(), 32 * 1024).await.unwrap();
-    let mr: octravpn_mesh::tailscale_wire::MapResponse =
-        serde_json::from_slice(&raw).unwrap();
+    let mr: octravpn_mesh::tailscale_wire::MapResponse = serde_json::from_slice(&raw).unwrap();
     assert_eq!(mr.peers.len(), 1);
     assert_eq!(mr.peers[0].name, "peer-b.octra.test");
 }
@@ -187,8 +186,7 @@ async fn ts2021_framing_responds_to_initiation() {
     // Spawn the responder driver on the server side.
     let state_clone = state.clone();
     let server_task = tokio::spawn(async move {
-        let _ =
-            octravpn_mesh::tailscale_wire::noise::drive_ts2021(state_clone, server_io).await;
+        let _ = octravpn_mesh::tailscale_wire::noise::drive_ts2021(state_clone, server_io).await;
     });
 
     // Client side: build a snow initiator and send the Initiation frame.
@@ -205,10 +203,20 @@ async fn ts2021_framing_responds_to_initiation() {
     // Read the Reply frame and finish the initiator side of the Noise
     // handshake.
     let (hdr, reply_body) = framed.read_frame().await.expect("read reply");
-    assert!(matches!(hdr, FrameHeader::Regular { msg_type: MsgType::Reply, .. }));
+    assert!(matches!(
+        hdr,
+        FrameHeader::Regular {
+            msg_type: MsgType::Reply,
+            ..
+        }
+    ));
     let mut throw = vec![0u8; 1024];
-    init.read_message(&reply_body, &mut throw).expect("noise reply decrypts");
-    assert!(init.is_handshake_finished(), "initiator should be done after one round-trip");
+    init.read_message(&reply_body, &mut throw)
+        .expect("noise reply decrypts");
+    assert!(
+        init.is_handshake_finished(),
+        "initiator should be done after one round-trip"
+    );
 
     // Drop the framed socket — that closes the server task. We don't
     // drive h2 on top in this test; the existing unit tests cover the
@@ -257,13 +265,13 @@ async fn flat_register_path_works_via_octravpn_node_router() {
             user: "bob".into(),
             hostname: "peer-b".into(),
             ipv4: std::net::Ipv4Addr::new(100, 64, 0, 99),
-        disco_key: None,
-        endpoints: Vec::new(),
-        expiry: None,
-        last_seen: chrono::Utc::now(),
-        ephemeral: false,
-        created_at: chrono::Utc::now(),
-        forced_tags: vec![],
+            disco_key: None,
+            endpoints: Vec::new(),
+            expiry: None,
+            last_seen: chrono::Utc::now(),
+            ephemeral: false,
+            created_at: chrono::Utc::now(),
+            forced_tags: vec![],
         },
     );
 
@@ -286,8 +294,7 @@ async fn flat_register_path_works_via_octravpn_node_router() {
         .unwrap();
     assert_eq!(resp.status(), axum::http::StatusCode::OK);
     let raw = to_bytes(resp.into_body(), 32 * 1024).await.unwrap();
-    let mr: octravpn_mesh::tailscale_wire::MapResponse =
-        serde_json::from_slice(&raw).unwrap();
+    let mr: octravpn_mesh::tailscale_wire::MapResponse = serde_json::from_slice(&raw).unwrap();
     assert_eq!(mr.peers.len(), 1);
 }
 
@@ -400,13 +407,13 @@ async fn stream_true_emits_chunk_on_registry_change() {
             user: "alice".into(),
             hostname: "peer-a".into(),
             ipv4: std::net::Ipv4Addr::new(100, 64, 0, 10),
-        disco_key: None,
-        endpoints: Vec::new(),
-        expiry: None,
-        last_seen: chrono::Utc::now(),
-        ephemeral: false,
-        created_at: chrono::Utc::now(),
-        forced_tags: vec![],
+            disco_key: None,
+            endpoints: Vec::new(),
+            expiry: None,
+            last_seen: chrono::Utc::now(),
+            ephemeral: false,
+            created_at: chrono::Utc::now(),
+            forced_tags: vec![],
         },
     );
 
@@ -462,13 +469,13 @@ async fn stream_true_emits_chunk_on_registry_change() {
                 user: "bob".into(),
                 hostname: "peer-b".into(),
                 ipv4: std::net::Ipv4Addr::new(100, 64, 0, 11),
-            disco_key: None,
-            endpoints: Vec::new(),
-            expiry: None,
-            last_seen: chrono::Utc::now(),
-            ephemeral: false,
-            created_at: chrono::Utc::now(),
-            forced_tags: vec![],
+                disco_key: None,
+                endpoints: Vec::new(),
+                expiry: None,
+                last_seen: chrono::Utc::now(),
+                ephemeral: false,
+                created_at: chrono::Utc::now(),
+                forced_tags: vec![],
             },
         );
     });
@@ -503,9 +510,7 @@ async fn map_response_includes_derp_map_when_configured() {
         wire::{DerpMap, DerpRegion, DerpRegionNode},
         MachineRegistry,
     };
-    use octravpn_mesh::{
-        ip_alloc::TailnetIpAllocator, PreauthMinter, ServerNoiseKey, WireState,
-    };
+    use octravpn_mesh::{ip_alloc::TailnetIpAllocator, PreauthMinter, ServerNoiseKey, WireState};
 
     let dir = tempdir().unwrap();
     let server = Arc::new(ServerNoiseKey::load_or_generate(dir.path()).unwrap());
@@ -564,7 +569,9 @@ async fn map_response_includes_derp_map_when_configured() {
                 .method("POST")
                 .uri("/machine/register")
                 .header("content-type", "application/json")
-                .body(axum::body::Body::from(serde_json::to_vec(&reg_body).unwrap()))
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(&reg_body).unwrap(),
+                ))
                 .unwrap(),
         )
         .await
@@ -581,13 +588,13 @@ async fn map_response_includes_derp_map_when_configured() {
             user: "bob".into(),
             hostname: "peer-b".into(),
             ipv4: std::net::Ipv4Addr::new(100, 64, 0, 99),
-        disco_key: None,
-        endpoints: Vec::new(),
-        expiry: None,
-        last_seen: chrono::Utc::now(),
-        ephemeral: false,
-        created_at: chrono::Utc::now(),
-        forced_tags: vec![],
+            disco_key: None,
+            endpoints: Vec::new(),
+            expiry: None,
+            last_seen: chrono::Utc::now(),
+            ephemeral: false,
+            created_at: chrono::Utc::now(),
+            forced_tags: vec![],
         },
     );
 
@@ -601,7 +608,9 @@ async fn map_response_includes_derp_map_when_configured() {
                 .method("POST")
                 .uri("/machine/map")
                 .header("content-type", "application/json")
-                .body(axum::body::Body::from(serde_json::to_vec(&map_body).unwrap()))
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(&map_body).unwrap(),
+                ))
                 .unwrap(),
         )
         .await
@@ -614,7 +623,10 @@ async fn map_response_includes_derp_map_when_configured() {
     // values (case-insensitive on the wire, but we pin the spelling
     // anyway).
     let raw_str = std::str::from_utf8(&raw).unwrap();
-    assert!(raw_str.contains("\"DERPMap\""), "DERPMap field name present");
+    assert!(
+        raw_str.contains("\"DERPMap\""),
+        "DERPMap field name present"
+    );
     assert!(raw_str.contains("\"Regions\""), "Regions inside DERPMap");
     assert!(raw_str.contains("\"RegionID\""));
     assert!(raw_str.contains("\"HostName\""));
@@ -622,8 +634,7 @@ async fn map_response_includes_derp_map_when_configured() {
     assert!(raw_str.contains("\"InsecureForTests\""));
     assert!(raw_str.contains("\"OmitDefaultRegions\""));
 
-    let mr: octravpn_mesh::tailscale_wire::MapResponse =
-        serde_json::from_slice(&raw).unwrap();
+    let mr: octravpn_mesh::tailscale_wire::MapResponse = serde_json::from_slice(&raw).unwrap();
     assert!(mr.derp_map.omit_default_regions);
     let region = mr.derp_map.regions.get(&1).expect("region 1 present");
     assert_eq!(region.region_id, 1);
@@ -655,10 +666,7 @@ async fn map_response_round_trips_disco_key_and_endpoints() {
     let a_hex = "a1".repeat(32);
     let b_hex = "b2".repeat(32);
 
-    for (hex, pk, host) in [
-        (&a_hex, &pk_a.key, "peer-a"),
-        (&b_hex, &pk_b.key, "peer-b"),
-    ] {
+    for (hex, pk, host) in [(&a_hex, &pk_a.key, "peer-a"), (&b_hex, &pk_b.key, "peer-b")] {
         let body = serde_json::json!({
             "NodeKey": format!("nodekey:{hex}"),
             "Auth": { "AuthKey": pk },
@@ -686,10 +694,7 @@ async fn map_response_round_trips_disco_key_and_endpoints() {
     // Peer-a's /map call carries DiscoKey + Endpoints — the moment
     // upstream stock-client crosses the post-handshake boundary.
     let disco_a = format!("discokey:{}", "1a".repeat(32));
-    let endpoints_a = vec![
-        "10.0.0.10:41641".to_string(),
-        "[fe80::1]:41641".to_string(),
-    ];
+    let endpoints_a = vec!["10.0.0.10:41641".to_string(), "[fe80::1]:41641".to_string()];
     let map_req_a = serde_json::json!({
         "Version": 39,
         "DiscoKey": &disco_a,
@@ -743,11 +748,9 @@ async fn map_response_round_trips_disco_key_and_endpoints() {
         raw_str.contains("\"Endpoints\""),
         "Endpoints tag present: {raw_str}"
     );
-    let mr: octravpn_mesh::tailscale_wire::MapResponse =
-        serde_json::from_slice(&raw).unwrap();
+    let mr: octravpn_mesh::tailscale_wire::MapResponse = serde_json::from_slice(&raw).unwrap();
     assert_eq!(mr.peers.len(), 1, "peer-a visible to peer-b");
     let peer_a = &mr.peers[0];
     assert_eq!(peer_a.disco_key.as_deref(), Some(disco_a.as_str()));
     assert_eq!(peer_a.endpoints, endpoints_a);
 }
-

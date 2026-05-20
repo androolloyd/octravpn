@@ -13,8 +13,8 @@ use axum::body::Body;
 use axum::http::{header::AUTHORIZATION, Request, StatusCode};
 use http_body_util::BodyExt;
 use octravpn_analytics::{
-    chain_step, http::HttpState, http::router as analytics_router, indexer::metric,
-    BucketWidth, Indexer,
+    chain_step, http::router as analytics_router, http::HttpState, indexer::metric, BucketWidth,
+    Indexer,
 };
 use serde_json::{json, Value};
 use tower::ServiceExt;
@@ -65,7 +65,12 @@ async fn replay_audit_log_then_query_metric_counts() {
     let scans = indexer.ingest_audit_dir(&key, dir.path()).unwrap();
     assert_eq!(scans.len(), 2);
     for s in &scans {
-        assert!(s.is_clean(), "scan {} broke: {:?}", s.path.display(), s.break_reason);
+        assert!(
+            s.is_clean(),
+            "scan {} broke: {:?}",
+            s.path.display(),
+            s.break_reason
+        );
     }
 
     // Direct counter assertions on the in-memory state.
@@ -76,7 +81,10 @@ async fn replay_audit_log_then_query_metric_counts() {
     assert_eq!(s.total(metric::PREAUTH_MINTED, BucketWidth::OneDay), 1);
     assert_eq!(s.total(metric::SLASH_DOUBLE_SIGN, BucketWidth::OneDay), 1);
     assert_eq!(s.total(metric::SETTLE_CLAIMS, BucketWidth::OneDay), 1);
-    assert_eq!(s.total(metric::VALIDATOR_HEALTH_PINGS, BucketWidth::OneDay), 1);
+    assert_eq!(
+        s.total(metric::VALIDATOR_HEALTH_PINGS, BucketWidth::OneDay),
+        1
+    );
     // Bytes settled: two receipts at 1_000 + 1_500 delta = 2_500.
     // settle_claim carried bytes_used = 0 so it adds nothing.
     assert_eq!(s.total(metric::BYTES_SETTLED, BucketWidth::OneDay), 2_500);
@@ -107,10 +115,7 @@ async fn replay_audit_log_then_query_metric_counts() {
     assert_eq!(v["metric"], "sessions_opened");
     assert_eq!(v["bucket"], "1m");
     let points = v["points"].as_array().unwrap();
-    let sum: u64 = points
-        .iter()
-        .map(|p| p["value"].as_u64().unwrap())
-        .sum();
+    let sum: u64 = points.iter().map(|p| p["value"].as_u64().unwrap()).sum();
     assert_eq!(sum, 2, "sessions_opened total across buckets must be 2");
 
     // /metrics — Prometheus text, scoped check on a specific line.
@@ -126,7 +131,12 @@ async fn replay_audit_log_then_query_metric_counts() {
         .await
         .unwrap();
     let body = String::from_utf8(
-        resp.into_body().collect().await.unwrap().to_bytes().to_vec(),
+        resp.into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec(),
     )
     .unwrap();
     assert!(

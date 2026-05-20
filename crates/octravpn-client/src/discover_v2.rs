@@ -74,10 +74,7 @@ pub(crate) enum CircleListing {
     /// member of this tailnet (or has the wrong key_id / passphrase).
     /// We still emit the entry so the operator menu shows "opaque" rows
     /// rather than silently dropping them.
-    Opaque {
-        circle_id: String,
-        reason: String,
-    },
+    Opaque { circle_id: String, reason: String },
     /// Listed on chain but no `/policy.json` asset exists yet.
     /// Operator hasn't published policy; treat as not connect-eligible.
     Unpublished { circle_id: String },
@@ -173,7 +170,10 @@ pub(crate) fn resolve_passphrase(
 /// that touches the tailnet (using `get_tailnet`) and scrape the storage
 /// block for keys of the shape `authorized_circles:<tid>:<circle_addr>`
 /// with value `"1"`. A later AML uplift should add a proper view.
-pub(crate) async fn list_authorized_circles(client: &Client, tailnet_id: u64) -> Result<Vec<String>> {
+pub(crate) async fn list_authorized_circles(
+    client: &Client,
+    tailnet_id: u64,
+) -> Result<Vec<String>> {
     let raw = client
         .rpc()
         .contract_call_raw(
@@ -324,16 +324,21 @@ pub(crate) async fn fetch_one(
             reason: "no sealed-passphrase available (set OCTRAVPN_SEALED_PASSPHRASE or [v2].sealed_passphrase)".into(),
         };
     };
-    let plaintext =
-        match decrypt_sealed_bytes(circle_id, key_id_on_chain, pp, ciphertext_b64, plaintext_hash) {
-            Ok(b) => b,
-            Err(e) => {
-                return CircleListing::Opaque {
-                    circle_id: circle_id.to_string(),
-                    reason: format!("policy sealed; you may not be a member of this tailnet ({e})"),
-                };
-            }
-        };
+    let plaintext = match decrypt_sealed_bytes(
+        circle_id,
+        key_id_on_chain,
+        pp,
+        ciphertext_b64,
+        plaintext_hash,
+    ) {
+        Ok(b) => b,
+        Err(e) => {
+            return CircleListing::Opaque {
+                circle_id: circle_id.to_string(),
+                reason: format!("policy sealed; you may not be a member of this tailnet ({e})"),
+            };
+        }
+    };
 
     // 5. Parse JSON.
     let policy: CirclePolicy = match serde_json::from_slice(&plaintext) {
@@ -347,9 +352,7 @@ pub(crate) async fn fetch_one(
     };
 
     // 6. Persist to cache (best-effort).
-    if let Err(e) =
-        cache.put(circle_id, plaintext_hash, &policy)
-    {
+    if let Err(e) = cache.put(circle_id, plaintext_hash, &policy) {
         tracing::debug!(circle = circle_id, error = %e, "cache write failed");
     }
 
@@ -485,18 +488,24 @@ mod tests {
         // Env wins.
         std::env::set_var("OCTRAVPN_SEALED_PASSPHRASE", "env-pp");
         assert_eq!(
-            resolve_passphrase(&cfg, Some("cli-pp")).as_deref().map(String::as_str),
+            resolve_passphrase(&cfg, Some("cli-pp"))
+                .as_deref()
+                .map(String::as_str),
             Some("env-pp")
         );
         // Without env, CLI wins.
         std::env::remove_var("OCTRAVPN_SEALED_PASSPHRASE");
         assert_eq!(
-            resolve_passphrase(&cfg, Some("cli-pp")).as_deref().map(String::as_str),
+            resolve_passphrase(&cfg, Some("cli-pp"))
+                .as_deref()
+                .map(String::as_str),
             Some("cli-pp")
         );
         // Without env or CLI, config wins.
         assert_eq!(
-            resolve_passphrase(&cfg, None).as_deref().map(String::as_str),
+            resolve_passphrase(&cfg, None)
+                .as_deref()
+                .map(String::as_str),
             Some("cfg-pp"),
         );
         // None of the three -> None.

@@ -193,10 +193,7 @@ impl AuditLog {
         Ok(me)
     }
 
-    fn open_inner(
-        dir: &Path,
-        sender: Option<mpsc::UnboundedSender<FlusherCmd>>,
-    ) -> Result<Self> {
+    fn open_inner(dir: &Path, sender: Option<mpsc::UnboundedSender<FlusherCmd>>) -> Result<Self> {
         std::fs::create_dir_all(dir)
             .with_context(|| format!("create audit dir {}", dir.display()))?;
         let key = load_or_create_key(dir)?;
@@ -360,7 +357,10 @@ impl AuditLog {
                     break;
                 }
             };
-            let Some(claimed_prev) = v.get("prev_mac").and_then(Value::as_str).map(str::to_string)
+            let Some(claimed_prev) = v
+                .get("prev_mac")
+                .and_then(Value::as_str)
+                .map(str::to_string)
             else {
                 first_error = Some(FileVerifyError {
                     line: line_num,
@@ -368,8 +368,7 @@ impl AuditLog {
                 });
                 break;
             };
-            let Some(claimed_mac) = v.get("mac").and_then(Value::as_str).map(str::to_string)
-            else {
+            let Some(claimed_mac) = v.get("mac").and_then(Value::as_str).map(str::to_string) else {
                 first_error = Some(FileVerifyError {
                     line: line_num,
                     kind: FileVerifyErrorKind::MissingField("mac"),
@@ -387,7 +386,10 @@ impl AuditLog {
                 });
                 break;
             }
-            let Some(canonical) = v.get("record_json").and_then(Value::as_str).map(str::to_string)
+            let Some(canonical) = v
+                .get("record_json")
+                .and_then(Value::as_str)
+                .map(str::to_string)
             else {
                 first_error = Some(FileVerifyError {
                     line: line_num,
@@ -414,7 +416,10 @@ impl AuditLog {
             // and nested-in-extra shapes are accepted to stay
             // forward-compat with future emit sites.
             if let Ok(rec) = serde_json::from_str::<Value>(&canonical) {
-                let sid = rec.get("session_id").and_then(Value::as_str).map(String::from);
+                let sid = rec
+                    .get("session_id")
+                    .and_then(Value::as_str)
+                    .map(String::from);
                 let extra = rec.get("extra");
                 let seq = rec
                     .get("seq")
@@ -841,7 +846,10 @@ mod tests {
         let report = AuditLog::verify_file(&log.key(), &audit_file).unwrap();
         assert_eq!(report.entries, 1);
         // Cross-check seq harvesting picked up the (sid, seq) tuple.
-        assert!(report.signed_seqs.get("a1b2c3").is_some_and(|s| s.contains(&7)));
+        assert!(report
+            .signed_seqs
+            .get("a1b2c3")
+            .is_some_and(|s| s.contains(&7)));
     }
 
     /// Multiple `record_receipt_signed` calls form a contiguous HMAC
@@ -863,7 +871,10 @@ mod tests {
             .unwrap()
             .path();
         let report = AuditLog::verify_file(&log.key(), &audit_file).unwrap();
-        assert_eq!(report.entries, 4, "all four receipt_signed rows chain cleanly");
+        assert_eq!(
+            report.entries, 4,
+            "all four receipt_signed rows chain cleanly"
+        );
     }
 
     #[test]
@@ -1071,8 +1082,12 @@ mod tests {
         let dir = tempdir().unwrap();
         let log = AuditLog::open(dir.path()).unwrap();
         // Two receipt_signed rows for two sessions.
-        log.record_receipt_signed("aa".into(), 1, 100).await.unwrap();
-        log.record_receipt_signed("aa".into(), 2, 200).await.unwrap();
+        log.record_receipt_signed("aa".into(), 1, 100)
+            .await
+            .unwrap();
+        log.record_receipt_signed("aa".into(), 2, 200)
+            .await
+            .unwrap();
         log.record_receipt_signed("bb".into(), 5, 0).await.unwrap();
         let audit_file = std::fs::read_dir(dir.path())
             .unwrap()

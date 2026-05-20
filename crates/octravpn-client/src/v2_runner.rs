@@ -46,7 +46,10 @@ pub(crate) async fn dispatch_discover(
         DiscoverOp::Invalidate { circle_id, all } => {
             if all {
                 cache.clear()?;
-                println!("cleared all cached policy entries in {}", cache_dir.display());
+                println!(
+                    "cleared all cached policy entries in {}",
+                    cache_dir.display()
+                );
                 return Ok(());
             }
             let Some(cid) = circle_id else {
@@ -169,10 +172,15 @@ pub(crate) async fn connect_v2(
     // decryptable entry.
     let (chosen_id, policy) = if let Some(id) = circle_id_arg {
         let listing =
-            discover_v2::fetch_one(client, id, &cfg.v2, Some(passphrase.as_str()), &mut cache).await;
+            discover_v2::fetch_one(client, id, &cfg.v2, Some(passphrase.as_str()), &mut cache)
+                .await;
         match listing {
-            CircleListing::Open { circle_id, policy, .. } => (circle_id, policy),
-            CircleListing::Opaque { reason, .. } => bail!("can't decrypt policy for {id}: {reason}"),
+            CircleListing::Open {
+                circle_id, policy, ..
+            } => (circle_id, policy),
+            CircleListing::Opaque { reason, .. } => {
+                bail!("can't decrypt policy for {id}: {reason}")
+            }
             CircleListing::Unpublished { .. } => bail!("circle {id} has no published policy yet"),
             CircleListing::Error { error, .. } => bail!("circle {id} fetch error: {error}"),
         }
@@ -206,16 +214,12 @@ async fn pick_first_open(
     passphrase: &str,
     cache: &mut PolicyCache,
 ) -> Result<(String, CirclePolicy)> {
-    let listings = discover_v2::list(
-        client,
-        tailnet_id,
-        &cfg.v2,
-        Some(passphrase),
-        cache,
-    )
-    .await?;
+    let listings = discover_v2::list(client, tailnet_id, &cfg.v2, Some(passphrase), cache).await?;
     for l in listings {
-        if let CircleListing::Open { circle_id, policy, .. } = l {
+        if let CircleListing::Open {
+            circle_id, policy, ..
+        } = l
+        {
             return Ok((circle_id, policy));
         }
     }
@@ -232,14 +236,8 @@ fn print_wg_handoff(policy: &CirclePolicy) {
     println!("Endpoint   = {}", policy.endpoint);
     println!("AllowedIPs = 0.0.0.0/0, ::/0");
     println!("# region        = {}", policy.region);
-    println!(
-        "# tariff shared = {} OU/MB",
-        policy.price_per_mb_shared
-    );
-    println!(
-        "# tariff intra  = {} OU/MB",
-        policy.price_per_mb_internal
-    );
+    println!("# tariff shared = {} OU/MB", policy.price_per_mb_shared);
+    println!("# tariff intra  = {} OU/MB", policy.price_per_mb_internal);
     println!("----------------------------------------------");
 }
 

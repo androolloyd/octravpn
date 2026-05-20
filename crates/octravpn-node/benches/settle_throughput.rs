@@ -189,8 +189,7 @@ fn bench_audit_flush_vs_fsync(c: &mut Criterion) {
         let prev_mac = "00".repeat(32);
         let mac = "11".repeat(32);
         let rec = r#"{"ts_unix":1717000000,"kind":"settle","source":"10.0.0.42:51820","session_id":"7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f","extra":{"bytes_used":1048576}}"#;
-        format!(r#"{{"record_json":{rec:?},"prev_mac":"{prev_mac}","mac":"{mac}"}}"#)
-            .into_bytes()
+        format!(r#"{{"record_json":{rec:?},"prev_mac":"{prev_mac}","mac":"{mac}"}}"#).into_bytes()
     };
 
     let mut g = c.benchmark_group("audit_append");

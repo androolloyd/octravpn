@@ -236,13 +236,7 @@ impl FrontClient {
 
     /// Same as `plan`, but pinned to a caller-supplied timestamp.
     /// Used by tests to assert on tag values deterministically.
-    pub fn plan_at(
-        &self,
-        method: &str,
-        path: &str,
-        body: &[u8],
-        ts_secs: u64,
-    ) -> Result<DialPlan> {
+    pub fn plan_at(&self, method: &str, path: &str, body: &[u8], ts_secs: u64) -> Result<DialPlan> {
         let path = if path.starts_with('/') {
             path.to_string()
         } else {
@@ -414,7 +408,9 @@ mod tests {
     #[test]
     fn dial_plan_splits_sni_from_host_header() {
         let client = FrontClient::new(enabled_config()).unwrap();
-        let plan = client.plan_at("POST", "/derp", b"hello-derp", 1_700_000_000).unwrap();
+        let plan = client
+            .plan_at("POST", "/derp", b"hello-derp", 1_700_000_000)
+            .unwrap();
 
         assert_eq!(
             plan.url, "https://octravpn-front.workers.dev/derp",
@@ -608,7 +604,11 @@ mod tests {
 
         let lines = captured.lock().await.clone();
         // Request line.
-        assert!(lines[0].starts_with("POST /derp HTTP/1.1"), "got {:?}", lines[0]);
+        assert!(
+            lines[0].starts_with("POST /derp HTTP/1.1"),
+            "got {:?}",
+            lines[0]
+        );
 
         // Find the Host: header — hyper sets it from the URL by
         // default but our explicit override wins.
@@ -731,7 +731,10 @@ mod tests {
         assert_eq!(p1.url, p2.url);
         let a1 = p1.headers.get(AUTH_HEADER).unwrap();
         let a2 = p2.headers.get(AUTH_HEADER).unwrap();
-        assert_eq!(a1, a2, "leading-slash normalisation must not affect the tag");
+        assert_eq!(
+            a1, a2,
+            "leading-slash normalisation must not affect the tag"
+        );
     }
 
     // -------------------------------------------------------------------
@@ -778,7 +781,11 @@ mod tests {
             let ts = 1_700_000_000 + skew;
             tags.insert(auth_tag(&key, ts, "POST", "/derp", b"body"));
         }
-        assert_eq!(tags.len(), 11, "each second within the window must mint a distinct tag");
+        assert_eq!(
+            tags.len(),
+            11,
+            "each second within the window must mint a distinct tag"
+        );
     }
 
     #[test]
@@ -813,7 +820,10 @@ mod tests {
     fn url_authority_is_front_host_across_path_shapes() {
         let client = FrontClient::new(enabled_config()).unwrap();
         let shapes = [
-            "/", "/derp", "/derp/probe", "/derp?session=1",
+            "/",
+            "/derp",
+            "/derp/probe",
+            "/derp?session=1",
             "/derp/v2/long/path/with/segments",
         ];
         for path in shapes {
@@ -898,7 +908,8 @@ mod tests {
     fn hmac_key_serde_handles_empty_string() {
         // The hex_byte_array deserializer treats empty string as
         // all-zero key (the disabled-config default). Verify.
-        let toml_src = "enabled = false\nfront_host = \"\"\nreal_host = \"\"\nfront_hmac_key = \"\"\n";
+        let toml_src =
+            "enabled = false\nfront_host = \"\"\nreal_host = \"\"\nfront_hmac_key = \"\"\n";
         let parsed: FrontConfig = toml::from_str(toml_src).expect("empty key parses to zero");
         assert_eq!(parsed.front_hmac_key, [0u8; 32]);
     }

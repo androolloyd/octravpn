@@ -48,12 +48,35 @@ pub struct AnnounceSessionRequest {
     /// the entry hop. Without this the entry hop can't construct a
     /// valid `Tunn` peer state and the WG handshake never completes.
     pub client_wg_pubkey: [u8; 32],
+    /// Chain transaction hash that emitted the `SessionOpened` event
+    /// for `session_id`.
+    pub open_tx_hash: String,
+    /// Signature over the announce envelope using `client_pubkey`.
+    pub client_sig: Signature,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AnnounceSessionResponse {
     pub accepted: bool,
     pub node_pubkey: PublicKey,
+}
+
+/// Build the deterministic payload clients sign when announcing a
+/// chain-opened session to an exit node.
+pub fn announce_signing_payload(
+    session_id: &SessionId,
+    client_pubkey: &PublicKey,
+    client_wg_pubkey: &[u8; 32],
+    open_tx_hash: &str,
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(22 + 32 + 32 + 32 + 4 + open_tx_hash.len());
+    out.extend_from_slice(b"octravpn:announce:v1");
+    out.extend_from_slice(session_id.as_bytes());
+    out.extend_from_slice(&client_pubkey.0);
+    out.extend_from_slice(client_wg_pubkey);
+    out.extend_from_slice(&(open_tx_hash.len() as u32).to_be_bytes());
+    out.extend_from_slice(open_tx_hash.as_bytes());
+    out
 }
 
 /// Exit-side view of a session, including the exit's signed receipt

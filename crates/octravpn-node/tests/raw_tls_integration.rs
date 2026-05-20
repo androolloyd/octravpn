@@ -25,14 +25,17 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use octravpn_mesh::{
     ip_alloc::TailnetIpAllocator,
     tailscale_wire::{
-        controlbase::{Framed, FrameHeader, MsgType},
+        controlbase::{FrameHeader, Framed, MsgType},
         raw_tls::serve_raw_tls,
         tls::{self as wire_tls, SanConfig},
         MachineRegistry,
     },
     tailscale_wire_router, PreauthMinter, ServerNoiseKey, WireState,
 };
-use rustls::{pki_types::CertificateDer, ClientConfig, RootCertStore};
+use rustls::{
+    pki_types::{pem::PemObject, CertificateDer},
+    ClientConfig, RootCertStore,
+};
 use tempfile::tempdir;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -64,7 +67,7 @@ async fn spawn_raw_tls(state: WireState) -> (SocketAddr, CertificateDer<'static>
     let material = wire_tls::load_or_generate(dir.path(), &sans).unwrap();
     // Pull the DER cert for the client trust store.
     let cert_der: CertificateDer<'static> =
-        rustls_pemfile::certs(&mut material.cert_pem.as_bytes())
+        CertificateDer::pem_slice_iter(material.cert_pem.as_bytes())
             .next()
             .unwrap()
             .unwrap();
@@ -212,7 +215,9 @@ async fn ts2021_post_dispatches_to_drive_ts2021_over_tls() {
         "expected 101 Switching Protocols, got: {header_text}"
     );
     assert!(
-        header_text.to_ascii_lowercase().contains("upgrade: tailscale-control-protocol"),
+        header_text
+            .to_ascii_lowercase()
+            .contains("upgrade: tailscale-control-protocol"),
         "expected Upgrade header echo: {header_text}"
     );
 

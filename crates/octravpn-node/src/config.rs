@@ -54,7 +54,7 @@
 //!   price_per_mb_internal = 0        # intra-tailnet (often free)
 //!
 //!   [control]
-//!   listen = "0.0.0.0:51821"
+//!   listen = "127.0.0.1:51821"      # set 0.0.0.0 explicitly when exposing it
 //!
 //!   [attestation]
 //!   poll_interval_secs = 30          # how often to recheck operator stake
@@ -524,7 +524,7 @@ impl Default for ControlCfg {
 }
 
 fn default_control_listen() -> String {
-    "0.0.0.0:51821".into()
+    "127.0.0.1:51821".into()
 }
 
 #[derive(Debug, Deserialize, Clone)]

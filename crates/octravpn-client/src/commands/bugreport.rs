@@ -121,24 +121,22 @@ fn render_redacted_config(cfg: Option<&ClientConfig>, source_path: &str) -> Stri
         // We intentionally rewrite by hand rather than using `toml::to_string`
         // — the `ClientConfig` struct is `Deserialize` only, and we want the
         // redaction policy to be obvious to reviewers.
-        let v2_block = if cfg.is_v2()
-            || cfg.v2.sealed_passphrase.is_some()
-            || !cfg.v2.cache_dir.is_empty()
-        {
-            let pp_redaction = if cfg.v2.sealed_passphrase.is_some() {
-                "# sealed_passphrase: <redacted>"
+        let v2_block =
+            if cfg.is_v2() || cfg.v2.sealed_passphrase.is_some() || !cfg.v2.cache_dir.is_empty() {
+                let pp_redaction = if cfg.v2.sealed_passphrase.is_some() {
+                    "# sealed_passphrase: <redacted>"
+                } else {
+                    "# sealed_passphrase: (unset)"
+                };
+                format!(
+                    "\n[v2]\nkey_id     = \"{kid}\"\ncache_dir  = \"{cache}\"\n{pp}\n",
+                    kid = cfg.v2.key_id,
+                    cache = cfg.v2.cache_dir,
+                    pp = pp_redaction,
+                )
             } else {
-                "# sealed_passphrase: (unset)"
+                String::new()
             };
-            format!(
-                "\n[v2]\nkey_id     = \"{kid}\"\ncache_dir  = \"{cache}\"\n{pp}\n",
-                kid = cfg.v2.key_id,
-                cache = cfg.v2.cache_dir,
-                pp = pp_redaction,
-            )
-        } else {
-            String::new()
-        };
         format!(
             r#"# octravpn bugreport — redacted snapshot of {src}
 

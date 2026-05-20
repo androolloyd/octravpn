@@ -206,8 +206,7 @@ mod tests {
         // Recompute via the explicit underlying primitives so a
         // future change to the math (truncation length, window-string
         // formatting) must be deliberate.
-        let mut mac =
-            <hmac::Hmac<sha2::Sha256> as hmac::Mac>::new_from_slice(&psk).unwrap();
+        let mut mac = <hmac::Hmac<sha2::Sha256> as hmac::Mac>::new_from_slice(&psk).unwrap();
         hmac::Mac::update(&mut mac, b"12345");
         let tag = hmac::Mac::finalize(mac).into_bytes();
         assert_eq!(knock, hex::encode(&tag[..8]));
@@ -215,8 +214,7 @@ mod tests {
 
     #[test]
     fn parse_knock_psk_query_strips_param() {
-        let mut psk_b64 =
-            base64::engine::general_purpose::STANDARD.encode(fixed_psk());
+        let mut psk_b64 = base64::engine::general_purpose::STANDARD.encode(fixed_psk());
         // Sanity: a 32-byte PSK encodes to a stable 44-char base64.
         assert_eq!(psk_b64.len(), 44);
 

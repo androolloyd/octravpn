@@ -57,3 +57,8 @@ name = "peer_publish"
 harness = false
 path = "benches/peer_publish.rs"
 required-features = ["test-helpers"]
+
+[[test]]
+name = "integration_e2e"
+path = "tests/integration_e2e.rs"
+required-features = ["test-helpers"]

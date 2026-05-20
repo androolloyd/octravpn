@@ -76,7 +76,9 @@ fn bench_aead_seal_mtu(c: &mut Criterion) {
         b.iter_custom(|iters| {
             let start = Instant::now();
             for _ in 0..iters {
-                let pt = cipher.decrypt(&nonce, black_box(ct.as_slice())).expect("open");
+                let pt = cipher
+                    .decrypt(&nonce, black_box(ct.as_slice()))
+                    .expect("open");
                 black_box(pt);
             }
             start.elapsed()

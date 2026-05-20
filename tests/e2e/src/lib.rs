@@ -480,10 +480,7 @@ mod tests {
         let client = KeyPair::generate();
         let node = KeyPair::generate();
         let r = Receipt {
-            context: ReceiptContext::v1_1(
-                Address::from_pubkey(&[0xABu8; 32]),
-                CHAIN_ID_TEST,
-            ),
+            context: ReceiptContext::v1_1(Address::from_pubkey(&[0xABu8; 32]), CHAIN_ID_TEST),
             session_id: SessionId::new([1u8; 32]),
             seq: 5,
             bytes_used: 1024,

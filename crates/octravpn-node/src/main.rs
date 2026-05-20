@@ -257,9 +257,9 @@ enum MeshCmd {
     /// HTTP is immediately redeemable through `register`.
     Serve {
         /// `host:port` to listen on for plain HTTP. Defaults to
-        /// `0.0.0.0:51821`. Used by the harness's curl probes and by
-        /// older Tailscale clients that don't force the 443 dial.
-        #[arg(long, default_value = "0.0.0.0:51821")]
+        /// `127.0.0.1:51821`; set an explicit public address for
+        /// docker interop harnesses or remote clients.
+        #[arg(long, default_value = "127.0.0.1:51821")]
         listen: String,
         /// `host:port` for the rustls-terminated HTTPS listener. Stock
         /// `tailscale up` v1.78+ forces a parallel HTTPS-on-443 dial
@@ -267,7 +267,7 @@ enum MeshCmd {
         /// flow stalls before reaching `/machine/register`. Pass the
         /// empty string to disable (useful for hosts that can't bind
         /// :443).
-        #[arg(long, default_value = "0.0.0.0:443")]
+        #[arg(long, default_value = "")]
         https_listen: String,
         /// SAN hostname embedded in the self-signed cert. Should match
         /// whatever the client resolves the login-server to (typically
@@ -452,8 +452,7 @@ async fn run_mesh_cmd(sub: MeshCmd) -> Result<()> {
             ttl_secs,
         } => {
             use octravpn_mesh::{PreauthMinter, DEFAULT_PREAUTH_TTL};
-            let ttl = ttl_secs
-                .map_or(DEFAULT_PREAUTH_TTL, std::time::Duration::from_secs);
+            let ttl = ttl_secs.map_or(DEFAULT_PREAUTH_TTL, std::time::Duration::from_secs);
             let minter = PreauthMinter::new();
             let pk = minter.mint(&user, ttl, reusable);
             // Single-line stdout output so the harness can capture
@@ -670,9 +669,7 @@ async fn run_mesh_serve(
             tls.cert_path.display(),
             tls.key_path.display()
         );
-        eprintln!(
-            "mesh serve: trust the cert in peer containers with `update-ca-certificates`"
-        );
+        eprintln!("mesh serve: trust the cert in peer containers with `update-ca-certificates`");
     }
     eprintln!("mesh serve: HTTP listening on {http_addr}");
 
@@ -726,9 +723,7 @@ fn load_knock_cfg_from_env() -> octravpn_mesh::tailscale_wire::KnockConfig {
     let psk = match octravpn_mesh::knock::decode_psk(raw.trim()) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!(
-                "mesh serve: OCTRAVPN_KNOCK_PSK decode failed ({e}); knock layer DISABLED"
-            );
+            eprintln!("mesh serve: OCTRAVPN_KNOCK_PSK decode failed ({e}); knock layer DISABLED");
             return octravpn_mesh::tailscale_wire::KnockConfig::disabled();
         }
     };
@@ -804,8 +799,7 @@ fn run_unseal_keys(
     // Refuse to write plaintext anywhere that's not a memory-volatile
     // mount. This is best-effort but it catches the obvious mistake of
     // pointing the dir at $HOME.
-    std::fs::create_dir_all(tmpdir)
-        .with_context(|| format!("mkdir {}", tmpdir.display()))?;
+    std::fs::create_dir_all(tmpdir).with_context(|| format!("mkdir {}", tmpdir.display()))?;
     seal::check_tmpfs(tmpdir)?;
     let mut pp = seal::resolve_passphrase(explicit, file, from_stdin)?;
     let sealed_targets = seal::targets_from_config(cfg);
@@ -1005,8 +999,8 @@ listen = "0.0.0.0:51821"
         run_seal_keys(&cfg, Some("pw"), None, false, false).unwrap();
         // Use the system tmpdir which is /tmp on macOS (check_tmpfs ok)
         // and tmpfs on most Linux CI containers.
-        let recovery_dir =
-            PathBuf::from(std::env::temp_dir()).join(format!("octravpn-test-{}", std::process::id()));
+        let recovery_dir = PathBuf::from(std::env::temp_dir())
+            .join(format!("octravpn-test-{}", std::process::id()));
         let r = run_unseal_keys(&cfg, &recovery_dir, Some("pw"), None, false);
         if r.is_err() {
             // The check_tmpfs gate may refuse the path on this host;
@@ -1039,8 +1033,8 @@ listen = "0.0.0.0:51821"
         let cfg = NodeConfig::load(&toml_path).unwrap();
         run_seal_keys(&cfg, Some("right"), None, false, false).unwrap();
 
-        let recovery =
-            PathBuf::from(std::env::temp_dir()).join(format!("octravpn-unseal-bad-{}", std::process::id()));
+        let recovery = PathBuf::from(std::env::temp_dir())
+            .join(format!("octravpn-unseal-bad-{}", std::process::id()));
         let r = run_unseal_keys(&cfg, &recovery, Some("wrong"), None, false);
         assert!(r.is_err(), "wrong passphrase must fail unseal");
         let _ = std::fs::remove_dir_all(&recovery);
@@ -1230,12 +1224,8 @@ listen = "0.0.0.0:51821"
 
     #[test]
     fn cli_parses_receipt_verify_with_session_id() {
-        let cli = Cli::try_parse_from([
-            "octravpn-node",
-            "receipt-verify",
-            &"a".repeat(64),
-        ])
-        .unwrap();
+        let cli =
+            Cli::try_parse_from(["octravpn-node", "receipt-verify", &"a".repeat(64)]).unwrap();
         match cli.cmd {
             Cmd::ReceiptVerify(args) => {
                 assert_eq!(args.session_id, "a".repeat(64));

@@ -6,11 +6,11 @@
 use std::net::Ipv4Addr;
 use std::time::Instant;
 
+use octravpn_core::sig::KeyPair;
 use octravpn_mesh::{
     AclDoc, MagicDns, PeerCandidate, PeerSnapshot, SignedPeerSnapshot, TailnetIpAllocator,
     PEER_SNAPSHOT_MAX_AGE_SECS,
 };
-use octravpn_core::sig::KeyPair;
 use proptest::prelude::*;
 
 // ---------- DNS parser robustness ----------
@@ -207,7 +207,9 @@ fn arb_candidate() -> impl Strategy<Value = PeerCandidate> {
             format!("10.0.0.1:{}", u16::from(p) + 1).parse().unwrap()
         )),
         any::<u16>().prop_map(|p| PeerCandidate::Stun(
-            format!("203.0.113.4:{}", p.saturating_add(1)).parse().unwrap()
+            format!("203.0.113.4:{}", p.saturating_add(1))
+                .parse()
+                .unwrap()
         )),
         "[a-z0-9]{4,16}".prop_map(|v| PeerCandidate::Relay { validator_addr: v }),
     ]

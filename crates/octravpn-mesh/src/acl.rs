@@ -1025,10 +1025,7 @@ mod tests {
         let doc = doc_with_rule(&["*"], &["autogroup:internet"]);
         let s = NodeView::new("100.64.0.1");
         let d = NodeView::new("8.8.8.8");
-        assert_eq!(
-            doc.evaluate_with(&s, &d, PortRef::any()),
-            AclAction::Accept
-        );
+        assert_eq!(doc.evaluate_with(&s, &d, PortRef::any()), AclAction::Accept);
     }
 
     #[test]
@@ -1036,10 +1033,7 @@ mod tests {
         let doc = doc_with_rule(&["autogroup:member"], &["*"]);
         let s = NodeView::new("100.64.0.1");
         let d = NodeView::new("100.64.0.2");
-        assert_eq!(
-            doc.evaluate_with(&s, &d, PortRef::any()),
-            AclAction::Accept
-        );
+        assert_eq!(doc.evaluate_with(&s, &d, PortRef::any()), AclAction::Accept);
     }
 
     #[test]
@@ -1130,14 +1124,8 @@ mod tests {
             user: Some("bob"),
             tags: &[],
         };
-        assert_eq!(
-            doc.evaluate_with(&s, &d, PortRef::any()),
-            AclAction::Accept
-        );
-        assert_eq!(
-            doc.evaluate_with(&s, &s2, PortRef::any()),
-            AclAction::Deny
-        );
+        assert_eq!(doc.evaluate_with(&s, &d, PortRef::any()), AclAction::Accept);
+        assert_eq!(doc.evaluate_with(&s, &s2, PortRef::any()), AclAction::Deny);
     }
 
     // --- New tests: bare tag: prefix on principals --------------------
@@ -1181,8 +1169,10 @@ mod tests {
     #[test]
     fn ipset_alias_matches_any_member_cidr() {
         let mut doc = doc_with_rule(&["*"], &["ipset:office"]);
-        doc.ipsets
-            .insert("office".into(), vec!["10.0.0.0/8".into(), "192.168.0.0/16".into()]);
+        doc.ipsets.insert(
+            "office".into(),
+            vec!["10.0.0.0/8".into(), "192.168.0.0/16".into()],
+        );
         let s = NodeView::new("100.64.0.1");
         let in1 = NodeView::new("10.1.2.3");
         let in2 = NodeView::new("192.168.4.5");
@@ -1195,10 +1185,7 @@ mod tests {
             doc.evaluate_with(&s, &in2, PortRef::any()),
             AclAction::Accept
         );
-        assert_eq!(
-            doc.evaluate_with(&s, &out, PortRef::any()),
-            AclAction::Deny
-        );
+        assert_eq!(doc.evaluate_with(&s, &out, PortRef::any()), AclAction::Deny);
     }
 
     #[test]
@@ -1516,14 +1503,18 @@ mod tests {
             version: 1,
             ..Default::default()
         };
-        a.ipsets
-            .insert("o".into(), vec!["10.0.0.0/8".into(), "192.168.0.0/16".into()]);
+        a.ipsets.insert(
+            "o".into(),
+            vec!["10.0.0.0/8".into(), "192.168.0.0/16".into()],
+        );
         let mut b = AclDoc {
             version: 1,
             ..Default::default()
         };
-        b.ipsets
-            .insert("o".into(), vec!["192.168.0.0/16".into(), "10.0.0.0/8".into()]);
+        b.ipsets.insert(
+            "o".into(),
+            vec!["192.168.0.0/16".into(), "10.0.0.0/8".into()],
+        );
         // Same set, different declared order ⇒ same canonical hash.
         assert_eq!(a.policy_hash(), b.policy_hash());
     }
@@ -1587,8 +1578,7 @@ mod tests {
     #[test]
     fn evaluate_with_group_referring_to_user_matches() {
         let mut doc = doc_with_rule(&["group:admins"], &["*"]);
-        doc.groups
-            .insert("admins".into(), vec!["alice".into()]);
+        doc.groups.insert("admins".into(), vec!["alice".into()]);
         let alice = NodeView {
             addr: None,
             user: Some("alice"),

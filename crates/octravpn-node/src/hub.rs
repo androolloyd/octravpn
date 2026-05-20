@@ -24,7 +24,7 @@ use crate::{
     },
     chain_v3::ChainCtxV3,
     config::{NodeConfig, ProtocolVersion},
-    control::{serve as control_serve, ControlState},
+    control::{serve as control_serve, ControlState, SessionAdmissionVerifier},
     onion::OnionRouter,
     tunnel::Server,
     v3_boot::{run_v3_boot, V3BootInputs},
@@ -150,9 +150,8 @@ impl Hub {
             .clone()
             .map_or_else(|| "./state/receipts.bin".into(), std::path::PathBuf::from);
         let receipt_journal = Arc::new(
-            octravpn_core::receipt_journal::ReceiptJournal::open(&journal_path).with_context(
-                || format!("open receipt journal at {}", journal_path.display()),
-            )?,
+            octravpn_core::receipt_journal::ReceiptJournal::open(&journal_path)
+                .with_context(|| format!("open receipt journal at {}", journal_path.display()))?,
         );
 
         Ok(Self {
@@ -204,9 +203,7 @@ impl Hub {
             if let Some(cid) = self.cfg.chain.circle_id.as_deref() {
                 println!("v3 circle id     = {cid}");
             } else {
-                println!(
-                    "v3 circle id     = <missing — set [chain].circle_id in node.toml>"
-                );
+                println!("v3 circle id     = <missing — set [chain].circle_id in node.toml>");
             }
             let p = crate::v3_boot::v3_state_path(&self.cfg);
             match crate::chain_v3::CircleV3State::load(&p) {
@@ -222,9 +219,7 @@ impl Hub {
                     }
                 }
                 Ok(None) => {
-                    println!(
-                        "v3 boot state    = <not yet computed; run `octravpn-node register`>"
-                    );
+                    println!("v3 boot state    = <not yet computed; run `octravpn-node register`>");
                 }
                 Err(e) => {
                     println!("v3 boot state    = <error reading {}: {e}>", p.display());
@@ -251,12 +246,13 @@ impl Hub {
                     }
                 }
                 Ok(None) => {
-                    println!(
-                        "v2 circle id     = <not yet derived; run `octravpn-node register`>"
-                    );
+                    println!("v2 circle id     = <not yet derived; run `octravpn-node register`>");
                 }
                 Err(e) => {
-                    println!("v2 circle state  = <error reading {}: {e}>", state_path.display());
+                    println!(
+                        "v2 circle state  = <error reading {}: {e}>",
+                        state_path.display()
+                    );
                 }
             }
         }
@@ -740,9 +736,9 @@ impl Hub {
             ProtocolVersion::V1_1 => {
                 let nonce = self.chain.nonce().await?;
                 let fee = self.chain.fee("contract_call").await?;
-                let call =
-                    self.chain
-                        .build_settle_claim_call(session_id, bytes_used, fee, nonce);
+                let call = self
+                    .chain
+                    .build_settle_claim_call(session_id, bytes_used, fee, nonce);
                 let signed = self.chain.sign_call(call)?;
                 let hash = self.chain.submit_signed_tx(&signed).await?;
                 info!(%hash, session_id, bytes_used, "settle_claim (v1.1) submitted");
@@ -757,9 +753,9 @@ impl Hub {
                     .ok()
                     .filter(|f| *f > 0)
                     .unwrap_or(1_000);
-                let call =
-                    self.chain_v2
-                        .build_settle_claim_call(session_id, bytes_used, fee, nonce);
+                let call = self
+                    .chain_v2
+                    .build_settle_claim_call(session_id, bytes_used, fee, nonce);
                 let signed = self.chain_v2.sign_call(call)?;
                 let hash = self.chain_v2.submit_signed_tx(&signed).await?;
                 info!(%hash, session_id, bytes_used, "settle_claim (v2) submitted");
@@ -768,9 +764,9 @@ impl Hub {
             ProtocolVersion::V3 => {
                 let nonce = self.chain_v3.nonce().await?;
                 let fee = self.chain_v3.fee_or_fallback("contract_call").await;
-                let call =
-                    self.chain_v3
-                        .build_settle_claim_call(session_id, bytes_used, fee, nonce);
+                let call = self
+                    .chain_v3
+                    .build_settle_claim_call(session_id, bytes_used, fee, nonce);
                 let signed = self.chain_v3.sign_call(call)?;
                 let hash = self.chain_v3.submit_signed_tx(&signed).await?;
                 info!(%hash, session_id, bytes_used, "settle_claim (v3) submitted");
@@ -1035,6 +1031,7 @@ impl Hub {
             .with_events_token(self.cfg.control.events_token.clone())
             .with_metrics_token(self.cfg.control.metrics_token.clone())
             .with_admin_token(admin_token)
+            .with_session_verifier(SessionAdmissionVerifier::new(self.chain.rpc.clone()))
             .with_wire_state(wire_state.as_ref().map(|(ws, _)| ws.clone()));
             // If the wire surface is enabled, swap the auto-constructed
             // preauth minter for the one shared with the wire router so
@@ -1054,24 +1051,22 @@ impl Hub {
             // indexer + bind it to the audit-log live tap so new
             // events fan out into the in-memory time-buckets.
             let analytics_tap = if self.cfg.analytics.enabled {
-                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<
-                    octravpn_analytics::AnalyticsEvent,
-                >();
+                let (tx, mut rx) =
+                    tokio::sync::mpsc::unbounded_channel::<octravpn_analytics::AnalyticsEvent>();
                 let indexer = octravpn_analytics::Indexer::new();
                 // Boot-time backfill: replay everything already on
                 // disk so the dashboards have history immediately.
                 // Errors are non-fatal — a missing audit dir on first
                 // boot is normal.
                 match octravpn_analytics::load_audit_key(std::path::Path::new(&audit_dir)) {
-                    Ok(key) => match indexer
-                        .ingest_audit_dir(&key, std::path::Path::new(&audit_dir))
-                    {
-                        Ok(scans) => info!(
-                            files = scans.len(),
-                            "analytics: replayed audit log at boot"
-                        ),
-                        Err(e) => warn!(error = %e, "analytics: audit replay failed"),
-                    },
+                    Ok(key) => {
+                        match indexer.ingest_audit_dir(&key, std::path::Path::new(&audit_dir)) {
+                            Ok(scans) => {
+                                info!(files = scans.len(), "analytics: replayed audit log at boot")
+                            }
+                            Err(e) => warn!(error = %e, "analytics: audit replay failed"),
+                        }
+                    }
                     Err(e) => warn!(error = %e, "analytics: no audit key (cold start)"),
                 }
                 // Live stream: drain the unbounded channel into the
@@ -1090,8 +1085,7 @@ impl Hub {
                 let listen_addr = self.cfg.analytics.listen_addr.clone();
                 let listen_for_log = listen_addr.clone();
                 tokio::spawn(async move {
-                    if let Err(e) =
-                        octravpn_analytics::serve(&listen_addr, http_state, None).await
+                    if let Err(e) = octravpn_analytics::serve(&listen_addr, http_state, None).await
                     {
                         warn!(error = %e, "analytics: http server stopped");
                     }
@@ -1240,12 +1234,9 @@ fn validate_obfs4_config(cfg: &crate::config::NodeConfig) -> Result<()> {
     if cfg.tun.transport.kind != TransportKind::Obfs4 {
         return Ok(());
     }
-    let o: &Obfs4Cfg = cfg
-        .tun
-        .transport
-        .obfs4
-        .as_ref()
-        .ok_or_else(|| anyhow!("[tun.transport].kind = \"obfs4\" but [tun.transport.obfs4] missing"))?;
+    let o: &Obfs4Cfg = cfg.tun.transport.obfs4.as_ref().ok_or_else(|| {
+        anyhow!("[tun.transport].kind = \"obfs4\" but [tun.transport.obfs4] missing")
+    })?;
 
     let node_id_bytes =
         ::hex::decode(&o.bridge_node_id).context("[tun.transport.obfs4].bridge_node_id hex")?;
@@ -1319,9 +1310,7 @@ fn read_secret_32(path: &str) -> Result<[u8; 32]> {
 /// `CoreError::PlaintextKeyOnDisk` — anyhow renders the suggested
 /// `octravpn-node seal-keys` invocation into the error message so the
 /// operator sees a copy-pasteable next step. Threat model: P1-6.
-fn read_secret_32_strict(
-    path: &str,
-) -> Result<zeroize::Zeroizing<[u8; 32]>> {
+fn read_secret_32_strict(path: &str) -> Result<zeroize::Zeroizing<[u8; 32]>> {
     octravpn_core::util::read_secret_32_or_sealed(path, None)
         .with_context(|| format!("strict-load secret {path}"))
 }
@@ -1351,14 +1340,16 @@ fn wallet_view_pubkey(wallet_secret: &[u8; 32]) -> [u8; 32] {
 /// CA-compromise MITM on the chain endpoint. P0-2 from the v2 threat
 /// model.
 fn build_rpc(chain: &crate::config::ChainCfg) -> Result<RpcClient> {
-    let paths = chain.pinned_root_paths.as_ref().map_or(&[][..], Vec::as_slice);
+    let paths = chain
+        .pinned_root_paths
+        .as_ref()
+        .map_or(&[][..], Vec::as_slice);
     if paths.is_empty() {
         return Ok(RpcClient::new(&chain.rpc_url));
     }
     let mut blobs = Vec::with_capacity(paths.len());
     for p in paths {
-        let pem = std::fs::read(p)
-            .with_context(|| format!("read pinned root {p}"))?;
+        let pem = std::fs::read(p).with_context(|| format!("read pinned root {p}"))?;
         blobs.push(pem);
     }
     RpcClient::new_with_pinned_roots(&chain.rpc_url, &blobs)

@@ -40,6 +40,10 @@ pvac-sidecar/octra-pvac-sidecar
 # every bringup).
 /demo/.mesh-state/
 
+# Generated demo FHE private keys. Public keys and sample node configs
+# may be tracked; private ceremony output must stay local.
+/docker/conf/node*/fhe.sk
+
 # Bench snapshots are committed (see docs/performance-limitations.md §7).
 # `target/criterion/` (under the already-ignored `/target`) holds
 # per-run criterion output; only the curated JSON under

@@ -37,19 +37,19 @@ use futures_util::StreamExt;
 use octravpn_core::{
     bounded::BoundedMap,
     control::{
-        AnnounceSessionRequest, AnnounceSessionResponse, ProposedReceipt, SessionStateResponse,
+        announce_signing_payload, AnnounceSessionRequest, AnnounceSessionResponse, ProposedReceipt,
+        SessionStateResponse,
     },
     receipt::{Receipt, ReceiptContext},
     receipt_journal::ReceiptJournal,
+    rpc::RpcClient,
     session::SessionId,
-    sig::KeyPair,
+    sig::{verify, KeyPair},
 };
-use octravpn_mesh::{
-    tailscale_wire_router, PreauthMinter, WireState, DEFAULT_PREAUTH_TTL,
-};
+use octravpn_mesh::{tailscale_wire_router, PreauthMinter, WireState, DEFAULT_PREAUTH_TTL};
 use serde::{Deserialize, Serialize};
 use tokio_stream::wrappers::BroadcastStream;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::{events::EventBus, onion::OnionRouter};
 
@@ -134,6 +134,50 @@ pub(crate) struct ControlState {
     /// the layer is omitted from the router entirely (no per-request
     /// overhead). See `crate::rate_limit`.
     pub rate_limit_cfg: crate::rate_limit::RateLimitCfg,
+    /// Optional chain-backed verifier for `POST /session`. Tests can
+    /// leave this unset and still exercise signature validation; hub
+    /// startup wires it so production announces must point at a
+    /// transaction that emitted `SessionOpened(session_id)`.
+    pub session_verifier: Option<SessionAdmissionVerifier>,
+}
+
+#[derive(Clone)]
+pub(crate) struct SessionAdmissionVerifier {
+    rpc: RpcClient,
+}
+
+impl SessionAdmissionVerifier {
+    pub(crate) fn new(rpc: RpcClient) -> Self {
+        Self { rpc }
+    }
+
+    pub(crate) async fn session_opened(
+        &self,
+        req: &AnnounceSessionRequest,
+    ) -> octravpn_core::CoreResult<bool> {
+        let tx = self.rpc.transaction(&req.open_tx_hash).await?;
+        Ok(transaction_has_session_opened(&tx, &req.session_id))
+    }
+}
+
+fn transaction_has_session_opened(tx: &serde_json::Value, session_id: &SessionId) -> bool {
+    let Some(events) = tx.get("events").and_then(|v| v.as_array()) else {
+        return false;
+    };
+    events.iter().any(|event| {
+        event.get("name").and_then(|v| v.as_str()) == Some("SessionOpened")
+            && event_session_id(event)
+                .as_ref()
+                .is_some_and(|event_id| event_id == session_id)
+    })
+}
+
+fn event_session_id(event: &serde_json::Value) -> Option<SessionId> {
+    let sid = event.get("session_id")?;
+    if let Some(id_u64) = sid.as_u64() {
+        return Some(SessionId::from_u64(id_u64));
+    }
+    SessionId::from_hex(sid.as_str()?)
 }
 
 /// Lightweight counters exposed via the /metrics endpoint. Kept as
@@ -225,7 +269,8 @@ impl NodeMetrics {
     /// the success counter; `success=false` bumps the fail counter.
     pub(crate) fn record_wg_handshake(&self, success: bool) {
         if success {
-            self.wg_handshake_success_total.fetch_add(1, Ordering::Relaxed);
+            self.wg_handshake_success_total
+                .fetch_add(1, Ordering::Relaxed);
         } else {
             self.wg_handshake_fail_total.fetch_add(1, Ordering::Relaxed);
         }
@@ -324,6 +369,7 @@ impl ControlState {
             admin_token: None,
             wire_state: None,
             rate_limit_cfg: crate::rate_limit::RateLimitCfg::default(),
+            session_verifier: None,
         }
     }
 
@@ -331,11 +377,13 @@ impl ControlState {
     /// production profile in `crate::rate_limit`). Hub wires this from
     /// `[control.rate_limit]` in `node.toml`; tests use the default.
     #[allow(dead_code)]
-    pub(crate) fn with_rate_limit_cfg(
-        mut self,
-        cfg: crate::rate_limit::RateLimitCfg,
-    ) -> Self {
+    pub(crate) fn with_rate_limit_cfg(mut self, cfg: crate::rate_limit::RateLimitCfg) -> Self {
         self.rate_limit_cfg = cfg;
+        self
+    }
+
+    pub(crate) fn with_session_verifier(mut self, verifier: SessionAdmissionVerifier) -> Self {
+        self.session_verifier = Some(verifier);
         self
     }
 
@@ -403,8 +451,7 @@ impl ControlState {
             // wire protocol behind `/key` + `/machine/{node_key}/…`.
             .route("/admin/preauth", post(mint_preauth));
         let limited = if self.rate_limit_cfg.enabled {
-            let rate_limiter =
-                crate::rate_limit::RateLimiter::from_cfg(&self.rate_limit_cfg);
+            let rate_limiter = crate::rate_limit::RateLimiter::from_cfg(&self.rate_limit_cfg);
             limited_routes
                 .layer(middleware::from_fn_with_state(
                     rate_limiter,
@@ -494,12 +541,47 @@ async fn announce(
     State(s): State<Arc<ControlState>>,
     Json(req): Json<AnnounceSessionRequest>,
 ) -> impl IntoResponse {
+    let payload = announce_signing_payload(
+        &req.session_id,
+        &req.client_pubkey,
+        &req.client_wg_pubkey,
+        &req.open_tx_hash,
+    );
+    if verify(&req.client_pubkey, &payload, &req.client_sig).is_err() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ApiError::new("bad announce signature")),
+        )
+            .into_response();
+    }
+    if let Some(verifier) = &s.session_verifier {
+        match verifier.session_opened(&req).await {
+            Ok(true) => {}
+            Ok(false) => {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(ApiError::new("session open transaction not found")),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                warn!(error = %e, "session admission verifier failed");
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(ApiError::new("session admission verifier unavailable")),
+                )
+                    .into_response();
+            }
+        }
+    }
     s.metrics.announces_total.fetch_add(1, Ordering::Relaxed);
     // `session_opens_total` mirrors `announces_total` today (every
     // accepted announce opens a session) but is kept as a separate
     // counter so a future "rejected announce" path can split the two
     // without breaking the dashboard query.
-    s.metrics.session_opens_total.fetch_add(1, Ordering::Relaxed);
+    s.metrics
+        .session_opens_total
+        .fetch_add(1, Ordering::Relaxed);
     let session_id_hex = req.session_id.to_hex();
     s.sessions.insert(
         req.session_id,
@@ -847,7 +929,9 @@ async fn get_state(
         tracing::warn!(error = %e, session = %id_hex, "receipt journal bump rejected; refusing to sign");
         return (
             StatusCode::CONFLICT,
-            Json(ApiError::new("receipt seq floor violation; refusing to sign")),
+            Json(ApiError::new(
+                "receipt seq floor violation; refusing to sign",
+            )),
         )
             .into_response();
     }
@@ -993,7 +1077,9 @@ async fn mint_preauth(
     // doesn't double-count when the bridge eventually wires its own
     // MetricsSink — the MetricsSink path is currently disabled at the
     // PreauthMinter constructor for control-plane-minted keys.
-    s.metrics.preauth_mints_total.fetch_add(1, Ordering::Relaxed);
+    s.metrics
+        .preauth_mints_total
+        .fetch_add(1, Ordering::Relaxed);
     Json(MintPreauthResponse {
         key: pk.key,
         user: pk.user,
@@ -1007,7 +1093,76 @@ async fn mint_preauth(
 mod tests {
     use super::*;
     use axum::http::HeaderValue;
-    use octravpn_core::{control::AnnounceSessionRequest, sig::verify};
+    use octravpn_core::{
+        control::{announce_signing_payload, AnnounceSessionRequest},
+        sig::verify,
+    };
+
+    fn signed_announce(
+        session_id: SessionId,
+        client_kp: &KeyPair,
+        client_wg_pubkey: [u8; 32],
+    ) -> AnnounceSessionRequest {
+        let open_tx_hash = "test-open-tx".to_string();
+        let client_sig = client_kp.sign(&announce_signing_payload(
+            &session_id,
+            &client_kp.public,
+            &client_wg_pubkey,
+            &open_tx_hash,
+        ));
+        AnnounceSessionRequest {
+            session_id,
+            client_pubkey: client_kp.public,
+            client_wg_pubkey,
+            open_tx_hash,
+            client_sig,
+        }
+    }
+
+    #[test]
+    fn transaction_open_event_matches_u64_and_hex_session_ids() {
+        let id_u64 = SessionId::from_u64(42);
+        let tx = serde_json::json!({
+            "events": [
+                {"name": "Other", "session_id": 42},
+                {"name": "SessionOpened", "session_id": 42}
+            ]
+        });
+        assert!(transaction_has_session_opened(&tx, &id_u64));
+
+        let id_hex = SessionId::new([0xAB; 32]);
+        let tx = serde_json::json!({
+            "events": [
+                {"name": "SessionOpened", "session_id": id_hex.to_hex()}
+            ]
+        });
+        assert!(transaction_has_session_opened(&tx, &id_hex));
+        assert!(!transaction_has_session_opened(
+            &tx,
+            &SessionId::new([0xCD; 32])
+        ));
+    }
+
+    #[tokio::test]
+    async fn announce_rejects_bad_client_signature_without_side_effects() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let client_kp = KeyPair::generate();
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let state = Arc::new(ControlState::new(node_kp, router, allowlist));
+        let id = SessionId::new([0x41u8; 32]);
+        let mut req = signed_announce(id.clone(), &client_kp, [9u8; 32]);
+        req.client_sig.0[0] ^= 1;
+
+        let resp = announce(State(state.clone()), Json(req))
+            .await
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert!(!state.sessions.contains_key(&id));
+        assert_eq!(state.allowlist.len(), 0);
+        assert_eq!(state.metrics.announces_total.load(Ordering::Relaxed), 0);
+        assert_eq!(state.metrics.session_opens_total.load(Ordering::Relaxed), 0);
+    }
 
     /// `/events` returns 404 when no token is configured, even if the
     /// caller supplies an `Authorization: Bearer …` header (the
@@ -1142,11 +1297,7 @@ mod tests {
 
         announce(
             State(state.clone()),
-            Json(AnnounceSessionRequest {
-                session_id: id.clone(),
-                client_pubkey: client_kp.public,
-                client_wg_pubkey: [9u8; 32],
-            }),
+            Json(signed_announce(id.clone(), &client_kp, [9u8; 32])),
         )
         .await;
 
@@ -1191,11 +1342,7 @@ mod tests {
 
         announce(
             State(state.clone()),
-            Json(AnnounceSessionRequest {
-                session_id: id.clone(),
-                client_pubkey: client_kp.public,
-                client_wg_pubkey: [9u8; 32],
-            }),
+            Json(signed_announce(id.clone(), &client_kp, [9u8; 32])),
         )
         .await;
 
@@ -1224,9 +1371,8 @@ mod tests {
         // process restart.
         let dir = tempfile::tempdir().unwrap();
         let journal_path = dir.path().join("receipts.bin");
-        let journal = Arc::new(
-            octravpn_core::receipt_journal::ReceiptJournal::open(&journal_path).unwrap(),
-        );
+        let journal =
+            Arc::new(octravpn_core::receipt_journal::ReceiptJournal::open(&journal_path).unwrap());
         let metrics = Arc::new(NodeMetrics::default());
         metrics
             .started_at_unix
@@ -1253,11 +1399,7 @@ mod tests {
         // Sign three receipts (seq 1, 2, 3).
         announce(
             State(state.clone()),
-            Json(AnnounceSessionRequest {
-                session_id: id.clone(),
-                client_pubkey: client_kp.public,
-                client_wg_pubkey: [9u8; 32],
-            }),
+            Json(signed_announce(id.clone(), &client_kp, [9u8; 32])),
         )
         .await;
         for expected_seq in 1..=3_u64 {
@@ -1273,9 +1415,8 @@ mod tests {
         // in-memory BoundedMap of sessions), then reopen the journal
         // from disk into a fresh state.
         drop(state);
-        let journal2 = Arc::new(
-            octravpn_core::receipt_journal::ReceiptJournal::open(&journal_path).unwrap(),
-        );
+        let journal2 =
+            Arc::new(octravpn_core::receipt_journal::ReceiptJournal::open(&journal_path).unwrap());
         assert_eq!(
             journal2.floor(&id),
             3,
@@ -1290,11 +1431,7 @@ mod tests {
         // scenario that used to let an attacker double-sign.
         announce(
             State(state2.clone()),
-            Json(AnnounceSessionRequest {
-                session_id: id.clone(),
-                client_pubkey: client_kp.public,
-                client_wg_pubkey: [9u8; 32],
-            }),
+            Json(signed_announce(id.clone(), &client_kp, [9u8; 32])),
         )
         .await;
         // get_state must skip past the journal floor to seq=4, NOT
@@ -1343,8 +1480,7 @@ mod tests {
         let router = Arc::new(OnionRouter::new());
         let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
         let state = Arc::new(
-            ControlState::new(node_kp, router, allowlist)
-                .with_admin_token(Some("secret".into())),
+            ControlState::new(node_kp, router, allowlist).with_admin_token(Some("secret".into())),
         );
 
         // Missing → 404.
@@ -1386,10 +1522,7 @@ mod tests {
             assert_eq!(resp.status(), StatusCode::OK);
             let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
             let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-            assert!(v["key"]
-                .as_str()
-                .unwrap()
-                .starts_with("octrapreauth-"));
+            assert!(v["key"].as_str().unwrap().starts_with("octrapreauth-"));
             assert_eq!(v["user"].as_str().unwrap(), "alice");
             assert!(!v["reusable"].as_bool().unwrap());
         }
@@ -1417,11 +1550,11 @@ mod tests {
         let before = state.metrics.session_opens_total.load(Ordering::Relaxed);
         announce(
             State(state.clone()),
-            Json(AnnounceSessionRequest {
-                session_id: SessionId::new([7u8; 32]),
-                client_pubkey: client_kp.public,
-                client_wg_pubkey: [9u8; 32],
-            }),
+            Json(signed_announce(
+                SessionId::new([7u8; 32]),
+                &client_kp,
+                [9u8; 32],
+            )),
         )
         .await;
         let after = state.metrics.session_opens_total.load(Ordering::Relaxed);
@@ -1439,8 +1572,7 @@ mod tests {
         let router = Arc::new(OnionRouter::new());
         let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
         let state = Arc::new(
-            ControlState::new(node_kp, router, allowlist)
-                .with_admin_token(Some("secret".into())),
+            ControlState::new(node_kp, router, allowlist).with_admin_token(Some("secret".into())),
         );
         let before = state.metrics.preauth_mints_total.load(Ordering::Relaxed);
         let mut headers = axum::http::HeaderMap::new();
@@ -1550,11 +1682,7 @@ mod tests {
         let id = SessionId::new([0x55u8; 32]);
         announce(
             State(state.clone()),
-            Json(AnnounceSessionRequest {
-                session_id: id.clone(),
-                client_pubkey: client_kp.public,
-                client_wg_pubkey: [9u8; 32],
-            }),
+            Json(signed_announce(id.clone(), &client_kp, [9u8; 32])),
         )
         .await;
         let lookups_before = state.metrics.state_lookups_total.load(Ordering::Relaxed);
@@ -1629,17 +1757,11 @@ mod tests {
         let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
         let dir = tempfile::tempdir().unwrap();
         let audit = crate::audit::AuditLog::open(dir.path()).unwrap();
-        let state = Arc::new(
-            ControlState::new(node_kp, router, allowlist).with_audit(audit),
-        );
+        let state = Arc::new(ControlState::new(node_kp, router, allowlist).with_audit(audit));
         let id = SessionId::new([0x66u8; 32]);
         announce(
             State(state.clone()),
-            Json(AnnounceSessionRequest {
-                session_id: id.clone(),
-                client_pubkey: client_kp.public,
-                client_wg_pubkey: [9u8; 32],
-            }),
+            Json(signed_announce(id.clone(), &client_kp, [9u8; 32])),
         )
         .await;
         let _ = get_state(State(state.clone()), Path(id.to_hex()))

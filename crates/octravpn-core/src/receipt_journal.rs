@@ -377,10 +377,7 @@ impl ReceiptJournal {
     /// The lock is held only long enough to clone the in-memory map.
     pub fn entries(&self) -> Vec<(SessionId, u64)> {
         let g = self.inner.lock();
-        g.by_session
-            .iter()
-            .map(|(k, v)| (k.clone(), *v))
-            .collect()
+        g.by_session.iter().map(|(k, v)| (k.clone(), *v)).collect()
     }
 
     /// Commit `new_seq` as the new floor for `session_id`. The write
@@ -436,9 +433,8 @@ impl ReceiptJournal {
         // keeps the bump hot-path O(1) — only the brief snapshot
         // clone (step 1) and the bounded swap (step 3) ever touch the
         // journal lock.
-        let needs_compaction = g.path.is_some()
-            && !g.compaction_inflight
-            && g.file_size > g.compaction_watermark;
+        let needs_compaction =
+            g.path.is_some() && !g.compaction_inflight && g.file_size > g.compaction_watermark;
         if needs_compaction {
             // Inside-lock: take the snapshot + mark inflight. The
             // tokio task that actually writes the snapshot is spawned
@@ -460,10 +456,9 @@ impl ReceiptJournal {
                     // the spawned task runs to completion. The
                     // `compaction_inflight` flag is cleared by the
                     // task's swap-phase regardless of outcome.
-                    let handle: JoinHandle<()> =
-                        tokio::task::spawn_blocking(move || {
-                            let _ = compact_async_worker(&inner, &snapshot, &path);
-                        });
+                    let handle: JoinHandle<()> = tokio::task::spawn_blocking(move || {
+                        let _ = compact_async_worker(&inner, &snapshot, &path);
+                    });
                     drop(handle);
                 }
                 Err(_) => {
@@ -684,10 +679,7 @@ fn compacting_tempfile_path(journal_path: &Path) -> PathBuf {
 /// rename — the caller does that). Used by the async compaction
 /// worker, which needs to write to a deterministic sibling path so
 /// `open()` can detect orphans after a crash.
-fn write_v1_snapshot_at(
-    dest: &Path,
-    by_session: &BTreeMap<SessionId, u64>,
-) -> std::io::Result<()> {
+fn write_v1_snapshot_at(dest: &Path, by_session: &BTreeMap<SessionId, u64>) -> std::io::Result<()> {
     // Create / truncate, then write the snapshot.
     let mut handle = OpenOptions::new()
         .create(true)
@@ -834,8 +826,9 @@ fn write_v1_snapshot(dest: &Path, by_session: &BTreeMap<SessionId, u64>) -> std:
         }
         handle.sync_all()?;
     }
-    tmp.persist(dest)
-        .map_err(|e| std::io::Error::other(format!("persist tempfile to {}: {e}", dest.display())))?;
+    tmp.persist(dest).map_err(|e| {
+        std::io::Error::other(format!("persist tempfile to {}: {e}", dest.display()))
+    })?;
     if let Some(parent) = parent {
         if let Ok(dir) = fs::File::open(parent) {
             let _ = dir.sync_all();
@@ -867,8 +860,9 @@ fn ensure_v1_header(path: &Path) -> std::io::Result<()> {
         handle.write_all(MAGIC_V1)?;
         handle.sync_all()?;
     }
-    tmp.persist(path)
-        .map_err(|e| std::io::Error::other(format!("persist v1 header to {}: {e}", path.display())))?;
+    tmp.persist(path).map_err(|e| {
+        std::io::Error::other(format!("persist v1 header to {}: {e}", path.display()))
+    })?;
     if let Some(parent) = parent {
         if let Ok(dir) = fs::File::open(parent) {
             let _ = dir.sync_all();
@@ -887,7 +881,11 @@ fn crc32_ieee(bytes: &[u8]) -> u32 {
         for (i, slot) in t.iter_mut().enumerate() {
             let mut c = i as u32;
             for _ in 0..8 {
-                c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
+                c = if c & 1 != 0 {
+                    0xEDB8_8320 ^ (c >> 1)
+                } else {
+                    c >> 1
+                };
             }
             *slot = c;
         }
@@ -1387,10 +1385,7 @@ mod tests {
         // state must still reflect the original two bumps (the
         // tempfile contents must NOT have been promoted).
         let r = ReceiptJournal::open(&path).unwrap();
-        assert!(
-            !tmp_path.exists(),
-            "open() must scrub orphan tempfile"
-        );
+        assert!(!tmp_path.exists(), "open() must scrub orphan tempfile");
         assert_eq!(r.floor(&id(0xAA)), 5);
         assert_eq!(r.floor(&id(0xBB)), 9, "both bumps must survive");
     }

@@ -84,10 +84,7 @@ async fn fetch_map(app: &axum::Router, node_hex: &str) -> MapResponse {
     serde_json::from_slice(&raw).expect("map response JSON decodes")
 }
 
-async fn put_policy(
-    app: &axum::Router,
-    body: &str,
-) -> (axum::http::StatusCode, serde_json::Value) {
+async fn put_policy(app: &axum::Router, body: &str) -> (axum::http::StatusCode, serde_json::Value) {
     let resp = app
         .clone()
         .oneshot(
@@ -103,8 +100,7 @@ async fn put_policy(
         .unwrap();
     let status = resp.status();
     let raw = to_bytes(resp.into_body(), 64 * 1024).await.unwrap();
-    let value: serde_json::Value =
-        serde_json::from_slice(&raw).unwrap_or(serde_json::Value::Null);
+    let value: serde_json::Value = serde_json::from_slice(&raw).unwrap_or(serde_json::Value::Null);
     (status, value)
 }
 
@@ -166,7 +162,11 @@ async fn policy_put_propagates_to_map_packet_filter() {
         ]
     }"#;
     let (status, body) = put_policy(&app, deny_all).await;
-    assert_eq!(status, axum::http::StatusCode::OK, "deny-all PUT ok: {body}");
+    assert_eq!(
+        status,
+        axum::http::StatusCode::OK,
+        "deny-all PUT ok: {body}"
+    );
     assert_eq!(body["applied"], serde_json::Value::Bool(true));
 
     let mr = fetch_map(&app, &a_hex).await;
@@ -186,7 +186,11 @@ async fn policy_put_propagates_to_map_packet_filter() {
         ]
     }"#;
     let (status, body) = put_policy(&app, allow_all).await;
-    assert_eq!(status, axum::http::StatusCode::OK, "allow-all PUT ok: {body}");
+    assert_eq!(
+        status,
+        axum::http::StatusCode::OK,
+        "allow-all PUT ok: {body}"
+    );
 
     let mr = fetch_map(&app, &a_hex).await;
     assert_eq!(mr.packet_filter.len(), 1, "allow-all ⇒ one wildcard rule");
@@ -213,7 +217,10 @@ async fn policy_put_rejects_invalid_hujson() {
         err_msg.contains("version") || err_msg.contains("missing"),
         "error should name the missing `version` field, got: {body}"
     );
-    assert!(!policy.is_loaded(), "rejected PUT must not mutate the store");
+    assert!(
+        !policy.is_loaded(),
+        "rejected PUT must not mutate the store"
+    );
 }
 
 #[tokio::test]

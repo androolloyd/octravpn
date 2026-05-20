@@ -105,8 +105,7 @@ impl AnalyticsEvent {
             .and_then(Value::as_str)
             .map(str::to_string);
         let extra = v.get("extra");
-        let extra_u64 =
-            |k: &str| extra.and_then(|e| e.get(k)).and_then(Value::as_u64);
+        let extra_u64 = |k: &str| extra.and_then(|e| e.get(k)).and_then(Value::as_u64);
 
         let ev = match kind {
             // Audit emits "announce" today for session announcements;
@@ -162,7 +161,10 @@ mod tests {
     fn announce_maps_to_session_open() {
         let j = r#"{"ts_unix":50,"kind":"announce","session_id":"s1","extra":null}"#;
         match AnalyticsEvent::from_audit_record_json(j).unwrap() {
-            AnalyticsEvent::SessionOpen { ts_unix, session_id } => {
+            AnalyticsEvent::SessionOpen {
+                ts_unix,
+                session_id,
+            } => {
                 assert_eq!(ts_unix, 50);
                 assert_eq!(session_id, "s1");
             }
@@ -181,10 +183,12 @@ mod tests {
 
     #[test]
     fn validator_health_prefix_is_lenient() {
-        for k in &["validator_health", "validator_health_ok", "validator_health_fail"] {
-            let j = format!(
-                r#"{{"ts_unix":1,"kind":"{k}","session_id":null,"extra":null}}"#
-            );
+        for k in &[
+            "validator_health",
+            "validator_health_ok",
+            "validator_health_fail",
+        ] {
+            let j = format!(r#"{{"ts_unix":1,"kind":"{k}","session_id":null,"extra":null}}"#);
             assert!(matches!(
                 AnalyticsEvent::from_audit_record_json(&j).unwrap(),
                 AnalyticsEvent::ValidatorHealthPing { .. }

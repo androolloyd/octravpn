@@ -126,8 +126,7 @@ impl FrameSealer {
 
         // Build the plaintext: [u16 BE real_len] [payload] [random pad].
         let pad_len = rand::thread_rng().gen_range(MIN_PAD_PLAINTEXT..=MAX_PAD_PLAINTEXT);
-        let mut plaintext =
-            Vec::with_capacity(INNER_LEN_BYTES + payload.len() + pad_len);
+        let mut plaintext = Vec::with_capacity(INNER_LEN_BYTES + payload.len() + pad_len);
         plaintext.extend_from_slice(&(payload.len() as u16).to_be_bytes());
         plaintext.extend_from_slice(payload);
         let pad_start = plaintext.len();
@@ -163,7 +162,6 @@ impl FrameSealer {
         out.extend_from_slice(&ciphertext);
         Ok(LEN_PREFIX_BYTES + total_len)
     }
-
 }
 
 /// Direction-tagged ChaCha20-Poly1305 opener.
@@ -195,8 +193,7 @@ impl FrameOpener {
                 need: LEN_PREFIX_BYTES,
             });
         }
-        let total_len =
-            u16::from_be_bytes([buf[0], buf[1]]) as usize;
+        let total_len = u16::from_be_bytes([buf[0], buf[1]]) as usize;
         let frame_end = LEN_PREFIX_BYTES + total_len;
         if buf.len() < frame_end {
             return Err(FrameError::Incomplete {
@@ -229,8 +226,7 @@ impl FrameOpener {
         if plaintext.len() < INNER_LEN_BYTES {
             return Err(FrameError::BadTag);
         }
-        let real_len =
-            u16::from_be_bytes([plaintext[0], plaintext[1]]) as usize;
+        let real_len = u16::from_be_bytes([plaintext[0], plaintext[1]]) as usize;
         if real_len > plaintext.len() - INNER_LEN_BYTES || real_len > MAX_PAYLOAD {
             return Err(FrameError::BadInnerLen {
                 claimed: real_len,
@@ -389,7 +385,10 @@ mod tests {
             sealer.seal_into(payload, &mut wire).unwrap();
             // Skip the 2-byte length prefix.
             let ct = wire[2..].to_vec();
-            assert!(seen.insert(ct), "counter {i} produced a duplicate ciphertext");
+            assert!(
+                seen.insert(ct),
+                "counter {i} produced a duplicate ciphertext"
+            );
         }
     }
 
@@ -408,7 +407,10 @@ mod tests {
         let _ = opener.open_from(&frames[0]).unwrap();
         // Now replay frame 0 (counter=0 ciphertext) against opener at
         // counter=1 → AEAD fails.
-        assert!(matches!(opener.open_from(&frames[0]), Err(FrameError::BadTag)));
+        assert!(matches!(
+            opener.open_from(&frames[0]),
+            Err(FrameError::BadTag)
+        ));
         // But frame 1 (counter=1) does open.
         assert!(opener.open_from(&frames[1]).is_ok());
     }

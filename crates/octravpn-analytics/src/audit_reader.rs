@@ -199,11 +199,7 @@ mod tests {
     /// Build a minimal audit file using the same format the node
     /// emits: one JSON object per line with `record_json`, `prev_mac`,
     /// `mac`.
-    fn write_audit_file(
-        path: &Path,
-        key: &[u8; 32],
-        records: &[&str],
-    ) {
+    fn write_audit_file(path: &Path, key: &[u8; 32], records: &[&str]) {
         use std::io::Write;
         let mut f = fs::File::create(path).unwrap();
         let mut prev_mac = [0u8; 32];
@@ -249,7 +245,11 @@ mod tests {
         // Verify with a DIFFERENT key — every MAC will mismatch.
         let scan = verify_file(&[0u8; 32], &path).unwrap();
         assert_eq!(scan.broke_at, Some(1));
-        assert!(scan.break_reason.as_deref().unwrap().contains("mac mismatch"));
+        assert!(scan
+            .break_reason
+            .as_deref()
+            .unwrap()
+            .contains("mac mismatch"));
         assert_eq!(scan.verified_lines, 0);
     }
 
@@ -271,7 +271,17 @@ mod tests {
         );
         let scans = scan_dir(&key, dir.path()).unwrap();
         assert_eq!(scans.len(), 2);
-        assert!(scans[0].path.file_name().unwrap().to_string_lossy().contains("01-01"));
-        assert!(scans[1].path.file_name().unwrap().to_string_lossy().contains("01-02"));
+        assert!(scans[0]
+            .path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .contains("01-01"));
+        assert!(scans[1]
+            .path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .contains("01-02"));
     }
 }

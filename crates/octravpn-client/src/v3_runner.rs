@@ -82,8 +82,7 @@ pub(crate) async fn connect_v3(
 
     // 1. Resolve the wallet (v3 lets us override `[wallet].secret_path`).
     let wallet_kp: KeyPair = if let Some(path) = v3.wallet_key_path.as_deref() {
-        wallet::load_keypair(path)
-            .with_context(|| format!("load [v3].wallet_key_path = {path}"))?
+        wallet::load_keypair(path).with_context(|| format!("load [v3].wallet_key_path = {path}"))?
     } else {
         // Reuse the keypair already loaded into the shared Client so
         // we don't re-read the secret file. Cheap clone via secret bytes.
@@ -162,13 +161,8 @@ pub(crate) async fn connect_v3(
     // 4. open_session(tailnet_id, circle, max_pay).
     let nonce = ctx.nonce().await?;
     let fee = ctx.fee_or_fallback("contract_call").await;
-    let open_call = ctx.build_open_session_call(
-        v3.tailnet_id,
-        &v3.circle_id,
-        v3.max_pay,
-        fee,
-        nonce,
-    );
+    let open_call =
+        ctx.build_open_session_call(v3.tailnet_id, &v3.circle_id, v3.max_pay, fee, nonce);
     let signed = ctx.sign_call(open_call)?;
     let tx_hash = ctx
         .submit_signed(&signed)
@@ -239,7 +233,10 @@ pub(crate) async fn run_settle_confirm(
     };
     let call = ctx.build_settle_confirm_call(&p);
     let signed = ctx.sign_call(call)?;
-    let tx_hash = ctx.submit_signed(&signed).await.context("submit settle_confirm")?;
+    let tx_hash = ctx
+        .submit_signed(&signed)
+        .await
+        .context("submit settle_confirm")?;
     info!(session_id, tx_hash = %tx_hash, "v3 settle_confirm submitted");
     println!("v3 session settled: id={session_id} net={net} bytes_used={bytes_used}");
     Ok(())
@@ -581,8 +578,7 @@ mod tests {
         // of the validator (e.g. operator serving a stale or rolled-back
         // state-root.json).
         let (sr_bytes2, _real_anchor, policy2) = matched_fixture(circle);
-        let bad_anchor =
-            "0000000000000000000000000000000000000000000000000000000000000000";
+        let bad_anchor = "0000000000000000000000000000000000000000000000000000000000000000";
         let err2 = check_policy_matches_anchor(circle, &policy2, &sr_bytes2, bad_anchor)
             .expect_err("mismatched anchor must error");
         assert!(
@@ -595,7 +591,9 @@ mod tests {
     fn fresh_blinding_is_64_char_lowercase_hex() {
         let a = fresh_blinding_hex();
         assert_eq!(a.len(), 64, "blinding must be 32 bytes / 64 hex chars");
-        assert!(a.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
+        assert!(a
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
         // Two consecutive calls must produce different bytes — proves
         // we're actually pulling from the OS RNG, not a fixed buffer.
         let b = fresh_blinding_hex();

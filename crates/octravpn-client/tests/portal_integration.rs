@@ -25,34 +25,35 @@ async fn portal_walks_index_confirm_resolve_render() {
     // ─── 1. start mock chain RPC ────────────────────────────────────
     let mock_rpc: Router = Router::new().route(
         "/",
-        post(|axum::Json(req): axum::Json<serde_json::Value>| async move {
-            let method = req.get("method").and_then(|v| v.as_str()).unwrap_or("");
-            let id = req.get("id").cloned().unwrap_or(json!(1));
-            if method == "circle_asset_ciphertext_by_resource_key" {
-                let payload = br#"{"endpoint":"vpn.example:51820","region":"us-east"}"#;
-                let b64 = base64::engine::general_purpose::STANDARD.encode(payload);
-                Json(json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "ciphertext_b64": b64,
-                        "plaintext_hash": "0".repeat(64),
-                        "key_id": "default",
-                    }
-                }))
-            } else {
-                Json(json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "error": { "code": -32601, "message": "method not found" },
-                }))
-            }
-        }),
+        post(
+            |axum::Json(req): axum::Json<serde_json::Value>| async move {
+                let method = req.get("method").and_then(|v| v.as_str()).unwrap_or("");
+                let id = req.get("id").cloned().unwrap_or(json!(1));
+                if method == "circle_asset_ciphertext_by_resource_key" {
+                    let payload = br#"{"endpoint":"vpn.example:51820","region":"us-east"}"#;
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(payload);
+                    Json(json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": {
+                            "ciphertext_b64": b64,
+                            "plaintext_hash": "0".repeat(64),
+                            "key_id": "default",
+                        }
+                    }))
+                } else {
+                    Json(json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "error": { "code": -32601, "message": "method not found" },
+                    }))
+                }
+            },
+        ),
     );
-    let rpc_listener =
-        tokio::net::TcpListener::bind::<SocketAddr>("127.0.0.1:0".parse().unwrap())
-            .await
-            .unwrap();
+    let rpc_listener = tokio::net::TcpListener::bind::<SocketAddr>("127.0.0.1:0".parse().unwrap())
+        .await
+        .unwrap();
     let rpc_addr = rpc_listener.local_addr().unwrap();
     tokio::spawn(async move {
         axum::serve(rpc_listener, mock_rpc).await.unwrap();
@@ -222,9 +223,15 @@ secret_path = "{}"
         .json()
         .await
         .unwrap();
-    assert_eq!(v.get("circle_id").and_then(|x| x.as_str()), Some("circleINTEG"));
+    assert_eq!(
+        v.get("circle_id").and_then(|x| x.as_str()),
+        Some("circleINTEG")
+    );
     assert_eq!(v.get("path").and_then(|x| x.as_str()), Some("/policy.json"));
-    assert_eq!(v.get("allowed").and_then(serde_json::Value::as_bool), Some(true));
+    assert_eq!(
+        v.get("allowed").and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
 
     // Shutdown.
     let _ = child.kill().await;
@@ -273,10 +280,9 @@ async fn portal_decrypts_sealed_asset_with_env_passphrase() {
             }
         }),
     );
-    let rpc_listener =
-        tokio::net::TcpListener::bind::<SocketAddr>("127.0.0.1:0".parse().unwrap())
-            .await
-            .unwrap();
+    let rpc_listener = tokio::net::TcpListener::bind::<SocketAddr>("127.0.0.1:0".parse().unwrap())
+        .await
+        .unwrap();
     let rpc_addr = rpc_listener.local_addr().unwrap();
     tokio::spawn(async move {
         axum::serve(rpc_listener, mock_rpc).await.unwrap();
@@ -413,9 +419,14 @@ async fn portal_412s_sealed_asset_when_passphrase_missing() {
     let circle_id = "octCIRCLE_NEEDS_PP";
     let key_id = "default";
     let plaintext = br#"{"k":"v"}"#;
-    let (ct_b64, ph_hex) =
-        encrypt_sealed_bytes(circle_id, key_id, "operator-secret", plaintext, PaddingClass::None)
-            .expect("fixture seal");
+    let (ct_b64, ph_hex) = encrypt_sealed_bytes(
+        circle_id,
+        key_id,
+        "operator-secret",
+        plaintext,
+        PaddingClass::None,
+    )
+    .expect("fixture seal");
 
     let mock_rpc: Router = Router::new().route(
         "/",
@@ -445,10 +456,9 @@ async fn portal_412s_sealed_asset_when_passphrase_missing() {
             }
         }),
     );
-    let rpc_listener =
-        tokio::net::TcpListener::bind::<SocketAddr>("127.0.0.1:0".parse().unwrap())
-            .await
-            .unwrap();
+    let rpc_listener = tokio::net::TcpListener::bind::<SocketAddr>("127.0.0.1:0".parse().unwrap())
+        .await
+        .unwrap();
     let rpc_addr = rpc_listener.local_addr().unwrap();
     tokio::spawn(async move {
         axum::serve(rpc_listener, mock_rpc).await.unwrap();
@@ -564,8 +574,7 @@ secret_path = "{}"
     // hint is replaced by a form posting to /unseal. Operators set the
     // passphrase per-circle in the browser without restarting the portal.
     assert!(
-        body.contains(r#"action="/unseal""#)
-            && body.contains(r#"name="passphrase""#),
+        body.contains(r#"action="/unseal""#) && body.contains(r#"name="passphrase""#),
         "expected interactive unseal form in the error page: {body}",
     );
 

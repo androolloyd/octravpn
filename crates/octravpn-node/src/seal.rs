@@ -120,7 +120,10 @@ fn read_plaintext_32(path: &Path) -> Result<[u8; 32]> {
         fs::read(path).with_context(|| format!("read plaintext secret {}", path.display()))?;
     if wallet_enc::looks_like_envelope(&raw) {
         raw.zeroize();
-        bail!("{} already sealed (OCTRA-WALLET-V1 envelope on disk)", path.display());
+        bail!(
+            "{} already sealed (OCTRA-WALLET-V1 envelope on disk)",
+            path.display()
+        );
     }
     let mut out = [0u8; 32];
     let parsed = if raw.len() == 32 {
@@ -131,8 +134,8 @@ fn read_plaintext_32(path: &Path) -> Result<[u8; 32]> {
         let s = std::str::from_utf8(&raw)
             .map_err(|e| anyhow!("non-utf8 plaintext key in {}: {e}", path.display()))?
             .trim();
-        let mut bytes = hex::decode(s)
-            .map_err(|e| anyhow!("invalid hex in {}: {e}", path.display()))?;
+        let mut bytes =
+            hex::decode(s).map_err(|e| anyhow!("invalid hex in {}: {e}", path.display()))?;
         let r = if bytes.len() == 32 {
             out.copy_from_slice(&bytes);
             Ok(())
@@ -157,12 +160,13 @@ fn read_plaintext_32(path: &Path) -> Result<[u8; 32]> {
 fn atomic_write(dest: &Path, bytes: &[u8]) -> Result<()> {
     if let Some(parent) = dest.parent() {
         if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("mkdir -p {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| format!("mkdir -p {}", parent.display()))?;
         }
     }
     let tmp = tempfile::NamedTempFile::new_in(
-        dest.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new(".")),
+        dest.parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new(".")),
     )
     .context("create tempfile for atomic write")?;
     {
@@ -304,10 +308,9 @@ pub(crate) fn unseal_one(target: &SealTarget, passphrase: &str) -> Result<()> {
 /// uses the system temp dir.
 #[cfg(target_os = "linux")]
 pub(crate) fn check_tmpfs(path: &Path) -> Result<()> {
-    let canon = fs::canonicalize(path)
-        .with_context(|| format!("canonicalize {}", path.display()))?;
-    let mounts = fs::read_to_string("/proc/self/mountinfo")
-        .context("read /proc/self/mountinfo")?;
+    let canon =
+        fs::canonicalize(path).with_context(|| format!("canonicalize {}", path.display()))?;
+    let mounts = fs::read_to_string("/proc/self/mountinfo").context("read /proc/self/mountinfo")?;
     // mountinfo line shape (man 5 proc):
     //   <id> <parent> <maj:min> <root> <mount-point> <opts> - <fs-type> <source> <super-opts>
     let mut best: Option<(usize, String)> = None; // (mountpoint-len, fs-type)
@@ -351,8 +354,8 @@ pub(crate) fn check_tmpfs(path: &Path) -> Result<()> {
     // under `/private/tmp` or `/tmp` (which is a symlink to
     // `/private/tmp`) — these are wiped on reboot, the same guarantee
     // a Linux tmpfs gives.
-    let canon = fs::canonicalize(path)
-        .with_context(|| format!("canonicalize {}", path.display()))?;
+    let canon =
+        fs::canonicalize(path).with_context(|| format!("canonicalize {}", path.display()))?;
     let s = canon.to_string_lossy();
     if s.starts_with("/private/tmp") || s.starts_with("/tmp") {
         return Ok(());

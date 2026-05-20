@@ -11,8 +11,8 @@
 //!                             Content-Disposition: attachment
 //!   GET  /api/resolve?u=    — JSON metadata (size + mime) without rendering
 //!   GET  /confirm?u=<…>     — confirm-on-first-fetch interstitial
-//!                             `?accept=cli` issues the token directly
-//!                             as JSON (no browser interstitial)
+//!                             `?accept=cli` issues a token as JSON
+//!                             without mutating approval state
 //!   POST /approve           — body: `circle=<…>&token=<…>&next=<…>`
 //!   POST /unseal            — interactive unseal: body
 //!                             `circle=<…>&passphrase=<…>&next=<…>`
@@ -230,10 +230,7 @@ struct ResolveQuery {
     u: String,
 }
 
-async fn api_resolve(
-    State(state): State<PortalState>,
-    Query(q): Query<ResolveQuery>,
-) -> Response {
+async fn api_resolve(State(state): State<PortalState>, Query(q): Query<ResolveQuery>) -> Response {
     let parsed = match parse_oct_url(&q.u) {
         Ok(p) => p,
         Err(e) => {
@@ -284,10 +281,7 @@ async fn api_resolve(
     .into_response()
 }
 
-async fn view_asset(
-    State(state): State<PortalState>,
-    Path(b64): Path<String>,
-) -> Response {
+async fn view_asset(State(state): State<PortalState>, Path(b64): Path<String>) -> Response {
     let Ok(raw) = B64URL.decode(b64.as_bytes()) else {
         return error_page(StatusCode::BAD_REQUEST, "", "bad base64 in URL");
     };
@@ -326,32 +320,27 @@ struct ConfirmQuery {
     /// When `accept=cli`, issue the approval token directly as JSON
     /// instead of rendering the browser interstitial. The token has the
     /// same provenance (HMAC-SHA256 over circle_id) and same privilege
-    /// — there is no separate `cli` scope — so this is a UX shortcut
-    /// for `curl` / `oct-curl` callers, not a privilege escalation.
+    /// — there is no separate `cli` scope. The caller still has to
+    /// present the token on `/raw`; GET never mutates approval state.
     #[serde(default)]
     accept: Option<String>,
 }
 
-async fn confirm_page(
-    State(state): State<PortalState>,
-    Query(q): Query<ConfirmQuery>,
-) -> Response {
+async fn confirm_page(State(state): State<PortalState>, Query(q): Query<ConfirmQuery>) -> Response {
     let parsed = match parse_oct_url(&q.u) {
         Ok(p) => p,
         Err(e) => return error_page(StatusCode::BAD_REQUEST, &q.u, &e.to_string()),
     };
     if matches!(q.accept.as_deref(), Some("cli")) {
-        // CLI-friendly path: mint + register the approval, return JSON.
-        // The HTML interstitial requires a POST /approve to mutate
-        // allow_set; the CLI path skips that round-trip because the
-        // operator already authenticated by having loopback access.
+        // CLI-friendly path: mint a bearer token and return JSON.
+        // State changes stay behind POST /approve; GET is safe to
+        // prefetch and cannot be used as a browser CSRF gadget.
         let token = state.token_for(&parsed.circle_id);
-        state.allow(&parsed.circle_id);
         return Json(json!({
             "circle_id": parsed.circle_id,
             "token": token,
-            "approved": true,
-            "note": "approval persists for the lifetime of this portal process",
+            "approved": false,
+            "note": "retry the raw URL with &token=<hex>; browser approval requires POST /approve",
         }))
         .into_response();
     }
@@ -365,10 +354,7 @@ struct ApproveForm {
     next: String,
 }
 
-async fn approve(
-    State(state): State<PortalState>,
-    Form(form): Form<ApproveForm>,
-) -> Response {
+async fn approve(State(state): State<PortalState>, Form(form): Form<ApproveForm>) -> Response {
     if !state.token_valid(&form.circle, &form.token) {
         return (StatusCode::UNAUTHORIZED, "bad approval token").into_response();
     }
@@ -398,10 +384,7 @@ struct RawQuery {
     dl: Option<String>,
 }
 
-async fn raw_asset(
-    State(state): State<PortalState>,
-    Query(q): Query<RawQuery>,
-) -> Response {
+async fn raw_asset(State(state): State<PortalState>, Query(q): Query<RawQuery>) -> Response {
     let parsed = match parse_oct_url(&q.u) {
         Ok(p) => p,
         Err(e) => {
@@ -421,10 +404,7 @@ async fn raw_asset(
         None => false,
     };
     if !approved_by_token && !state.is_allowed(&parsed.circle_id) {
-        let approve_url = format!(
-            "/confirm?u={}&accept=cli",
-            urlencode_query_value(&q.u),
-        );
+        let approve_url = format!("/confirm?u={}&accept=cli", urlencode_query_value(&q.u),);
         return (
             StatusCode::PRECONDITION_FAILED,
             Json(json!({
@@ -569,13 +549,15 @@ struct UnsealForm {
     next: String,
 }
 
-async fn unseal(
-    State(state): State<PortalState>,
-    Form(form): Form<UnsealForm>,
-) -> Response {
+async fn unseal(State(state): State<PortalState>, Form(form): Form<UnsealForm>) -> Response {
     let pp_trimmed = form.passphrase.trim();
     if pp_trimmed.is_empty() {
-        return unseal_form_page(&state, &form.circle, &form.next, Some("passphrase is empty"));
+        return unseal_form_page(
+            &state,
+            &form.circle,
+            &form.next,
+            Some("passphrase is empty"),
+        );
     }
     let candidate = Arc::new(Zeroizing::new(pp_trimmed.to_string()));
 
@@ -593,11 +575,7 @@ async fn unseal(
             // No state-root.json published; try /policy.json instead.
             state
                 .chain
-                .try_decrypt_with_passphrase(
-                    &form.circle,
-                    "/policy.json",
-                    Arc::clone(&candidate),
-                )
+                .try_decrypt_with_passphrase(&form.circle, "/policy.json", Arc::clone(&candidate))
                 .await
                 .map(|_| ())
         }
@@ -620,14 +598,12 @@ async fn unseal(
             let target = sanitize_next(&form.next);
             Redirect::to(&target).into_response()
         }
-        Err(FetchAssetError::DecryptFailed { .. }) => {
-            unseal_form_page(
-                &state,
-                &form.circle,
-                &form.next,
-                Some("wrong passphrase, try again"),
-            )
-        }
+        Err(FetchAssetError::DecryptFailed { .. }) => unseal_form_page(
+            &state,
+            &form.circle,
+            &form.next,
+            Some("wrong passphrase, try again"),
+        ),
         Err(other) => {
             // RPC failure / not published for both anchors — surface
             // the error without revealing whether the passphrase was
@@ -698,8 +674,11 @@ fn unseal_form_page(
 /// Restrict the post-unseal redirect to known-safe in-portal paths.
 /// Anything else (absolute URL, scheme, foreign host) collapses to `/`.
 fn sanitize_next(next: &str) -> String {
-    if next.starts_with("/o/") || next.starts_with("/raw") || next.starts_with("/api/")
-        || next == "/" || next.starts_with("/?")
+    if next.starts_with("/o/")
+        || next.starts_with("/raw")
+        || next.starts_with("/api/")
+        || next == "/"
+        || next.starts_with("/?")
     {
         next.to_string()
     } else {
@@ -880,7 +859,10 @@ fn render_save_as(url: &str, bytes: Vec<u8>) -> Response {
     let len = bytes.len();
     let resp = Response::builder()
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, SniffedMime::OctetStream.content_type())
+        .header(
+            header::CONTENT_TYPE,
+            SniffedMime::OctetStream.content_type(),
+        )
         .header(
             header::CONTENT_DISPOSITION,
             "attachment; filename=\"circle-asset.bin\"",
@@ -939,7 +921,9 @@ mod tests {
     }
 
     async fn body_string(resp: Response) -> String {
-        let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+        let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap();
         String::from_utf8_lossy(&bytes).into_owned()
     }
 
@@ -1029,10 +1013,7 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/approve")
-                    .header(
-                        header::CONTENT_TYPE,
-                        "application/x-www-form-urlencoded",
-                    )
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                     .body(Body::from(form_body))
                     .unwrap(),
             )
@@ -1056,10 +1037,7 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/approve")
-                    .header(
-                        header::CONTENT_TYPE,
-                        "application/x-www-form-urlencoded",
-                    )
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                     .body(Body::from(bad))
                     .unwrap(),
             )
@@ -1121,34 +1099,35 @@ mod tests {
         // Spawn a tiny axum server that pretends to be the chain RPC.
         let mock_app: Router = Router::new().route(
             "/",
-            post(|axum::Json(req): axum::Json<serde_json::Value>| async move {
-                let method = req.get("method").and_then(|v| v.as_str()).unwrap_or("");
-                let id = req.get("id").cloned().unwrap_or(json!(1));
-                if method == "circle_asset_ciphertext_by_resource_key" {
-                    let payload = b"plain text from the chain RPC";
-                    let b64 = base64::engine::general_purpose::STANDARD.encode(payload);
-                    Json(json!({
-                        "jsonrpc": "2.0",
-                        "id": id,
-                        "result": {
-                            "ciphertext_b64": b64,
-                            "plaintext_hash": "0".repeat(64),
-                            "key_id": "default",
-                        }
-                    }))
-                } else {
-                    Json(json!({
-                        "jsonrpc": "2.0",
-                        "id": id,
-                        "error": { "code": -32601, "message": "method not found" },
-                    }))
-                }
-            }),
+            post(
+                |axum::Json(req): axum::Json<serde_json::Value>| async move {
+                    let method = req.get("method").and_then(|v| v.as_str()).unwrap_or("");
+                    let id = req.get("id").cloned().unwrap_or(json!(1));
+                    if method == "circle_asset_ciphertext_by_resource_key" {
+                        let payload = b"plain text from the chain RPC";
+                        let b64 = base64::engine::general_purpose::STANDARD.encode(payload);
+                        Json(json!({
+                            "jsonrpc": "2.0",
+                            "id": id,
+                            "result": {
+                                "ciphertext_b64": b64,
+                                "plaintext_hash": "0".repeat(64),
+                                "key_id": "default",
+                            }
+                        }))
+                    } else {
+                        Json(json!({
+                            "jsonrpc": "2.0",
+                            "id": id,
+                            "error": { "code": -32601, "message": "method not found" },
+                        }))
+                    }
+                },
+            ),
         );
-        let listener =
-            tokio::net::TcpListener::bind::<SocketAddr>("127.0.0.1:0".parse().unwrap())
-                .await
-                .unwrap();
+        let listener = tokio::net::TcpListener::bind::<SocketAddr>("127.0.0.1:0".parse().unwrap())
+            .await
+            .unwrap();
         let mock_addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             axum::serve(listener, mock_app).await.unwrap();
@@ -1178,10 +1157,15 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body: serde_json::Value = serde_json::from_slice(
-            &axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap(),
+            &axum::body::to_bytes(resp.into_body(), 1 << 20)
+                .await
+                .unwrap(),
         )
         .unwrap();
-        assert_eq!(body.get("size").and_then(serde_json::Value::as_u64), Some(29));
+        assert_eq!(
+            body.get("size").and_then(serde_json::Value::as_u64),
+            Some(29)
+        );
         assert!(body
             .get("mime")
             .and_then(|v| v.as_str())
@@ -1265,24 +1249,23 @@ mod tests {
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri(format!(
-                        "/raw?u={}",
-                        urlenc("oct://circRAW/policy.json")
-                    ))
+                    .uri(format!("/raw?u={}", urlenc("oct://circRAW/policy.json")))
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::PRECONDITION_FAILED);
-        let body: serde_json::Value =
-            serde_json::from_str(&body_string(resp).await).unwrap();
-        assert_eq!(body.get("error").and_then(|v| v.as_str()), Some("circle not approved"));
+        let body: serde_json::Value = serde_json::from_str(&body_string(resp).await).unwrap();
+        assert_eq!(
+            body.get("error").and_then(|v| v.as_str()),
+            Some("circle not approved")
+        );
         assert!(body.get("approve_url").is_some());
     }
 
     #[tokio::test]
-    async fn confirm_accept_cli_returns_token_json_and_allows_circle() {
+    async fn confirm_accept_cli_returns_token_json_without_allowing_circle() {
         let state = state_no_chain();
         let app = router(state.clone());
         let resp = app
@@ -1298,12 +1281,13 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body: serde_json::Value =
-            serde_json::from_str(&body_string(resp).await).unwrap();
+        let body: serde_json::Value = serde_json::from_str(&body_string(resp).await).unwrap();
         assert!(body.get("token").and_then(|v| v.as_str()).is_some());
-        assert_eq!(body.get("approved").and_then(serde_json::Value::as_bool), Some(true));
-        // Side-effect: circle is now in the allow_set.
-        assert!(state.is_allowed("circCLI"));
+        assert_eq!(
+            body.get("approved").and_then(serde_json::Value::as_bool),
+            Some(false)
+        );
+        assert!(!state.is_allowed("circCLI"));
     }
 
     #[tokio::test]
@@ -1311,8 +1295,7 @@ mod tests {
         let (addr, _ct, _ph) =
             spawn_sealed_rpc("circRAWAUTH", "open-sesame", b"raw plain bytes").await;
         let rpc = RpcClient::new(format!("http://{addr}/"));
-        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0)
-            .with_passphrase("open-sesame");
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0).with_passphrase("open-sesame");
         let state = PortalState::new(chain);
         let token = state.token_for("circRAWAUTH");
         let app = router(state);
@@ -1345,8 +1328,7 @@ mod tests {
 
     #[tokio::test]
     async fn raw_endpoint_dl_param_sets_attachment_disposition() {
-        let (addr, _ct, _ph) =
-            spawn_sealed_rpc("circDL", "pp", b"raw download bytes").await;
+        let (addr, _ct, _ph) = spawn_sealed_rpc("circDL", "pp", b"raw download bytes").await;
         let rpc = RpcClient::new(format!("http://{addr}/"));
         let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0).with_passphrase("pp");
         let state = PortalState::new(chain);
@@ -1388,18 +1370,14 @@ mod tests {
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri(format!(
-                        "/raw?u={}",
-                        urlenc("oct://circSEAL/policy.json"),
-                    ))
+                    .uri(format!("/raw?u={}", urlenc("oct://circSEAL/policy.json"),))
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::PRECONDITION_FAILED);
-        let body: serde_json::Value =
-            serde_json::from_str(&body_string(resp).await).unwrap();
+        let body: serde_json::Value = serde_json::from_str(&body_string(resp).await).unwrap();
         assert_eq!(
             body.get("code").and_then(|v| v.as_str()),
             Some("sealed_decrypt_failed"),
@@ -1428,10 +1406,7 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/unseal")
-                    .header(
-                        header::CONTENT_TYPE,
-                        "application/x-www-form-urlencoded",
-                    )
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                     .body(Body::from(form))
                     .unwrap(),
             )
@@ -1449,8 +1424,7 @@ mod tests {
 
     #[tokio::test]
     async fn unseal_form_rerenders_with_error_on_wrong_passphrase() {
-        let (addr, _ct, _ph) =
-            spawn_sealed_rpc("circBAD", "right-pass", b"decrypted body").await;
+        let (addr, _ct, _ph) = spawn_sealed_rpc("circBAD", "right-pass", b"decrypted body").await;
         let rpc = RpcClient::new(format!("http://{addr}/"));
         let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
         let state = PortalState::new(chain);
@@ -1466,10 +1440,7 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/unseal")
-                    .header(
-                        header::CONTENT_TYPE,
-                        "application/x-www-form-urlencoded",
-                    )
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                     .body(Body::from(form))
                     .unwrap(),
             )
@@ -1497,10 +1468,7 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/unseal")
-                    .header(
-                        header::CONTENT_TYPE,
-                        "application/x-www-form-urlencoded",
-                    )
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                     .body(Body::from(form))
                     .unwrap(),
             )
@@ -1584,11 +1552,9 @@ mod tests {
                 }
             }),
         );
-        let listener = tokio::net::TcpListener::bind::<SocketAddr>(
-            "127.0.0.1:0".parse().unwrap(),
-        )
-        .await
-        .unwrap();
+        let listener = tokio::net::TcpListener::bind::<SocketAddr>("127.0.0.1:0".parse().unwrap())
+            .await
+            .unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
@@ -1619,7 +1585,12 @@ mod tests {
             .await
             .unwrap();
         assert!(resp.status().is_redirection());
-        let loc = resp.headers().get(header::LOCATION).unwrap().to_str().unwrap();
+        let loc = resp
+            .headers()
+            .get(header::LOCATION)
+            .unwrap()
+            .to_str()
+            .unwrap();
         assert!(loc.starts_with("/o/"));
     }
 
@@ -1715,13 +1686,25 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body: serde_json::Value =
-            serde_json::from_str(&body_string(resp).await).unwrap();
-        assert_eq!(body.get("circle_id").and_then(|v| v.as_str()), Some("circRESOLVE"));
+        let body: serde_json::Value = serde_json::from_str(&body_string(resp).await).unwrap();
+        assert_eq!(
+            body.get("circle_id").and_then(|v| v.as_str()),
+            Some("circRESOLVE")
+        );
         assert_eq!(body.get("path").and_then(|v| v.as_str()), Some("/x.txt"));
-        assert_eq!(body.get("size").and_then(serde_json::Value::as_u64), Some(18));
-        assert!(body.get("mime").and_then(|v| v.as_str()).unwrap().starts_with("text/plain"));
-        assert_eq!(body.get("renderable").and_then(serde_json::Value::as_bool), Some(true));
+        assert_eq!(
+            body.get("size").and_then(serde_json::Value::as_u64),
+            Some(18)
+        );
+        assert!(body
+            .get("mime")
+            .and_then(|v| v.as_str())
+            .unwrap()
+            .starts_with("text/plain"));
+        assert_eq!(
+            body.get("renderable").and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
     }
 
     #[tokio::test]
@@ -1737,8 +1720,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-        let body: serde_json::Value =
-            serde_json::from_str(&body_string(resp).await).unwrap();
+        let body: serde_json::Value = serde_json::from_str(&body_string(resp).await).unwrap();
         assert!(body.get("error").is_some());
     }
 
@@ -1751,18 +1733,14 @@ mod tests {
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri(format!(
-                        "/api/resolve?u={}",
-                        urlenc("oct://circDOWN/x.txt")
-                    ))
+                    .uri(format!("/api/resolve?u={}", urlenc("oct://circDOWN/x.txt")))
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
-        let body: serde_json::Value =
-            serde_json::from_str(&body_string(resp).await).unwrap();
+        let body: serde_json::Value = serde_json::from_str(&body_string(resp).await).unwrap();
         assert_eq!(
             body.get("hint")
                 .and_then(|v| v.as_str())
@@ -1773,8 +1751,7 @@ mod tests {
 
     #[tokio::test]
     async fn api_resolve_412_when_sealed_without_passphrase() {
-        let (addr, _ct, _ph) =
-            spawn_sealed_rpc("circRESOLVE412", "secret", b"plain").await;
+        let (addr, _ct, _ph) = spawn_sealed_rpc("circRESOLVE412", "secret", b"plain").await;
         let rpc = RpcClient::new(format!("http://{addr}/"));
         // No passphrase configured → MissingPassphrase.
         let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
@@ -1894,10 +1871,17 @@ mod tests {
 
     #[tokio::test]
     async fn image_render_emits_data_uri() {
-        let png: Vec<u8> = b"\x89PNG\r\n\x1a\n".iter().chain(std::iter::repeat(&0u8).take(32)).copied().collect();
+        let png: Vec<u8> = b"\x89PNG\r\n\x1a\n"
+            .iter()
+            .chain(std::iter::repeat(&0u8).take(32))
+            .copied()
+            .collect();
         let resp = render_bytes("oct://c/img.png", png.clone(), sniff(&png));
         let body = body_string(resp).await;
-        assert!(body.contains(r#"src="data:image/png;base64,"#), "body: {body}");
+        assert!(
+            body.contains(r#"src="data:image/png;base64,"#),
+            "body: {body}"
+        );
     }
 
     #[tokio::test]
@@ -1962,17 +1946,19 @@ mod tests {
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri(format!(
-                        "/raw?u={}",
-                        urlenc("oct://circRP/asset.txt")
-                    ))
+                    .uri(format!("/raw?u={}", urlenc("oct://circRP/asset.txt")))
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let ct = resp.headers().get(header::CONTENT_TYPE).unwrap().to_str().unwrap();
+        let ct = resp
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap();
         assert!(ct.starts_with("text/plain"));
         let body = body_string(resp).await;
         assert_eq!(body, "raw plaintext text bytes");
@@ -2001,18 +1987,14 @@ mod tests {
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri(format!(
-                        "/raw?u={}",
-                        urlenc("oct://circRD/asset.txt")
-                    ))
+                    .uri(format!("/raw?u={}", urlenc("oct://circRD/asset.txt")))
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
-        let body: serde_json::Value =
-            serde_json::from_str(&body_string(resp).await).unwrap();
+        let body: serde_json::Value = serde_json::from_str(&body_string(resp).await).unwrap();
         assert_eq!(body.get("code").and_then(|v| v.as_str()), Some("rpc"));
     }
 
@@ -2020,7 +2002,10 @@ mod tests {
     async fn raw_endpoint_octet_stream_sets_inline_disposition() {
         // Non-UTF8 bytes → OctetStream → defensive inline+filename
         // even without `&dl=1`.
-        let raw_bytes: Vec<u8> = (0..16).map(|i| (i * 13 + 7) as u8).chain([0xff, 0xfe]).collect();
+        let raw_bytes: Vec<u8> = (0..16)
+            .map(|i| (i * 13 + 7) as u8)
+            .chain([0xff, 0xfe])
+            .collect();
         // Spawn a stub that ships these exact bytes.
         let payload = raw_bytes.clone();
         let app_mock: Router = Router::new().route(
@@ -2042,11 +2027,9 @@ mod tests {
                 }
             }),
         );
-        let listener = tokio::net::TcpListener::bind::<SocketAddr>(
-            "127.0.0.1:0".parse().unwrap(),
-        )
-        .await
-        .unwrap();
+        let listener = tokio::net::TcpListener::bind::<SocketAddr>("127.0.0.1:0".parse().unwrap())
+            .await
+            .unwrap();
         let mock_addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             let _ = axum::serve(listener, app_mock).await;
@@ -2059,17 +2042,19 @@ mod tests {
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri(format!(
-                        "/raw?u={}",
-                        urlenc("oct://circOCT/blob.bin")
-                    ))
+                    .uri(format!("/raw?u={}", urlenc("oct://circOCT/blob.bin")))
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let cd = resp.headers().get(header::CONTENT_DISPOSITION).unwrap().to_str().unwrap();
+        let cd = resp
+            .headers()
+            .get(header::CONTENT_DISPOSITION)
+            .unwrap()
+            .to_str()
+            .unwrap();
         assert!(cd.starts_with("inline;"));
         assert!(cd.contains("blob.bin"));
     }
@@ -2140,8 +2125,7 @@ mod tests {
     async fn unseal_redirect_clamps_to_root_for_offsite_next() {
         // Even with valid passphrase, an offsite `next=` must collapse
         // to `/`.
-        let (addr, _ct, _ph) =
-            spawn_sealed_rpc("circREDIR", "pp", b"plain bytes").await;
+        let (addr, _ct, _ph) = spawn_sealed_rpc("circREDIR", "pp", b"plain bytes").await;
         let rpc = RpcClient::new(format!("http://{addr}/"));
         let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
         let state = PortalState::new(chain);
@@ -2164,7 +2148,12 @@ mod tests {
             .await
             .unwrap();
         assert!(resp.status().is_redirection());
-        let loc = resp.headers().get(header::LOCATION).unwrap().to_str().unwrap();
+        let loc = resp
+            .headers()
+            .get(header::LOCATION)
+            .unwrap()
+            .to_str()
+            .unwrap();
         assert_eq!(loc, "/", "off-site redirect must clamp to root");
     }
 

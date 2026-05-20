@@ -149,7 +149,10 @@ mod tests {
         let toml = ::toml::to_string(&creds).unwrap();
         let back: BridgeCredentials = ::toml::from_str(&toml).unwrap();
         assert_eq!(back.node_id, creds.node_id);
-        assert_eq!(back.identity_pubkey.as_bytes(), creds.identity_pubkey.as_bytes());
+        assert_eq!(
+            back.identity_pubkey.as_bytes(),
+            creds.identity_pubkey.as_bytes()
+        );
     }
 
     #[test]
@@ -173,7 +176,10 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         for _ in 0..64 {
             let id = BridgeIdentity::generate();
-            assert!(seen.insert(id.node_id), "BridgeIdentity::generate produced a duplicate node_id");
+            assert!(
+                seen.insert(id.node_id),
+                "BridgeIdentity::generate produced a duplicate node_id"
+            );
         }
     }
 

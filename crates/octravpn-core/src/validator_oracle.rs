@@ -214,7 +214,10 @@ mod tests {
             "octC".into(),
         ]);
         for s in ["octA", "octB", "octC"] {
-            assert!(oracle.is_validator(&Address::from_display(s)).await.unwrap());
+            assert!(oracle
+                .is_validator(&Address::from_display(s))
+                .await
+                .unwrap());
         }
     }
 
@@ -226,7 +229,10 @@ mod tests {
         let oracle = ValidatorOracle::new(rpc)
             .with_refresh(Duration::from_secs(1))
             .with_static_allowlist(["octX".into()]);
-        assert!(oracle.is_validator(&Address::from_display("octX")).await.unwrap());
+        assert!(oracle
+            .is_validator(&Address::from_display("octX"))
+            .await
+            .unwrap());
     }
 
     /// An address NOT in the allowlist and not in any RPC-bulk set
@@ -234,8 +240,7 @@ mod tests {
     #[tokio::test]
     async fn unknown_address_with_allowlist_returns_false() {
         let rpc = RpcClient::new("http://127.0.0.1:1/rpc");
-        let oracle = ValidatorOracle::new(rpc)
-            .with_static_allowlist(["octKNOWN".into()]);
+        let oracle = ValidatorOracle::new(rpc).with_static_allowlist(["octKNOWN".into()]);
         let unknown = Address::from_display("octOTHER");
         let res = oracle.is_validator(&unknown).await.unwrap();
         assert!(!res, "unknown address must NOT be considered a validator");
@@ -246,8 +251,7 @@ mod tests {
     #[tokio::test]
     async fn static_allowlist_is_idempotent() {
         let rpc = RpcClient::new("http://unreachable.test/rpc");
-        let oracle = ValidatorOracle::new(rpc)
-            .with_static_allowlist(["octIDEMP".into()]);
+        let oracle = ValidatorOracle::new(rpc).with_static_allowlist(["octIDEMP".into()]);
         let a = Address::from_display("octIDEMP");
         for _ in 0..5 {
             assert!(oracle.is_validator(&a).await.unwrap());

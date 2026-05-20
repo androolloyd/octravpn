@@ -38,6 +38,7 @@ pub(crate) struct Client {
 pub(crate) struct ActiveSession {
     pub session_id: SessionId,
     pub session_kp: KeyPair,
+    pub open_tx_hash: String,
     pub route: Vec<RouteHop>,
 }
 
@@ -66,8 +67,7 @@ impl Client {
         // Receipt domain: v1.1 clients leave circle_id = None; v2 clients
         // discover circle_id from the operator's policy bundle and call
         // `set_receipt_circle` before opening a session.
-        let receipt_context =
-            ReceiptContext::v1_1(program_addr.clone(), cfg.chain.chain_id);
+        let receipt_context = ReceiptContext::v1_1(program_addr.clone(), cfg.chain.chain_id);
         Ok(Self {
             rpc,
             http,
@@ -230,6 +230,7 @@ impl Client {
         *self.state.lock() = Some(ActiveSession {
             session_id: session_id.clone(),
             session_kp,
+            open_tx_hash: r.hash,
             route,
         });
 
@@ -292,6 +293,15 @@ async fn announce_to_exit(client: &Client) -> Result<()> {
             session_id: active.session_id.clone(),
             client_pubkey: active.session_kp.public,
             client_wg_pubkey,
+            open_tx_hash: active.open_tx_hash.clone(),
+            client_sig: active
+                .session_kp
+                .sign(&octravpn_core::control::announce_signing_payload(
+                    &active.session_id,
+                    &active.session_kp.public,
+                    &client_wg_pubkey,
+                    &active.open_tx_hash,
+                )),
         };
         (ctrl_endpoint, body)
     };
@@ -368,8 +378,7 @@ fn build_rpc(chain: &crate::config::ChainCfg) -> Result<RpcClient> {
     }
     let mut blobs = Vec::with_capacity(paths.len());
     for p in paths {
-        let pem = std::fs::read(p)
-            .with_context(|| format!("read pinned root {p}"))?;
+        let pem = std::fs::read(p).with_context(|| format!("read pinned root {p}"))?;
         blobs.push(pem);
     }
     RpcClient::new_with_pinned_roots(&chain.rpc_url, &blobs)
