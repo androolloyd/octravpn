@@ -1429,4 +1429,632 @@ receipt_journal_path = "{journal}"
         let report = build_receipt_report(&parsed, &journal_path, None).unwrap();
         assert_eq!(report.journal_floor, Some(1));
     }
+
+    // ----------------------------------------------------------------
+    // Additional coverage — config validate
+    // ----------------------------------------------------------------
+
+    fn build_runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn config_validate_skips_everything_when_schema_missing_file() {
+        let dir = tempdir().unwrap();
+        let args = ConfigValidateArgs {
+            path: dir.path().join("does-not-exist.toml"),
+            offline: true,
+            json: false,
+        };
+        let rt = build_runtime();
+        let report = rt.block_on(run_config_validate(&args));
+        assert!(!report.overall_pass);
+        assert!(matches!(report.schema_parsed, CheckOutcome::Fail { .. }));
+        assert!(matches!(report.wallet_key_loadable, CheckOutcome::Skipped { .. }));
+        assert!(matches!(report.wg_key_loadable, CheckOutcome::Skipped { .. }));
+        assert!(matches!(report.rpc_reachable, CheckOutcome::Skipped { .. }));
+    }
+
+    #[test]
+    fn config_validate_fails_on_missing_wg_key() {
+        let dir = tempdir().unwrap();
+        let toml = dir.path().join("node.toml");
+        let audit_dir = dir.path().join("audit").to_string_lossy().to_string();
+        let journal = dir.path().join("receipts.bin").to_string_lossy().to_string();
+        write_basic_node_toml(&toml, &audit_dir, &journal);
+        fs::remove_file(dir.path().join("wg.key")).unwrap();
+        let args = ConfigValidateArgs {
+            path: toml,
+            offline: true,
+            json: false,
+        };
+        let rt = build_runtime();
+        let report = rt.block_on(run_config_validate(&args));
+        assert!(!report.overall_pass);
+        assert!(matches!(report.wg_key_loadable, CheckOutcome::Fail { .. }));
+    }
+
+    #[test]
+    fn config_validate_fails_on_empty_wallet_file() {
+        let dir = tempdir().unwrap();
+        let toml = dir.path().join("node.toml");
+        let audit_dir = dir.path().join("audit").to_string_lossy().to_string();
+        let journal = dir.path().join("receipts.bin").to_string_lossy().to_string();
+        write_basic_node_toml(&toml, &audit_dir, &journal);
+        // Truncate wallet key to 0 bytes.
+        fs::write(dir.path().join("wallet.key"), b"").unwrap();
+        let args = ConfigValidateArgs {
+            path: toml,
+            offline: true,
+            json: false,
+        };
+        let rt = build_runtime();
+        let report = rt.block_on(run_config_validate(&args));
+        assert!(!report.overall_pass);
+        let detail = match report.wallet_key_loadable {
+            CheckOutcome::Fail { detail } => detail,
+            other => panic!("expected Fail, got {other:?}"),
+        };
+        assert!(detail.contains("empty"), "got: {detail}");
+    }
+
+    #[test]
+    fn config_validate_offline_short_circuits_chain_probes() {
+        let dir = tempdir().unwrap();
+        let toml = dir.path().join("node.toml");
+        let audit_dir = dir.path().join("audit").to_string_lossy().to_string();
+        let journal = dir.path().join("receipts.bin").to_string_lossy().to_string();
+        write_basic_node_toml(&toml, &audit_dir, &journal);
+        let args = ConfigValidateArgs {
+            path: toml,
+            offline: true,
+            json: false,
+        };
+        let rt = build_runtime();
+        let report = rt.block_on(run_config_validate(&args));
+        match report.rpc_reachable {
+            CheckOutcome::Skipped { detail } => assert!(detail.contains("offline")),
+            other => panic!("expected Skipped with offline marker, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn config_validate_chain_probe_fails_on_unreachable_rpc() {
+        // Without `--offline` the probe MUST attempt the dial; an
+        // unreachable :1 port surfaces as `Fail` for rpc_reachable.
+        let dir = tempdir().unwrap();
+        let toml = dir.path().join("node.toml");
+        let audit_dir = dir.path().join("audit").to_string_lossy().to_string();
+        let journal = dir.path().join("receipts.bin").to_string_lossy().to_string();
+        write_basic_node_toml(&toml, &audit_dir, &journal);
+        let args = ConfigValidateArgs {
+            path: toml,
+            offline: false,
+            json: false,
+        };
+        let rt = build_runtime();
+        let report = rt.block_on(run_config_validate(&args));
+        assert!(!report.overall_pass);
+        assert!(matches!(report.rpc_reachable, CheckOutcome::Fail { .. }));
+    }
+
+    #[test]
+    fn config_validate_run_config_returns_exit_code_one_on_fail() {
+        let dir = tempdir().unwrap();
+        let toml = dir.path().join("node.toml");
+        fs::write(&toml, "garbage").unwrap();
+        let args = ConfigValidateArgs {
+            path: toml,
+            offline: true,
+            json: false,
+        };
+        let code = run_config(ConfigCmd::Validate(args)).unwrap();
+        assert_eq!(code, 1);
+    }
+
+    #[test]
+    fn config_validate_run_config_returns_exit_code_zero_on_pass() {
+        let dir = tempdir().unwrap();
+        let toml = dir.path().join("node.toml");
+        let audit_dir = dir.path().join("audit").to_string_lossy().to_string();
+        let journal = dir.path().join("receipts.bin").to_string_lossy().to_string();
+        write_basic_node_toml(&toml, &audit_dir, &journal);
+        let args = ConfigValidateArgs {
+            path: toml,
+            offline: true,
+            json: true, // JSON output path is also exercised here.
+        };
+        let code = run_config(ConfigCmd::Validate(args)).unwrap();
+        assert_eq!(code, 0);
+    }
+
+    #[test]
+    fn probe_secret_file_reports_missing() {
+        let dir = tempdir().unwrap();
+        let missing = dir.path().join("nope.key");
+        let outcome = probe_secret_file(missing.to_str().unwrap());
+        assert!(matches!(outcome, CheckOutcome::Fail { .. }));
+        assert!(outcome.detail().contains("does not exist"));
+    }
+
+    #[test]
+    fn probe_secret_file_accepts_nonempty() {
+        let dir = tempdir().unwrap();
+        let key = dir.path().join("k");
+        fs::write(&key, [0u8; 16]).unwrap();
+        let outcome = probe_secret_file(key.to_str().unwrap());
+        assert!(matches!(outcome, CheckOutcome::Ok { .. }));
+    }
+
+    #[test]
+    fn probe_audit_dir_creates_when_missing() {
+        let dir = tempdir().unwrap();
+        let nested = dir.path().join("does/not/exist/yet");
+        let outcome = probe_audit_dir(Some(nested.to_str().unwrap()));
+        assert!(matches!(outcome, CheckOutcome::Ok { .. }));
+        assert!(nested.exists());
+    }
+
+    #[test]
+    fn probe_journal_path_opens_existing_file() {
+        let dir = tempdir().unwrap();
+        let p = dir.path().join("receipts.bin");
+        let j = ReceiptJournal::open(&p).unwrap();
+        j.bump(&SessionId::new([1u8; 32]), 3).unwrap();
+        drop(j);
+        let outcome = probe_journal_path(Some(p.to_str().unwrap()));
+        assert!(matches!(outcome, CheckOutcome::Ok { .. }));
+    }
+
+    #[test]
+    fn check_outcome_helpers_are_consistent() {
+        let ok = CheckOutcome::Ok { detail: "x".into() };
+        let f = CheckOutcome::Fail { detail: "y".into() };
+        let s = CheckOutcome::Skipped { detail: "z".into() };
+        assert!(!ok.is_fail());
+        assert!(f.is_fail());
+        assert!(!s.is_fail());
+        assert_eq!(ok.label(), "OK");
+        assert_eq!(f.label(), "FAIL");
+        assert_eq!(s.label(), "SKIP");
+        assert_eq!(ok.detail(), "x");
+        assert_eq!(f.detail(), "y");
+        assert_eq!(s.detail(), "z");
+    }
+
+    #[test]
+    fn trim_for_display_truncates_with_ellipsis() {
+        assert_eq!(trim_for_display("abcdef", 10), "abcdef");
+        let long = "x".repeat(100);
+        let out = trim_for_display(&long, 16);
+        assert!(out.ends_with('…'));
+        assert!(out.starts_with(&"x".repeat(16)));
+    }
+
+    #[test]
+    fn format_tail_line_strips_envelope_when_record_json_present() {
+        let envelope = json!({
+            "prev_mac": "00",
+            "mac": "11",
+            "record_json": "{\"kind\":\"announce\"}",
+        });
+        let s = format_tail_line(7, &envelope.to_string());
+        assert!(s.contains("[#     7]"));
+        assert!(s.contains("kind"));
+        // Should be the inner record, not the envelope.
+        assert!(!s.contains("prev_mac"));
+    }
+
+    #[test]
+    fn format_tail_line_falls_back_to_raw_on_bad_envelope() {
+        let s = format_tail_line(2, "not json at all");
+        assert!(s.contains("not json at all"));
+        assert!(s.contains("[#     2]"));
+    }
+
+    // ----------------------------------------------------------------
+    // Additional coverage — health
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn probe_audit_log_file_skips_when_missing() {
+        let dir = tempdir().unwrap();
+        let outcome = probe_audit_log_file(Some(dir.path().join("missing").to_str().unwrap()));
+        assert!(matches!(outcome, CheckOutcome::Skipped { .. }));
+    }
+
+    #[test]
+    fn probe_audit_log_file_ok_when_dir_present() {
+        let dir = tempdir().unwrap();
+        // Open and drop a log so the dir + key are seeded.
+        let _ = AuditLog::open(dir.path()).unwrap();
+        let outcome = probe_audit_log_file(Some(dir.path().to_str().unwrap()));
+        assert!(matches!(outcome, CheckOutcome::Ok { .. }));
+    }
+
+    #[test]
+    fn probe_journal_file_skips_when_missing() {
+        let dir = tempdir().unwrap();
+        let outcome = probe_journal_file(Some(dir.path().join("nope.bin").to_str().unwrap()));
+        assert!(matches!(outcome, CheckOutcome::Skipped { .. }));
+    }
+
+    #[test]
+    fn probe_journal_file_reports_session_count() {
+        let dir = tempdir().unwrap();
+        let p = dir.path().join("receipts.bin");
+        let j = ReceiptJournal::open(&p).unwrap();
+        j.bump(&SessionId::new([1u8; 32]), 4).unwrap();
+        j.bump(&SessionId::new([2u8; 32]), 8).unwrap();
+        drop(j);
+        let outcome = probe_journal_file(Some(p.to_str().unwrap()));
+        match outcome {
+            CheckOutcome::Ok { detail } => assert!(detail.contains("2 session"), "got: {detail}"),
+            other => panic!("expected Ok, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn probe_remote_health_ok_against_mock_server() {
+        use axum::{routing::get, Router};
+        let app = Router::new().route("/health", get(|| async { "OK" }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let _join = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        // Yield so the server is ready.
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let outcome = probe_remote_health(&format!("http://{addr}")).await;
+        assert!(matches!(outcome, CheckOutcome::Ok { .. }), "{:?}", outcome);
+    }
+
+    #[tokio::test]
+    async fn probe_remote_health_reports_non_2xx_as_fail() {
+        use axum::{http::StatusCode, routing::get, Router};
+        let app = Router::new().route(
+            "/health",
+            get(|| async { (StatusCode::INTERNAL_SERVER_ERROR, "boom") }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let _join = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let outcome = probe_remote_health(&format!("http://{addr}")).await;
+        assert!(matches!(outcome, CheckOutcome::Fail { .. }), "{:?}", outcome);
+    }
+
+    #[tokio::test]
+    async fn probe_remote_health_dial_failure_is_fail() {
+        // Unroutable port → connect error.
+        let outcome = probe_remote_health("http://127.0.0.1:1/health").await;
+        assert!(matches!(outcome, CheckOutcome::Fail { .. }));
+    }
+
+    #[tokio::test]
+    async fn probe_remote_health_appends_health_when_missing() {
+        use axum::{routing::get, Router};
+        let app = Router::new().route("/health", get(|| async { "ok" }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let _join = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let bare = format!("http://{addr}/"); // trailing slash
+        let outcome = probe_remote_health(&bare).await;
+        assert!(matches!(outcome, CheckOutcome::Ok { .. }), "{:?}", outcome);
+    }
+
+    // ----------------------------------------------------------------
+    // Additional coverage — audit tail
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn audit_tail_returns_3_when_path_missing() {
+        let dir = tempdir().unwrap();
+        let args = AuditTailArgs {
+            audit_path: dir.path().join("missing.jsonl"),
+            hmac_key: None,
+            follow: false,
+            poll_ms: 250,
+        };
+        let code = run_audit_tail(args).unwrap();
+        assert_eq!(code, 3);
+    }
+
+    #[test]
+    fn audit_tail_returns_3_when_directory_has_no_audit_files() {
+        let dir = tempdir().unwrap();
+        let args = AuditTailArgs {
+            audit_path: dir.path().to_path_buf(),
+            hmac_key: None,
+            follow: false,
+            poll_ms: 250,
+        };
+        let code = run_audit_tail(args).unwrap();
+        assert_eq!(code, 3);
+    }
+
+    #[test]
+    fn audit_tail_picks_latest_file_from_directory() {
+        let dir = tempdir().unwrap();
+        // Seed two audit files; the lexically-latest one is opened.
+        fs::write(
+            dir.path().join("audit-2030-01-01.jsonl"),
+            b"",
+        )
+        .unwrap();
+        // Build a real (chained) audit log with one entry so the
+        // verifier doesn't bail on a malformed line.
+        let log = AuditLog::open(dir.path()).unwrap();
+        log.write(&AuditRecord {
+            ts_unix: 1_700_000_000,
+            kind: "announce",
+            source: None,
+            session_id: Some(sid_hex(1)),
+            extra: json!({}),
+        })
+        .unwrap();
+        let args = AuditTailArgs {
+            audit_path: dir.path().to_path_buf(),
+            hmac_key: None,
+            follow: false,
+            poll_ms: 250,
+        };
+        let code = run_audit_tail(args).unwrap();
+        assert_eq!(code, 0);
+    }
+
+    #[test]
+    fn audit_tail_returns_3_when_hmac_key_missing() {
+        let dir = tempdir().unwrap();
+        let log = AuditLog::open(dir.path()).unwrap();
+        log.write(&AuditRecord {
+            ts_unix: 1_700_000_000,
+            kind: "announce",
+            source: None,
+            session_id: Some(sid_hex(1)),
+            extra: json!({}),
+        })
+        .unwrap();
+        let audit_file = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .find(|e| e.file_name().to_string_lossy().starts_with("audit-"))
+            .unwrap()
+            .path();
+        // Remove the auto-written .audit.key so the resolver can't find
+        // an HMAC key.
+        fs::remove_file(dir.path().join(".audit.key")).unwrap();
+        let args = AuditTailArgs {
+            audit_path: audit_file,
+            hmac_key: None,
+            follow: false,
+            poll_ms: 250,
+        };
+        let code = run_audit_tail(args).unwrap();
+        assert_eq!(code, 3);
+    }
+
+    #[test]
+    fn audit_tail_explicit_hmac_key_wrong_size_returns_3() {
+        let dir = tempdir().unwrap();
+        let log = AuditLog::open(dir.path()).unwrap();
+        log.write(&AuditRecord {
+            ts_unix: 1_700_000_000,
+            kind: "announce",
+            source: None,
+            session_id: Some(sid_hex(1)),
+            extra: json!({}),
+        })
+        .unwrap();
+        let audit_file = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .find(|e| e.file_name().to_string_lossy().starts_with("audit-"))
+            .unwrap()
+            .path();
+        let bad_key = dir.path().join("short.key");
+        fs::write(&bad_key, b"too-short").unwrap();
+        let args = AuditTailArgs {
+            audit_path: audit_file,
+            hmac_key: Some(bad_key),
+            follow: false,
+            poll_ms: 250,
+        };
+        let code = run_audit_tail(args).unwrap();
+        assert_eq!(code, 3);
+    }
+
+    #[test]
+    fn verify_one_line_detects_mac_mismatch() {
+        let key = [7u8; 32];
+        let prev = [0u8; 32];
+        // Build a syntactically valid envelope with a bogus mac.
+        let v = json!({
+            "prev_mac": hex::encode(prev),
+            "mac": hex::encode([0xFFu8; 32]),
+            "record_json": "{\"k\":\"v\"}",
+        });
+        let err = verify_one_line(&key, &prev, &v.to_string()).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("mac mismatch"), "{msg}");
+    }
+
+    #[test]
+    fn verify_one_line_detects_prev_mac_break() {
+        let key = [7u8; 32];
+        let prev = [1u8; 32]; // verifier carries 0x01..; envelope claims 0x00..
+        let v = json!({
+            "prev_mac": hex::encode([0u8; 32]),
+            "mac": hex::encode([0u8; 32]),
+            "record_json": "{}",
+        });
+        let err = verify_one_line(&key, &prev, &v.to_string()).unwrap_err();
+        assert!(format!("{err:#}").contains("chain break"));
+    }
+
+    // ----------------------------------------------------------------
+    // Additional coverage — receipt verify
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn parse_session_rejects_garbage() {
+        let r = parse_session("not-a-session-id");
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn parse_session_accepts_full_hex() {
+        let hex = "a".repeat(64);
+        let sid = parse_session(&hex).unwrap();
+        assert_eq!(sid.to_hex(), hex);
+    }
+
+    #[test]
+    fn receipt_verify_flags_audit_without_floor_as_lost_state() {
+        let dir = tempdir().unwrap();
+        // Don't create a journal at all; only audit entries.
+        let log = AuditLog::open(dir.path()).unwrap();
+        log.write(&AuditRecord {
+            ts_unix: 1_700_000_000,
+            kind: "receipt_signed",
+            source: None,
+            session_id: Some(sid_hex(0xAA)),
+            extra: json!({"seq": 3}),
+        })
+        .unwrap();
+        let report = build_receipt_report(
+            &SessionId::new([0xAA; 32]),
+            &dir.path().join("missing.bin"),
+            Some(dir.path()),
+        )
+        .unwrap();
+        assert!(report.journal_floor.is_none());
+        assert!(!report.cross_check_pass);
+        assert!(report.detail.contains("lost-state"));
+    }
+
+    #[test]
+    fn receipt_verify_unknown_session_when_no_floor_and_no_audit_entries() {
+        let dir = tempdir().unwrap();
+        let journal_path = dir.path().join("receipts.bin");
+        // Empty journal (only magic) — open then drop without bump.
+        let _ = ReceiptJournal::open(&journal_path).unwrap();
+        let report = build_receipt_report(
+            &SessionId::new([0xBB; 32]),
+            &journal_path,
+            Some(dir.path()),
+        )
+        .unwrap();
+        assert!(report.journal_floor.is_none());
+        assert!(report.audit_seqs.is_empty());
+        assert!(!report.cross_check_pass);
+        assert!(report.detail.contains("session unknown locally"));
+    }
+
+    #[test]
+    fn receipt_verify_journal_floor_only_passes() {
+        let dir = tempdir().unwrap();
+        let journal_path = dir.path().join("receipts.bin");
+        let j = ReceiptJournal::open(&journal_path).unwrap();
+        j.bump(&SessionId::new([0xAA; 32]), 4).unwrap();
+        let report =
+            build_receipt_report(&SessionId::new([0xAA; 32]), &journal_path, None).unwrap();
+        assert_eq!(report.journal_floor, Some(4));
+        assert!(report.audit_seqs.is_empty());
+        assert!(report.cross_check_pass);
+    }
+
+    #[test]
+    fn run_receipt_verify_returns_zero_on_pass() {
+        let dir = tempdir().unwrap();
+        let journal_path = dir.path().join("receipts.bin");
+        let j = ReceiptJournal::open(&journal_path).unwrap();
+        j.bump(&SessionId::new([0xAA; 32]), 4).unwrap();
+        drop(j);
+        let args = ReceiptVerifyArgs {
+            session_id: sid_hex(0xAA),
+            journal_path,
+            audit_path: None,
+            json: false,
+        };
+        let code = run_receipt_verify(args).unwrap();
+        assert_eq!(code, 0);
+    }
+
+    #[test]
+    fn run_receipt_verify_returns_one_when_unknown_session() {
+        let dir = tempdir().unwrap();
+        let journal_path = dir.path().join("receipts.bin");
+        // Empty journal.
+        let _ = ReceiptJournal::open(&journal_path).unwrap();
+        let args = ReceiptVerifyArgs {
+            session_id: sid_hex(0xCD),
+            journal_path,
+            audit_path: Some(dir.path().to_path_buf()),
+            json: true,
+        };
+        let code = run_receipt_verify(args).unwrap();
+        assert_eq!(code, 1);
+    }
+
+    #[test]
+    fn harvest_audit_seqs_dedupes_and_sorts() {
+        let dir = tempdir().unwrap();
+        let sid = SessionId::new([0xAA; 32]);
+        let log = AuditLog::open(dir.path()).unwrap();
+        for s in [3u64, 1, 3, 2, 2] {
+            log.write(&AuditRecord {
+                ts_unix: 1_700_000_000 + s,
+                kind: "receipt_signed",
+                source: None,
+                session_id: Some(sid.to_hex()),
+                extra: json!({"seq": s}),
+            })
+            .unwrap();
+        }
+        let seqs = harvest_audit_seqs(dir.path(), &sid).unwrap();
+        assert_eq!(seqs, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn harvest_audit_seqs_ignores_other_sessions() {
+        let dir = tempdir().unwrap();
+        let target = SessionId::new([0xAA; 32]);
+        let other = SessionId::new([0xBB; 32]);
+        let log = AuditLog::open(dir.path()).unwrap();
+        log.write(&AuditRecord {
+            ts_unix: 1_700_000_001,
+            kind: "receipt_signed",
+            source: None,
+            session_id: Some(target.to_hex()),
+            extra: json!({"seq": 9}),
+        })
+        .unwrap();
+        log.write(&AuditRecord {
+            ts_unix: 1_700_000_002,
+            kind: "receipt_signed",
+            source: None,
+            session_id: Some(other.to_hex()),
+            extra: json!({"seq": 4}),
+        })
+        .unwrap();
+        let seqs = harvest_audit_seqs(dir.path(), &target).unwrap();
+        assert_eq!(seqs, vec![9]);
+    }
+
+    #[test]
+    fn harvest_audit_seqs_returns_empty_on_missing_path() {
+        let dir = tempdir().unwrap();
+        let sid = SessionId::new([0xAA; 32]);
+        let seqs = harvest_audit_seqs(&dir.path().join("missing"), &sid).unwrap();
+        assert!(seqs.is_empty());
+    }
 }

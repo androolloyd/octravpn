@@ -66,6 +66,12 @@ toml        = { workspace = true }
 # to dispatch synthetic requests without a real TCP listener.
 tower       = { version = "0.5", features = ["util"] }
 criterion   = { version = "0.5", features = ["html_reports"] }
+# Property tests on the MIME sniffer + oct:// URL parser ensure no
+# byte sequence panics through the dispatch path.
+proptest    = { workspace = true }
+# Concurrent-access cache stress uses reqwest from outside the bin's
+# loopback. Already in the prod tree; mentioned here for clarity.
+reqwest     = { workspace = true }
 
 [lints]
 workspace = true

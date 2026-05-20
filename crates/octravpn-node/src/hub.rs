@@ -1017,6 +1017,7 @@ impl Hub {
                         // `mesh serve` entry point in `main.rs` is
                         // the one that honours the env var.
                         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
+                        dns: Arc::new(octravpn_mesh::headscale_api::dns::DnsStore::new()),
                     },
                     shared_minter,
                 ))

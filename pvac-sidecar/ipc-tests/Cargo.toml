@@ -1,0 +1,27 @@
+[package]
+name = "pvac-sidecar-ipc-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "IPC-boundary integration tests for the (GPL'd) octra-pvac-sidecar binary. The Rust code here is MIT/Apache; it spawns the sidecar as a subprocess and exercises the JSON-over-stdio protocol — no GPL symbols are linked."
+publish = false
+
+# Library target so tests can share a small IPC harness.
+[lib]
+name = "pvac_sidecar_ipc_tests"
+path = "src/lib.rs"
+
+[dependencies]
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+hex         = { workspace = true }
+base64      = { workspace = true }
+anyhow      = { workspace = true }
+
+[dev-dependencies]
+tempfile    = { workspace = true }
+
+[lints]
+workspace = true

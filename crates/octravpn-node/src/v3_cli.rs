@@ -891,4 +891,177 @@ mod tests {
         ];
         assert_eq!(kinds.len(), 3);
     }
+
+    // ----------------------------------------------------------------
+    // Additional coverage — sign envelope + ChainCtxV3 round-trips +
+    // extract_return shape variants. These don't touch the network.
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn sign_call_produces_consistent_envelope() {
+        let c = ctx();
+        let call = c.build_bond_endpoint_call(CID, 100, 500, 1);
+        let signed = c.sign_call(call).unwrap();
+        // Signed envelope must carry at least a signature + from
+        // identity. The exact shape comes from `octra_tx::sign_call`;
+        // we only assert the high-level invariant: it serializes to a
+        // non-empty JSON object and contains the signer.
+        assert!(signed.is_object(), "expected JSON object, got {signed}");
+        // Look for either top-level `from` or nested `tx.from`.
+        let has_from = signed.get("from").is_some()
+            || signed.get("tx").and_then(|t| t.get("from")).is_some();
+        assert!(has_from, "expected from field, got {signed}");
+    }
+
+    #[test]
+    fn build_chain_ctx_fails_when_wallet_missing() {
+        // Use a NodeConfig pointing at a non-existent wallet path.
+        // This avoids touching the network — `build_chain_ctx` reads
+        // the secret synchronously before constructing the ctx.
+        let toml = r#"
+[chain]
+rpc_url = "http://127.0.0.1:0/unused"
+program_addr = "oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3"
+validator_addr = "oct8taXQ4CvohcgzCJFYyaKrrAbcZs5mxkBCJQQYWb2Pcun"
+wallet_secret_path = "/nonexistent/path/wallet.key"
+
+[tunnel]
+public_endpoint = "1.2.3.4:51820"
+listen = "0.0.0.0:51820"
+wg_secret_path = "/nonexistent/path/wg.key"
+
+[pricing]
+price_per_mb = 100
+region = "test"
+
+[control]
+listen = "0.0.0.0:51821"
+"#;
+        let cfg: crate::config::NodeConfig = ::toml::from_str(toml).unwrap();
+        let err = match build_chain_ctx(&cfg) {
+            Ok(_) => panic!("expected wallet-missing error"),
+            Err(e) => e,
+        };
+        assert!(format!("{err:#}").to_lowercase().contains("wallet"));
+    }
+
+    #[test]
+    fn build_rpc_with_no_pinned_roots_constructs_client() {
+        let toml = r#"
+[chain]
+rpc_url = "http://127.0.0.1:0/unused"
+program_addr = "oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3"
+validator_addr = "oct8taXQ4CvohcgzCJFYyaKrrAbcZs5mxkBCJQQYWb2Pcun"
+wallet_secret_path = "/tmp/x"
+
+[tunnel]
+public_endpoint = "1.2.3.4:51820"
+listen = "0.0.0.0:51820"
+wg_secret_path = "/tmp/y"
+
+[pricing]
+price_per_mb = 100
+region = "test"
+
+[control]
+listen = "0.0.0.0:51821"
+"#;
+        let cfg: crate::config::NodeConfig = ::toml::from_str(toml).unwrap();
+        let r = build_rpc(&cfg.chain);
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn read_receipt_secret_accepts_hex_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = dir.path().join("receipt.key");
+        let secret = [0xDEu8; 32];
+        std::fs::write(&key, hex::encode(secret) + "\n").unwrap();
+        let got = read_receipt_secret(&key).unwrap();
+        assert_eq!(got, secret);
+    }
+
+    #[test]
+    fn read_receipt_secret_errors_on_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = dir.path().join("missing");
+        let err = read_receipt_secret(&key).unwrap_err();
+        assert!(format!("{err:#}").contains("read"));
+    }
+
+    #[test]
+    fn extract_return_from_tx_nested_result_shape() {
+        // Shape: { "tx": { "result": 42 } }
+        let tx = serde_json::json!({ "tx": { "result": 42 } });
+        let got = extract_return(&tx, ReturnLog::SessionId);
+        assert_eq!(got.as_deref(), Some("42"));
+    }
+
+    #[test]
+    fn extract_return_tailnet_id_extracts_u64() {
+        let tx = serde_json::json!({ "result": 99 });
+        let got = extract_return(&tx, ReturnLog::TailnetId);
+        assert_eq!(got.as_deref(), Some("99"));
+    }
+
+    #[test]
+    fn extract_return_returns_none_for_wrong_type() {
+        // Asking for SessionId (u64) on a bool payload returns None.
+        let tx = serde_json::json!({ "result": true });
+        assert!(extract_return(&tx, ReturnLog::SessionId).is_none());
+    }
+
+    #[test]
+    fn settle_confirm_call_has_four_params_in_order() {
+        let c = ctx();
+        let p = SettleConfirmParams {
+            session_id: 1,
+            bytes_used: 2,
+            net: 3,
+            settle_blinding: "abcd",
+            fee: 4,
+            nonce: 5,
+        };
+        let call = c.build_settle_confirm_call(&p);
+        let params = call["params"].as_array().unwrap();
+        assert_eq!(params, &[
+            serde_json::json!(1u64),
+            serde_json::json!(2u64),
+            serde_json::json!(3u64),
+            serde_json::json!("abcd"),
+        ]);
+        assert_eq!(call["fee"], 4);
+        assert_eq!(call["nonce"], 5);
+    }
+
+    #[test]
+    fn create_tailnet_carries_deposit_in_value_field() {
+        let c = ctx();
+        let call = c.build_create_tailnet_call(ANCHOR, 5_000_000, 500, 7);
+        assert_eq!(call["value"], 5_000_000);
+        // Confirm fee and nonce surfaced separately.
+        assert_eq!(call["fee"], 500);
+        assert_eq!(call["nonce"], 7);
+    }
+
+    #[test]
+    fn bond_endpoint_value_field_matches_amount() {
+        let c = ctx();
+        let call = c.build_bond_endpoint_call(CID, 123_456_789, 500, 8);
+        assert_eq!(call["value"], 123_456_789);
+    }
+
+    #[test]
+    fn non_payable_calls_have_zero_value() {
+        let c = ctx();
+        // Several non-payable methods should have value=0.
+        assert_eq!(c.build_unbond_endpoint_call(CID, 100, 1)["value"], 0);
+        assert_eq!(c.build_finalize_unbond_call(CID, 100, 1)["value"], 0);
+        assert_eq!(c.build_retire_circle_call(CID, 100, 1)["value"], 0);
+        assert_eq!(c.build_retire_tailnet_call(2, 100, 1)["value"], 0);
+        assert_eq!(c.build_settle_claim_call(1, 1, 100, 1)["value"], 0);
+        assert_eq!(c.build_claim_no_show_call(1, 100, 1)["value"], 0);
+        assert_eq!(c.build_sweep_expired_session_call(1, 100, 1)["value"], 0);
+        assert_eq!(c.build_claim_earnings_call(CID, 1, 100, 1)["value"], 0);
+    }
 }

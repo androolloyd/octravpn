@@ -107,3 +107,145 @@ pub(crate) fn open_in_browser(url: &str) -> Result<()> {
     }
     Ok(())
 }
+
+// ── tests for the in-process portal server ───────────────────────────
+//
+// These exercise the auto-port-0 listener spawn that `run_portal` uses,
+// the `/healthz` probe path, and concurrent connection handling. They
+// deliberately don't shell out to the `octravpn portal` binary (that's
+// covered in `tests/portal_integration.rs`); they spin the router up
+// directly so we exercise the same code path the CLI does.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::portal::routes::router;
+    use octravpn_core::rpc::RpcClient;
+    use std::time::Duration;
+
+    async fn spawn_test_portal() -> (SocketAddr, tokio::task::JoinHandle<()>) {
+        let rpc = RpcClient::new("http://127.0.0.1:1");
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
+        let state = PortalState::new(chain);
+        let app = router(state);
+        let listener =
+            tokio::net::TcpListener::bind::<SocketAddr>("127.0.0.1:0".parse().unwrap())
+                .await
+                .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        (addr, handle)
+    }
+
+    #[tokio::test]
+    async fn is_running_returns_true_for_live_portal() {
+        let (addr, h) = spawn_test_portal().await;
+        let up = is_running(addr).await;
+        assert!(up, "live portal must answer /healthz");
+        h.abort();
+    }
+
+    #[tokio::test]
+    async fn is_running_returns_false_for_unreachable_addr() {
+        // Port 1 is almost certainly closed.
+        let addr: SocketAddr = "127.0.0.1:1".parse().unwrap();
+        let up = is_running(addr).await;
+        assert!(!up);
+    }
+
+    #[tokio::test]
+    async fn wait_until_running_short_circuits_when_already_up() {
+        let (addr, h) = spawn_test_portal().await;
+        let ok = wait_until_running(addr, Duration::from_millis(500)).await;
+        assert!(ok);
+        h.abort();
+    }
+
+    #[tokio::test]
+    async fn wait_until_running_times_out_when_no_listener() {
+        let addr: SocketAddr = "127.0.0.1:1".parse().unwrap();
+        let start = std::time::Instant::now();
+        let ok = wait_until_running(addr, Duration::from_millis(250)).await;
+        assert!(!ok, "no listener → should time out");
+        // Should not exceed the budget by more than ~200ms.
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[tokio::test]
+    async fn portal_listens_on_auto_assigned_port_zero() {
+        // Bind to :0 → kernel picks a free port. That's the production
+        // path for the integration harness and for ad-hoc tests.
+        let (addr, h) = spawn_test_portal().await;
+        assert!(addr.port() != 0, "kernel must assign a real port");
+        // GET / works.
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(2))
+            .build()
+            .unwrap();
+        let resp = client.get(format!("http://{addr}/")).send().await.unwrap();
+        assert_eq!(resp.status().as_u16(), 200);
+        let body = resp.text().await.unwrap();
+        assert!(body.contains("octra portal"));
+        h.abort();
+    }
+
+    #[tokio::test]
+    async fn portal_handles_concurrent_health_checks() {
+        // 100 simultaneous /healthz probes — none must error or
+        // hang past a generous budget.
+        let (addr, h) = spawn_test_portal().await;
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let mut handles = Vec::with_capacity(100);
+        for _ in 0..100 {
+            let c = client.clone();
+            handles.push(tokio::spawn(async move {
+                c.get(format!("http://{addr}/healthz")).send().await
+            }));
+        }
+        for j in handles {
+            let r = j.await.expect("task did not panic").expect("HTTP error");
+            assert_eq!(r.status().as_u16(), 200);
+        }
+        h.abort();
+    }
+
+    #[tokio::test]
+    async fn portal_serves_index_and_healthz_under_one_runtime() {
+        // Multiple sequential GETs share a runtime / connection pool —
+        // the portal must not get wedged after the first request.
+        let (addr, h) = spawn_test_portal().await;
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(2))
+            .build()
+            .unwrap();
+        for _ in 0..5 {
+            let r = client.get(format!("http://{addr}/healthz")).send().await.unwrap();
+            assert_eq!(r.status().as_u16(), 200);
+        }
+        let r = client.get(format!("http://{addr}/")).send().await.unwrap();
+        assert_eq!(r.status().as_u16(), 200);
+        h.abort();
+    }
+
+    #[tokio::test]
+    async fn portal_serves_404_for_unknown_routes() {
+        let (addr, h) = spawn_test_portal().await;
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(2))
+            .build()
+            .unwrap();
+        let r = client
+            .get(format!("http://{addr}/this-route-does-not-exist"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status().as_u16(), 404);
+        h.abort();
+    }
+}

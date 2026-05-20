@@ -1557,4 +1557,678 @@ mod tests {
             .unwrap()
             .block_on(f)
     }
+
+    // ── Phase-Z extra route coverage ─────────────────────────────────
+
+    /// Helper: spawn a mock RPC that serves `plaintext` for any
+    /// `circle_asset_ciphertext_by_resource_key` call. Returns the
+    /// listening address.
+    async fn spawn_plain_rpc(plaintext: &[u8]) -> SocketAddr {
+        let payload = plaintext.to_vec();
+        let app: Router = Router::new().route(
+            "/",
+            post(move |Json(req): Json<serde_json::Value>| {
+                let payload = payload.clone();
+                async move {
+                    let id = req.get("id").cloned().unwrap_or(json!(1));
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(payload);
+                    Json(json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": {
+                            "ciphertext_b64": b64,
+                            "plaintext_hash": "0".repeat(64),
+                            "key_id": "default",
+                        }
+                    }))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind::<SocketAddr>(
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .await
+        .unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        addr
+    }
+
+    fn state_with_addr(addr: SocketAddr) -> PortalState {
+        let rpc = RpcClient::new(format!("http://{addr}/"));
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
+        PortalState::new(chain)
+    }
+
+    // ── /go endpoint ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn go_redirects_to_b64_for_valid_url() {
+        let app = router(state_no_chain());
+        let url = "oct://circGo/policy.json";
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/go?u={}", urlenc(url)))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(resp.status().is_redirection());
+        let loc = resp.headers().get(header::LOCATION).unwrap().to_str().unwrap();
+        assert!(loc.starts_with("/o/"));
+    }
+
+    #[tokio::test]
+    async fn go_400s_for_bad_url() {
+        let app = router(state_no_chain());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/go?u={}", urlenc("not-an-oct-url")))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = body_string(resp).await;
+        assert!(body.contains("oct://"));
+    }
+
+    // ── /o/<b64> bad-input paths ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn view_asset_400s_on_bad_base64() {
+        let app = router(state_no_chain());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/o/!!!-not-base64-!!!")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = body_string(resp).await;
+        assert!(body.contains("bad base64"));
+    }
+
+    #[tokio::test]
+    async fn view_asset_400s_on_non_utf8_url() {
+        // base64url-encode raw 0xFF bytes — decodes successfully but
+        // isn't valid UTF-8 for the URL.
+        let bad = B64URL.encode(&[0xff, 0xfe, 0xfd]);
+        let app = router(state_no_chain());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/o/{bad}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn view_asset_400s_on_bad_oct_url() {
+        let url = "https://not-oct/x";
+        let app = router(state_no_chain());
+        let b64 = B64URL.encode(url.as_bytes());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/o/{b64}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // ── /api/resolve ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn api_resolve_returns_metadata_for_plaintext_asset() {
+        let addr = spawn_plain_rpc(b"hello from resolve").await;
+        let state = state_with_addr(addr);
+        state.allow("circRESOLVE");
+        let app = router(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/resolve?u={}",
+                        urlenc("oct://circRESOLVE/x.txt")
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body: serde_json::Value =
+            serde_json::from_str(&body_string(resp).await).unwrap();
+        assert_eq!(body.get("circle_id").and_then(|v| v.as_str()), Some("circRESOLVE"));
+        assert_eq!(body.get("path").and_then(|v| v.as_str()), Some("/x.txt"));
+        assert_eq!(body.get("size").and_then(serde_json::Value::as_u64), Some(18));
+        assert!(body.get("mime").and_then(|v| v.as_str()).unwrap().starts_with("text/plain"));
+        assert_eq!(body.get("renderable").and_then(serde_json::Value::as_bool), Some(true));
+    }
+
+    #[tokio::test]
+    async fn api_resolve_rejects_bad_url() {
+        let app = router(state_no_chain());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/resolve?u={}", urlenc("not-oct")))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body: serde_json::Value =
+            serde_json::from_str(&body_string(resp).await).unwrap();
+        assert!(body.get("error").is_some());
+    }
+
+    #[tokio::test]
+    async fn api_resolve_502_when_rpc_unreachable() {
+        // No chain → RPC fails → 502 BAD_GATEWAY.
+        let state = state_no_chain();
+        state.allow("circDOWN");
+        let app = router(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/resolve?u={}",
+                        urlenc("oct://circDOWN/x.txt")
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
+        let body: serde_json::Value =
+            serde_json::from_str(&body_string(resp).await).unwrap();
+        assert_eq!(
+            body.get("hint")
+                .and_then(|v| v.as_str())
+                .map(|s| s.contains("tunnel")),
+            Some(true),
+        );
+    }
+
+    #[tokio::test]
+    async fn api_resolve_412_when_sealed_without_passphrase() {
+        let (addr, _ct, _ph) =
+            spawn_sealed_rpc("circRESOLVE412", "secret", b"plain").await;
+        let rpc = RpcClient::new(format!("http://{addr}/"));
+        // No passphrase configured → MissingPassphrase.
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
+        let state = PortalState::new(chain);
+        let app = router(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/resolve?u={}",
+                        urlenc("oct://circRESOLVE412/x.txt")
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::PRECONDITION_FAILED);
+    }
+
+    // ── /confirm interactive HTML path ───────────────────────────────
+
+    #[tokio::test]
+    async fn confirm_renders_html_interstitial_for_browser() {
+        let app = router(state_no_chain());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/confirm?u={}",
+                        urlenc("oct://circCONF/policy.json")
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_string(resp).await;
+        assert!(body.contains("Approve this circle?"));
+        assert!(body.contains("circCONF"));
+        // Hidden token field for HMAC.
+        assert!(body.contains(r#"name="token""#));
+    }
+
+    #[tokio::test]
+    async fn confirm_400s_on_bad_url() {
+        let app = router(state_no_chain());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/confirm?u={}", urlenc("bogus")))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // ── /approve form ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn approve_rejects_invalid_hex_token() {
+        let state = state_no_chain();
+        let app = router(state.clone());
+        let form = format!(
+            "circle={c}&token={t}&next=/",
+            c = urlenc("circHEX"),
+            t = "not-hex-at-all",
+        );
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/approve")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(form))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert!(!state.is_allowed("circHEX"));
+    }
+
+    // ── /healthz: always 200 ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn healthz_is_independent_of_chain_state() {
+        // Even with an unreachable chain endpoint, /healthz answers OK.
+        let state = state_no_chain();
+        let app = router(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/healthz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    // ── sandbox attribute on each render path ────────────────────────
+
+    #[tokio::test]
+    async fn json_render_serves_pretty_pre_block() {
+        let bytes = br#"{"a":1,"b":[2,3]}"#.to_vec();
+        let resp = render_bytes("oct://c/x.json", bytes, sniff(b"{\"a\":1}"));
+        let body = body_string(resp).await;
+        assert!(body.contains("<pre>"));
+        // Pretty-printed: keys on separate lines.
+        assert!(body.contains("\"a\":") || body.contains("&quot;a&quot;"));
+    }
+
+    #[tokio::test]
+    async fn image_render_emits_data_uri() {
+        let png: Vec<u8> = b"\x89PNG\r\n\x1a\n".iter().chain(std::iter::repeat(&0u8).take(32)).copied().collect();
+        let resp = render_bytes("oct://c/img.png", png.clone(), sniff(&png));
+        let body = body_string(resp).await;
+        assert!(body.contains(r#"src="data:image/png;base64,"#), "body: {body}");
+    }
+
+    #[tokio::test]
+    async fn plain_text_render_uses_pre() {
+        let bytes = b"some plain text\nwith newlines".to_vec();
+        let resp = render_bytes("oct://c/x.txt", bytes, SniffedMime::PlainText);
+        let body = body_string(resp).await;
+        assert!(body.contains("<pre>"));
+        assert!(body.contains("some plain text"));
+        // HTML escaping is in place — even though there's no <, & should
+        // not appear bare unless escaped.
+        let bytes2 = b"line with <script>".to_vec();
+        let resp = render_bytes("oct://c/x.txt", bytes2, SniffedMime::PlainText);
+        let body = body_string(resp).await;
+        assert!(body.contains("&lt;script&gt;"), "must HTML-escape");
+    }
+
+    #[tokio::test]
+    async fn html_render_is_inside_sandboxed_iframe() {
+        let bytes = b"<html><body><script>alert(1)</script></body></html>".to_vec();
+        let resp = render_bytes("oct://c/x.html", bytes, SniffedMime::Html);
+        let body = body_string(resp).await;
+        assert!(body.contains(r#"sandbox="allow-popups""#));
+        // The script payload is embedded as srcdoc (escaped) — must not
+        // appear bare.
+        assert!(!body.contains("<script>alert(1)</script>"));
+        assert!(body.contains("&lt;script&gt;"));
+    }
+
+    #[tokio::test]
+    async fn octet_stream_render_sets_save_as_headers() {
+        // 0xFF 0xFE 0xFD is not valid UTF-8, no magic — OctetStream.
+        let bytes = vec![0xff, 0xfe, 0xfd, 0x00, 0x01, 0x02];
+        let mime = sniff(&bytes);
+        assert_eq!(mime, SniffedMime::OctetStream);
+        let resp = render_bytes("oct://c/x.bin", bytes, mime);
+        assert_eq!(resp.status(), StatusCode::OK);
+        let ct = resp.headers().get(header::CONTENT_TYPE).unwrap();
+        assert_eq!(ct.to_str().unwrap(), "application/octet-stream");
+        let cd = resp.headers().get(header::CONTENT_DISPOSITION).unwrap();
+        assert!(cd.to_str().unwrap().contains("attachment"));
+    }
+
+    #[tokio::test]
+    async fn svg_render_emits_data_uri_image() {
+        let svg = b"<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>".to_vec();
+        let mime = sniff(&svg);
+        assert_eq!(mime, SniffedMime::Svg);
+        let resp = render_bytes("oct://c/x.svg", svg, mime);
+        let body = body_string(resp).await;
+        assert!(body.contains(r#"src="data:image/svg+xml;base64,"#));
+    }
+
+    // ── /raw bytes and Content-Type ─────────────────────────────────
+
+    #[tokio::test]
+    async fn raw_endpoint_serves_plaintext_with_text_mime() {
+        let addr = spawn_plain_rpc(b"raw plaintext text bytes").await;
+        let state = state_with_addr(addr);
+        state.allow("circRP");
+        let app = router(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/raw?u={}",
+                        urlenc("oct://circRP/asset.txt")
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let ct = resp.headers().get(header::CONTENT_TYPE).unwrap().to_str().unwrap();
+        assert!(ct.starts_with("text/plain"));
+        let body = body_string(resp).await;
+        assert_eq!(body, "raw plaintext text bytes");
+    }
+
+    #[tokio::test]
+    async fn raw_endpoint_400s_on_bad_url() {
+        let app = router(state_no_chain());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/raw?u={}", urlenc("nope")))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn raw_endpoint_502_when_rpc_unreachable() {
+        let state = state_no_chain();
+        state.allow("circRD");
+        let app = router(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/raw?u={}",
+                        urlenc("oct://circRD/asset.txt")
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
+        let body: serde_json::Value =
+            serde_json::from_str(&body_string(resp).await).unwrap();
+        assert_eq!(body.get("code").and_then(|v| v.as_str()), Some("rpc"));
+    }
+
+    #[tokio::test]
+    async fn raw_endpoint_octet_stream_sets_inline_disposition() {
+        // Non-UTF8 bytes → OctetStream → defensive inline+filename
+        // even without `&dl=1`.
+        let raw_bytes: Vec<u8> = (0..16).map(|i| (i * 13 + 7) as u8).chain([0xff, 0xfe]).collect();
+        // Spawn a stub that ships these exact bytes.
+        let payload = raw_bytes.clone();
+        let app_mock: Router = Router::new().route(
+            "/",
+            post(move |Json(req): Json<serde_json::Value>| {
+                let payload = payload.clone();
+                async move {
+                    let id = req.get("id").cloned().unwrap_or(json!(1));
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(payload);
+                    Json(json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": {
+                            "ciphertext_b64": b64,
+                            "plaintext_hash": "0".repeat(64),
+                            "key_id": "default",
+                        }
+                    }))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind::<SocketAddr>(
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .await
+        .unwrap();
+        let mock_addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app_mock).await;
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+
+        let state = state_with_addr(mock_addr);
+        state.allow("circOCT");
+        let app = router(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/raw?u={}",
+                        urlenc("oct://circOCT/blob.bin")
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let cd = resp.headers().get(header::CONTENT_DISPOSITION).unwrap().to_str().unwrap();
+        assert!(cd.starts_with("inline;"));
+        assert!(cd.contains("blob.bin"));
+    }
+
+    // ── PortalState helpers ─────────────────────────────────────────
+
+    #[test]
+    fn token_round_trip_passes_with_correct_hmac() {
+        let state = state_no_chain();
+        let t = state.token_for("circT");
+        assert!(state.token_valid("circT", &t));
+        // Wrong circle id breaks the verify.
+        assert!(!state.token_valid("circOTHER", &t));
+        // Wrong hex breaks the verify.
+        assert!(!state.token_valid("circT", "not-hex"));
+        assert!(!state.token_valid("circT", "deadbeef"));
+    }
+
+    #[test]
+    fn record_unseal_round_trip_through_passphrase_source() {
+        let state = state_no_chain();
+        let pp = Arc::new(Zeroizing::new("hello".to_string()));
+        state.record_unseal("circU", Arc::clone(&pp));
+        let src = state.passphrase_source();
+        let got = src.passphrase_for("circU").unwrap();
+        assert_eq!(got.as_str(), "hello");
+        // Missing circle falls back to the chain configured passphrase
+        // (None here).
+        assert!(src.passphrase_for("circMISS").is_none());
+    }
+
+    #[test]
+    fn allow_set_isolates_circles() {
+        let state = state_no_chain();
+        state.allow("circA");
+        assert!(state.is_allowed("circA"));
+        assert!(!state.is_allowed("circB"));
+    }
+
+    // ── unseal: edge shapes ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn unseal_with_only_whitespace_passphrase_is_rejected() {
+        let state = state_no_chain();
+        let app = router(state);
+        let form = format!(
+            "circle={c}&passphrase={p}&next=/",
+            c = urlenc("circWS"),
+            p = urlenc("   \t  "),
+        );
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/unseal")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(form))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        let body = body_string(resp).await;
+        assert!(body.contains("passphrase is empty"));
+    }
+
+    #[tokio::test]
+    async fn unseal_redirect_clamps_to_root_for_offsite_next() {
+        // Even with valid passphrase, an offsite `next=` must collapse
+        // to `/`.
+        let (addr, _ct, _ph) =
+            spawn_sealed_rpc("circREDIR", "pp", b"plain bytes").await;
+        let rpc = RpcClient::new(format!("http://{addr}/"));
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
+        let state = PortalState::new(chain);
+        let app = router(state.clone());
+        let form = format!(
+            "circle={c}&passphrase={p}&next={n}",
+            c = urlenc("circREDIR"),
+            p = urlenc("pp"),
+            n = urlenc("https://evil.example/steal"),
+        );
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/unseal")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(form))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(resp.status().is_redirection());
+        let loc = resp.headers().get(header::LOCATION).unwrap().to_str().unwrap();
+        assert_eq!(loc, "/", "off-site redirect must clamp to root");
+    }
+
+    // ── sanitize_next exhaustive ────────────────────────────────────
+
+    #[test]
+    fn sanitize_next_accepts_all_in_origin_prefixes() {
+        for ok in &[
+            "/o/abc",
+            "/o/xyz/123",
+            "/raw",
+            "/raw?u=x&token=y",
+            "/api/resolve",
+            "/api/resolve?u=x",
+            "/",
+            "/?foo=bar",
+        ] {
+            assert_eq!(sanitize_next(ok), *ok, "{ok} must be preserved");
+        }
+    }
+
+    #[test]
+    fn sanitize_next_clamps_all_offsite_shapes() {
+        for bad in &[
+            "http://evil.example/x",
+            "https://evil/",
+            "//evil/",
+            "/x",
+            "/static",
+            "javascript:alert(1)",
+            "data:text/plain,hi",
+            "ftp://x",
+            "x",
+            "",
+        ] {
+            assert_eq!(sanitize_next(bad), "/", "{bad} must clamp to /");
+        }
+    }
+
+    // ── last_path_component edge cases ──────────────────────────────
+
+    #[test]
+    fn last_path_component_handles_trailing_slash() {
+        assert_eq!(last_path_component("/foo/"), "foo");
+        assert_eq!(last_path_component("/foo/bar/"), "bar");
+    }
+
+    #[test]
+    fn last_path_component_strips_repeated_slashes() {
+        assert_eq!(last_path_component("/a//b"), "b");
+        assert_eq!(last_path_component("///"), "circle-asset.bin");
+    }
+
+    // ── urlencode_query_value: pinned format ─────────────────────────
+
+    #[test]
+    fn urlencode_query_value_preserves_safe_chars() {
+        let s = urlencode_query_value("abcXYZ0123-_.~");
+        assert_eq!(s, "abcXYZ0123-_.~");
+    }
+
+    #[test]
+    fn urlencode_query_value_encodes_special_chars() {
+        let s = urlencode_query_value("a b/c?d&e=f");
+        assert_eq!(s, "a%20b%2Fc%3Fd%26e%3Df");
+    }
 }

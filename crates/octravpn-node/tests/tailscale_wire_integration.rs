@@ -34,6 +34,7 @@ fn build_state() -> (WireState, PreauthMinter, tempfile::TempDir) {
         derp_map: Arc::new(octravpn_mesh::tailscale_wire::DerpMap::default()),
         policy: Arc::new(Default::default()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
+        dns: std::sync::Arc::new(headscale_api::dns::DnsStore::new()),
     };
     (state, minter, dir)
 }
@@ -136,6 +137,11 @@ async fn key_then_register_then_map_round_trip() {
             ipv4: std::net::Ipv4Addr::new(100, 64, 0, 99),
         disco_key: None,
         endpoints: Vec::new(),
+        expiry: None,
+        last_seen: chrono::Utc::now(),
+        ephemeral: false,
+        created_at: chrono::Utc::now(),
+        forced_tags: vec![],
         },
     );
 
@@ -253,6 +259,11 @@ async fn flat_register_path_works_via_octravpn_node_router() {
             ipv4: std::net::Ipv4Addr::new(100, 64, 0, 99),
         disco_key: None,
         endpoints: Vec::new(),
+        expiry: None,
+        last_seen: chrono::Utc::now(),
+        ephemeral: false,
+        created_at: chrono::Utc::now(),
+        forced_tags: vec![],
         },
     );
 
@@ -391,6 +402,11 @@ async fn stream_true_emits_chunk_on_registry_change() {
             ipv4: std::net::Ipv4Addr::new(100, 64, 0, 10),
         disco_key: None,
         endpoints: Vec::new(),
+        expiry: None,
+        last_seen: chrono::Utc::now(),
+        ephemeral: false,
+        created_at: chrono::Utc::now(),
+        forced_tags: vec![],
         },
     );
 
@@ -448,6 +464,11 @@ async fn stream_true_emits_chunk_on_registry_change() {
                 ipv4: std::net::Ipv4Addr::new(100, 64, 0, 11),
             disco_key: None,
             endpoints: Vec::new(),
+            expiry: None,
+            last_seen: chrono::Utc::now(),
+            ephemeral: false,
+            created_at: chrono::Utc::now(),
+            forced_tags: vec![],
             },
         );
     });
@@ -524,6 +545,7 @@ async fn map_response_includes_derp_map_when_configured() {
         derp_map: Arc::new(derp_map),
         policy: Arc::new(Default::default()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
+        dns: std::sync::Arc::new(headscale_api::dns::DnsStore::new()),
     };
 
     // Register a single peer and read its `/machine/map` view.
@@ -561,6 +583,11 @@ async fn map_response_includes_derp_map_when_configured() {
             ipv4: std::net::Ipv4Addr::new(100, 64, 0, 99),
         disco_key: None,
         endpoints: Vec::new(),
+        expiry: None,
+        last_seen: chrono::Utc::now(),
+        ephemeral: false,
+        created_at: chrono::Utc::now(),
+        forced_tags: vec![],
         },
     );
 

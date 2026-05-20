@@ -50,6 +50,7 @@ fn build_state() -> (WireState, tempfile::TempDir) {
         derp_map: Arc::new(octravpn_mesh::tailscale_wire::DerpMap::default()),
         policy: Arc::new(Default::default()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
+        dns: std::sync::Arc::new(headscale_api::dns::DnsStore::new()),
     };
     (state, dir)
 }

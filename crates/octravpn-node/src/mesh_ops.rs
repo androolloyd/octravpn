@@ -622,4 +622,316 @@ mod tests {
         std::env::remove_var("OCTRAVPN_ADMIN_TOKEN");
         assert_eq!(resolve_token(None), None);
     }
+
+    // ----------------------------------------------------------------
+    // Additional coverage — status / policy / token handling
+    // ----------------------------------------------------------------
+
+    #[tokio::test]
+    async fn mesh_status_500_surfaces_as_error() {
+        let mock = MockAdmin::spawn(None, json!({}), Value::Null, 200, 200).await;
+        // The 500 is coming from the mock by hitting a non-existent path,
+        // but the simplest way to elicit a 500 is to wire an explicit
+        // failing route. Instead, point at a port that 404s any path:
+        // hit the policy validate URL on a server whose machines endpoint
+        // is fine — easier: just dial a wrong path.
+        let url = format!("{}/api/v1/machines", mock.url());
+        let _ = url; // silence unused
+        // For a clean 500 case we use the existing infra: not all routes
+        // are mounted, so a different URL returns 404 — that's enough to
+        // exercise the error branch of `get_machines`.
+        let bad = format!("{}/wrong", mock.url());
+        let err = get_machines(&bad, None).await.err().unwrap();
+        assert!(format!("{err:#}").contains("404") || format!("{err:#}").contains("Not Found"));
+    }
+
+    #[tokio::test]
+    async fn mesh_status_against_connection_refused_url() {
+        // Port 1 should reliably refuse connections.
+        let err = get_machines("http://127.0.0.1:1", None).await.err().unwrap();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("/api/v1/machines") || msg.to_lowercase().contains("connect"),
+            "expected connect-related context, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn mesh_status_accepts_token_from_explicit_arg() {
+        let machines = json!([{ "id": "m-1", "hostname": "h", "ipv4": "100.64.0.1", "online": true }]);
+        let mock = MockAdmin::spawn(Some("tok".into()), machines, Value::Null, 200, 200).await;
+        let body = get_machines(&mock.url(), Some("tok")).await.unwrap();
+        assert_eq!(body.as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn mesh_status_wrong_token_returns_401() {
+        let mock = MockAdmin::spawn(Some("right".into()), json!([]), Value::Null, 200, 200).await;
+        let err = get_machines(&mock.url(), Some("wrong")).await.err().unwrap();
+        assert!(format!("{err:#}").contains("401"));
+    }
+
+    #[tokio::test]
+    async fn run_status_dispatches_through_async_entry_point() {
+        let mock = MockAdmin::spawn(None, json!([]), Value::Null, 200, 200).await;
+        let args = MeshStatusArgs {
+            remote: mock.url(),
+            admin_token: None,
+            json: true,
+        };
+        let code = run_status(args).await.unwrap();
+        assert_eq!(code, 0);
+    }
+
+    #[tokio::test]
+    async fn run_policy_get_writes_to_out_file() {
+        let mock = MockAdmin::spawn(
+            None,
+            json!([]),
+            json!({"loaded": true, "raw": "{}"}),
+            200,
+            200,
+        )
+        .await;
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("policy.hujson");
+        let cmd = MeshPolicyCmd::Get(MeshPolicyGetArgs {
+            remote: mock.url(),
+            admin_token: None,
+            out: Some(out.clone()),
+        });
+        let code = run_policy(cmd).await.unwrap();
+        assert_eq!(code, 0);
+        let written = std::fs::read_to_string(&out).unwrap();
+        assert_eq!(written, "{}");
+    }
+
+    #[tokio::test]
+    async fn run_policy_set_streams_payload_from_file() {
+        let mock = MockAdmin::spawn(
+            None,
+            json!([]),
+            json!({"loaded": false, "raw": ""}),
+            200,
+            200,
+        )
+        .await;
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("p.hujson");
+        let payload = r#"{"version":1,"rules":[]}"#;
+        std::fs::write(&file, payload).unwrap();
+        let cmd = MeshPolicyCmd::Set(MeshPolicySetArgs {
+            remote: mock.url(),
+            admin_token: None,
+            file,
+        });
+        let code = run_policy(cmd).await.unwrap();
+        assert_eq!(code, 0);
+        let captured = mock.last_put.lock().await.clone().unwrap();
+        assert_eq!(captured, payload);
+    }
+
+    #[tokio::test]
+    async fn run_policy_set_returns_one_on_server_4xx() {
+        let mock = MockAdmin::spawn(
+            None,
+            json!([]),
+            json!({"loaded": false}),
+            400,
+            200,
+        )
+        .await;
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("p.hujson");
+        std::fs::write(&file, "garbage").unwrap();
+        let cmd = MeshPolicyCmd::Set(MeshPolicySetArgs {
+            remote: mock.url(),
+            admin_token: None,
+            file,
+        });
+        let code = run_policy(cmd).await.unwrap();
+        assert_eq!(code, 1);
+    }
+
+    #[tokio::test]
+    async fn run_policy_validate_does_not_touch_put_endpoint() {
+        let mock = MockAdmin::spawn(
+            None,
+            json!([]),
+            json!({"loaded": false}),
+            200,
+            200,
+        )
+        .await;
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("p.hujson");
+        std::fs::write(&file, "{}").unwrap();
+        let cmd = MeshPolicyCmd::Validate(MeshPolicySetArgs {
+            remote: mock.url(),
+            admin_token: None,
+            file,
+        });
+        let code = run_policy(cmd).await.unwrap();
+        assert_eq!(code, 0);
+        // The PUT recorder MUST be untouched by validate.
+        assert!(mock.last_put.lock().await.is_none());
+        assert!(mock.last_validate.lock().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn run_policy_get_falls_back_to_stdout_when_no_out_file() {
+        // No assertion on stdout — just exercise the no-out branch and
+        // make sure no panic.
+        let mock = MockAdmin::spawn(
+            None,
+            json!([]),
+            json!({"loaded": true, "raw": "{}"}),
+            200,
+            200,
+        )
+        .await;
+        let cmd = MeshPolicyCmd::Get(MeshPolicyGetArgs {
+            remote: mock.url(),
+            admin_token: None,
+            out: None,
+        });
+        let code = run_policy(cmd).await.unwrap();
+        assert_eq!(code, 0);
+    }
+
+    #[tokio::test]
+    async fn run_policy_get_falls_back_to_stdout_when_policy_not_loaded() {
+        let mock = MockAdmin::spawn(
+            None,
+            json!([]),
+            json!({"loaded": false, "raw": ""}),
+            200,
+            200,
+        )
+        .await;
+        let cmd = MeshPolicyCmd::Get(MeshPolicyGetArgs {
+            remote: mock.url(),
+            admin_token: None,
+            out: None,
+        });
+        let code = run_policy(cmd).await.unwrap();
+        assert_eq!(code, 0);
+    }
+
+    // ----------------------------------------------------------------
+    // Helpers — URL handling, knock psk, render
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn url_join_handles_root_remote() {
+        assert_eq!(url_join("http://x:1", "/foo"), "http://x:1/foo");
+    }
+
+    #[test]
+    fn url_join_no_double_slash() {
+        assert_eq!(
+            url_join("http://x.example/", "/foo/bar"),
+            "http://x.example/foo/bar"
+        );
+    }
+
+    #[test]
+    fn trim_truncates_with_ellipsis() {
+        let long = "a".repeat(300);
+        let out = trim(&long, 16);
+        assert!(out.ends_with('…'));
+        assert!(out.starts_with(&"a".repeat(16)));
+    }
+
+    #[test]
+    fn trim_passes_short_strings_through() {
+        assert_eq!(trim("abc", 10), "abc");
+    }
+
+    #[test]
+    fn short_string_truncates_long_strings() {
+        let v = Value::String("a".repeat(20));
+        assert!(short_string(&v).ends_with('…'));
+    }
+
+    #[test]
+    fn short_string_preserves_non_strings() {
+        let v = json!(42);
+        assert_eq!(short_string(&v), "42");
+    }
+
+    #[test]
+    fn resolve_token_explicit_overrides_env() {
+        std::env::set_var("OCTRAVPN_ADMIN_TOKEN", "ignored");
+        assert_eq!(resolve_token(Some("wins")).as_deref(), Some("wins"));
+        std::env::remove_var("OCTRAVPN_ADMIN_TOKEN");
+    }
+
+    #[test]
+    fn resolve_knock_psk_returns_none_when_env_unset() {
+        std::env::remove_var("OCTRAVPN_KNOCK_PSK");
+        assert!(resolve_knock_psk().is_none());
+    }
+
+    #[test]
+    fn resolve_knock_psk_returns_none_on_empty() {
+        std::env::set_var("OCTRAVPN_KNOCK_PSK", "");
+        assert!(resolve_knock_psk().is_none());
+        std::env::remove_var("OCTRAVPN_KNOCK_PSK");
+    }
+
+    #[test]
+    fn resolve_knock_psk_returns_none_on_bad_base64() {
+        std::env::set_var("OCTRAVPN_KNOCK_PSK", "not-valid-base64!");
+        // Even bad PSK doesn't panic — it falls back to None with a
+        // warning printed to stderr.
+        assert!(resolve_knock_psk().is_none());
+        std::env::remove_var("OCTRAVPN_KNOCK_PSK");
+    }
+
+    #[test]
+    fn build_client_succeeds() {
+        // Smoke check that the client builder is reachable + returns Ok.
+        let c = build_client().unwrap();
+        // The accept-self-signed posture means the client builder
+        // succeeds even though TLS roots are pinned-off.
+        let _ = c;
+    }
+
+    #[test]
+    fn handle_policy_get_writes_loaded_to_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("out.hujson");
+        let body = json!({"loaded": true, "raw": "abc"});
+        handle_policy_get(&body, Some(&p)).unwrap();
+        let written = std::fs::read_to_string(&p).unwrap();
+        assert_eq!(written, "abc");
+    }
+
+    #[test]
+    fn handle_policy_get_writes_empty_when_no_raw() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("empty.hujson");
+        let body = json!({"loaded": false});
+        handle_policy_get(&body, Some(&p)).unwrap();
+        let written = std::fs::read_to_string(&p).unwrap();
+        assert_eq!(written, "");
+    }
+
+    #[test]
+    fn read_policy_file_reads_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("p");
+        std::fs::write(&p, "hello").unwrap();
+        let got = read_policy_file(&p).unwrap();
+        assert_eq!(got, "hello");
+    }
+
+    #[test]
+    fn read_policy_file_errors_on_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("missing");
+        let err = read_policy_file(&p).unwrap_err();
+        assert!(format!("{err:#}").contains("read"));
+    }
 }

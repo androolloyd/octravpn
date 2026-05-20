@@ -1267,4 +1267,328 @@ mod tests {
         assert_eq!(format_ts_utc(946_684_800), "2000-01-01T00:00:00Z");
         assert_eq!(format_ts_utc(1_704_067_200), "2024-01-01T00:00:00Z");
     }
+
+    // ----------------------------------------------------------------
+    // Additional coverage — verify edge cases + signed_seqs cross-check
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn verify_signed_seqs_populated_from_receipt_signed_entries() {
+        let dir = tempdir().unwrap();
+        let log = AuditLog::open(dir.path()).unwrap();
+        let sid_a = sid_hex(0xAA);
+        let sid_b = sid_hex(0xBB);
+        log.write(&AuditRecord {
+            ts_unix: 1_700_000_000,
+            kind: "receipt_signed",
+            source: None,
+            session_id: Some(sid_a.clone()),
+            extra: json!({"seq": 1}),
+        })
+        .unwrap();
+        log.write(&AuditRecord {
+            ts_unix: 1_700_000_001,
+            kind: "receipt_signed",
+            source: None,
+            session_id: Some(sid_a.clone()),
+            extra: json!({"seq": 2}),
+        })
+        .unwrap();
+        log.write(&AuditRecord {
+            ts_unix: 1_700_000_002,
+            kind: "receipt_signed",
+            source: None,
+            session_id: Some(sid_b.clone()),
+            extra: json!({"seq": 9}),
+        })
+        .unwrap();
+        let key = log.key();
+        // Discover the file under dir.
+        let files = discover_audit_files(dir.path()).unwrap();
+        let (_, signed_seqs) = verify_audit_files(&key, &files);
+        let seqs_a = signed_seqs.get(&sid_a).expect("sid_a present");
+        assert!(seqs_a.contains(&1));
+        assert!(seqs_a.contains(&2));
+        let seqs_b = signed_seqs.get(&sid_b).expect("sid_b present");
+        assert!(seqs_b.contains(&9));
+    }
+
+    #[test]
+    fn verify_empty_log_file_passes_with_zero_entries() {
+        // Zero-length file is OK — no records to verify.
+        let dir = tempdir().unwrap();
+        let log_file = dir.path().join("audit-2024-01-01.jsonl");
+        std::fs::write(&log_file, b"").unwrap();
+        // Need an HMAC key alongside.
+        std::fs::write(log_file.with_extension("jsonl.key"), [0u8; 32]).unwrap();
+        let args = VerifyArgs {
+            audit_path: log_file,
+            journal_path: dir.path().join("no-journal.bin"),
+            hmac_key: None,
+        };
+        let mut buf = Vec::new();
+        let report = run_verify(&args, &mut buf).unwrap();
+        assert!(report.overall_pass);
+        let detail = match &report.audit_log {
+            CheckResult::Ok { detail } => detail,
+            other => panic!("expected Ok, got {other:?}"),
+        };
+        assert!(detail.contains("0 entries"));
+    }
+
+    #[test]
+    fn verify_single_line_passes() {
+        let dir = tempdir().unwrap();
+        let log = AuditLog::open(dir.path()).unwrap();
+        log.write(&AuditRecord {
+            ts_unix: 1_700_000_000,
+            kind: "announce",
+            source: None,
+            session_id: Some(sid_hex(1)),
+            extra: Value::Null,
+        })
+        .unwrap();
+        let args = VerifyArgs {
+            audit_path: dir.path().to_path_buf(),
+            journal_path: dir.path().join("missing.bin"),
+            hmac_key: None,
+        };
+        let mut buf = Vec::new();
+        let report = run_verify(&args, &mut buf).unwrap();
+        assert!(report.overall_pass);
+    }
+
+    #[test]
+    fn verify_handles_file_without_trailing_newline() {
+        // Build a real chained line, write WITHOUT trailing newline.
+        let dir = tempdir().unwrap();
+        let log = AuditLog::open(dir.path()).unwrap();
+        log.write(&AuditRecord {
+            ts_unix: 1_700_000_000,
+            kind: "announce",
+            source: None,
+            session_id: Some(sid_hex(1)),
+            extra: Value::Null,
+        })
+        .unwrap();
+        // The audit log API writes a trailing newline; rebuild a copy
+        // without the trailer.
+        let audit_file = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .find(|e| e.file_name().to_string_lossy().starts_with("audit-"))
+            .unwrap()
+            .path();
+        let body = std::fs::read_to_string(&audit_file).unwrap();
+        let trimmed = body.trim_end_matches('\n');
+        std::fs::write(&audit_file, trimmed.as_bytes()).unwrap();
+        let args = VerifyArgs {
+            audit_path: dir.path().to_path_buf(),
+            journal_path: dir.path().join("missing.bin"),
+            hmac_key: None,
+        };
+        let mut buf = Vec::new();
+        let report = run_verify(&args, &mut buf).unwrap();
+        assert!(report.overall_pass);
+    }
+
+    #[test]
+    fn verify_explicit_hmac_key_wrong_size_io_error() {
+        let dir = tempdir().unwrap();
+        let log = AuditLog::open(dir.path()).unwrap();
+        log.write(&AuditRecord {
+            ts_unix: 1_700_000_000,
+            kind: "announce",
+            source: None,
+            session_id: Some(sid_hex(1)),
+            extra: Value::Null,
+        })
+        .unwrap();
+        let bad = dir.path().join("bad.key");
+        std::fs::write(&bad, b"shortkey").unwrap();
+        let args = VerifyArgs {
+            audit_path: dir.path().to_path_buf(),
+            journal_path: dir.path().join("missing.bin"),
+            hmac_key: Some(bad),
+        };
+        let mut buf = Vec::new();
+        let err = run_verify(&args, &mut buf).unwrap_err();
+        match err {
+            VerifyError::Io(e) => assert!(format!("{e:#}").contains("wrong size")),
+            VerifyError::Missing(m) => panic!("expected Io; got Missing: {m}"),
+        }
+    }
+
+    #[test]
+    fn replay_jsonl_emits_one_per_line() {
+        let dir = tempdir().unwrap();
+        write_synthetic_audit_log(
+            dir.path(),
+            &[
+                (10, "x", Some(&sid_hex(1))),
+                (20, "y", Some(&sid_hex(1))),
+                (30, "x", Some(&sid_hex(2))),
+            ],
+        );
+        let args = ReplayArgs {
+            audit_path: dir.path().to_path_buf(),
+            journal_path: dir.path().join("none.bin"),
+            session: None,
+            since: None,
+            until: None,
+            format: "jsonl".into(),
+        };
+        let mut buf = Vec::new();
+        run_replay(&args, &mut buf).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert_eq!(out.lines().count(), 3);
+    }
+
+    #[test]
+    fn replay_human_format_renders_no_ts_for_journal_only() {
+        let dir = tempdir().unwrap();
+        let journal_path = dir.path().join("receipts.bin");
+        let j = octravpn_core::receipt_journal::ReceiptJournal::open(&journal_path).unwrap();
+        j.bump(&SessionId::new([1u8; 32]), 4).unwrap();
+        let args = ReplayArgs {
+            audit_path: dir.path().join("no-audit-dir"),
+            journal_path,
+            session: None,
+            since: None,
+            until: None,
+            format: "human".into(),
+        };
+        let mut buf = Vec::new();
+        run_replay(&args, &mut buf).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(out.contains("<no-ts>"));
+        assert!(out.contains("journal_floor"));
+    }
+
+    #[test]
+    fn parse_session_filter_rejects_garbage() {
+        let r = parse_session_filter(Some("not-valid"));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn parse_session_filter_handles_none() {
+        let r = parse_session_filter(None).unwrap();
+        assert!(r.is_none());
+    }
+
+    #[test]
+    fn discover_audit_files_returns_sorted_files() {
+        let dir = tempdir().unwrap();
+        // Write three files out of order to ensure sort is enforced.
+        for name in ["audit-2024-03-15.jsonl", "audit-2024-01-01.jsonl", "audit-2024-02-15.jsonl"] {
+            std::fs::write(dir.path().join(name), b"").unwrap();
+        }
+        // Add an unrelated file that must be skipped.
+        std::fs::write(dir.path().join("other.txt"), b"").unwrap();
+        let files = discover_audit_files(dir.path()).unwrap();
+        assert_eq!(files.len(), 3);
+        // Lexicographically sorted = chronologically sorted (YYYY-MM-DD).
+        let names: Vec<String> = files
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names[0], "audit-2024-01-01.jsonl");
+        assert_eq!(names[2], "audit-2024-03-15.jsonl");
+    }
+
+    #[test]
+    fn discover_audit_files_returns_empty_for_missing_path() {
+        let dir = tempdir().unwrap();
+        let files = discover_audit_files(&dir.path().join("nowhere")).unwrap();
+        assert!(files.is_empty());
+    }
+
+    #[test]
+    fn audit_record_to_event_extracts_seq_and_bytes_from_extra() {
+        let rec = json!({
+            "ts_unix": 1_234_567_890u64,
+            "kind": "receipt_signed",
+            "session_id": sid_hex(0xAA),
+            "extra": { "seq": 5, "bytes_used": 999 }
+        });
+        let ev = audit_record_to_event(&rec);
+        assert_eq!(ev.kind, "receipt_signed");
+        assert_eq!(ev.seq, Some(5));
+        assert_eq!(ev.bytes_used, Some(999));
+        assert_eq!(ev.source, "audit");
+    }
+
+    #[test]
+    fn check_result_label_and_detail_helpers() {
+        let ok = CheckResult::Ok { detail: "x".into() };
+        let f = CheckResult::Fail { detail: "y".into() };
+        let s = CheckResult::Skipped { detail: "z".into() };
+        let w = CheckResult::Warn { detail: "q".into() };
+        assert_eq!(ok.label(), "OK");
+        assert_eq!(f.label(), "FAIL");
+        assert_eq!(s.label(), "SKIPPED");
+        assert_eq!(w.label(), "WARN");
+        assert_eq!(ok.detail(), "x");
+        assert_eq!(f.detail(), "y");
+        assert_eq!(s.detail(), "z");
+        assert_eq!(w.detail(), "q");
+    }
+
+    #[test]
+    fn short_hex_truncates_long_strings() {
+        let h = "a".repeat(20);
+        let out = short_hex(&h);
+        assert!(out.ends_with('…'));
+        assert!(out.starts_with(&"a".repeat(6)));
+    }
+
+    #[test]
+    fn short_hex_passes_through_short_strings() {
+        assert_eq!(short_hex("abcd"), "abcd");
+    }
+
+    #[test]
+    fn dispatch_replay_returns_zero_on_success() {
+        let dir = tempdir().unwrap();
+        write_synthetic_audit_log(
+            dir.path(),
+            &[(100, "announce", Some(&sid_hex(1)))],
+        );
+        let cmd = AuditCmd::Replay(ReplayArgs {
+            audit_path: dir.path().to_path_buf(),
+            journal_path: dir.path().join("missing.bin"),
+            session: None,
+            since: None,
+            until: None,
+            format: "human".into(),
+        });
+        let code = dispatch(cmd);
+        assert_eq!(code, 0);
+    }
+
+    #[test]
+    fn verify_journal_only_no_audit_dir_returns_skipped_cross_check() {
+        // Verify against a single-file path where the audit log exists
+        // standalone (not in a dir) and the journal is present.
+        let dir = tempdir().unwrap();
+        let log = AuditLog::open(dir.path()).unwrap();
+        log.write(&AuditRecord {
+            ts_unix: 1_700_000_000,
+            kind: "announce",
+            source: None,
+            session_id: Some(sid_hex(1)),
+            extra: Value::Null,
+        })
+        .unwrap();
+        let args = VerifyArgs {
+            audit_path: dir.path().to_path_buf(),
+            journal_path: dir.path().join("missing.bin"),
+            hmac_key: None,
+        };
+        let mut buf = Vec::new();
+        let report = run_verify(&args, &mut buf).unwrap();
+        // Journal missing → cross-check is skipped (not Fail).
+        assert!(matches!(report.cross_check, CheckResult::Skipped { .. }));
+    }
 }

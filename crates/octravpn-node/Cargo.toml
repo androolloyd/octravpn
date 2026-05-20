@@ -86,6 +86,7 @@ octravpn-mesh = { path = "../octravpn-mesh", features = ["test-helpers"] }
 # wire layer); we activate the admin feature here as a dev-dep so the
 # integration test can reach `admin::router` / `admin::AdminState`.
 headscale-api = { path = "../../../headscale-rs/headscale-api", default-features = false, features = ["admin"] }
+chrono = { version = "0.4", features = ["serde"] }
 # `tower::ServiceExt::oneshot` drives the merged axum::Router in the
 # `tailscale_wire_integration` test without binding a real port.
 tower = { version = "0.5", features = ["util"] }

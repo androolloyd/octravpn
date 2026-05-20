@@ -40,6 +40,7 @@ pub use headscale_api::tailscale_wire::{
     WireState,
 };
 pub use headscale_api::policy;
+pub use headscale_api;
 
 pub use acl::{AclAction, AclDoc, AclRule, PortRef, SignedAclDoc};
 pub use conn::{ConnState, Connection, ConnectionManager};

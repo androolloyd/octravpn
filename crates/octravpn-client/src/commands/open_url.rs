@@ -428,4 +428,234 @@ mod tests {
         let on_disk = std::fs::read(&out).unwrap();
         assert_eq!(on_disk, b"hello from circle");
     }
+
+    // ── Phase-Z parser coverage ──────────────────────────────────────
+
+    #[test]
+    fn parse_accepts_uppercase_scheme() {
+        let p = parse_oct_url("OCT://circle/policy.json").unwrap();
+        assert_eq!(p.circle_id, "circle");
+        assert_eq!(p.path, "/policy.json");
+    }
+
+    #[test]
+    fn parse_accepts_mixed_case_scheme() {
+        let p = parse_oct_url("Oct://circle/x").unwrap();
+        assert_eq!(p.circle_id, "circle");
+        assert_eq!(p.path, "/x");
+    }
+
+    #[test]
+    fn parse_circle_only_no_trailing_slash() {
+        let p = parse_oct_url("oct://circ").unwrap();
+        assert_eq!(p.circle_id, "circ");
+        assert_eq!(p.path, "/");
+    }
+
+    #[test]
+    fn parse_circle_with_trailing_slash() {
+        let p = parse_oct_url("oct://circ/").unwrap();
+        assert_eq!(p.circle_id, "circ");
+        assert_eq!(p.path, "/");
+    }
+
+    #[test]
+    fn parse_double_trailing_slash() {
+        // The parser doesn't canonicalize multi-slash paths — verifies
+        // current behaviour. `//x` should stay as the path so callers
+        // can canonicalize downstream.
+        let p = parse_oct_url("oct://circ//policy.json").unwrap();
+        assert_eq!(p.circle_id, "circ");
+        assert_eq!(p.path, "//policy.json");
+    }
+
+    #[test]
+    fn parse_rejects_missing_scheme() {
+        assert!(parse_oct_url("circle/policy.json").is_err());
+        assert!(parse_oct_url("//circle/policy.json").is_err());
+        assert!(parse_oct_url("").is_err());
+    }
+
+    #[test]
+    fn parse_double_scheme_currently_accepts_with_colon_in_circle() {
+        // BUG (filed): `oct://oct://double` parses as
+        // `circle_id="oct:"`, path="//double", because `parse_oct_url`
+        // only rejects whitespace / '?' / '#' in the circle id —
+        // colons slip through. The portal route layer never invokes
+        // the resource_key derivation on a colon-bearing id today,
+        // but the parser should still reject it. Documented here as a
+        // pinned regression so a future fix flips this assert.
+        let p = parse_oct_url("oct://oct://double").unwrap();
+        assert_eq!(p.circle_id, "oct:");
+        assert_eq!(p.path, "//double");
+    }
+
+    #[test]
+    fn parse_rejects_whitespace_in_circle_id() {
+        assert!(parse_oct_url("oct://bad circle/x").is_err());
+        assert!(parse_oct_url("oct://bad\tcircle/x").is_err());
+    }
+
+    #[test]
+    fn parse_rejects_fragment_marker_in_circle_id() {
+        assert!(parse_oct_url("oct://circle#frag/x").is_err());
+    }
+
+    #[test]
+    fn parse_allows_nested_dots_and_dashes_in_circle_id() {
+        let p = parse_oct_url("oct://circle-1.subnet/asset.bin").unwrap();
+        assert_eq!(p.circle_id, "circle-1.subnet");
+        assert_eq!(p.path, "/asset.bin");
+    }
+
+    #[test]
+    fn parse_preserves_query_in_path() {
+        // The parser doesn't split out `?` after the path — the path
+        // segment retains whatever follows the first `/`.
+        let p = parse_oct_url("oct://circ/api?x=1&y=2").unwrap();
+        assert_eq!(p.circle_id, "circ");
+        assert_eq!(p.path, "/api?x=1&y=2");
+    }
+
+    #[test]
+    fn parse_preserves_anchor_in_path() {
+        // Same for `#` once we're past the host segment — the URL parser
+        // is path-permissive, not RFC-3986 strict.
+        let p = parse_oct_url("oct://circ/page#section").unwrap();
+        assert_eq!(p.circle_id, "circ");
+        assert_eq!(p.path, "/page#section");
+    }
+
+    #[test]
+    fn parse_unicode_in_path_is_preserved() {
+        let p = parse_oct_url("oct://circ/héllo").unwrap();
+        assert_eq!(p.circle_id, "circ");
+        assert_eq!(p.path, "/héllo");
+    }
+
+    #[test]
+    fn parse_long_path() {
+        let long: String = "a/".repeat(500);
+        let url = format!("oct://circ/{long}");
+        let p = parse_oct_url(&url).unwrap();
+        assert_eq!(p.circle_id, "circ");
+        assert!(p.path.starts_with("/a/a/"));
+        assert_eq!(p.path.len(), long.len() + 1);
+    }
+
+    #[test]
+    fn mode_save_takes_precedence_only_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let args = OpenUrlArgs {
+            url: "oct://c/x".into(),
+            save: Some(tmp.path().join("out.bin")),
+            stdout: false,
+            portal: false,
+            portal_bind: None,
+        };
+        assert!(matches!(args.mode().unwrap(), Mode::Save(_)));
+    }
+
+    #[test]
+    fn mode_combination_save_plus_stdout_is_rejected() {
+        let args = OpenUrlArgs {
+            url: "oct://c/x".into(),
+            save: Some(std::path::PathBuf::from("/tmp/x")),
+            stdout: true,
+            portal: false,
+            portal_bind: None,
+        };
+        let err = args.mode().unwrap_err();
+        assert!(err.to_string().contains("at most one"));
+    }
+
+    #[test]
+    fn mode_combination_portal_plus_stdout_is_rejected() {
+        let args = OpenUrlArgs {
+            url: "oct://c/x".into(),
+            save: None,
+            stdout: true,
+            portal: true,
+            portal_bind: None,
+        };
+        assert!(args.mode().is_err());
+    }
+
+    #[test]
+    fn mode_combination_portal_plus_save_is_rejected() {
+        let args = OpenUrlArgs {
+            url: "oct://c/x".into(),
+            save: Some(std::path::PathBuf::from("/tmp/x")),
+            stdout: false,
+            portal: true,
+            portal_bind: None,
+        };
+        assert!(args.mode().is_err());
+    }
+
+    #[test]
+    fn browser_target_b64_round_trips() {
+        // browser_target() is private; reproduce its construction to
+        // pin down the format the portal binary expects.
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64URL, Engine as _};
+        let url = "oct://circle/policy.json";
+        let bind: SocketAddr = "127.0.0.1:51823".parse().unwrap();
+        let got = browser_target(bind, url);
+        let b64 = B64URL.encode(url.as_bytes());
+        assert_eq!(got, format!("http://{bind}/o/{b64}"));
+        // And the b64 must decode back to the original URL.
+        let decoded = B64URL.decode(b64.as_bytes()).unwrap();
+        assert_eq!(decoded, url.as_bytes());
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::test_runner::Config {
+            cases: 512,
+            .. proptest::test_runner::Config::default()
+        })]
+
+        /// The parser is a fixed-format hand-rolled split — it must
+        /// never panic regardless of the input. Either it returns a
+        /// well-formed `ParsedOctUrl`, or it returns an error. No
+        /// third option.
+        #[test]
+        fn parse_oct_url_never_panics(s in ".{0,256}") {
+            match parse_oct_url(&s) {
+                Ok(p) => {
+                    // Invariants on success:
+                    //   * circle_id non-empty
+                    //   * circle_id has no '/', no whitespace, no '?', no '#'
+                    //   * path starts with '/'
+                    proptest::prop_assert!(!p.circle_id.is_empty());
+                    proptest::prop_assert!(!p.circle_id.contains('/'));
+                    proptest::prop_assert!(!p.circle_id.contains('?'));
+                    proptest::prop_assert!(!p.circle_id.contains('#'));
+                    proptest::prop_assert!(!p.circle_id.contains(char::is_whitespace));
+                    proptest::prop_assert!(p.path.starts_with('/'));
+                }
+                Err(_) => {
+                    // Error path — must just be a clean anyhow.
+                }
+            }
+        }
+
+        /// For any valid-shaped input `oct://<id>/<path>`, parsing must
+        /// succeed and recover the exact id.
+        #[test]
+        fn parse_oct_url_roundtrip_for_well_formed(
+            id in "[a-zA-Z0-9._-]{1,32}",
+            path in "[a-zA-Z0-9._/-]{0,64}",
+        ) {
+            let url = if path.is_empty() {
+                format!("oct://{id}")
+            } else if let Some(rest) = path.strip_prefix('/') {
+                format!("oct://{id}/{rest}")
+            } else {
+                format!("oct://{id}/{path}")
+            };
+            let p = parse_oct_url(&url).unwrap();
+            proptest::prop_assert_eq!(p.circle_id, id);
+            proptest::prop_assert!(p.path.starts_with('/'));
+        }
+    }
 }

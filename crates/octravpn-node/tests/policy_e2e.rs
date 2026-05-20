@@ -48,6 +48,7 @@ fn build_app() -> (axum::Router, WireState, PolicyStore, tempfile::TempDir) {
         derp_map: Arc::new(octravpn_mesh::tailscale_wire::DerpMap::default()),
         policy: Arc::new(policy.clone()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
+        dns: std::sync::Arc::new(headscale_api::dns::DnsStore::new()),
     };
 
     let admin_state = admin::AdminState::builder()
@@ -123,6 +124,11 @@ async fn policy_put_propagates_to_map_packet_filter() {
             ipv4: std::net::Ipv4Addr::new(100, 64, 0, 10),
             disco_key: None,
             endpoints: Vec::new(),
+            expiry: None,
+            last_seen: chrono::Utc::now(),
+            ephemeral: false,
+            created_at: chrono::Utc::now(),
+            forced_tags: vec![],
         },
     );
     wire.machines.upsert(
@@ -135,6 +141,11 @@ async fn policy_put_propagates_to_map_packet_filter() {
             ipv4: std::net::Ipv4Addr::new(100, 64, 0, 11),
             disco_key: None,
             endpoints: Vec::new(),
+            expiry: None,
+            last_seen: chrono::Utc::now(),
+            ephemeral: false,
+            created_at: chrono::Utc::now(),
+            forced_tags: vec![],
         },
     );
 

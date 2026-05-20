@@ -1174,6 +1174,192 @@ mod tests {
         assert_eq!(cache.len(), 0, "cache stays empty when fetches fail");
     }
 
+    // ── Phase-Z added coverage (cache + decrypt path) ───────────────
+
+    /// Spawn an RPC that returns a JSON-RPC `error` for the asset
+    /// method. Drives the `FetchAssetError::Rpc` branch.
+    async fn spawn_error_rpc(message: &str) -> SocketAddr {
+        let msg = message.to_string();
+        let app: Router = Router::new().route(
+            "/",
+            post(move |Json(req): Json<serde_json::Value>| {
+                let msg = msg.clone();
+                async move {
+                    let id = req.get("id").cloned().unwrap_or(json!(1));
+                    Json(json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "error": { "code": -32000, "message": msg },
+                    }))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind::<SocketAddr>("127.0.0.1:0".parse().unwrap())
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        addr
+    }
+
+    #[tokio::test]
+    async fn rpc_not_found_maps_to_not_published() {
+        let addr = spawn_error_rpc("not found").await;
+        let rpc = RpcClient::new(format!("http://{addr}/"));
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
+        let err = chain
+            .fetch_circle_asset_bytes("circNF", "/missing.json")
+            .await
+            .expect_err("not found must map to NotPublished");
+        assert!(matches!(err, FetchAssetError::NotPublished { .. }));
+    }
+
+    #[tokio::test]
+    async fn rpc_empty_result_maps_to_not_published() {
+        let addr = spawn_error_rpc("empty result").await;
+        let rpc = RpcClient::new(format!("http://{addr}/"));
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
+        let err = chain
+            .fetch_circle_asset_bytes("circEMPTY", "/x.json")
+            .await
+            .expect_err("empty result must map to NotPublished");
+        assert!(matches!(err, FetchAssetError::NotPublished { .. }));
+    }
+
+    #[tokio::test]
+    async fn rpc_no_such_method_maps_to_not_published() {
+        let addr = spawn_error_rpc("no such method").await;
+        let rpc = RpcClient::new(format!("http://{addr}/"));
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
+        let err = chain
+            .fetch_circle_asset_bytes("circNS", "/x.json")
+            .await
+            .expect_err("no such must map to NotPublished");
+        assert!(matches!(err, FetchAssetError::NotPublished { .. }));
+    }
+
+    #[tokio::test]
+    async fn rpc_generic_failure_maps_to_rpc_error() {
+        let addr = spawn_error_rpc("internal server error").await;
+        let rpc = RpcClient::new(format!("http://{addr}/"));
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
+        let err = chain
+            .fetch_circle_asset_bytes("circGEN", "/x.json")
+            .await
+            .expect_err("generic error must map to Rpc");
+        match err {
+            FetchAssetError::Rpc { .. } => {}
+            other => panic!("expected Rpc, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn rpc_connection_refused_maps_to_rpc_error() {
+        // Point the chain at a port that's almost certainly closed.
+        let rpc = RpcClient::new("http://127.0.0.1:1/");
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
+        let err = chain
+            .fetch_circle_asset_bytes("circDOWN", "/x.json")
+            .await
+            .expect_err("connect refused must produce an error");
+        // Wire-level error: not `NotPublished` (the message doesn't
+        // include those magic phrases) → Rpc variant.
+        match err {
+            FetchAssetError::Rpc { .. } => {}
+            other => panic!("expected Rpc, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn malformed_rpc_payload_missing_bytes_field_maps_to_rpc() {
+        // Object response with neither `bytes_b64` nor `ciphertext_b64`.
+        let addr = spawn_mock_rpc(json!({
+            "plaintext_hash": "00".repeat(32),
+            "key_id": "default",
+        }))
+        .await;
+        let rpc = RpcClient::new(format!("http://{addr}/"));
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
+        let err = chain
+            .fetch_circle_asset_bytes("circBAD", "/x.json")
+            .await
+            .expect_err("missing bytes field must map to Rpc");
+        match err {
+            FetchAssetError::Rpc { source, .. } => {
+                let msg = source.to_string();
+                assert!(
+                    msg.contains("missing bytes_b64") || msg.contains("ciphertext_b64"),
+                    "got: {msg}"
+                );
+            }
+            other => panic!("expected Rpc, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn malformed_rpc_payload_non_object_maps_to_rpc() {
+        // RPC returns a bare string, not an object.
+        let addr = spawn_mock_rpc(json!("not an object")).await;
+        let rpc = RpcClient::new(format!("http://{addr}/"));
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
+        let err = chain
+            .fetch_circle_asset_bytes("circStr", "/x.json")
+            .await
+            .expect_err("non-object must map to Rpc");
+        assert!(matches!(err, FetchAssetError::Rpc { .. }));
+    }
+
+    #[tokio::test]
+    async fn malformed_base64_payload_maps_to_rpc() {
+        // ciphertext_b64 isn't valid base64.
+        let addr = spawn_mock_rpc(json!({
+            "ciphertext_b64": "!!!not-base64@@@",
+            "plaintext_hash": "0".repeat(64),
+            "key_id": "default",
+        }))
+        .await;
+        let rpc = RpcClient::new(format!("http://{addr}/"));
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
+        let err = chain
+            .fetch_circle_asset_bytes("circB64", "/x.json")
+            .await
+            .expect_err("invalid base64 must map to Rpc");
+        match err {
+            FetchAssetError::Rpc { source, .. } => {
+                assert!(source.to_string().contains("base64"));
+            }
+            other => panic!("expected Rpc, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn sealed_asset_missing_plaintext_hash_maps_to_rpc() {
+        // Sealed envelope but the response is missing plaintext_hash.
+        let plaintext = b"x";
+        let (ct_b64, _ph) =
+            build_sealed_fixture("circNOPH", "default", "pp", plaintext);
+        let addr = spawn_mock_rpc(json!({
+            "ciphertext_b64": ct_b64,
+            "key_id": "default",
+        }))
+        .await;
+        let rpc = RpcClient::new(format!("http://{addr}/"));
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0).with_passphrase("pp");
+        let err = chain
+            .fetch_circle_asset_bytes("circNOPH", "/x.json")
+            .await
+            .expect_err("missing plaintext_hash must map to Rpc");
+        match err {
+            FetchAssetError::Rpc { source, .. } => {
+                assert!(source.to_string().contains("plaintext_hash"));
+            }
+            other => panic!("expected Rpc, got {other:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn try_decrypt_with_passphrase_bypasses_cache() {
         // The unseal flow uses `try_decrypt_with_passphrase`, which
@@ -1211,5 +1397,420 @@ mod tests {
             count.load(Ordering::SeqCst) > warmed,
             "try_decrypt_with_passphrase must always hit the chain",
         );
+    }
+
+    // ── try_decrypt_with_passphrase: more shapes ───────────────────────
+
+    #[tokio::test]
+    async fn try_decrypt_with_wrong_passphrase_returns_decrypt_failed() {
+        let plaintext = b"unseal test";
+        let (ct_b64, ph_hex) =
+            build_sealed_fixture("circWP", "default", "right-pp", plaintext);
+        let addr = spawn_mock_rpc(json!({
+            "ciphertext_b64": ct_b64,
+            "plaintext_hash": ph_hex,
+            "key_id": "default",
+        }))
+        .await;
+        let rpc = RpcClient::new(format!("http://{addr}/"));
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
+        let pp = Arc::new(Zeroizing::new("wrong-pp".to_string()));
+        let err = chain
+            .try_decrypt_with_passphrase("circWP", "/x.json", pp)
+            .await
+            .expect_err("wrong pp must fail");
+        assert!(matches!(err, FetchAssetError::DecryptFailed { .. }));
+    }
+
+    #[tokio::test]
+    async fn try_decrypt_does_not_populate_cache() {
+        use std::sync::atomic::Ordering;
+        let plaintext = b"do not cache me";
+        let (ct_b64, ph_hex) =
+            build_sealed_fixture("circNOC", "default", "pp", plaintext);
+        let (addr, count) = spawn_counting_rpc(json!({
+            "ciphertext_b64": ct_b64,
+            "plaintext_hash": ph_hex,
+            "key_id": "default",
+        }))
+        .await;
+        let cache: Arc<AssetCache> = Arc::new(BoundedMap::new(16, Duration::from_secs(60)));
+        let chain = chain_with_cache(addr, Arc::clone(&cache));
+        let pp = Arc::new(Zeroizing::new("pp".to_string()));
+        // First call via try_decrypt: should not insert into cache.
+        let _ = chain
+            .try_decrypt_with_passphrase("circNOC", "/x.json", Arc::clone(&pp))
+            .await
+            .unwrap();
+        assert_eq!(cache.len(), 0, "try_decrypt must not populate cache");
+        // Second call also re-roundtrips.
+        let before = count.load(Ordering::SeqCst);
+        let _ = chain
+            .try_decrypt_with_passphrase("circNOC", "/x.json", pp)
+            .await
+            .unwrap();
+        assert!(count.load(Ordering::SeqCst) > before);
+    }
+
+    #[tokio::test]
+    async fn try_decrypt_on_not_published_returns_not_published() {
+        let addr = spawn_mock_rpc(serde_json::Value::Null).await;
+        let rpc = RpcClient::new(format!("http://{addr}/"));
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
+        let pp = Arc::new(Zeroizing::new("pp".to_string()));
+        let err = chain
+            .try_decrypt_with_passphrase("circDEC_NP", "/missing.json", pp)
+            .await
+            .expect_err("null result must be NotPublished");
+        assert!(matches!(err, FetchAssetError::NotPublished { .. }));
+    }
+
+    #[tokio::test]
+    async fn try_decrypt_on_plaintext_passthrough_returns_bytes() {
+        // Non-sealed bytes: the OCRS1 sniff says "not sealed" so we
+        // return the bytes verbatim regardless of the supplied
+        // passphrase.
+        let plain = b"plain bytes, no sealing";
+        let b64 = B64.encode(plain);
+        let addr = spawn_mock_rpc(json!({
+            "ciphertext_b64": b64,
+            "plaintext_hash": "0".repeat(64),
+            "key_id": "default",
+        }))
+        .await;
+        let rpc = RpcClient::new(format!("http://{addr}/"));
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
+        let pp = Arc::new(Zeroizing::new("ignored".to_string()));
+        let got = chain
+            .try_decrypt_with_passphrase("circDEC_PLAIN", "/x.json", pp)
+            .await
+            .unwrap();
+        assert_eq!(got, plain);
+    }
+
+    #[tokio::test]
+    async fn try_decrypt_correct_pp_works_even_with_stale_cache() {
+        // Pre-populate the cache with bogus bytes under the same key.
+        // try_decrypt must ignore the cache and re-fetch.
+        let plaintext = b"freshly decrypted";
+        let (ct_b64, ph_hex) =
+            build_sealed_fixture("circSTALE", "default", "good-pp", plaintext);
+        let addr = spawn_mock_rpc(json!({
+            "ciphertext_b64": ct_b64,
+            "plaintext_hash": ph_hex,
+            "key_id": "default",
+        }))
+        .await;
+        let cache: Arc<AssetCache> = Arc::new(BoundedMap::new(16, Duration::from_secs(60)));
+        let stale = CachedAsset {
+            bytes: Arc::new(b"STALE BYTES".to_vec()),
+            mime: sniff(b"STALE BYTES"),
+            fetched_at: Instant::now(),
+        };
+        cache.insert(
+            ("circSTALE".to_string(), "/x.json".to_string()),
+            stale,
+        );
+        let chain = chain_with_cache(addr, Arc::clone(&cache));
+        let pp = Arc::new(Zeroizing::new("good-pp".to_string()));
+        let got = chain
+            .try_decrypt_with_passphrase("circSTALE", "/x.json", pp)
+            .await
+            .unwrap();
+        assert_eq!(got, plaintext, "must NOT return cached stale bytes");
+    }
+
+    // ── Cache: oversubscription, isolation, eviction ─────────────────
+
+    #[tokio::test]
+    async fn cache_257_distinct_entries_evicts_first() {
+        // Stress the cap-256 behaviour: 257 distinct keys → only 256 stay.
+        use std::sync::atomic::Ordering;
+        let plain = b"X";
+        let b64 = B64.encode(plain);
+        let (addr, count) = spawn_counting_rpc(json!({
+            "ciphertext_b64": b64,
+            "plaintext_hash": "0".repeat(64),
+            "key_id": "default",
+        }))
+        .await;
+        let cache: Arc<AssetCache> =
+            Arc::new(BoundedMap::new(DEFAULT_ASSET_CACHE_CAPACITY, Duration::from_secs(60)));
+        let chain = chain_with_cache(addr, Arc::clone(&cache));
+        for i in 0..257 {
+            let path = format!("/asset-{i}.bin");
+            let _ = chain
+                .fetch_circle_asset_bytes("circ257", &path)
+                .await
+                .unwrap();
+        }
+        assert_eq!(count.load(Ordering::SeqCst), 257);
+        assert_eq!(
+            cache.len(),
+            DEFAULT_ASSET_CACHE_CAPACITY,
+            "cache must clip to its capacity",
+        );
+        // The very first key was evicted.
+        assert!(
+            cache.get(&("circ257".to_string(), "/asset-0.bin".to_string())).is_none(),
+            "asset-0 must have been evicted as the oldest",
+        );
+    }
+
+    #[tokio::test]
+    async fn cache_concurrent_writers_and_readers_do_not_panic() {
+        // 100 readers + 10 writers fanning over a few keys. Ensures
+        // BoundedMap's internal locks are correct under fan-out.
+        let plain = b"concurrent";
+        let b64 = B64.encode(plain);
+        let (addr, _count) = spawn_counting_rpc(json!({
+            "ciphertext_b64": b64,
+            "plaintext_hash": "0".repeat(64),
+            "key_id": "default",
+        }))
+        .await;
+        let cache: Arc<AssetCache> = Arc::new(BoundedMap::new(32, Duration::from_secs(60)));
+        let chain = chain_with_cache(addr, Arc::clone(&cache));
+        // Pre-warm a few keys so reader hits aren't all misses.
+        for i in 0..4 {
+            let _ = chain
+                .fetch_circle_asset_bytes("circCONC", &format!("/p{i}.bin"))
+                .await
+                .unwrap();
+        }
+        let mut handles = Vec::new();
+        // 100 readers over the warm keys.
+        for i in 0..100 {
+            let c = chain.clone();
+            let path = format!("/p{}.bin", i % 4);
+            handles.push(tokio::spawn(async move {
+                c.fetch_circle_asset_bytes("circCONC", &path).await
+            }));
+        }
+        // 10 writers under fresh keys (forces inserts + possible eviction).
+        for i in 0..10 {
+            let c = chain.clone();
+            let path = format!("/w-{i}.bin");
+            handles.push(tokio::spawn(async move {
+                c.fetch_circle_asset_bytes("circCONC", &path).await
+            }));
+        }
+        for h in handles {
+            let r = h.await.expect("task panicked");
+            r.expect("fetch failed in concurrent test");
+        }
+        // Cap is enforced.
+        assert!(cache.len() <= 32);
+    }
+
+    #[tokio::test]
+    async fn cache_hit_preserves_sniffed_mime_through_repeated_reads() {
+        // Hits should carry the same SniffedMime as the first miss.
+        // The PNG magic prefix is rare in JSON payloads, so this is a
+        // good cross-check.
+        let png = b"\x89PNG\r\n\x1a\nIHDR-rest-of-bytes";
+        let b64 = B64.encode(png);
+        let addr = spawn_mock_rpc(json!({
+            "ciphertext_b64": b64,
+            "plaintext_hash": "0".repeat(64),
+            "key_id": "default",
+        }))
+        .await;
+        let cache: Arc<AssetCache> = Arc::new(BoundedMap::new(8, Duration::from_secs(60)));
+        let chain = chain_with_cache(addr, Arc::clone(&cache));
+        let pp_src = ConfigPassphrase::new(None);
+        let a = chain
+            .fetch_with_source_sniffed("circPNG", "/img.png", &pp_src)
+            .await
+            .unwrap();
+        let b = chain
+            .fetch_with_source_sniffed("circPNG", "/img.png", &pp_src)
+            .await
+            .unwrap();
+        assert_eq!(a.mime, b.mime);
+        assert_eq!(a.mime, SniffedMime::Png);
+    }
+
+    #[tokio::test]
+    async fn cache_two_circles_same_path_isolated() {
+        // Confirm that the (circle, path) tuple isolates entries.
+        use std::sync::atomic::Ordering;
+        let plain = b"X";
+        let b64 = B64.encode(plain);
+        let (addr, count) = spawn_counting_rpc(json!({
+            "ciphertext_b64": b64,
+            "plaintext_hash": "0".repeat(64),
+            "key_id": "default",
+        }))
+        .await;
+        let cache: Arc<AssetCache> = Arc::new(BoundedMap::new(8, Duration::from_secs(60)));
+        let chain = chain_with_cache(addr, Arc::clone(&cache));
+        let _ = chain
+            .fetch_circle_asset_bytes("circLEFT", "/p.bin")
+            .await
+            .unwrap();
+        let _ = chain
+            .fetch_circle_asset_bytes("circRIGHT", "/p.bin")
+            .await
+            .unwrap();
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+        assert_eq!(cache.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn cache_does_not_serve_after_ttl_sweep() {
+        // Stronger variant of the existing ttl_expiry test — asserts
+        // that a `get` after `sweep` returns None.
+        let plain = b"ttl-via-sweep";
+        let b64 = B64.encode(plain);
+        let addr = spawn_mock_rpc(json!({
+            "ciphertext_b64": b64,
+            "plaintext_hash": "0".repeat(64),
+            "key_id": "default",
+        }))
+        .await;
+        let cache: Arc<AssetCache> = Arc::new(BoundedMap::new(8, Duration::from_millis(15)));
+        let chain = chain_with_cache(addr, Arc::clone(&cache));
+        let _ = chain
+            .fetch_circle_asset_bytes("circTTL2", "/p.bin")
+            .await
+            .unwrap();
+        assert_eq!(cache.len(), 1);
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        let evicted = cache.sweep();
+        assert!(evicted >= 1);
+        assert!(
+            cache
+                .get(&("circTTL2".to_string(), "/p.bin".to_string()))
+                .is_none(),
+            "post-sweep get must miss",
+        );
+    }
+
+    // ── FetchAssetError surface ───────────────────────────────────────
+
+    #[test]
+    fn fetch_asset_error_accessors_carry_circle_and_path() {
+        let e = FetchAssetError::NotPublished {
+            circle_id: "circA".into(),
+            path: "/policy".into(),
+            resource_key: "rk".into(),
+        };
+        assert_eq!(e.circle_id(), "circA");
+        assert_eq!(e.path(), "/policy");
+        let e = FetchAssetError::MissingPassphrase {
+            circle_id: "circB".into(),
+            path: "/p2".into(),
+        };
+        assert_eq!(e.circle_id(), "circB");
+        assert_eq!(e.path(), "/p2");
+        let e = FetchAssetError::DecryptFailed {
+            circle_id: "circC".into(),
+            path: "/p3".into(),
+        };
+        assert_eq!(e.circle_id(), "circC");
+        assert_eq!(e.path(), "/p3");
+        let e = FetchAssetError::Rpc {
+            circle_id: "circD".into(),
+            path: "/p4".into(),
+            source: anyhow::anyhow!("boom"),
+        };
+        assert_eq!(e.circle_id(), "circD");
+        assert_eq!(e.path(), "/p4");
+    }
+
+    #[test]
+    fn fetch_asset_error_display_does_not_leak_passphrase() {
+        // No passphrase ever flows into FetchAssetError construction;
+        // double-check the Display strings.
+        let e = FetchAssetError::DecryptFailed {
+            circle_id: "circD".into(),
+            path: "/p".into(),
+        };
+        let s = e.to_string();
+        assert!(!s.contains("passphrase=") && !s.to_lowercase().contains("secret"));
+    }
+
+    #[test]
+    fn has_passphrase_toggles_with_with_passphrase() {
+        let rpc = RpcClient::new("http://127.0.0.1:1");
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
+        assert!(!chain.has_passphrase());
+        let chain2 = chain.with_passphrase("hi");
+        assert!(chain2.has_passphrase());
+        assert!(chain2.configured_passphrase().is_some());
+    }
+
+    #[test]
+    fn config_passphrase_source_returns_configured_value() {
+        let pp = Arc::new(Zeroizing::new("my-secret".to_string()));
+        let src = ConfigPassphrase::new(Some(Arc::clone(&pp)));
+        let got = src.passphrase_for("any-circle").unwrap();
+        assert_eq!(got.as_str(), "my-secret");
+        // Different circle id → same value (circle-agnostic source).
+        let got2 = src.passphrase_for("other-circle").unwrap();
+        assert_eq!(got2.as_str(), "my-secret");
+    }
+
+    #[test]
+    fn config_passphrase_source_returns_none_when_unset() {
+        let src = ConfigPassphrase::new(None);
+        assert!(src.passphrase_for("anything").is_none());
+    }
+
+    // ── canonical_path: more corners ──────────────────────────────────
+
+    #[test]
+    fn canonical_path_strips_only_first_redundant_slash() {
+        // `//foo` → `/foo` (collapses), `/foo/` retained, `////` → `/`.
+        assert_eq!(canonical_path("/foo"), "/foo");
+        assert_eq!(canonical_path("//foo"), "/foo");
+        assert_eq!(canonical_path("///foo"), "/foo");
+        assert_eq!(canonical_path("//"), "/");
+    }
+
+    #[test]
+    fn canonical_path_preserves_trailing_slash() {
+        // We don't strip trailing slashes; the resource_key derivation
+        // is exact-match.
+        assert_eq!(canonical_path("/foo/"), "/foo/");
+        assert_eq!(canonical_path("foo/"), "/foo/");
+    }
+
+    #[test]
+    fn canonical_path_trims_whitespace() {
+        assert_eq!(canonical_path("  /foo  "), "/foo");
+        assert_eq!(canonical_path("\t/foo\n"), "/foo");
+    }
+
+    #[test]
+    fn looks_sealed_exact_magic_match() {
+        assert!(looks_sealed(b"OCRS1"));
+        assert!(looks_sealed(b"OCRS1\xff\xff\xff"));
+    }
+
+    #[test]
+    fn looks_sealed_rejects_partial_magic() {
+        assert!(!looks_sealed(b"OCRS")); // too short
+        assert!(!looks_sealed(b"OCR")); // way too short
+        assert!(!looks_sealed(b"ocrs1")); // case-sensitive
+    }
+
+    // ── Asset cache key + accessor surface ────────────────────────────
+
+    #[test]
+    fn portal_chain_with_asset_cache_returns_arc() {
+        let rpc = RpcClient::new("http://127.0.0.1:1");
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
+        let cache = chain.asset_cache();
+        assert_eq!(Arc::strong_count(&cache) >= 2, true);
+    }
+
+    #[test]
+    fn portal_chain_with_key_id_overrides_default() {
+        let rpc = RpcClient::new("http://127.0.0.1:1");
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0)
+            .with_key_id("custom-key");
+        assert_eq!(chain.key_id, "custom-key");
     }
 }
