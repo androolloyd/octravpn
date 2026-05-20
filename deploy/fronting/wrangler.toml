@@ -1,0 +1,23 @@
+# wrangler.toml — config for the Cloudflare Worker that fronts our
+# operator's DERP relay.  See docs/operators/derp-fronting.md.
+#
+# This file is intentionally minimal.  Operator secrets (the HMAC
+# key) are NOT stored here — they live in `wrangler secret put` /
+# Cloudflare Worker secrets.  See `scripts/operators/deploy-fronting.sh`.
+
+name = "octravpn-front"
+main = "derp-front.js"
+compatibility_date = "2025-01-01"
+
+# We do NOT enable the Workers Sites or KV bindings — the front is
+# pure compute, no persistent state.
+
+[vars]
+# Optional comma-separated allowlist of real_host values this Worker
+# is willing to proxy to.  Leave blank to allow any host the inner
+# request asks for (still HMAC-gated, but the allowlist is an extra
+# defense-in-depth if an operator key leaks).
+OCTRA_REAL_HOST_ALLOWLIST = ""
+
+# Free-tier limits: 100k requests/day, 10ms CPU per request.  See
+# the cost section in docs/operators/derp-fronting.md.

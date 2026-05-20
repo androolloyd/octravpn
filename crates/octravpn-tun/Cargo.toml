@@ -15,5 +15,23 @@ tracing     = { workspace = true }
 futures     = { workspace = true }
 tun-rs      = { workspace = true, features = ["async_tokio"] }
 
+# DERP domain-fronting (`derp::front`) needs:
+#   * reqwest  — outbound HTTPS dial with a separate SNI / Host split
+#   * hmac/sha2 — operator-shared HMAC the Worker verifies
+#   * subtle   — constant-time tag compare on the client (paranoia)
+#   * serde    — `FrontConfig` (de)serialisation in node.toml
+#   * hex      — hex-encoded HMAC tag in the X-Octra-Front-Auth header
+hex         = { workspace = true }
+hmac        = "0.12"
+reqwest     = { workspace = true }
+serde       = { workspace = true }
+sha2        = { workspace = true }
+subtle      = { workspace = true }
+
+# Test rig for the fronting unit-tests.
+#   * toml — round-trip the `FrontConfig` through node.toml
+[dev-dependencies]
+toml        = { workspace = true }
+
 [lints]
 workspace = true

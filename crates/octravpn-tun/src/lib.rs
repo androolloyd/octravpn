@@ -24,6 +24,17 @@ use std::net::Ipv4Addr;
 use anyhow::{Context, Result};
 use tracing::info;
 
+/// DERP transport plumbing. The `front` submodule implements the
+/// domain-fronting client used as a fallback when the censor IP-blocks
+/// the operator's `derp-*` pool (see `docs/operators/derp-fronting.md`).
+///
+/// This module lives next to the TUN device because both are dial-time
+/// concerns invoked from the same supervisor task — the TUN fd carries
+/// inner IP packets, the DERP front transport carries the encrypted
+/// relay session that wraps them. Keeping them in one crate avoids
+/// pulling `reqwest` into the upper `octravpn-mesh` layer.
+pub mod derp;
+
 /// IPv4 address + prefix length for the virtual interface.
 #[derive(Clone, Copy, Debug)]
 pub struct TunAddress {
