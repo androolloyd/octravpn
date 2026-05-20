@@ -139,7 +139,7 @@ sessions are both reported, both as `Warn`.
 `audit verify` failed. The detail string names the file and line
 number, e.g.:
 
-```
+```text
 audit log:        FAIL     /var/lib/octravpn/audit/audit-2026-05-15.jsonl: line 1247: MAC mismatch
 ```
 

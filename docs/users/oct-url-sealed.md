@@ -35,7 +35,7 @@ Canonical examples your operator may hand out:
 
 Sealed assets start with the `OCRS1` magic prefix (`b"OCRS1"`):
 
-```
+```text
 [ "OCRS1" (5B) ][ 12B nonce ][ AES-256-GCM ciphertext ][ 16B tag ]
                 ╰────────────────╮
                                   │

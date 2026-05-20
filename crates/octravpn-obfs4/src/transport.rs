@@ -240,7 +240,15 @@ impl Obfs4Transport {
             if let Some(PeerState::Established(session)) = peers.get_mut(&src) {
                 match session.opener.open_from(data) {
                     Ok((payload, _consumed)) => return Some(payload),
-                    Err(FrameError::BadTag | FrameError::BadInnerLen { .. }) => {
+                    Err(
+                        FrameError::BadTag
+                        | FrameError::BadInnerLen { .. }
+                        | FrameError::CounterExhausted,
+                    ) => {
+                        // audit-1 H-2: CounterExhausted is included with
+                        // the tear-down cases — the session's nonce
+                        // budget is spent, so we drop it; the peer must
+                        // re-handshake to obtain a fresh key + counter.
                         warn!(?src, "established session failed to open frame; resetting");
                         peers.remove(&src);
                         return None;

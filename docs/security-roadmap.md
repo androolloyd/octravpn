@@ -32,7 +32,7 @@ see `docs/v2-threat-model.md §3` for the full diagnostic and tests.
 | **P1-8 / P1-9** restart resets `last_seq = 0` | `dfc016e` | Persistent fsync'd `receipt_journal.rs`; floor consulted before every signature; closes Tree F.2.a (restart-replay) in the v2 threat model. |
 | **P1-10** sealed-passphrase not zeroized | `2d933fc` | `Zeroizing<String>` on the `discover_v2.rs` config path; core-dump / swap leak window closed. |
 | **45/45 v2 adversarial drill** | `beae338` | All 45 cases hold under the v2 substrate. |
-| **232 Lean theorems** (OctraVPN 46 + OctraVPN_V2 54 + OctraVPN_Rust 72 + WireProtocol 60) | — | TLC parity: 17 invariants, 3.8 M distinct states, 0 violations. |
+| **373 Lean theorems** (OctraVPN 46 + OctraVPN_V2 54 + OctraVPN_V3 55 + OctraVPN_Rust 109 + WireProtocol 109) | — | TLC parity: 17 invariants, 3.8 M distinct states, 0 violations. |
 | **30 Rust proptest harnesses** | — | Crypto, tx, wallet_enc, receipt-domain coverage. |
 | **PVAC sidecar past the AES KAT gate on mainnet** | `9e16868` | GPL-isolated daemon; dummy / non-fork pubkeys reject before sig-verify; sidecar pubkeys accepted. |
 

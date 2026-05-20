@@ -58,7 +58,7 @@ If the operator's network policy ([HuJSON policy file] on their
 side) restricts who can do what by tag, they will tell you
 something like:
 
-```
+```sh
 tailscale up ... --advertise-tags=tag:eng,tag:office
 ```
 
@@ -176,7 +176,7 @@ interop acceptance — see
 [`docs/tailscale-interop-blocker.md`](../tailscale-interop-blocker.md)
 §"Wall 7 closed". A successful ping has two flavours of healthy:
 
-```
+```text
 pong from desktop (100.64.0.7) via DERP(use1) in 84ms     # relay path
 pong from desktop (100.64.0.7) via 192.0.2.4:41641 in 11ms # direct path
 ```

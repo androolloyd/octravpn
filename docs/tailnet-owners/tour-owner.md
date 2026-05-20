@@ -88,7 +88,7 @@ The CLI prints the submitted tx hash and best-effort polls
 (an unsigned 64-bit integer). Note it down — every subsequent command
 needs it.
 
-```
+```text
 tx hash: …
 tailnet_id assigned: 7
 ```
@@ -223,7 +223,7 @@ octravpn-node mesh mint-preauth \
 The minted key goes to **stdout** as a single line, with
 human-readable info on stderr:
 
-```
+```text
 stderr: minted preauth: user=alice reusable=false expires_at=1716291600
 stdout: tskey-abc123-…
 ```
@@ -277,7 +277,7 @@ each reusable key is essentially a long-lived credential.
 
 The operator sees, in their logs:
 
-```
+```text
 [INFO] machine registered noise_pubkey=mkey:… user=alice tailnet=7
 [INFO] /map long-poll opened for alice
 ```

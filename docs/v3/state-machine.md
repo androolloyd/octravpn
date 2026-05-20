@@ -12,6 +12,15 @@ cases in
 
 ## Circle
 
+<!-- alt: Circle finite-state machine. Initial state Active is entered
+     by register_circle. Active self-loops on update_circle_state,
+     rotate_receipt_pubkey, bond_endpoint. Active transitions to
+     Retired via retire_circle, and Retired back to Active via
+     register_circle (same circle_id, not slashed). Active transitions
+     to Unbonding via unbond_endpoint, and Unbonding back to Active
+     via finalize_unbond. Any of Active, Unbonding, or Retired can
+     transition to the terminal Slashed state via slash_double_sign or
+     gov_slash_operator. -->
 ```mermaid
 stateDiagram-v2
     [*] --> Active: register_circle
@@ -80,6 +89,12 @@ stake. This is intentional: it preserves the option to re-bond.
 
 ## Tailnet
 
+<!-- alt: Tailnet finite-state machine. Initial state Open is entered
+     by create_tailnet. Open self-loops on deposit_to_tailnet and
+     update_members_root. retire_tailnet transitions Open to Retired.
+     Retired self-loops on withdraw_tailnet_treasury (draining the
+     remaining treasury). An informal terminal transition exits when
+     the treasury reaches zero. -->
 ```mermaid
 stateDiagram-v2
     [*] --> Open: create_tailnet
@@ -121,6 +136,17 @@ and continue to drain/refund into `tailnet_treasury`. Concretely:
 
 ## Session
 
+<!-- alt: Session finite-state machine. Initial state Open is entered
+     by open_session. The first valid settle_claim transitions Open to
+     the implicit ClaimSet state. claim_no_show (after grace),
+     sweep_expired_session (after 10x grace), or an equivocating
+     second settle_claim transition Open directly to terminal
+     Refunded. ClaimSet self-loops on an idempotent same-value
+     settle_claim; an equivocating settle_claim transitions to
+     Refunded. settle_confirm with mismatched bytes drops back to Open
+     (dispute), while settle_confirm with agreeing bytes transitions
+     ClaimSet to terminal Settled. Both Settled and Refunded are
+     terminal. -->
 ```mermaid
 stateDiagram-v2
     [*] --> Open: open_session

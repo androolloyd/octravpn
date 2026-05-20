@@ -230,7 +230,9 @@ async fn pick_first_open(
 }
 
 fn print_wg_handoff(policy: &CirclePolicy) {
-    println!("---- WireGuard handoff (v2 sealed policy) ----");
+    // audit-13: text labels instead of ASCII separators so screen
+    // readers (NVDA / VoiceOver) don't recite a run of dashes.
+    println!("[wireguard-handoff-begin v2-sealed-policy]");
     println!("[Peer]");
     println!("PublicKey  = {}", policy.wg_pubkey_b64);
     println!("Endpoint   = {}", policy.endpoint);
@@ -238,7 +240,7 @@ fn print_wg_handoff(policy: &CirclePolicy) {
     println!("# region        = {}", policy.region);
     println!("# tariff shared = {} OU/MB", policy.price_per_mb_shared);
     println!("# tariff intra  = {} OU/MB", policy.price_per_mb_internal);
-    println!("----------------------------------------------");
+    println!("[wireguard-handoff-end]");
 }
 
 fn require_v2(cfg: &ClientConfig) -> Result<()> {

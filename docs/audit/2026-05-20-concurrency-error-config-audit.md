@@ -47,6 +47,21 @@ and panic crash dumps.
   n.as_mut().enable();` BEFORE chunk-build, OR migrate to
   `tokio::sync::watch<u64>` (edge-triggered, race-free by design).
 
+> **Fixed in commit `21df30e` on branch `worktree-agent-a557416bd6d3fba66`
+> (companion change on the headscale-rs side: branch `audit-fixes`).**
+> The `MachineRegistry` now exposes a `watch::Sender<u64>`
+> generation counter (`tailscale_wire::mod.rs::wake_waiters`); the
+> `/map` stream's `unfold` subscribes once and awaits
+> `gen_rx.changed()` instead of re-registering a `Notified` per
+> iteration. The watch channel's stored value is missed-update
+> tolerant — a `send_modify` fired during the chunk-build window is
+> captured by the next `changed().await`. The legacy `Notify` stays
+> as a fan-out wake for other callers; both fire from
+> `wake_waiters`. Verified by a new integration test
+> `stream_true_wake_during_chunk_build_is_not_lost` that triggers
+> `insert_peer` with no `sleep` first and asserts the next chunk is
+> a full MapResponse (not a keepalive).
+
 ### C-2 [HIGH] Same lost-wake exposure on `PolicyStore` / `DnsStore`
 - Files: `headscale-rs/headscale-api/src/policy/mod.rs:160-170`,
   `dns.rs:241,254,261`.
