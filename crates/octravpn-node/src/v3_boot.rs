@@ -371,7 +371,7 @@ mod tests {
     use super::*;
     use crate::config::{
         AnalyticsCfg, AttestationCfg, ChainCfg, ControlCfg, NodeConfig, PricingCfg,
-        ProtocolVersion, TunnelCfg,
+        ProtocolVersion, TunCfg, TunnelCfg,
     };
     use std::path::Path;
 
@@ -397,6 +397,7 @@ mod tests {
                 public_endpoint: "1.2.3.4:51820".into(),
                 listen: "0.0.0.0:51820".into(),
                 wg_secret_path: "/tmp/unused".into(),
+                amnezia: Default::default(),
             },
             pricing: PricingCfg {
                 price_per_mb: 100,
@@ -410,6 +411,7 @@ mod tests {
             // fixture was written; the indexer defaults to disabled, so
             // the v3_boot tests are unaffected by the new field.
             analytics: AnalyticsCfg::default(),
+            tun: TunCfg::default(),
         }
     }
 

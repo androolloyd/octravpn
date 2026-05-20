@@ -490,11 +490,11 @@ async fn run_mesh_cmd(sub: MeshCmd) -> Result<()> {
         // `std::process::exit` so a non-zero remote response surfaces
         // to the operator's shell.
         MeshCmd::Status(args) => {
-            let code = mesh_ops::run_status(args)?;
+            let code = mesh_ops::run_status(args).await?;
             std::process::exit(code);
         }
         MeshCmd::Policy { cmd } => {
-            let code = mesh_ops::run_policy(cmd)?;
+            let code = mesh_ops::run_policy(cmd).await?;
             std::process::exit(code);
         }
     }

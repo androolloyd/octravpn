@@ -82,45 +82,40 @@ pub(crate) struct MeshPolicySetArgs {
 }
 
 // ---------------------------------------------------------------------------
-// Entry points (sync — they own a current-thread runtime internally,
-// matching the style of `cli_ops::run_health`).
+// Entry points — async so they can be awaited from inside the
+// `#[tokio::main]` dispatcher in main.rs. Previously these built a
+// nested current-thread runtime, which panics with "Cannot start a
+// runtime from within a runtime" when invoked from a Cmd::Mesh branch
+// (the binary's outer runtime is the multi-thread tokio::main one).
+// Tape 08 caught this on the first heavy CI render.
 // ---------------------------------------------------------------------------
 
-pub(crate) fn run_status(args: MeshStatusArgs) -> Result<i32> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("build current-thread runtime")?;
+pub(crate) async fn run_status(args: MeshStatusArgs) -> Result<i32> {
     let token = resolve_token(args.admin_token.as_deref());
-    let body = rt.block_on(get_machines(&args.remote, token.as_deref()))?;
+    let body = get_machines(&args.remote, token.as_deref()).await?;
     render_status(&body, args.json);
     Ok(0)
 }
 
-pub(crate) fn run_policy(cmd: MeshPolicyCmd) -> Result<i32> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("build current-thread runtime")?;
+pub(crate) async fn run_policy(cmd: MeshPolicyCmd) -> Result<i32> {
     match cmd {
         MeshPolicyCmd::Get(args) => {
             let token = resolve_token(args.admin_token.as_deref());
-            let body = rt.block_on(get_policy(&args.remote, token.as_deref()))?;
+            let body = get_policy(&args.remote, token.as_deref()).await?;
             handle_policy_get(&body, args.out.as_deref())?;
             Ok(0)
         }
         MeshPolicyCmd::Set(args) => {
             let token = resolve_token(args.admin_token.as_deref());
             let raw = read_policy_file(&args.file)?;
-            let (status, body) = rt.block_on(put_policy(&args.remote, token.as_deref(), &raw))?;
+            let (status, body) = put_policy(&args.remote, token.as_deref(), &raw).await?;
             render_policy_mutation("set", status, &body);
             Ok(if status.is_success() { 0 } else { 1 })
         }
         MeshPolicyCmd::Validate(args) => {
             let token = resolve_token(args.admin_token.as_deref());
             let raw = read_policy_file(&args.file)?;
-            let (status, body) =
-                rt.block_on(validate_policy(&args.remote, token.as_deref(), &raw))?;
+            let (status, body) = validate_policy(&args.remote, token.as_deref(), &raw).await?;
             render_policy_mutation("validate", status, &body);
             Ok(if status.is_success() { 0 } else { 1 })
         }

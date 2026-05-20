@@ -68,7 +68,10 @@ x-ts-peer-template: &ts-peer-template
 
 services:
   mesh-control:
-    image: debian:bookworm-slim
+    # ubuntu:24.04 matches GLIBC ABI of the GH Actions runner that
+    # builds octravpn-node (debian:bookworm-slim has GLIBC 2.36 and
+    # the binary requires 2.38+ — caught on the first heavy tape render).
+    image: ubuntu:24.04
     container_name: mesh-demo-control
     working_dir: /work
     environment:
@@ -195,7 +198,10 @@ services:
   # so a future `mesh serve --audit-dir` flag drops in without a
   # compose-level change.
   analytics:
-    image: debian:bookworm-slim
+    # ubuntu:24.04 matches GLIBC ABI of the GH Actions runner that
+    # builds octravpn-node (debian:bookworm-slim has GLIBC 2.36 and
+    # the binary requires 2.38+ — caught on the first heavy tape render).
+    image: ubuntu:24.04
     container_name: mesh-demo-analytics
     working_dir: /work
     environment:
