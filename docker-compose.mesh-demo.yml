@@ -1,0 +1,228 @@
+# docker-compose.mesh-demo.yml
+#
+# 3-peer Tailscale mesh demo stack, modelled directly on the proven
+# `docker/devnet/tailscale-interop/docker-compose.yml`. Three stock
+# `tailscale/tailscale:latest` clients (`tsi-peer-1/2/3`) join one
+# `mesh-control` running `octravpn-node mesh serve` over the same
+# `derp-1` sidecar the interop test ships. An `analytics` container
+# runs `octravpn-analytics` against the mesh-control's audit-log dir
+# (which, in the current Hub-free `mesh serve` shape, is empty — the
+# endpoints respond but counters stay flat; see the demo tape 10's
+# inline note for the upgrade path).
+#
+# Drivers:
+#   - `bash demo/lib/3node-mesh-bringup.sh`   — cold-start + 3-peer
+#                                                tailscale up + readiness.
+#   - `bash demo/lib/3node-mesh-teardown.sh`  — full down -v.
+#   - `vhs demo/tapes/{08,09,10}-*.tape`      — recordings.
+#
+# Why this file lives at the repo root rather than alongside the
+# tailscale-interop one: the interop test is a single-purpose CI probe
+# (exit codes 0/10/20/30/40/50 — see run-interop.sh). The demo is a
+# composite recording flow that piggybacks an analytics sidecar and
+# changes the peer count to 3; keeping the two compose files separate
+# means the interop test's exit-code contract is never accidentally
+# perturbed by a demo-side edit.
+#
+# DO NOT mutate `docker/devnet/tailscale-interop/*` — that's the
+# canonical interop fixture. This file copies its layout deliberately.
+
+x-ts-peer-template: &ts-peer-template
+  image: tailscale/tailscale:latest
+  cap_add: [NET_ADMIN, SYS_MODULE]
+  devices:
+    - /dev/net/tun:/dev/net/tun
+  environment:
+    TS_STATE_DIR: /var/lib/tailscale
+  # Override containerboot's TS_AUTHKEY-required exit so we can drive
+  # `tailscale up` via `docker exec` once the bringup script has minted
+  # a key. Mirrors the interop fixture's peer entrypoint verbatim.
+  entrypoint:
+    - sh
+    - -c
+    - |
+      for _ in $$(seq 1 30); do
+          if [ -s /mnt/mesh-control-state/tailscale-wire/tls.crt ]; then
+              break
+          fi
+          sleep 1
+      done
+      if [ -s /mnt/mesh-control-state/tailscale-wire/tls.crt ]; then
+          mkdir -p /usr/local/share/ca-certificates
+          cp /mnt/mesh-control-state/tailscale-wire/tls.crt \
+             /usr/local/share/ca-certificates/octravpn-mesh-control.crt
+          if [ -s /mnt/derp-certs/derp-1.crt ]; then
+              cp /mnt/derp-certs/derp-1.crt \
+                 /usr/local/share/ca-certificates/octravpn-derp-1.crt
+          fi
+          update-ca-certificates 2>&1 | tail -3 || true
+      else
+          echo "WARN: TLS cert not present; tailscaled may fail TLS verification" >&2
+      fi
+      TS_DEBUG_NOISE=1 \
+        tailscaled --statedir=/var/lib/tailscale --tun=userspace-networking \
+                   --socket=/var/run/tailscale/tailscaled.sock &
+      wait $$!
+  networks:
+    - mesh-demo
+
+services:
+  mesh-control:
+    image: debian:bookworm-slim
+    container_name: mesh-demo-control
+    working_dir: /work
+    environment:
+      OCTRAVPN_ADMIN_TOKEN: "mesh-demo-token"
+      RUST_LOG: "info,octravpn_node=debug,headscale_api::tailscale_wire=debug"
+      OCTRAVPN_DERP_MAP_PATH: "/work/derp-map.json"
+    command:
+      - "octravpn-node"
+      - "mesh"
+      - "serve"
+      - "--listen=0.0.0.0:51821"
+      - "--https-listen=0.0.0.0:443"
+      - "--cert-hostname=mesh-control"
+      - "--state-dir=/work/state/tailscale-wire"
+      - "--tailnet-id=mesh-demo"
+    ports:
+      # Publish the plain-HTTP listener so the bringup script's curl
+      # from the host can reach /admin/preauth.
+      - "51821:51821"
+      # Publish 443 so curl can probe the TLS surface from the host.
+      - "8443:443"
+    volumes:
+      # Bind-mount a Linux-built octravpn-node binary. `3node-mesh-bringup.sh`
+      # invokes the same `cargo build` container the interop test uses,
+      # emitting to `target/linux-debug/`. Keeping both stacks pointing
+      # at the same path means an interop test run warms the demo build
+      # cache and vice versa.
+      - type: bind
+        source: ./target/linux-debug/debug/octravpn-node
+        target: /usr/local/bin/octravpn-node
+        read_only: true
+      - type: bind
+        source: ./demo/.mesh-state
+        target: /work/state
+      - type: bind
+        source: ./docker/devnet/tailscale-interop/derp-map.json
+        target: /work/derp-map.json
+        read_only: true
+    networks:
+      - mesh-demo
+
+  derp-1:
+    # Reuse the interop fixture's Dockerfile verbatim — there is no
+    # second DERP image needed; the demo's network is single-region.
+    build:
+      context: ./docker/devnet/tailscale-interop
+      dockerfile: Dockerfile.derper
+    image: octravpn-interop-derper:latest
+    container_name: mesh-demo-derp-1
+    hostname: derp-1
+    command:
+      - "-hostname=derp-1"
+      - "-certmode=manual"
+      - "-certdir=/derp-certs"
+      - "-http-port=-1"
+      - "-a=:443"
+      - "-stun=false"
+    volumes:
+      - type: bind
+        source: ./docker/devnet/tailscale-interop/derp-certs
+        target: /derp-certs
+        read_only: true
+    networks:
+      - mesh-demo
+
+  tsi-peer-1:
+    <<: *ts-peer-template
+    container_name: tsi-peer-1
+    hostname: tsi-peer-1
+    environment:
+      TS_HOSTNAME: peer-1
+      TS_STATE_DIR: /var/lib/tailscale
+    volumes:
+      - tsi-peer-1-state:/var/lib/tailscale
+      - type: bind
+        source: ./demo/.mesh-state
+        target: /mnt/mesh-control-state
+        read_only: true
+      - type: bind
+        source: ./docker/devnet/tailscale-interop/derp-certs
+        target: /mnt/derp-certs
+        read_only: true
+
+  tsi-peer-2:
+    <<: *ts-peer-template
+    container_name: tsi-peer-2
+    hostname: tsi-peer-2
+    environment:
+      TS_HOSTNAME: peer-2
+      TS_STATE_DIR: /var/lib/tailscale
+    volumes:
+      - tsi-peer-2-state:/var/lib/tailscale
+      - type: bind
+        source: ./demo/.mesh-state
+        target: /mnt/mesh-control-state
+        read_only: true
+      - type: bind
+        source: ./docker/devnet/tailscale-interop/derp-certs
+        target: /mnt/derp-certs
+        read_only: true
+
+  tsi-peer-3:
+    <<: *ts-peer-template
+    container_name: tsi-peer-3
+    hostname: tsi-peer-3
+    environment:
+      TS_HOSTNAME: peer-3
+      TS_STATE_DIR: /var/lib/tailscale
+    volumes:
+      - tsi-peer-3-state:/var/lib/tailscale
+      - type: bind
+        source: ./demo/.mesh-state
+        target: /mnt/mesh-control-state
+        read_only: true
+      - type: bind
+        source: ./docker/devnet/tailscale-interop/derp-certs
+        target: /mnt/derp-certs
+        read_only: true
+
+  # Tape 10 (analytics tour) queries this container. The audit dir is
+  # mesh-control's state dir — currently empty under the Hub-free
+  # `mesh serve` shape, so the endpoints respond but the counters stay
+  # at zero. The bringup script's audit-dir bind keeps the path stable
+  # so a future `mesh serve --audit-dir` flag drops in without a
+  # compose-level change.
+  analytics:
+    image: debian:bookworm-slim
+    container_name: mesh-demo-analytics
+    working_dir: /work
+    environment:
+      RUST_LOG: "info,octravpn_analytics=debug"
+    command:
+      - "octravpn-analytics"
+      - "--audit-dir=/work/audit"
+      - "--listen=0.0.0.0:51822"
+    ports:
+      - "51822:51822/tcp"
+    volumes:
+      - type: bind
+        source: ./target/linux-debug/debug/octravpn-analytics
+        target: /usr/local/bin/octravpn-analytics
+        read_only: true
+      - type: bind
+        source: ./demo/.mesh-state/audit
+        target: /work/audit
+    networks:
+      - mesh-demo
+
+networks:
+  mesh-demo:
+    driver: bridge
+    name: octravpn-mesh-demo
+
+volumes:
+  tsi-peer-1-state:
+  tsi-peer-2-state:
+  tsi-peer-3-state:

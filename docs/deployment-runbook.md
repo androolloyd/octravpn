@@ -176,6 +176,45 @@ Grafana panels — at minimum:
 | Attestation freshness  | `time() - octravpn_last_attestation_unix`                            |
 | Uptime                 | `octravpn_uptime_seconds`                                            |
 
+## 5b. Mesh control-plane inspection (`mesh status` / `mesh policy`)
+
+When running with the `mesh serve` Tailscale-wire surface plus the
+headscale-rs admin router, the following CLI surfaces wrap the
+bearer-gated HTTP routes so operators don't need the sibling repo's
+`headscale-cli` installed:
+
+```bash
+# List the tailnet roster (wraps GET /api/v1/machines).
+octravpn-node mesh status \
+  --remote https://mesh-control.example.org \
+  --admin-token "${OCTRAVPN_ADMIN_TOKEN}"
+
+# Fetch the live hujson policy doc (wraps GET /api/v1/policy).
+octravpn-node mesh policy get \
+  --remote https://mesh-control.example.org \
+  --admin-token "${OCTRAVPN_ADMIN_TOKEN}" \
+  --out ./policy.hujson
+
+# Parse-only validation (wraps POST /api/v1/policy/validate) — never
+# mutates the live store. Use this in CI before a `set`.
+octravpn-node mesh policy validate \
+  --remote https://mesh-control.example.org \
+  --admin-token "${OCTRAVPN_ADMIN_TOKEN}" \
+  --file ./policy.hujson
+
+# Replace the live policy (wraps PUT /api/v1/policy). Takes effect
+# within ~1 ms (the policy store's Notify wakes parked /map long-pollers).
+octravpn-node mesh policy set \
+  --remote https://mesh-control.example.org \
+  --admin-token "${OCTRAVPN_ADMIN_TOKEN}" \
+  --file ./policy.hujson
+```
+
+Both subcommands honour `OCTRAVPN_ADMIN_TOKEN` as a fallback for
+`--admin-token`, and pass through the remote server's HTTP status
+codes (`mesh policy set` against a malformed doc exits non-zero with
+the validator's error body on stderr).
+
 ## 6. Daily housekeeping (cron)
 
 ```cron
