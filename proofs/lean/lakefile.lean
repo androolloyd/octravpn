@@ -14,6 +14,10 @@ lean_lib OctraVPN_V2 where
   roots := #[`OctraVPN_V2]
 
 @[default_target]
+lean_lib OctraVPN_V3 where
+  roots := #[`OctraVPN_V3]
+
+@[default_target]
 lean_lib OctraVPN_Rust where
   roots := #[`OctraVPN_Rust]
 
