@@ -18,6 +18,7 @@ use std::{net::SocketAddr, sync::Arc};
 
 use anyhow::Result;
 use boringtun::noise::{Tunn, TunnResult};
+use octravpn_tun::amnezia::{AmneziaConfig, AmneziaShield};
 use parking_lot::Mutex;
 use tokio::net::UdpSocket;
 use tracing::{debug, warn};
@@ -60,16 +61,46 @@ pub(crate) struct Server {
     /// the boringtun result variants. `None` is the test-default and
     /// is a zero-cost no-op on the data path.
     metrics: Option<Arc<crate::control::NodeMetrics>>,
+    /// AmneziaWG-style handshake obfuscation shield. Behind a Mutex
+    /// because the inbound-burst tracking + per-dst `junk_emitted`
+    /// state mutates on every send/recv. When the config is the
+    /// identity (default) every wrap_send/wrap_recv hits a
+    /// short-circuit path and the mutex is uncontended in practice
+    /// (one UDP recv loop, one send call per packet, both held
+    /// briefly). Operators who actually enable obfuscation pay
+    /// O(buf.len()) extra work per packet.
+    shield: Mutex<AmneziaShield>,
 }
 
 impl Server {
+    /// Backwards-compatible constructor that runs with the identity
+    /// shield. Used by the in-crate unit test and by any future
+    /// caller that doesn't need obfuscation.
+    #[allow(dead_code)]
     pub(crate) async fn bind(
         addr: SocketAddr,
         static_secret: StaticSecret,
         router: Arc<OnionRouter>,
         allowlist: Arc<octravpn_core::bounded::BoundedMap<[u8; 32], AllowedClient>>,
     ) -> Result<Self> {
+        Self::bind_with_shield(addr, static_secret, router, allowlist, AmneziaConfig::default())
+            .await
+    }
+
+    /// Construct a `Server` with a non-default Amnezia shield config.
+    /// When `shield_cfg` is the identity (`AmneziaConfig::default()`)
+    /// this is equivalent to `bind` and the shield's send/recv
+    /// wrappers are zero-cost no-ops.
+    pub(crate) async fn bind_with_shield(
+        addr: SocketAddr,
+        static_secret: StaticSecret,
+        router: Arc<OnionRouter>,
+        allowlist: Arc<octravpn_core::bounded::BoundedMap<[u8; 32], AllowedClient>>,
+        shield_cfg: AmneziaConfig,
+    ) -> Result<Self> {
         let sock = UdpSocket::bind(addr).await?;
+        let shield = AmneziaShield::new(shield_cfg)
+            .map_err(|e| anyhow::anyhow!("amnezia config invalid: {e}"))?;
         Ok(Self {
             sock: Arc::new(sock),
             static_secret,
@@ -77,6 +108,7 @@ impl Server {
             peers: octravpn_core::bounded::BoundedMap::new(PEERS_CAP, PEER_IDLE_TTL),
             allowlist,
             metrics: None,
+            shield: Mutex::new(shield),
         })
     }
 
@@ -100,8 +132,53 @@ impl Server {
                     continue;
                 }
             };
+            // Run the obfuscation strip step. wrap_recv expects a
+            // sync closure that fills the buffer; we already have
+            // the bytes in `buf[..n]`, so the closure is a one-shot
+            // returning that length. None ⇒ junk packet, drop.
+            let stripped_len = {
+                let mut consumed = false;
+                self.shield.lock().wrap_recv(&mut buf, |_out| {
+                    if consumed {
+                        return None;
+                    }
+                    consumed = true;
+                    // _out and buf alias the same memory (we pass
+                    // &mut buf in); wrap_recv reads from `_out`
+                    // after the closure returns, so the bytes are
+                    // already in place. Just confirm length.
+                    Some(n)
+                })
+            };
+            let Some(n) = stripped_len else {
+                debug!(?src, "amnezia: dropped junk packet");
+                continue;
+            };
             self.handle_packet(&buf[..n], src, &mut work).await;
         }
+    }
+
+    /// Send `bytes` to `dst`, routed through the amnezia shield's
+    /// outbound transform. Identity-config short-circuits to a single
+    /// `send_to`. Non-identity config may emit multiple datagrams
+    /// (pre-handshake junk burst once per dst).
+    async fn shielded_send_to(&self, bytes: &[u8], dst: SocketAddr) -> std::io::Result<usize> {
+        // Fast-path: when the shield is identity, skip the Vec
+        // allocation entirely.
+        if self.shield.lock().config().is_identity() {
+            return self.sock.send_to(bytes, dst).await;
+        }
+        // Collect outbound datagrams via the sync wrap_send closure,
+        // then flush them through the async UDP socket.
+        let mut out: Vec<Vec<u8>> = Vec::new();
+        self.shield
+            .lock()
+            .wrap_send(dst, bytes, |b| out.push(b.to_vec()));
+        let mut last = 0usize;
+        for pkt in &out {
+            last = self.sock.send_to(pkt, dst).await?;
+        }
+        Ok(last)
     }
 
     async fn handle_packet(&self, packet: &[u8], src: SocketAddr, work: &mut [u8]) {
@@ -134,7 +211,7 @@ impl Server {
                     m.record_wg_handshake(true);
                 }
                 let n = bytes.len();
-                if let Err(e) = self.sock.send_to(bytes, src).await {
+                if let Err(e) = self.shielded_send_to(bytes, src).await {
                     warn!(error = %e, "send_to failed");
                 }
                 debug!(?src, n, "wg control packet replied");
@@ -206,7 +283,7 @@ impl Server {
         payload.extend_from_slice(blob);
         match endpoint.parse::<SocketAddr>() {
             Ok(addr) => {
-                if let Err(e) = self.sock.send_to(&payload, addr).await {
+                if let Err(e) = self.shielded_send_to(&payload, addr).await {
                     warn!(?addr, error = %e, "forward send_to failed");
                 } else {
                     self.router

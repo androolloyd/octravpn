@@ -19,6 +19,8 @@
 //!   - **Windows**: SCM service runs as LocalSystem; wintun driver must
 //!     be installed once via `wintun.dll` registration.
 
+pub mod amnezia;
+
 use std::net::Ipv4Addr;
 
 use anyhow::{Context, Result};

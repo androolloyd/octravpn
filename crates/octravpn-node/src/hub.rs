@@ -886,12 +886,14 @@ impl Hub {
                 .listen
                 .parse()
                 .context("parse listen addr")?;
+            let shield_cfg = self.cfg.tunnel.amnezia.to_wire();
             let server = Arc::new(
-                Server::bind(
+                Server::bind_with_shield(
                     listen,
                     self.wg_static_secret.clone(),
                     self.router.clone(),
                     allowlist,
+                    shield_cfg,
                 )
                 .await?
                 .with_metrics(self.metrics.clone()),

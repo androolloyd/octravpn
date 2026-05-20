@@ -23,6 +23,12 @@ octravpn-mesh = { path = "../octravpn-mesh" }
 # `[analytics]` config block is present. Path dep (workspace member);
 # no transitive heavy deps — the analytics crate is in-memory only.
 octravpn-analytics = { path = "../octravpn-analytics" }
+# AmneziaWG-style WG handshake obfuscation lives in the `tun` crate
+# (next to the TUN device wrapper) as a UDP send/recv shim. The node's
+# tunnel datapath wires it into the WG `Server` when
+# `[tunnel.amnezia].enabled = true`. See
+# `docs/security/validator-hardening.md` § Layer 1.
+octravpn-tun = { path = "../octravpn-tun" }
 
 anyhow      = { workspace = true }
 async-trait = { workspace = true }

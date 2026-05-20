@@ -10,6 +10,8 @@ description = "Cross-platform TUN device abstraction for OctraVPN (Linux, macOS,
 [dependencies]
 anyhow      = { workspace = true }
 bytes       = { workspace = true }
+rand        = { workspace = true }
+serde       = { workspace = true }
 tokio       = { workspace = true }
 tracing     = { workspace = true }
 futures     = { workspace = true }
@@ -19,19 +21,20 @@ tun-rs      = { workspace = true, features = ["async_tokio"] }
 #   * reqwest  — outbound HTTPS dial with a separate SNI / Host split
 #   * hmac/sha2 — operator-shared HMAC the Worker verifies
 #   * subtle   — constant-time tag compare on the client (paranoia)
-#   * serde    — `FrontConfig` (de)serialisation in node.toml
 #   * hex      — hex-encoded HMAC tag in the X-Octra-Front-Auth header
 hex         = { workspace = true }
 hmac        = "0.12"
 reqwest     = { workspace = true }
-serde       = { workspace = true }
 sha2        = { workspace = true }
 subtle      = { workspace = true }
 
-# Test rig for the fronting unit-tests.
-#   * toml — round-trip the `FrontConfig` through node.toml
 [dev-dependencies]
+# `toml` round-trips the `FrontConfig` through node.toml in the
+# `derp::front` unit tests.
 toml        = { workspace = true }
+# `proptest` drives the `random_garbage_is_bypassed` property test in
+# `amnezia::tests`.
+proptest    = { workspace = true }
 
 [lints]
 workspace = true

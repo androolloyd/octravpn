@@ -246,6 +246,92 @@ pub(crate) struct TunnelCfg {
     pub public_endpoint: String,
     pub listen: String,
     pub wg_secret_path: String,
+    /// Optional AmneziaWG-style obfuscation parameters. When omitted
+    /// or `enabled = false`, the WG datapath runs unmodified
+    /// (zero-overhead identity transform; stock-WG peers can still
+    /// connect). When `enabled = true`, both peers MUST agree on
+    /// every field of this block or the handshake will silently
+    /// drop. See `docs/security/validator-hardening.md` § Layer 1.
+    #[serde(default)]
+    pub amnezia: AmneziaCfg,
+}
+
+/// `[tunnel.amnezia]` block. Maps 1:1 onto
+/// `octravpn_tun::amnezia::AmneziaConfig` (the wire-layer struct);
+/// kept separate here so the node config has a free `enabled`
+/// toggle without forcing the wire-layer to carry one (the wire
+/// layer's "disabled" state is just the identity config).
+#[derive(Debug, Deserialize, Clone, Copy, Default)]
+pub(crate) struct AmneziaCfg {
+    /// Master toggle. Defaults to `false` so existing deployments
+    /// upgrade with zero change. Set to `true` and configure the
+    /// other fields to actually obfuscate.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Pre-handshake junk packet count (0..=128).
+    #[serde(default)]
+    pub jc: u8,
+    /// Junk packet min size (1..=1280).
+    #[serde(default)]
+    pub jmin: u16,
+    /// Junk packet max size (1..=1280, >= jmin).
+    #[serde(default)]
+    pub jmax: u16,
+    /// Random prefix bytes on outgoing handshake-init (0..=1280).
+    #[serde(default)]
+    pub s1: u16,
+    /// Random prefix bytes on outgoing handshake-response (0..=1280).
+    #[serde(default)]
+    pub s2: u16,
+    /// Replacement msg-type value for WG init (1 = stock, else 5..=2_147_483_647).
+    #[serde(default = "amnezia_default_h1")]
+    pub h1: u32,
+    /// Replacement msg-type value for WG response (2 = stock, else 5..=2_147_483_647).
+    #[serde(default = "amnezia_default_h2")]
+    pub h2: u32,
+    /// Replacement msg-type value for WG cookie (3 = stock, else 5..=2_147_483_647).
+    #[serde(default = "amnezia_default_h3")]
+    pub h3: u32,
+    /// Replacement msg-type value for WG transport (4 = stock, else 5..=2_147_483_647).
+    #[serde(default = "amnezia_default_h4")]
+    pub h4: u32,
+}
+
+const fn amnezia_default_h1() -> u32 {
+    1
+}
+const fn amnezia_default_h2() -> u32 {
+    2
+}
+const fn amnezia_default_h3() -> u32 {
+    3
+}
+const fn amnezia_default_h4() -> u32 {
+    4
+}
+
+impl AmneziaCfg {
+    /// Render to the wire-layer `AmneziaConfig`. When `enabled =
+    /// false`, returns the identity config (so the shield is a
+    /// zero-cost pass-through regardless of the other field values
+    /// — defence in depth against config typos disabling the toggle
+    /// but leaving stale h-values).
+    pub(crate) fn to_wire(self) -> octravpn_tun::amnezia::AmneziaConfig {
+        if !self.enabled {
+            return octravpn_tun::amnezia::AmneziaConfig::default();
+        }
+        octravpn_tun::amnezia::AmneziaConfig {
+            jc: self.jc,
+            jmin: self.jmin,
+            jmax: self.jmax,
+            s1: self.s1,
+            s2: self.s2,
+            h1: self.h1,
+            h2: self.h2,
+            h3: self.h3,
+            h4: self.h4,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]

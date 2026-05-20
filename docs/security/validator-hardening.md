@@ -243,7 +243,100 @@ verifier exits non-zero with the offending line.
   corresponding `receipt_signed` row in the audit log
   (`audit_cli.rs:501-513`).
 
-## 6. Running the fuzz suite locally
+## 6. Layer 1: AmneziaWG-style obfuscation
+
+OctraVPN's WireGuard data plane runs on top of `boringtun`. Stock WG
+packets carry a deterministic fingerprint that any DPI middlebox
+(GFW, hotel captive-portal filter, hostile ISP) can match in O(1):
+
+  - bytes 0..4 = msg_type as a little-endian u32, always one of
+    `{1, 2, 3, 4}` followed by three NUL pad bytes;
+  - canonical lengths — handshake-init is exactly 148 bytes,
+    handshake-response is 92 bytes, cookie is 64 bytes;
+  - the very first packet of a session matches the init signature
+    every time.
+
+The Layer-1 shield is an
+[AmneziaWG](https://github.com/amnezia-vpn/amneziawg-go)-style
+**wrapper** around UDP send/recv in `crates/octravpn-tun/src/amnezia.rs`.
+We do not fork `boringtun`; we pre-process outbound packets after
+`Tunn::encapsulate` and post-process inbound packets before
+`Tunn::decapsulate`. The shield's three primitives:
+
+| Primitive | Knob(s)               | Defeats                                           |
+|-----------|-----------------------|---------------------------------------------------|
+| Pre-handshake junk burst | `jc`, `jmin`, `jmax` | "first datagram is the init" fingerprint           |
+| Random length-prefix     | `s1`, `s2`           | length-based matchers (148/92 vanish)              |
+| Msg-type substitution    | `h1`..`h4`           | the `byte 0 ∈ {1..=4} && bytes 1..4 == 0` matcher  |
+
+### Config
+
+Add to `node.toml`:
+
+```toml
+[tunnel.amnezia]
+enabled = true
+jc      = 4           # 1..=128   pre-handshake junk packets
+jmin    = 40          # 1..=1280  min junk-packet size
+jmax    = 70          # 1..=1280  max junk-packet size (≥ jmin)
+s1      = 24          # 0..=1280  bytes prepended to outgoing init
+s2      = 17          # 0..=1280  bytes prepended to outgoing response
+h1      = 0x21A1A1A1  # 5..=2_147_483_647   replaces msg-type 1
+h2      = 0x22B2B2B2  # 5..=2_147_483_647   replaces msg-type 2
+h3      = 0x23C3C3C3  # 5..=2_147_483_647   replaces msg-type 3
+h4      = 0x24D4D4D4  # 5..=2_147_483_647   replaces msg-type 4
+```
+
+`enabled = false` (the default) makes the shield an identity
+transform — zero allocations, zero substitutions, full stock-WG
+compatibility.
+
+### Interop
+
+**Both ends must agree** on every value of all 9 knobs. The shield
+is symmetric: when peer A applies `s1=24, h1=0x21A1A1A1`, peer B
+strips 24 bytes of prefix and rewrites the header back to `0x01` —
+if peer B is configured with `s1=0` or a different `h1`, B's
+`wrap_recv` returns `None` and the packet is dropped as junk.
+
+Stock-WireGuard peers **cannot** connect to a node with
+`[tunnel.amnezia].enabled = true`. To bridge the two populations
+run a second listener on a different UDP port with the shield
+disabled. The shield-disabled path is config-gated:
+`AmneziaCfg::to_wire()` returns the identity `AmneziaConfig`
+whenever `enabled = false`, even if the operator left h-values set
+from a previous experiment (defence in depth against typos).
+
+### What this layer does NOT hide
+
+  - **Timing.** Packet inter-arrival is unchanged. A traffic-analysis
+    adversary who sees both sides of the link can still infer
+    "this is a tunneled keepalive flow" from the periodic
+    25-second WG keepalive cadence.
+  - **Volume.** Total bytes per session are unchanged (plus the
+    fixed `s1 + s2 + jc * avg(jmin, jmax)` per-session overhead).
+  - **Endpoint addressing.** A passive observer still sees the
+    source/destination IP + port tuple of every datagram.
+  - **Active probing on the obfuscated port.** A probe that mints
+    a candidate `h1`-prefixed packet of plausible length can only
+    be told apart from a real init *after* `boringtun` rejects the
+    noise handshake — this layer is **defence in depth, not
+    steganography**. Subsequent layers (PSK-gated knock, decoy
+    flow, hidden-exit v2) raise the cost of an active probe.
+
+### Code refs
+
+  - `crates/octravpn-tun/src/amnezia.rs` — wire-layer shield +
+    11 unit/property/loopback tests.
+  - `crates/octravpn-node/src/tunnel.rs` — `Server` integration.
+    Public callers go through `Server::bind` (identity shield) or
+    `Server::bind_with_shield` (explicit config). The egress UDP
+    path (`Server::egress`) bypasses the shield because those
+    bytes are plaintext destined for the public internet, not WG.
+  - `crates/octravpn-node/src/config.rs` — `[tunnel.amnezia]`
+    `AmneziaCfg` block.
+
+## 7. Running the fuzz suite locally
 
 ```bash
 cd fuzz
