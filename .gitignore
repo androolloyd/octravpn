@@ -18,6 +18,13 @@ node_modules/
 # fuzz build artifacts
 fuzz/target/
 fuzz/Cargo.lock
+# Corpus + artifacts are produced by libfuzzer runs and persisted via
+# the CI cache between nightly runs; tracking them in git would balloon
+# the repo. The directories themselves are kept (via `.gitkeep`) so the
+# cache restore-keys have somewhere to land.
+fuzz/corpus/*/*
+!fuzz/corpus/*/.gitkeep
+fuzz/artifacts/
 
 # pvac-sidecar build outputs
 pvac-sidecar/build/

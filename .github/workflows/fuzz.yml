@@ -70,8 +70,19 @@ jobs:
     permissions:
       contents: read
       issues: write
+    # The crates in this repo depend on octra-foundry via a relative
+    # path (`../../../octra-foundry/crates/octra-core` — see
+    # `crates/octravpn-core/Cargo.toml`). CI must check out both
+    # repos as siblings so cargo can resolve that path, matching the
+    # dual-checkout layout used by ci.yml.
+    defaults:
+      run:
+        working-directory: octra
     steps:
       - uses: actions/checkout@v4
+        with: { path: octra }
+      - uses: actions/checkout@v4
+        with: { repository: androolloyd/octra-foundry, path: octra-foundry }
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@master
         with:
@@ -79,8 +90,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            .
-            fuzz
+            octra
+            octra/fuzz
       - name: Install cargo-fuzz
         run: cargo install --locked cargo-fuzz
 
@@ -105,8 +116,8 @@ jobs:
           # builds on prior coverage rather than restarting cold
           # every night.
           path: |
-            fuzz/corpus/${{ matrix.target }}
-            fuzz/artifacts/${{ matrix.target }}
+            octra/fuzz/corpus/${{ matrix.target }}
+            octra/fuzz/artifacts/${{ matrix.target }}
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
           restore-keys: |
             fuzz-corpus-${{ matrix.target }}-
@@ -144,8 +155,8 @@ jobs:
         with:
           name: fuzz-${{ matrix.target }}-${{ github.run_id }}
           path: |
-            fuzz/corpus/${{ matrix.target }}
-            fuzz/artifacts/${{ matrix.target }}
+            octra/fuzz/corpus/${{ matrix.target }}
+            octra/fuzz/artifacts/${{ matrix.target }}
           if-no-files-found: ignore
           retention-days: 30
 
