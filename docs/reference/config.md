@@ -8,28 +8,57 @@ consumes. Schema is defined in
 `serde`-`Deserialize` with `toml`; the loader is `NodeConfig::load` at
 `config.rs:651`.
 
-## CFG-1 audit BLOCKER (2026-05-20)
+## CFG-1 / CFG-2 / H-2 / H-6 — fixed (2026-05-20)
 
-This struct currently uses `#[serde(default)]` on **56 fields** spread
-across 51 attribute sites — meaning **typos in `node.toml` are silently
-ignored** and resolve to the default value. The 2026-05-20 concurrency
-audit flagged this as CFG-1 (BLOCKER): `deny_unknown_fields` should be
-added at the top level + every nested block. Until that lands, the
-following workflow is mandatory:
+Two audit findings against this schema are now closed:
 
-1. Use `octravpn-node config validate` after editing the TOML — it
-   does a round-trip through the schema and prints anything that
-   parses unexpectedly.
-2. Cross-reference every field against this document — if it's not
-   listed here, it's a typo (or you're on a newer schema and this
-   doc is stale).
-3. For production deployments, drive `node.toml` from your config
-   management system (Ansible, NixOS module, etc.) so unintended
-   keys don't survive a `vim` round-trip.
+* **CFG-1 (was BLOCKER)** — every config-shaped struct in
+  `crates/octravpn-node/src/config.rs` carries
+  `#[serde(deny_unknown_fields)]`. A typo in `node.toml` — e.g.
+  `metric_token` instead of `metrics_token` — now hard-fails
+  `NodeConfig::load` with an error that names the unknown field, so
+  the daemon refuses to boot rather than silently defaulting the
+  block. Twelve structs flipped: `NodeConfig`, `ChainCfg`,
+  `TunnelCfg`, `AmneziaCfg`, `PricingCfg`, `ControlCfg`,
+  `AttestationCfg`, `AnalyticsCfg`, `TunCfg`, `TransportCfg`,
+  `Obfs4Cfg`, `PvacCfg`. See the typo-rejection unit tests at the
+  bottom of `config.rs`.
+* **CFG-2 / Audit-3 H-6 (was HIGH)** — six secret-bearing fields are
+  now wrapped in `secrecy::SecretString`:
+  * `chain.sealed_passphrase` (the master tailnet passphrase)
+  * `control.admin_token`
+  * `control.events_token`
+  * `control.metrics_token`
+  * `analytics.bearer_token`
+  * `tun.transport.obfs4.bridge_identity_secret`
 
-A follow-up PR will add `deny_unknown_fields` and bump the schema
-version field. Search this file for `CFG-1` for the per-field
-fallback risks.
+  Each parent struct ships a hand-written `Debug` impl that prints
+  `<redacted>` in place of the wrapped bytes; `tracing::debug!(?cfg)`
+  is no longer a foot-gun. The runtime accessors are explicit and
+  redaction-free at the call site so an `expose_secret` is greppable:
+
+  ```rust
+  cfg.chain.sealed_passphrase_expose()         // Option<&str>
+  cfg.tun.transport.obfs4.bridge_identity_secret_expose()
+  cfg.control.admin_token_string()             // Option<String>
+  cfg.control.metrics_token_string()
+  cfg.control.events_token_string()
+  cfg.analytics.bearer_token_string()
+  ```
+
+  The `*_string()` flavours return an owned `String` for the
+  downstream consumers that build `ControlState` / `HttpState` (those
+  re-wrap in `Arc<str>` for constant-time compare).
+* **Audit-3 H-2 (was LEAK)** — `BlobUpdate.plaintext` in
+  `circle_update.rs` is now `zeroize::Zeroizing<Vec<u8>>` and both
+  `BlobUpdate` and `UpdateBundle` have hand-written `Debug` impls
+  that print only `plaintext_len` (never the bytes). The
+  Zeroizing wrap scrubs the heap buffer on drop.
+
+If you're adding a new config field with secret semantics: wrap it in
+`SecretString`, extend the parent `Debug` impl to redact it via the
+`redact_opt_secret` helper, and add a sentinel-bytes line to the
+`debug_format_does_not_leak_secret_bytes` test in `config.rs`.
 
 ## Top-level structure
 

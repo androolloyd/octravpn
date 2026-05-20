@@ -59,13 +59,36 @@
 //!   [attestation]
 //!   poll_interval_secs = 30          # how often to recheck operator stake
 
+use std::fmt;
 use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 
+/// Audit-2 CFG-2 / Audit-3 H-6 fix.
+///
+/// `redact_opt_secret` is the canonical `Debug` placeholder for every
+/// `Option<SecretString>` field on the node-config types. We render
+/// `None` as the literal `"None"` (so operators can still see whether a
+/// secret is configured) and `Some(_)` as the literal `"<redacted>"`
+/// (never the bytes — not even the length, since the length alone is
+/// enough to fingerprint bearer-token shapes like 32-byte hex). The
+/// trace-redaction unit test in this module pins this exact wording.
+// `&Option<T>` (rather than `Option<&T>`) is deliberate: the callers
+// thread this through Debug impls that already hold `&Option<SecretString>`
+// on the parent struct's `&self`, so re-borrowing would just add noise.
+#[allow(clippy::ref_option)]
+fn redact_opt_secret(f: &mut fmt::Formatter<'_>, v: &Option<SecretString>) -> fmt::Result {
+    match v {
+        None => f.write_str("None"),
+        Some(_) => f.write_str("Some(<redacted>)"),
+    }
+}
+
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct NodeConfig {
     pub chain: ChainCfg,
     pub tunnel: TunnelCfg,
@@ -108,6 +131,7 @@ pub(crate) struct NodeConfig {
 /// into `node.toml`. The remaining fields tune the supervisor + IPC
 /// timeouts.
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct PvacCfg {
     /// Master toggle. `false` (the default) ⇒ the subprocess is never
     /// spawned and `Hub::pvac()` returns `None`.
@@ -187,6 +211,7 @@ impl PvacCfg {
 
 /// `[tun]` block. Currently only carries the [`TransportCfg`] selector.
 #[derive(Debug, Deserialize, Clone, Default)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct TunCfg {
     /// `[tun.transport]` — see [`TransportCfg`].
     #[serde(default)]
@@ -214,6 +239,7 @@ pub(crate) struct TunCfg {
 /// See `docs/operators/obfs4-bridge.md` for credential minting and
 /// the operational runbook.
 #[derive(Debug, Deserialize, Clone, Default)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct TransportCfg {
     /// `"direct"` (default) or `"obfs4"`.
     #[serde(default)]
@@ -236,7 +262,8 @@ pub(crate) enum TransportKind {
 }
 
 /// `[tun.transport.obfs4]` block. Required when `kind = "obfs4"`.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Obfs4Cfg {
     /// 20-byte bridge `node_id`, hex-encoded (40 hex chars).
     /// Distributed to authorised clients out of band. Required.
@@ -249,19 +276,57 @@ pub(crate) struct Obfs4Cfg {
     /// on the bridge node; clients leave this unset. The same secret
     /// must produce the configured `bridge_pubkey`; the bridge will
     /// refuse to handshake otherwise.
+    ///
+    /// Audit-2 CFG-2 / Audit-3 H-6: wrapped in `secrecy::SecretString`
+    /// so any accidental `tracing::debug!(?cfg)` prints `<redacted>`
+    /// rather than the 64-char hex secret. Access via
+    /// [`Obfs4Cfg::bridge_identity_secret_expose`].
     #[serde(default)]
-    pub bridge_identity_secret: Option<String>,
+    pub bridge_identity_secret: Option<SecretString>,
     /// IAT mode: 0 = off (default), 1 = uniform 0..25ms,
     /// 2 = Pareto-shaped 0..200ms. See `octravpn_obfs4::IatMode`.
     #[serde(default)]
     pub iat_mode: u8,
 }
 
+impl Obfs4Cfg {
+    /// Expose the bridge-identity secret for the obfs4 handshake.
+    /// Returns `None` on client-side configs (no secret set). The
+    /// caller MUST NOT log or otherwise persist the returned &str.
+    pub(crate) fn bridge_identity_secret_expose(&self) -> Option<&str> {
+        self.bridge_identity_secret
+            .as_ref()
+            .map(ExposeSecret::expose_secret)
+    }
+}
+
+impl fmt::Debug for Obfs4Cfg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Obfs4Cfg")
+            .field("bridge_node_id", &self.bridge_node_id)
+            .field("bridge_pubkey", &self.bridge_pubkey)
+            .field(
+                "bridge_identity_secret",
+                &format_args!(
+                    "{}",
+                    if self.bridge_identity_secret.is_none() {
+                        "None"
+                    } else {
+                        "Some(<redacted>)"
+                    }
+                ),
+            )
+            .field("iat_mode", &self.iat_mode)
+            .finish()
+    }
+}
+
 /// `[analytics]` block. Bearer-gated like `[control].metrics_token`:
 /// the HTTP surface returns 503 unless `bearer_token` is set, so a
 /// misconfigured operator gets a clear "endpoint disabled" rather
 /// than an open Prometheus endpoint.
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Deserialize, Clone, Default)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct AnalyticsCfg {
     /// Spawn the indexer in-process. Defaults to `false` so existing
     /// operators upgrade without surprise. Set `true` + supply
@@ -279,8 +344,41 @@ pub(crate) struct AnalyticsCfg {
     /// indexer to serve. Pick a long random secret (≥32 bytes); the
     /// same value goes into your scrape config's
     /// `authorization.credentials` field.
+    ///
+    /// Audit-2 CFG-2 / Audit-3 H-6: wrapped in `secrecy::SecretString`
+    /// so any accidental `tracing::debug!(?cfg)` prints `<redacted>`.
+    /// Use [`AnalyticsCfg::bearer_token_string`] to materialise the
+    /// `Option<String>` the analytics HTTP layer requires.
     #[serde(default)]
-    pub bearer_token: Option<String>,
+    pub bearer_token: Option<SecretString>,
+}
+
+impl AnalyticsCfg {
+    /// Materialise the bearer token as `Option<String>` for the
+    /// analytics HTTP state constructor. The returned `String` is the
+    /// expose-point — callers should hand it directly into
+    /// `octravpn_analytics::HttpState::new` (which immediately wraps it
+    /// in `Arc<str>` for constant-time comparison) and never log it.
+    pub(crate) fn bearer_token_string(&self) -> Option<String> {
+        self.bearer_token
+            .as_ref()
+            .map(|s| s.expose_secret().to_string())
+    }
+}
+
+impl fmt::Debug for AnalyticsCfg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut s = f.debug_struct("AnalyticsCfg");
+        s.field("enabled", &self.enabled)
+            .field("listen_addr", &self.listen_addr);
+        struct R<'a>(&'a Option<SecretString>);
+        impl fmt::Debug for R<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                redact_opt_secret(f, self.0)
+            }
+        }
+        s.field("bearer_token", &R(&self.bearer_token)).finish()
+    }
 }
 
 fn default_analytics_listen() -> String {
@@ -320,7 +418,8 @@ impl Default for ProtocolVersion {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ChainCfg {
     pub rpc_url: String,
     pub program_addr: String,
@@ -349,8 +448,15 @@ pub(crate) struct ChainCfg {
     ///   2. This field.
     ///
     /// Empty in both ⇒ error.
+    ///
+    /// Audit-2 CFG-2 / Audit-3 H-6: wrapped in `secrecy::SecretString`
+    /// so the master tailnet passphrase never appears in
+    /// `tracing::debug!(?cfg)` output. Access via
+    /// [`ChainCfg::sealed_passphrase_expose`] (still returns the same
+    /// `Option<&str>` the consumers in `hub::boot::resolve_sealed_passphrase`
+    /// expect).
     #[serde(default)]
-    pub sealed_passphrase: Option<String>,
+    pub sealed_passphrase: Option<SecretString>,
     /// v2-only. Where to persist the predicted/deployed circle id so
     /// the operator doesn't re-derive on every restart. Defaults to
     /// `./state/circle.toml` next to the working directory.
@@ -410,6 +516,45 @@ pub(crate) struct ChainCfg {
     pub attestation_url: Option<String>,
 }
 
+impl ChainCfg {
+    /// Expose the per-tailnet sealed-asset passphrase. Returns the same
+    /// `Option<&str>` shape that `Option<String>::as_deref` used to
+    /// return, so the v2 boot / attestation / cli/circle consumers stay
+    /// 1-line changes. The caller MUST NOT log the result.
+    pub(crate) fn sealed_passphrase_expose(&self) -> Option<&str> {
+        self.sealed_passphrase
+            .as_ref()
+            .map(ExposeSecret::expose_secret)
+    }
+}
+
+impl fmt::Debug for ChainCfg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut s = f.debug_struct("ChainCfg");
+        s.field("rpc_url", &self.rpc_url)
+            .field("program_addr", &self.program_addr)
+            .field("validator_addr", &self.validator_addr)
+            .field("wallet_secret_path", &self.wallet_secret_path)
+            .field("protocol_version", &self.protocol_version)
+            .field("chain_id", &self.chain_id);
+        struct R<'a>(&'a Option<SecretString>);
+        impl fmt::Debug for R<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                redact_opt_secret(f, self.0)
+            }
+        }
+        s.field("sealed_passphrase", &R(&self.sealed_passphrase))
+            .field("circle_state_path", &self.circle_state_path)
+            .field("pinned_root_paths", &self.pinned_root_paths)
+            .field("circle_id", &self.circle_id)
+            .field("circle_v3_state_path", &self.circle_v3_state_path)
+            .field("v3_initial_stake", &self.v3_initial_stake)
+            .field("require_sealed_keys", &self.require_sealed_keys)
+            .field("attestation_url", &self.attestation_url)
+            .finish()
+    }
+}
+
 /// Default chain id when a config omits the field. Devnet today; will
 /// flip to mainnet once the production v2 deploy lands. Operators must
 /// override explicitly to opt into another network.
@@ -418,6 +563,7 @@ fn default_chain_id() -> u32 {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct TunnelCfg {
     pub public_endpoint: String,
     pub listen: String,
@@ -438,6 +584,7 @@ pub(crate) struct TunnelCfg {
 /// toggle without forcing the wire-layer to carry one (the wire
 /// layer's "disabled" state is just the identity config).
 #[derive(Debug, Deserialize, Clone, Copy, Default)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct AmneziaCfg {
     /// Master toggle. Defaults to `false` so existing deployments
     /// upgrade with zero change. Set to `true` and configure the
@@ -511,6 +658,7 @@ impl AmneziaCfg {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct PricingCfg {
     pub price_per_mb: u64,
     pub region: String,
@@ -536,7 +684,8 @@ impl PricingCfg {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ControlCfg {
     /// HTTP listen for the receipt control plane.
     #[serde(default = "default_control_listen")]
@@ -553,8 +702,13 @@ pub(crate) struct ControlCfg {
     /// endpoint used to broadcast every session_id ↔ client_wg_pubkey
     /// mapping + per-session bytes_used to any HTTP client; see
     /// docs/v2-threat-model.md P0-1 and docs/v2-rust-leak-audit.md.
+    ///
+    /// Audit-2 CFG-2 / Audit-3 H-6: wrapped in `secrecy::SecretString`
+    /// so `tracing::debug!(?cfg)` prints `<redacted>`. Use
+    /// [`ControlCfg::events_token_string`] for the `Option<String>` the
+    /// downstream control-plane state-setter expects.
     #[serde(default)]
-    pub events_token: Option<String>,
+    pub events_token: Option<SecretString>,
     /// Bearer token gating the `/metrics` Prometheus endpoint.
     /// `None` (the default) refuses scrapes with 503 — operators must
     /// set this for the endpoint to serve. Set the same value in
@@ -563,8 +717,11 @@ pub(crate) struct ControlCfg {
     ///
     /// Pick a random ≥32-byte secret (e.g. `openssl rand -hex 32`).
     /// Rotation is operator-driven; restart the node after changing.
+    ///
+    /// Audit-2 CFG-2 / Audit-3 H-6: `secrecy::SecretString`-wrapped.
+    /// Use [`ControlCfg::metrics_token_string`].
     #[serde(default)]
-    pub metrics_token: Option<String>,
+    pub metrics_token: Option<SecretString>,
     /// P1-8/9 persistent receipt-seq journal. The node consults this
     /// file before signing any receipt and refuses to sign at any seq
     /// that does not strictly exceed the on-disk floor. After a
@@ -586,8 +743,12 @@ pub(crate) struct ControlCfg {
     /// as a fallback when this field is unset — handy for ephemeral
     /// docker containers that load the token from a compose secret
     /// rather than persisting it in the rendered `node.toml`.
+    ///
+    /// Audit-2 CFG-2 / Audit-3 H-6: `secrecy::SecretString`-wrapped.
+    /// Use [`ControlCfg::admin_token_string`] to materialise the
+    /// `Option<String>` `hub::spawn` hands to `ControlState`.
     #[serde(default)]
-    pub admin_token: Option<String>,
+    pub admin_token: Option<SecretString>,
     /// Directory to persist the Tailscale-wire Noise long-term static
     /// key (and any future wire-protocol state). Defaults to
     /// `./state/tailscale-wire`. The `noise_static.key` file inside is
@@ -621,11 +782,62 @@ impl Default for ControlCfg {
     }
 }
 
+impl ControlCfg {
+    /// Materialise the events SSE bearer token. Wrap in `String` (not
+    /// `&str`) so the consumer in `hub::spawn` can hand it directly to
+    /// `ControlState::with_events_token` — same `Option<String>` shape
+    /// the pre-secrecy code passed.
+    pub(crate) fn events_token_string(&self) -> Option<String> {
+        self.events_token
+            .as_ref()
+            .map(|s| s.expose_secret().to_string())
+    }
+    /// Materialise the `/metrics` bearer token (same contract as
+    /// [`Self::events_token_string`]).
+    pub(crate) fn metrics_token_string(&self) -> Option<String> {
+        self.metrics_token
+            .as_ref()
+            .map(|s| s.expose_secret().to_string())
+    }
+    /// Materialise the admin bearer token (same contract as
+    /// [`Self::events_token_string`]).
+    pub(crate) fn admin_token_string(&self) -> Option<String> {
+        self.admin_token
+            .as_ref()
+            .map(|s| s.expose_secret().to_string())
+    }
+}
+
+impl fmt::Debug for ControlCfg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        struct R<'a>(&'a Option<SecretString>);
+        impl fmt::Debug for R<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                redact_opt_secret(f, self.0)
+            }
+        }
+        f.debug_struct("ControlCfg")
+            .field("listen", &self.listen)
+            .field("audit_dir", &self.audit_dir)
+            .field("events_token", &R(&self.events_token))
+            .field("metrics_token", &R(&self.metrics_token))
+            .field("receipt_journal_path", &self.receipt_journal_path)
+            .field("admin_token", &R(&self.admin_token))
+            .field(
+                "tailscale_wire_state_dir",
+                &self.tailscale_wire_state_dir,
+            )
+            .field("tailscale_tailnet_id", &self.tailscale_tailnet_id)
+            .finish()
+    }
+}
+
 fn default_control_listen() -> String {
     "127.0.0.1:51821".into()
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct AttestationCfg {
     /// How often to verify that the configured wallet is still an
     /// Octra protocol validator. Long enough that we don't hammer the
@@ -653,5 +865,265 @@ impl NodeConfig {
             .with_context(|| format!("read config: {}", path.as_ref().display()))?;
         let cfg: Self = ::toml::from_str(&raw).context("parse node config TOML")?;
         Ok(cfg)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Minimal valid TOML — every required-by-the-loader field present
+    /// and nothing else. Sub-tests prepend a typo'd top-level / nested
+    /// key to this baseline and assert the parse fails with a useful
+    /// message.
+    const MIN_TOML: &str = r#"
+[chain]
+rpc_url = "https://example/test"
+program_addr = "oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3"
+validator_addr = "oct8taXQ4CvohcgzCJFYyaKrrAbcZs5mxkBCJQQYWb2Pcun"
+wallet_secret_path = "/tmp/wallet.key"
+
+[tunnel]
+public_endpoint = "1.2.3.4:51820"
+listen = "0.0.0.0:51820"
+wg_secret_path = "/tmp/wg.key"
+
+[pricing]
+price_per_mb = 100
+region = "eu-west"
+"#;
+
+    /// Sanity: the baseline parses cleanly. If this regresses every
+    /// typo test below is meaningless.
+    #[test]
+    fn baseline_parses() {
+        let cfg: NodeConfig = ::toml::from_str(MIN_TOML).expect("baseline TOML must parse");
+        assert_eq!(cfg.pricing.price_per_mb, 100);
+    }
+
+    /// Audit-2 CFG-1: typo on a top-level key (`pricng` vs `pricing`)
+    /// MUST be rejected, naming the unknown field. Without
+    /// `deny_unknown_fields` the typo'd block was silently dropped and
+    /// the loader fell back to whatever defaults existed (none here ⇒
+    /// would have errored on the missing required `pricing.region` —
+    /// but only after the typo'd block was already discarded).
+    #[test]
+    fn unknown_top_level_block_is_rejected() {
+        let bad = format!("{MIN_TOML}\n[pricng]\nprice_per_mb = 9999\n");
+        let err = ::toml::from_str::<NodeConfig>(&bad).expect_err("typo'd block must fail");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("pricng") || msg.contains("unknown"),
+            "error should name the bad field, got: {msg}"
+        );
+    }
+
+    /// Audit-2 CFG-1: typo on a `[chain]` sub-field
+    /// (`progrm_addr` vs `program_addr`) MUST be rejected.
+    #[test]
+    fn unknown_chain_field_is_rejected() {
+        let bad = MIN_TOML.replace("program_addr =", "progrm_addr =");
+        let err = ::toml::from_str::<NodeConfig>(&bad).expect_err("typo'd field must fail");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("progrm_addr") || msg.contains("unknown") || msg.contains("missing"),
+            "error should name the bad field, got: {msg}"
+        );
+    }
+
+    /// Audit-2 CFG-1: typo on a `[control]` security-critical key
+    /// (`metric_token` vs `metrics_token`) MUST be rejected. This is
+    /// the canonical scanner-facing impact: pre-fix, the typo
+    /// resulted in a silent 503 with no diagnostic; post-fix the node
+    /// refuses to boot.
+    #[test]
+    fn unknown_control_token_field_is_rejected() {
+        let bad = format!("{MIN_TOML}\n[control]\nmetric_token = \"abc\"\n");
+        let err = ::toml::from_str::<NodeConfig>(&bad)
+            .expect_err("typo'd bearer-token key must fail");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("metric_token") || msg.contains("unknown"),
+            "error should name the bad field, got: {msg}"
+        );
+    }
+
+    /// Audit-2 CFG-1: typo on an `[analytics]` key
+    /// (`bearer` vs `bearer_token`) MUST be rejected.
+    #[test]
+    fn unknown_analytics_field_is_rejected() {
+        let bad = format!("{MIN_TOML}\n[analytics]\nbearer = \"abc\"\n");
+        let err = ::toml::from_str::<NodeConfig>(&bad).expect_err("typo'd analytics key must fail");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("bearer") || msg.contains("unknown"),
+            "error should name the bad field, got: {msg}"
+        );
+    }
+
+    /// Audit-2 CFG-1: typo on a `[tun.transport.obfs4]` key
+    /// (`bridge_identity_secrt` vs `bridge_identity_secret`) MUST be
+    /// rejected. Plain-string typos in security-critical hex blobs
+    /// were the audit's most-cited risk class.
+    #[test]
+    fn unknown_obfs4_field_is_rejected() {
+        let bad = format!(
+            "{MIN_TOML}\n[tun.transport]\nkind = \"obfs4\"\n\
+             [tun.transport.obfs4]\n\
+             bridge_node_id = \"0102030405060708090a0b0c0d0e0f1011121314\"\n\
+             bridge_pubkey  = \"abcd000000000000000000000000000000000000000000000000000000000000\"\n\
+             bridge_identity_secrt = \"deadbeef\"\n"
+        );
+        let err = ::toml::from_str::<NodeConfig>(&bad).expect_err("typo'd obfs4 key must fail");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("bridge_identity_secrt") || msg.contains("unknown"),
+            "error should name the bad field, got: {msg}"
+        );
+    }
+
+    /// Audit-3 H-6 / Audit-2 CFG-2: trace-redaction property.
+    ///
+    /// Populate every secret field with a sentinel value that's easy to
+    /// grep for; render the config through `{:?}` (mirrors
+    /// `tracing::debug!(?cfg)`); assert none of the secret bytes leak.
+    #[test]
+    fn debug_format_does_not_leak_secret_bytes() {
+        const SENTINEL_PASSPHRASE: &str = "TRIPWIRE_PASSPHRASE_AAAAAAAAAAAAAA";
+        const SENTINEL_ADMIN: &str = "TRIPWIRE_ADMIN_TOKEN_BBBBBBBBBBBBBB";
+        const SENTINEL_METRICS: &str = "TRIPWIRE_METRICS_TOKEN_CCCCCCCCCCCC";
+        const SENTINEL_EVENTS: &str = "TRIPWIRE_EVENTS_TOKEN_DDDDDDDDDDDDD";
+        const SENTINEL_ANALYTICS: &str = "TRIPWIRE_ANALYTICS_BEARER_EEEEEEEE";
+        const SENTINEL_OBFS4: &str = "TRIPWIRE_OBFS4_SECRET_FFFFFFFFFFFF";
+
+        let toml_str = format!(
+            r#"
+[chain]
+rpc_url = "https://example/test"
+program_addr = "oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3"
+validator_addr = "oct8taXQ4CvohcgzCJFYyaKrrAbcZs5mxkBCJQQYWb2Pcun"
+wallet_secret_path = "/tmp/wallet.key"
+sealed_passphrase = "{SENTINEL_PASSPHRASE}"
+
+[tunnel]
+public_endpoint = "1.2.3.4:51820"
+listen = "0.0.0.0:51820"
+wg_secret_path = "/tmp/wg.key"
+
+[pricing]
+price_per_mb = 100
+region = "eu-west"
+
+[control]
+admin_token = "{SENTINEL_ADMIN}"
+metrics_token = "{SENTINEL_METRICS}"
+events_token = "{SENTINEL_EVENTS}"
+
+[analytics]
+enabled = true
+bearer_token = "{SENTINEL_ANALYTICS}"
+
+[tun.transport]
+kind = "obfs4"
+
+[tun.transport.obfs4]
+bridge_node_id  = "0102030405060708090a0b0c0d0e0f1011121314"
+bridge_pubkey   = "abcd000000000000000000000000000000000000000000000000000000000000"
+bridge_identity_secret = "{SENTINEL_OBFS4}"
+iat_mode = 1
+"#
+        );
+        let cfg: NodeConfig =
+            ::toml::from_str(&toml_str).expect("trace-redaction fixture must parse");
+        let rendered = format!("{cfg:?}");
+        // Every sentinel string MUST be absent. If any of these
+        // assertions fires the redacting Debug impl regressed.
+        for needle in [
+            SENTINEL_PASSPHRASE,
+            SENTINEL_ADMIN,
+            SENTINEL_METRICS,
+            SENTINEL_EVENTS,
+            SENTINEL_ANALYTICS,
+            SENTINEL_OBFS4,
+        ] {
+            assert!(
+                !rendered.contains(needle),
+                "leak: {needle:?} appeared in Debug output:\n{rendered}"
+            );
+        }
+        // Positive control: the redaction sentinel IS present (so the
+        // assertion above isn't "vacuously true" because we used
+        // `{:?}` on the wrong value).
+        assert!(
+            rendered.contains("<redacted>"),
+            "expected '<redacted>' marker in Debug output, got:\n{rendered}"
+        );
+    }
+
+    /// Audit-3 H-6 / Audit-2 CFG-2: same property but through
+    /// `tracing::debug!(?cfg)` — a tracing subscriber capture, since
+    /// the audit specifically names this macro. Belt-and-braces vs.
+    /// the bare `format!("{:?}")` check above.
+    #[test]
+    fn tracing_debug_does_not_leak_secret_bytes() {
+        use std::sync::{Arc, Mutex};
+        use tracing_subscriber::fmt::MakeWriter;
+
+        const SENTINEL: &str = "TRACINGTRIPWIRE_PASSPHRASE_GGGGGGG";
+
+        let toml_str = format!(
+            r#"
+[chain]
+rpc_url = "https://example/test"
+program_addr = "oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3"
+validator_addr = "oct8taXQ4CvohcgzCJFYyaKrrAbcZs5mxkBCJQQYWb2Pcun"
+wallet_secret_path = "/tmp/wallet.key"
+sealed_passphrase = "{SENTINEL}"
+
+[tunnel]
+public_endpoint = "1.2.3.4:51820"
+listen = "0.0.0.0:51820"
+wg_secret_path = "/tmp/wg.key"
+
+[pricing]
+price_per_mb = 100
+region = "eu-west"
+"#
+        );
+        let cfg: NodeConfig = ::toml::from_str(&toml_str).expect("fixture must parse");
+
+        #[derive(Clone, Default)]
+        struct CapWriter(Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for CapWriter {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        impl<'a> MakeWriter<'a> for CapWriter {
+            type Writer = Self;
+            fn make_writer(&'a self) -> Self::Writer {
+                self.clone()
+            }
+        }
+
+        let buf: Arc<Mutex<Vec<u8>>> = Arc::default();
+        let writer = CapWriter(buf.clone());
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(writer)
+            .with_ansi(false)
+            .with_max_level(tracing::Level::DEBUG)
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::debug!(?cfg, "config-dump");
+        });
+        let out = String::from_utf8(buf.lock().unwrap().clone()).expect("utf8");
+        assert!(
+            !out.contains(SENTINEL),
+            "tracing::debug!(?cfg) leaked the sealed_passphrase sentinel:\n{out}"
+        );
     }
 }

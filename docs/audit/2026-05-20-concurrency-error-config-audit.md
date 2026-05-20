@@ -247,6 +247,16 @@ and panic crash dumps.
   `AttestationCfg`, `AnalyticsCfg`, `PvacCfg`, `TunCfg`,
   `TransportCfg`, `Obfs4Cfg`, `AmneziaCfg`. Add a deliberate-typo
   TOML unit test.
+- **Fixed** (worktree branch `worktree-agent-ae841e6f290904500`, commit pending):
+  added `#[serde(deny_unknown_fields)]` to all 12 node-side config
+  structs and shipped 5 typo-rejection unit tests in
+  `crates/octravpn-node/src/config.rs` (top-level block, chain
+  field, control bearer-token, analytics bearer, obfs4 secret).
+  Client-side config (`crates/octravpn-client/src/config.rs`) is
+  unchanged for now and tracked as a follow-up — it shares the
+  `[chain]` shape but the client's deserialization is consumed by
+  a different binary boundary. See `docs/reference/config.md`
+  CFG-1 / CFG-2 section.
 
 ### CFG-2 [HIGH] Six secret-bearing fields stored as plain `Option<String>`
 - File: `crates/octravpn-node/src/config.rs`:
@@ -260,6 +270,18 @@ and panic crash dumps.
 - Fix: wrap each in `secrecy::SecretString` (min:
   `zeroize::Zeroizing<String>`). Audit `tracing::*` macros in
   `hub.rs`/`main.rs`/`pvac.rs` for `?cfg` emissions.
+- **Fixed** (worktree branch `worktree-agent-ae841e6f290904500`, commit pending):
+  all 6 fields now `Option<SecretString>` (`secrecy 0.10` with `serde`
+  feature, added to workspace deps). `ChainCfg`, `ControlCfg`,
+  `AnalyticsCfg`, `Obfs4Cfg` carry hand-written `Debug` impls that
+  emit `<redacted>` for the wrapped slots. Two trace-redaction tests
+  in `crates/octravpn-node/src/config.rs` pin the property —
+  `debug_format_does_not_leak_secret_bytes` (bare `{:?}`) and
+  `tracing_debug_does_not_leak_secret_bytes` (live tracing capture).
+  Grep of `tracing::*!`/`eprintln`/`println` in the node confirms
+  no production caller currently dumps `?cfg` (only the test does).
+  Accessors `*_expose() -> Option<&str>` and `*_string() -> Option<String>`
+  on the parent blocks gate every consumer-side read.
 
 ### CFG-3 [HIGH] Multiple env-var precedence chains for the same secret
 - Files: `OCTRAVPN_SEALED_PASSPHRASE` read at `hub.rs:684`,

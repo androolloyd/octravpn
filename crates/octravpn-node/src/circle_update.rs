@@ -79,7 +79,13 @@ pub(crate) const ANCHOR_UPDATE_FEE_FALLBACK: u64 = 1_000;
 
 /// One blob the operator wants to seal + commit as part of this
 /// update bundle.
-#[derive(Clone, Debug)]
+///
+/// Audit-3 H-2: `Debug` is hand-written (NOT derived) so the plaintext
+/// bytes never appear in `tracing::*!(?blob)` output. Plaintext is
+/// also wrapped in `zeroize::Zeroizing<Vec<u8>>` for defence in depth:
+/// the heap buffer is scrubbed when the BlobUpdate drops, shrinking
+/// the window during which a coredump could rescue the bytes.
+#[derive(Clone)]
 pub(crate) struct BlobUpdate {
     /// Path inside the circle, e.g. `"/policy.json"`. Forms the
     /// `(circle_id, path)` content-address that
@@ -89,7 +95,11 @@ pub(crate) struct BlobUpdate {
     /// `*_hash` fields) and feeds them through
     /// `encrypt_sealed_bytes(circle_id, key_id, passphrase, plaintext,
     /// padding_class)`.
-    pub plaintext: Vec<u8>,
+    ///
+    /// Wrapped in `zeroize::Zeroizing<Vec<u8>>` so the bytes are scrubbed
+    /// from the heap on drop (Audit-3 H-2 defence-in-depth alongside the
+    /// hand-written `Debug` that hides them from log output).
+    pub plaintext: zeroize::Zeroizing<Vec<u8>>,
     /// Sealed-envelope key id. `"default"` for the single-key per-circle
     /// case; multi-key flows pass a non-default id and bind the
     /// resulting envelope's hash separately.
@@ -99,6 +109,22 @@ pub(crate) struct BlobUpdate {
     pub padding_class: PaddingClass,
 }
 
+impl std::fmt::Debug for BlobUpdate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Audit-3 H-2: print only structural metadata + the length of
+        // the plaintext (never the bytes). Length alone leaks at most
+        // a coarse fingerprint of policy size — acceptable trade-off
+        // for the operator-debuggability gain. Bytes never appear.
+        f.debug_struct("BlobUpdate")
+            .field("asset_path", &self.asset_path)
+            .field("plaintext_len", &self.plaintext.len())
+            .field("plaintext", &"<redacted>")
+            .field("key_id", &self.key_id)
+            .field("padding_class", &self.padding_class)
+            .finish()
+    }
+}
+
 impl BlobUpdate {
     /// SHA-256 of the plaintext (NOT the sealed ciphertext). This is
     /// the value the StateRoot's `policy_hash` / `wg_pubkey_hash` /
@@ -106,7 +132,8 @@ impl BlobUpdate {
     /// bytes opaquely, but the anchor commits to the pre-encryption
     /// plaintext so verifiers can re-derive it after decryption.
     pub(crate) fn plaintext_hash_hex(&self) -> String {
-        hex::encode(Sha256::digest(&self.plaintext))
+        // Slice through Zeroizing's Deref so the hash op sees `&[u8]`.
+        hex::encode(Sha256::digest(self.plaintext.as_slice()))
     }
 
     /// Map a known asset path to the StateRoot field whose hash binds
@@ -200,7 +227,12 @@ impl SealedAssetCreds {
 }
 
 /// Operator-side bundle: "rewrite these blobs and flip the anchor."
-#[derive(Clone, Debug)]
+///
+/// Audit-3 H-2: hand-written `Debug` (NOT derived) — flows through the
+/// per-blob redaction defined on `BlobUpdate::fmt` so neither
+/// `tracing::debug!(?bundle)` nor `tracing::info!(?bundle)` can leak
+/// the plaintext of any wrapped blob.
+#[derive(Clone)]
 pub(crate) struct UpdateBundle {
     pub circle_id: String,
     /// Blobs to seal + write. Each lands as a separate
@@ -208,6 +240,17 @@ pub(crate) struct UpdateBundle {
     /// changes; just flip the anchor."
     pub blobs: Vec<BlobUpdate>,
     pub anchor_overrides: AnchorOverrides,
+}
+
+impl std::fmt::Debug for UpdateBundle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Defers to BlobUpdate's redacting Debug for each entry.
+        f.debug_struct("UpdateBundle")
+            .field("circle_id", &self.circle_id)
+            .field("blobs", &self.blobs)
+            .field("anchor_overrides", &self.anchor_overrides)
+            .finish()
+    }
 }
 
 impl UpdateBundle {
@@ -418,7 +461,7 @@ fn sign_blob_put_tx(
         circle_id,
         &blob.key_id,
         creds.passphrase(),
-        &blob.plaintext,
+        blob.plaintext.as_slice(),
         blob.padding_class,
     )
     .with_context(|| format!("seal asset {} for circle {circle_id}", blob.asset_path))?;
@@ -577,7 +620,9 @@ pub(crate) async fn apply(
         .map_err(|e| UpdateError::BundleInvalid(format!("canonical_bytes: {e}")))?;
     let meta_blob = BlobUpdate {
         asset_path: "/state-root.json".to_string(),
-        plaintext: state_root_bytes,
+        // Audit-3 H-2 wrap: Zeroizing<Vec<u8>> so the meta-blob bytes
+        // are scrubbed on drop alongside the rest.
+        plaintext: zeroize::Zeroizing::new(state_root_bytes),
         key_id: "default".to_string(),
         padding_class: PaddingClass::None,
     };
@@ -752,11 +797,48 @@ mod tests {
 
     // --- Pure-function tests -----------------------------------------
 
+    /// Audit-3 H-2: `Debug` on `BlobUpdate` and `UpdateBundle` MUST
+    /// NOT include the plaintext bytes — neither at the field-by-field
+    /// level (`?blob`) nor at the bundle level (`?bundle`). Sentinel
+    /// bytes guarantee a failed redaction shows up loudly.
+    #[test]
+    fn debug_does_not_leak_blob_plaintext() {
+        const SENTINEL: &[u8] = b"H2-LEAK-CANARY-secret-policy-bytes-do-not-print";
+        let blob = BlobUpdate {
+            asset_path: "/policy.json".into(),
+            plaintext: zeroize::Zeroizing::new(SENTINEL.to_vec()),
+            key_id: "default".into(),
+            padding_class: PaddingClass::None,
+        };
+        let bundle = UpdateBundle {
+            circle_id: TEST_CIRCLE.into(),
+            blobs: vec![blob.clone()],
+            anchor_overrides: AnchorOverrides::default(),
+        };
+        let s_blob = format!("{blob:?}");
+        let s_bundle = format!("{bundle:?}");
+        let needle = std::str::from_utf8(SENTINEL).unwrap();
+        assert!(
+            !s_blob.contains(needle),
+            "BlobUpdate Debug leaked plaintext: {s_blob}"
+        );
+        assert!(
+            !s_bundle.contains(needle),
+            "UpdateBundle Debug leaked plaintext: {s_bundle}"
+        );
+        // Positive control: length IS exposed (audit accepts this
+        // trade-off — see BlobUpdate::fmt docstring).
+        assert!(
+            s_blob.contains(&format!("plaintext_len: {}", SENTINEL.len())),
+            "Debug should still expose plaintext_len for operator triage: {s_blob}"
+        );
+    }
+
     #[test]
     fn plaintext_hash_matches_sha256() {
         let blob = BlobUpdate {
             asset_path: "/policy.json".into(),
-            plaintext: b"hello".to_vec(),
+            plaintext: zeroize::Zeroizing::new(b"hello".to_vec()),
             key_id: "default".into(),
             padding_class: PaddingClass::None,
         };
@@ -807,7 +889,7 @@ mod tests {
             circle_id: TEST_CIRCLE.into(),
             blobs: vec![BlobUpdate {
                 asset_path: "/policy.json".into(),
-                plaintext: plaintext.to_vec(),
+                plaintext: zeroize::Zeroizing::new(plaintext.to_vec()),
                 key_id: "default".into(),
                 padding_class: PaddingClass::K4,
             }],
@@ -831,13 +913,13 @@ mod tests {
             blobs: vec![
                 BlobUpdate {
                     asset_path: "/policy.json".into(),
-                    plaintext: policy.to_vec(),
+                    plaintext: zeroize::Zeroizing::new(policy.to_vec()),
                     key_id: "default".into(),
                     padding_class: PaddingClass::K4,
                 },
                 BlobUpdate {
                     asset_path: "/wg.pub".into(),
-                    plaintext: wgpub.to_vec(),
+                    plaintext: zeroize::Zeroizing::new(wgpub.to_vec()),
                     key_id: "default".into(),
                     padding_class: PaddingClass::None,
                 },
@@ -909,7 +991,7 @@ mod tests {
             circle_id: TEST_CIRCLE.into(),
             blobs: vec![BlobUpdate {
                 asset_path: "/members.json".into(),
-                plaintext: b"members".to_vec(),
+                plaintext: zeroize::Zeroizing::new(b"members".to_vec()),
                 key_id: "default".into(),
                 padding_class: PaddingClass::K4,
             }],
@@ -954,7 +1036,7 @@ mod tests {
             circle_id: TEST_CIRCLE.into(),
             blobs: vec![BlobUpdate {
                 asset_path: "policy.json".into(),
-                plaintext: b"x".to_vec(),
+                plaintext: zeroize::Zeroizing::new(b"x".to_vec()),
                 key_id: "default".into(),
                 padding_class: PaddingClass::None,
             }],
@@ -973,13 +1055,13 @@ mod tests {
         let plaintext = b"region-policy";
         let b1 = BlobUpdate {
             asset_path: "/policy.json".into(),
-            plaintext: plaintext.to_vec(),
+            plaintext: zeroize::Zeroizing::new(plaintext.to_vec()),
             key_id: "eu-west".into(),
             padding_class: PaddingClass::K4,
         };
         let b2 = BlobUpdate {
             asset_path: "/policy.json".into(),
-            plaintext: plaintext.to_vec(),
+            plaintext: zeroize::Zeroizing::new(plaintext.to_vec()),
             key_id: "ap-south".into(),
             padding_class: PaddingClass::K4,
         };
@@ -1015,7 +1097,7 @@ mod tests {
             circle_id: TEST_CIRCLE.into(),
             blobs: vec![BlobUpdate {
                 asset_path: "/policy.json".into(),
-                plaintext: b"blob-content".to_vec(),
+                plaintext: zeroize::Zeroizing::new(b"blob-content".to_vec()),
                 key_id: "default".into(),
                 padding_class: PaddingClass::None,
             }],
@@ -1049,7 +1131,7 @@ mod tests {
         let creds = SealedAssetCreds::new(TEST_PASS);
         let blob = BlobUpdate {
             asset_path: "/policy.json".into(),
-            plaintext: b"hello".to_vec(),
+            plaintext: zeroize::Zeroizing::new(b"hello".to_vec()),
             key_id: "default".into(),
             padding_class: PaddingClass::None,
         };
@@ -1110,7 +1192,7 @@ mod tests {
             circle_id: TEST_CIRCLE.into(),
             blobs: vec![BlobUpdate {
                 asset_path: "/policy.json".into(),
-                plaintext: b"hello".to_vec(),
+                plaintext: zeroize::Zeroizing::new(b"hello".to_vec()),
                 key_id: "default".into(),
                 padding_class: PaddingClass::K4,
             }],
@@ -1391,7 +1473,7 @@ mod tests {
             circle_id: TEST_CIRCLE.into(),
             blobs: vec![BlobUpdate {
                 asset_path: "/policy.json".into(),
-                plaintext: new_policy.to_vec(),
+                plaintext: zeroize::Zeroizing::new(new_policy.to_vec()),
                 key_id: "default".into(),
                 padding_class: PaddingClass::K4,
             }],
@@ -1442,7 +1524,7 @@ mod tests {
             circle_id: TEST_CIRCLE.into(),
             blobs: vec![BlobUpdate {
                 asset_path: "/policy.json".into(),
-                plaintext: b"v3".to_vec(),
+                plaintext: zeroize::Zeroizing::new(b"v3".to_vec()),
                 key_id: "default".into(),
                 padding_class: PaddingClass::K4,
             }],
@@ -1487,13 +1569,13 @@ mod tests {
             blobs: vec![
                 BlobUpdate {
                     asset_path: "/policy.json".into(),
-                    plaintext: b"v4".to_vec(),
+                    plaintext: zeroize::Zeroizing::new(b"v4".to_vec()),
                     key_id: "default".into(),
                     padding_class: PaddingClass::K4,
                 },
                 BlobUpdate {
                     asset_path: "/wg.pub".into(),
-                    plaintext: b"new-wg".to_vec(),
+                    plaintext: zeroize::Zeroizing::new(b"new-wg".to_vec()),
                     key_id: "default".into(),
                     padding_class: PaddingClass::None,
                 },
@@ -1535,7 +1617,7 @@ mod tests {
             circle_id: TEST_CIRCLE.into(),
             blobs: vec![BlobUpdate {
                 asset_path: "/policy.json".into(),
-                plaintext: b"my-policy".to_vec(),
+                plaintext: zeroize::Zeroizing::new(b"my-policy".to_vec()),
                 key_id: "default".into(),
                 padding_class: PaddingClass::K4,
             }],

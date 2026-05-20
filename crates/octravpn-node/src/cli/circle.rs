@@ -249,7 +249,9 @@ fn parse_blob_specs(raw: &[String]) -> Result<Vec<circle_update::BlobUpdate>> {
             .ok_or_else(|| anyhow::anyhow!("unknown padding class {:?}", parts[3]))?;
         out.push(circle_update::BlobUpdate {
             asset_path: parts[0].to_string(),
-            plaintext,
+            // Audit-3 H-2: plaintext is now wrapped in `Zeroizing<Vec<u8>>`
+            // on `BlobUpdate` so the heap buffer is scrubbed on drop.
+            plaintext: zeroize::Zeroizing::new(plaintext),
             key_id: parts[2].to_string(),
             padding_class: padding,
         });
