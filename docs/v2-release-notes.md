@@ -214,12 +214,15 @@ From `docs/v2-threat-model.md §3`:
 
 ## What's blocked
 
-End-to-end HFHE settlement on devnet is blocked behind the devnet
-RPC nginx `client_max_body_size` rejecting POSTs above 1 MiB. PVAC
-pubkey registration is a ~4 MB tx, so `octra cast register-pvac`
-returns 413 on devnet. Mainnet accepts. Filed upstream;
-`pvac-sidecar/` is otherwise ready and the v2 program correctly
-routes `fhe_load_pk(circles[c].owner)`.
+End-to-end HFHE settlement on devnet is partially unblocked as of
+2026-05-18: the upstream nginx `client_max_body_size` was raised and
+`octra cast register-pvac` now confirms ~4 MB PVAC pubkey blobs on
+devnet. The residual blocker is the AML ↔ HFHE bridge: `fhe_load_pk`
+reverts inside our contracts even after a successful pubkey
+registration via `octra_registerPvacPubkey` (see
+`docs/octra-dev-questions.md §1` and
+`memory/octra_aml_fhe_load_pk_blocked.md`). `pvac-sidecar/` is past
+the mainnet AES KAT and produces chain-compatible blobs.
 
 ## Runbooks
 

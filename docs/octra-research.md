@@ -235,13 +235,18 @@ Reference operator circle: `octE5x8WvhXB1FStpDmmfxkMmFKdnx5cL1Fr4gnry6aUdqA`.
 | ------------------------------------ | -------------------------------------------------- | ----------------------------------------------------- |
 | `deploy_circle` op-type accepted     | Yes                                                | Yes                                                   |
 | `circle_asset_put_encrypted` accepted | Yes                                               | Yes                                                   |
-| `octra_registerPvacPubkey` body cap   | ≥8 MB (accepts a 4 MB base64 PVAC pk)              | **~1 MiB** at nginx edge — blocks PVAC registration   |
+| `octra_registerPvacPubkey` body cap   | ≥8 MB (accepts a 4 MB base64 PVAC pk)              | ≥8 MB ✓ (raised 2026-05-18; was ~1 MiB pre-fix)        |
 | AES KAT on first sealed-asset access  | Yes (one-time per worker)                          | Yes                                                   |
 | `ed25519_ok` accepts base64           | Yes                                                | Yes                                                   |
 
-The devnet body cap is the blocker for end-to-end HFHE on devnet —
-see `docs/v2-octra-questions.md §7` and saved memory
-`octra_devnet_rpc_body_cap.md`. Filed with the Octra dev team.
+The devnet body cap was raised 2026-05-18 and `octra_registerPvacPubkey`
+now confirms ~4 MB PVAC pubkey blobs on devnet. The remaining HFHE
+blocker is chain-side: AML `fhe_load_pk` reverts for our contracts
+even after a successful pubkey registration — verified against both
+our own `FheProbe` and an unmodified deploy of
+`octra-labs/program-examples/private_ml`. See
+`memory/octra_aml_fhe_load_pk_blocked.md` and
+`docs/octra-dev-questions.md §1`. Filed with the Octra dev team.
 
 ### HFHE inside circles
 

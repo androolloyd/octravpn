@@ -355,11 +355,15 @@ cargo test --workspace
 ## What's blocked
 
 - **End-to-end HFHE settle / claim_earnings on devnet**: the devnet
-  RPC nginx body cap rejects POST > 1 MiB, and the PVAC pubkey
-  registration tx is ~4 MB. Until the cap is raised (filed
-  upstream), `octra cast register-pvac` fails on devnet with a 413.
-  Mainnet accepts it; the PVAC sidecar has cleared the AES KAT
-  gate and produces chain-compatible blobs.
+  RPC body cap was raised on 2026-05-18 — `octra cast register-pvac`
+  now confirms a ~4 MB PVAC pubkey on devnet. The remaining blocker
+  is chain-side: `fhe_load_pk` reverts inside AML for our contracts
+  even after a successful pubkey registration via
+  `octra_registerPvacPubkey` (see `docs/octra-dev-questions.md §1`
+  and `memory/octra_aml_fhe_load_pk_blocked.md`). The PVAC sidecar
+  has cleared the AES KAT gate and produces chain-compatible blobs;
+  the gap is the AML ↔ HFHE bridge being unwired for caller-supplied
+  pubkeys.
 
 ## Threat model
 

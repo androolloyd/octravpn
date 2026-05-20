@@ -455,9 +455,11 @@ TLC runs:
 - For mainnet deploys: `require_sealed_keys = true`, sealed
   `*.sealed` paths in TOML, and a fresh wallet for each circle
   deploy — see [`docs/v2-operator-key-hygiene.md`](v2-operator-key-hygiene.md).
-- HFHE end-to-end settlement on devnet is blocked behind the
-  RPC body cap (`client_max_body_size`); see README's "What's
-  blocked" section.
+- HFHE end-to-end settlement on devnet is partially unblocked: the
+  RPC body cap was raised 2026-05-18 so PVAC pubkey registration
+  confirms, but chain-side AML `fhe_load_pk` still reverts for our
+  contracts — see README's "What's blocked" section and
+  `memory/octra_aml_fhe_load_pk_blocked.md`.
 
 ## 7. Migration
 

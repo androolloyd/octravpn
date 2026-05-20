@@ -113,15 +113,15 @@ serving ≥ M tailnets). Anyone can audit any of these.
 ## What v2 adds (since 2026-05-17, on devnet)
 
 v1 ships on main-net with public operator addresses. v2 (live on
-**devnet** as of 2026-05-17, mainnet bring-up gated on the devnet
-RPC body cap — see `docs/testnet.md`) uses Octra's public Circles
+**devnet** as of 2026-05-17; mainnet bring-up tracked in
+`docs/mainnet-ceremony.md`) uses Octra's public Circles
 primitive to offer three properties v1 cannot:
 
 | You get                                                            | How                                                                                                                |
 | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
 | **Hidden operator exits** (Tor-style)                              | Operators are deployed as Circles, not wallet addresses. The slim registry binds bond to `circle_id`; the operator's IP / WG key / policy live inside the circle, fetchable only by authorized clients via path-private sealed reads. |
 | **Per-class routing + per-class pricing**                          | Each operator-circle declares N classes (default 2: `shared` internet egress, `internal` intra-tailnet). Members pick a class at session-open; price snapshots at open-time per the v1 model.                                       |
-| **Encrypted metering** (bytes_used stays private)                  | Compute `total_paid = bytes_used × price` inside the circle; only the settled OU amount escapes to main-net. (Mainnet-only until devnet RPC body cap is raised — see `docs/v2-octra-questions.md §7`.)                            |
+| **Encrypted metering** (bytes_used stays private)                  | Compute `total_paid = bytes_used × price` inside the circle; only the settled OU amount escapes to main-net. (Today uses sha256 commitments + off-chain PVAC math — chain-side AML `fhe_load_pk` still reverts; see `docs/octra-dev-questions.md §1`.)                            |
 
 Unique selling proposition relative to v1 and to Tailscale: **hidden
 exits + ACL + encrypted metering on a public chain**. Tor offers the

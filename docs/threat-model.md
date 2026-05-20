@@ -40,7 +40,7 @@ adversary. See `docs/v2-threat-model.md §1`.
 | Receipts cannot be forged | the client's *session* key is compromised | strengthened — receipt now binds `program_addr / chain_id / circle_id` (P1-5, commit `060903d`); cross-program / cross-chain / cross-circle replay rejected at sig verify |
 | Double-signed receipts always slash | the validator's WG key is compromised AND the chain runs the slash | strengthened — receipt journal (P1-8/P1-9, commit `dfc016e`) means restart can no longer re-sign at the same `(session_id, seq)` |
 | Active session cannot be linked client↔exit | the validator's long-term key is compromised AND the adversary is local to both endpoints | partially eroded — chain-side `from=deployer → to_=circle_id` binding is permanent; mitigated only by operator-side fresh-wallet hygiene (`docs/v2-operator-key-hygiene.md`) |
-| Settled-amount privacy | Octra HFHE soundness fails | partially — HFHE settle is wired but devnet RPC body cap blocks the pubkey registration end-to-end; mainnet works |
+| Settled-amount privacy | Octra HFHE soundness fails | partially — HFHE settle is wired and PVAC pubkey registration confirms on devnet (body cap raised 2026-05-18); chain-side AML `fhe_load_pk` still reverts for our contracts (see `octra-dev-questions.md §1`) |
 | Payout-recipient privacy | Octra stealth scheme fails | unchanged |
 
 ## Properties we explicitly do NOT claim

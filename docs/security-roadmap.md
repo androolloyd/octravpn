@@ -122,17 +122,16 @@ proofs, ring sigs, DLEQ all subsume into a single verifier.
 
 **Estimated cost:** ~1 week.
 
-### 0.8 (planned) **Devnet RPC body cap lift to ≥ 8 MiB**
+### 0.8 (RESOLVED 2026-05-18) **Devnet RPC body cap lifted**
 
-The devnet nginx in front of `devnet.octrascan.io` returns
-`413 Request Entity Too Large` on POST bodies above 1 MiB. The PVAC
-sidecar's pubkey registration `fhe_load_pk` transaction is ~4 MiB
-(11k-coefficient lattice key). Mainnet has no such cap and accepts.
-End-to-end `settle_confirm` on HFHE byte counters on devnet is blocked
-on this. See `memory/octra_devnet_rpc_body_cap.md`.
-
-**Estimated cost:** trivial nginx config bump on octra-team
-infrastructure.
+The devnet nginx in front of `devnet.octrascan.io` previously returned
+`413 Request Entity Too Large` on POST bodies above 1 MiB, which
+blocked PVAC pubkey registration (~4 MiB lattice key). The upstream
+team raised the cap on 2026-05-18 and `octra_registerPvacPubkey` now
+confirms on devnet. The residual blocker for end-to-end HFHE settle is
+AML-side: `fhe_load_pk` still reverts for our contracts even after a
+successful pubkey registration (see `octra-dev-questions.md §1` and
+`memory/octra_aml_fhe_load_pk_blocked.md`).
 
 ---
 
@@ -459,7 +458,9 @@ RPC body-cap ask (§0.8).
 
 **v2.1** — re-deploy with end-to-end hardening:
 - §2.9 operator daemon ↔ PVAC sidecar wired (subprocess spawn + JSON IPC)
-- §0.8 devnet RPC body cap lifted (Octra-team ask)
+- §0.8 devnet RPC body cap lifted ✓ (resolved 2026-05-18); residual:
+  chain-side AML `fhe_load_pk` bridge still reverts (see
+  `memory/octra_aml_fhe_load_pk_blocked.md`)
 - Owner-routed `fhe_load_pk` registration via `circle.owner` (already
   shipped per `memory/octra_hfhe_pubkey_per_wallet.md`)
 - Drill case 46: re-entrancy attempt against `nonreentrant` paths

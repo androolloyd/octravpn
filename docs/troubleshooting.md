@@ -274,17 +274,22 @@ fresh-wallet hygiene rule before you run the deploy.
 
 ### HFHE / `settle_confirm` reverts
 
-The PVAC HFHE path is the known v1 gap that survived into v2: the
-encrypted-earnings settlement currently can't post a valid
-`settle_confirm` on devnet because the PVAC pubkey registration tx
-exceeds the devnet nginx RPC body cap (~1 MiB; pubkey blob is ~4 MiB).
-Mainnet accepts the full body. See
-[`docs/v2-threat-model.md`](v2-threat-model.md) §P0 and the
-`octra_devnet_rpc_body_cap` memo. Until the cap is raised on devnet:
+The devnet RPC body cap was raised on 2026-05-18, so
+`octra_registerPvacPubkey` now confirms a ~4 MB PVAC pubkey on devnet.
+The remaining HFHE blocker is chain-side: AML `fhe_load_pk` reverts
+inside our contracts even after a successful pubkey registration —
+verified empirically against both `FheProbe` and an unmodified deploy
+of `octra-labs/program-examples/private_ml`. See
+[`docs/octra-dev-questions.md §1`](octra-dev-questions.md) and the
+`octra_aml_fhe_load_pk_blocked` memo. Until the chain-side bridge is
+wired:
 
 - Sessions open and meter fine.
 - `settle_confirm` reverts at the HFHE-verify step.
 - Use `claim_no_show` (post-grace) to recover deposit on devnet.
+- The v3 path uses sha256 commitments on chain + off-chain PVAC math,
+  which sidesteps `fhe_load_pk` entirely and is the production
+  recommendation today.
 
 ### Operator daemon won't boot — `PlaintextKeyOnDisk`
 
