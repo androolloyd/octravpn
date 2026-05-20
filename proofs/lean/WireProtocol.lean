@@ -8,6 +8,7 @@ import WireProtocol.V3Policy
 import WireProtocol.HFHE
 import WireProtocol.Shielding
 import WireProtocol.Wire
+import WireProtocol.RpcEnvelope
 
 /-!
 # OctraVPN — wire-protocol primitive proofs.
@@ -45,6 +46,12 @@ and the portal HMAC token plumbing in #218):
     streamed `MapResponse` chunked framing, delta peer updates
     (PeersChanged / PeersRemoved / PeersChangedPatch), Wall-7
     `MachineRecord.disco_key` + `endpoints` propagation.
+  * `WireProtocol.RpcEnvelope` — the chain JSON-RPC envelope's
+    canonical bytes + sign/verify path.  Mirrors
+    `crates/octravpn-core/src/rpc.rs` + `tx.rs::canonical_bytes`.
+    Provides the method/chain-id/nonce binding theorems used by
+    `OctraVPN_Rust.EndToEnd` to argue cross-chain / cross-method
+    replay is impossible at the tx layer.
 
 See `WireProtocol/Theorems.md` for the full plain-English index +
 Rust-signature mapping.
