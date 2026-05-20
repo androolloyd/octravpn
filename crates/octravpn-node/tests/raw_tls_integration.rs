@@ -49,6 +49,7 @@ fn build_state() -> (WireState, tempfile::TempDir) {
         machines: Arc::new(MachineRegistry::new()),
         derp_map: Arc::new(octravpn_mesh::tailscale_wire::DerpMap::default()),
         policy: Arc::new(Default::default()),
+        knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
     };
     (state, dir)
 }

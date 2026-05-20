@@ -33,6 +33,7 @@ fn build_state() -> (WireState, PreauthMinter, tempfile::TempDir) {
         machines: Arc::new(MachineRegistry::new()),
         derp_map: Arc::new(octravpn_mesh::tailscale_wire::DerpMap::default()),
         policy: Arc::new(Default::default()),
+        knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
     };
     (state, minter, dir)
 }
@@ -522,6 +523,7 @@ async fn map_response_includes_derp_map_when_configured() {
         machines: Arc::new(MachineRegistry::new()),
         derp_map: Arc::new(derp_map),
         policy: Arc::new(Default::default()),
+        knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
     };
 
     // Register a single peer and read its `/machine/map` view.
