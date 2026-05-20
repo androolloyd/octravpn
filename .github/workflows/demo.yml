@@ -63,8 +63,17 @@ jobs:
           set -euo pipefail
           mkdir -p demo/recordings
           # Tapes 01 + 04 need our octravpn / octravpn-node binaries (built above).
+          # Tapes 11..16 are narration-shape (CLI surfaces only); they need
+          # the same binaries but no Docker / chain / sibling repos.
           # Tape 07 needs the headscale CLI from the sibling repo — skipped in CI.
-          for tape in demo/tapes/01-*.tape demo/tapes/04-*.tape; do
+          for tape in demo/tapes/01-*.tape \
+                     demo/tapes/04-*.tape \
+                     demo/tapes/11-*.tape \
+                     demo/tapes/12-*.tape \
+                     demo/tapes/13-*.tape \
+                     demo/tapes/14-*.tape \
+                     demo/tapes/15-*.tape \
+                     demo/tapes/16-*.tape; do
               echo "=== ${tape} ==="
               vhs "${tape}" || echo "  ! ${tape} failed (non-fatal in nightly)"
           done
@@ -155,13 +164,22 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p demo/recordings
+          # Tapes 17..22 + the master tour all depend on the mesh +
+          # chain fixtures the 3node-mesh-bringup.sh helper installs.
+          # We do a best-effort teardown between tapes so a bad
+          # bringup in tape N doesn't poison tape N+1.
           for tape in demo/tapes/05-v3-smoke.tape \
                      demo/tapes/08-3node-mesh.tape \
                      demo/tapes/09-traffic-patterns.tape \
-                     demo/tapes/10-metrics-grafana.tape; do
+                     demo/tapes/10-metrics-grafana.tape \
+                     demo/tapes/17-operator-onboarding.tape \
+                     demo/tapes/18-tailnet-owner-policy.tape \
+                     demo/tapes/19-circle-update-atomic.tape \
+                     demo/tapes/20-pvac-rotation.tape \
+                     demo/tapes/21-audit-verify.tape \
+                     demo/tapes/22-headscale-cli-tour.tape \
+                     demo/tapes/00-master-tour.tape; do
               echo "=== ${tape} ==="
-              # Best-effort teardown between tapes so a bad bringup
-              # doesn't poison the next tape's container names.
               bash demo/lib/3node-mesh-teardown.sh >/dev/null 2>&1 || true
               vhs "${tape}" || echo "  ! ${tape} failed (non-fatal in nightly)"
           done

@@ -162,3 +162,45 @@ only the interop segment shifted.
 
 The .tape files are the source of truth — never edit a gif/mp4
 directly. If the CLI surface changes, update the .tape and re-render.
+
+## Master tour (tapes 00 + 11..22)
+
+A second tape series captures the end-to-end user + operator
+experience as a single ~3-minute narrative cut, plus 12 stand-alone
+companions covering each segment in depth.
+
+| Tape | Theme | Job |
+|------|-------|-----|
+| `00-master-tour.tape` | fast-cut narrative (operator → owner → user → operator) | heavy |
+| `11-user-install-linux.tape` | Linux apt install + `tailscale up` | light |
+| `12-user-install-macos.tape` | macOS Homebrew + Tailscale.app | light |
+| `13-user-ssh-peer.tape` | MagicDNS + `ssh peer-2` | light |
+| `14-user-web-traffic.tape` | curl peer + `--exit-node` routing | light |
+| `15-user-oct-url-public.tape` | portal serve + open-url; MIME shapes | light |
+| `16-user-oct-url-sealed.tape` | sealed asset + CONFIRM + passphrase | light |
+| `17-operator-onboarding.tape` | seal-keys → bond → register → run → health | heavy |
+| `18-tailnet-owner-policy.tape` | `headscale policy set <FILE>` + live reload | heavy |
+| `19-circle-update-atomic.tape` | atomic `circle update` (dry-run + commit) | heavy |
+| `20-pvac-rotation.tape` | `rotate-pvac.sh` dry-run + broadcast + probe | heavy |
+| `21-audit-verify.tape` | clean + tampered `audit verify` | heavy |
+| `22-headscale-cli-tour.tape` | embedded `headscale` admin CLI tour | heavy |
+
+Render the full series + stitch into one mp4:
+
+```sh
+brew install vhs ffmpeg
+./demo/run-tour.sh                # render every tape + stitch
+./demo/run-tour.sh --tapes        # render only; no stitch
+./demo/run-tour.sh --stitch       # stitch existing recordings only
+```
+
+The script is idempotent — a tape with an mp4 newer than its `.tape`
+source is skipped. The stitched output lands at
+`demo/recordings/00-octravpn-tour.mp4` (concat of every available
+recording in narrative order; missing mp4s are skipped with a
+warning).
+
+Light-job tapes (11..16) need only the `octravpn` / `octravpn-node`
+binaries + stock `tailscale`. Heavy-job tapes (17..22 + the master
+tour) need a reachable chain + a control-plane host; see each
+tape's `# REQUIRES:` header for the per-tape state-dir contract.
