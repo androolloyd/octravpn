@@ -30,6 +30,36 @@
 //! (P1-8/9); audit-log entries are observability. Trading the per-line
 //! `fsync` for a batched one is the correct durability/throughput
 //! point.
+//!
+//! ## Backpressure contract (audit-2 C-6 / OOM-3 fix)
+//!
+//! The batched-flusher channel is **bounded** at
+//! [`DEFAULT_BATCH_QUEUE_CAP`] (8192 entries, ~2 MB worst-case
+//! buffered RAM). When it saturates (slow fsync, IO error spam,
+//! audit-emit flood), [`AuditLog::write_async`] falls back to a
+//! synchronous inline write under the same `Inner` mutex the flusher
+//! uses — the entry is written + fsynced before `write_async`
+//! returns. **No record is lost; no record is duplicated.** Each
+//! fallback increments `audit_inline_fallback_total`, surfaced on
+//! `/metrics` as `octravpn_audit_inline_fallback_total`. A non-zero
+//! growth rate is the operator-facing disk-stall signal.
+//!
+//! Pre-fix (the BLOCKER): the unbounded channel allowed 125 MB/s of
+//! queue growth on stall — 1 GB in 8 s, 16 GB in ~2 min. Post-fix:
+//! durable under stall, RAM capped at ~2 MB.
+//!
+//! ### Deadlock argument
+//!
+//! The inline fallback acquires the same `Arc<Mutex<Inner>>` the
+//! flusher uses. This is safe: `write_async` runs on a runtime
+//! worker (the caller's task), never on the flusher task itself —
+//! the flusher only reads from the mpsc receiver and never calls
+//! back into `write_async`. The fallback uses `spawn_blocking` so
+//! the parking-lot lock is acquired off the runtime worker thread;
+//! if the flusher is blocked on a slow fsync, both holders contend
+//! for the mutex but neither is waiting on the other's progress.
+//! The lock is released before any `.await`, so the standard
+//! "no parking_lot lock across await" rule still holds.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -64,6 +94,15 @@ pub(crate) const DEFAULT_BATCH_SIZE: usize = 64;
 /// allowance rationale.
 #[allow(dead_code)]
 pub(crate) const DEFAULT_BATCH_INTERVAL_MS: u64 = 100;
+/// Default capacity of the flusher channel. Bounded by design: an
+/// unbounded queue is an OOM weapon under disk stall (audit-2 C-6 /
+/// OOM-3 in `docs/audit/2026-05-20-load-perf-audit.md`). 8192 entries
+/// × ~256 B/entry = ~2 MB worst-case buffered RAM — large enough to
+/// absorb sub-second flusher stalls, small enough that a sustained
+/// disk stall trips the inline-fallback path within milliseconds
+/// instead of growing memory.
+#[allow(dead_code)]
+pub(crate) const DEFAULT_BATCH_QUEUE_CAP: usize = 8192;
 
 /// One audit record. `kind` is a short verb (`announce`, `get_state`,
 /// etc.) so downstream tools can filter without parsing JSON deeply.
@@ -112,10 +151,17 @@ enum FlusherCmd {
 #[derive(Clone)]
 pub(crate) struct AuditLog {
     inner: Arc<Mutex<Inner>>,
-    /// `Some` in batched mode: a sender into the flusher task. When
-    /// dropped (last sender goes), the receiver side terminates and
-    /// the flusher exits after a final fsync.
-    sender: Option<mpsc::UnboundedSender<FlusherCmd>>,
+    /// Process-lifetime audit counters. Lock-free atomics so the
+    /// `/metrics` scrape path can read them even while the flusher
+    /// is blocked on a disk stall.
+    counters: Arc<AuditCounters>,
+    /// `Some` in batched mode: a bounded sender into the flusher
+    /// task ([`DEFAULT_BATCH_QUEUE_CAP`] slots). When full,
+    /// `write_async` falls back to inline sync-fsync to preserve
+    /// durability (no record is lost). When dropped (last sender
+    /// goes), the receiver side terminates and the flusher exits
+    /// after a final fsync.
+    sender: Option<mpsc::Sender<FlusherCmd>>,
     /// Optional live-event tap for task #231 (`octravpn-analytics`).
     /// Every successful write fans an [`octravpn_analytics::
     /// AnalyticsEvent`] out to this channel; the indexer side
@@ -148,6 +194,20 @@ struct Inner {
     prev_mac: [u8; 32],
 }
 
+/// Process-lifetime counters bumped from the audit hot path. Lives
+/// alongside `Inner` rather than inside it so the `/metrics` scrape
+/// path can read these without acquiring the (potentially
+/// disk-stalled) `Inner` mutex.
+///
+/// Today's only counter is `inline_fallback_total`: the bounded
+/// flusher channel (see [`DEFAULT_BATCH_QUEUE_CAP`]) drops writes
+/// to an inline sync-fsync path when it saturates. Every such drop
+/// bumps this counter; non-zero growth is the disk-stall signal.
+#[derive(Default)]
+struct AuditCounters {
+    inline_fallback_total: std::sync::atomic::AtomicU64,
+}
+
 impl AuditLog {
     /// Open / create the audit log directory in synchronous-direct
     /// mode: every `write()` call writes + fsyncs inline. Suitable
@@ -169,14 +229,36 @@ impl AuditLog {
     /// I/O. Requires a tokio runtime to be active.
     ///
     /// Use [`DEFAULT_BATCH_SIZE`] / [`DEFAULT_BATCH_INTERVAL_MS`]
-    /// unless you have a specific durability target.
+    /// unless you have a specific durability target. The queue
+    /// capacity is [`DEFAULT_BATCH_QUEUE_CAP`]; when it fills,
+    /// `write_async` falls back to inline sync-fsync (bumps
+    /// `audit_inline_fallback_total`) so durability is preserved.
     #[allow(dead_code)]
     pub(crate) fn open_batched(
         dir: impl AsRef<Path>,
         batch_size: usize,
         batch_interval_ms: u64,
     ) -> Result<Self> {
-        let (tx, rx) = mpsc::unbounded_channel();
+        Self::open_batched_with_cap(
+            dir,
+            batch_size,
+            batch_interval_ms,
+            DEFAULT_BATCH_QUEUE_CAP,
+        )
+    }
+
+    /// Like [`Self::open_batched`] but with an explicit queue
+    /// capacity. Tests use a tiny cap (e.g. 1) to deterministically
+    /// hit the inline-fallback path; production callers should use
+    /// [`Self::open_batched`] which uses [`DEFAULT_BATCH_QUEUE_CAP`].
+    #[allow(dead_code)]
+    pub(crate) fn open_batched_with_cap(
+        dir: impl AsRef<Path>,
+        batch_size: usize,
+        batch_interval_ms: u64,
+        queue_cap: usize,
+    ) -> Result<Self> {
+        let (tx, rx) = mpsc::channel(queue_cap.max(1));
         let me = Self::open_inner(dir.as_ref(), Some(tx))?;
         // Share `Arc<Mutex<Inner>>` with the flusher task; the public
         // AuditLog and the flusher both hold the file handle + chain
@@ -193,7 +275,7 @@ impl AuditLog {
         Ok(me)
     }
 
-    fn open_inner(dir: &Path, sender: Option<mpsc::UnboundedSender<FlusherCmd>>) -> Result<Self> {
+    fn open_inner(dir: &Path, sender: Option<mpsc::Sender<FlusherCmd>>) -> Result<Self> {
         std::fs::create_dir_all(dir)
             .with_context(|| format!("create audit dir {}", dir.display()))?;
         let key = load_or_create_key(dir)?;
@@ -205,9 +287,21 @@ impl AuditLog {
                 key,
                 prev_mac: [0u8; 32],
             })),
+            counters: Arc::new(AuditCounters::default()),
             sender,
             analytics_tap: None,
         })
+    }
+
+    /// Process-lifetime count of writes that fell back to inline
+    /// sync-fsync because the batched-flusher queue was full. A
+    /// non-zero growth rate signals disk stall (operator action:
+    /// check disk health / journal latency). Lock-free — safe to
+    /// call from the `/metrics` scrape path under any disk state.
+    pub(crate) fn inline_fallback_total(&self) -> u64 {
+        self.counters
+            .inline_fallback_total
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Install a live analytics tap. The returned `AuditLog` is the
@@ -262,29 +356,72 @@ impl AuditLog {
         let _ = tap.send(ev);
     }
 
-    /// Async write. In batched mode this is fire-and-forget: returns
-    /// `Ok(())` immediately once the record is enqueued; the flusher
-    /// task takes care of writing + fsyncing within
-    /// `batch_interval_ms`. In direct mode the write is bounced off
-    /// `spawn_blocking` for tokio-runtime friendliness (no change in
-    /// semantics vs the pre-batched API).
+    /// Async write. Batched mode: try the bounded flusher channel
+    /// first; if it's full (disk stall on the flusher side), fall
+    /// back to an inline synchronous write under the shared `Inner`
+    /// mutex — same lock the flusher uses, same on-disk format, same
+    /// MAC chain. Direct mode: bounce off `spawn_blocking` for
+    /// tokio-runtime friendliness.
     ///
-    /// Crash safety: up to `batch_interval_ms` of recent records may
-    /// be lost on a hard kill. The receipt journal is authoritative
-    /// for double-sign protection (P1-8/9); the audit log is
-    /// observability — this trade-off is intentional.
+    /// **Durability contract (audit-2 C-6 / OOM-3 fix):** the audit
+    /// log is durable under all successful returns from this
+    /// function. Performance degrades to per-line fsync if the
+    /// flusher can't keep up — never silent drop, never OOM. The
+    /// bounded queue caps worst-case buffered RAM at
+    /// `DEFAULT_BATCH_QUEUE_CAP × ~256 B/entry ≈ 2 MB`. Inline
+    /// fallbacks bump `audit_inline_fallback_total` so operators
+    /// can detect disk stall via `/metrics`.
+    ///
+    /// Crash safety: in the fast path, up to `batch_interval_ms` of
+    /// recent records may be lost on a hard kill. The receipt
+    /// journal is authoritative for double-sign protection
+    /// (P1-8/9); the audit log is observability.
     pub(crate) async fn write_async(&self, rec: AuditRecord) -> Result<()> {
         if let Some(tx) = &self.sender {
-            // Publish to the analytics tap BEFORE moving `rec` into
-            // the flusher channel. The flusher does the disk write
-            // asynchronously; the indexer credit doesn't need to wait
-            // on fsync.
+            // Publish to the analytics tap BEFORE attempting the
+            // flusher send. The flusher does the disk write
+            // asynchronously; the indexer credit doesn't need to
+            // wait on fsync. The inline fallback (below) also doesn't
+            // republish — `tap_publish` would double-emit otherwise.
             self.tap_publish(&rec);
-            // Fire-and-forget. Channel send only fails if the flusher
-            // task has terminated.
-            tx.send(FlusherCmd::Write(rec))
-                .map_err(|_| anyhow::anyhow!("audit flusher channel closed"))?;
-            Ok(())
+            match tx.try_send(FlusherCmd::Write(rec)) {
+                Ok(()) => Ok(()),
+                Err(mpsc::error::TrySendError::Full(cmd)) => {
+                    // Queue full → flusher is stalled (slow fsync,
+                    // IO error spam). Fall back to inline sync write
+                    // to preserve durability. Bumps the metric so
+                    // operators see the disk-stall signal.
+                    self.counters
+                        .inline_fallback_total
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let rec = match cmd {
+                        FlusherCmd::Write(r) => r,
+                        FlusherCmd::Flush(_) => {
+                            return Err(anyhow::anyhow!(
+                                "audit write_async: non-Write returned by try_send"
+                            ));
+                        }
+                    };
+                    let me = self.clone();
+                    // `spawn_blocking` so the parking-lot mutex
+                    // acquisition + fsync don't stall a runtime
+                    // worker thread. See the deadlock argument in
+                    // `audit/README.md` (or below): the flusher
+                    // never calls into `write_async`, so the shared
+                    // mutex is fine.
+                    tokio::task::spawn_blocking(move || {
+                        let mut g = me.inner.lock();
+                        let r = write_inner_direct(&mut g, &rec, /*fsync=*/ true);
+                        drop(g);
+                        r
+                    })
+                    .await
+                    .context("spawn_blocking audit inline fallback")?
+                }
+                Err(mpsc::error::TrySendError::Closed(_)) => Err(anyhow::anyhow!(
+                    "audit flusher channel closed"
+                )),
+            }
         } else {
             // Direct fallback: bounce off spawn_blocking so a slow
             // disk doesn't stall the runtime worker.
@@ -304,7 +441,12 @@ impl AuditLog {
             return Ok(());
         };
         let (ack_tx, ack_rx) = oneshot::channel();
-        if tx.send(FlusherCmd::Flush(ack_tx)).is_err() {
+        // `send().await` (not `try_send`): the Flush fence MUST be
+        // queued in order behind any pending Writes — otherwise the
+        // ack could race ahead of a write the caller just enqueued.
+        // Blocking here is acceptable; `flush_and_close` is an
+        // explicit drain fence, not a hot-path emit.
+        if tx.send(FlusherCmd::Flush(ack_tx)).await.is_err() {
             // Flusher already exited.
             return Ok(());
         }
@@ -586,7 +728,7 @@ fn write_inner_direct(inner: &mut Inner, rec: &AuditRecord, fsync: bool) -> Resu
 #[allow(dead_code)]
 async fn flusher_loop(
     inner: Arc<Mutex<Inner>>,
-    mut rx: mpsc::UnboundedReceiver<FlusherCmd>,
+    mut rx: mpsc::Receiver<FlusherCmd>,
     batch_size: usize,
     batch_interval_ms: u64,
 ) {
@@ -1117,5 +1259,227 @@ mod tests {
         assert_ne!(a, c, "key-sensitive");
         let d = chain_step(&key, &[1u8; 32], b"hello");
         assert_ne!(a, d, "prev-mac-sensitive");
+    }
+
+    // ================================================================
+    // OOM-3 / audit-2 C-6: bounded-queue + inline-fallback tests.
+    // ================================================================
+
+    /// Find the single `audit-YYYY-MM-DD.jsonl` file under `dir`.
+    /// Local helper for the OOM-3 tests; the rest of the test module
+    /// inlines the same pattern.
+    fn audit_file_in(dir: &std::path::Path) -> std::path::PathBuf {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .find(|e| e.file_name().to_string_lossy().starts_with("audit-"))
+            .expect("at least one audit-*.jsonl file in dir")
+            .path()
+    }
+
+    /// Small fixed-shape record builder for the OOM-3 burst tests.
+    fn oom3_rec(i: u64) -> AuditRecord {
+        AuditRecord {
+            ts_unix: 1_700_000_000 + i,
+            kind: "x",
+            source: None,
+            session_id: Some(format!("s{i}")),
+            extra: serde_json::json!({"i": i}),
+        }
+    }
+
+    /// Burst of writes much larger than the queue capacity must all
+    /// land on disk — durability is the contract. The inline-fallback
+    /// path absorbs whatever the bounded queue can't.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn bounded_channel_doesnt_drop_under_burst() {
+        let dir = tempdir().unwrap();
+        // Tiny queue (cap=8) so the inline-fallback path is exercised
+        // heavily; big batch so the flusher fsyncs in chunks.
+        let log = AuditLog::open_batched_with_cap(dir.path(), 32, 50, 8).unwrap();
+        const N: u64 = 2_000;
+        for i in 0..N {
+            log.write_async(oom3_rec(i)).await.unwrap();
+        }
+        log.flush_and_close().await.unwrap();
+        let p = audit_file_in(dir.path());
+        let body = std::fs::read_to_string(&p).unwrap();
+        assert_eq!(
+            body.lines().count() as u64,
+            N,
+            "bounded channel must not drop records under burst"
+        );
+        // Chain must verify end-to-end — no record corruption even
+        // though writes interleaved between flusher + fallback paths.
+        let report = AuditLog::verify_file(&log.key(), &p).unwrap();
+        assert_eq!(report.entries, N);
+        assert!(
+            report.first_error.is_none(),
+            "chain broken under burst: {:?}",
+            report.first_error
+        );
+    }
+
+    /// When the queue fills, `write_async` must take the inline-fallback
+    /// path AND increment `audit_inline_fallback_total`. Synthetic
+    /// "disk stall": queue_cap=1, batch_interval long, no `.await`
+    /// between sends so the flusher gets no chance to drain on the
+    /// current-thread executor.
+    #[tokio::test(flavor = "current_thread")]
+    async fn inline_fallback_under_queue_full() {
+        let dir = tempdir().unwrap();
+        let log = AuditLog::open_batched_with_cap(dir.path(), 1024, 60_000, 1).unwrap();
+        let before = log.inline_fallback_total();
+        for i in 0..16u64 {
+            log.write_async(oom3_rec(i)).await.unwrap();
+        }
+        let after = log.inline_fallback_total();
+        assert!(
+            after > before,
+            "expected inline_fallback_total to increment; before={before} after={after}"
+        );
+        log.flush_and_close().await.unwrap();
+        let p = audit_file_in(dir.path());
+        let body = std::fs::read_to_string(p).unwrap();
+        assert_eq!(body.lines().count(), 16);
+    }
+
+    /// Under inline-fallback the HMAC chain stays linear:
+    /// `prev_mac` of line N+1 == `mac` of line N, regardless of which
+    /// path (flusher or fallback) wrote each line. Both paths go
+    /// through `write_inner_direct` under the same `Inner` mutex, so
+    /// the chain is unambiguous.
+    #[tokio::test(flavor = "current_thread")]
+    async fn inline_fallback_preserves_chain_order() {
+        let dir = tempdir().unwrap();
+        let log = AuditLog::open_batched_with_cap(dir.path(), 1024, 60_000, 1).unwrap();
+        const N: u64 = 64;
+        for i in 0..N {
+            log.write_async(oom3_rec(i)).await.unwrap();
+        }
+        log.flush_and_close().await.unwrap();
+        let p = audit_file_in(dir.path());
+        let report = AuditLog::verify_file(&log.key(), &p).unwrap();
+        assert_eq!(report.entries, N);
+        assert!(
+            report.first_error.is_none(),
+            "chain broken: {:?}",
+            report.first_error
+        );
+    }
+
+    /// After a burst that drives the inline-fallback counter up, a
+    /// quiescent period followed by ordinary writes should NOT keep
+    /// bumping the counter — the flusher catches up, future writes
+    /// take the fast path again.
+    #[tokio::test(flavor = "current_thread")]
+    async fn recovery_from_disk_stall() {
+        let dir = tempdir().unwrap();
+        let log = AuditLog::open_batched_with_cap(dir.path(), 64, 50, 1).unwrap();
+        // Burst phase.
+        for i in 0..32u64 {
+            log.write_async(oom3_rec(i)).await.unwrap();
+        }
+        let after_burst = log.inline_fallback_total();
+        assert!(
+            after_burst > 0,
+            "burst should have triggered ≥1 inline fallback (got {after_burst})"
+        );
+        log.flush_and_close().await.unwrap();
+        // Quiescent phase: yield + sleep between sends so the
+        // flusher drains each one. No fallback should fire.
+        let snapshot = log.inline_fallback_total();
+        for i in 32..36u64 {
+            log.write_async(oom3_rec(i)).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+        }
+        let after_quiet = log.inline_fallback_total();
+        assert_eq!(
+            after_quiet, snapshot,
+            "metric incremented during quiescent phase \
+             (snapshot={snapshot}, after={after_quiet})"
+        );
+        log.flush_and_close().await.unwrap();
+    }
+
+    /// The `octravpn_audit_inline_fallback_total` counter is exposed
+    /// on `GET /metrics`. End-to-end via the real handler + handler
+    /// state, with the bearer-token gate satisfied.
+    #[tokio::test(flavor = "current_thread")]
+    async fn metric_visible_on_metrics_endpoint() {
+        use crate::control::handlers::metrics::metrics as metrics_handler;
+        use crate::control::state::ControlState;
+        use crate::onion::OnionRouter;
+        use axum::extract::State;
+        use axum::http::{HeaderMap, HeaderValue};
+        use octravpn_core::{bounded::BoundedMap, sig::KeyPair};
+
+        let dir = tempdir().unwrap();
+        let log = AuditLog::open_batched_with_cap(dir.path(), 1024, 60_000, 1).unwrap();
+        // Force ≥1 inline fallback.
+        for i in 0..8u64 {
+            log.write_async(oom3_rec(i)).await.unwrap();
+        }
+        assert!(log.inline_fallback_total() > 0);
+
+        let node_kp = std::sync::Arc::new(KeyPair::generate());
+        let router = std::sync::Arc::new(OnionRouter::new());
+        let allowlist = std::sync::Arc::new(BoundedMap::new(
+            16,
+            std::time::Duration::from_secs(60),
+        ));
+        let state = std::sync::Arc::new(
+            ControlState::new(node_kp, router, allowlist)
+                .with_audit(log.clone())
+                .with_metrics_token(Some("tok".to_string())),
+        );
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer tok"),
+        );
+        let resp = metrics_handler(State(state), headers).await;
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let text = std::str::from_utf8(&body).unwrap();
+        assert!(
+            text.contains("octravpn_audit_inline_fallback_total "),
+            "/metrics body missing audit_inline_fallback_total counter: {text}"
+        );
+        // Value must match the live counter.
+        let expected = log.inline_fallback_total();
+        let needle = format!("octravpn_audit_inline_fallback_total {expected}\n");
+        assert!(
+            text.contains(&needle),
+            "/metrics body did not contain {needle:?}; body=\n{text}"
+        );
+        log.flush_and_close().await.unwrap();
+    }
+
+    /// When the flusher channel is closed (sender side dropped by,
+    /// e.g., the flusher task dying or the file system erroring out),
+    /// `write_async` returns Err rather than dropping the record
+    /// silently or leaking memory. This is the "audit log is broken"
+    /// surface — the closest in-process analogue to disk-full +
+    /// ENOSPC on macOS where /dev/full isn't available.
+    #[tokio::test(flavor = "current_thread")]
+    async fn disk_full_returns_error_not_oom() {
+        let dir = tempdir().unwrap();
+        let log = AuditLog::open_batched_with_cap(dir.path(), 1, 1, 1).unwrap();
+        // Synthesize the closed-channel condition: build a fresh
+        // channel, drop the receiver immediately, swap it into the
+        // log handle. The next try_send hits TrySendError::Closed.
+        let (dead_tx, dead_rx) = tokio::sync::mpsc::channel::<FlusherCmd>(1);
+        drop(dead_rx);
+        let mut log_dead = log.clone();
+        log_dead.sender = Some(dead_tx);
+        let err = log_dead.write_async(oom3_rec(0)).await.unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("closed"),
+            "expected 'closed' surface, got: {msg}"
+        );
+        log.flush_and_close().await.unwrap();
     }
 }
