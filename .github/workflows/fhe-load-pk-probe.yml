@@ -1,0 +1,270 @@
+name: fhe_load_pk daily re-probe
+
+# Re-runs the 3-curl reproducer from docs/octra-dev-questions.md §1
+# against devnet to detect when the AML → HFHE host-call bridge starts
+# working for newly-deployed contracts. Today the call reverts; see
+# the memory note at memory/octra_aml_fhe_load_pk_blocked.md and the
+# status JSON at docs/audit/fhe-load-pk-status.json.
+#
+# Behaviour:
+#   - SUCCESS transition (probe-2 OR probe-3 stops reverting): commit
+#     an updated status file (with [skip ci]) and open a GitHub issue
+#     to trigger the swap-ready AML deploy verification.
+#   - Continued failure (the expected case): just write a workflow
+#     summary; do not open an issue, do not commit the status file
+#     unless last_check timestamp changed (we still bump that so the
+#     badge ages correctly).
+#
+# This workflow is informational only: nothing it does gates the main
+# CI lane. It runs in its own scheduled context.
+
+on:
+  schedule:
+    # 06:00 UTC daily.
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      force_issue:
+        description: "Open issue even on continued-failure outcome (for testing)"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  probe:
+    name: probe devnet fhe_load_pk
+    runs-on: ubuntu-latest
+    env:
+      RPC: "https://devnet.octrascan.io/rpc"
+      WALLET: "oct8Tdgu4RLbSGah1fVoVHW4T4cLFDmsoKhTyVD8gCndNFm"
+      PRIVATE_ML_ADDR: "octHCQv6URtBXKjvAUo4AtDuDAgNjPhfazGiLPJXHwB3gDt"
+      FHE_PROBE_ADDR: "octaUNQtHpsmGrd4m4pftsjhE7zYwK4fVEgsDTKQ4BsXDRB"
+      STATUS_FILE: "docs/audit/fhe-load-pk-status.json"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Probe 1 — octra_pvacPubkey (sanity baseline)
+        id: probe1
+        continue-on-error: true
+        run: |
+          set -u
+          resp=$(curl -sS --max-time 30 -X POST -H 'content-type: application/json' \
+            --data "$(jq -nc --arg w "$WALLET" \
+              '{jsonrpc:"2.0", id:1, method:"octra_pvacPubkey", params:[$w]}')" \
+            "$RPC" || true)
+          # Result should be a long base64 blob. Treat "result present and
+          # >1 MB" as the sanity-pass signal; anything else fails this
+          # baseline (which itself is a useful alert).
+          got_bytes=$(printf '%s' "$resp" | jq -r '.result // empty' | wc -c || echo 0)
+          echo "probe1_bytes=$got_bytes" >> "$GITHUB_OUTPUT"
+          if [ "${got_bytes:-0}" -lt 1000000 ]; then
+            echo "probe1_pass=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::probe 1 (octra_pvacPubkey) returned <1 MB; sanity baseline failed"
+          else
+            echo "probe1_pass=true" >> "$GITHUB_OUTPUT"
+          fi
+          # Save the head of the response for the summary (truncated).
+          printf '%s' "$resp" | head -c 512 > /tmp/probe1.head
+
+      - name: Probe 2 — private_predict on private_ml clone
+        id: probe2
+        continue-on-error: true
+        run: |
+          set -u
+          # contract_call against the upstream private_ml example. The
+          # function reverts at the first fhe_load_pk today. A non-revert
+          # (e.g. result returned, even an empty/zero one) is the SUCCESS
+          # signal we are watching for.
+          body=$(jq -nc \
+            --arg addr "$PRIVATE_ML_ADDR" \
+            --arg caller "$WALLET" \
+            '{jsonrpc:"2.0", id:2, method:"contract_call",
+              params:{contract:$addr, caller:$caller, fn:"private_predict",
+                      args:["0", $caller, "hfhe_v1|AA==", "hfhe_v1|AA=="]}}')
+          resp=$(curl -sS --max-time 60 -X POST -H 'content-type: application/json' \
+            --data "$body" "$RPC" || true)
+          echo "$resp" > /tmp/probe2.json
+          err=$(printf '%s' "$resp" | jq -r '.error.message // .result.error // empty')
+          # A revert manifests as a non-empty error / "execution reverted"
+          # text. A non-revert means the call executed past fhe_load_pk
+          # (which is what we want to see).
+          if [ -z "$err" ]; then
+            echo "probe2_pass=true" >> "$GITHUB_OUTPUT"
+          elif printf '%s' "$err" | grep -qiE "execution reverted|fhe_load_pk|pubkey not registered"; then
+            echo "probe2_pass=false" >> "$GITHUB_OUTPUT"
+          else
+            # Some other RPC error (network, malformed). Treat as
+            # inconclusive — neither pass nor fail.
+            echo "probe2_pass=inconclusive" >> "$GITHUB_OUTPUT"
+          fi
+          echo "probe2_err=$(printf '%s' "$err" | head -c 200)" >> "$GITHUB_OUTPUT"
+
+      - name: Probe 3 — FheProbe.probe_load_pk
+        id: probe3
+        continue-on-error: true
+        run: |
+          set -u
+          body=$(jq -nc \
+            --arg addr "$FHE_PROBE_ADDR" \
+            --arg caller "$WALLET" \
+            '{jsonrpc:"2.0", id:3, method:"contract_call",
+              params:{contract:$addr, caller:$caller, fn:"probe_load_pk",
+                      args:[$caller]}}')
+          resp=$(curl -sS --max-time 60 -X POST -H 'content-type: application/json' \
+            --data "$body" "$RPC" || true)
+          echo "$resp" > /tmp/probe3.json
+          err=$(printf '%s' "$resp" | jq -r '.error.message // .result.error // empty')
+          if [ -z "$err" ]; then
+            echo "probe3_pass=true" >> "$GITHUB_OUTPUT"
+          elif printf '%s' "$err" | grep -qiE "execution reverted|fhe_load_pk|pubkey not registered"; then
+            echo "probe3_pass=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "probe3_pass=inconclusive" >> "$GITHUB_OUTPUT"
+          fi
+          echo "probe3_err=$(printf '%s' "$err" | head -c 200)" >> "$GITHUB_OUTPUT"
+
+      - name: Aggregate outcome
+        id: outcome
+        run: |
+          set -u
+          p2='${{ steps.probe2.outputs.probe2_pass }}'
+          p3='${{ steps.probe3.outputs.probe3_pass }}'
+          if [ "$p2" = "true" ] || [ "$p3" = "true" ]; then
+            echo "bridge_status=unblocked" >> "$GITHUB_OUTPUT"
+            echo "color=brightgreen" >> "$GITHUB_OUTPUT"
+            echo "label=fhe_load_pk" >> "$GITHUB_OUTPUT"
+            echo "message=unblocked" >> "$GITHUB_OUTPUT"
+          else
+            echo "bridge_status=blocked" >> "$GITHUB_OUTPUT"
+            echo "color=yellow" >> "$GITHUB_OUTPUT"
+            echo "label=fhe_load_pk" >> "$GITHUB_OUTPUT"
+            echo "message=blocked%20(reverts)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Read previous status
+        id: prev
+        run: |
+          set -u
+          if [ -f "$STATUS_FILE" ]; then
+            prev=$(jq -r '.bridge_status // "unknown"' "$STATUS_FILE")
+          else
+            prev="unknown"
+          fi
+          echo "previous=$prev" >> "$GITHUB_OUTPUT"
+
+      - name: Update status JSON
+        id: write
+        run: |
+          set -u
+          now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          # shields.io endpoint-shape: schemaVersion, label, message, color
+          jq -nc \
+            --arg schemaVersion "1" \
+            --arg label  "${{ steps.outcome.outputs.label }}" \
+            --arg message "$(printf '%s' '${{ steps.outcome.outputs.message }}' | sed 's/%20/ /g')" \
+            --arg color "${{ steps.outcome.outputs.color }}" \
+            --arg status "${{ steps.outcome.outputs.bridge_status }}" \
+            --arg last_check "$now" \
+            --arg p1 '${{ steps.probe1.outputs.probe1_pass }}' \
+            --arg p2 '${{ steps.probe2.outputs.probe2_pass }}' \
+            --arg p3 '${{ steps.probe3.outputs.probe3_pass }}' \
+            --arg p2_err '${{ steps.probe2.outputs.probe2_err }}' \
+            --arg p3_err '${{ steps.probe3.outputs.probe3_err }}' \
+            '{schemaVersion:($schemaVersion|tonumber), label:$label, message:$message,
+              color:$color, bridge_status:$status, last_check:$last_check,
+              probes:{baseline:$p1, private_predict:$p2, probe_load_pk:$p3},
+              errors:{private_predict:$p2_err, probe_load_pk:$p3_err},
+              workflow:"fhe-load-pk-probe",
+              source:"docs/octra-dev-questions.md §1"}' \
+            > "$STATUS_FILE"
+          echo "diff:"
+          git --no-pager diff -- "$STATUS_FILE" || true
+
+      - name: Workflow summary
+        run: |
+          {
+            echo "# fhe_load_pk re-probe — $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo
+            echo "| probe | result |"
+            echo "|-------|--------|"
+            echo "| 1. octra_pvacPubkey baseline | ${{ steps.probe1.outputs.probe1_pass }} (${{ steps.probe1.outputs.probe1_bytes }} B) |"
+            echo "| 2. private_predict (private_ml clone) | ${{ steps.probe2.outputs.probe2_pass }} |"
+            echo "| 3. probe_load_pk (FheProbe) | ${{ steps.probe3.outputs.probe3_pass }} |"
+            echo
+            echo "**Bridge status:** \`${{ steps.outcome.outputs.bridge_status }}\`"
+            echo "**Previous run:** \`${{ steps.prev.outputs.previous }}\`"
+            echo
+            echo "Probe-2 error head: \`${{ steps.probe2.outputs.probe2_err }}\`"
+            echo "Probe-3 error head: \`${{ steps.probe3.outputs.probe3_err }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit status JSON on transition
+        if: steps.outcome.outputs.bridge_status != steps.prev.outputs.previous
+        run: |
+          set -u
+          git config user.name  "octravpn-bot"
+          git config user.email "octravpn-bot@users.noreply.github.com"
+          git add "$STATUS_FILE"
+          if git diff --cached --quiet; then
+            echo "no change to commit"
+            exit 0
+          fi
+          git commit -m "audit(fhe-load-pk): ${{ steps.prev.outputs.previous }} -> ${{ steps.outcome.outputs.bridge_status }} [skip ci]"
+          git push
+
+      - name: Open swap-ready issue on success transition
+        if: >
+          steps.outcome.outputs.bridge_status == 'unblocked' &&
+          (steps.prev.outputs.previous != 'unblocked' ||
+           github.event.inputs.force_issue == 'true')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'HFHE bridge unblocked — trigger swap-ready deploy verification';
+            const body = [
+              'The daily `fhe_load_pk` re-probe just detected a SUCCESS transition.',
+              '',
+              `- Probe 2 (private_predict): ${{ steps.probe2.outputs.probe2_pass }}`,
+              `- Probe 3 (probe_load_pk): ${{ steps.probe3.outputs.probe3_pass }}`,
+              `- Probe 2 err head: \`${{ steps.probe2.outputs.probe2_err }}\``,
+              `- Probe 3 err head: \`${{ steps.probe3.outputs.probe3_err }}\``,
+              '',
+              'Next actions:',
+              '',
+              '1. Verify the swap-ready AML deploy on the `swap-ready-hfhe` branch (HFHE-3).',
+              '2. Re-run `docker/devnet/e2e-adversarial-v3.sh` with `OCTRAVPN_USE_HFHE=1`.',
+              '3. Update `docs/v3/hfhe-swap-rollout.md` with the deploy address and the dual-anchor cutover plan.',
+              '4. Update `memory/octra_aml_fhe_load_pk_blocked.md` to reflect the unblock and link the cutover doc.',
+              '',
+              'References:',
+              '- Status JSON: `docs/audit/fhe-load-pk-status.json`',
+              '- Original blocker memo: `memory/octra_aml_fhe_load_pk_blocked.md`',
+              '- Probe origin: `docs/octra-dev-questions.md §1`',
+              '- Swap rollout (to be filled in): `docs/v3/hfhe-swap-rollout.md`',
+              '- Swap branch: `swap-ready-hfhe`',
+              '',
+              '(opened automatically by `.github/workflows/fhe-load-pk-probe.yml`)',
+            ].join('\n');
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'hfhe-bridge',
+              per_page: 50,
+            });
+            const dup = existing.data.find(i => i.title === title);
+            if (dup) {
+              core.info(`already-open issue ${dup.html_url}; not duplicating`);
+              return;
+            }
+            const created = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['hfhe-bridge', 'swap-ready'],
+            });
+            core.info(`opened ${created.data.html_url}`);
