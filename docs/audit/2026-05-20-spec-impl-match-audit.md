@@ -20,11 +20,10 @@ shape, (c) the call-site flow actually exercises the property.
 | ⚠ Implementation-gap (axiom is true but flow bypasses it)  | 4     |
 | ? Stale file:line cite (function moved or shifted ≥10 LOC) | 24    |
 
-**Headline finding.** The mathematical core is in good shape:
-canonical encoders, receipt signing payload, HMAC chain, receipt
-journal, knock + obfs4 + amnezia primitives, ACL evaluator, portal
-HMAC tokens — each load-bearing axiom maps cleanly to the actual
-Rust function with the claimed semantics.
+**Headline finding.** The mathematical core is sound: canonical
+encoders, receipt signing payload, HMAC chain, receipt journal,
+knock + obfs4 + amnezia, ACL evaluator, portal tokens — each
+load-bearing axiom maps cleanly to the actual Rust function.
 
 **Where the spec leaves the rails.** Three load-bearing fictions:
 1. `WireProtocol/RpcEnvelope.lean` axiomatises `chain_id_binding`,
@@ -327,34 +326,21 @@ the gap.
 
 ## 4. Tightest theorems (byte-identical spec ↔ impl)
 
-These are the safest ground — every cite landed exactly, and the
-algebraic shape of the axiom maps to a single Rust function:
+Safest ground — every cite landed exactly:
 
-1. **`canonical_keys_sorted`** + **`canonical_reorder_invariant`** —
-   `crates/octravpn-core/src/v3_canonical.rs:84-91` literally
+1. **`canonical_keys_sorted` + `canonical_reorder_invariant`** —
+   `v3_canonical.rs:84-91` literally
    `entries.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()))`.
-2. **`receipt_signing_roundtrip`** + the 3 cross-rejection theorems —
-   `crates/octravpn-core/src/receipt.rs:217-232` writes
-   `(domain, program_addr, chain_id_be, circle_id_canonical,
-   session_id, seq_be, bytes_used_be, blind)` in exactly that
-   order. Module docstring at `:10-23` matches Lean's
-   `receiptSigningPayload` exactly.
-3. **`honest_chain_link`** — `crates/octravpn-node/src/audit/chain.rs:18`
-   `chain_step(key, prev_mac, record_bytes)` is the single
-   source of truth, used by writer (`audit/log.rs:124`) and
-   verifier (test at `audit/chain.rs:94`).
-4. **`token_for_distinct_circles`** + **`token_valid_iff_match`** —
-   `crates/octravpn-client/src/portal/routes.rs:159-175`. Lean
-   axiom `hmac_distinct_messages` maps to the HMAC-SHA256 crate
-   directly; the Rust function is a 5-liner.
-5. **All 53 AML invariants in `OctraVPN_V3/Invariants.lean`** —
-   12/12 spot-checks landed at the exact cited line; AML cite
-   discipline is the gold standard in the proof tree.
-6. **`bump_strict_monotone`** + **`anti_restart_replay`** —
-   `receipt_journal/mod.rs:191-216`. Lean's algebraic predicate
-   maps directly to the if-then-else in `bump`.
-7. **`current_knock` / `knock_at_window`** — `knock.rs:64-78`.
-   Lean cite `:64-67` + `:73-78` matches exactly.
+2. **`receipt_signing_roundtrip` + 3 cross-rejection** —
+   `receipt.rs:217-232` writes the 8-field payload in exactly
+   the order Lean's `receiptSigningPayload` specifies.
+3. **`honest_chain_link`** — `audit/chain.rs:18` `chain_step` is
+   the single source of truth, used by writer + verifier.
+4. **`token_*`** — `portal/routes.rs:159-175`, 5-line HMAC.
+5. **All 53 AML invariants** — 12/12 spot-checks at exact lines.
+6. **`bump_strict_monotone` + `anti_restart_replay`** —
+   `receipt_journal/mod.rs:191-216`.
+7. **`current_knock` / `knock_at_window`** — `knock.rs:64-78` ✓ exact.
 
 ---
 
@@ -470,29 +456,20 @@ delegation:
 | `ReceiptJournal2.anti_restart_replay`                     | ✓ |
 | `ReceiptJournal2.bump_strict_monotone`                    | ✓ |
 
-**The chain partially holds.** 17 / 20 cited sub-theorems land
-cleanly. Three break:
+**The chain partially holds.** 17/20 cited sub-theorems land
+cleanly. Three break: chain_id_binding (false at tx layer, true at
+receipt layer); forged_shadow_detectable (off-chain only — AML
+`fhe_verify` unwired); headline_settle_claim_correct itself
+(under-specifies earnings formula — actual is
+`(net - net*protocol_fee_bps/BPS_DENOM)` capped at deposit, not
+`bytes_used * price`).
 
-- **chain_id_binding_rejects_replay** — at the tx-envelope layer
-  this is false on the impl; on the receipt-payload layer it's
-  true. The composition uses the receipt-layer property
-  correctly, so the *headline conclusion* is salvageable — but
-  the auditor must understand the layering.
-- **forged_shadow_detectable** — true off-chain, not enforced
-  on-chain. Composition is fine but the "detection event" is
-  not yet a chain action.
-- **headline_settle_claim_correct itself** — under-specifies the
-  earnings formula; the implementation pays out
-  `(net * (BPS_DENOM - protocol_fee_bps) / BPS_DENOM)` capped at
-  `deposit`, not the raw `bytes_used * price`.
-
-**Net verdict.** The composition theorem is **directionally
-sound but quantitatively loose**. An attacker who can deviate
-within the three identified gaps cannot mint extra OCT — the
-chain-side bookkeeping (`slash_burn + bounty = total` etc.) is
-proven tight in `OctraVPN_V3/Invariants.lean`. But a verifier
-who reads the headline literally will overestimate what's
-formally proved by exactly the protocol fee.
+**Net verdict.** Directionally sound but quantitatively loose.
+The chain-side accounting (`slash_burn+bounty=total` etc.) is
+tight in `OctraVPN_V3/Invariants.lean`, so no attacker can mint
+extra OCT through these gaps. But an external verifier reading
+the headline literally will overestimate what's formally proved
+by exactly the protocol fee.
 
 ---
 
