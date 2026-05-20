@@ -10,8 +10,8 @@ their cost in OU, traffic flows over WireGuard, and settlement is
 **two-tx** (operator claims bytes_used → client confirms → AML
 settles or records a public dispute). Misbehavior is slashed in-AML.
 
-> **Status (2026-05-17).** Two AML deployments are live on devnet and
-> run in parallel, gated by the node/client `protocol_version` config:
+> **Status (2026-05-20).** Three AML deployments are live on devnet
+> and run in parallel, gated by the node/client `protocol_version` config:
 >
 > - **v1.1** — `program/main.aml`, deployed at
 >   `oct2YehVLezCi2RCcSkURc3nyyYtzxmspwGHHALm6pjkUvJ`. Public-registry
@@ -23,6 +23,16 @@ settles or records a public dispute). Misbehavior is slashed in-AML.
 >   per-class ACL, and metering counters. 45/45 adversarial drill,
 >   end-to-end on devnet through `open_session`. HFHE settlement is
 >   the last gate — see "What's blocked" below.
+> - **v3** — `program/main-v3.aml`, deployed at
+>   `oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3` (2026-05-18).
+>   Chain-minimal successor: OU custody + slash + 32-byte SHA-256
+>   anchors per role; sealed `policy.json` / `members.json` / per-session
+>   receipts live in operator + tailnet-owner Octra Circles. Replaces
+>   HFHE-encrypted earnings with a swap-ready SHA-256 hash chain
+>   while `fhe_*` AML host calls remain blocked. 40/40 adversarial drill
+>   green; end-to-end smoke replays the earnings hash chain
+>   byte-for-byte. **This is the substrate going to mainnet.**
+>   Design-doc set at [`docs/v3/`](docs/v3/).
 >
 > Workspace total: **232 Lean 4 theorems** across OctraVPN (46),
 > OctraVPN_V2 (54), OctraVPN_Rust (72), and WireProtocol (60) — clean `lake build`,
@@ -31,8 +41,12 @@ settles or records a public dispute). Misbehavior is slashed in-AML.
 > bounded checks, and a GPL-isolated PVAC sidecar (`pvac-sidecar/`)
 > producing chain-compatible HFHE blobs.
 
+[v3 design-doc set](docs/v3/) ·
+[v3 circle-resident architecture](docs/v3-circle-resident-architecture.md) ·
+[v3 threat model](docs/security/threat-model-v3.md) ·
+[v3 mainnet ceremony](docs/mainnet-ceremony.md) ·
 [Detailed v2 release notes](docs/v2-release-notes.md) ·
-[Circle-native design](docs/v2-circles-design.md) ·
+[v2 circle-native design](docs/v2-circles-design.md) ·
 [v2 threat model](docs/v2-threat-model.md) ·
 [v2 operator flow](docs/v2-operator-flow.md) ·
 [v2 client flow](docs/v2-client-flow.md) ·
@@ -140,6 +154,21 @@ JSON receipt protocol, and the same two-tx on-chain settle pattern.
 What changed is **who the operator is on chain** (a circle, not a
 wallet) and **how the client learns about it** (sealed asset fetched
 by `resource_key`, not a public `EndpointRecord`).
+
+### v3 — chain-minimal, circle-resident (deployed substrate)
+
+v3 doubles down on the circle move: the chain holds **only**
+OU custody (bonds + escrow + treasury), slash + state-version
+flags, and a 32-byte SHA-256 anchor per role. Operator policy,
+tailnet ACL, per-session receipts, and the per-class price tariff
+all live inside the role's Octra Circle as sealed assets. Class +
+price disappear from chain entrypoints; `open_session` is just
+`(tailnet, circle, max_pay)`. Earnings privacy uses a SHA-256
+hash chain (HFHE-swap-ready) because AML `fhe_*` host calls
+revert on devnet. Full design at [`docs/v3/`](docs/v3/) — see
+[`docs/v3/README.md`](docs/v3/README.md) for the reading order
+per audience (contributor / auditor / operator) and
+[`docs/v3/v3-vs-v2.md`](docs/v3/v3-vs-v2.md) for the per-entrypoint delta.
 
 ## What's shielded, by layer
 

@@ -4,8 +4,8 @@ This document is the long-form companion to the README. It walks
 through each subsystem's responsibilities, the wire formats between
 them, and the security argument tying them to the formal specs.
 
-Two AML programs are live on devnet in parallel and selected by the
-node/client `protocol_version` config flag:
+Three AML programs are live on devnet in parallel and selected by
+the node/client `protocol_version` config flag:
 
 - **v1.1** — `program/main.aml`, deployed at
   `oct2YehVLezCi2RCcSkURc3nyyYtzxmspwGHHALm6pjkUvJ`. Public operator
@@ -14,10 +14,22 @@ node/client `protocol_version` config flag:
   `oct3fxjrzfqh65ATo31eau8xRFBPiXh2Uzwue56EYkfVSj7`. Slim registry
   keyed by `circle_id`; identity + ACL + policy live in each
   operator's Octra Circle.
+- **v3** — `program/main-v3.aml`, deployed at
+  `oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3` (2026-05-18).
+  Chain-minimal: only OU custody, slash, and 32-byte SHA-256 anchors
+  per role. Class + price moved off chain entirely; settle is
+  `(bytes_used, net, settle_blinding)` against the operator's
+  circle. HFHE earnings ledger replaced by a SHA-256 hash chain
+  (swap-ready when `fhe_*` AML host calls unblock). **This is the
+  substrate going to mainnet.**
 
-§1 below covers v1.1 (production shape); §2 covers v2 (current
-substrate); §3-§5 cover shared off-chain components, wire formats,
-and the safety argument.
+§1 below covers v1.1 (production shape); §2 covers v2 (intermediate
+shape that introduced circle-keyed identity); v3 has its own
+canonical doc set at [`v3/`](v3/) — start with
+[`v3/README.md`](v3/README.md) for reading order per audience and
+[`v3/overview.md`](v3/overview.md) for the one-page narrative. §3-§5
+of this document cover off-chain components, wire formats, and the
+safety argument shared across all three versions.
 
 ## 1. v1.1 — public registry (`program/main.aml`)
 
