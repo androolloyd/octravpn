@@ -50,8 +50,18 @@ Three ways:
    tab shows test counts, the clippy gate, the Lean proof count, the
    last-known tailscale-interop exit code, and signed artifact hashes
    (`.deb` + `.rpm`).
-3. **Watch the demo recordings** at `demo/recordings/*.mp4` (regenerated
-   via `bash demo/run-demo.sh` from inside the Codespace).
+3. **Watch the demo recordings** below (or at `demo/recordings/*.mp4`;
+   regenerated via `bash demo/run-demo.sh` from inside the Codespace).
+
+### Recorded flows
+
+**`octravpn init` + `keygen` + `identity`** — cold-start operator flow:
+
+![init/keygen demo](demo/recordings/01-init-keygen.gif)
+
+**`octravpn-node mesh mint-preauth`** — single-use + reusable preauth keys:
+
+![mesh preauth demo](demo/recordings/04-mesh-preauth.gif)
 
 ---
 
