@@ -42,6 +42,14 @@ from active.
 
 ### B-1 [CORRECTNESS] Receipt-journal async-compaction phase-3 crash regresses seq floor
 
+- **Status:** Fixed in commit `4eb9339` (single-tempfile single-rename
+  commit; delta-replay now happens INTO the tempfile BEFORE the
+  rename, so the rename atomically swaps in a complete journal). 6
+  new crash-injection tests cover the three crash points (after
+  phase-2 snapshot, after deltas before rename, after rename). See
+  `crates/octravpn-core/src/receipt_journal/README.md` ("single-
+  tempfile snapshot/swap protocol") for the post-fix atomicity
+  contract.
 - File: `crates/octravpn-core/src/receipt_journal/compact.rs:64-138`,
   `mod.rs:191-273`.
 - Category: chain / slashable.
