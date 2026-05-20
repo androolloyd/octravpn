@@ -72,6 +72,31 @@ swap in HFHE additively the moment the bridge runs (see
 plaintext blindings live in operator circles and chain observers see
 running plaintext totals.
 
+### Note (2026-05-20): honest mock-rpc impl shipped
+
+We now have an honest mock-rpc implementation of the six `fhe_*` host
+calls (`fhe_load_pk`, `fhe_deser`, `fhe_add`, `fhe_add_const`,
+`fhe_verify_zero`, `fhe_ser`) at
+`octra-foundry/crates/octra-mock-rpc/src/aml/host_fhe.rs`. It exposes
+the surface via `octra_fhe*` JSON-RPC methods and as a Rust API, with
+23 unit tests covering happy paths, unregistered-pubkey reverts,
+malformed-ciphertext reverts, determinism over 100 trials, cross-
+process roundtrip, and the encrypt(5)+encrypt(3)→8 algebraic
+end-to-end. The accompanying smoke
+[`docker/devnet/v3-smoke-hfhe.sh`](../docker/devnet/v3-smoke-hfhe.sh)
+brings up the mock with `OCTRAVPN_E2E_USE_HFHE_MOCK=1` and drives the
+full encrypt → add → add_const → make_zero_proof → verify_zero →
+decrypt flow, plus the overclaim-rejection path. **It passes against
+our mock.** This confirms the contract shape on our side is correct;
+the gap is purely chain-side. The mock's ciphertexts are NOT byte-
+compatible with `octra-labs/HFHE` (we use a deterministic
+sha256-masked additive scheme rather than BFV), and our
+`fhe_verify_zero` accepts a different commitment shape than the
+chain's `zkzp_v2` proof — so a real-chain proof will not verify
+against the mock, and vice versa. The host-call signatures, error
+shapes, pk-registry lookup, and add/add_const/verify_zero algebra are
+identical, which is what the client-side code is bound to.
+
 ---
 
 ## 2. Circle code execution
