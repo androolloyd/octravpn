@@ -996,6 +996,7 @@ impl Hub {
                         // `allow_all_packet_filter` fallback in play
                         // until an operator pushes a doc.
                         policy: Arc::new(octravpn_mesh::policy::PolicyStore::new()),
+                        knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
                     },
                     shared_minter,
                 ))

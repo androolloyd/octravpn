@@ -567,6 +567,7 @@ async fn run_mesh_serve(
         // PUT to push hujson docs; the store's `Notify` wakes
         // parked `/map` long-pollers within ~1 ms.
         policy: Arc::new(octravpn_mesh::policy::PolicyStore::new()),
+        knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
     };
 
     eprintln!(
