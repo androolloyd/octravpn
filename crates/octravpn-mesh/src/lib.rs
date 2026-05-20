@@ -20,6 +20,7 @@ pub mod acl;
 pub mod conn;
 pub mod headscale_bridge;
 pub mod ip_alloc;
+pub mod knock;
 pub mod magic_dns;
 pub mod manager;
 pub mod peer;

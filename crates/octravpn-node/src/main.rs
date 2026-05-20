@@ -567,6 +567,12 @@ async fn run_mesh_serve(
         // PUT to push hujson docs; the store's `Notify` wakes
         // parked `/map` long-pollers within ~1 ms.
         policy: Arc::new(octravpn_mesh::policy::PolicyStore::new()),
+        // PSK-gated handshake (layer 3 of the active-probe shield).
+        // Default-disabled — operators opt in via
+        // `[control.knock] enabled = true` in node.toml, with the PSK
+        // distributed out-of-band alongside the preauth key. See
+        // `docs/operators/tls-rotation.md` §"PSK-gated control plane".
+        knock: load_knock_cfg_from_env(),
     };
 
     eprintln!(
@@ -690,6 +696,49 @@ async fn run_mesh_serve(
         }
     }
     Ok(())
+}
+
+/// Load the PSK-gated handshake config from the operator environment.
+///
+/// Source of truth:
+///   1. `OCTRAVPN_KNOCK_ENABLED` (any non-empty value enables)
+///   2. `OCTRAVPN_KNOCK_PSK` (base64-encoded 32-byte secret)
+///   3. `OCTRAVPN_KNOCK_WINDOW_SECS` (optional, defaults to 60)
+///
+/// Defaults to disabled when the env vars are absent — keeps existing
+/// deployments backward-compatible. See `docs/operators/tls-rotation.md`
+/// §"PSK-gated control plane" for the operator playbook.
+fn load_knock_cfg_from_env() -> octravpn_mesh::tailscale_wire::KnockConfig {
+    let enabled = std::env::var("OCTRAVPN_KNOCK_ENABLED")
+        .map(|v| !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false"))
+        .unwrap_or(false);
+    if !enabled {
+        return octravpn_mesh::tailscale_wire::KnockConfig::disabled();
+    }
+    let Ok(raw) = std::env::var("OCTRAVPN_KNOCK_PSK") else {
+        eprintln!(
+            "mesh serve: OCTRAVPN_KNOCK_ENABLED set but OCTRAVPN_KNOCK_PSK missing; \
+             knock layer DISABLED (would otherwise reject every connection)"
+        );
+        return octravpn_mesh::tailscale_wire::KnockConfig::disabled();
+    };
+    let psk = match octravpn_mesh::knock::decode_psk(raw.trim()) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!(
+                "mesh serve: OCTRAVPN_KNOCK_PSK decode failed ({e}); knock layer DISABLED"
+            );
+            return octravpn_mesh::tailscale_wire::KnockConfig::disabled();
+        }
+    };
+    let window_secs = std::env::var("OCTRAVPN_KNOCK_WINDOW_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(octravpn_mesh::tailscale_wire::knock::DEFAULT_WINDOW_SECS);
+    eprintln!("mesh serve: PSK-gated handshake ENABLED (window={window_secs}s)");
+    let mut cfg = octravpn_mesh::tailscale_wire::KnockConfig::enabled(psk);
+    cfg.window_secs = window_secs;
+    cfg
 }
 
 fn run_seal_keys(

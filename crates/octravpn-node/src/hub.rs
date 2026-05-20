@@ -994,6 +994,12 @@ impl Hub {
                         // `allow_all_packet_filter` fallback in play
                         // until an operator pushes a doc.
                         policy: Arc::new(octravpn_mesh::policy::PolicyStore::new()),
+                        // PSK-gated handshake: hub path is the
+                        // chain-aware boot path and predates the
+                        // knock layer. Always disabled here; the
+                        // `mesh serve` entry point in `main.rs` is
+                        // the one that honours the env var.
+                        knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
                     },
                     shared_minter,
                 ))

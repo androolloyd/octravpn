@@ -47,6 +47,7 @@ fn build_app() -> (axum::Router, WireState, PolicyStore, tempfile::TempDir) {
         machines: machines.clone(),
         derp_map: Arc::new(octravpn_mesh::tailscale_wire::DerpMap::default()),
         policy: Arc::new(policy.clone()),
+        knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
     };
 
     let admin_state = admin::AdminState::builder()

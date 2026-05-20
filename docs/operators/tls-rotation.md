@@ -189,3 +189,179 @@ Remove the old bundle after the cutover.
 | `/health` returns 200 but `s_client` shows old cert | listener was not reloaded | `systemctl reload octravpn-node` then re-poll |
 | DERP peer `failed to dial relay 1: x509: certificate has expired` | DERP cert past its 30-day window | re-run `run-interop.sh` step 1b; restart `derp-1` container |
 | Daemon refuses to start: `tls: private key does not match public key` | partial swap (cert from one mint, key from another) | restore from `${state_dir}/tls/backup/<latest>` and re-run the script |
+
+## PSK-gated control plane
+
+> Optional. Default-off. Operators running on a network where active
+> probing of the wire surface is plausible (state-level censors that
+> sweep candidate IPs for the "Tailscale fingerprint" — observed in
+> 2024–2026 GFW reports) should enable this. Operators on plain LAN
+> deployments don't need it.
+
+The Tailscale-wire control plane (`/key`, `/ts2021`,
+`/machine/register`, `/machine/map`) speaks the same shapes as
+upstream Tailscale, which means a probe that completes the Noise IK
+handshake against our endpoint gets the same positive signal it
+would from any tailnet — useful to a censor who wants to enumerate
+control planes to block. The PSK-gated handshake layer prevents that
+by requiring an out-of-band shared secret before the wire surface
+will even respond.
+
+When the gate is enabled, every request must carry one of:
+
+  * **`X-OctraVPN-Knock: <hmac16>`** header — used by our own
+    `octravpn` CLI (`mesh status`, `mesh policy …` per `#232`). Stock
+    Tailscale clients cannot add custom HTTP headers and use the path
+    variant below.
+  * **`/k/<hmac16>/<rest-of-path>` URL prefix** — the
+    operator-distributed `--login-server` URL embeds the knock as a
+    path segment, e.g.
+    `tailscale up --login-server https://node.example.org/k/abcdef0123456789 --authkey octrapreauth-…`.
+
+The `hmac16` is the first **8 bytes** of
+`HMAC-SHA256(psk, floor(unix_seconds / window_secs).to_string())`,
+hex-encoded → 16 ASCII chars. Default `window_secs = 60`. A knock is
+valid for both the current window and the next window (forward
+clock-skew tolerance), so the effective TTL is between 60 and 120
+seconds depending on when the client mints it.
+
+Any request that fails the gate — missing knock, wrong knock, expired
+window, malformed prefix — gets the canonical nginx 1.18 "404 Not
+Found" page (byte-for-byte identical across attempts; see
+`tailscale_wire::knock::NGINX_404_BODY`). To a probe, the wire surface
+is indistinguishable from a stock nginx that has nothing mounted at
+the requested path.
+
+### Generating the PSK
+
+The PSK is 32 raw bytes, distributed as a base64 string. Mint with:
+
+```bash
+openssl rand 32 | base64 > /etc/octravpn/knock.psk
+chmod 0600 /etc/octravpn/knock.psk
+```
+
+Or, for the inline-in-`oct://`-URL variant:
+
+```bash
+openssl rand 32 | base64
+# Embed the output as `?knock_psk=<base64>` in the URL you publish to
+# peers. The portal in `crates/octravpn-client/src/portal/` strips this
+# query parameter before dispatching the rest of the URL (see
+# `octravpn_mesh::knock::parse_knock_psk_query`), so the PSK is never
+# leaked into chain/fetch handlers.
+```
+
+### Distributing the PSK
+
+The PSK travels alongside the preauth key in the same out-of-band
+channel the operator already uses (Signal, Keybase, a printed
+QR-code at a tradeshow booth — pick whatever channel you trust). It
+is NOT secret in the cryptographic sense — knowing it lets a probe
+complete the knock, but the underlying Noise IK handshake still
+needs a valid preauth key, an authorised `mkey:` identity, etc. The
+knock layer is a *prefilter*, not the only line of defence.
+
+That said, treat the PSK with the same care as the preauth key. A
+state-level adversary that scrapes the PSK from a public forum will
+be able to detect-and-block the endpoint just like any other
+operator's deployment.
+
+### Enabling the gate on the node
+
+Wire it up via three environment variables read by `mesh serve` at
+startup (see `crates/octravpn-node/src/main.rs::load_knock_cfg_from_env`):
+
+```bash
+export OCTRAVPN_KNOCK_ENABLED=1
+export OCTRAVPN_KNOCK_PSK="$(cat /etc/octravpn/knock.psk)"
+# Optional — defaults to 60s. Wider windows tolerate more clock skew
+# but increase the replay window.
+export OCTRAVPN_KNOCK_WINDOW_SECS=60
+
+octravpn-node mesh serve --listen 0.0.0.0:51821 --https-listen 0.0.0.0:443 \
+    --state-dir /var/lib/octravpn/wire --tailnet-id tnt-prod
+```
+
+Startup logs `mesh serve: PSK-gated handshake ENABLED (window=60s)`
+when the gate is live. A non-empty `OCTRAVPN_KNOCK_ENABLED` with a
+missing or unparseable `OCTRAVPN_KNOCK_PSK` logs a warning and
+disables the gate (rather than rejecting every connection).
+
+### CLI tools
+
+`octravpn-node mesh status` / `mesh policy {get,set,validate}` wrap
+the admin routes (`#232`). They read `OCTRAVPN_KNOCK_PSK` from the
+environment and prepend the `X-OctraVPN-Knock` header on every
+request — set the env var in the same shell session before invoking
+them:
+
+```bash
+export OCTRAVPN_KNOCK_PSK="$(cat /etc/octravpn/knock.psk)"
+export OCTRAVPN_ADMIN_TOKEN="op-bearer-token"
+octravpn-node mesh status --remote https://node.example.org
+```
+
+Without the env var, the CLI sends no knock and gets a generic 404
+back from a knock-enabled node.
+
+### Stock-tailscale-client interop
+
+Stock `tailscale up` can't add HTTP headers. Use the path-prefix
+variant: publish per-peer `--login-server` URLs that already embed
+the current knock:
+
+```bash
+# On the operator's side, when minting a preauth key + URL bundle
+# for the peer:
+WIN=$(( $(date +%s) / 60 ))
+KNOCK=$(printf %s "$WIN" | openssl dgst -sha256 -hmac "$(cat /etc/octravpn/knock.psk | base64 -d)" -binary | head -c 8 | xxd -p)
+echo "tailscale up --login-server https://node.example.org/k/$KNOCK --authkey $PREAUTH_KEY"
+```
+
+Because the knock rolls every 60 seconds, the URL has the same
+short-lived character as the preauth key itself: mint it for the
+peer, expect them to use it inside the window. If they don't, mint
+another. The intent matches how preauth-key flows already work in
+production — operators mint a fresh URL per peer onboarding.
+
+For peers running our `octravpn` client, the PSK can be embedded
+directly in the `oct://` URL via `?knock_psk=<base64>`; the portal
+strips and applies the knock automatically without any environment
+plumbing.
+
+### Rotating the PSK
+
+The PSK is a 32-byte secret with the same lifetime expectations as a
+TLS root cert: rotate when (a) you suspect a peer has been
+compromised and may have leaked it, or (b) on a calendar cadence of
+your choice (no fixed maximum lifetime — the per-window HMAC means
+a leaked PSK can be revoked instantly by minting a new one, no
+on-chain coordination needed).
+
+To rotate:
+
+1. Mint a new PSK (`openssl rand 32 | base64 > /etc/octravpn/knock.psk.new`).
+2. Restart `octravpn-node mesh serve` with `OCTRAVPN_KNOCK_PSK`
+   pointing at the new file. The next minute, every peer carrying
+   the old PSK starts seeing nginx-404s.
+3. Distribute the new PSK alongside a fresh preauth key to each
+   peer through the same out-of-band channel.
+4. `mv /etc/octravpn/knock.psk.new /etc/octravpn/knock.psk` on the
+   node host so the new PSK is the persisted default.
+
+No grace period is built in — the gate is intentionally binary, the
+way `Server-Authorization` would be. Operators who want to coordinate
+a smooth cutover can run two listeners on different ports with
+different PSKs and migrate peers between them.
+
+### Constraints
+
+- DO NOT change the Noise IK handshake bytes; the knock is a
+  pre-handshake check that fires before the upgrade hijack.
+- DO NOT enable the gate without a working out-of-band channel; a
+  PSK shipped over insecure email is worth no more than a missing
+  gate.
+- The path-prefix variant has the PSK derivative visible in HTTP
+  access logs along the wire path — for sensitive deployments,
+  pair it with the existing rate-limit + audit log scrubbing.
