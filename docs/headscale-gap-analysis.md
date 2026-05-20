@@ -52,9 +52,9 @@ cited, not re-explained.
 | gRPC admin API       | `grpcv1.go` — full nodes/users/preauth admin via gRPC               | `headscale-api/src/grpc.rs` exists + proto generated under `generated/headscale.v1.rs` | handler impl & coverage TBD | P2 |
 | Metrics / health     | Prometheus, `/metrics`, `/health`                                   | yes (`mesh_metrics`, `/metrics`, `/health{,/ready,/live}`)      | parity         | —        |
 | Resource gateway     | —                                                                   | `headscale-api/src/gateway/` (auth/quota/inference/router)      | OctraVPN add-on | n/a    |
-| Payment ledger       | —                                                                   | `headscale-payments` (ledger, x402, escrow, channels)           | OctraVPN add-on | n/a    |
-| DID identity         | —                                                                   | `headscale-identity` (Ed25519, DID, session)                    | OctraVPN add-on | n/a    |
-| Resource registry/metering | —                                                             | `headscale-resources`                                           | OctraVPN add-on | n/a    |
+| Payment ledger       | —                                                                   | `headscale-payments` (ledger, x402, escrow, channels) — **kept on disk, dropped from workspace.members on 2026-05-20; deletion candidate** | OctraVPN add-on | n/a    |
+| DID identity         | —                                                                   | `headscale-identity` (Ed25519, DID, session) — **kept on disk, dropped from workspace.members on 2026-05-20** | OctraVPN add-on | n/a    |
+| Resource registry/metering | —                                                             | `headscale-resources` — **kept on disk, dropped from workspace.members on 2026-05-20** | OctraVPN add-on | n/a    |
 
 ## 1. Wire protocol — control plane HTTP
 
@@ -417,10 +417,20 @@ Ordered roughly by demand:
 OctraVPN-native layers, *not* parity gaps:
 
 - **`headscale-identity`** — Ed25519 keypair, DID, session.
+  *(As of 2026-05-20: kept on disk but dropped from
+  `[workspace.members]` in headscale-rs — only built transitively via
+  the active crates.)*
 - **`headscale-payments`** — internal ledger, x402 micropayments,
   escrow, payment channels.
+  *(As of 2026-05-20: kept on disk but dropped from
+  `[workspace.members]`; flagged as a deletion candidate once
+  `headscale-db::payments` is refactored off of it. OctraVPN uses the
+  Octra chain for payments — this crate is unused in production.)*
 - **`headscale-resources`** — provider capability registry, metering,
   allocation.
+  *(As of 2026-05-20: kept on disk but dropped from
+  `[workspace.members]` — `octravpn-node` reimplemented metering on
+  its own primitives.)*
 - **`headscale-api/src/gateway/`** — L7 resource gateway: per-request
   auth, quota, metering, proxy, signed receipts. Beyond upstream's scope.
 - **`headscale-core/src/swarm_transport.rs`** — mesh message bus.
