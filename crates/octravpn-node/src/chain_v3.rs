@@ -488,6 +488,54 @@ impl ChainCtxV3 {
         )
     }
 
+    /// HFHE-2 swap-ready settle-claim builder. Trailing positional
+    /// `bytes` arg carrying the encrypted `bytes_used` ciphertext
+    /// (or `""` when the PVAC sidecar is disabled). The on-chain
+    /// `program/main-v3.aml::settle_claim` does NOT yet consume
+    /// this third positional — call sites that submit tx today
+    /// MUST keep using [`Self::build_settle_claim_call`]. This
+    /// builder lives here so the shape lands in one place and
+    /// tests pin it.
+    #[allow(dead_code)] // wired by HFHE-3 swap diff
+    pub(crate) fn build_settle_claim_with_shadow_call(
+        &self,
+        session_id: u64,
+        bytes_used: u64,
+        enc_bytes_used: &str,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call_builder().settle_claim_with_shadow_call(
+            session_id,
+            bytes_used,
+            enc_bytes_used,
+            0,
+            fee,
+            nonce,
+        )
+    }
+
+    /// HFHE-2: produce the encrypted-bytes_used ciphertext for the
+    /// settle_claim shadow position. `Ok("")` (the empty-string
+    /// sentinel) when the sidecar is `None`; otherwise the sidecar
+    /// encrypts `bytes_used` under the supplied circle pubkey.
+    pub(crate) async fn build_settle_claim_args(
+        &self,
+        bytes_used: u64,
+        pvac: Option<&crate::pvac::PvacClient>,
+        circle_pk: Option<&str>,
+        circle_sk: Option<&str>,
+        seed_hex: &str,
+    ) -> Result<String> {
+        match (pvac, circle_pk, circle_sk) {
+            (Some(client), Some(pk), Some(sk)) => client
+                .encrypt_const(pk, sk, bytes_used, seed_hex)
+                .await
+                .map_err(|e| anyhow!("pvac encrypt_const(bytes_used): {e}")),
+            _ => Ok(String::new()),
+        }
+    }
+
     /// `nonreentrant settle_confirm(session_id, bytes_used, net,
     /// settle_blinding)` — opener-side second half. `net` is the
     /// pre-agreed plaintext credit (price * bytes after class rules);
@@ -508,6 +556,62 @@ impl ChainCtxV3 {
             p.fee,
             p.nonce,
         )
+    }
+
+    /// HFHE-2 swap-ready settle-confirm builder. Two trailing
+    /// positional `bytes` args carry `enc_bytes_used` + `enc_net`
+    /// ciphertexts. Same swap-ready posture as
+    /// [`Self::build_settle_claim_with_shadow_call`].
+    #[allow(dead_code)] // wired by HFHE-3 swap diff
+    pub(crate) fn build_settle_confirm_with_shadow_call(
+        &self,
+        p: &SettleConfirmParams<'_>,
+        enc_bytes_used: &str,
+        enc_net: &str,
+    ) -> Value {
+        self.call_builder().settle_confirm_with_shadow_call(
+            p.session_id,
+            p.bytes_used,
+            p.net,
+            p.settle_blinding,
+            enc_bytes_used,
+            enc_net,
+            0,
+            p.fee,
+            p.nonce,
+        )
+    }
+
+    /// HFHE-2: produce the (enc_bytes_used, enc_net) ciphertext
+    /// pair for the settle_confirm shadow positions. Returns
+    /// `Ok(("", ""))` when the sidecar is unwired; otherwise asks
+    /// the sidecar to encrypt each value under the circle pubkey,
+    /// with independent derived seeds.
+    pub(crate) async fn build_settle_confirm_args(
+        &self,
+        bytes_used: u64,
+        net: u64,
+        pvac: Option<&crate::pvac::PvacClient>,
+        circle_pk: Option<&str>,
+        circle_sk: Option<&str>,
+        seed_hex: &str,
+    ) -> Result<(String, String)> {
+        match (pvac, circle_pk, circle_sk) {
+            (Some(client), Some(pk), Some(sk)) => {
+                let seed_b = derive_seed(seed_hex, b"bytes");
+                let seed_n = derive_seed(seed_hex, b"net");
+                let enc_b = client
+                    .encrypt_const(pk, sk, bytes_used, &seed_b)
+                    .await
+                    .map_err(|e| anyhow!("pvac encrypt_const(bytes_used): {e}"))?;
+                let enc_n = client
+                    .encrypt_const(pk, sk, net, &seed_n)
+                    .await
+                    .map_err(|e| anyhow!("pvac encrypt_const(net): {e}"))?;
+                Ok((enc_b, enc_n))
+            }
+            _ => Ok((String::new(), String::new())),
+        }
     }
 
     /// `claim_no_show(session_id)` — opener-side abort path. Fires once
@@ -563,6 +667,40 @@ impl ChainCtxV3 {
         )
     }
 
+    /// HFHE-2 swap-ready claim-earnings builder.
+    #[allow(dead_code)] // wired by HFHE-3 swap diff
+    pub(crate) fn build_claim_earnings_with_shadow_call(
+        &self,
+        circle_id: &str,
+        amount: u64,
+        enc_amount: &str,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call_builder().claim_earnings_with_shadow_call(
+            circle_id, amount, enc_amount, 0, fee, nonce,
+        )
+    }
+
+    /// HFHE-2: encrypted-amount ciphertext for the claim_earnings
+    /// shadow position. `Ok("")` when the sidecar is disabled.
+    pub(crate) async fn build_claim_earnings_args(
+        &self,
+        amount: u64,
+        pvac: Option<&crate::pvac::PvacClient>,
+        circle_pk: Option<&str>,
+        circle_sk: Option<&str>,
+        seed_hex: &str,
+    ) -> Result<String> {
+        match (pvac, circle_pk, circle_sk) {
+            (Some(client), Some(pk), Some(sk)) => client
+                .encrypt_const(pk, sk, amount, seed_hex)
+                .await
+                .map_err(|e| anyhow!("pvac encrypt_const(amount): {e}")),
+            _ => Ok(String::new()),
+        }
+    }
+
     // ============================================================
     // Submit / sign
     // ============================================================
@@ -579,6 +717,20 @@ impl ChainCtxV3 {
         debug!(hash = %r.hash, "submitted tx (v3)");
         Ok(r.hash)
     }
+}
+
+/// HFHE-2: derive a 32-byte (64-char hex) seed from a parent seed
+/// plus a short label by sha256-ing the concatenation. Used by
+/// `build_settle_confirm_args` to split a single per-receipt seed
+/// into independent per-ciphertext seeds so two ciphertexts on the
+/// same receipt are not encrypted under the same randomness.
+fn derive_seed(parent_hex: &str, label: &[u8]) -> String {
+    use sha2::Digest as _;
+    let mut h = sha2::Sha256::new();
+    h.update(parent_hex.as_bytes());
+    h.update(b"|");
+    h.update(label);
+    hex::encode(h.finalize())
 }
 
 // ============================================================
@@ -1028,5 +1180,104 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("nope.toml");
         assert!(CircleV3State::load(&path).expect("load").is_none());
+    }
+
+    // ============================================================
+    // HFHE-2 shadow-builder tests.
+    // ============================================================
+
+    #[tokio::test]
+    async fn settle_claim_args_no_sidecar_returns_empty_string() {
+        let c = ctx();
+        let out = c
+            .build_settle_claim_args(1_048_576, None, None, None, &"00".repeat(32))
+            .await
+            .expect("no-sidecar path is infallible");
+        assert_eq!(out, "");
+    }
+
+    #[tokio::test]
+    async fn settle_confirm_args_no_sidecar_returns_empty_pair() {
+        let c = ctx();
+        let (a, b) = c
+            .build_settle_confirm_args(1_048_576, 1000, None, None, None, &"00".repeat(32))
+            .await
+            .expect("no-sidecar path is infallible");
+        assert_eq!(a, "");
+        assert_eq!(b, "");
+    }
+
+    #[tokio::test]
+    async fn claim_earnings_args_no_sidecar_returns_empty_string() {
+        let c = ctx();
+        let out = c
+            .build_claim_earnings_args(995, None, None, None, &"00".repeat(32))
+            .await
+            .expect("no-sidecar path is infallible");
+        assert_eq!(out, "");
+    }
+
+    #[test]
+    fn settle_claim_with_shadow_call_shape_empty() {
+        let c = ctx();
+        let call = c.build_settle_claim_with_shadow_call(0, 1_048_576, "", 500, 20);
+        assert_eq!(call["method"], "settle_claim");
+        let params = call["params"].as_array().unwrap();
+        assert_eq!(params.len(), 3);
+        assert_eq!(params[0], 0);
+        assert_eq!(params[1], 1_048_576);
+        assert_eq!(params[2], "");
+    }
+
+    #[test]
+    fn settle_claim_with_shadow_call_shape_populated() {
+        let c = ctx();
+        let call = c.build_settle_claim_with_shadow_call(7, 1000, "hfhe_v1|CT", 500, 22);
+        let params = call["params"].as_array().unwrap();
+        assert_eq!(params.len(), 3);
+        assert_eq!(params[2], "hfhe_v1|CT");
+    }
+
+    #[test]
+    fn settle_confirm_with_shadow_call_shape() {
+        let c = ctx();
+        let p = SettleConfirmParams {
+            session_id: 0,
+            bytes_used: 1_048_576,
+            net: 1000,
+            settle_blinding: "f8d1aa00bb22cc33",
+            fee: 500,
+            nonce: 21,
+        };
+        let call = c.build_settle_confirm_with_shadow_call(&p, "hfhe_v1|BB", "hfhe_v1|NN");
+        assert_eq!(call["method"], "settle_confirm");
+        let params = call["params"].as_array().unwrap();
+        assert_eq!(params.len(), 6);
+        assert_eq!(params[4], "hfhe_v1|BB");
+        assert_eq!(params[5], "hfhe_v1|NN");
+    }
+
+    #[test]
+    fn claim_earnings_with_shadow_call_shape_empty() {
+        let c = ctx();
+        let call = c.build_claim_earnings_with_shadow_call("octCID", 995, "", 500, 24);
+        assert_eq!(call["method"], "claim_earnings");
+        let params = call["params"].as_array().unwrap();
+        assert_eq!(params.len(), 3);
+        assert_eq!(params[0], "octCID");
+        assert_eq!(params[1], 995);
+        assert_eq!(params[2], "");
+    }
+
+    #[test]
+    fn derive_seed_is_deterministic_and_differs_per_label() {
+        let parent = "ab".repeat(32);
+        let a = derive_seed(&parent, b"bytes");
+        let b = derive_seed(&parent, b"bytes");
+        let c = derive_seed(&parent, b"net");
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        assert_eq!(a.len(), 64);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
     }
 }

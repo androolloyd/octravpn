@@ -71,6 +71,20 @@ pub struct ProposedReceipt {
     pub receipt: Receipt,
     pub node_pubkey: PublicKey,
     pub node_sig: Signature,
+    /// HFHE-2 shadow blob (encrypted `bytes_used`). Optional;
+    /// `None` when the operator's PVAC sidecar is disabled or the
+    /// circle pubkey is unloaded. Wire-compatible with pre-HFHE-2
+    /// receipts via `#[serde(default, skip_serializing_if=...)]`.
+    /// See `octravpn_core::receipt::SignedReceipt` for the full
+    /// shadow-blob contract.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enc_bytes_used: Option<String>,
+    /// HFHE-2 shadow blob (encrypted `net = bytes_used * price`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enc_net: Option<String>,
+    /// HFHE-2 zero-proof (`zkzp_v2|<b64>`) — optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pvac_zero_proof: Option<String>,
 }
 
 #[cfg(test)]

@@ -334,6 +334,34 @@ impl ContractCallBuilder {
         self.call(method::SETTLE_CLAIM, params, value, fee, nonce)
     }
 
+    /// HFHE-2 variant of [`Self::settle_claim_call`] that takes a
+    /// shadow ciphertext as the *trailing* positional argument.
+    /// Empty string when the PVAC sidecar is disabled; base64
+    /// ciphertext when enabled. The on-chain AML doesn't yet
+    /// consume the trailing position — pinning the shape here
+    /// makes the HFHE-3 swap-ready diff a single AML-side line.
+    pub fn settle_claim_with_shadow_call(
+        &self,
+        session_id: u64,
+        bytes_used: u64,
+        enc_bytes_used: &str,
+        value: u64,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call(
+            method::SETTLE_CLAIM,
+            &[
+                json!(session_id),
+                json!(bytes_used),
+                json!(enc_bytes_used),
+            ],
+            value,
+            fee,
+            nonce,
+        )
+    }
+
     /// Build a `settle_confirm` call.
     /// `params` order: `[session_id, bytes_used, net, settle_blinding]`.
     pub fn settle_confirm_call(
@@ -344,6 +372,38 @@ impl ContractCallBuilder {
         nonce: u64,
     ) -> Value {
         self.call(method::SETTLE_CONFIRM, params, value, fee, nonce)
+    }
+
+    /// HFHE-2 variant of [`Self::settle_confirm_call`] with two
+    /// trailing positional `bytes` args carrying `enc_bytes_used`
+    /// + `enc_net` ciphertexts.
+    #[allow(clippy::too_many_arguments)]
+    pub fn settle_confirm_with_shadow_call(
+        &self,
+        session_id: u64,
+        bytes_used: u64,
+        net: u64,
+        settle_blinding: &str,
+        enc_bytes_used: &str,
+        enc_net: &str,
+        value: u64,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call(
+            method::SETTLE_CONFIRM,
+            &[
+                json!(session_id),
+                json!(bytes_used),
+                json!(net),
+                json!(settle_blinding),
+                json!(enc_bytes_used),
+                json!(enc_net),
+            ],
+            value,
+            fee,
+            nonce,
+        )
     }
 
     /// Build a `claim_no_show` call.
@@ -384,6 +444,27 @@ impl ContractCallBuilder {
         nonce: u64,
     ) -> Value {
         self.call(method::CLAIM_EARNINGS, params, value, fee, nonce)
+    }
+
+    /// HFHE-2 variant of [`Self::claim_earnings_call`] with a
+    /// trailing encrypted-amount ciphertext positional. Empty
+    /// when the sidecar is disabled.
+    pub fn claim_earnings_with_shadow_call(
+        &self,
+        circle_id: &str,
+        amount: u64,
+        enc_amount: &str,
+        value: u64,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call(
+            method::CLAIM_EARNINGS,
+            &[json!(circle_id), json!(amount), json!(enc_amount)],
+            value,
+            fee,
+            nonce,
+        )
     }
 }
 
@@ -836,5 +917,79 @@ mod tests {
         assert_eq!(method::CLAIM_NO_SHOW, "claim_no_show");
         assert_eq!(method::SWEEP_EXPIRED_SESSION, "sweep_expired_session");
         assert_eq!(method::CLAIM_EARNINGS, "claim_earnings");
+    }
+
+    // ----------------------------------------------------------------
+    // HFHE-2 shadow-arg shape tests.
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn settle_claim_with_shadow_shape_empty_blob() {
+        let b = builder();
+        let got = b.settle_claim_with_shadow_call(0, 1_048_576, "", 0, 500, 20);
+        let want = json!({
+            "kind": "contract_call",
+            "from": WALLET,
+            "to": PROG,
+            "method": "settle_claim",
+            "params": [0u64, 1_048_576u64, ""],
+            "value": 0u64,
+            "fee": 500u64,
+            "nonce": 20u64,
+        });
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn settle_claim_with_shadow_shape_populated_blob() {
+        let b = builder();
+        let got = b.settle_claim_with_shadow_call(7, 1_000, "hfhe_v1|AAAA", 0, 500, 42);
+        assert_eq!(got["params"][0], 7);
+        assert_eq!(got["params"][1], 1_000);
+        assert_eq!(got["params"][2], "hfhe_v1|AAAA");
+        assert_eq!(got["method"], "settle_claim");
+    }
+
+    #[test]
+    fn settle_confirm_with_shadow_shape() {
+        let b = builder();
+        let got = b.settle_confirm_with_shadow_call(
+            0,
+            1_048_576,
+            1000,
+            "f8d1aa00bb22cc33",
+            "hfhe_v1|BB",
+            "hfhe_v1|NN",
+            0,
+            500,
+            21,
+        );
+        assert_eq!(got["method"], "settle_confirm");
+        let params = got["params"].as_array().unwrap();
+        assert_eq!(params.len(), 6);
+        assert_eq!(params[4], "hfhe_v1|BB");
+        assert_eq!(params[5], "hfhe_v1|NN");
+    }
+
+    #[test]
+    fn claim_earnings_with_shadow_shape() {
+        let b = builder();
+        let got = b.claim_earnings_with_shadow_call("octCID", 995, "hfhe_v1|AMT", 0, 500, 24);
+        assert_eq!(got["method"], "claim_earnings");
+        let params = got["params"].as_array().unwrap();
+        assert_eq!(params.len(), 3);
+        assert_eq!(params[2], "hfhe_v1|AMT");
+    }
+
+    #[test]
+    fn shadow_disabled_uses_empty_string_sentinel() {
+        let b = builder();
+        let claim = b.settle_claim_with_shadow_call(0, 0, "", 0, 0, 0);
+        assert_eq!(claim["params"][2], "");
+        let confirm = b.settle_confirm_with_shadow_call(0, 0, 0, "", "", "", 0, 0, 0);
+        assert_eq!(confirm["params"][4], "");
+        assert_eq!(confirm["params"][5], "");
+        let claim_earn = b.claim_earnings_with_shadow_call("x", 0, "", 0, 0, 0);
+        assert_eq!(claim_earn["params"][2], "");
     }
 }

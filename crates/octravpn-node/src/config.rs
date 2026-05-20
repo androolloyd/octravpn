@@ -128,6 +128,23 @@ pub(crate) struct PvacCfg {
     /// `PvacError::Timeout` if no response arrives. Default 30.
     #[serde(default = "default_pvac_request_timeout_secs")]
     pub request_timeout_secs: u64,
+    /// HFHE-2: optional path to the on-disk envelope holding the
+    /// operator's circle PVAC pubkey blob (`hfhe_v1|<base64>`).
+    /// When `enabled = true` AND both `circle_pubkey_path` and
+    /// `circle_secret_path` resolve to readable files at boot, the
+    /// receipt-signing path homomorphically encrypts `bytes_used`
+    /// and `net` under this pubkey and attaches the ciphertext to
+    /// each emitted receipt. When either path is unset OR the file
+    /// does not exist, the shadow blob is `None` on the wire — so
+    /// receipts remain wire-compatible with pre-HFHE-2 operators.
+    #[serde(default)]
+    pub circle_pubkey_path: Option<String>,
+    /// HFHE-2: optional path to the on-disk envelope holding the
+    /// matching circle PVAC secret key (`hfhe_v1|<base64>`). Loaded
+    /// once at boot when both this and `circle_pubkey_path`
+    /// resolve. The secret never leaves the operator process.
+    #[serde(default)]
+    pub circle_secret_path: Option<String>,
 }
 
 impl Default for PvacCfg {
@@ -137,6 +154,8 @@ impl Default for PvacCfg {
             binary_path: default_pvac_binary_path(),
             restart_backoff_ms: default_pvac_restart_backoff_ms(),
             request_timeout_secs: default_pvac_request_timeout_secs(),
+            circle_pubkey_path: None,
+            circle_secret_path: None,
         }
     }
 }

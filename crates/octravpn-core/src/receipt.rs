@@ -149,6 +149,37 @@ pub struct SignedReceipt {
     pub client_sig: Signature,
     pub node_pubkey: PublicKey,
     pub node_sig: Signature,
+    /// HFHE-2 "shadow blob": optional homomorphically-encrypted
+    /// `bytes_used` ciphertext, base64 over the PVAC sidecar's wire
+    /// format (`hfhe_v1|<b64>`). Emitted by the receipt-signing path
+    /// only when the operator has the PVAC sidecar enabled AND the
+    /// circle pubkey loaded; absent otherwise. Travels alongside the
+    /// today's sha256 commitment so that when Octra unblocks
+    /// `fhe_load_pk` the on-chain verify can flip from
+    /// "sha256-equality" to "sha256-AND-HFHE-equality" via a single
+    /// AML-side diff — historical receipts already carry the blob.
+    ///
+    /// **NOT** folded into the signing payload — verifying the
+    /// existing dual-sig MUST keep working unchanged for every
+    /// receipt ever emitted. The encrypted blob is an *additive*
+    /// commitment; integrity is enforced by the ciphertext being
+    /// produced under a public key the chain knows about (the
+    /// `circle_id`'s registered PVAC pubkey).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enc_bytes_used: Option<String>,
+    /// HFHE-2 shadow blob: optional encrypted `net = bytes_used *
+    /// price` value. Same wire format + same emission gating as
+    /// `enc_bytes_used`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enc_net: Option<String>,
+    /// HFHE-2 shadow blob: optional `zkzp_v2|<b64>` zero-proof bound
+    /// to a Pedersen opening of `(bytes_used, blind)`. Emitted by
+    /// the receipt-signing path when the sidecar can produce one;
+    /// the chain-side verifier ignores it until HFHE-3 swaps in the
+    /// AML `fhe_verify` line. Caller-only field — no impact on
+    /// receipt signature validity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pvac_zero_proof: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -201,10 +232,54 @@ impl Receipt {
     }
 }
 
+/// HFHE-2 shadow-blob bundle a receipt may carry in addition to its
+/// today's sha256 commitment. Produced by the operator's
+/// receipt-signing path when `Hub::pvac()` is `Some` AND the circle
+/// pubkey has been loaded at boot. The three fields are `None` on
+/// every path that doesn't have the sidecar wired up — receipts
+/// remain wire-compatible across the schema bump.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ShadowBlob {
+    pub enc_bytes_used: Option<String>,
+    pub enc_net: Option<String>,
+    pub pvac_zero_proof: Option<String>,
+}
+
+impl ShadowBlob {
+    /// Empty bundle — no encrypted fields populated. The receipt
+    /// serialises identically to a pre-HFHE-2 receipt under this
+    /// configuration.
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    /// True iff every field is `None`. Used by the test suite to
+    /// pin "sidecar disabled ⇒ no synthetic data on the wire".
+    pub fn is_empty(&self) -> bool {
+        self.enc_bytes_used.is_none() && self.enc_net.is_none() && self.pvac_zero_proof.is_none()
+    }
+}
+
 impl SignedReceipt {
-    /// Construct a fully-signed receipt. Both the client and the node
-    /// sign the same canonical payload.
+    /// Construct a fully-signed receipt with NO shadow blob. Both
+    /// the client and the node sign the same canonical payload.
+    /// Equivalent to `build_with_shadow(receipt, ..., ShadowBlob::empty())`.
     pub fn build(receipt: Receipt, client_kp: &KeyPair, node_kp: &KeyPair) -> Self {
+        Self::build_with_shadow(receipt, client_kp, node_kp, ShadowBlob::empty())
+    }
+
+    /// Construct a fully-signed receipt and attach the given shadow
+    /// blob. Signatures cover only the (pre-existing) signing
+    /// payload — the blob is wire-additive, never folded into the
+    /// hash. That way verifiers that don't understand HFHE keep
+    /// round-tripping receipts byte-for-byte, and the existing
+    /// dual-sig invariants are untouched.
+    pub fn build_with_shadow(
+        receipt: Receipt,
+        client_kp: &KeyPair,
+        node_kp: &KeyPair,
+        shadow: ShadowBlob,
+    ) -> Self {
         let payload = receipt.signing_payload();
         Self {
             receipt,
@@ -212,7 +287,26 @@ impl SignedReceipt {
             client_sig: client_kp.sign(&payload),
             node_pubkey: node_kp.public,
             node_sig: node_kp.sign(&payload),
+            enc_bytes_used: shadow.enc_bytes_used,
+            enc_net: shadow.enc_net,
+            pvac_zero_proof: shadow.pvac_zero_proof,
         }
+    }
+
+    /// Return the shadow-blob fields as a borrowed bundle. Cheap —
+    /// just three Option<&String> wrapped together. `None` for
+    /// receipts emitted without the sidecar enabled.
+    pub fn shadow(&self) -> ShadowBlob {
+        ShadowBlob {
+            enc_bytes_used: self.enc_bytes_used.clone(),
+            enc_net: self.enc_net.clone(),
+            pvac_zero_proof: self.pvac_zero_proof.clone(),
+        }
+    }
+
+    /// True iff the receipt carries any HFHE-2 shadow blob fields.
+    pub fn has_shadow(&self) -> bool {
+        self.enc_bytes_used.is_some() || self.enc_net.is_some() || self.pvac_zero_proof.is_some()
     }
 
     pub fn verify(&self) -> Result<(), ReceiptError> {
@@ -639,6 +733,183 @@ mod tests {
             Blind::new([0u8; 32]),
         );
         assert_eq!(r.signing_payload().len(), 32);
+    }
+
+    // ====================================================================
+    // HFHE-2 shadow-blob tests.
+    // ====================================================================
+
+    fn sample_receipt() -> Receipt {
+        Receipt::new(
+            ctx_v1(0xAA),
+            SessionId::new([7u8; 32]),
+            3,
+            1_048_576,
+            Blind::new([9u8; 32]),
+        )
+    }
+
+    #[test]
+    fn shadow_blob_absent_by_default() {
+        let sr = SignedReceipt::build(sample_receipt(), &fresh_kp(), &fresh_kp());
+        assert!(!sr.has_shadow());
+        assert!(sr.enc_bytes_used.is_none());
+        assert!(sr.enc_net.is_none());
+        assert!(sr.pvac_zero_proof.is_none());
+        assert!(sr.shadow().is_empty());
+    }
+
+    #[test]
+    fn shadow_blob_empty_equals_no_shadow() {
+        let client = fresh_kp();
+        let node = fresh_kp();
+        let b = SignedReceipt::build(sample_receipt(), &client, &node);
+        let c = SignedReceipt::build_with_shadow(
+            sample_receipt(),
+            &client,
+            &node,
+            ShadowBlob::empty(),
+        );
+        assert!(!b.has_shadow());
+        assert!(!c.has_shadow());
+        assert_eq!(b, c);
+    }
+
+    #[test]
+    fn shadow_blob_present_carries_fields() {
+        let shadow = ShadowBlob {
+            enc_bytes_used: Some("hfhe_v1|AAAA".into()),
+            enc_net: Some("hfhe_v1|BBBB".into()),
+            pvac_zero_proof: Some("zkzp_v2|CCCC".into()),
+        };
+        let sr = SignedReceipt::build_with_shadow(
+            sample_receipt(),
+            &fresh_kp(),
+            &fresh_kp(),
+            shadow.clone(),
+        );
+        assert!(sr.has_shadow());
+        assert_eq!(sr.enc_bytes_used.as_deref(), Some("hfhe_v1|AAAA"));
+        assert_eq!(sr.enc_net.as_deref(), Some("hfhe_v1|BBBB"));
+        assert_eq!(sr.pvac_zero_proof.as_deref(), Some("zkzp_v2|CCCC"));
+        assert_eq!(sr.shadow(), shadow);
+    }
+
+    #[test]
+    fn shadow_blob_does_not_change_signing_payload() {
+        let client = fresh_kp();
+        let node = fresh_kp();
+        let plain = SignedReceipt::build(sample_receipt(), &client, &node);
+        let shadowed = SignedReceipt::build_with_shadow(
+            sample_receipt(),
+            &client,
+            &node,
+            ShadowBlob {
+                enc_bytes_used: Some("hfhe_v1|AAAA".into()),
+                enc_net: Some("hfhe_v1|BBBB".into()),
+                pvac_zero_proof: None,
+            },
+        );
+        plain.verify().unwrap();
+        shadowed.verify().unwrap();
+        assert_eq!(plain.client_sig, shadowed.client_sig);
+        assert_eq!(plain.node_sig, shadowed.node_sig);
+    }
+
+    #[test]
+    fn signed_receipt_with_shadow_json_round_trip() {
+        let sr = SignedReceipt::build_with_shadow(
+            sample_receipt(),
+            &fresh_kp(),
+            &fresh_kp(),
+            ShadowBlob {
+                enc_bytes_used: Some("hfhe_v1|ZZZ".into()),
+                enc_net: Some("hfhe_v1|YYY".into()),
+                pvac_zero_proof: Some("zkzp_v2|XXX".into()),
+            },
+        );
+        let j = serde_json::to_string(&sr).unwrap();
+        let parsed: SignedReceipt = serde_json::from_str(&j).unwrap();
+        parsed.verify().unwrap();
+        assert_eq!(sr, parsed);
+    }
+
+    #[test]
+    fn legacy_signed_receipt_json_deserialises() {
+        let pre_hfhe2 = SignedReceipt::build(sample_receipt(), &fresh_kp(), &fresh_kp());
+        let j = serde_json::to_string(&pre_hfhe2).unwrap();
+        assert!(!j.contains("enc_bytes_used"));
+        assert!(!j.contains("enc_net"));
+        assert!(!j.contains("pvac_zero_proof"));
+        let parsed: SignedReceipt = serde_json::from_str(&j).unwrap();
+        assert!(!parsed.has_shadow());
+        parsed.verify().unwrap();
+        assert_eq!(pre_hfhe2, parsed);
+    }
+
+    #[test]
+    fn explicit_null_shadow_fields_decode_as_none() {
+        let r = sample_receipt();
+        let kp_c = fresh_kp();
+        let kp_n = fresh_kp();
+        let payload = r.signing_payload();
+        let cs = kp_c.sign(&payload);
+        let ns = kp_n.sign(&payload);
+        let j = serde_json::json!({
+            "receipt": r,
+            "client_pubkey": kp_c.public,
+            "client_sig": cs,
+            "node_pubkey": kp_n.public,
+            "node_sig": ns,
+            "enc_bytes_used": serde_json::Value::Null,
+            "enc_net": serde_json::Value::Null,
+            "pvac_zero_proof": serde_json::Value::Null,
+        });
+        let parsed: SignedReceipt = serde_json::from_value(j).unwrap();
+        assert!(!parsed.has_shadow());
+        parsed.verify().unwrap();
+    }
+
+    #[test]
+    fn tampered_shadow_blob_does_not_fail_verify() {
+        let mut sr = SignedReceipt::build_with_shadow(
+            sample_receipt(),
+            &fresh_kp(),
+            &fresh_kp(),
+            ShadowBlob {
+                enc_bytes_used: Some("hfhe_v1|AAAA".into()),
+                enc_net: Some("hfhe_v1|BBBB".into()),
+                pvac_zero_proof: None,
+            },
+        );
+        sr.verify().unwrap();
+        sr.enc_bytes_used = Some("hfhe_v1|ZZZZ".into());
+        sr.enc_net = Some("hfhe_v1|YYYY".into());
+        sr.verify().unwrap();
+    }
+
+    #[test]
+    fn shadow_blob_is_empty_only_when_all_none() {
+        assert!(ShadowBlob::empty().is_empty());
+        assert!(ShadowBlob::default().is_empty());
+        let one = ShadowBlob {
+            enc_bytes_used: Some("x".into()),
+            enc_net: None,
+            pvac_zero_proof: None,
+        };
+        assert!(!one.is_empty());
+        let two = ShadowBlob {
+            enc_bytes_used: None,
+            enc_net: Some("x".into()),
+            pvac_zero_proof: None,
+        };
+        assert!(!two.is_empty());
+        let three = ShadowBlob {
+            enc_bytes_used: None,
+            enc_net: None,
+            pvac_zero_proof: Some("x".into()),
+        };
+        assert!(!three.is_empty());
     }
 
     use proptest::prelude::*;
