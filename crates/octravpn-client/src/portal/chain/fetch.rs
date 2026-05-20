@@ -207,9 +207,38 @@ impl PortalChain {
 }
 
 /// Mirror of `runner::build_rpc` but visible here without making the
-/// runner pub. Pinned-root TLS plumbing is preserved.
+/// runner pub. Pinned-root TLS plumbing is preserved; SPKI pinning is
+/// applied on top when a `oct://...?spki=<base64>` URL is provided to
+/// [`build_rpc_for_oct_url`] (audit-1 H-1).
+#[allow(dead_code)] // legacy callsite kept for back-compat; new code uses build_rpc_for_oct_url
 pub(super) fn build_rpc(cfg: &ClientConfig) -> anyhow::Result<RpcClient> {
+    build_rpc_for_oct_url(cfg, None)
+}
+
+/// Same as [`build_rpc`] but, when `oct_url` carries an `?spki=…`
+/// parameter, installs a [`SpkiPinVerifier`] that gates every TLS
+/// handshake on the leaf cert's `sha256(SubjectPublicKeyInfo)`
+/// matching one of the pinned values. The pin set may carry multiple
+/// entries (comma-separated) for rotation grace; see
+/// `crates/octravpn-core/src/spki_verifier.rs`.
+///
+/// Falls back to the regular CA-pinned path when:
+///   * `oct_url` is `None`
+///   * the URL has no `?spki=` parameter
+///   * the `spki=` value fails to parse (returns `None` from
+///     [`SpkiPinVerifier::parse_pins_from_oct_url`])
+///
+/// This is intentional: a v1 oct:// URL minted before the SPKI-pin
+/// rollout still works against the same chain RPC — operators can
+/// upgrade the chain RPC's TLS cert and old URLs continue to function
+/// (with the original CA-only protection). Once an operator regenerates
+/// URLs with the new pin, the protection upgrades.
+pub(super) fn build_rpc_for_oct_url(
+    cfg: &ClientConfig,
+    oct_url: Option<&str>,
+) -> anyhow::Result<RpcClient> {
     use anyhow::Context as _;
+    use octravpn_core::spki_verifier::SpkiPinVerifier;
     let pinned: Vec<Vec<u8>> = match cfg.chain.pinned_root_paths.as_deref() {
         Some(paths) if !paths.is_empty() => paths
             .iter()
@@ -217,6 +246,19 @@ pub(super) fn build_rpc(cfg: &ClientConfig) -> anyhow::Result<RpcClient> {
             .collect::<anyhow::Result<Vec<_>>>()?,
         _ => Vec::new(),
     };
+    // SPKI pin path — only when the caller passed an oct:// URL AND
+    // the URL has `?spki=<b64>` AND it parses cleanly. Anything else
+    // falls back to CA pinning so legacy URLs keep working.
+    let spki_pins = oct_url.and_then(SpkiPinVerifier::parse_pins_from_oct_url);
+    if let Some(pins) = spki_pins {
+        let pem_roots: Option<&[Vec<u8>]> = if pinned.is_empty() {
+            None
+        } else {
+            Some(&pinned)
+        };
+        return RpcClient::new_with_pinned_spki(cfg.chain.rpc_url.clone(), pem_roots, pins)
+            .map_err(|e| anyhow::anyhow!("spki-pinned rpc client: {e}"));
+    }
     if pinned.is_empty() {
         Ok(RpcClient::new(cfg.chain.rpc_url.clone()))
     } else {

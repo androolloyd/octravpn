@@ -21,6 +21,7 @@ pub mod receipt;
 pub mod receipt_journal;
 pub mod rpc;
 pub mod session;
+pub mod spki_verifier;
 pub mod stealth;
 pub mod v3_calls;
 pub mod v3_canonical;

@@ -192,6 +192,17 @@ impl Hub {
             .with_session_verifier(SessionAdmissionVerifier::new(self.chain.rpc.clone()))
             .with_wire_state(wire_state.as_ref().map(|(ws, _)| ws.clone()))
             .with_shadow_signer(shadow_signer, 0);
+            // Audit-3 H-1: bearer-gated routes no longer leak
+            // token-presence on the wire (every reject reason returns
+            // `(404, NGINX_404_BODY)`), so a misconfigured `/metrics`
+            // looks identical to a non-existent endpoint to an
+            // external scanner. The only way the operator learns about
+            // the misconfiguration is this boot-time warning. Strict
+            // policies (currently `/metrics`) log; hidden policies
+            // (`/events`, `/admin/preauth`) stay silent.
+            state.bearer_metrics().warn_if_unconfigured();
+            state.bearer_admin().warn_if_unconfigured();
+            state.bearer_events().warn_if_unconfigured();
             // If the wire surface is enabled, swap the auto-constructed
             // preauth minter for the one shared with the wire router so
             // both paths see the same store.
