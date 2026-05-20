@@ -1,0 +1,28 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:05.000
+narrator: a guided tour of the headscale CLI surface.
+
+00:00:05.000 --> 00:00:15.000
+narrator: users — the namespace that owns nodes and keys.
+
+00:00:15.000 --> 00:00:25.000
+narrator: preauthkeys — single-use or reusable, scoped to a user.
+
+00:00:25.000 --> 00:00:35.000
+narrator: nodes — every machine that has run tailscale up.
+
+00:00:35.000 --> 00:00:45.000
+narrator: routes — subnets advertised by a peer for split-tunnel reach.
+
+00:00:45.000 --> 00:00:55.000
+narrator: policy — the HUJSON ACL document, set and gotten via CLI.
+
+00:00:55.000 --> 00:01:05.000
+narrator: api-keys — long-lived tokens for ops automation.
+
+00:01:05.000 --> 00:01:15.000
+narrator: every command mirrors the upstream headscale shape 1-for-1.
+
+00:01:15.000 --> 00:01:25.000
+narrator: existing tailscale-ops runbooks transfer with zero rewrites.

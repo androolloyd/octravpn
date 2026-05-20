@@ -1,0 +1,19 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:04.000
+narrator: a portal is booted on loopback to resolve oct:// URLs.
+
+00:00:04.000 --> 00:00:09.000
+narrator: /healthz responds, confirming the resolver is live.
+
+00:00:09.000 --> 00:00:16.000
+narrator: fetching an oct:// asset prints its bytes to stdout.
+
+00:00:16.000 --> 00:00:23.000
+narrator: same asset, saved to disk with the served Content-Type.
+
+00:00:23.000 --> 00:00:27.000
+narrator: the policy file is plain JSON, served from the chain.
+
+00:00:27.000 --> 00:00:35.000
+narrator: an interactive fetch will prompt before opening sealed assets.

@@ -1,0 +1,16 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:06.000
+narrator: replay walks the HMAC-chained audit log plus the receipts.
+
+00:00:06.000 --> 00:00:12.000
+narrator: the same data in JSONL — ready to pipe into jq or splunk.
+
+00:00:12.000 --> 00:00:22.000
+narrator: verify recomputes every HMAC and checks receipt monotonicity.
+
+00:00:22.000 --> 00:00:28.000
+narrator: a zero exit code is what a healthcheck cron pins to.
+
+00:00:28.000 --> 00:00:33.900
+narrator: any tamper would fail verify and surface here.

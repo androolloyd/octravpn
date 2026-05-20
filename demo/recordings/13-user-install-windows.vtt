@@ -1,0 +1,25 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:05.000
+narrator: the windows path — Tailscale MSI from the official download.
+
+00:00:05.000 --> 00:00:15.000
+narrator: the MSI bundles the WinTUN driver and the tailscale service.
+
+00:00:15.000 --> 00:00:25.000
+narrator: after install the tray icon prompts for a login server URL.
+
+00:00:25.000 --> 00:00:35.000
+narrator: paste the operator URL and the preauth key into the dialog.
+
+00:00:35.000 --> 00:00:45.000
+narrator: a UAC prompt confirms the WinTUN driver activation.
+
+00:00:45.000 --> 00:00:55.000
+narrator: tailscale status from PowerShell mirrors the linux output.
+
+00:00:55.000 --> 00:01:05.000
+narrator: ping a peer from cmd.exe — the data plane traverses normally.
+
+00:01:05.000 --> 00:01:15.000
+narrator: the windows host is now a member of the same tailnet.

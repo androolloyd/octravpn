@@ -1,0 +1,22 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:05.000
+narrator: leaving a tailnet — a clean uninstall on each platform.
+
+00:00:05.000 --> 00:00:15.000
+narrator: tailscale logout first, so the operator sees the departure.
+
+00:00:15.000 --> 00:00:25.000
+narrator: apt purge tailscale on linux removes the daemon and CLI.
+
+00:00:25.000 --> 00:00:35.000
+narrator: state lives under /var/lib/tailscale — remove it explicitly.
+
+00:00:35.000 --> 00:00:45.000
+narrator: macOS — brew uninstall and rm the Application Support dir.
+
+00:00:45.000 --> 00:00:55.000
+narrator: windows — the MSI uninstaller plus the per-user state dir.
+
+00:00:55.000 --> 00:01:05.000
+narrator: no on-disk material remains; the preauth key is single-use.
