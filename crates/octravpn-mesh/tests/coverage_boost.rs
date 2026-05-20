@@ -41,8 +41,8 @@ fn doc_with_rules(rules: Vec<AclRule>, groups: BTreeMap<String, Vec<String>>) ->
     AclDoc {
         version: 1,
         groups,
-        tags: BTreeMap::default(),
         rules,
+        ..Default::default()
     }
 }
 
