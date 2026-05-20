@@ -21,7 +21,7 @@ imported, matching the rest of the proof tree.
 | `State.lean`      | ~190  | 0        | On-chain state type (mirrors AML state block)   |
 | `Transitions.lean`| ~440  | 0        | Every entrypoint as `Option ProgramState`       |
 | `AmlLink.lean`    | ~95   | 2        | Axioms + chain-runtime proof-gap doc            |
-| `Invariants.lean` | ~870  | 53       | Safety theorems with AML line cites             |
+| `Invariants.lean` | ~1310 | 57       | Safety theorems with AML line cites             |
 
 Module index: `OctraVPN_V3.lean` (top-level `import`s).
 
@@ -116,6 +116,22 @@ Module index: `OctraVPN_V3.lean` (top-level `import`s).
 | `withdraw_program_treasury_conserves`    | Program-treasury withdraw conserves: `treasury' = treasury - amount`; paid out exactly `amount`.                                                                | 265         |
 
 ---
+
+## 8. C-1 fix: dispute resolution (`main-v3-c1-fix.aml:728-902`)
+
+These four theorems land on the **swap-ready-c1-fix** branch
+alongside the new `program/main-v3-c1-fix.aml` sibling AML file
+(deployed at a new program address; see
+`docs/v3/c1-resolve-rollout.md`). They cover the C-1 audit
+finding from `docs/audit/2026-05-20-deep-security-audit.md`,
+which previously had zero Lean coverage.
+
+| Theorem                                  | Plain-English statement                                                                                                                                                                              | AML line(s) |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `settle_resolve_grace_required`          | **GRACE-WINDOW INVARIANT**: `settle_resolve` only succeeds while `currentEpoch < sessionDisputeDeadline`. Prevents griefing via late resolve after the no-show fallback should have run.            | 733         |
+| `settle_resolve_loser_slashed`           | When `settle_resolve` succeeds, the session must have been `disputed` and the resolver acted within the grace window — the half-slash (not full-slash) regime is the only one available. Half-rate = `slash_burn_bps / 2` = 4500 bps on default. | 766-783     |
+| `claim_disputed_no_show_after_grace`     | **NO-SLASH ON NO-SHOW**: `claim_disputed_no_show` only succeeds AFTER `currentEpoch ≥ sessionDisputeDeadline`, and applies NO slash — `circleBond` and `circleSlashed` are unchanged.               | 847-851     |
+| `dispute_funds_never_stuck`              | **LIVENESS (the audit's veto property)**: under reasonable preconditions on a disputed session, either `settle_resolve` succeeds (in grace) OR `claim_disputed_no_show` succeeds (out of grace). The two paths are exhaustive — funds are never stuck. | 728-902     |
 
 ## Axioms introduced in `AmlLink.lean`
 

@@ -74,11 +74,14 @@ abbrev SessionId := Nat
 abbrev CircleId := Nat
 
 /-- v3 session status mirrors `SESSION_OPEN/SETTLED/REFUNDED`
-    constants at `main-v3.aml:42-44`. -/
+    constants at `main-v3.aml:42-44`. v3.2 (C-1 fix) adds
+    `disputed` for the post-`settle_confirm`-mismatch waiting
+    state — see `main-v3-c1-fix.aml:89` (`SESSION_DISPUTED = 3`). -/
 inductive SessionStatus where
   | open      : SessionStatus
   | settled   : SessionStatus
   | refunded  : SessionStatus
+  | disputed  : SessionStatus
   deriving Repr, DecidableEq
 
 /-- In-flight unbonding record. v3 stores this across two parallel
@@ -139,6 +142,8 @@ structure Params where
   slashBurnBps         : Nat
   slashBountyBps       : Nat
   protocolFeeBps       : Nat
+  /-- v3.2: dispute grace window (epochs). `main-v3-c1-fix.aml:206`. -/
+  disputeGraceEpochs   : Nat
   deriving Repr
 
 /-- v3 `bps` denominator (`BPS_DENOM = 10000` at `main-v3.aml:35`). -/
@@ -175,6 +180,11 @@ structure ProgramState where
   -- Sessions.
   sessionCount             : Nat
   sessions                 : Map SessionId (Option Session)
+
+  /-- v3.2 C-1: dispute grace deadline per session. `0` for any
+      session that has never been in `SessionStatus.disputed`.
+      `main-v3-c1-fix.aml:180`. -/
+  sessionDisputeDeadline   : Map SessionId Epoch
 
   -- Earnings (sha256 hash-chain era).
   circleEarningsTotal      : Map CircleId Nat

@@ -95,4 +95,10 @@ Governance:
   - set_paused_owner_only
   - set_params_owner_only
   - withdraw_program_treasury_conserves
+
+C-1 fix (dispute resolution; `main-v3-c1-fix.aml` sibling AML):
+  - settle_resolve_grace_required
+  - settle_resolve_loser_slashed
+  - claim_disputed_no_show_after_grace
+  - dispute_funds_never_stuck
 -/
