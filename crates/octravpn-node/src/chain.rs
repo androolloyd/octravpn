@@ -20,6 +20,12 @@ pub(crate) struct ChainCtx {
     pub program_addr: Address,
     pub validator_addr: Address,
     pub wallet: KeyPair,
+    /// v2 tx-envelope chain-id binding (P1-5b). The numeric chain id
+    /// from `cfg.chain.chain_id` is stringified into the envelope's
+    /// `chain_id` field at sign time, so a tx signed for one chain
+    /// cannot be replayed on another. Empty/None ⇒ v1 (wallet-compat)
+    /// signing.
+    pub chain_id: String,
 }
 
 /// Inputs to `register_endpoint`. Borrowed so call sites don't have
@@ -257,7 +263,7 @@ impl ChainCtx {
     }
 
     /// Sign a constructed call payload with the wallet key.
-    pub(crate) fn sign_call(&self, call: Value) -> Result<Value> {
+    pub(crate) fn sign_call(&self, mut call: Value) -> Result<Value> {
         // Capture the method name BEFORE signing: `tx::sign_call`
         // translates the legacy `kind:contract_call,method:..` shape
         // into the OctraTx wire envelope, which uses `encrypted_data`
@@ -267,6 +273,15 @@ impl ChainCtx {
             .get("method")
             .and_then(serde_json::Value::as_str)
             .map(str::to_string);
+        // v2 chain-id binding (P1-5b). Attach `chain_id` to the
+        // canonical pre-sign object so the signature commits to the
+        // network identifier. Empty string ⇒ skip (v1 wallet-compat).
+        if !self.chain_id.is_empty() {
+            if let Some(obj) = call.as_object_mut() {
+                obj.entry("chain_id")
+                    .or_insert_with(|| json!(self.chain_id.clone()));
+            }
+        }
         let signed = octravpn_core::tx::sign_call(&self.wallet, call)?;
         info!(method = method.as_deref().unwrap_or("?"), "signed tx");
         Ok(signed)

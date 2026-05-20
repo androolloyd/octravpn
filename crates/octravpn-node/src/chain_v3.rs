@@ -71,6 +71,9 @@ pub(crate) struct ChainCtxV3 {
     /// `register_circle` lands.
     pub wallet_addr: Address,
     pub wallet: KeyPair,
+    /// v2 tx-envelope chain-id binding (P1-5b). See `ChainCtx::chain_id`.
+    /// Empty ⇒ v1 wallet-compat signing.
+    pub chain_id: String,
 }
 
 // The v3 surface is wider than the boot-flow's immediate consumers
@@ -82,12 +85,26 @@ pub(crate) struct ChainCtxV3 {
 #[allow(dead_code)]
 impl ChainCtxV3 {
     pub(crate) fn new(rpc: RpcClient, program_addr: Address, wallet: KeyPair) -> Self {
+        Self::new_with_chain_id(rpc, program_addr, wallet, String::new())
+    }
+
+    /// Variant of [`new`] that pins a v2 chain-id binding for every tx
+    /// signed by this context (P1-5b). Mainnet boots pass
+    /// `"octra-mainnet"`; devnet boots pass `"octra-devnet"`. Empty
+    /// string ⇒ legacy v1 (wallet-compat) signing.
+    pub(crate) fn new_with_chain_id(
+        rpc: RpcClient,
+        program_addr: Address,
+        wallet: KeyPair,
+        chain_id: String,
+    ) -> Self {
         let wallet_addr = Address::from_pubkey(&wallet.public.0);
         Self {
             rpc,
             program_addr,
             wallet_addr,
             wallet,
+            chain_id,
         }
     }
 
@@ -686,7 +703,16 @@ impl ChainCtxV3 {
     /// Sign whatever `Value` we just built. Same `sign_call` the v1.1
     /// and v2 paths use — translates legacy `kind:contract_call`
     /// envelopes to the on-the-wire OctraTx shape.
-    pub(crate) fn sign_call(&self, call: Value) -> Result<Value> {
+    pub(crate) fn sign_call(&self, mut call: Value) -> Result<Value> {
+        // v2 chain-id binding (P1-5b). Splice the configured chain id
+        // into the canonical envelope before signing so the signature
+        // commits to the chain. Empty string ⇒ skip (v1 compat).
+        if !self.chain_id.is_empty() {
+            if let Some(obj) = call.as_object_mut() {
+                obj.entry("chain_id")
+                    .or_insert_with(|| json!(self.chain_id.clone()));
+            }
+        }
         octra_tx::sign_call(&self.wallet, call).map_err(|e| anyhow!("sign_call: {e}"))
     }
 

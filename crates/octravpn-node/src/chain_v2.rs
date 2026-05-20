@@ -80,16 +80,37 @@ pub(crate) struct ChainCtxV2 {
     /// Operator wallet address (becomes `circles[c].owner`).
     pub wallet_addr: Address,
     pub wallet: KeyPair,
+    /// v2 tx-envelope chain-id binding (P1-5b). See `ChainCtx::chain_id`.
+    /// Empty ⇒ v1 wallet-compat signing.
+    pub chain_id: String,
 }
 
 impl ChainCtxV2 {
+    /// v1-shape constructor (no chain-id binding). Retained for the
+    /// in-tree test fixtures + symmetry with `ChainCtxV3::new`;
+    /// production boot routes through `new_with_chain_id`.
+    #[allow(dead_code)]
     pub(crate) fn new(rpc: RpcClient, program_addr: Address, wallet: KeyPair) -> Self {
+        Self::new_with_chain_id(rpc, program_addr, wallet, String::new())
+    }
+
+    /// Variant of [`new`] that pins a v2 chain-id binding for every tx
+    /// signed by this context. Mainnet boots pass `"octra-mainnet"`;
+    /// devnet boots pass `"octra-devnet"`. Empty string ⇒ legacy v1
+    /// (wallet-compat) signing.
+    pub(crate) fn new_with_chain_id(
+        rpc: RpcClient,
+        program_addr: Address,
+        wallet: KeyPair,
+        chain_id: String,
+    ) -> Self {
         let wallet_addr = Address::from_pubkey(&wallet.public.0);
         Self {
             rpc,
             program_addr,
             wallet_addr,
             wallet,
+            chain_id,
         }
     }
 
@@ -312,14 +333,29 @@ impl ChainCtxV2 {
     /// Sign whatever `Value` we just built using the operator wallet
     /// key. Same `sign_call` the v1.1 path uses — translates legacy
     /// `kind:contract_call` shape to the on-the-wire OctraTx envelope.
-    pub(crate) fn sign_call(&self, call: Value) -> Result<Value> {
+    pub(crate) fn sign_call(&self, mut call: Value) -> Result<Value> {
+        // v2 chain-id binding (P1-5b). Splice the configured chain id
+        // into the canonical envelope before signing so the signature
+        // commits to the chain. Empty string ⇒ skip (v1 compat).
+        if !self.chain_id.is_empty() {
+            if let Some(obj) = call.as_object_mut() {
+                obj.entry("chain_id")
+                    .or_insert_with(|| json!(self.chain_id.clone()));
+            }
+        }
         octra_tx::sign_call(&self.wallet, call).map_err(|e| anyhow!("sign_call: {e}"))
     }
 
     /// Sign a pre-shaped OctraTx envelope (e.g. the deploy_circle /
     /// asset_put envelopes which already use `to_`, `amount`, `ou`,
     /// `op_type` and don't need legacy translation).
-    pub(crate) fn sign_envelope(&self, env: Value) -> Result<Value> {
+    pub(crate) fn sign_envelope(&self, mut env: Value) -> Result<Value> {
+        if !self.chain_id.is_empty() {
+            if let Some(obj) = env.as_object_mut() {
+                obj.entry("chain_id")
+                    .or_insert_with(|| json!(self.chain_id.clone()));
+            }
+        }
         octra_tx::sign_call(&self.wallet, env).map_err(|e| anyhow!("sign_envelope: {e}"))
     }
 

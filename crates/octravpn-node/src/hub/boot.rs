@@ -46,19 +46,34 @@ pub(super) async fn build_hub(cfg: NodeConfig) -> Result<Hub> {
     let wallet_v2 = KeyPair::from_secret_bytes(&wallet_secret);
     let wallet_v3 = KeyPair::from_secret_bytes(&wallet_secret);
 
+    // v2 tx-envelope chain-id binding (P1-5b). The numeric
+    // `cfg.chain.chain_id` (u32, e.g. `CHAIN_ID_DEVNET` 0x6F63_7464
+    // = "octd") is exposed at the tx layer as the human-readable
+    // strings the wallet + cast tooling already understand:
+    // mainnet -> "octra-mainnet", devnet -> "octra-devnet". Other
+    // values stringify to "octra-net-<hex>" so a future custom chain
+    // works without code changes.
+    let chain_id_str = chain_id_to_envelope_string(cfg.chain.chain_id);
+
     let chain = ChainCtx {
         rpc: rpc.clone(),
         program_addr: program_addr.clone(),
         validator_addr,
         wallet,
+        chain_id: chain_id_str.clone(),
     };
     // v2 chain context shares the same RPC + program_addr (operators
     // run their v2 program on the same chain, just a different
     // deployed AML). The wallet addr is the deployer.
-    let chain_v2 = ChainCtxV2::new(rpc.clone(), program_addr.clone(), wallet_v2);
+    let chain_v2 = ChainCtxV2::new_with_chain_id(
+        rpc.clone(),
+        program_addr.clone(),
+        wallet_v2,
+        chain_id_str.clone(),
+    );
     // v3 chain context — same wallet, same RPC, talks to the v3
     // deployment configured under `program_addr`.
-    let chain_v3 = ChainCtxV3::new(rpc, program_addr, wallet_v3);
+    let chain_v3 = ChainCtxV3::new_with_chain_id(rpc, program_addr, wallet_v3, chain_id_str);
 
     // The on-disk file holds a single 32-byte master secret. Two
     // independent subkeys are derived via HKDF-Expand with distinct
@@ -180,6 +195,23 @@ pub(super) fn read_secret_32(path: &str) -> Result<[u8; 32]> {
 pub(super) fn read_secret_32_strict(path: &str) -> Result<zeroize::Zeroizing<[u8; 32]>> {
     octravpn_core::util::read_secret_32_or_sealed(path, None)
         .with_context(|| format!("strict-load secret {path}"))
+}
+
+/// Map the u32 `cfg.chain.chain_id` (P1-5 receipt-layer constant) to
+/// the human-readable string the tx-envelope canonical bytes commit to
+/// (P1-5b). Devnet and mainnet have stable names that match what
+/// `octra cast send --chain-id` accepts; other values stringify to
+/// `octra-net-<hex>` so an operator on a custom network doesn't have
+/// to round-trip through this file to add a new constant.
+pub(super) fn chain_id_to_envelope_string(id: u32) -> String {
+    use octravpn_core::receipt::{CHAIN_ID_DEVNET, CHAIN_ID_MAINNET};
+    if id == CHAIN_ID_DEVNET {
+        "octra-devnet".to_string()
+    } else if id == CHAIN_ID_MAINNET {
+        "octra-mainnet".to_string()
+    } else {
+        format!("octra-net-{id:08x}")
+    }
 }
 
 /// Build the RPC client honoring `[chain].pinned_root_paths` if any.
