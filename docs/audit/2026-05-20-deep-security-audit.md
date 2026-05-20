@@ -118,6 +118,27 @@ and the 2026-05-20 audit-prep package (`docs/audit/`).
 - **Lean coverage:** No formal proof — fuzz-only coverage. Property
   `pinned_spki_rejects_mismatch` would be the home for a `cargo
   fuzz` target.
+- **Fixed in commit `__AUDIT1_H1_SHA__`** — new module
+  `crates/octravpn-core/src/spki_verifier.rs` ships a
+  `rustls::client::danger::ServerCertVerifier` that extracts the
+  leaf cert's `SubjectPublicKeyInfo` via a hand-rolled DER walk
+  (`extract_spki_der`), computes `sha256(SPKI)`, and constant-time
+  compares to a pin set parsed out of an
+  `oct://...?spki=<base64>[,<base64>...]` URL by
+  `SpkiPinVerifier::parse_pins_from_oct_url`. On match it defers to
+  a `WebPkiServerVerifier` for chain + hostname validation; on
+  mismatch it returns
+  `rustls::Error::InvalidCertificate(CertificateError::ApplicationVerificationFailure)`
+  before the inner verifier runs. Empty pin set fails closed.
+  Multiple pins are supported for rotation grace. Wired into
+  `crates/octravpn-client/src/portal/chain/fetch.rs::build_rpc_for_oct_url`
+  and called from `commands::open_url`; legacy oct:// URLs without
+  the `spki=` query continue to use CA-bundle pinning, preserving
+  the wire format. Six tests in `spki_verifier::tests` pin: match
+  → accept-and-delegate; mismatch → reject with
+  `ApplicationVerificationFailure`; multi-pin rotation grace; empty
+  pin set rejects; non-cert input rejects without panic;
+  oct-URL pin parsing happy + sad paths.
 
 ### H-2 — obfs4 frame counter uses `wrapping_add` — nonce reuse after 2^64 frames
 

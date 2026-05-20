@@ -354,9 +354,13 @@ impl ControlState {
     // bearer::tests pin the byte-stable response across all of them.
     // -----------------------------------------------------------------
 
-    /// `/metrics` is Strict-policy: 503 + descriptive body when
-    /// unconfigured (operator must see Prometheus scrape failing),
-    /// 401 + empty body for wrong bearer.
+    /// `/metrics` is Strict-policy: post audit-3 H-1 the wire response
+    /// for every reject reason is the same byte-stable
+    /// `(404, NGINX_404_BODY)` as `Hidden`, but the `Strict` label
+    /// causes `BearerCheck::warn_if_unconfigured` (called by
+    /// `Hub::spawn_control_plane` at boot) to log a tracing warning
+    /// so the operator notices a misconfigured Prometheus scrape via
+    /// the node's log rather than via the wire.
     pub(crate) fn bearer_metrics(&self) -> BearerCheck {
         BearerCheck::strict(
             self.metrics_token.clone(),

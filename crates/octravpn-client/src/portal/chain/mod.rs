@@ -99,13 +99,30 @@ pub(crate) struct PortalChain {
 
 impl PortalChain {
     /// Build a v3 context from the loaded `ClientConfig`. Refuses on
-    /// v1.1; accepts v2 or v3.
+    /// v1.1; accepts v2 or v3. CA-bundle pinning only (no SPKI pin).
     pub(crate) fn from_config(cfg: &ClientConfig) -> anyhow::Result<Self> {
+        Self::from_config_for_url(cfg, None)
+    }
+
+    /// Same as [`Self::from_config`] but with an optional `oct://`
+    /// URL. When the URL carries an `?spki=<base64>` parameter, the
+    /// chain RPC client is built with
+    /// [`octravpn_core::spki_verifier::SpkiPinVerifier`] active so the
+    /// TLS handshake is gated on the leaf cert's SPKI sha256 matching
+    /// one of the pinned values (audit-1 H-1). Without the parameter
+    /// the build path is identical to `from_config` (CA-pin or
+    /// system trust). The split exists so the `open_url` command
+    /// can pass the URL through verbatim; long-running flows
+    /// (`portal`, `connect-v3`) use the CA-only path.
+    pub(crate) fn from_config_for_url(
+        cfg: &ClientConfig,
+        oct_url: Option<&str>,
+    ) -> anyhow::Result<Self> {
         Self::require_circle_substrate(cfg)?;
         // The portal itself doesn't sign anything (read-only over RPC),
         // so we don't load the wallet here. `connect_v3` performs the
         // wallet load separately when it actually needs to sign.
-        let rpc = fetch::build_rpc(cfg)?;
+        let rpc = fetch::build_rpc_for_oct_url(cfg, oct_url)?;
         // Resolve the sealed-asset passphrase once at boot. We reuse
         // discover_v2's resolver so env > config precedence stays the
         // same as the v2 connect path. CLI override doesn't apply here

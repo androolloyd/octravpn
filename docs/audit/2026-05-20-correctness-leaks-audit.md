@@ -103,6 +103,19 @@ from active.
 - Proposed fix: unify on `(503, "")` or `(401, "")`. Operator-side
   scrape failure surfaces via the configured-or-not check at scrape
   config time, not by HTTP-body content.
+- **Fixed in commit `__AUDIT3_H1_SHA__`** — `BearerCheck::Strict` and
+  `BearerCheck::Hidden` now share one reject path: `(404,
+  NGINX_404_BODY)` for every reject reason (token unset, header
+  missing, wrong scheme, wrong token). The 503-with-text body became
+  a boot-time `tracing::warn!` log line emitted by
+  `BearerCheck::warn_if_unconfigured`, called by
+  `Hub::spawn_control_plane` for every Strict-policy check.
+  `crates/octravpn-core/src/bearer.rs::tests::bearer_failure_byte_identical_across_all_reject_reasons`
+  pins the byte-stable wire shape across every reject reason
+  (sha256 of body =
+  `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`,
+  the sha256 of the empty string — same as the knock-route 404 the
+  nginx default-page emits).
 
 ### H-2 [LEAK] `Debug` derive on `UpdateBundle` / `BlobUpdate` exposes plaintext blob bytes
 

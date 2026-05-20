@@ -2739,6 +2739,8 @@ dependencies = [
  "proptest",
  "rand 0.8.6",
  "reqwest",
+ "rustls",
+ "rustls-pki-types",
  "serde",
  "serde_json",
  "serde_with",
@@ -2748,6 +2750,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "webpki-roots",
  "x25519-dalek",
  "zeroize",
 ]
