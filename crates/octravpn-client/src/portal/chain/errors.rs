@@ -18,6 +18,7 @@ use thiserror::Error;
 /// the two decrypt-related variants render a dedicated 412 with
 /// passphrase-configuration guidance.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub(crate) enum FetchAssetError {
     /// JSON-RPC transport or response-shape problem. Carries the
     /// underlying anyhow chain for diagnostics — safe to render because

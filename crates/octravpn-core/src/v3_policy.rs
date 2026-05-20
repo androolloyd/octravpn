@@ -99,6 +99,7 @@ pub const WG_PUBKEY_RAW_LEN: usize = 32;
 
 /// Errors surfaced by the v3 `OperatorPolicy` encoder/decoder.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum V3PolicyError {
     #[error("schema version unsupported: got {got}, this build understands {supported}")]
     UnsupportedVersion { got: u32, supported: u32 },

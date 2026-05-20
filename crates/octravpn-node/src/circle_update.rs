@@ -227,6 +227,7 @@ pub(crate) struct UpdateResult {
 
 /// Errors that can short-circuit [`apply`] mid-flight.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub(crate) enum UpdateError {
     #[error("blob put failed for {asset_path}: {source}")]
     BlobPutFailed {

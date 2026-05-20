@@ -519,6 +519,7 @@ impl std::fmt::Display for FileVerifyError {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub(crate) enum FileVerifyErrorKind {
     /// The line's `prev_mac` didn't match what the verifier carried
     /// forward from the previous line (or the all-zeros sentinel for

@@ -34,6 +34,7 @@ const XOR_MAPPED_ADDRESS: u16 = 0x0020;
 const HDR_LEN: usize = 20;
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum StunError {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),

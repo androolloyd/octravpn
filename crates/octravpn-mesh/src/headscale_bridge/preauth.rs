@@ -339,6 +339,7 @@ impl PreauthMinter {
 
 /// Why a `redeem` call rejected a token.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RedeemError {
     /// Token doesn't match any minted key (or was already consumed
     /// once for a non-reusable key).

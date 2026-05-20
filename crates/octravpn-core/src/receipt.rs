@@ -183,6 +183,7 @@ pub struct SignedReceipt {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ReceiptError {
     #[error("non-monotonic seq: prev={prev} new={next}")]
     NonMonotonicSeq { prev: u64, next: u64 },

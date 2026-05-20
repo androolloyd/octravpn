@@ -65,6 +65,7 @@ const TAG_LEN: usize = 16;
 
 /// Errors raised by the framing layer.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum FrameError {
     /// Incoming buffer didn't contain a full frame (couldn't read the
     /// length prefix, or the prefix exceeded the buffer).

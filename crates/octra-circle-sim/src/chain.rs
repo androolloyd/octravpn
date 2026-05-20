@@ -36,6 +36,7 @@ pub enum SessionStatus {
 }
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ChainError {
     #[error("session {0} not found on chain")]
     SessionNotFound(u64),

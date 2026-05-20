@@ -69,6 +69,7 @@ pub const HEX_HASH_LEN: usize = 64;
 
 /// Errors surfaced by the v3 `StateRoot` encoder/decoder.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum StateRootError {
     #[error("schema version unsupported: got {got}, this build understands {supported}")]
     UnsupportedVersion { got: u32, supported: u32 },
