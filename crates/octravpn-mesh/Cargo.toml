@@ -27,6 +27,7 @@ async-trait = { workspace = true }
 base64      = { workspace = true }
 bytes       = { workspace = true }
 hmac        = "0.12"
+ipnet       = "2"
 parking_lot = { workspace = true }
 rand        = { workspace = true }
 serde       = { workspace = true }
