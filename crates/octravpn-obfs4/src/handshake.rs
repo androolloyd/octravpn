@@ -419,4 +419,194 @@ mod tests {
             Err(HandshakeError::TooShort(16))
         ));
     }
+
+    // -------------------------------------------------------------------
+    // 100 random handshakes → matched keys on both sides.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn handshake_round_trip_100_random_identities() {
+        // Stress the DH + KDF + MAC paths with 100 fresh
+        // (client_ephemeral, server_ephemeral, node_id, identity_pubkey)
+        // tuples. Every successful round trip MUST derive matched keys.
+        for i in 0..100 {
+            let (id, creds) = pair();
+            let client = ClientHandshake::start(creds);
+            let c_msg = client.message();
+            let server = ServerHandshake::new(&id);
+            let (s_msg, server_keys) = match server.respond(&c_msg) {
+                Ok(v) => v,
+                Err(e) => panic!("respond iter {i}: {e:?}"),
+            };
+            let client_keys = match client.finalize(&s_msg) {
+                Ok(v) => v,
+                Err(e) => panic!("finalize iter {i}: {e:?}"),
+            };
+            assert_eq!(client_keys.tx_key, server_keys.rx_key, "iter {i}");
+            assert_eq!(client_keys.rx_key, server_keys.tx_key, "iter {i}");
+            assert_ne!(client_keys.tx_key, client_keys.rx_key, "iter {i}");
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // mac1 binding: a flipped bit anywhere in mac1 yields BadMac.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn mac1_tampering_is_rejected() {
+        let (id, creds) = pair();
+        let client = ClientHandshake::start(creds);
+        let mut c_msg = client.message();
+        // Flip a bit inside the mac1 region (offset 32..64).
+        c_msg[40] ^= 0x08;
+        let server = ServerHandshake::new(&id);
+        match server.respond(&c_msg) {
+            Err(HandshakeError::BadMac) => {}
+            Err(other) => panic!("expected BadMac after mac1 tamper, got {other:?}"),
+            Ok(_) => panic!("expected BadMac, got Ok"),
+        }
+    }
+
+    #[test]
+    fn ephemeral_tampering_is_rejected() {
+        // Flipping a byte in the ephemeral pubkey invalidates mac1
+        // (mac1 = HMAC(node_id, prefix || X)).
+        let (id, creds) = pair();
+        let client = ClientHandshake::start(creds);
+        let mut c_msg = client.message();
+        c_msg[5] ^= 0x10; // inside the 32-byte X region
+        let server = ServerHandshake::new(&id);
+        assert!(matches!(server.respond(&c_msg), Err(HandshakeError::BadMac)));
+    }
+
+    // -------------------------------------------------------------------
+    // Padding: lengths bounded by [MIN_PAD, MAX_PAD], visible spread.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn handshake_padding_bounded() {
+        let (_id, creds) = pair();
+        for _ in 0..64 {
+            let c = ClientHandshake::start(creds.clone());
+            let msg = c.message();
+            assert!(msg.len() >= HANDSHAKE_FIXED_LEN + MIN_PAD);
+            assert!(msg.len() <= HANDSHAKE_MAX_LEN);
+        }
+    }
+
+    #[test]
+    fn handshake_padding_has_meaningful_spread() {
+        // 64 trials over 241 possible lengths should produce ≥16
+        // distinct sizes in practice (collision prob is tiny). If this
+        // ever fires, the RNG seam is hosed — investigate.
+        let (_id, creds) = pair();
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..64 {
+            seen.insert(ClientHandshake::start(creds.clone()).message().len());
+        }
+        assert!(
+            seen.len() >= 16,
+            "padding has weak spread: only {} distinct sizes in 64 trials",
+            seen.len()
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // Negative: server reply tampering → BadAuth.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn server_auth_tag_tampering_yields_bad_auth() {
+        let (id, creds) = pair();
+        let client = ClientHandshake::start(creds);
+        let c_msg = client.message();
+        let server = ServerHandshake::new(&id);
+        let (mut s_msg, _sk) = server.respond(&c_msg).unwrap_or_else(|e| panic!("respond: {e:?}"));
+        s_msg[48] ^= 0x40; // flip bit in the 32-byte auth region
+        match client.finalize(&s_msg) {
+            Err(HandshakeError::BadAuth) => {}
+            Err(other) => panic!("expected BadAuth, got {other:?}"),
+            Ok(_) => panic!("expected BadAuth, got Ok"),
+        }
+    }
+
+    #[test]
+    fn server_ephemeral_pubkey_tampering_yields_bad_auth() {
+        // If a MITM substitutes the server ephemeral pubkey Y, the
+        // ecdh_e value on the client side changes and the derived
+        // auth_key differs → BadAuth.
+        let (id, creds) = pair();
+        let client = ClientHandshake::start(creds);
+        let c_msg = client.message();
+        let server = ServerHandshake::new(&id);
+        let (mut s_msg, _sk) = server.respond(&c_msg).unwrap_or_else(|e| panic!("respond: {e:?}"));
+        s_msg[10] ^= 0x01;
+        match client.finalize(&s_msg) {
+            Err(HandshakeError::BadAuth) => {}
+            Err(other) => panic!("expected BadAuth, got {other:?}"),
+            Ok(_) => panic!("expected BadAuth, got Ok"),
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // Short server reply: TooShort.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn short_server_reply_rejected_by_client() {
+        let (_id, creds) = pair();
+        let client = ClientHandshake::start(creds);
+        let res = client.finalize(&[0u8; 32]);
+        assert!(matches!(res, Err(HandshakeError::TooShort(32))));
+    }
+
+    // -------------------------------------------------------------------
+    // Each client handshake uses a fresh ephemeral pubkey.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn client_handshake_ephemeral_pubkeys_are_unique() {
+        let (_id, creds) = pair();
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..32 {
+            let c = ClientHandshake::start(creds.clone());
+            let msg = c.message();
+            let mut pk = [0u8; 32];
+            pk.copy_from_slice(&msg[..32]);
+            assert!(seen.insert(pk), "ephemeral pubkey re-used across handshakes");
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // BridgeIdentity::from_bytes restores the same credentials.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn bridge_identity_from_bytes_round_trips_handshake() {
+        // Generate a bridge, persist its raw bytes, then restore. The
+        // restored identity must produce a valid handshake with a
+        // client holding the original credentials.
+        let id = BridgeIdentity::generate();
+        let node_id = id.node_id;
+        let secret_bytes: [u8; 32] = id.identity_secret.to_bytes();
+        let creds = id.credentials();
+        let restored = BridgeIdentity::from_bytes(node_id, secret_bytes);
+        // Restored identity_pubkey must match.
+        let restored_pk = x25519_dalek::PublicKey::from(&restored.identity_secret);
+        assert_eq!(restored_pk.as_bytes(), creds.identity_pubkey.as_bytes());
+
+        // End-to-end handshake against the restored identity.
+        let client = ClientHandshake::start(creds);
+        let c_msg = client.message();
+        let server = ServerHandshake::new(&restored);
+        let (s_msg, sk) = match server.respond(&c_msg) {
+            Ok(v) => v,
+            Err(e) => panic!("respond: {e:?}"),
+        };
+        let ck = match client.finalize(&s_msg) {
+            Ok(v) => v,
+            Err(e) => panic!("finalize: {e:?}"),
+        };
+        assert_eq!(ck.tx_key, sk.rx_key);
+    }
 }

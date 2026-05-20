@@ -813,4 +813,646 @@ mod tests {
         assert_eq!(got, Some(WG_INIT_LEN));
         assert_eq!(buf, raw); // verbatim
     }
+
+    // -------------------------------------------------------------------
+    // Helpers for the additional coverage block.
+    // -------------------------------------------------------------------
+
+    /// Drive a synthetic recv from a fixed byte buffer through a shield.
+    /// Returns `(returned_len, restored_buf)`.
+    fn recv_one(sh: &mut AmneziaShield, src: &[u8]) -> (Option<usize>, Vec<u8>) {
+        let mut rxbuf = vec![0u8; src.len().max(4)];
+        let mut once = Some(src.to_vec());
+        let got = sh.wrap_recv(&mut rxbuf, |out| {
+            let s = once.take()?;
+            out[..s.len()].copy_from_slice(&s);
+            Some(s.len())
+        });
+        (got, rxbuf)
+    }
+
+    /// Collect every datagram a shield would emit for a single inbound
+    /// payload.
+    fn collect_send(sh: &mut AmneziaShield, dst: SocketAddr, buf: &[u8]) -> Vec<Vec<u8>> {
+        let mut out = Vec::new();
+        sh.wrap_send(dst, buf, |b| out.push(b.to_vec()));
+        out
+    }
+
+    // -------------------------------------------------------------------
+    // Validate: positive cases + boundary checks.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn validate_accepts_h_at_canonical_slot_only() {
+        // h1==1 OK (canonical at slot 1), h2==2 OK, etc., as long as
+        // overall pairwise distinct. Identity passes.
+        assert!(AmneziaConfig::default().validate().is_ok());
+
+        // h2==1 (canonical for h1, not for h2) must be rejected.
+        let c = AmneziaConfig {
+            h2: 1,
+            ..AmneziaConfig::default()
+        };
+        // collides with h1==1
+        assert!(c.validate().is_err());
+
+        // h1==2 (h2's canonical) — must be rejected (out-of-range non-canonical).
+        let c = AmneziaConfig {
+            h1: 2,
+            ..AmneziaConfig::default()
+        };
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_zero_jmin_with_nonzero_jc() {
+        let mut c = nonid_cfg();
+        c.jmin = 0;
+        c.jmax = 10;
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_jmax_above_cap() {
+        let mut c = nonid_cfg();
+        c.jmax = MAX_JUNK + 1;
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_s1_above_cap() {
+        let mut c = nonid_cfg();
+        c.s1 = MAX_PREFIX + 1;
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_h_below_min() {
+        let mut c = nonid_cfg();
+        c.h1 = 4; // <5 and not canonical at slot 1
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn validate_accepts_h_at_upper_range() {
+        let mut c = nonid_cfg();
+        c.h1 = 2_147_483_647;
+        c.h2 = 2_147_483_646;
+        c.h3 = 2_147_483_645;
+        c.h4 = 2_147_483_644;
+        c.validate().expect("upper bound is inclusive");
+    }
+
+    #[test]
+    fn validate_rejects_h_above_max() {
+        let mut c = nonid_cfg();
+        c.h1 = 2_147_483_648; // 2^31, off the top
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn validate_accepts_jmin_eq_jmax() {
+        let mut c = nonid_cfg();
+        c.jmin = 50;
+        c.jmax = 50;
+        c.validate().expect("equal bounds must be allowed");
+    }
+
+    #[test]
+    fn validate_accepts_jc_at_max() {
+        let mut c = nonid_cfg();
+        c.jc = MAX_JC;
+        c.validate().expect("jc==MAX_JC must be accepted");
+    }
+
+    // -------------------------------------------------------------------
+    // Edge cases on wrap_send.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn wrap_send_short_buf_passes_through() {
+        // buf < 4 bytes: not a valid WG frame; shield must pass through
+        // unmodified (after junk burst, which we burn first).
+        let mut c = nonid_cfg();
+        c.jc = 0;
+        let mut sh = AmneziaShield::new(c).unwrap();
+        let dst: SocketAddr = "127.0.0.1:9".parse().unwrap();
+        let pkt = [0xAA, 0xBB, 0xCC];
+        let out = collect_send(&mut sh, dst, &pkt);
+        assert_eq!(out, vec![pkt.to_vec()]);
+    }
+
+    #[test]
+    fn wrap_send_unknown_msg_type_passes_through() {
+        let mut c = nonid_cfg();
+        c.jc = 0;
+        let mut sh = AmneziaShield::new(c).unwrap();
+        let dst: SocketAddr = "127.0.0.1:9".parse().unwrap();
+        // msg-type 0xFFFFFFFF is not in {1,2,3,4}, so wrap_send must
+        // not rewrite the header.
+        let mut pkt = vec![0u8; 32];
+        pkt[..4].copy_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
+        pkt[5] = 0x77;
+        let out = collect_send(&mut sh, dst, &pkt);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0], pkt);
+    }
+
+    #[test]
+    fn jc_zero_emits_no_junk_burst() {
+        let mut c = nonid_cfg();
+        c.jc = 0;
+        let mut sh = AmneziaShield::new(c).unwrap();
+        let dst: SocketAddr = "127.0.0.1:9".parse().unwrap();
+        let mut init = vec![0u8; WG_INIT_LEN];
+        init[..4].copy_from_slice(&WG_MSG_INIT.to_le_bytes());
+        let out = collect_send(&mut sh, dst, &init);
+        // Exactly one datagram (the substituted init).
+        assert_eq!(out.len(), 1, "jc=0 must suppress the burst entirely");
+    }
+
+    #[test]
+    fn s1_zero_emits_no_prefix_on_init() {
+        let mut c = nonid_cfg();
+        c.s1 = 0;
+        c.jc = 0;
+        let mut sh = AmneziaShield::new(c).unwrap();
+        let dst: SocketAddr = "127.0.0.1:9".parse().unwrap();
+        let mut init = vec![0u8; WG_INIT_LEN];
+        init[..4].copy_from_slice(&WG_MSG_INIT.to_le_bytes());
+        let out = collect_send(&mut sh, dst, &init);
+        assert_eq!(out.len(), 1);
+        // Length unchanged (no prefix), header is h1.
+        assert_eq!(out[0].len(), WG_INIT_LEN);
+        let hdr = u32::from_le_bytes([out[0][0], out[0][1], out[0][2], out[0][3]]);
+        assert_eq!(hdr, c.h1);
+    }
+
+    #[test]
+    fn s2_zero_emits_no_prefix_on_response() {
+        let mut c = nonid_cfg();
+        c.s2 = 0;
+        c.jc = 0;
+        let mut sh = AmneziaShield::new(c).unwrap();
+        let dst: SocketAddr = "127.0.0.1:9".parse().unwrap();
+        let mut resp = vec![0u8; WG_RESPONSE_LEN];
+        resp[..4].copy_from_slice(&WG_MSG_RESPONSE.to_le_bytes());
+        let out = collect_send(&mut sh, dst, &resp);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].len(), WG_RESPONSE_LEN);
+    }
+
+    #[test]
+    fn junk_burst_emits_exactly_jc_packets_in_order() {
+        // Run with jmin==jmax so we can verify exact sizes.
+        let mut c = nonid_cfg();
+        c.jc = 5;
+        c.jmin = 33;
+        c.jmax = 33;
+        let mut sh = AmneziaShield::new(c).unwrap();
+        let dst: SocketAddr = "127.0.0.1:9".parse().unwrap();
+        let mut pkt = vec![0u8; 32];
+        pkt[..4].copy_from_slice(&WG_MSG_TRANSPORT.to_le_bytes());
+        let out = collect_send(&mut sh, dst, &pkt);
+        // jc=5 junk pkts + 1 real = 6 datagrams.
+        assert_eq!(out.len(), 6, "must be jc + 1");
+        // First 5 are 33-byte random junk.
+        for j in &out[..5] {
+            assert_eq!(j.len(), 33);
+        }
+        // The 6th must NOT be junk-shaped: it's the substituted transport
+        // packet, length 32.
+        assert_eq!(out[5].len(), 32);
+        let hdr = u32::from_le_bytes([out[5][0], out[5][1], out[5][2], out[5][3]]);
+        assert_eq!(hdr, c.h4);
+    }
+
+    #[test]
+    fn junk_burst_emitted_once_per_destination() {
+        let mut c = nonid_cfg();
+        c.jc = 3;
+        c.jmin = 10;
+        c.jmax = 10;
+        let mut sh = AmneziaShield::new(c).unwrap();
+        let dst_a: SocketAddr = "127.0.0.1:11".parse().unwrap();
+        let dst_b: SocketAddr = "127.0.0.1:12".parse().unwrap();
+        let mut pkt = vec![0u8; 16];
+        pkt[..4].copy_from_slice(&WG_MSG_TRANSPORT.to_le_bytes());
+
+        // First send to A: burst + real = 4
+        let out_a1 = collect_send(&mut sh, dst_a, &pkt);
+        assert_eq!(out_a1.len(), 4);
+        // Second send to A: no burst, just real = 1
+        let out_a2 = collect_send(&mut sh, dst_a, &pkt);
+        assert_eq!(out_a2.len(), 1, "junk must NOT re-burst on the same dst");
+        // Send to B (new dst): burst + real = 4
+        let out_b1 = collect_send(&mut sh, dst_b, &pkt);
+        assert_eq!(out_b1.len(), 4, "junk must burst once per dst");
+    }
+
+    #[test]
+    fn near_mtu_buf_round_trips_through_init_path() {
+        // s1 prefix + WG_INIT_LEN sits comfortably under typical MTU
+        // (1500). Verify the round-trip still restores the original
+        // payload correctly even when the original buf is large.
+        let mut c = nonid_cfg();
+        c.jc = 0;
+        c.s1 = 20;
+        let mut tx = AmneziaShield::new(c).unwrap();
+        let mut rx = AmneziaShield::new(c).unwrap();
+        let dst: SocketAddr = "127.0.0.1:9".parse().unwrap();
+
+        // Use a longer-than-handshake "init"-tagged payload to stress
+        // the buf.copy_within path on a large slice.
+        let mut payload = vec![0u8; 1280];
+        payload[..4].copy_from_slice(&WG_MSG_INIT.to_le_bytes());
+        for (i, b) in payload.iter_mut().enumerate().skip(4) {
+            *b = (i as u8).wrapping_mul(3).wrapping_add(7);
+        }
+        let emitted = collect_send(&mut tx, dst, &payload);
+        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted[0].len(), payload.len() + c.s1 as usize);
+
+        let (got, rxbuf) = recv_one(&mut rx, &emitted[0]);
+        assert_eq!(got, Some(payload.len()));
+        assert_eq!(&rxbuf[..payload.len()], payload.as_slice());
+    }
+
+    #[test]
+    fn oversized_recv_buf_still_strips_to_correct_length() {
+        // The recv path reuses the inbound buffer in-place; if buf
+        // length > received-n, the extra trailing bytes must NOT
+        // affect the returned length.
+        let mut c = nonid_cfg();
+        c.jc = 0;
+        let mut tx = AmneziaShield::new(c).unwrap();
+        let mut rx = AmneziaShield::new(c).unwrap();
+        let dst: SocketAddr = "127.0.0.1:9".parse().unwrap();
+        let mut init = vec![0u8; WG_INIT_LEN];
+        init[..4].copy_from_slice(&WG_MSG_INIT.to_le_bytes());
+        init[100] = 0x5A;
+        let emitted = collect_send(&mut tx, dst, &init);
+        // Pad the rxbuf well past the datagram.
+        let mut rxbuf = vec![0xCCu8; emitted[0].len() + 256];
+        let raw = emitted[0].clone();
+        let raw_len = raw.len();
+        let mut once = Some(raw);
+        let got = rx.wrap_recv(&mut rxbuf, |out| {
+            let s = once.take()?;
+            out[..s.len()].copy_from_slice(&s);
+            Some(s.len())
+        });
+        assert_eq!(got, Some(WG_INIT_LEN));
+        // The bytes BEYOND the returned length stayed at 0xCC sentinel
+        // (we must not overwrite past raw_len during copy_within).
+        // copy_within is intra-buffer, so bytes beyond `raw_len` are
+        // untouched; assert that.
+        for b in &rxbuf[raw_len..] {
+            assert_eq!(*b, 0xCC);
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // Negative recv: garbage that looks like a magic match but fails
+    // structural rules.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn h1_at_offset_zero_is_rejected_when_s1_nonzero() {
+        // If a probe forges h1 magic at offset 0 (instead of offset s1
+        // where a real init would have it), the shield must treat it
+        // as junk — that magic only counts when correctly aligned.
+        let cfg = nonid_cfg();
+        let mut sh = AmneziaShield::new(cfg).unwrap();
+        // Build a packet whose leading 4 bytes ARE h1 but no prefix,
+        // and whose buf[s1..s1+4] is NOT h1.
+        let mut buf = vec![0u8; WG_INIT_LEN + cfg.s1 as usize];
+        buf[..4].copy_from_slice(&cfg.h1.to_le_bytes());
+        // Make sure offset s1 doesn't accidentally hit h1.
+        buf[cfg.s1 as usize] = 0xDE;
+        buf[cfg.s1 as usize + 1] = 0xAD;
+        buf[cfg.s1 as usize + 2] = 0xBE;
+        buf[cfg.s1 as usize + 3] = 0xEF;
+        let (got, _) = recv_one(&mut sh, &buf);
+        // h1 sits at offset-0 → no match against h3/h4 (cookie/transport)
+        // because cfg.h3 and cfg.h4 are different values. Offset s1
+        // doesn't hit h1 either, and offset s2 doesn't hit h2 (by
+        // construction). So this must drop as junk.
+        assert_eq!(got, None);
+    }
+
+    #[test]
+    fn truncated_packet_with_valid_h1_at_zero_drops() {
+        // Length < 4 → recv path returns None.
+        let cfg = nonid_cfg();
+        let mut sh = AmneziaShield::new(cfg).unwrap();
+        let buf = vec![0xAAu8; 3];
+        let (got, _) = recv_one(&mut sh, &buf);
+        assert_eq!(got, None);
+    }
+
+    #[test]
+    fn all_zero_buf_drops_as_junk_under_nonid_cfg() {
+        let cfg = nonid_cfg();
+        let mut sh = AmneziaShield::new(cfg).unwrap();
+        let buf = vec![0u8; 64];
+        let (got, _) = recv_one(&mut sh, &buf);
+        // 0u32 LE != any of h1..h4 (all nonzero in nonid_cfg).
+        assert_eq!(got, None);
+    }
+
+    #[test]
+    fn cookie_path_no_prefix_round_trip() {
+        let cfg = nonid_cfg();
+        let mut tx = AmneziaShield::new(cfg).unwrap();
+        let mut rx = AmneziaShield::new(cfg).unwrap();
+        let dst: SocketAddr = "127.0.0.1:9".parse().unwrap();
+        // Burn the junk burst by emitting a transport packet first.
+        let mut warm = vec![0u8; 8];
+        warm[..4].copy_from_slice(&WG_MSG_TRANSPORT.to_le_bytes());
+        let _ = collect_send(&mut tx, dst, &warm);
+
+        let mut cookie = vec![0u8; 64];
+        cookie[..4].copy_from_slice(&WG_MSG_COOKIE.to_le_bytes());
+        cookie[20] = 0x42;
+        let emitted = collect_send(&mut tx, dst, &cookie);
+        assert_eq!(emitted.len(), 1);
+        // No s-prefix on cookie — wire length matches input.
+        assert_eq!(emitted[0].len(), 64);
+        let (got, rxbuf) = recv_one(&mut rx, &emitted[0]);
+        assert_eq!(got, Some(64));
+        assert_eq!(
+            u32::from_le_bytes([rxbuf[0], rxbuf[1], rxbuf[2], rxbuf[3]]),
+            WG_MSG_COOKIE
+        );
+        assert_eq!(rxbuf[20], 0x42);
+    }
+
+    // -------------------------------------------------------------------
+    // Proptests: random configs + random WG-shaped payloads.
+    // -------------------------------------------------------------------
+
+    proptest! {
+        /// Arbitrary VALID configs never panic on encode/decode of a
+        /// canonical WG init.
+        #[test]
+        fn prop_valid_cfg_roundtrips_wg_init(
+            jc in 0u8..=10,
+            jmin_jmax in 1u16..=128,
+            s1 in 0u16..=200,
+            s2 in 0u16..=200,
+            h1 in 5u32..=2_147_483_647,
+            h2 in 5u32..=2_147_483_647,
+            h3 in 5u32..=2_147_483_647,
+            h4 in 5u32..=2_147_483_647,
+        ) {
+            // Force pairwise-distinct h1..h4 — easy way: nudge with offsets.
+            // We can't use prop_assume! exhaustively here so just compute
+            // distinct values by shifting up by index.
+            let h2 = h2.wrapping_add(1).max(5);
+            let h3 = h3.wrapping_add(2).max(5);
+            let h4 = h4.wrapping_add(3).max(5);
+            prop_assume!(h1 != h2 && h1 != h3 && h1 != h4
+                         && h2 != h3 && h2 != h4 && h3 != h4);
+            // Skip values that collide with canonical msg-types at
+            // non-canonical slots.
+            prop_assume!(![h1, h2, h3, h4].iter().any(|v| (1..=4).contains(v)));
+            let cfg = AmneziaConfig {
+                jc, jmin: jmin_jmax, jmax: jmin_jmax,
+                s1, s2, h1, h2, h3, h4,
+            };
+            prop_assume!(cfg.validate().is_ok());
+            let mut tx = AmneziaShield::new(cfg).unwrap();
+            let mut rx = AmneziaShield::new(cfg).unwrap();
+            let dst: SocketAddr = "127.0.0.1:9".parse().unwrap();
+            let mut init = vec![0u8; WG_INIT_LEN];
+            init[..4].copy_from_slice(&WG_MSG_INIT.to_le_bytes());
+            init[20] = 0x7E;
+            let mut out: Vec<Vec<u8>> = Vec::new();
+            tx.wrap_send(dst, &init, |b| out.push(b.to_vec()));
+            // jc junk packets first (if any), then the real packet.
+            prop_assert_eq!(out.len(), jc as usize + 1);
+            let real = out.last().unwrap();
+            // recv: drop the junk first (each yields None), then accept
+            // the real one.
+            for j in &out[..jc as usize] {
+                let (g, _) = recv_one(&mut rx, j);
+                // junk *may* coincidentally hit a magic at random — that
+                // is a real probability if h-values are tiny. Tolerate
+                // either None or Some(_) here, the test is about the
+                // real packet.
+                let _ = g;
+            }
+            let (got, rxbuf) = recv_one(&mut rx, real);
+            prop_assert_eq!(got, Some(WG_INIT_LEN));
+            prop_assert_eq!(
+                u32::from_le_bytes([rxbuf[0], rxbuf[1], rxbuf[2], rxbuf[3]]),
+                WG_MSG_INIT
+            );
+            prop_assert_eq!(rxbuf[20], 0x7E);
+        }
+
+        /// Wire compat: 100 random WG-handshake-init buffers wrapped
+        /// then stripped equal the original bytes.
+        #[test]
+        fn prop_random_wg_payloads_wrap_then_strip(
+            payload in proptest::collection::vec(any::<u8>(), 8..256),
+        ) {
+            let cfg = nonid_cfg();
+            let mut tx = AmneziaShield::new(cfg).unwrap();
+            let mut rx = AmneziaShield::new(cfg).unwrap();
+            let dst: SocketAddr = "127.0.0.1:9".parse().unwrap();
+            // Tag the payload as a WG init.
+            let mut p = payload;
+            p[..4].copy_from_slice(&WG_MSG_INIT.to_le_bytes());
+            // Burn junk on a different dst so the real packet is the
+            // first emitted to this dst (cleaner).
+            let mut emitted: Vec<Vec<u8>> = Vec::new();
+            tx.wrap_send(dst, &p, |b| emitted.push(b.to_vec()));
+            let real = emitted.last().cloned().unwrap();
+            // Drop junk on rx side.
+            for j in &emitted[..emitted.len() - 1] {
+                let _ = recv_one(&mut rx, j);
+            }
+            let (got, rxbuf) = recv_one(&mut rx, &real);
+            prop_assert_eq!(got, Some(p.len()));
+            prop_assert_eq!(&rxbuf[..p.len()], p.as_slice());
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // Concurrent: two shields on a shared (cloned) UDP socket.
+    // -------------------------------------------------------------------
+
+    /// Two senders + two receivers on a shared loopback exchange many
+    /// real WG-shaped frames in parallel. Verifies that the shield's
+    /// per-dst junk-tracking + restoration logic is independently
+    /// correct under concurrent traffic.
+    #[tokio::test]
+    async fn concurrent_round_trip_many_frames() {
+        use std::sync::Arc;
+        use tokio::net::UdpSocket;
+        use tokio::sync::Mutex;
+
+        let a = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let b = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let a_addr = a.local_addr().unwrap();
+        let b_addr = b.local_addr().unwrap();
+        // Tiny jc to keep the test fast.
+        let mut cfg = nonid_cfg();
+        cfg.jc = 1;
+        cfg.jmin = 8;
+        cfg.jmax = 8;
+        let sh_a = Arc::new(Mutex::new(AmneziaShield::new(cfg).unwrap()));
+        let sh_b = Arc::new(Mutex::new(AmneziaShield::new(cfg).unwrap()));
+
+        const N: usize = 64;
+        let send_task = {
+            let a = a.clone();
+            let sh_a = sh_a.clone();
+            tokio::spawn(async move {
+                for i in 0..N {
+                    let mut payload = vec![0u8; 64];
+                    payload[..4].copy_from_slice(&WG_MSG_TRANSPORT.to_le_bytes());
+                    payload[7] = i as u8;
+                    let mut bufs: Vec<Vec<u8>> = Vec::new();
+                    sh_a
+                        .lock()
+                        .await
+                        .wrap_send(b_addr, &payload, |b| bufs.push(b.to_vec()));
+                    for d in &bufs {
+                        a.send_to(d, b_addr).await.unwrap();
+                    }
+                }
+            })
+        };
+
+        let mut got = std::collections::HashSet::new();
+        let mut rxbuf = vec![0u8; 4096];
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
+        while got.len() < N && tokio::time::Instant::now() < deadline {
+            // Try to drain whatever's been delivered.
+            let res = tokio::time::timeout(std::time::Duration::from_millis(50), async {
+                b.recv_from(&mut rxbuf).await
+            })
+            .await;
+            let Ok(Ok((n, _src))) = res else { continue };
+            // Feed it through sh_b's wrap_recv synchronously.
+            let mut local = vec![0u8; n];
+            local.copy_from_slice(&rxbuf[..n]);
+            let mut buf = local.clone();
+            let mut once = Some(local);
+            let g = sh_b.lock().await.wrap_recv(&mut buf, |out| {
+                let s = once.take()?;
+                out[..s.len()].copy_from_slice(&s);
+                Some(s.len())
+            });
+            if let Some(sz) = g {
+                // Restored sentinel index 7 carries the iteration number.
+                if sz >= 8 {
+                    let hdr = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
+                    if hdr == WG_MSG_TRANSPORT {
+                        got.insert(buf[7]);
+                    }
+                }
+            }
+        }
+        send_task.await.unwrap();
+        // We expect every sentinel value to surface. Loopback can drop
+        // some on heavy bursts, so be generous: at least 80%.
+        assert!(
+            got.len() >= (N * 4) / 5,
+            "got {}/{} sentinel-tagged frames; concurrent path may be losing payloads",
+            got.len(),
+            N
+        );
+        let _ = a_addr;
+    }
+
+    // -------------------------------------------------------------------
+    // Bypass: outbound msg-type 0 (unknown) is passed unchanged through
+    // junk burst (junk still happens) and the restored msg-type rules.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn outbound_unknown_msg_type_skips_substitution_but_burns_junk() {
+        // Unknown msg-type passes through, but the *first* call to a
+        // new dst still emits the junk burst (because the burst gate
+        // fires before msg-type inspection).
+        let cfg = nonid_cfg();
+        let mut sh = AmneziaShield::new(cfg).unwrap();
+        let dst: SocketAddr = "127.0.0.1:9".parse().unwrap();
+        let mut pkt = vec![0u8; 32];
+        pkt[..4].copy_from_slice(&0xDEADu32.to_le_bytes());
+        let out = collect_send(&mut sh, dst, &pkt);
+        // jc junk + 1 unchanged real
+        assert_eq!(out.len(), cfg.jc as usize + 1);
+        assert_eq!(out.last().unwrap(), &pkt);
+    }
+
+    // -------------------------------------------------------------------
+    // Identity recv with sub-4-byte buf: returns the (under-4) length.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn identity_recv_short_buf_returns_under_four_bytes() {
+        let mut sh = AmneziaShield::new(AmneziaConfig::default()).unwrap();
+        let mut buf = [0u8; 4];
+        let got = sh.wrap_recv(&mut buf, |_b| Some(2));
+        // Identity path doesn't enforce the n>=4 rule (it bypasses).
+        assert_eq!(got, Some(2));
+    }
+
+    #[test]
+    fn nonid_recv_short_buf_returns_none() {
+        let cfg = nonid_cfg();
+        let mut sh = AmneziaShield::new(cfg).unwrap();
+        let mut buf = [0u8; 4];
+        // recv reports n=2 (under-four). Non-identity must reject.
+        let got = sh.wrap_recv(&mut buf, |_b| Some(2));
+        assert_eq!(got, None);
+    }
+
+    #[test]
+    fn recv_closure_returning_none_propagates() {
+        let cfg = nonid_cfg();
+        let mut sh = AmneziaShield::new(cfg).unwrap();
+        let mut buf = [0u8; 64];
+        let got = sh.wrap_recv(&mut buf, |_b| None);
+        assert_eq!(got, None);
+    }
+
+    #[test]
+    fn config_accessor_returns_active_config() {
+        let cfg = nonid_cfg();
+        let sh = AmneziaShield::new(cfg).unwrap();
+        // The shield exposes its config via `config()`; ensure it
+        // matches the one we constructed it with.
+        assert_eq!(sh.config().h1, cfg.h1);
+        assert_eq!(sh.config().s1, cfg.s1);
+        assert_eq!(sh.config().jc, cfg.jc);
+    }
+
+    #[test]
+    fn deserialize_default_yields_identity() {
+        // Serde-default path: an empty TOML table must produce the
+        // identity config (off-by-default ergonomics).
+        let cfg: AmneziaConfig = toml::from_str("").unwrap();
+        assert!(cfg.is_identity());
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn deserialize_partial_keeps_canonical_h() {
+        // jc=2,jmin=10,jmax=20,s1=5,s2=6 but no h-overrides → keep
+        // canonical h's (still identity-eligible only if all knobs are
+        // off; here jc>0 so it's NOT identity but h's are canonical).
+        let cfg: AmneziaConfig =
+            toml::from_str("jc = 2\njmin = 10\njmax = 20\ns1 = 5\ns2 = 6\n").unwrap();
+        assert_eq!(cfg.jc, 2);
+        assert_eq!(cfg.h1, WG_MSG_INIT);
+        assert_eq!(cfg.h4, WG_MSG_TRANSPORT);
+        assert!(!cfg.is_identity()); // jc>0 disqualifies
+    }
 }
