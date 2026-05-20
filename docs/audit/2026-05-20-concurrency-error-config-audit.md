@@ -167,7 +167,7 @@ and panic crash dumps.
   diff per file. Confirm no in-workspace exhaustive matches on a
   sibling crate's enum break (a couple of test sites do — they need
   wildcard arms).
-- Fixed in commit _(see worktree branch)_: `#[non_exhaustive]` added
+- Fixed in commit `f8ae96d`: `#[non_exhaustive]` added
   to all 17 error/error-like enums in this workspace
   (`OnionError`, `ReceiptError`, `JournalError`, `V3PolicyError`,
   `V3MembersError`, `StateRootError`, `MeshError`, `StunError`,
