@@ -12,6 +12,13 @@ octra-core  = { path = "../../../octra-foundry/crates/octra-core" }
 
 anyhow      = { workspace = true }
 async-trait = { workspace = true }
+# Used by `bearer.rs` so the bearer-auth check has access to
+# `HeaderMap`, `StatusCode`, and `IntoResponse`. The module is the
+# single canonical source of bearer-gated 401 / 404 / 503 response
+# shapes used by every control-plane HTTP route across the workspace
+# (octravpn-node `/metrics`, `/events`, `/admin/preauth`; future
+# octravpn-analytics consolidations).
+axum        = { workspace = true }
 base64      = { workspace = true }
 ed25519-dalek = { workspace = true }
 hex         = { workspace = true }
