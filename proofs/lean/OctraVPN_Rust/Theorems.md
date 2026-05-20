@@ -162,6 +162,158 @@ Theorem count: 7.
 
 ---
 
+## 5. `OctraVPN_Rust.AuditLog`
+
+HMAC-chained, tamper-evident audit-log model.  Mirrors
+`crates/octravpn-node/src/audit.rs`.  Models the `chain_step` +
+`verify_file` algebraic core; JSON/serde/tokio scheduling are
+delegated to the Rust proptest harnesses at the bottom of that file.
+
+| Theorem                                  | Plain-English statement                                                                                              |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `honest_chain_link`                      | Two consecutive honest lines are chained: line N+1's `prev_mac` equals line N's `mac`.                               |
+| `verify_accepts_honest`                  | A chain produced by `writeHonest` from any starting `prev` is accepted by the recursive verifier.                    |
+| `verify_file_accepts_honest`             | Top-level entry: an honest daily file always verifies cleanly.                                                       |
+| `tamper_prev_mac_detected`               | Flipping the `prev_mac` field on any line yields a `failedAt` with the exact line number + claimed/expected MACs.    |
+| `tamper_record_detected`                 | Flipping any byte in `record_json` (keeping prev_mac + mac intact) yields a MAC mismatch at that line.               |
+| `per_day_chain_resets`                   | A new daily file resets the chain to the zero sentinel; cross-file chain breaks do not propagate.                    |
+| `verify_completeness_honest`             | If `verifyFile` returns `ok n` on an honest file, `n` equals the file's line count (no skipped verification).        |
+| `signed_seqs_roundtrip`                  | `parseSignedSeq (serializeSignedSeq r) = some r` for every record (`record_receipt_signed` round-trip).              |
+| `signed_seqs_harvest_complete`           | The harvested `(sessionId, seq)` set equals the projection of the input record set.                                  |
+| `first_error_localisation`               | Honest chains have no `failedAt` outcome — `verifyFile` either succeeds or localises the FIRST broken line.          |
+
+Axioms introduced in `AuditLog.lean`:
+
+- `HmacSha256.injective_on_chain` — HMAC-SHA256 chain step is
+  injective on its `(prev_mac, record_bytes)` pair under a fixed
+  key.  Standard PRF security assumption.
+- `serializeSignedSeq_injective`, `parseSignedSeq_inverts` —
+  round-trip property of the canonical `record_receipt_signed`
+  serialiser, mirrors `serde_json` exercised by Rust proptest.
+
+Theorem count: 10.
+
+---
+
+## 6. `OctraVPN_Rust.ReceiptJournal`
+
+Append-only v1 journal model with v0 migration + compaction.
+Mirrors `crates/octravpn-core/src/receipt_journal.rs`.
+
+| Theorem                                  | Plain-English statement                                                                                              |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `fresh_floor_zero`                       | A fresh in-memory journal has floor 0 for every session.                                                             |
+| `bump_never_decreases`                   | Successful bumps never decrease any session's floor.                                                                 |
+| `anti_restart_replay`                    | A session that reached floor `K` rejects any `seq = 1` afterwards (forced-restart double-sign defence).              |
+| `bump_strict_monotone`                   | No bump can succeed with `newSeq ≤ floor`.                                                                           |
+| `per_session_isolation`                  | A bump on session `a` does not touch session `b`'s floor.                                                            |
+| `migration_preserves_entries`            | Every v0 snapshot entry survives migration to v1 as exactly one record.                                              |
+| `migration_preserves_replay`             | Replaying the migrated v1 file produces the same floor map as the original v0 snapshot.                              |
+| `compaction_preserves_floor`             | Post-compact in-memory floor map equals pre-compact — compaction is semantically a no-op.                            |
+| `crc_detects_seq_tamper`                 | A v1 record whose `seq` was mutated produces a different CRC32 than the honest encoding.                             |
+| `torn_tail_dropped_silently`             | A partial trailing record is dropped at open time; the floor map equals the well-formed prefix's.                    |
+| `every_write_immediate_durable`          | Under `EveryWrite`, every successful bump leaves `durable = disk` — durable the moment `bump` returns.               |
+| `periodic_durability_bound`              | Under `Periodic d`, the bump is durable iff `now ≥ lastFsync + d` — bounded loss window of `d`.                      |
+
+Axioms introduced in `ReceiptJournal.lean`:
+
+- `crc32_ieee_distinct` — distinct CRC inputs ⇒ distinct CRC outputs
+  (CRC32-IEEE one-byte-flip detection property).
+
+Theorem count: 12.
+
+---
+
+## 7. `OctraVPN_Rust.EndToEnd`
+
+The composition theorem.  Ties together the receipt-payload layer,
+the v3 wire-anchor layer, the HFHE shielded-arithmetic layer, the
+RPC envelope layer, and the audit + journal layer.  Mirrors the
+`settle_claim → settle_confirm → claim_earnings` chain path.
+
+| Theorem                                  | Plain-English statement                                                                                              |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `headline_settle_claim_correct`          | Honest receipt + matching circle + journal-monotonic seq ⇒ `settle = accepted (bytes_used * price)`.                  |
+| `forged_sig_detected`                    | A receipt signed by the wrong secret key is rejected at the chain layer (`badSig`).                                  |
+| `double_spend_detected`                  | A receipt with `seq ≤ floor` is rejected at the chain layer (anti-double-spend at settle).                            |
+| `mismatched_program_addr_detected`       | A receipt whose `programAddr.raw` doesn't match the circle's is rejected at the chain layer.                          |
+| `cross_chain_replay_detected`            | A receipt whose `chainId` doesn't match the circle's is rejected at the chain layer (P1-5 cross-chain replay defence). |
+| `forged_shadow_blob_detected`            | A forged HFHE shadow blob (cipher decrypts to a different bytes_used) is detected by the HFHE-3 cross-check.          |
+| `audit_tamper_caught_on_verify`          | A single-byte tamper of an honest audit record is caught by HMAC mismatch on next `verify_file`.                      |
+| `honest_path_succeeds`                   | Bundled restatement of the headline — single-citation form for external auditors.                                    |
+
+This module **composes** the following theorems from sibling
+modules (each cited inline in `EndToEnd.lean`'s docstring):
+
+- `Lemmas.receipt_signing_roundtrip` (receipt-payload layer)
+- `Lemmas.receipt_cross_program_rejected` (receipt-payload layer)
+- `Lemmas.receipt_cross_chain_rejected` (receipt-payload layer)
+- `Lemmas.receipt_cross_circle_rejected` (receipt-payload layer)
+- `Lemmas.sign_verify_rejects_wrong_pubkey` (sig layer)
+- `ShadowBlob.honest_dec_bytes_used` (HFHE shielded-arithmetic layer)
+- `ShadowBlob.honest_dec_net` (HFHE shielded-arithmetic layer)
+- `ShadowBlob.forged_shadow_detectable` (HFHE shielded-arithmetic layer)
+- `WireProtocol.HFHE.hom_add_matches_plaintext_add` (HFHE layer)
+- `WireProtocol.V3Canonical.canonical_reorder_invariant` (wire-anchor layer)
+- `WireProtocol.V3Members.members_anchor_collision_resistant` (wire-anchor layer)
+- `WireProtocol.V3Policy.policy_anchor_collision_resistant_on_epoch` (wire-anchor layer)
+- `WireProtocol.RpcEnvelope.tx_sign_verify_roundtrip` (RPC layer)
+- `WireProtocol.RpcEnvelope.method_binding_rejects_replay` (RPC layer)
+- `WireProtocol.RpcEnvelope.chain_id_binding_rejects_replay` (RPC layer)
+- `WireProtocol.RpcEnvelope.nonce_binding_rejects_replay` (RPC layer)
+- `AuditLog.verify_file_accepts_honest` (audit layer)
+- `AuditLog.tamper_record_detected` (audit layer)
+- `ReceiptJournal2.anti_restart_replay` (journal layer)
+- `ReceiptJournal2.bump_strict_monotone` (journal layer)
+
+Theorem count: 8.
+
+### Headline theorem statement (copy-paste from `EndToEnd.lean:205`)
+
+```lean
+theorem headline_settle_claim_correct
+    (circle : RegisteredCircle) (sk : SecretKey)
+    (sessionId : SessionId) (seq : Nat) (bytesUsed price : Nat)
+    (blind : Blind) (journalFloor : Nat)
+    (h_fresh : seq > journalFloor)
+    (_h_ctx_match : ∃ ctx_eq : ReceiptContext,
+                       ctx_eq.programAddr.raw = circle.programAddr.raw ∧
+                       ctx_eq.chainId = circle.chainId)
+    : let ctx : ReceiptContext :=
+        { programAddr := circle.programAddr,
+          chainId := circle.chainId,
+          circleId := some circle.circleId }
+      let payload := receiptSigningPayload ctx sessionId seq bytesUsed blind
+      let sig := ed25519Sign sk payload
+      let receipt : SignedReceipt :=
+        { ctx := ctx, sessionId := sessionId, seq := seq,
+          bytesUsed := bytesUsed, price := price, blind := blind,
+          sig := sig }
+      settle circle (deriveVerifyingKey sk) receipt journalFloor
+        = SettleOutcome.accepted (bytesUsed * price)
+```
+
+### What is delegated to operator trust
+
+The headline theorem proves the **chain-side honesty story**: no
+encrypted-arithmetic inflation, no double-spend, no cross-chain
+replay, no forged signature, no rolled-back seq.  What it does NOT
+prove (and what therefore remains in the operator's trust scope):
+
+- **PVAC pubkey rotation discipline.**  If an operator leaves a
+  stale PVAC pubkey registered after a key compromise, the
+  attacker can decrypt past shadow blobs.  Mitigated by
+  `ops/pvac-rotation-runbook.md`, not by this theorem.
+- **Audit-log HMAC key safety.**  If `.audit.key` leaks, an
+  attacker with write access can rewrite history.  HMAC is no
+  longer a MAC against a known-key adversary.
+- **Fsync durability of the underlying filesystem.**  POSIX
+  `fsync` is assumed honest.  Theorem 22 (`periodic_durability_bound`)
+  proves the algebraic relationship; the actual disk-side
+  guarantee is delegated to the OS.
+
+---
+
 ## Theorem count
 
 | Module                       | Theorems | Examples (anchors) |
@@ -171,8 +323,13 @@ Theorem count: 7.
 | `MachineRegistry`            | 5        | 1                  |
 | `ACL`                        | 8        | 2                  |
 | `ShadowBlob`                 | 7        | 0                  |
-| **Total (this module)**      | **79**   | 3+                 |
+| `AuditLog` (new)             | 10       | 0                  |
+| `ReceiptJournal` (new)       | 12       | 0                  |
+| `EndToEnd` (new)             | 8        | 0                  |
+| **Total (this module)**      | **109**  | 3+                 |
 
-Combined with the 76 theorems in `WireProtocol/`, the deductive
-proof surface now stands at **155 mechanically-checked theorems**
-(79 Rust security primitives + 76 wire-protocol primitives).
+Combined with `WireProtocol/` (now 81 theorems with the new
+`RpcEnvelope` module), the deductive proof surface now stands at
+**190 mechanically-checked theorems** (109 Rust security primitives
++ 81 wire-protocol primitives, of which 35 are new in this pass:
+10 AuditLog + 12 ReceiptJournal + 5 RpcEnvelope + 8 EndToEnd).

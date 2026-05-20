@@ -333,6 +333,33 @@ Axioms introduced in `V3Policy.lean`:
 
 ---
 
+## 9. `WireProtocol.RpcEnvelope`
+
+The chain JSON-RPC envelope's canonical bytes + signing path.
+Mirrors `crates/octravpn-core/src/rpc.rs` (the `octra_submit`
+envelope) and `octra-foundry/crates/octra-core/src/tx.rs::canonical_bytes`.
+
+| Theorem                                  | Plain-English statement                                                                                              |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `tx_canonical_deterministic`             | `canonical_bytes(tx)` is a function — same tx ⇒ same bytes ⇒ same hash.                                              |
+| `tx_sign_verify_roundtrip`               | An honestly signed envelope verifies under the matching pubkey.                                                       |
+| `method_binding_rejects_replay`          | A tx signed for `method = X` cannot be replayed against `method = Y` under the same nonce.                            |
+| `chain_id_binding_rejects_replay`        | A tx signed for `chain_id = X` cannot be replayed against a different chain (P1-5 at the tx-envelope layer).          |
+| `nonce_binding_rejects_replay`           | A tx signed for `nonce = N` cannot be replayed at a different nonce — canonical bytes change.                         |
+
+Axioms introduced in `RpcEnvelope.lean`:
+
+- `txCanonical_method_injective`, `txCanonical_chainId_injective`,
+  `txCanonical_nonce_injective` — load-bearing one-field-injectivity
+  properties of the `tx::canonical_bytes` encoder.  The Rust
+  proptest harness in `tx.rs` exercises each of these by
+  random-flipping one field at a time and asserting the canonical
+  bytes change.
+
+Theorem count: 5.
+
+---
+
 ## Theorem count
 
 | Module                  | Theorems | Examples (anchors) |
@@ -345,14 +372,17 @@ Axioms introduced in `V3Policy.lean`:
 | `V3Members`             | 5        | 1                  |
 | `V3Policy`              | 5        | 1                  |
 | `HFHE`                  | 16       | 2                  |
-| **Total (this module)** | **76**   | **12**             |
+| `RpcEnvelope` (new)     | 5        | 0                  |
+| **Total (this module)** | **81**   | **12**             |
 
-Combined with the 79 theorems in `OctraVPN_Rust/` (5 in
+Combined with the 109 theorems in `OctraVPN_Rust/` (5 in
 `Spec.lean` + 54 in `Lemmas.lean` + 5 in `MachineRegistry.lean` +
-8 in `ACL.lean` + 7 in `ShadowBlob.lean`), the deductive proof
-surface now stands at **155 mechanically-checked theorems**
-(79 Rust security primitives + 76 wire-protocol primitives,
-of which 23 are new in this pass).
+8 in `ACL.lean` + 7 in `ShadowBlob.lean` + 10 in `AuditLog.lean` +
+12 in `ReceiptJournal.lean` + 8 in `EndToEnd.lean`), the deductive
+proof surface now stands at **190 mechanically-checked theorems**
+(109 Rust security primitives + 81 wire-protocol primitives, of
+which 35 are new in this pass: 10 AuditLog + 12 ReceiptJournal +
+5 RpcEnvelope + 8 EndToEnd).
 
 ---
 

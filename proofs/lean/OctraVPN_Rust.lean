@@ -3,6 +3,9 @@ import OctraVPN_Rust.Lemmas
 import OctraVPN_Rust.MachineRegistry
 import OctraVPN_Rust.ACL
 import OctraVPN_Rust.ShadowBlob
+import OctraVPN_Rust.AuditLog
+import OctraVPN_Rust.ReceiptJournal
+import OctraVPN_Rust.EndToEnd
 
 /-!
 # OctraVPN — Rust security primitives, Lean 4 specification.
@@ -94,6 +97,28 @@ ACL:
 Peer snapshot:
   - peer_canonical_function
   - peer_canonical_audit_todo (TODO: length-prefix audit)
+
+Audit log (HMAC-chained):
+  - honest_chain_link, verify_accepts_honest,
+    verify_file_accepts_honest, tamper_prev_mac_detected,
+    tamper_record_detected, per_day_chain_resets,
+    verify_completeness_honest, signed_seqs_roundtrip,
+    signed_seqs_harvest_complete, first_error_localisation
+
+Receipt journal (v1 append-only, compaction, fsync policy):
+  - fresh_floor_zero, bump_never_decreases, anti_restart_replay,
+    bump_strict_monotone, per_session_isolation,
+    migration_preserves_entries, migration_preserves_replay,
+    compaction_preserves_floor, crc_detects_seq_tamper,
+    torn_tail_dropped_silently, every_write_immediate_durable,
+    periodic_durability_bound
+
+End-to-end composition (settle path):
+  - headline_settle_claim_correct  (THE HEADLINE THEOREM)
+  - forged_sig_detected, double_spend_detected,
+    mismatched_program_addr_detected, cross_chain_replay_detected,
+    forged_shadow_blob_detected, audit_tamper_caught_on_verify,
+    honest_path_succeeds
 
 ## Axioms introduced
 
