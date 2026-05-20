@@ -1,67 +1,37 @@
-//! Integration boundary with the headscale-style coordination plane.
+//! Preauth-key minter + bounded LRU audit log.
 //!
-//! ## What this module is, today
+//! This submodule owns the high-collision area of the headscale bridge:
+//! [`PreauthMinter`], the FIFO + idle-TTL bounded [`BoundedMap`]s it
+//! holds, and the [`PreauthKey`] / [`RedeemError`] / [`RedemptionRecord`]
+//! types that make up the redeem contract.
 //!
-//! A **minimum-viable preauth-key minter** so the
-//! `docker/devnet/tailscale-interop/run-interop.sh` test can advance
-//! past exit code 20 ("no preauth-key minting surface available").
+//! ## Cap defaults
 //!
-//! This is intentionally *not* a full Tailscale coordination server.
-//! It implements only what the interop test directly probes:
+//! The bounded LRU defaults that other agents have repeatedly collided
+//! on (see #236 and the modularize-* territories):
 //!
-//!   - Mint a preauth key for a named user.
-//!   - Hold the key in an in-process store so an operator (or test
-//!     harness) can later present it as a bearer credential to
-//!     `tailscale up --authkey ...`.
+//!   - [`DEFAULT_MINTS_CAPACITY`]        = `100_000` entries
+//!   - [`DEFAULT_REDEMPTIONS_CAPACITY`]  = `100_000` entries
+//!   - [`DEFAULT_BOUNDED_TTL`]           = `30 days` idle-TTL
+//!   - [`DEFAULT_PREAUTH_TTL`]           = `1 hour` per-key expiry
 //!
-//! See `docs/tailscale-interop-blocker.md` for what is *still*
-//! missing between "we hand out a preauth key" and "stock `tailscale`
-//! actually completes a handshake against us" — chiefly the
-//! `/key`, `/machine/{node_key}/register` and
-//! `/machine/{node_key}/map` long-poll endpoints, plus the
-//! TS2021 Noise frame layer they ride on. That work is a
-//! multi-week effort and is tracked in the blocker doc, not here.
-//!
-//! ## Why not pull in `headscale-rs`?
-//!
-//! `headscale-rs` (sibling repo at `~/Development/headscale-rs`) is
-//! *not* a drop-in Tailscale coordination server. Its public
-//! handlers (`headscale_api::http::build_router`) expose a custom
-//! `/api/v1/nodes`, `/api/v1/register`, `/api/v1/transfer` JSON
-//! surface — *not* the
-//! `GET /key` + `POST /machine/{node_key}/{register,map}` wire
-//! protocol that stock `tailscale up` speaks. Linking against it
-//! would not get us to exit code 0 either; it would just pull in
-//! a second incompatible surface. Until either (a) headscale-rs
-//! grows the Tailscale wire protocol upstream or (b) we vendor /
-//! fork a Rust port of it, the bridge stays preauth-only.
-//!
-//! ## Canonical inbound contract: `MeteringSnapshot`
-//!
-//! When the *metering* integration lands (separately, after the
-//! coordination plane is real), OctraVPN will consume exactly one
-//! type from headscale-rs:
-//! `headscale_core::metering::MeteringSnapshot`. Its expected shape
-//! is pinned by [`ExpectedMeteringSnapshotShape`] below so a
-//! drift in the upstream type is caught at compile time when the
-//! adapter lands.
+//! The #236 invariant: a key evicted from `mints` (capacity OR idle-TTL)
+//! MUST map to [`RedeemError::Unknown`] on a subsequent `redeem`,
+//! exactly the same shape a never-minted token returns. Reusable keys
+//! persist across audit-map eviction — the `mints` map is the
+//! authoritative single-use enforcement source, not `redemptions`.
 
 use std::{
-    net::Ipv4Addr,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use async_trait::async_trait;
-use headscale_api::tailscale_wire::{
-    AllocError, IpAllocator, PreauthRedeemer, RedeemError as WireRedeemError,
-};
 use octravpn_core::bounded::BoundedMap;
 use parking_lot::Mutex;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
-use crate::ip_alloc::TailnetIpAllocator;
+use super::metrics::MetricsSink;
 
 /// Default time-to-live for a freshly minted preauth key.
 ///
@@ -140,28 +110,6 @@ impl PreauthKey {
     pub fn is_expired(&self, now_unix: u64) -> bool {
         now_unix >= self.expires_at
     }
-}
-
-/// Minimal observability hook the bridge layer exposes to upper
-/// crates without taking a hard dependency on a metrics library.
-///
-/// Implementors map an event name to a counter / log line / whatever.
-/// The bridge ships exactly two event names today —
-/// `"preauth_mint"` and `"preauth_redeem"` — both bumped from
-/// `PreauthMinter`. Additional events may be added; sinks are
-/// expected to ignore unknown names so a mesh-side bump doesn't
-/// require a lock-step node-side recompile.
-///
-/// The trait is intentionally `Sync` (no `&mut self`) so the same
-/// sink can be shared across threads behind an `Arc`; the
-/// node-side `impl MetricsSink for NodeMetrics` in
-/// `octravpn-node/src/control.rs` uses `AtomicU64::fetch_add`,
-/// which is the right primitive for that pattern.
-pub trait MetricsSink: Send + Sync {
-    /// Record an event. `name` is a short ASCII string; sinks
-    /// match on it and bump the corresponding counter. Unknown
-    /// names are dropped silently.
-    fn record_event(&self, name: &str);
 }
 
 /// In-process preauth-key store + minter.
@@ -401,111 +349,16 @@ pub enum RedeemError {
     Expired,
 }
 
-fn now_unix() -> u64 {
+pub(super) fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
 }
 
-// ---------------------------------------------------------------------------
-// Bridge: implement the headscale-api Tailscale-wire traits on top of
-// OctraVPN's PreauthMinter + TailnetIpAllocator.
-//
-// As of 2026-05-19 the Tailscale wire-protocol implementation lives in
-// `headscale-api::tailscale_wire`. The wire layer parameterises on two
-// small traits (`PreauthRedeemer`, `IpAllocator`) so headscale-rs can
-// stay free of OctraVPN-specific policy. The bridge here is the only
-// place those traits meet OctraVPN's PreauthMinter + TailnetIpAllocator.
-// ---------------------------------------------------------------------------
-
-/// Adapter: wrap a `PreauthMinter` so it can be handed to
-/// `headscale_api::tailscale_wire::WireState.preauth` as an
-/// `Arc<dyn PreauthRedeemer>`.
-#[async_trait]
-impl PreauthRedeemer for PreauthMinter {
-    async fn redeem(
-        &self,
-        key: &str,
-    ) -> Result<headscale_api::tailscale_wire::RedeemOk, WireRedeemError> {
-        // Synchronous redeem under the hood; the async signature is for
-        // future-proofing on the wire side. We translate OctraVPN's
-        // RedeemError into the wire crate's identical-shape enum.
-        //
-        // Upstream `PreauthRedeemer::redeem` returns a `RedeemOk` carrying
-        // the bound user plus optional ephemeral/tags flags (#239+). We
-        // only know the user here — the wire crate's
-        // `From<String> for RedeemOk` builds the rest with empty defaults.
-        match Self::redeem(self, key) {
-            Ok(user) => Ok(user.into()),
-            Err(RedeemError::Unknown) => Err(WireRedeemError::Unknown),
-            Err(RedeemError::Expired) => Err(WireRedeemError::Expired),
-        }
-    }
-}
-
-/// Adapter: wrap a `TailnetIpAllocator` so it can be handed to
-/// `headscale_api::tailscale_wire::WireState.ip_allocator` as an
-/// `Arc<dyn IpAllocator>`.
-impl IpAllocator for TailnetIpAllocator {
-    fn allocate(&self, node_key_hex: &str) -> Result<Ipv4Addr, AllocError> {
-        // OctraVPN's allocator is infallible (deterministic hash into
-        // CGNAT /10), so the bridge never produces an `AllocError`.
-        Ok(Self::allocate(self, node_key_hex))
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Frozen field-name pin for the future metering integration.
-//
-// Kept verbatim from the pre-bridge audit so the eventual
-// `headscale_core::metering::MeteringSnapshot` adapter is anchored to a
-// known field signature. Renaming a field upstream will break the
-// adapter at compile time, drawing attention to the lock-step rename.
-// ---------------------------------------------------------------------------
-
-/// Frozen field signature of `headscale_core::metering::MeteringSnapshot`
-/// as of the audit pin date (2026-05-18). The pin lives in non-test
-/// code (rather than `#[cfg(test)]`) so consumers can construct
-/// fixtures from it in integration tests once the metering adapter
-/// lands. It carries no runtime cost — it's a plain struct.
-#[allow(dead_code)]
-pub struct ExpectedMeteringSnapshotShape {
-    pub session_id: String,
-    pub consumer_did: String,
-    pub provider_did: String,
-    pub bytes_in: u64,
-    pub bytes_out: u64,
-    pub bandwidth_limit: Option<u64>,
-    pub remaining: Option<u64>,
-    pub duration_secs: u64,
-    pub active: bool,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Field-name pin: catching a rename of `MeteringSnapshot` upstream.
-    /// The test constructs the expected shape, which forces the
-    /// compiler to confirm every field still exists with the right
-    /// type.
-    #[test]
-    fn pinned_metering_snapshot_field_names() {
-        let s = ExpectedMeteringSnapshotShape {
-            session_id: "sid".into(),
-            consumer_did: "did:c".into(),
-            provider_did: "did:p".into(),
-            bytes_in: 1,
-            bytes_out: 2,
-            bandwidth_limit: Some(10),
-            remaining: Some(7),
-            duration_secs: 30,
-            active: true,
-        };
-        assert_eq!(s.bytes_in + s.bytes_out, 3);
-        assert!(s.active);
-    }
 
     #[test]
     fn mint_then_lookup_roundtrip() {
@@ -552,47 +405,6 @@ mod tests {
         let k = m.mint("x", Duration::from_secs(0), false);
         assert!(m.lookup(&k.key).is_none());
         assert_eq!(m.redeem(&k.key), Err(RedeemError::Expired));
-    }
-
-    /// Test-only sink that records every event name it observes.
-    #[derive(Default)]
-    struct RecordingSink {
-        events: Mutex<Vec<String>>,
-    }
-
-    impl MetricsSink for RecordingSink {
-        fn record_event(&self, name: &str) {
-            self.events.lock().push(name.to_string());
-        }
-    }
-
-    /// `mint` publishes `preauth_mint` on the attached sink. Wiring
-    /// pin: a future refactor that moves the bump elsewhere will
-    /// break this test.
-    #[test]
-    fn mint_publishes_preauth_mint_event() {
-        let sink = Arc::new(RecordingSink::default());
-        let m = PreauthMinter::new().with_metrics_sink(sink.clone());
-        m.mint("u", DEFAULT_PREAUTH_TTL, false);
-        assert_eq!(sink.events.lock().as_slice(), &["preauth_mint".to_string()]);
-    }
-
-    /// `redeem` publishes `preauth_redeem` on success but NOT on the
-    /// unknown-token rejection path (a redeem that never finds a key
-    /// isn't a redemption).
-    #[test]
-    fn redeem_publishes_preauth_redeem_only_on_success() {
-        let sink = Arc::new(RecordingSink::default());
-        let m = PreauthMinter::new().with_metrics_sink(sink.clone());
-        let k = m.mint("u", DEFAULT_PREAUTH_TTL, false);
-        assert!(m.redeem(&k.key).is_ok());
-        assert!(m.redeem("nonexistent").is_err());
-        let events = sink.events.lock().clone();
-        let redeems = events
-            .iter()
-            .filter(|n| n.as_str() == "preauth_redeem")
-            .count();
-        assert_eq!(redeems, 1, "events: {events:?}");
     }
 
     /// A minter with no sink attached is a zero-cost no-op on the
@@ -747,22 +559,6 @@ mod tests {
         let (_, red_evicted) = m.sweep_expired();
         assert_eq!(red_evicted, 1, "idle audit record should sweep");
         assert_eq!(m.redemption_audit().len(), 0);
-    }
-
-    /// `with_capacity` and `with_metrics_sink` compose cleanly — the
-    /// builder chain works in either order without losing state. This
-    /// pins the production wiring pattern in `hub.rs`.
-    #[test]
-    fn with_capacity_chains_with_metrics_sink() {
-        let sink = Arc::new(RecordingSink::default());
-        let m = PreauthMinter::with_capacity(8, 8).with_metrics_sink(sink.clone());
-        let k = m.mint("u", DEFAULT_PREAUTH_TTL, false);
-        m.redeem(&k.key).unwrap();
-        let events = sink.events.lock().clone();
-        assert_eq!(
-            events,
-            vec!["preauth_mint".to_string(), "preauth_redeem".to_string()]
-        );
     }
 
     /// The redemption audit record carries the bound user even after
