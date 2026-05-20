@@ -1,0 +1,340 @@
+//! Frame sealing and opening for obfs4-modelled transport.
+//!
+//! # Wire layout
+//!
+//! Every post-handshake datagram on the wire looks like:
+//!
+//! ```text
+//!   ┌──────────────────────┬──────────────────────────────────────┐
+//!   │ u16 BE  total_len    │ ciphertext_with_tag (total_len bytes)│
+//!   ├──────────────────────┴──────────────────────────────────────┤
+//!   │  ciphertext_with_tag = ChaCha20-Poly1305(                   │
+//!   │      key  = direction_key,                                  │
+//!   │      nonce = 4-byte tag || u64 BE counter,                  │
+//!   │      aad  = (empty),                                        │
+//!   │      plaintext = [u16 BE real_len] [real_payload]           │
+//!   │                  [random padding]                           │
+//!   │  )                                                          │
+//!   │  + 16 byte Poly1305 tag                                     │
+//!   └─────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! Properties:
+//!
+//! - **Length-randomised.** Padding is uniform in
+//!   `[MIN_PAD_PLAINTEXT, MAX_PAD_PLAINTEXT]`, so a 92-byte WG
+//!   transport packet does not produce a constant-length frame.
+//! - **AEAD-sealed.** Tampering anywhere in the ciphertext (including
+//!   the length field, which is the first plaintext bytes) fails the
+//!   Poly1305 check and the frame is dropped.
+//! - **Counter per direction.** The 8-byte counter starts at 0 on
+//!   each direction and increments monotonically. A replayed frame
+//!   has the wrong counter and produces a tag mismatch.
+//!
+//! # Why a 2-byte outer length
+//!
+//! Each datagram is one frame; the outer u16 lets a hypothetical
+//! framed-over-TCP variant chunk-and-coalesce without redesigning
+//! the inner format. Maximum frame size is 65 535 bytes (well above
+//! the WG-side MTU).
+
+use chacha20poly1305::{
+    aead::{Aead, KeyInit, Payload},
+    ChaCha20Poly1305, Key, Nonce,
+};
+use rand::{Rng, RngCore};
+use thiserror::Error;
+
+/// Inner padding bounds. Plaintext layout is
+/// `[u16 BE real_len] [payload] [padding]`. Padding bytes are
+/// uniformly random in this range.
+const MIN_PAD_PLAINTEXT: usize = 0;
+const MAX_PAD_PLAINTEXT: usize = 256;
+
+/// Maximum size of a single decrypted payload, in bytes. Generous
+/// for WG packets (an MTU-1500 IPv4 packet plus WG overhead is well
+/// under 1600 bytes).
+pub const MAX_PAYLOAD: usize = 16 * 1024;
+
+/// Outer length prefix is u16 BE.
+const LEN_PREFIX_BYTES: usize = 2;
+/// Inner plaintext "real length" prefix is also u16 BE.
+const INNER_LEN_BYTES: usize = 2;
+/// Poly1305 tag length.
+const TAG_LEN: usize = 16;
+
+/// Errors raised by the framing layer.
+#[derive(Debug, Error)]
+pub enum FrameError {
+    /// Incoming buffer didn't contain a full frame (couldn't read the
+    /// length prefix, or the prefix exceeded the buffer).
+    #[error("incomplete frame: have {have} bytes, need {need}")]
+    Incomplete {
+        /// Bytes available in the input buffer.
+        have: usize,
+        /// Bytes the framing layer needs to decode the next frame.
+        need: usize,
+    },
+    /// AEAD tag did not validate. Either the frame was tampered with,
+    /// the counter is out of sync, or this is a replay.
+    #[error("aead tag mismatch")]
+    BadTag,
+    /// Inner length field claimed more bytes than the plaintext
+    /// contained, or more than [`MAX_PAYLOAD`].
+    #[error("inner length out of bounds: claimed {claimed}, max {max}")]
+    BadInnerLen {
+        /// The length the inner header claimed.
+        claimed: usize,
+        /// The maximum length the surrounding plaintext could possibly
+        /// hold.
+        max: usize,
+    },
+    /// `send_to` was called with a payload that wouldn't fit even
+    /// after sealing (MAX_PAYLOAD exceeded).
+    #[error("payload too large: {0} bytes (max {MAX_PAYLOAD})")]
+    PayloadTooLarge(usize),
+}
+
+/// Direction-tagged ChaCha20-Poly1305 sealer. Owns the key + the
+/// monotonic counter; `seal_into` advances the counter every call.
+pub struct FrameSealer {
+    cipher: ChaCha20Poly1305,
+    nonce_prefix: [u8; 4],
+    counter: u64,
+}
+
+impl FrameSealer {
+    /// Construct a sealer. `nonce_prefix` is a 4-byte tag that
+    /// distinguishes this direction from the opposite direction so a
+    /// reflected frame can't be opened as if it came from the other
+    /// peer. Convention: `b"c2s\0"` for client→server, `b"s2c\0"` for
+    /// server→client.
+    pub fn new(key: &[u8; 32], nonce_prefix: [u8; 4]) -> Self {
+        Self {
+            cipher: ChaCha20Poly1305::new(Key::from_slice(key)),
+            nonce_prefix,
+            counter: 0,
+        }
+    }
+
+    /// Seal `payload` into a frame written to `out`. Returns the
+    /// total bytes appended.
+    pub fn seal_into(&mut self, payload: &[u8], out: &mut Vec<u8>) -> Result<usize, FrameError> {
+        if payload.len() > MAX_PAYLOAD {
+            return Err(FrameError::PayloadTooLarge(payload.len()));
+        }
+
+        // Build the plaintext: [u16 BE real_len] [payload] [random pad].
+        let pad_len = rand::thread_rng().gen_range(MIN_PAD_PLAINTEXT..=MAX_PAD_PLAINTEXT);
+        let mut plaintext =
+            Vec::with_capacity(INNER_LEN_BYTES + payload.len() + pad_len);
+        plaintext.extend_from_slice(&(payload.len() as u16).to_be_bytes());
+        plaintext.extend_from_slice(payload);
+        let pad_start = plaintext.len();
+        plaintext.resize(pad_start + pad_len, 0);
+        rand::thread_rng().fill_bytes(&mut plaintext[pad_start..]);
+
+        // Nonce = 4-byte prefix || u64 BE counter.
+        let mut nonce_bytes = [0u8; 12];
+        nonce_bytes[..4].copy_from_slice(&self.nonce_prefix);
+        nonce_bytes[4..].copy_from_slice(&self.counter.to_be_bytes());
+        let nonce = Nonce::from_slice(&nonce_bytes);
+
+        // Seal.
+        let ciphertext = self
+            .cipher
+            .encrypt(
+                nonce,
+                Payload {
+                    msg: &plaintext,
+                    aad: &[],
+                },
+            )
+            .map_err(|_| FrameError::BadTag)?; // encrypt cannot really fail; map for total cover.
+        self.counter = self.counter.wrapping_add(1);
+
+        // Emit: [u16 BE total_len] [ciphertext (incl tag)].
+        let total_len = ciphertext.len();
+        // u16 BE bounds-checked: ciphertext = plaintext + 16-byte tag.
+        // plaintext ≤ MAX_PAYLOAD + 2 + 256 = MAX_PAYLOAD + 258.
+        // ciphertext ≤ MAX_PAYLOAD + 274 ≤ 16_658, well under u16::MAX.
+        let total_u16 = u16::try_from(total_len).expect("frame fits in u16");
+        out.extend_from_slice(&total_u16.to_be_bytes());
+        out.extend_from_slice(&ciphertext);
+        Ok(LEN_PREFIX_BYTES + total_len)
+    }
+
+}
+
+/// Direction-tagged ChaCha20-Poly1305 opener.
+pub struct FrameOpener {
+    cipher: ChaCha20Poly1305,
+    nonce_prefix: [u8; 4],
+    counter: u64,
+}
+
+impl FrameOpener {
+    /// Construct an opener; see [`FrameSealer::new`].
+    pub fn new(key: &[u8; 32], nonce_prefix: [u8; 4]) -> Self {
+        Self {
+            cipher: ChaCha20Poly1305::new(Key::from_slice(key)),
+            nonce_prefix,
+            counter: 0,
+        }
+    }
+
+    /// Open one frame from the head of `buf`. Returns
+    /// `(payload, consumed_bytes)` on success. On error, the opener's
+    /// counter does not advance (caller can attempt resynchronisation
+    /// via skipping to the next datagram boundary — but for UDP we
+    /// drop the offending datagram entirely).
+    pub fn open_from(&mut self, buf: &[u8]) -> Result<(Vec<u8>, usize), FrameError> {
+        if buf.len() < LEN_PREFIX_BYTES {
+            return Err(FrameError::Incomplete {
+                have: buf.len(),
+                need: LEN_PREFIX_BYTES,
+            });
+        }
+        let total_len =
+            u16::from_be_bytes([buf[0], buf[1]]) as usize;
+        let frame_end = LEN_PREFIX_BYTES + total_len;
+        if buf.len() < frame_end {
+            return Err(FrameError::Incomplete {
+                have: buf.len(),
+                need: frame_end,
+            });
+        }
+        if total_len < TAG_LEN + INNER_LEN_BYTES {
+            return Err(FrameError::BadTag);
+        }
+        let ciphertext = &buf[LEN_PREFIX_BYTES..frame_end];
+
+        let mut nonce_bytes = [0u8; 12];
+        nonce_bytes[..4].copy_from_slice(&self.nonce_prefix);
+        nonce_bytes[4..].copy_from_slice(&self.counter.to_be_bytes());
+        let nonce = Nonce::from_slice(&nonce_bytes);
+
+        let plaintext = self
+            .cipher
+            .decrypt(
+                nonce,
+                Payload {
+                    msg: ciphertext,
+                    aad: &[],
+                },
+            )
+            .map_err(|_| FrameError::BadTag)?;
+        self.counter = self.counter.wrapping_add(1);
+
+        if plaintext.len() < INNER_LEN_BYTES {
+            return Err(FrameError::BadTag);
+        }
+        let real_len =
+            u16::from_be_bytes([plaintext[0], plaintext[1]]) as usize;
+        if real_len > plaintext.len() - INNER_LEN_BYTES || real_len > MAX_PAYLOAD {
+            return Err(FrameError::BadInnerLen {
+                claimed: real_len,
+                max: plaintext.len() - INNER_LEN_BYTES,
+            });
+        }
+        let mut payload = vec![0u8; real_len];
+        payload.copy_from_slice(&plaintext[INNER_LEN_BYTES..INNER_LEN_BYTES + real_len]);
+        Ok((payload, frame_end))
+    }
+}
+
+/// Nonce-prefix constant for client→server frames.
+pub const NONCE_PREFIX_C2S: [u8; 4] = *b"C2S\0";
+/// Nonce-prefix constant for server→client frames.
+pub const NONCE_PREFIX_S2C: [u8; 4] = *b"S2C\0";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_trip() {
+        let key = [7u8; 32];
+        let mut sealer = FrameSealer::new(&key, NONCE_PREFIX_C2S);
+        let mut opener = FrameOpener::new(&key, NONCE_PREFIX_C2S);
+        let payload = b"WG transport packet bytes";
+        let mut wire = Vec::new();
+        sealer.seal_into(payload, &mut wire).unwrap();
+        let (out, n) = opener.open_from(&wire).unwrap();
+        assert_eq!(out, payload);
+        assert_eq!(n, wire.len());
+    }
+
+    #[test]
+    fn fixed_input_produces_random_length_output() {
+        let key = [9u8; 32];
+        let mut sealer = FrameSealer::new(&key, NONCE_PREFIX_C2S);
+        let payload = [0u8; 148]; // mimics WG handshake-init size
+        let mut sizes = std::collections::HashSet::new();
+        for _ in 0..32 {
+            let mut wire = Vec::new();
+            sealer.seal_into(&payload, &mut wire).unwrap();
+            sizes.insert(wire.len());
+        }
+        assert!(
+            sizes.len() > 4,
+            "expected diverse frame sizes for fixed input, got {} distinct",
+            sizes.len()
+        );
+    }
+
+    #[test]
+    fn tampered_frame_fails() {
+        let key = [1u8; 32];
+        let mut sealer = FrameSealer::new(&key, NONCE_PREFIX_C2S);
+        let mut opener = FrameOpener::new(&key, NONCE_PREFIX_C2S);
+        let mut wire = Vec::new();
+        sealer.seal_into(b"hello", &mut wire).unwrap();
+        let flip = wire.len() - 3;
+        wire[flip] ^= 0x01;
+        assert!(matches!(opener.open_from(&wire), Err(FrameError::BadTag)));
+    }
+
+    #[test]
+    fn wrong_direction_prefix_fails() {
+        let key = [3u8; 32];
+        let mut sealer = FrameSealer::new(&key, NONCE_PREFIX_C2S);
+        let mut opener = FrameOpener::new(&key, NONCE_PREFIX_S2C);
+        let mut wire = Vec::new();
+        sealer.seal_into(b"hi", &mut wire).unwrap();
+        assert!(matches!(opener.open_from(&wire), Err(FrameError::BadTag)));
+    }
+
+    #[test]
+    fn replay_fails_after_counter_advance() {
+        let key = [4u8; 32];
+        let mut sealer = FrameSealer::new(&key, NONCE_PREFIX_C2S);
+        let mut opener = FrameOpener::new(&key, NONCE_PREFIX_C2S);
+
+        // Seal two frames at counter=0 and counter=1.
+        let mut a = Vec::new();
+        sealer.seal_into(b"first", &mut a).unwrap();
+        let mut b = Vec::new();
+        sealer.seal_into(b"second", &mut b).unwrap();
+
+        // Open in order — both succeed and the opener's counter
+        // advances to 2.
+        let (got_a, _) = opener.open_from(&a).expect("a opens at counter=0");
+        assert_eq!(got_a, b"first");
+        let (got_b, _) = opener.open_from(&b).expect("b opens at counter=1");
+        assert_eq!(got_b, b"second");
+
+        // Now replay `a`. The opener is at counter=2, so the
+        // ChaCha20-Poly1305 tag computed under counter=0 must not
+        // verify under counter=2.
+        assert!(matches!(opener.open_from(&a), Err(FrameError::BadTag)));
+    }
+
+    #[test]
+    fn incomplete_frame_signals_need() {
+        let key = [0u8; 32];
+        let mut opener = FrameOpener::new(&key, NONCE_PREFIX_C2S);
+        let err = opener.open_from(&[]).unwrap_err();
+        assert!(matches!(err, FrameError::Incomplete { .. }));
+    }
+}

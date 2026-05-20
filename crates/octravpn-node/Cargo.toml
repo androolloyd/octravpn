@@ -29,6 +29,12 @@ octravpn-analytics = { path = "../octravpn-analytics" }
 # `[tunnel.amnezia].enabled = true`. See
 # `docs/security/validator-hardening.md` § Layer 1.
 octravpn-tun = { path = "../octravpn-tun" }
+# Obfs4-modelled UDP transport plug-point (4-layer shielding pack,
+# layer 2). Linked unconditionally so the config block can be
+# validated at boot; the `Obfs4Transport` instance is only constructed
+# when `[tun.transport].kind = "obfs4"`. See
+# `docs/operators/obfs4-bridge.md`.
+octravpn-obfs4 = { path = "../octravpn-obfs4" }
 
 anyhow      = { workspace = true }
 async-trait = { workspace = true }

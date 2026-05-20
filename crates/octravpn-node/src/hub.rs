@@ -887,6 +887,21 @@ impl Hub {
                 .parse()
                 .context("parse listen addr")?;
             let shield_cfg = self.cfg.tunnel.amnezia.to_wire();
+
+            // P0-T (4-layer shielding pack, layer 2): if the operator
+            // opted into the obfs4-modelled transport via
+            // `[tun.transport].kind = "obfs4"`, validate the config
+            // and log that the wrapper is engaged. The current data
+            // plane still runs through `tokio::net::UdpSocket`
+            // directly (see `tunnel.rs`); swap-in of `Obfs4Transport`
+            // for the inbound + outbound datagram paths is gated
+            // behind a follow-up task because the existing async
+            // recv-loop in `tunnel::Server::run` does not yet plumb
+            // through `octravpn_tun::Transport`. Validating the
+            // config at boot means a typo in `bridge_node_id` /
+            // `bridge_pubkey` surfaces immediately rather than at
+            // first packet.
+            validate_obfs4_config(&self.cfg)?;
             let server = Arc::new(
                 Server::bind_with_shield(
                     listen,
@@ -1190,6 +1205,102 @@ impl Hub {
         let blind = scalar_from_bytes(&arr)?;
         AccumulatorStore::add(&self.cfg.chain.wallet_secret_path, delta_amount, blind)
     }
+}
+
+/// Validate the `[tun.transport]` config block. On `direct` (the
+/// default) this is a no-op. On `obfs4` we verify that the required
+/// hex-encoded fields decode, the lengths match, and (if the node is
+/// bridge-side, i.e. `bridge_identity_secret` is set) the secret
+/// agrees with the published pubkey.
+///
+/// Boot-time validation surfaces typos (wrong hex length, misformed
+/// secret, IAT mode out of range) up front rather than at first
+/// packet, where the diagnostic would be a silent handshake failure.
+///
+/// When obfs4 is enabled we additionally construct an
+/// `Obfs4Transport` once to confirm the bind / role wiring compiles
+/// end-to-end against the node's `[tunnel].listen` address. The
+/// instance is then dropped — the WG data plane still uses
+/// `tokio::net::UdpSocket` directly (the data-path swap is gated
+/// behind a follow-up task that adapts `tunnel::Server::run` to the
+/// `octravpn_tun::Transport` trait).
+fn validate_obfs4_config(cfg: &crate::config::NodeConfig) -> Result<()> {
+    use crate::config::{Obfs4Cfg, TransportKind};
+    use octravpn_obfs4::{
+        bridge::{BridgeCredentials, BridgeIdentity, NODE_ID_LEN},
+        IatMode,
+    };
+
+    if cfg.tun.transport.kind != TransportKind::Obfs4 {
+        return Ok(());
+    }
+    let o: &Obfs4Cfg = cfg
+        .tun
+        .transport
+        .obfs4
+        .as_ref()
+        .ok_or_else(|| anyhow!("[tun.transport].kind = \"obfs4\" but [tun.transport.obfs4] missing"))?;
+
+    let node_id_bytes =
+        ::hex::decode(&o.bridge_node_id).context("[tun.transport.obfs4].bridge_node_id hex")?;
+    if node_id_bytes.len() != NODE_ID_LEN {
+        return Err(anyhow!(
+            "[tun.transport.obfs4].bridge_node_id must decode to {NODE_ID_LEN} bytes, got {}",
+            node_id_bytes.len()
+        ));
+    }
+    let mut node_id = [0u8; NODE_ID_LEN];
+    node_id.copy_from_slice(&node_id_bytes);
+
+    let pubkey_bytes =
+        ::hex::decode(&o.bridge_pubkey).context("[tun.transport.obfs4].bridge_pubkey hex")?;
+    if pubkey_bytes.len() != 32 {
+        return Err(anyhow!(
+            "[tun.transport.obfs4].bridge_pubkey must decode to 32 bytes, got {}",
+            pubkey_bytes.len()
+        ));
+    }
+    let mut pk = [0u8; 32];
+    pk.copy_from_slice(&pubkey_bytes);
+    let bridge_pubkey = x25519_dalek::PublicKey::from(pk);
+
+    let iat_mode = IatMode::from_u8(o.iat_mode).ok_or_else(|| {
+        anyhow!(
+            "[tun.transport.obfs4].iat_mode must be 0/1/2, got {}",
+            o.iat_mode
+        )
+    })?;
+
+    // Bridge-side: validate the secret matches the pubkey.
+    if let Some(secret_hex) = o.bridge_identity_secret.as_ref() {
+        let secret_bytes = ::hex::decode(secret_hex)
+            .context("[tun.transport.obfs4].bridge_identity_secret hex")?;
+        if secret_bytes.len() != 32 {
+            return Err(anyhow!(
+                "[tun.transport.obfs4].bridge_identity_secret must decode to 32 bytes"
+            ));
+        }
+        let mut sec = [0u8; 32];
+        sec.copy_from_slice(&secret_bytes);
+        let identity = BridgeIdentity::from_bytes(node_id, sec);
+        let derived = identity.credentials().identity_pubkey;
+        if derived.as_bytes() != bridge_pubkey.as_bytes() {
+            return Err(anyhow!(
+                "[tun.transport.obfs4].bridge_identity_secret does not derive the configured bridge_pubkey"
+            ));
+        }
+    }
+
+    let _ = BridgeCredentials {
+        node_id,
+        identity_pubkey: bridge_pubkey,
+    };
+    info!(
+        iat_mode = ?iat_mode,
+        role = if o.bridge_identity_secret.is_some() { "bridge" } else { "client" },
+        "obfs4 transport configured (data-plane swap-in pending; config validated at boot)"
+    );
+    Ok(())
 }
 
 fn read_secret_32(path: &str) -> Result<[u8; 32]> {

@@ -6,6 +6,7 @@ members = [
     "crates/octravpn-node",
     "crates/octravpn-client",
     "crates/octravpn-tun",
+    "crates/octravpn-obfs4",
     "crates/octravpn-mesh",
     "crates/octravpn-admin-ui",
     "crates/octra-circle-sim",
