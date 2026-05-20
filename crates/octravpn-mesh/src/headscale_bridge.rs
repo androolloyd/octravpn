@@ -427,12 +427,20 @@ fn now_unix() -> u64 {
 /// `Arc<dyn PreauthRedeemer>`.
 #[async_trait]
 impl PreauthRedeemer for PreauthMinter {
-    async fn redeem(&self, key: &str) -> Result<String, WireRedeemError> {
+    async fn redeem(
+        &self,
+        key: &str,
+    ) -> Result<headscale_api::tailscale_wire::RedeemOk, WireRedeemError> {
         // Synchronous redeem under the hood; the async signature is for
         // future-proofing on the wire side. We translate OctraVPN's
         // RedeemError into the wire crate's identical-shape enum.
+        //
+        // Upstream `PreauthRedeemer::redeem` returns a `RedeemOk` carrying
+        // the bound user plus optional ephemeral/tags flags (#239+). We
+        // only know the user here — the wire crate's
+        // `From<String> for RedeemOk` builds the rest with empty defaults.
         match Self::redeem(self, key) {
-            Ok(user) => Ok(user),
+            Ok(user) => Ok(user.into()),
             Err(RedeemError::Unknown) => Err(WireRedeemError::Unknown),
             Err(RedeemError::Expired) => Err(WireRedeemError::Expired),
         }
