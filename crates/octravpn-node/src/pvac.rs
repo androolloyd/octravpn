@@ -113,6 +113,7 @@ use tracing::{debug, info, warn};
 
 /// Errors surfaced by [`PvacClient`].
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub(crate) enum PvacError {
     /// The sidecar binary could not be located or spawned. Returned by
     /// [`PvacClient::spawn`]; once spawn has succeeded, transient

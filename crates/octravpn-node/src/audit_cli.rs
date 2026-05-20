@@ -459,6 +459,7 @@ fn run_verify_cli(args: &VerifyArgs) -> i32 {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub(crate) enum VerifyError {
     Missing(String),
     Io(anyhow::Error),

@@ -117,6 +117,7 @@ pub const WALLET_PREFIX: &str = "oct";
 
 /// Errors surfaced by the v3 `TailnetMembers` encoder/decoder.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum V3MembersError {
     #[error("schema version unsupported: got {got}, this build understands {supported}")]
     UnsupportedVersion { got: u32, supported: u32 },

@@ -325,3 +325,31 @@ specific variant.
   [cli-headscale-embedded.md](./cli-headscale-embedded.md).
 * The receipt journal byte spec:
   `crates/octravpn-core/src/receipt_journal/README.md`.
+
+---
+
+## `#[non_exhaustive]` policy
+
+Every public error enum in this workspace carries `#[non_exhaustive]`
+(audit blocker E-1, fixed 2026-05-20). The policy:
+
+* **Variants listed above are PUBLIC** — they ship in the current
+  release and downstream code may match them by name.
+* **New variants are added freely** — adding a variant is NOT a
+  breaking change. Downstream code that pattern-matches MUST carry a
+  wildcard arm (`_ =>`) to remain forward-compatible. Failing to do so
+  produces a compile error against the new variant.
+* Forward-compat sentinel tests live at
+  `crates/{octravpn-core,octravpn-mesh,octravpn-obfs4,octra-circle-sim}/tests/non_exhaustive_errors.rs`
+  — each does a cross-crate exhaustive match with a `_` arm under
+  `#[deny(unreachable_patterns)]`, so dropping the attribute on any of
+  the listed enums breaks the build.
+* Crate-private error types (`FetchAssetError`, `VerifyError`,
+  `UpdateError`, `PvacError`, `FileVerifyErrorKind`) also carry
+  `#[non_exhaustive]` for consistency, even though the attribute is
+  a no-op within the defining crate.
+
+Variants documented in earlier sections of this file are the **current
+public surface**. Variants added in later releases will be appended to
+the relevant section with a "(since X.Y)" suffix; the wildcard arm
+contract above means existing downstream code keeps building.

@@ -43,6 +43,7 @@ pub const MAX_HOPS: usize = 3;
 pub const ONION_HKDF_INFO: &[u8] = b"octravpn-onion-v1";
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum OnionError {
     #[error("empty route")]
     EmptyRoute,

@@ -101,6 +101,7 @@ pub const HANDSHAKE_MAX_LEN: usize = HANDSHAKE_FIXED_LEN + MAX_PAD;
 
 /// Errors raised by the handshake path.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum HandshakeError {
     /// The incoming handshake was shorter than the 64-byte minimum.
     #[error("handshake message too short: {0} bytes (need ≥ {HANDSHAKE_FIXED_LEN})")]

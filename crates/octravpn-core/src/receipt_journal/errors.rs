@@ -5,6 +5,7 @@
 /// Errors raised by [`ReceiptJournal`](super::ReceiptJournal) public
 /// entry points.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum JournalError {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),

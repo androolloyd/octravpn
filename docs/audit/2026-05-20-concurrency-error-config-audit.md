@@ -167,6 +167,25 @@ and panic crash dumps.
   diff per file. Confirm no in-workspace exhaustive matches on a
   sibling crate's enum break (a couple of test sites do — they need
   wildcard arms).
+- Fixed in commit `f8ae96d`: `#[non_exhaustive]` added
+  to all 17 error/error-like enums in this workspace
+  (`OnionError`, `ReceiptError`, `JournalError`, `V3PolicyError`,
+  `V3MembersError`, `StateRootError`, `MeshError`, `StunError`,
+  `KnockPskError`, `RedeemError`, `ChainError`, `HandshakeError`,
+  `FrameError`, `FetchAssetError`, `VerifyError`, `UpdateError`,
+  `PvacError`, `FileVerifyErrorKind`). Forward-compat sentinel tests
+  live at
+  `crates/{octravpn-core,octravpn-mesh,octravpn-obfs4,octra-circle-sim}/tests/non_exhaustive_errors.rs`
+  — each does a cross-crate exhaustive match with a `_` arm under
+  `#[deny(unreachable_patterns)]`. Policy documented at
+  `docs/reference/error-codes.md#non_exhaustive-policy`. No existing
+  match sites needed wildcard arms — all in-workspace matches were
+  either `matches!(…, X::Variant)` (still compatible) or same-crate
+  matches (where `#[non_exhaustive]` is inert). The audit's listing of
+  `headscale-rs` / `octra-foundry` / `octravpn-analytics` enums does
+  not apply to this worktree's `crates/` membership — those crates
+  either live in sibling repos (out-of-scope for this fix) or do not
+  define `thiserror` enums at HEAD.
 
 ### E-2 [MEDIUM] `anyhow::Error` crosses public API boundaries
 - Files: `crates/octravpn-node/src/audit.rs` (every pub method);
