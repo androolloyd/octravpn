@@ -187,7 +187,10 @@ impl Obfs4Transport {
         let outcome = loop {
             let (n, src) = self.sock.recv_from(&mut buf)?;
             if src != bridge_addr {
-                debug!(?src, "ignoring datagram from unexpected source during handshake");
+                debug!(
+                    ?src,
+                    "ignoring datagram from unexpected source during handshake"
+                );
                 continue;
             }
             if n < HANDSHAKE_FIXED_LEN {
@@ -310,10 +313,7 @@ impl Transport for Obfs4Transport {
                 // (it has no way to "dial" a client). If the session
                 // isn't there yet, drop with an explicit error so
                 // upstream callers know to back off.
-                let exists = matches!(
-                    self.peers.lock().get(&dst),
-                    Some(PeerState::Established(_))
-                );
+                let exists = matches!(self.peers.lock().get(&dst), Some(PeerState::Established(_)));
                 if !exists {
                     return Err(io::Error::new(
                         io::ErrorKind::NotConnected,
@@ -353,7 +353,10 @@ impl Transport for Obfs4Transport {
                 }
                 Role::Client { bridge_addr, .. } => {
                     if src != *bridge_addr {
-                        debug!(?src, "client transport dropping datagram from non-bridge addr");
+                        debug!(
+                            ?src,
+                            "client transport dropping datagram from non-bridge addr"
+                        );
                         continue;
                     }
                     // Either a handshake reply (handled by
@@ -416,8 +419,7 @@ mod tests {
     fn obfs4_handshake_and_payload_round_trip() {
         let id = Arc::new(BridgeIdentity::generate());
         let creds = id.credentials();
-        let server =
-            Obfs4Transport::bind_server(loopback_v4(0), id, IatMode::Off).unwrap();
+        let server = Obfs4Transport::bind_server(loopback_v4(0), id, IatMode::Off).unwrap();
         let server_addr = server.local_addr();
 
         // Server recv loop in a background thread; ack the first
@@ -434,14 +436,12 @@ mod tests {
         });
 
         // Client.
-        let client = Obfs4Transport::connect_client(
-            loopback_v4(0),
-            server_addr,
-            creds,
-            IatMode::Off,
-        )
-        .unwrap();
-        client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let client =
+            Obfs4Transport::connect_client(loopback_v4(0), server_addr, creds, IatMode::Off)
+                .unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
         let payload = b"WG transport packet over obfs4";
         client.send_to(payload, server_addr).expect("client send");
 
@@ -461,8 +461,7 @@ mod tests {
     #[test]
     fn buyer_without_node_id_fails_handshake() {
         let real_id = Arc::new(BridgeIdentity::generate());
-        let server =
-            Obfs4Transport::bind_server(loopback_v4(0), real_id, IatMode::Off).unwrap();
+        let server = Obfs4Transport::bind_server(loopback_v4(0), real_id, IatMode::Off).unwrap();
         let server_addr = server.local_addr();
 
         // Background recv loop on the server: invokes the internal
@@ -528,8 +527,7 @@ mod tests {
         // go to the right peer (`server_addr` of the real server).
         let id = Arc::new(BridgeIdentity::generate());
         let creds = id.credentials();
-        let real_server =
-            Obfs4Transport::bind_server(loopback_v4(0), id, IatMode::Off).unwrap();
+        let real_server = Obfs4Transport::bind_server(loopback_v4(0), id, IatMode::Off).unwrap();
         let real_server_addr = real_server.local_addr();
         let (tx, rx) = mpsc::channel::<()>();
 
@@ -548,14 +546,12 @@ mod tests {
             }
         });
 
-        let client = Obfs4Transport::connect_client(
-            loopback_v4(0),
-            real_server_addr,
-            creds,
-            IatMode::Off,
-        )
-        .unwrap();
-        client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let client =
+            Obfs4Transport::connect_client(loopback_v4(0), real_server_addr, creds, IatMode::Off)
+                .unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
 
         // First send drives the handshake.
         let payload = vec![0xABu8; 148];
@@ -571,7 +567,9 @@ mod tests {
         // the rigorous spread check; here we want a smoke test that
         // 16 transport sends all complete.
         for _ in 0..16 {
-            client.send_to(&payload, real_server_addr).expect("send loop");
+            client
+                .send_to(&payload, real_server_addr)
+                .expect("send loop");
         }
         let _ = raw_server; // suppress unused
         let _ = server_addr;
@@ -584,18 +582,15 @@ mod tests {
     fn client_rejects_send_to_wrong_dst() {
         let id = Arc::new(BridgeIdentity::generate());
         let creds = id.credentials();
-        let server =
-            Obfs4Transport::bind_server(loopback_v4(0), id, IatMode::Off).unwrap();
+        let server = Obfs4Transport::bind_server(loopback_v4(0), id, IatMode::Off).unwrap();
         let server_addr = server.local_addr();
 
-        let client = Obfs4Transport::connect_client(
-            loopback_v4(0),
-            server_addr,
-            creds,
-            IatMode::Off,
-        )
-        .unwrap();
-        client.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+        let client =
+            Obfs4Transport::connect_client(loopback_v4(0), server_addr, creds, IatMode::Off)
+                .unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
 
         // Pick a deliberately wrong destination.
         let wrong: SocketAddr = "127.0.0.1:1".parse().unwrap();
@@ -608,8 +603,7 @@ mod tests {
     #[test]
     fn server_send_without_session_fails() {
         let id = Arc::new(BridgeIdentity::generate());
-        let server =
-            Obfs4Transport::bind_server(loopback_v4(0), id, IatMode::Off).unwrap();
+        let server = Obfs4Transport::bind_server(loopback_v4(0), id, IatMode::Off).unwrap();
         // No client has handshaked → no session.
         let phantom: SocketAddr = "127.0.0.1:1".parse().unwrap();
         let err = server.send_to(b"hi", phantom).unwrap_err();
@@ -622,10 +616,11 @@ mod tests {
     fn server_handles_multiple_clients_serially() {
         let id = Arc::new(BridgeIdentity::generate());
         let creds = id.credentials();
-        let server =
-            Obfs4Transport::bind_server(loopback_v4(0), id, IatMode::Off).unwrap();
+        let server = Obfs4Transport::bind_server(loopback_v4(0), id, IatMode::Off).unwrap();
         let server_addr = server.local_addr();
-        server.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        server
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
 
         let _t = thread::spawn(move || {
             let mut buf = [0u8; 2048];
@@ -645,7 +640,9 @@ mod tests {
                 IatMode::Off,
             )
             .unwrap();
-            client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            client
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
             let payload = vec![i as u8; 32];
             client.send_to(&payload, server_addr).unwrap();
             let mut buf = [0u8; 2048];
@@ -662,8 +659,7 @@ mod tests {
     fn iat_uniform_does_not_break_handshake() {
         let id = Arc::new(BridgeIdentity::generate());
         let creds = id.credentials();
-        let server =
-            Obfs4Transport::bind_server(loopback_v4(0), id, IatMode::Off).unwrap();
+        let server = Obfs4Transport::bind_server(loopback_v4(0), id, IatMode::Off).unwrap();
         let server_addr = server.local_addr();
 
         let _t = thread::spawn(move || {
@@ -671,14 +667,12 @@ mod tests {
             let _ = server.recv_from(&mut buf);
         });
 
-        let client = Obfs4Transport::connect_client(
-            loopback_v4(0),
-            server_addr,
-            creds,
-            IatMode::Uniform,
-        )
-        .unwrap();
-        client.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let client =
+            Obfs4Transport::connect_client(loopback_v4(0), server_addr, creds, IatMode::Uniform)
+                .unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
         client.send_to(b"with iat", server_addr).expect("send");
     }
 
@@ -686,10 +680,12 @@ mod tests {
     #[test]
     fn local_addr_reports_bound_port() {
         let id = Arc::new(BridgeIdentity::generate());
-        let server =
-            Obfs4Transport::bind_server(loopback_v4(0), id, IatMode::Off).unwrap();
+        let server = Obfs4Transport::bind_server(loopback_v4(0), id, IatMode::Off).unwrap();
         let addr = server.local_addr();
-        assert_eq!(addr.ip(), std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+        assert_eq!(
+            addr.ip(),
+            std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)
+        );
         assert!(addr.port() > 0, "port should be assigned by the OS");
     }
 
@@ -699,10 +695,11 @@ mod tests {
     fn recv_into_undersized_buf_errors() {
         let id = Arc::new(BridgeIdentity::generate());
         let creds = id.credentials();
-        let server =
-            Obfs4Transport::bind_server(loopback_v4(0), id, IatMode::Off).unwrap();
+        let server = Obfs4Transport::bind_server(loopback_v4(0), id, IatMode::Off).unwrap();
         let server_addr = server.local_addr();
-        server.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        server
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
 
         let _t = thread::spawn(move || {
             let mut buf = [0u8; 4096];
@@ -714,14 +711,12 @@ mod tests {
             let _ = (n, src);
         });
 
-        let client = Obfs4Transport::connect_client(
-            loopback_v4(0),
-            server_addr,
-            creds,
-            IatMode::Off,
-        )
-        .unwrap();
-        client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let client =
+            Obfs4Transport::connect_client(loopback_v4(0), server_addr, creds, IatMode::Off)
+                .unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
         client.send_to(b"trigger", server_addr).unwrap();
 
         let mut tiny = [0u8; 8]; // smaller than 1024-byte echo

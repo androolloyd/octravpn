@@ -28,10 +28,7 @@ use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use base64::engine::general_purpose::STANDARD as BASE64_STD;
 use base64::Engine as _;
 use octravpn_core::{
-    address::Address,
-    rpc::RpcClient,
-    sig::KeyPair,
-    v3_policy::OperatorPolicy,
+    address::Address, rpc::RpcClient, sig::KeyPair, v3_policy::OperatorPolicy,
     v3_state_root::StateRoot,
 };
 use parking_lot::Mutex;
@@ -167,13 +164,20 @@ async fn rpc_handler(
             // the `{"plaintext": "<utf8>"}` envelope shape; the v3
             // runner's `fetch_circle_asset_bytes` accepts that variant.
             let arr = params.as_array().cloned().unwrap_or_default();
-            let circle = arr.first().and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let path = arr.get(1).and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let circle = arr
+                .first()
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let path = arr
+                .get(1)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let g = state.lock();
             match g.circle_assets.get(&(circle, path)) {
                 Some(bytes) => {
-                    let s = std::str::from_utf8(bytes)
-                        .expect("v3 mock fixtures are UTF-8 JSON");
+                    let s = std::str::from_utf8(bytes).expect("v3 mock fixtures are UTF-8 JSON");
                     json!({ "plaintext": s })
                 }
                 None => Value::Null,
@@ -207,11 +211,7 @@ fn apply_tx_side_effects(state: &mut MockState, tx: &Value) -> Vec<Value> {
             let sid = state.next_session_id;
             state.next_session_id += 1;
             let tid = p.first().and_then(Value::as_u64).unwrap_or(0);
-            let circle = p
-                .get(1)
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string();
+            let circle = p.get(1).and_then(Value::as_str).unwrap_or("").to_string();
             vec![json!({
                 "name": "SessionOpened",
                 "session_id": sid,
@@ -283,10 +283,14 @@ fn seed_v3_fixtures(mock: &SharedMock, circle_id: &str) -> OperatorPolicy {
 
     let mut g = mock.lock();
     g.anchors.insert(circle_id.to_string(), anchor);
-    g.circle_assets
-        .insert((circle_id.to_string(), "/policy.json".to_string()), policy_bytes);
-    g.circle_assets
-        .insert((circle_id.to_string(), "/state-root.json".to_string()), sr_bytes);
+    g.circle_assets.insert(
+        (circle_id.to_string(), "/policy.json".to_string()),
+        policy_bytes,
+    );
+    g.circle_assets.insert(
+        (circle_id.to_string(), "/state-root.json".to_string()),
+        sr_bytes,
+    );
     policy
 }
 
@@ -414,8 +418,7 @@ async fn cold_open_session_then_settle_confirm() {
     let wallet = KeyPair::from_secret_bytes(&secret);
     let wallet_addr = Address::from_pubkey(&wallet.public.0);
     let from = wallet_addr.display();
-    let program_addr =
-        Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+    let program_addr = Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
     let circle_id = "oct8taXQ4CvohcgzCJFYyaKrrAbcZs5mxkBCJQQYWb2Pcun".to_string();
     let tailnet_id: u64 = 0;
     let max_pay: u64 = 1_500;
@@ -450,20 +453,13 @@ async fn cold_open_session_then_settle_confirm() {
         .as_str()
         .expect("get_circle_state_root returns a hex string")
         .to_string();
-    assert_eq!(
-        anchor_str.len(),
-        64,
-        "anchor must be a 64-char hex SHA-256",
-    );
+    assert_eq!(anchor_str.len(), 64, "anchor must be a 64-char hex SHA-256",);
 
     // ---- step 1b: validate the operator's sealed policy against
     //               the on-chain anchor. This is the critical step
     //               that replaced DEFAULT_PRICE_PER_MB.
     let policy_bytes_resp = rpc
-        .raw_call(
-            "circle_asset",
-            json!([circle_id.clone(), "/policy.json"]),
-        )
+        .raw_call("circle_asset", json!([circle_id.clone(), "/policy.json"]))
         .await
         .expect("circle_asset(policy.json)");
     let policy_bytes = policy_bytes_resp
@@ -472,8 +468,7 @@ async fn cold_open_session_then_settle_confirm() {
         .expect("mock returns {plaintext: ...}")
         .as_bytes()
         .to_vec();
-    let fetched_policy =
-        OperatorPolicy::decode_lenient(&policy_bytes).expect("decode policy");
+    let fetched_policy = OperatorPolicy::decode_lenient(&policy_bytes).expect("decode policy");
     let sr_bytes_resp = rpc
         .raw_call(
             "circle_asset",
@@ -528,8 +523,8 @@ async fn cold_open_session_then_settle_confirm() {
 
     // ---- step 3: settle_confirm ---------------------------------
     let bytes_used: u64 = 2 * 1_048_576; // 2 MiB
-    // The price now comes from the operator's policy.json (validated
-    // above against the chain anchor), not from a placeholder constant.
+                                         // The price now comes from the operator's policy.json (validated
+                                         // above against the chain anchor), not from a placeholder constant.
     let net = (bytes_used / 1_048_576) * price_per_mb;
     assert_eq!(net, 2_000);
     // 64-char lowercase hex blinding (32 bytes). The production code
@@ -551,8 +546,7 @@ async fn cold_open_session_then_settle_confirm() {
         fee,
         nonce2,
     );
-    let signed_settle =
-        octravpn_core::tx::sign_call(&wallet, settle_call).expect("sign settle");
+    let signed_settle = octravpn_core::tx::sign_call(&wallet, settle_call).expect("sign settle");
     let r2 = rpc.submit(&signed_settle).await.expect("submit settle");
     assert!(!r2.hash.is_empty());
 
@@ -562,8 +556,7 @@ async fn cold_open_session_then_settle_confirm() {
     let (_, open_env) = &g.submitted[0];
     assert_eq!(open_env["op_type"], "call");
     assert_eq!(open_env["encrypted_data"], "open_session");
-    let open_params: Value =
-        serde_json::from_str(open_env["message"].as_str().unwrap()).unwrap();
+    let open_params: Value = serde_json::from_str(open_env["message"].as_str().unwrap()).unwrap();
     let open_params = open_params.as_array().unwrap();
     assert_eq!(open_params[0], tailnet_id);
     assert_eq!(open_params[1], circle_id);
@@ -593,8 +586,7 @@ async fn claim_no_show_when_operator_stalls() {
     let wallet = KeyPair::from_secret_bytes(&secret);
     let wallet_addr = Address::from_pubkey(&wallet.public.0);
     let from = wallet_addr.display();
-    let program_addr =
-        Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+    let program_addr = Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
     let circle_id = "octEPUyqvqAQ6Y6jp1WqaPVnPNghYjN4tFr95mvSuLcvFTL".to_string();
     let tailnet_id: u64 = 3;
 

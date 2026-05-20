@@ -20,7 +20,9 @@ use serde_json::json;
 
 #[test]
 fn pubkey_round_trips_byte_identical_across_two_processes() {
-    let Some(bin) = skip_if_no_binary() else { return };
+    let Some(bin) = skip_if_no_binary() else {
+        return;
+    };
 
     // Process A: keygen → pubkey bytes.
     let mut a = Sidecar::spawn(&bin).unwrap();
@@ -58,7 +60,9 @@ fn pubkey_export_string_is_stable_across_calls() {
     // come out byte-identical every time — this is the property the
     // chain's IEE contract relies on for "operator deletion-resistant
     // identity".
-    let Some(bin) = skip_if_no_binary() else { return };
+    let Some(bin) = skip_if_no_binary() else {
+        return;
+    };
     let mut sc = Sidecar::spawn(&bin).unwrap();
     let mut last: Option<String> = None;
     for _ in 0..10 {
@@ -78,7 +82,9 @@ fn imported_pubkey_used_in_add_op_preserves_format() {
     // Use process A's pk to encrypt two ciphers, then ask process B
     // (same pk via determinism) to add them. The output must be a
     // well-formed cipher under the same pk.
-    let Some(bin) = skip_if_no_binary() else { return };
+    let Some(bin) = skip_if_no_binary() else {
+        return;
+    };
     let mut a = Sidecar::spawn(&bin).unwrap();
     let kg = a
         .request(&json!({"op": "keygen", "seed": seed_hex(0xAB)}))
@@ -117,7 +123,9 @@ fn imported_pubkey_used_in_add_op_preserves_format() {
 fn pubkey_bytes_are_idempotent_under_repeated_seed_keygen() {
     // 5 distinct seeds, each used 3 times: every triple yields the
     // same pk; the 5 outputs are distinct from each other.
-    let Some(bin) = skip_if_no_binary() else { return };
+    let Some(bin) = skip_if_no_binary() else {
+        return;
+    };
     let mut sc = Sidecar::spawn(&bin).unwrap();
     let mut got = Vec::new();
     for seed_byte in [0x10u8, 0x20, 0x30, 0x40, 0x50] {

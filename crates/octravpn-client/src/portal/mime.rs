@@ -93,10 +93,7 @@ pub(crate) fn sniff(bytes: &[u8]) -> SniffedMime {
     }
 
     // HTML / SVG (case-insensitive on the magic prefix).
-    let ascii_lc: Vec<u8> = trimmed_head
-        .iter()
-        .map(u8::to_ascii_lowercase)
-        .collect();
+    let ascii_lc: Vec<u8> = trimmed_head.iter().map(u8::to_ascii_lowercase).collect();
     if ascii_lc.starts_with(b"<!doctype html")
         || ascii_lc.starts_with(b"<html")
         || ascii_lc.starts_with(b"<head")
@@ -130,9 +127,11 @@ fn find_subslice_ci(haystack: &[u8], needle_lc: &[u8]) -> Option<usize> {
     if needle_lc.is_empty() {
         return Some(0);
     }
-    haystack
-        .windows(needle_lc.len())
-        .position(|w| w.iter().map(u8::to_ascii_lowercase).eq(needle_lc.iter().copied()))
+    haystack.windows(needle_lc.len()).position(|w| {
+        w.iter()
+            .map(u8::to_ascii_lowercase)
+            .eq(needle_lc.iter().copied())
+    })
 }
 
 #[cfg(test)]
@@ -269,7 +268,10 @@ mod tests {
 
     #[test]
     fn sniff_html_leading_whitespace() {
-        assert_eq!(sniff(b"   \n\t<!DOCTYPE html><html></html>"), SniffedMime::Html);
+        assert_eq!(
+            sniff(b"   \n\t<!DOCTYPE html><html></html>"),
+            SniffedMime::Html
+        );
     }
 
     #[test]
@@ -337,8 +339,14 @@ mod tests {
         assert_eq!(SniffedMime::Pdf.content_type(), "application/pdf");
         assert_eq!(SniffedMime::Json.content_type(), "application/json");
         assert_eq!(SniffedMime::Html.content_type(), "text/html; charset=utf-8");
-        assert_eq!(SniffedMime::PlainText.content_type(), "text/plain; charset=utf-8");
-        assert_eq!(SniffedMime::OctetStream.content_type(), "application/octet-stream");
+        assert_eq!(
+            SniffedMime::PlainText.content_type(),
+            "text/plain; charset=utf-8"
+        );
+        assert_eq!(
+            SniffedMime::OctetStream.content_type(),
+            "application/octet-stream"
+        );
     }
 
     #[test]
@@ -394,13 +402,18 @@ mod tests {
         // Pad to 50 with permutations: each base form, with extra trailing
         // attribute / whitespace / suffix.
         let suffixes: &[&[u8]] = &[
-            b"\n", b" ", b"\t<body>x</body>", b"<head></head>",
-            b" lang=\"en\">", b" data-x=\"y\">", b"</html>", b"foo",
-            b"<title>t</title>", b"<meta charset=\"utf-8\">",
+            b"\n",
+            b" ",
+            b"\t<body>x</body>",
+            b"<head></head>",
+            b" lang=\"en\">",
+            b" data-x=\"y\">",
+            b"</html>",
+            b"foo",
+            b"<title>t</title>",
+            b"<meta charset=\"utf-8\">",
         ];
-        let bases: &[&[u8]] = &[
-            b"<!DOCTYPE html>", b"<html>", b"<head>", b"<body>",
-        ];
+        let bases: &[&[u8]] = &[b"<!DOCTYPE html>", b"<html>", b"<head>", b"<body>"];
         for base in bases {
             for suf in suffixes {
                 let mut buf = base.to_vec();

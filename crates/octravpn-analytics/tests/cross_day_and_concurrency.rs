@@ -9,13 +9,7 @@
 //!   - Concurrent ingest: 10 ingesting tasks + 100 query tasks → no
 //!     panic, eventual consistency.
 
-use std::{
-    fs::File,
-    io::Write,
-    path::Path,
-    sync::Arc,
-    thread,
-};
+use std::{fs::File, io::Write, path::Path, sync::Arc, thread};
 
 use octravpn_analytics::{
     bucket::BucketWidth,
@@ -92,7 +86,9 @@ fn cross_day_audit_files_fold_into_one_indexer_without_duplication() {
     // Total events MUST be exactly 5 — no double-counting across files.
     assert_eq!(indexer.state.total_events(), 5);
     assert_eq!(
-        indexer.state.total(metric::SESSIONS_OPENED, BucketWidth::OneDay),
+        indexer
+            .state
+            .total(metric::SESSIONS_OPENED, BucketWidth::OneDay),
         5,
     );
     // chain_status::verified_lines should be 5 as well.
@@ -205,8 +201,12 @@ fn concurrent_ingest_10_threads_100_queries_eventually_consistent() {
         let idx = indexer.clone();
         handles.push(thread::spawn(move || {
             // Reads must never panic mid-ingest.
-            let _ = idx.state.total(metric::SESSIONS_OPENED, BucketWidth::OneMinute);
-            let _ = idx.state.series(metric::SESSIONS_OPENED, BucketWidth::OneMinute);
+            let _ = idx
+                .state
+                .total(metric::SESSIONS_OPENED, BucketWidth::OneMinute);
+            let _ = idx
+                .state
+                .series(metric::SESSIONS_OPENED, BucketWidth::OneMinute);
             let _ = idx.state.total_events();
         }));
     }
@@ -223,7 +223,9 @@ fn concurrent_ingest_10_threads_100_queries_eventually_consistent() {
     );
     // The per-metric total must also match (every event was a SessionOpen).
     assert_eq!(
-        indexer.state.total(metric::SESSIONS_OPENED, BucketWidth::OneDay),
+        indexer
+            .state
+            .total(metric::SESSIONS_OPENED, BucketWidth::OneDay),
         expected,
     );
 }
@@ -257,11 +259,15 @@ fn concurrent_bytes_settled_dedupe_under_contention() {
 
     let expected = threads as u64 * receipts * step; // 8 * 20 * 100 = 16000
     assert_eq!(
-        indexer.state.total(metric::BYTES_SETTLED, BucketWidth::OneDay),
+        indexer
+            .state
+            .total(metric::BYTES_SETTLED, BucketWidth::OneDay),
         expected,
     );
     assert_eq!(
-        indexer.state.total(metric::RECEIPTS_SIGNED, BucketWidth::OneDay),
+        indexer
+            .state
+            .total(metric::RECEIPTS_SIGNED, BucketWidth::OneDay),
         threads as u64 * receipts,
     );
 }

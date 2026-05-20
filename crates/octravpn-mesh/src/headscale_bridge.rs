@@ -216,10 +216,7 @@ impl Default for PreauthMinter {
     fn default() -> Self {
         Self {
             seq: Arc::new(Mutex::new(())),
-            mints: Arc::new(BoundedMap::new(
-                DEFAULT_MINTS_CAPACITY,
-                DEFAULT_BOUNDED_TTL,
-            )),
+            mints: Arc::new(BoundedMap::new(DEFAULT_MINTS_CAPACITY, DEFAULT_BOUNDED_TTL)),
             redemptions: Arc::new(BoundedMap::new(
                 DEFAULT_REDEMPTIONS_CAPACITY,
                 DEFAULT_BOUNDED_TTL,

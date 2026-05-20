@@ -176,13 +176,7 @@ impl ContractCallBuilder {
 
     /// Build a `retire_circle` call.
     /// `params` order: `[circle_id]`.
-    pub fn retire_circle_call(
-        &self,
-        params: &[Value],
-        value: u64,
-        fee: u64,
-        nonce: u64,
-    ) -> Value {
+    pub fn retire_circle_call(&self, params: &[Value], value: u64, fee: u64, nonce: u64) -> Value {
         self.call(method::RETIRE_CIRCLE, params, value, fee, nonce)
     }
 
@@ -192,13 +186,7 @@ impl ContractCallBuilder {
 
     /// Build a `bond_endpoint` call.
     /// `params` order: `[circle_id]`. `value` is the bond top-up.
-    pub fn bond_endpoint_call(
-        &self,
-        params: &[Value],
-        value: u64,
-        fee: u64,
-        nonce: u64,
-    ) -> Value {
+    pub fn bond_endpoint_call(&self, params: &[Value], value: u64, fee: u64, nonce: u64) -> Value {
         self.call(method::BOND_ENDPOINT, params, value, fee, nonce)
     }
 
@@ -248,13 +236,7 @@ impl ContractCallBuilder {
 
     /// Build a `create_tailnet` call.
     /// `params` order: `[members_root_hex]`. `value` is the initial deposit.
-    pub fn create_tailnet_call(
-        &self,
-        params: &[Value],
-        value: u64,
-        fee: u64,
-        nonce: u64,
-    ) -> Value {
+    pub fn create_tailnet_call(&self, params: &[Value], value: u64, fee: u64, nonce: u64) -> Value {
         self.call(method::CREATE_TAILNET, params, value, fee, nonce)
     }
 
@@ -272,13 +254,7 @@ impl ContractCallBuilder {
 
     /// Build a `retire_tailnet` call.
     /// `params` order: `[tailnet_id]`.
-    pub fn retire_tailnet_call(
-        &self,
-        params: &[Value],
-        value: u64,
-        fee: u64,
-        nonce: u64,
-    ) -> Value {
+    pub fn retire_tailnet_call(&self, params: &[Value], value: u64, fee: u64, nonce: u64) -> Value {
         self.call(method::RETIRE_TAILNET, params, value, fee, nonce)
     }
 
@@ -312,49 +288,25 @@ impl ContractCallBuilder {
 
     /// Build an `open_session` call.
     /// `params` order: `[tailnet_id, circle_id, max_pay]`.
-    pub fn open_session_call(
-        &self,
-        params: &[Value],
-        value: u64,
-        fee: u64,
-        nonce: u64,
-    ) -> Value {
+    pub fn open_session_call(&self, params: &[Value], value: u64, fee: u64, nonce: u64) -> Value {
         self.call(method::OPEN_SESSION, params, value, fee, nonce)
     }
 
     /// Build a `settle_claim` call.
     /// `params` order: `[session_id, bytes_used]`.
-    pub fn settle_claim_call(
-        &self,
-        params: &[Value],
-        value: u64,
-        fee: u64,
-        nonce: u64,
-    ) -> Value {
+    pub fn settle_claim_call(&self, params: &[Value], value: u64, fee: u64, nonce: u64) -> Value {
         self.call(method::SETTLE_CLAIM, params, value, fee, nonce)
     }
 
     /// Build a `settle_confirm` call.
     /// `params` order: `[session_id, bytes_used, net, settle_blinding]`.
-    pub fn settle_confirm_call(
-        &self,
-        params: &[Value],
-        value: u64,
-        fee: u64,
-        nonce: u64,
-    ) -> Value {
+    pub fn settle_confirm_call(&self, params: &[Value], value: u64, fee: u64, nonce: u64) -> Value {
         self.call(method::SETTLE_CONFIRM, params, value, fee, nonce)
     }
 
     /// Build a `claim_no_show` call.
     /// `params` order: `[session_id]`.
-    pub fn claim_no_show_call(
-        &self,
-        params: &[Value],
-        value: u64,
-        fee: u64,
-        nonce: u64,
-    ) -> Value {
+    pub fn claim_no_show_call(&self, params: &[Value], value: u64, fee: u64, nonce: u64) -> Value {
         self.call(method::CLAIM_NO_SHOW, params, value, fee, nonce)
     }
 
@@ -376,13 +328,7 @@ impl ContractCallBuilder {
 
     /// Build a `claim_earnings` call.
     /// `params` order: `[circle_id, amount]`.
-    pub fn claim_earnings_call(
-        &self,
-        params: &[Value],
-        value: u64,
-        fee: u64,
-        nonce: u64,
-    ) -> Value {
+    pub fn claim_earnings_call(&self, params: &[Value], value: u64, fee: u64, nonce: u64) -> Value {
         self.call(method::CLAIM_EARNINGS, params, value, fee, nonce)
     }
 }
@@ -439,12 +385,7 @@ mod tests {
     #[test]
     fn update_circle_state_shape() {
         let b = builder();
-        let got = b.update_circle_state_call(
-            &[json!("octCID"), json!(anchor_hex())],
-            0,
-            500,
-            7,
-        );
+        let got = b.update_circle_state_call(&[json!("octCID"), json!(anchor_hex())], 0, 500, 7);
         let want = json!({
             "kind": "contract_call",
             "from": WALLET,
@@ -462,7 +403,10 @@ mod tests {
     fn rotate_receipt_pubkey_shape() {
         let b = builder();
         let got = b.rotate_receipt_pubkey_call(
-            &[json!("octCID"), json!("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA=")],
+            &[
+                json!("octCID"),
+                json!("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA="),
+            ],
             0,
             500,
             9,
@@ -596,12 +540,7 @@ mod tests {
     #[test]
     fn update_members_root_shape() {
         let b = builder();
-        let got = b.update_members_root_call(
-            &[json!(0u64), json!(anchor_hex())],
-            0,
-            500,
-            16,
-        );
+        let got = b.update_members_root_call(&[json!(0u64), json!(anchor_hex())], 0, 500, 16);
         let want = json!({
             "kind": "contract_call",
             "from": WALLET,
@@ -652,12 +591,7 @@ mod tests {
     #[test]
     fn withdraw_tailnet_treasury_shape() {
         let b = builder();
-        let got = b.withdraw_tailnet_treasury_call(
-            &[json!(2u64), json!(100_000u64)],
-            0,
-            500,
-            11,
-        );
+        let got = b.withdraw_tailnet_treasury_call(&[json!(2u64), json!(100_000u64)], 0, 500, 11);
         let want = json!({
             "kind": "contract_call",
             "from": WALLET,
@@ -674,12 +608,7 @@ mod tests {
     #[test]
     fn open_session_shape() {
         let b = builder();
-        let got = b.open_session_call(
-            &[json!(0u64), json!("octCID"), json!(1500u64)],
-            0,
-            500,
-            19,
-        );
+        let got = b.open_session_call(&[json!(0u64), json!("octCID"), json!(1500u64)], 0, 500, 19);
         let want = json!({
             "kind": "contract_call",
             "from": WALLET,
@@ -803,12 +732,7 @@ mod tests {
             500,
             19,
         );
-        let want = b.open_session_call(
-            &[json!(0u64), json!("octCID"), json!(1500u64)],
-            0,
-            500,
-            19,
-        );
+        let want = b.open_session_call(&[json!(0u64), json!("octCID"), json!(1500u64)], 0, 500, 19);
         assert_eq!(got, want);
     }
 
@@ -829,7 +753,10 @@ mod tests {
         assert_eq!(method::UPDATE_MEMBERS_ROOT, "update_members_root");
         assert_eq!(method::RETIRE_TAILNET, "retire_tailnet");
         assert_eq!(method::DEPOSIT_TO_TAILNET, "deposit_to_tailnet");
-        assert_eq!(method::WITHDRAW_TAILNET_TREASURY, "withdraw_tailnet_treasury");
+        assert_eq!(
+            method::WITHDRAW_TAILNET_TREASURY,
+            "withdraw_tailnet_treasury"
+        );
         assert_eq!(method::OPEN_SESSION, "open_session");
         assert_eq!(method::SETTLE_CLAIM, "settle_claim");
         assert_eq!(method::SETTLE_CONFIRM, "settle_confirm");

@@ -64,9 +64,7 @@ impl OpenUrlArgs {
     /// Pick a single effective mode given the flags. `--portal` is the
     /// default when none are set.
     fn mode(&self) -> Result<Mode> {
-        let count = u8::from(self.save.is_some())
-            + u8::from(self.stdout)
-            + u8::from(self.portal);
+        let count = u8::from(self.save.is_some()) + u8::from(self.stdout) + u8::from(self.portal);
         if count > 1 {
             bail!("at most one of --save, --stdout, --portal may be set");
         }
@@ -126,7 +124,7 @@ pub(crate) fn parse_oct_url(s: &str) -> Result<ParsedOctUrl> {
     if circle.is_empty() {
         bail!("oct:// URL missing circle id: {s}");
     }
-    if circle.contains(|c: char| c.is_whitespace() || c == '?' || c == '#') {
+    if circle.contains(|c: char| c.is_whitespace() || matches!(c, '?' | '#' | ':')) {
         bail!("circle id contains forbidden chars: {circle}");
     }
 
@@ -186,14 +184,12 @@ async fn dispatch_to_portal(cfg: &ClientConfig, args: &OpenUrlArgs) -> Result<()
     // dead URL.
     let chain = PortalChain::from_config(cfg)?;
 
-    let bind: SocketAddr = args
-        .portal_bind
-        .unwrap_or_else(|| {
-            SocketAddr::new(
-                std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
-                portal::DEFAULT_PORTAL_PORT,
-            )
-        });
+    let bind: SocketAddr = args.portal_bind.unwrap_or_else(|| {
+        SocketAddr::new(
+            std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            portal::DEFAULT_PORTAL_PORT,
+        )
+    });
 
     // Already running? Just open the browser.
     if portal::is_running(bind).await {
@@ -381,25 +377,26 @@ mod tests {
 
         let mock: Router = Router::new().route(
             "/",
-            post(|axum::Json(req): axum::Json<serde_json::Value>| async move {
-                let id = req.get("id").cloned().unwrap_or(json!(1));
-                let payload = b"hello from circle";
-                let b64 = base64::engine::general_purpose::STANDARD.encode(payload);
-                Json(json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "ciphertext_b64": b64,
-                        "plaintext_hash": "0".repeat(64),
-                        "key_id": "default",
-                    }
-                }))
-            }),
+            post(
+                |axum::Json(req): axum::Json<serde_json::Value>| async move {
+                    let id = req.get("id").cloned().unwrap_or(json!(1));
+                    let payload = b"hello from circle";
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(payload);
+                    Json(json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": {
+                            "ciphertext_b64": b64,
+                            "plaintext_hash": "0".repeat(64),
+                            "key_id": "default",
+                        }
+                    }))
+                },
+            ),
         );
-        let listener =
-            tokio::net::TcpListener::bind::<SocketAddr>("127.0.0.1:0".parse().unwrap())
-                .await
-                .unwrap();
+        let listener = tokio::net::TcpListener::bind::<SocketAddr>("127.0.0.1:0".parse().unwrap())
+            .await
+            .unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             axum::serve(listener, mock).await.unwrap();
@@ -477,17 +474,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_double_scheme_currently_accepts_with_colon_in_circle() {
-        // BUG (filed): `oct://oct://double` parses as
-        // `circle_id="oct:"`, path="//double", because `parse_oct_url`
-        // only rejects whitespace / '?' / '#' in the circle id —
-        // colons slip through. The portal route layer never invokes
-        // the resource_key derivation on a colon-bearing id today,
-        // but the parser should still reject it. Documented here as a
-        // pinned regression so a future fix flips this assert.
-        let p = parse_oct_url("oct://oct://double").unwrap();
-        assert_eq!(p.circle_id, "oct:");
-        assert_eq!(p.path, "//double");
+    fn parse_rejects_double_scheme_with_colon_in_circle() {
+        assert!(parse_oct_url("oct://oct://double").is_err());
     }
 
     #[test]
@@ -624,12 +612,13 @@ mod tests {
                 Ok(p) => {
                     // Invariants on success:
                     //   * circle_id non-empty
-                    //   * circle_id has no '/', no whitespace, no '?', no '#'
+                    //   * circle_id has no '/', no whitespace, no '?', no '#', no ':'
                     //   * path starts with '/'
                     proptest::prop_assert!(!p.circle_id.is_empty());
                     proptest::prop_assert!(!p.circle_id.contains('/'));
                     proptest::prop_assert!(!p.circle_id.contains('?'));
                     proptest::prop_assert!(!p.circle_id.contains('#'));
+                    proptest::prop_assert!(!p.circle_id.contains(':'));
                     proptest::prop_assert!(!p.circle_id.contains(char::is_whitespace));
                     proptest::prop_assert!(p.path.starts_with('/'));
                 }

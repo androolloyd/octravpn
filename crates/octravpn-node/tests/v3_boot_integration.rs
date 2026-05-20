@@ -41,12 +41,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
-use octravpn_core::{
-    address::Address,
-    rpc::RpcClient,
-    sig::KeyPair,
-    v3_state_root::StateRoot,
-};
+use octravpn_core::{address::Address, rpc::RpcClient, sig::KeyPair, v3_state_root::StateRoot};
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 use tokio::sync::oneshot;
@@ -308,8 +303,7 @@ async fn cold_boot_registers_and_settle_claim() {
     let wallet = KeyPair::from_secret_bytes(&secret);
     let wallet_addr = Address::from_pubkey(&wallet.public.0);
     let from = wallet_addr.display();
-    let program_addr =
-        Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+    let program_addr = Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
     let circle_id = "oct8taXQ4CvohcgzCJFYyaKrrAbcZs5mxkBCJQQYWb2Pcun".to_string();
 
     // ---- Cold boot ----------------------------------------------
@@ -409,7 +403,11 @@ async fn cold_boot_registers_and_settle_claim() {
         )
         .await
         .expect("get_circle_active after submit");
-    assert_eq!(active_after, json!(true), "register should flip circle_active");
+    assert_eq!(
+        active_after,
+        json!(true),
+        "register should flip circle_active"
+    );
 
     let anchor_after = rpc
         .contract_call(
@@ -502,14 +500,7 @@ async fn cold_boot_registers_and_settle_claim() {
     let nonce2 = balance2.pending_nonce.max(balance2.nonce);
     let prog2 = program_addr.display();
     #[allow(clippy::needless_borrow)]
-    let settle_call = build_settle_claim_call(
-        &from,
-        &prog2,
-        0,
-        1_048_576,
-        fee,
-        nonce2,
-    );
+    let settle_call = build_settle_claim_call(&from, &prog2, 0, 1_048_576, fee, nonce2);
     let signed_settle = octravpn_core::tx::sign_call(&wallet, settle_call).expect("sign settle");
     let r2 = rpc.submit(&signed_settle).await.expect("submit settle");
     assert!(!r2.hash.is_empty());
@@ -539,8 +530,7 @@ async fn slashed_circle_blocks_register() {
         let mut g = mock.lock();
         g.slashed.insert(circle_id.clone(), true);
     }
-    let program_addr =
-        Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+    let program_addr = Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
 
     let slashed = rpc
         .contract_call(
@@ -575,8 +565,7 @@ async fn anchor_drift_triggers_update() {
     let wallet = KeyPair::from_secret_bytes(&secret);
     let wallet_addr = Address::from_pubkey(&wallet.public.0);
     let from = wallet_addr.display();
-    let program_addr =
-        Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+    let program_addr = Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
     let circle_id = "octEPUyqvqAQ6Y6jp1WqaPVnPNghYjN4tFr95mvSuLcvFTL".to_string();
 
     // Seed: active + a deliberately-different anchor than what we'll

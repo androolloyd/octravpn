@@ -172,10 +172,7 @@ fn run_replay(args: &ReplayArgs, out: &mut dyn Write) -> Result<()> {
     let audit_events = load_audit_events(&args.audit_path).unwrap_or_default();
     let journal_events = load_journal_events(&args.journal_path).unwrap_or_default();
 
-    let mut all: Vec<TimelineEvent> = audit_events
-        .into_iter()
-        .chain(journal_events)
-        .collect();
+    let mut all: Vec<TimelineEvent> = audit_events.into_iter().chain(journal_events).collect();
 
     // Filter by session id.
     if let Some(want) = want_session.as_ref() {
@@ -230,8 +227,8 @@ fn render_human(events: &[TimelineEvent], out: &mut dyn Write) -> Result<()> {
         }
         if !e.extra.is_null() {
             // Compact JSON of the extra blob keeps the line greppable.
-            let extra = serde_json::to_string(&e.extra)
-                .unwrap_or_else(|_| "<unprintable>".to_string());
+            let extra =
+                serde_json::to_string(&e.extra).unwrap_or_else(|_| "<unprintable>".to_string());
             let _ = write!(line, " extra={extra}");
         }
         let _ = write!(line, "  ({})", e.source);
@@ -291,7 +288,11 @@ fn load_audit_events(path: &Path) -> Result<Vec<TimelineEvent>> {
                 Ok(s) if s.trim().is_empty() => continue,
                 Ok(s) => s,
                 Err(e) => {
-                    eprintln!("audit replay: skip {}:{}: read error {e}", file.display(), i + 1);
+                    eprintln!(
+                        "audit replay: skip {}:{}: read error {e}",
+                        file.display(),
+                        i + 1
+                    );
                     continue;
                 }
             };
@@ -469,13 +470,15 @@ impl From<anyhow::Error> for VerifyError {
     }
 }
 
-pub(crate) fn run_verify(args: &VerifyArgs, out: &mut dyn Write) -> Result<VerifyReport, VerifyError> {
+pub(crate) fn run_verify(
+    args: &VerifyArgs,
+    out: &mut dyn Write,
+) -> Result<VerifyReport, VerifyError> {
     // Locate the HMAC key.
     let key = load_hmac_key(&args.audit_path, args.hmac_key.as_deref())?;
 
     // ---- Audit log chain ----
-    let files = discover_audit_files(&args.audit_path)
-        .map_err(VerifyError::Io)?;
+    let files = discover_audit_files(&args.audit_path).map_err(VerifyError::Io)?;
     if files.is_empty() {
         return Err(VerifyError::Missing(format!(
             "no audit log found at {}",
@@ -567,7 +570,10 @@ fn render_verify_report(r: &VerifyReport, out: &mut dyn Write) -> Result<()> {
 fn verify_audit_files(
     key: &[u8; 32],
     files: &[PathBuf],
-) -> (CheckResult, BTreeMap<String, std::collections::BTreeSet<u64>>) {
+) -> (
+    CheckResult,
+    BTreeMap<String, std::collections::BTreeSet<u64>>,
+) {
     let mut total: u64 = 0;
     let mut signed_seqs: BTreeMap<String, std::collections::BTreeSet<u64>> = BTreeMap::new();
     for file in files {
@@ -960,10 +966,7 @@ mod tests {
     #[test]
     fn replay_includes_journal_entries() {
         let dir = tempdir().unwrap();
-        write_synthetic_audit_log(
-            dir.path(),
-            &[(100, "announce", Some(&sid_hex(1)))],
-        );
+        write_synthetic_audit_log(dir.path(), &[(100, "announce", Some(&sid_hex(1)))]);
         let journal_path = dir.path().join("receipts.bin");
         let j = octravpn_core::receipt_journal::ReceiptJournal::open(&journal_path).unwrap();
         j.bump(&SessionId::new([1u8; 32]), 7).unwrap();
@@ -1059,7 +1062,10 @@ mod tests {
             CheckResult::Fail { detail } => detail.clone(),
             other => panic!("expected fail; got {other:?}"),
         };
-        assert!(detail.contains("line 3"), "expected line 3 in detail: {detail}");
+        assert!(
+            detail.contains("line 3"),
+            "expected line 3 in detail: {detail}"
+        );
     }
 
     #[test]
@@ -1481,7 +1487,11 @@ mod tests {
     fn discover_audit_files_returns_sorted_files() {
         let dir = tempdir().unwrap();
         // Write three files out of order to ensure sort is enforced.
-        for name in ["audit-2024-03-15.jsonl", "audit-2024-01-01.jsonl", "audit-2024-02-15.jsonl"] {
+        for name in [
+            "audit-2024-03-15.jsonl",
+            "audit-2024-01-01.jsonl",
+            "audit-2024-02-15.jsonl",
+        ] {
             std::fs::write(dir.path().join(name), b"").unwrap();
         }
         // Add an unrelated file that must be skipped.
@@ -1551,10 +1561,7 @@ mod tests {
     #[test]
     fn dispatch_replay_returns_zero_on_success() {
         let dir = tempdir().unwrap();
-        write_synthetic_audit_log(
-            dir.path(),
-            &[(100, "announce", Some(&sid_hex(1)))],
-        );
+        write_synthetic_audit_log(dir.path(), &[(100, "announce", Some(&sid_hex(1)))]);
         let cmd = AuditCmd::Replay(ReplayArgs {
             audit_path: dir.path().to_path_buf(),
             journal_path: dir.path().join("missing.bin"),

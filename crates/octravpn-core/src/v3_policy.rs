@@ -102,15 +102,11 @@ pub const WG_PUBKEY_RAW_LEN: usize = 32;
 pub enum V3PolicyError {
     #[error("schema version unsupported: got {got}, this build understands {supported}")]
     UnsupportedVersion { got: u32, supported: u32 },
-    #[error(
-        "wg_pubkey_b64 length is {len}, expected {WG_PUBKEY_B64_LEN} (base64 of 32 bytes)"
-    )]
+    #[error("wg_pubkey_b64 length is {len}, expected {WG_PUBKEY_B64_LEN} (base64 of 32 bytes)")]
     BadWgPubkeyLength { len: usize },
     #[error("wg_pubkey_b64 is not valid base64: {0}")]
     BadWgPubkeyEncoding(String),
-    #[error(
-        "wg_pubkey_b64 decodes to {got} bytes, expected {WG_PUBKEY_RAW_LEN}"
-    )]
+    #[error("wg_pubkey_b64 decodes to {got} bytes, expected {WG_PUBKEY_RAW_LEN}")]
     BadWgPubkeyDecodedLength { got: usize },
     #[error("endpoint is empty")]
     EmptyEndpoint,
@@ -651,14 +647,14 @@ mod tests {
     /// Strategy producing arbitrary, well-formed `OperatorPolicy`s.
     fn arb_policy() -> impl Strategy<Value = OperatorPolicy> {
         (
-            ".{1,32}",                            // endpoint
-            any::<[u8; 32]>(),                    // wg_pubkey seed
-            ".{1,16}",                            // region
-            any::<u64>(),                         // price_per_mb_shared
-            any::<u64>(),                         // price_per_mb_internal
-            any::<u64>(),                         // effective_epoch
-            any::<u64>(),                         // timestamp_secs
-            proptest::option::of(".{0,32}"),      // attestation_url
+            ".{1,32}",                       // endpoint
+            any::<[u8; 32]>(),               // wg_pubkey seed
+            ".{1,16}",                       // region
+            any::<u64>(),                    // price_per_mb_shared
+            any::<u64>(),                    // price_per_mb_internal
+            any::<u64>(),                    // effective_epoch
+            any::<u64>(),                    // timestamp_secs
+            proptest::option::of(".{0,32}"), // attestation_url
             btree_map(
                 "x_[a-z]{1,8}",
                 prop_oneof![
@@ -894,8 +890,7 @@ mod tests {
         // and this trips, the doc fixture is also wrong: update BOTH
         // in lockstep, never just the test.
         assert_eq!(
-            hash,
-            "d24ee1b8b9fc41071ffa16fa747626b5e3827ef8a6921eb2108520e1af9ad04f",
+            hash, "d24ee1b8b9fc41071ffa16fa747626b5e3827ef8a6921eb2108520e1af9ad04f",
             "worked-example hash drifted from docs/v3-policy-schema.md"
         );
     }

@@ -39,7 +39,9 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use octravpn_core::{address::Address, receipt_journal::ReceiptJournal, rpc::RpcClient, session::SessionId};
+use octravpn_core::{
+    address::Address, receipt_journal::ReceiptJournal, rpc::RpcClient, session::SessionId,
+};
 
 use crate::audit::{chain_step, AuditLog};
 use crate::config::NodeConfig;
@@ -250,8 +252,12 @@ async fn run_config_validate(args: &ConfigValidateArgs) -> ConfigValidateReport 
     // 6 + 7: chain reachability.
     let (rpc_reachable, program_responsive) = if args.offline {
         (
-            CheckOutcome::Skipped { detail: "--offline".into() },
-            CheckOutcome::Skipped { detail: "--offline".into() },
+            CheckOutcome::Skipped {
+                detail: "--offline".into(),
+            },
+            CheckOutcome::Skipped {
+                detail: "--offline".into(),
+            },
         )
     } else {
         probe_chain(&cfg).await
@@ -505,12 +511,24 @@ async fn run_health_async(args: &HealthArgs) -> HealthReport {
     let Some(cfg) = cfg_opt else {
         return HealthReport {
             schema_parsed,
-            endpoint_stake: CheckOutcome::Skipped { detail: "no config".into() },
-            endpoint_slashed: CheckOutcome::Skipped { detail: "no config".into() },
-            endpoint_unbonding: CheckOutcome::Skipped { detail: "no config".into() },
-            audit_log: CheckOutcome::Skipped { detail: "no config".into() },
-            receipt_journal: CheckOutcome::Skipped { detail: "no config".into() },
-            remote_health: CheckOutcome::Skipped { detail: "no config".into() },
+            endpoint_stake: CheckOutcome::Skipped {
+                detail: "no config".into(),
+            },
+            endpoint_slashed: CheckOutcome::Skipped {
+                detail: "no config".into(),
+            },
+            endpoint_unbonding: CheckOutcome::Skipped {
+                detail: "no config".into(),
+            },
+            audit_log: CheckOutcome::Skipped {
+                detail: "no config".into(),
+            },
+            receipt_journal: CheckOutcome::Skipped {
+                detail: "no config".into(),
+            },
+            remote_health: CheckOutcome::Skipped {
+                detail: "no config".into(),
+            },
             overall_pass: false,
         };
     };
@@ -551,9 +569,15 @@ async fn probe_endpoint_state(cfg: &NodeConfig) -> (CheckOutcome, CheckOutcome, 
         Err(e) => {
             let msg = format!("build rpc: {e:#}");
             return (
-                CheckOutcome::Fail { detail: msg.clone() },
-                CheckOutcome::Skipped { detail: "rpc unavailable".into() },
-                CheckOutcome::Skipped { detail: "rpc unavailable".into() },
+                CheckOutcome::Fail {
+                    detail: msg.clone(),
+                },
+                CheckOutcome::Skipped {
+                    detail: "rpc unavailable".into(),
+                },
+                CheckOutcome::Skipped {
+                    detail: "rpc unavailable".into(),
+                },
             );
         }
     };
@@ -917,9 +941,7 @@ fn verify_one_line(key: &[u8; 32], prev_mac: &[u8; 32], line: &str) -> Result<[u
         .ok_or_else(|| anyhow::anyhow!("missing record_json"))?;
     let expected_prev = hex::encode(prev_mac);
     if claimed_prev != expected_prev {
-        anyhow::bail!(
-            "chain break: expected prev_mac={expected_prev}, claimed={claimed_prev}"
-        );
+        anyhow::bail!("chain break: expected prev_mac={expected_prev}, claimed={claimed_prev}");
     }
     let expect = chain_step(key, prev_mac, canonical.as_bytes());
     if hex::encode(expect) != claimed_mac {
@@ -947,8 +969,8 @@ fn locate_hmac_key(audit_path: &Path, explicit: Option<&Path>) -> Result<[u8; 32
             candidate.display()
         );
     }
-    let raw = fs::read(&candidate)
-        .with_context(|| format!("read hmac key {}", candidate.display()))?;
+    let raw =
+        fs::read(&candidate).with_context(|| format!("read hmac key {}", candidate.display()))?;
     if raw.len() != 32 {
         anyhow::bail!(
             "hmac key {} has wrong size ({}); expected 32",
@@ -1000,9 +1022,7 @@ fn parse_session(raw: &str) -> Result<SessionId> {
     if let Ok(n) = raw.parse::<u64>() {
         return Ok(SessionId::from_u64(n));
     }
-    anyhow::bail!(
-        "session id `{raw}`: must be 64-char hex or a u64 (legacy v1 form)"
-    )
+    anyhow::bail!("session id `{raw}`: must be 64-char hex or a u64 (legacy v1 form)")
 }
 
 fn build_receipt_report(
@@ -1063,7 +1083,9 @@ fn build_receipt_report(
             .push_str("no journal floor and no audit entries — session unknown locally; ");
         report.cross_check_pass = false;
     } else {
-        report.detail.push_str("journal floor present, no audit entries cross-referenced; ");
+        report
+            .detail
+            .push_str("journal floor present, no audit entries cross-referenced; ");
     }
 
     Ok(report)
@@ -1114,10 +1136,11 @@ fn harvest_audit_seqs(path: &Path, sid: &SessionId) -> Result<Vec<u64>> {
             if rec_sid != wanted {
                 continue;
             }
-            let seq = rec
-                .get("seq")
-                .and_then(Value::as_u64)
-                .or_else(|| rec.get("extra").and_then(|e| e.get("seq")).and_then(Value::as_u64));
+            let seq = rec.get("seq").and_then(Value::as_u64).or_else(|| {
+                rec.get("extra")
+                    .and_then(|e| e.get("seq"))
+                    .and_then(Value::as_u64)
+            });
             if let Some(s) = seq {
                 out.push(s);
             }
@@ -1193,16 +1216,8 @@ listen = "0.0.0.0:51821"
 audit_dir = "{audit_dir}"
 receipt_journal_path = "{journal}"
 "#,
-            wallet = path
-                .parent()
-                .unwrap()
-                .join("wallet.key")
-                .display(),
-            wg = path
-                .parent()
-                .unwrap()
-                .join("wg.key")
-                .display(),
+            wallet = path.parent().unwrap().join("wallet.key").display(),
+            wg = path.parent().unwrap().join("wg.key").display(),
             audit_dir = audit_dir,
             journal = journal,
         );
@@ -1218,7 +1233,11 @@ receipt_journal_path = "{journal}"
         let dir = tempdir().unwrap();
         let toml = dir.path().join("node.toml");
         let audit_dir = dir.path().join("audit").to_string_lossy().to_string();
-        let journal = dir.path().join("receipts.bin").to_string_lossy().to_string();
+        let journal = dir
+            .path()
+            .join("receipts.bin")
+            .to_string_lossy()
+            .to_string();
         write_basic_node_toml(&toml, &audit_dir, &journal);
         let args = ConfigValidateArgs {
             path: toml,
@@ -1246,7 +1265,11 @@ receipt_journal_path = "{journal}"
         let dir = tempdir().unwrap();
         let toml = dir.path().join("node.toml");
         let audit_dir = dir.path().join("audit").to_string_lossy().to_string();
-        let journal = dir.path().join("receipts.bin").to_string_lossy().to_string();
+        let journal = dir
+            .path()
+            .join("receipts.bin")
+            .to_string_lossy()
+            .to_string();
         write_basic_node_toml(&toml, &audit_dir, &journal);
         fs::remove_file(dir.path().join("wallet.key")).unwrap();
         let args = ConfigValidateArgs {
@@ -1260,7 +1283,10 @@ receipt_journal_path = "{journal}"
             .unwrap();
         let report = rt.block_on(run_config_validate(&args));
         assert!(!report.overall_pass);
-        assert!(matches!(report.wallet_key_loadable, CheckOutcome::Fail { .. }));
+        assert!(matches!(
+            report.wallet_key_loadable,
+            CheckOutcome::Fail { .. }
+        ));
     }
 
     #[test]
@@ -1377,12 +1403,9 @@ receipt_journal_path = "{journal}"
         })
         .unwrap();
 
-        let report = build_receipt_report(
-            &SessionId::new([0xAA; 32]),
-            &journal_path,
-            Some(dir.path()),
-        )
-        .unwrap();
+        let report =
+            build_receipt_report(&SessionId::new([0xAA; 32]), &journal_path, Some(dir.path()))
+                .unwrap();
         assert_eq!(report.journal_floor, Some(7));
         assert_eq!(report.audit_seqs, vec![5, 7]);
         assert!(report.cross_check_pass, "{:?}", report.detail);
@@ -1403,12 +1426,9 @@ receipt_journal_path = "{journal}"
             extra: json!({"seq": 9}),
         })
         .unwrap();
-        let report = build_receipt_report(
-            &SessionId::new([0xAA; 32]),
-            &journal_path,
-            Some(dir.path()),
-        )
-        .unwrap();
+        let report =
+            build_receipt_report(&SessionId::new([0xAA; 32]), &journal_path, Some(dir.path()))
+                .unwrap();
         assert!(!report.cross_check_pass);
         assert!(report.detail.contains("P1-8/9"));
     }
@@ -1453,8 +1473,14 @@ receipt_journal_path = "{journal}"
         let report = rt.block_on(run_config_validate(&args));
         assert!(!report.overall_pass);
         assert!(matches!(report.schema_parsed, CheckOutcome::Fail { .. }));
-        assert!(matches!(report.wallet_key_loadable, CheckOutcome::Skipped { .. }));
-        assert!(matches!(report.wg_key_loadable, CheckOutcome::Skipped { .. }));
+        assert!(matches!(
+            report.wallet_key_loadable,
+            CheckOutcome::Skipped { .. }
+        ));
+        assert!(matches!(
+            report.wg_key_loadable,
+            CheckOutcome::Skipped { .. }
+        ));
         assert!(matches!(report.rpc_reachable, CheckOutcome::Skipped { .. }));
     }
 
@@ -1463,7 +1489,11 @@ receipt_journal_path = "{journal}"
         let dir = tempdir().unwrap();
         let toml = dir.path().join("node.toml");
         let audit_dir = dir.path().join("audit").to_string_lossy().to_string();
-        let journal = dir.path().join("receipts.bin").to_string_lossy().to_string();
+        let journal = dir
+            .path()
+            .join("receipts.bin")
+            .to_string_lossy()
+            .to_string();
         write_basic_node_toml(&toml, &audit_dir, &journal);
         fs::remove_file(dir.path().join("wg.key")).unwrap();
         let args = ConfigValidateArgs {
@@ -1482,7 +1512,11 @@ receipt_journal_path = "{journal}"
         let dir = tempdir().unwrap();
         let toml = dir.path().join("node.toml");
         let audit_dir = dir.path().join("audit").to_string_lossy().to_string();
-        let journal = dir.path().join("receipts.bin").to_string_lossy().to_string();
+        let journal = dir
+            .path()
+            .join("receipts.bin")
+            .to_string_lossy()
+            .to_string();
         write_basic_node_toml(&toml, &audit_dir, &journal);
         // Truncate wallet key to 0 bytes.
         fs::write(dir.path().join("wallet.key"), b"").unwrap();
@@ -1506,7 +1540,11 @@ receipt_journal_path = "{journal}"
         let dir = tempdir().unwrap();
         let toml = dir.path().join("node.toml");
         let audit_dir = dir.path().join("audit").to_string_lossy().to_string();
-        let journal = dir.path().join("receipts.bin").to_string_lossy().to_string();
+        let journal = dir
+            .path()
+            .join("receipts.bin")
+            .to_string_lossy()
+            .to_string();
         write_basic_node_toml(&toml, &audit_dir, &journal);
         let args = ConfigValidateArgs {
             path: toml,
@@ -1528,7 +1566,11 @@ receipt_journal_path = "{journal}"
         let dir = tempdir().unwrap();
         let toml = dir.path().join("node.toml");
         let audit_dir = dir.path().join("audit").to_string_lossy().to_string();
-        let journal = dir.path().join("receipts.bin").to_string_lossy().to_string();
+        let journal = dir
+            .path()
+            .join("receipts.bin")
+            .to_string_lossy()
+            .to_string();
         write_basic_node_toml(&toml, &audit_dir, &journal);
         let args = ConfigValidateArgs {
             path: toml,
@@ -1560,7 +1602,11 @@ receipt_journal_path = "{journal}"
         let dir = tempdir().unwrap();
         let toml = dir.path().join("node.toml");
         let audit_dir = dir.path().join("audit").to_string_lossy().to_string();
-        let journal = dir.path().join("receipts.bin").to_string_lossy().to_string();
+        let journal = dir
+            .path()
+            .join("receipts.bin")
+            .to_string_lossy()
+            .to_string();
         write_basic_node_toml(&toml, &audit_dir, &journal);
         let args = ConfigValidateArgs {
             path: toml,
@@ -1726,7 +1772,11 @@ receipt_journal_path = "{journal}"
         });
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         let outcome = probe_remote_health(&format!("http://{addr}")).await;
-        assert!(matches!(outcome, CheckOutcome::Fail { .. }), "{:?}", outcome);
+        assert!(
+            matches!(outcome, CheckOutcome::Fail { .. }),
+            "{:?}",
+            outcome
+        );
     }
 
     #[tokio::test]
@@ -1785,11 +1835,7 @@ receipt_journal_path = "{journal}"
     fn audit_tail_picks_latest_file_from_directory() {
         let dir = tempdir().unwrap();
         // Seed two audit files; the lexically-latest one is opened.
-        fs::write(
-            dir.path().join("audit-2030-01-01.jsonl"),
-            b"",
-        )
-        .unwrap();
+        fs::write(dir.path().join("audit-2030-01-01.jsonl"), b"").unwrap();
         // Build a real (chained) audit log with one entry so the
         // verifier doesn't bail on a malformed line.
         let log = AuditLog::open(dir.path()).unwrap();
@@ -1947,12 +1993,9 @@ receipt_journal_path = "{journal}"
         let journal_path = dir.path().join("receipts.bin");
         // Empty journal (only magic) — open then drop without bump.
         let _ = ReceiptJournal::open(&journal_path).unwrap();
-        let report = build_receipt_report(
-            &SessionId::new([0xBB; 32]),
-            &journal_path,
-            Some(dir.path()),
-        )
-        .unwrap();
+        let report =
+            build_receipt_report(&SessionId::new([0xBB; 32]), &journal_path, Some(dir.path()))
+                .unwrap();
         assert!(report.journal_floor.is_none());
         assert!(report.audit_seqs.is_empty());
         assert!(!report.cross_check_pass);

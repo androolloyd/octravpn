@@ -363,8 +363,16 @@ mod tests {
             bytes_used: 1500,
         });
         // First receipt credits 500; second credits 1000 (1500 - 500).
-        assert_eq!(idx.state.total(metric::BYTES_SETTLED, BucketWidth::OneMinute), 1500);
-        assert_eq!(idx.state.total(metric::RECEIPTS_SIGNED, BucketWidth::OneMinute), 2);
+        assert_eq!(
+            idx.state
+                .total(metric::BYTES_SETTLED, BucketWidth::OneMinute),
+            1500
+        );
+        assert_eq!(
+            idx.state
+                .total(metric::RECEIPTS_SIGNED, BucketWidth::OneMinute),
+            2
+        );
     }
 
     #[test]
@@ -383,7 +391,11 @@ mod tests {
             seq: 1,
             bytes_used: 500,
         });
-        assert_eq!(idx.state.total(metric::BYTES_SETTLED, BucketWidth::OneMinute), 2000);
+        assert_eq!(
+            idx.state
+                .total(metric::BYTES_SETTLED, BucketWidth::OneMinute),
+            2000
+        );
     }
 
     #[test]
@@ -402,7 +414,9 @@ mod tests {
             ts_unix: 30,
             session_id: "c".into(),
         });
-        let s = idx.state.series(metric::SESSIONS_OPENED, BucketWidth::OneMinute);
+        let s = idx
+            .state
+            .series(metric::SESSIONS_OPENED, BucketWidth::OneMinute);
         // Three buckets: (0, 1), (600, 1), (660, 1).
         assert_eq!(s.len(), 3);
         assert_eq!(s[0], (0, 1));
@@ -417,6 +431,9 @@ mod tests {
             ts_unix: 1,
             kind: "future_event".into(),
         });
-        assert_eq!(idx.state.total(metric::EVENTS_OTHER, BucketWidth::OneDay), 1);
+        assert_eq!(
+            idx.state.total(metric::EVENTS_OTHER, BucketWidth::OneDay),
+            1
+        );
     }
 }

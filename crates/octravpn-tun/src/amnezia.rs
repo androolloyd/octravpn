@@ -190,10 +190,17 @@ impl AmneziaConfig {
         }
         // Range check: 5..=2_147_483_647 OR the canonical 1..=4 value
         // at the same slot (identity).
-        let canon = [WG_MSG_INIT, WG_MSG_RESPONSE, WG_MSG_COOKIE, WG_MSG_TRANSPORT];
+        let canon = [
+            WG_MSG_INIT,
+            WG_MSG_RESPONSE,
+            WG_MSG_COOKIE,
+            WG_MSG_TRANSPORT,
+        ];
         for (h, c) in hs.iter().zip(canon.iter()) {
             if *h != *c && !(5..=2_147_483_647).contains(h) {
-                return Err("h1..h4 must be 5..=2_147_483_647 (or the canonical value at that slot)");
+                return Err(
+                    "h1..h4 must be 5..=2_147_483_647 (or the canonical value at that slot)",
+                );
             }
         }
         Ok(())
@@ -1317,8 +1324,7 @@ mod tests {
                     payload[..4].copy_from_slice(&WG_MSG_TRANSPORT.to_le_bytes());
                     payload[7] = i as u8;
                     let mut bufs: Vec<Vec<u8>> = Vec::new();
-                    sh_a
-                        .lock()
+                    sh_a.lock()
                         .await
                         .wrap_send(b_addr, &payload, |b| bufs.push(b.to_vec()));
                     for d in &bufs {

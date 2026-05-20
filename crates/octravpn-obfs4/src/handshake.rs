@@ -210,10 +210,7 @@ impl<'a> ServerHandshake<'a> {
     /// Consume a client handshake message; on success return
     /// `(reply_bytes, session_keys)`. On `BadMac`, callers MUST drop
     /// the packet silently and not send any reply.
-    pub fn respond(
-        &self,
-        client_msg: &[u8],
-    ) -> Result<(Vec<u8>, SessionKeys), HandshakeError> {
+    pub fn respond(&self, client_msg: &[u8]) -> Result<(Vec<u8>, SessionKeys), HandshakeError> {
         if client_msg.len() < HANDSHAKE_FIXED_LEN {
             return Err(HandshakeError::TooShort(client_msg.len()));
         }
@@ -476,7 +473,10 @@ mod tests {
         let mut c_msg = client.message();
         c_msg[5] ^= 0x10; // inside the 32-byte X region
         let server = ServerHandshake::new(&id);
-        assert!(matches!(server.respond(&c_msg), Err(HandshakeError::BadMac)));
+        assert!(matches!(
+            server.respond(&c_msg),
+            Err(HandshakeError::BadMac)
+        ));
     }
 
     // -------------------------------------------------------------------
@@ -521,7 +521,9 @@ mod tests {
         let client = ClientHandshake::start(creds);
         let c_msg = client.message();
         let server = ServerHandshake::new(&id);
-        let (mut s_msg, _sk) = server.respond(&c_msg).unwrap_or_else(|e| panic!("respond: {e:?}"));
+        let (mut s_msg, _sk) = server
+            .respond(&c_msg)
+            .unwrap_or_else(|e| panic!("respond: {e:?}"));
         s_msg[48] ^= 0x40; // flip bit in the 32-byte auth region
         match client.finalize(&s_msg) {
             Err(HandshakeError::BadAuth) => {}
@@ -539,7 +541,9 @@ mod tests {
         let client = ClientHandshake::start(creds);
         let c_msg = client.message();
         let server = ServerHandshake::new(&id);
-        let (mut s_msg, _sk) = server.respond(&c_msg).unwrap_or_else(|e| panic!("respond: {e:?}"));
+        let (mut s_msg, _sk) = server
+            .respond(&c_msg)
+            .unwrap_or_else(|e| panic!("respond: {e:?}"));
         s_msg[10] ^= 0x01;
         match client.finalize(&s_msg) {
             Err(HandshakeError::BadAuth) => {}
@@ -573,7 +577,10 @@ mod tests {
             let msg = c.message();
             let mut pk = [0u8; 32];
             pk.copy_from_slice(&msg[..32]);
-            assert!(seen.insert(pk), "ephemeral pubkey re-used across handshakes");
+            assert!(
+                seen.insert(pk),
+                "ephemeral pubkey re-used across handshakes"
+            );
         }
     }
 

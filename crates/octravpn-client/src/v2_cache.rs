@@ -252,13 +252,11 @@ mod tests {
     fn entry_path_sanitizes_weird_chars() {
         let td = tempdir().unwrap();
         let p = entry_path(td.path(), "oct/with:weird\\chars");
-        assert!(p
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.'));
+        assert!(p.file_name().unwrap().to_str().unwrap().chars().all(|c| c
+            .is_ascii_alphanumeric()
+            || c == '-'
+            || c == '_'
+            || c == '.'));
     }
 
     #[test]

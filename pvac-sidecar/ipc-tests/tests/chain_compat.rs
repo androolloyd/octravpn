@@ -37,7 +37,9 @@ const TAG_ZERO_PROOF: u8 = 6;
 
 #[test]
 fn seckey_blob_starts_with_pvac_magic_v2_tag_seckey() {
-    let Some(bin) = skip_if_no_binary() else { return };
+    let Some(bin) = skip_if_no_binary() else {
+        return;
+    };
     let mut sc = Sidecar::spawn(&bin).unwrap();
     let kg = sc
         .request(&json!({"op": "keygen", "seed": seed_hex(0x31)}))
@@ -51,7 +53,9 @@ fn seckey_blob_starts_with_pvac_magic_v2_tag_seckey() {
 
 #[test]
 fn cipher_blob_starts_with_pvac_magic_v2_tag_cipher() {
-    let Some(bin) = skip_if_no_binary() else { return };
+    let Some(bin) = skip_if_no_binary() else {
+        return;
+    };
     let mut sc = Sidecar::spawn(&bin).unwrap();
     let kg = sc
         .request(&json!({"op": "keygen", "seed": seed_hex(0x32)}))
@@ -82,7 +86,9 @@ fn zero_proof_blob_is_raw_no_pvac_header() {
     // serialized shapes and worth pinning.
     //
     // See: pvac-sidecar/vendor/pvac/pvac_c_api.cpp::pvac_serialize_zero_proof
-    let Some(bin) = skip_if_no_binary() else { return };
+    let Some(bin) = skip_if_no_binary() else {
+        return;
+    };
     let mut sc = Sidecar::spawn(&bin).unwrap();
     let kg = sc
         .request(&json!({"op": "keygen", "seed": seed_hex(0x34)}))
@@ -130,7 +136,9 @@ fn pubkey_blob_is_compressed_not_raw_pvac_magic() {
     // so the first 4 bytes are NOT b"PVAC". The chain accepts both
     // forms (deserialize_pubkey checks is_packed first). This test
     // pins that the sidecar ships the compressed form.
-    let Some(bin) = skip_if_no_binary() else { return };
+    let Some(bin) = skip_if_no_binary() else {
+        return;
+    };
     let mut sc = Sidecar::spawn(&bin).unwrap();
     let kg = sc
         .request(&json!({"op": "keygen", "seed": seed_hex(0x36)}))
@@ -144,7 +152,11 @@ fn pubkey_blob_is_compressed_not_raw_pvac_magic() {
          this contradicts the compressed-output contract"
     );
     // Pubkey is intentionally big (compressed PVAC pubkeys are ~3 MiB).
-    assert!(pk_bytes.len() > 1_000_000, "pk size {} unexpectedly small", pk_bytes.len());
+    assert!(
+        pk_bytes.len() > 1_000_000,
+        "pk size {} unexpectedly small",
+        pk_bytes.len()
+    );
 }
 
 #[test]
@@ -152,7 +164,9 @@ fn aes_kat_is_deterministic_across_processes() {
     // Spawn TWO separate processes and confirm both compute the same
     // KAT. This is the on-chain check that decides whether the sidecar
     // is allowed to register a pubkey at all.
-    let Some(bin) = skip_if_no_binary() else { return };
+    let Some(bin) = skip_if_no_binary() else {
+        return;
+    };
     let mut sc1 = Sidecar::spawn(&bin).unwrap();
     let mut sc2 = Sidecar::spawn(&bin).unwrap();
     let a = sc1.request(&json!({"op": "aes_kat"})).unwrap();
@@ -169,7 +183,9 @@ fn keygen_is_deterministic_under_same_seed() {
     // Determinism is a hard requirement: the chain expects that an
     // operator who re-derives their wallet from the same seed gets the
     // same PVAC pubkey, otherwise the IEE proxy contract bricks.
-    let Some(bin) = skip_if_no_binary() else { return };
+    let Some(bin) = skip_if_no_binary() else {
+        return;
+    };
     let mut sc = Sidecar::spawn(&bin).unwrap();
     let seed = seed_hex(0x99);
     let r1 = sc.request(&json!({"op": "keygen", "seed": &seed})).unwrap();
@@ -180,7 +196,9 @@ fn keygen_is_deterministic_under_same_seed() {
 
 #[test]
 fn keygen_distinct_seeds_yield_distinct_keys() {
-    let Some(bin) = skip_if_no_binary() else { return };
+    let Some(bin) = skip_if_no_binary() else {
+        return;
+    };
     let mut sc = Sidecar::spawn(&bin).unwrap();
     let a = sc
         .request(&json!({"op": "keygen", "seed": seed_hex(0xAA)}))
@@ -198,7 +216,9 @@ fn encrypt_then_add_zero_yields_distinct_but_well_formed_cipher() {
     // not necessarily byte-identical (the result has different
     // randomness internally). What we can pin is that the wire format
     // is well-formed: PVAC magic + cipher tag.
-    let Some(bin) = skip_if_no_binary() else { return };
+    let Some(bin) = skip_if_no_binary() else {
+        return;
+    };
     let mut sc = Sidecar::spawn(&bin).unwrap();
     let kg = sc
         .request(&json!({"op": "keygen", "seed": seed_hex(0x40)}))

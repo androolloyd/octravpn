@@ -481,7 +481,10 @@ impl PortalChain {
                 // the asset isn't published — distinct from a wire
                 // failure that we'd render as 502.
                 let msg = e.to_string();
-                if msg.contains("empty result") || msg.contains("not found") || msg.contains("no such") {
+                if msg.contains("empty result")
+                    || msg.contains("not found")
+                    || msg.contains("no such")
+                {
                     return Err(FetchAssetError::NotPublished {
                         circle_id: circle_id.to_string(),
                         path,
@@ -748,8 +751,8 @@ mod tests {
         }))
         .await;
         let rpc = RpcClient::new(format!("http://{addr}/"));
-        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0)
-            .with_passphrase("correct-passphrase");
+        let chain =
+            PortalChain::from_rpc(rpc, "octPROG".into(), 0).with_passphrase("correct-passphrase");
 
         let got = chain
             .fetch_circle_asset_bytes("octCIRCLE_T1", "/policy.json")
@@ -792,8 +795,8 @@ mod tests {
         }))
         .await;
         let rpc = RpcClient::new(format!("http://{addr}/"));
-        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0)
-            .with_passphrase("WRONG-passphrase");
+        let chain =
+            PortalChain::from_rpc(rpc, "octPROG".into(), 0).with_passphrase("WRONG-passphrase");
 
         let err = chain
             .fetch_circle_asset_bytes("octCIRCLE_T3", "/policy.json")
@@ -1018,7 +1021,11 @@ mod tests {
             .fetch_circle_asset_bytes("circCAP", "/c.json")
             .await
             .unwrap();
-        assert_eq!(count.load(Ordering::SeqCst), 3, "three distinct keys, three RPCs");
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            3,
+            "three distinct keys, three RPCs"
+        );
         assert_eq!(cache.len(), 2, "capacity must cap at 2");
 
         // /a.json was the oldest; refetching must miss + roundtrip.
@@ -1339,8 +1346,7 @@ mod tests {
     async fn sealed_asset_missing_plaintext_hash_maps_to_rpc() {
         // Sealed envelope but the response is missing plaintext_hash.
         let plaintext = b"x";
-        let (ct_b64, _ph) =
-            build_sealed_fixture("circNOPH", "default", "pp", plaintext);
+        let (ct_b64, _ph) = build_sealed_fixture("circNOPH", "default", "pp", plaintext);
         let addr = spawn_mock_rpc(json!({
             "ciphertext_b64": ct_b64,
             "key_id": "default",
@@ -1367,8 +1373,7 @@ mod tests {
         // plaintext would let a wrong passphrase validate successfully.
         use std::sync::atomic::Ordering;
         let plaintext = b"unseal bypass bytes";
-        let (ct_b64, ph_hex) =
-            build_sealed_fixture("circBYPASS", "default", "right-pp", plaintext);
+        let (ct_b64, ph_hex) = build_sealed_fixture("circBYPASS", "default", "right-pp", plaintext);
         let (addr, count) = spawn_counting_rpc(json!({
             "ciphertext_b64": ct_b64,
             "plaintext_hash": ph_hex,
@@ -1404,8 +1409,7 @@ mod tests {
     #[tokio::test]
     async fn try_decrypt_with_wrong_passphrase_returns_decrypt_failed() {
         let plaintext = b"unseal test";
-        let (ct_b64, ph_hex) =
-            build_sealed_fixture("circWP", "default", "right-pp", plaintext);
+        let (ct_b64, ph_hex) = build_sealed_fixture("circWP", "default", "right-pp", plaintext);
         let addr = spawn_mock_rpc(json!({
             "ciphertext_b64": ct_b64,
             "plaintext_hash": ph_hex,
@@ -1426,8 +1430,7 @@ mod tests {
     async fn try_decrypt_does_not_populate_cache() {
         use std::sync::atomic::Ordering;
         let plaintext = b"do not cache me";
-        let (ct_b64, ph_hex) =
-            build_sealed_fixture("circNOC", "default", "pp", plaintext);
+        let (ct_b64, ph_hex) = build_sealed_fixture("circNOC", "default", "pp", plaintext);
         let (addr, count) = spawn_counting_rpc(json!({
             "ciphertext_b64": ct_b64,
             "plaintext_hash": ph_hex,
@@ -1493,8 +1496,7 @@ mod tests {
         // Pre-populate the cache with bogus bytes under the same key.
         // try_decrypt must ignore the cache and re-fetch.
         let plaintext = b"freshly decrypted";
-        let (ct_b64, ph_hex) =
-            build_sealed_fixture("circSTALE", "default", "good-pp", plaintext);
+        let (ct_b64, ph_hex) = build_sealed_fixture("circSTALE", "default", "good-pp", plaintext);
         let addr = spawn_mock_rpc(json!({
             "ciphertext_b64": ct_b64,
             "plaintext_hash": ph_hex,
@@ -1507,10 +1509,7 @@ mod tests {
             mime: sniff(b"STALE BYTES"),
             fetched_at: Instant::now(),
         };
-        cache.insert(
-            ("circSTALE".to_string(), "/x.json".to_string()),
-            stale,
-        );
+        cache.insert(("circSTALE".to_string(), "/x.json".to_string()), stale);
         let chain = chain_with_cache(addr, Arc::clone(&cache));
         let pp = Arc::new(Zeroizing::new("good-pp".to_string()));
         let got = chain
@@ -1534,8 +1533,10 @@ mod tests {
             "key_id": "default",
         }))
         .await;
-        let cache: Arc<AssetCache> =
-            Arc::new(BoundedMap::new(DEFAULT_ASSET_CACHE_CAPACITY, Duration::from_secs(60)));
+        let cache: Arc<AssetCache> = Arc::new(BoundedMap::new(
+            DEFAULT_ASSET_CACHE_CAPACITY,
+            Duration::from_secs(60),
+        ));
         let chain = chain_with_cache(addr, Arc::clone(&cache));
         for i in 0..257 {
             let path = format!("/asset-{i}.bin");
@@ -1552,7 +1553,9 @@ mod tests {
         );
         // The very first key was evicted.
         assert!(
-            cache.get(&("circ257".to_string(), "/asset-0.bin".to_string())).is_none(),
+            cache
+                .get(&("circ257".to_string(), "/asset-0.bin".to_string()))
+                .is_none(),
             "asset-0 must have been evicted as the oldest",
         );
     }
@@ -1809,8 +1812,7 @@ mod tests {
     #[test]
     fn portal_chain_with_key_id_overrides_default() {
         let rpc = RpcClient::new("http://127.0.0.1:1");
-        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0)
-            .with_key_id("custom-key");
+        let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0).with_key_id("custom-key");
         assert_eq!(chain.key_id, "custom-key");
     }
 }

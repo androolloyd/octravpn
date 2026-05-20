@@ -323,13 +323,10 @@ fn build_chain_ctx(cfg: &NodeConfig) -> Result<ChainCtxV3> {
     let rpc = build_rpc(&cfg.chain)?;
     let program_addr = Address::from_display(&cfg.chain.program_addr);
     let wallet_secret = if cfg.chain.require_sealed_keys {
-        *octravpn_core::util::read_secret_32_or_sealed(
-            &cfg.chain.wallet_secret_path,
-            None,
-        )
-        .with_context(|| {
-            format!("strict-load wallet secret {}", cfg.chain.wallet_secret_path)
-        })?
+        *octravpn_core::util::read_secret_32_or_sealed(&cfg.chain.wallet_secret_path, None)
+            .with_context(|| {
+                format!("strict-load wallet secret {}", cfg.chain.wallet_secret_path)
+            })?
     } else {
         octravpn_core::util::read_secret_32(&cfg.chain.wallet_secret_path)
             .with_context(|| format!("load wallet secret {}", cfg.chain.wallet_secret_path))?
@@ -354,8 +351,7 @@ fn build_rpc(chain: &crate::config::ChainCfg) -> Result<RpcClient> {
         let pem = std::fs::read(p).with_context(|| format!("read pinned root {p}"))?;
         blobs.push(pem);
     }
-    RpcClient::new_with_pinned_roots(&chain.rpc_url, &blobs)
-        .map_err(|e| anyhow!("pinned tls: {e}"))
+    RpcClient::new_with_pinned_roots(&chain.rpc_url, &blobs).map_err(|e| anyhow!("pinned tls: {e}"))
 }
 
 // ============================================================
@@ -420,19 +416,12 @@ async fn run_retire(ctx: &ChainCtxV3, a: &RetireArgs) -> Result<()> {
 async fn run_create_tailnet(ctx: &ChainCtxV3, a: &CreateTailnetArgs) -> Result<()> {
     let (nonce, fee) = nonce_and_fee(ctx).await?;
     let call = ctx.build_create_tailnet_call(&a.members_root, a.deposit, fee, nonce);
-    submit_and_log(
-        ctx,
-        "create_tailnet",
-        call,
-        Some(ReturnLog::TailnetId),
-    )
-    .await
+    submit_and_log(ctx, "create_tailnet", call, Some(ReturnLog::TailnetId)).await
 }
 
 async fn run_update_members_root(ctx: &ChainCtxV3, a: &UpdateMembersArgs) -> Result<()> {
     let (nonce, fee) = nonce_and_fee(ctx).await?;
-    let call =
-        ctx.build_update_members_root_call(a.tailnet_id, &a.new_members_root, fee, nonce);
+    let call = ctx.build_update_members_root_call(a.tailnet_id, &a.new_members_root, fee, nonce);
     submit_and_log(ctx, "update_members_root", call, None).await
 }
 
@@ -557,11 +546,7 @@ async fn submit_and_log(
 /// Best-effort poll of `octra_transaction(hash)` for a return value.
 /// Returns `None` if the chain never reports a result within the
 /// bounded number of attempts.
-async fn poll_return_value(
-    ctx: &ChainCtxV3,
-    hash: &str,
-    kind: ReturnLog,
-) -> Option<String> {
+async fn poll_return_value(ctx: &ChainCtxV3, hash: &str, kind: ReturnLog) -> Option<String> {
     // 5 attempts at 1s each — plenty for devnet's block cadence, brief
     // enough on mainnet that ops aren't blocked if a tx hasn't included.
     for _ in 0..5 {
@@ -632,15 +617,13 @@ mod tests {
     fn ctx() -> ChainCtxV3 {
         let secret = [9u8; 32];
         let wallet = KeyPair::from_secret_bytes(&secret);
-        let program_addr =
-            Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+        let program_addr = Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
         let rpc = RpcClient::new("http://127.0.0.1:0/unused");
         ChainCtxV3::new(rpc, program_addr, wallet)
     }
 
     const CID: &str = "oct8taXQ4CvohcgzCJFYyaKrrAbcZs5mxkBCJQQYWb2Pcun";
-    const ANCHOR: &str =
-        "1111111111111111111111111111111111111111111111111111111111111111";
+    const ANCHOR: &str = "1111111111111111111111111111111111111111111111111111111111111111";
 
     #[test]
     fn bond_args_build_expected_call() {
@@ -717,7 +700,10 @@ mod tests {
             5,
         );
         assert_eq!(call["method"], "rotate_receipt_pubkey");
-        assert_eq!(call["params"][1], "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA=");
+        assert_eq!(
+            call["params"][1],
+            "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA="
+        );
     }
 
     #[test]
@@ -908,8 +894,8 @@ mod tests {
         // non-empty JSON object and contains the signer.
         assert!(signed.is_object(), "expected JSON object, got {signed}");
         // Look for either top-level `from` or nested `tx.from`.
-        let has_from = signed.get("from").is_some()
-            || signed.get("tx").and_then(|t| t.get("from")).is_some();
+        let has_from =
+            signed.get("from").is_some() || signed.get("tx").and_then(|t| t.get("from")).is_some();
         assert!(has_from, "expected from field, got {signed}");
     }
 
@@ -1024,12 +1010,15 @@ listen = "0.0.0.0:51821"
         };
         let call = c.build_settle_confirm_call(&p);
         let params = call["params"].as_array().unwrap();
-        assert_eq!(params, &[
-            serde_json::json!(1u64),
-            serde_json::json!(2u64),
-            serde_json::json!(3u64),
-            serde_json::json!("abcd"),
-        ]);
+        assert_eq!(
+            params,
+            &[
+                serde_json::json!(1u64),
+                serde_json::json!(2u64),
+                serde_json::json!(3u64),
+                serde_json::json!("abcd"),
+            ]
+        );
         assert_eq!(call["fee"], 4);
         assert_eq!(call["nonce"], 5);
     }

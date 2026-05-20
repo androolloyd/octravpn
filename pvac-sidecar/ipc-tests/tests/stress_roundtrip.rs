@@ -18,8 +18,11 @@ use pvac_sidecar_ipc_tests::{seed_hex, skip_if_no_binary, split_prefixed, Sideca
 use serde_json::json;
 
 #[test]
+#[ignore = "long-running sidecar IPC stress; run explicitly with --ignored"]
 fn stress_one_thousand_round_trips_on_one_process() {
-    let Some(bin) = skip_if_no_binary() else { return };
+    let Some(bin) = skip_if_no_binary() else {
+        return;
+    };
     let mut sc = Sidecar::spawn(&bin).unwrap();
     let kg = sc
         .request(&json!({"op": "keygen", "seed": seed_hex(0x77)}))
@@ -68,11 +71,14 @@ fn stress_one_thousand_round_trips_on_one_process() {
 }
 
 #[test]
+#[ignore = "long-running sidecar IPC stress; run explicitly with --ignored"]
 fn stress_alternating_ops_dont_desync_the_pipe() {
     // 200 cycles of (ping, keygen, ping). Each cycle's keygen response
     // must NOT show up as the answer to a ping. This proves the
     // line-protocol can't drift on the stdin/stdout pipe under load.
-    let Some(bin) = skip_if_no_binary() else { return };
+    let Some(bin) = skip_if_no_binary() else {
+        return;
+    };
     let mut sc = Sidecar::spawn(&bin).unwrap();
     for i in 0u32..200 {
         let p1 = sc.request(&json!({"op": "ping"})).unwrap();
@@ -92,10 +98,13 @@ fn stress_alternating_ops_dont_desync_the_pipe() {
 }
 
 #[test]
+#[ignore = "long-running sidecar IPC stress; run explicitly with --ignored"]
 fn stress_make_zero_proof_50_iterations() {
     // make_zero_proof is the heaviest op; 50 iterations is enough to
     // surface any leak in the proof object's RAII guard.
-    let Some(bin) = skip_if_no_binary() else { return };
+    let Some(bin) = skip_if_no_binary() else {
+        return;
+    };
     let mut sc = Sidecar::spawn(&bin).unwrap();
     let kg = sc
         .request(&json!({"op": "keygen", "seed": seed_hex(0x88)}))

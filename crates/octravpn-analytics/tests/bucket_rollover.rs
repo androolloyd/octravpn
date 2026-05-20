@@ -77,7 +77,9 @@ fn late_arriving_event_back_fills_bucket_without_resetting_freshness() {
     );
 
     // The late event must back-fill bucket [960, 1020) at 1m width.
-    let s = idx.state.series(metric::SESSIONS_OPENED, BucketWidth::OneMinute);
+    let s = idx
+        .state
+        .series(metric::SESSIONS_OPENED, BucketWidth::OneMinute);
     let totals: u64 = s.iter().map(|(_, v)| *v).sum();
     assert_eq!(totals, 2, "both events accounted for");
     // Both fall into the same 1m bucket [960, 1020).
@@ -98,7 +100,9 @@ fn late_arrival_into_distinct_bucket_back_fills_correctly() {
         session_id: "b".into(),
     });
 
-    let s = idx.state.series(metric::SESSIONS_OPENED, BucketWidth::OneMinute);
+    let s = idx
+        .state
+        .series(metric::SESSIONS_OPENED, BucketWidth::OneMinute);
     assert_eq!(s.len(), 2);
     assert_eq!(s[0], (0, 1));
     assert_eq!(s[1], (1200, 1));
@@ -205,11 +209,13 @@ fn bytes_settled_delta_across_three_receipts() {
         });
     }
     assert_eq!(
-        idx.state.total(metric::BYTES_SETTLED, BucketWidth::OneMinute),
+        idx.state
+            .total(metric::BYTES_SETTLED, BucketWidth::OneMinute),
         2000,
     );
     assert_eq!(
-        idx.state.total(metric::RECEIPTS_SIGNED, BucketWidth::OneMinute),
+        idx.state
+            .total(metric::RECEIPTS_SIGNED, BucketWidth::OneMinute),
         3,
     );
 }
@@ -231,11 +237,13 @@ fn bytes_settled_multi_session_isolated_counters() {
     }
     // a: 100 + 200 = 300; b: 50 + 30 = 80. Total credited = 380.
     assert_eq!(
-        idx.state.total(metric::BYTES_SETTLED, BucketWidth::OneMinute),
+        idx.state
+            .total(metric::BYTES_SETTLED, BucketWidth::OneMinute),
         380,
     );
     assert_eq!(
-        idx.state.total(metric::RECEIPTS_SIGNED, BucketWidth::OneMinute),
+        idx.state
+            .total(metric::RECEIPTS_SIGNED, BucketWidth::OneMinute),
         4,
     );
 }

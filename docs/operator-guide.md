@@ -79,7 +79,7 @@ price_per_mb       = 100                   # 100 OU = 0.0001 OCT per MB
 region             = "eu-west"
 
 [control]
-listen             = "0.0.0.0:51821"
+listen             = "127.0.0.1:51821"
 audit_dir          = "/var/log/octravpn/audit"
 
 [attestation]

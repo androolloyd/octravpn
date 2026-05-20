@@ -153,7 +153,10 @@ async fn prometheus_metrics(State(s): State<HttpState>, headers: HeaderMap) -> R
     }
     (
         StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4",
+        )],
         body,
     )
         .into_response()
@@ -276,7 +279,12 @@ mod tests {
         let (s, _) = make_state(None);
         let app = router(s);
         let resp = app
-            .oneshot(Request::builder().uri("/metrics").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/metrics")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
@@ -319,7 +327,12 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = String::from_utf8(
-            resp.into_body().collect().await.unwrap().to_bytes().to_vec(),
+            resp.into_body()
+                .collect()
+                .await
+                .unwrap()
+                .to_bytes()
+                .to_vec(),
         )
         .unwrap();
         assert!(body.contains("octravpn_analytics_sessions_opened{window=\"1m\"} 1"));

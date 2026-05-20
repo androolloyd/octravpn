@@ -172,7 +172,7 @@ production v2 turns it on unconditionally.
 
 ## 3. Control-plane exposure
 
-The control plane (default `0.0.0.0:51821`) carries:
+The control plane (default `127.0.0.1:51821`) carries:
 - Session-announce: client publishes `(session_id, client_wg_pubkey)`
 - Receipt-proposal: client fetches dual-sig receipt
 - `/health`, `/metrics`, `/events` (SSE)

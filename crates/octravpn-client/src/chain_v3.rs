@@ -20,8 +20,7 @@
 
 use anyhow::{anyhow, Context, Result};
 use octravpn_core::{
-    address::Address, rpc::RpcClient, sig::KeyPair, tx as octra_tx,
-    v3_calls::ContractCallBuilder,
+    address::Address, rpc::RpcClient, sig::KeyPair, tx as octra_tx, v3_calls::ContractCallBuilder,
 };
 use serde_json::{json, Value};
 
@@ -285,12 +284,7 @@ impl<'a> ChainCtxV3<'a> {
     /// once `epoch >= opened_at + session_grace_epochs` and the
     /// operator hasn't called `settle_claim`. Refunds the deposit to
     /// the tailnet treasury.
-    pub(crate) fn build_claim_no_show_call(
-        &self,
-        session_id: u64,
-        fee: u64,
-        nonce: u64,
-    ) -> Value {
+    pub(crate) fn build_claim_no_show_call(&self, session_id: u64, fee: u64, nonce: u64) -> Value {
         self.call_builder()
             .claim_no_show_call(&[json!(session_id)], 0, fee, nonce)
     }
@@ -358,8 +352,7 @@ mod tests {
     fn fixtures() -> (RpcClient, Address, KeyPair) {
         let secret = [7u8; 32];
         let wallet = KeyPair::from_secret_bytes(&secret);
-        let program_addr =
-            Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+        let program_addr = Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
         let rpc = RpcClient::new("http://127.0.0.1:0/unused");
         (rpc, program_addr, wallet)
     }
@@ -397,8 +390,7 @@ mod tests {
             session_id: 0,
             bytes_used: 1_048_576,
             net: 1_000,
-            settle_blinding:
-                "f8d1aa00bb22cc33f8d1aa00bb22cc33f8d1aa00bb22cc33f8d1aa00bb22cc33",
+            settle_blinding: "f8d1aa00bb22cc33f8d1aa00bb22cc33f8d1aa00bb22cc33f8d1aa00bb22cc33",
             fee: 500,
             nonce: 21,
         };

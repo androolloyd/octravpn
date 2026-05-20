@@ -45,7 +45,10 @@ pub fn check_hash<E>(value: &str, not_hex: impl FnOnce() -> E) -> Result<(), E> 
     if value.len() != HEX_HASH_LEN {
         return Err(not_hex());
     }
-    if !value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+    if !value
+        .bytes()
+        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
         return Err(not_hex());
     }
     Ok(())

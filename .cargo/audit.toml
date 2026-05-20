@@ -1,9 +1,17 @@
-# cargo-audit / cargo-deny configuration.
+# cargo-audit configuration.
 # Run: cargo install --locked cargo-audit cargo-deny
 #      cargo audit
 #      cargo deny check
 [advisories]
-db-path = "~/.cargo/advisory-db"
-db-urls = ["https://github.com/rustsec/advisory-db"]
-ignore = []
+ignore = [
+  # No fixed release as of the 2026-05-20 audit; pulled only through
+  # sqlx-mysql in the sibling headscale checkout. The companion
+  # headscale-rs audit branch removes this path from normal builds.
+  "RUSTSEC-2023-0071",
+  # No fixed replacement from tun-rs/netlink-packet-core yet.
+  "RUSTSEC-2024-0436",
+  # Removed from the companion headscale-rs audit branch by switching
+  # to rustls-pki-types' built-in PEM parser.
+  "RUSTSEC-2025-0134",
+]
 informational_warnings = ["unmaintained", "unsound"]

@@ -34,8 +34,7 @@
 
 use anyhow::{anyhow, Context, Result};
 use octravpn_core::{
-    address::Address, rpc::RpcClient, sig::KeyPair, tx as octra_tx,
-    v3_calls::ContractCallBuilder,
+    address::Address, rpc::RpcClient, sig::KeyPair, tx as octra_tx, v3_calls::ContractCallBuilder,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -116,7 +115,11 @@ impl ChainCtxV3 {
     /// inline; v3 routes through this helper so the unit tests can
     /// assert the same fallback semantics without re-running RPC.
     pub(crate) async fn fee_or_fallback(&self, op: &str) -> u64 {
-        self.fee(op).await.ok().filter(|f| *f > 0).unwrap_or(CALL_FEE_FALLBACK)
+        self.fee(op)
+            .await
+            .ok()
+            .filter(|f| *f > 0)
+            .unwrap_or(CALL_FEE_FALLBACK)
     }
 
     /// Current chain epoch (used by the v3 boot flow to stamp the
@@ -283,12 +286,7 @@ impl ChainCtxV3 {
     /// `retire_circle(circle)` — flip `circle_active[circle] = 0`. The
     /// stake remains until `finalize_unbond` (assuming an `unbond`
     /// already ran). Caller MUST be `circle_owner[circle]`.
-    pub(crate) fn build_retire_circle_call(
-        &self,
-        circle_id: &str,
-        fee: u64,
-        nonce: u64,
-    ) -> Value {
+    pub(crate) fn build_retire_circle_call(&self, circle_id: &str, fee: u64, nonce: u64) -> Value {
         self.call_builder()
             .retire_circle_call(&[json!(circle_id)], 0, fee, nonce)
     }
@@ -347,10 +345,7 @@ impl ChainCtxV3 {
     /// the SAME `circle_receipt_pk[circle]`. Sigs are base64-encoded
     /// ed25519 over the raw payload bytes; the AML's `ed25519_ok`
     /// builtin decodes them natively.
-    pub(crate) fn build_slash_double_sign_call(
-        &self,
-        p: &SlashDoubleSignParams<'_>,
-    ) -> Value {
+    pub(crate) fn build_slash_double_sign_call(&self, p: &SlashDoubleSignParams<'_>) -> Value {
         self.call_builder().slash_double_sign_call(
             &[
                 json!(p.circle_id),
@@ -404,12 +399,7 @@ impl ChainCtxV3 {
     }
 
     /// `retire_tailnet(tailnet_id)` — flip `tailnet_retired = 1`.
-    pub(crate) fn build_retire_tailnet_call(
-        &self,
-        tailnet_id: u64,
-        fee: u64,
-        nonce: u64,
-    ) -> Value {
+    pub(crate) fn build_retire_tailnet_call(&self, tailnet_id: u64, fee: u64, nonce: u64) -> Value {
         self.call_builder()
             .retire_tailnet_call(&[json!(tailnet_id)], 0, fee, nonce)
     }
@@ -493,10 +483,7 @@ impl ChainCtxV3 {
     /// pre-agreed plaintext credit (price * bytes after class rules);
     /// `settle_blinding` is a per-session secret string fed into the
     /// earnings hash chain so auditors can detect tampering.
-    pub(crate) fn build_settle_confirm_call(
-        &self,
-        p: &SettleConfirmParams<'_>,
-    ) -> Value {
+    pub(crate) fn build_settle_confirm_call(&self, p: &SettleConfirmParams<'_>) -> Value {
         self.call_builder().settle_confirm_call(
             &[
                 json!(p.session_id),
@@ -514,12 +501,7 @@ impl ChainCtxV3 {
     /// `epoch >= opened_at + session_grace_epochs` and the operator
     /// hasn't called `settle_claim`. Refunds the deposit to the
     /// tailnet treasury.
-    pub(crate) fn build_claim_no_show_call(
-        &self,
-        session_id: u64,
-        fee: u64,
-        nonce: u64,
-    ) -> Value {
+    pub(crate) fn build_claim_no_show_call(&self, session_id: u64, fee: u64, nonce: u64) -> Value {
         self.call_builder()
             .claim_no_show_call(&[json!(session_id)], 0, fee, nonce)
     }
@@ -555,12 +537,8 @@ impl ChainCtxV3 {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        self.call_builder().claim_earnings_call(
-            &[json!(circle_id), json!(amount)],
-            0,
-            fee,
-            nonce,
-        )
+        self.call_builder()
+            .claim_earnings_call(&[json!(circle_id), json!(amount)], 0, fee, nonce)
     }
 
     // ============================================================
@@ -686,8 +664,7 @@ mod tests {
     fn ctx() -> ChainCtxV3 {
         let secret = [7u8; 32];
         let wallet = KeyPair::from_secret_bytes(&secret);
-        let program_addr =
-            Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+        let program_addr = Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
         let rpc = RpcClient::new("http://127.0.0.1:0/unused");
         ChainCtxV3::new(rpc, program_addr, wallet)
     }
@@ -762,11 +739,8 @@ mod tests {
     #[test]
     fn retire_circle_call_shape() {
         let c = ctx();
-        let call = c.build_retire_circle_call(
-            "oct8taXQ4CvohcgzCJFYyaKrrAbcZs5mxkBCJQQYWb2Pcun",
-            500,
-            10,
-        );
+        let call =
+            c.build_retire_circle_call("oct8taXQ4CvohcgzCJFYyaKrrAbcZs5mxkBCJQQYWb2Pcun", 500, 10);
         assert_eq!(call["method"], "retire_circle");
         let params = call["params"].as_array().unwrap();
         assert_eq!(params.len(), 1);

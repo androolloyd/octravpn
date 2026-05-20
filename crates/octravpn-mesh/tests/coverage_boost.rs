@@ -67,12 +67,7 @@ fn acl_unknown_group_does_not_match() {
     let mut groups = BTreeMap::default();
     groups.insert("admins".into(), vec!["octA".into()]);
     let doc = doc_with_rules(
-        vec![rule(
-            AclAction::Accept,
-            &["group:ghosts"],
-            &["*"],
-            &[],
-        )],
+        vec![rule(AclAction::Accept, &["group:ghosts"], &["*"], &[])],
         groups,
     );
     assert_eq!(
@@ -220,7 +215,10 @@ fn acl_decide_short_circuits_on_first_deny() {
 fn acl_canonical_bytes_independent_of_member_order_within_group() {
     let mk = |members: Vec<&str>| {
         let mut g = BTreeMap::default();
-        g.insert("admins".into(), members.into_iter().map(String::from).collect());
+        g.insert(
+            "admins".into(),
+            members.into_iter().map(String::from).collect(),
+        );
         doc_with_rules(
             vec![rule(AclAction::Accept, &["group:admins"], &["*"], &[])],
             g,
@@ -413,7 +411,10 @@ fn preauth_concurrent_mint_no_key_collisions() {
     let mut all = HashSet::new();
     for h in handles {
         for k in h.join().unwrap() {
-            assert!(all.insert(k), "duplicate preauth key minted under contention");
+            assert!(
+                all.insert(k),
+                "duplicate preauth key minted under contention"
+            );
         }
     }
     assert_eq!(all.len(), 32 * 64);
@@ -579,8 +580,7 @@ fn signed_peer_snapshot_serde_json_round_trip_verifies() {
     let snap = fake_peer_snapshot("tnet1", "octA");
     let signed = SignedPeerSnapshot::sign(snap, &kp);
     let bytes = serde_json::to_vec(&signed).expect("serialize");
-    let back: SignedPeerSnapshot =
-        serde_json::from_slice(&bytes).expect("deserialize");
+    let back: SignedPeerSnapshot = serde_json::from_slice(&bytes).expect("deserialize");
     // ts + sig + candidates survived a JSON round-trip; signature
     // verifies against the same pubkey.
     back.verify(&kp.public, PEER_SNAPSHOT_MAX_AGE_SECS)

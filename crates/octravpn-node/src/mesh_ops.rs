@@ -19,11 +19,7 @@
 //! into a `Value` and re-serialise so a future-compatible admin server
 //! that adds fields doesn't break our CLI.
 
-use std::{
-    fs,
-    path::PathBuf,
-    time::Duration,
-};
+use std::{fs, net::IpAddr, path::PathBuf, time::Duration};
 
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Args, Subcommand};
@@ -161,25 +157,48 @@ fn resolve_knock_psk() -> Option<[u8; 32]> {
 /// Apply the knock header to `req` if `OCTRAVPN_KNOCK_PSK` is set.
 fn with_knock(mut req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
     if let Some(psk) = resolve_knock_psk() {
-        let knock = octravpn_mesh::knock::current_knock(
-            &psk,
-            octravpn_mesh::knock::DEFAULT_WINDOW_SECS,
-        );
+        let knock =
+            octravpn_mesh::knock::current_knock(&psk, octravpn_mesh::knock::DEFAULT_WINDOW_SECS);
         req = req.header(octravpn_mesh::knock::KNOCK_HEADER, knock);
     }
     req
 }
 
-fn build_client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
-        // The mesh-control self-signed cert isn't in the system trust
-        // store on the operator's host; accept self-signed against an
-        // explicitly-passed admin URL. This is the same trust posture
-        // as `cli_ops::probe_remote_health`.
-        .danger_accept_invalid_certs(true)
+fn build_client(remote: &str) -> Result<reqwest::Client> {
+    let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS));
+    if allow_invalid_certs_for_remote(remote) {
+        builder = builder.danger_accept_invalid_certs(true);
+    }
+    builder
         .build()
         .map_err(|e| anyhow!("build http client: {e}"))
+}
+
+fn allow_invalid_certs_for_remote(remote: &str) -> bool {
+    let env = std::env::var("OCTRAVPN_MESH_INSECURE_TLS").ok();
+    allow_invalid_certs_for_remote_with_env(remote, env.as_deref())
+}
+
+fn allow_invalid_certs_for_remote_with_env(remote: &str, env_override: Option<&str>) -> bool {
+    if matches!(
+        env_override.map(str::trim),
+        Some("1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON")
+    ) {
+        return true;
+    }
+    let Ok(url) = reqwest::Url::parse(remote) else {
+        return false;
+    };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
 }
 
 fn url_join(remote: &str, path: &str) -> String {
@@ -188,29 +207,36 @@ fn url_join(remote: &str, path: &str) -> String {
 }
 
 async fn get_machines(remote: &str, token: Option<&str>) -> Result<Value> {
-    let client = build_client()?;
+    let client = build_client(remote)?;
     let mut req = client.get(url_join(remote, "/api/v1/machines"));
     if let Some(t) = token {
         req = req.bearer_auth(t);
     }
     req = with_knock(req);
-    let resp = req.send().await.with_context(|| format!("GET {remote}/api/v1/machines"))?;
+    let resp = req
+        .send()
+        .await
+        .with_context(|| format!("GET {remote}/api/v1/machines"))?;
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
     if !status.is_success() {
         bail!("GET /api/v1/machines: {status}: {}", trim(&body, 200));
     }
-    serde_json::from_str(&body).with_context(|| format!("parse machines body: {}", trim(&body, 200)))
+    serde_json::from_str(&body)
+        .with_context(|| format!("parse machines body: {}", trim(&body, 200)))
 }
 
 async fn get_policy(remote: &str, token: Option<&str>) -> Result<Value> {
-    let client = build_client()?;
+    let client = build_client(remote)?;
     let mut req = client.get(url_join(remote, "/api/v1/policy"));
     if let Some(t) = token {
         req = req.bearer_auth(t);
     }
     req = with_knock(req);
-    let resp = req.send().await.with_context(|| format!("GET {remote}/api/v1/policy"))?;
+    let resp = req
+        .send()
+        .await
+        .with_context(|| format!("GET {remote}/api/v1/policy"))?;
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
     if !status.is_success() {
@@ -224,7 +250,7 @@ async fn put_policy(
     token: Option<&str>,
     raw: &str,
 ) -> Result<(reqwest::StatusCode, Value)> {
-    let client = build_client()?;
+    let client = build_client(remote)?;
     let mut req = client
         .put(url_join(remote, "/api/v1/policy"))
         .header("content-type", "application/json")
@@ -233,7 +259,10 @@ async fn put_policy(
         req = req.bearer_auth(t);
     }
     req = with_knock(req);
-    let resp = req.send().await.with_context(|| format!("PUT {remote}/api/v1/policy"))?;
+    let resp = req
+        .send()
+        .await
+        .with_context(|| format!("PUT {remote}/api/v1/policy"))?;
     let status = resp.status();
     let body_text = resp.text().await.unwrap_or_default();
     let body =
@@ -246,7 +275,7 @@ async fn validate_policy(
     token: Option<&str>,
     raw: &str,
 ) -> Result<(reqwest::StatusCode, Value)> {
-    let client = build_client()?;
+    let client = build_client(remote)?;
     let mut req = client
         .post(url_join(remote, "/api/v1/policy/validate"))
         .header("content-type", "application/json")
@@ -274,7 +303,9 @@ fn read_policy_file(path: &std::path::Path) -> Result<String> {
     if path.as_os_str() == "-" {
         use std::io::Read;
         let mut buf = String::new();
-        std::io::stdin().read_to_string(&mut buf).context("read stdin")?;
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .context("read stdin")?;
         Ok(buf)
     } else {
         fs::read_to_string(path).with_context(|| format!("read {}", path.display()))
@@ -282,17 +313,10 @@ fn read_policy_file(path: &std::path::Path) -> Result<String> {
 }
 
 fn handle_policy_get(body: &Value, out: Option<&std::path::Path>) -> Result<()> {
-    let raw = body
-        .get("raw")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    let loaded = body
-        .get("loaded")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    let raw = body.get("raw").and_then(Value::as_str).unwrap_or("");
+    let loaded = body.get("loaded").and_then(Value::as_bool).unwrap_or(false);
     if let Some(p) = out {
-        fs::write(p, raw.as_bytes())
-            .with_context(|| format!("write {}", p.display()))?;
+        fs::write(p, raw.as_bytes()).with_context(|| format!("write {}", p.display()))?;
         eprintln!(
             "mesh policy get: wrote {} byte(s) to {} (loaded={loaded})",
             raw.len(),
@@ -321,10 +345,7 @@ fn render_status(body: &Value, json: bool) {
     }
     println!("{:<18}  {:<24}  {:<20}  online", "id", "hostname", "ipv4");
     for m in arr {
-        let id = m
-            .get("id")
-            .map(short_string)
-            .unwrap_or_else(|| "-".into());
+        let id = m.get("id").map(short_string).unwrap_or_else(|| "-".into());
         let hostname = m
             .get("hostname")
             .and_then(Value::as_str)
@@ -335,10 +356,7 @@ fn render_status(body: &Value, json: bool) {
             .and_then(Value::as_str)
             .unwrap_or("-")
             .to_string();
-        let online = m
-            .get("online")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+        let online = m.get("online").and_then(Value::as_bool).unwrap_or(false);
         println!("{id:<18}  {hostname:<24}  {ipv4:<20}  {online}");
     }
 }
@@ -550,14 +568,7 @@ mod tests {
     #[tokio::test]
     async fn mesh_status_rejected_without_token_when_required() {
         let machines = json!([]);
-        let mock = MockAdmin::spawn(
-            Some("right".into()),
-            machines,
-            Value::Null,
-            200,
-            200,
-        )
-        .await;
+        let mock = MockAdmin::spawn(Some("right".into()), machines, Value::Null, 200, 200).await;
         let err = get_machines(&mock.url(), None).await.err().unwrap();
         assert!(format!("{err:#}").contains("401"));
     }
@@ -584,7 +595,8 @@ mod tests {
             200,
         )
         .await;
-        let payload = r#"{"version":1,"rules":[{"action":"deny","src":["*"],"dst":["*"],"ports":["*/*"]}]}"#;
+        let payload =
+            r#"{"version":1,"rules":[{"action":"deny","src":["*"],"dst":["*"],"ports":["*/*"]}]}"#;
         let (status, body) = put_policy(&mock.url(), Some("tok"), payload).await.unwrap();
         assert!(status.is_success());
         assert_eq!(body["applied"], Value::Bool(true));
@@ -595,7 +607,9 @@ mod tests {
     #[tokio::test]
     async fn mesh_policy_validate_surfaces_400_on_bad_doc() {
         let mock = MockAdmin::spawn(None, json!([]), json!({"loaded": false}), 200, 400).await;
-        let (status, body) = validate_policy(&mock.url(), None, "not even json").await.unwrap();
+        let (status, body) = validate_policy(&mock.url(), None, "not even json")
+            .await
+            .unwrap();
         assert_eq!(status.as_u16(), 400);
         assert_eq!(body["ok"], Value::Bool(false));
         let captured = mock.last_validate.lock().await.clone().unwrap();
@@ -637,9 +651,9 @@ mod tests {
         // is fine — easier: just dial a wrong path.
         let url = format!("{}/api/v1/machines", mock.url());
         let _ = url; // silence unused
-        // For a clean 500 case we use the existing infra: not all routes
-        // are mounted, so a different URL returns 404 — that's enough to
-        // exercise the error branch of `get_machines`.
+                     // For a clean 500 case we use the existing infra: not all routes
+                     // are mounted, so a different URL returns 404 — that's enough to
+                     // exercise the error branch of `get_machines`.
         let bad = format!("{}/wrong", mock.url());
         let err = get_machines(&bad, None).await.err().unwrap();
         assert!(format!("{err:#}").contains("404") || format!("{err:#}").contains("Not Found"));
@@ -648,7 +662,10 @@ mod tests {
     #[tokio::test]
     async fn mesh_status_against_connection_refused_url() {
         // Port 1 should reliably refuse connections.
-        let err = get_machines("http://127.0.0.1:1", None).await.err().unwrap();
+        let err = get_machines("http://127.0.0.1:1", None)
+            .await
+            .err()
+            .unwrap();
         let msg = format!("{err:#}");
         assert!(
             msg.contains("/api/v1/machines") || msg.to_lowercase().contains("connect"),
@@ -658,7 +675,8 @@ mod tests {
 
     #[tokio::test]
     async fn mesh_status_accepts_token_from_explicit_arg() {
-        let machines = json!([{ "id": "m-1", "hostname": "h", "ipv4": "100.64.0.1", "online": true }]);
+        let machines =
+            json!([{ "id": "m-1", "hostname": "h", "ipv4": "100.64.0.1", "online": true }]);
         let mock = MockAdmin::spawn(Some("tok".into()), machines, Value::Null, 200, 200).await;
         let body = get_machines(&mock.url(), Some("tok")).await.unwrap();
         assert_eq!(body.as_array().unwrap().len(), 1);
@@ -667,7 +685,10 @@ mod tests {
     #[tokio::test]
     async fn mesh_status_wrong_token_returns_401() {
         let mock = MockAdmin::spawn(Some("right".into()), json!([]), Value::Null, 200, 200).await;
-        let err = get_machines(&mock.url(), Some("wrong")).await.err().unwrap();
+        let err = get_machines(&mock.url(), Some("wrong"))
+            .await
+            .err()
+            .unwrap();
         assert!(format!("{err:#}").contains("401"));
     }
 
@@ -733,14 +754,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_policy_set_returns_one_on_server_4xx() {
-        let mock = MockAdmin::spawn(
-            None,
-            json!([]),
-            json!({"loaded": false}),
-            400,
-            200,
-        )
-        .await;
+        let mock = MockAdmin::spawn(None, json!([]), json!({"loaded": false}), 400, 200).await;
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join("p.hujson");
         std::fs::write(&file, "garbage").unwrap();
@@ -755,14 +769,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_policy_validate_does_not_touch_put_endpoint() {
-        let mock = MockAdmin::spawn(
-            None,
-            json!([]),
-            json!({"loaded": false}),
-            200,
-            200,
-        )
-        .await;
+        let mock = MockAdmin::spawn(None, json!([]), json!({"loaded": false}), 200, 200).await;
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join("p.hujson");
         std::fs::write(&file, "{}").unwrap();
@@ -892,10 +899,32 @@ mod tests {
     #[test]
     fn build_client_succeeds() {
         // Smoke check that the client builder is reachable + returns Ok.
-        let c = build_client().unwrap();
-        // The accept-self-signed posture means the client builder
-        // succeeds even though TLS roots are pinned-off.
+        let c = build_client(DEFAULT_REMOTE).unwrap();
         let _ = c;
+    }
+
+    #[test]
+    fn invalid_cert_override_is_loopback_or_explicit_only() {
+        assert!(allow_invalid_certs_for_remote_with_env(
+            "https://127.0.0.1:8443",
+            None
+        ));
+        assert!(allow_invalid_certs_for_remote_with_env(
+            "https://[::1]:8443",
+            None
+        ));
+        assert!(allow_invalid_certs_for_remote_with_env(
+            "https://localhost:8443",
+            None
+        ));
+        assert!(!allow_invalid_certs_for_remote_with_env(
+            "https://admin.example.com",
+            None
+        ));
+        assert!(allow_invalid_certs_for_remote_with_env(
+            "https://admin.example.com",
+            Some("1")
+        ));
     }
 
     #[test]

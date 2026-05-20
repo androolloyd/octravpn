@@ -35,9 +35,7 @@ pub(crate) async fn run_portal(chain: PortalChain, bind: SocketAddr) -> Result<(
     let listener = tokio::net::TcpListener::bind(bind)
         .await
         .with_context(|| format!("bind portal {bind}"))?;
-    let actual = listener
-        .local_addr()
-        .context("read portal listener addr")?;
+    let actual = listener.local_addr().context("read portal listener addr")?;
     info!(addr = %actual, "octravpn portal listening");
     println!("octravpn portal listening on http://{actual}/");
     println!("  paste oct:// URLs in the address bar, or click an oct:// link");
@@ -92,7 +90,15 @@ pub(crate) fn open_in_browser(url: &str) -> Result<()> {
     #[cfg(target_os = "macos")]
     let (cmd, args) = ("open", vec![url.to_string()]);
     #[cfg(target_os = "windows")]
-    let (cmd, args) = ("cmd", vec!["/C".to_string(), "start".to_string(), "".to_string(), url.to_string()]);
+    let (cmd, args) = (
+        "cmd",
+        vec![
+            "/C".to_string(),
+            "start".to_string(),
+            "".to_string(),
+            url.to_string(),
+        ],
+    );
     #[cfg(target_os = "linux")]
     let (cmd, args) = ("xdg-open", vec![url.to_string()]);
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
@@ -128,15 +134,17 @@ mod tests {
         let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
         let state = PortalState::new(chain);
         let app = router(state);
-        let listener =
-            tokio::net::TcpListener::bind::<SocketAddr>("127.0.0.1:0".parse().unwrap())
-                .await
-                .unwrap();
+        let listener = tokio::net::TcpListener::bind::<SocketAddr>("127.0.0.1:0".parse().unwrap())
+            .await
+            .unwrap();
         let addr = listener.local_addr().unwrap();
         let handle = tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
         });
-        tokio::time::sleep(Duration::from_millis(40)).await;
+        assert!(
+            wait_until_running(addr, Duration::from_secs(2)).await,
+            "portal test server did not become healthy"
+        );
         (addr, handle)
     }
 
@@ -225,7 +233,11 @@ mod tests {
             .build()
             .unwrap();
         for _ in 0..5 {
-            let r = client.get(format!("http://{addr}/healthz")).send().await.unwrap();
+            let r = client
+                .get(format!("http://{addr}/healthz"))
+                .send()
+                .await
+                .unwrap();
             assert_eq!(r.status().as_u16(), 200);
         }
         let r = client.get(format!("http://{addr}/")).send().await.unwrap();

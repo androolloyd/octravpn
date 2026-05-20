@@ -51,9 +51,7 @@ use tracing::{info, warn};
 use x25519_dalek::{PublicKey as X25519Pub, StaticSecret};
 
 use crate::{
-    chain_v3::{
-        ChainCtxV3, CircleV3State, RegisterCircleParams, MIN_CIRCLE_STAKE_DEFAULT,
-    },
+    chain_v3::{ChainCtxV3, CircleV3State, RegisterCircleParams, MIN_CIRCLE_STAKE_DEFAULT},
     config::NodeConfig,
 };
 
@@ -100,12 +98,7 @@ pub(crate) async fn run_v3_boot(inputs: &V3BootInputs<'_>) -> Result<V3BootOutco
     // `hash_hex()` is what flows into `state-root.policy_hash` — the
     // chain anchors `sha256_hex(canonical_bytes(state-root.json))`,
     // and state-root.json embeds this hash.
-    let policy = build_operator_policy_for_v3(
-        inputs.cfg,
-        &wg_pubkey_b64,
-        epoch,
-        timestamp_secs,
-    );
+    let policy = build_operator_policy_for_v3(inputs.cfg, &wg_pubkey_b64, epoch, timestamp_secs);
     policy
         .validate()
         .map_err(|e| anyhow!("v3 operator-policy validation: {e}"))?;
@@ -120,7 +113,7 @@ pub(crate) async fn run_v3_boot(inputs: &V3BootInputs<'_>) -> Result<V3BootOutco
         None, // no attestation hash until remote-attestation lands
         inputs.cfg.pricing.region.clone(),
         0, // member_count starts at 0; tailnet-owner circle owns the
-           // authoritative set, this is just observability.
+        // authoritative set, this is just observability.
         epoch,
         timestamp_secs,
     );
@@ -219,9 +212,10 @@ pub(crate) async fn run_v3_boot(inputs: &V3BootInputs<'_>) -> Result<V3BootOutco
         // Registered but anchor drifted — submit `update_circle_state`.
         let nonce = inputs.chain_v3.nonce().await?;
         let fee = inputs.chain_v3.fee_or_fallback("contract_call").await;
-        let call = inputs
-            .chain_v3
-            .build_update_circle_state_call(circle_id, &anchor_hex, fee, nonce);
+        let call =
+            inputs
+                .chain_v3
+                .build_update_circle_state_call(circle_id, &anchor_hex, fee, nonce);
         let signed = inputs.chain_v3.sign_call(call)?;
         let hash = inputs.chain_v3.submit_signed_tx(&signed).await?;
         info!(
@@ -454,10 +448,8 @@ mod tests {
 
     #[test]
     fn policy_bytes_are_stable() {
-        let a =
-            policy_bytes_for_v3(&min_cfg(Some("oct…")), &sample_wg_pubkey_b64(), 0, 0).unwrap();
-        let b =
-            policy_bytes_for_v3(&min_cfg(Some("oct…")), &sample_wg_pubkey_b64(), 0, 0).unwrap();
+        let a = policy_bytes_for_v3(&min_cfg(Some("oct…")), &sample_wg_pubkey_b64(), 0, 0).unwrap();
+        let b = policy_bytes_for_v3(&min_cfg(Some("oct…")), &sample_wg_pubkey_b64(), 0, 0).unwrap();
         assert_eq!(a, b);
         // And contain the region we set.
         let s = std::str::from_utf8(&a).unwrap();
@@ -524,12 +516,8 @@ mod tests {
     #[test]
     fn policy_hash_is_64_char_lowercase_hex() {
         let cfg = min_cfg(Some("oct…"));
-        let policy = build_operator_policy_for_v3(
-            &cfg,
-            &sample_wg_pubkey_b64(),
-            12345,
-            1_705_000_000,
-        );
+        let policy =
+            build_operator_policy_for_v3(&cfg, &sample_wg_pubkey_b64(), 12345, 1_705_000_000);
         let hash = policy.hash_hex().unwrap();
         assert_eq!(hash.len(), 64, "hash not 64 chars: {hash}");
         assert!(
@@ -546,13 +534,10 @@ mod tests {
     fn attestation_url_round_trips() {
         let cfg_none = min_cfg(Some("oct…"));
         let mut cfg_some = min_cfg(Some("oct…"));
-        cfg_some.chain.attestation_url =
-            Some("https://op.example/attestation".to_string());
+        cfg_some.chain.attestation_url = Some("https://op.example/attestation".to_string());
 
-        let bytes_none =
-            policy_bytes_for_v3(&cfg_none, &sample_wg_pubkey_b64(), 1, 2).unwrap();
-        let bytes_some =
-            policy_bytes_for_v3(&cfg_some, &sample_wg_pubkey_b64(), 1, 2).unwrap();
+        let bytes_none = policy_bytes_for_v3(&cfg_none, &sample_wg_pubkey_b64(), 1, 2).unwrap();
+        let bytes_some = policy_bytes_for_v3(&cfg_some, &sample_wg_pubkey_b64(), 1, 2).unwrap();
 
         // `None` must not emit the key at all (no `null`).
         let s_none = std::str::from_utf8(&bytes_none).unwrap();
@@ -571,8 +556,7 @@ mod tests {
         // hash with an empty URL).
         let mut cfg_empty = min_cfg(Some("oct…"));
         cfg_empty.chain.attestation_url = Some(String::new());
-        let bytes_empty =
-            policy_bytes_for_v3(&cfg_empty, &sample_wg_pubkey_b64(), 1, 2).unwrap();
+        let bytes_empty = policy_bytes_for_v3(&cfg_empty, &sample_wg_pubkey_b64(), 1, 2).unwrap();
         assert_eq!(bytes_empty, bytes_none);
     }
 

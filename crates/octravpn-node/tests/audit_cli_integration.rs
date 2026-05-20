@@ -106,11 +106,7 @@ fn audit_replay_against_synthetic_fixture() {
     let dir = tempdir().unwrap();
     let (audit_dir, journal_path) = write_pair_fixture(dir.path());
     let out = Command::new(bin())
-        .args([
-            "audit",
-            "replay",
-            "--audit-path",
-        ])
+        .args(["audit", "replay", "--audit-path"])
         .arg(&audit_dir)
         .arg("--journal-path")
         .arg(&journal_path)
@@ -150,7 +146,11 @@ fn audit_replay_filters_by_session_via_cli() {
         .arg(&want_sid)
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8(out.stdout).unwrap();
     // No 0xBB short-hex in output.
     assert!(!stdout.contains("bbbbbb"), "BB leaked: {stdout}");
@@ -169,7 +169,11 @@ fn audit_replay_jsonl_parses_per_line() {
         .args(["--format", "json"])
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8(out.stdout).unwrap();
     let mut lines = 0;
     for line in stdout.lines() {
@@ -248,11 +252,7 @@ fn audit_verify_exit_code_1_on_broken_chain() {
 fn audit_verify_exit_code_3_on_missing_audit() {
     let dir = tempdir().unwrap();
     let out = Command::new(bin())
-        .args([
-            "audit",
-            "verify",
-            "--audit-path",
-        ])
+        .args(["audit", "verify", "--audit-path"])
         .arg(dir.path().join("nowhere"))
         .arg("--journal-path")
         .arg(dir.path().join("none.bin"))

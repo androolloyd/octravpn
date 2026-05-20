@@ -120,17 +120,13 @@ pub const WALLET_PREFIX: &str = "oct";
 pub enum V3MembersError {
     #[error("schema version unsupported: got {got}, this build understands {supported}")]
     UnsupportedVersion { got: u32, supported: u32 },
-    #[error(
-        "ip_salt length is {len}, expected {IP_SALT_HEX_LEN} (hex of 32 random bytes)"
-    )]
+    #[error("ip_salt length is {len}, expected {IP_SALT_HEX_LEN} (hex of 32 random bytes)")]
     BadIpSaltLength { len: usize },
     #[error("ip_salt contains a non-hex character or uppercase letter")]
     BadIpSaltEncoding,
     #[error("member at index {index}: wallet is empty")]
     EmptyWallet { index: usize },
-    #[error(
-        "member at index {index}: wallet {wallet:?} is missing the {prefix:?} prefix"
-    )]
+    #[error("member at index {index}: wallet {wallet:?} is missing the {prefix:?} prefix")]
     BadWalletPrefix {
         index: usize,
         wallet: String,
@@ -413,12 +409,13 @@ fn check_wg_pubkey(index: usize, value: &str) -> Result<(), V3MembersError> {
             len: value.len(),
         });
     }
-    let raw = BASE64_STD
-        .decode(value.as_bytes())
-        .map_err(|e| V3MembersError::BadWgPubkeyEncoding {
-            index,
-            reason: e.to_string(),
-        })?;
+    let raw =
+        BASE64_STD
+            .decode(value.as_bytes())
+            .map_err(|e| V3MembersError::BadWgPubkeyEncoding {
+                index,
+                reason: e.to_string(),
+            })?;
     if raw.len() != WG_PUBKEY_RAW_LEN {
         return Err(V3MembersError::BadWgPubkeyDecodedLength {
             index,
@@ -599,7 +596,11 @@ mod tests {
         };
         m.members.push(dup);
         match m.validate() {
-            Err(V3MembersError::DuplicateWallet { wallet, first, second }) => {
+            Err(V3MembersError::DuplicateWallet {
+                wallet,
+                first,
+                second,
+            }) => {
                 assert_eq!(wallet, sample().members[0].wallet);
                 assert_eq!(first, 0);
                 assert_eq!(second, m.members.len() - 1);
@@ -662,8 +663,7 @@ mod tests {
     #[test]
     fn bad_wallet_prefix_rejected() {
         let mut m = sample();
-        m.members[1].wallet =
-            "xyz0000000000000000000000000000000000000000000".to_string();
+        m.members[1].wallet = "xyz0000000000000000000000000000000000000000000".to_string();
         match m.validate() {
             Err(V3MembersError::BadWalletPrefix { index, prefix, .. }) => {
                 assert_eq!(index, 1);
@@ -678,8 +678,7 @@ mod tests {
         // Encode a "v2" blob with an extra `acl_root` field and verify
         // the v1 decoder preserves it AND recomputes the same hash.
         let bytes_v1 = sample().canonical_bytes().expect("encode v1");
-        let mut value: Value =
-            serde_json::from_slice(&bytes_v1).expect("parse v1 to Value");
+        let mut value: Value = serde_json::from_slice(&bytes_v1).expect("parse v1 to Value");
         if let Value::Object(map) = &mut value {
             map.insert(
                 "acl_root".to_string(),
@@ -749,8 +748,7 @@ mod tests {
         let bytes_b = m.canonical_bytes().expect("encode b");
         assert_eq!(bytes_a, bytes_b);
 
-        let decoded =
-            TailnetMembers::decode_lenient(&bytes_a).expect("lenient decode");
+        let decoded = TailnetMembers::decode_lenient(&bytes_a).expect("lenient decode");
         let bytes_c = decoded.canonical_bytes().expect("re-encode");
         assert_eq!(bytes_a, bytes_c);
 
@@ -796,13 +794,13 @@ mod tests {
     /// `validate()` always succeeds.
     fn arb_members() -> impl Strategy<Value = TailnetMembers> {
         (
-            any::<u64>(),                                    // tailnet_id
-            any::<[u8; 32]>(),                               // ip_salt seed
-            pvec("[a-z0-9]{1,16}", 0..8),                    // wallet suffixes
-            pvec(any::<[u8; 32]>(), 8),                      // wg pubkey seeds
-            pvec(any::<u64>(), 8),                           // joined_epochs
-            any::<u64>(),                                    // effective_epoch
-            any::<u64>(),                                    // timestamp_secs
+            any::<u64>(),                 // tailnet_id
+            any::<[u8; 32]>(),            // ip_salt seed
+            pvec("[a-z0-9]{1,16}", 0..8), // wallet suffixes
+            pvec(any::<[u8; 32]>(), 8),   // wg pubkey seeds
+            pvec(any::<u64>(), 8),        // joined_epochs
+            any::<u64>(),                 // effective_epoch
+            any::<u64>(),                 // timestamp_secs
             btree_map(
                 "x_[a-z]{1,8}",
                 prop_oneof![
@@ -814,40 +812,33 @@ mod tests {
                 0..4,
             ),
         )
-            .prop_map(
-                |(tid, salt, suffixes, keys, epochs, ep, ts, unknown_map)| {
-                    // Dedup wallet suffixes so we never trip
-                    // DuplicateWallet at validate() time.
-                    let mut seen = std::collections::BTreeSet::new();
-                    let members: Vec<Member> = suffixes
-                        .into_iter()
-                        .filter(|s| seen.insert(s.clone()))
-                        .enumerate()
-                        .map(|(i, suffix)| {
-                            let wallet = format!("oct{suffix}");
-                            let key = wg_b64_from(&keys[i % keys.len()]);
-                            let je = epochs[i % epochs.len()];
-                            Member {
-                                wallet,
-                                wg_pubkey_b64: key,
-                                joined_epoch: je,
-                            }
-                        })
-                        .collect();
-                    let mut m = TailnetMembers::new_v1(
-                        tid,
-                        ip_salt_from(&salt),
-                        members,
-                        ep,
-                        ts,
-                    );
-                    let bt: BTreeMap<String, Value> = unknown_map.into_iter().collect();
-                    m.unknown = bt;
-                    m
-                },
-            )
-            .prop_filter("well-formed members must validate",
-                |m| m.validate().is_ok())
+            .prop_map(|(tid, salt, suffixes, keys, epochs, ep, ts, unknown_map)| {
+                // Dedup wallet suffixes so we never trip
+                // DuplicateWallet at validate() time.
+                let mut seen = std::collections::BTreeSet::new();
+                let members: Vec<Member> = suffixes
+                    .into_iter()
+                    .filter(|s| seen.insert(s.clone()))
+                    .enumerate()
+                    .map(|(i, suffix)| {
+                        let wallet = format!("oct{suffix}");
+                        let key = wg_b64_from(&keys[i % keys.len()]);
+                        let je = epochs[i % epochs.len()];
+                        Member {
+                            wallet,
+                            wg_pubkey_b64: key,
+                            joined_epoch: je,
+                        }
+                    })
+                    .collect();
+                let mut m = TailnetMembers::new_v1(tid, ip_salt_from(&salt), members, ep, ts);
+                let bt: BTreeMap<String, Value> = unknown_map.into_iter().collect();
+                m.unknown = bt;
+                m
+            })
+            .prop_filter("well-formed members must validate", |m| {
+                m.validate().is_ok()
+            })
     }
 
     proptest! {

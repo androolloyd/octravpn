@@ -366,10 +366,7 @@ mod tests {
         // back-compat path: program_addr defaults to endpoint_addr,
         // chain_id to devnet, circle_id to None. Reproduce that
         // exactly so the sig matches what `verify()` reconstructs.
-        let ctx = ReceiptContext::v1_1(
-            Address::from_display(endpoint_addr),
-            CHAIN_ID_DEVNET,
-        );
+        let ctx = ReceiptContext::v1_1(Address::from_display(endpoint_addr), CHAIN_ID_DEVNET);
         let r = Receipt {
             context: ctx,
             session_id: SessionId::new(sid),
@@ -389,8 +386,7 @@ mod tests {
     fn verify_real_equivocation_returns_true() {
         let kp = KeyPair::generate();
         let sid = [7u8; 32];
-        let endpoint =
-            Address::from_pubkey(&[0x11; 32]).display().to_string();
+        let endpoint = Address::from_pubkey(&[0x11; 32]).display().to_string();
         let a = build_blob(&kp, &endpoint, sid, 5, 100, [1u8; 32]);
         let b = build_blob(&kp, &endpoint, sid, 5, 200, [2u8; 32]);
         let ev = EquivocationEvidence {
@@ -411,8 +407,7 @@ mod tests {
     fn verify_identical_receipts_is_not_equivocation() {
         let kp = KeyPair::generate();
         let sid = [3u8; 32];
-        let endpoint =
-            Address::from_pubkey(&[0x22; 32]).display().to_string();
+        let endpoint = Address::from_pubkey(&[0x22; 32]).display().to_string();
         let a = build_blob(&kp, &endpoint, sid, 1, 100, [9u8; 32]);
         let b = a.clone();
         let ev = EquivocationEvidence {
@@ -434,8 +429,7 @@ mod tests {
         let real = KeyPair::generate();
         let attacker = KeyPair::generate();
         let sid = [4u8; 32];
-        let endpoint =
-            Address::from_pubkey(&[0x33; 32]).display().to_string();
+        let endpoint = Address::from_pubkey(&[0x33; 32]).display().to_string();
         let a = build_blob(&attacker, &endpoint, sid, 1, 1, [1u8; 32]);
         let b = build_blob(&attacker, &endpoint, sid, 1, 2, [2u8; 32]);
         let ev = EquivocationEvidence {

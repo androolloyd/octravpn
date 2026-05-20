@@ -235,10 +235,7 @@ impl ChainCtxV2 {
             "encrypted_data": ciphertext_b64,
             "message": payload.to_string(),
         });
-        Ok(PutEncryptedTx {
-            tx,
-            plaintext_hash,
-        })
+        Ok(PutEncryptedTx { tx, plaintext_hash })
     }
 
     /// Build the `register_circle` contract-call. Payable: `value`
@@ -316,16 +313,14 @@ impl ChainCtxV2 {
     /// key. Same `sign_call` the v1.1 path uses — translates legacy
     /// `kind:contract_call` shape to the on-the-wire OctraTx envelope.
     pub(crate) fn sign_call(&self, call: Value) -> Result<Value> {
-        octra_tx::sign_call(&self.wallet, call)
-            .map_err(|e| anyhow!("sign_call: {e}"))
+        octra_tx::sign_call(&self.wallet, call).map_err(|e| anyhow!("sign_call: {e}"))
     }
 
     /// Sign a pre-shaped OctraTx envelope (e.g. the deploy_circle /
     /// asset_put envelopes which already use `to_`, `amount`, `ou`,
     /// `op_type` and don't need legacy translation).
     pub(crate) fn sign_envelope(&self, env: Value) -> Result<Value> {
-        octra_tx::sign_call(&self.wallet, env)
-            .map_err(|e| anyhow!("sign_envelope: {e}"))
+        octra_tx::sign_call(&self.wallet, env).map_err(|e| anyhow!("sign_envelope: {e}"))
     }
 
     pub(crate) async fn submit_signed_tx(&self, signed: &Value) -> Result<String> {
@@ -413,8 +408,8 @@ impl CircleState {
         }
         let raw = std::fs::read_to_string(path)
             .with_context(|| format!("read circle state {}", path.display()))?;
-        let s: Self =
-            toml::from_str(&raw).with_context(|| format!("parse circle state {}", path.display()))?;
+        let s: Self = toml::from_str(&raw)
+            .with_context(|| format!("parse circle state {}", path.display()))?;
         Ok(Some(s))
     }
 

@@ -41,7 +41,12 @@ async fn metrics_503_when_token_unconfigured() {
     let (s, _) = make_state(None);
     let app = router(s);
     let resp = app
-        .oneshot(Request::builder().uri("/metrics").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/metrics")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
@@ -121,7 +126,12 @@ async fn metrics_401_on_missing_authorization_header() {
     let (s, _) = make_state(Some("tok"));
     let app = router(s);
     let resp = app
-        .oneshot(Request::builder().uri("/metrics").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/metrics")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
@@ -193,7 +203,12 @@ async fn prometheus_exposition_has_help_and_type_per_metric() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let body = String::from_utf8(
-        resp.into_body().collect().await.unwrap().to_bytes().to_vec(),
+        resp.into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec(),
     )
     .unwrap();
 
@@ -201,14 +216,8 @@ async fn prometheus_exposition_has_help_and_type_per_metric() {
     for m in metric::ALL {
         let help_tag = format!("# HELP octravpn_analytics_{m}");
         let type_tag = format!("# TYPE octravpn_analytics_{m}");
-        assert!(
-            body.contains(&help_tag),
-            "missing `{help_tag}` in:\n{body}"
-        );
-        assert!(
-            body.contains(&type_tag),
-            "missing `{type_tag}` in:\n{body}"
-        );
+        assert!(body.contains(&help_tag), "missing `{help_tag}` in:\n{body}");
+        assert!(body.contains(&type_tag), "missing `{type_tag}` in:\n{body}");
         // Every width label appears as a metric line.
         for w in BucketWidth::all() {
             let line = format!("octravpn_analytics_{m}{{window=\"{}\"}}", w.label());
@@ -241,7 +250,12 @@ async fn prometheus_exposition_metric_lines_match_regex() {
         .await
         .unwrap();
     let body = String::from_utf8(
-        resp.into_body().collect().await.unwrap().to_bytes().to_vec(),
+        resp.into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec(),
     )
     .unwrap();
     // Simple regex: `^[a-zA-Z_][a-zA-Z0-9_]*(\{[^}]*\})? [0-9]+$`.
@@ -474,7 +488,10 @@ async fn health_reflects_first_break_verbatim() {
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
     let v: Value = serde_json::from_slice(&bytes).unwrap();
     let fb = &v["chain"]["first_break"];
-    assert!(!fb.is_null(), "/analytics/health didn't surface first_break");
+    assert!(
+        !fb.is_null(),
+        "/analytics/health didn't surface first_break"
+    );
     assert_eq!(fb["file"], "audit-2026-01-01.jsonl");
     assert!(fb["reason"].as_str().unwrap().contains("mac mismatch"));
 
@@ -555,7 +572,12 @@ async fn metrics_events_total_reflects_ingest_count() {
         .await
         .unwrap();
     let body = String::from_utf8(
-        resp.into_body().collect().await.unwrap().to_bytes().to_vec(),
+        resp.into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec(),
     )
     .unwrap();
     assert!(
