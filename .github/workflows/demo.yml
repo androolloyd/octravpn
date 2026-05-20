@@ -5,10 +5,16 @@
 # different artefacts. Coordinate with #241 + #243 by adding files,
 # never editing the others.
 #
-# The workflow only renders tapes that do not require external services
-# (Docker, the foundry binary, sibling repos). Tapes 05 / 06 are
-# explicitly skipped here and stay in the manual-record set; see
-# `docs/demo.md`.
+# The `render` job covers tapes that need nothing more than the
+# octravpn binaries + a synthesized audit fixture + the standalone
+# `headscale` CLI. The `render-heavy` job covers tapes that drive
+# Docker + the 3-node mesh + the portal (tape 02). See `docs/demo.md`
+# for the full per-tape matrix.
+#
+# Tapes intentionally not rendered in CI: none — every tape in
+# `demo/tapes/` is routed to one of the two jobs below. If a tape
+# can't render on a runner (e.g. needs a real GUI or a 3rd-party
+# service), document that inline next to its entry in the for-loop.
 
 name: demo
 
@@ -59,17 +65,103 @@ jobs:
           cargo build --release -p octravpn-client -p octravpn-node
           echo "${PWD}/target/release" >> "$GITHUB_PATH"
 
+      - name: Build + install standalone headscale CLI (sibling repo)
+        run: |
+          set -euo pipefail
+          # Tape 07 (`headscale-cli`) drives the standalone `headscale`
+          # binary from the headscale-rs sibling — installing into
+          # /usr/local/bin keeps the parity-with-upstream story
+          # (same CLI, same surface) that the demo tour leans on.
+          if [[ -d headscale-rs/headscale-cli ]]; then
+              cargo install --path headscale-rs/headscale-cli --bin headscale --root /usr/local --force
+          elif [[ -d headscale-rs ]]; then
+              # Layout fallback — newer headscale-rs checkouts may have
+              # the bin at the workspace root.
+              cargo install --path headscale-rs --bin headscale --root /usr/local --force || \
+                  echo "headscale build failed (tape 07 will skip)"
+          else
+              echo "headscale-rs sibling not cloned; tape 07 will skip"
+          fi
+          command -v headscale || true
+          headscale --version || true
+
+      - name: Generate audit + receipt-journal fixture for tape 03
+        working-directory: octravpn
+        run: |
+          set -euo pipefail
+          # Tape 03 (`audit-replay`) pins these paths:
+          #   demo/state/node/audit.log
+          #   demo/state/node/receipts.bin
+          # Synthesize a small HMAC-chained audit log + an empty
+          # receipt journal so `octravpn-node audit replay` has
+          # something to render. The replay path is lenient (skip
+          # bad lines, accept empty journal), so we don't need a
+          # full daemon roundtrip — just well-formed JSONL.
+          mkdir -p demo/state/node
+          python3 - <<'PY'
+          import hmac, hashlib, json, os, secrets
+          state_dir = "demo/state/node"
+          key = secrets.token_bytes(32)
+          # Sibling key so `audit verify` has a chance too (it walks
+          # `<audit_path>.key` for the file-case lookup).
+          with open(f"{state_dir}/audit.log.key", "wb") as f:
+              f.write(key)
+          records = [
+              (1715000000, "session_open",  "a" * 64, {"peer": "peer-1"}),
+              (1715000005, "session_open",  "b" * 64, {"peer": "peer-2"}),
+              (1715000020, "bytes_used",    "a" * 64, {"bytes_used": 4096}),
+              (1715000040, "receipt_sign",  "a" * 64, {"seq": 1, "bytes_used": 4096}),
+              (1715000060, "bytes_used",    "b" * 64, {"bytes_used": 8192}),
+              (1715000080, "receipt_sign",  "b" * 64, {"seq": 1, "bytes_used": 8192}),
+              (1715000100, "session_close", "a" * 64, {"reason": "client_quit"}),
+              (1715000120, "session_close", "b" * 64, {"reason": "client_quit"}),
+          ]
+          prev_mac = b"\x00" * 32
+          with open(f"{state_dir}/audit.log", "w") as f:
+              for ts, kind, sid, extra in records:
+                  rec = {
+                      "ts_unix": ts,
+                      "kind": kind,
+                      "source": None,
+                      "session_id": sid,
+                      "extra": extra,
+                  }
+                  canonical = json.dumps(rec, separators=(",", ":"), sort_keys=False)
+                  mac = hmac.new(key, prev_mac + canonical.encode(), hashlib.sha256).digest()
+                  chained = {
+                      "record_json": canonical,
+                      "prev_mac": prev_mac.hex(),
+                      "mac": mac.hex(),
+                  }
+                  f.write(json.dumps(chained) + "\n")
+                  prev_mac = mac
+          # Empty journal file — replay tolerates this and renders
+          # only the audit-derived rows. A future tape revision can
+          # swap this for a real ReceiptJournal::bump-built fixture.
+          open(f"{state_dir}/receipts.bin", "wb").close()
+          print(f"wrote {len(records)} audit records + empty journal")
+          PY
+          ls -la demo/state/node/
+
       - name: Render dependency-light tapes
         working-directory: octravpn
         run: |
           set -euo pipefail
           mkdir -p demo/recordings
-          # Tapes 01 + 04 need our octravpn / octravpn-node binaries (built above).
-          # Tapes 11..16 are narration-shape (CLI surfaces only); they need
-          # the same binaries but no Docker / chain / sibling repos.
-          # Tape 07 needs the headscale CLI from the sibling repo — skipped in CI.
+          # Tapes 01 + 04 drive the octravpn / octravpn-node binaries
+          # (built above). Tape 03 reads the synthesized audit fixture.
+          # Tape 07 drives the standalone `headscale` binary from the
+          # headscale-rs sibling (installed above). Tapes 11..16 are
+          # narration-shape (CLI surfaces only) and need only the
+          # octravpn binaries.
+          #
+          # Tape 02 (portal-fetch) is routed to render-heavy because
+          # start-portal.sh requires a pre-existing chain-backed
+          # config; it is not self-bootstrapping.
           for tape in demo/tapes/01-*.tape \
+                     demo/tapes/03-*.tape \
                      demo/tapes/04-*.tape \
+                     demo/tapes/07-*.tape \
                      demo/tapes/11-*.tape \
                      demo/tapes/12-*.tape \
                      demo/tapes/13-*.tape \
@@ -111,8 +203,15 @@ jobs:
           git config user.email "octravpn-demo-bot@users.noreply.github.com"
           git add demo/recordings/
           DATE=$(date -u +%Y-%m-%d)
+          # Enumerate the tapes this run actually produced so the
+          # commit log is auditable without crawling the action output.
+          TAPES=$(git diff --cached --name-only demo/recordings/ \
+                  | grep -Eo '[0-9]{2}-[a-z0-9-]+\.(mp4|gif)' \
+                  | sort -u \
+                  | tr '\n' ' ')
           git commit -m "ci(demo): refresh light recordings ${DATE}" \
                      -m "[skip ci]" \
+                     -m "Tapes produced: ${TAPES:-(none)}" \
                      -m "Auto-generated by demo.yml render job (run ${GITHUB_RUN_ID})."
           # Light job may race the heavy job's push; rebase + retry once.
           git pull --rebase origin main || true
@@ -179,9 +278,18 @@ jobs:
           mkdir -p demo/recordings
           # Tapes 17..22 + the master tour all depend on the mesh +
           # chain fixtures the 3node-mesh-bringup.sh helper installs.
+          # Tape 02 (portal-fetch) requires a chain-backed config at
+          # demo/state/portal/config.toml — best-effort here; the
+          # tape's `Source` directive will surface the missing-config
+          # error if no fixture is present.
+          # Tape 06 (tailscale-interop) drives docker-compose +
+          # openssl + both sibling repos; the heavy runner already
+          # has all three.
           # We do a best-effort teardown between tapes so a bad
           # bringup in tape N doesn't poison tape N+1.
-          for tape in demo/tapes/05-v3-smoke.tape \
+          for tape in demo/tapes/02-portal-fetch.tape \
+                     demo/tapes/05-v3-smoke.tape \
+                     demo/tapes/06-tailscale-interop.tape \
                      demo/tapes/08-3node-mesh.tape \
                      demo/tapes/09-traffic-patterns.tape \
                      demo/tapes/10-metrics-grafana.tape \
@@ -226,8 +334,13 @@ jobs:
           git config user.email "octravpn-demo-bot@users.noreply.github.com"
           git add demo/recordings/
           DATE=$(date -u +%Y-%m-%d)
+          TAPES=$(git diff --cached --name-only demo/recordings/ \
+                  | grep -Eo '[0-9]{2}-[a-z0-9-]+\.(mp4|gif)' \
+                  | sort -u \
+                  | tr '\n' ' ')
           git commit -m "ci(demo): refresh recordings ${DATE}" \
                      -m "[skip ci]" \
+                     -m "Tapes produced: ${TAPES:-(none)}" \
                      -m "Auto-generated by demo.yml render-heavy job (run ${GITHUB_RUN_ID}). README gifs use relative paths, so this push updates the README inline."
           git pull --rebase origin main || true
           git push origin HEAD:main
