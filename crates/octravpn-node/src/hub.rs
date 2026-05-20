@@ -227,6 +227,45 @@ impl Hub {
         self.pvac.as_ref()
     }
 
+    /// HFHE-2: build the optional [`crate::control::ShadowSigner`]
+    /// from `(self.pvac, cfg.pvac.circle_pubkey_path,
+    /// cfg.pvac.circle_secret_path)`. Returns `None` when any
+    /// component is missing — that's the no-shadow path. A
+    /// read failure on either key file is logged + treated as
+    /// `None` so a missing-key situation degrades gracefully
+    /// rather than blowing up boot.
+    fn build_shadow_signer(&self) -> Option<Arc<crate::control::ShadowSigner>> {
+        let pvac = self.pvac.as_ref()?.clone();
+        let pk_path = self.cfg.pvac.circle_pubkey_path.as_deref()?;
+        let sk_path = self.cfg.pvac.circle_secret_path.as_deref()?;
+        let pk = match std::fs::read_to_string(pk_path) {
+            Ok(s) => s.trim().to_string(),
+            Err(e) => {
+                warn!(error = %e, path = %pk_path, "circle pubkey unreadable; shadow blob disabled");
+                return None;
+            }
+        };
+        let sk = match std::fs::read_to_string(sk_path) {
+            Ok(s) => s.trim().to_string(),
+            Err(e) => {
+                warn!(error = %e, path = %sk_path, "circle secret unreadable; shadow blob disabled");
+                return None;
+            }
+        };
+        if !pk.starts_with("hfhe_v1|") || !sk.starts_with("hfhe_v1|") {
+            warn!(
+                "circle key files do not have hfhe_v1| prefix; shadow blob disabled"
+            );
+            return None;
+        }
+        info!("HFHE-2 shadow signer enabled (circle keys loaded)");
+        Some(Arc::new(crate::control::ShadowSigner {
+            pvac,
+            circle_pk: pk,
+            circle_sk: sk,
+        }))
+    }
+
     /// Open the audit log configured for this hub (or return `None`
     /// if no `audit_dir` is set). Used by the `verify-audit-log`
     /// subcommand to access the HMAC key for offline verification.
@@ -1078,6 +1117,13 @@ impl Hub {
             } else {
                 None
             };
+            // HFHE-2: build the optional shadow-blob signer. Only
+            // materialises when (a) the PVAC sidecar spawned at boot
+            // AND (b) both circle key paths resolve to readable
+            // files. Either piece missing => `None`, and the receipt
+            // path emits no shadow data (wire-identical to the
+            // pre-HFHE-2 build).
+            let shadow_signer = self.build_shadow_signer();
             let mut state = ControlState::with_metrics(
                 self.wg_kp.clone(),
                 self.router.clone(),
@@ -1090,7 +1136,8 @@ impl Hub {
             .with_metrics_token(self.cfg.control.metrics_token.clone())
             .with_admin_token(admin_token)
             .with_session_verifier(SessionAdmissionVerifier::new(self.chain.rpc.clone()))
-            .with_wire_state(wire_state.as_ref().map(|(ws, _)| ws.clone()));
+            .with_wire_state(wire_state.as_ref().map(|(ws, _)| ws.clone()))
+            .with_shadow_signer(shadow_signer, 0);
             // If the wire surface is enabled, swap the auto-constructed
             // preauth minter for the one shared with the wire router so
             // both paths see the same store.

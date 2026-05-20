@@ -57,6 +57,10 @@ use std::collections::BTreeMap;
 
 /// Canonical schema version emitted by encoders in this crate.
 pub const SCHEMA_VERSION_V1: u32 = 1;
+/// v2 — adds the optional `enc_anchor_hash` field for the HFHE-2
+/// shadow-blob commitment. See `StateRoot::new_v2` for the canonical
+/// constructor.
+pub const SCHEMA_VERSION_V2: u32 = 2;
 
 /// Length of a SHA-256 hex digest produced by AML's `sha256()` builtin
 /// and required by every `state_root` / `members_root` argument in
@@ -156,6 +160,22 @@ pub struct StateRoot {
     /// operators is expected and NOT a verifier reject condition.
     pub timestamp_secs: u64,
 
+    /// HFHE-2 shadow-blob commitment: a 64-char lowercase hex
+    /// SHA-256 digest folded over the sealed `oct://<circle_id>/
+    /// enc-receipts.json` (or equivalent operator-managed manifest
+    /// of `(session_id, seq) -> { enc_bytes_used, enc_net,
+    /// pvac_zero_proof }`). Anchoring its hash here means an
+    /// on-chain anchor rotation is *evidence* of encrypted-blob
+    /// change — verifiers detect when an operator silently rotates
+    /// the shadow set out from under previously-emitted receipts.
+    ///
+    /// `None` for v1 anchors and for v2 operators who choose not to
+    /// commit a shadow set. When `None` the field is OMITTED from
+    /// canonical JSON (not emitted as `null`) so v1 anchors remain
+    /// byte-identical across the schema bump.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub enc_anchor_hash: Option<String>,
+
     /// Forward-compatibility bucket. Any JSON keys not recognised by
     /// this decoder land here, and are re-emitted verbatim by
     /// `canonical_bytes()` so the SHA-256 round-trips for v(N+1) data
@@ -188,6 +208,38 @@ impl StateRoot {
             member_count,
             epoch,
             timestamp_secs,
+            enc_anchor_hash: None,
+            unknown: BTreeMap::new(),
+        }
+    }
+
+    /// Build a v2 `StateRoot` carrying an optional HFHE-2 shadow
+    /// anchor. Sets `v = SCHEMA_VERSION_V2`. If `enc_anchor_hash` is
+    /// `None` the canonical bytes are *byte-identical* to a v1 with
+    /// the same other fields except for the bumped `"v":2`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_v2(
+        circle_id: impl Into<String>,
+        policy_hash: impl Into<String>,
+        wg_pubkey_hash: impl Into<String>,
+        attestation_hash: Option<String>,
+        region: impl Into<String>,
+        member_count: u32,
+        epoch: u64,
+        timestamp_secs: u64,
+        enc_anchor_hash: Option<String>,
+    ) -> Self {
+        Self {
+            v: SCHEMA_VERSION_V2,
+            circle_id: circle_id.into(),
+            policy_hash: policy_hash.into(),
+            wg_pubkey_hash: wg_pubkey_hash.into(),
+            attestation_hash,
+            region: region.into(),
+            member_count,
+            epoch,
+            timestamp_secs,
+            enc_anchor_hash,
             unknown: BTreeMap::new(),
         }
     }
@@ -222,16 +274,13 @@ impl StateRoot {
         Ok(sr)
     }
 
-    /// Field-level invariants. Run on every encode and decode that
-    /// touches untrusted data.
+    /// Field-level invariants. Accepts both v1 and v2 schemas; v2
+    /// additionally validates the optional `enc_anchor_hash` hex.
     pub fn validate(&self) -> Result<(), StateRootError> {
-        if self.v != SCHEMA_VERSION_V1 {
-            // v1 is the only version this build understands. We do NOT
-            // reject higher versions outright at decode time when called
-            // through the forward-compat path — see `decode_lenient`.
+        if self.v != SCHEMA_VERSION_V1 && self.v != SCHEMA_VERSION_V2 {
             return Err(StateRootError::UnsupportedVersion {
                 got: self.v,
-                supported: SCHEMA_VERSION_V1,
+                supported: SCHEMA_VERSION_V2,
             });
         }
         if self.circle_id.is_empty() {
@@ -244,6 +293,9 @@ impl StateRoot {
         check_hash("wg_pubkey_hash", &self.wg_pubkey_hash)?;
         if let Some(h) = &self.attestation_hash {
             check_hash("attestation_hash", h)?;
+        }
+        if let Some(h) = &self.enc_anchor_hash {
+            check_hash("enc_anchor_hash", h)?;
         }
         Ok(())
     }
@@ -265,6 +317,9 @@ impl StateRoot {
         check_hash("wg_pubkey_hash", &sr.wg_pubkey_hash)?;
         if let Some(h) = &sr.attestation_hash {
             check_hash("attestation_hash", h)?;
+        }
+        if let Some(h) = &sr.enc_anchor_hash {
+            check_hash("enc_anchor_hash", h)?;
         }
         Ok(sr)
     }
@@ -443,9 +498,10 @@ mod tests {
 
     #[test]
     fn unknown_future_fields_preserved_through_round_trip() {
-        // Encode a "v2" blob (extra field `policy_url`) and verify that
-        // a v1 decoder both preserves the extra field AND recomputes
-        // the same anchor when re-encoded.
+        // Encode a "v99" blob (extra field `policy_url`) and verify
+        // forward-compat. We use v=99 (not v=2) because HFHE-2 made
+        // v=2 a real, supported schema — v=99 stands in for a
+        // hypothetical future version this build doesn't understand.
         let bytes_v1 = sample().canonical_bytes().unwrap();
         let mut value: Value = serde_json::from_slice(&bytes_v1).unwrap();
         if let Value::Object(map) = &mut value {
@@ -453,17 +509,14 @@ mod tests {
                 "policy_url".to_string(),
                 Value::String("https://op.example/policy".to_string()),
             );
-            // Pretend the producer bumped the schema version, but for
-            // the forward-compat check we want the v1 decoder to still
-            // succeed via decode_lenient.
-            map.insert("v".to_string(), Value::from(2u32));
+            map.insert("v".to_string(), Value::from(99u32));
         }
         let bytes_v2 = serde_json::to_vec(&value).unwrap();
 
-        // Strict decode rejects v=2.
+        // Strict decode rejects v=99.
         assert!(matches!(
             StateRoot::decode(&bytes_v2),
-            Err(StateRootError::UnsupportedVersion { got: 2, .. })
+            Err(StateRootError::UnsupportedVersion { got: 99, .. })
         ));
 
         // Lenient decode succeeds and preserves the extra key.
@@ -740,6 +793,122 @@ mod tests {
             sr.attestation_hash = Some(hex::encode(h));
             let some_anchor = sr.anchor_hex().expect("some anchor");
             prop_assert_ne!(none_anchor, some_anchor);
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // HFHE-2: v2 schema + `enc_anchor_hash` tests.
+    // -----------------------------------------------------------------
+
+    fn sample_v2_with_anchor() -> StateRoot {
+        StateRoot::new_v2(
+            "oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3",
+            h(0xab),
+            h(0xcd),
+            Some(h(0xef)),
+            "us-east-1",
+            42,
+            12345,
+            1_705_000_000,
+            Some(h(0xa5)),
+        )
+    }
+
+    #[test]
+    fn v2_state_root_validates() {
+        assert!(sample_v2_with_anchor().validate().is_ok());
+    }
+
+    #[test]
+    fn v2_state_root_round_trips_through_canonical_bytes() {
+        let sr = sample_v2_with_anchor();
+        let bytes = sr.canonical_bytes().expect("encode");
+        let back = StateRoot::decode(&bytes).expect("decode");
+        assert_eq!(sr, back);
+    }
+
+    #[test]
+    fn v1_anchor_unchanged_by_v2_schema_bump() {
+        let v1 = sample();
+        let bytes = v1.canonical_bytes().unwrap();
+        let s = std::str::from_utf8(&bytes).unwrap();
+        assert!(!s.contains("enc_anchor_hash"));
+        let anchor = v1.anchor_hex().unwrap();
+        assert_eq!(anchor.len(), HEX_HASH_LEN);
+    }
+
+    #[test]
+    fn v2_without_enc_anchor_differs_from_v1_only_in_v_field() {
+        let v1 = sample();
+        let v2_no_anchor = StateRoot::new_v2(
+            v1.circle_id.clone(),
+            v1.policy_hash.clone(),
+            v1.wg_pubkey_hash.clone(),
+            v1.attestation_hash.clone(),
+            v1.region.clone(),
+            v1.member_count,
+            v1.epoch,
+            v1.timestamp_secs,
+            None,
+        );
+        let v1_bytes = v1.canonical_bytes().unwrap();
+        let v2_bytes = v2_no_anchor.canonical_bytes().unwrap();
+        let v1_s = std::str::from_utf8(&v1_bytes).unwrap();
+        let v2_s = std::str::from_utf8(&v2_bytes).unwrap();
+        assert!(v1_s.contains("\"v\":1"));
+        assert!(v2_s.contains("\"v\":2"));
+        let mended = v1_s.replace("\"v\":1", "\"v\":2");
+        assert_eq!(mended, v2_s);
+    }
+
+    #[test]
+    fn v2_enc_anchor_changes_anchor() {
+        let v2_no = StateRoot::new_v2(
+            "oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3",
+            h(0xab),
+            h(0xcd),
+            None,
+            "us-east-1",
+            1,
+            1,
+            1,
+            None,
+        );
+        let v2_with = StateRoot::new_v2(
+            "oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3",
+            h(0xab),
+            h(0xcd),
+            None,
+            "us-east-1",
+            1,
+            1,
+            1,
+            Some(h(0x77)),
+        );
+        let a = v2_no.anchor_hex().unwrap();
+        let b = v2_with.anchor_hex().unwrap();
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn v2_bad_enc_anchor_hash_rejected() {
+        let mut sr = sample_v2_with_anchor();
+        sr.enc_anchor_hash = Some("not-hex".into());
+        match sr.validate() {
+            Err(StateRootError::BadHashLength { field, .. }) => {
+                assert_eq!(field, "enc_anchor_hash");
+            }
+            other => panic!("expected BadHashLength, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_version_rejected_by_validate() {
+        let mut sr = sample_v2_with_anchor();
+        sr.v = 99;
+        match sr.validate() {
+            Err(StateRootError::UnsupportedVersion { got: 99, .. }) => {}
+            other => panic!("expected UnsupportedVersion(99), got {other:?}"),
         }
     }
 

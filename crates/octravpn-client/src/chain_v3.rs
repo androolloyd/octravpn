@@ -280,6 +280,33 @@ impl<'a> ChainCtxV3<'a> {
         )
     }
 
+    /// HFHE-2 swap-ready settle-confirm builder. Two trailing
+    /// positional `bytes` args carry `enc_bytes_used` + `enc_net`
+    /// ciphertexts. The on-chain
+    /// `program/main-v3.aml::settle_confirm` does NOT yet consume
+    /// these positions; production tx submission still uses
+    /// [`Self::build_settle_confirm_call`] until the HFHE-3 AML
+    /// diff lands.
+    #[allow(dead_code)] // wired by HFHE-3 AML swap
+    pub(crate) fn build_settle_confirm_with_shadow_call(
+        &self,
+        p: &SettleConfirmParams<'_>,
+        enc_bytes_used: &str,
+        enc_net: &str,
+    ) -> Value {
+        self.call_builder().settle_confirm_with_shadow_call(
+            p.session_id,
+            p.bytes_used,
+            p.net,
+            p.settle_blinding,
+            enc_bytes_used,
+            enc_net,
+            0,
+            p.fee,
+            p.nonce,
+        )
+    }
+
     /// `claim_no_show(session_id)` — opener-side abort path. Fires
     /// once `epoch >= opened_at + session_grace_epochs` and the
     /// operator hasn't called `settle_claim`. Refunds the deposit to

@@ -139,6 +139,19 @@ pub(crate) struct ControlState {
     /// startup wires it so production announces must point at a
     /// transaction that emitted `SessionOpened(session_id)`.
     pub session_verifier: Option<SessionAdmissionVerifier>,
+    /// HFHE-2: optional shadow-blob signer. When `Some` the
+    /// `get_state` receipt-emission path consults the PVAC sidecar
+    /// for `encrypt_const(bytes_used)` + `encrypt_const(net)` and
+    /// attaches the ciphertexts to the proposed receipt. `None`
+    /// (the default) is the no-shadow path — receipts emit
+    /// identical bytes to pre-HFHE-2 builds.
+    pub shadow_signer: Option<Arc<ShadowSigner>>,
+    /// HFHE-2: per-session price in OU/byte used to compute the
+    /// shadow `net` ciphertext (`net = bytes_used * price`). v3
+    /// `settle_confirm` takes `net` as a plaintext positional arg
+    /// the opener and operator agree on out-of-band, so the shadow
+    /// `net` is encrypted under the same `price`. Default 0.
+    pub shadow_price_per_byte: u64,
 }
 
 #[derive(Clone)]
@@ -178,6 +191,31 @@ fn event_session_id(event: &serde_json::Value) -> Option<SessionId> {
         return Some(SessionId::from_u64(id_u64));
     }
     SessionId::from_hex(sid.as_str()?)
+}
+
+/// HFHE-2 shadow-blob signer bundle. Held on `ControlState` as
+/// `Option<Arc<ShadowSigner>>`. Carries the live `PvacClient`
+/// handle plus the two circle key blobs (`hfhe_v1|<b64>` strings).
+///
+/// Lifecycle: built at boot by `Hub::new` when
+/// `cfg.pvac.enabled = true` AND both `circle_pubkey_path` /
+/// `circle_secret_path` resolve to readable files. Mid-session
+/// enable is NOT supported — the state is captured once at
+/// `with_shadow_signer` time and not re-checked. An operator who
+/// flips the sidecar on mid-session sees *new* receipts carry the
+/// shadow blob from the next `get_state` onward, but in-flight
+/// receipts already proposed without the blob are NOT re-emitted.
+/// The chain doesn't verify either side today, so the
+/// inconsistency is purely off-chain bookkeeping.
+pub(crate) struct ShadowSigner {
+    /// Live PVAC sidecar client handle. Shared with `Hub::pvac()`.
+    pub pvac: Arc<crate::pvac::PvacClient>,
+    /// Circle PVAC pubkey blob (`hfhe_v1|<base64>`).
+    pub circle_pk: String,
+    /// Circle PVAC secret key blob (`hfhe_v1|<base64>`). The
+    /// sidecar's `encrypt_const` op takes both pk + sk; the secret
+    /// is used only for randomness derivation, never to decrypt.
+    pub circle_sk: String,
 }
 
 /// Lightweight counters exposed via the /metrics endpoint. Kept as
@@ -370,7 +408,25 @@ impl ControlState {
             wire_state: None,
             rate_limit_cfg: crate::rate_limit::RateLimitCfg::default(),
             session_verifier: None,
+            shadow_signer: None,
+            shadow_price_per_byte: 0,
         }
+    }
+
+    /// HFHE-2: attach a shadow-blob signer. When set, every signed
+    /// receipt emitted from `get_state` is amended with encrypted
+    /// `bytes_used` + `net` ciphertexts produced by the PVAC
+    /// sidecar. `None` (the default) preserves the legacy
+    /// no-shadow wire shape.
+    #[allow(dead_code)] // wired by Hub::new when [pvac] block + circle keys are present
+    pub(crate) fn with_shadow_signer(
+        mut self,
+        signer: Option<Arc<ShadowSigner>>,
+        price_per_byte: u64,
+    ) -> Self {
+        self.shadow_signer = signer;
+        self.shadow_price_per_byte = price_per_byte;
+        self
     }
 
     /// Override the rate-limit config (defaults are the documented
@@ -878,6 +934,37 @@ async fn events_sse(
         .into_response()
 }
 
+/// HFHE-2: derive a per-receipt encryption seed (64-char hex) from
+/// the (session_id_hex, seq) tuple. Deterministic — the auditor
+/// who knows `(session_id, seq, circle_pk, circle_sk)` can
+/// recompute the ciphertext byte-for-byte.
+///
+/// The label `octravpn-shadow-v1|` pins the domain so this seed
+/// space never collides with any other use of `sha256(session_id
+/// || seq)`.
+fn shadow_seed_for(session_id_hex: &str, seq: u64) -> String {
+    use sha2::Digest as _;
+    let mut h = sha2::Sha256::new();
+    h.update(b"octravpn-shadow-v1|");
+    h.update(session_id_hex.as_bytes());
+    h.update(b"|");
+    h.update(seq.to_be_bytes());
+    hex::encode(h.finalize())
+}
+
+/// HFHE-2: split a parent shadow seed into a per-field subseed.
+/// Cheap (one sha256). The label distinguishes `enc_bytes_used`
+/// vs `enc_net` so the two ciphertexts on a single receipt are
+/// never encrypted under the same randomness.
+fn shadow_subseed(parent_hex: &str, label: &[u8]) -> String {
+    use sha2::Digest as _;
+    let mut h = sha2::Sha256::new();
+    h.update(parent_hex.as_bytes());
+    h.update(b"|");
+    h.update(label);
+    hex::encode(h.finalize())
+}
+
 /// Constant-time string equality. Doesn't short-circuit on length, but
 /// strings with different lengths can't be equal — return false
 /// up-front. The remaining comparison is byte-by-byte XOR-and-OR.
@@ -967,10 +1054,81 @@ async fn get_state(
     // session identifier in the event.
     let event_seq = r.seq;
     let event_bytes = r.bytes_used;
+
+    // HFHE-2 shadow-blob emission. The sidecar's `encrypt_const`
+    // round-trip is on the order of ~200µs; the no-shadow path
+    // skips it entirely. Two ciphertexts (bytes_used + net) are
+    // produced under deterministic per-receipt seeds derived from
+    // `(session_id, seq)` so the same input produces identical
+    // bytes — useful for the test suite + an auditor recomputing
+    // the blob from plaintext + sk. We do NOT retry on sidecar
+    // transient errors; a failure emits the receipt WITHOUT the
+    // shadow blob and logs a warning. The chain doesn't verify
+    // the blob today — a missing blob is a soft degrade, not a
+    // hard fail.
+    let (enc_bytes_used, enc_net, pvac_zero_proof) =
+        match s.shadow_signer.as_ref() {
+            None => (None, None, None),
+            Some(signer) => {
+                let net = event_bytes.saturating_mul(s.shadow_price_per_byte);
+                let seed = shadow_seed_for(&id_hex, event_seq);
+                let seed_b = shadow_subseed(&seed, b"bytes");
+                let seed_n = shadow_subseed(&seed, b"net");
+                let enc_b = signer
+                    .pvac
+                    .encrypt_const(&signer.circle_pk, &signer.circle_sk, event_bytes, &seed_b)
+                    .await
+                    .map_err(|e| {
+                        tracing::warn!(error = %e, "shadow encrypt_const(bytes_used) failed; emitting receipt without shadow");
+                        e
+                    })
+                    .ok();
+                let enc_n = if enc_b.is_some() {
+                    signer
+                        .pvac
+                        .encrypt_const(&signer.circle_pk, &signer.circle_sk, net, &seed_n)
+                        .await
+                        .map_err(|e| {
+                            tracing::warn!(error = %e, "shadow encrypt_const(net) failed; emitting receipt without enc_net");
+                            e
+                        })
+                        .ok()
+                } else {
+                    None
+                };
+                let proof = if let Some(ct) = enc_b.as_ref() {
+                    use base64::Engine as _;
+                    let blinding_b64 = base64::engine::general_purpose::STANDARD
+                        .encode(blind.as_bytes());
+                    signer
+                        .pvac
+                        .make_zero_proof(
+                            &signer.circle_pk,
+                            &signer.circle_sk,
+                            ct,
+                            event_bytes,
+                            &blinding_b64,
+                        )
+                        .await
+                        .map_err(|e| {
+                            tracing::warn!(error = %e, "shadow make_zero_proof failed; emitting receipt without proof");
+                            e
+                        })
+                        .ok()
+                } else {
+                    None
+                };
+                (enc_b, enc_n, proof)
+            }
+        };
+
     let proposed = ProposedReceipt {
         receipt: r,
         node_pubkey: s.node_kp.public,
         node_sig,
+        enc_bytes_used,
+        enc_net,
+        pvac_zero_proof,
     };
     s.events.publish(crate::events::Event {
         ts_unix: octravpn_core::util::now_unix_secs(),
@@ -1808,5 +1966,95 @@ mod tests {
 
         let j2 = ReceiptJournal::open(&path).unwrap();
         assert_eq!(j2.floor(&sess), 99);
+    }
+
+    // ====================================================================
+    // HFHE-2 shadow-blob tests (control-plane integration).
+    // ====================================================================
+
+    #[test]
+    fn shadow_seed_for_is_deterministic_per_session_and_seq() {
+        let a = shadow_seed_for("abcd", 1);
+        let b = shadow_seed_for("abcd", 1);
+        let c = shadow_seed_for("abcd", 2);
+        let d = shadow_seed_for("abce", 1);
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(a, d);
+        assert_eq!(a.len(), 64);
+    }
+
+    #[test]
+    fn shadow_subseed_differs_per_label() {
+        let parent = shadow_seed_for("abcd", 7);
+        let s1 = shadow_subseed(&parent, b"bytes");
+        let s2 = shadow_subseed(&parent, b"net");
+        let s1_again = shadow_subseed(&parent, b"bytes");
+        assert_eq!(s1, s1_again);
+        assert_ne!(s1, s2);
+        assert_eq!(s1.len(), 64);
+    }
+
+    /// A `ControlState` constructed without a `ShadowSigner` MUST
+    /// have `shadow_signer = None` and `shadow_price_per_byte = 0`
+    /// — the no-shadow default. This is the safety-net pin that
+    /// keeps the no-sidecar path wire-identical to pre-HFHE-2.
+    #[test]
+    fn control_state_default_has_no_shadow_signer() {
+        let kp = Arc::new(KeyPair::generate());
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(
+            10,
+            std::time::Duration::from_secs(60),
+        ));
+        let state = ControlState::new(kp, router, allowlist);
+        assert!(state.shadow_signer.is_none());
+        assert_eq!(state.shadow_price_per_byte, 0);
+    }
+
+    /// `with_shadow_signer(None, …)` is a no-op — the field stays
+    /// `None`. Verifies the wiring is additive, not destructive.
+    #[test]
+    fn with_shadow_signer_none_is_identity() {
+        let kp = Arc::new(KeyPair::generate());
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(
+            10,
+            std::time::Duration::from_secs(60),
+        ));
+        let state = ControlState::new(kp, router, allowlist).with_shadow_signer(None, 42);
+        assert!(state.shadow_signer.is_none());
+        assert_eq!(state.shadow_price_per_byte, 42);
+    }
+
+    /// JSON serialisation of a `ProposedReceipt` with no shadow
+    /// data does NOT mention the three new field names — the wire
+    /// stays byte-identical to pre-HFHE-2 receipts.
+    #[test]
+    fn proposed_receipt_no_shadow_json_omits_fields() {
+        let kp_n = KeyPair::generate();
+        let r = octravpn_core::receipt::Receipt::new(
+            octravpn_core::receipt::ReceiptContext::v1_1(
+                octravpn_core::address::Address::from_pubkey(&[0u8; 32]),
+                octravpn_core::receipt::CHAIN_ID_TEST,
+            ),
+            SessionId::new([1u8; 32]),
+            1,
+            100,
+            octravpn_core::session::Blind::new([0u8; 32]),
+        );
+        let sig = kp_n.sign(&r.signing_payload());
+        let p = octravpn_core::control::ProposedReceipt {
+            receipt: r,
+            node_pubkey: kp_n.public,
+            node_sig: sig,
+            enc_bytes_used: None,
+            enc_net: None,
+            pvac_zero_proof: None,
+        };
+        let j = serde_json::to_string(&p).unwrap();
+        assert!(!j.contains("enc_bytes_used"), "wire: {j}");
+        assert!(!j.contains("enc_net"));
+        assert!(!j.contains("pvac_zero_proof"));
     }
 }

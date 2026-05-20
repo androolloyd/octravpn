@@ -70,12 +70,22 @@ pub(crate) async fn settle_active(client: &Arc<Client>, active: ActiveSession) -
     // dispute resolution; build the full signed receipt and stash
     // it locally even though we don't submit it.
     let client_sig = active.session_kp.sign(&payload);
+    // HFHE-2: forward whatever shadow-blob fields the operator
+    // attached on its side. The client doesn't introspect them — it
+    // just carries them through so the locally-stashed
+    // `SignedReceipt` stays bit-identical to what the operator
+    // signed. When the operator is on the no-sidecar path, all
+    // three remain None and the receipt JSON drops the fields
+    // entirely via serde skip_serializing_if.
     let signed = SignedReceipt {
         receipt: proposed.receipt,
         client_pubkey: active.session_kp.public,
         client_sig,
         node_pubkey: proposed.node_pubkey,
         node_sig: proposed.node_sig,
+        enc_bytes_used: proposed.enc_bytes_used.clone(),
+        enc_net: proposed.enc_net.clone(),
+        pvac_zero_proof: proposed.pvac_zero_proof.clone(),
     };
     signed.verify().context("dual-sig self-verify")?;
 
