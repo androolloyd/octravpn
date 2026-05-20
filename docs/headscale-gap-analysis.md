@@ -4,7 +4,9 @@
 (Go, `main` as of 2026-05-19 — most recent migration in
 [`hscontrol/db/db.go`](https://github.com/juanfont/headscale/blob/main/hscontrol/db/db.go)
 is `202602201200-clear-tagged-node-user-id`, v0.27.x line) and our
-sibling Rust port at `/Users/androolloyd/Development/headscale-rs/`.
+sibling Rust port at `/Users/androolloyd/Development/headscale-rs/`
+(sibling-repo layout + dep-resolution strategy:
+see [`docs/architecture/headscale-dep-strategy.md`](./architecture/headscale-dep-strategy.md)).
 Prioritised by what blocks **stock `tailscale up` (v1.78+) joining a
 mesh hosted by an OctraVPN-derived control plane**, as exercised by
 `docker/devnet/tailscale-interop/run-interop.sh`.
