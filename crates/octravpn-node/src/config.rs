@@ -85,6 +85,85 @@ pub(crate) struct NodeConfig {
     /// `[tun.transport]` — see `docs/operators/obfs4-bridge.md`.
     #[serde(default)]
     pub tun: TunCfg,
+    /// `[pvac]` block — managed `octra-pvac-sidecar` subprocess for the
+    /// HFHE path. Default disabled; operators opt in by setting
+    /// `[pvac].enabled = true` and (optionally) overriding
+    /// `binary_path`. When enabled but the binary is missing, the node
+    /// logs a warning and continues without HFHE — boot does NOT fail.
+    /// See [`crate::pvac::PvacClient`] for the API and the supervisor
+    /// contract.
+    #[serde(default)]
+    pub pvac: PvacCfg,
+}
+
+/// `[pvac]` block. Off-by-default so existing deployments are
+/// unaffected by the wiring. To enable, drop a:
+///
+/// ```toml
+/// [pvac]
+/// enabled = true
+/// binary_path = "./pvac-sidecar/octra-pvac-sidecar"
+/// ```
+///
+/// into `node.toml`. The remaining fields tune the supervisor + IPC
+/// timeouts.
+#[derive(Debug, Deserialize, Clone)]
+pub(crate) struct PvacCfg {
+    /// Master toggle. `false` (the default) ⇒ the subprocess is never
+    /// spawned and `Hub::pvac()` returns `None`.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Path to the `octra-pvac-sidecar` binary. Default
+    /// `"./pvac-sidecar/octra-pvac-sidecar"` so the in-repo build
+    /// "just works" on a fresh checkout that ran `cd pvac-sidecar &&
+    /// make`. Production operators should point this at an absolute
+    /// path under `/usr/local/bin` or similar.
+    #[serde(default = "default_pvac_binary_path")]
+    pub binary_path: String,
+    /// Initial back-off after a sidecar crash, in milliseconds. The
+    /// supervisor doubles per consecutive crash up to 60s. Default 250.
+    #[serde(default = "default_pvac_restart_backoff_ms")]
+    pub restart_backoff_ms: u64,
+    /// Per-request timeout in seconds. Returned as
+    /// `PvacError::Timeout` if no response arrives. Default 30.
+    #[serde(default = "default_pvac_request_timeout_secs")]
+    pub request_timeout_secs: u64,
+}
+
+impl Default for PvacCfg {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            binary_path: default_pvac_binary_path(),
+            restart_backoff_ms: default_pvac_restart_backoff_ms(),
+            request_timeout_secs: default_pvac_request_timeout_secs(),
+        }
+    }
+}
+
+fn default_pvac_binary_path() -> String {
+    "./pvac-sidecar/octra-pvac-sidecar".into()
+}
+
+const fn default_pvac_restart_backoff_ms() -> u64 {
+    250
+}
+
+const fn default_pvac_request_timeout_secs() -> u64 {
+    30
+}
+
+impl PvacCfg {
+    /// Render to the runtime [`crate::pvac::PvacConfig`] used by
+    /// `PvacClient::spawn`.
+    pub(crate) fn to_runtime(&self) -> crate::pvac::PvacConfig {
+        crate::pvac::PvacConfig {
+            binary_path: std::path::PathBuf::from(&self.binary_path),
+            restart_backoff: std::time::Duration::from_millis(self.restart_backoff_ms),
+            request_timeout: std::time::Duration::from_secs(self.request_timeout_secs),
+            env: Vec::new(),
+        }
+    }
 }
 
 /// `[tun]` block. Currently only carries the [`TransportCfg`] selector.
