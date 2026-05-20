@@ -104,7 +104,10 @@ pub(crate) async fn metrics(
          octravpn_ip_allocator_used {ip_used}\n\
          # HELP octravpn_ip_allocator_capacity Static host-range capacity of the CGNAT allocator.\n\
          # TYPE octravpn_ip_allocator_capacity gauge\n\
-         octravpn_ip_allocator_capacity {ip_cap}\n",
+         octravpn_ip_allocator_capacity {ip_cap}\n\
+         # HELP octravpn_audit_inline_fallback_total Audit writes that fell back to inline sync-fsync because the batched flusher queue was full (disk stall signal).\n\
+         # TYPE octravpn_audit_inline_fallback_total counter\n\
+         octravpn_audit_inline_fallback_total {audit_inline_fb}\n",
         announces = m.announces_total.load(Ordering::Relaxed),
         state_lookups = m.state_lookups_total.load(Ordering::Relaxed),
         receipts_signed = m.receipts_signed_total.load(Ordering::Relaxed),
@@ -126,6 +129,15 @@ pub(crate) async fn metrics(
         tn_members = m.tailnet_member_count.load(Ordering::Relaxed),
         ip_used = m.ip_allocator_used.load(Ordering::Relaxed),
         ip_cap = m.ip_allocator_capacity.load(Ordering::Relaxed),
+        // Audit-flusher backpressure counter. Read directly off the
+        // `AuditLog` handle (its `Arc<AuditCounters>` is lock-free,
+        // so a disk-stalled flusher cannot block this scrape). When
+        // `[audit]` is disabled the gauge is zero, which is the
+        // correct "no fallback possible" value.
+        audit_inline_fb = s
+            .audit
+            .as_ref()
+            .map_or(0, crate::audit::AuditLog::inline_fallback_total),
     );
     (
         [(
@@ -232,6 +244,7 @@ mod tests {
             "octravpn_tailnet_member_count ",
             "octravpn_ip_allocator_used ",
             "octravpn_ip_allocator_capacity ",
+            "octravpn_audit_inline_fallback_total ",
         ] {
             assert!(
                 text.contains(needle),
