@@ -92,6 +92,11 @@ impl From<std::process::Output> for CommandOutput {
 
 /// Assert that two runs are byte-identical on stdout + stderr + exit.
 /// Pretty-prints the mismatch when they aren't.
+///
+/// `clippy::manual_assert` would rewrite the body as a multi-line
+/// `assert!(...)`, but the divergence report needs the explicit
+/// `panic!` block for readability of the formatted diagnostic.
+#[allow(clippy::manual_assert)]
 #[track_caller]
 fn assert_byte_identical(label: &str, embed: &CommandOutput, stand: &CommandOutput) {
     if embed.stdout != stand.stdout || embed.stderr != stand.stderr || embed.code != stand.code {

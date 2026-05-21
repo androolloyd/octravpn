@@ -59,20 +59,26 @@ impl HttpState {
 
     /// Returns `Ok(())` if the request is authorized; `Err(response)`
     /// is the rejection the handler should return directly.
-    fn check_auth(&self, headers: &HeaderMap) -> Result<(), Response> {
+    ///
+    /// The error variant is boxed so the `Result` stays small
+    /// (`axum::Response` is ~128 bytes, which trips
+    /// `clippy::result_large_err` at the workspace's `-D warnings`).
+    fn check_auth(&self, headers: &HeaderMap) -> Result<(), Box<Response>> {
         let Some(want) = self.bearer_token.as_deref() else {
-            return Err((
-                StatusCode::SERVICE_UNAVAILABLE,
-                "analytics endpoint disabled: set [analytics].bearer_token",
-            )
-                .into_response());
+            return Err(Box::new(
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "analytics endpoint disabled: set [analytics].bearer_token",
+                )
+                    .into_response(),
+            ));
         };
         let got = headers
             .get(AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.strip_prefix("Bearer "));
         if !got.is_some_and(|tok| ct_eq(tok, want)) {
-            return Err((StatusCode::UNAUTHORIZED, "").into_response());
+            return Err(Box::new((StatusCode::UNAUTHORIZED, "").into_response()));
         }
         Ok(())
     }
@@ -111,7 +117,7 @@ pub async fn serve(
 
 async fn prometheus_metrics(State(s): State<HttpState>, headers: HeaderMap) -> Response {
     if let Err(resp) = s.check_auth(&headers) {
-        return resp;
+        return *resp;
     }
     let mut body = String::new();
     // `write!` into String is infallible; the unwraps below silence
@@ -187,9 +193,9 @@ async fn series(
     Query(q): Query<SeriesQuery>,
 ) -> Response {
     if let Err(resp) = s.check_auth(&headers) {
-        return resp;
+        return *resp;
     }
-    let Some(width) = BucketWidth::from_str(&q.bucket) else {
+    let Some(width) = BucketWidth::parse(&q.bucket) else {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "unknown bucket; want one of 1m/5m/1h/1d"})),

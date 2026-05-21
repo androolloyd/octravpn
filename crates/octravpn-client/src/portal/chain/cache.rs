@@ -516,6 +516,6 @@ mod tests {
         let rpc = RpcClient::new("http://127.0.0.1:1");
         let chain = PortalChain::from_rpc(rpc, "octPROG".into(), 0);
         let cache = chain.asset_cache();
-        assert_eq!(Arc::strong_count(&cache) >= 2, true);
+        assert!(Arc::strong_count(&cache) >= 2);
     }
 }

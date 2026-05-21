@@ -101,8 +101,12 @@ impl BucketWidth {
 
     /// Parse a URL-friendly token (`1m`, `5m`, `1h`, `1d`). Lenient on
     /// case but not on extra whitespace.
+    ///
+    /// Named `parse` rather than `from_str` to avoid the
+    /// `clippy::should_implement_trait` lint: this returns `Option`,
+    /// not `Result`, and so cannot satisfy `std::str::FromStr`.
     #[must_use]
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "1m" | "60s" => Some(Self::OneMinute),
             "5m" | "300s" => Some(Self::FiveMinutes),
@@ -156,7 +160,7 @@ impl BucketSeries {
     /// Returns 0 if empty.
     #[must_use]
     pub fn latest(&self) -> u64 {
-        self.buckets.last_key_value().map(|(_, v)| *v).unwrap_or(0)
+        self.buckets.last_key_value().map_or(0, |(_, v)| *v)
     }
 
     /// All buckets in (start, value) order. Returned as a vector so
@@ -278,10 +282,10 @@ mod tests {
     }
 
     #[test]
-    fn width_round_trip_via_label_and_from_str() {
+    fn width_round_trip_via_label_and_parse() {
         for w in BucketWidth::all() {
-            assert_eq!(BucketWidth::from_str(w.label()), Some(w));
+            assert_eq!(BucketWidth::parse(w.label()), Some(w));
         }
-        assert_eq!(BucketWidth::from_str("17m"), None);
+        assert_eq!(BucketWidth::parse("17m"), None);
     }
 }

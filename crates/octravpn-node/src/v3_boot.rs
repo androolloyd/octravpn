@@ -365,7 +365,7 @@ fn policy_bytes_for_v3(
 mod tests {
     use super::*;
     use crate::config::{
-        AnalyticsCfg, AttestationCfg, ChainCfg, ControlCfg, NodeConfig, PricingCfg,
+        AmneziaCfg, AnalyticsCfg, AttestationCfg, ChainCfg, ControlCfg, NodeConfig, PricingCfg,
         ProtocolVersion, TunCfg, TunnelCfg,
     };
     use std::path::Path;
@@ -392,7 +392,7 @@ mod tests {
                 public_endpoint: "1.2.3.4:51820".into(),
                 listen: "0.0.0.0:51820".into(),
                 wg_secret_path: "/tmp/unused".into(),
-                amnezia: Default::default(),
+                amnezia: AmneziaCfg::default(),
             },
             pricing: PricingCfg {
                 price_per_mb: 100,

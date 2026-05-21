@@ -38,7 +38,7 @@ impl Subcommand for HealthArgs {
         false
     }
     async fn dispatch(self, _ctx: CliContext<'_>) -> Result<i32> {
-        let code = cli_ops::run_health(self)?;
+        let code = cli_ops::run_health(&self)?;
         std::process::exit(code);
     }
 }
@@ -52,7 +52,7 @@ impl Subcommand for AuditTailArgs {
         false
     }
     async fn dispatch(self, _ctx: CliContext<'_>) -> Result<i32> {
-        let code = cli_ops::run_audit_tail(self)?;
+        let code = cli_ops::run_audit_tail(&self)?;
         std::process::exit(code);
     }
 }
@@ -66,7 +66,7 @@ impl Subcommand for ReceiptVerifyArgs {
         false
     }
     async fn dispatch(self, _ctx: CliContext<'_>) -> Result<i32> {
-        let code = cli_ops::run_receipt_verify(self)?;
+        let code = cli_ops::run_receipt_verify(&self)?;
         std::process::exit(code);
     }
 }

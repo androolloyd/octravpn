@@ -639,24 +639,20 @@ mod tests {
         /// third option.
         #[test]
         fn parse_oct_url_never_panics(s in ".{0,256}") {
-            match parse_oct_url(&s) {
-                Ok(p) => {
-                    // Invariants on success:
-                    //   * circle_id non-empty
-                    //   * circle_id has no '/', no whitespace, no '?', no '#', no ':'
-                    //   * path starts with '/'
-                    proptest::prop_assert!(!p.circle_id.is_empty());
-                    proptest::prop_assert!(!p.circle_id.contains('/'));
-                    proptest::prop_assert!(!p.circle_id.contains('?'));
-                    proptest::prop_assert!(!p.circle_id.contains('#'));
-                    proptest::prop_assert!(!p.circle_id.contains(':'));
-                    proptest::prop_assert!(!p.circle_id.contains(char::is_whitespace));
-                    proptest::prop_assert!(p.path.starts_with('/'));
-                }
-                Err(_) => {
-                    // Error path — must just be a clean anyhow.
-                }
+            if let Ok(p) = parse_oct_url(&s) {
+                // Invariants on success:
+                //   * circle_id non-empty
+                //   * circle_id has no '/', no whitespace, no '?', no '#', no ':'
+                //   * path starts with '/'
+                proptest::prop_assert!(!p.circle_id.is_empty());
+                proptest::prop_assert!(!p.circle_id.contains('/'));
+                proptest::prop_assert!(!p.circle_id.contains('?'));
+                proptest::prop_assert!(!p.circle_id.contains('#'));
+                proptest::prop_assert!(!p.circle_id.contains(':'));
+                proptest::prop_assert!(!p.circle_id.contains(char::is_whitespace));
+                proptest::prop_assert!(p.path.starts_with('/'));
             }
+            // Error path — parser is expected to fail cleanly on garbage; no panic.
         }
 
         /// For any valid-shaped input `oct://<id>/<path>`, parsing must

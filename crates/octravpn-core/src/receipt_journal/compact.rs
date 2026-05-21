@@ -74,7 +74,7 @@ fn maybe_crash(at: CrashPoint) {
     CRASH_AT.with(|c| {
         if c.get() == Some(at) {
             c.set(None);
-            panic!("crash injection: {:?}", at);
+            panic!("crash injection: {at:?}");
         }
     });
 }
@@ -755,7 +755,7 @@ mod tests {
                 let dir = tempfile::tempdir().unwrap();
                 let path = dir
                     .path()
-                    .join(format!("regress-{:?}-{}.bin", crash_at, acked_floor));
+                    .join(format!("regress-{crash_at:?}-{acked_floor}.bin"));
                 let j = Arc::new(ReceiptJournal::open(&path).unwrap());
                 // Ack the floor.
                 for s in 0..3u8 {
@@ -841,7 +841,7 @@ mod tests {
 
         // Flip a bit inside the seq field of the FIRST record (after
         // the 8-byte magic, skipping 32 bytes of session id).
-        let mut tampered = raw.clone();
+        let mut tampered = raw;
         let seq_offset_first_record = MAGIC_V1.len() + 32;
         tampered[seq_offset_first_record] ^= 0x01;
         fs::write(&path, &tampered).unwrap();

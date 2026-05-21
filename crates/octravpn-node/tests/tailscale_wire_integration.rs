@@ -32,7 +32,7 @@ fn build_state() -> (WireState, PreauthMinter, tempfile::TempDir) {
         ip_allocator: Arc::new(TailnetIpAllocator::new("interop-test")),
         machines: Arc::new(MachineRegistry::new()),
         derp_map: Arc::new(octravpn_mesh::tailscale_wire::DerpMap::default()),
-        policy: Arc::new(Default::default()),
+        policy: Arc::new(headscale_api::policy::PolicyStore::default()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
         dns: std::sync::Arc::new(headscale_api::dns::DnsStore::new()),
     };
@@ -548,7 +548,7 @@ async fn map_response_includes_derp_map_when_configured() {
         ip_allocator: Arc::new(TailnetIpAllocator::new("interop-test")),
         machines: Arc::new(MachineRegistry::new()),
         derp_map: Arc::new(derp_map),
-        policy: Arc::new(Default::default()),
+        policy: Arc::new(headscale_api::policy::PolicyStore::default()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
         dns: std::sync::Arc::new(headscale_api::dns::DnsStore::new()),
     };

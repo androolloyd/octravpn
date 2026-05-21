@@ -42,7 +42,7 @@ fn build_app() -> (axum::Router, WireState, PolicyStore, tempfile::TempDir) {
 
     let wire = WireState {
         server_noise_key: server,
-        preauth: Arc::new(minter.clone()),
+        preauth: Arc::new(minter),
         ip_allocator: Arc::new(TailnetIpAllocator::new("policy-e2e")),
         machines: machines.clone(),
         derp_map: Arc::new(octravpn_mesh::tailscale_wire::DerpMap::default()),
@@ -54,7 +54,7 @@ fn build_app() -> (axum::Router, WireState, PolicyStore, tempfile::TempDir) {
     let admin_state = admin::AdminState::builder()
         .bearer_token(ADMIN_TOKEN)
         .users(admin::UserRegistry::new())
-        .machines(Arc::new(admin::WireMachineAdmin::new(machines.clone())))
+        .machines(Arc::new(admin::WireMachineAdmin::new(machines)))
         .preauth(Arc::new(admin::InMemoryPreauthAdmin::new()))
         .derp_regions(0)
         .policy(policy.clone())

@@ -103,29 +103,26 @@ pub fn verify_file(key: &[u8; 32], path: &Path) -> Result<AuditFileScan> {
                 break;
             }
         };
-        let claimed_prev = match envelope.get("prev_mac").and_then(Value::as_str) {
-            Some(s) => s.to_string(),
-            None => {
-                scan.broke_at = Some(line_num);
-                scan.break_reason = Some("missing prev_mac".into());
-                break;
-            }
+        let claimed_prev = if let Some(s) = envelope.get("prev_mac").and_then(Value::as_str) {
+            s.to_string()
+        } else {
+            scan.broke_at = Some(line_num);
+            scan.break_reason = Some("missing prev_mac".into());
+            break;
         };
-        let claimed_mac = match envelope.get("mac").and_then(Value::as_str) {
-            Some(s) => s.to_string(),
-            None => {
-                scan.broke_at = Some(line_num);
-                scan.break_reason = Some("missing mac".into());
-                break;
-            }
+        let claimed_mac = if let Some(s) = envelope.get("mac").and_then(Value::as_str) {
+            s.to_string()
+        } else {
+            scan.broke_at = Some(line_num);
+            scan.break_reason = Some("missing mac".into());
+            break;
         };
-        let record_json = match envelope.get("record_json").and_then(Value::as_str) {
-            Some(s) => s.to_string(),
-            None => {
-                scan.broke_at = Some(line_num);
-                scan.break_reason = Some("missing record_json".into());
-                break;
-            }
+        let record_json = if let Some(s) = envelope.get("record_json").and_then(Value::as_str) {
+            s.to_string()
+        } else {
+            scan.broke_at = Some(line_num);
+            scan.break_reason = Some("missing record_json".into());
+            break;
         };
         let expected_prev = hex::encode(prev_mac);
         if expected_prev != claimed_prev {
@@ -165,7 +162,10 @@ pub fn scan_dir(key: &[u8; 32], dir: &Path) -> Result<Vec<AuditFileScan>> {
         .filter_map(|e| {
             let p = e.path();
             let name = p.file_name()?.to_string_lossy().into_owned();
-            (name.starts_with("audit-") && name.ends_with(".jsonl")).then_some(p)
+            let is_jsonl = std::path::Path::new(&name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("jsonl"));
+            (name.starts_with("audit-") && is_jsonl).then_some(p)
         })
         .collect();
     paths.sort();

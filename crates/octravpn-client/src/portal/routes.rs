@@ -1634,7 +1634,7 @@ mod tests {
     async fn view_asset_400s_on_non_utf8_url() {
         // base64url-encode raw 0xFF bytes — decodes successfully but
         // isn't valid UTF-8 for the URL.
-        let bad = B64URL.encode(&[0xff, 0xfe, 0xfd]);
+        let bad = B64URL.encode([0xff, 0xfe, 0xfd]);
         let app = router(state_no_chain());
         let resp = app
             .oneshot(

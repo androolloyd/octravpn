@@ -235,7 +235,7 @@ impl Hub {
                     Ok(key) => {
                         match indexer.ingest_audit_dir(&key, std::path::Path::new(&audit_dir)) {
                             Ok(scans) => {
-                                info!(files = scans.len(), "analytics: replayed audit log at boot")
+                                info!(files = scans.len(), "analytics: replayed audit log at boot");
                             }
                             Err(e) => warn!(error = %e, "analytics: audit replay failed"),
                         }
@@ -256,7 +256,7 @@ impl Hub {
                 // crate wraps it in Arc<str> + ct-compares on the request path.
                 let bearer = self.cfg.analytics.bearer_token_string();
                 let gated = bearer.is_some();
-                let http_state = octravpn_analytics::HttpState::new(indexer.state.clone(), bearer);
+                let http_state = octravpn_analytics::HttpState::new(indexer.state, bearer);
                 let listen_addr = self.cfg.analytics.listen_addr.clone();
                 let listen_for_log = listen_addr.clone();
                 tokio::spawn(async move {

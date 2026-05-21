@@ -190,6 +190,11 @@ pub(crate) struct AnchorOverrides {
     pub members_hash: Option<String>,
     pub wg_pubkey_hash: Option<String>,
     /// `Some(Some(hex))` = set; `Some(None)` = clear; `None` = inherit.
+    ///
+    /// The three-state semantics are load-bearing — a custom enum would
+    /// duplicate `Option` semantics with no payoff, so we keep the
+    /// nesting and silence `clippy::option_option`.
+    #[allow(clippy::option_option)]
     pub attestation_hash: Option<Option<String>>,
     pub region: Option<String>,
     pub member_count: Option<u64>,
@@ -721,12 +726,9 @@ pub(crate) async fn list_orphaned_blobs(
         let Some(bytes) = fetch_circle_asset_plain(ctx, circle_id, path).await? else {
             continue;
         };
-        let s = match std::str::from_utf8(&bytes) {
-            Ok(s) => s,
-            Err(_) => {
-                orphans.push((*path).to_string());
-                continue;
-            }
+        let Ok(s) = std::str::from_utf8(&bytes) else {
+            orphans.push((*path).to_string());
+            continue;
         };
         if decrypt_sealed_bytes(
             circle_id,

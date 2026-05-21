@@ -51,7 +51,7 @@ fn build_state() -> (WireState, tempfile::TempDir) {
         ip_allocator: Arc::new(TailnetIpAllocator::new("raw-tls-test")),
         machines: Arc::new(MachineRegistry::new()),
         derp_map: Arc::new(octravpn_mesh::tailscale_wire::DerpMap::default()),
-        policy: Arc::new(Default::default()),
+        policy: Arc::new(headscale_api::policy::PolicyStore::default()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
         dns: std::sync::Arc::new(headscale_api::dns::DnsStore::new()),
     };

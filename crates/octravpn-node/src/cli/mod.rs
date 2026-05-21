@@ -186,8 +186,8 @@ pub(crate) enum Cmd {
     /// `docs/operators/cli-migration.md`).
     Headscale(headscale::HeadscaleArgs),
     /// #232: schema-check + key + RPC + program reachability against a
-    /// `node.toml`. Replaces the manual `octra cast rpc node_status`
-    /// + `octra cast call $PROG get_params` smoke probe + ad-hoc TOML
+    /// `node.toml`. Replaces the manual `octra cast rpc node_status` +
+    /// `octra cast call $PROG get_params` smoke probe + ad-hoc TOML
     /// diffing dance from `docs/deployment-runbook.md` §1.
     Config(ops::ConfigArgs),
     /// #232: one-shot operator health probe. Reads on-chain stake /

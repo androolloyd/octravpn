@@ -106,14 +106,14 @@ pub(crate) async fn run_policy(cmd: MeshPolicyCmd) -> Result<i32> {
             let raw = read_policy_file(&args.file)?;
             let (status, body) = put_policy(&args.remote, token.as_deref(), &raw).await?;
             render_policy_mutation("set", status, &body);
-            Ok(if status.is_success() { 0 } else { 1 })
+            Ok(i32::from(!status.is_success()))
         }
         MeshPolicyCmd::Validate(args) => {
             let token = resolve_token(args.admin_token.as_deref());
             let raw = read_policy_file(&args.file)?;
             let (status, body) = validate_policy(&args.remote, token.as_deref(), &raw).await?;
             render_policy_mutation("validate", status, &body);
-            Ok(if status.is_success() { 0 } else { 1 })
+            Ok(i32::from(!status.is_success()))
         }
     }
 }
@@ -345,7 +345,7 @@ fn render_status(body: &Value, json: bool) {
     }
     println!("{:<18}  {:<24}  {:<20}  online", "id", "hostname", "ipv4");
     for m in arr {
-        let id = m.get("id").map(short_string).unwrap_or_else(|| "-".into());
+        let id = m.get("id").map_or_else(|| "-".into(), short_string);
         let hostname = m
             .get("hostname")
             .and_then(Value::as_str)

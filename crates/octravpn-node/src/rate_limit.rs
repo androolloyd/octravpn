@@ -316,6 +316,10 @@ pub(crate) async fn rate_limit_layer(
 }
 
 #[cfg(test)]
+// `RouteCfg::{rps,burst}` are `f64` configured via integer-valued
+// defaults; `assert_eq!` on the documented table is the clearest
+// regression check. Localized to the test module.
+#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
     use std::{net::Ipv4Addr, time::Duration};
@@ -456,7 +460,7 @@ mod tests {
         SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, octet)), 12345)
     }
 
-    fn build_router(cfg: RateLimitCfg) -> axum::Router {
+    fn build_router(cfg: &RateLimitCfg) -> axum::Router {
         async fn ok() -> &'static str {
             "ok"
         }
@@ -469,7 +473,7 @@ mod tests {
             .route("/metrics", get(ok))
             .route("/unknown", get(ok));
         if cfg.enabled {
-            let rl = RateLimiter::from_cfg(&cfg);
+            let rl = RateLimiter::from_cfg(cfg);
             routes.layer(axum::middleware::from_fn_with_state(rl, rate_limit_layer))
         } else {
             routes
@@ -494,18 +498,17 @@ mod tests {
             enabled: true,
             default_rps: None,
             burst: None,
-            routes: [(
+            routes: std::iter::once((
                 "preauth".into(),
                 RouteCfg {
                     rps: Some(0.001),
                     burst: Some(3.0),
                 },
-            )]
-            .into_iter()
+            ))
             .collect(),
             max_keys: Some(1024),
         };
-        let app = build_router(cfg);
+        let app = build_router(&cfg);
         let peer = addr(11);
         for _ in 0..3 {
             let resp = app
@@ -540,18 +543,17 @@ mod tests {
             enabled: true,
             default_rps: None,
             burst: None,
-            routes: [(
+            routes: std::iter::once((
                 "receipt".into(),
                 RouteCfg {
                     rps: Some(0.001),
                     burst: Some(5.0),
                 },
-            )]
-            .into_iter()
+            ))
             .collect(),
             max_keys: Some(1024),
         };
-        let app = build_router(cfg);
+        let app = build_router(&cfg);
         let peer = addr(12);
         for i in 0..5 {
             let resp = app
@@ -577,18 +579,17 @@ mod tests {
             enabled: true,
             default_rps: Some(60.0),
             burst: Some(120.0),
-            routes: [(
+            routes: std::iter::once((
                 "v3_calls".into(),
                 RouteCfg {
                     rps: Some(0.001),
                     burst: Some(3.0),
                 },
-            )]
-            .into_iter()
+            ))
             .collect(),
             max_keys: Some(1024),
         };
-        let app = build_router(cfg);
+        let app = build_router(&cfg);
         let peer = addr(13);
         for _ in 0..3 {
             let resp = app
@@ -632,7 +633,7 @@ mod tests {
             routes: HashMap::new(),
             max_keys: None,
         };
-        let app = build_router(cfg);
+        let app = build_router(&cfg);
         let peer = addr(14);
         for i in 0..200 {
             let resp = app
@@ -660,7 +661,7 @@ mod tests {
             routes: HashMap::new(),
             max_keys: Some(1024),
         };
-        let app = build_router(cfg);
+        let app = build_router(&cfg);
         let peer = addr(15);
         // Drain the "other" bucket by hitting /unknown.
         let _ = app
