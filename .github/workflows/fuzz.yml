@@ -83,6 +83,13 @@ jobs:
         with: { path: octra }
       - uses: actions/checkout@v4
         with: { repository: androolloyd/octra-foundry, path: octra-foundry }
+      # octravpn-mesh path-deps `../../../headscale-rs/headscale-api`
+      # and `../../../headscale-rs/headscale-api-acl` — without this
+      # sibling checkout `cargo build` fails before libfuzzer ever
+      # starts, and the non-zero exit gets mis-attributed to a fuzz
+      # finding (see #17/#22/#36 family of false-positive crash issues).
+      - uses: actions/checkout@v4
+        with: { repository: androolloyd/headscale-rs, path: headscale-rs }
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@master
         with:
