@@ -36,6 +36,15 @@ zeroize     = { workspace = true }
 # Real crypto for commits, FHE, onion
 curve25519-dalek = { workspace = true }
 chacha20poly1305 = { workspace = true }
+# Perf-5: hardware-accelerated ChaCha20-Poly1305 for the data-plane hot
+# path (`aead.rs` shim, wired into `onion.rs` and obfs4 `frame.rs`).
+# Already present in `Cargo.lock` transitively via `rcgen` (headscale-api)
+# and `tokio-rustls` (octravpn-node's rustls feature) so no new
+# transitive deps enter the supply chain. `default-features = false`
+# disables the FIPS module (we still get the assembly backend); the
+# `aws-lc-sys` feature pulls the C/asm libcrypto build that ships AVX2
+# on x86_64 and NEON on aarch64. See `src/aead.rs` for the rationale.
+aws-lc-rs       = { version = "1.17", default-features = false, features = ["aws-lc-sys"] }
 hkdf            = { workspace = true }
 parking_lot     = { workspace = true }
 x25519-dalek    = { workspace = true }

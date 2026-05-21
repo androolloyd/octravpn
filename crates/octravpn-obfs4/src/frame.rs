@@ -56,10 +56,13 @@
 //! silent regression path (e.g. a future shrink to a 32-bit counter
 //! would otherwise wrap at ~71 minutes of saturated traffic).
 
-use chacha20poly1305::{
-    aead::{Aead, KeyInit, Payload},
-    ChaCha20Poly1305, Key, Nonce,
-};
+// Perf-5: per-frame AEAD goes through the hardware-accelerated
+// `aws-lc-rs` shim in `octravpn-core::aead`. The pre-expanded
+// `AeadKey` is constructed once at sealer/opener init and reused
+// for every frame, which amortises the `UnboundKey::new` cost across
+// the session and matches the portable crate's "construct once,
+// encrypt many times" lifecycle.
+use octravpn_core::aead::{AeadKey, AEAD_NONCE_LEN};
 use rand::{Rng, RngCore};
 use thiserror::Error;
 
@@ -124,7 +127,7 @@ pub enum FrameError {
 /// Direction-tagged ChaCha20-Poly1305 sealer. Owns the key + the
 /// monotonic counter; `seal_into` advances the counter every call.
 pub struct FrameSealer {
-    cipher: ChaCha20Poly1305,
+    cipher: AeadKey,
     nonce_prefix: [u8; 4],
     counter: u64,
 }
@@ -137,7 +140,11 @@ impl FrameSealer {
     /// server→client.
     pub fn new(key: &[u8; 32], nonce_prefix: [u8; 4]) -> Self {
         Self {
-            cipher: ChaCha20Poly1305::new(Key::from_slice(key)),
+            // Perf-5: pre-expand the key once; per-frame seal just
+            // dispatches into the assembly-tuned `aws-lc-rs` core.
+            // `AeadKey::new` is infallible for a 32-byte key under
+            // CHACHA20_POLY1305; the `expect` documents that contract.
+            cipher: AeadKey::new(key).expect("32-byte key always expands"),
             nonce_prefix,
             counter: 0,
         }
@@ -172,22 +179,17 @@ impl FrameSealer {
         rand::thread_rng().fill_bytes(&mut plaintext[pad_start..]);
 
         // Nonce = 4-byte prefix || u64 BE counter.
-        let mut nonce_bytes = [0u8; 12];
+        let mut nonce_bytes = [0u8; AEAD_NONCE_LEN];
         nonce_bytes[..4].copy_from_slice(&self.nonce_prefix);
         nonce_bytes[4..].copy_from_slice(&self.counter.to_be_bytes());
-        let nonce = Nonce::from_slice(&nonce_bytes);
 
-        // Seal.
+        // Seal via the hardware-accelerated shim. Output bytes are
+        // identical to the previous portable backend (same RFC 8439
+        // standard) — see `octravpn_core::aead::tests::cross_impl_compatibility`.
         let ciphertext = self
             .cipher
-            .encrypt(
-                nonce,
-                Payload {
-                    msg: &plaintext,
-                    aad: &[],
-                },
-            )
-            .map_err(|_| FrameError::BadTag)?; // encrypt cannot really fail; map for total cover.
+            .seal(&nonce_bytes, &[], &plaintext)
+            .map_err(|_| FrameError::BadTag)?; // seal cannot really fail; map for total cover.
                                                // audit-1 H-2: counter advance pre-validated above.
         self.counter = next_counter;
 
@@ -205,7 +207,7 @@ impl FrameSealer {
 
 /// Direction-tagged ChaCha20-Poly1305 opener.
 pub struct FrameOpener {
-    cipher: ChaCha20Poly1305,
+    cipher: AeadKey,
     nonce_prefix: [u8; 4],
     counter: u64,
 }
@@ -214,7 +216,8 @@ impl FrameOpener {
     /// Construct an opener; see [`FrameSealer::new`].
     pub fn new(key: &[u8; 32], nonce_prefix: [u8; 4]) -> Self {
         Self {
-            cipher: ChaCha20Poly1305::new(Key::from_slice(key)),
+            // Perf-5: pre-expanded key, same rationale as `FrameSealer::new`.
+            cipher: AeadKey::new(key).expect("32-byte key always expands"),
             nonce_prefix,
             counter: 0,
         }
@@ -253,20 +256,15 @@ impl FrameOpener {
         }
         let ciphertext = &buf[LEN_PREFIX_BYTES..frame_end];
 
-        let mut nonce_bytes = [0u8; 12];
+        let mut nonce_bytes = [0u8; AEAD_NONCE_LEN];
         nonce_bytes[..4].copy_from_slice(&self.nonce_prefix);
         nonce_bytes[4..].copy_from_slice(&self.counter.to_be_bytes());
-        let nonce = Nonce::from_slice(&nonce_bytes);
 
+        // Open via the hardware-accelerated shim. The tag check and
+        // plaintext recovery happen in one assembly-tuned pass.
         let plaintext = self
             .cipher
-            .decrypt(
-                nonce,
-                Payload {
-                    msg: ciphertext,
-                    aad: &[],
-                },
-            )
+            .open(&nonce_bytes, &[], ciphertext)
             .map_err(|_| FrameError::BadTag)?;
         // audit-1 H-2: counter advance pre-validated above.
         self.counter = next_counter;

@@ -46,17 +46,31 @@ public API — see the bench docstring). Host: Darwin arm64 / Apple
 M3 Max / macOS 26.1, `--release`. Bench:
 `crates/octravpn-node/benches/wireguard_throughput.rs`.
 
-| Primitive                          | Mean      | Implied single-core ceiling |
-|------------------------------------|-----------|------------------------------|
-| ChaCha20-Poly1305 seal (1380 B)    | 4.43 µs   | 2.49 Gbps (encap only)       |
-| ChaCha20-Poly1305 open (1380 B)    | 4.53 µs   | 2.44 Gbps (decap only)       |
-| X25519 ECDH (handshake)            | 29.3 µs   | 34 k handshakes/s/core       |
+| Primitive                                  | Mean      | Implied single-core ceiling |
+|--------------------------------------------|-----------|------------------------------|
+| ChaCha20-Poly1305 seal (1380 B, portable)  | 4.48 µs   | ~2.46 Gbps (encap only)      |
+| ChaCha20-Poly1305 open (1380 B, portable)  | 4.46 µs   | ~2.47 Gbps (decap only)      |
+| ChaCha20-Poly1305 seal (1380 B, aws-lc-rs) | 0.93 µs   | ~11.6 Gbps (encap only)      |
+| ChaCha20-Poly1305 open (1380 B, aws-lc-rs) | 1.09 µs   | ~9.86 Gbps (decap only)      |
+| X25519 ECDH (handshake)                    | 29.3 µs   | 34 k handshakes/s/core       |
 
-Extrapolated WG-relay-hop budget per core: one decap + one encap
-per packet ≈ 8.96 µs/pkt → ~1.23 Gbps. Add one `onion_peel_layer`
-(31.7 µs, `bench-snapshots/core.json`) and the budget falls to
-~270 Mbps/core/hop. Live tunnels run on real UDP sockets with
-~80 B header; these are upper-bound crypto-cost numbers, not
+Perf-5 (hardware-accelerated AEAD, `crates/octravpn-core/src/aead.rs`)
+switched the WireGuard data-plane and obfs4 framing call sites from
+the portable `chacha20poly1305 = "0.10"` crate to a `aws-lc-rs`-backed
+shim that uses AVX2 on x86_64 and NEON on aarch64. The hwaccel rows
+above are the post-switch numbers; the portable rows are kept as the
+audit baseline. Seal speedup: −79 % wall-time, ~4.8×; open speedup:
+−76 %, ~4.1×.
+
+Extrapolated WG-relay-hop budget per core, **portable path**: one
+decap + one encap per packet ≈ 8.94 µs/pkt → ~1.23 Gbps.
+**Hardware-accelerated path**: ≈ 2.02 µs/pkt → ~**5.47 Gbps/core**.
+Add one `onion_peel_layer` (31.7 µs from the older
+`bench-snapshots/core.json`; onion is now also on the hwaccel path so
+this will measure smaller on the next snapshot) and the relay-hop
+budget for a 3-hop circuit moves from ~270 Mbps/core/hop to ~1 Gbps+
+once the snapshot refreshes. Live tunnels run on real UDP sockets
+with ~80 B header; these are upper-bound crypto-cost numbers, not
 wire-rate.
 
 ## 2. Mesh control plane

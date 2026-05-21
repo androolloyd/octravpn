@@ -40,6 +40,25 @@ heap shape, a one-second flusher stall queues ~100 MB; a minute is
 LRU eviction, no back-pressure. Fix is one-line per Audit-2 ("bounded
 4096 + sync-fallback").
 
+**Data-plane AEAD acceleration (Perf-5).** Fixed on branch
+`perf-5-chacha-simd`: the per-packet ChaCha20-Poly1305 seal/open calls
+on the data plane (onion routing `crates/octravpn-core/src/onion.rs`,
+obfs4 framing `crates/octravpn-obfs4/src/frame.rs`) now route through
+`aws-lc-rs` via the shim at `crates/octravpn-core/src/aead.rs`. WG
+proper still lives inside `boringtun` and is out of scope per
+constraints. Bench delta (`crates/octravpn-node/benches/wireguard_throughput.rs`):
+encap 4.48 µs → 0.93 µs (−79 %), decap 4.46 µs → 1.09 µs (−76 %).
+Single-core relay-hop budget (one decap + one encap per 1380-byte
+packet) moves from ~1.23 Gbps to ~5.47 Gbps. Multiplies into every
+relay-hop budget on the table below: a 3-hop circuit's portable ceiling
+of ~270 Mbps/core/hop rises to ~1 Gbps+/core/hop once the onion
+peel-layer snapshot is recaptured (the peel path is also on the new
+shim). Output bytes are byte-identical to the portable backend by
+construction (same RFC 8439 standard) — the `cross_impl_compatibility`
+test in `aead.rs` is the safety gate. `aws-lc-rs` and `aws-lc-sys`
+were already in `Cargo.lock` transitively via `rcgen` and
+`tokio-rustls`, so no new transitive supply-chain surface entered.
+
 ---
 
 ## 2. Latency results (committed snapshot)

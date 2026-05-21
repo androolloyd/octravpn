@@ -10,6 +10,7 @@
 // re-export them here so existing call sites keep working unchanged.
 pub use octra_core::{address, circle, coverage, sig, tx, util, wallet_enc, CoreError, CoreResult};
 
+pub mod aead;
 pub mod backend;
 pub mod bearer;
 pub mod bounded;

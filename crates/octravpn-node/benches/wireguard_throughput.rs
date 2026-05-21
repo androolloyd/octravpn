@@ -39,6 +39,7 @@ use chacha20poly1305::{
     ChaCha20Poly1305, Nonce,
 };
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use octravpn_core::aead::AeadKey;
 use rand::{rngs::OsRng, RngCore};
 use x25519_dalek::{PublicKey, StaticSecret};
 
@@ -47,6 +48,20 @@ const PAYLOAD_BYTES: usize = 1380;
 
 /// AEAD seal of an MTU-sized payload. This is the per-packet cost
 /// WireGuard's encap step pays.
+///
+/// Two backends are benched side-by-side so the regression-gate can
+/// quote a delta directly:
+///
+/// - `seal_1380B` / `open_1380B`: the portable RustCrypto
+///   `chacha20poly1305 = "0.10"` crate. This is the historical Audit-8
+///   §1 number (4.43 µs / 4.53 µs → ~2.49 Gbps encap, ~1.23 Gbps
+///   relay-hop).
+/// - `seal_1380B_hwaccel` / `open_1380B_hwaccel`: the Perf-5
+///   `aws-lc-rs`-backed shim from `octravpn_core::aead::AeadKey`.
+///   `aws-lc-rs` ships an assembly-tuned ChaCha20-Poly1305 with AVX2
+///   on x86_64 and NEON on aarch64. Output bytes are byte-identical
+///   (same RFC 8439 standard); see
+///   `octravpn_core::aead::tests::cross_impl_compatibility`.
 fn bench_aead_seal_mtu(c: &mut Criterion) {
     let mut key = [0u8; 32];
     OsRng.fill_bytes(&mut key);
@@ -78,6 +93,41 @@ fn bench_aead_seal_mtu(c: &mut Criterion) {
             for _ in 0..iters {
                 let pt = cipher
                     .decrypt(&nonce, black_box(ct.as_slice()))
+                    .expect("open");
+                black_box(pt);
+            }
+            start.elapsed()
+        });
+    });
+
+    // ----------------- Perf-5: hardware-accelerated path -----------------
+    //
+    // The shim pre-expands the key once (just like `ChaCha20Poly1305::new`
+    // above), so the per-iteration work is the same kind: one AEAD pass
+    // over a 1380-byte buffer. The delta over the portable path is the
+    // expected Perf-5 win.
+    let hw_key = AeadKey::new(&key).expect("32-byte key always expands");
+    let hw_nonce = [0u8; 12];
+    g.bench_function("seal_1380B_hwaccel", |b| {
+        b.iter_custom(|iters| {
+            let start = Instant::now();
+            for _ in 0..iters {
+                let ct = hw_key
+                    .seal(&hw_nonce, &[], black_box(payload.as_slice()))
+                    .expect("seal");
+                black_box(ct);
+            }
+            start.elapsed()
+        });
+    });
+
+    let hw_ct = hw_key.seal(&hw_nonce, &[], &payload).expect("seal");
+    g.bench_function("open_1380B_hwaccel", |b| {
+        b.iter_custom(|iters| {
+            let start = Instant::now();
+            for _ in 0..iters {
+                let pt = hw_key
+                    .open(&hw_nonce, &[], black_box(hw_ct.as_slice()))
                     .expect("open");
                 black_box(pt);
             }

@@ -149,16 +149,44 @@ jobs:
           fi
           exit 0
 
+      - name: Inventory fuzz output dirs (diagnostic)
+        if: steps.gate.outputs.skip == '0' && always()
+        # Surfaces what cargo-fuzz actually wrote so a silent
+        # "0 files uploaded" failure is visible in the run log.
+        # Both dirs always exist when cargo-fuzz has been invoked
+        # (it creates them lazily); this also catches the case where
+        # libfuzzer's exit-on-crash never touched the artifacts/
+        # subdir because the panic fired before the writer step.
+        run: |
+          echo "== corpus =="
+          find octra/fuzz/corpus -mindepth 1 -type f 2>&1 | head -20 || true
+          echo "== artifacts =="
+          find octra/fuzz/artifacts -mindepth 1 -type f 2>&1 | head -20 || true
+          echo "== sizes =="
+          du -sh octra/fuzz/corpus octra/fuzz/artifacts 2>&1 || true
+
       - name: Upload corpus + artifacts
         if: steps.gate.outputs.skip == '0' && always()
         uses: actions/upload-artifact@v4
         with:
           name: fuzz-${{ matrix.target }}-${{ github.run_id }}
+          # Use glob patterns so empty subdirs don't trigger
+          # "no files found"; the path resolver in upload-artifact@v4
+          # is repo-root-relative regardless of working-directory on
+          # the step. Include the target-name dir explicitly so
+          # downloads carry the same shape (one artifact dir per
+          # target).
           path: |
-            octra/fuzz/corpus/${{ matrix.target }}
-            octra/fuzz/artifacts/${{ matrix.target }}
-          if-no-files-found: ignore
+            octra/fuzz/corpus/${{ matrix.target }}/**
+            octra/fuzz/artifacts/${{ matrix.target }}/**
+          # Warn (not ignore) so a silent empty upload turns into a
+          # visible CI warning. The job already re-raises on libfuzzer
+          # exit-on-crash, so the workflow status reflects findings;
+          # this only catches the artifact-loss class of bug we just
+          # hit on run 26212879368.
+          if-no-files-found: warn
           retention-days: 30
+          include-hidden-files: true
 
       - name: Open issue on crash
         if: steps.gate.outputs.skip == '0' && steps.run.outputs.found == '1'

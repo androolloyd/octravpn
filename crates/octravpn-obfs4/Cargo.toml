@@ -9,6 +9,11 @@ description = "Minimal obfs4-style DPI-evasion wrapper for OctraVPN's UDP transp
 
 [dependencies]
 octravpn-tun = { path = "../octravpn-tun" }
+# Perf-5: per-frame ChaCha20-Poly1305 in `frame.rs` goes through
+# `octravpn_core::aead`, the hardware-accelerated shim that wraps
+# `aws-lc-rs`. The portable `chacha20poly1305` dep is retained so the
+# in-crate test module can keep its existing assertions without churn.
+octravpn-core    = { path = "../octravpn-core" }
 
 anyhow            = { workspace = true }
 chacha20poly1305  = { workspace = true }
