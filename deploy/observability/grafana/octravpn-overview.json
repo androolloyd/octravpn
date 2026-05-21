@@ -248,6 +248,37 @@
       }
     },
     {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Receipt-journal in-mem mirror (Perf-8 cap + TTL)",
+      "description": "octravpn_receipt_journal_in_mem_sessions (gauge) tracks the live size of the receipt-journal in-mem cache. Capped by [receipt_journal].max_in_mem_sessions (default 100k ≈ 8.8 MB). rate(octravpn_receipt_journal_evictions_total[5m]) and rate(octravpn_receipt_journal_disk_resurrect_total[5m]) are the cache-pressure signals — sustained non-zero rates mean the working set exceeds the cap. Operator action: raise max_in_mem_sessions in [receipt_journal]. See audit-8 OOM-1 (docs/audit/2026-05-20-load-perf-audit.md §7 rec #7).",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 22},
+      "targets": [
+        {
+          "expr": "octravpn_receipt_journal_in_mem_sessions",
+          "legendFormat": "{{instance}} in-mem entries",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(octravpn_receipt_journal_evictions_total[5m])",
+          "legendFormat": "{{instance}} evictions /s",
+          "refId": "B"
+        },
+        {
+          "expr": "rate(octravpn_receipt_journal_disk_resurrect_total[5m])",
+          "legendFormat": "{{instance}} disk-resurrects /s",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineInterpolation": "linear", "fillOpacity": 10}
+        }
+      }
+    },
+    {
       "type": "row",
       "id": 20,
       "title": "Peer connectivity",

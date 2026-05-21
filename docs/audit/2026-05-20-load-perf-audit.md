@@ -378,7 +378,7 @@ noticeable on network FS.
 
 | ID    | Collection                                            | Bound today                                | Worst-case RAM (attack)         | Source                         |
 |-------|-------------------------------------------------------|--------------------------------------------|---------------------------------|--------------------------------|
-| OOM-1 | `ReceiptJournal.by_session: BTreeMap<SessionId, u64>` | **none** (one entry per session ever seen) | 1M sess × 88 B = ~88 MB; 100M sess = ~8.8 GB | `receipt_journal.rs:204` |
+| OOM-1 | `ReceiptJournal.by_session: BTreeMap<SessionId, u64>` | **cap=100k + 1h TTL LRU evict** (Perf-8) | ~8.8 MB resident worst-case (100k × 88 B) — **bounded**. Pre-fix: 1M sess × 88 B = ~88 MB; 100M sess = ~8.8 GB. Observability: `octravpn_receipt_journal_{in_mem_sessions,evictions_total,disk_resurrect_total}`. **Fixed in Perf-8 (`crates/octravpn-core/src/receipt_journal/{inner,eviction,compact}.rs`)** | `receipt_journal/inner.rs` |
 | OOM-2 | `MachineRegistry inner: RwLock<Arc<HashMap>>`          | **none** at the type; bounded by registration auth | 100k machines × 512 B = ~50 MB; 10M = ~5 GB | `headscale-api/.../tailscale_wire/mod.rs:282` |
 | OOM-3 | Audit flusher mpsc                                    | **bounded(8192)** (Fixed)                  | Pre-fix: 125 MB/s queue growth on stall (unbounded). Post-fix: bounded queue + inline-fsync fallback; durable under stall, RAM capped at ~2 MB. Observability: `octravpn_audit_inline_fallback_total > 0` is the disk-stall signal. **Fixed in commit 3a25b24** | `audit.rs`; Audit-2 C-6 |
 | OOM-4 | `/machine/map` long-poller tokio tasks                | **no per-IP cap**                          | 1M conns × ~4 KB task = ~4 GB | `headscale-api/.../tailscale_wire/map.rs` (no per-conn limit) |
@@ -488,6 +488,26 @@ node is **not** the bottleneck below 1 Gbps (boringtun primitive ceiling
    confirms last-seq, or document the **88 B/sess × lifetime** RSS
    floor. For a 1-year node with 10 M unique sessions: ~880 MB just
    for the mirror.
+
+   **Fixed in Perf-8** (branch `perf-8-journal-ttl`): TTL+cap evict
+   landed in
+   `crates/octravpn-core/src/receipt_journal/{inner,eviction,compact}.rs`.
+   - In-mem mirror bounded at **~8.8 MB** worst-case (100 000 entries ×
+     88 B/entry), configurable via `[receipt_journal].max_in_mem_sessions`.
+   - LRU cap-overflow eviction on the hot bump path + 1 h TTL sweep via
+     `spawn_ttl_sweeper`.
+   - Equivocation defence preserved: every bump that hits an evicted
+     entry consults the **durable** on-disk floor (single `sync_data`
+     before the read so the page-cache state can't be observed under
+     `FsyncPolicy::Periodic`) before the monotonicity check. Pinned by
+     `evicted_session_rejects_replay_attempt_via_disk_check` in
+     `receipt_journal/eviction.rs`.
+   - Compaction merges in-mem state with the on-disk floor so evicted
+     sessions never lose their disk-side seq.
+   - Observability: `octravpn_receipt_journal_in_mem_sessions` (gauge)
+     + `octravpn_receipt_journal_evictions_total` /
+     `octravpn_receipt_journal_disk_resurrect_total` (counters), plus
+     a panel in `deploy/observability/grafana/octravpn-overview.json`.
 
 8. **[LOW] Inventory the 23/37 orphan `tokio::spawn`s** (Audit-2 C-10)
    and convert the top-3 RSS-impactful (`hub.rs` cluster of 6) to

@@ -12,6 +12,7 @@
 mod codec;
 mod compact;
 mod errors;
+mod eviction;
 mod fsync_policy;
 mod inner;
 mod migration;
@@ -23,7 +24,7 @@ use std::{
     fs::{self, OpenOptions},
     path::PathBuf,
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use parking_lot::Mutex;
@@ -33,11 +34,14 @@ use crate::session::SessionId;
 
 use codec::encode_record;
 use compact::{compact_async_worker, compact_locked, compacting_tempfile_path};
-use inner::Inner;
+use inner::{Inner, JournalMetrics};
 use migration::{ensure_v1_header, replay_any, write_v1_snapshot};
 
 pub use errors::{JournalError, JournalResult};
-pub use fsync_policy::{FsyncPolicy, DEFAULT_COMPACTION_WATERMARK};
+pub use fsync_policy::{
+    FsyncPolicy, DEFAULT_COMPACTION_WATERMARK, DEFAULT_MAX_IN_MEM_SESSIONS,
+    DEFAULT_RECENTLY_EVICTED_CAP, DEFAULT_SESSION_IN_MEM_TTL, DEFAULT_TTL_SWEEP_INTERVAL,
+};
 
 /// Persistent floor for `(session_id → last_signed_seq)`.
 ///
@@ -108,6 +112,27 @@ impl ReceiptJournal {
         let handle = OpenOptions::new().append(true).read(true).open(&path)?;
         let file_size = handle.metadata()?.len();
 
+        // Perf-8: seed the auxiliary recency indices with `now` for
+        // every entry we just replayed off disk. The TTL clock starts
+        // ticking from boot — operators who restart a node don't get
+        // an immediate eviction cliff if the mirror happens to be
+        // above cap, but the cap-overflow LRU path will trim it down
+        // on the next bump regardless. See `bump_with_eviction`.
+        let now = Instant::now();
+        let mut last_seen = std::collections::HashMap::with_capacity(by_session.len());
+        let mut lru_index = std::collections::BTreeSet::new();
+        for id in by_session.keys() {
+            last_seen.insert(id.clone(), now);
+            lru_index.insert((now, id.clone()));
+        }
+        let (_d_last, _d_lru, recently_evicted, recently_evicted_set) =
+            Inner::fresh_eviction_state();
+        let metrics = Arc::new(JournalMetrics::default());
+        metrics.in_mem_sessions.store(
+            by_session.len() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+
         Ok(Self {
             inner: Arc::new(Mutex::new(Inner {
                 by_session,
@@ -118,6 +143,14 @@ impl ReceiptJournal {
                 last_fsync: Instant::now(),
                 compaction_watermark: DEFAULT_COMPACTION_WATERMARK,
                 compaction_inflight: false,
+                max_in_mem_sessions: Inner::default_max_in_mem_sessions(),
+                session_in_mem_ttl: Inner::default_session_in_mem_ttl(),
+                last_seen,
+                lru_index,
+                recently_evicted,
+                recently_evicted_set,
+                evictions_since_compaction: false,
+                metrics,
             })),
         })
     }
@@ -126,6 +159,8 @@ impl ReceiptJournal {
     /// Equivalent to `open()` on a path that's never written.
     #[must_use]
     pub fn in_memory() -> Self {
+        let (last_seen, lru_index, recently_evicted, recently_evicted_set) =
+            Inner::fresh_eviction_state();
         Self {
             inner: Arc::new(Mutex::new(Inner {
                 by_session: std::collections::BTreeMap::new(),
@@ -136,6 +171,14 @@ impl ReceiptJournal {
                 last_fsync: Instant::now(),
                 compaction_watermark: DEFAULT_COMPACTION_WATERMARK,
                 compaction_inflight: false,
+                max_in_mem_sessions: Inner::default_max_in_mem_sessions(),
+                session_in_mem_ttl: Inner::default_session_in_mem_ttl(),
+                last_seen,
+                lru_index,
+                recently_evicted,
+                recently_evicted_set,
+                evictions_since_compaction: false,
+                metrics: Arc::new(JournalMetrics::default()),
             })),
         }
     }
@@ -157,12 +200,106 @@ impl ReceiptJournal {
         self.inner.lock().compaction_watermark = bytes;
     }
 
+    /// Perf-8: cap on the in-mem mirror size. Overflow evicts the LRU
+    /// entry; the durable on-disk journal still holds the floor for
+    /// any evicted session, so a subsequent `bump` re-reads it before
+    /// checking monotonicity. Default
+    /// [`DEFAULT_MAX_IN_MEM_SESSIONS`].
+    pub fn set_max_in_mem_sessions(&self, max: usize) {
+        // Guard against `max == 0`, which would evict on every bump
+        // and force a disk-resurrect per call. `max == 1` is the
+        // smallest sensible value; clamp 0 → 1.
+        let mut g = self.inner.lock();
+        g.max_in_mem_sessions = max.max(1);
+        // Trim immediately so the gauge reflects the new cap without
+        // waiting for the next bump.
+        eviction::enforce_cap_locked(&mut g);
+        g.update_gauge();
+    }
+
+    /// Perf-8: TTL after which an idle entry is evicted by the
+    /// background sweeper. Default [`DEFAULT_SESSION_IN_MEM_TTL`].
+    pub fn set_session_in_mem_ttl(&self, ttl: Duration) {
+        self.inner.lock().session_in_mem_ttl = ttl;
+    }
+
+    /// Perf-8: run one TTL sweep. The background sweeper started by
+    /// [`spawn_ttl_sweeper`](Self::spawn_ttl_sweeper) calls this on a
+    /// timer; tests call it directly. Returns the number of entries
+    /// evicted.
+    pub fn sweep_ttl(&self) -> usize {
+        eviction::sweep_ttl(&self.inner)
+    }
+
+    /// Perf-8: spawn a background tokio task that runs `sweep_ttl()`
+    /// on `interval`. Returns a `JoinHandle` so the operator's
+    /// shutdown path can abort the sweeper cleanly. Must be called
+    /// from inside a tokio runtime.
+    ///
+    /// The default interval is [`DEFAULT_TTL_SWEEP_INTERVAL`].
+    pub fn spawn_ttl_sweeper(&self, interval: Duration) -> JoinHandle<()> {
+        let inner = self.inner.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(interval);
+            // Skip the immediate first tick — interval's
+            // MissedTickBehavior::Burst would otherwise sweep at t=0.
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            // Consume the first (immediate) tick before the loop body
+            // so we always wait at least `interval` between sweeps.
+            tick.tick().await;
+            loop {
+                tick.tick().await;
+                let _ = eviction::sweep_ttl(&inner);
+            }
+        })
+    }
+
+    /// Perf-8: snapshot of the live `(in_mem_sessions, evictions_total,
+    /// disk_resurrect_total)` counters. The `/metrics` handler reads
+    /// these lock-free. Tuple order is `(gauge, evictions, resurrects)`.
+    pub fn metrics_snapshot(&self) -> (u64, u64, u64) {
+        use std::sync::atomic::Ordering;
+        // Read the metrics Arc directly so the scrape never blocks on
+        // the journal lock — the AtomicU64s are kept in sync by the
+        // hot path under lock.
+        let m = self.inner.lock().metrics.clone();
+        (
+            m.in_mem_sessions.load(Ordering::Relaxed),
+            m.evictions_total.load(Ordering::Relaxed),
+            m.disk_resurrect_total.load(Ordering::Relaxed),
+        )
+    }
+
     /// Return the persistent floor for `session_id`. Used by the
     /// control plane to compute `next_seq = max(in_mem, journal_floor)
     /// + 1`. Returns 0 if the session has never been seen.
+    ///
+    /// Perf-8: a miss in the in-mem mirror falls through to a disk
+    /// read so an evicted entry's floor is still observable. The
+    /// fsync-before-read step ensures the read sees the durable
+    /// (post-`sync_data`) on-disk state, never the in-flight unfsync'd
+    /// page-cache state — required to keep the seq-monotonic
+    /// equivocation defence airtight under `FsyncPolicy::Periodic`.
     pub fn floor(&self, session_id: &SessionId) -> u64 {
-        let g = self.inner.lock();
-        g.by_session.get(session_id).copied().unwrap_or(0)
+        let mut g = self.inner.lock();
+        if let Some(v) = g.by_session.get(session_id).copied() {
+            return v;
+        }
+        // Miss path: consult disk only if the journal is persistent
+        // AND we've previously evicted this id (or might have). For
+        // pure-cold misses (never seen) the disk read would just
+        // confirm 0 — skip the syscall.
+        if g.path.is_none() {
+            return 0;
+        }
+        if !g.recently_evicted_set.contains(session_id) {
+            // Cold-miss optimisation: the on-disk file is a strict
+            // superset of "everything we've ever bumped", so a session
+            // we don't remember evicting and don't have in-mem is a
+            // first-touch. Floor is 0.
+            return 0;
+        }
+        eviction::resurrect_floor_from_disk(&mut g, session_id).unwrap_or(0)
     }
 
     /// Alias for `floor`. Matches the naming used in the v2 threat
@@ -196,7 +333,25 @@ impl ReceiptJournal {
     pub fn bump(&self, session_id: &SessionId, new_seq: u64) -> JournalResult<()> {
         use std::io::Write as _;
         let mut g = self.inner.lock();
-        let prev = g.by_session.get(session_id).copied().unwrap_or(0);
+        // Perf-8: a hot bump may land on a session whose entry was
+        // evicted from the in-mem mirror. Resurrect the floor from
+        // disk BEFORE the monotonicity check — otherwise an attacker
+        // could force an eviction (TTL or cap) then replay an earlier
+        // seq and the in-mem `prev = 0` would let it through. The
+        // disk-resurrect path fsyncs first so the read sees the
+        // durable on-disk state, never the in-flight page-cache (the
+        // load-bearing invariant for `FsyncPolicy::Periodic`).
+        let in_mem = g.by_session.get(session_id).copied();
+        let prev = match in_mem {
+            Some(v) => v,
+            None => {
+                if g.path.is_some() && g.recently_evicted_set.contains(session_id) {
+                    eviction::resurrect_floor_from_disk(&mut g, session_id)?
+                } else {
+                    0
+                }
+            }
+        };
         if new_seq <= prev {
             return Err(JournalError::SeqNotMonotonic {
                 session: session_id.to_hex(),
@@ -230,6 +385,13 @@ impl ReceiptJournal {
             g.file_size += record.len() as u64;
         }
         g.by_session.insert(session_id.clone(), new_seq);
+        // Perf-8: keep the LRU recency in lock-step with `by_session`
+        // and enforce the cap. The bump path is the only mutator that
+        // can grow the mirror, so cap enforcement here is sufficient.
+        let now = Instant::now();
+        g.touch_recency(session_id, now);
+        eviction::enforce_cap_locked(&mut g);
+        g.update_gauge();
         // Auto-compact off-thread if the journal has grown beyond the
         // watermark and no compaction is already in flight. Doing this
         // *after* the in-mem update means the snapshot the async
@@ -352,10 +514,26 @@ impl ReceiptJournal {
         g.handle = None;
         let raw = fs::read(&path)?;
         let (map, _migrate) = replay_any(&raw, &path)?;
+        // Perf-8: reset the eviction indices to mirror the reloaded
+        // map. Without this, the LRU/TTL state would point at sessions
+        // that no longer exist in `by_session` and the gauge would
+        // drift.
+        let now = Instant::now();
+        let mut last_seen = std::collections::HashMap::with_capacity(map.len());
+        let mut lru_index = std::collections::BTreeSet::new();
+        for id in map.keys() {
+            last_seen.insert(id.clone(), now);
+            lru_index.insert((now, id.clone()));
+        }
         g.by_session = map;
+        g.last_seen = last_seen;
+        g.lru_index = lru_index;
+        g.recently_evicted.clear();
+        g.recently_evicted_set.clear();
         let h = OpenOptions::new().append(true).read(true).open(&path)?;
         g.file_size = h.metadata()?.len();
         g.handle = Some(h);
+        g.update_gauge();
         Ok(())
     }
 }

@@ -24,9 +24,32 @@ protocol.
 | `codec.rs`        | v1 record encoder/decoder, CRC32, `MAGIC_V1`, `RECORD_SIZE`          |
 | `migration.rs`    | v0 → v1 in-place migration; `ensure_v1_header`; snapshot rewrite     |
 | `compact.rs`      | Sync `compact_locked` + async snapshot/swap worker; tempfile path    |
-| `fsync_policy.rs` | `FsyncPolicy` + `DEFAULT_COMPACTION_WATERMARK`                       |
+| `eviction.rs`     | Perf-8: cap+TTL eviction + disk-resurrect on bump-miss               |
+| `fsync_policy.rs` | `FsyncPolicy` + `DEFAULT_COMPACTION_WATERMARK` + Perf-8 defaults     |
 | `errors.rs`       | `JournalError` + `JournalResult`                                     |
 | `proptests.rs`    | Four proptest properties (monotonicity, isolation, torn tails)       |
+
+## Perf-8: in-mem mirror eviction (audit-8 OOM-1)
+
+The `by_session` map is a hot-path cache of the durable on-disk floor.
+Without bounds, every session ever opened on the node lives in the
+mirror until process restart (88 B/entry × N forever; 1M sessions ≈
+88 MB, 100M ≈ 8.8 GB). Perf-8 caps it at `max_in_mem_sessions` entries
+(default 100k ≈ 8.8 MB) with a 1 h TTL sweep.
+
+**Critical invariant**: an evicted entry's floor still lives on disk,
+so a `bump` that hits an evicted session forces a disk read (after
+`sync_data` so the page-cache state isn't observable under
+`FsyncPolicy::Periodic`) before the monotonicity check — see
+`eviction::resurrect_floor_from_disk` +
+`evicted_session_rejects_replay_attempt_via_disk_check`. The
+disk-resurrect path is the load-bearing equivocation defence under
+the new eviction policy.
+
+Compaction merges in-mem state with the on-disk floor (`merged_floor_map`)
+so evicted sessions never lose their disk-side seq when the file is
+rewritten. The fast path (no evictions since last compaction) preserves
+pre-Perf-8 phase 3a behaviour to keep the under-lock window bounded.
 
 ---
 
