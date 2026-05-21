@@ -16,6 +16,11 @@ tokio       = { workspace = true }
 tracing     = { workspace = true }
 futures     = { workspace = true }
 tun-rs      = { workspace = true, features = ["async_tokio"] }
+# Perf-Data-Plane #3: PmtudTracker uses libc::EMSGSIZE on Unix to detect
+# path-MTU exhaustion and fall back from MTU_DEFAULT (1420) to
+# MTU_LEGACY_SAFE (1380). libc is already in the lock graph via tokio.
+[target.'cfg(unix)'.dependencies]
+libc        = "0.2"
 
 # DERP domain-fronting (`derp::front`) needs:
 #   * reqwest  — outbound HTTPS dial with a separate SNI / Host split

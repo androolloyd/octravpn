@@ -87,6 +87,12 @@ tempfile    = { workspace = true }
 # here is a no-op for the lockfile (reqwest is already in the resolved
 # graph via other workspace members).
 reqwest     = { workspace = true }
+# Perf-Data-Plane #7: SO_REUSEPORT multi-queue UDP. socket2 is already
+# in the lock graph (tokio + reqwest both pull it transitively); we
+# declare it explicitly so the SO_REUSEPORT bind path in tunnel.rs has
+# a stable surface to call. Gated on Linux/FreeBSD; macOS uses a single
+# tokio bind because BSD-style SO_REUSEPORT doesn't flow-hash.
+socket2     = "0.5"
 
 [dev-dependencies]
 octravpn-mesh = { path = "../octravpn-mesh", features = ["test-helpers"] }

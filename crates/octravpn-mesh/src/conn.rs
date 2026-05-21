@@ -35,6 +35,22 @@ pub enum ConnState {
     Relay,
 }
 
+impl ConnState {
+    /// Is this connection routing data plane traffic directly to the
+    /// peer (no onion-relay hop in between)? Perf-Data-Plane #3 uses
+    /// this to decide whether the data plane needs to wrap/peel the
+    /// onion layer: a Direct session traverses no relay, so the onion
+    /// has no recipient and we can short-circuit the AEAD+ECDH cost.
+    ///
+    /// Privacy invariant: a `false` return MUST mean we will *still*
+    /// peel the onion. `Relay`-state connections rely on the onion
+    /// for unlinkability. The `octravpn-node` data plane enforces this
+    /// with a debug-only assertion before short-circuiting.
+    pub fn is_direct(self) -> bool {
+        matches!(self, Self::Direct)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Connection {
     pub peer_addr: String, // Octra address of the remote peer
@@ -300,6 +316,19 @@ mod tests {
         // upgrade_period=0 lets the next step attempt promotion.
         let s = cm.step("t", "octB");
         assert_eq!(s, ConnState::Direct);
+    }
+
+    /// Perf-Data-Plane #3: ConnState::is_direct() reports true only
+    /// for the Direct variant. This is the privacy invariant the data
+    /// plane's onion-skip path keys off — a regression here would
+    /// flip the conservative default and silently leak plaintext on
+    /// relay flows.
+    #[test]
+    fn is_direct_only_for_direct_state() {
+        assert!(!ConnState::Init.is_direct());
+        assert!(!ConnState::Probing.is_direct());
+        assert!(ConnState::Direct.is_direct());
+        assert!(!ConnState::Relay.is_direct());
     }
 
     #[test]

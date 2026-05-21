@@ -10,7 +10,7 @@
 
 use std::{
     collections::HashMap,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
 use octravpn_core::{onion::HopAction, session::SessionId};
@@ -29,6 +29,21 @@ pub(crate) struct SessionRoute {
     pub action: HopAction,
     pub bytes_in: AtomicU64,
     pub bytes_out: AtomicU64,
+    /// Perf-Data-Plane #3 onion-peel-required flag.
+    ///
+    /// `true` (default): every inbound layer for this session is
+    /// peeled via `octravpn_core::onion::peel_layer` (or the
+    /// pinned-key fast path from Perf-Data-Plane #9). This is the
+    /// safe path; a relay hop MUST peel to know where to forward.
+    ///
+    /// `false`: the session is verified Direct
+    /// (`ConnState::is_direct() == true`) and there's no relay between
+    /// us and the peer. We can skip the AEAD+ECDH onion cost. The
+    /// `Server::dispatch_inner` path enforces this with a debug-only
+    /// `is_direct || onion_peel_required` assertion before the skip
+    /// fires; a regression that mis-sets this on a relay session
+    /// would panic in debug builds rather than silently leak.
+    pub onion_peel_required: AtomicBool,
 }
 
 impl Clone for SessionRoute {
@@ -37,6 +52,7 @@ impl Clone for SessionRoute {
             action: self.action.clone(),
             bytes_in: AtomicU64::new(self.bytes_in.load(Ordering::Relaxed)),
             bytes_out: AtomicU64::new(self.bytes_out.load(Ordering::Relaxed)),
+            onion_peel_required: AtomicBool::new(self.onion_peel_required.load(Ordering::Relaxed)),
         }
     }
 }
@@ -57,7 +73,37 @@ impl OnionRouter {
                 action,
                 bytes_in: AtomicU64::new(0),
                 bytes_out: AtomicU64::new(0),
+                onion_peel_required: AtomicBool::new(true),
             });
+    }
+
+    /// Mark a session as direct (onion-peel can be skipped). Called by
+    /// the mesh manager when `ConnState::is_direct() == true` at
+    /// session-open. Idempotent + race-free: a relay-state session
+    /// that races to `set_onion_peel_required(true)` always wins on
+    /// the conservative path because the datapath checks the flag
+    /// every packet.
+    ///
+    /// `peel_required = true` is the safe default. `peel_required = false`
+    /// is the optimization. The data plane's debug-only assertion
+    /// guards against the mis-set case.
+    #[allow(dead_code)]
+    pub(crate) fn set_onion_peel_required(&self, session: &SessionId, peel_required: bool) {
+        if let Some(route) = self.sessions.read().get(session) {
+            route
+                .onion_peel_required
+                .store(peel_required, Ordering::Relaxed);
+        }
+    }
+
+    /// Read the current peel-required policy for `session`. Returns
+    /// `None` if the session isn't installed yet (in which case the
+    /// caller MUST treat it as `true` — the conservative path).
+    pub(crate) fn onion_peel_required(&self, session: &SessionId) -> Option<bool> {
+        self.sessions
+            .read()
+            .get(session)
+            .map(|r| r.onion_peel_required.load(Ordering::Relaxed))
     }
 
     pub(crate) fn record_bytes(&self, session: &SessionId, dir: Direction, n: u64) {
@@ -110,5 +156,33 @@ mod tests {
         let (i, o) = r.bytes(&id).unwrap();
         assert_eq!(i, 100);
         assert_eq!(o, 50);
+    }
+
+    /// Perf-Data-Plane #3: peel-required defaults to true on install —
+    /// the conservative path. A regression that flips the default
+    /// would silently turn off onion routing for every fresh session.
+    #[test]
+    fn fresh_install_requires_peel() {
+        let r = OnionRouter::new();
+        let id = SessionId::new([2u8; 32]);
+        r.install(id.clone(), HopAction::Egress);
+        assert_eq!(r.onion_peel_required(&id), Some(true));
+    }
+
+    /// The setter flips to false (the optimization) and back; unknown
+    /// sessions return None (caller MUST default-to-true).
+    #[test]
+    fn set_and_read_peel_required() {
+        let r = OnionRouter::new();
+        let id = SessionId::new([3u8; 32]);
+        let unknown = SessionId::new([99u8; 32]);
+        r.install(id.clone(), HopAction::Egress);
+
+        r.set_onion_peel_required(&id, false);
+        assert_eq!(r.onion_peel_required(&id), Some(false));
+        r.set_onion_peel_required(&id, true);
+        assert_eq!(r.onion_peel_required(&id), Some(true));
+        // Unknown session: caller is expected to treat None as true.
+        assert_eq!(r.onion_peel_required(&unknown), None);
     }
 }

@@ -40,24 +40,49 @@ heap shape, a one-second flusher stall queues ~100 MB; a minute is
 LRU eviction, no back-pressure. Fix is one-line per Audit-2 ("bounded
 4096 + sync-fallback").
 
-**Data-plane AEAD acceleration (Perf-5).** Fixed on branch
-`perf-5-chacha-simd`: the per-packet ChaCha20-Poly1305 seal/open calls
-on the data plane (onion routing `crates/octravpn-core/src/onion.rs`,
-obfs4 framing `crates/octravpn-obfs4/src/frame.rs`) now route through
-`aws-lc-rs` via the shim at `crates/octravpn-core/src/aead.rs`. WG
-proper still lives inside `boringtun` and is out of scope per
-constraints. Bench delta (`crates/octravpn-node/benches/wireguard_throughput.rs`):
+**Data-plane AEAD acceleration (Perf-5, merged `be03944`).** The
+per-packet ChaCha20-Poly1305 seal/open calls on the data plane (onion
+routing `crates/octravpn-core/src/onion.rs`, obfs4 framing
+`crates/octravpn-obfs4/src/frame.rs`) now route through `aws-lc-rs`
+via the shim at `crates/octravpn-core/src/aead.rs`. WG proper still
+lives inside `boringtun` and is out of scope per constraints. Bench
+delta (`crates/octravpn-node/benches/wireguard_throughput.rs`):
 encap 4.48 µs → 0.93 µs (−79 %), decap 4.46 µs → 1.09 µs (−76 %).
 Single-core relay-hop budget (one decap + one encap per 1380-byte
-packet) moves from ~1.23 Gbps to ~5.47 Gbps. Multiplies into every
-relay-hop budget on the table below: a 3-hop circuit's portable ceiling
-of ~270 Mbps/core/hop rises to ~1 Gbps+/core/hop once the onion
-peel-layer snapshot is recaptured (the peel path is also on the new
-shim). Output bytes are byte-identical to the portable backend by
+packet) moves from ~1.23 Gbps to ~5.47 Gbps on the AEAD primitives
+alone. Output bytes are byte-identical to the portable backend by
 construction (same RFC 8439 standard) — the `cross_impl_compatibility`
 test in `aead.rs` is the safety gate. `aws-lc-rs` and `aws-lc-sys`
 were already in `Cargo.lock` transitively via `rcgen` and
 `tokio-rustls`, so no new transitive supply-chain surface entered.
+
+### Perf-Data-Plane unified update (`perf-dataplane-unified`)
+
+Combined #2 multi-tunnel + #3 MTU/onion-skip + #7 SO_REUSEPORT +
+#9 session-pinned onion keys. Post-fix table addendum, same host
+(M3 Max / macOS 26.1 / arm64 / `--release`). The Perf-DP combos below
+were captured against the **portable AEAD** path (this branch forked
+before Perf-5 merged); re-running on the post-Perf-5 tree compounds
+the ~4× AEAD speedup into each combo (projected combo means → ~3 µs
+on the multi-tunn path, projected Gbps/core → ~3.7 Gbps/shard).
+
+| Combo                                             | Mean/pkt (1420 B) | Gbps/core    | Source |
+|---------------------------------------------------|-------------------|--------------|--------|
+| Baseline (single Tunn, single queue)              | 12.20 µs          | ~0.93 Gbps   | `wireguard_throughput.rs::perf_combos/single_tunn_single_queue` |
+| #2 + #7 (multi-tunn + SO_REUSEPORT, per shard)    | 9.69 µs           | ~1.17 Gbps/shard | `perf_combos/multi_tunn_multi_queue` |
+| #2 + #7 + #3 direct (onion-skip on direct)        | 9.66 µs           | ~1.18 Gbps   | `perf_combos/direct_no_onion` |
+| #2 + #7 + #3 relay + #9 (pinned onion keys)       | 14.65 µs          | ~0.78 Gbps   | `perf_combos/pinned_onion_keys_relay` |
+| `peel_with_pinned_key` (AEAD-only, fast path)     | 9.73 µs           | —            | `onion_peel/peel_with_pinned_key_fast` |
+| `peel_layer` (X25519+HKDF+AEAD, slow path)        | 35.54 µs          | —            | `onion_peel/peel_layer_slow` |
+
+Onion-peel cost: **31.7 µs → 9.7 µs** (~3.6× win) on the pinned-key
+fast path. Slow `peel_layer` still runs once per session (first
+packet); every subsequent packet hits the fast path.
+
+MTU 1420 vs 1380 goodput on a 1500-MTU path: 94.67 % vs 92.00 %
+(+2.67 percentage points; **+2.9 % goodput**). PMTUD fallback to
+1380 lives in `octravpn-tun::PmtudTracker::on_send_error`; floor
+is `MTU_FLOOR = 1280` (IPv6 link minimum, RFC 8200 §5).
 
 ---
 
