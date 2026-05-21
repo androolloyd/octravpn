@@ -363,11 +363,12 @@ pub fn peel_with_pinned_key(
         return Err(OnionError::Malformed);
     }
     let key_bytes = keys.key_for(hop_idx).ok_or(OnionError::Malformed)?;
-    let key = Key::from(*key_bytes);
-    let cipher = ChaCha20Poly1305::new(&key);
-    let nonce = Nonce::from_slice(&[0u8; 12]);
-    let pt = cipher
-        .decrypt(nonce, &packet[32..])
+    let nonce = [0u8; AEAD_NONCE_LEN];
+    // Perf-5 + Perf-DP merge fix-up: route the pinned-key fast path
+    // through the hwaccel AEAD shim, matching `peel_layer` above. Same
+    // RFC 8439 key/nonce shape — `key_bytes` is `[u8; KEY_LEN]`,
+    // identical to what `derive_aead_key` produces in the slow path.
+    let pt = aead_open(key_bytes, &nonce, &[], &packet[32..])
         .map_err(|e| OnionError::Aead(e.to_string()))?;
     parse_layer(&pt)
 }
