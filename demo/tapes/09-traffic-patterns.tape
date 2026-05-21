@@ -69,9 +69,9 @@ Type `docker exec tsi-peer-1 sh -c "wget -q -O- http://$PEER2_IP:8080/payload"`
 Enter
 Sleep 4s
 
-Type "# Policy CRUD (against the admin surface) — placeholder for the"
+Type "# Policy CRUD against the admin surface. mesh serve now mounts"
 Enter
-Type "# post-Hub wire-up. The CLI prints the HTTP error verbatim."
+Type "# /api/v1/policy via build_admin_router (see docs/operators/mesh-admin.md)."
 Enter
 Type "./target/release/octravpn-node mesh policy get --remote http://127.0.0.1:51821 --admin-token mesh-demo-token || true"
 Enter

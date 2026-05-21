@@ -49,10 +49,10 @@ Type "# Use the new mesh-status CLI against the local control plane"
 Enter
 Type "./target/release/octravpn-node mesh status --remote http://127.0.0.1:51821 --admin-token mesh-demo-token --json"
 Enter
-# Note: this hits /api/v1/machines on the admin surface; with the
-# current Hub-free mesh serve the admin router isn't mounted, so the
-# CLI surfaces a clear HTTP error. The flag exists for the post-Hub
-# wire-up — recording the failure here documents the gap.
+# Hits /api/v1/machines on the admin surface, which `mesh serve` now
+# mounts via `octravpn_mesh::build_admin_router` (see
+# docs/operators/mesh-admin.md). Expect a JSON array with one entry
+# per peer in the tailnet (3 entries on a healthy stack).
 Sleep 5s
 
 Type "# Teardown"

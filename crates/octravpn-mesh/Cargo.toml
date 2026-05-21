@@ -20,7 +20,7 @@ octravpn-core = { path = "../octravpn-core" }
 # PreauthMinter + TailnetIpAllocator (see `headscale_bridge.rs`) and
 # re-exports the wire module through `lib.rs` so existing callers
 # keep working.
-headscale-api = { path = "../../../headscale-rs/headscale-api", default-features = false }
+headscale-api = { path = "../../../headscale-rs/headscale-api", default-features = false, features = ["admin"] }
 # Canonical ACL evaluator — shared with headscale-api as of
 # 2026-05-20. Lives in the headscale-rs workspace alongside
 # headscale-api so neither side has a dep cycle. The OctraVPN-only
@@ -30,6 +30,7 @@ headscale-api-acl = { path = "../../../headscale-rs/headscale-api-acl" }
 
 anyhow      = { workspace = true }
 async-trait = { workspace = true }
+axum        = { workspace = true }
 base64      = { workspace = true }
 bytes       = { workspace = true }
 hmac        = "0.12"
@@ -51,6 +52,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 proptest = { workspace = true }
 tempfile = { workspace = true }
 tokio    = { workspace = true, features = ["test-util"] }
+tower    = { version = "0.5", features = ["util"] }
 
 [lints]
 workspace = true

@@ -17,6 +17,7 @@
 //!   - [`serve`]     — serve/funnel advertisement bookkeeping
 
 pub mod acl;
+pub mod admin_surface;
 pub mod conn;
 pub mod headscale_bridge;
 pub mod ip_alloc;
@@ -27,6 +28,11 @@ pub mod peer;
 pub mod serve;
 pub mod stun;
 pub mod subnet;
+
+// Unified admin-router builder used by BOTH the full Hub daemon and
+// the Hub-free `mesh serve` shape. See [`admin_surface`] for the
+// auth posture (byte-stable 404 hidden-policy outer guard).
+pub use admin_surface::{build_admin_router, AdminState, AdminStateBuilder};
 
 // The Tailscale wire-protocol implementation moved into
 // `headscale-api::tailscale_wire` on 2026-05-19. octravpn-mesh keeps
