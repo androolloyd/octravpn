@@ -16,9 +16,12 @@ description: |
   and set the job-level default working-directory to `octra`.
 inputs:
   toolchain:
-    description: "Toolchain channel (stable, nightly, etc.)"
+    description: |
+      Toolchain channel (stable, nightly, etc.) or pinned version.
+      Default matches the workspace's `rust-toolchain.toml` so CI
+      and local builds agree on rustfmt + clippy lint sets.
     required: false
-    default: stable
+    default: "1.88.0"
   components:
     description: "Comma-separated rustup components (clippy, rustfmt, ...)"
     required: false
