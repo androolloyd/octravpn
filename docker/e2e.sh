@@ -55,6 +55,12 @@ wait_rpc_ready() {
 }
 
 echo "[e2e] Building images..."
+# Build the `builder` stage first so the downstream Dockerfiles can
+# `FROM octravpn-builder:latest`. `docker compose build` runs services
+# in parallel and does not respect FROM-image dependencies, so node /
+# client / mock-rpc would otherwise race and try to pull the (non-
+# existent) `octravpn-builder` image from docker.io.
+docker compose build --quiet builder
 docker compose build --quiet
 
 echo "[e2e] Starting mock-rpc..."

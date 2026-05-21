@@ -20,8 +20,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config libssl-dev ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-# Mirror the host layout: /work/octra + /work/octra-foundry side-by-side.
+# Mirror the host layout: /work/octra + /work/octra-foundry +
+# /work/headscale-rs side-by-side. The two sibling repos own crates
+# that octra/ path-deps into (octra-foundry → mock-rpc + octraforge;
+# headscale-rs → headscale-api + headscale-cli for the wire/admin
+# layer), so the Cargo workspace cannot resolve without them.
 COPY octra-foundry ./octra-foundry
+COPY headscale-rs ./headscale-rs
 COPY octra/Cargo.toml octra/Cargo.lock* ./octra/
 COPY octra/rust-toolchain.toml* ./octra/
 COPY octra/crates ./octra/crates
