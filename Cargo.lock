@@ -2722,6 +2722,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "aws-lc-rs",
  "axum",
  "base64",
  "bs58",
@@ -2864,6 +2865,7 @@ dependencies = [
  "hex",
  "hkdf",
  "hmac",
+ "octravpn-core",
  "octravpn-tun",
  "parking_lot",
  "rand 0.8.6",

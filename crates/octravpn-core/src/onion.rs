@@ -29,15 +29,18 @@
 
 use std::io::{Cursor, Read};
 
-use chacha20poly1305::{
-    aead::{Aead, KeyInit},
-    ChaCha20Poly1305, Key, Nonce,
-};
 use hkdf::Hkdf;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use x25519_dalek::{EphemeralSecret, PublicKey as X25519Pub, StaticSecret};
+
+// Perf-5: hot-path AEAD goes through the hardware-accelerated shim
+// (`aead::aead_seal` / `aead::aead_open`), not the portable
+// `chacha20poly1305` crate. The shim wraps `aws-lc-rs` and emits
+// byte-identical AEAD output — see `aead.rs::cross_impl_compatibility`
+// for the safety gate.
+use crate::aead::{aead_open, aead_seal, AEAD_NONCE_LEN, KEY_LEN};
 
 pub const MAX_HOPS: usize = 3;
 pub const ONION_HKDF_INFO: &[u8] = b"octravpn-onion-v1";
@@ -125,17 +128,21 @@ fn wrap_layer(static_pk: &[u8; 32], header: &[u8], inner: &[u8]) -> Result<Vec<u
     let shared = eph_secret.diffie_hellman(&X25519Pub::from(*static_pk));
 
     let key = derive_aead_key(shared.as_bytes());
-    let cipher = ChaCha20Poly1305::new(&key);
-    let nonce = Nonce::from_slice(&[0u8; 12]);
+    // Per-layer nonce stays at zero because the key itself is unique
+    // per layer (ECDH(eph_i, static_i) is a fresh shared secret). This
+    // matches the Tor / Sphinx onion convention.
+    let nonce = [0u8; AEAD_NONCE_LEN];
 
     let mut plaintext = Vec::with_capacity(4 + header.len() + inner.len());
     plaintext.extend_from_slice(&(header.len() as u32).to_be_bytes());
     plaintext.extend_from_slice(header);
     plaintext.extend_from_slice(inner);
 
-    let ct = cipher
-        .encrypt(nonce, plaintext.as_ref())
-        .map_err(|e| OnionError::Aead(e.to_string()))?;
+    // Perf-5: hardware-accelerated AEAD. The previous `chacha20poly1305`
+    // crate produced byte-identical output (same RFC 8439 standard); the
+    // wire format is preserved.
+    let ct =
+        aead_seal(&key, &nonce, &[], &plaintext).map_err(|e| OnionError::Aead(e.to_string()))?;
 
     let mut out = Vec::with_capacity(32 + ct.len());
     out.extend_from_slice(eph_pub.as_bytes());
@@ -143,12 +150,12 @@ fn wrap_layer(static_pk: &[u8; 32], header: &[u8], inner: &[u8]) -> Result<Vec<u
     Ok(out)
 }
 
-fn derive_aead_key(shared: &[u8]) -> Key {
+fn derive_aead_key(shared: &[u8]) -> [u8; KEY_LEN] {
     let hk = Hkdf::<Sha256>::new(None, shared);
-    let mut okm = [0u8; 32];
+    let mut okm = [0u8; KEY_LEN];
     hk.expand(ONION_HKDF_INFO, &mut okm)
         .expect("32-byte HKDF output is always valid");
-    Key::from(okm)
+    okm
 }
 
 /// One hop's view of an inbound onion packet.
@@ -169,11 +176,11 @@ pub fn peel_layer(static_secret: &StaticSecret, packet: &[u8]) -> Result<PeeledL
     eph_pk.copy_from_slice(&packet[..32]);
     let shared = static_secret.diffie_hellman(&X25519Pub::from(eph_pk));
     let key = derive_aead_key(shared.as_bytes());
-    let cipher = ChaCha20Poly1305::new(&key);
-    let nonce = Nonce::from_slice(&[0u8; 12]);
-    let pt = cipher
-        .decrypt(nonce, &packet[32..])
-        .map_err(|e| OnionError::Aead(e.to_string()))?;
+    let nonce = [0u8; AEAD_NONCE_LEN];
+    // Perf-5: hardware-accelerated AEAD open. See wrap_layer for the
+    // matching seal side.
+    let pt =
+        aead_open(&key, &nonce, &[], &packet[32..]).map_err(|e| OnionError::Aead(e.to_string()))?;
     parse_layer(&pt)
 }
 
