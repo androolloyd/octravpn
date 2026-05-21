@@ -140,10 +140,12 @@ impl ReceiptJournal {
         }
     }
 
-    /// Swap the durability policy. `EveryWrite` is the default and
-    /// matches the original v0 behaviour; `Periodic` defers fsyncs to
-    /// the configured interval. Throughput-mode for operators who
-    /// accept a bounded loss window.
+    /// Swap the durability policy. `Periodic(1s)` is the default
+    /// (Perf-1); `EveryWrite` matches the original v0 behaviour and is
+    /// the durability-first opt-in for financial-invariant operators.
+    /// Under `Periodic` the receipts-at-risk window across an OS-level
+    /// crash is bounded by the configured `Duration`; the audit log
+    /// (`journal rebuild --from-audit`) backstops the gap.
     pub fn set_fsync_policy(&self, policy: FsyncPolicy) {
         self.inner.lock().fsync_policy = policy;
     }

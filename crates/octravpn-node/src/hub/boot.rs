@@ -124,6 +124,19 @@ pub(super) async fn build_hub(cfg: NodeConfig) -> Result<Hub> {
         octravpn_core::receipt_journal::ReceiptJournal::open(&journal_path)
             .with_context(|| format!("open receipt journal at {}", journal_path.display()))?,
     );
+    // Perf-1: apply the operator-selected fsync policy. The default
+    // is `Periodic(1s)` (~500k receipts/s vs ~225/s under
+    // `EveryWrite`; audit-8 §3). Financial-invariant operators flip
+    // to `every_write` in `[control].fsync_policy`. The 1s loss
+    // window is recoverable from the audit log via
+    // `octravpn-node journal rebuild --from-audit`.
+    let fsync_policy = cfg.control.resolved_fsync_policy();
+    receipt_journal.set_fsync_policy(fsync_policy);
+    info!(
+        ?fsync_policy,
+        journal = %journal_path.display(),
+        "receipt journal fsync policy set"
+    );
 
     // PVAC sidecar wiring. Opt-in (operator must set `[pvac].enabled
     // = true`); failure to spawn is *non-fatal* — we log a warning

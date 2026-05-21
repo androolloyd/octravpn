@@ -9,7 +9,9 @@
 //! Three benches here close that gap with public APIs only:
 //!
 //! 1. `receipt_journal_bump` — drives `ReceiptJournal::bump` against a
-//!    real on-disk file under the default `FsyncPolicy::EveryWrite`.
+//!    real on-disk file under `FsyncPolicy::EveryWrite`. Pre-Perf-1
+//!    this was the journal default; post-Perf-1 it is the policy
+//!    financial-invariant operators opt back into.
 //!    Since #235 the journal is **append-only** + per-record fsync,
 //!    so each call is a single 44-byte append + `sync_data`. The cost
 //!    is dominated by the fsync round-trip, not by serialisation
@@ -95,12 +97,12 @@ fn session_id_from(idx: u64) -> SessionId {
     SessionId::new(bytes)
 }
 
-/// Receipt-journal bump throughput under the default
-/// `FsyncPolicy::EveryWrite`. Each iteration is one append of a
-/// 44-byte record + one `sync_data`. Population size is varied to
-/// confirm the new append-only path is **flat** in the live session
-/// count (the v0 snapshot path was O(N) per call and degraded at 1k
-/// sessions to ~96 receipts/s).
+/// Receipt-journal bump throughput under `FsyncPolicy::EveryWrite` —
+/// pre-Perf-1 default, post-Perf-1 the durability-first opt-in. Each
+/// iteration is one append of a 44-byte record + one `sync_data`.
+/// Population size is varied to confirm the new append-only path is
+/// **flat** in the live session count (the v0 snapshot path was O(N)
+/// per call and degraded at 1k sessions to ~96 receipts/s).
 fn bench_receipt_journal_bump(c: &mut Criterion) {
     let mut g = c.benchmark_group("receipt_journal_bump");
     g.throughput(Throughput::Elements(1));
@@ -114,6 +116,10 @@ fn bench_receipt_journal_bump(c: &mut Criterion) {
                 let dir = TempDir::new().expect("tempdir");
                 let path = dir.path().join("rj.bin");
                 let j = ReceiptJournal::open(&path).expect("open journal");
+                // Perf-1: pin `EveryWrite` so this bench keeps
+                // measuring the per-fsync ceiling even after the
+                // default flipped to `Periodic(1s)`.
+                j.set_fsync_policy(FsyncPolicy::EveryWrite);
                 // Pre-populate to `n_sessions - 1` so the bench
                 // appends past a non-trivial baseline. With the
                 // append-only format the population size doesn't

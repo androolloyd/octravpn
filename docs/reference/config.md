@@ -188,6 +188,7 @@ Source: `config.rs::ControlCfg` at `:539-622`.
 | `events_token` | string | (none — endpoint 404s) | `:557` | Bearer for `GET /events` SSE. v2 hardening fix (P0-1). |
 | `metrics_token` | string | (none — endpoint 503s) | `:567` | Bearer for `GET /metrics`. Must set in production. Pick ≥32-byte random. |
 | `receipt_journal_path` | path | `./state/receipts.bin` | `:579` | P1-8/9 persistent seq journal. See [state-files.md](./state-files.md). |
+| `fsync_policy` | `"periodic"` \| `"every_write"` | `"periodic"` (Perf-1) | `config.rs::FsyncPolicyCfg` | Receipt-journal durability policy. `"periodic"` ⇒ `Periodic(1s)`, ~500 k receipts/s ceiling, ≤1 s loss window on hard crash (recoverable via `journal rebuild --from-audit`). `"every_write"` ⇒ `EveryWrite`, ~225 RPS/node ceiling, instantly durable per bump — pick for financial-invariant exit nodes. See [operators/performance.md](../operators/performance.md) and audit-8 §3. |
 | `admin_token` | string | (none — `POST /admin/preauth` 404s) | `:590` | Falls back to `OCTRAVPN_ADMIN_TOKEN`. |
 | `tailscale_wire_state_dir` | path | `./state/tailscale-wire` | `:599` | Noise long-term static + future wire state. Must survive restarts. |
 | `tailscale_tailnet_id` | string | `"octravpn-interop"` | `:606` | IP allocator key. Set per-deployment in production. |
@@ -359,6 +360,11 @@ audit_dir            = "/var/lib/octravpn/audit"
 metrics_token        = "${random ≥32 bytes}"
 admin_token          = "${random ≥32 bytes}"
 receipt_journal_path = "/var/lib/octravpn/receipts.bin"
+# Perf-1: receipt-journal fsync policy. "periodic" (default) trades
+# a ≤1 s loss window on hard crash for ~500 k receipts/s/node;
+# "every_write" is the financial-invariant override.
+# See docs/operators/performance.md.
+fsync_policy             = "periodic"
 tailscale_wire_state_dir = "/var/lib/octravpn/tailscale-wire"
 tailscale_tailnet_id     = "acme-prod"
 

@@ -258,16 +258,22 @@ overwrite the tempfile in place.
 
 ## Fsync policy
 
-`FsyncPolicy::EveryWrite` (default) — `sync_data` after every append.
-Durable; one fsync round-trip per receipt.
-
-`FsyncPolicy::Periodic(Duration)` — `sync_data` only when the
-configured interval has elapsed since the last fsync. The OS write
-buffer still receives every append immediately (an `append`-mode
+`FsyncPolicy::Periodic(1s)` is the **default** as of Perf-1. The OS
+write buffer receives every append immediately (an `append`-mode
 `File::write_all` doesn't buffer in user space), so a process crash
-without an OS crash still preserves every record. Throughput-mode for
-operators who accept a bounded loss window across an OS crash. The
-loss bound is `Duration` of receipts.
+without an OS crash still preserves every record; the loss bound is
+the `Duration` of receipts across a hard kernel/host crash. Recovery
+from a torn-tail write inside that window: the audit log carries every
+`(session_id, seq)` the daemon committed before signing, so
+`octravpn-node journal rebuild --from-audit <dir> --output <path>`
+reconstructs the floor map verbatim (see audit-9 H-RTO and
+`crates/octravpn-node/src/cli/journal.rs`).
+
+`FsyncPolicy::EveryWrite` — `sync_data` after every append. Durable;
+one fsync round-trip per receipt (~225 receipts/s on a typical NVMe
+host; audit-8 §3). Operators set this for financial-invariant exit
+nodes where even one second of replay-from-audit is unacceptable.
+Surfaced as `[control].fsync_policy = "every_write"` in node TOML.
 
 ---
 
