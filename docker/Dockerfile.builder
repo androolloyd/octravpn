@@ -15,9 +15,12 @@ FROM rust:1.88-bookworm AS builder
 
 WORKDIR /work
 
-# Install system deps (boringtun is pure Rust; only build-essential needed).
+# Install system deps. boringtun is pure Rust; `protobuf-compiler` is
+# needed by the path-depped `headscale-api` build script (prost-build).
+# Mirrors the GH-Actions `setup-rust` composite action that we wired
+# the same way for ci.yml + demo.yml + proof.yml + fuzz.yml.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    pkg-config libssl-dev ca-certificates && \
+    pkg-config libssl-dev ca-certificates protobuf-compiler && \
     rm -rf /var/lib/apt/lists/*
 
 # Mirror the host layout: /work/octra + /work/octra-foundry +
