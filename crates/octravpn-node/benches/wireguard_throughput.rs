@@ -39,12 +39,21 @@ use chacha20poly1305::{
     ChaCha20Poly1305, Nonce,
 };
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use octravpn_core::aead::AeadKey;
+use octravpn_core::{
+    aead::AeadKey,
+    onion::{build_onion, peel_layer, peel_with_pinned_key, HopBuildInput, OnionSessionKeys},
+    session::SessionId,
+};
 use rand::{rngs::OsRng, RngCore};
 use x25519_dalek::{PublicKey, StaticSecret};
 
-/// MTU set in `octravpn-tun/src/lib.rs:58`. WG header is 80 B on top.
-const PAYLOAD_BYTES: usize = 1380;
+/// MTU bumped to 1420 by Perf-Data-Plane #3 (octravpn-tun::MTU_DEFAULT).
+/// We bench both 1380 (legacy / PMTUD-fallback) and 1420 (the new
+/// default) so the headline shows the goodput delta on 1500-byte paths.
+const PAYLOAD_LEGACY: usize = 1380;
+const PAYLOAD_BUMPED: usize = 1420;
+/// Retain the historical constant so existing snapshots match.
+const PAYLOAD_BYTES: usize = PAYLOAD_LEGACY;
 
 /// AEAD seal of an MTU-sized payload. This is the per-packet cost
 /// WireGuard's encap step pays.
@@ -159,5 +168,193 @@ fn bench_x25519_dh(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, bench_aead_seal_mtu, bench_x25519_dh);
+/// Perf-Data-Plane #3 — MTU 1420 path. Same AEAD primitive, 40 bytes
+/// more per packet. Used in the headline goodput-on-1500-MTU
+/// calculation (goodput% = payload / (payload + 80 WG header)).
+fn bench_aead_seal_bumped_mtu(c: &mut Criterion) {
+    let mut key = [0u8; 32];
+    OsRng.fill_bytes(&mut key);
+    let cipher = ChaCha20Poly1305::new((&key).into());
+    let nonce = Nonce::from([0u8; 12]);
+    let payload = vec![0xABu8; PAYLOAD_BUMPED];
+
+    let mut g = c.benchmark_group("wg_aead_mtu_bumped");
+    g.throughput(Throughput::Bytes(PAYLOAD_BUMPED as u64));
+    g.measurement_time(Duration::from_secs(3));
+    g.bench_function("seal_1420B", |b| {
+        b.iter_custom(|iters| {
+            let start = Instant::now();
+            for _ in 0..iters {
+                let ct = cipher
+                    .encrypt(&nonce, black_box(payload.as_slice()))
+                    .expect("seal");
+                black_box(ct);
+            }
+            start.elapsed()
+        });
+    });
+    g.finish();
+}
+
+/// Perf-Data-Plane #9 — pinned-key peel vs full peel_layer. This is
+/// the core onion-peel-cost-reduction benchmark. Pre-fix:
+/// `onion_peel_layer` at 31.7 µs (X25519 + HKDF + AEAD). Post-fix:
+/// AEAD-only ≈ open-1380B (~4.5 µs).
+fn bench_onion_peel_paths(c: &mut Criterion) {
+    let static_secret = StaticSecret::random_from_rng(OsRng);
+    let static_pub = PublicKey::from(&static_secret);
+    let onion = build_onion(
+        &[HopBuildInput {
+            static_pubkey: static_pub.to_bytes(),
+            endpoint: "x".into(),
+        }],
+        &vec![0xCDu8; 1380],
+    )
+    .unwrap();
+    let mut eph_pk = [0u8; 32];
+    eph_pk.copy_from_slice(&onion[..32]);
+    let keys = OnionSessionKeys::from_ephemeral_pubkeys(&static_secret, &[eph_pk]).unwrap();
+
+    let mut g = c.benchmark_group("onion_peel");
+    g.throughput(Throughput::Bytes(onion.len() as u64));
+    g.measurement_time(Duration::from_secs(3));
+
+    g.bench_function("peel_layer_slow", |b| {
+        b.iter_custom(|iters| {
+            let start = Instant::now();
+            for _ in 0..iters {
+                let p = peel_layer(black_box(&static_secret), black_box(&onion)).unwrap();
+                black_box(p);
+            }
+            start.elapsed()
+        });
+    });
+
+    g.bench_function("peel_with_pinned_key_fast", |b| {
+        b.iter_custom(|iters| {
+            let start = Instant::now();
+            for _ in 0..iters {
+                let p = peel_with_pinned_key(black_box(&keys), 0, black_box(&onion)).unwrap();
+                black_box(p);
+            }
+            start.elapsed()
+        });
+    });
+    g.finish();
+    // Reference the SessionId path to keep the dep meaningful even if
+    // a future refactor stops importing it directly.
+    let _ = SessionId::new([0u8; 32]);
+}
+
+/// Combined-path estimates. We can't bench end-to-end (`Tunn` is
+/// module-private) but we CAN model the per-packet cost of each
+/// combo by summing the right primitives. Each bench function below
+/// runs the per-packet ops that would fire in that mode; the
+/// criterion mean × cost-per-packet → Gbps/core ceiling.
+fn bench_perf_combos(c: &mut Criterion) {
+    let mut key = [0u8; 32];
+    OsRng.fill_bytes(&mut key);
+    let cipher = ChaCha20Poly1305::new((&key).into());
+    let nonce = Nonce::from([0u8; 12]);
+    let payload = vec![0xABu8; PAYLOAD_BUMPED];
+    let ct = cipher.encrypt(&nonce, payload.as_slice()).unwrap();
+
+    let static_secret = StaticSecret::random_from_rng(OsRng);
+    let static_pub = PublicKey::from(&static_secret);
+    let onion = build_onion(
+        &[HopBuildInput {
+            static_pubkey: static_pub.to_bytes(),
+            endpoint: "x".into(),
+        }],
+        &payload,
+    )
+    .unwrap();
+    let mut eph_pk = [0u8; 32];
+    eph_pk.copy_from_slice(&onion[..32]);
+    let keys = OnionSessionKeys::from_ephemeral_pubkeys(&static_secret, &[eph_pk]).unwrap();
+
+    let mut g = c.benchmark_group("perf_combos");
+    g.throughput(Throughput::Bytes(PAYLOAD_BUMPED as u64));
+    g.measurement_time(Duration::from_secs(3));
+
+    // Baseline: single Tunn, single queue — one encap + one decap per
+    // relay-hop packet (no onion overhead since baseline only counts
+    // WG itself).
+    g.bench_function("single_tunn_single_queue", |b| {
+        b.iter_custom(|iters| {
+            let start = Instant::now();
+            for _ in 0..iters {
+                let c = cipher.encrypt(&nonce, payload.as_slice()).unwrap();
+                let p = cipher.decrypt(&nonce, c.as_slice()).unwrap();
+                black_box(p);
+            }
+            start.elapsed()
+        });
+    });
+
+    // #2 + #7 combined: same per-packet ops as baseline (the wins are
+    // throughput-scaling, not per-packet-cost). We add a SipHash13
+    // 4-tuple shard select to capture the cost the multi-tunnel
+    // dispatch pays per packet.
+    g.bench_function("multi_tunn_multi_queue", |b| {
+        b.iter_custom(|iters| {
+            use std::hash::{Hash, Hasher};
+            let start = Instant::now();
+            for i in 0..iters {
+                // 4-tuple shard select (mirrors tunnel.rs::shard_for_4tuple).
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                std::net::IpAddr::from([10, 0, 0, 1]).hash(&mut h);
+                (i as u16).hash(&mut h);
+                std::net::IpAddr::from([10, 0, 0, 2]).hash(&mut h);
+                51820u16.hash(&mut h);
+                let _shard = (h.finish() as usize) % 8;
+                let c = cipher.encrypt(&nonce, payload.as_slice()).unwrap();
+                let p = cipher.decrypt(&nonce, c.as_slice()).unwrap();
+                black_box(p);
+            }
+            start.elapsed()
+        });
+    });
+
+    // #2 + #7 + #3 (direct, no onion): one encap + one decap, NO onion
+    // peel. The onion-skip path's per-packet cost.
+    g.bench_function("direct_no_onion", |b| {
+        b.iter_custom(|iters| {
+            let start = Instant::now();
+            for _ in 0..iters {
+                let c = cipher.encrypt(&nonce, payload.as_slice()).unwrap();
+                let p = cipher.decrypt(&nonce, c.as_slice()).unwrap();
+                black_box(p);
+            }
+            start.elapsed()
+        });
+    });
+
+    // #2 + #7 + #3 (relay) + #9 pinned: one encap + one decap + one
+    // pinned-key AEAD-only peel. The peel cost is added on top of
+    // WG; this is the relay path with the per-session pinned key.
+    g.bench_function("pinned_onion_keys_relay", |b| {
+        b.iter_custom(|iters| {
+            let start = Instant::now();
+            for _ in 0..iters {
+                let c = cipher.encrypt(&nonce, payload.as_slice()).unwrap();
+                let p = cipher.decrypt(&nonce, c.as_slice()).unwrap();
+                let pl = peel_with_pinned_key(&keys, 0, &onion).unwrap();
+                black_box((p, pl));
+            }
+            start.elapsed()
+        });
+    });
+    g.finish();
+    let _ = ct; // keep ct in scope
+}
+
+criterion_group!(
+    benches,
+    bench_aead_seal_mtu,
+    bench_aead_seal_bumped_mtu,
+    bench_x25519_dh,
+    bench_onion_peel_paths,
+    bench_perf_combos,
+);
 criterion_main!(benches);

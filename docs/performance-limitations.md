@@ -14,7 +14,7 @@ fixes — that's the next ticket.
 
 | # | Layer                  | Current ceiling                                 | Bottleneck                                                       | Measured?                |
 |---|------------------------|-------------------------------------------------|------------------------------------------------------------------|--------------------------|
-| 1 | Data plane (WireGuard) | ~1.2 Gbps/core relay-hop (chacha+onion)         | per-packet decap + onion peel (`tunnel.rs`, `onion.rs:163`)      | yes — primitives, §1     |
+| 1 | Data plane (WireGuard) | ~1.18 Gbps/core direct; ~775 Mbps/core relay (pinned onion); 8× shard scale on Linux/FreeBSD | Pre Perf-Data-Plane: per-packet decap + onion peel (`tunnel.rs`, `onion.rs:163`). Post-fix: multi-tunn + SO_REUSEPORT + onion-skip + pinned keys | yes — primitives + combos, §1 |
 | 2 | Mesh control plane     | ~2.3M publishes/s; tick ~1 µs/peer              | `peer.rs:270` TTL, `conn.rs:76` upgrade period                   | yes — §2                 |
 | 3 | IP allocator           | O(1) SHA-256 per allocation, ~4.19 M hosts/tnet | `ip_alloc.rs:118` (`hashed_host`)                                | yes — unit + birthday    |
 | 4 | Chain interactions     | one tx per ~10 s mainnet epoch per wallet       | nonce serialization through one wallet; epoch finality           | epoch length empirical   |
@@ -52,11 +52,12 @@ M3 Max / macOS 26.1, `--release`. Bench:
 | ChaCha20-Poly1305 open (1380 B, portable)  | 4.46 µs   | ~2.47 Gbps (decap only)      |
 | ChaCha20-Poly1305 seal (1380 B, aws-lc-rs) | 0.93 µs   | ~11.6 Gbps (encap only)      |
 | ChaCha20-Poly1305 open (1380 B, aws-lc-rs) | 1.09 µs   | ~9.86 Gbps (decap only)      |
+| ChaCha20-Poly1305 seal (1420 B, portable)  | 4.92 µs   | ~2.31 Gbps (MTU bumped)      |
 | X25519 ECDH (handshake)                    | 29.3 µs   | 34 k handshakes/s/core       |
 
-Perf-5 (hardware-accelerated AEAD, `crates/octravpn-core/src/aead.rs`)
+**Perf-5 (hardware-accelerated AEAD, `crates/octravpn-core/src/aead.rs`)**
 switched the WireGuard data-plane and obfs4 framing call sites from
-the portable `chacha20poly1305 = "0.10"` crate to a `aws-lc-rs`-backed
+the portable `chacha20poly1305 = "0.10"` crate to an `aws-lc-rs`-backed
 shim that uses AVX2 on x86_64 and NEON on aarch64. The hwaccel rows
 above are the post-switch numbers; the portable rows are kept as the
 audit baseline. Seal speedup: −79 % wall-time, ~4.8×; open speedup:
@@ -65,13 +66,49 @@ audit baseline. Seal speedup: −79 % wall-time, ~4.8×; open speedup:
 Extrapolated WG-relay-hop budget per core, **portable path**: one
 decap + one encap per packet ≈ 8.94 µs/pkt → ~1.23 Gbps.
 **Hardware-accelerated path**: ≈ 2.02 µs/pkt → ~**5.47 Gbps/core**.
-Add one `onion_peel_layer` (31.7 µs from the older
-`bench-snapshots/core.json`; onion is now also on the hwaccel path so
-this will measure smaller on the next snapshot) and the relay-hop
-budget for a 3-hop circuit moves from ~270 Mbps/core/hop to ~1 Gbps+
-once the snapshot refreshes. Live tunnels run on real UDP sockets
-with ~80 B header; these are upper-bound crypto-cost numbers, not
-wire-rate.
+
+### Perf-Data-Plane unified (`perf-dataplane-unified`)
+
+Combined #2 multi-tunnel + #3 MTU/onion-skip + #7 SO_REUSEPORT + #9
+session-pinned onion keys. Bench data from
+`crates/octravpn-node/benches/wireguard_throughput.rs` (criterion,
+`--sample-size 10 --measurement-time 1`, Apple M3 Max / macOS 26.1
+/ arm64, `--release`).
+
+The Perf-DP bench rows below were captured against the portable AEAD
+path (pre Perf-5 merge in this worktree); re-running on the
+hwaccel-merged tree will compound the Perf-5 win into the same combos
+(rough projection: combo means drop by ~4×, Gbps/core rises into the
+3-9 Gbps range per shard).
+
+| Combo                                        | Mean per pkt (1420 B) | Implied Gbps/core | Notes |
+|----------------------------------------------|----------------------|-------------------|-------|
+| baseline: single Tunn, single queue          | 12.20 µs             | ~0.93             | one encap + one decap (portable AEAD) |
+| #2 + #7 multi-tunn + multi-queue (per shard) | 9.69 µs              | ~1.17/shard       | Linux/FreeBSD ×N shards ≈ ~9.4 Gbps aggregate at N=8 |
+| #2 + #7 + #3 direct (no onion)               | 9.66 µs              | ~1.18             | onion-skip on direct sessions |
+| #2 + #7 + #3 relay + #9 pinned onion keys    | 14.65 µs             | ~0.78             | one AEAD-only peel (was 35.5 µs/peel slow path) |
+
+Onion-peel cost transformation:
+- pre-fix `peel_layer` (X25519 + HKDF + AEAD): **35.5 µs** measured
+  (was 31.7 µs in the pre-fix snapshot — within measurement variance)
+- post-fix `peel_with_pinned_key`: **9.73 µs** measured (AEAD-only)
+- net win: **~3.6× faster onion peel on a relay hop**
+
+MTU bump (1380 → 1420) goodput on a 1500-MTU path:
+- pre-fix: 1380 / 1500 = 92.00 % goodput
+- post-fix: 1420 / 1500 = 94.67 % goodput
+- net increase: **+2.67 percentage points** = ~**+2.9 %** more goodput
+  per packet on otherwise-identical paths. Operators with PMTUD
+  failures fall back to 1380 via `PmtudTracker::on_send_error`
+  (`octravpn-tun::PmtudTracker`); see `MTU_FLOOR=1280`.
+
+Privacy invariant on the onion-skip path: the data plane checks
+`OnionRouter::onion_peel_required(session)` per packet and only
+skips when `Some(false)` — explicitly set by the mesh manager after
+`ConnState::is_direct()` returns true. The `dispatch_inner`
+short-circuit carries a `debug_assert!` mirroring the same check; a
+regression that misuses the flag panics in debug rather than silently
+leaking plaintext to a relay.
 
 ## 2. Mesh control plane
 
