@@ -84,13 +84,13 @@ pub(super) fn enforce_cap_locked(g: &mut Inner) {
         // If two entries share an `Instant`, the SessionId tiebreak
         // is deterministic but arbitrary; either is a valid eviction
         // target.
-        let Some((_seen, id)) = g.lru_index.iter().next().cloned() else {
+        let Some((seen, id)) = g.lru_index.iter().next().cloned() else {
             break;
         };
         // Remove the LRU index entry first, then the `by_session`
         // entry, so the gauge update in `record_eviction` sees the
         // post-eviction len.
-        g.lru_index.remove(&(_seen, id.clone()));
+        g.lru_index.remove(&(seen, id.clone()));
         g.by_session.remove(&id);
         g.record_eviction(&id);
     }

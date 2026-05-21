@@ -136,17 +136,22 @@ pub(crate) struct Inner {
     pub(crate) metrics: Arc<JournalMetrics>,
 }
 
+/// Eviction state tuple for a newly-opened journal: (last-seen map,
+/// LRU index, recently-evicted FIFO, recently-evicted membership set).
+/// Aliased so the constructor signature isn't itself a clippy lint.
+pub(crate) type FreshEvictionState = (
+    HashMap<SessionId, Instant>,
+    BTreeSet<(Instant, SessionId)>,
+    VecDeque<SessionId>,
+    std::collections::HashSet<SessionId>,
+);
+
 impl Inner {
     /// Default eviction state for a newly-opened journal. Centralised
     /// so `ReceiptJournal::open` and `ReceiptJournal::in_memory` build
     /// identical inner state — Perf-8 must not introduce in-memory vs
     /// persistent skew.
-    pub(crate) fn fresh_eviction_state() -> (
-        HashMap<SessionId, Instant>,
-        BTreeSet<(Instant, SessionId)>,
-        VecDeque<SessionId>,
-        std::collections::HashSet<SessionId>,
-    ) {
+    pub(crate) fn fresh_eviction_state() -> FreshEvictionState {
         (
             HashMap::new(),
             BTreeSet::new(),
