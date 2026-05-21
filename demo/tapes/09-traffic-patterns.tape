@@ -65,7 +65,7 @@ Enter
 Type "docker exec -d tsi-peer-2 sh -c 'echo hello-from-peer-2 > /tmp/payload && busybox httpd -f -p 0.0.0.0:8080 -h /tmp &'"
 Enter
 Sleep 3s
-Type "docker exec tsi-peer-1 sh -c \"wget -q -O- http://$PEER2_IP:8080/payload\""
+Type `docker exec tsi-peer-1 sh -c "wget -q -O- http://$PEER2_IP:8080/payload"`
 Enter
 Sleep 4s
 

@@ -1,17 +1,14 @@
 # 02-portal-fetch.tape
 #
-# Captures the `oct://` URL-handler flows: the portal HTTP server, the
-# CLI `fetch` (raw bytes + `--save` + `-i` interactive) all hitting the
-# same chain-backed asset resolver.
+# Captures the `oct://` URL-handler flows: the portal HTTP server
+# (containerized) and the CLI `fetch` (raw bytes + `--save` + `-i`
+# interactive) all driven via `docker exec` against the same
+# chain-backed asset resolver.
 #
-# REQUIRES:
-#   - A running `octravpn portal` on 127.0.0.1:51823. The `Source`
-#     directive below boots it via demo/lib/start-portal.sh; that
-#     helper is idempotent.
-#   - A demo circle on the configured chain (devnet or mock-rpc) that
-#     hosts `policy.json` as a plaintext asset. The demo state dir
-#     (`demo/state/portal/config.toml`) should be pointed at a circle
-#     with a known `oct://octCircleDemo/policy.json`.
+# Harness: demo/lib/portal-container-bringup.sh — boots mock-rpc +
+# node1 (chain substrate) via docker-compose.yml, plus an
+# `octravpn portal` container bound to 127.0.0.1:51823. /healthz is
+# polled until 200 before the script returns.
 #
 # Re-run with: vhs demo/tapes/02-portal-fetch.tape
 
@@ -24,33 +21,36 @@ Set Height 700
 Set Theme "Dracula"
 Set TypingSpeed 40ms
 
-# Boot a portal in the background if one is not already up. The
-# helper polls /healthz and only returns once the surface is ready.
-Source demo/lib/start-portal.sh
-
+Type "bash demo/lib/portal-container-bringup.sh"
+Enter
+Sleep 60s
 Type "# /healthz is up — confirm before we drive the CLI"
 Enter
 Type "curl -s http://127.0.0.1:51823/healthz"
 Enter
 Sleep 2s
 
-Type "# raw bytes to stdout"
+Type "# raw bytes to stdout (against the mock chain via the portal container)"
 Enter
-Type "octravpn --config demo/state/portal/config.toml fetch oct://octCircleDemo/policy.json"
+Type "docker exec octravpn-portal-demo octravpn --config /etc/octravpn/config.toml fetch oct://octCircleDemo/policy.json"
 Enter
-Sleep 3s
+Sleep 4s
 
 Type "# same asset, save to disk + show Content-Type"
 Enter
-Type "octravpn --config demo/state/portal/config.toml fetch --headers -o /tmp/policy.json oct://octCircleDemo/policy.json"
-Enter
-Sleep 3s
-Type "cat /tmp/policy.json"
-Enter
-Sleep 2s
-
-Type "# interactive prompt path (sealed asset; will prompt on TTY)"
-Enter
-Type "octravpn --config demo/state/portal/config.toml fetch -i oct://octCircleDemo/sealed.json"
+Type "docker exec octravpn-portal-demo octravpn --config /etc/octravpn/config.toml fetch --headers -o /tmp/policy.json oct://octCircleDemo/policy.json"
 Enter
 Sleep 4s
+Type "docker exec octravpn-portal-demo cat /tmp/policy.json"
+Enter
+Sleep 3s
+
+Type "# interactive prompt path (sealed asset; surfaces 'sealed' error without TTY)"
+Enter
+Type "docker exec octravpn-portal-demo octravpn --config /etc/octravpn/config.toml fetch -i oct://octCircleDemo/sealed.json || true"
+Enter
+Sleep 5s
+
+Type "bash demo/lib/portal-container-teardown.sh"
+Enter
+Sleep 5s

@@ -1,21 +1,12 @@
 # 16-user-oct-url-sealed.tape
 #
-# Captures the sealed-asset oct:// flow: the same portal as tape 15,
-# but the asset path resolves to a circle entry that is encrypted
-# under a per-circle passphrase. The portal shows the CONFIRM card,
-# prompts for the passphrase, decrypts in-process, then renders the
-# plaintext. CLI surface only; the visual CONFIRM page is exercised
-# in the OBS-captured browser half (see docs/demo.md §Segment 2).
+# Captures the sealed-asset oct:// flow against the same containerized
+# portal as tape 15. The portal shows the CONFIRM card, prompts for
+# the passphrase, decrypts in-process, then renders the plaintext.
+# CLI surface only; the visual CONFIRM page is exercised in the
+# OBS-captured browser half (see docs/demo.md §Segment 2).
 #
-# The companion test that pins this flow end-to-end is
-# `crates/octravpn-client/tests/portal_integration.rs::sealed_*`.
-#
-# REQUIRES:
-#   - Same as tape 15: `octravpn` client on PATH; portal at
-#     127.0.0.1:51823 (auto-spawned by the Source line below).
-#   - A sealed asset at `oct://octCircleDemo/sealed.json` whose
-#     plaintext is decryptable with `OCTRAVPN_SEALED_PASSPHRASE`.
-#     The demo state directory must carry the matching keyset.
+# Harness: demo/lib/portal-container-bringup.sh.
 #
 # Re-run with: vhs demo/tapes/16-user-oct-url-sealed.tape
 
@@ -28,8 +19,9 @@ Set Height 720
 Set Theme "Dracula"
 Set TypingSpeed 40ms
 
-Source demo/lib/start-portal.sh
-
+Type "bash demo/lib/portal-container-bringup.sh"
+Enter
+Sleep 60s
 Type "# 1. portal is up; CONFIRM gate kicks in on first-touch sealed assets"
 Enter
 Type "curl -fsS http://127.0.0.1:51823/healthz"
@@ -38,27 +30,28 @@ Sleep 2s
 
 Type "# 2. fetch a sealed JSON asset, passphrase via env (matches CI)"
 Enter
-Type "export OCTRAVPN_SEALED_PASSPHRASE=demo-passphrase-correct-horse"
+Type "docker exec -e OCTRAVPN_SEALED_PASSPHRASE=demo-passphrase-correct-horse octravpn-portal-demo octravpn --config /etc/octravpn/config.toml fetch -i oct://octCircleDemo/sealed.json || true"
 Enter
-Sleep 1s
-Type "octravpn --config demo/state/portal/config.toml fetch -i oct://octCircleDemo/sealed.json"
-Enter
-Sleep 4s
+Sleep 5s
 
 Type "# 3. same asset via open-url — portal shows CONFIRM, prompts on TTY"
 Enter
-Type "octravpn --config demo/state/portal/config.toml open-url oct://octCircleDemo/sealed.json"
+Type "docker exec -e OCTRAVPN_SEALED_PASSPHRASE=demo-passphrase-correct-horse octravpn-portal-demo octravpn --config /etc/octravpn/config.toml open-url oct://octCircleDemo/sealed.json || true"
 Enter
-Sleep 4s
+Sleep 5s
 
 Type "# 4. wrong passphrase — sealed envelope detects + refuses to render"
 Enter
-Type "OCTRAVPN_SEALED_PASSPHRASE=wrong octravpn --config demo/state/portal/config.toml fetch oct://octCircleDemo/sealed.json || echo 'sealed: decrypt failed (expected)'"
+Type "docker exec -e OCTRAVPN_SEALED_PASSPHRASE=wrong octravpn-portal-demo sh -c 'octravpn --config /etc/octravpn/config.toml fetch oct://octCircleDemo/sealed.json || echo sealed: decrypt failed (expected)'"
 Enter
-Sleep 4s
+Sleep 5s
 
 Type "# 5. plaintext sibling unaffected — no CONFIRM, no passphrase needed"
 Enter
-Type "octravpn --config demo/state/portal/config.toml fetch oct://octCircleDemo/policy.json"
+Type "docker exec octravpn-portal-demo octravpn --config /etc/octravpn/config.toml fetch oct://octCircleDemo/policy.json || true"
 Enter
-Sleep 3s
+Sleep 4s
+
+Type "bash demo/lib/portal-container-teardown.sh"
+Enter
+Sleep 5s

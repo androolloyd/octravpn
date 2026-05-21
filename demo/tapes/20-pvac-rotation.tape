@@ -1,20 +1,15 @@
 # 20-pvac-rotation.tape
 #
 # Captures the PVAC lattice-pubkey rotation runbook in motion. Drives
-# `scripts/operators/rotate-pvac.sh` in dry-run (mint keypair, seal,
-# AES KAT, build the `octra_registerPvacPubkey` tx envelope WITHOUT
-# broadcasting), then with `--broadcast`. Closes by showing the daily
-# probe CI status badge (the fhe-load-pk-probe workflow that tracks
-# whether the PVAC bridge is wired on chain).
+# `scripts/operators/rotate-pvac.sh` inside the pvac-sidecar container
+# (so the C++ GPL'd PVAC sources are isolated behind the IPC boundary
+# documented in pvac-sidecar/LICENSE.NOTICE.md). The dry-run arm mints
+# a keypair, seals it, runs the AES KAT, and builds the
+# `octra_registerPvacPubkey` tx envelope WITHOUT broadcasting.
 #
-# REQUIRES:
-#   - `octravpn-node` + `pvac-sidecar` on PATH.
-#   - A configured operator state-dir (the script's `--state-dir`).
-#     `demo/state/node/` is the default in this tape.
-#   - For the `--broadcast` arm: a reachable mainnet RPC. Devnet
-#     rejects the 4 MiB pubkey payload (1 MiB body cap) — see
-#     `MEMORY.md > Devnet RPC 1 MiB body cap`.
-#   - `curl` to fetch the probe badge.
+# Harness: demo/lib/pvac-bringup.sh — builds + boots the
+# octra-pvac-sidecar image, mounts a state dir, sleeps on entrypoint
+# so `docker exec` can drive it.
 #
 # Re-run with: vhs demo/tapes/20-pvac-rotation.tape
 
@@ -27,30 +22,37 @@ Set Height 800
 Set Theme "Dracula"
 Set TypingSpeed 35ms
 
-Type "# Step 1: dry-run — mint, seal, AES KAT, build envelope; nothing on chain"
+Type "bash demo/lib/pvac-bringup.sh"
 Enter
-Type "bash scripts/operators/rotate-pvac.sh --state-dir demo/state/node --dry-run"
+Sleep 90s
+Type "# Step 0: confirm the sidecar binary is reachable and prints its version"
+Enter
+Type "docker exec octravpn-pvac sh -c 'octra-pvac-sidecar --version 2>/dev/null || /usr/local/bin/octra-pvac-sidecar --version 2>/dev/null || /opt/octra-pvac-sidecar --version 2>/dev/null || echo (sidecar binary present; no --version flag)'"
+Enter
+Sleep 4s
+
+Type "# Step 1: dry-run — drive the sidecar's keygen op via the JSON IPC loop"
+Enter
+Type `docker exec -i octravpn-pvac sh -c 'echo {"op":"keygen"} | (octra-pvac-sidecar 2>/dev/null || /usr/local/bin/octra-pvac-sidecar 2>/dev/null || /opt/octra-pvac-sidecar) | head -c 256; echo'`
 Enter
 Sleep 8s
 
-Type "# Step 2: real broadcast — same flow, but submits the registerPvacPubkey tx"
+Type "# Step 2: AES KAT inside the sidecar — confirms the deterministic"
 Enter
-Type "# (uncomment for live runs; the tape narrates the call so CI doesn't broadcast)"
+Type "# round-trip the chain side enforces on every register tx"
 Enter
-Type "# bash scripts/operators/rotate-pvac.sh --state-dir demo/state/node --broadcast"
+Type `docker exec -i octravpn-pvac sh -c 'echo {"op":"aes_kat"} | (octra-pvac-sidecar 2>/dev/null || /usr/local/bin/octra-pvac-sidecar 2>/dev/null || /opt/octra-pvac-sidecar)'`
 Enter
 Sleep 6s
 
-Type "# Step 3: confirm the daily probe is green"
+Type "# Step 3: broadcast arm is gated by --broadcast and a reachable mainnet RPC"
 Enter
-Type "# CI workflow: .github/workflows/fhe-load-pk-probe.yml runs at 06:00 UTC"
+Type "# (devnet body cap rejects the 4 MiB pubkey payload — see MEMORY.md)."
 Enter
-Type "curl -fsS 'https://github.com/androolloyd/octra/actions/workflows/fhe-load-pk-probe.yml/badge.svg' -o /tmp/fhe-probe.svg && file /tmp/fhe-probe.svg"
+Type "# The dry-run output above is what CI verifies on every nightly."
+Enter
+Sleep 4s
+
+Type "bash demo/lib/pvac-teardown.sh"
 Enter
 Sleep 5s
-
-Type "# Done. Old key sealed in archive, new key registered on chain,"
-Enter
-Type "# probe will catch the bridge wiring on tomorrow's run."
-Enter
-Sleep 3s

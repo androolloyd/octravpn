@@ -1,21 +1,14 @@
 # 18-tailnet-owner-policy.tape
 #
-# Captures the tailnet-owner day-2 policy surface: edit a hujson
-# policy locally, push it via `octravpn-node headscale policy set
-# <FILE>`, and demonstrate that already-joined nodes pick up the new
-# filter on the next `/map` poll. The parked-poller path wakes within
-# ~1ms — see `crates/octravpn-node/tests/policy_e2e.rs` for the
-# end-to-end assertion.
+# Captures the tailnet-owner day-2 policy surface end-to-end:
+# write a hujson policy to a tempfile inside mesh-demo-control via
+# `docker exec -i sh -c 'cat > ...'`, then `octravpn-node headscale
+# policy set` it, then read it back.
 #
-# REQUIRES:
-#   - `octravpn-node` on PATH (the embedded `headscale` CLI surface).
-#   - A reachable headscale control plane. Two ways to satisfy this:
-#       (a) point HEADSCALE_URL / HEADSCALE_ADMIN_TOKEN at a running
-#           control plane (e.g. the 3-node mesh from tape 08), OR
-#       (b) source the in-repo mesh bringup (uncomment the Source line
-#           below). Bringup costs ~120s of cold cache the first time.
-#   - `curl` to confirm the live-reload (peer hits /map and sees the
-#     new ACL set echoed back).
+# Harness: demo/lib/3node-mesh-bringup.sh — same mesh + control
+# plane every other "8/9/10" tape uses. The HEADSCALE_URL +
+# HEADSCALE_ADMIN_TOKEN flow into the control container's admin
+# surface at 127.0.0.1:51820.
 #
 # Re-run with: vhs demo/tapes/18-tailnet-owner-policy.tape
 
@@ -28,45 +21,44 @@ Set Height 800
 Set Theme "Dracula"
 Set TypingSpeed 35ms
 
-# Uncomment to bring the 3-node mesh up locally; in CI the heavy job
-# already has the stack from the matrix step before this tape.
-# Source demo/lib/3node-mesh-bringup.sh
+Type "bash demo/lib/3node-mesh-bringup.sh"
+Enter
+Sleep 120s
 
-Type "# Step 1: write a minimal hujson policy (allow all between alice + bob)"
+Type "# Step 1: write a minimal hujson policy (alice <-> bob accept-all)"
 Enter
-Type "cat > /tmp/policy.hujson <<HUJSON"
+Type "docker exec -i mesh-demo-control sh -c 'cat > /tmp/policy.hujson'"
 Enter
-Type "// allow alice <-> bob, deny everything else"
+Sleep 500ms
+Type `{ "acls": [ { "action": "accept", "src": ["alice"], "dst": ["bob:*"] } ] }`
 Enter
-Type "{ acls: [ { action: 'accept', src: ['alice'], dst: ['bob:*'] } ] }"
-Enter
-Type "HUJSON"
+Ctrl+D
+Sleep 1s
+Type "docker exec mesh-demo-control cat /tmp/policy.hujson"
 Enter
 Sleep 2s
 
-Type "# Step 2: push the policy via the embedded headscale CLI"
+Type "# Step 2: lint + push the policy via the embedded headscale CLI"
 Enter
-Type "octravpn-node headscale policy check /tmp/policy.hujson"
-Enter
-Sleep 3s
-Type "octravpn-node headscale policy set /tmp/policy.hujson"
+Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51820 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale policy check /tmp/policy.hujson || true"
 Enter
 Sleep 4s
+Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51820 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale policy set /tmp/policy.hujson || true"
+Enter
+Sleep 5s
 
-Type "# Step 3: confirm the control plane echoes back the new policy"
+Type "# Step 3: read the active policy back from the control plane"
 Enter
-Type "octravpn-node headscale policy get"
+Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51820 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale policy get || true"
 Enter
-Sleep 4s
+Sleep 5s
 
-Type "# Step 4: any parked /map poller wakes within ~1ms (policy_e2e.rs pins this)"
+Type "# Step 4: nodes list — parked /map pollers see the new packetfilter on next request"
 Enter
-Type "# A joined peer hits /machine/<key>/map and gets the updated PacketFilter:"
+Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51820 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale nodes list || true"
 Enter
-Type "octravpn-node headscale nodes list"
-Enter
-Sleep 4s
+Sleep 5s
 
-Type "# Done. New policy live across the tailnet without a peer reconnect."
+Type "bash demo/lib/3node-mesh-teardown.sh"
 Enter
-Sleep 2s
+Sleep 5s

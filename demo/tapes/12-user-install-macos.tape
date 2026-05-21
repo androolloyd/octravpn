@@ -1,5 +1,12 @@
 # 12-user-install-macos.tape
 #
+# INTENTIONALLY FAKED — see demo-realize PR notes. macOS install paths
+# (Homebrew / App Store / Network Extension load) cannot be exercised
+# from Linux CI and require GUI interaction on a Mac. The fake
+# narration below is the contract this tape ships; the corresponding
+# live flow lives in tape 08 (3-node docker mesh) for the headless
+# CLI shape.
+#
 # Captures the macOS end-user's join flow. Two install paths:
 #  (a) Homebrew + the CLI-only tailscale package (preferred for
 #      headless macOS hosts and the demo's CI runner).

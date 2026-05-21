@@ -1,17 +1,14 @@
 # 22-headscale-cli-tour.tape
 #
-# Quick tour of the embedded `headscale` admin CLI surface — the
-# single-binary win from simplify-5+ (one `octravpn-node`, no
-# separate `headscale` install). Same flags, same exit codes, same
-# stdout as the standalone binary in headscale-rs; the only
-# difference is the `octravpn-node` prefix in the usage block.
+# Quick tour of the embedded `headscale` admin CLI surface as exposed
+# by `octravpn-node headscale` — the single-binary win from
+# simplify-5+ (one `octravpn-node`, no separate `headscale` install).
+# Same flags, same exit codes, same stdout as the standalone binary
+# in headscale-rs.
 #
-# REQUIRES:
-#   - `octravpn-node` on PATH or under target/{release,debug}/.
-#   - A reachable headscale control plane. `HEADSCALE_URL` /
-#     `HEADSCALE_ADMIN_TOKEN` should be set, or `--server` /
-#     `--token` passed explicitly. The 3-node mesh from tape 08
-#     boots a control plane on http://127.0.0.1:51820 that works.
+# Harness: demo/lib/3node-mesh-bringup.sh — mesh-demo-control hosts
+# the headscale admin surface on 127.0.0.1:51820. Bearer token
+# `mesh-demo-token` is baked into the compose env.
 #
 # Re-run with: vhs demo/tapes/22-headscale-cli-tour.tape
 
@@ -24,50 +21,45 @@ Set Height 800
 Set Theme "Dracula"
 Set TypingSpeed 35ms
 
-Type "export HEADSCALE_URL=http://127.0.0.1:51820"
+Type "bash demo/lib/3node-mesh-bringup.sh"
 Enter
-Type "export HEADSCALE_ADMIN_TOKEN=mesh-demo-token"
-Enter
-Sleep 1s
-
+Sleep 120s
 Type "# 1. create a user (the namespace that owns nodes + keys)"
 Enter
-Type "octravpn-node headscale users create alice"
+Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51820 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale users create alice || true"
+Enter
+Sleep 3s
+Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51820 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale users list || true"
 Enter
 Sleep 3s
 
-Type "octravpn-node headscale users list"
+Type "# 2. enumerate joined nodes (machines) — peer-1/2/3 from the bringup"
 Enter
-Sleep 3s
-
-Type "# 2. enumerate joined nodes (machines)"
+Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51820 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale nodes list || true"
 Enter
-Type "octravpn-node headscale nodes list"
-Enter
-Sleep 3s
+Sleep 4s
 
 Type "# 3. mint a reusable preauth key for fleet rollouts"
 Enter
-Type "octravpn-node headscale preauthkeys create --user alice --reusable --expiration 24h"
+Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51820 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale preauthkeys create --user alice --reusable --expiration 24h || true"
 Enter
-Sleep 3s
-
-Type "octravpn-node headscale preauthkeys list --user alice"
+Sleep 4s
+Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51820 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale preauthkeys list --user alice || true"
 Enter
-Sleep 3s
+Sleep 4s
 
 Type "# 4. inspect the active hujson policy"
 Enter
-Type "octravpn-node headscale policy get"
+Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51820 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale policy get || true"
 Enter
-Sleep 3s
+Sleep 4s
 
-Type "# 5. tailnet-wide status — DERP regions, derp latency, peer count"
+Type "# 5. tailnet-wide status — DERP regions, latency, peer count"
 Enter
-Type "octravpn-node headscale tailnet status"
+Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51820 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale tailnet status || true"
 Enter
-Sleep 3s
+Sleep 4s
 
-Type "# All of that surface lives behind one binary now."
+Type "bash demo/lib/3node-mesh-teardown.sh"
 Enter
-Sleep 2s
+Sleep 5s
