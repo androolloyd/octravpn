@@ -195,11 +195,27 @@ async fn policy_put_propagates_to_map_packet_filter() {
     let mr = fetch_map(&app, &a_hex).await;
     assert_eq!(mr.packet_filter.len(), 1, "allow-all ⇒ one wildcard rule");
     let rule = &mr.packet_filter[0];
-    assert_eq!(rule.src_ips, vec!["*"]);
-    assert_eq!(rule.dst_ports.len(), 1);
-    assert_eq!(rule.dst_ports[0].ip, "*");
+    // Headscale-go parity (sibling commit 612a7bb): `*` principals
+    // expand into the IPv4+IPv6 zero-prefix pair when emitted on the
+    // wire — see `wildcard_filter_cidrs()` in headscale-api-acl. The
+    // dst side mirrors the same shape, producing TWO NetPortRange
+    // entries (one per address family) per wildcard rule. Tailscale
+    // clients accept both forms; the cidr pair is the canonical
+    // upstream representation.
+    //
+    // KNOWN INCONSISTENCY (headscale-rs follow-up): the default
+    // allow-all bypass at Step 1 still emits the legacy `["*"]`
+    // because it doesn't route through the same expansion path. The
+    // user-supplied-policy path (here) is parity-correct; the
+    // bypass needs to be lifted to match.
+    assert_eq!(rule.src_ips, vec!["0.0.0.0/0", "::/0"]);
+    assert_eq!(rule.dst_ports.len(), 2);
+    assert_eq!(rule.dst_ports[0].ip, "0.0.0.0/0");
+    assert_eq!(rule.dst_ports[1].ip, "::/0");
     assert_eq!(rule.dst_ports[0].ports.first, 0);
     assert_eq!(rule.dst_ports[0].ports.last, 65535);
+    assert_eq!(rule.dst_ports[1].ports.first, 0);
+    assert_eq!(rule.dst_ports[1].ports.last, 65535);
     assert!(rule.ip_proto.is_empty(), "IPProto empty ⇒ all protocols");
 }
 
