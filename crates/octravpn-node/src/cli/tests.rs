@@ -392,15 +392,211 @@ fn cli_parses_mesh_mint_preauth() {
                 user,
                 reusable,
                 ttl_secs,
+                remote,
+                admin_token,
             } => {
                 assert_eq!(user, "alice");
                 assert!(reusable);
                 assert!(ttl_secs.is_none());
+                // Backward-compat: omitting both flags = local mint mode.
+                assert!(remote.is_none());
+                assert!(admin_token.is_none());
             }
             other => panic!("expected Mesh::MintPreauth, got {other:?}"),
         },
         other => panic!("expected Mesh, got {other:?}"),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Daemon-bound `mesh mint-preauth --remote ... --admin-token ...` coverage.
+// ---------------------------------------------------------------------------
+
+/// Clap validates the `--remote` / `--admin-token` requires-pair:
+/// supplying one without the other must fail at parse time so a
+/// misconfig prints a clear error, not a 401 from the daemon.
+#[test]
+fn remote_flag_without_admin_token_clap_rejects() {
+    // `--remote` without `--admin-token` → parse error.
+    let err = Cli::try_parse_from([
+        "octravpn-node",
+        "mesh",
+        "mint-preauth",
+        "--user",
+        "alice",
+        "--remote",
+        "http://127.0.0.1:51821",
+    ])
+    .unwrap_err();
+    // clap's MissingRequiredArgument variant maps to this kind.
+    assert_eq!(
+        err.kind(),
+        clap::error::ErrorKind::MissingRequiredArgument,
+        "expected MissingRequiredArgument, got {:?}",
+        err.kind()
+    );
+
+    // And the inverse: `--admin-token` without `--remote` is just as
+    // invalid (the token is only meaningful when the remote path is
+    // active).
+    let err = Cli::try_parse_from([
+        "octravpn-node",
+        "mesh",
+        "mint-preauth",
+        "--user",
+        "alice",
+        "--admin-token",
+        "secret",
+    ])
+    .unwrap_err();
+    assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument,);
+}
+
+/// Backward-compat: `mesh mint-preauth --user alice` (no remote flags)
+/// still drives the local in-process minter and prints a key prefixed
+/// with `octrapreauth-` to stdout.
+#[tokio::test]
+async fn local_mode_prints_key_when_no_remote() {
+    // Drive the dispatcher directly with the MintPreauth variant in
+    // local-mode shape. We capture stdout by reusing the public
+    // PreauthMinter — the dispatcher prints the same shape via
+    // `println!`, but here we just confirm the variant constructs
+    // cleanly and would produce a properly-formatted key. (The actual
+    // `println!` is exercised end-to-end by the tape.)
+    use octravpn_mesh::{PreauthMinter, DEFAULT_PREAUTH_TTL};
+    let minter = PreauthMinter::new();
+    let pk = minter.mint("alice", DEFAULT_PREAUTH_TTL, false);
+    assert!(
+        pk.key.starts_with("octrapreauth-"),
+        "local mint must produce an `octrapreauth-` prefixed key (got {})",
+        pk.key
+    );
+    assert_eq!(pk.user, "alice");
+    assert!(!pk.reusable);
+
+    // Also confirm clap parses the local-mode shape cleanly (no
+    // remote flags) — guards against an accidental `required` slip
+    // that would break backward-compat.
+    let cli =
+        Cli::try_parse_from(["octravpn-node", "mesh", "mint-preauth", "--user", "alice"]).unwrap();
+    match cli.cmd {
+        Cmd::Mesh(a) => match a.sub {
+            super::mesh::MeshCmd::MintPreauth { remote, .. } => assert!(remote.is_none()),
+            _ => panic!("expected MintPreauth"),
+        },
+        _ => panic!("expected Mesh"),
+    }
+}
+
+/// Daemon-bound mode: POST hits `/admin/preauth` with the right body
+/// shape and `Authorization: Bearer <token>` header. Drives a real
+/// ephemeral axum server on 127.0.0.1:0 — same pattern as the
+/// `probe_remote_health_ok_against_mock_server` test in `cli_ops.rs`.
+#[tokio::test]
+async fn remote_mode_posts_to_admin_preauth_endpoint() {
+    use axum::{extract::State, http::HeaderMap, routing::post, Json, Router};
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    struct Captured {
+        auth_header: Arc<Mutex<Option<String>>>,
+        body_json: Arc<Mutex<Option<serde_json::Value>>>,
+    }
+
+    let state = Captured::default();
+    let app = {
+        let state = state.clone();
+        Router::new().route(
+            "/admin/preauth",
+            post(
+                move |State(s): State<Captured>,
+                      headers: HeaderMap,
+                      Json(b): Json<serde_json::Value>| async move {
+                    *s.auth_header.lock().unwrap() = headers
+                        .get(axum::http::header::AUTHORIZATION)
+                        .and_then(|v| v.to_str().ok())
+                        .map(std::string::ToString::to_string);
+                    *s.body_json.lock().unwrap() = Some(b);
+                    Json(serde_json::json!({
+                        "key": "octrapreauth-test-abc",
+                        "user": "alice",
+                        "reusable": true,
+                        "expires_at": 1_700_000_000_u64,
+                    }))
+                },
+            )
+            .with_state(state),
+        )
+    };
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let _join = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    // Yield so the server is ready before the client dials.
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+    let out = super::mesh::run_remote_mint(
+        &format!("http://{addr}"),
+        "the-token",
+        "alice",
+        true,
+        Some(7200),
+    )
+    .await
+    .expect("remote mint succeeds");
+
+    // Response is parsed into RemoteMintOutcome with the daemon's
+    // exact field names.
+    assert_eq!(out.key, "octrapreauth-test-abc");
+    assert_eq!(out.user, "alice");
+    assert!(out.reusable);
+    assert_eq!(out.expires_at, 1_700_000_000);
+
+    // The request hit the right route with the right auth and body.
+    let auth = state.auth_header.lock().unwrap().clone();
+    assert_eq!(auth.as_deref(), Some("Bearer the-token"));
+    let body = state.body_json.lock().unwrap().clone().unwrap();
+    assert_eq!(body["user"], "alice");
+    assert_eq!(body["reusable"], true);
+    assert_eq!(body["ttl_secs"], 7200);
+}
+
+/// A 401 from the daemon surfaces as a user-friendly error pointing
+/// at the `[control].admin_token` config field — operators should not
+/// have to grep the source to translate "401" into "rotate your bearer".
+#[tokio::test]
+async fn remote_mode_propagates_4xx_with_clear_message() {
+    use axum::{http::StatusCode, routing::post, Router};
+    let app = Router::new().route(
+        "/admin/preauth",
+        post(|| async { (StatusCode::UNAUTHORIZED, "nope") }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let _join = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+    let err = super::mesh::run_remote_mint(
+        &format!("http://{addr}"),
+        "wrong-token",
+        "alice",
+        false,
+        None,
+    )
+    .await
+    .expect_err("401 must surface as a Result::Err");
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("admin token rejected"),
+        "expected friendly 401 message, got: {msg}"
+    );
+    assert!(
+        msg.contains("[control].admin_token"),
+        "expected config-field hint, got: {msg}"
+    );
 }
 
 // ----------------------------------------------------------------------

@@ -35,14 +35,24 @@ pub(crate) enum MeshCmd {
     ///   KEY=$(octravpn-node mesh mint-preauth --user alice)
     ///   tailscale up --login-server http://… --authkey "$KEY"
     ///
-    /// The key is generated locally (no daemon contact) and is
-    /// suitable for emitting to an operator. Cross-process binding
-    /// (so a running daemon's coordination plane would accept the
-    /// key) requires the persistent minter from
-    /// `docs/tailscale-interop-blocker.md`; until that lands, this
-    /// subcommand is fine for satisfying the interop test's "is the
-    /// preauth surface reachable" probe but cannot, on its own,
-    /// authorise a real tailscale join.
+    /// Two modes:
+    ///
+    /// 1. **Local (default)** — `mesh mint-preauth --user alice`.
+    ///    The key is generated in-process (no daemon contact) and
+    ///    printed to stdout. Suitable for shell scripting and for
+    ///    satisfying the interop test's "reachable surface" probe,
+    ///    but cannot authorise a real `tailscale up` join because
+    ///    the running daemon doesn't know about the key.
+    ///
+    /// 2. **Daemon-bound (remote)** — pass both `--remote <URL>` and
+    ///    `--admin-token <TOKEN>`. The CLI POSTs to
+    ///    `<remote>/admin/preauth` with `Authorization: Bearer
+    ///    <token>`; the running daemon's persistent `PreauthMinter`
+    ///    materialises the key so it survives across process
+    ///    boundaries and is honoured by a real
+    ///    `tailscale up --authkey "$KEY"`. The minted key is printed
+    ///    to stdout in the same shape as the local mode so existing
+    ///    shell scripts work unchanged.
     MintPreauth {
         /// User label to bind the minted key to.
         #[arg(long, default_value = "default")]
@@ -54,6 +64,17 @@ pub(crate) enum MeshCmd {
         /// TTL in seconds. Defaults to `DEFAULT_PREAUTH_TTL` (1 h).
         #[arg(long)]
         ttl_secs: Option<u64>,
+        /// Optional. When set, switches to the daemon-bound mint
+        /// path: POST to `<URL>/admin/preauth` instead of minting
+        /// locally. Pair with `--admin-token`. Example:
+        /// `--remote http://127.0.0.1:51821`.
+        #[arg(long, requires = "admin_token")]
+        remote: Option<String>,
+        /// Bearer token for the daemon's admin surface. Required
+        /// when `--remote` is set (and only meaningful then). Maps
+        /// to `[control].admin_token` in the daemon's `node.toml`.
+        #[arg(long, requires = "remote")]
+        admin_token: Option<String>,
     },
     /// Run a minimal Tailscale-wire control plane (no chain / wallet
     /// dependencies). Used by the
@@ -137,7 +158,32 @@ pub(crate) async fn run_mesh_cmd(sub: MeshCmd) -> Result<()> {
             user,
             reusable,
             ttl_secs,
+            remote,
+            admin_token,
         } => {
+            // Remote (daemon-bound) path: clap's `requires` keeps
+            // these in lock-step — if one is set, the other must
+            // be too, so we can match on `remote` and trust
+            // `admin_token` is present.
+            if let Some(remote_url) = remote {
+                let token = admin_token.expect(
+                    "clap `requires = \"admin_token\"` should have rejected `--remote` \
+                     without `--admin-token`",
+                );
+                let minted = run_remote_mint(&remote_url, &token, &user, reusable, ttl_secs)
+                    .await
+                    .with_context(|| format!("daemon-bound mint via {remote_url}"))?;
+                // Same stdout/stderr split as the local path so
+                // `KEY=$(octravpn-node mesh mint-preauth ...)` keeps
+                // working byte-identically.
+                eprintln!(
+                    "minted preauth (remote): user={} reusable={} expires_at={}",
+                    minted.user, minted.reusable, minted.expires_at
+                );
+                println!("{}", minted.key);
+                return Ok(());
+            }
+
             use octravpn_mesh::{PreauthMinter, DEFAULT_PREAUTH_TTL};
             let ttl = ttl_secs.map_or(DEFAULT_PREAUTH_TTL, std::time::Duration::from_secs);
             let minter = PreauthMinter::new();
@@ -260,18 +306,26 @@ async fn run_mesh_serve(
         }
         _ => empty_derp_map(),
     };
+    // Shared handles: the wire layer + the admin router both need to
+    // see the same `MachineRegistry` (so `GET /api/v1/machines` reflects
+    // the real wire roster) and the same `PolicyStore` (so
+    // `PUT /api/v1/policy` lands a doc the wire `/map` handler will see
+    // on its next poll). Cloning the `Arc`s is the standard headscale-rs
+    // wiring — see `tests/policy_e2e.rs` for the in-process proof.
+    let machines = Arc::new(MachineRegistry::new());
+    let policy = octravpn_mesh::policy::PolicyStore::new();
     let ws = WireState {
         server_noise_key: server_noise_key.clone(),
         preauth: Arc::new(minter.clone()),
         ip_allocator: Arc::new(TailnetIpAllocator::new(tailnet_id)),
-        machines: Arc::new(MachineRegistry::new()),
+        machines: machines.clone(),
         derp_map: Arc::new(derp_map),
         // P1-policy: empty store ⇒ wire layer falls back to
         // `allow_all_packet_filter`. The admin surface (when
         // mounted) holds an `Arc` clone of this store and uses
         // PUT to push hujson docs; the store's `Notify` wakes
         // parked `/map` long-pollers within ~1 ms.
-        policy: Arc::new(octravpn_mesh::policy::PolicyStore::new()),
+        policy: Arc::new(policy.clone()),
         // PSK-gated handshake (layer 3 of the active-probe shield).
         // Default-disabled — operators opt in via
         // `[control.knock] enabled = true` in node.toml, with the PSK
@@ -339,13 +393,50 @@ async fn run_mesh_serve(
         })
         .into_response()
     }
+    // Share the bearer token between the two admin sub-routers (the
+    // legacy `POST /admin/preauth` shim + the unified
+    // `/api/v1/{machines,policy,...}` surface built below). Cloning
+    // the `Arc<str>` is cheap — both layers run the same byte-stable
+    // 404 reject path on missing / wrong tokens.
+    let admin_token_arc: Option<Arc<str>> = admin_token.map(Arc::from);
     let admin_ctx = AdminCtx {
-        minter,
-        token: admin_token.map(Arc::from),
+        minter: minter.clone(),
+        token: admin_token_arc.clone(),
     };
-    let admin_router = Router::new()
+    let legacy_preauth_router = Router::new()
         .route("/admin/preauth", post(mint_handler))
         .with_state(admin_ctx);
+
+    // Unified admin surface — same routes the full Hub would mount
+    // (`/api/v1/machines` for the roster, `/api/v1/policy{,/validate}`
+    // for the live ACL store, `/api/v1/preauthkeys` for HTTP mint /
+    // expire, plus the operator HTML pages at `/admin/...`). Shares the
+    // `MachineRegistry` + `PolicyStore` constructed above with the wire
+    // layer, so `mesh status` / `mesh policy get` reflect (and mutate)
+    // the live state seen by `/map`.
+    //
+    // Wrapped in `octravpn_mesh::build_admin_router`, which layers a
+    // hidden-policy `BearerCheck` on top so every failed-auth response
+    // is byte-stable `(404, NGINX_404_BODY)` — preserves the Audit-3
+    // H-1 invariant `BearerCheck::Hidden` already enforces for
+    // `/admin/preauth` and `/events`.
+    let unified_admin_router = {
+        let admin_state = octravpn_mesh::admin_surface::AdminState::builder()
+            .bearer_token(admin_token_arc.as_deref().unwrap_or("").to_string())
+            .users(octravpn_mesh::headscale_api::admin::UserRegistry::new())
+            .machines(Arc::new(
+                octravpn_mesh::headscale_api::admin::WireMachineAdmin::new(machines.clone()),
+            ))
+            .preauth(Arc::new(
+                octravpn_mesh::headscale_api::admin::InMemoryPreauthAdmin::new(),
+            ))
+            .derp_regions(0)
+            .policy(policy.clone())
+            .build();
+        octravpn_mesh::admin_surface::build_admin_router(admin_state, admin_token_arc.clone())
+    };
+
+    let admin_router = legacy_preauth_router.merge(unified_admin_router);
 
     // Dual-bind: plain HTTP on `listen` for /admin/preauth + curl
     // probes; rustls-terminated HTTPS on `https_listen` for the
@@ -400,6 +491,124 @@ async fn run_mesh_serve(
         }
     }
     Ok(())
+}
+
+/// Outcome of a successful daemon-bound preauth mint. Mirrors the
+/// `POST /admin/preauth` response envelope (see
+/// `crates/octravpn-node/src/control/handlers/preauth.rs::MintPreauthResponse`)
+/// so the CLI's stdout shape matches the local path byte-for-byte
+/// (single line `key`; user/reusable/expires_at go to stderr).
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct RemoteMintOutcome {
+    pub(crate) key: String,
+    pub(crate) user: String,
+    pub(crate) reusable: bool,
+    pub(crate) expires_at: u64,
+}
+
+/// Daemon-bound preauth mint. POSTs JSON to `<remote>/admin/preauth`
+/// with a bearer token; on 2xx parses the `{key, user, reusable,
+/// expires_at}` envelope. Non-2xx and transport errors are mapped to
+/// operator-friendly messages here so the parent CLI can `?`-propagate
+/// straight to stderr.
+///
+/// `ttl_secs` is best-effort: the current daemon handler hard-codes
+/// `DEFAULT_PREAUTH_TTL` and ignores any TTL field in the body. We
+/// still send it (named `ttl_secs`, matching the contract the operator
+/// docs advertise) so a future daemon-side patch can pick it up
+/// without a wire-format break.
+pub(crate) async fn run_remote_mint(
+    remote: &str,
+    admin_token: &str,
+    user: &str,
+    reusable: bool,
+    ttl_secs: Option<u64>,
+) -> Result<RemoteMintOutcome> {
+    use anyhow::{anyhow, bail};
+    use std::time::Duration;
+
+    let url = {
+        let trimmed = remote.trim_end_matches('/');
+        format!("{trimmed}/admin/preauth")
+    };
+
+    // Match the mesh_ops `build_client` posture: 5s timeout, accept
+    // self-signed certs on loopback so the same daemon's HTTPS surface
+    // works without `--insecure` ergonomics. Bare-bones (no knock
+    // header — the daemon's `/admin/preauth` route is bearer-gated, not
+    // knock-gated).
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|e| anyhow!("build http client: {e}"))?;
+
+    let body = serde_json::json!({
+        "user": user,
+        "reusable": reusable,
+        "ttl_secs": ttl_secs,
+    });
+
+    let resp = client
+        .post(&url)
+        .bearer_auth(admin_token)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(body.to_string())
+        .send()
+        .await
+        .map_err(|e| {
+            // reqwest::Error::is_connect() catches the "daemon not
+            // running" case; anything else (DNS, timeout) bubbles up
+            // with the underlying message.
+            if e.is_connect() {
+                anyhow!("daemon at {remote} not reachable: {e}")
+            } else {
+                anyhow!("POST {url} failed: {e}")
+            }
+        })?;
+
+    let status = resp.status();
+    let body_text = resp.text().await.unwrap_or_default();
+
+    if !status.is_success() {
+        match status.as_u16() {
+            // The daemon's BearerCheck::Hidden returns 404 for every
+            // auth-rejection mode, but operators sometimes also stand
+            // up the surface behind a reverse proxy that returns 401;
+            // and `BearerCheck::Strict` (config: `admin_hidden = false`)
+            // does return real 401s. Map both shapes.
+            401 | 403 => bail!(
+                "admin token rejected (check [control].admin_token in node.toml on the daemon at {remote})"
+            ),
+            // 404 is ambiguous: Hidden-mode auth failure looks identical
+            // to "admin surface disabled". Bias the message towards the
+            // most common ops mistake (missing token in node.toml), and
+            // include the body for debugging.
+            404 => bail!(
+                "POST {url}: 404 — either the admin surface is disabled \
+                 (daemon started without [control].admin_token) or the bearer \
+                 was rejected in Hidden-mode. Body: {}",
+                trim_body(&body_text, 200)
+            ),
+            503 => bail!(
+                "admin surface disabled — daemon was started without [control].admin_token set"
+            ),
+            _ => bail!(
+                "POST {url}: {status}: {}",
+                trim_body(&body_text, 200)
+            ),
+        }
+    }
+
+    serde_json::from_str::<RemoteMintOutcome>(&body_text)
+        .with_context(|| format!("parse mint response body: {}", trim_body(&body_text, 200)))
+}
+
+fn trim_body(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}…", &s[..max])
+    }
 }
 
 /// Load the PSK-gated handshake config from the operator environment.

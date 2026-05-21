@@ -731,11 +731,27 @@ Usage: octravpn-node mesh mint-preauth [OPTIONS]
 | `--user` | string | `default` | User label to bind the minted key to. |
 | `--reusable` | bool | off | Off matches Tailscale's safer single-use default. |
 | `--ttl-secs` | u64 | `DEFAULT_PREAUTH_TTL` (3600 = 1h) | |
+| `--remote` | URL | _unset_ | When set, switches to the daemon-bound mint path: POST to `<URL>/admin/preauth` instead of minting locally. Requires `--admin-token`. |
+| `--admin-token` | string | _unset_ | Bearer token for the daemon's admin surface. Required when `--remote` is set (clap-`requires`). Maps to `[control].admin_token` in the daemon's `node.toml`. |
 
-Writes the key to stdout as a single line. The key is generated locally
-(no daemon contact); cross-process binding (so a running daemon's
-coordination plane would accept the key) requires the persistent minter
-work described in `docs/tailscale-interop-blocker.md`.
+Two modes:
+
+  * **Local mint (default)** — `mesh mint-preauth --user alice` generates
+    a key in-process with no daemon contact and prints it to stdout.
+    Suitable for shell scripting and reachability probes but NOT
+    honoured by a real `tailscale up` join because the running daemon
+    doesn't know about the key.
+  * **Daemon-bound mint** — `mesh mint-preauth --user alice --remote
+    http://127.0.0.1:51821 --admin-token <TOKEN>` POSTs to
+    `<remote>/admin/preauth`; the daemon's persistent `PreauthMinter`
+    materialises the key so it survives across process boundaries and
+    IS honoured by a real `tailscale up --authkey "$KEY"`.
+
+Stdout format is identical in both modes (single line, `octrapreauth-…`),
+so the `KEY=$(octravpn-node mesh mint-preauth …)` shell idiom works
+byte-identically. See [`docs/operators/mesh-preauth.md`](../operators/mesh-preauth.md)
+for the full operator playbook, error-mapping reference, and the
+`[control].admin_token` cross-reference.
 
 ### `mesh serve`
 
