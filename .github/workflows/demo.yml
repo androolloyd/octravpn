@@ -72,16 +72,26 @@ jobs:
           # binary from the headscale-rs sibling — installing into
           # /usr/local/bin keeps the parity-with-upstream story
           # (same CLI, same surface) that the demo tour leans on.
+          # Install into $HOME/.local — it's user-writable and the
+          # default PATH on ubuntu-latest already includes it. Using
+          # /usr/local would need sudo for the `cargo install`
+          # registry-touch (`/usr/local/.crates.toml`).
+          install_root="$HOME/.local"
+          mkdir -p "$install_root/bin"
+          echo "$install_root/bin" >> "$GITHUB_PATH"
           if [[ -d headscale-rs/headscale-cli ]]; then
-              cargo install --path headscale-rs/headscale-cli --bin headscale --root /usr/local --force
+              cargo install --path headscale-rs/headscale-cli --bin headscale --root "$install_root" --force
           elif [[ -d headscale-rs ]]; then
               # Layout fallback — newer headscale-rs checkouts may have
               # the bin at the workspace root.
-              cargo install --path headscale-rs --bin headscale --root /usr/local --force || \
+              cargo install --path headscale-rs --bin headscale --root "$install_root" --force || \
                   echo "headscale build failed (tape 07 will skip)"
           else
               echo "headscale-rs sibling not cloned; tape 07 will skip"
           fi
+          # GITHUB_PATH only takes effect for SUBSEQUENT steps; tell
+          # the current step too so the next two commands work.
+          export PATH="$install_root/bin:$PATH"
           command -v headscale || true
           headscale --version || true
 
