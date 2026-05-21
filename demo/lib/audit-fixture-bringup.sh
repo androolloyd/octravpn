@@ -61,7 +61,7 @@ docker exec "${CONTAINER_NAME}" sh -c 'command -v python3 >/dev/null 2>&1 || (ap
 
 # Synthesize the audit fixture inside the container so the binary's
 # byte-ordering / line-format expectations match the host's.
-docker exec "${CONTAINER_NAME}" python3 - <<'PY' || { echo "audit-fixture-bringup: fixture synth failed" >&2; exit 20; }
+docker exec -i "${CONTAINER_NAME}" python3 - <<'PY' || { echo "audit-fixture-bringup: fixture synth failed" >&2; exit 20; }
 import hmac, hashlib, json, os, secrets
 state_dir = "/work/node"
 os.makedirs(state_dir, exist_ok=True)

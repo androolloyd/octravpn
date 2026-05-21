@@ -33,7 +33,7 @@ Sleep 5s
 
 Type "# same data, JSONL form (drop into jq, splunk, etc.)"
 Enter
-Type "docker exec octravpn-audit-fixture sh -c 'octravpn-node audit replay --audit-path /work/node/audit.log --journal-path /work/node/receipts.bin --json | head -10'"
+Type "docker exec octravpn-audit-fixture sh -c 'octravpn-node audit replay --audit-path /work/node/audit.log --journal-path /work/node/receipts.bin --format json | head -10'"
 Enter
 Sleep 4s
 

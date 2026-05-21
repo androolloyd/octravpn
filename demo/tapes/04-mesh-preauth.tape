@@ -27,13 +27,13 @@ Sleep 120s
 
 Type "# Shape A — single-use preauth key for alice (default ttl), via the CLI"
 Enter
-Type "docker exec mesh-demo-control octravpn-node mesh mint-preauth --remote http://127.0.0.1:51821 --admin-token mesh-demo-token --user alice"
+Type "docker exec mesh-demo-control octravpn-node mesh mint-preauth --user alice"
 Enter
 Sleep 4s
 
 Type "# Shape B — reusable key for a fleet rollout, ttl 24h"
 Enter
-Type "docker exec mesh-demo-control octravpn-node mesh mint-preauth --remote http://127.0.0.1:51821 --admin-token mesh-demo-token --user fleet-ops --reusable --ttl-secs 86400"
+Type "docker exec mesh-demo-control octravpn-node mesh mint-preauth --user fleet-ops --reusable --ttl-secs 86400"
 Enter
 Sleep 4s
 
