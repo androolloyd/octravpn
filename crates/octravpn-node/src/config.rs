@@ -123,6 +123,64 @@ pub(crate) struct NodeConfig {
     /// See `docs/operators/audit-log.md`.
     #[serde(default)]
     pub audit: AuditCfg,
+    /// `[receipt_journal]` block — in-mem mirror cap, TTL eviction, and
+    /// sweeper interval (Perf-8 / audit-8 OOM-1). Defaults bound the
+    /// mirror at ~8.8 MB resident (100k entries × 88 B/entry); operators
+    /// with bigger working sets raise `max_in_mem_sessions`.
+    #[serde(default)]
+    pub receipt_journal: ReceiptJournalCfg,
+}
+
+/// `[receipt_journal]` block — Perf-8 (audit-8 OOM-1). Bounds the
+/// in-mem mirror so a 1-year node with 10M unique sessions doesn't
+/// hold ~880 MB of cumulative `(SessionId, u64)` entries forever. The
+/// on-disk journal is the authoritative source — any bump that hits
+/// an evicted entry consults disk to recover the floor before the
+/// monotonicity check.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ReceiptJournalCfg {
+    /// Hard cap on the in-mem mirror. Cap overflow evicts the LRU
+    /// entry on the hot bump path. Default 100_000 entries (~8.8 MB
+    /// at 88 B/entry). Raise this for operators carrying >100k live
+    /// sessions; the only cost is steady-state RSS.
+    #[serde(default = "default_max_in_mem_sessions")]
+    pub max_in_mem_sessions: usize,
+    /// TTL after which an idle session is evicted by the background
+    /// sweeper. Default `3600` (1 hour); long enough that mainnet's
+    /// ~10s per-session receipt cadence keeps a session hot
+    /// indefinitely. Specified in seconds.
+    #[serde(default = "default_session_in_mem_ttl_secs")]
+    pub session_in_mem_ttl_secs: u64,
+    /// Interval at which the background sweeper scans for TTL-aged
+    /// entries. Default `60` seconds. The hot bump path enforces the
+    /// hard cap on overflow, so the sweeper only matters when the
+    /// mirror is below cap and operators want idle sessions shed.
+    /// Specified in seconds.
+    #[serde(default = "default_ttl_sweep_interval_secs")]
+    pub ttl_sweep_interval_secs: u64,
+}
+
+impl Default for ReceiptJournalCfg {
+    fn default() -> Self {
+        Self {
+            max_in_mem_sessions: default_max_in_mem_sessions(),
+            session_in_mem_ttl_secs: default_session_in_mem_ttl_secs(),
+            ttl_sweep_interval_secs: default_ttl_sweep_interval_secs(),
+        }
+    }
+}
+
+fn default_max_in_mem_sessions() -> usize {
+    octravpn_core::receipt_journal::DEFAULT_MAX_IN_MEM_SESSIONS
+}
+
+fn default_session_in_mem_ttl_secs() -> u64 {
+    octravpn_core::receipt_journal::DEFAULT_SESSION_IN_MEM_TTL.as_secs()
+}
+
+fn default_ttl_sweep_interval_secs() -> u64 {
+    octravpn_core::receipt_journal::DEFAULT_TTL_SWEEP_INTERVAL.as_secs()
 }
 
 /// `[pvac]` block. Off-by-default so existing deployments are

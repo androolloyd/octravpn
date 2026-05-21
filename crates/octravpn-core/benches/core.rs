@@ -13,6 +13,7 @@ use octravpn_core::{
     earnings,
     onion::{build_onion, peel_layer, HopBuildInput},
     receipt::{Receipt, ReceiptContext, SignedReceipt, CHAIN_ID_TEST},
+    receipt_journal::{FsyncPolicy, ReceiptJournal},
     session::{Blind, SessionId},
     sig::KeyPair,
     tx::{canonical_bytes, sign_call},
@@ -141,6 +142,124 @@ fn bench_wallet_enc(c: &mut Criterion) {
     });
 }
 
+/// Perf-8: receipt-journal bump hot-path with the cap+TTL eviction
+/// bookkeeping in play. Uses `FsyncPolicy::Periodic(60s)` so the
+/// fsync floor doesn't swamp the signal — we're measuring the cost
+/// of the in-mem map mutations + LRU/recency bookkeeping, not the
+/// disk-side fsync (already characterised by audit-8 §3).
+///
+/// Two paths:
+/// - `journal_bump_hot_path` — bumps for a small fixed working set
+///   (mirror well below cap; no evictions). This is the baseline
+///   the Perf-8 LRU bookkeeping adds cost to.
+/// - `journal_bump_at_cap_with_evictions` — bumps with unique
+///   session_ids beyond the cap, forcing cap-overflow eviction on
+///   every call. Measures the steady-state cost when an attacker
+///   floods unique IDs (the OOM-1 attack shape).
+/// - `journal_disk_resurrect` — bumps where the in-mem entry was
+///   evicted and the floor must be read from disk before the
+///   monotonicity check. This is the Perf-8 worst-case hot-path
+///   cost.
+fn bench_journal(c: &mut Criterion) {
+    use std::sync::atomic::AtomicU64;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("bench.bin");
+    let j = ReceiptJournal::open(&path).unwrap();
+    // Keep fsyncs off the hot path so the measurement is the
+    // in-mem work, not the disk cost.
+    j.set_fsync_policy(FsyncPolicy::Periodic(Duration::from_secs(60)));
+
+    // Hot path: small working set, no evictions. Single session,
+    // ascending seq.
+    let sess = SessionId::new([0x77; 32]);
+    let n_pre: u64 = 16;
+    for s in 1..=n_pre {
+        j.bump(&sess, s).unwrap();
+    }
+    let counter = Arc::new(AtomicU64::new(n_pre));
+    c.bench_function("journal_bump_hot_path", |b| {
+        b.iter(|| {
+            let next = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            j.bump(&sess, next).unwrap();
+            black_box(next);
+        });
+    });
+
+    // Steady-state at cap: every iteration evicts the LRU entry.
+    // Use a tight cap so eviction fires every bump.
+    let dir2 = tempfile::tempdir().unwrap();
+    let path2 = dir2.path().join("evict.bin");
+    let j2 = ReceiptJournal::open(&path2).unwrap();
+    j2.set_fsync_policy(FsyncPolicy::Periodic(Duration::from_secs(60)));
+    j2.set_max_in_mem_sessions(8);
+    // Pre-fill at cap.
+    for s in 0u64..8 {
+        let mut bytes = [0u8; 32];
+        bytes[..8].copy_from_slice(&s.to_be_bytes());
+        j2.bump(&SessionId::new(bytes), 1).unwrap();
+    }
+    let counter2 = Arc::new(AtomicU64::new(100));
+    c.bench_function("journal_bump_at_cap_with_evictions", |b| {
+        b.iter(|| {
+            // Each iteration uses a fresh session_id so the bump
+            // always overflows the cap.
+            let n = counter2.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let mut bytes = [0u8; 32];
+            bytes[..8].copy_from_slice(&n.to_be_bytes());
+            j2.bump(&SessionId::new(bytes), 1).unwrap();
+            black_box(n);
+        });
+    });
+
+    // Disk resurrect path: an evicted session whose seq we want to
+    // advance. Setup: large pre-populated journal so the resurrect
+    // path does a real scan. Cap of 1 means every bump evicts the
+    // previous; resurrecting `target` then writing the next seq.
+    let dir3 = tempfile::tempdir().unwrap();
+    let path3 = dir3.path().join("resurrect.bin");
+    let j3 = ReceiptJournal::open(&path3).unwrap();
+    j3.set_fsync_policy(FsyncPolicy::Periodic(Duration::from_secs(60)));
+    // Pre-populate the disk with ~1000 sessions so the resurrect
+    // scan has real work to do (~44 KB linear read).
+    for s in 0u64..1000 {
+        let mut bytes = [0u8; 32];
+        bytes[..8].copy_from_slice(&s.to_be_bytes());
+        j3.bump(&SessionId::new(bytes), 1).unwrap();
+    }
+    j3.set_max_in_mem_sessions(1);
+    let target = SessionId::new({
+        let mut b = [0u8; 32];
+        b[..8].copy_from_slice(&7u64.to_be_bytes());
+        b
+    });
+    // Use a base of 10_000 to comfortably exceed both the unique
+    // session_id space (0..1000) and the initial target seq=1, so
+    // every `bump(target, ...)` is strictly monotonic.
+    let counter3 = Arc::new(AtomicU64::new(10_000));
+    c.bench_function("journal_disk_resurrect", |b| {
+        b.iter(|| {
+            // Bump a placeholder to evict `target` from in-mem. The
+            // placeholder id encodes `n` so each iteration uses a
+            // fresh id and never trips the monotonicity guard.
+            let n = counter3.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let mut other = [0u8; 32];
+            other[..8].copy_from_slice(&n.to_be_bytes());
+            // The placeholder bump must also be monotonic; first
+            // touch for a fresh id starts at seq=1 (in-mem floor 0,
+            // disk floor 0 because we never wrote that id).
+            j3.bump(&SessionId::new(other), 1).unwrap();
+            // Now bump `target` to a strictly-increasing seq — must
+            // resurrect from disk because the cap=1 eviction kicked
+            // it out.
+            j3.bump(&target, n).unwrap();
+            black_box(n);
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_receipt,
@@ -149,5 +268,6 @@ criterion_group!(
     bench_onion,
     bench_tx,
     bench_wallet_enc,
+    bench_journal,
 );
 criterion_main!(benches);

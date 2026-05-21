@@ -138,6 +138,27 @@ pub(super) async fn build_hub(cfg: NodeConfig) -> Result<Hub> {
         "receipt journal fsync policy set"
     );
 
+    // Perf-8 (audit-8 OOM-1): cap + TTL on the in-mem mirror so the
+    // BTreeMap doesn't grow unbounded with every session that ever
+    // opens on the node. Defaults bound the mirror at ~8.8 MB
+    // resident; operators carrying >100k live sessions raise
+    // `max_in_mem_sessions` in `[receipt_journal]`.
+    {
+        let rj_cfg = &cfg.receipt_journal;
+        receipt_journal.set_max_in_mem_sessions(rj_cfg.max_in_mem_sessions);
+        receipt_journal.set_session_in_mem_ttl(std::time::Duration::from_secs(
+            rj_cfg.session_in_mem_ttl_secs,
+        ));
+        // Spawn the periodic TTL sweeper. The JoinHandle is dropped
+        // — the task lives for the process lifetime, like the other
+        // hub-level supervisors (attestation, analytics). A SIGTERM
+        // closes the tokio runtime which aborts it cleanly.
+        let sweep_handle = receipt_journal.spawn_ttl_sweeper(std::time::Duration::from_secs(
+            rj_cfg.ttl_sweep_interval_secs,
+        ));
+        drop(sweep_handle);
+    }
+
     // PVAC sidecar wiring. Opt-in (operator must set `[pvac].enabled
     // = true`); failure to spawn is *non-fatal* — we log a warning
     // and run without HFHE. Behaviour rationale:

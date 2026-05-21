@@ -114,7 +114,16 @@ pub(crate) async fn metrics(
          octravpn_ip_allocator_capacity {ip_cap}\n\
          # HELP octravpn_audit_inline_fallback_total Audit writes that fell back to inline sync-fsync because the batched flusher queue was full (disk stall signal).\n\
          # TYPE octravpn_audit_inline_fallback_total counter\n\
-         octravpn_audit_inline_fallback_total {audit_inline_fb}\n",
+         octravpn_audit_inline_fallback_total {audit_inline_fb}\n\
+         # HELP octravpn_receipt_journal_in_mem_sessions Current entries cached in the receipt-journal in-mem mirror (Perf-8 / audit-8 OOM-1). Bounded by [receipt_journal].max_in_mem_sessions (default 100k ≈ 8.8 MB).\n\
+         # TYPE octravpn_receipt_journal_in_mem_sessions gauge\n\
+         octravpn_receipt_journal_in_mem_sessions {rj_in_mem}\n\
+         # HELP octravpn_receipt_journal_evictions_total Cap-overflow + TTL evictions from the in-mem mirror over process lifetime. Steady non-zero rate means the working set exceeds the cap — operator should raise [receipt_journal].max_in_mem_sessions.\n\
+         # TYPE octravpn_receipt_journal_evictions_total counter\n\
+         octravpn_receipt_journal_evictions_total {rj_evictions}\n\
+         # HELP octravpn_receipt_journal_disk_resurrect_total Bumps whose session-id was not in the in-mem mirror and required a disk read to recover the floor. Same disk-stall / cap-undersized signal as the eviction counter; sustained non-zero growth is the cue to raise [receipt_journal].max_in_mem_sessions.\n\
+         # TYPE octravpn_receipt_journal_disk_resurrect_total counter\n\
+         octravpn_receipt_journal_disk_resurrect_total {rj_resurrects}\n",
         announces = m.announces_total.load(Ordering::Relaxed),
         state_lookups = m.state_lookups_total.load(Ordering::Relaxed),
         receipts_signed = m.receipts_signed_total.load(Ordering::Relaxed),
@@ -145,6 +154,22 @@ pub(crate) async fn metrics(
             .audit
             .as_ref()
             .map_or(0, crate::audit::AuditLog::inline_fallback_total),
+        // Perf-8 (audit-8 OOM-1): receipt-journal in-mem mirror gauge
+        // + eviction counters. `metrics_snapshot` reads the atomic
+        // surface lock-free so a stalled journal doesn't block the
+        // scrape.
+        rj_in_mem = {
+            let (gauge, _e, _r) = s.receipt_journal.metrics_snapshot();
+            gauge
+        },
+        rj_evictions = {
+            let (_g, evictions, _r) = s.receipt_journal.metrics_snapshot();
+            evictions
+        },
+        rj_resurrects = {
+            let (_g, _e, resurrects) = s.receipt_journal.metrics_snapshot();
+            resurrects
+        },
     );
     (
         [(
@@ -261,6 +286,9 @@ mod tests {
             "octravpn_ip_allocator_used ",
             "octravpn_ip_allocator_capacity ",
             "octravpn_audit_inline_fallback_total ",
+            "octravpn_receipt_journal_in_mem_sessions ",
+            "octravpn_receipt_journal_evictions_total ",
+            "octravpn_receipt_journal_disk_resurrect_total ",
         ] {
             assert!(
                 text.contains(needle),

@@ -414,6 +414,10 @@ mod tests {
             // Perf-6: `[audit]` defaults preserve pre-rotation behaviour
             // for fixtures — 256 MiB / 32-file ring / skip-to-tip boot.
             audit: crate::config::AuditCfg::default(),
+            // Perf-8: in-mem mirror cap + TTL. v3_boot fixtures take
+            // the defaults — the journal still functions identically
+            // for these tests because the mirror is well below cap.
+            receipt_journal: crate::config::ReceiptJournalCfg::default(),
         }
     }
 
