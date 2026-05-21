@@ -411,6 +411,9 @@ mod tests {
             // P1-sidecar wiring: `[pvac]` is opt-in; v3_boot fixtures
             // run without the HFHE sidecar so the default suffices.
             pvac: crate::config::PvacCfg::default(),
+            // Perf-6: `[audit]` defaults preserve pre-rotation behaviour
+            // for fixtures — 256 MiB / 32-file ring / skip-to-tip boot.
+            audit: crate::config::AuditCfg::default(),
         }
     }
 

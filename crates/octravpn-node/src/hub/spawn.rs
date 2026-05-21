@@ -274,12 +274,56 @@ impl Hub {
             } else {
                 None
             };
-            match crate::audit::AuditLog::open_batched(
+            // Perf-6: thread the operator-tunable rotation policy
+            // ([audit] block) into the audit-log opener. Defaults
+            // (256 MiB × 32 files, skip-to-tip boot replay) keep
+            // pre-Perf-6 behaviour intact for nodes that never touch
+            // the new config block.
+            let rotation = self.cfg.audit.to_runtime();
+            match crate::audit::AuditLog::open_batched_with_rotation(
                 &audit_dir,
                 crate::audit::DEFAULT_BATCH_SIZE,
                 crate::audit::DEFAULT_BATCH_INTERVAL_MS,
+                crate::audit::DEFAULT_BATCH_QUEUE_CAP,
+                rotation,
             ) {
                 Ok(mut audit) => {
+                    // Perf-6 boot-replay: when `boot_replay = skip_to_tip`
+                    // (the default), walk the post-tip tail only — on a
+                    // 30-day-old high-traffic node this turns a ~26 s
+                    // HMAC chain re-walk into a sub-second tail verify.
+                    // `Full` mode forces every line to be re-verified.
+                    if matches!(rotation.boot_replay, crate::audit::BootReplayMode::SkipToTip) {
+                        let t0 = std::time::Instant::now();
+                        match crate::audit::AuditLog::verify_dir_skip_to_tip(
+                            &audit.key(),
+                            std::path::Path::new(&audit_dir),
+                        ) {
+                            Ok(reports) => {
+                                let lines: u64 = reports.iter().map(|(_, r)| r.entries).sum();
+                                let broken = reports
+                                    .iter()
+                                    .filter(|(_, r)| r.first_error.is_some())
+                                    .count();
+                                let took = t0.elapsed();
+                                if broken > 0 {
+                                    warn!(
+                                        broken_files = broken,
+                                        replay_us = took.as_micros() as u64,
+                                        "audit boot replay (skip-to-tip): chain broke; \
+                                         run `octravpn-node audit verify --full <dir>` to forensic"
+                                    );
+                                } else {
+                                    info!(
+                                        verified_lines = lines,
+                                        replay_us = took.as_micros() as u64,
+                                        "audit boot replay (skip-to-tip) clean"
+                                    );
+                                }
+                            }
+                            Err(e) => warn!(error = %e, "audit boot replay (skip-to-tip) failed"),
+                        }
+                    }
                     if let Some(tap) = analytics_tap {
                         audit = audit.with_analytics_tap(tap);
                     }
@@ -288,7 +332,10 @@ impl Hub {
                         dir = %audit_dir,
                         batch_size = crate::audit::DEFAULT_BATCH_SIZE,
                         batch_interval_ms = crate::audit::DEFAULT_BATCH_INTERVAL_MS,
-                        "audit log open (batched fsync)"
+                        max_file_bytes = rotation.max_file_bytes,
+                        max_file_count = rotation.max_file_count,
+                        boot_replay = ?rotation.boot_replay,
+                        "audit log open (batched fsync + rotation)"
                     );
                 }
                 Err(e) => warn!(error = %e, dir = %audit_dir, "audit log disabled"),

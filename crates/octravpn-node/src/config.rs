@@ -117,6 +117,12 @@ pub(crate) struct NodeConfig {
     /// contract.
     #[serde(default)]
     pub pvac: PvacCfg,
+    /// `[audit]` block — audit-log rotation + boot-replay knobs
+    /// (Perf-6). Defaults: 256 MiB per file, 32-file ring buffer,
+    /// boot replay skips the prefix committed-to by `audit-chain.tip`.
+    /// See `docs/operators/audit-log.md`.
+    #[serde(default)]
+    pub audit: AuditCfg,
 }
 
 /// `[pvac]` block. Off-by-default so existing deployments are
@@ -383,6 +389,68 @@ impl fmt::Debug for AnalyticsCfg {
 
 fn default_analytics_listen() -> String {
     "127.0.0.1:51823".into()
+}
+
+/// `[audit]` config block — rotation policy + boot-replay mode.
+///
+/// Trade-offs:
+///   - Smaller `max_file_bytes` ⇒ more rotations ⇒ more fd churn
+///     (open/close per rotation), but a faster full-replay if
+///     skip-to-tip ever falls back (e.g. tip file corruption,
+///     prefix tamper).
+///   - Larger `max_file_bytes` ⇒ fewer fd churn but each full-replay
+///     fallback re-walks more lines.
+///
+/// Defaults (256 MiB × 32 files = 8 GiB retention) target a 30-day
+/// node at 100 receipts/s without spilling. Operators with shorter
+/// retention SLAs can shrink the file count; operators with stricter
+/// retention should ship rotated files off-box.
+#[derive(Debug, Deserialize, Clone, Copy)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AuditCfg {
+    /// Roll the active audit JSONL file when the next write would
+    /// push its size past this byte count. Default 256 MiB.
+    #[serde(default = "default_audit_max_file_bytes")]
+    pub max_file_bytes: u64,
+    /// Cap the number of `audit-*.jsonl` files retained in the audit
+    /// dir. Oldest files (lexicographic order ≡ chronological order)
+    /// are deleted FIFO once the cap is exceeded. Default 32.
+    #[serde(default = "default_audit_max_file_count")]
+    pub max_file_count: usize,
+    /// `"full"` re-verifies every line on every cold start.
+    /// `"skip_to_tip"` (default) honours `audit-chain.tip` and only
+    /// re-verifies the post-tip tail. Falls back to full replay on
+    /// any tip mismatch (tampered prefix detection).
+    #[serde(default)]
+    pub boot_replay: crate::audit::BootReplayMode,
+}
+
+impl Default for AuditCfg {
+    fn default() -> Self {
+        Self {
+            max_file_bytes: default_audit_max_file_bytes(),
+            max_file_count: default_audit_max_file_count(),
+            boot_replay: crate::audit::BootReplayMode::default(),
+        }
+    }
+}
+
+impl AuditCfg {
+    pub(crate) fn to_runtime(&self) -> crate::audit::RotationCfg {
+        crate::audit::RotationCfg {
+            max_file_bytes: self.max_file_bytes,
+            max_file_count: self.max_file_count,
+            boot_replay: self.boot_replay,
+        }
+    }
+}
+
+const fn default_audit_max_file_bytes() -> u64 {
+    crate::audit::DEFAULT_MAX_FILE_BYTES
+}
+
+const fn default_audit_max_file_count() -> usize {
+    crate::audit::DEFAULT_MAX_FILE_COUNT
 }
 
 /// Which on-chain program shape the operator is talking to.
