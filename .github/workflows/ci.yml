@@ -75,8 +75,15 @@ jobs:
     # Compares a fresh octravpn-core bench run against the committed
     # snapshot at bench-snapshots/core.json. Lives in its own job so a
     # slow / noisy bench run doesn't gate the cargo lane.
+    #
+    # Advisory: GH-hosted ubuntu-latest runners exhibit ~20-30% bench-to-
+    # bench wall-clock variance (shared infra, neighbour noise, no perf
+    # isolation). Keep the signal visible but don't block PR merges on it;
+    # treat it as a smoke alarm — investigate when it fires alongside a
+    # plausible code-side perf change, ignore when it fires in isolation.
     name: bench regression gate
     runs-on: ubuntu-latest
+    continue-on-error: true
     defaults:
       run:
         working-directory: octra
