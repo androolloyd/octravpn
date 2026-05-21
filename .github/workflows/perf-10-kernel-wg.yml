@@ -1,0 +1,70 @@
+name: Perf-10 kernel WG smoke
+
+# Linux-only end-to-end smoke for the kernel WireGuard backend. Runs
+# the `#[ignore]`-gated tests in `crates/octravpn-node/tests/wg_kernel_backend.rs`
+# inside a privileged container so CAP_NET_ADMIN + `ip link add type
+# wireguard` succeed.
+#
+# Skipped on macOS / BSD runners — the kernel backend is Linux-only.
+# See docs/operators/wireguard-backend.md for the operator matrix.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/octravpn-node/src/tunnel/**"
+      - "crates/octravpn-node/tests/wg_kernel_backend.rs"
+      - ".github/workflows/perf-10-kernel-wg.yml"
+  pull_request:
+    paths:
+      - "crates/octravpn-node/src/tunnel/**"
+      - "crates/octravpn-node/tests/wg_kernel_backend.rs"
+      - ".github/workflows/perf-10-kernel-wg.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  kernel-wg-smoke:
+    name: kernel WG backend e2e (privileged)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: octra
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: octra }
+      - uses: actions/checkout@v4
+        with: { repository: androolloyd/octra-foundry, path: octra-foundry }
+      - uses: actions/checkout@v4
+        with: { repository: androolloyd/headscale-rs, path: headscale-rs }
+      - uses: ./octra/.github/actions/setup-rust
+
+      - name: Ensure wireguard kernel module is loaded
+        run: |
+          sudo modprobe wireguard || true
+          # GitHub-hosted ubuntu-latest ships the in-tree wireguard
+          # module since 5.6. If `modprobe` fails, the runner is
+          # likely on an older kernel — surface the diagnostic but
+          # continue so the test body can report the precise reason.
+          ls -l /sys/module/wireguard || echo "wireguard module not present"
+
+      - name: Install wireguard userspace tools
+        run: sudo apt-get update && sudo apt-get install -y wireguard-tools
+
+      - name: Build the node tests
+        run: cargo test --no-run -p octravpn-node --test wg_kernel_backend
+
+      - name: Run the kernel-backend smoke (privileged)
+        # sudo + --ignored to run the gated lifecycle test. The
+        # binary already has CAP_NET_ADMIN once we sudo into it.
+        run: sudo -E env "PATH=$PATH" cargo test -p octravpn-node --test wg_kernel_backend -- --ignored --nocapture
+
+      - name: Print backend selection from a synthetic boot
+        # Sanity check: a `tunnel.backend = "kernel"` config should
+        # bring up a wg-octra-* iface on this runner. We don't run
+        # the full daemon (it would expect a chain RPC), just print
+        # the iface state to confirm the kernel path is wired.
+        run: |
+          ip link show type wireguard || echo "no wg iface (expected if test torn down)"

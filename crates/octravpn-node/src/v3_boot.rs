@@ -393,6 +393,7 @@ mod tests {
                 listen: "0.0.0.0:51820".into(),
                 wg_secret_path: "/tmp/unused".into(),
                 amnezia: AmneziaCfg::default(),
+                backend: crate::tunnel::backend::BackendKind::default(),
             },
             pricing: PricingCfg {
                 price_per_mb: 100,

@@ -91,6 +91,19 @@ pub(crate) struct Hub {
     #[allow(dead_code)]
     // consumed by v3_calls + headscale_bridge once HFHE rewires off placeholders
     pub pvac: Option<Arc<crate::pvac::PvacClient>>,
+    /// Perf-10: pluggable WireGuard peer-administration backend.
+    /// Chosen at boot via [`crate::tunnel::backend::select_backend`].
+    /// `auto` (default) picks boringtun because the onion-peel data
+    /// plane binds the listen port. `kernel` requires Linux + the
+    /// `wireguard` kernel module + `CAP_NET_ADMIN`. See
+    /// `docs/operators/wireguard-backend.md`.
+    #[allow(dead_code)] // consumed by future control-plane peer admin
+    pub wg_backend: Arc<dyn crate::tunnel::backend::WgBackend>,
+    /// Diagnostic record of which backend was chosen and why. Surfaced
+    /// in `/health` so operators can verify the pick without re-reading
+    /// the boot logs.
+    #[allow(dead_code)]
+    pub wg_backend_selection: crate::tunnel::backend::BackendSelection,
 }
 
 impl Hub {

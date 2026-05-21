@@ -576,6 +576,15 @@ pub(crate) struct TunnelCfg {
     /// drop. See `docs/security/validator-hardening.md` § Layer 1.
     #[serde(default)]
     pub amnezia: AmneziaCfg,
+    /// Perf-10: pick the WireGuard peer-administration backend.
+    /// `"auto"` (default) probes for the kernel module on Linux and
+    /// falls back to userspace boringtun on every other host. `"kernel"`
+    /// forces the kernel path and fails boot if the probe is negative.
+    /// `"boringtun"` forces userspace — use this to dodge kernel-side
+    /// bugs without recompiling. See
+    /// `docs/operators/wireguard-backend.md` for the full matrix.
+    #[serde(default)]
+    pub backend: crate::tunnel::backend::BackendKind,
 }
 
 /// `[tunnel.amnezia]` block. Maps 1:1 onto
