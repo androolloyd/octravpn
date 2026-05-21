@@ -2,9 +2,11 @@
 //! day, HMAC-SHA256-chained line by line. Submodules: `inner` (owned
 //! state + counters), `log` (sync write + `AuditRecord` + envelope),
 //! `batched` (async flusher + bounded queue + inline fallback),
-//! `chain` (pure HMAC + key + date math), `verify` (offline file
-//! verifier), `tap` (analytics side-channel). See `audit/README.md`
-//! for the threading model, durability ladder, and the on-disk format
+//! `chain` (pure HMAC + key + date math), `rotation` (Perf-6 size
+//! rotation + chain-tip persistence + ring-buffer eviction),
+//! `verify` (offline file verifier — full + skip-to-tip modes),
+//! `tap` (analytics side-channel). See `audit/README.md` for the
+//! threading model, durability ladder, and the on-disk format
 //! contract.
 
 use std::sync::Arc;
@@ -16,15 +18,22 @@ mod batched;
 mod chain;
 mod inner;
 mod log;
+mod rotation;
 mod tap;
 mod verify;
 
 #[cfg(test)]
 mod test_util;
 
-pub(crate) use batched::{DEFAULT_BATCH_INTERVAL_MS, DEFAULT_BATCH_SIZE};
+pub(crate) use batched::{DEFAULT_BATCH_INTERVAL_MS, DEFAULT_BATCH_QUEUE_CAP, DEFAULT_BATCH_SIZE};
 pub(crate) use chain::chain_step;
 pub(crate) use log::AuditRecord;
+pub(crate) use rotation::{
+    BootReplayMode, RotationCfg, DEFAULT_MAX_FILE_BYTES, DEFAULT_MAX_FILE_COUNT,
+};
+#[cfg(test)]
+#[allow(unused_imports)]
+pub(crate) use rotation::ChainTip;
 pub(crate) use verify::FileVerifyReport;
 
 use batched::FlusherCmd;
@@ -54,6 +63,16 @@ impl AuditLog {
     pub(crate) fn inline_fallback_total(&self) -> u64 {
         self.counters
             .inline_fallback_total
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Process-lifetime count of size-triggered audit-log rotations
+    /// (Perf-6). Excludes date roll-overs at UTC midnight (those are
+    /// time-driven, not load-driven). Lock-free.
+    #[allow(dead_code)]
+    pub(crate) fn rotations_total(&self) -> u64 {
+        self.counters
+            .rotations_total
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 }

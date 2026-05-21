@@ -8,15 +8,27 @@ use std::path::{Path, PathBuf};
 use super::log::AuditRecord;
 use super::AuditLog;
 
-/// Return the single `audit-YYYY-MM-DD.jsonl` file in `dir`. Panics if
-/// none is found.
+/// Return the (chronologically first) `audit-*.jsonl` file in `dir`.
+/// Panics if none is found. Skips the tip file + key file. Pre-Perf-6
+/// there was only one such file per day; the multi-file rotation case
+/// is handled by [`crate::audit::rotation::list_audit_files`] directly.
 pub(super) fn audit_file_in(dir: &Path) -> PathBuf {
-    std::fs::read_dir(dir)
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
         .unwrap()
         .filter_map(std::result::Result::ok)
-        .find(|e| e.file_name().to_string_lossy().starts_with("audit-"))
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let is_jsonl = Path::new(&name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("jsonl"));
+            (name.starts_with("audit-") && is_jsonl).then_some(e.path())
+        })
+        .collect();
+    paths.sort();
+    paths
+        .into_iter()
+        .next()
         .expect("at least one audit-*.jsonl file in dir")
-        .path()
 }
 
 /// Write `n` minimal `kind="x"` records via the sync path.

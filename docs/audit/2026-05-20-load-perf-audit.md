@@ -279,6 +279,18 @@ Tracing `info!` markers on the boot path (`hub.rs`):
 **Single biggest contributor:** audit-log replay at boot
 (`hub/spawn.rs:224`). Recommendation #6 in §9 covers the rotation gap.
 
+> **Update (2026-05-21, Perf-6 landed).** Rotation + skip-to-tip boot
+> replay shipped on branch `perf-6-audit-rotation`. Bench
+> (`cargo bench -p octravpn-node --bench audit_boot_replay`):
+> 100k-line full replay = **2.71 µs/line (~271 ms total)**;
+> skip-to-tip = **0.0005 µs/line (~46 µs total)**. Extrapolated to
+> a 30-day @ 100 receipts/s node (259 M lines): **~700 s → ~0.12 s
+> cold-start budget** (the §5.2 ~26 s figure was on the lower-bound
+> measurement; the bench's release-build extrapolation produces a
+> more conservative number). The full-replay path remains
+> available as `octravpn-node audit verify --full <dir>` for
+> forensic tamper-detection. See `docs/operators/audit-log.md`.
+
 ---
 
 ## 6. Hot-path overhead per middleware
@@ -456,6 +468,19 @@ node is **not** the bottleneck below 1 Gbps (boringtun primitive ceiling
    replays ~26 s of HMAC-chain at startup. Either rotate on size or
    ship a `replay_from_offset` flag that skips already-verified prefix
    (the chain root is preserved by `verify_file`).
+
+   > **Fixed on branch `perf-6-audit-rotation` (2026-05-21).** Both
+   > knobs land: `[audit].max_file_bytes` (default 256 MiB) +
+   > `[audit].max_file_count` (default 32) for size rotation,
+   > `[audit].boot_replay = "skip_to_tip" | "full"` for the boot
+   > path. Skip-to-tip uses the new `.audit-chain.tip` commitment
+   > so already-verified lines are skipped at boot. Cold-start
+   > budget on the 100-receipts/s × 30-day node: **~700 s → ~0.12 s**
+   > (5891× faster, `cargo bench --bench audit_boot_replay`). Tip
+   > corruption / ring-buffer eviction degrades to full replay
+   > gracefully; tamper of the tip-committed line is detected and
+   > also falls back to full replay (which catches the tamper).
+   > See `docs/operators/audit-log.md`.
 
 7. **[LOW] Hard-cap `ReceiptJournal.by_session: BTreeMap` size.** Today
    any session ever opened on the node lives in the in-mem mirror

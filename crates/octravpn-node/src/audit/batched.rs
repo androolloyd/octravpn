@@ -14,8 +14,9 @@ use anyhow::{Context, Result};
 use parking_lot::Mutex;
 use tokio::sync::{mpsc, oneshot};
 
-use super::inner::Inner;
+use super::inner::{AuditCounters, Inner};
 use super::log::{write_inner_direct, AuditRecord};
+use super::rotation::{ChainTip, RotationCfg};
 use super::AuditLog;
 
 /// Default flush batch size — N entries per fsync. `dead_code`
@@ -70,14 +71,36 @@ impl AuditLog {
         batch_interval_ms: u64,
         queue_cap: usize,
     ) -> Result<Self> {
+        Self::open_batched_with_rotation(
+            dir,
+            batch_size,
+            batch_interval_ms,
+            queue_cap,
+            RotationCfg::default(),
+        )
+    }
+
+    /// Full-control opener: batched mode + custom rotation policy.
+    /// `hub::spawn` calls this; tests call it to dial `max_file_bytes`
+    /// low enough to deterministically trigger rotation under load.
+    #[allow(dead_code)]
+    pub(crate) fn open_batched_with_rotation(
+        dir: impl AsRef<std::path::Path>,
+        batch_size: usize,
+        batch_interval_ms: u64,
+        queue_cap: usize,
+        rotation: RotationCfg,
+    ) -> Result<Self> {
         let (tx, rx) = mpsc::channel(queue_cap.max(1));
-        let me = Self::open_inner(dir.as_ref(), Some(tx))?;
+        let me = Self::open_inner(dir.as_ref(), Some(tx), rotation)?;
         // Share `Arc<Mutex<Inner>>` with the flusher task so the sync
         // `write` path still works concurrently (tests that want
         // read-after-write visibility under tokio rely on this).
         let inner = me.inner.clone();
+        let counters = me.counters.clone();
         tokio::spawn(flusher_loop(
             inner,
+            counters,
             rx,
             batch_size.max(1),
             batch_interval_ms.max(1),
@@ -118,8 +141,25 @@ impl AuditLog {
                     // `write_async`, so the shared mutex is safe.
                     tokio::task::spawn_blocking(move || {
                         let mut g = me.inner.lock();
-                        let r = write_inner_direct(&mut g, &rec, /*fsync=*/ true);
-                        drop(g);
+                        let r = write_inner_direct(&mut g, &me.counters, &rec, /*fsync=*/ true);
+                        // Inline fallback fsyncs synchronously — safe
+                        // to publish the chain-tip here. Best-effort:
+                        // a tip-write failure does not abort the audit
+                        // write; the next successful fsync re-syncs.
+                        if r.is_ok() {
+                            let tip = ChainTip {
+                                file_id: g.current_file_id.clone(),
+                                seq: g.current_file_seq,
+                                mac: hex::encode(g.prev_mac),
+                            };
+                            let dir = g.dir.clone();
+                            drop(g);
+                            if let Err(e) = tip.store(&dir) {
+                                tracing::warn!(error = %e, "audit chain-tip store failed");
+                            }
+                        } else {
+                            drop(g);
+                        }
                         r
                     })
                     .await
@@ -186,6 +226,7 @@ impl AuditLog {
 #[allow(dead_code)]
 async fn flusher_loop(
     inner: Arc<Mutex<Inner>>,
+    counters: Arc<AuditCounters>,
     mut rx: mpsc::Receiver<FlusherCmd>,
     batch_size: usize,
     batch_interval_ms: u64,
@@ -204,27 +245,27 @@ async fn flusher_loop(
                     None => {
                         // All senders dropped. Final fsync + exit.
                         if unsynced > 0 {
-                            let _ = fsync_now(&inner);
+                            let _ = fsync_and_publish_tip(&inner);
                         }
                         return;
                     }
                     Some(FlusherCmd::Write(rec)) => {
                         let mut g = inner.lock();
-                        let r = write_inner_direct(&mut g, &rec, /*fsync=*/ false);
+                        let r = write_inner_direct(&mut g, &counters, &rec, /*fsync=*/ false);
                         drop(g);
                         match r {
                             Ok(()) => unsynced += 1,
                             Err(e) => tracing::warn!(error = %e, "audit batched write failed"),
                         }
                         if unsynced >= batch_size {
-                            let _ = fsync_now(&inner);
+                            let _ = fsync_and_publish_tip(&inner);
                             unsynced = 0;
                             deadline = tokio::time::Instant::now() + interval;
                         }
                     }
                     Some(FlusherCmd::Flush(ack)) => {
                         if unsynced > 0 {
-                            let _ = fsync_now(&inner);
+                            let _ = fsync_and_publish_tip(&inner);
                             unsynced = 0;
                         }
                         let _ = ack.send(());
@@ -234,7 +275,7 @@ async fn flusher_loop(
             }
             () = &mut timeout_at => {
                 if unsynced > 0 {
-                    let _ = fsync_now(&inner);
+                    let _ = fsync_and_publish_tip(&inner);
                     unsynced = 0;
                 }
                 deadline = tokio::time::Instant::now() + interval;
@@ -243,11 +284,32 @@ async fn flusher_loop(
     }
 }
 
+/// fsync the active audit file + publish the post-fsync chain tip.
+/// The tip is updated only after fsync returns so a SIGKILL between
+/// `write()` and `sync_data()` leaves the tip pointing at the prior
+/// (durably-fsynced) line — the boot replay then re-verifies the
+/// in-flight tail rather than trusting a torn write.
 #[allow(dead_code)]
-fn fsync_now(inner: &Arc<Mutex<Inner>>) -> Result<()> {
-    let mut g = inner.lock();
-    if let Some(f) = g.current_file.as_mut() {
-        f.sync_data().context("fsync audit log")?;
+fn fsync_and_publish_tip(inner: &Arc<Mutex<Inner>>) -> Result<()> {
+    let (dir, tip) = {
+        let mut g = inner.lock();
+        if let Some(f) = g.current_file.as_mut() {
+            f.sync_data().context("fsync audit log")?;
+        }
+        // Even if no file is open we publish an empty tip — but the
+        // file-open invariant says we're called only after at least
+        // one write succeeded, so `current_file_id` is non-empty.
+        let tip = ChainTip {
+            file_id: g.current_file_id.clone(),
+            seq: g.current_file_seq,
+            mac: hex::encode(g.prev_mac),
+        };
+        (g.dir.clone(), tip)
+    };
+    if !tip.file_id.is_empty() {
+        if let Err(e) = tip.store(&dir) {
+            tracing::warn!(error = %e, "audit chain-tip store failed");
+        }
     }
     Ok(())
 }

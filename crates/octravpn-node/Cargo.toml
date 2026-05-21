@@ -175,6 +175,14 @@ name = "pvac_shadow"
 harness = false
 path = "benches/pvac_shadow.rs"
 
+# Perf-6: audit-log boot-replay (full HMAC walk vs. skip-to-tip).
+# Plain `fn main()` harness — the two paths' timescales differ by
+# >100x so criterion's plot output is unhelpful.
+[[bench]]
+name = "audit_boot_replay"
+harness = false
+path = "benches/audit_boot_replay.rs"
+
 # cargo-deb metadata: `cargo deb -p octravpn-node` produces an installable .deb.
 [package.metadata.deb]
 name = "octravpn-node"
