@@ -734,6 +734,29 @@ pub(crate) struct ControlCfg {
     /// P1-9.
     #[serde(default)]
     pub receipt_journal_path: Option<String>,
+    /// Perf-1: durability policy for the receipt-seq journal's per-
+    /// receipt `bump`. Two accepted values, default `"periodic"`:
+    ///
+    /// - `"periodic"` (default) ⇒ `FsyncPolicy::Periodic(1s)`. The
+    ///   journal absorbs ~500k receipts/s instead of the ~225/s
+    ///   ceiling under per-bump fsync (audit-8 §3,
+    ///   `crates/octravpn-node/benches/settle_throughput.rs`).
+    ///   **Loss window** on a hard kernel/host crash is up to one
+    ///   second of receipts; the audit log carries the same
+    ///   `(session_id, seq)` pairs and `octravpn-node journal
+    ///   rebuild --from-audit <dir>` reconstructs the floor map
+    ///   verbatim, so a torn write in that window is recoverable on
+    ///   next boot. Process-only crashes (panic, SIGKILL) preserve
+    ///   every append — the OS page cache holds them.
+    /// - `"every_write"` ⇒ `FsyncPolicy::EveryWrite`. Pre-Perf-1
+    ///   default. One fsync round-trip per bump; receipts-monotonic
+    ///   invariant is durable the instant `bump` returns. Pick this
+    ///   for financial-invariant exit nodes where even a one-second
+    ///   replay-from-audit is unacceptable.
+    ///
+    /// See `docs/operators/performance.md` for the full launch note.
+    #[serde(default)]
+    pub fsync_policy: Option<FsyncPolicyCfg>,
     /// Bearer token gating the `POST /admin/preauth` endpoint (the
     /// preauth-key minter the Tailscale-interop harness probes for).
     /// `None` (the default) hides the endpoint entirely (any request
@@ -775,9 +798,45 @@ impl Default for ControlCfg {
             events_token: None,
             metrics_token: None,
             receipt_journal_path: None,
+            fsync_policy: None,
             admin_token: None,
             tailscale_wire_state_dir: None,
             tailscale_tailnet_id: None,
+        }
+    }
+}
+
+/// Perf-1: TOML selector for the receipt-journal fsync policy.
+///
+/// ```toml
+/// [control]
+/// fsync_policy = "periodic"      # default (Perf-1)
+/// # fsync_policy = "every_write" # financial-invariant operators
+/// ```
+///
+/// The default is `Periodic(1s)`; financial-invariant operators flip
+/// to `EveryWrite`. See [`octravpn_core::receipt_journal::FsyncPolicy`]
+/// for the runtime semantics + `docs/operators/performance.md` for the
+/// migration note.
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum FsyncPolicyCfg {
+    /// `FsyncPolicy::Periodic(1s)` — Perf-1 default.
+    #[default]
+    Periodic,
+    /// `FsyncPolicy::EveryWrite` — pre-Perf-1 default, opt-in only.
+    EveryWrite,
+}
+
+impl FsyncPolicyCfg {
+    /// Materialise the runtime `FsyncPolicy`. `Periodic` resolves to
+    /// `FsyncPolicy::default()` (currently `Periodic(1s)`) so the
+    /// `DEFAULT_PERIODIC_FSYNC_INTERVAL` constant stays the single
+    /// source of truth.
+    pub(crate) fn to_runtime(self) -> octravpn_core::receipt_journal::FsyncPolicy {
+        match self {
+            Self::Periodic => octravpn_core::receipt_journal::FsyncPolicy::default(),
+            Self::EveryWrite => octravpn_core::receipt_journal::FsyncPolicy::EveryWrite,
         }
     }
 }
@@ -806,6 +865,12 @@ impl ControlCfg {
             .as_ref()
             .map(|s| s.expose_secret().to_string())
     }
+
+    /// Perf-1: resolve the effective fsync policy. Returns the default
+    /// (`Periodic(1s)`) when the operator omitted the field.
+    pub(crate) fn resolved_fsync_policy(&self) -> octravpn_core::receipt_journal::FsyncPolicy {
+        self.fsync_policy.unwrap_or_default().to_runtime()
+    }
 }
 
 impl fmt::Debug for ControlCfg {
@@ -822,6 +887,7 @@ impl fmt::Debug for ControlCfg {
             .field("events_token", &R(&self.events_token))
             .field("metrics_token", &R(&self.metrics_token))
             .field("receipt_journal_path", &self.receipt_journal_path)
+            .field("fsync_policy", &self.fsync_policy)
             .field("admin_token", &R(&self.admin_token))
             .field("tailscale_wire_state_dir", &self.tailscale_wire_state_dir)
             .field("tailscale_tailnet_id", &self.tailscale_tailnet_id)
@@ -896,6 +962,70 @@ region = "eu-west"
     fn baseline_parses() {
         let cfg: NodeConfig = ::toml::from_str(MIN_TOML).expect("baseline TOML must parse");
         assert_eq!(cfg.pricing.price_per_mb, 100);
+    }
+
+    /// Perf-1: a default-built `ControlCfg` (operator omits the field)
+    /// resolves to `FsyncPolicy::Periodic(1s)`. This pins the
+    /// throughput-first default end-to-end through the config layer —
+    /// not just at the core enum.
+    #[test]
+    fn control_default_resolves_periodic_fsync() {
+        let cfg = ControlCfg::default();
+        assert!(cfg.fsync_policy.is_none(), "field defaults to None");
+        assert_eq!(
+            cfg.resolved_fsync_policy(),
+            octravpn_core::receipt_journal::FsyncPolicy::Periodic(
+                std::time::Duration::from_secs(1)
+            )
+        );
+    }
+
+    /// Perf-1: a fully default-built `NodeConfig` (no TOML overrides)
+    /// inherits the `Periodic(1s)` policy. Mirrors the audit-8 §3
+    /// expectation: a stock node clears the 500k receipts/s ceiling,
+    /// not the 225/s `EveryWrite` floor.
+    #[test]
+    fn default_node_config_uses_periodic_fsync() {
+        // Loader-built NodeConfig: parse the minimal valid TOML and
+        // confirm the [control] block defaulted correctly (since
+        // MIN_TOML doesn't set [control] at all).
+        let cfg: NodeConfig = ::toml::from_str(MIN_TOML).expect("baseline TOML must parse");
+        assert!(cfg.control.fsync_policy.is_none());
+        assert_eq!(
+            cfg.control.resolved_fsync_policy(),
+            octravpn_core::receipt_journal::FsyncPolicy::Periodic(
+                std::time::Duration::from_secs(1)
+            )
+        );
+    }
+
+    /// Perf-1: financial-invariant operators MUST be able to opt back
+    /// into `every_write` via TOML. This is the explicit override
+    /// path documented in `docs/operators/performance.md`.
+    #[test]
+    fn control_every_write_override_parses() {
+        let toml_str = format!("{MIN_TOML}\n[control]\nfsync_policy = \"every_write\"\n");
+        let cfg: NodeConfig = ::toml::from_str(&toml_str).expect("override TOML must parse");
+        assert_eq!(cfg.control.fsync_policy, Some(FsyncPolicyCfg::EveryWrite));
+        assert_eq!(
+            cfg.control.resolved_fsync_policy(),
+            octravpn_core::receipt_journal::FsyncPolicy::EveryWrite
+        );
+    }
+
+    /// Perf-1: explicit `"periodic"` parses to the runtime
+    /// `Periodic(1s)`. Same wire value the operator docs name.
+    #[test]
+    fn control_periodic_explicit_override_parses() {
+        let toml_str = format!("{MIN_TOML}\n[control]\nfsync_policy = \"periodic\"\n");
+        let cfg: NodeConfig = ::toml::from_str(&toml_str).expect("override TOML must parse");
+        assert_eq!(cfg.control.fsync_policy, Some(FsyncPolicyCfg::Periodic));
+        assert_eq!(
+            cfg.control.resolved_fsync_policy(),
+            octravpn_core::receipt_journal::FsyncPolicy::Periodic(
+                std::time::Duration::from_secs(1)
+            )
+        );
     }
 
     /// Audit-2 CFG-1: typo on a top-level key (`pricng` vs `pricing`)
