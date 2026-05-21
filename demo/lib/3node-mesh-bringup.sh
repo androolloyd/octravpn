@@ -86,6 +86,16 @@ else
     mkdir -p "${LINUX_TARGET_DIR}/cargo-registry" \
              "${LINUX_TARGET_DIR}/cargo-git"
 
+    # headscale-api's build.rs (via prost-build) shells out to protoc;
+    # the prebuilt octravpn-builder:latest installs it in the
+    # Dockerfile, but the vanilla rust:1.88-bookworm fallback needs an
+    # inline apt-get. Skip the apt step when the prebuilt image is
+    # present (which already has protoc installed).
+    BUILD_PREAMBLE=""
+    if [[ "${BUILDER_IMAGE}" == "rust:1.88-bookworm" ]]; then
+        BUILD_PREAMBLE="apt-get update >/dev/null && \
+            apt-get install -y --no-install-recommends protobuf-compiler >/dev/null && "
+    fi
     docker run --rm \
         -v "${REPO_ROOT}":/work/octra \
         -v "${OCTRA_FOUNDRY}":/work/octra-foundry \
@@ -95,7 +105,7 @@ else
         -v "${LINUX_TARGET_DIR}/cargo-git":/usr/local/cargo/git \
         -w /work/octra \
         "${BUILDER_IMAGE}" \
-        bash -c "cargo build --bin octravpn-node && cargo build --bin octravpn-analytics" >&2 || {
+        bash -c "${BUILD_PREAMBLE}cargo build --bin octravpn-node && cargo build --bin octravpn-analytics" >&2 || {
             echo "BUILD FAIL: cargo build inside ${BUILDER_IMAGE} failed" >&2
             exit 10
         }
