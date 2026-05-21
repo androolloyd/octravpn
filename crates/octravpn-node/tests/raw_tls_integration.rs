@@ -42,6 +42,13 @@ use tokio::{
     net::TcpStream,
 };
 
+fn octra_dns_store() -> headscale_api::dns::DnsStore {
+    headscale_api::dns::DnsStore::from_spec(headscale_api::dns::DnsConfigSpec {
+        base_domain: "octra.test".into(),
+        ..Default::default()
+    })
+}
+
 fn build_state() -> (WireState, tempfile::TempDir) {
     let dir = tempdir().unwrap();
     let server = Arc::new(ServerNoiseKey::load_or_generate(dir.path()).unwrap());
@@ -53,7 +60,7 @@ fn build_state() -> (WireState, tempfile::TempDir) {
         derp_map: Arc::new(octravpn_mesh::tailscale_wire::DerpMap::default()),
         policy: Arc::new(headscale_api::policy::PolicyStore::default()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
-        dns: std::sync::Arc::new(headscale_api::dns::DnsStore::new()),
+        dns: std::sync::Arc::new(octra_dns_store()),
     };
     (state, dir)
 }

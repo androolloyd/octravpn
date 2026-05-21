@@ -332,7 +332,12 @@ async fn run_mesh_serve(
         // distributed out-of-band alongside the preauth key. See
         // `docs/operators/tls-rotation.md` §"PSK-gated control plane".
         knock: load_knock_cfg_from_env(),
-        dns: Arc::new(octravpn_mesh::headscale_api::dns::DnsStore::new()),
+        dns: Arc::new(octravpn_mesh::headscale_api::dns::DnsStore::from_spec(
+            octravpn_mesh::headscale_api::dns::DnsConfigSpec {
+                base_domain: "octra.test".into(),
+                ..Default::default()
+            },
+        )),
     };
 
     eprintln!(

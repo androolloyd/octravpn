@@ -22,6 +22,13 @@ use std::sync::Arc;
 use tempfile::tempdir;
 use tower::ServiceExt;
 
+fn octra_dns_store() -> headscale_api::dns::DnsStore {
+    headscale_api::dns::DnsStore::from_spec(headscale_api::dns::DnsConfigSpec {
+        base_domain: "octra.test".into(),
+        ..Default::default()
+    })
+}
+
 fn build_state() -> (WireState, PreauthMinter, tempfile::TempDir) {
     let dir = tempdir().unwrap();
     let server = Arc::new(ServerNoiseKey::load_or_generate(dir.path()).unwrap());
@@ -34,7 +41,7 @@ fn build_state() -> (WireState, PreauthMinter, tempfile::TempDir) {
         derp_map: Arc::new(octravpn_mesh::tailscale_wire::DerpMap::default()),
         policy: Arc::new(headscale_api::policy::PolicyStore::default()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
-        dns: std::sync::Arc::new(headscale_api::dns::DnsStore::new()),
+        dns: std::sync::Arc::new(octra_dns_store()),
     };
     (state, minter, dir)
 }
@@ -550,7 +557,7 @@ async fn map_response_includes_derp_map_when_configured() {
         derp_map: Arc::new(derp_map),
         policy: Arc::new(headscale_api::policy::PolicyStore::default()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
-        dns: std::sync::Arc::new(headscale_api::dns::DnsStore::new()),
+        dns: std::sync::Arc::new(octra_dns_store()),
     };
 
     // Register a single peer and read its `/machine/map` view.

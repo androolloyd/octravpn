@@ -167,7 +167,12 @@ impl Hub {
                         // `mesh serve` entry point in `main.rs` is
                         // the one that honours the env var.
                         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
-                        dns: Arc::new(octravpn_mesh::headscale_api::dns::DnsStore::new()),
+                        dns: Arc::new(octravpn_mesh::headscale_api::dns::DnsStore::from_spec(
+                            octravpn_mesh::headscale_api::dns::DnsConfigSpec {
+                                base_domain: "octra.test".into(),
+                                ..Default::default()
+                            },
+                        )),
                     },
                     shared_minter,
                 ))
@@ -293,7 +298,10 @@ impl Hub {
                     // 30-day-old high-traffic node this turns a ~26 s
                     // HMAC chain re-walk into a sub-second tail verify.
                     // `Full` mode forces every line to be re-verified.
-                    if matches!(rotation.boot_replay, crate::audit::BootReplayMode::SkipToTip) {
+                    if matches!(
+                        rotation.boot_replay,
+                        crate::audit::BootReplayMode::SkipToTip
+                    ) {
                         let t0 = std::time::Instant::now();
                         match crate::audit::AuditLog::verify_dir_skip_to_tip(
                             &audit.key(),

@@ -30,6 +30,13 @@ use tower::ServiceExt;
 
 const ADMIN_TOKEN: &str = "policy-e2e-token-1234";
 
+fn octra_dns_store() -> headscale_api::dns::DnsStore {
+    headscale_api::dns::DnsStore::from_spec(headscale_api::dns::DnsConfigSpec {
+        base_domain: "octra.test".into(),
+        ..Default::default()
+    })
+}
+
 /// Build a shared (`WireState`, `admin::AdminState`) pair that points
 /// at the same `PolicyStore`. Matches the production wiring in
 /// `octravpn-node/src/main.rs` modulo the in-memory backing stores.
@@ -48,7 +55,7 @@ fn build_app() -> (axum::Router, WireState, PolicyStore, tempfile::TempDir) {
         derp_map: Arc::new(octravpn_mesh::tailscale_wire::DerpMap::default()),
         policy: Arc::new(policy.clone()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
-        dns: std::sync::Arc::new(headscale_api::dns::DnsStore::new()),
+        dns: std::sync::Arc::new(octra_dns_store()),
     };
 
     let admin_state = admin::AdminState::builder()
