@@ -906,11 +906,17 @@ mod tests {
         // The "sidecar" exits immediately; the next request should
         // time out (no response) — proves the timeout path doesn't hang.
         let err = client.ping().await.unwrap_err();
-        // Either Timeout (channel still open, no response) or
-        // SubprocessCrashed (channel closed mid-flight) — both are
-        // correct behaviour for this scenario.
+        // Either Timeout (channel still open, no response),
+        // SubprocessCrashed (channel closed mid-flight), Shutdown,
+        // or Other("write: Broken pipe") — all four are correct
+        // behaviour for "the sidecar exited before we got a reply".
+        // On Linux+macOS CI the kernel raced the test, surfacing
+        // EPIPE on the write side of the IPC pipe before the read
+        // side detected EOF. The `Other` variant wraps that
+        // io::Error path; treat it the same way.
         match err {
             PvacError::Timeout(_) | PvacError::SubprocessCrashed | PvacError::Shutdown => {}
+            PvacError::Other(ref msg) if msg.contains("Broken pipe") => {}
             other => panic!("unexpected error: {other:?}"),
         }
     }
