@@ -36,23 +36,25 @@ Type "echo peer-2 tailnet ip = $PEER2_IP"
 Enter
 Sleep 2s
 
-Type "# Stand up busybox httpd on peer-2 with a known payload"
+Type "# Stand up a tiny HTTP responder on peer-2 (nc-based; the"
 Enter
-Type "docker exec tsi-peer-2 sh -c 'echo hello-from-peer-2 > /tmp/payload'"
+Type "# tailscale image's busybox lacks the httpd applet)."
 Enter
-Type "docker exec -d tsi-peer-2 sh -c 'busybox httpd -f -p 0.0.0.0:8080 -h /tmp'"
+Type "docker exec -d tsi-peer-2 sh -c 'while true; do printf \"HTTP/1.0 200 OK\\r\\nContent-Type: text/plain\\r\\n\\r\\nhello-from-peer-2\\n\" | nc -l -p 8080; done'"
 Enter
-Sleep 2s
+Sleep 3s
 
-Type "# Real GET from peer-1 → peer-2:8080 over WireGuard"
+Type "# Real GET from peer-1 → peer-2:8080 via tailscale nc"
 Enter
-Type `docker exec tsi-peer-1 sh -c "wget -qO- http://${PEER2_IP}:8080/payload"`
+Type "# (userspace-networking mode — wget can't see tailnet IPs directly)."
+Enter
+Type `docker exec tsi-peer-1 sh -c "(printf 'GET / HTTP/1.0\r\nHost: x\r\n\r\n'; sleep 1) | tailscale --socket=/var/run/tailscale/tailscaled.sock nc ${PEER2_IP} 8080 | tail -1"`
 Enter
 Sleep 4s
 
-Type "# Same path, RTT + HTTP code via wget -S"
+Type "# Status code via the same path"
 Enter
-Type `docker exec tsi-peer-1 sh -c "time wget -qO /dev/null -S http://${PEER2_IP}:8080/payload 2>&1 | grep -E 'HTTP/|real'"`
+Type `docker exec tsi-peer-1 sh -c "(printf 'HEAD / HTTP/1.0\r\nHost: x\r\n\r\n'; sleep 1) | tailscale --socket=/var/run/tailscale/tailscaled.sock nc ${PEER2_IP} 8080 | head -1"`
 Enter
 Sleep 5s
 

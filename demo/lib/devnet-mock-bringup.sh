@@ -40,6 +40,15 @@ cd "${REPO_ROOT}"
 # Force a build pass so a fresh checkout (no prebuilt images) still
 # works. The Dockerfile.* layers use cached cargo registry so the
 # second invocation is fast.
+#
+# The mock-rpc / node{1,2,3} Dockerfiles `FROM octravpn-builder:latest`
+# — build that base image FIRST or the downstream builds fail with
+# `pull access denied, repository does not exist` (Docker tries to
+# pull from docker.io as a fallback).  e2e.sh follows the same order.
+docker compose -f "${COMPOSE_BASE}" build builder >&2 || {
+    echo "devnet-mock-bringup: builder image build failed" >&2
+    exit 20
+}
 docker compose -f "${COMPOSE_BASE}" build mock-rpc node1 node2 node3 >&2 || {
     echo "devnet-mock-bringup: image build failed" >&2
     exit 20

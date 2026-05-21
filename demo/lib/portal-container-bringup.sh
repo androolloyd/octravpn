@@ -71,12 +71,33 @@ mkdir -p "${PORTAL_STATE}"
 if [[ ! -f "${PORTAL_STATE}/config.toml" ]]; then
     cat > "${PORTAL_STATE}/config.toml" <<'TOML'
 [chain]
-rpc_url      = "http://mock-rpc:18080/rpc"
-program_addr = "octPROGmockaddress0000000000000000000000"
+rpc_url          = "http://mock-rpc:18080/rpc"
+program_addr     = "octPROGmockaddress0000000000000000000000"
+# The oct:// portal handler refuses to start on the v1.1 path —
+# circles are a v2/v3 substrate.  Pin to v2 (mock-rpc's surface
+# matches v2; v3 here would also work but pulls extra anchors we
+# don't fixture).
+protocol_version = "v2"
+
+# ClientConfig requires a [wallet] section even though the portal
+# only reads chain assets — the deserializer fails fast otherwise.
+# The path doesn't need to point at a real key; the portal subcommand
+# never signs.  Use a deterministic dummy for reproducibility.
+[wallet]
+addr        = "octWALLETportaldemo000000000000000000000"
+secret_path = "/etc/octravpn/wallet.key"
 
 [portal]
 bind = "0.0.0.0:51823"
 TOML
+fi
+
+# Materialize a dummy wallet.key so the portal binary's lazy-loader
+# (if it touches the file at startup) doesn't ENOENT.  Content is
+# ignored as long as nothing signs.
+if [[ ! -f "${PORTAL_STATE}/wallet.key" ]]; then
+    echo "00000000000000000000000000000000" > "${PORTAL_STATE}/wallet.key"
+    chmod 0600 "${PORTAL_STATE}/wallet.key"
 fi
 
 docker rm -f "${PORTAL_CONTAINER}" >/dev/null 2>&1 || true

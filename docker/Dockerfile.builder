@@ -35,6 +35,18 @@ COPY octra/rust-toolchain.toml* ./octra/
 COPY octra/crates ./octra/crates
 COPY octra/tests ./octra/tests
 COPY octra/program ./octra/program
+# pvac-sidecar/ipc-tests is a workspace member referenced from the
+# root Cargo.toml; cargo errors out at workspace-load time if absent.
+# We only need the manifest + the (tiny) src/ for cargo to be happy
+# — the binaries this builder produces don't link it.
+COPY octra/pvac-sidecar ./octra/pvac-sidecar
 
 WORKDIR /work/octra
-RUN cargo build --release -p octravpn-node -p octravpn-client
+# octra-mock-rpc lives in the sibling octra-foundry workspace but is
+# co-built here because Dockerfile.mock-rpc copies it out of this
+# image's target/release/ directory.
+RUN cargo build --release -p octravpn-node -p octravpn-client && \
+    cd /work/octra-foundry && \
+    cargo build --release -p octra-mock-rpc && \
+    cp /work/octra-foundry/target/release/octra-mock-rpc \
+       /work/octra/target/release/octra-mock-rpc

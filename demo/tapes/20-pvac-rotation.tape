@@ -27,13 +27,13 @@ Enter
 Sleep 90s
 Type "# Step 0: confirm the sidecar binary is reachable and prints its version"
 Enter
-Type "docker exec octravpn-pvac sh -c 'octra-pvac-sidecar --version 2>/dev/null || /usr/local/bin/octra-pvac-sidecar --version 2>/dev/null || /opt/octra-pvac-sidecar --version 2>/dev/null || echo (sidecar binary present; no --version flag)'"
+Type "docker exec octravpn-pvac sh -c 'octra-pvac-sidecar --version 2>/dev/null || /usr/local/bin/octra-pvac-sidecar --version 2>/dev/null || /opt/octra-pvac-sidecar --version 2>/dev/null || echo \"(sidecar binary present; no --version flag)\"'"
 Enter
 Sleep 4s
 
 Type "# Step 1: dry-run — drive the sidecar's keygen op via the JSON IPC loop"
 Enter
-Type `docker exec -i octravpn-pvac sh -c 'echo {"op":"keygen"} | (octra-pvac-sidecar 2>/dev/null || /usr/local/bin/octra-pvac-sidecar 2>/dev/null || /opt/octra-pvac-sidecar) | head -c 256; echo'`
+Type `docker exec -i octravpn-pvac sh -c 'echo "{\"op\":\"keygen\",\"seed\":\"0000000000000000000000000000000000000000000000000000000000000000\"}" | (octra-pvac-sidecar 2>/dev/null || /usr/local/bin/octra-pvac-sidecar 2>/dev/null || /opt/octra-pvac-sidecar) | head -c 256; echo'`
 Enter
 Sleep 8s
 
@@ -41,7 +41,7 @@ Type "# Step 2: AES KAT inside the sidecar — confirms the deterministic"
 Enter
 Type "# round-trip the chain side enforces on every register tx"
 Enter
-Type `docker exec -i octravpn-pvac sh -c 'echo {"op":"aes_kat"} | (octra-pvac-sidecar 2>/dev/null || /usr/local/bin/octra-pvac-sidecar 2>/dev/null || /opt/octra-pvac-sidecar)'`
+Type `docker exec -i octravpn-pvac sh -c 'echo "{\"op\":\"aes_kat\"}" | (octra-pvac-sidecar 2>/dev/null || /usr/local/bin/octra-pvac-sidecar 2>/dev/null || /opt/octra-pvac-sidecar)'`
 Enter
 Sleep 6s
 

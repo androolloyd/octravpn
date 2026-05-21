@@ -26,37 +26,37 @@ Enter
 Sleep 120s
 Type "# 1. create a user (the namespace that owns nodes + keys)"
 Enter
-Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51820 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale users create alice || true"
+Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51821 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale users create alice || true"
 Enter
 Sleep 3s
-Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51820 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale users list || true"
+Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51821 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale users list || true"
 Enter
 Sleep 3s
 
 Type "# 2. enumerate joined nodes (machines) — peer-1/2/3 from the bringup"
 Enter
-Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51820 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale nodes list || true"
+Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51821 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale nodes list || true"
 Enter
 Sleep 4s
 
 Type "# 3. mint a reusable preauth key for fleet rollouts"
 Enter
-Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51820 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale preauthkeys create --user alice --reusable --expires-in 24h || true"
+Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51821 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale preauthkeys create --user alice --reusable --expires-in 24h || true"
 Enter
 Sleep 4s
-Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51820 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale preauthkeys list --user alice || true"
+Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51821 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale preauthkeys list --user alice || true"
 Enter
 Sleep 4s
 
 Type "# 4. inspect the active hujson policy"
 Enter
-Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51820 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale policy get || true"
+Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51821 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale policy get || true"
 Enter
 Sleep 4s
 
 Type "# 5. tailnet-wide status — DERP regions, latency, peer count"
 Enter
-Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51820 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale tailnet status || true"
+Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51821 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale tailnet status || true"
 Enter
 Sleep 4s
 

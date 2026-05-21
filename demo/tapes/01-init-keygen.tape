@@ -46,7 +46,7 @@ Type "docker exec -w /work octravpn-keygen-fixture ls -la"
 Enter
 Sleep 2s
 
-Type "docker exec -w /work octravpn-keygen-fixture octravpn --config ./config.toml identity"
+Type "docker exec -w /work octravpn-keygen-fixture octravpn --config ./client.toml identity"
 Enter
 Sleep 3s
 

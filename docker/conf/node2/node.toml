@@ -14,6 +14,7 @@ price_per_mb        = 100
 region              = "compose"
 
 [control]
+receipt_journal_path = "/tmp/octravpn-state/receipts.bin"
 listen              = "0.0.0.0:51821"
 audit_dir           = "/tmp/octravpn-audit"
 

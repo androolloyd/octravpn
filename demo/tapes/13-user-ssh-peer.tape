@@ -60,7 +60,7 @@ Enter
 Type "echo peer-2 tailnet ip = $PEER2_IP"
 Enter
 Sleep 2s
-Type `docker exec tsi-peer-1 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$PEER2_IP "uname -a; echo session_ok"`
+Type `docker exec tsi-peer-1 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o "ProxyCommand=tailscale --socket=/var/run/tailscale/tailscaled.sock nc %h %p" root@$PEER2_IP "uname -a; echo session_ok"`
 Enter
 Sleep 8s
 

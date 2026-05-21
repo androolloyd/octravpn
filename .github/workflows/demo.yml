@@ -179,6 +179,22 @@ jobs:
                      demo/tapes/15-*.tape \
                      demo/tapes/16-*.tape; do
               echo "=== ${tape} ==="
+              # Preflight gate — every command in the tape must
+              # return exit 0 against the live harness before vhs
+              # records.  See demo/lib/preflight-tape.sh for the
+              # heuristic + memory/demo_preflight_required.md for
+              # the rule.  Tapes 11/12 are intentional OS-install
+              # fakes; their `Type "..."` lines are commented-out
+              # narration so preflight is a fast no-op.
+              case "${tape}" in
+                  *11-*.tape|*12-*.tape) ;;
+                  *)
+                      if ! bash demo/lib/preflight-tape.sh "${tape}"; then
+                          echo "::warning::${tape} failed preflight — skipping vhs render"
+                          continue
+                      fi
+                      ;;
+              esac
               vhs "${tape}" || echo "  ! ${tape} failed (non-fatal in nightly)"
           done
           ls -la demo/recordings/ || true
@@ -312,6 +328,18 @@ jobs:
                      demo/tapes/00-master-tour.tape; do
               echo "=== ${tape} ==="
               bash demo/lib/3node-mesh-teardown.sh >/dev/null 2>&1 || true
+              # Preflight before recording.  Tapes 05/06 delegate to
+              # shell scripts that exit-code themselves, so we skip
+              # the per-command preflight there.
+              case "${tape}" in
+                  *05-*.tape|*06-*.tape) ;;
+                  *)
+                      if ! bash demo/lib/preflight-tape.sh "${tape}"; then
+                          echo "::warning::${tape} failed preflight — skipping vhs render"
+                          continue
+                      fi
+                      ;;
+              esac
               vhs "${tape}" || echo "  ! ${tape} failed (non-fatal in nightly)"
           done
           bash demo/lib/3node-mesh-teardown.sh >/dev/null 2>&1 || true

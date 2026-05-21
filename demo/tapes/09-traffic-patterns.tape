@@ -59,13 +59,14 @@ Sleep 10s
 
 Type "# Spin up a tiny HTTP target on peer-2 and pull bytes from peer-1"
 Enter
-# `tailscale/tailscale:latest` is alpine-based; busybox httpd is
-# already present and serves the working dir over HTTP without a
-# python dependency.
-Type "docker exec -d tsi-peer-2 sh -c 'echo hello-from-peer-2 > /tmp/payload && busybox httpd -f -p 0.0.0.0:8080 -h /tmp &'"
+# `tailscale/tailscale:latest` runs in userspace-networking, so we
+# can't reach tailnet IPs with wget — apps need to dial via
+# `tailscale nc` (or the tailscale SOCKS proxy).  We listen on
+# peer-2 with busybox nc and pull via `tailscale nc` from peer-1.
+Type "docker exec -d tsi-peer-2 sh -c 'while true; do printf \"HTTP/1.0 200 OK\\r\\nContent-Type: text/plain\\r\\n\\r\\nhello-from-peer-2\\n\" | nc -l -p 8080; done'"
 Enter
 Sleep 3s
-Type `docker exec tsi-peer-1 sh -c "wget -q -O- http://$PEER2_IP:8080/payload"`
+Type `docker exec tsi-peer-1 sh -c "(printf 'GET / HTTP/1.0\r\nHost: x\r\n\r\n'; sleep 1) | tailscale --socket=/var/run/tailscale/tailscaled.sock nc $PEER2_IP 8080 | tail -1"`
 Enter
 Sleep 4s
 
