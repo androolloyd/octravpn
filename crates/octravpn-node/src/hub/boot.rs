@@ -163,6 +163,35 @@ pub(super) async fn build_hub(cfg: NodeConfig) -> Result<Hub> {
         None
     };
 
+    // Perf-10: pick the WireGuard peer-administration backend per
+    // `[tunnel.backend]`. `auto` (default) → boringtun (keeps the
+    // onion-peel data plane intact); `kernel` → kernel WG (Linux +
+    // CAP_NET_ADMIN required, listen port handed to the kernel);
+    // `boringtun` → forced userspace. See
+    // `crates/octravpn-node/src/tunnel/backend/mod.rs` and
+    // `docs/operators/wireguard-backend.md`.
+    let listen_port = cfg
+        .tunnel
+        .listen
+        .parse::<std::net::SocketAddr>()
+        .map_or(0, |sa| sa.port());
+    let iface_name = crate::tunnel::backend::default_iface_name(listen_port);
+    // The kernel backend needs the WG private key as base64. The
+    // static secret bytes are already in `wg_static_secret`; render
+    // them via `StaticSecret::to_bytes`.
+    let wg_secret_b64 = {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(wg_static_secret.to_bytes())
+    };
+    let (wg_backend, wg_backend_selection) = crate::tunnel::backend::select_backend(
+        cfg.tunnel.backend,
+        &iface_name,
+        listen_port,
+        &wg_secret_b64,
+    )
+    .await
+    .context("select WG backend")?;
+
     Ok(Hub {
         cfg,
         chain,
@@ -176,6 +205,8 @@ pub(super) async fn build_hub(cfg: NodeConfig) -> Result<Hub> {
         metrics,
         receipt_journal,
         pvac,
+        wg_backend,
+        wg_backend_selection,
     })
 }
 

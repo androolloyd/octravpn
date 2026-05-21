@@ -1,4 +1,18 @@
-//! Userspace `WireGuard` data plane on the node.
+//! `WireGuard` data plane on the node.
+//!
+//! Two coexisting roles:
+//!
+//! * The original onion-forwarding `Server` in this module — userspace
+//!   boringtun, single UDP socket, peers admitted on first handshake.
+//!   This is the path that does the `OnionRouter` peel + forward/egress.
+//! * A pluggable [`backend::WgBackend`] surface for plain WG peer
+//!   administration. Two impls live under [`backend`]:
+//!   [`backend::BoringtunBackend`] (wraps an in-process `Tunn` pool) and
+//!   [`backend::KernelBackend`] (Linux-only; drives kernel `wireguard`
+//!   via the `wg`/`ip` userspace tools). See
+//!   `docs/operators/wireguard-backend.md` for the operator matrix and
+//!   [`backend::select_backend`] for the capability-detection heuristic
+//!   (Perf-10).
 //!
 //! Each accepted client peer gets its own boringtun `Tunn` instance; we
 //! demultiplex by source UDP address. The node is a *forwarding* relay:
@@ -25,6 +39,12 @@ use tracing::{debug, warn};
 use x25519_dalek::{PublicKey as X25519Pub, StaticSecret};
 
 use crate::onion::{Direction, OnionRouter};
+
+// Many items on the backend trait surface are exercised only by tests
+// + by control-plane wiring forthcoming alongside Perf-DP. Suppress
+// dead-code lint for the whole tree until those consumers land.
+#[allow(dead_code)]
+pub(crate) mod backend;
 
 /// One peer's per-connection state.
 pub(crate) struct Peer {
