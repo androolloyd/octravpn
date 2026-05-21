@@ -113,6 +113,7 @@ use tracing::{debug, info, warn};
 
 /// Errors surfaced by [`PvacClient`].
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub(crate) enum PvacError {
     /// The sidecar binary could not be located or spawned. Returned by
     /// [`PvacClient::spawn`]; once spawn has succeeded, transient
@@ -271,11 +272,7 @@ impl PvacClient {
         let (tx, rx) = mpsc::channel::<Outbound>(32);
         let shutdown = Arc::new(Notify::new());
 
-        let supervisor = tokio::spawn(supervisor_loop(
-            cfg.clone(),
-            rx,
-            shutdown.clone(),
-        ));
+        let supervisor = tokio::spawn(supervisor_loop(cfg.clone(), rx, shutdown.clone()));
 
         Ok(Self {
             inner: Arc::new(ClientInner {
@@ -377,10 +374,7 @@ impl PvacClient {
     /// round-trips through the chain's RPC.
     pub(crate) async fn keygen(&self, seed_hex: &str) -> PvacResult<KeygenOut> {
         let v = self
-            .request(
-                "keygen",
-                json!({"op": "keygen", "seed": seed_hex}),
-            )
+            .request("keygen", json!({"op": "keygen", "seed": seed_hex}))
             .await?;
         let pk = v
             .get("pk")
@@ -485,10 +479,7 @@ impl PvacClient {
     /// the AML runtime itself.
     pub(crate) async fn add(&self, pk: &str, a: &str, b: &str) -> PvacResult<String> {
         let v = self
-            .request(
-                "add",
-                json!({"op": "add", "pk": pk, "a": a, "b": b}),
-            )
+            .request("add", json!({"op": "add", "pk": pk, "a": a, "b": b}))
             .await?;
         v.get("ct")
             .and_then(Value::as_str)
@@ -535,11 +526,7 @@ pub(crate) struct KeygenOut {
 
 /// Long-running task that spawns the subprocess, pumps the request
 /// channel, and respawns on crash with exponential back-off.
-async fn supervisor_loop(
-    cfg: PvacConfig,
-    mut rx: mpsc::Receiver<Outbound>,
-    shutdown: Arc<Notify>,
-) {
+async fn supervisor_loop(cfg: PvacConfig, mut rx: mpsc::Receiver<Outbound>, shutdown: Arc<Notify>) {
     let mut backoff = cfg.restart_backoff;
     let mut consecutive_crashes: u32 = 0;
 
@@ -719,9 +706,7 @@ async fn run_incarnation(
     }
 }
 
-async fn read_one_line(
-    reader: &mut BufReader<ChildStdout>,
-) -> std::io::Result<Option<String>> {
+async fn read_one_line(reader: &mut BufReader<ChildStdout>) -> std::io::Result<Option<String>> {
     let mut line = String::new();
     let n = reader.read_line(&mut line).await?;
     if n == 0 {
@@ -751,12 +736,13 @@ async fn drain_pending(
         let read = timeout(remaining, read_one_line(reader)).await;
         match read {
             Ok(Ok(Some(line))) => {
-                let Some(id) = send_order.pop_front() else { continue };
+                let Some(id) = send_order.pop_front() else {
+                    continue;
+                };
                 if let Some(tx) = pending.remove(&id) {
                     let parsed: Result<Value, _> = serde_json::from_str(&line);
-                    let res = parsed.map_err(|e| {
-                        PvacError::other(format!("response not json: {e}"))
-                    });
+                    let res =
+                        parsed.map_err(|e| PvacError::other(format!("response not json: {e}")));
                     let _ = tx.send(res);
                 }
             }
@@ -865,7 +851,10 @@ mod tests {
         };
         match err {
             PvacError::Spawn { path, .. } => {
-                assert_eq!(path.to_string_lossy(), "/definitely/not/a/real/path/sidecar");
+                assert_eq!(
+                    path.to_string_lossy(),
+                    "/definitely/not/a/real/path/sidecar"
+                );
             }
             other => panic!("expected Spawn, got {other:?}"),
         }
@@ -917,11 +906,17 @@ mod tests {
         // The "sidecar" exits immediately; the next request should
         // time out (no response) — proves the timeout path doesn't hang.
         let err = client.ping().await.unwrap_err();
-        // Either Timeout (channel still open, no response) or
-        // SubprocessCrashed (channel closed mid-flight) — both are
-        // correct behaviour for this scenario.
+        // Either Timeout (channel still open, no response),
+        // SubprocessCrashed (channel closed mid-flight), Shutdown,
+        // or Other("write: Broken pipe") — all four are correct
+        // behaviour for "the sidecar exited before we got a reply".
+        // On Linux+macOS CI the kernel raced the test, surfacing
+        // EPIPE on the write side of the IPC pipe before the read
+        // side detected EOF. The `Other` variant wraps that
+        // io::Error path; treat it the same way.
         match err {
             PvacError::Timeout(_) | PvacError::SubprocessCrashed | PvacError::Shutdown => {}
+            PvacError::Other(ref msg) if msg.contains("Broken pipe") => {}
             other => panic!("unexpected error: {other:?}"),
         }
     }
@@ -930,7 +925,9 @@ mod tests {
 
     #[tokio::test]
     async fn ping_roundtrips_against_real_binary() {
-        let Some(bin) = skip_if_no_binary() else { return };
+        let Some(bin) = skip_if_no_binary() else {
+            return;
+        };
         let client = PvacClient::spawn(test_cfg(bin)).await.unwrap();
         let ok = client.ping().await.unwrap();
         assert!(ok, "ping should return pong=true");
@@ -938,7 +935,9 @@ mod tests {
 
     #[tokio::test]
     async fn version_returns_sidecar_identity() {
-        let Some(bin) = skip_if_no_binary() else { return };
+        let Some(bin) = skip_if_no_binary() else {
+            return;
+        };
         let client = PvacClient::spawn(test_cfg(bin)).await.unwrap();
         let v = client.version().await.unwrap();
         assert!(v.starts_with("octra-pvac-sidecar/"), "got: {v}");
@@ -946,7 +945,9 @@ mod tests {
 
     #[tokio::test]
     async fn aes_kat_is_deterministic() {
-        let Some(bin) = skip_if_no_binary() else { return };
+        let Some(bin) = skip_if_no_binary() else {
+            return;
+        };
         let client = PvacClient::spawn(test_cfg(bin)).await.unwrap();
         let a = client.aes_kat().await.unwrap();
         let b = client.aes_kat().await.unwrap();
@@ -957,7 +958,9 @@ mod tests {
 
     #[tokio::test]
     async fn keygen_returns_hfhe_v1_prefixed_blobs() {
-        let Some(bin) = skip_if_no_binary() else { return };
+        let Some(bin) = skip_if_no_binary() else {
+            return;
+        };
         let client = PvacClient::spawn(test_cfg(bin)).await.unwrap();
         let kp = client.keygen(&seed_hex(0x01)).await.unwrap();
         assert!(kp.pk.starts_with("hfhe_v1|"));
@@ -971,7 +974,9 @@ mod tests {
         // through the sidecar from the same seed. The sidecar's keygen
         // is documented deterministic; this pins that behaviour from
         // the Rust side so a future libpvac swap can be caught.
-        let Some(bin) = skip_if_no_binary() else { return };
+        let Some(bin) = skip_if_no_binary() else {
+            return;
+        };
         let client = PvacClient::spawn(test_cfg(bin)).await.unwrap();
         let a = client.keygen(&seed_hex(0x42)).await.unwrap();
         let b = client.keygen(&seed_hex(0x42)).await.unwrap();
@@ -987,7 +992,9 @@ mod tests {
         // leaves the wallet process). We exercise the closest thing
         // the contract permits: encrypt(0) + add(0, 0) should produce
         // a structurally valid ciphertext.
-        let Some(bin) = skip_if_no_binary() else { return };
+        let Some(bin) = skip_if_no_binary() else {
+            return;
+        };
         let client = PvacClient::spawn(test_cfg(bin)).await.unwrap();
         let kp = client.keygen(&seed_hex(0x03)).await.unwrap();
         let ct = client
@@ -1005,7 +1012,9 @@ mod tests {
         // must see pong=true. This pins the request/response ordering
         // contract: the supervisor never garbles replies even under
         // high concurrency.
-        let Some(bin) = skip_if_no_binary() else { return };
+        let Some(bin) = skip_if_no_binary() else {
+            return;
+        };
         let client = Arc::new(PvacClient::spawn(test_cfg(bin)).await.unwrap());
         let mut handles = Vec::new();
         for _ in 0..16 {
@@ -1072,7 +1081,9 @@ mod tests {
         // The second ping must succeed within the supervisor's
         // respawn budget (a few hundred ms with our test back-off of
         // 50ms).
-        let Some(bin) = skip_if_no_binary() else { return };
+        let Some(bin) = skip_if_no_binary() else {
+            return;
+        };
         let client = PvacClient::spawn(test_cfg(bin)).await.unwrap();
         assert!(client.ping().await.unwrap());
 
@@ -1136,17 +1147,15 @@ mod tests {
         // is still alive. Verify the latter by issuing one more call
         // and confirming it returns (timeout or crash error, but no
         // hang).
-        let r = tokio::time::timeout(
-            Duration::from_secs(2),
-            client.ping(),
-        )
-        .await;
+        let r = tokio::time::timeout(Duration::from_secs(2), client.ping()).await;
         assert!(r.is_ok(), "supervisor task appears wedged");
     }
 
     #[tokio::test]
     async fn graceful_shutdown_drains_quickly() {
-        let Some(bin) = skip_if_no_binary() else { return };
+        let Some(bin) = skip_if_no_binary() else {
+            return;
+        };
         let client = PvacClient::spawn(test_cfg(bin)).await.unwrap();
         // Warm up
         let _ = client.ping().await.unwrap();
@@ -1165,7 +1174,9 @@ mod tests {
 
     #[tokio::test]
     async fn request_after_supervisor_gone_returns_shutdown() {
-        let Some(bin) = skip_if_no_binary() else { return };
+        let Some(bin) = skip_if_no_binary() else {
+            return;
+        };
         // Spawn, then clone the inner Arc twice so we keep a handle
         // even after the original PvacClient drops.
         let original = PvacClient::spawn(test_cfg(bin)).await.unwrap();
@@ -1184,7 +1195,9 @@ mod tests {
 
     #[tokio::test]
     async fn encrypt_const_roundtrips_a_known_value() {
-        let Some(bin) = skip_if_no_binary() else { return };
+        let Some(bin) = skip_if_no_binary() else {
+            return;
+        };
         let client = PvacClient::spawn(test_cfg(bin)).await.unwrap();
         let kp = client.keygen(&seed_hex(0x05)).await.unwrap();
         let ct = client
@@ -1196,7 +1209,9 @@ mod tests {
 
     #[tokio::test]
     async fn make_zero_proof_returns_zkzp_v2_blob() {
-        let Some(bin) = skip_if_no_binary() else { return };
+        let Some(bin) = skip_if_no_binary() else {
+            return;
+        };
         let client = PvacClient::spawn(test_cfg(bin)).await.unwrap();
         let kp = client.keygen(&seed_hex(0x07)).await.unwrap();
         let ct = client
@@ -1215,7 +1230,9 @@ mod tests {
 
     #[tokio::test]
     async fn sidecar_error_surface_through_pvac_error() {
-        let Some(bin) = skip_if_no_binary() else { return };
+        let Some(bin) = skip_if_no_binary() else {
+            return;
+        };
         let client = PvacClient::spawn(test_cfg(bin)).await.unwrap();
         // keygen with a wrong-length seed → sidecar returns
         // {"error": "seed must be 32 bytes (got ...)"} which the

@@ -89,7 +89,7 @@ audit report, or a third-party assurance opinion.
    [`v3/fee-model.md`](v3/fee-model.md),
    [`v3/v3-vs-v2.md`](v3/v3-vs-v2.md)).
 5. Lean theorems index — [`../proofs/lean/WireProtocol/Theorems.md`](../proofs/lean/WireProtocol/Theorems.md)
-   (the canonical entry point into the 232-theorem Lean workspace).
+   (the canonical entry point into the 373-theorem Lean workspace).
 6. [`security/threat-model-v3.md`](security/threat-model-v3.md) +
    [`security/pentest-runbook.md`](security/pentest-runbook.md) +
    [`security/validator-hardening.md`](security/validator-hardening.md).

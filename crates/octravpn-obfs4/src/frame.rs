@@ -37,6 +37,24 @@
 //! framed-over-TCP variant chunk-and-coalesce without redesigning
 //! the inner format. Maximum frame size is 65 535 bytes (well above
 //! the WG-side MTU).
+//!
+//! # Per-key message-count budget (audit-1 H-2)
+//!
+//! The 8-byte counter is the bottom half of the ChaCha20-Poly1305
+//! nonce; reusing it under the same key is a catastrophic
+//! confidentiality failure. The counter therefore MUST NOT wrap. We
+//! enforce this by switching every `counter` mutation to
+//! [`u64::checked_add`] — a frame at `u64::MAX` is the last frame any
+//! sealer/opener will accept under the current key, and any attempt to
+//! emit / open a 2^64-th frame surfaces as
+//! [`FrameError::CounterExhausted`]. Operators rotate the key (close
+//! and re-handshake the obfs4 session) well before that point.
+//!
+//! At a sustained 1 Mfps the budget is `2^64 / 1e6 / 86400 / 365 ≈
+//! 585 000 millennia`, so the hard wall is practically unreachable —
+//! but switching from `wrapping_add` to `checked_add` removes any
+//! silent regression path (e.g. a future shrink to a 32-bit counter
+//! would otherwise wrap at ~71 minutes of saturated traffic).
 
 use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
@@ -65,6 +83,7 @@ const TAG_LEN: usize = 16;
 
 /// Errors raised by the framing layer.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum FrameError {
     /// Incoming buffer didn't contain a full frame (couldn't read the
     /// length prefix, or the prefix exceeded the buffer).
@@ -93,6 +112,13 @@ pub enum FrameError {
     /// after sealing (MAX_PAYLOAD exceeded).
     #[error("payload too large: {0} bytes (max {MAX_PAYLOAD})")]
     PayloadTooLarge(usize),
+    /// audit-1 H-2: the 64-bit counter that drives the AEAD nonce has
+    /// reached its maximum and cannot increment without wrapping. Any
+    /// further frame under the current key would risk nonce reuse;
+    /// callers MUST tear down the session and re-handshake to obtain a
+    /// fresh key + zeroed counter.
+    #[error("counter exhausted: the 2^64-frame per-key budget has been spent — rotate keys")]
+    CounterExhausted,
 }
 
 /// Direction-tagged ChaCha20-Poly1305 sealer. Owns the key + the
@@ -124,6 +150,18 @@ impl FrameSealer {
             return Err(FrameError::PayloadTooLarge(payload.len()));
         }
 
+        // audit-1 H-2: refuse to wrap the AEAD nonce. We check the
+        // *next* counter value before sealing so the last accepted
+        // frame is at `u64::MAX - 1` and `u64::MAX` itself is reserved
+        // — any attempt to emit a frame from a sealer whose counter
+        // has reached `u64::MAX` returns `CounterExhausted` BEFORE the
+        // ciphertext is appended to `out`. This way the caller's
+        // buffer is never mutated under an exhausted-counter path.
+        let next_counter = self
+            .counter
+            .checked_add(1)
+            .ok_or(FrameError::CounterExhausted)?;
+
         // Build the plaintext: [u16 BE real_len] [payload] [random pad].
         let pad_len = rand::thread_rng().gen_range(MIN_PAD_PLAINTEXT..=MAX_PAD_PLAINTEXT);
         let mut plaintext = Vec::with_capacity(INNER_LEN_BYTES + payload.len() + pad_len);
@@ -150,7 +188,8 @@ impl FrameSealer {
                 },
             )
             .map_err(|_| FrameError::BadTag)?; // encrypt cannot really fail; map for total cover.
-        self.counter = self.counter.wrapping_add(1);
+                                               // audit-1 H-2: counter advance pre-validated above.
+        self.counter = next_counter;
 
         // Emit: [u16 BE total_len] [ciphertext (incl tag)].
         let total_len = ciphertext.len();
@@ -187,6 +226,14 @@ impl FrameOpener {
     /// via skipping to the next datagram boundary — but for UDP we
     /// drop the offending datagram entirely).
     pub fn open_from(&mut self, buf: &[u8]) -> Result<(Vec<u8>, usize), FrameError> {
+        // audit-1 H-2: refuse to wrap the AEAD nonce. Same pre-check as
+        // the sealer's: if the next counter would overflow, reject this
+        // frame outright. The opener has not yet consumed bytes from
+        // `buf`, so the caller's read position is preserved.
+        let next_counter = self
+            .counter
+            .checked_add(1)
+            .ok_or(FrameError::CounterExhausted)?;
         if buf.len() < LEN_PREFIX_BYTES {
             return Err(FrameError::Incomplete {
                 have: buf.len(),
@@ -221,7 +268,8 @@ impl FrameOpener {
                 },
             )
             .map_err(|_| FrameError::BadTag)?;
-        self.counter = self.counter.wrapping_add(1);
+        // audit-1 H-2: counter advance pre-validated above.
+        self.counter = next_counter;
 
         if plaintext.len() < INNER_LEN_BYTES {
             return Err(FrameError::BadTag);
@@ -236,6 +284,25 @@ impl FrameOpener {
         let mut payload = vec![0u8; real_len];
         payload.copy_from_slice(&plaintext[INNER_LEN_BYTES..INNER_LEN_BYTES + real_len]);
         Ok((payload, frame_end))
+    }
+}
+
+impl FrameSealer {
+    /// Test-only counter setter. Production code never touches the
+    /// counter directly; only `seal_into` advances it. Tests use this
+    /// to drive the audit-1 H-2 `CounterExhausted` guard at the
+    /// boundary without sealing `u64::MAX` legitimate frames first.
+    #[cfg(test)]
+    pub(crate) fn set_counter_for_test(&mut self, c: u64) {
+        self.counter = c;
+    }
+}
+
+impl FrameOpener {
+    /// Test-only counter setter; see [`FrameSealer::set_counter_for_test`].
+    #[cfg(test)]
+    pub(crate) fn set_counter_for_test(&mut self, c: u64) {
+        self.counter = c;
     }
 }
 
@@ -552,6 +619,75 @@ mod tests {
 
     // ---------- Test the existing `round_trip` is checking real bytes
     //            and not silently passing on an empty payload edge. ----
+
+    // ---------- audit-1 H-2: counter exhaustion ----------
+
+    /// A sealer whose counter has reached `u64::MAX` MUST refuse to
+    /// emit another frame. The error is `CounterExhausted`, the
+    /// caller's `out` buffer is unchanged, and the internal counter
+    /// stays put — the only safe recovery is to drop this sealer +
+    /// re-handshake under a fresh key.
+    #[test]
+    fn sealer_at_counter_max_refuses_next_frame() {
+        let key = [0x55u8; 32];
+        let mut sealer = FrameSealer::new(&key, NONCE_PREFIX_C2S);
+        sealer.set_counter_for_test(u64::MAX);
+        let before_counter = sealer.counter;
+        let mut out = b"prefix-not-modified".to_vec();
+        let before_out = out.clone();
+        let err = sealer
+            .seal_into(b"would-cause-wrap", &mut out)
+            .expect_err("counter exhausted");
+        assert!(matches!(err, FrameError::CounterExhausted));
+        // Buffer untouched — we rejected before extending `out`.
+        assert_eq!(out, before_out);
+        // Internal counter unchanged so a follow-up call hits the same
+        // guard rather than wrapping silently.
+        assert_eq!(sealer.counter, before_counter);
+    }
+
+    /// An opener at `u64::MAX` likewise refuses. We test that the
+    /// rejection happens BEFORE any cipher work so a torn or replayed
+    /// frame at end-of-budget can't sneak through.
+    #[test]
+    fn opener_at_counter_max_refuses_next_frame() {
+        let key = [0x66u8; 32];
+        let mut opener = FrameOpener::new(&key, NONCE_PREFIX_C2S);
+        opener.set_counter_for_test(u64::MAX);
+        // Even a syntactically-valid-looking buffer is rejected.
+        let mut buf = vec![];
+        buf.extend_from_slice(&64u16.to_be_bytes());
+        buf.extend_from_slice(&[0u8; 64]);
+        let err = opener.open_from(&buf).expect_err("counter exhausted");
+        assert!(matches!(err, FrameError::CounterExhausted));
+    }
+
+    /// One frame *below* exhaustion still succeeds — the last legitimate
+    /// frame is at `u64::MAX - 1`. This pins the off-by-one boundary
+    /// against future regressions to either `<` or `<=` checks.
+    #[test]
+    fn sealer_one_below_max_still_seals() {
+        let key = [0x77u8; 32];
+        let mut sealer = FrameSealer::new(&key, NONCE_PREFIX_C2S);
+        let mut opener = FrameOpener::new(&key, NONCE_PREFIX_C2S);
+        sealer.set_counter_for_test(u64::MAX - 1);
+        opener.set_counter_for_test(u64::MAX - 1);
+        let mut wire = Vec::new();
+        sealer
+            .seal_into(b"last-legitimate", &mut wire)
+            .expect("seal at MAX-1 succeeds");
+        // Counter advanced to MAX; next call rejects.
+        assert_eq!(sealer.counter, u64::MAX);
+        let (got, _) = opener.open_from(&wire).expect("open at MAX-1 succeeds");
+        assert_eq!(got, b"last-legitimate");
+        assert_eq!(opener.counter, u64::MAX);
+        // Now both sides are exhausted; next op fails on both ends.
+        let mut more = Vec::new();
+        assert!(matches!(
+            sealer.seal_into(b"x", &mut more),
+            Err(FrameError::CounterExhausted)
+        ));
+    }
 
     #[test]
     fn round_trip_with_inner_zero_bytes_payload() {

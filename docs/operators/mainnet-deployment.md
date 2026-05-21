@@ -267,7 +267,7 @@ sudo journalctl -u octravpn-node -f
 
 Expected first-startup log lines (order may vary):
 
-```
+```text
 INFO  loaded sealed wallet from /etc/octravpn/wallet.hex.sealed
 INFO  v3 register_circle submitted (atomic register+bond)
 INFO  tunnel listening on 0.0.0.0:51820/udp

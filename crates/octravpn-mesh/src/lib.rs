@@ -59,6 +59,7 @@ pub use stun::{stun_binding_request, StunError};
 pub use subnet::{SubnetAdvertisement, SubnetRouter};
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum MeshError {
     #[error("stun: {0}")]
     Stun(#[from] StunError),

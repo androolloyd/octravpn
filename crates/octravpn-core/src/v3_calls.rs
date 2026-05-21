@@ -315,11 +315,7 @@ impl ContractCallBuilder {
     ) -> Value {
         self.call(
             method::SETTLE_CLAIM,
-            &[
-                json!(session_id),
-                json!(bytes_used),
-                json!(enc_bytes_used),
-            ],
+            &[json!(session_id), json!(bytes_used), json!(enc_bytes_used)],
             value,
             fee,
             nonce,

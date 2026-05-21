@@ -14,7 +14,16 @@ reports are taken seriously and rewarded.
    - Affected versions and components.
    - Suggested fix or mitigation if you have one.
 2. Optionally encrypt with our PGP key, fingerprint:
-   `<pending — see https://octra.org/security.asc>`.
+   `<TO BE GENERATED — see docs/release.md §5>`.
+
+> **The release GPG key is not yet generated.** Until it is,
+> verify releases via Sigstore Rekor entries (see
+> `docs/release.md` §6) or skip verification at your own risk.
+> The `gpg --verify` flow documented in `docs/release.md` §6 is
+> the target state, not the current state — the workflow runs
+> green today producing **unsigned** artifacts. Track the
+> rollout via the T1.x items in
+> `docs/audit/2026-05-20-reproducible-builds-audit.md` §6.
 
 You'll receive an acknowledgement within **48 hours** and a triage
 decision within **5 business days**.

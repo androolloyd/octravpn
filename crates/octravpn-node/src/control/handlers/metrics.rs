@@ -1,7 +1,11 @@
 //! `GET /metrics` — Prometheus text-format exposition. Bearer-gated by
-//! `ControlState::bearer_metrics` (Strict policy: 503 + descriptive
-//! body when unconfigured, 401 + empty body for wrong bearer). Body is
-//! one hand-rolled `format!` over [`super::super::metrics::NodeMetrics`];
+//! `ControlState::bearer_metrics`. Post audit-3 H-1 the bearer-reject
+//! path is uniform across every endpoint: `(404, NGINX_404_BODY)` on
+//! any failure (token unset, header missing, wrong bearer). The
+//! operator notices a misconfigured `/metrics` via the
+//! `bearer_metrics().warn_if_unconfigured()` log line at boot, not via
+//! the wire. Body of the success path is one hand-rolled `format!`
+//! over [`super::super::metrics::NodeMetrics`];
 //! `tests::metrics_handler_emits_every_new_field` pins that no field
 //! is silently dropped.
 
@@ -14,9 +18,12 @@ use crate::control::state::ControlState;
 
 /// Prometheus text format. Bearer-gated by default — operators must
 /// set `[control].metrics_token` for the endpoint to serve scrapes.
-/// Returns 503 (not 404) when unconfigured so a misconfigured Prometheus
-/// surfaces a clear "endpoint disabled" error rather than silently
-/// 404'ing.
+/// Post audit-3 H-1 the bearer-reject shape is uniform across every
+/// endpoint: `(404, NGINX_404_BODY)` on any reject reason (token
+/// unset, header missing, wrong bearer). The operator learns about a
+/// misconfigured `/metrics` via the boot-time
+/// `bearer_metrics().warn_if_unconfigured()` warning, not from the
+/// wire.
 pub(crate) async fn metrics(
     State(s): State<Arc<ControlState>>,
     headers: axum::http::HeaderMap,
@@ -104,7 +111,10 @@ pub(crate) async fn metrics(
          octravpn_ip_allocator_used {ip_used}\n\
          # HELP octravpn_ip_allocator_capacity Static host-range capacity of the CGNAT allocator.\n\
          # TYPE octravpn_ip_allocator_capacity gauge\n\
-         octravpn_ip_allocator_capacity {ip_cap}\n",
+         octravpn_ip_allocator_capacity {ip_cap}\n\
+         # HELP octravpn_audit_inline_fallback_total Audit writes that fell back to inline sync-fsync because the batched flusher queue was full (disk stall signal).\n\
+         # TYPE octravpn_audit_inline_fallback_total counter\n\
+         octravpn_audit_inline_fallback_total {audit_inline_fb}\n",
         announces = m.announces_total.load(Ordering::Relaxed),
         state_lookups = m.state_lookups_total.load(Ordering::Relaxed),
         receipts_signed = m.receipts_signed_total.load(Ordering::Relaxed),
@@ -126,6 +136,15 @@ pub(crate) async fn metrics(
         tn_members = m.tailnet_member_count.load(Ordering::Relaxed),
         ip_used = m.ip_allocator_used.load(Ordering::Relaxed),
         ip_cap = m.ip_allocator_capacity.load(Ordering::Relaxed),
+        // Audit-flusher backpressure counter. Read directly off the
+        // `AuditLog` handle (its `Arc<AuditCounters>` is lock-free,
+        // so a disk-stalled flusher cannot block this scrape). When
+        // `[audit]` is disabled the gauge is zero, which is the
+        // correct "no fallback possible" value.
+        audit_inline_fb = s
+            .audit
+            .as_ref()
+            .map_or(0, crate::audit::AuditLog::inline_fallback_total),
     );
     (
         [(
@@ -145,22 +164,29 @@ mod tests {
     use axum::http::{HeaderValue, StatusCode};
     use octravpn_core::{bounded::BoundedMap, sig::KeyPair};
 
-    /// `/metrics` returns 503 when `[control].metrics_token` is unset
-    /// (the default). Operators must configure a token in production.
+    /// Audit-3 H-1: `/metrics` returns the byte-stable
+    /// `(404, NGINX_404_BODY)` when `[control].metrics_token` is unset
+    /// (the default). Externally indistinguishable from a non-existent
+    /// endpoint. Operators learn about the misconfiguration via the
+    /// `bearer_metrics().warn_if_unconfigured()` log line at boot.
     #[tokio::test]
-    async fn metrics_default_returns_503() {
+    async fn metrics_default_returns_byte_stable_404() {
         let node_kp = Arc::new(KeyPair::generate());
         let router = Arc::new(OnionRouter::new());
         let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
         let state = Arc::new(ControlState::new(node_kp, router, allowlist));
         let headers = axum::http::HeaderMap::new();
         let resp = metrics(State(state), headers).await;
-        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        assert_eq!(&body[..], octravpn_core::bearer::NGINX_404_BODY);
     }
 
-    /// Token configured + wrong bearer → 401.
+    /// Audit-3 H-1: token configured + wrong bearer → also the
+    /// byte-stable 404 (not a 401). Indistinguishable from the
+    /// unconfigured case.
     #[tokio::test]
-    async fn metrics_rejects_wrong_token() {
+    async fn metrics_rejects_wrong_token_with_byte_stable_404() {
         let node_kp = Arc::new(KeyPair::generate());
         let router = Arc::new(OnionRouter::new());
         let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
@@ -174,7 +200,9 @@ mod tests {
             HeaderValue::from_static("Bearer wrong"),
         );
         let resp = metrics(State(state), headers).await;
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        assert_eq!(&body[..], octravpn_core::bearer::NGINX_404_BODY);
     }
 
     /// Token configured + right bearer → 200 with Prometheus exposition.
@@ -232,6 +260,7 @@ mod tests {
             "octravpn_tailnet_member_count ",
             "octravpn_ip_allocator_used ",
             "octravpn_ip_allocator_capacity ",
+            "octravpn_audit_inline_fallback_total ",
         ] {
             assert!(
                 text.contains(needle),

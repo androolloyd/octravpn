@@ -358,7 +358,9 @@ impl Hub {
     pub(super) fn sealed_passphrase(&self) -> Result<zeroize::Zeroizing<String>> {
         super::boot::resolve_sealed_passphrase(
             std::env::var("OCTRAVPN_SEALED_PASSPHRASE").ok().as_deref(),
-            self.cfg.chain.sealed_passphrase.as_deref(),
+            // Audit-2 CFG-2 / Audit-3 H-6: pull `Option<&str>` through the
+            // redaction-safe accessor — the raw field is `Option<SecretString>`.
+            self.cfg.chain.sealed_passphrase_expose(),
         )
     }
 

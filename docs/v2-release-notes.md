@@ -84,8 +84,10 @@ a registered, sealed-policy-published operator circle):
 - **`6c9d15b` v2: route fhe_load_pk through circle.owner.** Octra's
   PVAC pubkey registry is per-wallet; circles are contracts with no
   keypair, so `fhe_load_pk(circle)` always fails. v2 routes through
-  `circles[c].owner` (`main-v2.aml:790, :858`), unblocking
-  `settle_confirm` and `claim_earnings`.
+  `circles[c].owner` — the live wiring has since been refactored, see
+  the design comment at `main-v2.aml:176` (`memory/octra_aml_fhe_load_pk_blocked.md`
+  tracks the chain-side bridge status); behavior is unchanged. This
+  unblocks `settle_confirm` and `claim_earnings`.
 - **`9e16868` pvac-sidecar: GPL-isolated daemon — past the AES KAT
   wall on chain.** `pvac-sidecar/` (C++, GPL-2+ with OpenSSL
   exemption) vendors the upstream `octra-labs/webcli` PVAC sources
@@ -101,9 +103,10 @@ a registered, sealed-policy-published operator circle):
   - **Lean 4** v2 module (`proofs/lean/OctraVPN_V2/`) — 50+ new
     theorems covering atomic `register_circle`, per-class price
     stamping, slash carries-over, sealed-asset put/fetch, and member
-    ACL acceptance. Workspace total as of 2026-05-20: **232 theorems /
-    0 `sorry`** across OctraVPN (46), OctraVPN_V2 (54), OctraVPN_Rust
-    (72), and WireProtocol (60); clean `lake build`.
+    ACL acceptance. Workspace total as of 2026-05-20: **373 theorems /
+    0 `sorry`** across OctraVPN (46), OctraVPN_V2 (54), OctraVPN_V3
+    (55), OctraVPN_Rust (109), and WireProtocol (109); clean
+    `lake build`.
   - **TLA+** v2 spec (`proofs/tla/OctraVPN_V2.tla`) — 17 invariants
     including `Inv_CircleAtomicRegisterBond`,
     `Inv_AuthorizedCircleIsActive`, and

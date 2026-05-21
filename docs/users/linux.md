@@ -183,7 +183,7 @@ tailscale status
 You should see one entry for "yourself" (your IP, hostname, "offers
 exit node" flags) plus an entry per peer in the tailnet:
 
-```
+```text
 100.64.0.3   andrew@laptop          linux   active; relay "use1"
 100.64.0.7   colleague@desktop      linux   idle
 100.64.0.9   colleague@server       linux   idle; offers exit node
@@ -222,7 +222,7 @@ peer **direct** (peer-to-peer WireGuard, lowest latency) or via
 harness, a successful ping is the Wall-7 acceptance signal; if it
 returns RTTs you are joined and the datapath is live.
 
-```
+```text
 pong from desktop (100.64.0.7) via DERP(use1) in 84ms
 pong from desktop (100.64.0.7) via 192.0.2.4:41641 in 11ms
 ```

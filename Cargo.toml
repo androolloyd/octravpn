@@ -85,6 +85,7 @@ toml        = "0.8"
 tracing     = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 zeroize     = { version = "1", features = ["derive"] }
+secrecy     = { version = "0.10", features = ["serde"] }
 proptest    = "1"
 axum        = "0.7"
 tower-http  = "0.6"

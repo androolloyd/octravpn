@@ -3,11 +3,18 @@
 //! * [`compact_locked`] — synchronous. Caller holds the inner lock.
 //!   Rewrites the journal atomically (tempfile → rename → fsync).
 //! * [`compact_async_worker`] — runs the slow snapshot-write off the
-//!   journal lock, then reacquires for the bounded atomic swap +
-//!   delta replay. Keeps `bump` hot-path O(1) at the watermark.
+//!   journal lock, then reacquires for the bounded *single-tempfile*
+//!   commit: append the deltas of bumps that landed during phase 2 into
+//!   the same tempfile, fsync it, then a single atomic rename swaps in
+//!   the complete (snapshot + deltas) journal. Keeps `bump` hot-path
+//!   O(1) at the watermark.
 //!
 //! See `README.md` ("Atomicity contract") for the per-phase crash
-//! semantics.
+//! semantics. The post-B-1 contract: the on-disk journal at the
+//! authoritative path is **either** the full pre-compaction file
+//! **or** the post-compaction file (snapshot + deltas, all durable
+//! before the rename). There is no intermediate state visible to a
+//! restart.
 
 use std::{
     collections::BTreeMap,
@@ -33,6 +40,45 @@ use super::migration::write_v1_snapshot;
 /// authoritative journal file.
 pub(crate) const COMPACTING_SUFFIX: &str = ".compacting";
 
+/// Crash-injection hook for deterministic crash tests. Production code
+/// never sets this; the `#[cfg(test)]` paths in this module flip it to
+/// force a panic at a known phase so we can prove the on-disk state at
+/// each crash point.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CrashPoint {
+    /// Crash after the snapshot tempfile is written + fsync'd (phase 2)
+    /// but before the lock is reacquired for phase 3. Models a crash
+    /// during the lock-free window.
+    AfterPhase2Snapshot,
+    /// Crash after deltas have been written + fsync'd into the
+    /// tempfile but BEFORE the atomic rename. Models the on-disk
+    /// state where the old journal is still authoritative.
+    AfterDeltasBeforeRename,
+    /// Crash immediately after the atomic rename. Models the on-disk
+    /// state where the new journal is durable and contains
+    /// snapshot+deltas — the recovery path that the B-1 fix protects.
+    AfterRename,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Per-thread crash injection. Set by tests before driving the
+    /// worker; cleared on read so it only fires once.
+    pub(crate) static CRASH_AT: std::cell::Cell<Option<CrashPoint>> =
+        const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+fn maybe_crash(at: CrashPoint) {
+    CRASH_AT.with(|c| {
+        if c.get() == Some(at) {
+            c.set(None);
+            panic!("crash injection: {at:?}");
+        }
+    });
+}
+
 /// Synchronous compaction routine. The lock is held by the caller;
 /// this rewrites the journal in place via tempfile + rename and
 /// re-opens the append handle.
@@ -51,72 +97,89 @@ pub(crate) fn compact_locked(g: &mut Inner) -> JournalResult<()> {
 
 /// The async compaction worker. Runs *off* the journal lock for the
 /// slow phase (writing + fsyncing the snapshot tempfile), then acquires
-/// the lock only briefly to perform the atomic swap and replay the
-/// delta of bumps that landed during phase 2. See the module-level
-/// docs for the invariants.
+/// the lock to (a) append any post-snapshot delta records into the
+/// **same** tempfile, (b) fsync it, and (c) atomically rename it over
+/// the live journal. The atomic rename is the single commit point: the
+/// on-disk authoritative journal moves from "pre-compaction" to
+/// "post-compaction (snapshot + deltas)" in one step. No intermediate
+/// state is ever visible.
+///
+/// Lock window is bounded by the number of bumps that landed during
+/// phase 2 (one extra record per such bump in the delta append). At any
+/// realistic compaction frequency this is single-digit records, so the
+/// extra fsync covers a handful of bytes.
 ///
 /// On any error, clears the `compaction_inflight` flag so future
-/// compactions can retry. The journal file is left untouched on phase-2
-/// failure (no rename has happened) and is left in a consistent state
-/// on phase-3 failure (the rename either happened or didn't; the
-/// in-mem map is the source of truth and the delta-replay would have
-/// brought it back to consistency on the next compaction).
+/// compactions can retry. On failure before the rename, the tempfile is
+/// removed (best effort). On failure after the rename — by construction
+/// the only operation between rename and clearing the flag is the
+/// reopen, which is local I/O on a freshly-renamed file — we leave the
+/// new file in place (it is the durable post-compaction journal).
 pub(crate) fn compact_async_worker(
     inner: &Arc<Mutex<Inner>>,
     snapshot: &BTreeMap<SessionId, u64>,
     path: &Path,
 ) -> JournalResult<()> {
-    // Phase 2: write the snapshot tempfile with no lock held. This is
-    // the slow part — for a 10 MB journal it's ~100 ms of write + a
-    // full fsync round-trip. Concurrent `bump()` calls keep appending
-    // to the live (pre-compaction) journal file.
     let tmp_path = compacting_tempfile_path(path);
     let result = (|| -> JournalResult<()> {
+        // === Phase 2 (no lock held) ===
+        // Write the snapshot to the tempfile and sync it. Concurrent
+        // `bump()` keeps appending to the live (pre-compaction) journal
+        // file. This is the slow part — for a 10 MB journal it's
+        // ~100 ms of write + a full fsync round-trip.
         write_v1_snapshot_at(&tmp_path, snapshot)?;
+        #[cfg(test)]
+        maybe_crash(CrashPoint::AfterPhase2Snapshot);
 
-        // Phase 3: atomic swap under the lock. This is bounded by the
-        // number of bumps that landed during phase 2 (one extra
-        // record per such bump in the delta-replay), so it remains
-        // O(bumps_during_compaction) and not O(N).
+        // === Phase 3a (lock held): append deltas into the tempfile ===
+        // Bumps that landed during phase 2 are in `by_session` but
+        // strictly newer than the snapshot. We append one record per
+        // such bump into the SAME tempfile, then fsync. After this,
+        // the tempfile holds a complete (snapshot + deltas) v1 journal
+        // — it is fully durable, just not yet at the canonical path.
         let mut g = inner.lock();
         let path = g.path.clone().expect("worker only runs with a path");
+        let mut tmp_handle = OpenOptions::new().append(true).read(true).open(&tmp_path)?;
+        // Iterate the in-mem map: any (id, cur) > snapshot or absent
+        // from snapshot becomes a delta record. Bounded by the number
+        // of bumps during phase 2.
+        for (id, &cur_seq) in &g.by_session {
+            let snap_seq = snapshot.get(id).copied().unwrap_or(0);
+            if cur_seq > snap_seq {
+                let record = encode_record(id, cur_seq);
+                tmp_handle.write_all(&record)?;
+            }
+        }
+        // Single fsync covers the entire delta append.
+        tmp_handle.sync_data()?;
+        // Drop the tempfile handle BEFORE the rename — on Windows a
+        // rename over an open file fails; on Unix we want a clean
+        // tempfile-side handle drop so the kernel can recycle the fd.
+        drop(tmp_handle);
+        #[cfg(test)]
+        maybe_crash(CrashPoint::AfterDeltasBeforeRename);
+
+        // === Phase 3b (lock held): atomic rename ===
         // Drop the live append handle before the rename so we don't
-        // hold an open fd into the soon-to-be-replaced inode. On Unix
-        // this isn't strictly required (rename works fine over an
-        // open fd) but it's tidier and matches the sync path.
+        // hold an open fd into the soon-to-be-replaced inode.
         g.handle = None;
-        // Atomic rename: replaces the journal inode with our snapshot
-        // tempfile. POSIX guarantees this is observable as a single
-        // step to concurrent observers; the tempfile is in the same
-        // directory as the journal, so it's the same filesystem and
-        // the rename is genuinely atomic.
+        // Atomic rename: POSIX guarantees this is a single observable
+        // step. After this line the journal file IS the snapshot +
+        // deltas file we just fsync'd. Crash here-or-after leaves
+        // the canonical path holding a durable, complete journal.
         fs::rename(&tmp_path, &path)?;
+        #[cfg(test)]
+        maybe_crash(CrashPoint::AfterRename);
         // fsync the parent directory so the rename itself is durable
-        // (otherwise a crash could leave the directory entry stale).
+        // (otherwise a power-loss could leave the dirent stale).
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
             if let Ok(dir) = fs::File::open(parent) {
                 let _ = dir.sync_all();
             }
         }
         // Reopen the append handle on the freshly-swapped file.
-        let mut handle = OpenOptions::new().append(true).read(true).open(&path)?;
-        let mut size = handle.metadata()?.len();
-        // Delta-replay: any entry where the current in-mem seq has
-        // advanced past the snapshot's value, or didn't exist in the
-        // snapshot at all, gets one fresh record appended. This is
-        // bounded by the number of bumps that landed during phase 2,
-        // which is small at any realistic compaction frequency.
-        for (id, &cur_seq) in &g.by_session {
-            let snap_seq = snapshot.get(id).copied().unwrap_or(0);
-            if cur_seq > snap_seq {
-                let record = encode_record(id, cur_seq);
-                handle.write_all(&record)?;
-                size += record.len() as u64;
-            }
-        }
-        // Durability: a single fsync covers every delta record we
-        // just wrote (plus the rename, via the dir fsync above).
-        handle.sync_data()?;
+        let handle = OpenOptions::new().append(true).read(true).open(&path)?;
+        let size = handle.metadata()?.len();
         g.handle = Some(handle);
         g.file_size = size;
         g.last_fsync = Instant::now();
@@ -156,10 +219,7 @@ pub(crate) fn compacting_tempfile_path(journal_path: &Path) -> PathBuf {
 /// rename — the caller does that). Used by the async compaction
 /// worker, which needs to write to a deterministic sibling path so
 /// `open()` can detect orphans after a crash.
-fn write_v1_snapshot_at(
-    dest: &Path,
-    by_session: &BTreeMap<SessionId, u64>,
-) -> std::io::Result<()> {
+fn write_v1_snapshot_at(dest: &Path, by_session: &BTreeMap<SessionId, u64>) -> std::io::Result<()> {
     // Create / truncate, then write the snapshot.
     let mut handle = OpenOptions::new()
         .create(true)
@@ -178,8 +238,8 @@ fn write_v1_snapshot_at(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::receipt_journal::codec::RECORD_SIZE;
-    use crate::receipt_journal::ReceiptJournal;
+    use crate::receipt_journal::codec::{replay_v1, RECORD_SIZE};
+    use crate::receipt_journal::{JournalError, ReceiptJournal};
     use std::time::Duration;
 
     fn id(b: u8) -> SessionId {
@@ -386,6 +446,23 @@ mod tests {
     /// task, not under the journal lock. We assert wall-clock + p50
     /// smoke checks rather than a tight p99 (fsync floors on macOS/
     /// network FS hosts make a tight target unstable).
+    ///
+    /// **The p50 budget below (15ms) is deliberately loose.** The
+    /// thing under test is "compaction does not block bumps" — i.e.
+    /// the wall-clock budget at the top of the assertion block,
+    /// which would be `n_tasks × compaction_cost` if compaction
+    /// serialised under the lock. The per-bump p50 is a *secondary*
+    /// signal: a regression that put compaction back under the lock
+    /// would push p50 into the hundreds-of-milliseconds range, not
+    /// the tens. Shared CI runners (especially the GitHub-hosted
+    /// `ubuntu-latest` fleet) see scheduling jitter that pushes
+    /// honest-but-slow runs into the ~15ms p50 range under the
+    /// 4-task contention this test creates; audit-10 R3 measured
+    /// 1/10 fail rate at the old 5ms target on shared runners, and
+    /// the Fix-4 audit independently observed 14.57ms on a contended
+    /// host. Widening the budget keeps the regression signal without
+    /// flaking — a true regression will blow through 15ms by an
+    /// order of magnitude.
     #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
     async fn auto_compaction_does_not_block_bumps() {
         use crate::receipt_journal::FsyncPolicy;
@@ -452,9 +529,11 @@ mod tests {
              p50={p50:?} p99={p99:?} max={max:?}"
         );
         // Smoke check #2: median bump latency below the fsync floor —
-        // most bumps don't touch disk under the lock at all.
+        // most bumps don't touch disk under the lock at all. See the
+        // docstring above for why this budget is 15ms (shared-runner
+        // scheduling jitter) and not a tight per-bump latency target.
         assert!(
-            p50 < Duration::from_millis(5),
+            p50 < Duration::from_millis(15),
             "p50 bump latency {p50:?} too high — even the median \
              bump appears to be blocking on compaction I/O \
              (p99={p99:?}, max={max:?})"
@@ -465,5 +544,315 @@ mod tests {
             let sess = id(0x80 + task as u8);
             assert_eq!(j.floor(&sess), bumps_per_task + 1);
         }
+    }
+
+    // -------------------------------------------------------------
+    // B-1 fix: crash-injection tests for the new atomicity contract.
+    //
+    // The shape: drive `compact_async_worker` synchronously (via a
+    // tokio spawn_blocking task) with `CRASH_AT` set to a specific
+    // phase. The injection panics from inside the spawn-blocking
+    // task — tokio catches the panic and returns `Err(JoinError)`
+    // to the awaiter. After the join error, we simulate "fresh boot"
+    // by dropping the journal and reopening from disk; the new state
+    // must satisfy the contract for that crash point.
+    //
+    // Because `CRASH_AT` is a thread-local, we install it inside the
+    // spawn-blocking closure itself rather than on the test thread.
+    // -------------------------------------------------------------
+
+    /// Helper: drive a single async compaction with a crash injection.
+    /// Returns once the worker has either completed or panicked.
+    /// The returned `Option` is `Some(result)` if the worker ran to
+    /// completion (no crash), or `None` if the worker panicked.
+    async fn compact_with_crash_at(
+        j: &Arc<ReceiptJournal>,
+        crash_at: CrashPoint,
+    ) -> Option<JournalResult<()>> {
+        // We can't reuse the public `compact_async` because we need
+        // to install the crash injection on the worker thread. Build
+        // the equivalent by hand, calling the worker directly.
+        let (snapshot, path) = {
+            let mut g = j.inner.lock();
+            assert!(g.path.is_some(), "crash tests require a persistent journal");
+            assert!(
+                !g.compaction_inflight,
+                "another compaction is already in flight"
+            );
+            g.compaction_inflight = true;
+            (g.by_session.clone(), g.path.clone().unwrap())
+        };
+        let inner = j.inner.clone();
+        let h: tokio::task::JoinHandle<JournalResult<()>> =
+            tokio::task::spawn_blocking(move || {
+                CRASH_AT.with(|c| c.set(Some(crash_at)));
+                let r = compact_async_worker(&inner, &snapshot, &path);
+                // Ensure inject is cleared even if the worker didn't
+                // hit it (defensive).
+                CRASH_AT.with(|c| c.set(None));
+                r
+            });
+        match h.await {
+            Ok(r) => Some(r),
+            Err(e) => {
+                // A panic in the worker: ensure the inflight flag is
+                // cleared (the worker's deferred clear didn't run).
+                j.inner.lock().compaction_inflight = false;
+                assert!(e.is_panic(), "expected panic, got {e:?}");
+                None
+            }
+        }
+    }
+
+    /// B-1 contract: a crash after deltas are written + fsync'd into
+    /// the tempfile but BEFORE the atomic rename leaves the **pre-
+    /// compaction** journal at the authoritative path. The next
+    /// `open()` must replay the full pre-compaction file, including
+    /// the bumps that landed during phase 2 (which were appended to
+    /// the LIVE journal under the lock — i.e. the file we did NOT
+    /// rename over yet).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn phase_3a_crash_leaves_pre_compaction_journal_intact() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("phase3a.bin");
+        let j = Arc::new(ReceiptJournal::open(&path).unwrap());
+        // Bumps before compaction starts. These are in the
+        // pre-compaction file at `path`.
+        for s in 0..5u8 {
+            j.bump(&id(s), 1).unwrap();
+        }
+        let pre_size = j.file_size();
+
+        // Inject crash at AfterDeltasBeforeRename.
+        let res = compact_with_crash_at(&j, CrashPoint::AfterDeltasBeforeRename).await;
+        assert!(res.is_none(), "worker should have panicked");
+
+        // Drop the in-memory journal and reopen from disk to model a
+        // process restart.
+        drop(j);
+        let r = ReceiptJournal::open(&path).unwrap();
+        // All pre-compaction bumps must be present.
+        for s in 0..5u8 {
+            assert_eq!(r.floor(&id(s)), 1, "pre-compaction floor for {s:#x}");
+        }
+        // The file at `path` is the pre-compaction file — same size
+        // as before the crash (open() unlinks the orphan tempfile but
+        // doesn't touch the authoritative journal).
+        assert_eq!(
+            r.file_size(),
+            pre_size,
+            "pre-compaction journal must be untouched on phase-3a crash"
+        );
+    }
+
+    /// B-1 contract: a crash IMMEDIATELY after the atomic rename
+    /// leaves the **post-compaction** journal at the authoritative
+    /// path. The tempfile (which is now `<path>` after the rename)
+    /// holds the snapshot + deltas fully durable. Next `open()` must
+    /// recover all entries with no loss.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn phase_3b_crash_leaves_post_compaction_journal_intact_with_deltas() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("phase3b.bin");
+        let j = Arc::new(ReceiptJournal::open(&path).unwrap());
+        // Pre-compaction bumps.
+        for s in 0..5u8 {
+            j.bump(&id(s), 7).unwrap();
+        }
+        // Inject crash at AfterRename.
+        let res = compact_with_crash_at(&j, CrashPoint::AfterRename).await;
+        assert!(res.is_none(), "worker should have panicked");
+
+        // Reopen and assert all pre-compaction floors survive in the
+        // post-compaction file.
+        drop(j);
+        let tmp_path = compacting_tempfile_path(&path);
+        assert!(
+            !tmp_path.exists(),
+            "tempfile name is now the journal (rename succeeded)"
+        );
+        let r = ReceiptJournal::open(&path).unwrap();
+        for s in 0..5u8 {
+            assert_eq!(r.floor(&id(s)), 7);
+        }
+        // File is compacted: header + 5 records (one per session).
+        assert_eq!(r.file_size(), 8 + 5 * RECORD_SIZE as u64);
+    }
+
+    /// B-1: a bump that arrives during phase 3 (lock held by worker)
+    /// is forced to wait for the lock and then writes to the
+    /// post-rename file. The post-compaction journal therefore
+    /// includes it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_bump_during_phase_3_lands_in_post_journal() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("phase3-concurrent.bin");
+        let j = Arc::new(ReceiptJournal::open(&path).unwrap());
+        // Pre-compaction bumps.
+        for s in 0..3u8 {
+            j.bump(&id(s), 1).unwrap();
+        }
+        // Start a compaction. While the worker is in phase 2 (off
+        // lock, writing tempfile), fire bumps that update the in-mem
+        // map; phase 3 must capture them as deltas in the tempfile.
+        let h = j.compact_async();
+        // We can't deterministically interleave without a sync hook;
+        // instead, fire many bumps and rely on the BTreeMap delta
+        // computation in phase 3 to pick up whatever made it in.
+        for s in 0..3u8 {
+            let j2 = j.clone();
+            tokio::task::spawn_blocking(move || {
+                for seq in 2..=50u64 {
+                    j2.bump(&id(s), seq).unwrap();
+                }
+            })
+            .await
+            .unwrap();
+        }
+        h.await.unwrap().unwrap();
+
+        // In-mem and on-disk floors must both reflect the latest
+        // bump for each session.
+        for s in 0..3u8 {
+            assert_eq!(j.floor(&id(s)), 50);
+        }
+        drop(j);
+        let r = ReceiptJournal::open(&path).unwrap();
+        for s in 0..3u8 {
+            assert_eq!(
+                r.floor(&id(s)),
+                50,
+                "delta record for {s:#x} must be in the post-compaction file"
+            );
+        }
+    }
+
+    /// B-1: under crash injection at every phase, the on-disk floor
+    /// for a session NEVER regresses below a value the daemon
+    /// ack'd before the compaction started. Models the slashable
+    /// invariant: an attacker forcing a restart cannot make us
+    /// resign at an earlier seq.
+    #[test]
+    fn compaction_never_regresses_floor_under_crash() {
+        // Standalone-runtime test (avoid #[tokio::test] so we can
+        // build a fresh runtime per iteration and tear it down).
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+
+        // Try all three crash points in a loop with varying bump
+        // patterns. The floor for each session must be >= the
+        // value we ack'd before the crash.
+        let crash_points = [
+            CrashPoint::AfterPhase2Snapshot,
+            CrashPoint::AfterDeltasBeforeRename,
+            CrashPoint::AfterRename,
+        ];
+        for crash_at in crash_points {
+            for &acked_floor in &[1u64, 5, 50] {
+                let dir = tempfile::tempdir().unwrap();
+                let path = dir
+                    .path()
+                    .join(format!("regress-{crash_at:?}-{acked_floor}.bin"));
+                let j = Arc::new(ReceiptJournal::open(&path).unwrap());
+                // Ack the floor.
+                for s in 0..3u8 {
+                    for n in 1..=acked_floor {
+                        j.bump(&id(s), n).unwrap();
+                    }
+                }
+                // Crash mid-compaction.
+                let _ = runtime.block_on(compact_with_crash_at(&j, crash_at));
+                drop(j);
+                // Reopen and verify.
+                let r = ReceiptJournal::open(&path).unwrap();
+                for s in 0..3u8 {
+                    assert!(
+                        r.floor(&id(s)) >= acked_floor,
+                        "floor regressed for {s:#x} under {crash_at:?}: \
+                         got {}, expected >= {acked_floor}",
+                        r.floor(&id(s))
+                    );
+                }
+            }
+        }
+    }
+
+    /// B-1: a leftover `<journal>.compacting` orphan from a phase-2
+    /// crash gets removed by the next `open()`. The authoritative
+    /// journal is unchanged.
+    #[test]
+    fn compacting_tempfile_orphan_removed_on_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("orphan-after-p2.bin");
+        let j = ReceiptJournal::open(&path).unwrap();
+        for s in 0..3u8 {
+            j.bump(&id(s), 11).unwrap();
+        }
+        let live_size = j.file_size();
+        drop(j);
+
+        // Fabricate a phase-2 orphan: a well-formed v1 snapshot of a
+        // strictly-stale state (only id(0) at seq=11 — missing id(1),
+        // id(2)). This is what a phase-2 crash *could* leave: the
+        // snapshot was taken under the lock, before the other bumps,
+        // and then the worker died before phase 3.
+        let tmp_path = compacting_tempfile_path(&path);
+        let mut stale_snap = MAGIC_V1.to_vec();
+        stale_snap.extend_from_slice(&encode_record(&id(0), 11));
+        fs::write(&tmp_path, &stale_snap).unwrap();
+        assert!(tmp_path.exists());
+
+        // Open the journal: the orphan is removed, the live journal
+        // is untouched, all original bumps survive.
+        let r = ReceiptJournal::open(&path).unwrap();
+        assert!(!tmp_path.exists(), "open() must scrub the orphan");
+        assert_eq!(r.file_size(), live_size);
+        for s in 0..3u8 {
+            assert_eq!(r.floor(&id(s)), 11);
+        }
+    }
+
+    /// B-1: a tampered post-compaction journal (CRC byte flipped)
+    /// is detected by codec validation on the next open — we MUST
+    /// NOT silently accept a corrupt journal that an attacker has
+    /// edited on disk to lower the floor.
+    #[test]
+    fn crc_failures_on_corrupted_post_compaction_journal_detected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("post-corrupt.bin");
+        let j = ReceiptJournal::open(&path).unwrap();
+        for s in 0..3u8 {
+            j.bump(&id(s), 9).unwrap();
+        }
+        // Compact synchronously to get a small post-compaction file
+        // whose layout we know byte-for-byte: 8 bytes magic + 3 * 44
+        // bytes records.
+        j.compact().unwrap();
+        drop(j);
+
+        // Sanity-check the file size matches the post-compaction
+        // expectation; also confirm a clean replay works first.
+        let raw = fs::read(&path).unwrap();
+        assert_eq!(raw.len(), 8 + 3 * RECORD_SIZE);
+        let _ = replay_v1(&raw, &path).unwrap();
+
+        // Flip a bit inside the seq field of the FIRST record (after
+        // the 8-byte magic, skipping 32 bytes of session id).
+        let mut tampered = raw;
+        let seq_offset_first_record = MAGIC_V1.len() + 32;
+        tampered[seq_offset_first_record] ^= 0x01;
+        fs::write(&path, &tampered).unwrap();
+
+        // The next open must surface ChecksumMismatch — silently
+        // accepting the tampered seq would regress the floor and
+        // expose us to slash_double_sign.
+        let err = ReceiptJournal::open(&path).unwrap_err();
+        assert!(
+            matches!(err, JournalError::ChecksumMismatch { .. }),
+            "expected ChecksumMismatch, got {err:?}"
+        );
     }
 }

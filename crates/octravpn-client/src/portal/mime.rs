@@ -362,7 +362,7 @@ mod tests {
             SniffedMime::Html,
             SniffedMime::PlainText,
         ] {
-            assert!(m.renderable(), "{:?} must be renderable", m);
+            assert!(m.renderable(), "{m:?} must be renderable");
         }
         assert!(!SniffedMime::OctetStream.renderable());
     }

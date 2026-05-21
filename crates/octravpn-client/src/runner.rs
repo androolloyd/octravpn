@@ -349,7 +349,9 @@ fn print_wg_config(client: &Client) -> Result<()> {
     let g = client.state.lock();
     let active = g.as_ref().ok_or_else(|| anyhow!("no active session"))?;
     let entry = &active.route[0].validator;
-    println!("---- WireGuard client config ----");
+    // audit-13: text labels instead of ASCII separators so screen
+    // readers (NVDA / VoiceOver) don't recite "dash dash dash dash …".
+    println!("[wireguard-config-begin]");
     println!("[Interface]");
     println!("PrivateKey = <derive from your wallet; see docs/keys.md>");
     println!("Address = 10.66.0.2/24");
@@ -359,7 +361,7 @@ fn print_wg_config(client: &Client) -> Result<()> {
     println!("PublicKey = {}", hex::encode(entry.wg_pubkey.0));
     println!("Endpoint = {}", entry.endpoint);
     println!("AllowedIPs = 0.0.0.0/0, ::/0");
-    println!("--------------------------------");
+    println!("[wireguard-config-end]");
     Ok(())
 }
 

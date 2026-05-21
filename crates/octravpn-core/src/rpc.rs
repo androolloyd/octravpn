@@ -80,6 +80,91 @@ impl RpcClient {
         }
     }
 
+    /// Construct an RPC client pinned to a set of leaf
+    /// **SubjectPublicKeyInfo** sha256 fingerprints — the audit-1 H-1
+    /// fix.
+    ///
+    /// `spki_pins` is a non-empty list of 32-byte hashes (typically
+    /// parsed out of an `oct://<...>?spki=<base64>` URL by
+    /// [`crate::spki_verifier::SpkiPinVerifier::parse_pins_from_oct_url`]);
+    /// the TLS handshake fails closed unless the chain RPC's leaf
+    /// cert's SPKI sha256 matches one of them. `pem_roots`, when
+    /// supplied, gates the inner chain validator to a specific issuer
+    /// set; pass `None` to use Mozilla's public CA bundle (the typical
+    /// "public endpoint with a Let's Encrypt cert" case).
+    ///
+    /// Unlike [`Self::new_with_pinned_roots`], a compromise of any
+    /// CA — including the operator's own pinned root — is **not**
+    /// sufficient to MITM the connection: the attacker would also
+    /// need the private key matching one of the pinned SPKIs, which
+    /// the threat model treats as out-of-scope (the leaf key never
+    /// leaves the RPC endpoint).
+    pub fn new_with_pinned_spki(
+        endpoint: impl Into<String>,
+        pem_roots: Option<&[Vec<u8>]>,
+        spki_pins: Vec<[u8; 32]>,
+    ) -> CoreResult<Self> {
+        use std::sync::Arc;
+
+        use rustls::client::WebPkiServerVerifier;
+        use rustls::pki_types::CertificateDer;
+        use rustls::RootCertStore;
+
+        if spki_pins.is_empty() {
+            return Err(CoreError::Rpc(
+                "spki pin list must be non-empty for new_with_pinned_spki".to_string(),
+            ));
+        }
+
+        // Build the inner WebPKI verifier. Start from either the
+        // caller-supplied PEM bundle or the Mozilla webpki-roots set
+        // (the public-CA fallback for a vanilla `https://…`
+        // endpoint). Either way the SPKI pin is the load-bearing
+        // gate — the WebPKI step is "is the chain itself
+        // well-formed", not "is the operator who-we-think".
+        let mut roots = RootCertStore::empty();
+        if let Some(blobs) = pem_roots {
+            for blob in blobs {
+                // Parse PEM bundle into DER certs via rustls-pemfile
+                // — but we don't have rustls-pemfile available, so
+                // we re-parse via reqwest's helper and then extract
+                // DER. Cleaner: parse PEM here directly.
+                for cert in parse_pem_bundle(blob)
+                    .map_err(|e| CoreError::Rpc(format!("pinned cert parse: {e}")))?
+                {
+                    roots.add(CertificateDer::from(cert)).map_err(|e| {
+                        CoreError::Rpc(format!("add pinned cert to rustls roots: {e}"))
+                    })?;
+                }
+            }
+        } else {
+            // Use the bundled Mozilla webpki-roots set so a default
+            // call against e.g. `https://devnet.octrascan.io` still
+            // chain-validates.
+            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        }
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let inner = WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider.clone())
+            .build()
+            .map_err(|e| CoreError::Rpc(format!("build webpki verifier: {e}")))?;
+        let verifier = Arc::new(crate::spki_verifier::SpkiPinVerifier::new(spki_pins, inner));
+        let tls_cfg = rustls::ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .map_err(|e| CoreError::Rpc(format!("rustls protocol versions: {e}")))?
+            .dangerous()
+            .with_custom_certificate_verifier(verifier)
+            .with_no_client_auth();
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .use_preconfigured_tls(tls_cfg)
+            .build()
+            .map_err(|e| CoreError::Rpc(format!("build spki-pinned tls client: {e}")))?;
+        Ok(Self {
+            endpoint: endpoint.into(),
+            http,
+        })
+    }
+
     /// Construct an RPC client whose TLS trust roots are *exactly* the
     /// supplied PEM blobs — system trust store is disabled. Use this
     /// when you want to pin to a specific issuer chain (e.g.
@@ -90,6 +175,12 @@ impl RpcClient {
     /// trust (caller probably wants `new` in that case).
     ///
     /// P0-2 from docs/v2-threat-model.md.
+    ///
+    /// Note: This pins to a CA-bundle only — a cert issued by a
+    /// pinned CA still passes even if its leaf key isn't the one
+    /// the operator expected. Use [`Self::new_with_pinned_spki`]
+    /// instead when you have an `oct://...?spki=...` URL with a
+    /// leaf-pubkey pin (audit-1 H-1).
     pub fn new_with_pinned_roots(
         endpoint: impl Into<String>,
         pem_roots: &[Vec<u8>],
@@ -391,4 +482,44 @@ pub struct SubmitResult {
 #[derive(Debug, Deserialize)]
 pub struct ViewPubkeyResult {
     pub view_pubkey: String,
+}
+
+/// Parse a PEM-encoded certificate bundle into its raw DER blobs. A
+/// bundle may carry multiple back-to-back `-----BEGIN CERTIFICATE-----`
+/// blocks. We accept LF or CRLF line endings and ignore lines that
+/// aren't part of a cert block.
+///
+/// Used by [`RpcClient::new_with_pinned_spki`] to populate a rustls
+/// `RootCertStore`; we don't need every PEM tag the world's heard of,
+/// just `CERTIFICATE`. Refusing the rest keeps the parser tight enough
+/// that a stray base64 body inside (say) a `PRIVATE KEY` block can't
+/// inject a fake cert.
+fn parse_pem_bundle(pem: &[u8]) -> Result<Vec<Vec<u8>>, String> {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine as _;
+    const BEGIN: &str = "-----BEGIN CERTIFICATE-----";
+    const END: &str = "-----END CERTIFICATE-----";
+    let text = std::str::from_utf8(pem).map_err(|e| format!("PEM utf8: {e}"))?;
+    let mut out = Vec::new();
+    let mut cursor = text;
+    while let Some(begin_at) = cursor.find(BEGIN) {
+        let after_begin = &cursor[begin_at + BEGIN.len()..];
+        let end_at = after_begin
+            .find(END)
+            .ok_or_else(|| "PEM block without END marker".to_string())?;
+        // Strip whitespace and decode the base64 between BEGIN and END.
+        let b64: String = after_begin[..end_at]
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        let der = STANDARD
+            .decode(b64.as_bytes())
+            .map_err(|e| format!("PEM base64: {e}"))?;
+        out.push(der);
+        cursor = &after_begin[end_at + END.len()..];
+    }
+    if out.is_empty() {
+        return Err("no PEM CERTIFICATE blocks found".to_string());
+    }
+    Ok(out)
 }

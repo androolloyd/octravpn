@@ -1,0 +1,25 @@
+# Workspace cargo config.
+#
+# Audit-6 follow-up (2026-05-20 reproducible-builds audit, R1+R2+R3):
+# release binaries embed host-specific paths in panic strings and
+# rustc's `std` backtrace metadata. On a single host these are stable;
+# across machines they break byte-for-byte reproducibility. The
+# `--remap-path-prefix` flags below rewrite those paths to host-
+# independent stand-ins so a CI runner ($HOME=/home/runner), a macOS
+# dev box ($HOME=/Users/...), and a Linux root build ($HOME=/root)
+# all produce the same bytes.
+#
+# Cross-reference: docs/audit/2026-05-20-reproducible-builds-audit.md
+# §1.2 (rows R1-R3) and §6 T2.1.
+#
+# The remaps are intentionally broad ($HOME prefixes get collapsed to
+# `user/`) — we don't want to require a CI-specific RUSTFLAGS override
+# in release.yml; the same config has to fire on local `cargo build
+# --release` too. CARGO_HOME and RUSTUP_HOME are env-expanded by cargo
+# when present; if unset on a given host they no-op rather than fail.
+[build]
+rustflags = [
+    "--remap-path-prefix=/Users/=user/",
+    "--remap-path-prefix=/home/=user/",
+    "--remap-path-prefix=/root/=user/",
+]

@@ -142,15 +142,29 @@ Crash points:
 - **Between rename and reopen:** the new file is durably the journal;
   on next `open()` the in-mem state is rebuilt from it.
 
-### Async `compact_async()` — snapshot/swap protocol
+### Async `compact_async()` — single-tempfile snapshot/swap protocol
 
-Three phases. The slow phase (2) runs *off* the journal lock:
+Three phases. The slow phase (2) runs *off* the journal lock. The
+**single durability barrier** is the atomic `rename` in phase 3b: the
+tempfile is fully durable (snapshot + deltas + fsync) **before** the
+rename, so the rename commits an already-complete journal in one
+observable step. See B-1 in
+`docs/audit/2026-05-20-correctness-leaks-audit.md` for the historical
+bug this fixes (previously the delta-replay happened *after* the
+rename, so a crash in that window would discard durable bumps and
+regress the seq floor on reboot — slashable under `slash_double_sign`).
 
-| Phase | Lock held? | What happens                                                                                    |
-| ----- | ---------- | ----------------------------------------------------------------------------------------------- |
-| 1     | yes        | Clone `by_session` to a snapshot, set `compaction_inflight = true`. Drop the lock.              |
-| 2     | **no**     | On a `spawn_blocking` task: write the snapshot to `<journal>.compacting`, `sync_all`. Concurrent `bump`s keep appending to the live journal file. |
-| 3     | yes        | Drop the append handle. `rename(<journal>.compacting → <journal>)`. fsync the parent dir. Reopen the append handle. Walk the live `by_session`; for each `(id, seq)` strictly greater than the snapshot's value (or absent from the snapshot), append one fresh delta record. `sync_data` the handle. Clear `compaction_inflight`. |
+| Phase  | Lock held? | What happens                                                                                                                                                        |
+| ------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1      | yes        | Clone `by_session` to a snapshot, set `compaction_inflight = true`. Drop the lock.                                                                                  |
+| 2      | **no**     | On a `spawn_blocking` task: write the snapshot to `<journal>.compacting`, `sync_all`. Concurrent `bump`s keep appending to the live journal file.                   |
+| **3a** | yes        | Open `<journal>.compacting` in append mode. For each `(id, seq)` in the live `by_session` that is strictly greater than the snapshot's value (or absent from the snapshot), append one fresh delta record. `sync_data` the tempfile. Drop the tempfile handle. |
+| **3b** | yes        | Drop the live append handle. `rename(<journal>.compacting → <journal>)`. fsync the parent dir. Reopen the append handle on the freshly-swapped file. Clear `compaction_inflight`. |
+
+The lock is held continuously from the start of phase 3a through the
+end of phase 3b. No bump can land between the delta computation and
+the rename; therefore the post-rename file holds every bump the
+in-memory map ever reflected at the moment phase 3a started.
 
 #### Phase-by-phase crash contract
 
@@ -170,35 +184,51 @@ in the live journal (the snapshot was taken under the lock, before
 any concurrent bump could append). Removing the orphan is therefore
 invariant-preserving.
 
-**Crash during phase 3, after rename, before delta replay.** The
-filesystem now sees the snapshot at `journal_path`. The live append
-handle is dropped. Bumps that landed during phase 2 are visible only
-in the in-mem `by_session`; the on-disk file is missing those delta
-records. **However the process has crashed**, so the in-mem state is
-also gone. Recovery on next boot: `open()` replays the snapshot file
-(which is exactly the pre-compaction in-mem state plus the bumps that
-finished before phase 1's clone). The "lost" bumps are the bumps that
-landed during phase 2 — but those bumps either fsync'd before
-returning (under `EveryWrite`) and are therefore in the *pre-rename*
-journal which was just replaced (a real loss window — see below), or
-they didn't fsync and were never durable to begin with.
+**Crash during phase 3a (deltas being written into the tempfile, lock
+held, before the rename).** The tempfile is in some state — possibly
+with a fully-written deltas suffix, possibly torn mid-record, possibly
+unsynced. The live journal file at `journal_path` is **still the
+authoritative pre-compaction file**, byte-for-byte unchanged. Recovery:
+`open()` unlinks the tempfile orphan; the pre-compaction journal
+replays as if no compaction was attempted. **No bump is lost** because
+every bump that landed before this crash is in the pre-compaction file
+(or was never durable to begin with under the active `FsyncPolicy`).
 
-The real-loss window above is the reason phase 3 fsyncs the parent
-directory after the rename and `sync_data`s the handle after the
-delta replay — both must complete before `bump` returns ack to its
-caller for any bump that landed during phase 2. Under `EveryWrite`
-this is enforced: phase 2 cannot complete (and therefore phase 3
-cannot start) until the snapshot file is durably on disk; bumps
-during phase 2 fsync inline. The only loss window is the rename-vs-
-delta gap, which is closed by the dir fsync (after rename, before
-returning to caller) plus the in-flight bumps' per-bump fsync. So in
-practice: under `EveryWrite`, no acknowledged bump is ever lost.
-Under `Periodic`, the same bounded-loss-window the policy advertises
-applies.
+**Crash during phase 3a, AFTER deltas were written + fsync'd, BEFORE
+the rename.** Same as above: the tempfile is complete and durable, but
+not yet at the canonical path. `open()` removes the orphan and replays
+the pre-compaction file. The deltas in the tempfile are discarded —
+this is safe because every delta represents a bump whose authoritative
+durable record is also in the pre-compaction file (`bump` appends to
+the live file under the lock before updating `by_session`).
 
-**Crash during phase 3, after delta replay.** The file is exactly the
-v1 encoding of the in-mem map. No recovery needed beyond the normal
-replay.
+**Crash during phase 3b, AFTER the rename, before the dir fsync /
+reopen.** The atomic rename has committed the post-compaction journal
+(snapshot + deltas, all fsync'd by phase 3a) at the canonical path.
+The dir fsync that follows the rename promotes the rename itself to
+durable; on a power-loss before that dir fsync the rename may revert
+to the pre-compaction file (POSIX-permitted). Either way the on-disk
+state is a complete, valid v1 journal:
+- **rename durable** → post-compaction journal (snapshot + deltas);
+- **rename not yet durable** → pre-compaction journal (unchanged).
+
+Both cases preserve every bump up to the start of phase 3a.
+
+**Crash during phase 3b, after dir fsync.** The file is the post-
+compaction journal. Normal replay path.
+
+#### Atomicity summary (one paragraph)
+
+After B-1: the journal at the authoritative path is **either** the
+full pre-compaction file **or** the post-compaction file (snapshot
+plus every delta from phase 2, all durable before the rename). There
+is no intermediate state visible to a process restart. Recovery: on
+`open()`, the orphan `<journal>.compacting` is unconditionally
+unlinked; whichever file is at the canonical path is replayed
+verbatim. The in-memory floor map that `bump` maintains is always a
+superset of the on-disk floor (we append + fsync before updating the
+map), so a crash never regresses the floor below the highest seq the
+operator ack'd as signed.
 
 #### Concurrent `compact_async` calls
 

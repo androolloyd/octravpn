@@ -32,9 +32,7 @@ use tokio::task::JoinHandle;
 use crate::session::SessionId;
 
 use codec::encode_record;
-use compact::{
-    compact_async_worker, compact_locked, compacting_tempfile_path,
-};
+use compact::{compact_async_worker, compact_locked, compacting_tempfile_path};
 use inner::Inner;
 use migration::{ensure_v1_header, replay_any, write_v1_snapshot};
 
@@ -49,7 +47,12 @@ pub use fsync_policy::{FsyncPolicy, DEFAULT_COMPACTION_WATERMARK};
 /// the spawned-blocking compaction worker.
 #[derive(Debug)]
 pub struct ReceiptJournal {
-    inner: Arc<Mutex<Inner>>,
+    // `pub(super)` so the crash-injection tests in `compact.rs` can
+    // hand-roll a single compaction invocation (set `compaction_inflight`,
+    // clone the snapshot, drive the worker with a `CRASH_AT` injection
+    // installed on the worker thread). Production code never reads
+    // `inner` from outside this module.
+    pub(super) inner: Arc<Mutex<Inner>>,
 }
 
 impl ReceiptJournal {

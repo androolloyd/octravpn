@@ -136,11 +136,19 @@ unsigned artifacts. To enable signing:
 
 ### Current signing key
 
-| Field        | Value                                              |
-| ------------ | -------------------------------------------------- |
-| Fingerprint  | _UNSET — populate when the key is generated._       |
-| Key URL      | _UNSET — populate when the key is published._       |
-| Algorithm    | _Recommendation: ed25519 / cv25519 subkey._        |
+| Field        | Value                                                                    |
+| ------------ | ------------------------------------------------------------------------ |
+| Fingerprint  | `<TO BE GENERATED — see docs/release.md §5>` (key not yet provisioned)   |
+| Key URL      | `<TO BE GENERATED — see docs/release.md §5>` (key not yet published)     |
+| Algorithm    | _Recommendation: ed25519 / cv25519 subkey._                              |
+
+> **Interim verification path.** Until the GPG release key is
+> generated, operators MUST verify releases via Sigstore Rekor
+> transparency-log entries (see §6) or accept an unverified
+> install at their own risk. The `gpg --verify` flow below is
+> the *target* state, not the current state. See
+> `docs/audit/2026-05-20-reproducible-builds-audit.md` §2.2
+> (key-custody status) for the deeper context.
 
 ## 6. Verifying a release
 

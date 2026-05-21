@@ -8,9 +8,7 @@ use std::sync::Arc;
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 
-use crate::control::state::{
-    ControlState, HEALTH_ATTESTATION_FRESHNESS_S, HEALTH_WARMUP_S,
-};
+use crate::control::state::{ControlState, HEALTH_ATTESTATION_FRESHNESS_S, HEALTH_WARMUP_S};
 
 pub(crate) async fn health(State(s): State<Arc<ControlState>>) -> impl IntoResponse {
     let now = octravpn_core::util::now_unix_secs();

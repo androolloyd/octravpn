@@ -47,6 +47,21 @@ and panic crash dumps.
   n.as_mut().enable();` BEFORE chunk-build, OR migrate to
   `tokio::sync::watch<u64>` (edge-triggered, race-free by design).
 
+> **Fixed in commit `21df30e` on branch `worktree-agent-a557416bd6d3fba66`
+> (companion change on the headscale-rs side: branch `audit-fixes`).**
+> The `MachineRegistry` now exposes a `watch::Sender<u64>`
+> generation counter (`tailscale_wire::mod.rs::wake_waiters`); the
+> `/map` stream's `unfold` subscribes once and awaits
+> `gen_rx.changed()` instead of re-registering a `Notified` per
+> iteration. The watch channel's stored value is missed-update
+> tolerant — a `send_modify` fired during the chunk-build window is
+> captured by the next `changed().await`. The legacy `Notify` stays
+> as a fan-out wake for other callers; both fire from
+> `wake_waiters`. Verified by a new integration test
+> `stream_true_wake_during_chunk_build_is_not_lost` that triggers
+> `insert_peer` with no `sleep` first and asserts the next chunk is
+> a full MapResponse (not a keepalive).
+
 ### C-2 [HIGH] Same lost-wake exposure on `PolicyStore` / `DnsStore`
 - Files: `headscale-rs/headscale-api/src/policy/mod.rs:160-170`,
   `dns.rs:241,254,261`.
@@ -167,6 +182,25 @@ and panic crash dumps.
   diff per file. Confirm no in-workspace exhaustive matches on a
   sibling crate's enum break (a couple of test sites do — they need
   wildcard arms).
+- Fixed in commit `f8ae96d`: `#[non_exhaustive]` added
+  to all 17 error/error-like enums in this workspace
+  (`OnionError`, `ReceiptError`, `JournalError`, `V3PolicyError`,
+  `V3MembersError`, `StateRootError`, `MeshError`, `StunError`,
+  `KnockPskError`, `RedeemError`, `ChainError`, `HandshakeError`,
+  `FrameError`, `FetchAssetError`, `VerifyError`, `UpdateError`,
+  `PvacError`, `FileVerifyErrorKind`). Forward-compat sentinel tests
+  live at
+  `crates/{octravpn-core,octravpn-mesh,octravpn-obfs4,octra-circle-sim}/tests/non_exhaustive_errors.rs`
+  — each does a cross-crate exhaustive match with a `_` arm under
+  `#[deny(unreachable_patterns)]`. Policy documented at
+  `docs/reference/error-codes.md#non_exhaustive-policy`. No existing
+  match sites needed wildcard arms — all in-workspace matches were
+  either `matches!(…, X::Variant)` (still compatible) or same-crate
+  matches (where `#[non_exhaustive]` is inert). The audit's listing of
+  `headscale-rs` / `octra-foundry` / `octravpn-analytics` enums does
+  not apply to this worktree's `crates/` membership — those crates
+  either live in sibling repos (out-of-scope for this fix) or do not
+  define `thiserror` enums at HEAD.
 
 ### E-2 [MEDIUM] `anyhow::Error` crosses public API boundaries
 - Files: `crates/octravpn-node/src/audit.rs` (every pub method);
@@ -247,6 +281,16 @@ and panic crash dumps.
   `AttestationCfg`, `AnalyticsCfg`, `PvacCfg`, `TunCfg`,
   `TransportCfg`, `Obfs4Cfg`, `AmneziaCfg`. Add a deliberate-typo
   TOML unit test.
+- **Fixed** (worktree branch `worktree-agent-ae841e6f290904500`, commit a0347e2):
+  added `#[serde(deny_unknown_fields)]` to all 12 node-side config
+  structs and shipped 5 typo-rejection unit tests in
+  `crates/octravpn-node/src/config.rs` (top-level block, chain
+  field, control bearer-token, analytics bearer, obfs4 secret).
+  Client-side config (`crates/octravpn-client/src/config.rs`) is
+  unchanged for now and tracked as a follow-up — it shares the
+  `[chain]` shape but the client's deserialization is consumed by
+  a different binary boundary. See `docs/reference/config.md`
+  CFG-1 / CFG-2 section.
 
 ### CFG-2 [HIGH] Six secret-bearing fields stored as plain `Option<String>`
 - File: `crates/octravpn-node/src/config.rs`:
@@ -260,6 +304,18 @@ and panic crash dumps.
 - Fix: wrap each in `secrecy::SecretString` (min:
   `zeroize::Zeroizing<String>`). Audit `tracing::*` macros in
   `hub.rs`/`main.rs`/`pvac.rs` for `?cfg` emissions.
+- **Fixed** (worktree branch `worktree-agent-ae841e6f290904500`, commit a0347e2):
+  all 6 fields now `Option<SecretString>` (`secrecy 0.10` with `serde`
+  feature, added to workspace deps). `ChainCfg`, `ControlCfg`,
+  `AnalyticsCfg`, `Obfs4Cfg` carry hand-written `Debug` impls that
+  emit `<redacted>` for the wrapped slots. Two trace-redaction tests
+  in `crates/octravpn-node/src/config.rs` pin the property —
+  `debug_format_does_not_leak_secret_bytes` (bare `{:?}`) and
+  `tracing_debug_does_not_leak_secret_bytes` (live tracing capture).
+  Grep of `tracing::*!`/`eprintln`/`println` in the node confirms
+  no production caller currently dumps `?cfg` (only the test does).
+  Accessors `*_expose() -> Option<&str>` and `*_string() -> Option<String>`
+  on the parent blocks gate every consumer-side read.
 
 ### CFG-3 [HIGH] Multiple env-var precedence chains for the same secret
 - Files: `OCTRAVPN_SEALED_PASSPHRASE` read at `hub.rs:684`,

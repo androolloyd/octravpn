@@ -16,9 +16,12 @@ description: |
   and set the job-level default working-directory to `octra`.
 inputs:
   toolchain:
-    description: "Toolchain channel (stable, nightly, etc.)"
+    description: |
+      Toolchain channel (stable, nightly, etc.) or pinned version.
+      Default matches the workspace's `rust-toolchain.toml` so CI
+      and local builds agree on rustfmt + clippy lint sets.
     required: false
-    default: stable
+    default: "1.88.0"
   components:
     description: "Comma-separated rustup components (clippy, rustfmt, ...)"
     required: false
@@ -40,6 +43,14 @@ runs:
         toolchain: ${{ inputs.toolchain }}
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
+    - name: Install protoc (headscale-api build script)
+      shell: bash
+      run: |
+        if ! command -v protoc >/dev/null; then
+          sudo apt-get update -y >/dev/null
+          sudo apt-get install -y --no-install-recommends protobuf-compiler >/dev/null
+        fi
+        protoc --version
     - if: inputs.cache == 'true'
       uses: Swatinem/rust-cache@v2
       with:

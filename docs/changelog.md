@@ -59,9 +59,9 @@ modularize *`:
 - OctraVPN_V3 state-machine model landed — 53 invariants
   (`proofs/lean: add OctraVPN_V3 state-machine model (53 invariants)`).
 
-Workspace total now: **232 Lean 4 theorems** across OctraVPN (46),
-OctraVPN_V2 (54), OctraVPN_Rust (72), and WireProtocol (60) — clean
-`lake build`, zero `sorry`.
+Workspace total now: **373 Lean 4 theorems** across OctraVPN (46),
+OctraVPN_V2 (54), OctraVPN_V3 (55), OctraVPN_Rust (109), and
+WireProtocol (109) — clean `lake build`, zero `sorry`.
 
 ### Audits dropped
 

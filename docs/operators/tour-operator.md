@@ -327,7 +327,7 @@ octravpn-node --config /etc/octravpn/node.toml run
 
 A clean boot logs roughly:
 
-```
+```text
 [INFO] config schema validated
 [INFO] strict sealed-keys: wallet+WG loaded from envelope
 [INFO] chain RPC ok program_addr=oct…
@@ -385,7 +385,7 @@ On your side, three things happen in parallel:
 
 **Logs.** `journalctl -u octravpn-node -f` will show:
 
-```
+```text
 [INFO] session opened id=<32-byte-hex> tailnet=<id> max_pay=<ou>
 [INFO] receipt seq=0 bytes=0 signed
 [INFO] receipt seq=1 bytes=<n> signed

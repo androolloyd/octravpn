@@ -42,6 +42,14 @@ from active.
 
 ### B-1 [CORRECTNESS] Receipt-journal async-compaction phase-3 crash regresses seq floor
 
+- **Status:** Fixed in commit `4eb9339` (single-tempfile single-rename
+  commit; delta-replay now happens INTO the tempfile BEFORE the
+  rename, so the rename atomically swaps in a complete journal). 6
+  new crash-injection tests cover the three crash points (after
+  phase-2 snapshot, after deltas before rename, after rename). See
+  `crates/octravpn-core/src/receipt_journal/README.md` ("single-
+  tempfile snapshot/swap protocol") for the post-fix atomicity
+  contract.
 - File: `crates/octravpn-core/src/receipt_journal/compact.rs:64-138`,
   `mod.rs:191-273`.
 - Category: chain / slashable.
@@ -103,6 +111,19 @@ from active.
 - Proposed fix: unify on `(503, "")` or `(401, "")`. Operator-side
   scrape failure surfaces via the configured-or-not check at scrape
   config time, not by HTTP-body content.
+- **Fixed in commit `7d016618155c`** — `BearerCheck::Strict` and
+  `BearerCheck::Hidden` now share one reject path: `(404,
+  NGINX_404_BODY)` for every reject reason (token unset, header
+  missing, wrong scheme, wrong token). The 503-with-text body became
+  a boot-time `tracing::warn!` log line emitted by
+  `BearerCheck::warn_if_unconfigured`, called by
+  `Hub::spawn_control_plane` for every Strict-policy check.
+  `crates/octravpn-core/src/bearer.rs::tests::bearer_failure_byte_identical_across_all_reject_reasons`
+  pins the byte-stable wire shape across every reject reason
+  (sha256 of body =
+  `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`,
+  the sha256 of the empty string — same as the knock-route 404 the
+  nginx default-page emits).
 
 ### H-2 [LEAK] `Debug` derive on `UpdateBundle` / `BlobUpdate` exposes plaintext blob bytes
 
@@ -125,6 +146,14 @@ from active.
   Vec<u8>>` for defense in depth.
 - Test: `assert!(!format!("{:?}", bundle).contains("my-secret-
   policy"))`.
+- **Fixed** (worktree branch `worktree-agent-ae841e6f290904500`,
+  commit a0347e2): `BlobUpdate.plaintext` is now
+  `zeroize::Zeroizing<Vec<u8>>`. Both `BlobUpdate` and `UpdateBundle`
+  ship hand-written `Debug` impls (no derive). The
+  `debug_does_not_leak_blob_plaintext` unit test
+  (`circle_update.rs::tests`) seeds a sentinel-byte plaintext and
+  asserts neither `{blob:?}` nor `{bundle:?}` contains the sentinel,
+  with a positive control asserting `plaintext_len` IS exposed.
 
 ### H-3 [LEAK] HashMap-keyed bearer lookup in `InMemoryLeaseStore::validate_token` is timing-side-channel
 
@@ -218,6 +247,11 @@ from active.
   SecretString`. Defense in depth: add a test that asserts
   `format!("{:?}", cfg)` does not match `[0-9a-f]{40,}` or
   `r#"Bearer "#`.
+- **Fixed** (worktree branch `worktree-agent-ae841e6f290904500`,
+  commit a0347e2): see Audit-2 CFG-2 entry — all 6 fields now
+  `Option<SecretString>` with redacting Debug impls, and the
+  defense-in-depth trace-redaction tests (bare-`Debug` + live
+  tracing-subscriber capture) ship in `config.rs::tests`.
 
 ---
 

@@ -244,6 +244,21 @@ no CLI.
 **RTO:** ≥30 min hand-built, OR ≈1 min "delete + accept rollback"
 with chain-side equivocation slash as the only remaining defense.
 
+> **Fixed in commit `21df30e` on branch `worktree-agent-a557416bd6d3fba66`.**
+> Drill #6 (H-RTO) is now PASS: the new
+> `octravpn-node journal rebuild --from-audit <dir> --output <path>`
+> CLI (`crates/octravpn-node/src/cli/journal.rs`) walks the HMAC-chained
+> audit log via `AuditLog::verify_file`, harvests the
+> `(session_id, seq)` pairs, computes the per-session floor, and emits
+> a fresh v1 journal — with post-write verification that the rebuilt
+> floor map matches the audit-derived plan. Exit codes:
+> 0 success / 1 tampered audit / 2 IO / 3 refuse-overwrite / 4 verify-mismatch.
+> `--dry-run` previews the plan without writing.
+> Wall-clock on a synthetic 10 000-entry audit log: **~1.06 s**
+> (test `cli::journal::tests::rebuild_10k_entries_under_two_minutes`).
+> New target RTO: under 2 minutes including operator ceremony
+> (stop daemon, rebuild, restart).
+
 ### Drill #7 — `kill -9` mid-receipt-sign
 
 **Failure:** `kill -9 octravpn-node` while signing receipts + with

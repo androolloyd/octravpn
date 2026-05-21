@@ -198,8 +198,7 @@ impl IndexerState {
             .read()
             .get(metric)
             .and_then(|m| m.get(&width))
-            .map(BucketSeries::total)
-            .unwrap_or(0)
+            .map_or(0, BucketSeries::total)
     }
 
     /// Number of events ingested since process start.

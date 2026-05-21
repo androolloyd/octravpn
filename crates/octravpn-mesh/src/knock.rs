@@ -151,6 +151,7 @@ pub fn parse_knock_psk_query(url: &str) -> Result<Option<(String, [u8; 32])>, Kn
 
 /// Errors from parsing the `knock_psk` query parameter.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum KnockPskError {
     /// Base64 decode failed.
     #[error("knock_psk: base64 decode failed")]

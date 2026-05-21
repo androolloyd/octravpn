@@ -71,6 +71,11 @@ event_num() {
 }
 
 echo "[tailnet-e2e] Building images..."
+# Build the `builder` stage first; the other Dockerfiles FROM it and
+# `docker compose build` is parallel by default, so without this the
+# node/client builds race and try to pull octravpn-builder from
+# docker.io. See docker/e2e.sh for the same rationale.
+docker compose build --quiet builder
 docker compose build --quiet
 
 echo "[tailnet-e2e] Starting mock-rpc..."

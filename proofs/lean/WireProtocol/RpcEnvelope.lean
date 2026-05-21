@@ -23,8 +23,34 @@ We model:
   * method-name binding (a tx signed for method X cannot be replayed
     against method Y under the same nonce),
   * chain-id binding (a tx signed for chain X cannot be replayed
-    against chain Y) — bridging to `OctraVPN_Rust.Lemmas`'s
-    `receipt_cross_chain_rejected` (P1-5).
+    against chain Y) — **now binding at the tx-envelope layer too**.
+
+## P1-5b — tx-envelope chain-id binding (2026-05-20)
+
+Earlier this module's `chain_id_binding_rejects_replay` axiomatised
+chain-id injectivity in `txCanonicalInput`, but the Rust impl at
+`octra-foundry/crates/octra-core/src/tx.rs::to_canonical_json`
+**did not** include `chain_id` in its canonical bytes (module
+docstring explicitly said "no chain id"). The defence held at the
+receipt-payload layer (`crates/octravpn-core/src/receipt.rs:224`
+binds `ReceiptContext::chain_id`), but the tx envelope itself was
+free to be replayed cross-chain.
+
+That divergence is closed as of this commit. The tx envelope now
+supports a v2 format where `chain_id` is canonicalised between
+`op_type` and the optional `encrypted_data` / `message` tail — see
+`octra-foundry/crates/octra-core/src/tx.rs` field
+`OctraTx.chain_id: Option<String>` (defaults to `None` for v1
+wallet-compat, set to e.g. `"octra-mainnet"` by chain-id-aware
+callers). Empty `chain_id` strings are rejected at canonical-bytes
+construction (`canonical_bytes`), so the one-field injectivity
+argument holds over a non-empty domain.
+
+Backward compatibility: existing chain history was signed under v1
+(no `chain_id` key in canonical JSON). The Rust verifier auto-detects
+the format by inspecting the envelope — txs that don't carry a
+`chain_id` field continue to verify under v1 canonical bytes, so no
+chain-history re-sign is required.
 
 ## Axioms introduced
 
@@ -34,7 +60,9 @@ None new — we reuse `Sha256.injective`,
 `txCanonicalInput_injective` axiom that mirrors the load-bearing
 "different tx-fields ⇒ different canonical bytes" property the Rust
 proptest harness in `octra-foundry/crates/octra-core/src/tx.rs`
-exercises.
+exercises. The injectivity axioms now match the Rust impl
+byte-for-byte (the Rust `prop_chain_id_binding_rejects_replay`
+proptest exercises the same predicate).
 
 ## Build
 
@@ -177,9 +205,20 @@ theorem method_binding_rejects_replay
     receipt's `receipt_cross_chain_rejected` theorem (P1-5) at the
     tx-envelope layer.
 
-    Rust file:line: `tx.rs::canonical_bytes` (chain_id is in the
-    canonicalised bytes from P1-5 onwards).
-    Proptest: `tx.rs` (`cross_chain_replay_rejected`). -/
+    Rust file:line: `octra-foundry/crates/octra-core/src/tx.rs:121-160`
+    (`OctraTx.chain_id: Option<String>` field + the
+    `write_kv_str(&mut s, "chain_id", cid, false)` line inside
+    `to_canonical_json`). Backed by P1-5b (2026-05-20) which closed
+    the spec↔impl divergence noted in
+    `docs/audit/2026-05-20-spec-impl-match-audit.md` §3.2 — the
+    `chain_id` is now in the canonicalised bytes the wallet signs.
+
+    Rust proptest: `tx.rs::tests::prop_chain_id_binding_rejects_replay`
+    (and the unit tests `v2_canonical_bytes_include_chain_id`,
+    `chain_id_bit_flip_changes_canonical_bytes`,
+    `cross_chain_replay_rejected_by_verify`, plus the mock-rpc
+    integration test
+    `crates/octra-mock-rpc/tests/chain_id_binding.rs::cross_chain_replay_rejected_by_mock`). -/
 theorem chain_id_binding_rejects_replay
     (sk : SecretKey) (tx tx' : TxEnvelope)
     (h_chain : tx.chainId ≠ tx'.chainId)

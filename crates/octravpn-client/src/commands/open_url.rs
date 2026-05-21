@@ -86,7 +86,14 @@ enum Mode {
     Portal,
 }
 
-/// Parsed `oct://<circle>/<path>` URL.
+/// Parsed `oct://<circle>/<path>[?spki=<b64>[,<b64>...]]` URL.
+///
+/// The `spki` query parameter, when present, carries one or more
+/// base64-encoded sha256 fingerprints of the chain RPC's leaf-cert
+/// SubjectPublicKeyInfo. The parsed pins are honoured by
+/// [`PortalChain::from_config_for_url`] which installs a
+/// [`octravpn_core::spki_verifier::SpkiPinVerifier`] for the RPC
+/// client. Multiple pins (comma-separated) provide rotation grace.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ParsedOctUrl {
     pub circle_id: String,
@@ -128,12 +135,22 @@ pub(crate) fn parse_oct_url(s: &str) -> Result<ParsedOctUrl> {
         bail!("circle id contains forbidden chars: {circle}");
     }
 
-    let path = if path.is_empty() {
+    // Audit-1 H-1: strip the `?spki=…` query (and any fragment) from
+    // the resource path so the on-chain `resource_key` is computed
+    // against the canonical path, NOT against the SPKI pin bytes.
+    // Without this strip an attacker who controls the URL could
+    // index a different sealed asset by appending a different
+    // `?spki=` value. The pin itself is still consulted via the
+    // full raw URL string downstream (see
+    // [`PortalChain::from_config_for_url`]).
+    let path_no_query = path.split('?').next().unwrap_or(path);
+    let path_no_frag = path_no_query.split('#').next().unwrap_or(path_no_query);
+    let path = if path_no_frag.is_empty() {
         "/".to_string()
-    } else if path.starts_with('/') {
-        path.to_string()
+    } else if path_no_frag.starts_with('/') {
+        path_no_frag.to_string()
     } else {
-        format!("/{path}")
+        format!("/{path_no_frag}")
     };
 
     Ok(ParsedOctUrl {
@@ -154,7 +171,11 @@ pub(crate) async fn open_url(cfg: &ClientConfig, args: OpenUrlArgs) -> Result<()
 
 async fn fetch_to_stdout(cfg: &ClientConfig, url: &str) -> Result<()> {
     let parsed = parse_oct_url(url)?;
-    let chain = PortalChain::from_config(cfg)?;
+    // Audit-1 H-1: when the user-supplied oct:// URL carries an
+    // `?spki=<b64>` pin parameter, route the RPC client through
+    // `SpkiPinVerifier`. Legacy pinless URLs fall back to CA-only
+    // pinning (preserved wire shape).
+    let chain = PortalChain::from_config_for_url(cfg, Some(url))?;
     let bytes = chain
         .fetch_circle_asset_bytes(&parsed.circle_id, &parsed.path)
         .await?;
@@ -167,7 +188,11 @@ async fn fetch_to_stdout(cfg: &ClientConfig, url: &str) -> Result<()> {
 
 async fn fetch_to_path(cfg: &ClientConfig, url: &str, path: &Path) -> Result<()> {
     let parsed = parse_oct_url(url)?;
-    let chain = PortalChain::from_config(cfg)?;
+    // Audit-1 H-1: when the user-supplied oct:// URL carries an
+    // `?spki=<b64>` pin parameter, route the RPC client through
+    // `SpkiPinVerifier`. Legacy pinless URLs fall back to CA-only
+    // pinning (preserved wire shape).
+    let chain = PortalChain::from_config_for_url(cfg, Some(url))?;
     let bytes = chain
         .fetch_circle_asset_bytes(&parsed.circle_id, &parsed.path)
         .await?;
@@ -182,7 +207,11 @@ async fn dispatch_to_portal(cfg: &ClientConfig, args: &OpenUrlArgs) -> Result<()
     // Build the chain context first so we fail-fast on bad config /
     // wrong protocol_version, BEFORE we open the user's browser at a
     // dead URL.
-    let chain = PortalChain::from_config(cfg)?;
+    // Audit-1 H-1: when the user-supplied oct:// URL carries an
+    // `?spki=<b64>` pin parameter, route the RPC client through
+    // `SpkiPinVerifier`. Legacy pinless URLs fall back to CA-only
+    // pinning (preserved wire shape).
+    let chain = PortalChain::from_config_for_url(cfg, Some(&args.url))?;
 
     let bind: SocketAddr = args.portal_bind.unwrap_or_else(|| {
         SocketAddr::new(
@@ -497,21 +526,23 @@ mod tests {
     }
 
     #[test]
-    fn parse_preserves_query_in_path() {
-        // The parser doesn't split out `?` after the path — the path
-        // segment retains whatever follows the first `/`.
-        let p = parse_oct_url("oct://circ/api?x=1&y=2").unwrap();
+    fn parse_strips_query_from_path() {
+        // Audit-1 H-1: the parser now strips `?...` from the path so
+        // the on-chain `resource_key` is computed against the canonical
+        // path bytes (not the SPKI pin or any other query payload).
+        // The pin itself is consumed downstream from the full URL.
+        let p = parse_oct_url("oct://circ/api?spki=AAAA&y=2").unwrap();
         assert_eq!(p.circle_id, "circ");
-        assert_eq!(p.path, "/api?x=1&y=2");
+        assert_eq!(p.path, "/api");
     }
 
     #[test]
-    fn parse_preserves_anchor_in_path() {
-        // Same for `#` once we're past the host segment — the URL parser
-        // is path-permissive, not RFC-3986 strict.
+    fn parse_strips_anchor_from_path() {
+        // `#fragment` is similarly stripped — fragments are
+        // client-side only and never make it to the chain RPC.
         let p = parse_oct_url("oct://circ/page#section").unwrap();
         assert_eq!(p.circle_id, "circ");
-        assert_eq!(p.path, "/page#section");
+        assert_eq!(p.path, "/page");
     }
 
     #[test]
@@ -608,24 +639,20 @@ mod tests {
         /// third option.
         #[test]
         fn parse_oct_url_never_panics(s in ".{0,256}") {
-            match parse_oct_url(&s) {
-                Ok(p) => {
-                    // Invariants on success:
-                    //   * circle_id non-empty
-                    //   * circle_id has no '/', no whitespace, no '?', no '#', no ':'
-                    //   * path starts with '/'
-                    proptest::prop_assert!(!p.circle_id.is_empty());
-                    proptest::prop_assert!(!p.circle_id.contains('/'));
-                    proptest::prop_assert!(!p.circle_id.contains('?'));
-                    proptest::prop_assert!(!p.circle_id.contains('#'));
-                    proptest::prop_assert!(!p.circle_id.contains(':'));
-                    proptest::prop_assert!(!p.circle_id.contains(char::is_whitespace));
-                    proptest::prop_assert!(p.path.starts_with('/'));
-                }
-                Err(_) => {
-                    // Error path — must just be a clean anyhow.
-                }
+            if let Ok(p) = parse_oct_url(&s) {
+                // Invariants on success:
+                //   * circle_id non-empty
+                //   * circle_id has no '/', no whitespace, no '?', no '#', no ':'
+                //   * path starts with '/'
+                proptest::prop_assert!(!p.circle_id.is_empty());
+                proptest::prop_assert!(!p.circle_id.contains('/'));
+                proptest::prop_assert!(!p.circle_id.contains('?'));
+                proptest::prop_assert!(!p.circle_id.contains('#'));
+                proptest::prop_assert!(!p.circle_id.contains(':'));
+                proptest::prop_assert!(!p.circle_id.contains(char::is_whitespace));
+                proptest::prop_assert!(p.path.starts_with('/'));
             }
+            // Error path — parser is expected to fail cleanly on garbage; no panic.
         }
 
         /// For any valid-shaped input `oct://<id>/<path>`, parsing must

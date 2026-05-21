@@ -206,15 +206,46 @@
     },
     {
       "id": 14,
-      "type": "text",
-      "title": "TODO — audit log fsync vs flush latency",
-      "description": "",
-      "gridPos": {"h": 4, "w": 12, "x": 12, "y": 15},
-      "options": {
-        "mode": "markdown",
-        "content": "The audit log calls `f.flush()` after each line but does **not** record histograms. From the perf-bench-doc finding, flush ≈ buffer-flush only (microseconds) — true fsync latency would require `f.sync_data()` plus an observation hook. Add `audit_flush_seconds` (histogram) to `NodeMetrics`. NOTE: the hand-rolled Prometheus exposition format used by `/metrics` does not support histograms; landing this metric requires migrating to either a prometheus_client crate or a custom histogram serializer."
+      "type": "timeseries",
+      "title": "Audit-flusher inline fallback /s (disk-stall alarm)",
+      "description": "rate(octravpn_audit_inline_fallback_total[5m]) — count of audit writes that bypassed the batched flusher and took the inline-sync-fsync path because the bounded queue was full. Steady-state zero. Non-zero growth means the flusher cannot keep up with audit-emit rate (disk stall, IO error spam, or an OOM-3-style flood). Operator action: check disk health, journal latency, and whether the node is under malformed-audit-emit DoS. See OOM-3 fix in docs/audit/2026-05-20-load-perf-audit.md.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 15},
+      "targets": [
+        {
+          "expr": "rate(octravpn_audit_inline_fallback_total[5m])",
+          "legendFormat": "{{instance}} fallback /s",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineInterpolation": "linear", "fillOpacity": 10},
+          "unit": "ops",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 0.001}
+            ]
+          }
+        }
       },
-      "type": "text"
+      "alert": {
+        "name": "AuditInlineFallbackNonZero",
+        "message": "Audit flusher cannot keep up — disk stalled or under audit-emit flood. Inline-fallback path is active; durability preserved, but throughput is degraded to per-line fsync.",
+        "frequency": "30s",
+        "conditions": [
+          {
+            "type": "query",
+            "query": {"params": ["A", "5m", "now"]},
+            "reducer": {"type": "max", "params": []},
+            "evaluator": {"type": "gt", "params": [0]}
+          }
+        ],
+        "for": "30s"
+      }
     },
     {
       "type": "row",

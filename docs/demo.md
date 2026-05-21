@@ -20,6 +20,12 @@ dive expands each segment with the underlying technical material.
 
 ## Architecture (segment 0)
 
+<!-- alt: Architecture graph. The OctraVPN client speaks oct:// to a
+     Portal HTTP service and exchanges per-session calls with
+     octravpn-node. The node makes Octra chain RPC calls, and speaks
+     /key + /machine/ to a headscale-rs mesh. A stock tailscale CLI
+     connects to the same mesh via TS2021; the mesh returns map data
+     and forwards relayed traffic over a derper sidecar. -->
 ```mermaid
 graph LR
   client[octravpn client] -->|oct://| portal[Portal HTTP]

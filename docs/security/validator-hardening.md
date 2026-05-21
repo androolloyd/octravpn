@@ -217,7 +217,7 @@ Events the validator MUST emit:
 |------------------|-----------------------------------------------------|
 | `announce`       | session-open                                        |
 | `get_state`      | mid-session state pull                              |
-| `receipt_signed` | every signed receipt — `audit.rs:388`               |
+| `receipt_signed` | every signed receipt — `audit.rs:461`               |
 | `preauth_mint`   | `PreauthMinter::mint` (via `MetricsSink`)           |
 | `preauth_redeem` | `PreauthMinter::redeem` (via `MetricsSink`)         |
 

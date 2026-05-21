@@ -1,0 +1,25 @@
+# Per-Dockerfile ignore for Dockerfile.builder (buildkit ≥0.10).
+# Context is the PARENT of this repo (octra/), which on CI contains
+# fresh checkouts of {octra, octra-foundry, headscale-rs} with no
+# target/ artefacts. On dev machines the same parent may carry huge
+# cargo target directories + git worktrees that balloon the build
+# context past 10GB and stall buildkit. Trim them aggressively.
+
+# Per-repo cargo build artefacts.
+**/target/
+**/.cargo-cache/
+
+# Git internals + worktrees.
+**/.git/
+**/.git-worktrees/
+
+# IDE / OS junk.
+**/.DS_Store
+**/.idea/
+**/.vscode/
+
+# Bare sibling worktrees that some devs leave in the parent dir
+# (matches the naming convention `<repo>-<branch>`).
+headscale-rs-*
+octra-*-fixes
+octra-*-pvac-*

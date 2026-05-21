@@ -48,6 +48,23 @@ bs58            = { workspace = true }
 # so a crash mid-write can't leave us with a partial entry. tempfile is
 # already in the dev-deps; promoting to a normal dep for the journal.
 tempfile        = { workspace = true }
+# SPKI fingerprint pinning (audit-1 H-1): the `spki_verifier` module
+# implements a `rustls::client::danger::ServerCertVerifier` that
+# extracts the leaf cert's SubjectPublicKeyInfo, sha256s it, and
+# compares to a pin set parsed out of an `oct://...?spki=base64...`
+# URL parameter. The verifier is plumbed into reqwest via
+# `Client::builder().use_preconfigured_tls(rustls::ClientConfig)`;
+# octravpn-client wires it under the existing `pinned_root_paths`
+# config path. Both crates pull `rustls` 0.23 from the workspace
+# `reqwest` `rustls-tls` feature so versions stay aligned.
+rustls          = { version = "0.23", default-features = false, features = ["std", "ring"] }
+rustls-pki-types = "1"
+# webpki-roots provides Mozilla's CA bundle so the SPKI-pinned RPC
+# path can still chain-validate against the standard public CAs that
+# back our chain RPC endpoints. Without this the verifier has no
+# fallback trust anchor and every connection fails before we even
+# reach the SPKI check.
+webpki-roots    = "1"
 
 [lints]
 workspace = true

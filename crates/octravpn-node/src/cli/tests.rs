@@ -114,8 +114,7 @@ fn unseal_keys_recovers_plaintext_into_tmpdir() {
     let cfg = NodeConfig::load(&toml_path).unwrap();
 
     seal_cli::run_seal_keys(&cfg, Some("pw"), None, false, false).unwrap();
-    let recovery_dir = PathBuf::from(std::env::temp_dir())
-        .join(format!("octravpn-test-{}", std::process::id()));
+    let recovery_dir = std::env::temp_dir().join(format!("octravpn-test-{}", std::process::id()));
     let r = seal_cli::run_unseal_keys(&cfg, &recovery_dir, Some("pw"), None, false);
     if r.is_err() {
         eprintln!("unseal skipped (tmpfs gate): {:?}", r.err());
@@ -144,8 +143,7 @@ fn unseal_keys_wrong_passphrase_fails() {
     let cfg = NodeConfig::load(&toml_path).unwrap();
     seal_cli::run_seal_keys(&cfg, Some("right"), None, false, false).unwrap();
 
-    let recovery = PathBuf::from(std::env::temp_dir())
-        .join(format!("octravpn-unseal-bad-{}", std::process::id()));
+    let recovery = std::env::temp_dir().join(format!("octravpn-unseal-bad-{}", std::process::id()));
     let r = seal_cli::run_unseal_keys(&cfg, &recovery, Some("wrong"), None, false);
     assert!(r.is_err(), "wrong passphrase must fail unseal");
     let _ = std::fs::remove_dir_all(&recovery);
@@ -278,7 +276,9 @@ fn cli_parses_audit_verify_subcommand() {
     match cli.cmd {
         Cmd::Audit(a) => match a.cmd {
             audit_cli::AuditCmd::Verify(_) => {}
-            other => panic!("expected Audit::Verify, got {other:?}"),
+            other @ audit_cli::AuditCmd::Replay(_) => {
+                panic!("expected Audit::Verify, got {other:?}")
+            }
         },
         other => panic!("expected Audit, got {other:?}"),
     }
@@ -300,7 +300,6 @@ fn cli_parses_config_validate_with_offline() {
                 assert!(args.offline);
                 assert_eq!(args.path, PathBuf::from("/tmp/node.toml"));
             }
-            other => panic!("expected Config::Validate, got {other:?}"),
         },
         other => panic!("expected Config, got {other:?}"),
     }

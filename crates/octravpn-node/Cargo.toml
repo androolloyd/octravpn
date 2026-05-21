@@ -75,6 +75,7 @@ tracing     = { workspace = true }
 tracing-subscriber = { workspace = true }
 x25519-dalek = { workspace = true }
 zeroize     = { workspace = true }
+secrecy     = { workspace = true }
 # Atomic file writes for P1-6 (seal-keys / unseal-keys) and P1-8/9 (the
 # receipt journal). Used to write the sealed envelope + journal via
 # tempfile + rename so a crash mid-write can't corrupt the destination.

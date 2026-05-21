@@ -181,6 +181,28 @@ hold up under attack" CI gate.
 | `threat-model-summary.md` | 2-page exec summary of the v3 threat model. |
 | `manifest.json` | SHA-256 manifest of every file in this directory. |
 
+### 5.1 Pre-launch audit wave (2026-05-20)
+
+Thirteen self-audits run before the v3 launch. Each audit is a single dated `.md` file in this directory; every finding cites the code (file:line) it applies to, and each fixed finding carries a "Fixed in commit `<sha>`" annotation pointing to the resolution.
+
+| Audit | Findings | Status |
+|---|---|---|
+| `2026-05-20-deep-security-audit.md` | 1 CRITICAL + 5 HIGH + 7 MED + 6 LOW | HIGH (H-1 SPKI pinning) fixed; LOW open as docs follow-ups |
+| `2026-05-20-concurrency-error-config-audit.md` | 2 BLOCKERS + 5 HIGH | CFG-1, E-1, C-1 lost-wake all fixed |
+| `2026-05-20-correctness-leaks-audit.md` | 1 BLOCKER + 6 HIGH + 9 MED | B-1 (journal compaction), H-1 (bearer 404), H-2/H-6 (secret Debug-leak) fixed |
+| `2026-05-20-supply-chain-audit.md` | 0 reachable advisories | Cross-host non-reproducibility pinned for path-remap fix |
+| `2026-05-20-spec-impl-match-audit.md` | 286 theorems verified, 6 divergences, 4 gaps | chain_id binding closed; others tracked |
+| `2026-05-20-reproducible-builds-audit.md` | Same-host PASS; cross-host FAIL; S1 GPG SPOF | T1.1 (fingerprint), install.sh `.sig`, path-remap landed |
+| `2026-05-20-license-audit.md` | GPL isolation PASS; 0/411 SPDX headers | SPDX rollout is post-launch |
+| `2026-05-20-load-perf-audit.md` | 1 BLOCKER (OOM-3) + HFHE-2 caveat | OOM-3 (bounded mpsc) fixed |
+| `2026-05-20-dr-drill-audit.md` | 1 FAIL-RTO (journal CRC) | journal rebuild CLI lands sub-2-min RTO |
+| `2026-05-20-test-quality-audit.md` | Coverage/mutation deferred; 1 flake | Flake p50 budget widened |
+| `2026-05-20-tier3-audit.md` | CI + threat model + claims, 38 findings | 17 stale-citation sweep + theorem-count refresh in Fix-8 |
+| `2026-05-20-accessibility-i18n-audit.md` | 75% / 15% | Not a launch blocker; 4 a11y items fixed |
+| `2026-05-20-claims-audit.md` | Pre-existing; baseline reference | Baseline |
+
+All 5 code-side BLOCKERS are closed before launch (C-1 lives on the `swap-ready-c1-fix` branch for v3.2 program-addr deployment; CFG-1, E-1, B-1, OOM-3 are merged to main). 373 Lean theorems across `OctraVPN/`, `OctraVPN_V2/`, `OctraVPN_V3/`, `OctraVPN_Rust/`, `WireProtocol/`, `HFHE/` — zero `sorry`, zero `admit`.
+
 ---
 
 ## 6. Reporting findings

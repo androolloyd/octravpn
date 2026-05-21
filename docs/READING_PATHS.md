@@ -94,7 +94,7 @@ gaps.
 11. [`security/threat-model-v3.md`](security/threat-model-v3.md).
 12. [`security/pentest-runbook.md`](security/pentest-runbook.md).
 13. [`../proofs/lean/WireProtocol/Theorems.md`](../proofs/lean/WireProtocol/Theorems.md)
-    — Lean theorems index (canonical entry point into the 232-theorem
+    — Lean theorems index (canonical entry point into the 373-theorem
     workspace, by module: BeNonce, Controlbase, HFHE, HmacToken,
     PortalCache, RpcEnvelope, Shielding, V3Canonical, V3Members,
     V3Policy, Wire).

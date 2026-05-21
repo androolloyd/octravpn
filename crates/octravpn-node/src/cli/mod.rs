@@ -52,6 +52,7 @@ pub(crate) mod bond;
 pub(crate) mod circle;
 pub(crate) mod headscale;
 pub(crate) mod identity;
+pub(crate) mod journal;
 pub(crate) mod mesh;
 pub(crate) mod ops;
 pub(crate) mod runtime;
@@ -185,8 +186,8 @@ pub(crate) enum Cmd {
     /// `docs/operators/cli-migration.md`).
     Headscale(headscale::HeadscaleArgs),
     /// #232: schema-check + key + RPC + program reachability against a
-    /// `node.toml`. Replaces the manual `octra cast rpc node_status`
-    /// + `octra cast call $PROG get_params` smoke probe + ad-hoc TOML
+    /// `node.toml`. Replaces the manual `octra cast rpc node_status` +
+    /// `octra cast call $PROG get_params` smoke probe + ad-hoc TOML
     /// diffing dance from `docs/deployment-runbook.md` §1.
     Config(ops::ConfigArgs),
     /// #232: one-shot operator health probe. Reads on-chain stake /
@@ -207,6 +208,14 @@ pub(crate) enum Cmd {
     /// the P1-8/9 invariant (no signed seq above the journal floor).
     /// Useful as a quick forensic probe after an alert.
     ReceiptVerify(ops::ReceiptVerifyArgs),
+    /// audit-9 H-RTO: receipt-journal disaster-recovery tooling.
+    /// `journal rebuild --from-audit <dir> --output <path>`
+    /// reconstructs a v1 journal from the HMAC-chained audit log when
+    /// the live journal is corrupted (CRC mismatch on a v1 record).
+    /// Closes the recovery gap operators previously had to fill by
+    /// hand-rebuilding 44-byte records — target RTO drops from
+    /// ≥30 min to under 2 min.
+    Journal(journal::JournalArgs),
 }
 
 /// Per-call dispatch context. `hub` is `Some` iff the dispatching
@@ -291,6 +300,7 @@ fn cmd_needs_hub(cmd: &Cmd) -> bool {
         Cmd::Health(a) => a.needs_hub(),
         Cmd::AuditTail(a) => a.needs_hub(),
         Cmd::ReceiptVerify(a) => a.needs_hub(),
+        Cmd::Journal(a) => a.needs_hub(),
     }
 }
 
@@ -317,5 +327,6 @@ async fn dispatch(cmd: Cmd, ctx: CliContext<'_>) -> Result<i32> {
         Cmd::Health(a) => a.dispatch(ctx).await,
         Cmd::AuditTail(a) => a.dispatch(ctx).await,
         Cmd::ReceiptVerify(a) => a.dispatch(ctx).await,
+        Cmd::Journal(a) => a.dispatch(ctx).await,
     }
 }

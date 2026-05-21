@@ -37,7 +37,7 @@ through three or more.
 | # | Layer | Where | Status |
 | --- | --- | --- | --- |
 | 1 | On-chain adversarial drill | `docker/devnet/e2e-adversarial.sh` (49 cases) + `e2e-adversarial-v2.sh` (45 cases) + `e2e-adversarial-v3.sh` (40 cases) | 49/49 + 45/45 + 40/40 green |
-| 2 | Lean 4 theorems | `proofs/lean/{OctraVPN,OctraVPN_V2,OctraVPN_Rust,WireProtocol}/` | 232 theorems: 46 + 54 + 72 + 60; 0 sorry |
+| 2 | Lean 4 theorems | `proofs/lean/{OctraVPN,OctraVPN_V2,OctraVPN_V3,OctraVPN_Rust,WireProtocol}/` | 373 theorems: 46 + 54 + 55 + 109 + 109; 0 sorry |
 | 3 | TLA+ / TLC model-check | `proofs/tla/OctraVPN.tla` + v2 module | 17 invariants, 3.8M distinct states, 0 violations |
 | 4 | Rust proptest harnesses | `crates/octravpn-core/tests/prop_*.rs`, `octra-foundry/crates/octra-core/tests/prop_*.rs` | 30 properties: crypto, tx canonicalisation, wallet_enc, receipt domain binders |
 | 5 | Dep audit | `cargo audit` over both workspaces + `deny.toml` | clean for vulnerability advisories (RustSec db 1090); one informational unmaintained-crate warning (`paste 1.0.15`) |
@@ -182,7 +182,7 @@ receipts at the same `(session_id, seq)`. Closes Tree F.2.a in
 - **CEI ordering**: `settle_confirm` validates, snapshots, mutates,
   *then* updates the encrypted earnings ledger. Re-entrancy via the
   refund leg cannot observe partial state. The `nonreentrant`
-  modifier is wired on `main-v2.aml:366` (`finalize_unbond`); v2
+  modifier is wired on `main-v2.aml:392` (`finalize_unbond`); v2
   drill case 46 for reentrancy attempts is still on the open list.
 - **Replay protection**: canonical tx bytes per `octra-labs/webcli`
   format; per-account nonce disambiguates. Cross-chain replay is now

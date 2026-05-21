@@ -28,6 +28,7 @@
 //! key sane?").
 
 use std::{
+    fmt::Write as FmtWrite,
     fs,
     io::{BufRead, BufReader, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
@@ -482,12 +483,12 @@ struct HealthReport {
     overall_pass: bool,
 }
 
-pub(crate) fn run_health(args: HealthArgs) -> Result<i32> {
+pub(crate) fn run_health(args: &HealthArgs) -> Result<i32> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .context("build current-thread runtime")?;
-    let report = rt.block_on(run_health_async(&args));
+    let report = rt.block_on(run_health_async(args));
     render_health(&report, args.json);
     Ok(i32::from(!report.overall_pass))
 }
@@ -569,9 +570,7 @@ async fn probe_endpoint_state(cfg: &NodeConfig) -> (CheckOutcome, CheckOutcome, 
         Err(e) => {
             let msg = format!("build rpc: {e:#}");
             return (
-                CheckOutcome::Fail {
-                    detail: msg.clone(),
-                },
+                CheckOutcome::Fail { detail: msg },
                 CheckOutcome::Skipped {
                     detail: "rpc unavailable".into(),
                 },
@@ -783,7 +782,7 @@ fn render_health(report: &HealthReport, json: bool) {
 // `audit tail` — live-follow + verify
 // ============================================================================
 
-pub(crate) fn run_audit_tail(args: AuditTailArgs) -> Result<i32> {
+pub(crate) fn run_audit_tail(args: &AuditTailArgs) -> Result<i32> {
     // Pick the file to tail. If a directory is passed, take the
     // lexically-latest `audit-*.jsonl` (which is also chronologically
     // latest because of the UTC-date prefix).
@@ -802,16 +801,14 @@ pub(crate) fn run_audit_tail(args: AuditTailArgs) -> Result<i32> {
                 }
             }
         }
-        match best {
-            Some(p) => p,
-            None => {
-                eprintln!(
-                    "audit tail: no audit-*.jsonl files in {}",
-                    args.audit_path.display()
-                );
-                return Ok(3);
-            }
-        }
+        let Some(p) = best else {
+            eprintln!(
+                "audit tail: no audit-*.jsonl files in {}",
+                args.audit_path.display()
+            );
+            return Ok(3);
+        };
+        p
     } else if args.audit_path.exists() {
         args.audit_path.clone()
     } else {
@@ -1008,7 +1005,7 @@ struct ReceiptVerifyReport {
     detail: String,
 }
 
-pub(crate) fn run_receipt_verify(args: ReceiptVerifyArgs) -> Result<i32> {
+pub(crate) fn run_receipt_verify(args: &ReceiptVerifyArgs) -> Result<i32> {
     let sid = parse_session(&args.session_id)?;
     let report = build_receipt_report(&sid, &args.journal_path, args.audit_path.as_deref())?;
     render_receipt_verify(&report, args.json);
@@ -1046,10 +1043,11 @@ fn build_receipt_report(
             report.journal_floor = Some(floor);
         }
     } else {
-        report.detail.push_str(&format!(
+        let _ = write!(
+            report.detail,
             "journal {} does not exist; ",
             journal_path.display()
-        ));
+        );
     }
 
     if let Some(audit_path) = audit_path {
@@ -1064,13 +1062,15 @@ fn build_receipt_report(
         let max_audit = report.audit_seqs.iter().copied().max().unwrap_or(0);
         if max_audit > floor {
             report.cross_check_pass = false;
-            report.detail.push_str(&format!(
+            let _ = write!(
+                report.detail,
                 "audit max seq {max_audit} > journal floor {floor} (P1-8/9 invariant violation); ",
-            ));
+            );
         } else {
-            report.detail.push_str(&format!(
+            let _ = write!(
+                report.detail,
                 "max audit seq {max_audit} <= journal floor {floor} (OK); ",
-            ));
+            );
         }
     } else if report.journal_floor.is_none() && !report.audit_seqs.is_empty() {
         report.cross_check_pass = false;
@@ -1146,7 +1146,7 @@ fn harvest_audit_seqs(path: &Path, sid: &SessionId) -> Result<Vec<u64>> {
             }
         }
     }
-    out.sort();
+    out.sort_unstable();
     out.dedup();
     Ok(out)
 }
@@ -1337,7 +1337,7 @@ receipt_journal_path = "{journal}"
             poll_ms: 250,
         };
         // Smoke test — no panics, exit 0 on a clean chain.
-        let code = run_audit_tail(args).unwrap();
+        let code = run_audit_tail(&args).unwrap();
         assert_eq!(code, 0);
     }
 
@@ -1373,7 +1373,7 @@ receipt_journal_path = "{journal}"
             follow: false,
             poll_ms: 250,
         };
-        let code = run_audit_tail(args).unwrap();
+        let code = run_audit_tail(&args).unwrap();
         assert_ne!(code, 0, "tampered chain must surface non-zero exit");
     }
 
@@ -1755,7 +1755,7 @@ receipt_journal_path = "{journal}"
         // Yield so the server is ready.
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         let outcome = probe_remote_health(&format!("http://{addr}")).await;
-        assert!(matches!(outcome, CheckOutcome::Ok { .. }), "{:?}", outcome);
+        assert!(matches!(outcome, CheckOutcome::Ok { .. }), "{outcome:?}");
     }
 
     #[tokio::test]
@@ -1772,11 +1772,7 @@ receipt_journal_path = "{journal}"
         });
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         let outcome = probe_remote_health(&format!("http://{addr}")).await;
-        assert!(
-            matches!(outcome, CheckOutcome::Fail { .. }),
-            "{:?}",
-            outcome
-        );
+        assert!(matches!(outcome, CheckOutcome::Fail { .. }), "{outcome:?}");
     }
 
     #[tokio::test]
@@ -1798,7 +1794,7 @@ receipt_journal_path = "{journal}"
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         let bare = format!("http://{addr}/"); // trailing slash
         let outcome = probe_remote_health(&bare).await;
-        assert!(matches!(outcome, CheckOutcome::Ok { .. }), "{:?}", outcome);
+        assert!(matches!(outcome, CheckOutcome::Ok { .. }), "{outcome:?}");
     }
 
     // ----------------------------------------------------------------
@@ -1814,7 +1810,7 @@ receipt_journal_path = "{journal}"
             follow: false,
             poll_ms: 250,
         };
-        let code = run_audit_tail(args).unwrap();
+        let code = run_audit_tail(&args).unwrap();
         assert_eq!(code, 3);
     }
 
@@ -1827,7 +1823,7 @@ receipt_journal_path = "{journal}"
             follow: false,
             poll_ms: 250,
         };
-        let code = run_audit_tail(args).unwrap();
+        let code = run_audit_tail(&args).unwrap();
         assert_eq!(code, 3);
     }
 
@@ -1853,7 +1849,7 @@ receipt_journal_path = "{journal}"
             follow: false,
             poll_ms: 250,
         };
-        let code = run_audit_tail(args).unwrap();
+        let code = run_audit_tail(&args).unwrap();
         assert_eq!(code, 0);
     }
 
@@ -1884,7 +1880,7 @@ receipt_journal_path = "{journal}"
             follow: false,
             poll_ms: 250,
         };
-        let code = run_audit_tail(args).unwrap();
+        let code = run_audit_tail(&args).unwrap();
         assert_eq!(code, 3);
     }
 
@@ -1914,7 +1910,7 @@ receipt_journal_path = "{journal}"
             follow: false,
             poll_ms: 250,
         };
-        let code = run_audit_tail(args).unwrap();
+        let code = run_audit_tail(&args).unwrap();
         assert_eq!(code, 3);
     }
 
@@ -2028,7 +2024,7 @@ receipt_journal_path = "{journal}"
             audit_path: None,
             json: false,
         };
-        let code = run_receipt_verify(args).unwrap();
+        let code = run_receipt_verify(&args).unwrap();
         assert_eq!(code, 0);
     }
 
@@ -2044,7 +2040,7 @@ receipt_journal_path = "{journal}"
             audit_path: Some(dir.path().to_path_buf()),
             json: true,
         };
-        let code = run_receipt_verify(args).unwrap();
+        let code = run_receipt_verify(&args).unwrap();
         assert_eq!(code, 1);
     }
 

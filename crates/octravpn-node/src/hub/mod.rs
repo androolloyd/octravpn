@@ -88,7 +88,8 @@ pub(crate) struct Hub {
     /// and the node continues without HFHE — boot does NOT fail. See
     /// `Hub::pvac` for the surfacing accessor used by the v3 settle
     /// path and the headscale bridge.
-    #[allow(dead_code)] // consumed by v3_calls + headscale_bridge once HFHE rewires off placeholders
+    #[allow(dead_code)]
+    // consumed by v3_calls + headscale_bridge once HFHE rewires off placeholders
     pub pvac: Option<Arc<crate::pvac::PvacClient>>,
 }
 

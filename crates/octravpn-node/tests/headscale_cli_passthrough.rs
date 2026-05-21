@@ -92,12 +92,14 @@ impl From<std::process::Output> for CommandOutput {
 
 /// Assert that two runs are byte-identical on stdout + stderr + exit.
 /// Pretty-prints the mismatch when they aren't.
+///
+/// `clippy::manual_assert` would rewrite the body as a multi-line
+/// `assert!(...)`, but the divergence report needs the explicit
+/// `panic!` block for readability of the formatted diagnostic.
+#[allow(clippy::manual_assert)]
 #[track_caller]
 fn assert_byte_identical(label: &str, embed: &CommandOutput, stand: &CommandOutput) {
-    if embed.stdout != stand.stdout
-        || embed.stderr != stand.stderr
-        || embed.code != stand.code
-    {
+    if embed.stdout != stand.stdout || embed.stderr != stand.stderr || embed.code != stand.code {
         panic!(
             "{label}: pass-through divergence
 embed exit:   {:?}
@@ -191,7 +193,11 @@ fn tailnet_status_missing_server_is_byte_identical() {
 #[test]
 fn users_list_connection_refused_is_byte_identical() {
     let embed = octravpn(&[
-        "headscale", "--server", "http://127.0.0.1:1", "users", "list",
+        "headscale",
+        "--server",
+        "http://127.0.0.1:1",
+        "users",
+        "list",
     ]);
     let stand = standalone(&["--server", "http://127.0.0.1:1", "users", "list"]);
     assert_byte_identical("users list (connection refused)", &embed, &stand);
@@ -208,7 +214,11 @@ fn users_list_connection_refused_is_byte_identical() {
 #[test]
 fn nodes_list_connection_refused_is_byte_identical() {
     let embed = octravpn(&[
-        "headscale", "--server", "http://127.0.0.1:1", "nodes", "list",
+        "headscale",
+        "--server",
+        "http://127.0.0.1:1",
+        "nodes",
+        "list",
     ]);
     let stand = standalone(&["--server", "http://127.0.0.1:1", "nodes", "list"]);
     assert_byte_identical("nodes list (connection refused)", &embed, &stand);
@@ -218,7 +228,11 @@ fn nodes_list_connection_refused_is_byte_identical() {
 #[test]
 fn policy_get_connection_refused_is_byte_identical() {
     let embed = octravpn(&[
-        "headscale", "--server", "http://127.0.0.1:1", "policy", "get",
+        "headscale",
+        "--server",
+        "http://127.0.0.1:1",
+        "policy",
+        "get",
     ]);
     let stand = standalone(&["--server", "http://127.0.0.1:1", "policy", "get"]);
     assert_byte_identical("policy get (connection refused)", &embed, &stand);
@@ -228,7 +242,11 @@ fn policy_get_connection_refused_is_byte_identical() {
 #[test]
 fn tailnet_status_connection_refused_is_byte_identical() {
     let embed = octravpn(&[
-        "headscale", "--server", "http://127.0.0.1:1", "tailnet", "status",
+        "headscale",
+        "--server",
+        "http://127.0.0.1:1",
+        "tailnet",
+        "status",
     ]);
     let stand = standalone(&["--server", "http://127.0.0.1:1", "tailnet", "status"]);
     assert_byte_identical("tailnet status (connection refused)", &embed, &stand);
