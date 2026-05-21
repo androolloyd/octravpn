@@ -38,6 +38,14 @@
     "tx_sign_call": {
       "threshold_pct": 10,
       "reason": "Snapshot 14.8us; quick-mode 15.0-15.8us across runs (-1% to +6%)."
+    },
+    "wallet_encrypt_1k_iters": {
+      "threshold_pct": 15,
+      "reason": "PBKDF2 hot loop varies with libc / syscall stack across runner kernel versions; +10% drift seen between consecutive CI runs."
+    },
+    "wallet_decrypt_1k_iters": {
+      "threshold_pct": 15,
+      "reason": "Same PBKDF2 hot loop as wallet_encrypt; share the threshold."
     }
   }
 }
