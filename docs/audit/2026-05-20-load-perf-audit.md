@@ -251,7 +251,7 @@ overhead cost is the cost the request pays even on the happy path
 | **Knock** (if `[knock].enabled = true`)    | ~200 µs — HMAC-SHA256 over the knock packet | `mesh/src/knock.rs` |
 | **`tracing::info!` macro on cold path**    | ~100 ns at default filter (no allocation when filtered) | tokio-tracing 0.1.x semantics |
 | **Audit `write_async` emit per receipt**   | ~1 µs (channel send) + amortized fsync (1/64 records = ~76 µs/record at 4.89 ms fsync) | `audit/batched.rs:68` + `settle_throughput.rs` |
-| **HFHE-2 shadow-blob emission** (`[pvac].enabled = true`) | **~900 µs** per receipt pre-Perf-4 = 2× `encrypt_const` (200 µs each) + 1× `make_zero_proof` (~500 µs). **Post-Perf-4: ~400 µs** (single `receipt_shadow` IPC). | `control/handlers/receipt.rs` |
+| **HFHE-2 shadow-blob emission** (`[pvac].enabled = true`) | Pre-Perf-4: 2× `encrypt_const` + 1× `make_zero_proof` — docstring estimate ~900 µs on Linux/x86, measured ~2.21 ms on M1/arm64. **Post-Perf-4: single `receipt_shadow` IPC, measured ~0.86 ms on M1/arm64 (~2.6× faster).** | `control/handlers/receipt.rs` |
 
 **HFHE-2 verification of the "0.35%" claim.** The claim is in PR thread,
 not in `control.rs`. Source-of-truth: receipt build-sign is **22 µs**
@@ -265,26 +265,47 @@ which is the opposite of 0.35%. The 0.35% headline was plausible
 + 10s epoch wait + WG handshake), where 900 µs is indeed ~0.0001× the
 ~10 s denominator.
 
-**Fixed in Perf-4 (commit see branch `perf-4-pvac-batched-rpc`):**
-combined `receipt_shadow` IPC reduces HFHE-2 receipt cost from
-**~900 µs to ~400 µs** (microbench-confirmed against the real
-sidecar binary; see `crates/octravpn-node/benches/pvac_shadow.rs`).
-The sidecar's libpvac math (2× `pvac_enc_value_seeded` + 1×
+**Fixed in Perf-4 (branch `perf-4-pvac-batched-rpc`, commit 1e28bee):**
+combined `receipt_shadow` IPC merges the 3 sidecar round-trips into
+one. The sidecar's libpvac math (2× `pvac_enc_value_seeded` + 1×
 `pvac_make_zero_proof_bound`) is unchanged — only the IPC framing
 shrinks (one syscall round-trip + one JSON parse instead of three of
-each). Restated honestly post-fix, the HFHE-2 path is now in the
-**~18× bare-receipt-cost range (~+1800% absolute receipt latency)**,
-not the pre-fix 40× / +4000%. Against the "full mainnet connect"
-~10s denominator the relative overhead is now ~0.004%, still
-swallowed by the open-session + epoch-wait cost. **A real future
-denominator-honest claim:** "PVAC shadow blob adds ~400 µs per
-signed receipt; for a 1 k-session node at 100 receipts/s that's ~40 ms
-of CPU/s, or ~4% of one core. Two-orders-of-magnitude below the
-EveryWrite journal-fsync ceiling of 225 receipts/s, so it's no
-longer the gate." See `crates/octravpn-node/src/pvac.rs::PvacClient::receipt_shadow`
-+ the four new tests in `pvac.rs::tests` (receipt_shadow_roundtrip,
-…_matches_legacy_serial_calls, …_supervisor_respawn_after_crash,
-…_timeout_when_sidecar_hangs).
+each).
+
+Microbench-confirmed against the real sidecar binary on Apple
+Silicon arm64 (`crates/octravpn-node/benches/pvac_shadow.rs`,
+`cargo bench --bench pvac_shadow -- --quick`):
+
+  | Path                          | Per-receipt wall-clock | Ratio |
+  |-------------------------------|------------------------|-------|
+  | Legacy 3-call serial          | ~2.21 ms (Linux/x86 docstring estimate was ~900 µs; reality on M1/arm64 with the unoptimized vendored libpvac is ~2× higher) | 1.00× |
+  | Batched `receipt_shadow`      | ~0.86 ms               | 2.6× faster |
+
+**The original "900 µs → 400 µs / ~10-30×" framing assumed Linux/x86
+libpvac numbers from the docstring; the actual measured ratio on
+the bench host is the relevant deliverable.** On hardware where
+libpvac is tuned (x86 with AVX2/AES-NI) we expect the absolute
+numbers to be lower (closer to the 200-500 µs docstring estimates
+the original audit cited), but the **2.6× IPC-framing speedup
+should hold** because the wins come from removing two syscall
+round-trips and two JSON parse passes — costs that are
+arch-independent. The "0.35% vs 4000%" framing for the receipt-build
+hot path is now closer to **~1500% on M1 (still high but ~2.6× less
+bad than pre-fix)**; on tuned x86 it likely lands in the **~10-30×
+bare-receipt-cost band** the audit brief predicted.
+
+**Real denominator-honest claim post-fix:** "PVAC shadow blob adds
+~860 µs (M1) / ~400 µs (tuned x86 expected) per signed receipt; the
+batched IPC removes two of the three sidecar round-trips. For a 1 k-
+session node at 100 receipts/s that's ~86 ms/s of wallclock waiting
+on the sidecar — still significant on M1 but no longer the gate
+relative to the journal-fsync ceiling of 225 receipts/s."
+
+See `crates/octravpn-node/src/pvac.rs::PvacClient::receipt_shadow`
++ the four new tests in `pvac.rs::tests` (`receipt_shadow_roundtrip`,
+`receipt_shadow_matches_legacy_serial_calls`,
+`receipt_shadow_supervisor_respawn_after_crash`,
+`receipt_shadow_timeout_when_sidecar_hangs`).
 
 **Fsyncs per second under steady-state.** With `DEFAULT_BATCH_SIZE = 64`
 and `DEFAULT_BATCH_INTERVAL_MS = 100`, the audit flusher fsyncs
