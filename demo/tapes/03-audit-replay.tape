@@ -2,17 +2,14 @@
 #
 # Captures the operator-side audit surface: a structured replay of the
 # HMAC-chained audit log + receipt journal, followed by a full
-# cryptographic verify.
+# cryptographic verify. Drives the real `octravpn-node audit replay`
+# / `audit verify` subcommands inside a debian container against an
+# in-container HMAC-chained fixture.
 #
-# REQUIRES:
-#   - `octravpn-node` on PATH or under target/{release,debug}/.
-#   - Pre-populated audit artifacts at:
-#       demo/state/node/audit.log
-#       demo/state/node/receipts.bin
-#     For the canned demo, point at a checked-in fixture dir or the
-#     state directory of a running devnet node. The exact paths are
-#     overridable via the env vars `AUDIT_PATH` and `JOURNAL_PATH`,
-#     but the .tape pins them so the recording is reproducible.
+# Harness: demo/lib/audit-fixture-bringup.sh — spawns
+# `octravpn-audit-fixture` (debian + bind-mounted octravpn-node) and
+# writes a deterministic 8-record audit log + sibling key + empty
+# receipt journal at /work/node/.
 #
 # Re-run with: vhs demo/tapes/03-audit-replay.tape
 
@@ -25,24 +22,27 @@ Set Height 720
 Set Theme "Dracula"
 Set TypingSpeed 40ms
 
+Type "bash demo/lib/audit-fixture-bringup.sh"
+Enter
+Sleep 15s
 Type "# replay a day's worth of audit + receipt-journal entries"
 Enter
-Type "octravpn-node audit replay --audit-path demo/state/node/audit.log --journal-path demo/state/node/receipts.bin"
+Type "docker exec octravpn-audit-fixture octravpn-node audit replay --audit-path /work/node/audit.log --journal-path /work/node/receipts.bin"
 Enter
-Sleep 4s
+Sleep 5s
 
 Type "# same data, JSONL form (drop into jq, splunk, etc.)"
 Enter
-Type "octravpn-node audit replay --audit-path demo/state/node/audit.log --journal-path demo/state/node/receipts.bin --json | head -10"
-Enter
-Sleep 3s
-
-Type "# strict cryptographic verify — HMAC chain + receipt monotonicity"
-Enter
-Type "octravpn-node audit verify --audit-path demo/state/node/audit.log --journal-path demo/state/node/receipts.bin"
+Type "docker exec octravpn-audit-fixture sh -c 'octravpn-node audit replay --audit-path /work/node/audit.log --journal-path /work/node/receipts.bin --json | head -10'"
 Enter
 Sleep 4s
 
-Type "echo \"exit=$?\""
+Type "# strict cryptographic verify — HMAC chain + receipt monotonicity"
 Enter
-Sleep 1500ms
+Type "docker exec octravpn-audit-fixture sh -c 'octravpn-node audit verify --audit-path /work/node/audit.log --journal-path /work/node/receipts.bin; echo exit=$?'"
+Enter
+Sleep 5s
+
+Type "bash demo/lib/audit-fixture-teardown.sh"
+Enter
+Sleep 5s

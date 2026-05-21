@@ -1,14 +1,15 @@
 # 01-init-keygen.tape
 #
-# Captures the cold-start operator flow: a fresh directory, an `octravpn
-# init` that writes a config.toml + wallet key, and a follow-up
-# `octravpn keygen` that mints an extra key for the operator's bond
-# wallet.
+# Captures the cold-start operator flow: a fresh scratch dir in a
+# throwaway container, an `octravpn init` that writes a config.toml +
+# wallet key, then `octravpn keygen` for a bond wallet, and finally
+# `octravpn identity` to print the derived address.
 #
-# REQUIRES:
-#   - `octravpn` on PATH or built into ./target/{release,debug}/.
-#     The tape runs the binary literally — we do not source any helper.
-#   - A writable scratch dir at /tmp/octravpn-demo.
+# Harness: demo/lib/keygen-fixture-bringup.sh — spins up a single
+# `debian:bookworm-slim` container with the host-built `octravpn`
+# binary bind-mounted at /usr/local/bin/octravpn. The recording's
+# real terminal stays on the host; every `docker exec` call below
+# drives the container.
 #
 # Re-run with: vhs demo/tapes/01-init-keygen.tape
 
@@ -21,26 +22,34 @@ Set Height 600
 Set Theme "Dracula"
 Set TypingSpeed 40ms
 
-Type "rm -rf /tmp/octravpn-demo && mkdir -p /tmp/octravpn-demo && cd /tmp/octravpn-demo"
+# Bring up the fixture container (idempotent; ~1s warm, ~3s cold).
+Type "bash demo/lib/keygen-fixture-bringup.sh"
 Enter
-Sleep 500ms
+Sleep 10s
+Type "docker exec octravpn-keygen-fixture sh -c 'rm -rf /work/* && mkdir -p /work'"
+Enter
+Sleep 1s
 
-Type "octravpn init --dir ."
+Type "docker exec -w /work octravpn-keygen-fixture octravpn init --dir ."
+Enter
+Sleep 3s
+
+Type "docker exec -w /work octravpn-keygen-fixture ls -la"
 Enter
 Sleep 2s
 
-Type "ls -la"
+Type "docker exec -w /work octravpn-keygen-fixture octravpn keygen --out ./bond.key"
 Enter
-Sleep 1500ms
+Sleep 3s
 
-Type "octravpn keygen --out ./bond.key"
+Type "docker exec -w /work octravpn-keygen-fixture ls -la"
 Enter
 Sleep 2s
 
-Type "ls -la"
+Type "docker exec -w /work octravpn-keygen-fixture octravpn --config ./config.toml identity"
 Enter
-Sleep 1500ms
+Sleep 3s
 
-Type "octravpn --config ./config.toml identity"
+Type "bash demo/lib/keygen-fixture-teardown.sh"
 Enter
-Sleep 2s
+Sleep 5s

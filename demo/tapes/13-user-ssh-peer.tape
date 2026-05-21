@@ -2,14 +2,15 @@
 #
 # Captures the tailnet user-to-user SSH path: MagicDNS resolves a peer
 # hostname inside the tailnet, then `ssh peer-2` opens a session over
-# the WireGuard data plane. The point is that no port-forwards, no
+# the WireGuard data plane. The point is no port-forwards, no
 # bastion, no public-IP exchange — the operator's control plane gives
 # every peer a stable MagicDNS name + a routable tailnet IP, and
 # OpenSSH does the rest.
 #
-# REQUIRES:
-#   - `tailscale` + `ssh` on PATH.
-#   - Nothing else: this is a CLI-shape demo, not a live tailnet.
+# Harness: demo/lib/3node-mesh-bringup.sh — 3-peer tailscale mesh.
+# Tape installs dropbear into tsi-peer-2 on the fly so peer-1's
+# `ssh` invocation has something to connect to (the stock tailscale
+# alpine image ships no SSH daemon).
 #
 # Re-run with: vhs demo/tapes/13-user-ssh-peer.tape
 
@@ -22,47 +23,47 @@ Set Height 600
 Set Theme "Dracula"
 Set TypingSpeed 40ms
 
-Type "# Already up on the tailnet from tape 11 — confirm peer roster:"
+Type "bash demo/lib/3node-mesh-bringup.sh"
 Enter
-Type "tailscale status"
+Sleep 120s
+Type "# Confirm the peer roster from peer-1's view"
+Enter
+Type "docker exec tsi-peer-1 tailscale --socket=/var/run/tailscale/tailscaled.sock status"
+Enter
+Sleep 4s
+
+Type "# Resolve peer-2's tailnet IP — pure tailscale DNS, no public DNS hop"
+Enter
+Type "docker exec tsi-peer-1 tailscale --socket=/var/run/tailscale/tailscaled.sock ip -4 tsi-peer-2"
 Enter
 Sleep 3s
 
-Type "# MagicDNS resolution — peer-2 is a tailnet hostname, not a public DNS name"
+Type "# Install dropbear + an authorized_keys pair so the SSH dial actually lands"
 Enter
-Type "# $ tailscale ip -4 peer-2"
+Type "docker exec tsi-peer-2 sh -c 'apk add --no-cache dropbear openssh-keygen >/dev/null && mkdir -p /etc/dropbear /root/.ssh && dropbearkey -t ed25519 -f /etc/dropbear/dropbear_ed25519_host_key >/dev/null 2>&1'"
 Enter
-Sleep 1s
-Type "# 100.64.0.2"
+Sleep 6s
+Type `docker exec tsi-peer-1 sh -c 'apk add --no-cache openssh-client >/dev/null && ssh-keygen -t ed25519 -N "" -f /root/.ssh/id_ed25519 -q'`
 Enter
-Sleep 1500ms
-Type "# $ getent hosts peer-2"
+Sleep 6s
+Type "docker exec tsi-peer-1 cat /root/.ssh/id_ed25519.pub | docker exec -i tsi-peer-2 sh -c 'cat > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys'"
 Enter
-Sleep 1s
-Type "# 100.64.0.2  peer-2.demo-tailnet.ts.net  peer-2"
-Enter
-Sleep 2s
-
-Type "# SSH straight through — OpenSSH sees a normal hostname"
-Enter
-Type "# $ ssh user@peer-2"
-Enter
-Sleep 1s
-Type "# Welcome to peer-2 (Linux 6.5.0, octravpn tailnet member)"
-Enter
-Type "# Last login: from 100.64.0.1"
-Enter
-Type "# user@peer-2:~$ uname -a"
-Enter
-Sleep 1s
-Type "# Linux peer-2 6.5.0 #1 SMP x86_64 GNU/Linux"
-Enter
-Type "# user@peer-2:~$ exit"
+Sleep 3s
+Type "docker exec -d tsi-peer-2 dropbear -E -F -p 22 -r /etc/dropbear/dropbear_ed25519_host_key"
 Enter
 Sleep 2s
 
-Type "# All traffic on this SSH session rode the WireGuard data plane,"
+Type "# Resolve peer-2's tailnet IP into an env var, then SSH against it"
 Enter
-Type "# end-to-end, with the session billed against the operator's circle."
+Type "PEER2_IP=$(docker exec tsi-peer-2 tailscale --socket=/var/run/tailscale/tailscaled.sock ip -4 | head -1)"
+Enter
+Type "echo peer-2 tailnet ip = $PEER2_IP"
 Enter
 Sleep 2s
+Type `docker exec tsi-peer-1 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$PEER2_IP "uname -a; echo session_ok"`
+Enter
+Sleep 8s
+
+Type "bash demo/lib/3node-mesh-teardown.sh"
+Enter
+Sleep 5s

@@ -1,22 +1,15 @@
 # 17-operator-onboarding.tape
 #
-# Captures the operator's 90-second cold-start: seal the on-disk keys
-# under the wallet passphrase, bond the minimum stake, register the
-# endpoint, boot the daemon, then probe `octravpn-node health` to
-# confirm the daemon is up + bonded + reachable from RPC.
+# Captures the operator's cold-start: seal the on-disk keys under
+# the wallet passphrase, bond the minimum stake, register the
+# endpoint, boot the daemon, then probe `octravpn-node health`.
+# Every step runs inside the node1 container against the mock-rpc
+# chain so the recording is fully deterministic.
 #
-# This is the headline of the operator deep-dive: from `octravpn-node
-# init` output to a daemon visible on chain. Tape 01 already covers
-# the keygen step; this tape picks up afterwards.
-#
-# REQUIRES:
-#   - `octravpn-node` on PATH or under target/{release,debug}/.
-#   - A reachable RPC endpoint (devnet or mock-rpc) configured in
-#     `demo/state/node/config.toml`. The bond / register subcommands
-#     submit real transactions, so the chain must be live or the
-#     calls will surface a clean RPC error rather than fake success.
-#   - The operator wallet passphrase available as
-#     `OCTRAVPN_KEY_PASSPHRASE` (so `seal-keys` does not prompt).
+# Harness: demo/lib/devnet-mock-bringup.sh — boots mock-rpc + 3
+# node containers from docker-compose.yml. Keys + node.toml are
+# baked into docker/conf/node1 so seal-keys + bond + register all
+# operate against real on-disk artefacts.
 #
 # Re-run with: vhs demo/tapes/17-operator-onboarding.tape
 
@@ -29,41 +22,39 @@ Set Height 800
 Set Theme "Dracula"
 Set TypingSpeed 35ms
 
+Type "bash demo/lib/devnet-mock-bringup.sh"
+Enter
+Sleep 60s
 Type "# Step 1: seal on-disk keys (wallet + WG) under the operator passphrase"
 Enter
-Type "octravpn-node --config demo/state/node/config.toml seal-keys"
+Type "docker compose -f docker-compose.yml exec -T -e OCTRAVPN_KEY_PASSPHRASE=demo-passphrase node1 octravpn-node --config /etc/octravpn/node.toml seal-keys || true"
 Enter
-Sleep 4s
+Sleep 5s
 
 Type "# Step 2: bond the minimum stake (1000 OCT = 10^9 OU)"
 Enter
-Type "octravpn-node --config demo/state/node/config.toml bond --amount 1000000000"
+Type "docker compose -f docker-compose.yml exec -T node1 octravpn-node --config /etc/octravpn/node.toml bond --amount 1000000000 || true"
 Enter
 Sleep 6s
 
 Type "# Step 3: register the endpoint (idempotent — skips if already registered)"
 Enter
-Type "octravpn-node --config demo/state/node/config.toml register"
+Type "docker compose -f docker-compose.yml exec -T node1 octravpn-node --config /etc/octravpn/node.toml register || true"
 Enter
 Sleep 6s
 
-Type "# Step 4: launch the daemon in the background and let it settle"
+Type "# Step 4: daemon is already running in node1 — confirm via 'ps' and the control port"
 Enter
-Type "nohup octravpn-node --config demo/state/node/config.toml run >/tmp/octravpn-node.log 2>&1 &"
+Type "docker compose -f docker-compose.yml exec -T node1 sh -c 'ps -ef | grep octravpn-node | grep -v grep'"
 Enter
-Sleep 1s
-Type "OCTRAVPN_NODE_PID=$!"
-Enter
-Sleep 6s
+Sleep 4s
 
 Type "# Step 5: health probe — local file checks + chain state + remote /health"
 Enter
-Type "octravpn-node --config demo/state/node/config.toml health --remote http://127.0.0.1:51821"
+Type "docker compose -f docker-compose.yml exec -T node1 octravpn-node --config /etc/octravpn/node.toml health --remote http://127.0.0.1:51821 || true"
 Enter
 Sleep 5s
 
-Type "# Done. Daemon is up, bonded, registered, audit log writable."
+Type "bash demo/lib/devnet-mock-teardown.sh"
 Enter
-Type "kill $OCTRAVPN_NODE_PID 2>/dev/null || true"
-Enter
-Sleep 3s
+Sleep 5s

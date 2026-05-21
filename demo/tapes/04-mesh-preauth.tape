@@ -1,15 +1,14 @@
 # 04-mesh-preauth.tape
 #
-# Captures the mesh preauth-key minting surface: both the CLI (one-shot,
-# emits key to stdout for shell capture) and the equivalent HTTP path
-# that a running daemon's coordination plane exposes.
+# Captures the mesh preauth-key minting surface end-to-end:
+#   1. CLI shape: `octravpn-node mesh mint-preauth` via `docker exec`
+#      against the running mesh-control daemon.
+#   2. HTTP shape: a real `curl POST /admin/preauth` with a JSON body
+#      written through multiple Type lines (vhs heredoc pattern).
 #
-# REQUIRES:
-#   - `octravpn-node` on PATH or under target/{release,debug}/.
-#   - For the HTTP probe the node must be running with `mesh serve`
-#     bound to 127.0.0.1:51821. The tape demonstrates the CLI flow
-#     unconditionally; the HTTP probe is left as a `curl` that the
-#     viewer can read even when the daemon is not running.
+# Harness: demo/lib/3node-mesh-bringup.sh — boots mesh-control +
+# derp-1 + 3 tailscale peers + analytics. Tape exits via the matching
+# teardown so the next tape starts clean.
 #
 # Re-run with: vhs demo/tapes/04-mesh-preauth.tape
 
@@ -22,28 +21,38 @@ Set Height 600
 Set Theme "Dracula"
 Set TypingSpeed 40ms
 
-Type "# single-use key for alice (default ttl)"
+Type "bash demo/lib/3node-mesh-bringup.sh"
 Enter
-Type "octravpn-node mesh mint-preauth --user alice"
-Enter
-Sleep 3s
+Sleep 120s
 
-Type "# reusable key for a fleet rollout"
+Type "# Shape A — single-use preauth key for alice (default ttl), via the CLI"
 Enter
-Type "octravpn-node mesh mint-preauth --user fleet-ops --reusable --ttl-secs 86400"
+Type "docker exec mesh-demo-control octravpn-node mesh mint-preauth --remote http://127.0.0.1:51821 --admin-token mesh-demo-token --user alice"
 Enter
-Sleep 3s
+Sleep 4s
 
-Type "# same surface, over HTTP (Bearer-gated; daemon must be running):"
+Type "# Shape B — reusable key for a fleet rollout, ttl 24h"
 Enter
-Type "#   POST /admin/preauth"
+Type "docker exec mesh-demo-control octravpn-node mesh mint-preauth --remote http://127.0.0.1:51821 --admin-token mesh-demo-token --user fleet-ops --reusable --ttl-secs 86400"
 Enter
-Type "#   Authorization: Bearer <token>"
+Sleep 4s
+
+Type "# Shape C — same surface over HTTP. Write JSON body to a tempfile via heredoc."
 Enter
-Type "#   Content-Type: application/json"
+Type "docker exec -i mesh-demo-control sh -c 'cat > /tmp/preauth.json'"
 Enter
-Type "#   body: an admin-preauth-mint JSON document"
+Sleep 500ms
+Type `{"user":"bob","reusable":false}`
 Enter
-Type "# (curl example omitted; vhs cannot type literal JSON braces cleanly)"
+Ctrl+D
+Sleep 1s
+Type "docker exec mesh-demo-control cat /tmp/preauth.json"
 Enter
-Sleep 3s
+Sleep 2s
+Type `docker exec mesh-demo-control sh -c "apt-get update -qq >/dev/null 2>&1; apt-get install -y --no-install-recommends curl >/dev/null 2>&1 || true; curl -fsS -H 'Authorization: Bearer mesh-demo-token' -H 'Content-Type: application/json' --data @/tmp/preauth.json http://127.0.0.1:51821/admin/preauth"`
+Enter
+Sleep 8s
+
+Type "bash demo/lib/3node-mesh-teardown.sh"
+Enter
+Sleep 5s

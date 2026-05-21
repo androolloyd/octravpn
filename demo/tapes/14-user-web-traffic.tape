@@ -1,16 +1,18 @@
 # 14-user-web-traffic.tape
 #
-# Captures two web-traffic shapes a tailnet user exercises:
-#   1. Direct peer-to-peer HTTP: `curl peer-2:8080` over the WG mesh.
-#   2. Internet egress via a paid exit node: `tailscale up
-#      --exit-node peer-3` then `curl https://example.com`.
+# Captures peer-to-peer HTTP traffic across the tailnet. busybox httpd
+# on tsi-peer-2 serves /tmp/payload over :8080; tsi-peer-1 wgets it
+# over the WireGuard data plane. Closes with a timing run via
+# `wget --output-document=- -S` so the response code + RTT line up
+# in the recording.
 #
-# Both shapes are narrated (CLI shape only) so the tape renders on a
-# host without an actual tailnet handy. Tape 09 covers the live-
-# traffic counterpart against the docker-compose 3-node mesh.
+# The exit-node arm (curl to the public internet via peer-3) is
+# narrated only — the docker network in compose has no real internet
+# egress configured, so a live curl to example.com would either
+# hairpin or fail depending on the runner's NAT. The arm is shown
+# as a tour comment so the README's "shape" still appears.
 #
-# REQUIRES:
-#   - `tailscale` + `curl` on PATH.
+# Harness: demo/lib/3node-mesh-bringup.sh — same as tapes 09 / 13.
 #
 # Re-run with: vhs demo/tapes/14-user-web-traffic.tape
 
@@ -23,44 +25,43 @@ Set Height 600
 Set Theme "Dracula"
 Set TypingSpeed 40ms
 
+Type "bash demo/lib/3node-mesh-bringup.sh"
+Enter
+Sleep 120s
 Type "# Shape A — peer-to-peer HTTP across the tailnet"
 Enter
-Type "# peer-2 is serving a small payload on :8080 (busybox httpd / nginx / etc)"
+Type "PEER2_IP=$(docker exec tsi-peer-2 tailscale --socket=/var/run/tailscale/tailscaled.sock ip -4 | head -1)"
 Enter
-Sleep 1500ms
-Type "# $ curl -sS http://peer-2:8080/payload"
-Enter
-Type "# hello-from-peer-2"
-Enter
-Sleep 2s
-Type "# $ curl -sS -o /dev/null -w 'rtt=%{time_total}s code=%{http_code}\\n' http://peer-2:8080/payload"
-Enter
-Type "# rtt=0.012s code=200"
+Type "echo peer-2 tailnet ip = $PEER2_IP"
 Enter
 Sleep 2s
 
-Type "# Shape B — exit-node routing through a paid validator (peer-3)"
+Type "# Stand up busybox httpd on peer-2 with a known payload"
 Enter
-Type "# peer-3 advertised an exit node via 'tailscale up --advertise-exit-node'"
+Type "docker exec tsi-peer-2 sh -c 'echo hello-from-peer-2 > /tmp/payload'"
 Enter
-Type "# the operator approved + priced it on chain; clients select it per-flow"
-Enter
-Sleep 2s
-Type "# $ sudo tailscale up --exit-node peer-3"
-Enter
-Sleep 2s
-Type "# $ curl -sS https://example.com | head -1"
-Enter
-Sleep 1s
-Type "# <!doctype html>"
-Enter
-Sleep 2s
-Type "# the request rode WG to peer-3, then NATted to the public internet"
+Type "docker exec -d tsi-peer-2 sh -c 'busybox httpd -f -p 0.0.0.0:8080 -h /tmp'"
 Enter
 Sleep 2s
 
-Type "# Disable the exit node when you're done — traffic returns to direct paths"
+Type "# Real GET from peer-1 → peer-2:8080 over WireGuard"
 Enter
-Type "# $ sudo tailscale up --exit-node="
+Type `docker exec tsi-peer-1 sh -c "wget -qO- http://${PEER2_IP}:8080/payload"`
 Enter
-Sleep 2s
+Sleep 4s
+
+Type "# Same path, RTT + HTTP code via wget -S"
+Enter
+Type `docker exec tsi-peer-1 sh -c "time wget -qO /dev/null -S http://${PEER2_IP}:8080/payload 2>&1 | grep -E 'HTTP/|real'"`
+Enter
+Sleep 5s
+
+Type "# Shape B (exit-node routing) is exercised in docker/devnet/tailscale-interop"
+Enter
+Type "# against a runner with real egress; the compose bridge here has none."
+Enter
+Sleep 3s
+
+Type "bash demo/lib/3node-mesh-teardown.sh"
+Enter
+Sleep 5s

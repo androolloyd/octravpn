@@ -1,5 +1,12 @@
 # 11-user-install-linux.tape
 #
+# INTENTIONALLY FAKED — see demo-realize PR notes. OS-level package
+# installs (apt-get / curl|sh) vary per host and require root; the
+# CI runner's apt sources / tailscale repo trust shape isn't worth
+# replicating just for a CLI shape that's already documented upstream
+# at tailscale.com/install. The fake narration below is the
+# contract this tape ships.
+#
 # Captures the Linux end-user's join flow: install the stock
 # `tailscale` package, `tailscale up --login-server` against the
 # operator's `octravpn-node`-hosted control plane, then a peer

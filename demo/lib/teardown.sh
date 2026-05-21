@@ -40,6 +40,23 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
     if [[ -f "${INTEROP_COMPOSE}" ]]; then
         docker compose -f "${INTEROP_COMPOSE}" down -v --remove-orphans >/dev/null 2>&1 || true
     fi
+    # Mesh demo stack (used by tapes 04 / 07 / 08 / 09 / 10 / 13 / 14 /
+    # 18 / 22 / 00 after the demo-realize rewrite).
+    MESH_COMPOSE="${REPO_ROOT}/docker-compose.mesh-demo.yml"
+    if [[ -f "${MESH_COMPOSE}" ]]; then
+        docker compose -f "${MESH_COMPOSE}" down -v --remove-orphans >/dev/null 2>&1 || true
+    fi
 fi
+
+# 3. Per-tape one-shot fixture containers spawned by the new
+# *-bringup.sh helpers (audit / keygen / portal / pvac). Each
+# teardown is best-effort and safe on a cold host.
+for sub in audit-fixture-teardown.sh keygen-fixture-teardown.sh \
+           portal-container-teardown.sh pvac-teardown.sh \
+           devnet-mock-teardown.sh; do
+    if [[ -x "${DEMO_DIR}/lib/${sub}" ]]; then
+        "${DEMO_DIR}/lib/${sub}" >/dev/null 2>&1 || true
+    fi
+done
 
 echo "teardown.sh: done" >&2
