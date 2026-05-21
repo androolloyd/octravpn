@@ -131,16 +131,22 @@ pub(crate) async fn get_state(
     let event_seq = r.seq;
     let event_bytes = r.bytes_used;
 
-    // HFHE-2 shadow-blob emission. The sidecar's `encrypt_const`
-    // round-trip is on the order of ~200µs; the no-shadow path
-    // skips it entirely. Two ciphertexts (bytes_used + net) are
-    // produced under deterministic per-receipt seeds derived from
-    // `(session_id, seq)` so the same input produces identical
-    // bytes — useful for the test suite + an auditor recomputing
-    // the blob from plaintext + sk. We do NOT retry on sidecar
-    // transient errors; a failure emits the receipt WITHOUT the
-    // shadow blob and logs a warning. The chain doesn't verify
-    // the blob today — a missing blob is a soft degrade, not a
+    // HFHE-2 shadow-blob emission. Perf-4: pre-batching this path took
+    // ~900 µs/receipt (3× separate IPC round-trips into the sidecar:
+    // 2× encrypt_const @ ~200 µs + 1× make_zero_proof @ ~500 µs). After
+    // batching it's a single `receipt_shadow` round-trip — same libpvac
+    // math under the hood, ~400-500 µs less wire chatter per receipt.
+    // The no-shadow path still skips it entirely. The deterministic
+    // per-field seeds derived from `(session_id, seq)` are unchanged,
+    // so the two ciphertexts stay byte-identical to what the legacy
+    // three-call wiring produced — an auditor recomputing the blob
+    // from plaintext + sk sees the same bytes. The zero-proof is
+    // randomized internally (Bulletproofs pull fresh blinding per
+    // call); the chain's verify-zero check is happy with any valid
+    // proof under the same `(ct, amount, blinding)` triple. We do NOT
+    // retry on sidecar transient errors; a failure emits the receipt
+    // WITHOUT the shadow blob and logs a warning. The chain doesn't
+    // verify the blob today — a missing blob is a soft degrade, not a
     // hard fail.
     let (enc_bytes_used, enc_net, pvac_zero_proof) = match s.shadow_signer.as_ref() {
         None => (None, None, None),
@@ -149,51 +155,35 @@ pub(crate) async fn get_state(
             let seed = shadow_seed_for(&id_hex, event_seq);
             let seed_b = shadow_subseed(&seed, b"bytes");
             let seed_n = shadow_subseed(&seed, b"net");
-            let enc_b = signer
-                    .pvac
-                    .encrypt_const(&signer.circle_pk, &signer.circle_sk, event_bytes, &seed_b)
-                    .await
-                    .map_err(|e| {
-                        tracing::warn!(error = %e, "shadow encrypt_const(bytes_used) failed; emitting receipt without shadow");
-                        e
-                    })
-                    .ok();
-            let enc_n = if enc_b.is_some() {
-                signer
-                        .pvac
-                        .encrypt_const(&signer.circle_pk, &signer.circle_sk, net, &seed_n)
-                        .await
-                        .map_err(|e| {
-                            tracing::warn!(error = %e, "shadow encrypt_const(net) failed; emitting receipt without enc_net");
-                            e
-                        })
-                        .ok()
-            } else {
-                None
-            };
-            let proof = if let Some(ct) = enc_b.as_ref() {
-                use base64::Engine as _;
-                let blinding_b64 =
-                    base64::engine::general_purpose::STANDARD.encode(blind.as_bytes());
-                signer
-                        .pvac
-                        .make_zero_proof(
-                            &signer.circle_pk,
-                            &signer.circle_sk,
-                            ct,
-                            event_bytes,
-                            &blinding_b64,
-                        )
-                        .await
-                        .map_err(|e| {
-                            tracing::warn!(error = %e, "shadow make_zero_proof failed; emitting receipt without proof");
-                            e
-                        })
-                        .ok()
-            } else {
-                None
-            };
-            (enc_b, enc_n, proof)
+            use base64::Engine as _;
+            let blinding_b64 =
+                base64::engine::general_purpose::STANDARD.encode(blind.as_bytes());
+            match signer
+                .pvac
+                .receipt_shadow(
+                    &signer.circle_pk,
+                    &signer.circle_sk,
+                    event_bytes,
+                    net,
+                    &seed_b,
+                    &seed_n,
+                    &blinding_b64,
+                )
+                .await
+            {
+                Ok(out) => (
+                    Some(out.enc_bytes_used),
+                    Some(out.enc_net),
+                    Some(out.zero_proof),
+                ),
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "shadow receipt_shadow failed; emitting receipt without shadow blob",
+                    );
+                    (None, None, None)
+                }
+            }
         }
     };
 

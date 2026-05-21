@@ -159,6 +159,16 @@ name = "wireguard_throughput"
 harness = false
 path = "benches/wireguard_throughput.rs"
 
+# Perf-4: HFHE-2 batched PVAC sidecar RPC. Measures the IPC-framing
+# delta between (a) legacy 3-call serial shadow-blob emission and
+# (b) the new single-call `receipt_shadow` op. Skip-if-no-binary —
+# requires `pvac-sidecar/octra-pvac-sidecar` to exist (or
+# `$PVAC_SIDECAR_BIN` to point at one).
+[[bench]]
+name = "pvac_shadow"
+harness = false
+path = "benches/pvac_shadow.rs"
+
 # cargo-deb metadata: `cargo deb -p octravpn-node` produces an installable .deb.
 [package.metadata.deb]
 name = "octravpn-node"

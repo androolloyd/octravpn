@@ -44,6 +44,21 @@
            "b":"hfhe_v1|..."}
         < {"ct":"hfhe_v1|<b64>"}
 
+      receipt_shadow (Perf-4: batched HFHE-2 receipt-shadow emission)
+        > {"op":"receipt_shadow","pk":"hfhe_v1|...","sk":"hfhe_v1|...",
+           "bytes_used":"<u64 decimal>","net":"<u64 decimal>",
+           "seed_bytes":"<32-byte hex>","seed_net":"<32-byte hex>",
+           "blinding":"<base64 32 bytes>"}
+        < {"enc_bytes_used":"hfhe_v1|<b64>",
+           "enc_net":"hfhe_v1|<b64>",
+           "zero_proof":"zkzp_v2|<b64>"}
+
+        Single round-trip combining 2x encrypt_const + 1x
+        make_zero_proof. Byte-for-byte identical to issuing those
+        three ops serially with the same (pk, sk, value, seed) tuples
+        and blinding. The win is in IPC framing (one syscall round-trip,
+        one JSON parse, one JSON serialize) not the math itself.
+
       ping (no-op)
         > {"op":"ping"}
         < {"pong":true}
@@ -352,6 +367,78 @@ json op_make_zero_proof(const json& req) {
     return json{{"proof", with_prefix(ZKZP_PREFIX, bytes)}};
 }
 
+// Perf-4: batched receipt-shadow emission. Combines what used to be
+// 2x encrypt_const + 1x make_zero_proof into one IPC round-trip. The
+// internals run the *same* libpvac calls in the *same* order against
+// the *same* inputs (caller-supplied per-field seeds and 32-byte
+// blinding), so the output is byte-identical to the legacy serial
+// path. The win is purely in IPC framing: one read, one write, one
+// JSON parse, one JSON serialize.
+//
+// Backwards compatible with the existing encrypt_const + make_zero_proof
+// ops — they're left in place for non-receipt callers (e.g. PVAC
+// pubkey registration which only needs encrypt_zero / encrypt_const).
+json op_receipt_shadow(const json& req) {
+    uint64_t bytes_used = parse_u64(req.at("bytes_used"), "bytes_used");
+    uint64_t net        = parse_u64(req.at("net"),        "net");
+
+    auto seed_b = hex_decode(req.at("seed_bytes").get<std::string>());
+    require_seed32(seed_b, "seed_bytes");
+    auto seed_n = hex_decode(req.at("seed_net").get<std::string>());
+    require_seed32(seed_n, "seed_net");
+
+    auto blinding = octra::base64_decode(req.at("blinding").get<std::string>());
+    if (blinding.size() != 32)
+        throw std::runtime_error("blinding must be 32 bytes (base64)");
+
+    pvac_pubkey pk = deser_pubkey(req.at("pk").get<std::string>());
+    GUARD(pk, pvac_free_pubkey);
+
+    pvac_seckey sk = deser_seckey(req.at("sk").get<std::string>());
+    GUARD(sk, pvac_free_seckey);
+
+    // Step 1: encrypt(bytes_used). The cipher we keep around is also
+    // the one fed to make_zero_proof below — identical to what the
+    // legacy three-call path used to do (signer used the bytes_used
+    // ciphertext, not the net one, for the proof).
+    pvac_cipher ct_b = pvac_enc_value_seeded(pk, sk, bytes_used, seed_b.data());
+    if (!ct_b) throw std::runtime_error("pvac_enc_value_seeded(bytes_used) returned null");
+    GUARD(ct_b, pvac_free_cipher);
+
+    // Step 2: encrypt(net) under its own (per-field-distinct) seed.
+    pvac_cipher ct_n = pvac_enc_value_seeded(pk, sk, net, seed_n.data());
+    if (!ct_n) throw std::runtime_error("pvac_enc_value_seeded(net) returned null");
+    GUARD(ct_n, pvac_free_cipher);
+
+    // Step 3: zero-proof bound to (bytes_used, blinding) and the
+    // *bytes_used* ciphertext. This must match the legacy three-call
+    // wiring in `crates/octravpn-node/src/control/handlers/receipt.rs`
+    // exactly: see the `make_zero_proof` call there — `amount` is
+    // `event_bytes`, `ct` is `enc_b`. If you change either side, the
+    // determinism test in `pvac.rs::tests::receipt_shadow_matches_legacy_serial_calls`
+    // will trip.
+    pvac_zero_proof zp =
+        pvac_make_zero_proof_bound(pk, sk, ct_b, bytes_used, blinding.data());
+    if (!zp) throw std::runtime_error("pvac_make_zero_proof_bound returned null");
+    GUARD(zp, pvac_free_zero_proof);
+
+    auto bytes_b = serialize_cipher(ct_b);
+    auto bytes_n = serialize_cipher(ct_n);
+    auto bytes_p = serialize_zero_proof(zp);
+
+    dbg("receipt_shadow(bytes_used=" + std::to_string(bytes_used) +
+        ",net=" + std::to_string(net) + "): enc_b=" +
+        std::to_string(bytes_b.size()) + "B enc_n=" +
+        std::to_string(bytes_n.size()) + "B proof=" +
+        std::to_string(bytes_p.size()) + "B");
+
+    return json{
+        {"enc_bytes_used", with_prefix(HFHE_PREFIX, bytes_b)},
+        {"enc_net",        with_prefix(HFHE_PREFIX, bytes_n)},
+        {"zero_proof",     with_prefix(ZKZP_PREFIX, bytes_p)},
+    };
+}
+
 json op_add(const json& req) {
     pvac_pubkey pk = deser_pubkey(req.at("pk").get<std::string>());
     GUARD(pk, pvac_free_pubkey);
@@ -389,6 +476,7 @@ json process_request(const std::string& line) {
         if (op == "encrypt_zero")    return op_encrypt_zero(req);
         if (op == "encrypt_const")   return op_encrypt_const(req);
         if (op == "make_zero_proof") return op_make_zero_proof(req);
+        if (op == "receipt_shadow")  return op_receipt_shadow(req);
         if (op == "add")             return op_add(req);
         if (op == "ping")            return json{{"pong", true}};
         if (op == "version")         return json{{"sidecar", "octra-pvac-sidecar/0.1"}};
