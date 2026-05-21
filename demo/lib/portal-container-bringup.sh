@@ -37,10 +37,21 @@ PORTAL_CONTAINER="${PORTAL_CONTAINER:-octravpn-portal-demo}"
 PORTAL_BIND_HOST="${PORTAL_BIND_HOST:-127.0.0.1:51823}"
 READY_TIMEOUT_SECS="${PORTAL_READY_TIMEOUT:-30}"
 
-# Locate a client binary to mount in.
+# Locate a client binary to mount in. On a fresh macOS host the Linux
+# binary won't exist yet — kick the shared builder. The helper is a
+# no-op when the artefact is already fresh (sub-second), so CI (which
+# pre-stages the binary) doesn't pay any cost.
+LINUX_BIN="${REPO_ROOT}/target/linux-debug/debug/octravpn"
+if [[ ! -x "${LINUX_BIN}" ]]; then
+    if ! "${SCRIPT_DIR}/build-linux-binaries.sh" >&2; then
+        echo "portal-container-bringup: build-linux-binaries.sh failed" >&2
+        exit 10
+    fi
+fi
+
 BIN=""
 for candidate in \
-    "${REPO_ROOT}/target/linux-debug/debug/octravpn" \
+    "${LINUX_BIN}" \
     "${REPO_ROOT}/target/release/octravpn" \
     "${REPO_ROOT}/target/debug/octravpn"; do
     if [[ -x "${candidate}" ]]; then
@@ -50,6 +61,7 @@ for candidate in \
 done
 if [[ -z "${BIN}" ]]; then
     echo "portal-container-bringup: octravpn binary not found under target/" >&2
+    echo "  run demo/lib/build-linux-binaries.sh to produce target/linux-debug/debug/octravpn" >&2
     exit 10
 fi
 

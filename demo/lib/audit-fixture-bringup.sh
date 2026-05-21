@@ -26,15 +26,23 @@ CONTAINER_NAME="${AUDIT_FIXTURE_CONTAINER:-octravpn-audit-fixture}"
 mkdir -p "${FIXTURE_DIR}/node"
 
 if [[ ! -x "${LINUX_BIN}" ]]; then
-    # Fall back to release if debug isn't built; demo workflow builds debug.
-    if [[ -x "${REPO_ROOT}/target/release/octravpn-node" ]]; then
-        LINUX_BIN="${REPO_ROOT}/target/release/octravpn-node"
-    elif [[ -x "${REPO_ROOT}/target/debug/octravpn-node" ]]; then
-        LINUX_BIN="${REPO_ROOT}/target/debug/octravpn-node"
-    else
-        echo "audit-fixture-bringup: octravpn-node binary missing under target/" >&2
-        echo "  expected ${LINUX_BIN} (Linux build) — run 'cargo build -p octravpn-node' inside the builder container first" >&2
-        exit 10
+    # On a fresh macOS host the Linux binary won't exist. The shared
+    # builder is a no-op when artefacts are fresh, so this is safe in
+    # CI (which pre-stages the binary) and self-healing locally.
+    "${SCRIPT_DIR}/build-linux-binaries.sh" >&2 || true
+
+    if [[ ! -x "${LINUX_BIN}" ]]; then
+        # Fall back to release if debug still isn't built; demo
+        # workflow builds debug.
+        if [[ -x "${REPO_ROOT}/target/release/octravpn-node" ]]; then
+            LINUX_BIN="${REPO_ROOT}/target/release/octravpn-node"
+        elif [[ -x "${REPO_ROOT}/target/debug/octravpn-node" ]]; then
+            LINUX_BIN="${REPO_ROOT}/target/debug/octravpn-node"
+        else
+            echo "audit-fixture-bringup: octravpn-node binary missing under target/" >&2
+            echo "  run demo/lib/build-linux-binaries.sh to produce target/linux-debug/debug/octravpn-node" >&2
+            exit 10
+        fi
     fi
 fi
 

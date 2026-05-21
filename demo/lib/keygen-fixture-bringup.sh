@@ -20,9 +20,20 @@ REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 CONTAINER_NAME="${KEYGEN_FIXTURE_CONTAINER:-octravpn-keygen-fixture}"
 
 # Prefer the Linux-built binary so this works on macOS hosts too.
+# If the Linux target doesn't exist yet, kick the shared build helper —
+# it's a no-op when the artefact is already fresh, so this stays cheap
+# in CI (where the binary is pre-staged) and self-healing locally.
+LINUX_BIN="${REPO_ROOT}/target/linux-debug/debug/octravpn"
+if [[ ! -x "${LINUX_BIN}" ]]; then
+    if ! "${SCRIPT_DIR}/build-linux-binaries.sh" >&2; then
+        echo "keygen-fixture-bringup: build-linux-binaries.sh failed" >&2
+        exit 10
+    fi
+fi
+
 BIN=""
 for candidate in \
-    "${REPO_ROOT}/target/linux-debug/debug/octravpn" \
+    "${LINUX_BIN}" \
     "${REPO_ROOT}/target/release/octravpn" \
     "${REPO_ROOT}/target/debug/octravpn"; do
     if [[ -x "${candidate}" ]]; then
@@ -33,7 +44,7 @@ done
 
 if [[ -z "${BIN}" ]]; then
     echo "keygen-fixture-bringup: octravpn binary not found under target/" >&2
-    echo "  run 'cargo build -p octravpn-client' (in the builder container for Linux targets)" >&2
+    echo "  run demo/lib/build-linux-binaries.sh to produce target/linux-debug/debug/octravpn" >&2
     exit 10
 fi
 
