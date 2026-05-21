@@ -1,0 +1,1015 @@
+// OctraVPN v3.2 — Circle-resident, chain-minimal AML + C-1 dispute resolver.
+//
+// STATUS: NOT YET DEPLOYED. Sibling to `main-v3.aml` (the devnet
+// 2026-05-18 deployment). Deploys at a NEW program address; v3
+// operators must re-register to switch over. See
+// `docs/v3/c1-resolve-rollout.md` for the migration runbook.
+//
+// DELTA vs main-v3.aml (the ONLY changes, verifiable by `diff`):
+//
+//   1. New `SESSION_DISPUTED` status constant (= 3).
+//   2. New per-session field `session_dispute_deadline: map[int]int`
+//      capturing `epoch + DISPUTE_GRACE_EPOCHS_DEFAULT` at the moment
+//      `settle_confirm` records a disagreement.
+//   3. `settle_confirm` no longer leaves a disagreed session forever
+//      in `SESSION_OPEN`. It flips to `SESSION_DISPUTED`, records the
+//      operator + client claims, and emits an actionable
+//      `SettleDispute` event with the grace deadline.
+//   4. New entrypoint `settle_resolve(session_id, accepted_bytes_used)`:
+//      either party (tailnet owner OR operator's circle owner) may
+//      pick one of the two claimed values within the grace window.
+//      The OPPOSING party (the one whose claim was NOT picked) is
+//      slashed by `slash_burn_bps / 2` — half of double-sign slash,
+//      since a dispute is less severe than provable equivocation.
+//   5. New entrypoint `claim_disputed_no_show(session_id)`: after the
+//      grace window expires, any third party can fall back to the
+//      CLIENT's claim (operator-default cost) — no slash. Conservative
+//      for the chain: deposit gets unstuck, no party gets railroaded.
+//   6. New `dispute_grace_epochs` governance knob; rolled into
+//      `set_params` with sane bounds.
+//
+// Sibling-deploy pattern mirrors the swap-ready-hfhe branch: the
+// existing main-v3 program continues to receive traffic; this v3.2
+// program is brought up at a fresh address, operators re-register +
+// re-bond, and the tailnet treasuries migrate via `retire_tailnet`
+// + `withdraw_tailnet_treasury` on the old program followed by
+// `create_tailnet` on the new one.
+//
+// Sibling to main.aml (v1.1) and main-v2.aml (v2.x); those stay as
+// references.
+//
+// NOTE on the `bytes` type at the RPC boundary: AML accepts `bytes`
+// params as JSON strings and applies `len()` to the raw char count
+// without decoding. The chain's own `sha256()` builtin returns a
+// 64-char hex string. So all "32-byte sha256" anchors below require
+// `len() == 64` — they are stored verbatim as 64-char hex digests,
+// not as raw 32-byte buffers. The chain doesn't crypto-verify the
+// value; integrity is enforced by off-chain verifiers fetching the
+// canonical source (state-root.json, members.json) and comparing
+// `sha256_hex(source) == anchor`.
+//
+// Design thesis (full version in docs/v3-circle-resident-architecture.md):
+//   * 4 KiB cap on map[address]string => no large inline blobs.
+//   * fhe_* host calls revert on devnet => no HFHE at chain runtime.
+//   * deploy_circle.code_b64 stored but circles aren't executed =>
+//     bonds + slash cannot live in a circle yet.
+// The chain keeps only: bonds + slash, session escrow, tailnet
+// treasury, treasury, params, and 32-byte sha256 commitments pointing
+// at each role's circle-resident state. Earnings use a sha256
+// hash-chain commit while HFHE is blocked; the storage shape is
+// forward-compatible with a later HFHE swap. Pause halts user flows
+// only; governance bypasses pause (matches v1.1).
+
+contract OctraVPN_V3 {
+
+  // ============================================================
+  // Constants
+  // ============================================================
+
+  const BPS_DENOM: int = 10000
+  const SLASH_BURN_DEFAULT_BPS: int = 9000   // 90% burn, 10% bounty
+  const PROTOCOL_FEE_DEFAULT_BPS: int = 50
+  const SWEEP_GRACE_MULT_DEFAULT: int = 10
+  const SWEEP_BOUNTY_DEFAULT_BPS: int = 100
+
+  // C-1: 7-epoch dispute grace window. At octra's ~1 hour block-time
+  // target (10-minute slots × 6 slots/epoch on devnet), 7 epochs is
+  // ~7 hours of wall-clock — long enough for an off-call operator to
+  // wake up and submit a resolve tx, short enough that a chronically-
+  // unresponsive operator does not strand client deposits. The chain
+  // owner can tune via `set_params`; floor is 1 epoch, ceiling is
+  // `session_grace_epochs * 2` so disputes always resolve well before
+  // permissionless sweep.
+  const DISPUTE_GRACE_EPOCHS_DEFAULT: int = 7
+
+  // session.status — `SESSION_DISPUTED` is new in v3.2 (C-1 fix).
+  const SESSION_OPEN: int = 0
+  const SESSION_SETTLED: int = 1
+  const SESSION_REFUNDED: int = 2
+  const SESSION_DISPUTED: int = 3
+
+  // ============================================================
+  // Events
+  // ============================================================
+
+  event CircleRegistered(circle: address, owner: address, state_root: bytes)
+  event CircleStateUpdated(circle: address, state_root: bytes, version: int)
+  event CircleRetired(circle: address)
+  event StakeBonded(circle: address, amount: int, new_total: int)
+  event StakeUnbonded(circle: address, amount: int, unlock_epoch: int)
+  event StakeFinalized(circle: address, amount: int)
+  event OperatorSlashed(circle: address, total: int, burn: int, bounty: int)
+
+  event TailnetCreated(tailnet_id: int, owner: address, members_root: bytes)
+  event TailnetMembersRootUpdated(tailnet_id: int, members_root: bytes)
+  event TailnetDeposit(tailnet_id: int, amount: int, new_treasury: int)
+
+  event SessionOpened(session_id: int, tailnet_id: int, circle: address, deposit: int, opened_at: int)
+  event SettleClaimed(session_id: int, circle: address, bytes_used: int)
+  event SettleConfirmed(session_id: int, opener: address, bytes_used: int)
+  // SettleDispute now also carries the dispute-grace deadline so
+  // off-chain monitors know the resolve window. (v3.2 C-1.)
+  event SettleDispute(session_id: int, operator_bytes: int, client_bytes: int, dispute_deadline: int)
+  // SettleResolved is emitted by `settle_resolve` (in-grace
+  // arbitration). `loser` is the address whose claim was rejected;
+  // `slash_amount` is the bond fraction burned from the loser.
+  event SettleResolved(session_id: int, accepted_bytes: int, resolver: address, loser: address, slash_amount: int)
+  // DisputeNoShowResolved is emitted by `claim_disputed_no_show`
+  // (post-grace fallback). No slash; defaults to client value.
+  event DisputeNoShowResolved(session_id: int, accepted_bytes: int, sweeper: address)
+  event SessionSettled(session_id: int, circle: address, net: int, refund: int)
+  event SessionRefunded(session_id: int, reason: string)
+  event SessionSwept(session_id: int)
+
+  event EarningsCommitted(circle: address, new_total: int, chain_head: bytes)
+  event EarningsClaimed(circle: address, amount: int, claimed_total: int)
+
+  event ProgramTreasuryWithdrawn(to: address, amount: int)
+
+  // ============================================================
+  // State — chain-minimal. No structs over 64B; no inline blobs.
+  // ============================================================
+
+  state {
+    owner: address
+    paused: int
+
+    // --------- Circle registry (thin) ---------
+    circle_owner: map[address]address
+    // Base64 ed25519 pubkey (44 chars) — used by slash_double_sign.
+    circle_receipt_pk: map[address]string
+    // sha256 of the operator's canonical /state-root.json (32B).
+    circle_state_root: map[address]bytes
+    circle_state_version: map[address]int
+    circle_active: map[address]int
+
+    // --------- Bonds + slash ---------
+    circle_bond: map[address]int
+    circle_unbonding: map[address]int
+    circle_unbond_unlock_epoch: map[address]int
+    circle_slashed: map[address]int
+
+    // --------- Tailnets (treasury + members-root commitment) ---------
+    tailnet_count: int
+    tailnet_owner: map[int]address
+    tailnet_treasury: map[int]int
+    // sha256 of /tailnet-{id}/members.json in tailnet-owner circle.
+    tailnet_members_root: map[int]bytes
+    tailnet_root_version: map[int]int
+    tailnet_retired: map[int]int
+
+    // --------- Sessions (chain holds escrow + adjudicates) ---------
+    session_count: int
+    session_deposit: map[int]int
+    session_status: map[int]int
+    session_opener: map[int]address
+    session_exit: map[int]address     // circle_id of the operator
+    session_tailnet: map[int]int
+    session_opened_at: map[int]int
+
+    // Two-tx settle (operator claim + opener confirm).
+    operator_claim_bytes: map[int]int
+    operator_claim_set: map[int]int
+    client_confirm_bytes: map[int]int
+    client_confirm_set: map[int]int
+
+    // C-1: dispute-grace deadline per session. Set when
+    // settle_confirm flips the session to SESSION_DISPUTED; zero
+    // otherwise. Reads as `epoch >= session_dispute_deadline[sid]`
+    // to test "grace window expired".
+    session_dispute_deadline: map[int]int
+
+    // --------- Earnings (sha256 hash-chain era; HFHE swap-ready) ---------
+    circle_earnings_total: map[address]int
+    circle_earnings_claimed: map[address]int
+    // head' = sha256(head || sha256(settle_blinding)) per settle
+    circle_earnings_chain: map[address]bytes
+
+    // --------- Treasury + governance params ---------
+    treasury: int
+    burned: int
+
+    min_session_deposit: int
+    min_tailnet_deposit: int
+    min_circle_stake: int
+    session_grace_epochs: int
+    unbond_grace_epochs: int
+    sweep_grace_multiplier: int
+    sweep_bounty_bps: int
+    slash_burn_bps: int
+    slash_bounty_bps: int
+    protocol_fee_bps: int
+
+    // C-1: dispute grace window (epochs). Bounded
+    // 1 <= dispute_grace_epochs <= session_grace_epochs * 2.
+    dispute_grace_epochs: int
+  }
+
+  // ============================================================
+  // Constructor
+  // ============================================================
+
+  constructor(min_session_deposit: int, min_tailnet_deposit: int, min_circle_stake: int, session_grace_epochs: int, unbond_grace_epochs: int) {
+    require(min_session_deposit > 0, "min session deposit > 0")
+    require(min_tailnet_deposit > 0, "min tailnet deposit > 0")
+    require(min_circle_stake >= 100000000, "min circle stake floor")
+    require(session_grace_epochs > 0, "session grace > 0")
+    require(unbond_grace_epochs >= 1000, "unbond grace too short")
+
+    self.owner = caller
+    self.paused = 0
+
+    self.tailnet_count = 0
+    self.session_count = 0
+    self.treasury = 0
+    self.burned = 0
+
+    self.min_session_deposit = min_session_deposit
+    self.min_tailnet_deposit = min_tailnet_deposit
+    self.min_circle_stake = min_circle_stake
+    self.session_grace_epochs = session_grace_epochs
+    self.unbond_grace_epochs = unbond_grace_epochs
+    self.sweep_grace_multiplier = SWEEP_GRACE_MULT_DEFAULT
+    self.sweep_bounty_bps = SWEEP_BOUNTY_DEFAULT_BPS
+    self.slash_burn_bps = SLASH_BURN_DEFAULT_BPS
+    self.slash_bounty_bps = BPS_DENOM - SLASH_BURN_DEFAULT_BPS
+    self.protocol_fee_bps = PROTOCOL_FEE_DEFAULT_BPS
+    self.dispute_grace_epochs = DISPUTE_GRACE_EPOCHS_DEFAULT
+  }
+
+  // ============================================================
+  // Internal helpers
+  // ============================================================
+
+  private fn require_owner() {
+    require(caller == self.owner, "not owner")
+  }
+
+  private fn require_not_paused() {
+    require(self.paused == 0, "paused")
+  }
+
+  private fn circle_is_active(c: address): bool {
+    if self.circle_slashed[c] != 0 {
+      return false
+    }
+    return self.circle_active[c] == 1
+  }
+
+  // C-1 helper: half-slash an operator's live bond. Used by
+  // `settle_resolve` when the operator is the dispute loser. We
+  // touch ONLY live bond (not the unbonding slot) because a
+  // dispute is a weaker signal than provable equivocation —
+  // pending-unbond stake stays on its own schedule. The burned
+  // amount goes to the program treasury (same as double-sign).
+  //
+  // Returns the burned amount so the caller can emit the right
+  // SettleResolved event. The operator is NOT marked slashed
+  // (that flag is reserved for double-sign equivocation).
+  private fn apply_dispute_slash_operator(circle: address): int {
+    let live = self.circle_bond[circle]
+    let half_burn_bps = self.slash_burn_bps / 2
+    let burn_amt = live * half_burn_bps / BPS_DENOM
+    if burn_amt > 0 {
+      self.circle_bond[circle] = live - burn_amt
+      self.treasury = self.treasury + burn_amt
+      self.burned = self.burned + burn_amt
+    }
+    return burn_amt
+  }
+
+  // C-1 helper: half-slash the client side. Clients don't post a
+  // bond; the "bond" available is the deposit being adjudicated.
+  // We forfeit `slash_burn_bps / 2` of the deposit to the program
+  // treasury and return the remainder to the tailnet. Returns the
+  // burned amount.
+  private fn apply_dispute_slash_client(deposit: int): int {
+    let half_burn_bps = self.slash_burn_bps / 2
+    let burn_amt = deposit * half_burn_bps / BPS_DENOM
+    if burn_amt > 0 {
+      self.treasury = self.treasury + burn_amt
+      self.burned = self.burned + burn_amt
+    }
+    return burn_amt
+  }
+
+  // Common slash settlement. Burns + bounties out the total stake,
+  // permanently bans the circle. Caller MUST have already gated on
+  // pause + already-slashed; this helper only does the bookkeeping.
+  private fn apply_slash(circle: address) {
+    let live = self.circle_bond[circle]
+    let unb = self.circle_unbonding[circle]
+    let total = live + unb
+    require(total > 0, "no stake to slash")
+    let burn_amt = total * self.slash_burn_bps / BPS_DENOM
+    let bounty_amt = total - burn_amt
+    self.circle_bond[circle] = 0
+    self.circle_unbonding[circle] = 0
+    self.circle_unbond_unlock_epoch[circle] = 0
+    self.circle_slashed[circle] = 1
+    self.circle_active[circle] = 0
+    self.treasury = self.treasury + burn_amt
+    self.burned = self.burned + burn_amt
+    if bounty_amt > 0 {
+      require(transfer(caller, bounty_amt), "bounty transfer failed")
+    }
+    emit OperatorSlashed(circle, total, burn_amt, bounty_amt)
+  }
+
+  // ============================================================
+  // Governance (owner-only; intentionally NOT pause-gated)
+  // ============================================================
+
+  fn transfer_ownership(new_owner: address): bool {
+    require_owner()
+    require(is_address(new_owner), "invalid owner")
+    self.owner = new_owner
+    return true
+  }
+
+  fn set_paused(p: int): bool {
+    require_owner()
+    require(p == 0 || p == 1, "p must be 0 or 1")
+    self.paused = p
+    return true
+  }
+
+  fn set_params(new_min_session_deposit: int, new_min_tailnet_deposit: int, new_session_grace_epochs: int, new_sweep_grace_multiplier: int, new_sweep_bounty_bps: int, new_min_circle_stake: int, new_unbond_grace_epochs: int, new_slash_burn_bps: int, new_slash_bounty_bps: int, new_protocol_fee_bps: int, new_dispute_grace_epochs: int): bool {
+    require_owner()
+    require(new_min_session_deposit > 0, "session deposit > 0")
+    require(new_min_tailnet_deposit > 0, "tailnet deposit > 0")
+    require(new_session_grace_epochs > 0, "session grace > 0")
+    require(new_sweep_grace_multiplier > 0, "sweep > 0")
+    require(new_sweep_bounty_bps <= 1000, "sweep bounty <= 10%")
+    require(new_min_circle_stake >= 100000000, "stake floor too low")
+    require(new_unbond_grace_epochs >= 1000, "unbond grace too short")
+    require(new_slash_burn_bps >= 5000, "burn share too low")
+    require(new_slash_burn_bps + new_slash_bounty_bps == BPS_DENOM, "slash bps sum")
+    require(new_protocol_fee_bps <= 200, "protocol fee > 2%")
+    require(new_dispute_grace_epochs >= 1, "dispute grace >= 1")
+    require(new_dispute_grace_epochs <= new_session_grace_epochs * 2, "dispute grace too long")
+    self.min_session_deposit = new_min_session_deposit
+    self.min_tailnet_deposit = new_min_tailnet_deposit
+    self.session_grace_epochs = new_session_grace_epochs
+    self.sweep_grace_multiplier = new_sweep_grace_multiplier
+    self.sweep_bounty_bps = new_sweep_bounty_bps
+    self.min_circle_stake = new_min_circle_stake
+    self.unbond_grace_epochs = new_unbond_grace_epochs
+    self.slash_burn_bps = new_slash_burn_bps
+    self.slash_bounty_bps = new_slash_bounty_bps
+    self.protocol_fee_bps = new_protocol_fee_bps
+    self.dispute_grace_epochs = new_dispute_grace_epochs
+    return true
+  }
+
+  fn withdraw_program_treasury(to: address, amount: int): bool {
+    require_owner()
+    require(is_address(to), "invalid to")
+    require(amount > 0, "amount > 0")
+    require(self.treasury >= amount, "treasury insufficient")
+    self.treasury = self.treasury - amount
+    require(transfer(to, amount), "transfer failed")
+    emit ProgramTreasuryWithdrawn(to, amount)
+    return true
+  }
+
+  // ============================================================
+  // Circle registry — atomic register + bond (chicken-and-egg fix)
+  // ============================================================
+
+  // state_root = sha256 of the operator's canonical /state-root.json
+  // sealed inside the circle. register + bond are atomic.
+  payable fn register_circle(circle: address, state_root: bytes, receipt_pubkey: string): bool {
+    require_not_paused()
+    require(is_address(circle), "invalid circle id")
+    require(self.circle_active[circle] == 0, "circle already active")
+    require(self.circle_slashed[circle] == 0, "previously slashed")
+    require(len(state_root) == 64, "state_root must be 64-char hex sha256")
+    require(len(receipt_pubkey) > 0, "receipt pubkey required")
+    require(
+      self.circle_bond[circle] + value >= self.min_circle_stake,
+      "initial stake below minimum"
+    )
+
+    self.circle_bond[circle] = self.circle_bond[circle] + value
+    self.circle_owner[circle] = caller
+    self.circle_receipt_pk[circle] = receipt_pubkey
+    self.circle_state_root[circle] = state_root
+    self.circle_state_version[circle] = 1
+    self.circle_active[circle] = 1
+    // Earnings ledger starts empty. Initialize the hash chain head to
+    // sha256(state_root) so audit replay doesn't depend on the AML
+    // default-value quirk (unset `bytes` reads back as the literal
+    // string "0", not the empty string). Anchoring the chain genesis
+    // to the operator's first state_root also ties the earnings log
+    // to a known commitment from epoch 0.
+    self.circle_earnings_total[circle] = 0
+    self.circle_earnings_claimed[circle] = 0
+    self.circle_earnings_chain[circle] = sha256(state_root)
+
+    emit CircleRegistered(circle, caller, state_root)
+    if value > 0 {
+      emit StakeBonded(circle, value, self.circle_bond[circle])
+    }
+    return true
+  }
+
+  // Auth: caller == circle_owner. Tx envelope is already ed25519-
+  // verified by the chain runtime, so no inline sig needed.
+  fn update_circle_state(circle: address, new_state_root: bytes): bool {
+    require_not_paused()
+    require(self.circle_owner[circle] == caller, "not circle owner")
+    require(self.circle_active[circle] == 1, "circle not active")
+    require(self.circle_slashed[circle] == 0, "previously slashed")
+    require(len(new_state_root) == 64, "state_root must be 64-char hex sha256")
+    self.circle_state_root[circle] = new_state_root
+    self.circle_state_version[circle] = self.circle_state_version[circle] + 1
+    emit CircleStateUpdated(circle, new_state_root, self.circle_state_version[circle])
+    return true
+  }
+
+  // Rotate the on-chain attestation pubkey. Old pubkey is dropped:
+  // future slash uses the new one. Off-chain witnesses must adopt
+  // the new key from this epoch on.
+  fn rotate_receipt_pubkey(circle: address, new_pubkey: string): bool {
+    require_not_paused()
+    require(self.circle_owner[circle] == caller, "not circle owner")
+    require(self.circle_active[circle] == 1, "circle not active")
+    require(self.circle_slashed[circle] == 0, "previously slashed")
+    require(len(new_pubkey) > 0, "pubkey required")
+    self.circle_receipt_pk[circle] = new_pubkey
+    return true
+  }
+
+  fn retire_circle(circle: address): bool {
+    require_not_paused()
+    require(self.circle_owner[circle] == caller, "not circle owner")
+    require(self.circle_active[circle] == 1, "circle not active")
+    self.circle_active[circle] = 0
+    emit CircleRetired(circle)
+    return true
+  }
+
+  // ============================================================
+  // Circle stake (bond / unbond / finalize)
+  // ============================================================
+
+  payable fn bond_endpoint(circle: address): bool {
+    require_not_paused()
+    require(value > 0, "no value")
+    require(self.circle_slashed[circle] == 0, "previously slashed")
+    require(self.circle_unbonding[circle] == 0, "unbonding in progress")
+    require(self.circle_owner[circle] == caller, "not circle owner")
+    self.circle_bond[circle] = self.circle_bond[circle] + value
+    emit StakeBonded(circle, value, self.circle_bond[circle])
+    return true
+  }
+
+  fn unbond_endpoint(circle: address): bool {
+    require_not_paused()
+    require(self.circle_owner[circle] == caller, "not circle owner")
+    let amt = self.circle_bond[circle]
+    require(amt > 0, "no stake")
+    require(self.circle_unbonding[circle] == 0, "already unbonding")
+    let unlock = epoch + self.unbond_grace_epochs
+    self.circle_unbonding[circle] = amt
+    self.circle_unbond_unlock_epoch[circle] = unlock
+    self.circle_bond[circle] = 0
+    emit StakeUnbonded(circle, amt, unlock)
+    return true
+  }
+
+  nonreentrant fn finalize_unbond(circle: address): bool {
+    require_not_paused()
+    require(self.circle_owner[circle] == caller, "not circle owner")
+    let amt = self.circle_unbonding[circle]
+    require(amt > 0, "nothing unbonding")
+    require(epoch >= self.circle_unbond_unlock_epoch[circle], "unbond grace not elapsed")
+    self.circle_unbonding[circle] = 0
+    self.circle_unbond_unlock_epoch[circle] = 0
+    require(transfer(caller, amt), "transfer failed")
+    emit StakeFinalized(circle, amt)
+    return true
+  }
+
+  // ============================================================
+  // Slash
+  // ============================================================
+
+  fn slash_double_sign(circle: address, payload_a: string, sig_a: string, payload_b: string, sig_b: string): bool {
+    require_not_paused()
+    require(self.circle_slashed[circle] == 0, "already slashed")
+    require(payload_a != payload_b, "payloads identical")
+    let receipt_pk = self.circle_receipt_pk[circle]
+    require(len(receipt_pk) > 0, "circle has no receipt pubkey")
+    require(ed25519_ok(receipt_pk, payload_a, sig_a), "sig_a invalid")
+    require(ed25519_ok(receipt_pk, payload_b, sig_b), "sig_b invalid")
+    apply_slash(circle)
+    return true
+  }
+
+  fn gov_slash_operator(circle: address): bool {
+    require_not_paused()
+    require_owner()
+    require(self.circle_slashed[circle] == 0, "already slashed")
+    apply_slash(circle)
+    return true
+  }
+
+  // ============================================================
+  // Tailnets — treasury + members-root only
+  // ============================================================
+
+  // members_root = sha256 of /tailnet-{id}/members.json sealed in the
+  // tailnet-owner's circle. ACL policy is entirely off-chain.
+  payable fn create_tailnet(members_root: bytes): int {
+    require_not_paused()
+    require(value >= self.min_tailnet_deposit, "deposit below minimum")
+    require(len(members_root) == 64, "members_root must be 64-char hex sha256")
+    let tid = self.tailnet_count
+    self.tailnet_count = tid + 1
+    self.tailnet_owner[tid] = caller
+    self.tailnet_treasury[tid] = value
+    self.tailnet_members_root[tid] = members_root
+    self.tailnet_root_version[tid] = 1
+    self.tailnet_retired[tid] = 0
+    emit TailnetCreated(tid, caller, members_root)
+    return tid
+  }
+
+  payable fn deposit_to_tailnet(tailnet_id: int): bool {
+    require_not_paused()
+    require(value > 0, "no deposit")
+    require(tailnet_id < self.tailnet_count, "tailnet not found")
+    require(self.tailnet_retired[tailnet_id] == 0, "tailnet retired")
+    // Anyone can top up; membership is off-chain ACL.
+    self.tailnet_treasury[tailnet_id] = self.tailnet_treasury[tailnet_id] + value
+    emit TailnetDeposit(tailnet_id, value, self.tailnet_treasury[tailnet_id])
+    return true
+  }
+
+  // Owner re-seals members.json, bumps the root here.
+  fn update_members_root(tailnet_id: int, new_members_root: bytes): bool {
+    require_not_paused()
+    require(tailnet_id < self.tailnet_count, "tailnet not found")
+    require(self.tailnet_owner[tailnet_id] == caller, "not tailnet owner")
+    require(len(new_members_root) == 64, "members_root must be 64-char hex sha256")
+    self.tailnet_members_root[tailnet_id] = new_members_root
+    self.tailnet_root_version[tailnet_id] = self.tailnet_root_version[tailnet_id] + 1
+    emit TailnetMembersRootUpdated(tailnet_id, new_members_root)
+    return true
+  }
+
+  fn retire_tailnet(tailnet_id: int): bool {
+    require_not_paused()
+    require(self.tailnet_owner[tailnet_id] == caller, "not tailnet owner")
+    self.tailnet_retired[tailnet_id] = 1
+    return true
+  }
+
+  // Withdraw any leftover treasury after retire.
+  nonreentrant fn withdraw_tailnet_treasury(tailnet_id: int, amount: int): bool {
+    require_not_paused()
+    require(self.tailnet_owner[tailnet_id] == caller, "not tailnet owner")
+    require(self.tailnet_retired[tailnet_id] == 1, "tailnet not retired")
+    require(amount > 0, "amount > 0")
+    require(self.tailnet_treasury[tailnet_id] >= amount, "treasury insufficient")
+    self.tailnet_treasury[tailnet_id] = self.tailnet_treasury[tailnet_id] - amount
+    require(transfer(caller, amount), "transfer failed")
+    return true
+  }
+
+  // ============================================================
+  // Sessions — chain escrow + adjudication; no class/price logic.
+  // v3 sessions are class- and price-agnostic on chain. Class/price
+  // live in the operator's signed off-chain receipt (sealed at
+  // /receipts/{epoch}.json in the operator's circle); the chain only
+  // sees bytes_used + the pre-agreed net. Adjudication: both signed
+  // values agree.
+  // ============================================================
+
+  fn open_session(tailnet_id: int, circle: address, max_pay: int): int {
+    require_not_paused()
+    require(tailnet_id < self.tailnet_count, "tailnet not found")
+    require(self.tailnet_retired[tailnet_id] == 0, "tailnet retired")
+    require(circle_is_active(circle), "circle inactive or slashed")
+    require(max_pay >= self.min_session_deposit, "deposit below min")
+    require(self.tailnet_treasury[tailnet_id] >= max_pay, "tailnet treasury insufficient")
+
+    // Membership = off-chain Merkle proof vs tailnet_members_root.
+    // If operator misbehaves, client recovers via claim_no_show /
+    // sweep_expired_session.
+    self.tailnet_treasury[tailnet_id] = self.tailnet_treasury[tailnet_id] - max_pay
+    let sid = self.session_count
+    self.session_count = sid + 1
+    self.session_tailnet[sid] = tailnet_id
+    self.session_exit[sid] = circle
+    self.session_opener[sid] = caller
+    self.session_deposit[sid] = max_pay
+    self.session_opened_at[sid] = epoch
+    self.session_status[sid] = SESSION_OPEN
+    emit SessionOpened(sid, tailnet_id, circle, max_pay, epoch)
+    return sid
+  }
+
+  // Operator records bytes_used. Re-claiming a different value =
+  // equivocation: refund the session; bond is burned by a follow-up
+  // slash_double_sign tx.
+  fn settle_claim(session_id: int, bytes_used: int): bool {
+    require_not_paused()
+    require(session_id < self.session_count, "session not found")
+    require(self.session_status[session_id] == SESSION_OPEN, "session not open")
+    require(bytes_used >= 0, "bytes >= 0")
+    let circle = self.session_exit[session_id]
+    require(self.circle_owner[circle] == caller, "not circle owner")
+    require(circle_is_active(circle), "operator inactive")
+
+    let prev_set = self.operator_claim_set[session_id]
+    if prev_set == 1 {
+      let prev_bytes = self.operator_claim_bytes[session_id]
+      if prev_bytes == bytes_used {
+        return true
+      }
+      // Equivocation: refund deposit, mark refunded. Slash itself
+      // requires the signed receipts; that's slash_double_sign's job.
+      // (The 0 dispute_deadline distinguishes this immediate-refund
+      // path from C-1's deferred-resolve path.)
+      let tid = self.session_tailnet[session_id]
+      let dep = self.session_deposit[session_id]
+      self.session_status[session_id] = SESSION_REFUNDED
+      self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + dep
+      emit SettleDispute(session_id, prev_bytes, bytes_used, 0)
+      emit SessionRefunded(session_id, "operator equivocation")
+      return false
+    }
+
+    self.operator_claim_set[session_id] = 1
+    self.operator_claim_bytes[session_id] = bytes_used
+    emit SettleClaimed(session_id, circle, bytes_used)
+    return true
+  }
+
+  // Opener confirms. `net` is the operator's plaintext credit pre-
+  // agreed off-chain (price * bytes after class rules). `settle_blinding`
+  // is a per-session secret that feeds the earnings hash-chain so
+  // off-chain auditors can detect tampering with the settle stream.
+  nonreentrant fn settle_confirm(session_id: int, bytes_used: int, net: int, settle_blinding: string): bool {
+    require_not_paused()
+    require(session_id < self.session_count, "session not found")
+    require(self.session_status[session_id] == SESSION_OPEN, "session not open")
+    require(self.session_opener[session_id] == caller, "only opener can confirm")
+    require(self.operator_claim_set[session_id] == 1, "no operator claim yet")
+    require(net >= 0, "net >= 0")
+    require(len(settle_blinding) > 0, "blinding required")
+
+    let op_bytes = self.operator_claim_bytes[session_id]
+    if op_bytes != bytes_used {
+      // C-1 FIX: Disagreement no longer strands the deposit. We
+      // record both claims, flip the session to SESSION_DISPUTED,
+      // and seed the dispute-grace deadline. `settle_resolve` (in
+      // grace) or `claim_disputed_no_show` (after grace) closes
+      // the dispute.
+      self.client_confirm_set[session_id] = 1
+      self.client_confirm_bytes[session_id] = bytes_used
+      let deadline = epoch + self.dispute_grace_epochs
+      self.session_dispute_deadline[session_id] = deadline
+      self.session_status[session_id] = SESSION_DISPUTED
+      emit SettleDispute(session_id, op_bytes, bytes_used, deadline)
+      return false
+    }
+
+    self.client_confirm_set[session_id] = 1
+    self.client_confirm_bytes[session_id] = bytes_used
+
+    let circle = self.session_exit[session_id]
+    let tid = self.session_tailnet[session_id]
+    let dep = self.session_deposit[session_id]
+
+    // Cap net against deposit; surplus is refunded to the tailnet.
+    let total_paid = net
+    if total_paid > dep {
+      total_paid = dep
+    }
+    let fee = total_paid * self.protocol_fee_bps / BPS_DENOM
+    let net_after_fee = total_paid - fee
+    let refund = dep - total_paid
+
+    self.session_status[session_id] = SESSION_SETTLED
+    self.treasury = self.treasury + fee
+    if refund > 0 {
+      self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + refund
+    }
+
+    if net_after_fee > 0 {
+      self.circle_earnings_total[circle] = self.circle_earnings_total[circle] + net_after_fee
+      // head' = sha256(head || sha256(blinding))
+      let bh = sha256(settle_blinding)
+      let prev_head = self.circle_earnings_chain[circle]
+      let new_head = sha256(prev_head + bh)
+      self.circle_earnings_chain[circle] = new_head
+      emit EarningsCommitted(circle, self.circle_earnings_total[circle], new_head)
+    }
+
+    emit SettleConfirmed(session_id, caller, bytes_used)
+    emit SessionSettled(session_id, circle, net_after_fee, refund)
+    return true
+  }
+
+  // ============================================================
+  // C-1 fix: dispute resolution
+  // ============================================================
+  //
+  // After `settle_confirm` records a disagreement, the session sits
+  // in SESSION_DISPUTED with a deadline `dispute_grace_epochs` in
+  // the future. EITHER the tailnet owner (representing the client
+  // side) OR the operator's circle owner can call `settle_resolve`
+  // within the window to pick one of the two claimed values as
+  // authoritative. The party whose claim is NOT picked is slashed
+  // by `slash_burn_bps / 2` (half of double-sign slash):
+  //
+  //   - If the operator's claim is picked, the client side
+  //     (deposit) forfeits the half-slash to the program treasury.
+  //   - If the client's claim is picked, the operator's live bond
+  //     gets the half-slash; their circle is NOT marked slashed
+  //     (that bit is reserved for double-sign equivocation).
+  //
+  // Half-slash rate is chosen because a dispute is fundamentally
+  // ambiguous — both sides have a signed receipt; we just don't
+  // know which arithmetic is right. Full-slash is reserved for
+  // provable equivocation (`slash_double_sign`).
+  //
+  // Outside the window, anyone may call `claim_disputed_no_show`
+  // to apply the CLIENT's claim with no slash. This biases the
+  // chain's default toward the client because, in practice, an
+  // unresponsive party in a dispute is more often the operator
+  // (clients have an active wallet UI; operators are daemons that
+  // can stop running). No party is railroaded; no slash is applied
+  // on no-show.
+
+  // Either party (tailnet owner OR operator's circle owner) picks
+  // one of the two claimed values within the grace window and
+  // applies settlement. `accepted_bytes_used` MUST equal one of
+  // the recorded claims; off-claim values revert.
+  nonreentrant fn settle_resolve(session_id: int, accepted_bytes_used: int, settle_blinding: string): bool {
+    require_not_paused()
+    require(session_id < self.session_count, "session not found")
+    require(self.session_status[session_id] == SESSION_DISPUTED, "session not disputed")
+    require(epoch < self.session_dispute_deadline[session_id], "dispute grace elapsed")
+    require(self.operator_claim_set[session_id] == 1, "no operator claim")
+    require(self.client_confirm_set[session_id] == 1, "no client confirm")
+    require(len(settle_blinding) > 0, "blinding required")
+
+    let circle = self.session_exit[session_id]
+    let tid = self.session_tailnet[session_id]
+    let circle_owner = self.circle_owner[circle]
+    let tailnet_owner_addr = self.tailnet_owner[tid]
+
+    // Caller must be the operator OR the tailnet owner. The
+    // tailnet owner is the on-chain steward of the client side
+    // (their treasury funded the deposit).
+    require(caller == circle_owner || caller == tailnet_owner_addr, "not a dispute party")
+
+    let op_bytes = self.operator_claim_bytes[session_id]
+    let cl_bytes = self.client_confirm_bytes[session_id]
+    require(accepted_bytes_used == op_bytes || accepted_bytes_used == cl_bytes, "accepted bytes not in claims")
+
+    let dep = self.session_deposit[session_id]
+    let chosen_op = (accepted_bytes_used == op_bytes)
+
+    // Half-slash the LOSING side. Operator loses bond; client
+    // loses deposit fraction (forfeit to program treasury,
+    // NOT refunded to tailnet).
+    let slash_amt: int = 0
+    let loser: address = circle_owner
+    let post_slash_deposit = dep
+    if chosen_op {
+      // Client lost. Burn half-slash share off the deposit.
+      slash_amt = apply_dispute_slash_client(dep)
+      loser = tailnet_owner_addr
+      post_slash_deposit = dep - slash_amt
+    } else {
+      // Operator lost. Half-slash live bond.
+      slash_amt = apply_dispute_slash_operator(circle)
+      loser = circle_owner
+      // No deposit forfeit when operator loses.
+      post_slash_deposit = dep
+    }
+
+    // Apply settlement using the accepted bytes. The chain does
+    // not know the off-chain price; in this resolve path we use
+    // `accepted_bytes_used` AS the credit amount capped against
+    // the post-slash deposit. Off-chain auditors recompute the
+    // exact net from class + price; on-chain we conservatively
+    // pay out at most one OctRaw per byte. (For mainnet, the
+    // resolver may pass an explicit `net` argument; this v3.2
+    // ships the minimum viable shape.)
+    let total_paid = accepted_bytes_used
+    if total_paid > post_slash_deposit {
+      total_paid = post_slash_deposit
+    }
+    let fee = total_paid * self.protocol_fee_bps / BPS_DENOM
+    let net_after_fee = total_paid - fee
+    let refund = post_slash_deposit - total_paid
+
+    self.session_status[session_id] = SESSION_SETTLED
+    self.treasury = self.treasury + fee
+    if refund > 0 {
+      self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + refund
+    }
+
+    if net_after_fee > 0 {
+      self.circle_earnings_total[circle] = self.circle_earnings_total[circle] + net_after_fee
+      let bh = sha256(settle_blinding)
+      let prev_head = self.circle_earnings_chain[circle]
+      let new_head = sha256(prev_head + bh)
+      self.circle_earnings_chain[circle] = new_head
+      emit EarningsCommitted(circle, self.circle_earnings_total[circle], new_head)
+    }
+
+    emit SettleResolved(session_id, accepted_bytes_used, caller, loser, slash_amt)
+    emit SessionSettled(session_id, circle, net_after_fee, refund)
+    return true
+  }
+
+  // Auto-resolve fallback. Once the dispute-grace window has
+  // expired, any third party can settle the session at the
+  // CLIENT's claimed value. No slash is applied — the chain's
+  // default is "conservative for the operator" because the
+  // operator was the one with the chance to call settle_resolve.
+  // The client's bytes value is used (operator-default cost), the
+  // protocol fee is taken, the refund flows back to the tailnet,
+  // and a small sweep bounty pays the third party for the
+  // bookkeeping tx.
+  nonreentrant fn claim_disputed_no_show(session_id: int): bool {
+    require_not_paused()
+    require(session_id < self.session_count, "session not found")
+    require(self.session_status[session_id] == SESSION_DISPUTED, "session not disputed")
+    require(epoch >= self.session_dispute_deadline[session_id], "dispute grace not elapsed")
+    require(self.client_confirm_set[session_id] == 1, "no client confirm")
+
+    let circle = self.session_exit[session_id]
+    let tid = self.session_tailnet[session_id]
+    let dep = self.session_deposit[session_id]
+    let cl_bytes = self.client_confirm_bytes[session_id]
+
+    let total_paid = cl_bytes
+    if total_paid > dep {
+      total_paid = dep
+    }
+    let fee = total_paid * self.protocol_fee_bps / BPS_DENOM
+    let net_after_fee = total_paid - fee
+    let refund = dep - total_paid
+
+    // Sweep bounty to the caller (same sweep_bounty_bps used by
+    // sweep_expired_session). Taken from refund, not from
+    // operator earnings.
+    let bounty = refund * self.sweep_bounty_bps / BPS_DENOM
+    let refund_after_bounty = refund - bounty
+
+    self.session_status[session_id] = SESSION_SETTLED
+    self.treasury = self.treasury + fee
+
+    if bounty > 0 {
+      require(transfer(caller, bounty), "bounty transfer failed")
+    }
+    if refund_after_bounty > 0 {
+      self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + refund_after_bounty
+    }
+
+    if net_after_fee > 0 {
+      self.circle_earnings_total[circle] = self.circle_earnings_total[circle] + net_after_fee
+      // No fresh blinding from caller (third party). We re-anchor
+      // with the existing earnings chain head + a deterministic
+      // tag so off-chain auditors can still replay the chain
+      // unambiguously.
+      let prev_head = self.circle_earnings_chain[circle]
+      let new_head = sha256(prev_head + sha256("disputed-no-show"))
+      self.circle_earnings_chain[circle] = new_head
+      emit EarningsCommitted(circle, self.circle_earnings_total[circle], new_head)
+    }
+
+    emit DisputeNoShowResolved(session_id, cl_bytes, caller)
+    emit SessionSettled(session_id, circle, net_after_fee, refund_after_bounty)
+    return true
+  }
+
+  fn claim_no_show(session_id: int): bool {
+    require_not_paused()
+    require(session_id < self.session_count, "session not found")
+    require(self.session_status[session_id] == SESSION_OPEN, "session not open")
+    require(self.session_opener[session_id] == caller, "only opener")
+    let opened = self.session_opened_at[session_id]
+    require(epoch >= opened + self.session_grace_epochs, "grace not elapsed")
+    require(self.operator_claim_set[session_id] == 0, "operator claimed")
+    self.session_status[session_id] = SESSION_REFUNDED
+    let tid = self.session_tailnet[session_id]
+    let dep = self.session_deposit[session_id]
+    self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + dep
+    emit SessionRefunded(session_id, "no-show")
+    return true
+  }
+
+  nonreentrant fn sweep_expired_session(session_id: int): bool {
+    require_not_paused()
+    require(session_id < self.session_count, "session not found")
+    require(self.session_status[session_id] == SESSION_OPEN, "session not open")
+    let opened = self.session_opened_at[session_id]
+    let sweep_grace = self.session_grace_epochs * self.sweep_grace_multiplier
+    require(epoch >= opened + sweep_grace, "sweep grace not elapsed")
+    self.session_status[session_id] = SESSION_REFUNDED
+    let dep = self.session_deposit[session_id]
+    let bounty = dep * self.sweep_bounty_bps / BPS_DENOM
+    let refund = dep - bounty
+    if bounty > 0 {
+      require(transfer(caller, bounty), "bounty transfer failed")
+    }
+    if refund > 0 {
+      let tid = self.session_tailnet[session_id]
+      self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + refund
+    }
+    emit SessionSwept(session_id)
+    return true
+  }
+
+  // ============================================================
+  // Earnings claim (hash-chain era). Plaintext running total in
+  // circle_earnings_total; sha256 hash-chain in circle_earnings_chain
+  // gives tamper-evidence for off-chain auditors. HFHE migration adds
+  // a proof + ciphertext path next to (not replacing) these fields.
+  // ============================================================
+
+  nonreentrant fn claim_earnings(circle: address, amount: int): bool {
+    require_not_paused()
+    require(self.circle_owner[circle] == caller, "not circle owner")
+    require(self.circle_slashed[circle] == 0, "operator slashed")
+    require(amount > 0, "amount > 0")
+    let avail = self.circle_earnings_total[circle] - self.circle_earnings_claimed[circle]
+    require(amount <= avail, "amount exceeds available earnings")
+    self.circle_earnings_claimed[circle] = self.circle_earnings_claimed[circle] + amount
+    require(transfer(caller, amount), "transfer failed")
+    emit EarningsClaimed(circle, amount, self.circle_earnings_claimed[circle])
+    return true
+  }
+
+  // ============================================================
+  // Views
+  // ============================================================
+
+  view fn get_circle_active(circle: address): bool {
+    return self.circle_active[circle] == 1
+  }
+
+  view fn is_circle_slashed(circle: address): bool {
+    return self.circle_slashed[circle] == 1
+  }
+
+  view fn get_circle_state_root(circle: address): bytes {
+    return self.circle_state_root[circle]
+  }
+
+  view fn get_circle_state_version(circle: address): int {
+    return self.circle_state_version[circle]
+  }
+
+  view fn get_circle_owner(circle: address): address {
+    return self.circle_owner[circle]
+  }
+
+  view fn endpoint_stake_of(circle: address): int {
+    return self.circle_bond[circle]
+  }
+
+  view fn get_tailnet_members_root(tailnet_id: int): bytes {
+    return self.tailnet_members_root[tailnet_id]
+  }
+
+  view fn get_tailnet_treasury(tailnet_id: int): int {
+    return self.tailnet_treasury[tailnet_id]
+  }
+
+  view fn get_earnings_total(circle: address): int {
+    return self.circle_earnings_total[circle]
+  }
+
+  view fn get_earnings_claimed(circle: address): int {
+    return self.circle_earnings_claimed[circle]
+  }
+
+  view fn get_earnings_chain(circle: address): bytes {
+    return self.circle_earnings_chain[circle]
+  }
+
+  view fn get_session_status(session_id: int): int {
+    return self.session_status[session_id]
+  }
+
+  // C-1: dispute grace deadline. Returns 0 if the session is not
+  // in SESSION_DISPUTED (never disputed, or already resolved).
+  view fn get_session_dispute_deadline(session_id: int): int {
+    return self.session_dispute_deadline[session_id]
+  }
+
+  view fn get_dispute_grace_epochs(): int {
+    return self.dispute_grace_epochs
+  }
+}

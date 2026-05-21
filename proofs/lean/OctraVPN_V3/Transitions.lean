@@ -113,6 +113,8 @@ def setParams (s : ProgramState) (caller : Addr) (p : Params) :
   else if p.slashBurnBps < 5000 then none
   else if p.slashBurnBps + p.slashBountyBps ≠ BPS_DENOM then none
   else if p.protocolFeeBps > 200 then none
+  else if p.disputeGraceEpochs = 0 then none
+  else if p.disputeGraceEpochs > p.sessionGraceEpochs * 2 then none
   else some { s with params := p }
 
 /-- `withdraw_program_treasury(to, amount)` — owner-only. Returns
@@ -508,6 +510,125 @@ def settleConfirm
                       s.circleEarningsChain.update sess.circle newHead
                     else s.circleEarningsChain }
             some s'
+
+/-- v3.2 (C-1 fix): `settle_resolve(session_id, accepted_bytes_used,
+    blinding)` — either the operator's circle owner OR the tailnet
+    owner picks one of the two recorded claims within the grace
+    window. Half-slash on the losing party. Models
+    `main-v3-c1-fix.aml:728-832`.
+
+    The `verified : Bool` is the chain runtime's `circle_owner ==
+    caller || tailnet_owner == caller` check; we surface it at the
+    Lean boundary so the body assumes "caller is a dispute party".
+    `pickOperator : Bool` says which claim was accepted. The losing
+    side's half-slash amount is the function's second return value;
+    on operator-loss the slash is from `circleBond`, on client-loss
+    it is forfeited off the deposit. -/
+def settleResolve
+    (s : ProgramState) (caller : Addr) (sid : SessionId)
+    (acceptedBytes : Nat) (blinding : Bytes) :
+    Option (ProgramState × OctRaw) :=
+  if s.paused then none
+  else if sid ≥ s.sessionCount then none
+  else
+    match s.sessions sid with
+    | none => none
+    | some sess =>
+      if sess.status ≠ SessionStatus.disputed then none
+      else if s.currentEpoch ≥ s.sessionDisputeDeadline sid then none
+      else
+        match sess.operatorClaim, sess.clientConfirm with
+        | none, _ => none
+        | _, none => none
+        | some opBytes, some clBytes =>
+          if blinding = [] then none
+          else
+            let circleOwn := s.circleOwner sess.circle
+            let tnOwn := (s.tailnets sess.tailnetId).owner
+            if caller ≠ circleOwn ∧ caller ≠ tnOwn then none
+            else if acceptedBytes ≠ opBytes ∧ acceptedBytes ≠ clBytes then none
+            else
+              let chosenOp : Bool := decide (acceptedBytes = opBytes)
+              let halfBurnBps := s.params.slashBurnBps / 2
+              let dep := sess.deposit
+              -- Half-slash bookkeeping. Operator loses bond; client
+              -- loses deposit fraction.
+              let opSlashAmt :=
+                if chosenOp then 0 else (s.circleBond sess.circle) * halfBurnBps / BPS_DENOM
+              let clSlashAmt :=
+                if chosenOp then dep * halfBurnBps / BPS_DENOM else 0
+              let postSlashDep :=
+                if chosenOp then dep - clSlashAmt else dep
+              let totalPaid := if acceptedBytes > postSlashDep then postSlashDep else acceptedBytes
+              let fee := totalPaid * s.params.protocolFeeBps / BPS_DENOM
+              let netAfterFee := totalPaid - fee
+              let refund := postSlashDep - totalPaid
+              let curBond := s.circleBond sess.circle
+              let curTotal := s.circleEarningsTotal sess.circle
+              let curHead  := s.circleEarningsChain sess.circle
+              let newHead  := sha256 (curHead ++ sha256 blinding)
+              let upd : Session := { sess with status := SessionStatus.settled }
+              let t := s.tailnets sess.tailnetId
+              let t' := { t with treasury := t.treasury + refund }
+              let s' : ProgramState :=
+                { s with
+                    sessions := s.sessions.update sid (some upd),
+                    tailnets := s.tailnets.update sess.tailnetId t',
+                    circleBond := s.circleBond.update sess.circle (curBond - opSlashAmt),
+                    programTreasury :=
+                      s.programTreasury + fee + opSlashAmt + clSlashAmt,
+                    burned := s.burned + opSlashAmt + clSlashAmt,
+                    circleEarningsTotal :=
+                      if netAfterFee > 0 then
+                        s.circleEarningsTotal.update sess.circle (curTotal + netAfterFee)
+                      else s.circleEarningsTotal,
+                    circleEarningsChain :=
+                      if netAfterFee > 0 then
+                        s.circleEarningsChain.update sess.circle newHead
+                      else s.circleEarningsChain }
+              some (s', opSlashAmt + clSlashAmt)
+
+/-- v3.2 (C-1 fix): `claim_disputed_no_show(session_id)` — third-
+    party fallback after the grace window expires. Defaults to the
+    CLIENT's claimed value (operator-default cost), no slash, small
+    sweep bounty to the caller. Models `main-v3-c1-fix.aml:843-902`.
+-/
+def claimDisputedNoShow
+    (s : ProgramState) (_caller : Addr) (sid : SessionId) :
+    Option (ProgramState × OctRaw) :=
+  if s.paused then none
+  else if sid ≥ s.sessionCount then none
+  else
+    match s.sessions sid with
+    | none => none
+    | some sess =>
+      if sess.status ≠ SessionStatus.disputed then none
+      else if s.currentEpoch < s.sessionDisputeDeadline sid then none
+      else
+        match sess.clientConfirm with
+        | none => none
+        | some clBytes =>
+          let dep := sess.deposit
+          let totalPaid := if clBytes > dep then dep else clBytes
+          let fee := totalPaid * s.params.protocolFeeBps / BPS_DENOM
+          let netAfterFee := totalPaid - fee
+          let refund := dep - totalPaid
+          let bounty := refund * s.params.sweepBountyBps / BPS_DENOM
+          let refundAfterBounty := refund - bounty
+          let upd : Session := { sess with status := SessionStatus.settled }
+          let t := s.tailnets sess.tailnetId
+          let t' := { t with treasury := t.treasury + refundAfterBounty }
+          let curTotal := s.circleEarningsTotal sess.circle
+          let s' : ProgramState :=
+            { s with
+                sessions := s.sessions.update sid (some upd),
+                tailnets := s.tailnets.update sess.tailnetId t',
+                programTreasury := s.programTreasury + fee,
+                circleEarningsTotal :=
+                  if netAfterFee > 0 then
+                    s.circleEarningsTotal.update sess.circle (curTotal + netAfterFee)
+                  else s.circleEarningsTotal }
+          some (s', bounty)
 
 /-- `claim_no_show(session_id)`. Opener-only; refunds the deposit
     to the tailnet after `session_grace_epochs` has elapsed AND
