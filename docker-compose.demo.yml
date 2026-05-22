@@ -1,0 +1,39 @@
+# Demo overlay: brings up node1/2/3 wired at the live Octra devnet
+# (https://devnet.octrascan.io/rpc) and the deployed program address
+# `oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3`.
+#
+# Used by demo/lib/devnet-bringup.sh — keep separate from
+# docker-compose.yml so docker/devnet/e2e*.sh, which depends on
+# mock-rpc-bound node1/2/3, keeps working.
+#
+# Apply via:
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d node1 node2 node3
+#
+# The demo overlay re-mounts each node's config to the demo-node{1,2,3}
+# directory which points at devnet, and drops the mock-rpc dep so node
+# containers can come up without it.
+
+services:
+  node1:
+    depends_on: !reset []
+    environment:
+      OCTRAVPN_DEMO_CIRCLE_ID: "${OCTRAVPN_DEMO_CIRCLE_ID:-}"
+      OCTRAVPN_SEALED_PASSPHRASE: "${OCTRAVPN_SEALED_PASSPHRASE:-demo}"
+    volumes: !override
+      - ./docker/conf/demo-node1:/etc/octravpn:ro
+
+  node2:
+    depends_on: !reset []
+    environment:
+      OCTRAVPN_DEMO_CIRCLE_ID: "${OCTRAVPN_DEMO_CIRCLE_ID:-}"
+      OCTRAVPN_SEALED_PASSPHRASE: "${OCTRAVPN_SEALED_PASSPHRASE:-demo}"
+    volumes: !override
+      - ./docker/conf/demo-node2:/etc/octravpn:ro
+
+  node3:
+    depends_on: !reset []
+    environment:
+      OCTRAVPN_DEMO_CIRCLE_ID: "${OCTRAVPN_DEMO_CIRCLE_ID:-}"
+      OCTRAVPN_SEALED_PASSPHRASE: "${OCTRAVPN_SEALED_PASSPHRASE:-demo}"
+    volumes: !override
+      - ./docker/conf/demo-node3:/etc/octravpn:ro

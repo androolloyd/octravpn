@@ -1,14 +1,27 @@
 # 02-portal-fetch.tape
 #
-# Captures the `oct://` URL-handler flows: the portal HTTP server
-# (containerized) and the CLI `fetch` (raw bytes + `--save` + `-i`
-# interactive) all driven via `docker exec` against the same
-# chain-backed asset resolver.
+# Captures the `oct://` URL-handler flow against the **live Octra
+# devnet**. Every chain-hosted asset is sealed by default
+# (`resource_mode = sealed_read`) — there is no plaintext-fetch path on
+# devnet today. This tape walks one passphrase unsealing the whole
+# demo asset set:
 #
-# Harness: demo/lib/portal-container-bringup.sh — boots mock-rpc +
-# node1 (chain substrate) via docker-compose.yml, plus an
-# `octravpn portal` container bound to 127.0.0.1:51823. /healthz is
-# polled until 200 before the script returns.
+#   /policy.json — sealed JSON (v3 ACL policy shape)
+#   /index.html  — sealed HTML landing page
+#   /style.css   — sealed CSS
+#   /raw.bin     — sealed 256B blob
+#   /sealed.json — sealed JSON (sensitive-looking)
+#
+# Forward-compat note: a plaintext-fetch flow returns the day chain
+# enables `resource_mode = public_read`. See
+# octra-foundry `cast circle put` (commit ef6d0ed) — the client-side
+# wire format is already in place; only the chain policy needs to flip.
+#
+# Harness: demo/lib/portal-container-bringup.sh — ensures the demo
+# circle (5 sealed assets, passphrase `demo`) exists on devnet, then
+# spins up an `octravpn portal` container at 127.0.0.1:51823. The
+# resolved circle id is exported as ${OCTRAVPN_DEMO_CIRCLE_ID} into
+# the container env so the body of this tape doesn't hardcode an id.
 #
 # Re-run with: vhs demo/tapes/02-portal-fetch.tape
 
@@ -17,37 +30,44 @@ Output demo/recordings/02-portal-fetch.mp4
 
 Set FontSize 14
 Set Width 1200
-Set Height 700
+Set Height 720
 Set Theme "Dracula"
 Set TypingSpeed 40ms
 
 Type "bash demo/lib/portal-container-bringup.sh"
 Enter
 Sleep 60s
-Type "# /healthz is up — confirm before we drive the CLI"
+
+Type "# portal is up and pinned to the LIVE devnet — confirm health"
 Enter
-Type "curl -s http://127.0.0.1:51823/healthz"
+Type "curl -fsS http://127.0.0.1:51823/healthz"
 Enter
 Sleep 2s
 
-Type "# raw bytes to stdout (against the mock chain via the portal container)"
+Type "# resolve the demo circle id (sealed-by-default on devnet)"
 Enter
-Type "docker exec octravpn-portal-demo octravpn --config /etc/octravpn/config.toml fetch oct://octCircleDemo/policy.json"
+Type `CIRCLE=$(docker exec octravpn-portal-demo printenv OCTRAVPN_DEMO_CIRCLE_ID) && echo $CIRCLE`
 Enter
-Sleep 4s
+Sleep 2s
 
-Type "# same asset, save to disk + show Content-Type"
+Type "# sealed fetch — passphrase via OCTRAVPN_SEALED_PASSPHRASE env"
 Enter
-Type "docker exec octravpn-portal-demo octravpn --config /etc/octravpn/config.toml fetch --headers -o /tmp/policy.json oct://octCircleDemo/policy.json"
+Type "docker exec -e OCTRAVPN_SEALED_PASSPHRASE=demo octravpn-portal-demo octravpn --config /etc/octravpn/config.toml fetch oct://$CIRCLE/policy.json"
+Enter
+Sleep 5s
+
+Type "# same asset via headers + save-to-file (Content-Type comes through)"
+Enter
+Type "docker exec -e OCTRAVPN_SEALED_PASSPHRASE=demo octravpn-portal-demo octravpn --config /etc/octravpn/config.toml fetch --headers -o /tmp/policy.json oct://$CIRCLE/policy.json"
 Enter
 Sleep 4s
 Type "docker exec octravpn-portal-demo cat /tmp/policy.json"
 Enter
 Sleep 3s
 
-Type "# interactive prompt path (sealed asset; surfaces 'sealed' error without TTY)"
+Type "# wrong passphrase => sealed envelope detects + refuses to render"
 Enter
-Type "docker exec octravpn-portal-demo octravpn --config /etc/octravpn/config.toml fetch -i oct://octCircleDemo/sealed.json || true"
+Type `docker exec -e OCTRAVPN_SEALED_PASSPHRASE=wrong octravpn-portal-demo sh -c 'octravpn --config /etc/octravpn/config.toml fetch oct://$CIRCLE/sealed.json || echo sealed-decrypt-failed-expected'`
 Enter
 Sleep 5s
 

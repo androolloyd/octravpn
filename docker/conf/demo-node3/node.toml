@@ -1,0 +1,23 @@
+# demo-node3/node.toml — see docker/conf/demo-node1/node.toml header.
+[chain]
+rpc_url             = "https://devnet.octrascan.io/rpc"
+program_addr        = "oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3"
+validator_addr      = "octVNODE3AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+wallet_secret_path  = "/etc/octravpn/wallet.key"
+
+[tunnel]
+public_endpoint     = "demo-node3:51820"
+listen              = "0.0.0.0:51820"
+wg_secret_path      = "/etc/octravpn/wg.key"
+
+[pricing]
+price_per_mb        = 100
+region              = "demo-devnet"
+
+[control]
+receipt_journal_path = "/tmp/octravpn-state/receipts.bin"
+listen              = "0.0.0.0:51821"
+audit_dir           = "/tmp/octravpn-audit"
+
+[attestation]
+poll_interval_secs  = 30

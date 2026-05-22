@@ -5,8 +5,14 @@
 # (join, fetch) by driving REAL `docker exec` calls against the same
 # harnesses the per-segment tapes use.
 #
+# Chain currently enforces sealed_read on all circles; the plaintext-
+# fetch flow returns when chain enables `resource_mode = public_read`.
+# See octra-foundry `cast circle put` (commit ef6d0ed) — the
+# wire-compatible client side is already in place.
+#
 # Harness usage:
-#   - devnet-mock        — segment 1 (operator), 6 (circle update)
+#   - devnet stack       — segment 1 (operator), 6 (circle update),
+#                          both against the live devnet
 #   - 3-node mesh        — segments 2 (policy), 3 (join), 4 (ping)
 #   - audit fixture      — segment 5 (verify clean)
 #
@@ -25,19 +31,19 @@ Set Height 800
 Set Theme "Dracula"
 Set TypingSpeed 35ms
 
-# ── Segment 1: operator deploys (~30s) ───────────────────────────────
-Type "# what's happening: an operator deploys their node from cold"
+# ── Segment 1: operator deploys against live devnet (~30s) ───────────
+Type "# what's happening: an operator brings their demo-node up against live devnet"
 Enter
-Type "bash demo/lib/devnet-mock-bringup.sh"
+Type "bash demo/lib/devnet-bringup.sh"
 Enter
 Sleep 60s
-Type "docker compose -f docker-compose.yml exec -T -e OCTRAVPN_KEY_PASSPHRASE=demo node1 octravpn-node --config /etc/octravpn/node.toml seal-keys || true"
+Type "docker compose -f docker-compose.yml -f docker-compose.demo.yml exec -T -e OCTRAVPN_KEY_PASSPHRASE=demo node1 octravpn-node --config /etc/octravpn/node.toml seal-keys || true"
 Enter
 Sleep 5s
-Type "docker compose -f docker-compose.yml exec -T node1 octravpn-node --config /etc/octravpn/node.toml health --remote http://127.0.0.1:51821 || true"
+Type "docker compose -f docker-compose.yml -f docker-compose.demo.yml exec -T node1 octravpn-node --config /etc/octravpn/node.toml health --remote http://127.0.0.1:51821 || true"
 Enter
 Sleep 5s
-Type "bash demo/lib/devnet-mock-teardown.sh"
+Type "bash demo/lib/devnet-teardown.sh"
 Enter
 Sleep 5s
 
@@ -90,23 +96,24 @@ Type "bash demo/lib/audit-fixture-teardown.sh"
 Enter
 Sleep 5s
 
-# ── Segment 6: atomic circle update (dry-run, ~25s) ──────────────────
-Type "# what's happening: the operator rotates a sealed circle asset"
+# ── Segment 6: sealed-by-default circle fetch (~25s) ─────────────────
+# All assets on devnet are sealed today; this segment shows the
+# canonical "one passphrase unseals the whole asset set" flow.
+Type "# what's happening: every chain-hosted asset is sealed by default; unseal with one passphrase"
 Enter
-Type "bash demo/lib/devnet-mock-bringup.sh"
+Type "bash demo/lib/portal-container-bringup.sh"
 Enter
 Sleep 60s
-Type "docker compose -f docker-compose.yml exec -iT node1 sh -c 'mkdir -p /tmp/cr && cat > /tmp/cr/policy.json'"
+Type `CIRCLE=$(docker exec octravpn-portal-demo printenv OCTRAVPN_DEMO_CIRCLE_ID) && echo $CIRCLE`
 Enter
-Sleep 500ms
-Type `{"version":8}`
+Sleep 2s
+Type "docker exec -e OCTRAVPN_SEALED_PASSPHRASE=demo octravpn-portal-demo octravpn --config /etc/octravpn/config.toml fetch oct://$CIRCLE/policy.json || true"
 Enter
-Ctrl+D
-Sleep 1s
-Type "docker compose -f docker-compose.yml exec -T -e OCTRAVPN_SEALED_PASSPHRASE=demo node1 octravpn-node --config /etc/octravpn/node.toml circle update --circle octCircleDemo --blob /policy.json:/tmp/cr/policy.json:default:4k --dry-run || true"
+Sleep 4s
+Type "docker exec -e OCTRAVPN_SEALED_PASSPHRASE=demo octravpn-portal-demo octravpn --config /etc/octravpn/config.toml fetch oct://$CIRCLE/sealed.json || true"
 Enter
-Sleep 5s
-Type "bash demo/lib/devnet-mock-teardown.sh"
+Sleep 4s
+Type "bash demo/lib/portal-container-teardown.sh"
 Enter
 Sleep 5s
 

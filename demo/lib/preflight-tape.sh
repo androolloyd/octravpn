@@ -147,7 +147,13 @@ detect_heredoc_opener() {
     # Match patterns like:
     #   docker exec -i <c> sh -c 'cat > /tmp/foo.json'
     #   docker compose ... exec -iT <svc> sh -c 'cat > /tmp/foo.json'
-    if [[ "${prev}" =~ (docker[[:space:]]+(exec|compose[[:space:]]+-f[[:space:]]+[^[:space:]]+[[:space:]]+exec)[[:space:]]+[^\']*sh[[:space:]]+-c[[:space:]]+\'cat[[:space:]]+\>[[:space:]]+[^\']+\') ]]; then
+    #   docker compose -f a.yml -f b.yml exec -iT <svc> sh -c 'cat > /tmp/foo.json'
+    # The classic regex only allowed one `-f` flag; demo flows that
+    # overlay a second compose file (e.g. docker-compose.demo.yml)
+    # need to be recognized too. Permissive: any prefix that contains
+    # `docker` and ends with `... sh -c 'cat > <path>'` qualifies.
+    if [[ "${prev}" =~ docker[[:space:]] && \
+          "${prev}" =~ sh[[:space:]]+-c[[:space:]]+\'cat[[:space:]]+\>[[:space:]]+[^\']+\' ]]; then
         HEREDOC_TARGET_CMD="${prev}"
         return 0
     fi
@@ -178,6 +184,10 @@ start_persistent_shell() {
     exec 9<>"${PREFLIGHT_SHELL_IN}"
     bash >"${PREFLIGHT_SHELL_OUT}" 2>"${PREFLIGHT_SHELL_ERR}" <"${PREFLIGHT_SHELL_IN}" &
     PREFLIGHT_SHELL_PID=$!
+    # Pin the persistent shell's cwd to the repo root so tape commands
+    # that reference relative paths (`docker-compose.yml`, etc.) resolve
+    # correctly regardless of where preflight-tape.sh was invoked from.
+    printf 'cd %q\n' "${REPO_ROOT}" >&9
 }
 
 stop_persistent_shell() {
@@ -206,6 +216,17 @@ run_cmd_persistent() {
     # $? to stderr.  120s per command is generous — bringups are
     # cached, real CLI invocations finish in seconds.
     local per_cmd_timeout="${PREFLIGHT_CMD_TIMEOUT:-120}"
+    # Variable assignments (`FOO=bar`, `FOO=$(cmd)`, possibly chained
+    # with `; cmd2`) MUST run directly in the persistent shell so the
+    # assignment survives to the next tape line. Wrapping them in
+    # `bash -c` would put them in a subshell whose vars are discarded.
+    # We detect a leading `IDENT=` assignment at the start of the line
+    # (mirroring vhs's `Type "FOO=..."` form used to thread the resolved
+    # circle id through subsequent docker exec calls).
+    local is_assignment=0
+    if [[ "${cmd}" =~ ^[[:space:]]*[A-Za-z_][A-Za-z_0-9]*= ]]; then
+        is_assignment=1
+    fi
     {
         # Honour any pre-existing `&&`/`||` chain by wrapping in a
         # subshell.  bash 4+ `timeout` isn't a builtin; we use the
@@ -213,12 +234,27 @@ run_cmd_persistent() {
         # background-PID kill if not (macOS dev hosts have neither
         # `timeout` nor `gtimeout` by default — Docker for Mac
         # includes coreutils though, so most paths are covered).
-        if command -v timeout >/dev/null 2>&1; then
-            printf 'timeout %ss bash -c %q\n' "${per_cmd_timeout}" "${cmd}"
+        if (( is_assignment == 1 )); then
+            # Run directly so `FOO=$(...)` persists across commands.
+            # Auto-export the leading identifier so subsequent
+            # `bash -c "cmd ... $FOO"` invocations (which run in a
+            # subshell, see below) inherit the value via the env.
+            # Redirect stdin to /dev/null so commands like
+            # `docker compose exec -T` don't block on the persistent
+            # shell's FIFO stdin.
+            local _ident
+            _ident=$(printf '%s' "${cmd}" \
+                | sed -nE 's/^[[:space:]]*([A-Za-z_][A-Za-z_0-9]*)=.*/\1/p')
+            printf '{ %s ; } </dev/null\n' "${cmd}"
+            if [[ -n "${_ident}" ]]; then
+                printf 'export %s\n' "${_ident}"
+            fi
+        elif command -v timeout >/dev/null 2>&1; then
+            printf 'timeout %ss bash -c %q </dev/null\n' "${per_cmd_timeout}" "${cmd}"
         elif command -v gtimeout >/dev/null 2>&1; then
-            printf 'gtimeout %ss bash -c %q\n' "${per_cmd_timeout}" "${cmd}"
+            printf 'gtimeout %ss bash -c %q </dev/null\n' "${per_cmd_timeout}" "${cmd}"
         else
-            printf '%s\n' "${cmd}"
+            printf '{ %s ; } </dev/null\n' "${cmd}"
         fi
         printf 'echo "%s:$?" 1>&2\n' "${sentinel}"
     } >&9
@@ -236,6 +272,11 @@ run_cmd_persistent() {
     if [[ -z "${code}" ]]; then
         printf 'FAIL  %s (preflight-shell timeout)\n' "${cmd}"
         failed=$((failed + 1))
+        # The persistent shell is wedged on this hung command; kill +
+        # restart so subsequent commands get a fresh shell. Without
+        # this, every later command also reports "timeout" because the
+        # sentinel from the wedged command never arrives.
+        stop_persistent_shell
         return 1
     fi
     # Defensive: if sed didn't yield a pure integer (e.g. grep

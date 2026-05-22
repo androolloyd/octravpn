@@ -1,0 +1,29 @@
+# demo-node1/node.toml — points the demo node at the live Octra devnet
+# (https://devnet.octrascan.io/rpc), the deployed program address
+# `oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3`, and the devnet chain id
+# (default `octravpn_core::receipt::CHAIN_ID_DEVNET` — no override needed).
+#
+# Demo flow only. The mock-rpc node1/2/3 configs under
+# docker/conf/node{1,2,3}/ stay mock-rpc-bound for docker/devnet/e2e*.sh.
+[chain]
+rpc_url             = "https://devnet.octrascan.io/rpc"
+program_addr        = "oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3"
+validator_addr      = "octVNODE1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+wallet_secret_path  = "/etc/octravpn/wallet.key"
+
+[tunnel]
+public_endpoint     = "demo-node1:51820"
+listen              = "0.0.0.0:51820"
+wg_secret_path      = "/etc/octravpn/wg.key"
+
+[pricing]
+price_per_mb        = 100
+region              = "demo-devnet"
+
+[control]
+receipt_journal_path = "/tmp/octravpn-state/receipts.bin"
+listen              = "0.0.0.0:51821"
+audit_dir           = "/tmp/octravpn-audit"
+
+[attestation]
+poll_interval_secs  = 30
