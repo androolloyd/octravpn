@@ -73,6 +73,30 @@ jobs:
           cargo build --release -p octravpn-client -p octravpn-node
           echo "${PWD}/target/release" >> "$GITHUB_PATH"
 
+      - name: Build octravpn-builder image (gives the Linux-binary build step a protoc-equipped container)
+        run: |
+          set -euo pipefail
+          # build-linux-binaries.sh falls back to vanilla rust:1.88-bookworm
+          # + an inline `apt-get install protobuf-compiler` preamble when
+          # `octravpn-builder:latest` isn't present. In CI we run that
+          # script as non-root (--user $(id -u):$(id -g)) so the bind-
+          # mounted ELFs don't land owned by uid 0 — but apt-get install
+          # needs root inside the container, so the apt preamble fails.
+          # Pre-build the Dockerfile.builder image (which bakes in protoc)
+          # so the script sees it via `docker image inspect` and skips
+          # the apt path entirely.
+          #
+          # Layout note: Dockerfile.builder's COPYs use `octra/` paths
+          # but the checkout step puts the repo at `octravpn/`. Symlink
+          # so the COPYs resolve. Build context = the parent dir holding
+          # the three sibling checkouts (octravpn, octra-foundry,
+          # headscale-rs).
+          ln -sfn octravpn octra
+          docker build \
+            -f octra/docker/Dockerfile.builder \
+            -t octravpn-builder:latest \
+            . 2>&1 | tail -8
+
       - name: Build Linux binaries for fixture containers
         working-directory: octravpn
         run: |
@@ -82,6 +106,8 @@ jobs:
           # call builds (~100s); subsequent calls are sub-second.
           # Output: target/linux-debug/debug/{octravpn,octravpn-node,
           # octravpn-analytics,octra-mock-rpc}.
+          # Picks up octravpn-builder:latest (built above) which has
+          # protoc baked in via Dockerfile.builder.
           bash demo/lib/build-linux-binaries.sh
 
       - name: Build + install standalone headscale CLI (sibling repo)
