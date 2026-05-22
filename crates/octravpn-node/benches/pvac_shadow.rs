@@ -31,9 +31,9 @@
 //! workspace's `cargo bench` green on a host without the C++
 //! toolchain.
 
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::io::{BufRead, BufReader, Write};
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
@@ -136,19 +136,17 @@ fn pvac_shadow_bench(c: &mut Criterion) {
     let net = 123_450_u64;
 
     // ── Sanity check: legacy and batched ciphertexts MUST agree ──────
-    let legacy_b = sc
-        .call(&json!({
-            "op":"encrypt_const","pk":pk,"sk":sk,
-            "value": bytes_used.to_string(), "seed": seed_b,
-        }))["ct"]
+    let legacy_b = sc.call(&json!({
+        "op":"encrypt_const","pk":pk,"sk":sk,
+        "value": bytes_used.to_string(), "seed": seed_b,
+    }))["ct"]
         .as_str()
         .unwrap()
         .to_owned();
-    let legacy_n = sc
-        .call(&json!({
-            "op":"encrypt_const","pk":pk,"sk":sk,
-            "value": net.to_string(), "seed": seed_n,
-        }))["ct"]
+    let legacy_n = sc.call(&json!({
+        "op":"encrypt_const","pk":pk,"sk":sk,
+        "value": net.to_string(), "seed": seed_n,
+    }))["ct"]
         .as_str()
         .unwrap()
         .to_owned();

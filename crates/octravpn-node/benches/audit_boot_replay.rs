@@ -96,7 +96,8 @@ fn skip_to_tip(path: &Path) -> usize {
         }
         if start == 0 {
             // Whole file is one line.
-            let v: serde_json::Value = serde_json::from_str(std::str::from_utf8(body).unwrap()).unwrap();
+            let v: serde_json::Value =
+                serde_json::from_str(std::str::from_utf8(body).unwrap()).unwrap();
             return v.get("record_json").unwrap().as_str().unwrap().len();
         }
         start = (start - chunk).max(0);
@@ -149,9 +150,7 @@ fn main() {
     const LINES_30_DAY: u64 = 100 * 86400 * 30;
     let full_30day_s = (full_per_line_us as f64 * LINES_30_DAY as f64) / 1_000_000.0;
     let skip_30day_s = (skip_per_line_us as f64 * LINES_30_DAY as f64) / 1_000_000.0;
-    println!(
-        "\n30-day cold-start budget (audit-8 §5.2 extrapolation):"
-    );
+    println!("\n30-day cold-start budget (audit-8 §5.2 extrapolation):");
     println!(
         "  full replay     : ~{:.1} s on {} M lines",
         full_30day_s,

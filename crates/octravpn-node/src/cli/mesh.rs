@@ -319,6 +319,7 @@ async fn run_mesh_serve(
         preauth: Arc::new(minter.clone()),
         ip_allocator: Arc::new(TailnetIpAllocator::new(tailnet_id)),
         machines: machines.clone(),
+        registration_store: None,
         derp_map: Arc::new(derp_map),
         // P1-policy: empty store ⇒ wire layer falls back to
         // `allow_all_packet_filter`. The admin surface (when
@@ -338,6 +339,8 @@ async fn run_mesh_serve(
                 ..Default::default()
             },
         )),
+        public_control_url: None,
+        registration_cache: Arc::new(octravpn_mesh::tailscale_wire::RegistrationCache::new()),
     };
 
     eprintln!(
@@ -460,6 +463,7 @@ async fn run_mesh_serve(
         https_addr,
         state_dir: std::path::PathBuf::from(&state_dir),
         sans: SanConfig::with_hostname(&cert_hostname),
+        oidc: None,
     };
     let handle = wire_serve(ws, cfg, admin_router)
         .await

@@ -56,7 +56,7 @@ jobs:
           sudo apt-get update
           # espeak-ng is the TTS backend used by demo/lib/render-with-audio.sh
           # on linux; on macOS the same script picks up /usr/bin/say.
-          sudo apt-get install -y ffmpeg ttyd chromium-browser jq espeak-ng protobuf-compiler
+          sudo apt-get install -y ffmpeg ttyd chromium-browser jq espeak-ng protobuf-compiler libprotobuf-dev
           VHS_VERSION=$(curl -sL https://api.github.com/repos/charmbracelet/vhs/releases/latest | jq -r .tag_name)
           curl -sL "https://github.com/charmbracelet/vhs/releases/download/${VHS_VERSION}/vhs_${VHS_VERSION#v}_amd64.deb" -o /tmp/vhs.deb
           sudo dpkg -i /tmp/vhs.deb
@@ -77,7 +77,7 @@ jobs:
         run: |
           set -euo pipefail
           # build-linux-binaries.sh falls back to vanilla rust:1.88-bookworm
-          # + an inline `apt-get install protobuf-compiler` preamble when
+          # + an inline `apt-get install protobuf-compiler libprotobuf-dev` preamble when
           # `octravpn-builder:latest` isn't present. In CI we run that
           # script as non-root (--user $(id -u):$(id -g)) so the bind-
           # mounted ELFs don't land owned by uid 0 — but apt-get install
@@ -331,7 +331,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y ffmpeg ttyd chromium-browser jq openssl espeak-ng protobuf-compiler
+          sudo apt-get install -y ffmpeg ttyd chromium-browser jq openssl espeak-ng protobuf-compiler libprotobuf-dev
           VHS_VERSION=$(curl -sL https://api.github.com/repos/charmbracelet/vhs/releases/latest | jq -r .tag_name)
           curl -sL "https://github.com/charmbracelet/vhs/releases/download/${VHS_VERSION}/vhs_${VHS_VERSION#v}_amd64.deb" -o /tmp/vhs.deb
           sudo dpkg -i /tmp/vhs.deb
@@ -351,6 +351,17 @@ jobs:
           # are produced by build-linux-binaries.sh in the next step.
           cargo build --release -p octravpn-client -p octravpn-node -p octravpn-analytics
           echo "${PWD}/target/release" >> "$GITHUB_PATH"
+
+      - name: Build octravpn-builder image (gives the Linux-binary build step a protoc-equipped container)
+        run: |
+          set -euo pipefail
+          # Same fix as render-job. See the light job's identical step
+          # at the top of the workflow for the full rationale.
+          ln -sfn octravpn octra
+          docker build \
+            -f octra/docker/Dockerfile.builder \
+            -t octravpn-builder:latest \
+            . 2>&1 | tail -8
 
       - name: Build Linux binaries for fixture containers
         working-directory: octravpn

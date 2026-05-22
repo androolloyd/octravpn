@@ -94,7 +94,7 @@ else
     BUILD_PREAMBLE=""
     if [[ "${BUILDER_IMAGE}" == "rust:1.88-bookworm" ]]; then
         BUILD_PREAMBLE="apt-get update >/dev/null && \
-            apt-get install -y --no-install-recommends protobuf-compiler >/dev/null && "
+            apt-get install -y --no-install-recommends protobuf-compiler libprotobuf-dev >/dev/null && "
     fi
     docker run --rm \
         -v "${REPO_ROOT}":/work/octra \

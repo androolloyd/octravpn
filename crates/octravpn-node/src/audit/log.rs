@@ -74,10 +74,7 @@ impl AuditLog {
     /// Open with a non-default rotation policy. Used by `hub::spawn`
     /// to plumb the operator-tuned `[audit]` config block.
     #[allow(dead_code)]
-    pub(crate) fn open_with_rotation(
-        dir: impl AsRef<Path>,
-        rotation: RotationCfg,
-    ) -> Result<Self> {
+    pub(crate) fn open_with_rotation(dir: impl AsRef<Path>, rotation: RotationCfg) -> Result<Self> {
         Self::open_inner(dir.as_ref(), None, rotation)
     }
 
@@ -159,10 +156,7 @@ fn open_or_rotate(inner: &mut Inner, date: &str, next_line_len: u64) -> Result<b
     let same_date = inner.current_date == date;
     let need_size_rotate = same_date
         && inner.current_file.is_some()
-        && inner
-            .current_file_size
-            .saturating_add(next_line_len)
-            > inner.rotation.max_file_bytes;
+        && inner.current_file_size.saturating_add(next_line_len) > inner.rotation.max_file_bytes;
 
     if inner.current_file.is_some() && same_date && !need_size_rotate {
         return Ok(false);
@@ -219,11 +213,7 @@ fn open_or_rotate(inner: &mut Inner, date: &str, next_line_len: u64) -> Result<b
     let basename = if cold_start && !inner.current_file_id.is_empty() {
         // Recovered an existing file. Check whether this very write
         // would overflow it; if so, treat as a rotation now.
-        if inner
-            .current_file_size
-            .saturating_add(next_line_len)
-            > inner.rotation.max_file_bytes
-        {
+        if inner.current_file_size.saturating_add(next_line_len) > inner.rotation.max_file_bytes {
             rotated = true;
             inner.current_file_seq = 0;
             inner.current_file_size = 0;
@@ -284,13 +274,10 @@ fn recover_chain_for_date(
     let mut files: Vec<std::path::PathBuf> = rotation::list_audit_files(dir)?
         .into_iter()
         .filter(|p| {
-            p.file_name()
-                .and_then(|s| s.to_str())
-                .is_some_and(|n| {
-                    n == format!("audit-{date}.jsonl")
-                        || n.starts_with(&format!("audit-{date}-"))
-                            && n.ends_with(".jsonl")
-                })
+            p.file_name().and_then(|s| s.to_str()).is_some_and(|n| {
+                n == format!("audit-{date}.jsonl")
+                    || n.starts_with(&format!("audit-{date}-")) && n.ends_with(".jsonl")
+            })
         })
         .collect();
     files.sort();
@@ -490,7 +477,9 @@ mod tests {
             .map(|e| e.unwrap().file_name().into_string().unwrap())
             .collect();
         assert!(
-            files.iter().any(|f| f.starts_with("audit-") && f.ends_with(".jsonl")),
+            files
+                .iter()
+                .any(|f| f.starts_with("audit-") && f.ends_with(".jsonl")),
             "no audit file: {files:?}"
         );
         let audit_file = files
@@ -662,7 +651,8 @@ mod tests {
                 let record_json = v.get("record_json").unwrap().as_str().unwrap();
                 if let Some(prior) = &last_mac {
                     assert_eq!(
-                        &claimed_prev, prior,
+                        &claimed_prev,
+                        prior,
                         "intra-file chain break in {}: prev_mac mismatch",
                         f.display()
                     );
@@ -671,8 +661,7 @@ mod tests {
                 let mut prev_bytes = [0u8; 32];
                 let raw = hex::decode(&claimed_prev).unwrap();
                 prev_bytes.copy_from_slice(&raw);
-                let expect =
-                    crate::audit::chain_step(&key, &prev_bytes, record_json.as_bytes());
+                let expect = crate::audit::chain_step(&key, &prev_bytes, record_json.as_bytes());
                 assert_eq!(
                     hex::encode(expect),
                     claimed_mac,
@@ -690,8 +679,10 @@ mod tests {
         // verified line is in the latest file.
         let reports = AuditLog::verify_dir_skip_to_tip(&key, dir.path()).unwrap();
         // Every report after the tip's file must verify cleanly.
-        assert!(reports.iter().all(|(_, r)| r.first_error.is_none()),
-            "skip-to-tip reports: {reports:?}");
+        assert!(
+            reports.iter().all(|(_, r)| r.first_error.is_none()),
+            "skip-to-tip reports: {reports:?}"
+        );
     }
 
     /// SIGKILL between rotate-close and tip-update: simulate the

@@ -52,10 +52,13 @@ fn build_app() -> (axum::Router, WireState, PolicyStore, tempfile::TempDir) {
         preauth: Arc::new(minter),
         ip_allocator: Arc::new(TailnetIpAllocator::new("policy-e2e")),
         machines: machines.clone(),
+        registration_store: None,
         derp_map: Arc::new(octravpn_mesh::tailscale_wire::DerpMap::default()),
         policy: Arc::new(policy.clone()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
         dns: std::sync::Arc::new(octra_dns_store()),
+        public_control_url: None,
+        registration_cache: Arc::new(octravpn_mesh::tailscale_wire::RegistrationCache::new()),
     };
 
     let admin_state = admin::AdminState::builder()
@@ -71,6 +74,23 @@ fn build_app() -> (axum::Router, WireState, PolicyStore, tempfile::TempDir) {
     let admin_router = admin::router(admin_state);
     let app = wire_router.merge(admin_router);
     (app, wire, policy, dir)
+}
+
+fn machine_record(
+    node_key_hex: String,
+    user: &str,
+    hostname: &str,
+    ipv4: std::net::Ipv4Addr,
+) -> MachineRecord {
+    MachineRecord::new_at(
+        chrono::Utc::now(),
+        node_key_hex,
+        String::new(),
+        user.into(),
+        hostname.into(),
+        ipv4,
+        false,
+    )
 }
 
 async fn fetch_map(app: &axum::Router, node_hex: &str) -> MapResponse {
@@ -119,37 +139,21 @@ async fn policy_put_propagates_to_map_packet_filter() {
     let b_hex = "bb".repeat(32);
     wire.machines.upsert(
         a_hex.clone(),
-        MachineRecord {
-            node_key_hex: a_hex.clone(),
-            machine_key_hex: String::new(),
-            user: "alice".into(),
-            hostname: "peer-a".into(),
-            ipv4: std::net::Ipv4Addr::new(100, 64, 0, 10),
-            disco_key: None,
-            endpoints: Vec::new(),
-            expiry: None,
-            last_seen: chrono::Utc::now(),
-            ephemeral: false,
-            created_at: chrono::Utc::now(),
-            forced_tags: vec![],
-        },
+        machine_record(
+            a_hex.clone(),
+            "alice",
+            "peer-a",
+            std::net::Ipv4Addr::new(100, 64, 0, 10),
+        ),
     );
     wire.machines.upsert(
         b_hex.clone(),
-        MachineRecord {
-            node_key_hex: b_hex.clone(),
-            machine_key_hex: String::new(),
-            user: "bob".into(),
-            hostname: "peer-b".into(),
-            ipv4: std::net::Ipv4Addr::new(100, 64, 0, 11),
-            disco_key: None,
-            endpoints: Vec::new(),
-            expiry: None,
-            last_seen: chrono::Utc::now(),
-            ephemeral: false,
-            created_at: chrono::Utc::now(),
-            forced_tags: vec![],
-        },
+        machine_record(
+            b_hex.clone(),
+            "bob",
+            "peer-b",
+            std::net::Ipv4Addr::new(100, 64, 0, 11),
+        ),
     );
 
     // -- Step 1: no policy loaded ⇒ wire serves the allow-all default.

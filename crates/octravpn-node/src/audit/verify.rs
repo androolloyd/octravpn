@@ -148,15 +148,13 @@ impl AuditLog {
         // Locate the tip's target index in the sorted files list. If
         // the tip references a file that's been evicted, fall back to
         // tip-less mode (full replay).
-        let tip_idx = tip
-            .as_ref()
-            .and_then(|t| {
-                files.iter().position(|p| {
-                    p.file_name()
-                        .and_then(|s| s.to_str())
-                        .map_or(false, |n| n == t.file_id)
-                })
-            });
+        let tip_idx = tip.as_ref().and_then(|t| {
+            files.iter().position(|p| {
+                p.file_name()
+                    .and_then(|s| s.to_str())
+                    .map_or(false, |n| n == t.file_id)
+            })
+        });
 
         // If tip is present + targets a surviving file, start the
         // verification at THAT file (skip everything older — those

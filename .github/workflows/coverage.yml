@@ -1,0 +1,29 @@
+name: Coverage
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  tarpaulin:
+    name: cargo tarpaulin
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: octra
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: octra }
+      - uses: actions/checkout@v4
+        with: { repository: androolloyd/octra-foundry, path: octra-foundry }
+      - uses: actions/checkout@v4
+        with: { repository: androolloyd/headscale-rs, path: headscale-rs }
+      - uses: ./octra/.github/actions/setup-rust
+      - name: Run coverage
+        run: ./scripts/coverage.sh

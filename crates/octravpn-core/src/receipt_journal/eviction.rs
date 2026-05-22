@@ -276,10 +276,17 @@ mod tests {
             "AA must have been evicted by the cap overflow"
         );
         // floor() must still observe 5 (read from disk).
-        assert_eq!(j.floor(&id(0xAA)), 5, "evicted session floor recovered from disk");
+        assert_eq!(
+            j.floor(&id(0xAA)),
+            5,
+            "evicted session floor recovered from disk"
+        );
         // Resurrect counter bumped.
         let (_g, _e, resurrects) = j.metrics_snapshot();
-        assert!(resurrects >= 1, "disk_resurrect_total must have incremented");
+        assert!(
+            resurrects >= 1,
+            "disk_resurrect_total must have incremented"
+        );
     }
 
     /// Equivocation defence: an evicted session cannot be bumped
@@ -367,7 +374,11 @@ mod tests {
         // Drop and reopen to confirm AA's floor wasn't lost.
         drop(j);
         let r = ReceiptJournal::open(&path).unwrap();
-        assert_eq!(r.floor(&id(0xAA)), 7, "AA's disk floor must survive compaction");
+        assert_eq!(
+            r.floor(&id(0xAA)),
+            7,
+            "AA's disk floor must survive compaction"
+        );
         assert_eq!(r.floor(&id(0xBB)), 11);
         assert_eq!(r.floor(&id(0xCC)), 13);
     }

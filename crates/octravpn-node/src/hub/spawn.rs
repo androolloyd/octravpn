@@ -154,6 +154,7 @@ impl Hub {
                         preauth: Arc::new(shared_minter.clone()),
                         ip_allocator: Arc::new(TailnetIpAllocator::new(tailnet_id)),
                         machines: Arc::new(MachineRegistry::new()),
+                        registration_store: None,
                         derp_map: Arc::new(derp_map),
                         // P1-policy: live ACL store, shared with the
                         // admin surface (when mounted). The default
@@ -173,6 +174,10 @@ impl Hub {
                                 ..Default::default()
                             },
                         )),
+                        public_control_url: None,
+                        registration_cache: Arc::new(
+                            octravpn_mesh::tailscale_wire::RegistrationCache::new(),
+                        ),
                     },
                     shared_minter,
                 ))

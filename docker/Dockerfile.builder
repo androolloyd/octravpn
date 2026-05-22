@@ -20,7 +20,7 @@ WORKDIR /work
 # Mirrors the GH-Actions `setup-rust` composite action that we wired
 # the same way for ci.yml + demo.yml + proof.yml + fuzz.yml.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    pkg-config libssl-dev ca-certificates protobuf-compiler && \
+    pkg-config libssl-dev ca-certificates protobuf-compiler libprotobuf-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # Mirror the host layout: /work/octra + /work/octra-foundry +

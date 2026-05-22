@@ -38,12 +38,32 @@ fn build_state() -> (WireState, PreauthMinter, tempfile::TempDir) {
         preauth: Arc::new(minter.clone()),
         ip_allocator: Arc::new(TailnetIpAllocator::new("interop-test")),
         machines: Arc::new(MachineRegistry::new()),
+        registration_store: None,
         derp_map: Arc::new(octravpn_mesh::tailscale_wire::DerpMap::default()),
         policy: Arc::new(headscale_api::policy::PolicyStore::default()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
         dns: std::sync::Arc::new(octra_dns_store()),
+        public_control_url: None,
+        registration_cache: Arc::new(octravpn_mesh::tailscale_wire::RegistrationCache::new()),
     };
     (state, minter, dir)
+}
+
+fn machine_record(
+    node_key_hex: String,
+    user: &str,
+    hostname: &str,
+    ipv4: std::net::Ipv4Addr,
+) -> octravpn_mesh::MachineRecord {
+    octravpn_mesh::MachineRecord::new_at(
+        chrono::Utc::now(),
+        node_key_hex,
+        String::new(),
+        user.into(),
+        hostname.into(),
+        ipv4,
+        false,
+    )
 }
 
 #[tokio::test]
@@ -136,20 +156,12 @@ async fn key_then_register_then_map_round_trip() {
     let other_hex = "cd".repeat(32);
     state.machines.upsert(
         other_hex.clone(),
-        octravpn_mesh::MachineRecord {
-            node_key_hex: other_hex.clone(),
-            machine_key_hex: String::new(),
-            user: "bob".into(),
-            hostname: "peer-b".into(),
-            ipv4: std::net::Ipv4Addr::new(100, 64, 0, 99),
-            disco_key: None,
-            endpoints: Vec::new(),
-            expiry: None,
-            last_seen: chrono::Utc::now(),
-            ephemeral: false,
-            created_at: chrono::Utc::now(),
-            forced_tags: vec![],
-        },
+        machine_record(
+            other_hex.clone(),
+            "bob",
+            "peer-b",
+            std::net::Ipv4Addr::new(100, 64, 0, 99),
+        ),
     );
 
     let resp = app
@@ -266,20 +278,12 @@ async fn flat_register_path_works_via_octravpn_node_router() {
     let other_hex = "2b".repeat(32);
     state.machines.upsert(
         other_hex.clone(),
-        octravpn_mesh::MachineRecord {
-            node_key_hex: other_hex.clone(),
-            machine_key_hex: String::new(),
-            user: "bob".into(),
-            hostname: "peer-b".into(),
-            ipv4: std::net::Ipv4Addr::new(100, 64, 0, 99),
-            disco_key: None,
-            endpoints: Vec::new(),
-            expiry: None,
-            last_seen: chrono::Utc::now(),
-            ephemeral: false,
-            created_at: chrono::Utc::now(),
-            forced_tags: vec![],
-        },
+        machine_record(
+            other_hex.clone(),
+            "bob",
+            "peer-b",
+            std::net::Ipv4Addr::new(100, 64, 0, 99),
+        ),
     );
 
     let map_body = serde_json::json!({
@@ -408,20 +412,12 @@ async fn stream_true_emits_chunk_on_registry_change() {
     // Seed peer-a so the `/map` handler doesn't 404.
     state.machines.upsert(
         a_hex.clone(),
-        octravpn_mesh::MachineRecord {
-            node_key_hex: a_hex.clone(),
-            machine_key_hex: String::new(),
-            user: "alice".into(),
-            hostname: "peer-a".into(),
-            ipv4: std::net::Ipv4Addr::new(100, 64, 0, 10),
-            disco_key: None,
-            endpoints: Vec::new(),
-            expiry: None,
-            last_seen: chrono::Utc::now(),
-            ephemeral: false,
-            created_at: chrono::Utc::now(),
-            forced_tags: vec![],
-        },
+        machine_record(
+            a_hex.clone(),
+            "alice",
+            "peer-a",
+            std::net::Ipv4Addr::new(100, 64, 0, 10),
+        ),
     );
 
     let app = tailscale_wire_router(state.clone());
@@ -470,20 +466,12 @@ async fn stream_true_emits_chunk_on_registry_change() {
         tokio::time::sleep(Duration::from_millis(10)).await;
         state_for_spawn.machines.upsert(
             b_hex_for_spawn.clone(),
-            octravpn_mesh::MachineRecord {
-                node_key_hex: b_hex_for_spawn,
-                machine_key_hex: String::new(),
-                user: "bob".into(),
-                hostname: "peer-b".into(),
-                ipv4: std::net::Ipv4Addr::new(100, 64, 0, 11),
-                disco_key: None,
-                endpoints: Vec::new(),
-                expiry: None,
-                last_seen: chrono::Utc::now(),
-                ephemeral: false,
-                created_at: chrono::Utc::now(),
-                forced_tags: vec![],
-            },
+            machine_record(
+                b_hex_for_spawn,
+                "bob",
+                "peer-b",
+                std::net::Ipv4Addr::new(100, 64, 0, 11),
+            ),
         );
     });
 
@@ -531,21 +519,28 @@ async fn map_response_includes_derp_map_when_configured() {
             region_id: 1,
             region_code: "interop".into(),
             region_name: "Interop test region".into(),
+            latitude: 0.0,
+            longitude: 0.0,
             avoid: false,
+            no_measure_no_home: false,
             nodes: vec![DerpRegionNode {
                 name: "1a".into(),
                 region_id: 1,
                 host_name: "derp-1".into(),
+                cert_name: String::new(),
                 ipv4: String::new(),
                 ipv6: String::new(),
                 derp_port: 443,
                 stun_port: 0,
                 stun_only: false,
                 insecure_for_tests: true,
+                stun_test_ip: String::new(),
+                can_port80: false,
             }],
         },
     );
     let derp_map = DerpMap {
+        home_params: None,
         regions,
         omit_default_regions: true,
     };
@@ -554,10 +549,13 @@ async fn map_response_includes_derp_map_when_configured() {
         preauth: Arc::new(minter.clone()),
         ip_allocator: Arc::new(TailnetIpAllocator::new("interop-test")),
         machines: Arc::new(MachineRegistry::new()),
+        registration_store: None,
         derp_map: Arc::new(derp_map),
         policy: Arc::new(headscale_api::policy::PolicyStore::default()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
         dns: std::sync::Arc::new(octra_dns_store()),
+        public_control_url: None,
+        registration_cache: Arc::new(octravpn_mesh::tailscale_wire::RegistrationCache::new()),
     };
 
     // Register a single peer and read its `/machine/map` view.
@@ -589,20 +587,12 @@ async fn map_response_includes_derp_map_when_configured() {
     let other_hex = "fe".repeat(32);
     state.machines.upsert(
         other_hex.clone(),
-        octravpn_mesh::MachineRecord {
-            node_key_hex: other_hex,
-            machine_key_hex: String::new(),
-            user: "bob".into(),
-            hostname: "peer-b".into(),
-            ipv4: std::net::Ipv4Addr::new(100, 64, 0, 99),
-            disco_key: None,
-            endpoints: Vec::new(),
-            expiry: None,
-            last_seen: chrono::Utc::now(),
-            ephemeral: false,
-            created_at: chrono::Utc::now(),
-            forced_tags: vec![],
-        },
+        machine_record(
+            other_hex,
+            "bob",
+            "peer-b",
+            std::net::Ipv4Addr::new(100, 64, 0, 99),
+        ),
     );
 
     let map_body = serde_json::json!({
@@ -642,8 +632,9 @@ async fn map_response_includes_derp_map_when_configured() {
     assert!(raw_str.contains("\"OmitDefaultRegions\""));
 
     let mr: octravpn_mesh::tailscale_wire::MapResponse = serde_json::from_slice(&raw).unwrap();
-    assert!(mr.derp_map.omit_default_regions);
-    let region = mr.derp_map.regions.get(&1).expect("region 1 present");
+    let derp_map = mr.derp_map.as_ref().expect("DERPMap present");
+    assert!(derp_map.omit_default_regions);
+    let region = derp_map.regions.get(&1).expect("region 1 present");
     assert_eq!(region.region_id, 1);
     assert_eq!(region.region_code, "interop");
     assert_eq!(region.nodes.len(), 1);

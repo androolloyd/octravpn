@@ -1109,9 +1109,9 @@ region = "eu-west"
         assert!(cfg.fsync_policy.is_none(), "field defaults to None");
         assert_eq!(
             cfg.resolved_fsync_policy(),
-            octravpn_core::receipt_journal::FsyncPolicy::Periodic(
-                std::time::Duration::from_secs(1)
-            )
+            octravpn_core::receipt_journal::FsyncPolicy::Periodic(std::time::Duration::from_secs(
+                1
+            ))
         );
     }
 
@@ -1128,9 +1128,9 @@ region = "eu-west"
         assert!(cfg.control.fsync_policy.is_none());
         assert_eq!(
             cfg.control.resolved_fsync_policy(),
-            octravpn_core::receipt_journal::FsyncPolicy::Periodic(
-                std::time::Duration::from_secs(1)
-            )
+            octravpn_core::receipt_journal::FsyncPolicy::Periodic(std::time::Duration::from_secs(
+                1
+            ))
         );
     }
 
@@ -1157,9 +1157,9 @@ region = "eu-west"
         assert_eq!(cfg.control.fsync_policy, Some(FsyncPolicyCfg::Periodic));
         assert_eq!(
             cfg.control.resolved_fsync_policy(),
-            octravpn_core::receipt_journal::FsyncPolicy::Periodic(
-                std::time::Duration::from_secs(1)
-            )
+            octravpn_core::receipt_journal::FsyncPolicy::Periodic(std::time::Duration::from_secs(
+                1
+            ))
         );
     }
 

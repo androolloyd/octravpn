@@ -141,7 +141,8 @@ impl AuditLog {
                     // `write_async`, so the shared mutex is safe.
                     tokio::task::spawn_blocking(move || {
                         let mut g = me.inner.lock();
-                        let r = write_inner_direct(&mut g, &me.counters, &rec, /*fsync=*/ true);
+                        let r =
+                            write_inner_direct(&mut g, &me.counters, &rec, /*fsync=*/ true);
                         // Inline fallback fsyncs synchronously — safe
                         // to publish the chain-tip here. Best-effort:
                         // a tip-write failure does not abort the audit

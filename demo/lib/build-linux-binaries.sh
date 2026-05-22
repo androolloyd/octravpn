@@ -31,7 +31,7 @@
 # pre-pulled, target/linux-debug wiped, host cargo cache untouched):
 #   cold (`rm -rf target/linux-debug && time bash …`): ~103 s real
 #     (octravpn workspace 1m15s in cargo, mock-rpc 10s, plus the apt
-#     protobuf-compiler install). Linker is the long pole; `dev`
+#     protobuf-compiler libprotobuf-dev install). Linker is the long pole; `dev`
 #     profile keeps it bearable.
 #   warm (every binary fresh): ~0.2 s real — pure stat() and shell.
 # Subsequent cold rebuilds (target wiped, cargo-registry preserved)
@@ -103,7 +103,7 @@ fi
 BUILD_PREAMBLE=""
 if [[ "${BUILDER_IMAGE}" == "rust:1.88-bookworm" ]]; then
     BUILD_PREAMBLE="apt-get update >/dev/null 2>&1 && \
-        apt-get install -y --no-install-recommends protobuf-compiler >/dev/null 2>&1 && "
+        apt-get install -y --no-install-recommends protobuf-compiler libprotobuf-dev >/dev/null 2>&1 && "
 fi
 
 # ---------------------------------------------------------------------------
@@ -162,14 +162,32 @@ human_size() {
 # Identity passthrough: when CI / a non-root host invokes this script,
 # we still want the emitted ELF files to be owned by the invoking
 # user — otherwise subsequent `git add`, `cp`, or `docker compose up`
-# steps fail with EACCES on the root-owned target dir. Pass the host
-# uid/gid into the container so cargo writes as the caller. HOME is
-# pinned to /tmp because the image's /root is unwritable to a
-# non-root uid.
+# steps fail with EACCES on the root-owned target dir.
+#
+# We used to drop to the caller's uid via `--user`, but the
+# BUILD_PREAMBLE (apt-get install protobuf-compiler libprotobuf-dev when falling back
+# to vanilla rust:1.88-bookworm) needs root inside the container. The
+# robust fix: build as root inside, then chown the output tree to
+# the caller after — the bind mount preserves the chown.
 DOCKER_USER_ARGS=""
-if [[ "$(id -u)" != "0" ]]; then
-    DOCKER_USER_ARGS="--user $(id -u):$(id -g) -e HOME=/tmp"
-fi
+# Captured here so the post-build chown matches.
+CALLER_UID="$(id -u)"
+CALLER_GID="$(id -g)"
+
+# Post-build hook to fix ownership of the bind-mounted target dir.
+# Called after every successful run_in_builder invocation. No-op when
+# already owned by the caller (warm cache).
+fixup_ownership() {
+    if [[ "${CALLER_UID}" == "0" ]]; then
+        return 0  # root caller: nothing to fix
+    fi
+    # Use a tiny `chown` container to do this — it runs as root
+    # inside, has access to the bind mount, and exits in <100ms.
+    docker run --rm \
+        -v "${LINUX_TARGET_DIR}":/work/target \
+        -v "${FOUNDRY_DEBUG_DIR}":/work/foundry-target \
+        alpine:3 sh -c "chown -R ${CALLER_UID}:${CALLER_GID} /work/target /work/foundry-target" >/dev/null 2>&1 || true
+}
 
 run_in_builder() {
     local cmd="$1"
@@ -227,6 +245,7 @@ if (( ${#OCTRAVPN_NEEDED[@]} > 0 )); then
         echo "BUILD FAIL: cargo build${cargo_args} (octravpn workspace)" >&2
         exit 10
     fi
+    fixup_ownership
 fi
 
 # Emit BUILT lines for the octravpn-workspace binaries.
@@ -265,6 +284,7 @@ else
         echo "BUILD FAIL: cargo build --bin octra-mock-rpc (foundry workspace)" >&2
         exit 10
     fi
+    fixup_ownership
     if [[ ! -x "${MOCK_RPC_BIN_FOUNDRY}" ]]; then
         echo "BUILD FAIL: ${MOCK_RPC_BIN_FOUNDRY} missing after cargo build" >&2
         exit 10

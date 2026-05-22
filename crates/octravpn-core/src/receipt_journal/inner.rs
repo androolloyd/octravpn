@@ -216,9 +216,7 @@ impl Inner {
                 }
             }
         }
-        self.metrics
-            .evictions_total
-            .fetch_add(1, Ordering::Relaxed);
+        self.metrics.evictions_total.fetch_add(1, Ordering::Relaxed);
         self.metrics
             .in_mem_sessions
             .store(self.by_session.len() as u64, Ordering::Relaxed);

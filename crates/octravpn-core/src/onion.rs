@@ -831,8 +831,7 @@ mod tests {
                     let sid_byte = ((iter as u8).wrapping_add(t as u8)) & 0x0F;
                     let sid = crate::session::SessionId::new([sid_byte; 32]);
                     if iter % 2 == 0 {
-                        let keys =
-                            OnionSessionKeys::from_ephemeral_pubkeys(&sk, &[eph]).unwrap();
+                        let keys = OnionSessionKeys::from_ephemeral_pubkeys(&sk, &[eph]).unwrap();
                         store.pin(sid, keys);
                     } else {
                         store.evict(&sid);

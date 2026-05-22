@@ -59,20 +59,15 @@ fn upsert_peer(machines: &MachineRegistry, hostname: &str, ipv4: [u8; 4], user: 
     let key_hex = format!("{:02x}{}", ipv4[3], "aa".repeat(31));
     machines.upsert(
         key_hex.clone(),
-        MachineRecord {
-            node_key_hex: key_hex,
-            machine_key_hex: String::new(),
-            user: user.into(),
-            hostname: hostname.into(),
-            ipv4: std::net::Ipv4Addr::from(ipv4),
-            disco_key: None,
-            endpoints: Vec::new(),
-            expiry: None,
-            last_seen: Utc::now(),
-            ephemeral: false,
-            created_at: Utc::now(),
-            forced_tags: vec![],
-        },
+        MachineRecord::new_at(
+            Utc::now(),
+            key_hex,
+            String::new(),
+            user.into(),
+            hostname.into(),
+            std::net::Ipv4Addr::from(ipv4),
+            false,
+        ),
     );
 }
 

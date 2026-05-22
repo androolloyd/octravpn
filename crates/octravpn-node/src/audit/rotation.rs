@@ -226,7 +226,10 @@ fn file_sort_key(p: &Path) -> (String, u32) {
         Some(s) => s,
         None => return (String::new(), u32::MAX),
     };
-    let Some(rest) = name.strip_prefix("audit-").and_then(|s| s.strip_suffix(".jsonl")) else {
+    let Some(rest) = name
+        .strip_prefix("audit-")
+        .and_then(|s| s.strip_suffix(".jsonl"))
+    else {
         return (String::new(), u32::MAX);
     };
     // `rest` is either `YYYY-MM-DD` (plain) or `YYYY-MM-DD-NNN`.
@@ -321,7 +324,11 @@ mod tests {
     #[test]
     fn evict_drops_oldest_first() {
         let dir = tempdir().unwrap();
-        for n in ["audit-2026-05-19.jsonl", "audit-2026-05-20.jsonl", "audit-2026-05-21.jsonl"] {
+        for n in [
+            "audit-2026-05-19.jsonl",
+            "audit-2026-05-20.jsonl",
+            "audit-2026-05-21.jsonl",
+        ] {
             std::fs::write(dir.path().join(n), b"x").unwrap();
         }
         evict_to_count(dir.path(), 2).unwrap();

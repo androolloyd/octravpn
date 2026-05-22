@@ -28,12 +28,12 @@ mod test_util;
 pub(crate) use batched::{DEFAULT_BATCH_INTERVAL_MS, DEFAULT_BATCH_QUEUE_CAP, DEFAULT_BATCH_SIZE};
 pub(crate) use chain::chain_step;
 pub(crate) use log::AuditRecord;
-pub(crate) use rotation::{
-    BootReplayMode, RotationCfg, DEFAULT_MAX_FILE_BYTES, DEFAULT_MAX_FILE_COUNT,
-};
 #[cfg(test)]
 #[allow(unused_imports)]
 pub(crate) use rotation::ChainTip;
+pub(crate) use rotation::{
+    BootReplayMode, RotationCfg, DEFAULT_MAX_FILE_BYTES, DEFAULT_MAX_FILE_COUNT,
+};
 pub(crate) use verify::FileVerifyReport;
 
 use batched::FlusherCmd;

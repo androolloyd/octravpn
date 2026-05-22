@@ -747,8 +747,7 @@ mod tests {
         for &count in &[1usize, 2, 4, 8] {
             let first = shard_for_4tuple(ipv4("10.1.1.1"), 1234, ipv4("10.2.2.2"), 51820, count);
             for _ in 0..1024 {
-                let s =
-                    shard_for_4tuple(ipv4("10.1.1.1"), 1234, ipv4("10.2.2.2"), 51820, count);
+                let s = shard_for_4tuple(ipv4("10.1.1.1"), 1234, ipv4("10.2.2.2"), 51820, count);
                 assert_eq!(s, first, "shard map flaked with count={count}");
                 assert!(s < count, "shard out of bounds for count={count}");
             }
@@ -870,7 +869,10 @@ mod tests {
         // We can't easily mock a Peer (Tunn is non-trivial), but the
         // invariant the data plane relies on is exactly this equality,
         // so it's the right thing to test.
-        assert_eq!(direct, shard_for_4tuple(src.ip(), src.port(), local.ip(), local.port(), count));
+        assert_eq!(
+            direct,
+            shard_for_4tuple(src.ip(), src.port(), local.ip(), local.port(), count)
+        );
     }
 
     // ---------------------------------------------------------------
@@ -905,7 +907,11 @@ mod tests {
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let (socks, _local) = bind_reuseport(addr, 8).await.expect("bind ok");
         if !reuseport_flow_hashes() {
-            assert_eq!(socks.len(), 1, "non-flow-hashing platforms must fall back to 1");
+            assert_eq!(
+                socks.len(),
+                1,
+                "non-flow-hashing platforms must fall back to 1"
+            );
         }
     }
 
@@ -923,8 +929,13 @@ mod tests {
         let count = 8;
         let mut buckets = vec![0u32; count];
         for i in 0..10_000u32 {
-            let src_ip: std::net::IpAddr =
-                std::net::Ipv4Addr::new(10, ((i >> 16) & 0xff) as u8, ((i >> 8) & 0xff) as u8, (i & 0xff) as u8).into();
+            let src_ip: std::net::IpAddr = std::net::Ipv4Addr::new(
+                10,
+                ((i >> 16) & 0xff) as u8,
+                ((i >> 8) & 0xff) as u8,
+                (i & 0xff) as u8,
+            )
+            .into();
             let port = (i as u16).wrapping_add(1024);
             let s = shard_for_4tuple(src_ip, port, ipv4("10.6.6.6"), 51820, count);
             buckets[s] += 1;

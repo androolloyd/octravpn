@@ -75,7 +75,7 @@ jobs:
       - name: Install protoc (headscale-api build script)
         run: |
           sudo apt-get update -y >/dev/null
-          sudo apt-get install -y --no-install-recommends protobuf-compiler >/dev/null
+          sudo apt-get install -y --no-install-recommends protobuf-compiler libprotobuf-dev >/dev/null
           protoc --version
 
       - name: Cargo build cache

@@ -57,10 +57,13 @@ fn build_state() -> (WireState, tempfile::TempDir) {
         preauth: Arc::new(PreauthMinter::new()),
         ip_allocator: Arc::new(TailnetIpAllocator::new("raw-tls-test")),
         machines: Arc::new(MachineRegistry::new()),
+        registration_store: None,
         derp_map: Arc::new(octravpn_mesh::tailscale_wire::DerpMap::default()),
         policy: Arc::new(headscale_api::policy::PolicyStore::default()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
         dns: std::sync::Arc::new(octra_dns_store()),
+        public_control_url: None,
+        registration_cache: Arc::new(octravpn_mesh::tailscale_wire::RegistrationCache::new()),
     };
     (state, dir)
 }
