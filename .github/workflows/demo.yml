@@ -8,13 +8,21 @@
 # The `render` job covers tapes that need nothing more than the
 # octravpn binaries + a synthesized audit fixture + the standalone
 # `headscale` CLI. The `render-heavy` job covers tapes that drive
-# Docker + the 3-node mesh + the portal (tape 02). See `docs/demo.md`
-# for the full per-tape matrix.
+# Docker + the 3-node mesh + the portal (tape 02) + devnet bringups +
+# the PVAC sidecar + the audit fixture. See `docs/demo.md` for the
+# full per-tape matrix.
 #
 # Tapes intentionally not rendered in CI: none — every tape in
 # `demo/tapes/` is routed to one of the two jobs below. If a tape
 # can't render on a runner (e.g. needs a real GUI or a 3rd-party
 # service), document that inline next to its entry in the for-loop.
+#
+# Grouping discipline (see the per-job render steps): tapes that
+# share a harness are rendered back-to-back, with ONE bringup before
+# the group and ONE teardown after. The bringup helpers are
+# idempotent, so a tape's inline `Source` directive that re-runs the
+# same bringup is a fast no-op. This trims the per-tape ~90s bringup
+# overhead from N×90s to 1×90s per harness.
 
 name: demo
 
@@ -29,7 +37,7 @@ permissions:
 jobs:
   render:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -58,12 +66,23 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build octravpn binaries needed by tapes
+      - name: Build octravpn binaries needed by tapes (host)
         working-directory: octravpn
         run: |
           set -euo pipefail
           cargo build --release -p octravpn-client -p octravpn-node
           echo "${PWD}/target/release" >> "$GITHUB_PATH"
+
+      - name: Build Linux binaries for fixture containers
+        working-directory: octravpn
+        run: |
+          set -euo pipefail
+          # Canonical entry point for the Linux binaries the demo
+          # bringups bind-mount into their fixture containers. First
+          # call builds (~100s); subsequent calls are sub-second.
+          # Output: target/linux-debug/debug/{octravpn,octravpn-node,
+          # octravpn-analytics,octra-mock-rpc}.
+          bash demo/lib/build-linux-binaries.sh
 
       - name: Build + install standalone headscale CLI (sibling repo)
         run: |
@@ -153,50 +172,63 @@ jobs:
           PY
           ls -la demo/state/node/
 
-      - name: Render dependency-light tapes
+      - name: Render light tapes (grouped by harness)
         working-directory: octravpn
         run: |
           set -euo pipefail
           mkdir -p demo/recordings
-          # Tapes 01 + 04 drive the octravpn / octravpn-node binaries
-          # (built above). Tape 03 reads the synthesized audit fixture.
-          # Tape 07 drives the standalone `headscale` binary from the
-          # headscale-rs sibling (installed above). Tapes 11..16 are
-          # narration-shape (CLI surfaces only) and need only the
-          # octravpn binaries.
-          #
-          # Tape 02 (portal-fetch) is routed to render-heavy because
-          # start-portal.sh requires a pre-existing chain-backed
-          # config; it is not self-bootstrapping.
-          for tape in demo/tapes/01-*.tape \
-                     demo/tapes/03-*.tape \
-                     demo/tapes/04-*.tape \
-                     demo/tapes/07-*.tape \
-                     demo/tapes/11-*.tape \
-                     demo/tapes/12-*.tape \
-                     demo/tapes/13-*.tape \
-                     demo/tapes/14-*.tape \
-                     demo/tapes/15-*.tape \
-                     demo/tapes/16-*.tape; do
+
+          # Per-tape renderer with preflight gate. PASS => vhs render.
+          # FAIL => `::warning::` + continue (the job stays green so
+          # the rest of the groups still run; the missing tape is
+          # caught by the demo-bot's commit summary).
+          render_tape() {
+              local tape="$1"
+              local skip_preflight="${2:-0}"
               echo "=== ${tape} ==="
-              # Preflight gate — every command in the tape must
-              # return exit 0 against the live harness before vhs
-              # records.  See demo/lib/preflight-tape.sh for the
-              # heuristic + memory/demo_preflight_required.md for
-              # the rule.  Tapes 11/12 are intentional OS-install
-              # fakes; their `Type "..."` lines are commented-out
-              # narration so preflight is a fast no-op.
-              case "${tape}" in
-                  *11-*.tape|*12-*.tape) ;;
-                  *)
-                      if ! bash demo/lib/preflight-tape.sh "${tape}"; then
-                          echo "::warning::${tape} failed preflight — skipping vhs render"
-                          continue
-                      fi
-                      ;;
-              esac
-              vhs "${tape}" || echo "  ! ${tape} failed (non-fatal in nightly)"
-          done
+              if [[ "${skip_preflight}" != "1" ]]; then
+                  if ! bash demo/lib/preflight-tape.sh "${tape}"; then
+                      echo "::warning::${tape} failed preflight — skipping vhs render"
+                      return 0
+                  fi
+              fi
+              vhs "${tape}" || echo "::warning::${tape} failed vhs render (non-fatal in nightly)"
+          }
+
+          # --- Group L1: keygen-fixture (tape 01) -----------------------
+          # Single fast container (~5s bringup). Just tape 01.
+          echo "--- group: keygen-fixture ---"
+          bash demo/lib/keygen-fixture-bringup.sh
+          render_tape demo/tapes/01-init-keygen.tape
+          bash demo/lib/keygen-fixture-teardown.sh >/dev/null 2>&1 || true
+
+          # --- Group L2: audit-fixture (tape 03) ------------------------
+          # Single throwaway container with a synthesized audit.log.
+          echo "--- group: audit-fixture (light) ---"
+          bash demo/lib/audit-fixture-bringup.sh
+          render_tape demo/tapes/03-audit-replay.tape
+          bash demo/lib/audit-fixture-teardown.sh >/dev/null 2>&1 || true
+
+          # --- Group L3: 3-node mesh (04, 07, 11, 12, 13, 14) -----------
+          # One mesh bringup serves the mesh-preauth tape (04), the
+          # peer-routing tapes (13, 14), and the headscale-cli tape
+          # (07; the standalone CLI talks to the mesh control plane).
+          # Tapes 11 + 12 are narration-shape OS-install fakes — every
+          # Type line is a `#` comment so preflight is a no-op and the
+          # mesh harness is not actually exercised. We render them
+          # inside the group so the harness stays warm across all six
+          # tapes. Preflight is skipped explicitly for 11/12 (matches
+          # the previous workflow's case-statement carve-out).
+          echo "--- group: 3-node-mesh (light) ---"
+          bash demo/lib/3node-mesh-bringup.sh
+          render_tape demo/tapes/04-mesh-preauth.tape
+          render_tape demo/tapes/07-headscale-cli.tape
+          render_tape demo/tapes/11-user-install-linux.tape 1
+          render_tape demo/tapes/12-user-install-macos.tape 1
+          render_tape demo/tapes/13-user-ssh-peer.tape
+          render_tape demo/tapes/14-user-web-traffic.tape
+          bash demo/lib/3node-mesh-teardown.sh >/dev/null 2>&1 || true
+
           ls -la demo/recordings/ || true
 
       - name: Mux captions + TTS audio onto light recordings
@@ -244,18 +276,19 @@ jobs:
           git push origin HEAD:main
 
   # ---------------------------------------------------------------------
-  # Heavy job: render tapes 08/09/10 which drive the full
-  # docker-compose.mesh-demo.yml stack (3 stock tailscale clients +
-  # mesh-control + derp-1 + analytics). Same docker-compose flow the
-  # tailscale-interop test (Wall 7) drives in CI, scaled to 3 peers.
+  # Heavy job: render tapes that drive the full docker-compose.mesh-demo.yml
+  # stack (3 stock tailscale clients + mesh-control + derp-1 + analytics),
+  # the portal container, devnet bringups, the PVAC sidecar, and the
+  # audit-verify fixture. Same docker-compose flow the tailscale-interop
+  # test (Wall 7) drives in CI, scaled to N peers.
   #
   # The job is intentionally separate from the dependency-light job
   # above so a docker-daemon hiccup on the runner can't break the
-  # nightly tapes 01/04 rendering.
+  # nightly tapes 01/03/04/07/11..14 rendering.
   # ---------------------------------------------------------------------
   render-heavy:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
@@ -281,68 +314,122 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build octravpn-node + analytics (debug for compose mount + release for host CLI)
+      - name: Build octravpn-node + analytics (host release for compose mount fallback)
         working-directory: octravpn
         run: |
           set -euo pipefail
-          # Two builds because the docker-compose.mesh-demo.yml bind-mounts
-          # target/linux-debug/debug/* into the containers, while the host
-          # tape uses target/release/octravpn-node for the `mesh status`
-          # CLI invocation. The release build is faster to cargo-incremental
-          # so we do it second.
-          cargo build -p octravpn-node -p octravpn-analytics
-          mkdir -p target/linux-debug/debug
-          cp target/debug/octravpn-node target/linux-debug/debug/
-          cp target/debug/octravpn-analytics target/linux-debug/debug/
-          cargo build --release -p octravpn-node -p octravpn-analytics
+          # Host-side release builds: tapes invoke `octravpn` /
+          # `octravpn-node` from the recording terminal (NOT inside
+          # docker) for the `mesh status` CLI surface. The Linux fixture
+          # binaries (the ones actually bind-mounted into containers)
+          # are produced by build-linux-binaries.sh in the next step.
+          cargo build --release -p octravpn-client -p octravpn-node -p octravpn-analytics
           echo "${PWD}/target/release" >> "$GITHUB_PATH"
 
-      - name: Render heavy tapes (each tape's failure is non-fatal)
+      - name: Build Linux binaries for fixture containers
+        working-directory: octravpn
+        run: |
+          set -euo pipefail
+          # Canonical entry point for the Linux binaries the heavy
+          # bringups bind-mount into their fixture containers:
+          # target/linux-debug/debug/{octravpn,octravpn-node,
+          # octravpn-analytics,octra-mock-rpc}. Idempotent — sub-second
+          # on re-runs.
+          bash demo/lib/build-linux-binaries.sh
+
+      - name: Render heavy tapes (grouped by harness)
         working-directory: octravpn
         run: |
           set -euo pipefail
           mkdir -p demo/recordings
-          # Tapes 17..22 + the master tour all depend on the mesh +
-          # chain fixtures the 3node-mesh-bringup.sh helper installs.
-          # Tape 02 (portal-fetch) requires a chain-backed config at
-          # demo/state/portal/config.toml — best-effort here; the
-          # tape's `Source` directive will surface the missing-config
-          # error if no fixture is present.
-          # Tape 06 (tailscale-interop) drives docker-compose +
-          # openssl + both sibling repos; the heavy runner already
-          # has all three.
-          # We do a best-effort teardown between tapes so a bad
-          # bringup in tape N doesn't poison tape N+1.
-          for tape in demo/tapes/02-portal-fetch.tape \
-                     demo/tapes/05-v3-smoke.tape \
-                     demo/tapes/06-tailscale-interop.tape \
-                     demo/tapes/08-3node-mesh.tape \
-                     demo/tapes/09-traffic-patterns.tape \
-                     demo/tapes/10-metrics-grafana.tape \
-                     demo/tapes/17-operator-onboarding.tape \
-                     demo/tapes/18-tailnet-owner-policy.tape \
-                     demo/tapes/19-circle-update-atomic.tape \
-                     demo/tapes/20-pvac-rotation.tape \
-                     demo/tapes/21-audit-verify.tape \
-                     demo/tapes/22-headscale-cli-tour.tape \
-                     demo/tapes/00-master-tour.tape; do
+
+          # Per-tape renderer with preflight gate. PASS => vhs render.
+          # FAIL => `::warning::` + continue.
+          render_tape() {
+              local tape="$1"
+              local skip_preflight="${2:-0}"
               echo "=== ${tape} ==="
-              bash demo/lib/3node-mesh-teardown.sh >/dev/null 2>&1 || true
-              # Preflight before recording.  Tapes 05/06 delegate to
-              # shell scripts that exit-code themselves, so we skip
-              # the per-command preflight there.
-              case "${tape}" in
-                  *05-*.tape|*06-*.tape) ;;
-                  *)
-                      if ! bash demo/lib/preflight-tape.sh "${tape}"; then
-                          echo "::warning::${tape} failed preflight — skipping vhs render"
-                          continue
-                      fi
-                      ;;
-              esac
-              vhs "${tape}" || echo "  ! ${tape} failed (non-fatal in nightly)"
-          done
+              if [[ "${skip_preflight}" != "1" ]]; then
+                  if ! bash demo/lib/preflight-tape.sh "${tape}"; then
+                      echo "::warning::${tape} failed preflight — skipping vhs render"
+                      return 0
+                  fi
+              fi
+              vhs "${tape}" || echo "::warning::${tape} failed vhs render (non-fatal in nightly)"
+          }
+
+          # --- Group H1: delegated / self-bringup (tapes 05, 06) --------
+          # These tapes delegate to shell scripts that exit-code
+          # themselves (e2e + tailscale-interop). They self-bring-up
+          # and self-teardown, so we just render them; per-command
+          # preflight is intentionally skipped (skip_preflight=1).
+          echo "--- group: delegated (tapes 05, 06) ---"
+          render_tape demo/tapes/05-v3-smoke.tape 1
+          render_tape demo/tapes/06-tailscale-interop.tape 1
+
+          # --- Group H2: portal-container (02, 15, 16) ------------------
+          # One containerized portal serves the portal-fetch tape (02)
+          # and the oct-url tapes (15, 16). Bringup wires to the LIVE
+          # devnet + deploys the demo circle.
+          echo "--- group: portal-container (02, 15, 16) ---"
+          bash demo/lib/portal-container-bringup.sh
+          render_tape demo/tapes/02-portal-fetch.tape
+          render_tape demo/tapes/15-user-oct-url-public.tape
+          render_tape demo/tapes/16-user-oct-url-sealed.tape
+          bash demo/lib/portal-container-teardown.sh >/dev/null 2>&1 || true
+
+          # --- Group H3: 3-node mesh (08, 09, 10, 18, 22) ---------------
+          # Mesh tapes that need the full compose stack: 3 tailscale
+          # peers + derp-1 + analytics + grafana scraping. Tapes 18
+          # (tailnet-owner-policy) + 22 (headscale-cli-tour) drive the
+          # mesh control plane via headscale.
+          echo "--- group: 3-node-mesh (heavy) ---"
+          bash demo/lib/3node-mesh-bringup.sh
+          render_tape demo/tapes/08-3node-mesh.tape
+          render_tape demo/tapes/09-traffic-patterns.tape
+          render_tape demo/tapes/10-metrics-grafana.tape
+          render_tape demo/tapes/18-tailnet-owner-policy.tape
+          render_tape demo/tapes/22-headscale-cli-tour.tape
           bash demo/lib/3node-mesh-teardown.sh >/dev/null 2>&1 || true
+
+          # --- Group H4: devnet (17, 19) --------------------------------
+          # devnet-bringup deploys the demo circle to LIVE devnet and
+          # brings up node1/2/3 against it. Tape 17 is the operator
+          # onboarding flow, tape 19 is the atomic circle-update.
+          echo "--- group: devnet (17, 19) ---"
+          bash demo/lib/devnet-bringup.sh
+          render_tape demo/tapes/17-operator-onboarding.tape
+          render_tape demo/tapes/19-circle-update-atomic.tape
+          bash demo/lib/devnet-teardown.sh >/dev/null 2>&1 || true
+
+          # --- Group H5: pvac (20) --------------------------------------
+          # The PVAC sidecar's Dockerfile compiles GPL'd C++ sources;
+          # first build is ~3-5 min cold. Single tape uses this; we
+          # keep it in its own group so the slow build doesn't gate
+          # the other heavy renders.
+          echo "--- group: pvac (20) ---"
+          bash demo/lib/pvac-bringup.sh
+          render_tape demo/tapes/20-pvac-rotation.tape
+          bash demo/lib/pvac-teardown.sh >/dev/null 2>&1 || true
+
+          # --- Group H6: audit-fixture (21) -----------------------------
+          # Tape 21 (audit-verify) drives the same fixture as light
+          # tape 03 but the verify path needs the heavy job's full
+          # octravpn-node binary stack (audit verify walks the receipt
+          # journal which the light job's empty stub doesn't satisfy).
+          echo "--- group: audit-fixture (21) ---"
+          bash demo/lib/audit-fixture-bringup.sh
+          render_tape demo/tapes/21-audit-verify.tape
+          bash demo/lib/audit-fixture-teardown.sh >/dev/null 2>&1 || true
+
+          # --- Group H7: master-tour (00) -------------------------------
+          # Renders LAST so the prior groups' teardowns leave a clean
+          # slate. The master tour's own `Source` directives bring up
+          # whichever harnesses it needs (idempotent — already-up is a
+          # no-op). Per-command preflight runs against whatever's live.
+          echo "--- group: master-tour (00) ---"
+          render_tape demo/tapes/00-master-tour.tape
+
           ls -la demo/recordings/ || true
 
       - name: Mux captions + TTS audio onto heavy recordings

@@ -158,9 +158,24 @@ human_size() {
 # bind-mounted at the same paths the mesh-bringup uses, so cargo's
 # path-dep resolution sees the same layout it would on CI.
 # ---------------------------------------------------------------------------
+#
+# Identity passthrough: when CI / a non-root host invokes this script,
+# we still want the emitted ELF files to be owned by the invoking
+# user — otherwise subsequent `git add`, `cp`, or `docker compose up`
+# steps fail with EACCES on the root-owned target dir. Pass the host
+# uid/gid into the container so cargo writes as the caller. HOME is
+# pinned to /tmp because the image's /root is unwritable to a
+# non-root uid.
+DOCKER_USER_ARGS=""
+if [[ "$(id -u)" != "0" ]]; then
+    DOCKER_USER_ARGS="--user $(id -u):$(id -g) -e HOME=/tmp"
+fi
+
 run_in_builder() {
     local cmd="$1"
+    # shellcheck disable=SC2086
     docker run --rm \
+        ${DOCKER_USER_ARGS} \
         -v "${REPO_ROOT}":/work/octra \
         -v "${OCTRA_FOUNDRY}":/work/octra-foundry \
         -v "${HEADSCALE_RS}":/work/headscale-rs \
@@ -237,7 +252,9 @@ if is_fresh "${MOCK_RPC_BIN_LOCAL}" "${MOCK_RPC_SRC_MAIN}" "${MOCK_RPC_SRC_TOML}
     echo "FRESH: target/linux-debug/debug/octra-mock-rpc ($(human_size "${MOCK_RPC_BIN_LOCAL}"))" >&2
 else
     echo "building (in ${BUILDER_IMAGE}): octra-mock-rpc (sibling foundry)" >&2
+    # shellcheck disable=SC2086
     if ! docker run --rm \
+        ${DOCKER_USER_ARGS} \
         -v "${OCTRA_FOUNDRY}":/work/octra-foundry \
         -v "${FOUNDRY_DEBUG_DIR}":/work/octra-foundry/target \
         -v "${LINUX_TARGET_DIR}/cargo-registry":/usr/local/cargo/registry \
