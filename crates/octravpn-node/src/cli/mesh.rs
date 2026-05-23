@@ -272,7 +272,7 @@ async fn run_mesh_serve(
         ip_alloc::TailnetIpAllocator,
         tailscale_wire::{
             derp_config::{empty_derp_map, load_derp_map},
-            serve::{serve as wire_serve, ServeConfig},
+            serve::{serve as wire_serve, ServeConfig, TrustedProxyConfig},
             tls::{SanConfig, TlsMaterialSource},
             MachineRegistry,
         },
@@ -473,6 +473,7 @@ async fn run_mesh_serve(
         },
         oidc: None,
         metrics_addr: None,
+        trusted_proxies: TrustedProxyConfig::default(),
     };
     let handle = wire_serve(ws, cfg, admin_router)
         .await
