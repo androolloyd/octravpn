@@ -58,6 +58,7 @@ fn build_app() -> (axum::Router, WireState, PolicyStore, tempfile::TempDir) {
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
         dns: std::sync::Arc::new(octra_dns_store()),
         public_control_url: None,
+        runtime_config: Arc::new(octravpn_mesh::tailscale_wire::RuntimeConfigSnapshot::default()),
         registration_cache: Arc::new(octravpn_mesh::tailscale_wire::RegistrationCache::new()),
         pings: Arc::new(octravpn_mesh::tailscale_wire::PingTracker::new()),
     };

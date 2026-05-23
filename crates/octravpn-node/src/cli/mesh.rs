@@ -273,7 +273,7 @@ async fn run_mesh_serve(
         tailscale_wire::{
             derp_config::{empty_derp_map, load_derp_map},
             serve::{serve as wire_serve, ServeConfig},
-            tls::SanConfig,
+            tls::{SanConfig, TlsMaterialSource},
             MachineRegistry,
         },
         PreauthMinter, ServerNoiseKey, WireState, DEFAULT_PREAUTH_TTL,
@@ -340,6 +340,7 @@ async fn run_mesh_serve(
             },
         )),
         public_control_url: None,
+        runtime_config: Arc::new(octravpn_mesh::tailscale_wire::RuntimeConfigSnapshot::default()),
         registration_cache: Arc::new(octravpn_mesh::tailscale_wire::RegistrationCache::new()),
         pings: Arc::new(octravpn_mesh::tailscale_wire::PingTracker::new()),
     };
@@ -459,11 +460,17 @@ async fn run_mesh_serve(
         Some(https_listen.parse().context("parse https listen addr")?)
     };
 
+    let state_dir_path = std::path::PathBuf::from(&state_dir);
+    let sans = SanConfig::with_hostname(&cert_hostname);
     let cfg = ServeConfig {
         http_addr,
         https_addr,
-        state_dir: std::path::PathBuf::from(&state_dir),
-        sans: SanConfig::with_hostname(&cert_hostname),
+        state_dir: state_dir_path.clone(),
+        sans: sans.clone(),
+        tls_source: TlsMaterialSource::SelfSigned {
+            state_dir: state_dir_path,
+            sans,
+        },
         oidc: None,
         metrics_addr: None,
     };

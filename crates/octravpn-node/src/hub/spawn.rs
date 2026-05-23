@@ -175,6 +175,9 @@ impl Hub {
                             },
                         )),
                         public_control_url: None,
+                        runtime_config: Arc::new(
+                            octravpn_mesh::tailscale_wire::RuntimeConfigSnapshot::default(),
+                        ),
                         registration_cache: Arc::new(
                             octravpn_mesh::tailscale_wire::RegistrationCache::new(),
                         ),
