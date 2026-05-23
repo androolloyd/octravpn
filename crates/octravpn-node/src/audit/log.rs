@@ -276,7 +276,7 @@ fn recover_chain_for_date(
         .filter(|p| {
             p.file_name().and_then(|s| s.to_str()).is_some_and(|n| {
                 n == format!("audit-{date}.jsonl")
-                    || n.starts_with(&format!("audit-{date}-")) && n.ends_with(".jsonl")
+                    || n.starts_with(&format!("audit-{date}-")) && is_jsonl_name(n)
             })
         })
         .collect();
@@ -342,9 +342,8 @@ fn walk_with_seed(path: &Path, key: &[u8; 32], seed: [u8; 32]) -> Result<([u8; 3
         let Some(record_json) = v.get("record_json").and_then(Value::as_str) else {
             break;
         };
-        let claimed = match v.get("mac").and_then(Value::as_str) {
-            Some(s) => s,
-            None => break,
+        let Some(claimed) = v.get("mac").and_then(Value::as_str) else {
+            break;
         };
         let expect = chain_step(key, &prev, record_json.as_bytes());
         if hex::encode(expect) != claimed {
@@ -354,6 +353,12 @@ fn walk_with_seed(path: &Path, key: &[u8; 32], seed: [u8; 32]) -> Result<([u8; 3
         count += 1;
     }
     Ok((prev, count))
+}
+
+fn is_jsonl_name(name: &str) -> bool {
+    Path::new(name)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("jsonl"))
 }
 
 /// Verify that the line at 1-indexed `seq` in `path` carries `mac_hex`
@@ -479,12 +484,12 @@ mod tests {
         assert!(
             files
                 .iter()
-                .any(|f| f.starts_with("audit-") && f.ends_with(".jsonl")),
+                .any(|f| f.starts_with("audit-") && is_jsonl_name(f)),
             "no audit file: {files:?}"
         );
         let audit_file = files
             .iter()
-            .find(|f| f.starts_with("audit-") && f.ends_with(".jsonl"))
+            .find(|f| f.starts_with("audit-") && is_jsonl_name(f))
             .unwrap();
         let body = std::fs::read_to_string(dir.path().join(audit_file)).unwrap();
         assert_eq!(body.lines().count(), 2);
@@ -519,7 +524,7 @@ mod tests {
                 e.as_ref()
                     .map(|e| {
                         let n = e.file_name().to_string_lossy().to_string();
-                        n.starts_with("audit-") && n.ends_with(".jsonl")
+                        n.starts_with("audit-") && is_jsonl_name(&n)
                     })
                     .unwrap_or(false)
             })
@@ -601,7 +606,7 @@ mod tests {
                 suffix.parse::<u32>().ok()
             })
             .collect();
-        suffixes.sort();
+        suffixes.sort_unstable();
         assert_eq!(suffixes.len(), 2);
         assert!(
             suffixes[0] >= 4 && suffixes[1] >= 5,

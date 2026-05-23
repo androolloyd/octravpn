@@ -25,6 +25,8 @@
 //! because the two paths' timescales differ by >100x and a single
 //! plot scale doesn't help operators.
 
+#![allow(clippy::cast_precision_loss)]
+
 use std::{
     fs::File,
     io::{BufWriter, Write},
@@ -55,7 +57,7 @@ fn build_synthetic_log(path: &Path, key: &[u8; 32], n_lines: usize) {
         let mac = chain_step(key, &prev_mac, record_json.as_bytes());
         let envelope = format!(
             r#"{{"record_json":{},"prev_mac":"{}","mac":"{}"}}"#,
-            serde_json::Value::String(record_json).to_string(),
+            serde_json::Value::String(record_json),
             hex::encode(prev_mac),
             hex::encode(mac),
         );
@@ -109,18 +111,12 @@ fn main() {
     let path = dir.path().join("audit-2026-05-21-001.jsonl");
     let key = [0x42u8; 32];
 
-    println!(
-        "Perf-6 audit boot-replay bench — synthesising {} lines …",
-        N_LINES
-    );
+    println!("Perf-6 audit boot-replay bench — synthesising {N_LINES} lines …");
     let t0 = Instant::now();
     build_synthetic_log(&path, &key, N_LINES);
     let build_ms = t0.elapsed().as_millis();
     let file_bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-    println!(
-        "  built {} lines = {} bytes in {} ms",
-        N_LINES, file_bytes, build_ms
-    );
+    println!("  built {N_LINES} lines = {file_bytes} bytes in {build_ms} ms");
 
     // Warm the disk cache identically for both paths.
     let _ = std::fs::read(&path);
@@ -129,10 +125,10 @@ fn main() {
     let t0 = Instant::now();
     let scan = verify_file(&key, &path).expect("verify_file");
     let full_us = t0.elapsed().as_micros();
-    let full_per_line_us = full_us as f64 / scan.verified_lines as f64;
+    let verified_lines = scan.verified_lines;
+    let full_per_line_us = full_us as f64 / verified_lines as f64;
     println!(
-        "  full replay     : {:>10} µs total  ({:.3} µs/line, verified {} lines)",
-        full_us, full_per_line_us, scan.verified_lines
+        "  full replay     : {full_us:>10} µs total  ({full_per_line_us:.3} µs/line, verified {verified_lines} lines)"
     );
 
     // ---- Path 2: skip-to-tip (the Perf-6 boot path) ----
@@ -141,28 +137,20 @@ fn main() {
     let skip_us = t0.elapsed().as_micros();
     let skip_per_line_us = skip_us as f64 / N_LINES as f64;
     println!(
-        "  skip-to-tip     : {:>10} µs total  ({:.4} µs/line — tail record_json={} bytes)",
-        skip_us, skip_per_line_us, tail_len
+        "  skip-to-tip     : {skip_us:>10} µs total  ({skip_per_line_us:.4} µs/line — tail record_json={tail_len} bytes)"
     );
 
     // Extrapolate to the 30-day node §5.2 highlights:
     //   100 receipts/s × 86400 s × 30 days = 259,200,000 lines.
     const LINES_30_DAY: u64 = 100 * 86400 * 30;
-    let full_30day_s = (full_per_line_us as f64 * LINES_30_DAY as f64) / 1_000_000.0;
-    let skip_30day_s = (skip_per_line_us as f64 * LINES_30_DAY as f64) / 1_000_000.0;
+    let full_30day_s = (full_per_line_us * LINES_30_DAY as f64) / 1_000_000.0;
+    let skip_30day_s = (skip_per_line_us * LINES_30_DAY as f64) / 1_000_000.0;
+    let lines_30_day_m = LINES_30_DAY / 1_000_000;
     println!("\n30-day cold-start budget (audit-8 §5.2 extrapolation):");
+    println!("  full replay     : ~{full_30day_s:.1} s on {lines_30_day_m} M lines");
     println!(
-        "  full replay     : ~{:.1} s on {} M lines",
-        full_30day_s,
-        LINES_30_DAY / 1_000_000
+        "  skip-to-tip     : ~{skip_30day_s:.3} s on {lines_30_day_m} M lines  (Perf-6 ceiling)"
     );
-    println!(
-        "  skip-to-tip     : ~{:.3} s on {} M lines  (Perf-6 ceiling)",
-        skip_30day_s,
-        LINES_30_DAY / 1_000_000
-    );
-    println!(
-        "  delta           : ~{:.1}× faster",
-        full_per_line_us as f64 / skip_per_line_us.max(0.0001)
-    );
+    let speedup = full_per_line_us / skip_per_line_us.max(0.0001);
+    println!("  delta           : ~{speedup:.1}× faster");
 }

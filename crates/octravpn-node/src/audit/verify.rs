@@ -113,7 +113,7 @@ impl AuditLog {
     ) -> Result<FileVerifyReport> {
         let f = std::fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
         let reader = std::io::BufReader::new(f);
-        walk_chain(key, reader, seed, /*skip_lines=*/ 0)
+        Ok(walk_chain(key, reader, seed, /*skip_lines=*/ 0))
     }
 
     /// Cold-start fast path: when the chain-tip file is present and
@@ -152,7 +152,7 @@ impl AuditLog {
             files.iter().position(|p| {
                 p.file_name()
                     .and_then(|s| s.to_str())
-                    .map_or(false, |n| n == t.file_id)
+                    .is_some_and(|n| n == t.file_id)
             })
         });
 
@@ -186,7 +186,7 @@ impl AuditLog {
                         Some(seed) => {
                             let f = std::fs::File::open(path)
                                 .with_context(|| format!("open {}", path.display()))?;
-                            walk_chain(key, std::io::BufReader::new(f), seed, seq as usize)?
+                            walk_chain(key, std::io::BufReader::new(f), seed, seq as usize)
                         }
                         None => {
                             // Tip didn't match this file's prefix — fall
@@ -260,7 +260,7 @@ fn walk_chain<R: BufRead>(
     reader: R,
     seed: [u8; 32],
     skip_lines: usize,
-) -> Result<FileVerifyReport> {
+) -> FileVerifyReport {
     let mut prev_mac = seed;
     let mut entries: u64 = 0;
     let mut signed_seqs: BTreeMap<String, BTreeSet<u64>> = BTreeMap::new();
@@ -363,12 +363,12 @@ fn walk_chain<R: BufRead>(
             }
         }
     }
-    Ok(FileVerifyReport {
+    FileVerifyReport {
         entries,
         signed_seqs,
         first_error,
         last_mac: prev_mac,
-    })
+    }
 }
 
 #[cfg(test)]
@@ -511,7 +511,7 @@ mod tests {
         // Skip-to-tip: relies on the tip file written by `log.write`.
         let reports = AuditLog::verify_dir_skip_to_tip(&key, dir.path()).unwrap();
         let skip_total: u64 = reports.iter().map(|(_, r)| r.entries).sum();
-        let skip_last = reports.last().map(|(_, r)| r.last_mac).unwrap_or([0u8; 32]);
+        let skip_last = reports.last().map_or([0u8; 32], |(_, r)| r.last_mac);
         // After skip-to-tip: the prefix is committed-to by the tip, so
         // `entries` counts only the un-skipped tail. The *MAC* must
         // still match the full-walk final MAC.

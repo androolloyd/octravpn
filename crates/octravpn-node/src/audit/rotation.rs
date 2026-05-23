@@ -222,9 +222,8 @@ pub(crate) fn list_audit_files(dir: &Path) -> Result<Vec<PathBuf>> {
 /// any `audit-DATE-NNN.jsonl` (which becomes `(DATE, NNN)`). Files
 /// that don't parse fall to the end with an empty date + max seq.
 fn file_sort_key(p: &Path) -> (String, u32) {
-    let name = match p.file_name().and_then(|s| s.to_str()) {
-        Some(s) => s,
-        None => return (String::new(), u32::MAX),
+    let Some(name) = p.file_name().and_then(|s| s.to_str()) else {
+        return (String::new(), u32::MAX);
     };
     let Some(rest) = name
         .strip_prefix("audit-")

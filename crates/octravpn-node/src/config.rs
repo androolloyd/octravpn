@@ -494,7 +494,7 @@ impl Default for AuditCfg {
 }
 
 impl AuditCfg {
-    pub(crate) fn to_runtime(&self) -> crate::audit::RotationCfg {
+    pub(crate) fn to_runtime(self) -> crate::audit::RotationCfg {
         crate::audit::RotationCfg {
             max_file_bytes: self.max_file_bytes,
             max_file_count: self.max_file_count,
