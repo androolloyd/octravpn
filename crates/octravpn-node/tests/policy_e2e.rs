@@ -59,6 +59,7 @@ fn build_app() -> (axum::Router, WireState, PolicyStore, tempfile::TempDir) {
         dns: std::sync::Arc::new(octra_dns_store()),
         public_control_url: None,
         registration_cache: Arc::new(octravpn_mesh::tailscale_wire::RegistrationCache::new()),
+        pings: Arc::new(octravpn_mesh::tailscale_wire::PingTracker::new()),
     };
 
     let admin_state = admin::AdminState::builder()

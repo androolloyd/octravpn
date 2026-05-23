@@ -10,7 +10,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use octravpn_mesh::tailscale_wire_router;
+use octravpn_mesh::tailscale_wire_embedded_control_router;
 
 use super::handlers;
 use super::state::ControlState;
@@ -78,12 +78,11 @@ pub(crate) fn router_axum(state: Arc<ControlState>) -> Router {
 
     // Tailscale-wire surface (PRs 1-4). Mounted unconditionally
     // when `wire_state` is populated; absent otherwise so the
-    // routes don't reply to unrelated probes. Same `merge` pattern
-    // as `/events` because the wire router doesn't share state
-    // with `ControlState` — it owns its own `Arc`-shared
-    // `WireState` constructed at Hub init.
+    // routes don't reply to unrelated probes. The Hub mounts only
+    // stock-client wire paths here; `/health`, `/metrics`, and
+    // operator diagnostics remain owned by Octra's control plane.
     if let Some(ws) = state.wire_state.clone() {
-        merged = merged.merge(tailscale_wire_router(ws));
+        merged = merged.merge(tailscale_wire_embedded_control_router(ws));
     }
 
     merged

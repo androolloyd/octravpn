@@ -341,6 +341,7 @@ async fn run_mesh_serve(
         )),
         public_control_url: None,
         registration_cache: Arc::new(octravpn_mesh::tailscale_wire::RegistrationCache::new()),
+        pings: Arc::new(octravpn_mesh::tailscale_wire::PingTracker::new()),
     };
 
     eprintln!(
@@ -464,6 +465,7 @@ async fn run_mesh_serve(
         state_dir: std::path::PathBuf::from(&state_dir),
         sans: SanConfig::with_hostname(&cert_hostname),
         oidc: None,
+        metrics_addr: None,
     };
     let handle = wire_serve(ws, cfg, admin_router)
         .await
