@@ -87,11 +87,15 @@ jobs:
           # the apt path entirely.
           #
           # Layout note: Dockerfile.builder's COPYs use `octra/` paths
-          # but the checkout step puts the repo at `octravpn/`. Symlink
-          # so the COPYs resolve. Build context = the parent dir holding
-          # the three sibling checkouts (octravpn, octra-foundry,
-          # headscale-rs).
-          ln -sfn octravpn octra
+          # but the checkout step puts the repo at `octravpn/`.
+          # BuildKit refuses to traverse symlinks for directory COPYs
+          # (run 26342245088 failed at `COPY octra/pvac-sidecar` with
+          # "/octra/pvac-sidecar: not found"), so make a hardlinked
+          # mirror — same inodes, BuildKit sees real files.
+          # cp -al = archive mode + hardlink where possible; near-zero
+          # disk cost on the same filesystem.
+          rm -rf octra
+          cp -al octravpn octra
           docker build \
             -f octra/docker/Dockerfile.builder \
             -t octravpn-builder:latest \
