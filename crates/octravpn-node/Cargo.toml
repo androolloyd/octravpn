@@ -92,7 +92,8 @@ reqwest     = { workspace = true }
 # declare it explicitly so the SO_REUSEPORT bind path in tunnel.rs has
 # a stable surface to call. Gated on Linux/FreeBSD; macOS uses a single
 # tokio bind because BSD-style SO_REUSEPORT doesn't flow-hash.
-socket2     = "0.5"
+# `all` feature is required for set_reuse_port + reuse-address knobs.
+socket2     = { version = "0.5", features = ["all"] }
 
 [dev-dependencies]
 octravpn-mesh = { path = "../octravpn-mesh", features = ["test-helpers"] }
