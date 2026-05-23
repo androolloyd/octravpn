@@ -17,18 +17,24 @@
 
 use std::sync::Arc;
 
-use axum::body::to_bytes;
+use axum::{
+    body::to_bytes,
+    extract::Request,
+    middleware::{self, Next},
+    response::Response,
+};
 use headscale_api::admin;
 use octravpn_mesh::{
     ip_alloc::TailnetIpAllocator,
     policy::PolicyStore,
     tailscale_wire::{MachineRecord, MachineRegistry, MapResponse},
-    tailscale_wire_router, PreauthMinter, ServerNoiseKey, WireState,
+    PreauthMinter, ServerNoiseKey, WireState,
 };
 use tempfile::tempdir;
 use tower::ServiceExt;
 
 const ADMIN_TOKEN: &str = "policy-e2e-token-1234";
+const TEST_CAPABILITY_VERSION: u32 = 113;
 
 fn octra_dns_store() -> headscale_api::dns::DnsStore {
     headscale_api::dns::DnsStore::from_spec(headscale_api::dns::DnsConfigSpec {
@@ -53,7 +59,9 @@ fn build_app() -> (axum::Router, WireState, PolicyStore, tempfile::TempDir) {
         ip_allocator: Arc::new(TailnetIpAllocator::new("policy-e2e")),
         machines: machines.clone(),
         registration_store: None,
-        derp_map: Arc::new(octravpn_mesh::tailscale_wire::DerpMap::default()),
+        derp_map: octravpn_mesh::tailscale_wire::DerpMapStore::shared(
+            octravpn_mesh::tailscale_wire::DerpMap::default(),
+        ),
         policy: Arc::new(policy.clone()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
         dns: std::sync::Arc::new(octra_dns_store()),
@@ -72,7 +80,7 @@ fn build_app() -> (axum::Router, WireState, PolicyStore, tempfile::TempDir) {
         .policy(policy.clone())
         .build();
 
-    let wire_router = tailscale_wire_router(wire.clone());
+    let wire_router = test_machine_router(wire.clone());
     let admin_router = admin::router(admin_state);
     let app = wire_router.merge(admin_router);
     (app, wire, policy, dir)
@@ -86,13 +94,58 @@ fn machine_record(
 ) -> MachineRecord {
     MachineRecord::new_at(
         chrono::Utc::now(),
+        node_key_hex.clone(),
         node_key_hex,
-        String::new(),
         user.into(),
         hostname.into(),
         ipv4,
         false,
     )
+}
+
+fn test_machine_router(state: WireState) -> axum::Router {
+    use axum::routing::post;
+    use octravpn_mesh::tailscale_wire::{map, register};
+
+    axum::Router::new()
+        .route(
+            "/machine/:node_key/register",
+            post(register::handle_register),
+        )
+        .route("/machine/:node_key/map", post(map::handle_map))
+        .route("/machine/register", post(register::handle_register_flat))
+        .route("/machine/map", post(map::handle_map_flat))
+        .layer(middleware::from_fn(inject_test_noise_machine_key))
+        .with_state(state)
+}
+
+async fn inject_test_noise_machine_key(mut req: Request, next: Next) -> Response {
+    let missing_machine_key = req
+        .extensions()
+        .get::<octravpn_mesh::tailscale_wire::noise::NoisePeerMachineKey>()
+        .is_none();
+    if missing_machine_key {
+        if let Some(machine_key) = machine_key_from_path(req.uri().path()) {
+            req.extensions_mut()
+                .insert(octravpn_mesh::tailscale_wire::noise::NoisePeerMachineKey(
+                    machine_key,
+                ));
+        }
+    }
+    next.run(req).await
+}
+
+fn machine_key_from_path(path: &str) -> Option<String> {
+    let rest = path.strip_prefix("/machine/nodekey:")?;
+    let (node_key, suffix) = rest.split_once('/')?;
+    matches!(suffix, "register" | "map").then(|| node_key.to_string())
+}
+
+fn base_packet_filter(mr: &MapResponse) -> &[octravpn_mesh::tailscale_wire::wire::FilterRule] {
+    mr.packet_filters
+        .get("base")
+        .and_then(|rules| rules.as_deref())
+        .expect("PacketFilters.base present")
 }
 
 async fn fetch_map(app: &axum::Router, node_hex: &str) -> MapResponse {
@@ -103,7 +156,12 @@ async fn fetch_map(app: &axum::Router, node_hex: &str) -> MapResponse {
                 .method("POST")
                 .uri(format!("/machine/nodekey:{node_hex}/map"))
                 .header("content-type", "application/json")
-                .body(axum::body::Body::from(b"{}".to_vec()))
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "Version": TEST_CAPABILITY_VERSION
+                    }))
+                    .unwrap(),
+                ))
                 .unwrap(),
         )
         .await
@@ -166,20 +224,19 @@ async fn policy_put_propagates_to_map_packet_filter() {
     // path), so dst_ports has TWO NetPortRange entries — one per
     // address family.
     let mr = fetch_map(&app, &a_hex).await;
-    assert_eq!(mr.packet_filter.len(), 1, "default ⇒ allow-all single rule");
-    assert_eq!(mr.packet_filter[0].src_ips, vec!["0.0.0.0/0", "::/0"]);
-    assert_eq!(mr.packet_filter[0].dst_ports.len(), 2);
-    assert_eq!(mr.packet_filter[0].dst_ports[0].ip, "0.0.0.0/0");
-    assert_eq!(mr.packet_filter[0].dst_ports[1].ip, "::/0");
+    assert!(mr.packet_filter.is_empty(), "upstream uses PacketFilters");
+    let base = base_packet_filter(&mr);
+    assert_eq!(base.len(), 1, "default ⇒ allow-all single rule");
+    assert_eq!(base[0].src_ips, vec!["0.0.0.0/0", "::/0"]);
+    assert_eq!(base[0].dst_ports.len(), 2);
+    assert_eq!(base[0].dst_ports[0].ip, "0.0.0.0/0");
+    assert_eq!(base[0].dst_ports[1].ip, "::/0");
 
-    // -- Step 2: PUT a deny-all policy. The only rule is `action=deny`
-    // — the translator drops deny rules from the FilterRule output, so
-    // `packet_filter` lands as an empty list on the wire.
+    // -- Step 2: PUT an empty policy. The public headscale-go-shaped
+    // HuJSON surface only accepts `accept` actions; an empty `acls` list
+    // is the deny-all/default-deny representation.
     let deny_all = r#"{
-        "version": 1,
-        "rules": [
-            {"action":"deny","src":["*"],"dst":["*"],"ports":["*/*"]}
-        ]
+        "acls": []
     }"#;
     let (status, body) = put_policy(&app, deny_all).await;
     assert_eq!(
@@ -191,18 +248,17 @@ async fn policy_put_propagates_to_map_packet_filter() {
 
     let mr = fetch_map(&app, &a_hex).await;
     assert!(
-        mr.packet_filter.is_empty(),
-        "deny-all policy ⇒ wire emits empty PacketFilter, got: {:?}",
-        mr.packet_filter
+        base_packet_filter(&mr).is_empty(),
+        "deny-all policy ⇒ wire emits empty PacketFilters.base, got: {:?}",
+        mr.packet_filters
     );
 
     // -- Step 3: PUT an allow-all policy. The wildcard rule survives
     // translation and lands as one FilterRule on the wire.
     let allow_all = r#"{
-        "version": 1,
         // operator note: testing live reload
-        "rules": [
-            {"action":"accept","src":["*"],"dst":["*"],"ports":["*/*"]},
+        "acls": [
+            {"action":"accept","src":["*"],"dst":["*:*"]},
         ]
     }"#;
     let (status, body) = put_policy(&app, allow_all).await;
@@ -213,25 +269,24 @@ async fn policy_put_propagates_to_map_packet_filter() {
     );
 
     let mr = fetch_map(&app, &a_hex).await;
-    assert_eq!(mr.packet_filter.len(), 1, "allow-all ⇒ one wildcard rule");
-    let rule = &mr.packet_filter[0];
-    // Headscale-go parity: `*` principals expand into the IPv4+IPv6
-    // zero-prefix pair when emitted on the wire — see
-    // `wildcard_filter_cidrs()` in headscale-api-acl, called from
-    // both the user-policy path (sibling 612a7bb) and the bypass
-    // path (sibling PR #2). The dst side mirrors the same shape,
-    // producing TWO NetPortRange entries (one per address family)
-    // per wildcard rule. Tailscale clients accept both forms; the
-    // cidr pair is the canonical upstream representation.
+    assert!(mr.packet_filter.is_empty(), "upstream uses PacketFilters");
+    let base = base_packet_filter(&mr);
+    assert_eq!(base.len(), 1, "allow-all ⇒ one wildcard rule");
+    let rule = &base[0];
+    // Headscale-go parity: `*` sources expand into the IPv4+IPv6
+    // zero-prefix pair. PacketFilters["base"] is reduced for the map
+    // recipient, so this IPv4-only fixture keeps only the IPv4 wildcard
+    // destination entry.
     assert_eq!(rule.src_ips, vec!["0.0.0.0/0", "::/0"]);
-    assert_eq!(rule.dst_ports.len(), 2);
+    assert_eq!(rule.dst_ports.len(), 1);
     assert_eq!(rule.dst_ports[0].ip, "0.0.0.0/0");
-    assert_eq!(rule.dst_ports[1].ip, "::/0");
     assert_eq!(rule.dst_ports[0].ports.first, 0);
     assert_eq!(rule.dst_ports[0].ports.last, 65535);
-    assert_eq!(rule.dst_ports[1].ports.first, 0);
-    assert_eq!(rule.dst_ports[1].ports.last, 65535);
-    assert!(rule.ip_proto.is_empty(), "IPProto empty ⇒ all protocols");
+    assert_eq!(
+        rule.ip_proto,
+        vec![6, 17],
+        "HuJSON dst ports default to TCP+UDP"
+    );
 }
 
 // The headscale-api policy validator currently accepts the
@@ -269,8 +324,7 @@ async fn policy_get_round_trips_raw_hujson() {
 
     let raw = r#"{
         // a comment that must survive the round-trip
-        "version": 1,
-        "rules": []
+        "acls": []
     }"#;
     let (status, _body) = put_policy(&app, raw).await;
     assert_eq!(status, axum::http::StatusCode::OK);
@@ -302,7 +356,7 @@ async fn policy_get_round_trips_raw_hujson() {
 async fn policy_validate_does_not_mutate_store() {
     let (app, _wire, policy, _dir) = build_app();
 
-    let good = r#"{"version":1,"rules":[]}"#;
+    let good = r#"{"acls":[]}"#;
     let resp = app
         .clone()
         .oneshot(

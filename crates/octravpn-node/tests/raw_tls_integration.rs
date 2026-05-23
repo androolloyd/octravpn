@@ -42,6 +42,8 @@ use tokio::{
     net::TcpStream,
 };
 
+const TEST_CAPABILITY_VERSION: u16 = 113;
+
 fn octra_dns_store() -> headscale_api::dns::DnsStore {
     headscale_api::dns::DnsStore::from_spec(headscale_api::dns::DnsConfigSpec {
         base_domain: "octra.test".into(),
@@ -58,7 +60,9 @@ fn build_state() -> (WireState, tempfile::TempDir) {
         ip_allocator: Arc::new(TailnetIpAllocator::new("raw-tls-test")),
         machines: Arc::new(MachineRegistry::new()),
         registration_store: None,
-        derp_map: Arc::new(octravpn_mesh::tailscale_wire::DerpMap::default()),
+        derp_map: octravpn_mesh::tailscale_wire::DerpMapStore::shared(
+            octravpn_mesh::tailscale_wire::DerpMap::default(),
+        ),
         policy: Arc::new(headscale_api::policy::PolicyStore::default()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
         dns: std::sync::Arc::new(octra_dns_store()),
@@ -147,8 +151,10 @@ async fn non_ts2021_post_dispatches_to_router() {
     let client_cfg = client_config_trusting(&cert);
     let mut s = dial_tls(addr, client_cfg).await;
 
-    let req = b"GET /key HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
-    s.write_all(req).await.unwrap();
+    let req = format!(
+        "GET /key?v={TEST_CAPABILITY_VERSION} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+    );
+    s.write_all(req.as_bytes()).await.unwrap();
     s.flush().await.unwrap();
 
     let mut resp = Vec::new();
@@ -177,7 +183,10 @@ async fn non_ts2021_post_dispatches_to_router() {
 async fn ts2021_post_dispatches_to_drive_ts2021_over_tls() {
     let (state, _dir) = build_state();
     let server_pub = state.server_noise_key.public_bytes();
-    let initiator = state.server_noise_key.build_initiator(&server_pub).unwrap();
+    let initiator = state
+        .server_noise_key
+        .build_initiator_for_version(&server_pub, TEST_CAPABILITY_VERSION)
+        .unwrap();
     let (addr, cert) = spawn_raw_tls(state).await;
     let client_cfg = client_config_trusting(&cert);
     let mut s = dial_tls(addr, client_cfg).await;
@@ -201,7 +210,7 @@ async fn ts2021_post_dispatches_to_drive_ts2021_over_tls() {
     init_body.truncate(n);
     // Upstream layout: [version:u16be][type=1:u8][len:u16be][body...].
     // See controlbase.rs::MsgType doc.
-    payload.extend_from_slice(&39u16.to_be_bytes());
+    payload.extend_from_slice(&TEST_CAPABILITY_VERSION.to_be_bytes());
     payload.push(MsgType::Initiation as u8);
     payload.extend_from_slice(&(init_body.len() as u16).to_be_bytes());
     payload.extend_from_slice(&init_body);

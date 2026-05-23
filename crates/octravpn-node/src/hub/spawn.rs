@@ -155,7 +155,7 @@ impl Hub {
                         ip_allocator: Arc::new(TailnetIpAllocator::new(tailnet_id)),
                         machines: Arc::new(MachineRegistry::new()),
                         registration_store: None,
-                        derp_map: Arc::new(derp_map),
+                        derp_map: octravpn_mesh::tailscale_wire::DerpMapStore::shared(derp_map),
                         // P1-policy: live ACL store, shared with the
                         // admin surface (when mounted). The default
                         // empty store keeps the wire layer's

@@ -8,7 +8,12 @@
 //! `crates/octravpn-mesh/src/tailscale_wire/mod.rs` decision log) is
 //! still in play.
 
-use axum::body::to_bytes;
+use axum::{
+    body::to_bytes,
+    extract::Request,
+    middleware::{self, Next},
+    response::Response,
+};
 use octravpn_mesh::{
     ip_alloc::TailnetIpAllocator,
     tailscale_wire::{
@@ -16,7 +21,8 @@ use octravpn_mesh::{
         key_handler::OverTLSPublicKeyResponse,
         MachineRegistry,
     },
-    tailscale_wire_router, PreauthMinter, ServerNoiseKey, WireState, DEFAULT_PREAUTH_TTL,
+    tailscale_wire_embedded_control_router, PreauthMinter, ServerNoiseKey, WireState,
+    DEFAULT_PREAUTH_TTL,
 };
 use std::sync::Arc;
 use tempfile::tempdir;
@@ -39,7 +45,9 @@ fn build_state() -> (WireState, PreauthMinter, tempfile::TempDir) {
         ip_allocator: Arc::new(TailnetIpAllocator::new("interop-test")),
         machines: Arc::new(MachineRegistry::new()),
         registration_store: None,
-        derp_map: Arc::new(octravpn_mesh::tailscale_wire::DerpMap::default()),
+        derp_map: octravpn_mesh::tailscale_wire::DerpMapStore::shared(
+            octravpn_mesh::tailscale_wire::DerpMap::default(),
+        ),
         policy: Arc::new(headscale_api::policy::PolicyStore::default()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
         dns: std::sync::Arc::new(octra_dns_store()),
@@ -51,6 +59,10 @@ fn build_state() -> (WireState, PreauthMinter, tempfile::TempDir) {
     (state, minter, dir)
 }
 
+const TEST_CAPABILITY_VERSION: u32 = 113;
+const TEST_NOISE_MACHINE_KEY_HEX: &str =
+    "4242424242424242424242424242424242424242424242424242424242424242";
+
 fn machine_record(
     node_key_hex: String,
     user: &str,
@@ -59,13 +71,51 @@ fn machine_record(
 ) -> octravpn_mesh::MachineRecord {
     octravpn_mesh::MachineRecord::new_at(
         chrono::Utc::now(),
+        node_key_hex.clone(),
         node_key_hex,
-        String::new(),
         user.into(),
         hostname.into(),
         ipv4,
         false,
     )
+}
+
+fn test_machine_router(state: WireState) -> axum::Router {
+    use axum::routing::post;
+    use octravpn_mesh::tailscale_wire::{map, register};
+
+    axum::Router::new()
+        .route(
+            "/machine/:node_key/register",
+            post(register::handle_register),
+        )
+        .route("/machine/:node_key/map", post(map::handle_map))
+        .route("/machine/register", post(register::handle_register_flat))
+        .route("/machine/map", post(map::handle_map_flat))
+        .layer(middleware::from_fn(inject_test_noise_machine_key))
+        .with_state(state)
+}
+
+async fn inject_test_noise_machine_key(mut req: Request, next: Next) -> Response {
+    if req
+        .extensions()
+        .get::<octravpn_mesh::tailscale_wire::noise::NoisePeerMachineKey>()
+        .is_none()
+    {
+        let machine_key = machine_key_from_path(req.uri().path())
+            .unwrap_or_else(|| TEST_NOISE_MACHINE_KEY_HEX.to_string());
+        req.extensions_mut()
+            .insert(octravpn_mesh::tailscale_wire::noise::NoisePeerMachineKey(
+                machine_key,
+            ));
+    }
+    next.run(req).await
+}
+
+fn machine_key_from_path(path: &str) -> Option<String> {
+    let rest = path.strip_prefix("/machine/nodekey:")?;
+    let (node_key, suffix) = rest.split_once('/')?;
+    matches!(suffix, "register" | "map").then(|| node_key.to_string())
 }
 
 #[tokio::test]
@@ -74,14 +124,15 @@ async fn key_then_register_then_map_round_trip() {
     let pk = minter.mint("alice", DEFAULT_PREAUTH_TTL, false);
     let server_pub = state.server_noise_key.public_hex();
 
-    let app = tailscale_wire_router(state.clone());
+    let public_app = tailscale_wire_embedded_control_router(state.clone());
+    let app = test_machine_router(state.clone());
 
     // /key
-    let resp = app
+    let resp = public_app
         .clone()
         .oneshot(
             axum::http::Request::builder()
-                .uri("/key?v=39")
+                .uri(format!("/key?v={TEST_CAPABILITY_VERSION}"))
                 .body(axum::body::Body::empty())
                 .unwrap(),
         )
@@ -99,7 +150,7 @@ async fn key_then_register_then_map_round_trip() {
     // produce), it also returns 400 because the connection is not
     // upgradable in oneshot-mode. We assert both responses are 400 so
     // the test exercises the input-validation paths added in PR 2.
-    let resp = app
+    let resp = public_app
         .clone()
         .oneshot(
             axum::http::Request::builder()
@@ -113,7 +164,7 @@ async fn key_then_register_then_map_round_trip() {
     assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST);
 
     // With the upgrade header but no hijackable transport: still 400.
-    let resp = app
+    let resp = public_app
         .clone()
         .oneshot(
             axum::http::Request::builder()
@@ -131,6 +182,7 @@ async fn key_then_register_then_map_round_trip() {
     // /machine/.../register (plaintext JSON path)
     let node_hex = "ab".repeat(32);
     let reg_body = serde_json::json!({
+        "Version": TEST_CAPABILITY_VERSION,
         "NodeKey": format!("nodekey:{node_hex}"),
         "Auth": { "AuthKey": pk.key },
         "Hostinfo": { "Hostname": "peer-a", "OS": "linux", "OSVersion": "6.6" },
@@ -172,7 +224,12 @@ async fn key_then_register_then_map_round_trip() {
                 .method("POST")
                 .uri(format!("/machine/nodekey:{node_hex}/map"))
                 .header("content-type", "application/json")
-                .body(axum::body::Body::from(b"{}".to_vec()))
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "Version": TEST_CAPABILITY_VERSION
+                    }))
+                    .unwrap(),
+                ))
                 .unwrap(),
         )
         .await
@@ -211,13 +268,16 @@ async fn ts2021_framing_responds_to_initiation() {
     });
 
     // Client side: build a snow initiator and send the Initiation frame.
-    let mut init = state.server_noise_key.build_initiator(&server_pub).unwrap();
+    let mut init = state
+        .server_noise_key
+        .build_initiator_for_version(&server_pub, TEST_CAPABILITY_VERSION as u16)
+        .unwrap();
     let mut framed = Framed::new(client_io);
     let mut init_body = vec![0u8; 1024];
     let n = init.write_message(b"", &mut init_body).unwrap();
     init_body.truncate(n);
     framed
-        .write_initiation(39, &init_body)
+        .write_initiation(TEST_CAPABILITY_VERSION as u16, &init_body)
         .await
         .expect("write initiation");
 
@@ -252,10 +312,11 @@ async fn ts2021_framing_responds_to_initiation() {
 async fn flat_register_path_works_via_octravpn_node_router() {
     let (state, minter, _dir) = build_state();
     let pk = minter.mint("alice", DEFAULT_PREAUTH_TTL, false);
-    let app = tailscale_wire_router(state.clone());
+    let app = test_machine_router(state.clone());
 
     let node_hex = "1a".repeat(32);
     let reg_body = serde_json::json!({
+        "Version": TEST_CAPABILITY_VERSION,
         "NodeKey": format!("nodekey:{node_hex}"),
         "Auth": { "AuthKey": pk.key },
         "Hostinfo": { "Hostname": "peer-a", "OS": "linux", "OSVersion": "6.6" },
@@ -290,7 +351,7 @@ async fn flat_register_path_works_via_octravpn_node_router() {
 
     let map_body = serde_json::json!({
         "NodeKey": format!("nodekey:{node_hex}"),
-        "Version": 39,
+        "Version": TEST_CAPABILITY_VERSION,
     });
     let resp = app
         .oneshot(
@@ -422,8 +483,12 @@ async fn stream_true_emits_chunk_on_registry_change() {
         ),
     );
 
-    let app = tailscale_wire_router(state.clone());
-    let req_body = serde_json::json!({ "Stream": true, "Version": 39 });
+    let app = test_machine_router(state.clone());
+    let req_body = serde_json::json!({
+        "Stream": true,
+        "Version": TEST_CAPABILITY_VERSION,
+        "Compress": "zstd"
+    });
     let resp = app
         .oneshot(
             axum::http::Request::builder()
@@ -487,11 +552,11 @@ async fn stream_true_emits_chunk_on_registry_change() {
     let second: octravpn_mesh::tailscale_wire::MapResponse =
         serde_json::from_slice(&json_bytes).unwrap();
     assert_eq!(
-        second.peers.len(),
+        second.peers_changed.len(),
         1,
-        "stream should emit a fresh MapResponse on registry change"
+        "stream should emit a peer delta on registry change"
     );
-    assert_eq!(second.peers[0].addresses[0], "100.64.0.11/32");
+    assert_eq!(second.peers_changed[0].addresses[0], "100.64.0.11/32");
 }
 
 /// Wall 6 regression guard: when `WireState.derp_map` is populated
@@ -552,7 +617,7 @@ async fn map_response_includes_derp_map_when_configured() {
         ip_allocator: Arc::new(TailnetIpAllocator::new("interop-test")),
         machines: Arc::new(MachineRegistry::new()),
         registration_store: None,
-        derp_map: Arc::new(derp_map),
+        derp_map: octravpn_mesh::tailscale_wire::DerpMapStore::shared(derp_map),
         policy: Arc::new(headscale_api::policy::PolicyStore::default()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
         dns: std::sync::Arc::new(octra_dns_store()),
@@ -564,9 +629,10 @@ async fn map_response_includes_derp_map_when_configured() {
 
     // Register a single peer and read its `/machine/map` view.
     let pk = minter.mint("alice", DEFAULT_PREAUTH_TTL, false);
-    let app = tailscale_wire_router(state.clone());
+    let app = test_machine_router(state.clone());
     let node_hex = "ef".repeat(32);
     let reg_body = serde_json::json!({
+        "Version": TEST_CAPABILITY_VERSION,
         "NodeKey": format!("nodekey:{node_hex}"),
         "Auth": { "AuthKey": pk.key },
         "Hostinfo": { "Hostname": "peer-a", "OS": "linux", "OSVersion": "6.6" },
@@ -601,7 +667,7 @@ async fn map_response_includes_derp_map_when_configured() {
 
     let map_body = serde_json::json!({
         "NodeKey": format!("nodekey:{node_hex}"),
-        "Version": 39,
+        "Version": TEST_CAPABILITY_VERSION,
     });
     let resp = app
         .oneshot(
@@ -633,7 +699,7 @@ async fn map_response_includes_derp_map_when_configured() {
     assert!(raw_str.contains("\"HostName\""));
     assert!(raw_str.contains("\"DERPPort\""));
     assert!(raw_str.contains("\"InsecureForTests\""));
-    assert!(raw_str.contains("\"OmitDefaultRegions\""));
+    assert!(raw_str.contains("\"omitDefaultRegions\""));
 
     let mr: octravpn_mesh::tailscale_wire::MapResponse = serde_json::from_slice(&raw).unwrap();
     let derp_map = mr.derp_map.as_ref().expect("DERPMap present");
@@ -659,7 +725,7 @@ async fn map_response_includes_derp_map_when_configured() {
 #[tokio::test]
 async fn map_response_round_trips_disco_key_and_endpoints() {
     let (state, minter, _dir) = build_state();
-    let app = tailscale_wire_router(state.clone());
+    let app = test_machine_router(state.clone());
 
     // Register peer-a + peer-b via the wire router so the registry
     // sees the same MachineRecord shape stock `tailscale up` produces.
@@ -670,6 +736,7 @@ async fn map_response_round_trips_disco_key_and_endpoints() {
 
     for (hex, pk, host) in [(&a_hex, &pk_a.key, "peer-a"), (&b_hex, &pk_b.key, "peer-b")] {
         let body = serde_json::json!({
+            "Version": TEST_CAPABILITY_VERSION,
             "NodeKey": format!("nodekey:{hex}"),
             "Auth": { "AuthKey": pk },
             "Hostinfo": { "Hostname": host, "OS": "linux", "OSVersion": "6.6" },
@@ -698,7 +765,7 @@ async fn map_response_round_trips_disco_key_and_endpoints() {
     let disco_a = format!("discokey:{}", "1a".repeat(32));
     let endpoints_a = vec!["10.0.0.10:41641".to_string(), "[fe80::1]:41641".to_string()];
     let map_req_a = serde_json::json!({
-        "Version": 39,
+        "Version": TEST_CAPABILITY_VERSION,
         "DiscoKey": &disco_a,
         "Endpoints": &endpoints_a,
     });
@@ -725,7 +792,7 @@ async fn map_response_round_trips_disco_key_and_endpoints() {
 
     // Peer-b polls /map; its MapResponse.Peers[0] (== peer-a) must
     // carry DiscoKey + Endpoints byte-identical to what peer-a sent.
-    let map_req_b = serde_json::json!({ "Version": 39 });
+    let map_req_b = serde_json::json!({ "Version": TEST_CAPABILITY_VERSION });
     let resp = app
         .oneshot(
             axum::http::Request::builder()

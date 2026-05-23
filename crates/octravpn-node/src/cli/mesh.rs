@@ -320,7 +320,7 @@ async fn run_mesh_serve(
         ip_allocator: Arc::new(TailnetIpAllocator::new(tailnet_id)),
         machines: machines.clone(),
         registration_store: None,
-        derp_map: Arc::new(derp_map),
+        derp_map: octravpn_mesh::tailscale_wire::DerpMapStore::shared(derp_map),
         // P1-policy: empty store ⇒ wire layer falls back to
         // `allow_all_packet_filter`. The admin surface (when
         // mounted) holds an `Arc` clone of this store and uses
