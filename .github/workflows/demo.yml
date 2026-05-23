@@ -41,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: octravpn
+          path: octra
 
       - name: Checkout sibling repos (octra-foundry, headscale-rs)
         run: |
@@ -67,7 +67,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build octravpn binaries needed by tapes (host)
-        working-directory: octravpn
+        working-directory: octra
         run: |
           set -euo pipefail
           cargo build --release -p octravpn-client -p octravpn-node
@@ -86,23 +86,17 @@ jobs:
           # so the script sees it via `docker image inspect` and skips
           # the apt path entirely.
           #
-          # Layout note: Dockerfile.builder's COPYs use `octra/` paths
-          # but the checkout step puts the repo at `octravpn/`.
-          # BuildKit refuses to traverse symlinks for directory COPYs
-          # (run 26342245088 failed at `COPY octra/pvac-sidecar` with
-          # "/octra/pvac-sidecar: not found"), so make a hardlinked
-          # mirror — same inodes, BuildKit sees real files.
-          # cp -al = archive mode + hardlink where possible; near-zero
-          # disk cost on the same filesystem.
-          rm -rf octra
-          cp -al octravpn octra
+          # Dockerfile.builder's COPYs use `octra/` paths; checkout
+          # `path:` was renamed octravpn → octra so they resolve directly
+          # (no more symlink / hardlink dance — see run 26342421874 for
+          # the BuildKit-won't-follow-symlinks history).
           docker build \
             -f octra/docker/Dockerfile.builder \
             -t octravpn-builder:latest \
             . 2>&1 | tail -8
 
       - name: Build Linux binaries for fixture containers
-        working-directory: octravpn
+        working-directory: octra
         run: |
           set -euo pipefail
           # Canonical entry point for the Linux binaries the demo
@@ -145,7 +139,7 @@ jobs:
           headscale --version || true
 
       - name: Generate audit + receipt-journal fixture for tape 03
-        working-directory: octravpn
+        working-directory: octra
         run: |
           set -euo pipefail
           # Tape 03 (`audit-replay`) pins these paths:
@@ -203,7 +197,7 @@ jobs:
           ls -la demo/state/node/
 
       - name: Render light tapes (grouped by harness)
-        working-directory: octravpn
+        working-directory: octra
         run: |
           set -euo pipefail
           mkdir -p demo/recordings
@@ -262,7 +256,7 @@ jobs:
           ls -la demo/recordings/ || true
 
       - name: Mux captions + TTS audio onto light recordings
-        working-directory: octravpn
+        working-directory: octra
         run: |
           set -euo pipefail
           # The .vtt files live under demo/recordings/ as siblings of
@@ -276,11 +270,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: demo-recordings
-          path: octravpn/demo/recordings/
+          path: octra/demo/recordings/
           if-no-files-found: warn
 
       - name: Commit refreshed recordings back to repo (light job)
-        working-directory: octravpn
+        working-directory: octra
         run: |
           set -euo pipefail
           if [[ -z "$(git status --porcelain demo/recordings/)" ]]; then
@@ -322,7 +316,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: octravpn
+          path: octra
 
       - name: Checkout sibling repos
         run: |
@@ -345,7 +339,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build octravpn-node + analytics (host release for compose mount fallback)
-        working-directory: octravpn
+        working-directory: octra
         run: |
           set -euo pipefail
           # Host-side release builds: tapes invoke `octravpn` /
@@ -368,7 +362,7 @@ jobs:
             . 2>&1 | tail -8
 
       - name: Build Linux binaries for fixture containers
-        working-directory: octravpn
+        working-directory: octra
         run: |
           set -euo pipefail
           # Canonical entry point for the Linux binaries the heavy
@@ -379,7 +373,7 @@ jobs:
           bash demo/lib/build-linux-binaries.sh
 
       - name: Render heavy tapes (grouped by harness)
-        working-directory: octravpn
+        working-directory: octra
         run: |
           set -euo pipefail
           mkdir -p demo/recordings
@@ -474,7 +468,7 @@ jobs:
           ls -la demo/recordings/ || true
 
       - name: Mux captions + TTS audio onto heavy recordings
-        working-directory: octravpn
+        working-directory: octra
         run: |
           set -euo pipefail
           bash demo/lib/render-with-captions.sh || echo "(captioning non-fatal)"
@@ -485,11 +479,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: demo-recordings-heavy
-          path: octravpn/demo/recordings/
+          path: octra/demo/recordings/
           if-no-files-found: warn
 
       - name: Commit refreshed recordings back to repo
-        working-directory: octravpn
+        working-directory: octra
         run: |
           set -euo pipefail
           if [[ -z "$(git status --porcelain demo/recordings/)" ]]; then
