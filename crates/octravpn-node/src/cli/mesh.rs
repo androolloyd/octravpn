@@ -463,7 +463,7 @@ async fn run_mesh_serve(
     let state_dir_path = std::path::PathBuf::from(&state_dir);
     let sans = SanConfig::with_hostname(&cert_hostname);
     let cfg = ServeConfig {
-        http_addr,
+        http_addr: Some(http_addr),
         https_addr,
         state_dir: state_dir_path.clone(),
         sans: sans.clone(),
@@ -490,7 +490,9 @@ async fn run_mesh_serve(
 
     // Wait for whichever listener exits first. Either bubbling up an
     // error is fine — the harness teardown handles container restart.
-    let http_fut = handle.http;
+    let http_fut = handle
+        .http
+        .context("mesh serve: http listener disabled unexpectedly")?;
     let https_fut = handle.https;
     match https_fut {
         Some(https_fut) => {
