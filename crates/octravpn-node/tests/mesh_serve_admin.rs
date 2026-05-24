@@ -155,9 +155,8 @@ async fn mesh_serve_policy_get_returns_loaded_acl() {
     // Pre-load a policy doc via the shared store (mimicking a prior PUT).
     let raw = r#"{
         // operator-loaded policy
-        "version": 1,
-        "rules": [
-            {"action":"accept","src":["*"],"dst":["*"],"ports":["*/*"]}
+        "acls": [
+            {"action":"accept","src":["*"],"dst":["*:*"]}
         ]
     }"#;
     {
@@ -194,10 +193,7 @@ async fn mesh_serve_policy_set_persists_and_propagates() {
     let app = build_admin_router(state, Some(Arc::from(TOK)));
 
     let payload = r#"{
-        "version": 1,
-        "rules": [
-            {"action":"deny","src":["*"],"dst":["*"],"ports":["*/*"]}
-        ]
+        "acls": []
     }"#;
     let resp = app
         .clone()
@@ -240,7 +236,7 @@ async fn mesh_serve_policy_set_persists_and_propagates() {
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["loaded"], serde_json::Value::Bool(true));
     let returned_raw = v["raw"].as_str().unwrap();
-    assert!(returned_raw.contains("deny"));
+    assert!(returned_raw.contains("acls"));
 }
 
 /// Both the full Hub and `mesh serve` mount the SAME

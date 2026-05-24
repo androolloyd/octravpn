@@ -59,12 +59,9 @@ control container starts; both stock tailscale containers start
 probes `/key`, `/machine/{mkey}/map`, `/derp/probe` and gets
 `Connection refused` on all three.
 
-That's the drift this test surfaces:
-`crates/octravpn-mesh/src/headscale_bridge.rs` is pin-only ("zero
-Rust-API coupling to headscale-rs"); `octravpn-node`'s control plane
-(`crates/octravpn-node/src/control.rs`) only mounts `/session`,
-`/session/:id`, `/health`, `/metrics`, `/events` — none Tailscale
-coordination endpoints. No preauth-mint CLI, no admin RPC, no
-TS2021/Noise surface. Once the bridge lands (e.g. `octravpn-node
-mesh mint-preauth` or `POST /admin/preauth`), the script
-auto-advances past step 3 and asserts an actual `tailscale ping`.
+That was the original drift this test surfaced. The current Octra /
+headscale-rs boundary is different: headscale-rs owns `/key`, `/ts2021`,
+and flat + keyed `/machine/{register,map}`; Octra owns the harness,
+the embedded CLI passthrough, and the compatibility `POST /admin/preauth`
+shim used to mint keys for the test. The script now exercises that
+boundary directly and asserts an actual `tailscale ping`.

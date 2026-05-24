@@ -21,7 +21,7 @@ A short string. Two formats are in use, both work:
   embedded `octravpn-node mesh mint-preauth` command (see
   [`crates/octravpn-node/src/cli/mesh.rs`](../../crates/octravpn-node/src/cli/mesh.rs)).
 - **Headscale-stock format** — a 48-character hex blob. Minted via
-  `octravpn-node headscale preauthkeys create --user <U>` (see
+  `octravpn-node headscale preauthkeys create --user <ID>` (see
   [`docs/operators/cli-migration.md`](../operators/cli-migration.md)).
 
 You don't need to know which format you got — `tailscale up` accepts
@@ -117,7 +117,7 @@ Two cases:
 
 **Untagged (the default).** You join under your "user" identity (the
 preauth key was minted under a specific user, e.g.
-`octravpn-node headscale preauthkeys create --user alice`). All
+`octravpn-node headscale preauthkeys create --user 42`). All
 policy decisions are scoped to that user.
 
 **Tagged.** The operator's HuJSON policy declares ACL rules like

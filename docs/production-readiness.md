@@ -7,7 +7,7 @@ fragmented state from `production-checklist.md` (v1 gates),
 `tailscale-interop-blocker.md` (Wall 5), and `octra-dev-questions.md`
 (chain-side blockers).
 
-**Last updated.** 2026-05-19.
+**Last updated.** 2026-05-24.
 
 **Operator persona.** A single operator: one wallet, one bonded circle on
 Octra mainnet, one tailnet hosting 5–50 stock-`tailscale` clients, real
@@ -26,7 +26,9 @@ the full lifecycle clears smoke + a 40-case adversarial drill. The
 client/node Rust stack compiles, has TLS-pinned cert validation,
 sealed-key boot, and a signed receipt journal. The mesh control plane
 ships `/key`, `/ts2021`, flat `/machine/{register,map}`, controlbase
-framing, BE-nonce noise transport, and h2-over-Noise (commit `e0337b5`).
+framing, BE-nonce noise transport, h2-over-Noise, stream chunks,
+PacketFilters, and the gRPC-first embedded admin CLI path (headscale-rs
+`201fc8c`).
 Where we are NOT: stock `tailscale up` against our control plane still
 exits non-zero (Wall 5 — post-register the daemon never reaches "Up");
 chain-side `fhe_*` host calls revert on every newly-deployed contract;
@@ -35,19 +37,20 @@ independent audit has started.
 
 **Smallest set that closes the gap to "one operator on mainnet."** Five
 items (enumerated in P0 below): close Wall 5 so a stock client actually
-joins, finish operator CLI surface for the day-2 ops a node operator
-needs (preauth keys, policy reload, node lifecycle), deploy v3 AML to
-mainnet behind an owner-wallet ceremony, replace devnet-only smoke
-harness with one mainnet-runnable smoke, and ship a v0 operator runbook
-that covers the keys, the bond, the receipts journal, and the recovery
-paths. None of these depend on Octra dev-team action; all four of the
+joins, verify the embedded headscale admin workflow against the
+gRPC-first surface, deploy v3 AML to mainnet behind an owner-wallet
+ceremony, replace devnet-only smoke harness with one mainnet-runnable
+smoke, and ship a v0 operator runbook that covers the keys, the bond,
+the receipts journal, and the recovery paths. None of these depend on
+Octra dev-team action; all four of the
 chain-side asks in `octra-dev-questions.md` improve v3 but do not block
 the first mainnet operator.
 
 **What we are NOT doing for v0.1.** Multi-tenant control plane,
-DERP-relay hosting, OIDC SSO, MagicDNS, delta `MapResponse` updates,
-HFHE-encrypted ledger, circle-resident bonds. All deferred to v1.0
-(see "broadly" section below).
+DERP-relay hosting, OIDC SSO, full MagicDNS/SplitDNS, production-grade
+restart/batcher parity for `MapResponse` deltas, HFHE-encrypted ledger,
+and circle-resident bonds. All deferred to v1.0 (see "broadly" section
+below).
 
 ## Inventory
 
@@ -58,10 +61,10 @@ HFHE-encrypted ledger, circle-resident bonds. All deferred to v1.0
 | Mesh | `GET /key` + persistent X25519 server key | shipped (`e0337b5`) | — | shipped |
 | Mesh | TS2021 / controlbase + Noise IK + EarlyNoise | shipped — Wall 4 closed (`e0337b5`) | — | shipped |
 | Mesh | Flat `/machine/{register,map}` + TLS-on-443 | shipped (`2654663`) | — | shipped |
-| Mesh | `MapResponse` per-chunk streaming | partial — single-shot + 30s keepalives, no per-chunk writer | task #215 (Wall 5) | per-chunk ndjson; stock client reaches "Up" + survives a peer change |
+| Mesh | `MapResponse` per-chunk streaming | shipped in headscale-rs; Octra packaged path still needs stock-client regression | task #215 (Wall 5 packaging follow-through) | packaged `octravpn-node` path reaches "Up" + survives a peer change |
 | Mesh | Stock `tailscale up` joins mesh — exit 0 on `docker/devnet/tailscale-interop/run-interop.sh` | **failing** — Wall 5 | task #215 | `run-interop.sh` exits 0 in CI for 5 consecutive nights |
 | Mesh | EarlyNoise validated against real client bytes | unverified — daemon never reaches `/ts2021` cleanly in stock-client flow | task #215 | tcpdump shows our challenge accepted |
-| Mesh | `MapResponse.PacketFilters` populated from ACL | missing | headscale-rs P1 (gap-analysis §4) | ACL deny rules enforced client-side on real `tailscale ping` denials |
+| Mesh | `MapResponse.PacketFilters` populated from ACL | covered in headscale-rs wire tests and paired ACL smokes; Octra needs packaged-path regression | headscale-rs parity ledger + gap-analysis §4 | ACL deny rules enforced client-side on real `tailscale ping` denials in the Octra packaged daemon path |
 
 ### 2. Chain integration (v3 substrate)
 
@@ -87,7 +90,7 @@ HFHE-encrypted ledger, circle-resident bonds. All deferred to v1.0
 | CLI | `octravpn-node` v3 subcommand surface (17 cmds) | shipped (`00c274a`) | — | shipped |
 | CLI | Operator audit CLI (`octravpn audit …` for ledger + receipt diffs) | not started | task #217 | covers session/settle/claim diff against chain state; flags drift |
 | CLI | Operator CLI v0 — production-runbook subset (bond, register-circle, rotate keys, dump receipts, mirror state-root) | partial — subcommands exist; not consolidated under one operator-facing UX | task #216 | one binary, one `--config`, ten verbs an operator needs in a runbook |
-| CLI | Headscale-side operator CLI: `users`, `preauthkeys`, `policy`, `apikeys` | missing | headscale-gap-analysis.md §11 | preauth keys are CLI-manageable; HTTP `/admin/preauth` shim no longer load-bearing |
+| CLI | Headscale-side operator CLI: `users`, `nodes`, `preauthkeys`, `auth`, `apikeys`, `policy`, `tailnet`, `debug` | shipped in embedded passthrough; gRPC-first with explicit legacy HTTP fallback | headscale-gap-analysis.md §11 | passthrough tests stay byte-identical to standalone `headscale`; runbooks prefer `headscale preauthkeys` over raw `/admin/preauth` |
 | Admin | `/admin/preauth` token-gated minter | shipped (`2e1ad52`, `f4f5e65`) | — | shipped |
 | Admin | `/events` SSE gated by `events_token` | shipped (`f4f5e65`) | — | shipped |
 | Packaging | Reproducible builds for node + client | not started | F-row of `production-checklist.md` | cosign-signed artefact; bit-for-bit reproducible from a clean checkout |
@@ -149,7 +152,7 @@ HFHE-encrypted ledger, circle-resident bonds. All deferred to v1.0
 | Octra | Sealed-asset write events | open ask | `octra-dev-questions.md` §6 | event emitted on `circle_asset_put_encrypted`; subscribable |
 | Octra | Mainnet RPC body cap documented | open ask | `octra-dev-questions.md` §7 | a number we can target for client-side chunking |
 | headscale-rs | Wire-surface drift fixes (P0 batch from gap analysis) | in progress | task #214 (drift), task #215 (Wall 5) | headscale-rs at parity with `tailscale_wire` PRs we landed locally |
-| headscale-rs | Persistent `preauth_keys` + `machines` + `users` tables | not started | headscale-gap-analysis.md §10 | nodes survive a control-plane restart |
+| headscale-rs | Persistent `preauth_keys` + `machines` + `users` tables | adapters/migrations exist; production wiring audit remains | headscale-gap-analysis.md §10 | nodes survive a control-plane restart in the packaged daemon path |
 | headscale-rs | Embedded DERP server | not started | headscale-gap-analysis.md §5 | only required for WAN multi-tenant; not v0.1 |
 
 ## P0 (blocks the first mainnet deploy)
@@ -212,10 +215,11 @@ on mainnet today.
 What we need before a second operator can self-serve onto the network
 without our handholding.
 
-- **headscale-rs persistence layer.** Today `MachineRegistry` and
-  `PreauthMinter` are in-process; a restart loses every joined node.
-  Schema is straightforward (see `headscale-gap-analysis.md` §10), the
-  work is wiring sqlx migrations + handlers. Size: medium.
+- **headscale-rs persistence wiring audit.** The tables and adapters now
+  exist for users, machines, API keys, policies, and preauth keys; prove
+  the packaged daemon path uses them end-to-end and decide whether
+  Octra's `/admin/preauth` compatibility shim should share that store.
+  Size: medium.
 - **AML→HFHE bridge runs on new deploys** (`octra-dev-questions.md`
   §1). Without this, v3 settle/claim leaks plaintext running totals to
   any chain observer. v0.1 ships with this leak documented; v1.0 does
@@ -250,14 +254,15 @@ without our handholding.
 - **Sealed-asset write events** (`octra-dev-questions.md` §6). Lets
   off-chain auditors subscribe rather than poll. Latency improvement,
   not correctness.
-- **HuJSON ACL parser**, autogroups beyond `internet`, NodeAttr
-  resolution. Upstream parity polish.
+- **Autogroups beyond `internet`, `ipset:` macros, NodeAttr
+  resolution.** Upstream parity polish beyond the shipped HuJSON/ACL
+  and PacketFilters path.
 - **DERP map URL/file loaders.** Lets operators point at external
   relays without restart.
 - **MagicDNS / SplitDNS.** Mesh names today resolve through the
   hard-coded `octra.test` domain with no responder.
-- **gRPC admin API completeness.** `headscale-api/src/grpc.rs` exists;
-  per-RPC handler coverage was not enumerated.
+- **gRPC admin exactness.** The embedded CLI groups are wired; continue
+  expanding exact error/status coverage against upstream.
 - **`/version`, `/robots.txt`** routes.
 - **Annual re-audit cadence.** Worth scheduling once item 1 of the
   audit gate lands; not blocking v0.

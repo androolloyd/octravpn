@@ -69,6 +69,9 @@ fn build_app() -> (axum::Router, WireState, PolicyStore, tempfile::TempDir) {
         runtime_config: Arc::new(octravpn_mesh::tailscale_wire::RuntimeConfigSnapshot::default()),
         registration_cache: Arc::new(octravpn_mesh::tailscale_wire::RegistrationCache::new()),
         pings: Arc::new(octravpn_mesh::tailscale_wire::PingTracker::new()),
+        mapresponse_debug: Arc::new(
+            octravpn_mesh::tailscale_wire::MapResponseDebugStore::disabled(),
+        ),
     };
 
     let admin_state = admin::AdminState::builder()
@@ -289,32 +292,20 @@ async fn policy_put_propagates_to_map_packet_filter() {
     );
 }
 
-// The headscale-api policy validator currently accepts the
-// minimal `{ "rules": [] }` body without requiring the `version`
-// field (200 instead of the expected 400). The reject-on-missing-version
-// behaviour lives upstream in the sibling `headscale-rs` repo, which is
-// on its own release train — see the corresponding PR there. Until the
-// sibling lands the stricter schema check, this test asserts behaviour
-// the server doesn't yet provide, so we mark it ignored rather than
-// blanket-weakening the assertion.
-#[ignore = "blocked on headscale-rs policy schema strictness (sibling-repo PR)"]
 #[tokio::test]
-async fn policy_put_rejects_invalid_hujson() {
+async fn policy_put_accepts_upstream_policy_without_version() {
     let (app, _wire, policy, _dir) = build_app();
 
-    // Malformed: missing `version`. The schema validator must reject;
-    // the store stays untouched.
-    let bad = r#"{ "rules": [] }"#;
-    let (status, body) = put_policy(&app, bad).await;
-    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
-    let err_msg = body["error"].as_str().unwrap_or("");
+    // Headscale-go accepts policies without an explicit version and
+    // defaults them to the current policy schema. This used to be an
+    // Octra-side stale expectation; keep it pinned so Octra does not
+    // reintroduce stricter-than-upstream policy validation.
+    let raw = r#"{ "acls": [] }"#;
+    let (status, body) = put_policy(&app, raw).await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
     assert!(
-        err_msg.contains("version") || err_msg.contains("missing"),
-        "error should name the missing `version` field, got: {body}"
-    );
-    assert!(
-        !policy.is_loaded(),
-        "rejected PUT must not mutate the store"
+        policy.is_loaded(),
+        "accepted PUT must mutate the shared policy store"
     );
 }
 

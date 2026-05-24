@@ -40,7 +40,7 @@ To render a single tape pass any unique substring:
 | `03-audit-replay.tape` | `octravpn-node audit replay` + `audit verify` | `octravpn-node`, fixture audit + receipt journal at `demo/state/node/` |
 | `04-mesh-preauth.tape` | `mesh mint-preauth` (CLI + HTTP) | `octravpn-node` |
 | `05-v3-smoke.tape` | `docker/devnet/v3-smoke.sh` full lifecycle | funded `deployer.key`, foundry binary, devnet RPC |
-| `06-tailscale-interop.tape` | `docker/devnet/tailscale-interop/run-interop.sh` exit 0 | Docker, sibling `octra-foundry` + `headscale-rs` repos, openssl |
+| `06-tailscale-interop.tape` | `docker/devnet/tailscale-interop/run-interop.sh` exit 0 | Docker, `octra-foundry` + `headscale-rs` checkouts (default siblings; override headscale with `HEADSCALE_RS_PATH`), openssl |
 | `07-headscale-cli.tape` | `headscale users create / preauthkeys create / nodes list` | `headscale` binary (from `headscale-rs`) |
 
 Each tape leads with a comment block stating exact prereqs. Tapes

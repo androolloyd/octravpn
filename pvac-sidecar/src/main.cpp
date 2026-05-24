@@ -93,7 +93,6 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* HFHE_PREFIX = "hfhe_v1|";
-constexpr const char* RP_PREFIX = "rp_v1|";
 constexpr const char* ZKZP_PREFIX = "zkzp_v2|";
 
 bool debug_enabled() {

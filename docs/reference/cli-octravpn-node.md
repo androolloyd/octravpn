@@ -1,4 +1,4 @@
-<!-- captured from binary at SHA 2ffead7 (debug build, 2026-05-20) -->
+<!-- refreshed for headscale-rs 201fc8c passthrough notes on 2026-05-24; regenerate full CLI captures before release -->
 <!-- Refresh command:
        cargo build -p octravpn-node
        BIN=./target/debug/octravpn-node
@@ -919,16 +919,16 @@ Source: `cli/ops.rs::ReceiptVerifyArgs::dispatch` → `cli_ops.rs::run_receipt_v
 | Code | Meaning |
 |---|---|
 | 0 | Success (or `audit verify` on a clean chain, or `config validate` schema-clean) |
-| 1 | Generic failure (anyhow chain printed to stderr) |
+| 1 | Generic failure (anyhow chain printed to stderr), or headscale handler usage/runtime error |
 | 2 | (reserved by clap for usage errors) |
 | 3 | Headscale: connection / DNS / TLS pre-status |
 | 4 | Headscale: auth (401/403) |
 | 5 | Headscale: 404 |
 | 6 | Headscale: any other 4xx/5xx / decode |
 
-The 0/3/4/5/6 contract comes from `headscale_cli::admin::ExitCode`
-(`headscale-rs/headscale-cli/src/admin/mod.rs:75-81`); the other codes
-are the standard clap/anyhow contract from `cli/mod.rs::run`.
+The headscale 0/1/3/4/5/6 contract comes from
+`headscale_cli::admin::ExitCode`; clap parser errors still exit 2
+before dispatch.
 
 ---
 

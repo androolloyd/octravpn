@@ -170,12 +170,11 @@ Validate the document **before** pushing it live:
 octravpn-node headscale policy check \
     --server  http://localhost:51821 \
     --token   "$HEADSCALE_ADMIN_TOKEN" \
-    ./policy.hujson
+    --file    ./policy.hujson
 ```
 
-`policy check` takes the FILE as a positional arg. Exit 0 means
-parse-only validation passed. Exit non-zero with the line offset of
-the first error.
+Exit 0 means parse-only validation passed. Exit non-zero with the line
+offset of the first error.
 
 ---
 
@@ -185,7 +184,7 @@ the first error.
 octravpn-node headscale policy set \
     --server  http://localhost:51821 \
     --token   "$HEADSCALE_ADMIN_TOKEN" \
-    ./policy.hujson
+    --file    ./policy.hujson
 ```
 
 This calls `PUT /api/v1/policy` on the operator's mesh-control admin
@@ -200,8 +199,10 @@ including comments — useful for the rotation flow in step 9.
 
 > **Embedded `headscale` admin CLI.** Every subcommand the standalone
 > `headscale` binary supports is reachable here verbatim
-> (`octravpn-node headscale {users,nodes,preauthkeys,policy,tailnet} …`).
-> Same `--server`, `--token`, `--json` flags. See
+> (`octravpn-node headscale {users,nodes,preauthkeys,auth,apikeys,policy,tailnet,debug} …`).
+> The embedded surface is gRPC-first (`--unix-socket` locally, or
+> `--address` + `--api-key` remotely) with legacy `--server`/`--token`
+> fallback where the command keeps one. See
 > [`../operators/cli-migration.md`](../operators/cli-migration.md) for
 > the migration from the old `mesh policy` / `mesh status` arms.
 
@@ -393,13 +394,13 @@ $EDITOR policy.hujson
 octravpn-node headscale policy check \
     --server  http://<operator>:51821 \
     --token   "$HEADSCALE_ADMIN_TOKEN" \
-    ./policy.hujson
+    --file    ./policy.hujson
 
 # 3. PUT.
 octravpn-node headscale policy set \
     --server  http://<operator>:51821 \
     --token   "$HEADSCALE_ADMIN_TOKEN" \
-    ./policy.hujson
+    --file    ./policy.hujson
 ```
 
 Verify by re-GETting:
@@ -453,8 +454,7 @@ octravpn-node headscale nodes delete \
 ```
 
 Then expire any outstanding preauth keys. `preauthkeys expire` takes
-the visible PREFIX of the key as a positional arg (you record this at
-mint time):
+the key's numeric ID:
 
 ```bash
 # List the user's outstanding keys to find the prefix.
@@ -466,7 +466,7 @@ octravpn-node headscale preauthkeys list \
 octravpn-node headscale preauthkeys expire \
     --server http://<operator>:51821 \
     --token  "$HEADSCALE_ADMIN_TOKEN" \
-    <key-prefix>
+    --id     <key-id>
 ```
 
 ### Layer 2 — rotate the sealed `/policy.json` passphrase

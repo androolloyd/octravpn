@@ -2,39 +2,30 @@
 //!
 //! ## What this module is, today
 //!
-//! A **minimum-viable preauth-key minter** so the
-//! `docker/devnet/tailscale-interop/run-interop.sh` test can advance
-//! past exit code 20 ("no preauth-key minting surface available").
+//! A **small preauth-key minter** shared by Octra's local admin route
+//! and the headscale-rs Tailscale-wire handlers.
 //!
 //! This is intentionally *not* a full Tailscale coordination server.
-//! It implements only what the interop test directly probes:
+//! It implements only the Octra-owned part of the join flow:
 //!
 //!   - Mint a preauth key for a named user.
 //!   - Hold the key in an in-process store so an operator (or test
 //!     harness) can later present it as a bearer credential to
 //!     `tailscale up --authkey ...`.
 //!
-//! See `docs/tailscale-interop-blocker.md` for what is *still*
-//! missing between "we hand out a preauth key" and "stock `tailscale`
-//! actually completes a handshake against us" — chiefly the
-//! `/key`, `/machine/{node_key}/register` and
-//! `/machine/{node_key}/map` long-poll endpoints, plus the
-//! TS2021 Noise frame layer they ride on. That work is a
-//! multi-week effort and is tracked in the blocker doc, not here.
+//! The Tailscale-wire surface itself now lives in headscale-rs:
+//! `GET /key`, `POST /ts2021`, and the flat + keyed
+//! `/machine/.../{register,map}` handlers are outside this module.
+//! Remaining interop gaps are tracked in `docs/tailscale-interop-blocker.md`
+//! and are mostly about map-stream semantics, lifecycle, and production
+//! polish rather than the existence of these routes.
 //!
-//! ## Why not pull in `headscale-rs`?
+//! ## Why keep this module?
 //!
-//! `headscale-rs` (sibling repo at `~/Development/headscale-rs`) is
-//! *not* a drop-in Tailscale coordination server. Its public
-//! handlers (`headscale_api::http::build_router`) expose a custom
-//! `/api/v1/nodes`, `/api/v1/register`, `/api/v1/transfer` JSON
-//! surface — *not* the
-//! `GET /key` + `POST /machine/{node_key}/{register,map}` wire
-//! protocol that stock `tailscale up` speaks. Linking against it
-//! would not get us to exit code 0 either; it would just pull in
-//! a second incompatible surface. Until either (a) headscale-rs
-//! grows the Tailscale wire protocol upstream or (b) we vendor /
-//! fork a Rust port of it, the bridge stays preauth-only.
+//! Octra still owns the `/admin/preauth` convenience shim and the
+//! chain/audit-facing counters around it. A future shared persistent
+//! preauth admin can replace the in-memory store, but this module is
+//! deliberately narrow until that wiring is well-covered.
 //!
 //! ## Canonical inbound contract: `MeteringSnapshot`
 //!

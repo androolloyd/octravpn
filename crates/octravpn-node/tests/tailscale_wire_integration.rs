@@ -55,6 +55,9 @@ fn build_state() -> (WireState, PreauthMinter, tempfile::TempDir) {
         runtime_config: Arc::new(octravpn_mesh::tailscale_wire::RuntimeConfigSnapshot::default()),
         registration_cache: Arc::new(octravpn_mesh::tailscale_wire::RegistrationCache::new()),
         pings: Arc::new(octravpn_mesh::tailscale_wire::PingTracker::new()),
+        mapresponse_debug: Arc::new(
+            octravpn_mesh::tailscale_wire::MapResponseDebugStore::disabled(),
+        ),
     };
     (state, minter, dir)
 }
@@ -144,12 +147,10 @@ async fn key_then_register_then_map_round_trip() {
     assert_eq!(okr.public_key, format!("mkey:{server_pub}"));
 
     // /ts2021: without the `Upgrade: tailscale-control-protocol`
-    // header the handler returns 400 — the documented "you POSTed,
-    // but not as an upgrade" path. With the upgrade header but no
-    // hyper OnUpgrade extension (which `tower::oneshot` can't
-    // produce), it also returns 400 because the connection is not
-    // upgradable in oneshot-mode. We assert both responses are 400 so
-    // the test exercises the input-validation paths added in PR 2.
+    // header the handler matches headscale-go's generic "Internal
+    // error" response. With the upgrade header but no hyper OnUpgrade
+    // extension (which `tower::oneshot` can't produce), it returns
+    // 400 because the connection is not upgradable in oneshot-mode.
     let resp = public_app
         .clone()
         .oneshot(
@@ -161,7 +162,9 @@ async fn key_then_register_then_map_round_trip() {
         )
         .await
         .unwrap();
-    assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST);
+    assert_eq!(resp.status(), axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+    let raw = to_bytes(resp.into_body(), 4096).await.unwrap();
+    assert_eq!(raw.as_ref(), b"Internal error\n");
 
     // With the upgrade header but no hijackable transport: still 400.
     let resp = public_app
@@ -625,6 +628,9 @@ async fn map_response_includes_derp_map_when_configured() {
         runtime_config: Arc::new(octravpn_mesh::tailscale_wire::RuntimeConfigSnapshot::default()),
         registration_cache: Arc::new(octravpn_mesh::tailscale_wire::RegistrationCache::new()),
         pings: Arc::new(octravpn_mesh::tailscale_wire::PingTracker::new()),
+        mapresponse_debug: Arc::new(
+            octravpn_mesh::tailscale_wire::MapResponseDebugStore::disabled(),
+        ),
     };
 
     // Register a single peer and read its `/machine/map` view.

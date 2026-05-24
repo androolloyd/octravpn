@@ -7,15 +7,18 @@ is `202602201200-clear-tagged-node-user-id`, v0.27.x line) and our
 sibling Rust port at `/Users/androolloyd/Development/headscale-rs/`
 (sibling-repo layout + dep-resolution strategy:
 see [`docs/architecture/headscale-dep-strategy.md`](./architecture/headscale-dep-strategy.md)).
+The implementation notes below were refreshed against headscale-rs
+`201fc8c` on 2026-05-24; set `HEADSCALE_RS_PATH` in Octra scripts when
+the checkout is not at the default sibling path.
 Prioritised by what blocks **stock `tailscale up` (v1.78+) joining a
 mesh hosted by an OctraVPN-derived control plane**, as exercised by
 `docker/devnet/tailscale-interop/run-interop.sh`.
 
-**Treatment of the in-flight migration.** The seven files in
-`crates/octravpn-mesh/src/tailscale_wire/` (controlbase, key_handler,
-map, mod, noise, register, wire) already have copies under
-`headscale-api/src/tailscale_wire/` — assume "shipped in headscale-rs"
-when comparing.
+**Treatment of the wire migration.** The Tailscale-wire routes now live
+under `headscale-api/src/tailscale_wire/` in headscale-rs. Octra owns
+the harness, `POST /admin/preauth` shim, and embedding points; route
+existence for `/key`, `/ts2021`, and `/machine/...` should be evaluated
+in headscale-rs, not in old Octra-local copies.
 
 **Priorities.** P0 = blocks `tailscale up` exit 0. P1 = blocks realistic
 multi-peer deployment. P2 = operator-grade polish.
@@ -31,25 +34,25 @@ cited, not re-explained.
 | Subsystem            | Upstream (Go) ships                                                 | headscale-rs ships                                              | Gap            | Priority |
 | -------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------- | -------------- | -------- |
 | `GET /key`           | `tailcfg.OverTLSPublicKey{,Legacy}`                                 | yes (`tailscale_wire/key_handler.rs`)                           | none           | —        |
-| Noise IK + controlbase | `controlhttpserver.AcceptHTTP`, h2-over-noise                     | controlbase framing + `NoiseStream` + h2 + EarlyNoise stub      | EarlyNoise unverified | P0 |
-| `POST /ts2021`       | Upgrade hijack, runs noise router under h2                          | shipped                                                         | client never reaches it (see below) | P0 |
-| `/machine/register` (flat)  | served on noise router (`hscontrol/noise.go`)                 | only `/machine/{node_key}/register` (path-param shape)          | flat path missing | **P0** |
-| `/machine/map` (flat)       | served on noise router                                        | only `/machine/{node_key}/map`                                  | flat path missing | **P0** |
-| TLS on :443          | yes (`server_tls.go`, autocert + manual cert)                       | none                                                            | client forces 443 dial | **P0** |
-| `MapResponse.Stream=true` ndjson | required, streaming chunks                                | single-shot body; 30s keepalives implemented but not wrapped per-chunk | partial | **P0** |
-| Full `MapResponse` fields | Node, Peers, PeersChanged{,Patch,Removed}, DNSConfig, DERPMap, Domain, PacketFilters, UserProfiles, SSHPolicy, ControlTime, Debug, CollectServicesDisabled, PingRequest | Node, Peers, DnsConfig, DerpMap, Domain, KeepAlive | majority of fields | P1 |
-| Delta map updates    | `PeersChanged` / `PeersChangedPatch` / `PeersRemoved`               | none — full snapshot only                                       | full           | P1       |
-| ACL engine           | HuJSON, `policy/v2/`, autoApprovers, ssh, tagOwners, autogroups, ipsets, route approvers | strict-JSON ACL parser, autoApprovers (routes+exitNode), ssh, tagOwners, groups, `autogroup:internet` | HuJSON, autogroups beyond `internet`, NodeAttrs, route auto-approval wiring | P1 |
-| Pre-auth keys        | reusable / single-use / ephemeral / tagged, expiry, per-user, bcrypt-hashed | `PreauthMinter` in-process, single-use bearer       | reusable/ephemeral/tagged/expiry/persistence | **P1** |
+| Noise IK + controlbase | `controlhttpserver.AcceptHTTP`, h2-over-noise                     | controlbase framing + BE-nonce transport + h2-over-Noise        | behavioural validation remains in Wall 5 | P0 |
+| `POST /ts2021`       | Upgrade hijack, runs noise router under h2                          | shipped (`tailscale_wire/raw_tls.rs`, `noise.rs`)               | none for route existence | — |
+| `/machine/register` (flat)  | served on noise router (`hscontrol/noise.go`)                 | shipped; keyed compatibility route retained                     | none for route existence | — |
+| `/machine/map` (flat)       | served on noise router                                        | shipped; keyed compatibility route retained                     | streaming/lifecycle semantics remain | P0/P1 |
+| TLS on :443          | yes (`server_tls.go`, autocert + manual cert)                       | raw rustls listener shipped; Octra harness binds/cert-distributes | deployment config only | — |
+| `MapResponse.Stream=true` ndjson | required, streaming chunks                                | chunked MapResponse stream + canonical `{"KeepAlive":true}` frames | Octra packaged-path stock-client regression | P0/P1 |
+| Full `MapResponse` fields | Node, Peers, PeersChanged{,Patch,Removed}, DNSConfig, DERPMap, Domain, PacketFilters, UserProfiles, SSHPolicy, ControlTime, Debug, CollectServicesDisabled, PingRequest | core fields plus PacketFilters["base"], UserProfiles, SSHPolicy, ControlTime, Debug, keepalive and ping support | long-tail optional fields + restart/lifecycle replay | P1 |
+| Delta map updates    | `PeersChanged` / `PeersChangedPatch` / `PeersRemoved`               | connected long-poll deltas implemented; batching/restart parity still under audit | production semantics | P1 |
+| ACL engine           | HuJSON, `policy/v2/`, autoApprovers, ssh, tagOwners, autogroups, ipsets, route approvers | HuJSON/raw round-trip, `acls` alias, versionless policy default, PacketFilters, autoApprovers (routes+exitNode), ssh, tagOwners, groups, `autogroup:internet` | autogroups beyond `internet`, NodeAttrs, ipsets, packaged route wiring | P1 |
+| Pre-auth keys        | reusable / single-use / ephemeral / tagged, expiry, per-user, bcrypt-hashed | persistent admin store + gRPC/HTTP CLI support; Octra shim remains in-process | shared Octra shim wiring/lifecycle polish | P1 |
 | OIDC                 | full SSO (`oidc.go`, mockoidc, templates)                           | none                                                            | full           | P2       |
 | Embedded DERP server | yes — wraps `tailscale/derp.Server`, serves `/derp`, `/derp/probe`, `/bootstrap-dns`, STUN | DERP *client* + map-emit only; no relay        | full server    | P1 (none for docker-bridge interop) |
 | DERP map serving     | merges file + URL + embedded sources                                | builds map from configured servers in `MeshCoordinator`         | URL/file-based loaders | P2 |
 | MagicDNS             | `dns/`, MagicDNS, SplitDNS resolvers, extra records hot-reload (`extrarecords.go`), search domains | empty `DnsConfig` shape only                  | full           | P1       |
-| Machine lifecycle    | register → expire → renew → logout → delete; ephemeral GC; tag rewrite | register + IP alloc + in-memory record only                  | expire/renew/logout/ephemeral/GC | P1 |
+| Machine lifecycle    | register → expire → renew → logout → delete; ephemeral GC; tag rewrite | register + IP alloc + persistent admin adapters; lifecycle ops partial | renew/ephemeral GC and replay validation | P1 |
 | OIDC + browser flow  | `/register/:auth_id`, `/auth/:auth_id`, templates                   | none                                                            | full           | P2       |
-| Persistence          | GORM + 17 versioned `gormigrate` migrations (latest 202602201200)   | sqlx + 4 migrations (`20260118000001..4`)                       | preauthkey/policy/apikey/user tables, no NodeKey rotation history | P1 |
-| Operator CLI         | 17 cmd groups (users, nodes, preauthkeys, apikeys, policy, debug, generate, serve, configtest, mockoidc, dump_config, version, health, auth, root) | 5 (server, node, identity, nodes list/show, status, init-config) | users/preauthkeys/apikeys/policy/debug subcommands | P1 |
-| gRPC admin API       | `grpcv1.go` — full nodes/users/preauth admin via gRPC               | `headscale-api/src/grpc.rs` exists + proto generated under `generated/headscale.v1.rs` | handler impl & coverage TBD | P2 |
+| Persistence          | GORM + 17 versioned `gormigrate` migrations (latest 202602201200)   | sqlx + 12 migrations covering nodes, users, preauth keys, API keys, policy, routes | production wiring/restart replay audit | P1 |
+| Operator CLI         | 17 cmd groups (users, nodes, preauthkeys, apikeys, policy, debug, generate, serve, configtest, mockoidc, dump_config, version, health, auth, root) | admin groups include users, nodes, preauthkeys, auth, apikeys, policy, tailnet, debug; standalone still carries serve/generate/configtest/mockoidc/version/health | remaining parity details and hidden/non-admin groups | P2 |
+| gRPC admin API       | `grpcv1.go` — full nodes/users/preauth/admin API                    | generated proto + service handlers wired for the embedded CLI groups | exact long-tail errors/coverage still expanding | P2 |
 | Metrics / health     | Prometheus, `/metrics`, `/health`                                   | yes (`mesh_metrics`, `/metrics`, `/health{,/ready,/live}`)      | parity         | —        |
 | Resource gateway     | —                                                                   | `headscale-api/src/gateway/` (auth/quota/inference/router)      | OctraVPN add-on | n/a    |
 | Payment ledger       | —                                                                   | `headscale-payments` (ledger, x402, escrow, channels) — **kept on disk, dropped from workspace.members on 2026-05-20; deletion candidate** | OctraVPN add-on | n/a    |
@@ -66,8 +69,8 @@ and the 2026-05-19 continuation §"Wire-format surprise"):
 | -------------------------------- | ------ | ---------------------- |
 | `GET /key`                       | GET    | shipped (`headscale-api/src/tailscale_wire/key_handler.rs`) |
 | `POST /ts2021`                   | POST   | shipped (noise upgrade + h2 + inner router) |
-| `POST /machine/register` (flat)  | POST   | **missing** (only `/machine/{node_key}/register` exists) — P0 |
-| `POST /machine/map` (flat)       | POST   | **missing** (only `/machine/{node_key}/map`) — P0 |
+| `POST /machine/register` (flat)  | POST   | shipped; keyed compatibility route retained |
+| `POST /machine/map` (flat)       | POST   | shipped; keyed compatibility route retained |
 | `GET /machine/ssh/action/{src}/to/{dst}` | GET | missing — required only if SSH ACLs are exposed |
 | `GET /derp/probe`                | GET    | missing — only needed if we host an embedded DERP |
 | `GET /derp` (upgrade)            | GET    | missing — embedded DERP not in scope for interop |
@@ -78,9 +81,10 @@ and the 2026-05-19 continuation §"Wire-format surprise"):
 Upstream's `hscontrol/handlers.go` registers the public side
 (see [WebFetch summary]) and `hscontrol/noise.go` chains the inner
 router for noise-protected `/machine/{register,map,ssh/...}`.
-headscale-rs mirrors this split — public router in
-[`headscale-api/src/http.rs:43-58`](../headscale-rs/headscale-api/src/http.rs),
-inner noise router built in `tailscale_wire/noise.rs::handle_ts2021_post`.
+headscale-rs mirrors this split: public wire routes are built in
+`tailscale_wire::router`/`serve`, while the inner noise router is built
+in `tailscale_wire/noise.rs` and dispatches flat `/machine/register`
+and `/machine/map` plus the keyed compatibility routes.
 
 The `/api/v1/...` JSON routes in `http.rs:43-58` are an OctraVPN-only
 admin surface and not part of Tailscale interop; they coexist with the
@@ -105,10 +109,10 @@ headscale-rs ships in `tailscale_wire/`:
   with stub `{"NodeKeyChallenge":{"Public":"nodekey:00…"}}`
 - **Inner router dispatch** via `tower::ServiceExt::oneshot` against axum
 
-**Gap:** EarlyNoise content is unverified against real client bytes
-(blocker doc, §"EarlyNoise frame status"). Stock client never reaches
-`/ts2021` until §3 below is fixed, so this is currently dead weight on
-the wire. **Priority: P0** to validate once flat paths land.
+**Gap:** This is no longer a missing-route item. The remaining risk is
+end-to-end behaviour under the stock client flow: Wall 5 now lives
+around map streaming, keepalive framing, lifecycle, and peer convergence
+rather than absence of `/ts2021`, `/key`, or flat `/machine/...` routes.
 
 ## 3. MapResponse construction
 
@@ -119,36 +123,36 @@ Upstream's `hscontrol/mapper/builder.go` populates a fluent
 | -------------------- | ------------------------------ | ------------------------------------------------ |
 | `Node`               | `WithSelfNode`                 | yes                                              |
 | `Peers`              | `WithPeers`                    | yes                                              |
-| `PeersChanged`       | `WithPeerChanges`              | **missing** — P1                                 |
-| `PeersChangedPatch`  | `WithPeerChangedPatch`         | **missing** — P1                                 |
-| `PeersRemoved`       | `WithPeersRemoved`             | **missing** — P1                                 |
-| `DNSConfig`          | `WithDNSConfig`                | empty stub                                       |
-| `DERPMap`            | `WithDERPMap`                  | empty stub                                       |
-| `Domain`             | `WithDomain`                   | hard-coded `octra.test`                          |
-| `PacketFilters`      | `WithPacketFilters`            | **missing** — P1 (ACL enforcement on client)     |
-| `UserProfiles`       | `WithUserProfiles`             | **missing** — P1                                 |
-| `SSHPolicy`          | `WithSSHPolicy`                | **missing** — P2                                 |
-| `Debug`              | `WithDebugConfig`              | missing                                          |
-| `CollectServices`    | `WithCollectServicesDisabled`  | missing                                          |
-| `PingRequest`        | `WithPingRequest`              | missing — P2                                     |
-| `ControlTime`        | auto                           | missing — P1                                     |
-| `KeepAlive`          | per-frame                      | top-level field; not per-frame                   |
+| `PeersChanged`       | `WithPeerChanges`              | shipped for connected long-poll changes; restart replay still under audit |
+| `PeersChangedPatch`  | `WithPeerChangedPatch`         | type + patch path present; exact upstream batching remains P1 |
+| `PeersRemoved`       | `WithPeersRemoved`             | shipped for connected removal deltas; restart replay still under audit |
+| `DNSConfig`          | `WithDNSConfig`                | runtime DNS store + MagicDNS root; SplitDNS/responder still P1 |
+| `DERPMap`            | `WithDERPMap`                  | runtime DERP map store; URL/file loaders still P2 |
+| `Domain`             | `WithDomain`                   | derived from configured DNS base domain |
+| `PacketFilters`      | `WithPacketFilters`            | shipped as reduced `PacketFilters["base"]` from the shared policy store |
+| `UserProfiles`       | `WithUserProfiles`             | shipped for self/visible peers |
+| `SSHPolicy`          | `WithSSHPolicy`                | shipped; broader stock-client variants covered in headscale-rs |
+| `Debug`              | `WithDebugConfig`              | shipped for logtail disable/debug-mapresponse support; long-tail flags partial |
+| `CollectServices`    | `WithCollectServicesDisabled`  | shipped as disabled collection |
+| `PingRequest`        | `WithPingRequest`              | shipped via the ping tracker/debug path |
+| `ControlTime`        | auto                           | shipped |
+| `KeepAlive`          | per-frame                      | shipped as separate canonical `{"KeepAlive":true}` frames |
 
 **Streaming.** Upstream's `hscontrol/poll.go` runs a session loop:
 "streaming requests (Stream=true): continuous long-poll connections",
-JSON-marshalled, optionally Zstd-compressed, ~50s jittered keepalives.
-headscale-rs (`tailscale_wire/map.rs:45-51`) emits a single body plus
-30s `\n` keepalives but is **not** per-chunk MapResponse-framed —
-`MAP_KEEPALIVE_INTERVAL` is wired, full ndjson chunked write is not.
-**Priority: P0** for interop; raw client probably tolerates the
-single-shot path for the first response but rejects when the connection
-closes without the streaming continuation.
+JSON-marshalled, optionally Zstd-compressed, with keepalive frames.
+headscale-rs now emits framed MapResponse chunks for stream=true and
+uses the canonical `{"KeepAlive":true}` keepalive payload in the same
+compression mode. The remaining Octra risk is not missing writer
+support; it is packaged-path stock-client coverage through the
+`octravpn-node` embedding and lifecycle/restart scenarios.
 
 **Delta updates.** Upstream's `mapper/batcher.go` is ~6 files (batcher,
 batcher_concurrency, batcher_scale_bench, batcher_unit, mapper,
-node_conn) of incremental-update plumbing. headscale-rs sends every
-peer change as a full snapshot — fine for the 2-peer interop test, not
-for production. **Priority: P1.**
+node_conn) of incremental-update plumbing. headscale-rs has connected
+long-poll deltas for peer, policy, and route changes, but exact batching,
+restart replay, and large-tailnet behaviour still need production-grade
+parity coverage. **Priority: P1.**
 
 ## 4. ACL / policy engine
 
@@ -169,7 +173,8 @@ headscale-rs ships in
 
 | Feature | Status |
 | ------- | ------ |
-| Strict JSON parser with unknown-field rejection | shipped (`from_json_strict`) |
+| HuJSON parser with raw byte round-trip | shipped |
+| Versionless upstream policy default + `acls` alias | shipped |
 | `hosts`, `groups`, `acls`, `tagOwners`, `autoApprovers`, `ssh` | shipped |
 | `autogroup:internet` | shipped |
 | CIDR matching + named hosts + port specs (incl. `[ipv6]:port`) | shipped |
@@ -178,19 +183,14 @@ headscale-rs ships in
 | Property tests for ACL semantics | shipped (`acl::proptests`) |
 
 **Gaps vs upstream:**
-- **HuJSON parser** — upstream accepts policies with comments; we
-  require strict JSON. P2 (operator nicety).
 - **Autogroups beyond `internet`** — `autogroup:tagged`, `autogroup:members`,
   `autogroup:self`, `autogroup:nonroot`, `autogroup:danger-all` are absent. P1.
 - **`NodeAttr` resolution** — upstream emits a list of capability flags
   per peer (`funnel`, `ssh`, etc.) that the client honours. P2.
-- **PacketFilter generation** — the ACL exists but isn't compiled into
-  a `tailcfg.FilterRule` stream that ships in `MapResponse.PacketFilters`.
-  Without this the client enforces no policy; ACL evaluation only runs
-  if `octravpn-node` does its own L3 gating. **P1** for any non-trivial
-  deployment.
-- **Route auto-approval wired into register/map flow** — the evaluator
-  knows how, but the wire handlers don't call it.
+- **`ipset:` macros** — upstream policy can name reusable IP sets. P1/P2.
+- **Packaged route auto-approval regression** — headscale-rs has route
+  and exit-node auto-approval logic; Octra still needs an embedded
+  daemon regression that proves the packaged path applies it end-to-end.
 - **`policy/v2/` engine** — upstream's matcher dataflow is more
   efficient at scale; we have a single linear evaluator. P2.
 
@@ -265,19 +265,21 @@ headscale-rs (`tailscale_wire/register.rs:43-...`):
 Upstream supports reusable / single-use / ephemeral / tagged keys,
 per-user, with expiry, bcrypt-hashed (migration `202511011637-preauthkey-bcrypt`).
 
-headscale-rs has `PreauthMinter` in
-`/Users/androolloyd/Development/octra/crates/octravpn-mesh/src/headscale_bridge.rs`
-(noted in the wire-bridge intro: "in-process store so an operator … can
-later present it as a bearer credential"). Single-use, in-process,
-per-user label only.
+headscale-rs now has a persistent admin-side preauth store
+(`PersistentPreauthAdmin`) backed by the `pre_auth_keys` migration,
+plus gRPC/HTTP admin paths and CLI support for reusable, ephemeral,
+tagged, expiring keys. Octra still keeps the legacy
+`POST /admin/preauth` shim backed by `octravpn-mesh::PreauthMinter`
+for the demo/interop harness.
 
 **Gaps:**
-- Reusable keys — **P1**.
-- Ephemeral flag — **P1** (couples to ephemeral lifecycle in §7).
-- Tagged keys — **P1**.
-- Expiry timestamp — **P1**.
-- Bcrypt-at-rest — **P2**.
-- DB persistence (survive restart) — **P1** (today the keys evaporate).
+- Shared Octra shim wiring — **P1** if we want `/admin/preauth` to use
+  the same persistent headscale admin store instead of the in-process
+  harness minter.
+- Ephemeral lifecycle and GC — **P1** (the key flag exists; node
+  lifecycle semantics still matter).
+- Operator migration from the legacy shim to `headscale preauthkeys`
+  workflows — **P2** documentation/runbook work.
 
 ## 9. OIDC / OAuth
 
@@ -301,24 +303,27 @@ APIKey, Policy, Route, Migration. Plus IP allocation, version checks,
 text serialisers, ephemeral GC.
 
 headscale-rs (`headscale-db/`):
-- sqlx + 4 SQL migrations:
+- sqlx + 12 SQL migrations:
   `20260118000001_create_nodes.sql`,
   `20260118000002_create_transactions.sql`,
   `20260118000003_create_resources.sql`,
-  `20260118000004_create_sessions.sql`
-- Models: `NodeRow`, `payments`, `resources`, `sessions`
-- **In-memory only:** `MachineRegistry` in `tailscale_wire/mod.rs`,
-  `PreauthMinter` in `headscale_bridge.rs`.
+  `20260118000004_create_sessions.sql`,
+  `20260520000005_create_preauth_keys.sql`,
+  `20260521000006_create_api_keys.sql`,
+  `20260521000007_create_users.sql`,
+  `20260521000008_create_policies.sql`,
+  and follow-up node/auth-key/route/user-FK migrations.
+- Models/admin adapters cover nodes, users, API keys, policy, and
+  persistent preauth keys. Octra's local `PreauthMinter` remains
+  in-process only when using the compatibility `/admin/preauth` shim.
 
 **Gaps:**
-- **No `preauth_keys` table** — keys are lost on restart. **P1.**
-- **No `policy` table / hot reload from DB** — P1.
-- **No `users` / `api_keys`** — P1.
-- **`MachineRegistry` is RAM-only** — register survives in-process only.
-  Forces every restart to re-bootstrap every node. **P1.**
-- **Tests:** upstream has a fixture story via `servertest/`; we have
-  `headscale-db::tests::test_database_creation` (in-memory). Not analysed
-  per task constraints.
+- Verify production wiring uses the persistent adapters everywhere the
+  daemon is expected to survive restarts. **P1.**
+- Confirm route/lifecycle persistence under real `tailscale up` replay
+  rather than only admin-unit coverage. **P1.**
+- Keep the Octra compatibility shim's in-memory behavior explicit until
+  shared preauth admin wiring lands. **P2.**
 
 ## 11. Operator CLI
 
@@ -331,19 +336,21 @@ headscale-rs (`headscale-cli/src/main.rs`) ships:
 - `server` — run the control plane
 - `node` — run as a mesh node
 - `identity {generate, show}`
-- `nodes {list, show}` (against the JSON `/api/v1/nodes` admin route)
-- `status`
-- `init-config`
+- admin groups exposed directly and embeddable through
+  `headscale_cli::AdminCmd`: `users`, `nodes`, `preauthkeys`, `auth`,
+  `apikeys`, `policy`, `tailnet`, `debug`
+- non-admin / standalone groups: `serve`, `generate`, `mockoidc`,
+  `health`, `version`, `completion`, `configtest`, `dumpConfig`,
+  `status`, `init-config`
 
 **Gaps:**
-- `users` create/list/delete — **P1**.
-- `preauthkeys` create/list/expire — **P1** (right now the only minter
-  is the HTTP `/admin/preauth` shim).
-- `apikeys` create/list/expire — P1.
-- `policy {set, get, check}` — **P1**.
-- `debug` (dump map, recompute peer map, validate ACL) — P2.
-- `generate` (skeleton config, private key) — partial (`init-config`).
-- `configtest`, `dump_config` — P2.
+- Parity details remain for some upstream command shapes and hidden
+  non-admin groups, but the former P1 Octra-facing gaps (`users`,
+  `preauthkeys`, `apikeys`, `policy`, `debug`, `auth`) are no longer
+  missing surfaces.
+- Octra's embedded CLI docs/tests must track the gRPC-first admin
+  model: migrated commands default to the local Unix socket; explicit
+  `--server` selects the legacy HTTP path.
 
 ## 12. Out-of-scope-for-now flags
 
@@ -360,30 +367,21 @@ do not file as gaps:
 
 ## Critical path to exit code 0 on `docker/devnet/tailscale-interop/run-interop.sh`
 
-Ordered, minimum closing set. Per the
-[blocker doc 2026-05-19 §"What unblocks exit 0 from here"](./tailscale-interop-blocker.md#wire-format-surprise-newer-tailscale-never-hits-ts2021):
+Ordered, minimum closing set after the 2026-05-24 boundary refresh:
 
-1. **TLS termination on :443.** Add a rustls-axum (or nginx) front;
-   self-signed cert trusted in the peer containers. Without this the
-   client's `controlhttp: forcing port 443 dial due to recent noise dial`
-   path fails before reaching anything we serve. **P0.**
-2. **Flat `/machine/register` + `/machine/map` routes.** Resolve NodeKey
-   from request body instead of path. Wire them through the existing
-   `register.rs` / `map.rs` handlers. **P0.**
-3. **Per-chunk MapResponse streaming.** Implement `Stream=true` ndjson:
+1. **Per-chunk MapResponse streaming.** Implement `Stream=true` ndjson:
    write one JSON-marshalled `MapResponse` per `\n` and continue with
    either keepalive chunks or delta chunks. `tailscale_wire/map.rs`
    has the timer skeleton; needs per-chunk writer. **P0.**
-4. **EarlyNoise validation in-the-wild.** Once 1–3 land and the client
-   actually reaches `/ts2021`, capture bytes and confirm the
-   `NodeKeyChallenge` payload matches what the daemon expects.
-   The framing is right (`controlbase.rs` unit tests pass); the JSON body
-   may need a real challenge. **P0.**
+2. **Post-register stock-client replay.** Capture the current stock
+   client flow through `/ts2021` and `/machine/map`, then close any
+   remaining response-framing or lifecycle mismatch. **P0.**
+3. **Peer-convergence regression.** Keep both flat and keyed routes in
+   coverage while proving two stock clients learn each other and
+   `tailscale ping` succeeds. **P0.**
 
-After these four, the test should clear exit 30 → 0 or 40 depending on
-whether the long-poll holds open long enough for both peers to learn
-each other (current 30s `MAP_LONGPOLL_TIMEOUT` is below stock client's
-patience window but matches the interop test's tight loop).
+After these, the test should clear exit 30 → 0 or 40 depending on
+whether peer convergence or final ping is the remaining failure.
 
 **Out of critical path.** ACL packet filters, DERP, MagicDNS, OIDC,
 re-registration, full delta updates — none of these block exit 0.
@@ -392,25 +390,26 @@ re-registration, full delta updates — none of these block exit 0.
 
 Ordered roughly by demand:
 
-1. **Persistent `preauth_keys` + `machines` + `users` tables** (P1) —
-   the in-process registries lose all state on restart. Schema is
-   straightforward; the gap is the absence of any migration today.
-2. **Reusable / ephemeral / tagged preauth keys** (P1) — depends on (1).
-3. **`PacketFilters` in `MapResponse`** (P1) — without this the ACL
-   evaluator's policy never reaches the client. Needs a compiler from
-   `AclPolicy` → `tailcfg.FilterRule` shape.
+1. **Persistent-adapter production wiring audit** (P1) — the tables and
+   adapters exist; verify every serve/admin path uses them in the
+   production daemon and not only in tests.
+2. **Octra `/admin/preauth` convergence** (P1) — decide whether to keep
+   the in-process compatibility shim or wire it to the persistent
+   headscale preauth admin.
+3. **Packaged ACL regression** (P1) — headscale-rs emits reduced
+   `PacketFilters["base"]`; Octra still needs a packaged-daemon stock
+   client denial/allowance regression.
 4. **Machine lifecycle** (P1) — logout, expire, renew, ephemeral GC.
-5. **Delta `MapResponse` updates** (P1) — full snapshots scale O(n²)
-   per change; upstream's batcher is non-trivial but well-tested.
+5. **Production `MapResponse` delta parity** (P1) — connected deltas
+   exist; restart replay, batching, and large-tailnet semantics remain
+   to be audited against headscale-go.
 6. **MagicDNS responder + DNSConfig in MapResponse** (P1) — start with
    a single-domain A/AAAA, layer SplitDNS later.
-7. **Operator CLI parity** (P1) — `users`, `preauthkeys`, `policy`
-   subcommands. The HTTP `/admin/preauth` shim is fine for the interop
-   test but operators expect a CLI.
-8. **Embedded DERP server** (P1, only for WAN) — wraps the `tailscale-derp`
+7. **Embedded DERP server** (P1, only for WAN) — wraps the `tailscale-derp`
    primitives if a clean Rust port exists; otherwise vendor and rebuild.
-9. **OIDC SSO** (P2) — only if multi-user web onboarding is required.
-10. **HuJSON ACL parser + autogroup expansion** (P2) — operator polish.
+8. **OIDC SSO** (P2) — only if multi-user web onboarding is required.
+9. **Autogroup/ipset/NodeAttr expansion** (P2) — operator polish beyond
+   the shipped HuJSON parser and base ACL translation.
 
 ## Things headscale-rs ships that headscale-go DOESN'T
 

@@ -279,7 +279,7 @@ companions covering each segment in depth.
 | `15-user-oct-url-public.tape` | portal serve + open-url; MIME shapes | light |
 | `16-user-oct-url-sealed.tape` | sealed asset + CONFIRM + passphrase | light |
 | `17-operator-onboarding.tape` | seal-keys → bond → register → run → health | heavy |
-| `18-tailnet-owner-policy.tape` | `headscale policy set <FILE>` + live reload | heavy |
+| `18-tailnet-owner-policy.tape` | `headscale policy set --file <FILE>` + live reload | heavy |
 | `19-circle-update-atomic.tape` | atomic `circle update` (dry-run + commit) | heavy |
 | `20-pvac-rotation.tape` | `rotate-pvac.sh` dry-run + broadcast + probe | heavy |
 | `21-audit-verify.tape` | clean + tampered `audit verify` | heavy |

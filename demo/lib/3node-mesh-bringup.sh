@@ -71,9 +71,9 @@ else
         echo "BUILD FAIL: ../octra-foundry not found next to repo root" >&2
         exit 10
     fi
-    HEADSCALE_RS="${REPO_ROOT}/../headscale-rs"
+    HEADSCALE_RS="${HEADSCALE_RS_PATH:-${REPO_ROOT}/../headscale-rs}"
     if [[ ! -d "${HEADSCALE_RS}" ]]; then
-        echo "BUILD FAIL: ../headscale-rs not found next to repo root" >&2
+        echo "BUILD FAIL: headscale-rs not found at ${HEADSCALE_RS}" >&2
         exit 10
     fi
 

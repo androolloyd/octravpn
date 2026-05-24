@@ -1,4 +1,4 @@
-<!-- captured from binary at SHA 2ffead7 (debug build, 2026-05-20) -->
+<!-- refreshed against headscale-rs 201fc8c (debug build, 2026-05-24) -->
 
 # `octravpn-node headscale …` — embedded headscale admin CLI
 
@@ -14,10 +14,11 @@ juggle two binaries to manage a tailnet.
 * Embedding entry: `crates/octravpn-node/src/cli/headscale.rs`
   (just a clap-flatten + a single `headscale_cli::dispatch` call).
 * Dispatcher: `headscale-rs/headscale-cli/src/lib.rs::dispatch`.
-* Subcommand definitions: `headscale-rs/headscale-cli/src/admin/mod.rs`
-  (the `AdminCmd` clap enum).
+* Subcommand definitions: `headscale-rs/headscale-cli/src/lib.rs`
+  (`AdminCmd`) plus `headscale-rs/headscale-cli/src/admin/mod.rs`
+  (per-group clap enums and dispatchers).
 * Per-command implementations:
-  `headscale-rs/headscale-cli/src/admin/{users,nodes,preauthkeys,policy,tailnet}.rs`.
+  `headscale-rs/headscale-cli/src/admin/{users,nodes,preauthkeys,auth,apikeys,policy,tailnet,debug}.rs`.
 * Standalone equivalent binary: `headscale` (cargo target
   `headscale-rs/headscale-cli/src/main.rs`).
 * Passthrough byte-diff test: `crates/octravpn-node/tests/headscale_cli_passthrough.rs`.
@@ -28,28 +29,40 @@ juggle two binaries to manage a tailnet.
 Usage: octravpn-node headscale [OPTIONS] <COMMAND>
 ```
 
-| Flag | Type | Default | Env override | Source |
+| Flag | Type | Default | Env override | Notes |
 |---|---|---|---|---|
-| `--server <SERVER>` | URL | required | `HEADSCALE_URL` | `admin/mod.rs:101` |
-| `--token <TOKEN>` | string | required | `HEADSCALE_ADMIN_TOKEN` | `admin/mod.rs:104` |
-| `--json` | bool | off | — | `admin/mod.rs:107` |
+| `--address <ADDR>` | URL | unset | `HEADSCALE_CLI_ADDRESS` | Upstream-compatible gRPC admin endpoint. |
+| `--api-key <KEY>` | string | unset | `HEADSCALE_CLI_API_KEY` | API key for remote gRPC. |
+| `--unix-socket <PATH>` | path | local default | `HEADSCALE_UNIX_SOCKET` | Used when `--address` is unset. |
+| `--insecure` | bool | off | `HEADSCALE_CLI_INSECURE` | Disable TLS certificate verification for remote gRPC. |
+| `--server <SERVER>` | URL | unset | `HEADSCALE_URL` | Legacy HTTP admin endpoint; selecting it keeps migrated groups on `/api/v1/*`. |
+| `--token <TOKEN>` | string | empty | `HEADSCALE_ADMIN_TOKEN` | Legacy HTTP bearer. |
+| `--json` | bool | off | — | Raw JSON output alias. |
+| `-o, --output <FMT>` | `json`, `json-line`, `yaml` | table | — | Structured output selector. |
+| `--force` | bool | off | — | Disable prompts where the upstream command requires confirmation. |
 | `-h, --help` | bool | — | — | clap derived |
 
-`--server` accepts a trailing `/`. `--token` empty is allowed (some
-admin builds disable bearer auth in tests) — the server returns 401 if
-it's required.
+Current admin groups are gRPC-first. With no explicit `--address`,
+commands try the local Unix socket. Supplying `--server` without an
+explicit gRPC endpoint selects the legacy HTTP path for command groups
+that still keep one.
 
 ## Exit-code contract
 
-From `headscale-rs/headscale-cli/src/admin/mod.rs:75-81`:
+From the stable `ExitCode` enum in
+`headscale-rs/headscale-cli/src/admin/mod.rs`:
 
 | Code | Variant | Meaning |
 |---|---|---|
 | 0 | `Success` | Operation completed. |
+| 1 | `Usage` | Cobra-style runtime usage error returned by a handler. |
 | 3 | `Connection` | DNS / TCP / TLS / handshake failed — anything pre-status. |
 | 4 | `Auth` | HTTP 401 / 403. Wrong or missing bearer. |
 | 5 | `NotFound` | HTTP 404. User / node / preauth key not found. |
 | 6 | `Server` | HTTP 5xx, or any other 4xx, or response-decode failure, or local file IO. |
+
+Clap parser errors still exit 2 before dispatch, matching the standalone
+binary.
 
 The `octravpn-node headscale …` invocation forwards this code via
 `std::process::exit` (`cli/headscale.rs:31`). Operators can cron-pipe
@@ -60,10 +73,13 @@ the subcommands and rely on the codes without parsing stderr.
 | Subcommand | Section |
 |---|---|
 | `users create` / `list` / `delete` | [users](#users) |
-| `nodes list` / `show` / `expire` / `logout` / `rename` / `tags` / `delete` | [nodes](#nodes) |
-| `preauthkeys create` / `list` / `expire` | [preauthkeys](#preauthkeys) |
+| `nodes list` / `list-routes` / `register` / `expire` / `rename` / `tag` / `approve-routes` / `delete` / `backfillips` | [nodes](#nodes) |
+| `preauthkeys create` / `list` / `expire` / `delete` | [preauthkeys](#preauthkeys) |
+| `auth register` / `approve` / `reject` | [auth](#auth) |
+| `apikeys create` / `list` / `expire` / `delete` | [apikeys](#apikeys) |
 | `policy get` / `set` / `check` | [policy](#policy) |
 | `tailnet status` | [tailnet](#tailnet) |
+| `debug create-node` | [debug](#debug) |
 
 ## `users`
 
@@ -88,13 +104,21 @@ Usage: octravpn-node headscale users list [OPTIONS]
 List all users. With `--json`, emits the raw JSON array of `{ id, name,
 created_at }` records.
 
-### `users delete <NAME>`
+### `users destroy`
 
 ```
-Usage: octravpn-node headscale users delete [OPTIONS] <NAME>
+Usage: octravpn-node headscale users destroy [OPTIONS]
 ```
 
-Delete a user by name. Returns exit code 5 if the user does not exist.
+Delete a user by `--identifier` or `--name`. Alias: `delete`.
+
+### `users rename`
+
+```
+Usage: octravpn-node headscale users rename [OPTIONS] --new-name <NEW_NAME>
+```
+
+Rename a user selected by `--identifier` or `--name`.
 
 ## `nodes`
 
@@ -113,66 +137,76 @@ Usage: octravpn-node headscale nodes list [OPTIONS]
 List registered nodes. The default table view shows `id`, `name`,
 `user`, `last_seen`. `--json` emits the full record.
 
-### `nodes show <ID_OR_NAME>`
+### `nodes list-routes`
 
 ```
-Usage: octravpn-node headscale nodes show [OPTIONS] <ID_OR_NAME>
+Usage: octravpn-node headscale nodes list-routes [OPTIONS]
 ```
 
-Show one node by node_key hex or hostname.
+List advertised, approved, and serving routes. Alias: `routes`.
 
-### `nodes expire <ID>`
+### `nodes register`
 
 ```
-Usage: octravpn-node headscale nodes expire [OPTIONS] <ID>
+Usage: octravpn-node headscale nodes register --user <USER> --key <KEY>
+```
+
+Register a node by auth key over the gRPC admin path.
+
+### `nodes expire`
+
+```
+Usage: octravpn-node headscale nodes expire [OPTIONS]
 ```
 
 | Flag | Type | Notes |
 |---|---|---|
-| `--at <ISO8601>` | string | Schedule expiry at the given timestamp. Defaults to "now". |
+| `-i, --identifier <ID>` | string | Node ID. Positional ID is also accepted. |
+| `-e, --expiry <RFC3339>` | string | Schedule expiry at the given timestamp. Defaults to "now". Alias: `--at`. |
+| `--disable` | bool | Clear key expiry. |
 
-Without `--at`, expires immediately (forces re-register on the node's
-next `/map`). With `--at`, schedules expiry for the supplied ISO-8601
-timestamp.
+Alias: `logout`.
 
-### `nodes logout <ID>`
-
-```
-Usage: octravpn-node headscale nodes logout [OPTIONS] <ID>
-```
-
-Force-logout a node — clears Noise/disco keys + stamps `expiry=now` so
-the next `/map` round-trip returns a logout response. Mirrors upstream
-`headscale nodes logout`.
-
-### `nodes rename <ID> <HOSTNAME>`
+### `nodes rename`
 
 ```
-Usage: octravpn-node headscale nodes rename [OPTIONS] <ID> <HOSTNAME>
+Usage: octravpn-node headscale nodes rename [OPTIONS] <NEW_NAME>
 ```
 
 Operator-driven hostname rewrite.
 
-### `nodes tags <ID> [TAGS]...`
+### `nodes tag`
 
 ```
-Usage: octravpn-node headscale nodes tags [OPTIONS] <ID> [TAGS]...
+Usage: octravpn-node headscale nodes tag [OPTIONS] [ID] [TAGS]...
 ```
 
-| Argument | Type | Notes |
-|---|---|---|
-| `[TAGS]...` | comma-separated | e.g. `tag:prod,tag:web`. Empty list clears the override. |
+Replace the node's forced-tags list. Aliases: `tags`, `t`.
 
-Replace the node's forced-tags list. Tags are matched by exact string
-against the policy.
-
-### `nodes delete <ID>`
+### `nodes approve-routes`
 
 ```
-Usage: octravpn-node headscale nodes delete [OPTIONS] <ID>
+Usage: octravpn-node headscale nodes approve-routes --identifier <ID> --routes <ROUTES>
+```
+
+Replace the approved routes for a node.
+
+### `nodes delete`
+
+```
+Usage: octravpn-node headscale nodes delete [OPTIONS] [ID]
 ```
 
 Delete a node. Exit code 5 if not found.
+
+### `nodes backfillips`
+
+```
+Usage: octravpn-node headscale nodes backfillips [OPTIONS]
+```
+
+Backfill missing node IP addresses. Requires `--confirm` or global
+`--force`.
 
 ## `preauthkeys`
 
@@ -181,16 +215,16 @@ Manage pre-auth keys. Source: `admin/preauthkeys.rs`.
 ### `preauthkeys create`
 
 ```
-Usage: octravpn-node headscale preauthkeys create [OPTIONS] --user <USER>
+Usage: octravpn-node headscale preauthkeys create [OPTIONS]
 ```
 
 | Flag | Type | Default | Notes |
 |---|---|---|---|
-| `--user <USER>` | string | required | User the key belongs to. |
+| `--user <ID>` | integer | optional | User ID the key belongs to. |
 | `--reusable` | bool | off | Allow more than one redemption. |
 | `--ephemeral` | bool | off | Mark resulting device ephemeral (auto-clean). |
 | `--tags <TAGS>` | comma-separated | (none) | `tag:foo,tag:bar`. |
-| `--expires-in <DUR>` | duration | `24h` | e.g. `24h`, `7d`, `30m`. |
+| `--expiration <DUR>` | duration | `1h` | e.g. `24h`, `7d`, `30m`. Alias: `--expires-in`. |
 
 Mint a fresh preauth key.
 
@@ -204,13 +238,43 @@ Usage: octravpn-node headscale preauthkeys list [OPTIONS]
 |---|---|---|
 | `--user <USER>` | string | Restrict to a single user. |
 
-### `preauthkeys expire <PREFIX>`
+### `preauthkeys expire`
 
 ```
-Usage: octravpn-node headscale preauthkeys expire [OPTIONS] <PREFIX>
+Usage: octravpn-node headscale preauthkeys expire --id <ID>
 ```
 
-Expire a key identified by its visible prefix.
+Expire a key identified by numeric ID. Aliases: `revoke`, `exp`, `e`.
+
+### `preauthkeys delete`
+
+```
+Usage: octravpn-node headscale preauthkeys delete --id <ID>
+```
+
+Delete a key by numeric ID. Aliases: `del`, `rm`, `d`.
+
+## `auth`
+
+Manage node authentication and approval over the upstream gRPC admin API.
+Source: `admin/auth.rs`.
+
+| Command | Usage |
+|---|---|
+| `auth register` | `octravpn-node headscale auth register --user <USER> --auth-id <AUTH_ID>` |
+| `auth approve` | `octravpn-node headscale auth approve --auth-id <AUTH_ID>` |
+| `auth reject` | `octravpn-node headscale auth reject --auth-id <AUTH_ID>` |
+
+## `apikeys`
+
+Manage API keys. Source: `admin/apikeys.rs`.
+
+| Command | Usage |
+|---|---|
+| `apikeys create` | `octravpn-node headscale apikeys create [--expiration 90d]` |
+| `apikeys list` | `octravpn-node headscale apikeys list` |
+| `apikeys expire` | `octravpn-node headscale apikeys expire (--id <ID> \| --prefix <PREFIX>)` |
+| `apikeys delete` | `octravpn-node headscale apikeys delete (--id <ID> \| --prefix <PREFIX>)` |
 
 ## `policy`
 
@@ -225,24 +289,25 @@ Usage: octravpn-node headscale policy get [OPTIONS]
 Fetch the policy currently loaded on the server. Default output is the
 hujson document; `--json` wraps it in a transport envelope.
 
-### `policy set <FILE>`
+### `policy set`
 
 ```
-Usage: octravpn-node headscale policy set [OPTIONS] <FILE>
+Usage: octravpn-node headscale policy set --file <FILE>
 ```
 
-Push a policy file to the server. The change takes effect within ~1ms —
-the policy store's `Notify` wakes parked `/map` long-pollers.
+Push a HuJSON policy file to the server. The change takes effect within
+~1ms — the policy store's `Notify` wakes parked `/map` long-pollers.
 
-### `policy check <FILE>`
+### `policy check`
 
 ```
-Usage: octravpn-node headscale policy check [OPTIONS] <FILE>
+Usage: octravpn-node headscale policy check --file <FILE>
 ```
 
-Validate a policy file locally without touching the server. Honours
-`--server` only when the local validator wants to cross-check against
-known nodes.
+Validate a policy file. The direct-database bypass flag is available for
+the standalone `headscale` binary when it has loaded a headscale config;
+the embedded Octra dispatch path does not load that config, so Octra
+operators should use the gRPC/default path here.
 
 ## `tailnet`
 
@@ -257,6 +322,18 @@ Usage: octravpn-node headscale tailnet status [OPTIONS]
 Show tailnet-wide status (DERP regions, DNS, policy). The default table
 view is operator-friendly; `--json` emits the raw status envelope.
 
+## `debug`
+
+Debug and test helpers. Source: `admin/mod.rs::DebugCmd`.
+
+### `debug create-node`
+
+```
+Usage: octravpn-node headscale debug create-node --user <USER> --key <KEY> --name <NAME> [--route <CIDR>...]
+```
+
+Create a node that can be registered with `nodes register`.
+
 ## Migration from deprecated `mesh` arms
 
 The two `mesh` arms in
@@ -267,8 +344,8 @@ The two `mesh` arms in
 |---|---|
 | `octravpn-node mesh status --remote URL --admin-token T` | `octravpn-node headscale nodes list --server URL --token T` |
 | `octravpn-node mesh policy get` | `octravpn-node headscale policy get` |
-| `octravpn-node mesh policy set --file F` | `octravpn-node headscale policy set F` |
-| `octravpn-node mesh policy validate --file F` | `octravpn-node headscale policy check F` |
+| `octravpn-node mesh policy set --file F` | `octravpn-node headscale policy set --file F` |
+| `octravpn-node mesh policy validate --file F` | `octravpn-node headscale policy check --file F` |
 
 See `docs/operators/cli-migration.md` for the deprecation timeline.
 
@@ -277,9 +354,10 @@ See `docs/operators/cli-migration.md` for the deprecation timeline.
 This surface is intentionally a thin wrapper. To compare behaviour
 against the standalone `headscale` binary, the passthrough test at
 `crates/octravpn-node/tests/headscale_cli_passthrough.rs` shells out to
-both binaries for every subcommand and asserts byte-equal stdout. If a
-documented flag here ever drifts from the standalone `headscale` binary,
-that test fails CI.
+both binaries across representative gRPC-default and legacy-HTTP paths
+and asserts byte-equal stdout, stderr, and exit code. If the embedded
+surface drifts from the standalone `headscale` binary, that test fails
+CI.
 
 Upstream reference docs:
 
@@ -289,6 +367,9 @@ Upstream reference docs:
 
 ## Cross-references
 
-* Env vars (`HEADSCALE_URL`, `HEADSCALE_ADMIN_TOKEN`): [env-vars.md](./env-vars.md).
+* Env vars (`HEADSCALE_URL`, `HEADSCALE_ADMIN_TOKEN`,
+  `HEADSCALE_CLI_ADDRESS`, `HEADSCALE_CLI_API_KEY`,
+  `HEADSCALE_UNIX_SOCKET`, `HEADSCALE_CLI_INSECURE`):
+  [env-vars.md](./env-vars.md).
 * Error variants (`AdminError`): [error-codes.md](./error-codes.md#adminerror).
 * Operator tour: `docs/operators/tour-*.md` (the headscale section).

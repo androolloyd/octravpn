@@ -93,10 +93,11 @@ fi
 # The `headscale-rs` sibling provides the `headscale-api` crate which
 # hosts the Tailscale-wire layer (migrated 2026-05-19). octravpn-mesh
 # depends on it via `path = "../../../headscale-rs/headscale-api"`, so
-# the builder container needs both repos mounted side-by-side.
-HEADSCALE_RS="${REPO_ROOT}/../headscale-rs"
+# the builder container needs both repos mounted side-by-side. Override
+# with HEADSCALE_RS_PATH when the checkout is not next to this repo.
+HEADSCALE_RS="${HEADSCALE_RS_PATH:-${REPO_ROOT}/../headscale-rs}"
 if [[ ! -d "${HEADSCALE_RS}" ]]; then
-    echo "BUILD FAIL: ../headscale-rs not found next to repo root" >&2
+    echo "BUILD FAIL: headscale-rs not found at ${HEADSCALE_RS}" >&2
     exit 10
 fi
 

@@ -7,18 +7,26 @@
 //! enforce that contract by driving both binaries side-by-side
 //! through `assert_cmd` and `diff`-ing the captured output.
 //!
-//! Network-touching paths (`users list`, `nodes list`, …) are
-//! exercised against a non-routable address (`127.0.0.1:1`) so the
-//! "connection refused" error path runs the same code in both
-//! binaries. No live mesh-control is required.
+//! Network-touching paths are exercised through two hermetic failure
+//! modes: a definitely-missing local gRPC Unix socket for migrated
+//! upstream-compatible commands, and `127.0.0.1:1` for the legacy
+//! `--server` HTTP fallback. No live mesh-control is required.
 //!
 //! See `docs/operators/cli-migration.md` for the operator-facing
 //! migration table.
 
 use assert_cmd::Command;
 use escargot::CargoBuild;
-use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::{env, path::PathBuf, sync::OnceLock, time::Duration};
+
+const HEADSCALE_ENV_VARS: &[&str] = &[
+    "HEADSCALE_URL",
+    "HEADSCALE_ADMIN_TOKEN",
+    "HEADSCALE_CLI_ADDRESS",
+    "HEADSCALE_CLI_API_KEY",
+    "HEADSCALE_UNIX_SOCKET",
+    "HEADSCALE_CLI_INSECURE",
+];
 
 /// Build the standalone `headscale` binary from the sibling
 /// `headscale-rs` workspace once, then re-use the path across every
@@ -29,23 +37,49 @@ use std::sync::OnceLock;
 fn headscale_bin() -> &'static PathBuf {
     static BIN: OnceLock<PathBuf> = OnceLock::new();
     BIN.get_or_init(|| {
-        // Manifest path is relative to the integration-test cwd
-        // (`crates/octravpn-node/`). The sibling repo lives at
-        // `../../../headscale-rs/headscale-cli/Cargo.toml` — same
-        // shape as the `headscale-cli` path-dep in `Cargo.toml`.
-        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../headscale-rs/headscale-cli/Cargo.toml")
+        if let Some(path) = env::var_os("HEADSCALE_BIN") {
+            return PathBuf::from(path);
+        }
+
+        // By default, mirror the path-dep shape in Cargo.toml. Set
+        // HEADSCALE_RS_PATH when the headscale-rs checkout is elsewhere.
+        let headscale_rs = env::var_os("HEADSCALE_RS_PATH").map_or_else(
+            || {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../..")
+                    .join("headscale-rs")
+            },
+            PathBuf::from,
+        );
+        let manifest = headscale_rs
+            .join("headscale-cli/Cargo.toml")
             .canonicalize()
             .expect("canonicalize sibling manifest path");
         let bin = CargoBuild::new()
             .manifest_path(&manifest)
             .bin("headscale")
             .current_release()
-            .current_target()
+            .target_dir(octra_target_dir())
             .run()
             .expect("build standalone headscale binary");
         bin.path().to_path_buf()
     })
+}
+
+fn octra_target_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("target")
+}
+
+fn child_timeout() -> Duration {
+    Duration::from_secs(2)
+}
+
+fn scrub_headscale_env(cmd: &mut Command) {
+    for key in HEADSCALE_ENV_VARS {
+        cmd.env_remove(key);
+    }
 }
 
 /// Spawn `octravpn-node` with the supplied args. Captures stdout +
@@ -54,8 +88,10 @@ fn headscale_bin() -> &'static PathBuf {
 /// accidentally read it (they shouldn't — admin surface only touches
 /// `--server` / env).
 fn octravpn(args: &[&str]) -> CommandOutput {
-    let out = Command::cargo_bin("octravpn-node")
-        .expect("octravpn-node bin under test")
+    let mut cmd = Command::cargo_bin("octravpn-node").expect("octravpn-node bin under test");
+    scrub_headscale_env(&mut cmd);
+    let out = cmd
+        .timeout(child_timeout())
         .arg("--config")
         .arg("/nonexistent/octravpn-headscale-passthrough-test.toml")
         .args(args)
@@ -66,11 +102,57 @@ fn octravpn(args: &[&str]) -> CommandOutput {
 
 /// Spawn the standalone `headscale` binary with the supplied args.
 fn standalone(args: &[&str]) -> CommandOutput {
-    let out = Command::new(headscale_bin())
+    let mut cmd = Command::new(headscale_bin());
+    scrub_headscale_env(&mut cmd);
+    let out = cmd
+        .timeout(child_timeout())
         .args(args)
         .output()
         .expect("spawn standalone headscale");
     CommandOutput::from(out)
+}
+
+/// Spawn the embedded CLI through the local gRPC transport, pointed at
+/// a per-process path that should not exist. This keeps the migrated
+/// command tests off the host's real `/var/run/headscale/headscale.sock`.
+fn octravpn_local_grpc(args: &[&str]) -> CommandOutput {
+    let mut cmd = Command::cargo_bin("octravpn-node").expect("octravpn-node bin under test");
+    scrub_headscale_env(&mut cmd);
+    let out = cmd
+        .timeout(child_timeout())
+        .arg("--config")
+        .arg("/nonexistent/octravpn-headscale-passthrough-test.toml")
+        .arg("headscale")
+        .arg("--unix-socket")
+        .arg(missing_unix_socket_path())
+        .args(args)
+        .output()
+        .expect("spawn octravpn-node");
+    CommandOutput::from(out)
+}
+
+/// Spawn the standalone CLI through the same local gRPC missing-socket
+/// path used for the embedded passthrough.
+fn standalone_local_grpc(args: &[&str]) -> CommandOutput {
+    let mut cmd = Command::new(headscale_bin());
+    scrub_headscale_env(&mut cmd);
+    let out = cmd
+        .timeout(child_timeout())
+        .arg("--unix-socket")
+        .arg(missing_unix_socket_path())
+        .args(args)
+        .output()
+        .expect("spawn standalone headscale");
+    CommandOutput::from(out)
+}
+
+fn missing_unix_socket_path() -> PathBuf {
+    let path = env::temp_dir().join(format!(
+        "octravpn-headscale-passthrough-{}.sock",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    path
 }
 
 #[derive(Debug)]
@@ -132,7 +214,16 @@ fn headscale_help_lists_every_admin_subcommand() {
     let out = octravpn(&["headscale", "--help"]);
     let s = String::from_utf8_lossy(&out.stdout);
     assert!(!s.is_empty(), "stdout should be non-empty");
-    for verb in ["users", "nodes", "preauthkeys", "policy", "tailnet"] {
+    for verb in [
+        "users",
+        "nodes",
+        "preauthkeys",
+        "auth",
+        "apikeys",
+        "policy",
+        "tailnet",
+        "debug",
+    ] {
         assert!(
             s.contains(verb),
             "headscale --help missing `{verb}` subcommand:\n{s}"
@@ -141,49 +232,66 @@ fn headscale_help_lists_every_admin_subcommand() {
     assert_eq!(out.code, Some(0), "help exits 0");
 }
 
-/// Missing `--server` is the same error in both binaries — emitted
-/// before any HTTP call. Same stdout (empty), same stderr message,
-/// same exit code (6 — Server / Local error per the ExitCode contract).
+/// Migrated commands use the local upstream-compatible gRPC endpoint
+/// and fail the same way when its Unix socket is absent.
 #[test]
-fn users_list_missing_server_is_byte_identical() {
-    let embed = octravpn(&["headscale", "users", "list"]);
-    let stand = standalone(&["users", "list"]);
-    assert_byte_identical("users list (missing --server)", &embed, &stand);
+fn users_list_local_grpc_missing_socket_is_byte_identical() {
+    let embed = octravpn_local_grpc(&["users", "list"]);
+    let stand = standalone_local_grpc(&["users", "list"]);
+    assert_byte_identical("users list (local gRPC missing socket)", &embed, &stand);
 }
 
 #[test]
-fn users_create_missing_server_is_byte_identical() {
-    let embed = octravpn(&["headscale", "users", "create", "alice"]);
-    let stand = standalone(&["users", "create", "alice"]);
-    assert_byte_identical("users create (missing --server)", &embed, &stand);
+fn users_create_local_grpc_missing_socket_is_byte_identical() {
+    let embed = octravpn_local_grpc(&["users", "create", "alice"]);
+    let stand = standalone_local_grpc(&["users", "create", "alice"]);
+    assert_byte_identical("users create (local gRPC missing socket)", &embed, &stand);
 }
 
 #[test]
-fn nodes_list_missing_server_is_byte_identical() {
-    let embed = octravpn(&["headscale", "nodes", "list"]);
-    let stand = standalone(&["nodes", "list"]);
-    assert_byte_identical("nodes list (missing --server)", &embed, &stand);
+fn nodes_list_local_grpc_missing_socket_is_byte_identical() {
+    let embed = octravpn_local_grpc(&["nodes", "list"]);
+    let stand = standalone_local_grpc(&["nodes", "list"]);
+    assert_byte_identical("nodes list (local gRPC missing socket)", &embed, &stand);
 }
 
 #[test]
-fn preauthkeys_create_missing_server_is_byte_identical() {
-    let embed = octravpn(&["headscale", "preauthkeys", "create", "--user", "alice"]);
-    let stand = standalone(&["preauthkeys", "create", "--user", "alice"]);
-    assert_byte_identical("preauthkeys create (missing --server)", &embed, &stand);
+fn preauthkeys_create_local_grpc_missing_socket_is_byte_identical() {
+    let embed = octravpn_local_grpc(&["preauthkeys", "create", "--user", "42"]);
+    let stand = standalone_local_grpc(&["preauthkeys", "create", "--user", "42"]);
+    assert_byte_identical(
+        "preauthkeys create (local gRPC missing socket)",
+        &embed,
+        &stand,
+    );
 }
 
 #[test]
-fn policy_get_missing_server_is_byte_identical() {
-    let embed = octravpn(&["headscale", "policy", "get"]);
-    let stand = standalone(&["policy", "get"]);
-    assert_byte_identical("policy get (missing --server)", &embed, &stand);
+fn policy_get_local_grpc_missing_socket_is_byte_identical() {
+    let embed = octravpn_local_grpc(&["policy", "get"]);
+    let stand = standalone_local_grpc(&["policy", "get"]);
+    assert_byte_identical("policy get (local gRPC missing socket)", &embed, &stand);
 }
 
 #[test]
-fn tailnet_status_missing_server_is_byte_identical() {
-    let embed = octravpn(&["headscale", "tailnet", "status"]);
-    let stand = standalone(&["tailnet", "status"]);
-    assert_byte_identical("tailnet status (missing --server)", &embed, &stand);
+fn tailnet_status_local_grpc_missing_socket_is_byte_identical() {
+    let embed = octravpn_local_grpc(&["tailnet", "status"]);
+    let stand = standalone_local_grpc(&["tailnet", "status"]);
+    assert_byte_identical("tailnet status (local gRPC missing socket)", &embed, &stand);
+}
+
+#[test]
+fn apikeys_list_local_grpc_missing_socket_is_byte_identical() {
+    let embed = octravpn_local_grpc(&["apikeys", "list"]);
+    let stand = standalone_local_grpc(&["apikeys", "list"]);
+    assert_byte_identical("apikeys list (local gRPC missing socket)", &embed, &stand);
+}
+
+#[test]
+fn auth_approve_local_grpc_missing_socket_is_byte_identical() {
+    let embed = octravpn_local_grpc(&["auth", "approve", "--auth-id", "pending-id"]);
+    let stand = standalone_local_grpc(&["auth", "approve", "--auth-id", "pending-id"]);
+    assert_byte_identical("auth approve (local gRPC missing socket)", &embed, &stand);
 }
 
 /// Connection refused against a non-routable address — exercises the

@@ -19,6 +19,8 @@ touches that path.
   - `../octra-foundry` — hosts the `octra-mock-rpc` crate the demo
     chain uses.
   - `../headscale-rs` — path dep of the mesh crate's protobuf bridge.
+    Scripts that shell into Docker accept `HEADSCALE_RS_PATH` when this
+    checkout lives elsewhere.
 
 ## One-shot: build the Linux binaries
 
@@ -42,7 +44,7 @@ mtime, so a re-run with nothing changed is sub-second. Exit codes:
 | 0    | All requested binaries present + fresh. |
 | 10   | `cargo build` inside docker failed (check the log above). |
 | 20   | Docker daemon not reachable. |
-| 30   | Sibling repo missing at `../octra-foundry` or `../headscale-rs`. |
+| 30   | Sibling repo missing at `../octra-foundry` or `${HEADSCALE_RS_PATH:-../headscale-rs}`. |
 
 Observed timings on an Apple M-series host (see the script header for
 detail):

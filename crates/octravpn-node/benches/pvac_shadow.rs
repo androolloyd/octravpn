@@ -210,7 +210,11 @@ fn pvac_shadow_bench(c: &mut Criterion) {
 
     // Also emit a wall-clock µs-per-receipt summary so a CI log
     // reader doesn't have to dig through criterion's HTML report.
-    let n: u32 = 200;
+    let n: u32 = std::env::var("PVAC_SHADOW_SUMMARY_ITERS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(10);
     let t0 = Instant::now();
     for _ in 0..n {
         let r1 = sc.call(&json!({

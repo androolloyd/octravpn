@@ -60,7 +60,7 @@ Type `{ "acls": [ { "action": "accept", "src": ["alice"], "dst": ["bob:*"] } ] }
 Enter
 Ctrl+D
 Sleep 1s
-Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51821 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale policy set /tmp/policy.hujson || true"
+Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51821 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale policy set --file /tmp/policy.hujson || true"
 Enter
 Sleep 4s
 

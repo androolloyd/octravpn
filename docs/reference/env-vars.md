@@ -33,13 +33,17 @@ precedence.
 | `OCTRAVPN_SERVE_DIR` | `octravpn serve` | path | Override `serve.toml` location. |
 | `HEADSCALE_URL` | `octravpn-node headscale …` | URL | Admin server URL. Equivalent to `--server`. |
 | `HEADSCALE_ADMIN_TOKEN` | `octravpn-node headscale …` | string | Admin bearer. Equivalent to `--token`. |
+| `HEADSCALE_CLI_ADDRESS` | `octravpn-node headscale …` | URL | gRPC admin endpoint. Equivalent to `--address`. |
+| `HEADSCALE_CLI_API_KEY` | `octravpn-node headscale …` | string | API key for remote gRPC. Equivalent to `--api-key`. |
+| `HEADSCALE_UNIX_SOCKET` | `octravpn-node headscale …` | path | Local gRPC Unix socket. Equivalent to `--unix-socket`. |
+| `HEADSCALE_CLI_INSECURE` | `octravpn-node headscale …` | bool | Disable TLS verification for remote gRPC. Equivalent to `--insecure`. |
 | `PVAC_SIDECAR_BIN` | `octravpn-node` (when `[pvac].enabled`) | path | Override `[pvac].binary_path`. |
 | `RUST_LOG` | every binary | tracing-env-filter | `info`, `info,octravpn=debug`, etc. Honoured via `tracing-subscriber`'s `EnvFilter`. |
 | `HOME` | `octravpn` (tailnet.rs, v2_cache.rs) | path | Used to locate `~/.octravpn/tailnets/*.toml`. |
 | `XDG_CACHE_HOME` | `octravpn` | path | Override default cache root before `HOME`. |
 | `HOST` / `HOSTNAME` | `octravpn` (tailnet.rs) | string | Fallback hostname for MagicDNS. |
 
-Total unique env vars: **19** (12 OctraVPN-namespaced, 2 headscale, 1 PVAC, 4 standard).
+Total unique env vars: **23** (12 OctraVPN-namespaced, 6 headscale, 1 PVAC, 4 standard).
 
 ---
 
@@ -151,16 +155,44 @@ Source: `crates/octravpn-node/src/cli/mesh.rs:408-440`.
 
 * **Binary.** `octravpn-node headscale …` (and the standalone
   `headscale` binary).
-* **Type.** Admin server URL. Trailing `/` allowed.
-* **Precedence.** `--server` flag > this env > error.
-* **Source.** `headscale-rs/headscale-cli/src/admin/mod.rs:101`.
+* **Type.** Legacy HTTP admin server URL. Trailing `/` allowed.
+* **Precedence.** `--server` flag > this env > gRPC default path.
+* **Source.** `headscale-rs/headscale-cli/src/admin/mod.rs::ConnectArgs`.
 
 ### `HEADSCALE_ADMIN_TOKEN`
 
 * **Binary.** `octravpn-node headscale …`.
 * **Type.** Bearer token string. Empty allowed.
 * **Precedence.** `--token` flag > this env.
-* **Source.** `headscale-rs/headscale-cli/src/admin/mod.rs:104`.
+* **Source.** `headscale-rs/headscale-cli/src/admin/mod.rs::ConnectArgs`.
+
+### `HEADSCALE_CLI_ADDRESS`
+
+* **Binary.** `octravpn-node headscale …`.
+* **Type.** gRPC admin endpoint URL.
+* **Precedence.** `--address` flag > this env > local Unix socket.
+* **Source.** `headscale-rs/headscale-cli/src/admin/mod.rs::ConnectArgs`.
+
+### `HEADSCALE_CLI_API_KEY`
+
+* **Binary.** `octravpn-node headscale …`.
+* **Type.** Remote gRPC API key.
+* **Precedence.** `--api-key` flag > this env.
+* **Source.** `headscale-rs/headscale-cli/src/admin/mod.rs::ConnectArgs`.
+
+### `HEADSCALE_UNIX_SOCKET`
+
+* **Binary.** `octravpn-node headscale …`.
+* **Type.** Local gRPC Unix socket path.
+* **Precedence.** `--unix-socket` flag > this env > built-in default.
+* **Source.** `headscale-rs/headscale-cli/src/admin/mod.rs::ConnectArgs`.
+
+### `HEADSCALE_CLI_INSECURE`
+
+* **Binary.** `octravpn-node headscale …`.
+* **Type.** Boolean flag.
+* **Precedence.** `--insecure` flag > this env > TLS verification on.
+* **Source.** `headscale-rs/headscale-cli/src/admin/mod.rs::ConnectArgs`.
 
 ### `PVAC_SIDECAR_BIN`
 
