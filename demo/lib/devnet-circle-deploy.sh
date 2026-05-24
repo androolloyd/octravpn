@@ -92,10 +92,19 @@ if [[ ! -x "${OCTRA_BIN}" ]]; then
         exit 10
     fi
 fi
-if [[ ! -f "${DEPLOYER_KEY}" ]]; then
-    echo "devnet-circle-deploy: deployer key missing: ${DEPLOYER_KEY}" >&2
-    exit 10
-fi
+# NOTE: DEPLOYER_KEY is only required for write ops (deploy/asset-put).
+# Read-only reuse of an already-deployed + seeded circle does NOT need
+# it. Defer the check until we know we need to deploy or seed. This is
+# what lets CI run without secrets-side wallet provisioning — the
+# canonical demo circle already exists on devnet.
+require_deployer_key() {
+    if [[ ! -f "${DEPLOYER_KEY}" ]]; then
+        echo "devnet-circle-deploy: deployer key missing: ${DEPLOYER_KEY}" >&2
+        echo "  set DEPLOYER_KEY env or commit the key file. Read-only reuse" >&2
+        echo "  doesn't need it — this path fires only on deploy/asset-seed." >&2
+        exit 10
+    fi
+}
 if ! curl -fsS -m 5 -X POST -H 'Content-Type: application/json' \
         -d '{"jsonrpc":"2.0","method":"node_status","params":[],"id":1}' \
         "${OCTRA_RPC_URL}" >/dev/null 2>&1; then
@@ -184,6 +193,7 @@ fi
 
 # Stage 3: deploy fresh if neither cache nor known-id worked.
 if [[ -z "${CIRCLE_ID}" ]]; then
+    require_deployer_key
     log "deploying new circle on ${OCTRA_RPC_URL}"
     DEPLOY_OUT=$("${OCTRA_BIN}" cast circle deploy \
         --key "${DEPLOYER_KEY}" \
@@ -213,6 +223,9 @@ if circle_fully_seeded "${CIRCLE_ID}"; then
     echo "${CIRCLE_ID}"
     exit 0
 fi
+
+# About to write to chain — need the deployer key.
+require_deployer_key
 
 log "seeding sealed assets under passphrase '${PASSPHRASE}' (skipping already-on-chain paths)"
 TMP=$(mktemp -d)
