@@ -54,10 +54,9 @@ pvac-sidecar/octra-pvac-sidecar
 /demo/.audit-fixture/
 
 # Devnet per-tape runtime state seeded by demo/lib/devnet-circle-deploy.sh.
-# Wallet keys MUST NOT be tracked; circle-id.txt is a public chain
-# address (no secret) and IS tracked so CI doesn't need a deployer key
-# to reuse the canonical demo circle.
-/demo/state/
+# Track only the public circle-id.txt; ignore everything else (wallets,
+# keys, ephemeral fixture dirs).
+/demo/state/*
 !/demo/state/devnet/
 /demo/state/devnet/*
 !/demo/state/devnet/circle-id.txt
