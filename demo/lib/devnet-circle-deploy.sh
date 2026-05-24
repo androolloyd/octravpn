@@ -62,9 +62,26 @@ PASSPHRASE="${OCTRAVPN_SEALED_PASSPHRASE:-demo}"
 
 # Preflight -----------------------------------------------------------
 if [[ ! -x "${OCTRA_BIN}" ]]; then
-    echo "devnet-circle-deploy: octra binary not found at ${OCTRA_BIN}" >&2
-    echo "  build via: (cd ../octra-foundry && cargo build --release -p octra-cli --bin octra)" >&2
-    exit 10
+    # Try to build it on first use. The foundry's octra-cli isn't part
+    # of build-linux-binaries.sh's list (that builds Linux ELFs for
+    # docker mounts; the cast CLI runs on the host directly). Build
+    # release for portability across the matrix jobs that need it
+    # (H2 portal-container, H4 devnet, H7 master-tour).
+    echo "devnet-circle-deploy: building octra CLI from foundry (first use)" >&2
+    foundry_dir="${REPO_ROOT}/../octra-foundry"
+    if [[ ! -d "${foundry_dir}" ]]; then
+        echo "devnet-circle-deploy: sibling octra-foundry not found at ${foundry_dir}" >&2
+        exit 10
+    fi
+    if ! (cd "${foundry_dir}" && cargo build --release -p octra-cli --bin octra >&2); then
+        echo "devnet-circle-deploy: cargo build --release -p octra-cli --bin octra failed" >&2
+        exit 10
+    fi
+    OCTRA_BIN="${foundry_dir}/target/release/octra"
+    if [[ ! -x "${OCTRA_BIN}" ]]; then
+        echo "devnet-circle-deploy: octra binary still missing at ${OCTRA_BIN} after build" >&2
+        exit 10
+    fi
 fi
 if [[ ! -f "${DEPLOYER_KEY}" ]]; then
     echo "devnet-circle-deploy: deployer key missing: ${DEPLOYER_KEY}" >&2
