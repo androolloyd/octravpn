@@ -34,7 +34,8 @@ Sleep 1s
 
 Type "bash docker/devnet/tailscale-interop/run-interop.sh"
 Enter
-# Build phase + compose-up + peer-join + ping. First-run cold cache
-# can hit 5-10 minutes; warm cache is sub-minute. We give it 6 min,
-# vhs will truncate the recording at the script's exit.
-Sleep 360s
+# Build phase + compose-up + peer-join + ping. With the warm runner
+# cache + deferred-shutdown defaults, run-interop.sh typically finishes
+# in <90s; 3 min gives headroom without burning wall-clock. vhs will
+# truncate the recording at the script's exit anyway.
+Sleep 180s

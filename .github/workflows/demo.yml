@@ -309,10 +309,81 @@ jobs:
   # The job is intentionally separate from the dependency-light job
   # above so a docker-daemon hiccup on the runner can't break the
   # nightly tapes 01/03/04/07/11..14 rendering.
+  #
+  # Matrix layout: one parallel job per harness group (H1..H7). The
+  # previous sequential implementation regularly blew past 90 min when
+  # a single group stalled (see run 26342601617 — SIGTERM at 47 min
+  # inside tape 06). Splitting trades ~5 min of duplicated per-job
+  # setup for genuine parallelism. fail-fast=false so one group's
+  # failure doesn't cancel the others. Each matrix job uploads its
+  # recordings as `demo-recordings-h<N>`; a single aggregator job
+  # (`render-heavy-aggregate`) downloads all artifacts, muxes
+  # captions+audio across the combined set, and commits once.
   # ---------------------------------------------------------------------
   render-heavy:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Group H1: delegated / self-bringup (tapes 05, 06)
+          # Tapes that drive their own bringup+teardown via shell
+          # scripts (e2e + tailscale-interop). Preflight skipped.
+          - group: h1
+            name: delegated
+            tapes: "05-v3-smoke.tape:1 06-tailscale-interop.tape:1"
+            bringup: ""
+            teardown: ""
+          # Group H2: portal-container (02, 15, 16)
+          # One containerized portal wired to LIVE devnet + demo circle.
+          - group: h2
+            name: portal-container
+            tapes: "02-portal-fetch.tape 15-user-oct-url-public.tape 16-user-oct-url-sealed.tape"
+            bringup: "demo/lib/portal-container-bringup.sh"
+            teardown: "demo/lib/portal-container-teardown.sh"
+          # Group H3: 3-node mesh (08, 09, 10, 18, 22)
+          # Full compose stack: 3 tailscale peers + derp-1 + analytics +
+          # grafana. Tapes 18+22 drive the headscale control plane.
+          - group: h3
+            name: 3node-mesh
+            tapes: "08-3node-mesh.tape 09-traffic-patterns.tape 10-metrics-grafana.tape 18-tailnet-owner-policy.tape 22-headscale-cli-tour.tape"
+            bringup: "demo/lib/3node-mesh-bringup.sh"
+            teardown: "demo/lib/3node-mesh-teardown.sh"
+          # Group H4: devnet (17, 19)
+          # devnet-bringup deploys demo circle + node1/2/3 against live devnet.
+          - group: h4
+            name: devnet
+            tapes: "17-operator-onboarding.tape 19-circle-update-atomic.tape"
+            bringup: "demo/lib/devnet-bringup.sh"
+            teardown: "demo/lib/devnet-teardown.sh"
+          # Group H5: pvac (20)
+          # PVAC sidecar Dockerfile compiles GPL'd C++ — cold build 3-5 min.
+          - group: h5
+            name: pvac
+            tapes: "20-pvac-rotation.tape"
+            bringup: "demo/lib/pvac-bringup.sh"
+            teardown: "demo/lib/pvac-teardown.sh"
+          # Group H6: audit-fixture (21)
+          # Same fixture container as light tape 03 but with the full
+          # heavy-job binary stack so `audit verify` walks the journal.
+          - group: h6
+            name: audit-fixture
+            tapes: "21-audit-verify.tape"
+            bringup: "demo/lib/audit-fixture-bringup.sh"
+            teardown: "demo/lib/audit-fixture-teardown.sh"
+          # Group H7: master-tour (00)
+          # The master tour's own `Source` directives bring up whichever
+          # harnesses it touches (idempotent). With the matrix split it
+          # runs in its OWN runner, so the previous "must come last so
+          # prior teardowns leave a clean slate" constraint is moot —
+          # this job starts on a fresh ubuntu-latest with nothing else
+          # running. Per-tape preflight still gates each segment.
+          - group: h7
+            name: master-tour
+            tapes: "00-master-tour.tape"
+            bringup: ""
+            teardown: ""
     steps:
       - uses: actions/checkout@v4
         with:
@@ -336,7 +407,12 @@ jobs:
           vhs --version
 
       - uses: dtolnay/rust-toolchain@stable
+
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Distinct cache key per matrix value so 7 parallel jobs
+          # don't trample each other's incremental artifacts.
+          key: render-heavy-${{ matrix.group }}
 
       - name: Build octravpn-node + analytics (host release for compose mount fallback)
         working-directory: octra
@@ -355,7 +431,6 @@ jobs:
           set -euo pipefail
           # Same fix as render-job. See the light job's identical step
           # at the top of the workflow for the full rationale.
-          ln -sfn octravpn octra
           docker build \
             -f octra/docker/Dockerfile.builder \
             -t octravpn-builder:latest \
@@ -372,14 +447,59 @@ jobs:
           # on re-runs.
           bash demo/lib/build-linux-binaries.sh
 
-      - name: Render heavy tapes (grouped by harness)
+      - name: Generate audit + receipt-journal fixture (for H6/H7 master-tour)
+        if: matrix.group == 'h6' || matrix.group == 'h7'
+        working-directory: octra
+        run: |
+          set -euo pipefail
+          # Tape 21 (and 00's audit segment) needs the same synthesized
+          # audit fixture the light job builds for tape 03. Replicate
+          # it locally since the light job's checkout is on a different
+          # runner.
+          mkdir -p demo/state/node
+          python3 - <<'PY'
+          import hmac, hashlib, json, secrets
+          state_dir = "demo/state/node"
+          key = secrets.token_bytes(32)
+          with open(f"{state_dir}/audit.log.key", "wb") as f:
+              f.write(key)
+          records = [
+              (1715000000, "session_open",  "a" * 64, {"peer": "peer-1"}),
+              (1715000005, "session_open",  "b" * 64, {"peer": "peer-2"}),
+              (1715000020, "bytes_used",    "a" * 64, {"bytes_used": 4096}),
+              (1715000040, "receipt_sign",  "a" * 64, {"seq": 1, "bytes_used": 4096}),
+              (1715000060, "bytes_used",    "b" * 64, {"bytes_used": 8192}),
+              (1715000080, "receipt_sign",  "b" * 64, {"seq": 1, "bytes_used": 8192}),
+              (1715000100, "session_close", "a" * 64, {"reason": "client_quit"}),
+              (1715000120, "session_close", "b" * 64, {"reason": "client_quit"}),
+          ]
+          prev_mac = b"\x00" * 32
+          with open(f"{state_dir}/audit.log", "w") as f:
+              for ts, kind, sid, extra in records:
+                  rec = {"ts_unix": ts, "kind": kind, "source": None,
+                         "session_id": sid, "extra": extra}
+                  canonical = json.dumps(rec, separators=(",", ":"), sort_keys=False)
+                  mac = hmac.new(key, prev_mac + canonical.encode(), hashlib.sha256).digest()
+                  chained = {"record_json": canonical,
+                             "prev_mac": prev_mac.hex(),
+                             "mac": mac.hex()}
+                  f.write(json.dumps(chained) + "\n")
+                  prev_mac = mac
+          open(f"{state_dir}/receipts.bin", "wb").close()
+          print(f"wrote {len(records)} audit records + empty journal")
+          PY
+          ls -la demo/state/node/
+
+      - name: Render group ${{ matrix.group }} (${{ matrix.name }})
         working-directory: octra
         run: |
           set -euo pipefail
           mkdir -p demo/recordings
 
           # Per-tape renderer with preflight gate. PASS => vhs render.
-          # FAIL => `::warning::` + continue.
+          # FAIL => `::warning::` + continue (preserves the per-tape
+          # preflight gate behavior from the previous sequential heavy
+          # job — see render_tape() in the light job above).
           render_tape() {
               local tape="$1"
               local skip_preflight="${2:-0}"
@@ -393,81 +513,73 @@ jobs:
               vhs "${tape}" || echo "::warning::${tape} failed vhs render (non-fatal in nightly)"
           }
 
-          # --- Group H1: delegated / self-bringup (tapes 05, 06) --------
-          # These tapes delegate to shell scripts that exit-code
-          # themselves (e2e + tailscale-interop). They self-bring-up
-          # and self-teardown, so we just render them; per-command
-          # preflight is intentionally skipped (skip_preflight=1).
-          echo "--- group: delegated (tapes 05, 06) ---"
-          render_tape demo/tapes/05-v3-smoke.tape 1
-          render_tape demo/tapes/06-tailscale-interop.tape 1
+          echo "--- group: ${{ matrix.name }} (${{ matrix.group }}) ---"
 
-          # --- Group H2: portal-container (02, 15, 16) ------------------
-          # One containerized portal serves the portal-fetch tape (02)
-          # and the oct-url tapes (15, 16). Bringup wires to the LIVE
-          # devnet + deploys the demo circle.
-          echo "--- group: portal-container (02, 15, 16) ---"
-          bash demo/lib/portal-container-bringup.sh
-          render_tape demo/tapes/02-portal-fetch.tape
-          render_tape demo/tapes/15-user-oct-url-public.tape
-          render_tape demo/tapes/16-user-oct-url-sealed.tape
-          bash demo/lib/portal-container-teardown.sh >/dev/null 2>&1 || true
+          # Bringup (may be empty for self-bringup groups like H1/H7).
+          if [[ -n "${{ matrix.bringup }}" ]]; then
+              bash "${{ matrix.bringup }}"
+          fi
 
-          # --- Group H3: 3-node mesh (08, 09, 10, 18, 22) ---------------
-          # Mesh tapes that need the full compose stack: 3 tailscale
-          # peers + derp-1 + analytics + grafana scraping. Tapes 18
-          # (tailnet-owner-policy) + 22 (headscale-cli-tour) drive the
-          # mesh control plane via headscale.
-          echo "--- group: 3-node-mesh (heavy) ---"
-          bash demo/lib/3node-mesh-bringup.sh
-          render_tape demo/tapes/08-3node-mesh.tape
-          render_tape demo/tapes/09-traffic-patterns.tape
-          render_tape demo/tapes/10-metrics-grafana.tape
-          render_tape demo/tapes/18-tailnet-owner-policy.tape
-          render_tape demo/tapes/22-headscale-cli-tour.tape
-          bash demo/lib/3node-mesh-teardown.sh >/dev/null 2>&1 || true
+          # Render each tape in the group. Tape spec is
+          # "<file>[:<skip_preflight>]" — skip_preflight defaults to 0.
+          for spec in ${{ matrix.tapes }}; do
+              tape_file="${spec%%:*}"
+              skip="${spec##*:}"
+              [[ "${skip}" == "${spec}" ]] && skip="0"
+              render_tape "demo/tapes/${tape_file}" "${skip}"
+          done
 
-          # --- Group H4: devnet (17, 19) --------------------------------
-          # devnet-bringup deploys the demo circle to LIVE devnet and
-          # brings up node1/2/3 against it. Tape 17 is the operator
-          # onboarding flow, tape 19 is the atomic circle-update.
-          echo "--- group: devnet (17, 19) ---"
-          bash demo/lib/devnet-bringup.sh
-          render_tape demo/tapes/17-operator-onboarding.tape
-          render_tape demo/tapes/19-circle-update-atomic.tape
-          bash demo/lib/devnet-teardown.sh >/dev/null 2>&1 || true
-
-          # --- Group H5: pvac (20) --------------------------------------
-          # The PVAC sidecar's Dockerfile compiles GPL'd C++ sources;
-          # first build is ~3-5 min cold. Single tape uses this; we
-          # keep it in its own group so the slow build doesn't gate
-          # the other heavy renders.
-          echo "--- group: pvac (20) ---"
-          bash demo/lib/pvac-bringup.sh
-          render_tape demo/tapes/20-pvac-rotation.tape
-          bash demo/lib/pvac-teardown.sh >/dev/null 2>&1 || true
-
-          # --- Group H6: audit-fixture (21) -----------------------------
-          # Tape 21 (audit-verify) drives the same fixture as light
-          # tape 03 but the verify path needs the heavy job's full
-          # octravpn-node binary stack (audit verify walks the receipt
-          # journal which the light job's empty stub doesn't satisfy).
-          echo "--- group: audit-fixture (21) ---"
-          bash demo/lib/audit-fixture-bringup.sh
-          render_tape demo/tapes/21-audit-verify.tape
-          bash demo/lib/audit-fixture-teardown.sh >/dev/null 2>&1 || true
-
-          # --- Group H7: master-tour (00) -------------------------------
-          # Renders LAST so the prior groups' teardowns leave a clean
-          # slate. The master tour's own `Source` directives bring up
-          # whichever harnesses it needs (idempotent — already-up is a
-          # no-op). Per-command preflight runs against whatever's live.
-          echo "--- group: master-tour (00) ---"
-          render_tape demo/tapes/00-master-tour.tape
+          # Teardown (may be empty).
+          if [[ -n "${{ matrix.teardown }}" ]]; then
+              bash "${{ matrix.teardown }}" >/dev/null 2>&1 || true
+          fi
 
           ls -la demo/recordings/ || true
 
-      - name: Mux captions + TTS audio onto heavy recordings
+      - name: Upload group recordings
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-recordings-${{ matrix.group }}
+          path: octra/demo/recordings/
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------
+  # Aggregator job: pulls every matrix job's artifact, muxes captions +
+  # TTS audio across the combined set, and commits once. Runs only after
+  # ALL matrix entries finish (success OR failure — `if: always()` so a
+  # single group failure doesn't strand the others' recordings).
+  # ---------------------------------------------------------------------
+  render-heavy-aggregate:
+    runs-on: ubuntu-latest
+    needs: [render-heavy]
+    if: always()
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: octra
+
+      - name: Install ffmpeg + espeak-ng (for captions+audio mux)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg espeak-ng jq
+
+      - name: Download all matrix artifacts
+        uses: actions/download-artifact@v4
+        with:
+          # Merge every render-heavy-h<N> artifact into a single dir.
+          pattern: demo-recordings-h*
+          merge-multiple: true
+          path: octra/demo/recordings/
+
+      - name: List combined recordings
+        working-directory: octra
+        run: |
+          set -euo pipefail
+          ls -la demo/recordings/ || true
+
+      - name: Mux captions + TTS audio onto combined recordings
         working-directory: octra
         run: |
           set -euo pipefail
@@ -475,7 +587,7 @@ jobs:
           bash demo/lib/render-with-audio.sh   || echo "(audio non-fatal)"
           ls -la demo/recordings/ || true
 
-      - name: Upload heavy recordings
+      - name: Upload aggregated heavy recordings
         uses: actions/upload-artifact@v4
         with:
           name: demo-recordings-heavy
@@ -501,6 +613,6 @@ jobs:
           git commit -m "ci(demo): refresh recordings ${DATE}" \
                      -m "[skip ci]" \
                      -m "Tapes produced: ${TAPES:-(none)}" \
-                     -m "Auto-generated by demo.yml render-heavy job (run ${GITHUB_RUN_ID}). README gifs use relative paths, so this push updates the README inline."
+                     -m "Auto-generated by demo.yml render-heavy matrix aggregator (run ${GITHUB_RUN_ID}). README gifs use relative paths, so this push updates the README inline."
           git pull --rebase origin main || true
           git push origin HEAD:main
