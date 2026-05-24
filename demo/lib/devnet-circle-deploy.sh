@@ -73,6 +73,15 @@ if [[ ! -x "${OCTRA_BIN}" ]]; then
         echo "devnet-circle-deploy: sibling octra-foundry not found at ${foundry_dir}" >&2
         exit 10
     fi
+    # Safety net: build-linux-binaries.sh's docker run mounts the
+    # foundry tree + writes Cargo.lock as root inside the container.
+    # That leaves root-owned files in the host's octra-foundry/, which
+    # blocks the native cargo build below with "Permission denied"
+    # on creating target/release/. sudo-chown to the calling user (no-op
+    # if already correct) so the native cargo can write.
+    if command -v sudo >/dev/null 2>&1; then
+        sudo chown -R "$(id -u):$(id -g)" "${foundry_dir}" >/dev/null 2>&1 || true
+    fi
     if ! (cd "${foundry_dir}" && cargo build --release -p octra-cli --bin octra >&2); then
         echo "devnet-circle-deploy: cargo build --release -p octra-cli --bin octra failed" >&2
         exit 10
