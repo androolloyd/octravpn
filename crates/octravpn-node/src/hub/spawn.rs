@@ -182,6 +182,9 @@ impl Hub {
                             octravpn_mesh::tailscale_wire::RegistrationCache::new(),
                         ),
                         pings: Arc::new(octravpn_mesh::tailscale_wire::PingTracker::new()),
+                        mapresponse_debug: Arc::new(
+                            octravpn_mesh::tailscale_wire::MapResponseDebugStore::disabled(),
+                        ),
                     },
                     shared_minter,
                 ))

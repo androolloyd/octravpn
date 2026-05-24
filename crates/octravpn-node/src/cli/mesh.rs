@@ -343,6 +343,9 @@ async fn run_mesh_serve(
         runtime_config: Arc::new(octravpn_mesh::tailscale_wire::RuntimeConfigSnapshot::default()),
         registration_cache: Arc::new(octravpn_mesh::tailscale_wire::RegistrationCache::new()),
         pings: Arc::new(octravpn_mesh::tailscale_wire::PingTracker::new()),
+        mapresponse_debug: Arc::new(
+            octravpn_mesh::tailscale_wire::MapResponseDebugStore::disabled(),
+        ),
     };
 
     eprintln!(
