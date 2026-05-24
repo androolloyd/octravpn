@@ -23,7 +23,7 @@ Set TypingSpeed 35ms
 
 Type "bash demo/lib/3node-mesh-bringup.sh"
 Enter
-Sleep 120s
+Sleep 5s
 
 Type "# Step 1: write a minimal hujson policy (alice <-> bob accept-all)"
 Enter

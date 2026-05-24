@@ -23,7 +23,7 @@ Set TypingSpeed 35ms
 
 Type "bash demo/lib/3node-mesh-bringup.sh"
 Enter
-Sleep 120s
+Sleep 5s
 Type "# 1. create a user (the namespace that owns nodes + keys)"
 Enter
 Type "docker exec -e HEADSCALE_URL=http://127.0.0.1:51821 -e HEADSCALE_ADMIN_TOKEN=mesh-demo-token mesh-demo-control octravpn-node headscale users create alice || true"

@@ -44,6 +44,14 @@ pvac-sidecar/octra-pvac-sidecar
 # may be tracked; private ceremony output must stay local.
 /docker/conf/node*/fhe.sk
 
+# Demo nodes (docker/conf/demo-node{1,2,3}) use known-stub wallet/wg
+# keypairs — they do sealed-only reads against devnet and never sign
+# chain txs. The keys are deterministic 32-byte hex placeholders;
+# tracking them keeps CI's docker compose up from failing on missing
+# mount targets. NOT real wallets.
+!/docker/conf/demo-node*/wallet.key
+!/docker/conf/demo-node*/wg.key
+
 # Bench snapshots are committed (see docs/performance-limitations.md §7).
 # `target/criterion/` (under the already-ignored `/target`) holds
 # per-run criterion output; only the curated JSON under

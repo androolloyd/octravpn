@@ -37,7 +37,7 @@ Enter
 # is just `docker compose up -d` + tailscale-up + 3-peer convergence.
 # Wall-clock on a CI runner: 60-90s. Sleep budget is the upper bound
 # so vhs's frame capture stops cleanly when the prompt returns.
-Sleep 120s
+Sleep 5s
 
 Type "# Show the roster from peer-1's vantage point"
 Enter
