@@ -345,9 +345,23 @@ jobs:
           # Group H3: 3-node mesh (08, 09, 10, 18, 22)
           # Full compose stack: 3 tailscale peers + derp-1 + analytics +
           # grafana. Tapes 18+22 drive the headscale control plane.
-          - group: h3
-            name: 3node-mesh
-            tapes: "08-3node-mesh.tape 09-traffic-patterns.tape 10-metrics-grafana.tape 18-tailnet-owner-policy.tape 22-headscale-cli-tour.tape"
+          # Group H3a: 3node-mesh data-plane tapes (08, 09, 10)
+          # Split from H3 in 2026-05-24: the original 5-tape group
+          # blew past timeout-minutes=60 on the renderer's SIGTERM at
+          # ~50 min (see run 26347263190 H3). Three-tape groups fit
+          # comfortably with setup + bringup + render.
+          - group: h3a
+            name: 3node-mesh-data
+            tapes: "08-3node-mesh.tape 09-traffic-patterns.tape 10-metrics-grafana.tape"
+            bringup: "demo/lib/3node-mesh-bringup.sh"
+            teardown: "demo/lib/3node-mesh-teardown.sh"
+          # Group H3b: 3node-mesh admin tapes (18, 22)
+          # Same harness as H3a, distinct matrix entry so the bringup
+          # runs in parallel (two ~10-min renders instead of five
+          # ~25-min serialised).
+          - group: h3b
+            name: 3node-mesh-admin
+            tapes: "18-tailnet-owner-policy.tape 22-headscale-cli-tour.tape"
             bringup: "demo/lib/3node-mesh-bringup.sh"
             teardown: "demo/lib/3node-mesh-teardown.sh"
           # Group H4: devnet (17, 19)
