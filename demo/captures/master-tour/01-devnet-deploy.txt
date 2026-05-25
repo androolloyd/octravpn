@@ -1,0 +1,4 @@
+devnet-bringup: circle ready: octEY88M6UifvMVR5bDmsjJPYakVoLVomZW7KuLpw8PWv3b
+devnet-bringup: node1/2/3 up via docker-compose.demo.yml
+sealed → /etc/octravpn/wallet.key.sealed (ed25519, AEAD)
+health: ok (validator=octVNODE1..., chain=devnet)

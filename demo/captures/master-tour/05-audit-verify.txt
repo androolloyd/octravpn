@@ -1,0 +1,3 @@
+audit-fixture: 8 records + journal at /work/node/{audit.log,receipts.bin}
+audit verify: 8/8 records OK · journal hmac chain intact · tip @ slot 7
+exit=0

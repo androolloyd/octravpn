@@ -1,0 +1,2 @@
+3node-mesh-bringup: control + node1/2/3 ready (tailnet=octravpn-demo)
+policy set: doc accepted (1 acl, 2 groups) → /map long-pollers woken in 0.8ms

@@ -1,0 +1,3 @@
+100.64.0.1   tsi-peer-1   alice@octravpn.demo   linux   -
+100.64.0.2   tsi-peer-2   bob@octravpn.demo     linux   active; direct, tx 14kB rx 12kB
+100.64.0.3   tsi-peer-3   carol@octravpn.demo   linux   idle; relay "octra-derp"

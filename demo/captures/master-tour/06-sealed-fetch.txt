@@ -1,0 +1,5 @@
+CIRCLE=octEY88M6UifvMVR5bDmsjJPYakVoLVomZW7KuLpw8PWv3b
+fetch oct://octEY88…3b/policy.json: 142 B (sealed, unsealed with passphrase)
+{ "allow": ["read"], "circle": "demo", "version": 1 }
+fetch oct://octEY88…3b/sealed.json: 1.2 KB (sealed, unsealed with passphrase)
+{ "kind": "vault", "items": 4, "rotated_at": "2026-05-20T17:07:00Z" }

@@ -1,0 +1,2 @@
+pong from 100.64.0.2 via direct ipv4 in 1ms
+pong from 100.64.0.2 via direct ipv4 in 1ms
