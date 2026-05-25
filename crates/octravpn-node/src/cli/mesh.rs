@@ -477,6 +477,8 @@ async fn run_mesh_serve(
         oidc: None,
         metrics_addr: None,
         acme_http01: None,
+        acme_http01_host: None,
+        acme_http01_addr: None,
         trusted_proxies: TrustedProxyConfig::default(),
     };
     let handle = wire_serve(ws, cfg, admin_router)
