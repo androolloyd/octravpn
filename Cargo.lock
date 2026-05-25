@@ -1658,6 +1658,7 @@ dependencies = [
  "tonic-reflection",
  "tower",
  "tracing",
+ "x509-parser",
  "zstd",
 ]
 

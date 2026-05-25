@@ -23,18 +23,19 @@
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use octravpn_mesh::{
+    PreauthMinter, ServerNoiseKey, WireState,
     ip_alloc::TailnetIpAllocator,
     tailscale_wire::{
+        MachineRegistry,
         controlbase::{FrameHeader, Framed, MsgType},
         raw_tls::serve_raw_tls,
-        tls::{self as wire_tls, SanConfig},
-        MachineRegistry,
+        tls::{self as wire_tls, ReloadableServerConfig, SanConfig},
     },
-    tailscale_wire_router, PreauthMinter, ServerNoiseKey, WireState,
+    tailscale_wire_router,
 };
 use rustls::{
-    pki_types::{pem::PemObject, CertificateDer},
     ClientConfig, RootCertStore,
+    pki_types::{CertificateDer, pem::PemObject},
 };
 use tempfile::tempdir;
 use tokio::{
@@ -96,7 +97,7 @@ async fn spawn_raw_tls(state: WireState) -> (SocketAddr, CertificateDer<'static>
     let addr: SocketAddr = std_listener.local_addr().unwrap();
     drop(std_listener);
 
-    let server_config = Arc::clone(&material.server_config);
+    let server_config = ReloadableServerConfig::new(Arc::clone(&material.server_config));
     let router = tailscale_wire_router(state.clone());
     let state_clone = state.clone();
     tokio::spawn(async move {
