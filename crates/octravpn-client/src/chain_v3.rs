@@ -216,21 +216,15 @@ impl<'a> ChainCtxV3<'a> {
             }
             // Base64-encoded byte string fallback (matches the v2
             // sealed-asset RPC convention).
-            if let Some(s) = obj.get("bytes").and_then(Value::as_str) {
-                use base64::engine::general_purpose::STANDARD as BASE64_STD;
-                use base64::Engine as _;
-                let decoded = BASE64_STD
-                    .decode(s.as_bytes())
-                    .map_err(|e| anyhow!("circle_asset bytes base64: {e}"))?;
-                return Ok(Some(decoded));
-            }
-            if let Some(s) = obj.get("bytes_b64").and_then(Value::as_str) {
-                use base64::engine::general_purpose::STANDARD as BASE64_STD;
-                use base64::Engine as _;
-                let decoded = BASE64_STD
-                    .decode(s.as_bytes())
-                    .map_err(|e| anyhow!("circle_asset bytes_b64 base64: {e}"))?;
-                return Ok(Some(decoded));
+            for key in ["bytes", "bytes_b64"] {
+                if let Some(s) = obj.get(key).and_then(Value::as_str) {
+                    use base64::engine::general_purpose::STANDARD as BASE64_STD;
+                    use base64::Engine as _;
+                    let decoded = BASE64_STD
+                        .decode(s.as_bytes())
+                        .map_err(|e| anyhow!("circle_asset {key} base64: {e}"))?;
+                    return Ok(Some(decoded));
+                }
             }
         }
         Err(anyhow!(
