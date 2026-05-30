@@ -11,7 +11,6 @@ mod commands;
 mod config;
 mod discover;
 mod discover_v2;
-mod operator_backend;
 mod portal;
 mod runner;
 mod settler;
