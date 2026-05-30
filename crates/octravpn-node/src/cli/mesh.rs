@@ -276,7 +276,7 @@ async fn run_mesh_serve(
             tls::{SanConfig, TlsMaterialSource},
             MachineRegistry,
         },
-        PreauthMinter, ServerNoiseKey, WireState, DEFAULT_PREAUTH_TTL,
+        PreauthMinter, ServerNoiseKey, DEFAULT_PREAUTH_TTL,
     };
     use serde::{Deserialize, Serialize};
     use std::{net::SocketAddr, sync::Arc};
@@ -314,39 +314,22 @@ async fn run_mesh_serve(
     // wiring — see `tests/policy_e2e.rs` for the in-process proof.
     let machines = Arc::new(MachineRegistry::new());
     let policy = octravpn_mesh::policy::PolicyStore::new();
-    let ws = WireState {
-        server_noise_key: server_noise_key.clone(),
-        preauth: Arc::new(minter.clone()),
-        ip_allocator: Arc::new(TailnetIpAllocator::new(tailnet_id)),
-        machines: machines.clone(),
-        registration_store: None,
-        derp_map: octravpn_mesh::tailscale_wire::DerpMapStore::shared(derp_map),
-        // P1-policy: empty store ⇒ wire layer falls back to
-        // `allow_all_packet_filter`. The admin surface (when
-        // mounted) holds an `Arc` clone of this store and uses
-        // PUT to push hujson docs; the store's `Notify` wakes
-        // parked `/map` long-pollers within ~1 ms.
-        policy: Arc::new(policy.clone()),
-        // PSK-gated handshake (layer 3 of the active-probe shield).
-        // Default-disabled — operators opt in via
-        // `[control.knock] enabled = true` in node.toml, with the PSK
-        // distributed out-of-band alongside the preauth key. See
-        // `docs/operators/tls-rotation.md` §"PSK-gated control plane".
-        knock: load_knock_cfg_from_env(),
-        dns: Arc::new(octravpn_mesh::headscale_api::dns::DnsStore::from_spec(
-            octravpn_mesh::headscale_api::dns::DnsConfigSpec {
-                base_domain: "octra.test".into(),
-                ..Default::default()
-            },
-        )),
-        public_control_url: None,
-        runtime_config: Arc::new(octravpn_mesh::tailscale_wire::RuntimeConfigSnapshot::default()),
-        registration_cache: Arc::new(octravpn_mesh::tailscale_wire::RegistrationCache::new()),
-        pings: Arc::new(octravpn_mesh::tailscale_wire::PingTracker::new()),
-        mapresponse_debug: Arc::new(
-            octravpn_mesh::tailscale_wire::MapResponseDebugStore::disabled(),
-        ),
-    };
+    // The admin surface (when mounted) holds `Arc` clones of `machines`
+    // + `policy`, so a `PUT /api/v1/policy` mutates the same store the
+    // wire `/map` handler reads. An empty policy store ⇒ the wire layer
+    // falls back to `allow_all_packet_filter`. The PSK-gated knock layer
+    // is opt-in via `[control.knock]` in node.toml (env-sourced here);
+    // every other field takes the builder's octra defaults.
+    let ws = octravpn_mesh::WireStateBuilder::new(
+        server_noise_key.clone(),
+        Arc::new(minter.clone()),
+        Arc::new(TailnetIpAllocator::new(tailnet_id)),
+        machines.clone(),
+        Arc::new(policy.clone()),
+        octravpn_mesh::tailscale_wire::DerpMapStore::shared(derp_map),
+    )
+    .knock(load_knock_cfg_from_env())
+    .build();
 
     eprintln!(
         "mesh serve: noise pubkey mkey:{} listen={listen}",

@@ -56,8 +56,10 @@ pub mod metrics;
 pub mod persistence;
 pub mod preauth;
 pub mod traits;
+pub mod wire_state;
 
 pub use metrics::MetricsSink;
+pub use wire_state::WireStateBuilder;
 pub use preauth::{
     PreauthKey, PreauthMinter, RedeemError, RedemptionRecord, DEFAULT_BOUNDED_TTL,
     DEFAULT_MINTS_CAPACITY, DEFAULT_PREAUTH_TTL, DEFAULT_REDEMPTIONS_CAPACITY,

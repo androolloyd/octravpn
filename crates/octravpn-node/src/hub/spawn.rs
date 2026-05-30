@@ -111,7 +111,7 @@ impl Hub {
                         derp_config::{empty_derp_map, load_derp_map},
                         MachineRegistry,
                     },
-                    PreauthMinter, ServerNoiseKey, WireState,
+                    PreauthMinter, ServerNoiseKey,
                 };
                 let server_noise_key = Arc::new(
                     ServerNoiseKey::load_or_generate(&dir)
@@ -148,44 +148,23 @@ impl Hub {
                         .with_context(|| format!("load DERP map from {path}"))?,
                     _ => empty_derp_map(),
                 };
+                // The hub path is the chain-aware boot path; it predates
+                // the knock layer and leaves it disabled (the `mesh serve`
+                // entry point is the one that honours the env var). The
+                // ACL store is shared with the admin surface (when
+                // mounted); empty ⇒ the wire layer's `allow_all_packet_filter`
+                // fallback stays in play until an operator PUTs a doc.
+                // Everything else takes the builder's octra defaults.
                 Some((
-                    WireState {
+                    octravpn_mesh::WireStateBuilder::new(
                         server_noise_key,
-                        preauth: Arc::new(shared_minter.clone()),
-                        ip_allocator: Arc::new(TailnetIpAllocator::new(tailnet_id)),
-                        machines: Arc::new(MachineRegistry::new()),
-                        registration_store: None,
-                        derp_map: octravpn_mesh::tailscale_wire::DerpMapStore::shared(derp_map),
-                        // P1-policy: live ACL store, shared with the
-                        // admin surface (when mounted). The default
-                        // empty store keeps the wire layer's
-                        // `allow_all_packet_filter` fallback in play
-                        // until an operator pushes a doc.
-                        policy: Arc::new(octravpn_mesh::policy::PolicyStore::new()),
-                        // PSK-gated handshake: hub path is the
-                        // chain-aware boot path and predates the
-                        // knock layer. Always disabled here; the
-                        // `mesh serve` entry point in `main.rs` is
-                        // the one that honours the env var.
-                        knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
-                        dns: Arc::new(octravpn_mesh::headscale_api::dns::DnsStore::from_spec(
-                            octravpn_mesh::headscale_api::dns::DnsConfigSpec {
-                                base_domain: "octra.test".into(),
-                                ..Default::default()
-                            },
-                        )),
-                        public_control_url: None,
-                        runtime_config: Arc::new(
-                            octravpn_mesh::tailscale_wire::RuntimeConfigSnapshot::default(),
-                        ),
-                        registration_cache: Arc::new(
-                            octravpn_mesh::tailscale_wire::RegistrationCache::new(),
-                        ),
-                        pings: Arc::new(octravpn_mesh::tailscale_wire::PingTracker::new()),
-                        mapresponse_debug: Arc::new(
-                            octravpn_mesh::tailscale_wire::MapResponseDebugStore::disabled(),
-                        ),
-                    },
+                        Arc::new(shared_minter.clone()),
+                        Arc::new(TailnetIpAllocator::new(tailnet_id)),
+                        Arc::new(MachineRegistry::new()),
+                        Arc::new(octravpn_mesh::policy::PolicyStore::new()),
+                        octravpn_mesh::tailscale_wire::DerpMapStore::shared(derp_map),
+                    )
+                    .build(),
                     shared_minter,
                 ))
             } else {
