@@ -23,8 +23,17 @@ jobs:
         with: { repository: androolloyd/octra-foundry, path: octra-foundry }
       - uses: actions/checkout@v4
         with: { repository: androolloyd/headscale-rs, path: headscale-rs }
+      # nightly rustfmt: `cargo fmt --all` reaches the path-dep'd
+      # headscale-rs sibling, whose `rustfmt.toml` `ignore`s its
+      # tonic-generated `headscale.v1.rs` — but `ignore` is a
+      # nightly-only rustfmt feature, so on the pinned stable toolchain
+      # it's silently dropped and the (un-formattable) generated file
+      # fails the check. nightly honours the ignore; octra's own code
+      # formats identically (it uses only stable rustfmt features, no
+      # octra-level rustfmt.toml).
       - uses: ./octra/.github/actions/setup-rust
         with:
+          toolchain: nightly
           components: rustfmt
           cache: "false"
       - run: cargo fmt --all -- --check

@@ -443,8 +443,9 @@ mod tests {
     // Real kernel-backend tests are gated behind `#[ignore]` + a
     // runtime cap_net_admin probe — they only run in privileged CI.
     // See `tests/wg_kernel_backend.rs` for the integration suite.
-
-    use super::*;
+    //
+    // These pure-parser unit tests are self-contained (they replicate
+    // the tab-split path against fixtures), so no `use super::*`.
 
     /// Pure-Rust unit test: parse a synthetic `wg show <iface> dump`
     /// blob and assert the fields we care about (pubkey, rx, tx,
@@ -458,7 +459,7 @@ mod tests {
         // Columns (peer row):
         //   pubkey \t psk \t endpoint \t allowed-ips \t
         //   latest-handshake-unix-s \t rx \t tx \t keepalive
-        let _stdout = "\
+        let stdout = "\
 PRIV\tPUB\t51820\toff
 PEER1\t(none)\t1.2.3.4:51820\t10.0.0.2/32\t1700000000\t1048576\t2097152\t25
 ";
@@ -467,7 +468,7 @@ PEER1\t(none)\t1.2.3.4:51820\t10.0.0.2/32\t1700000000\t1048576\t2097152\t25
         // tab-split path; this keeps the regression coverage on the
         // critical parse + the wg invocation separately testable.
         let mut peers: Vec<(String, u64, u64, u64)> = Vec::new();
-        for (i, line) in _stdout.lines().enumerate() {
+        for (i, line) in stdout.lines().enumerate() {
             if i == 0 {
                 continue;
             }
@@ -498,8 +499,7 @@ PEER1\t(none)\t1.2.3.4:51820\t10.0.0.2/32\t1700000000\t1048576\t2097152\t25
             if i == 0 {
                 continue;
             }
-            let cols: Vec<&str> = line.split('\t').collect();
-            if cols.len() >= 8 {
+            if line.split('\t').count() >= 8 {
                 peer_count += 1;
             }
         }
