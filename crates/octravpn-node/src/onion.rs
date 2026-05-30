@@ -65,7 +65,19 @@ impl OnionRouter {
     /// Install a route for a session. Idempotent: subsequent calls with
     /// the same `session_id` are a no-op (preserving accumulated byte
     /// counters), so the per-packet hot path may call it unconditionally.
+    ///
+    /// After the first packet of a session the entry already exists, so
+    /// this takes only a **read** lock in the steady state — the
+    /// per-packet common case no longer serializes on the write lock,
+    /// which matters under SO_REUSEPORT multi-queue where the write lock
+    /// would otherwise undo the per-shard parallelism. The write lock is
+    /// taken only when the entry is genuinely new; `entry().or_insert_with`
+    /// still handles the race where two first-packets for the same
+    /// session arrive concurrently.
     pub(crate) fn install(&self, session: SessionId, action: HopAction) {
+        if self.sessions.read().contains_key(&session) {
+            return;
+        }
         self.sessions
             .write()
             .entry(session)
