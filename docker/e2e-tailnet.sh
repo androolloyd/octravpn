@@ -135,10 +135,16 @@ sid=$(echo "$tx" | event_num SessionOpened session_id)
 [ -n "$sid" ] || { echo "[tailnet-e2e] FAIL: no SessionOpened"; echo "$tx"; exit 1; }
 echo "[tailnet-e2e]   session id = $sid"
 
-# 5. Settle: validator-only. node1 reports bytes_used=2 → 200 OU gross,
+# 5. Settle (two-step). The single-call `settle_session` was replaced by
+#    an operator-claim / opener-confirm handshake: the exit operator
+#    (node1 / $VAL1, the session's `exit`) claims the metered bytes, then
+#    the session opener ($CLIENT) confirms the same count. Matching byte
+#    counts ⇒ `settle_confirm` emits SessionSettled; a mismatch ⇒
+#    SettleDispute instead. node1 reports bytes_used=2 → 200 OU gross,
 #    1 OU protocol fee (0.5 %), 199 net to operator earnings, 800 OU refund.
-echo "[tailnet-e2e] Settling..."
-resp=$(submit "$VAL1" settle_session "[$sid,2]")
+echo "[tailnet-e2e] Settling (operator claim → client confirm)..."
+submit "$VAL1" settle_claim "[$sid,2]" >/dev/null
+resp=$(submit "$CLIENT" settle_confirm "[$sid,2]")
 hash=$(echo "$resp" | jget result/hash)
 tx=$(rpc octra_transaction "[\"$hash\"]")
 total_paid=$(echo "$tx" | event_num SessionSettled total_paid)
