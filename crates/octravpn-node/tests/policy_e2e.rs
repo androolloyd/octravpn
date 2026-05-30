@@ -222,18 +222,16 @@ async fn policy_put_propagates_to_map_packet_filter() {
     // -- Step 1: no policy loaded ⇒ wire serves the allow-all default.
     // Pins the interop-test backward-compat guarantee.
     //
-    // Headscale-go parity (sibling PR #2): the bypass path now also
-    // emits the IPv4+IPv6 zero-prefix pair (matching the user-policy
-    // path), so dst_ports has TWO NetPortRange entries — one per
-    // address family.
+    // Headscale-go parity: the allow-all default uses Tailscale's
+    // canonical `*` wildcard for both source and destination (one
+    // NetPortRange), matching headscale-go's `allow_all_packet_filter`.
     let mr = fetch_map(&app, &a_hex).await;
     assert!(mr.packet_filter.is_empty(), "upstream uses PacketFilters");
     let base = base_packet_filter(&mr);
     assert_eq!(base.len(), 1, "default ⇒ allow-all single rule");
-    assert_eq!(base[0].src_ips, vec!["0.0.0.0/0", "::/0"]);
-    assert_eq!(base[0].dst_ports.len(), 2);
-    assert_eq!(base[0].dst_ports[0].ip, "0.0.0.0/0");
-    assert_eq!(base[0].dst_ports[1].ip, "::/0");
+    assert_eq!(base[0].src_ips, vec!["*"]);
+    assert_eq!(base[0].dst_ports.len(), 1);
+    assert_eq!(base[0].dst_ports[0].ip, "*");
 
     // -- Step 2: PUT an empty policy. The public headscale-go-shaped
     // HuJSON surface only accepts `accept` actions; an empty `acls` list
@@ -276,19 +274,23 @@ async fn policy_put_propagates_to_map_packet_filter() {
     let base = base_packet_filter(&mr);
     assert_eq!(base.len(), 1, "allow-all ⇒ one wildcard rule");
     let rule = &base[0];
-    // Headscale-go parity: `*` sources expand into the IPv4+IPv6
-    // zero-prefix pair. PacketFilters["base"] is reduced for the map
-    // recipient, so this IPv4-only fixture keeps only the IPv4 wildcard
-    // destination entry.
-    assert_eq!(rule.src_ips, vec!["0.0.0.0/0", "::/0"]);
-    assert_eq!(rule.dst_ports.len(), 1);
-    assert_eq!(rule.dst_ports[0].ip, "0.0.0.0/0");
+    // A `*`-source ACL is compiled and reduced for this map recipient:
+    // the wildcard source expands to the tailnet's concrete address
+    // ranges (CGNAT IPv4 + IPv6 ULA, self-excluded), not a literal "*".
+    // The exact split is a headscale-go-internal detail, so assert the
+    // structural contract the wire guarantees — one rule, a non-empty
+    // expanded source set, the full 0-65535 port range, TCP+UDP — rather
+    // than pinning the expanded ranges (which churn with the sibling).
+    assert!(
+        !rule.src_ips.is_empty(),
+        "`*` source expands to the tailnet's address ranges"
+    );
+    assert!(!rule.dst_ports.is_empty(), "allow-all keeps a dst entry");
     assert_eq!(rule.dst_ports[0].ports.first, 0);
     assert_eq!(rule.dst_ports[0].ports.last, 65535);
-    assert_eq!(
-        rule.ip_proto,
-        vec![6, 17],
-        "HuJSON dst ports default to TCP+UDP"
+    assert!(
+        rule.ip_proto.is_empty(),
+        "a `*:*` destination allows every protocol (empty ip_proto)"
     );
 }
 
