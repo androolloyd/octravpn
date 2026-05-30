@@ -51,6 +51,10 @@ pub(crate) async fn metrics(
         );
     }
 
+    // One lock-free read of the journal's atomic surface for all three
+    // receipt-journal gauges (was previously three separate snapshots).
+    let (rj_in_mem, rj_evictions, rj_resurrects) = s.receipt_journal.metrics_snapshot();
+
     let body = format!(
         "# HELP octravpn_announces_total Sessions announced via control plane.\n\
          # TYPE octravpn_announces_total counter\n\
@@ -158,18 +162,9 @@ pub(crate) async fn metrics(
         // + eviction counters. `metrics_snapshot` reads the atomic
         // surface lock-free so a stalled journal doesn't block the
         // scrape.
-        rj_in_mem = {
-            let (gauge, _e, _r) = s.receipt_journal.metrics_snapshot();
-            gauge
-        },
-        rj_evictions = {
-            let (_g, evictions, _r) = s.receipt_journal.metrics_snapshot();
-            evictions
-        },
-        rj_resurrects = {
-            let (_g, _e, resurrects) = s.receipt_journal.metrics_snapshot();
-            resurrects
-        },
+        rj_in_mem = rj_in_mem,
+        rj_evictions = rj_evictions,
+        rj_resurrects = rj_resurrects,
     );
     (
         [(

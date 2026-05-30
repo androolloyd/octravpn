@@ -194,15 +194,20 @@ pub(crate) async fn get_state(
         enc_net,
         pvac_zero_proof,
     };
-    s.events.publish(crate::events::Event {
-        ts_unix: octravpn_core::util::now_unix_secs(),
-        kind: "receipt_signed".to_string(),
-        payload: serde_json::json!({
-            "session_id": id_hex.clone(),
-            "seq": event_seq,
-            "bytes_used": event_bytes,
-        }),
-    });
+    // Only build the SSE payload (a String + JSON map) when something is
+    // actually subscribed — with no `/events` clients connected (the
+    // common case) `publish` would allocate and immediately drop it.
+    if s.events.receiver_count() > 0 {
+        s.events.publish(crate::events::Event {
+            ts_unix: octravpn_core::util::now_unix_secs(),
+            kind: "receipt_signed".to_string(),
+            payload: serde_json::json!({
+                "session_id": id_hex.clone(),
+                "seq": event_seq,
+                "bytes_used": event_bytes,
+            }),
+        });
+    }
     // Persist a structured audit row so `audit verify`'s cross-check
     // sees a `(session_id, seq)` pair for every signed receipt. The
     // SSE event above is in-process and ephemeral; the audit row is

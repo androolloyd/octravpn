@@ -58,6 +58,14 @@ impl EventBus {
         let _ = self.tx.send(ev);
     }
 
+    /// Number of live subscribers. Callers building an expensive `Event`
+    /// payload on a hot path can skip the allocation when this is 0 —
+    /// `publish` would drop it anyway (the "nobody listening" common
+    /// case). A cheap atomic load on the underlying broadcast channel.
+    pub(crate) fn receiver_count(&self) -> usize {
+        self.tx.receiver_count()
+    }
+
     /// Subscribe to receive every event published *after* this call.
     /// Events published before subscribing are not replayed — that's
     /// the broadcast contract.
