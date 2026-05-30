@@ -260,6 +260,36 @@ fn bench_journal(c: &mut Criterion) {
     });
 }
 
+/// BoundedMap hot-path ops. Mirrors the node tunnel's
+/// `BoundedMap<[u8;32], AllowedClient>` (cap 4096): `keys()` (the
+/// handshake-admission path, which only needs pubkeys) vs `snapshot()`
+/// (clones every value too), plus `get()` (per-packet last-touch
+/// refresh off the monotonic clock).
+fn bench_bounded(c: &mut Criterion) {
+    use octravpn_core::bounded::BoundedMap;
+    use std::time::Duration;
+
+    // 96-byte value stands in for `AllowedClient`; 4096 == the allowlist
+    // cap, so this is the worst-case per-handshake enumeration size.
+    let map: BoundedMap<[u8; 32], [u8; 96]> = BoundedMap::new(4096, Duration::from_secs(300));
+    for i in 0..4096u32 {
+        let mut k = [0u8; 32];
+        k[..4].copy_from_slice(&i.to_le_bytes());
+        map.insert(k, [i as u8; 96]);
+    }
+    let mut probe = [0u8; 32];
+    probe[..4].copy_from_slice(&2048u32.to_le_bytes());
+
+    // E4: admission only needs keys (4096×32 B) — `snapshot` additionally
+    // clones 4096×96 B of values for nothing.
+    c.bench_function("bounded_keys_4096", |b| b.iter(|| black_box(map.keys())));
+    c.bench_function("bounded_snapshot_4096", |b| b.iter(|| black_box(map.snapshot())));
+    // E1: per-packet `get` refreshes last-touch off the monotonic clock.
+    c.bench_function("bounded_get", |b| {
+        b.iter(|| black_box(map.get(black_box(&probe))));
+    });
+}
+
 criterion_group!(
     benches,
     bench_receipt,
@@ -269,5 +299,6 @@ criterion_group!(
     bench_tx,
     bench_wallet_enc,
     bench_journal,
+    bench_bounded,
 );
 criterion_main!(benches);

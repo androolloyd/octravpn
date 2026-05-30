@@ -152,6 +152,15 @@ impl<K: Hash + Eq + Clone, V: Clone> BoundedMap<K, V> {
             .collect()
     }
 
+    /// Snapshot just the keys — clones the keys but **not** the values.
+    /// For callers that only need to enumerate keys (e.g. trial-matching
+    /// an incoming handshake against allowed pubkeys), this avoids
+    /// cloning every (potentially large) `V` the way [`Self::snapshot`]
+    /// does. The released lock lets the caller `.await` per key.
+    pub fn keys(&self) -> Vec<K> {
+        self.inner.lock().map.keys().cloned().collect()
+    }
+
     /// Number of entries inserted since `epoch`. Crude metric for tests
     /// and dashboards.
     pub fn elapsed_since_oldest(&self) -> Option<Duration> {
@@ -163,12 +172,17 @@ impl<K: Hash + Eq + Clone, V: Clone> BoundedMap<K, V> {
     }
 }
 
+/// Microseconds since a fixed process-start baseline, read off the
+/// **monotonic** clock. The value is only ever used for idle-TTL delta
+/// math (`now - last_touch`), so wall-clock is both unnecessary and
+/// wrong: a backward `SystemTime` jump (NTP step, `settimeofday`) could
+/// make a live entry look arbitrarily stale and evict it mid-session.
+/// `Instant` can't jump, and on macOS skips the pricier `gettimeofday`
+/// the wall-clock path took on every per-packet `get`/`modify`.
 fn mono_us() -> u64 {
-    use std::time::SystemTime;
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_micros() as u64)
-        .unwrap_or(0)
+    use std::sync::OnceLock;
+    static EPOCH: OnceLock<Instant> = OnceLock::new();
+    EPOCH.get_or_init(Instant::now).elapsed().as_micros() as u64
 }
 
 #[cfg(test)]
