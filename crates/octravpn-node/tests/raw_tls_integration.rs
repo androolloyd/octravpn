@@ -23,19 +23,18 @@
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use octravpn_mesh::{
-    PreauthMinter, ServerNoiseKey, WireState,
     ip_alloc::TailnetIpAllocator,
     tailscale_wire::{
-        MachineRegistry,
         controlbase::{FrameHeader, Framed, MsgType},
         raw_tls::serve_raw_tls,
         tls::{self as wire_tls, ReloadableServerConfig, SanConfig},
+        MachineRegistry,
     },
-    tailscale_wire_router,
+    tailscale_wire_router, PreauthMinter, ServerNoiseKey, WireState,
 };
 use rustls::{
+    pki_types::{pem::PemObject, CertificateDer},
     ClientConfig, RootCertStore,
-    pki_types::{CertificateDer, pem::PemObject},
 };
 use tempfile::tempdir;
 use tokio::{

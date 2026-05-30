@@ -547,10 +547,7 @@ fn render_verify_report(r: &VerifyReport, out: &mut dyn Write) -> Result<()> {
 fn verify_audit_files(
     key: &[u8; 32],
     files: &[PathBuf],
-) -> (
-    Check,
-    BTreeMap<String, std::collections::BTreeSet<u64>>,
-) {
+) -> (Check, BTreeMap<String, std::collections::BTreeSet<u64>>) {
     let mut total: u64 = 0;
     let mut signed_seqs: BTreeMap<String, std::collections::BTreeSet<u64>> = BTreeMap::new();
     for file in files {

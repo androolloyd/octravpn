@@ -213,9 +213,7 @@ pub(super) async fn build_hub(cfg: NodeConfig) -> Result<Hub> {
     // The kernel backend needs the WG private key as base64. The
     // static secret bytes are already in `wg_static_secret`; render
     // them via `StaticSecret::to_bytes`.
-    let wg_secret_b64 = {
-        octravpn_core::b64::encode(wg_static_secret.to_bytes())
-    };
+    let wg_secret_b64 = { octravpn_core::b64::encode(wg_static_secret.to_bytes()) };
     let (wg_backend, wg_backend_selection) = crate::tunnel::backend::select_backend(
         cfg.tunnel.backend,
         &iface_name,

@@ -14,9 +14,7 @@
 //!   (standard / URL-safe × padded / unpadded). For inputs whose origin
 //!   is uncontrolled (PSK config, SPKI pin bundles).
 
-use base64::engine::general_purpose::{
-    STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD,
-};
+use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD};
 use base64::Engine as _;
 
 pub use base64::DecodeError;
@@ -79,10 +77,10 @@ mod tests {
     fn decode_any_accepts_every_alphabet() {
         let raw = [0xff, 0xfe, 0xfd, 0x00, 0x10];
         for variant in [
-            encode(raw),                                          // standard padded
-            encode_url(raw),                                      // url-safe no pad
-            STANDARD_NO_PAD.encode(raw),                          // standard no pad
-            URL_SAFE.encode(raw),                                 // url-safe padded
+            encode(raw),                 // standard padded
+            encode_url(raw),             // url-safe no pad
+            STANDARD_NO_PAD.encode(raw), // standard no pad
+            URL_SAFE.encode(raw),        // url-safe padded
         ] {
             assert_eq!(decode_any(&variant).as_deref(), Some(&raw[..]), "{variant}");
         }

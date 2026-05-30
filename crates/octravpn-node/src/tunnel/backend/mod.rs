@@ -394,8 +394,7 @@ mod tests {
         let raw = [9u8; 32];
         let pk = PublicKey(raw);
         let b64 = pk.to_base64();
-        let dec = octravpn_core::b64::decode(b64)
-            .unwrap();
+        let dec = octravpn_core::b64::decode(b64).unwrap();
         assert_eq!(dec, raw);
     }
 

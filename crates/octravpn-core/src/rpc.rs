@@ -510,8 +510,7 @@ fn parse_pem_bundle(pem: &[u8]) -> Result<Vec<Vec<u8>>, String> {
             .chars()
             .filter(|c| !c.is_whitespace())
             .collect();
-        let der = crate::b64::decode(b64.as_bytes())
-            .map_err(|e| format!("PEM base64: {e}"))?;
+        let der = crate::b64::decode(b64.as_bytes()).map_err(|e| format!("PEM base64: {e}"))?;
         out.push(der);
         cursor = &after_begin[end_at + END.len()..];
     }

@@ -8,8 +8,8 @@
 //! into its own crate-level module under `crates/octravpn-node/src/`
 //! rather than expanding this file.
 
-use std::sync::Arc;
 use octravpn_core::address::Address;
+use std::sync::Arc;
 use tracing::{info, warn};
 use x25519_dalek::PublicKey as X25519Pub;
 

@@ -12,12 +12,12 @@
 //! The unseal path in `decrypt.rs` calls `fetch_inner` directly so it
 //! always bypasses the cache.
 
-use std::{sync::Arc, time::Instant};
 use octravpn_core::{
     circle::{decrypt_sealed_bytes, resource_key},
     rpc::RpcClient,
 };
 use serde_json::{json, Value};
+use std::{sync::Arc, time::Instant};
 use zeroize::Zeroizing;
 
 use crate::{
@@ -151,8 +151,8 @@ impl PortalChain {
             });
         };
 
-        let bytes = octravpn_core::b64::decode(b64.as_bytes())
-            .map_err(|e| FetchAssetError::Rpc {
+        let bytes =
+            octravpn_core::b64::decode(b64.as_bytes()).map_err(|e| FetchAssetError::Rpc {
                 circle_id: circle_id.to_string(),
                 path: path.clone(),
                 source: anyhow::anyhow!("decode base64 asset: {e}"),

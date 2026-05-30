@@ -16,14 +16,22 @@ use serde::Serialize;
 #[derive(Debug, Serialize, Clone)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub(crate) enum Check {
-    Ok { detail: String },
-    Fail { detail: String },
+    Ok {
+        detail: String,
+    },
+    Fail {
+        detail: String,
+    },
     /// An earlier check made this one un-runnable (e.g. the config
     /// failed to parse, so every downstream field is skipped).
-    Skipped { detail: String },
+    Skipped {
+        detail: String,
+    },
     /// Soft warning — surfaced to the operator but does NOT flip a
     /// report's `overall_pass` (used by `audit verify`'s cross-check).
-    Warn { detail: String },
+    Warn {
+        detail: String,
+    },
 }
 
 impl Check {

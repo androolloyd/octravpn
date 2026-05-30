@@ -409,11 +409,10 @@ fn check_wg_pubkey(index: usize, value: &str) -> Result<(), V3MembersError> {
         });
     }
     let raw =
-        crate::b64::decode(value.as_bytes())
-            .map_err(|e| V3MembersError::BadWgPubkeyEncoding {
-                index,
-                reason: e.to_string(),
-            })?;
+        crate::b64::decode(value.as_bytes()).map_err(|e| V3MembersError::BadWgPubkeyEncoding {
+            index,
+            reason: e.to_string(),
+        })?;
     if raw.len() != WG_PUBKEY_RAW_LEN {
         return Err(V3MembersError::BadWgPubkeyDecodedLength {
             index,

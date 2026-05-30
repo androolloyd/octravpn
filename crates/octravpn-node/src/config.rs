@@ -448,7 +448,8 @@ impl fmt::Debug for AnalyticsCfg {
         let mut s = f.debug_struct("AnalyticsCfg");
         s.field("enabled", &self.enabled)
             .field("listen_addr", &self.listen_addr);
-        s.field("bearer_token", &RedactedOpt(&self.bearer_token)).finish()
+        s.field("bearer_token", &RedactedOpt(&self.bearer_token))
+            .finish()
     }
 }
 

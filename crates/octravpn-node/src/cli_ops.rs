@@ -40,9 +40,7 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use octravpn_core::{
-    address::Address, receipt_journal::ReceiptJournal, session::SessionId,
-};
+use octravpn_core::{address::Address, receipt_journal::ReceiptJournal, session::SessionId};
 
 use crate::audit::{chain_step, resolve_hmac_key, AuditLog, HmacKeyError};
 use crate::cli_report::Check;
@@ -1192,10 +1190,7 @@ receipt_journal_path = "{journal}"
             "offline config validate should pass: {report:#?}"
         );
         assert!(matches!(report.rpc_reachable, Check::Skipped { .. }));
-        assert!(matches!(
-            report.program_responsive,
-            Check::Skipped { .. }
-        ));
+        assert!(matches!(report.program_responsive, Check::Skipped { .. }));
     }
 
     #[test]
@@ -1221,10 +1216,7 @@ receipt_journal_path = "{journal}"
             .unwrap();
         let report = rt.block_on(run_config_validate(&args));
         assert!(!report.overall_pass);
-        assert!(matches!(
-            report.wallet_key_loadable,
-            Check::Fail { .. }
-        ));
+        assert!(matches!(report.wallet_key_loadable, Check::Fail { .. }));
     }
 
     #[test]
@@ -1411,14 +1403,8 @@ receipt_journal_path = "{journal}"
         let report = rt.block_on(run_config_validate(&args));
         assert!(!report.overall_pass);
         assert!(matches!(report.schema_parsed, Check::Fail { .. }));
-        assert!(matches!(
-            report.wallet_key_loadable,
-            Check::Skipped { .. }
-        ));
-        assert!(matches!(
-            report.wg_key_loadable,
-            Check::Skipped { .. }
-        ));
+        assert!(matches!(report.wallet_key_loadable, Check::Skipped { .. }));
+        assert!(matches!(report.wg_key_loadable, Check::Skipped { .. }));
         assert!(matches!(report.rpc_reachable, Check::Skipped { .. }));
     }
 
