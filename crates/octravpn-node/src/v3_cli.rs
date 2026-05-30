@@ -47,7 +47,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use clap::{Args, Subcommand};
-use octravpn_core::{address::Address, rpc::RpcClient, sig::KeyPair};
+use octravpn_core::{address::Address, sig::KeyPair};
 use serde_json::Value;
 use tracing::{info, warn};
 
@@ -327,7 +327,7 @@ pub(crate) fn build_chain_ctx_for_circle(cfg: &NodeConfig) -> Result<ChainCtxV3>
 /// does: in strict mode, plaintext-on-disk surfaces a typed
 /// `PlaintextKeyOnDisk` error pointing at `seal-keys`.
 fn build_chain_ctx(cfg: &NodeConfig) -> Result<ChainCtxV3> {
-    let rpc = build_rpc(&cfg.chain)?;
+    let rpc = cfg.chain.build_rpc_client()?;
     let program_addr = Address::from_display(&cfg.chain.program_addr);
     let wallet_secret = if cfg.chain.require_sealed_keys {
         *octravpn_core::util::read_secret_32_or_sealed(&cfg.chain.wallet_secret_path, None)
@@ -340,25 +340,6 @@ fn build_chain_ctx(cfg: &NodeConfig) -> Result<ChainCtxV3> {
     };
     let wallet = KeyPair::from_secret_bytes(&wallet_secret);
     Ok(ChainCtxV3::new(rpc, program_addr, wallet))
-}
-
-/// Same `RpcClient` builder `Hub::new` uses (honors
-/// `[chain].pinned_root_paths`). Re-implemented locally so the CLI
-/// dispatch path doesn't have to construct a Hub.
-fn build_rpc(chain: &crate::config::ChainCfg) -> Result<RpcClient> {
-    let paths = chain
-        .pinned_root_paths
-        .as_ref()
-        .map_or(&[][..], Vec::as_slice);
-    if paths.is_empty() {
-        return Ok(RpcClient::new(&chain.rpc_url));
-    }
-    let mut blobs = Vec::with_capacity(paths.len());
-    for p in paths {
-        let pem = std::fs::read(p).with_context(|| format!("read pinned root {p}"))?;
-        blobs.push(pem);
-    }
-    RpcClient::new_with_pinned_roots(&chain.rpc_url, &blobs).map_err(|e| anyhow!("pinned tls: {e}"))
 }
 
 // ============================================================
@@ -960,7 +941,7 @@ region = "test"
 listen = "0.0.0.0:51821"
 "#;
         let cfg: crate::config::NodeConfig = ::toml::from_str(toml).unwrap();
-        let r = build_rpc(&cfg.chain);
+        let r = cfg.chain.build_rpc_client();
         assert!(r.is_ok());
     }
 

@@ -26,7 +26,7 @@ mod verify;
 mod test_util;
 
 pub(crate) use batched::{DEFAULT_BATCH_INTERVAL_MS, DEFAULT_BATCH_QUEUE_CAP, DEFAULT_BATCH_SIZE};
-pub(crate) use chain::chain_step;
+pub(crate) use chain::{chain_step, days_to_ymd, resolve_hmac_key, HmacKeyError};
 pub(crate) use log::AuditRecord;
 #[cfg(test)]
 #[allow(unused_imports)]

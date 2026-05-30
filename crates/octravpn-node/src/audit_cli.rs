@@ -46,7 +46,7 @@ use serde_json::Value;
 
 use octravpn_core::session::SessionId;
 
-use crate::audit::{AuditLog, FileVerifyReport};
+use crate::audit::{days_to_ymd, resolve_hmac_key, AuditLog, FileVerifyReport, HmacKeyError};
 
 /// `octravpn-node audit …` top-level subcommand.
 #[derive(Subcommand, Debug)]
@@ -720,37 +720,13 @@ fn cross_check_journal(
 // ============================================================================
 
 fn load_hmac_key(audit_path: &Path, explicit: Option<&Path>) -> Result<[u8; 32], VerifyError> {
-    let candidate: PathBuf = match explicit {
-        Some(p) => p.to_path_buf(),
-        None => {
-            if audit_path.is_dir() {
-                audit_path.join(".audit.key")
-            } else {
-                let mut p = audit_path.as_os_str().to_os_string();
-                p.push(".key");
-                PathBuf::from(p)
-            }
-        }
-    };
-    if !candidate.exists() {
-        return Err(VerifyError::Missing(format!(
+    resolve_hmac_key(audit_path, explicit).map_err(|e| match e {
+        HmacKeyError::NotFound(p) => VerifyError::Missing(format!(
             "HMAC key not found at {} (pass --hmac-key explicitly)",
-            candidate.display()
-        )));
-    }
-    let raw = fs::read(&candidate)
-        .with_context(|| format!("read hmac key {}", candidate.display()))
-        .map_err(VerifyError::Io)?;
-    if raw.len() != 32 {
-        return Err(VerifyError::Io(anyhow::anyhow!(
-            "hmac key file {} has wrong size ({}); expected 32",
-            candidate.display(),
-            raw.len()
-        )));
-    }
-    let mut k = [0u8; 32];
-    k.copy_from_slice(&raw);
-    Ok(k)
+            p.display()
+        )),
+        HmacKeyError::Invalid(e) => VerifyError::Io(e),
+    })
 }
 
 fn parse_session_filter(s: Option<&str>) -> Result<Option<String>> {
@@ -779,9 +755,9 @@ fn short_hex(s: &str) -> String {
 }
 
 /// Format a unix timestamp as `YYYY-MM-DDTHH:MM:SSZ`. Reuses the same
-/// "no chrono" arithmetic the audit log uses for rotation; keeping the
-/// formatter local means we don't drag in a new dep just for replay
-/// output.
+/// "no chrono" arithmetic ([`days_to_ymd`]) the audit log uses for
+/// rotation; keeping the formatter local means we don't drag in a new
+/// dep just for replay output.
 #[allow(clippy::many_single_char_names)]
 fn format_ts_utc(ts: u64) -> String {
     let days = (ts / 86_400) as i64;
@@ -791,22 +767,6 @@ fn format_ts_utc(ts: u64) -> String {
     let min = (secs_of_day % 3_600) / 60;
     let s = secs_of_day % 60;
     format!("{y:04}-{m:02}-{d:02}T{h:02}:{min:02}:{s:02}Z")
-}
-
-/// Howard Hinnant days-since-1970 → (year, month, day). Copy of the
-/// same algorithm in `audit.rs`; the function is private over there.
-fn days_to_ymd(days: i64) -> (i32, u32, u32) {
-    let z = days + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = (z - era * 146_097) as u32;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe as i32 + (era as i32) * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    (y, m, d)
 }
 
 // ============================================================================

@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use octravpn_core::{address::Address, rpc::RpcClient, sig::KeyPair};
+use octravpn_core::{address::Address, sig::KeyPair};
 use tracing::{info, warn};
 use x25519_dalek::StaticSecret;
 
@@ -25,7 +25,7 @@ use crate::{
 /// Layered boot sequence. Each step has a comment block explaining
 /// why it is ordered where it is.
 pub(super) async fn build_hub(cfg: NodeConfig) -> Result<Hub> {
-    let rpc = build_rpc(&cfg.chain)?;
+    let rpc = cfg.chain.build_rpc_client()?;
     let validator_addr = Address::from_display(&cfg.chain.validator_addr);
     let program_addr = Address::from_display(&cfg.chain.program_addr);
 
@@ -274,28 +274,6 @@ pub(super) fn chain_id_to_envelope_string(id: u32) -> String {
     } else {
         format!("octra-net-{id:08x}")
     }
-}
-
-/// Build the RPC client honoring `[chain].pinned_root_paths` if any.
-/// Empty / absent → system trust store (current behaviour). Set →
-/// only the supplied PEM bundles are trusted, defeating
-/// CA-compromise MITM on the chain endpoint. P0-2 from the v2 threat
-/// model.
-pub(super) fn build_rpc(chain: &crate::config::ChainCfg) -> Result<RpcClient> {
-    let paths = chain
-        .pinned_root_paths
-        .as_ref()
-        .map_or(&[][..], Vec::as_slice);
-    if paths.is_empty() {
-        return Ok(RpcClient::new(&chain.rpc_url));
-    }
-    let mut blobs = Vec::with_capacity(paths.len());
-    for p in paths {
-        let pem = std::fs::read(p).with_context(|| format!("read pinned root {p}"))?;
-        blobs.push(pem);
-    }
-    RpcClient::new_with_pinned_roots(&chain.rpc_url, &blobs)
-        .map_err(|e| anyhow::anyhow!("pinned tls: {e}"))
 }
 
 /// Resolve the v2 sealed-asset passphrase given the env var + config

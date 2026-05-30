@@ -87,6 +87,19 @@ fn redact_opt_secret(f: &mut fmt::Formatter<'_>, v: &Option<SecretString>) -> fm
     }
 }
 
+/// `Debug` newtype for an optional secret field. Lets the hand-written
+/// `Debug` impls below pass `&RedactedOpt(&self.field)` to
+/// `debug_struct().field(..)` so the secret renders as `Some(<redacted>)`
+/// instead of leaking. One shared shim for every secret-bearing config
+/// struct (`AnalyticsCfg`, `ChainCfg`, `ControlCfg`).
+struct RedactedOpt<'a>(&'a Option<SecretString>);
+
+impl fmt::Debug for RedactedOpt<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        redact_opt_secret(f, self.0)
+    }
+}
+
 #[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct NodeConfig {
@@ -435,13 +448,7 @@ impl fmt::Debug for AnalyticsCfg {
         let mut s = f.debug_struct("AnalyticsCfg");
         s.field("enabled", &self.enabled)
             .field("listen_addr", &self.listen_addr);
-        struct R<'a>(&'a Option<SecretString>);
-        impl fmt::Debug for R<'_> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                redact_opt_secret(f, self.0)
-            }
-        }
-        s.field("bearer_token", &R(&self.bearer_token)).finish()
+        s.field("bearer_token", &RedactedOpt(&self.bearer_token)).finish()
     }
 }
 
@@ -652,6 +659,31 @@ impl ChainCfg {
             .as_ref()
             .map(ExposeSecret::expose_secret)
     }
+
+    /// Build the chain `RpcClient` this config describes, honoring
+    /// `[chain].pinned_root_paths`. Empty / absent → system trust store
+    /// (back-compat default). Set → only the supplied PEM bundles are
+    /// trusted, defeating CA-compromise MITM on the chain endpoint (P0-2,
+    /// docs/v2-threat-model.md). Single source of truth shared by
+    /// `hub::boot`, the v3 CLI dispatch path, and the `config validate` /
+    /// `health` probes — none of which want to stand up a full `Hub`.
+    pub(crate) fn build_rpc_client(&self) -> Result<octravpn_core::rpc::RpcClient> {
+        use octravpn_core::rpc::RpcClient;
+        let paths = self
+            .pinned_root_paths
+            .as_ref()
+            .map_or(&[][..], Vec::as_slice);
+        if paths.is_empty() {
+            return Ok(RpcClient::new(&self.rpc_url));
+        }
+        let mut blobs = Vec::with_capacity(paths.len());
+        for p in paths {
+            let pem = fs::read(p).with_context(|| format!("read pinned root {p}"))?;
+            blobs.push(pem);
+        }
+        RpcClient::new_with_pinned_roots(&self.rpc_url, &blobs)
+            .map_err(|e| anyhow::anyhow!("pinned tls: {e}"))
+    }
 }
 
 impl fmt::Debug for ChainCfg {
@@ -663,13 +695,7 @@ impl fmt::Debug for ChainCfg {
             .field("wallet_secret_path", &self.wallet_secret_path)
             .field("protocol_version", &self.protocol_version)
             .field("chain_id", &self.chain_id);
-        struct R<'a>(&'a Option<SecretString>);
-        impl fmt::Debug for R<'_> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                redact_opt_secret(f, self.0)
-            }
-        }
-        s.field("sealed_passphrase", &R(&self.sealed_passphrase))
+        s.field("sealed_passphrase", &RedactedOpt(&self.sealed_passphrase))
             .field("circle_state_path", &self.circle_state_path)
             .field("pinned_root_paths", &self.pinned_root_paths)
             .field("circle_id", &self.circle_id)
@@ -1010,20 +1036,14 @@ impl ControlCfg {
 
 impl fmt::Debug for ControlCfg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        struct R<'a>(&'a Option<SecretString>);
-        impl fmt::Debug for R<'_> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                redact_opt_secret(f, self.0)
-            }
-        }
         f.debug_struct("ControlCfg")
             .field("listen", &self.listen)
             .field("audit_dir", &self.audit_dir)
-            .field("events_token", &R(&self.events_token))
-            .field("metrics_token", &R(&self.metrics_token))
+            .field("events_token", &RedactedOpt(&self.events_token))
+            .field("metrics_token", &RedactedOpt(&self.metrics_token))
             .field("receipt_journal_path", &self.receipt_journal_path)
             .field("fsync_policy", &self.fsync_policy)
-            .field("admin_token", &R(&self.admin_token))
+            .field("admin_token", &RedactedOpt(&self.admin_token))
             .field("tailscale_wire_state_dir", &self.tailscale_wire_state_dir)
             .field("tailscale_tailnet_id", &self.tailscale_tailnet_id)
             .finish()

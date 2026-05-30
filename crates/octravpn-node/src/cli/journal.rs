@@ -65,7 +65,7 @@ use tracing::info;
 
 use octravpn_core::{receipt_journal::ReceiptJournal, session::SessionId};
 
-use crate::audit::AuditLog;
+use crate::audit::{resolve_hmac_key, AuditLog, HmacKeyError};
 
 use super::{CliContext, Subcommand};
 
@@ -343,31 +343,16 @@ fn emit_report_footer(out: &mut dyn std::io::Write, r: &RebuildReport) -> std::i
 // Helpers
 // ----------------------------------------------------------------------
 
-/// Resolve the HMAC key file. Mirrors `audit_cli::load_hmac_key` but
-/// stays local so this module's surface is self-contained.
+/// Resolve the HMAC key file. Shares the discovery + validation rule
+/// with the `audit`/`receipt` CLI surfaces via [`resolve_hmac_key`].
 fn load_hmac_key(audit_dir: &Path, explicit: Option<&Path>) -> Result<[u8; 32]> {
-    let candidate: PathBuf = match explicit {
-        Some(p) => p.to_path_buf(),
-        None => audit_dir.join(".audit.key"),
-    };
-    if !candidate.exists() {
-        anyhow::bail!(
+    resolve_hmac_key(audit_dir, explicit).map_err(|e| match e {
+        HmacKeyError::NotFound(p) => anyhow::anyhow!(
             "HMAC key not found at {} (pass --hmac-key explicitly)",
-            candidate.display()
-        );
-    }
-    let raw =
-        fs::read(&candidate).with_context(|| format!("read hmac key {}", candidate.display()))?;
-    if raw.len() != 32 {
-        anyhow::bail!(
-            "hmac key file {} has wrong size ({}); expected 32",
-            candidate.display(),
-            raw.len()
-        );
-    }
-    let mut k = [0u8; 32];
-    k.copy_from_slice(&raw);
-    Ok(k)
+            p.display()
+        ),
+        HmacKeyError::Invalid(e) => e,
+    })
 }
 
 fn discover_audit_files(path: &Path) -> Result<Vec<PathBuf>> {

@@ -41,10 +41,10 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use octravpn_core::{
-    address::Address, receipt_journal::ReceiptJournal, rpc::RpcClient, session::SessionId,
+    address::Address, receipt_journal::ReceiptJournal, session::SessionId,
 };
 
-use crate::audit::{chain_step, AuditLog};
+use crate::audit::{chain_step, resolve_hmac_key, AuditLog, HmacKeyError};
 use crate::config::NodeConfig;
 
 // ============================================================================
@@ -362,7 +362,7 @@ fn probe_journal_path(journal_path: Option<&str>) -> CheckOutcome {
 }
 
 async fn probe_chain(cfg: &NodeConfig) -> (CheckOutcome, CheckOutcome) {
-    let rpc = match build_rpc_client(cfg) {
+    let rpc = match cfg.chain.build_rpc_client() {
         Ok(r) => r,
         Err(e) => {
             return (
@@ -410,24 +410,6 @@ async fn probe_chain(cfg: &NodeConfig) -> (CheckOutcome, CheckOutcome) {
         },
     };
     (rpc_outcome, prog_outcome)
-}
-
-fn build_rpc_client(cfg: &NodeConfig) -> Result<RpcClient> {
-    let paths = cfg
-        .chain
-        .pinned_root_paths
-        .as_ref()
-        .map_or(&[][..], Vec::as_slice);
-    if paths.is_empty() {
-        return Ok(RpcClient::new(&cfg.chain.rpc_url));
-    }
-    let mut blobs = Vec::with_capacity(paths.len());
-    for p in paths {
-        let pem = fs::read(p).with_context(|| format!("read pinned root {p}"))?;
-        blobs.push(pem);
-    }
-    RpcClient::new_with_pinned_roots(&cfg.chain.rpc_url, &blobs)
-        .map_err(|e| anyhow::anyhow!("pinned tls: {e}"))
 }
 
 fn trim_for_display(s: &str, max: usize) -> String {
@@ -565,7 +547,7 @@ async fn run_health_async(args: &HealthArgs) -> HealthReport {
 }
 
 async fn probe_endpoint_state(cfg: &NodeConfig) -> (CheckOutcome, CheckOutcome, CheckOutcome) {
-    let rpc = match build_rpc_client(cfg) {
+    let rpc = match cfg.chain.build_rpc_client() {
         Ok(r) => r,
         Err(e) => {
             let msg = format!("build rpc: {e:#}");
@@ -948,36 +930,12 @@ fn verify_one_line(key: &[u8; 32], prev_mac: &[u8; 32], line: &str) -> Result<[u
 }
 
 fn locate_hmac_key(audit_path: &Path, explicit: Option<&Path>) -> Result<[u8; 32]> {
-    let candidate: PathBuf = match explicit {
-        Some(p) => p.to_path_buf(),
-        None => {
-            if audit_path.is_dir() {
-                audit_path.join(".audit.key")
-            } else {
-                let mut p = audit_path.as_os_str().to_os_string();
-                p.push(".key");
-                PathBuf::from(p)
-            }
+    resolve_hmac_key(audit_path, explicit).map_err(|e| match e {
+        HmacKeyError::NotFound(p) => {
+            anyhow::anyhow!("HMAC key not found at {} (pass --hmac-key)", p.display())
         }
-    };
-    if !candidate.exists() {
-        anyhow::bail!(
-            "HMAC key not found at {} (pass --hmac-key)",
-            candidate.display()
-        );
-    }
-    let raw =
-        fs::read(&candidate).with_context(|| format!("read hmac key {}", candidate.display()))?;
-    if raw.len() != 32 {
-        anyhow::bail!(
-            "hmac key {} has wrong size ({}); expected 32",
-            candidate.display(),
-            raw.len()
-        );
-    }
-    let mut k = [0u8; 32];
-    k.copy_from_slice(&raw);
-    Ok(k)
+        HmacKeyError::Invalid(e) => e,
+    })
 }
 
 fn format_tail_line(line_no: u64, raw: &str) -> String {
