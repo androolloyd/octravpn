@@ -26,17 +26,19 @@ jobs:
       # nightly rustfmt: `cargo fmt --all` reaches the path-dep'd
       # headscale-rs sibling, whose `rustfmt.toml` `ignore`s its
       # tonic-generated `headscale.v1.rs` — but `ignore` is a
-      # nightly-only rustfmt feature, so on the pinned stable toolchain
-      # it's silently dropped and the (un-formattable) generated file
-      # fails the check. nightly honours the ignore; octra's own code
-      # formats identically (it uses only stable rustfmt features, no
-      # octra-level rustfmt.toml).
+      # nightly-only rustfmt feature, so on a stable toolchain it's
+      # silently dropped and the (un-formattable) generated file fails
+      # the check. We install nightly here AND invoke `cargo +nightly`
+      # below, because the repo's `rust-toolchain.toml` pins 1.88 and a
+      # plain `cargo fmt` would honour that file over the installed
+      # nightly. octra's own code formats identically under either (it
+      # uses only stable rustfmt features, no octra-level rustfmt.toml).
       - uses: ./octra/.github/actions/setup-rust
         with:
           toolchain: nightly
           components: rustfmt
           cache: "false"
-      - run: cargo fmt --all -- --check
+      - run: cargo +nightly fmt --all -- --check
 
   clippy:
     name: cargo clippy
