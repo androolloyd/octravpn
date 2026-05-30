@@ -23,6 +23,11 @@ octravpn-mesh = { path = "../octravpn-mesh" }
 # `[analytics]` config block is present. Path dep (workspace member);
 # no transitive heavy deps — the analytics crate is in-memory only.
 octravpn-analytics = { path = "../octravpn-analytics" }
+# Audit-log HMAC chain-step primitive. Shared with `octravpn-analytics`
+# (the verifier) so the writer here and the reader there compute the
+# tamper-evidence MAC from one byte-identical implementation. See
+# `audit::chain`, which re-exports `chain_step` from this crate.
+octravpn-audit-chain = { path = "../octravpn-audit-chain" }
 # AmneziaWG-style WG handshake obfuscation lives in the `tun` crate
 # (next to the TUN device wrapper) as a UDP send/recv shim. The node's
 # tunnel datapath wires it into the WG `Server` when

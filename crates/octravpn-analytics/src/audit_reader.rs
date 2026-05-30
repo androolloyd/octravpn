@@ -10,14 +10,13 @@
 //!   - `mac`         — hex(32) HMAC of this line:
 //!                     `HMAC-SHA256(key, prev_mac || record_json)`
 //!
-//! ## Why re-implement the HMAC step here?
-//!
-//! `AuditLog::verify_file` in the node crate is `pub(crate)` and the
-//! node crate is a binary (no library target). Re-implementing the
-//! one-line `chain_step` is cheaper than refactoring the node crate
-//! into a lib + bin split. The constant-time MAC comparison in
-//! `verify_file` below intentionally mirrors the node's behaviour so
-//! the same on-disk artefact verifies bit-identically under both.
+//! The HMAC chain step ([`chain_step`]) lives in the shared
+//! `octravpn-audit-chain` crate, which the node writer also depends on —
+//! so the verifier here and the writer there compute the MAC from one
+//! byte-identical implementation rather than two that could drift. The
+//! constant-time MAC comparison in `verify_file` below intentionally
+//! mirrors the node's behaviour so the same on-disk artefact verifies
+//! bit-identically under both.
 
 use std::{
     fs,
@@ -26,24 +25,13 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use hmac::{Hmac, Mac};
 use serde_json::Value;
-use sha2::Sha256;
 
 use crate::event::AnalyticsEvent;
 
-type HmacSha256 = Hmac<Sha256>;
-
-/// HMAC-SHA256 chain step matching `octravpn-node`'s
-/// `audit::chain_step`. Re-implemented here so this crate doesn't
-/// depend on the node binary.
-#[must_use]
-pub fn chain_step(key: &[u8; 32], prev_mac: &[u8; 32], record_bytes: &[u8]) -> [u8; 32] {
-    let mut mac = <HmacSha256 as hmac::Mac>::new_from_slice(key).expect("HMAC accepts any key");
-    mac.update(prev_mac);
-    mac.update(record_bytes);
-    mac.finalize().into_bytes().into()
-}
+/// Re-export of the shared HMAC chain step, so external consumers keep
+/// reaching it as `octravpn_analytics::chain_step`.
+pub use octravpn_audit_chain::chain_step;
 
 /// Outcome of verifying + reading one audit file.
 #[derive(Debug, Default, Clone)]

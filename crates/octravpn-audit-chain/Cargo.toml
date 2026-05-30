@@ -1,0 +1,18 @@
+[package]
+name = "octravpn-audit-chain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Audit-log HMAC chain-step primitive — single source of truth shared by the node (writer) and the analytics reader (verifier)."
+
+[dependencies]
+hmac = "0.12"
+sha2 = { workspace = true }
+
+[dev-dependencies]
+hex = { workspace = true }
+
+[lints]
+workspace = true

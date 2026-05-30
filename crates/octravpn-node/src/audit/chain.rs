@@ -1,25 +1,16 @@
-//! Pure HMAC chain math + key persistence + date math. No async, no
-//! mutex. `chain_step` is `pub(crate)` so the verifier and integration
-//! tests share the exact algorithm the writer uses.
+//! Audit HMAC-key persistence + date math. No async, no mutex.
+//!
+//! The HMAC chain step itself lives in the `octravpn-audit-chain` crate
+//! and is re-exported here (so existing `audit::chain::chain_step` /
+//! `audit::chain_step` call sites are unchanged) — the analytics reader
+//! depends on the same crate, so writer and verifier can't diverge.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use hmac::{Hmac, Mac};
 use rand::{rngs::OsRng, RngCore};
-use sha2::Sha256;
 
-type HmacSha256 = Hmac<Sha256>;
-
-/// The HMAC step shared by writers and verifiers. Exposed so
-/// integration tests can build synthetic fixtures without duplicating
-/// the algorithm.
-pub(crate) fn chain_step(key: &[u8; 32], prev_mac: &[u8; 32], record_bytes: &[u8]) -> [u8; 32] {
-    let mut mac = <HmacSha256 as hmac::Mac>::new_from_slice(key).expect("HMAC accepts any key");
-    mac.update(prev_mac);
-    mac.update(record_bytes);
-    mac.finalize().into_bytes().into()
-}
+pub(crate) use octravpn_audit_chain::chain_step;
 
 pub(crate) fn load_or_create_key(dir: &Path) -> Result<[u8; 32]> {
     let p = dir.join(".audit.key");
@@ -138,18 +129,6 @@ mod tests {
         assert_eq!(ymd_utc(1_704_067_200), "2024-01-01");
     }
 
-    /// `chain_step` is the single source of truth for the HMAC step
-    /// (cf. F6 in the reuse review). A writer + reader should agree.
-    #[test]
-    fn chain_step_is_deterministic_and_keyed() {
-        let key = [0x42u8; 32];
-        let prev = [0u8; 32];
-        let a = chain_step(&key, &prev, b"hello");
-        let b = chain_step(&key, &prev, b"hello");
-        assert_eq!(a, b, "deterministic");
-        let c = chain_step(&[0x43u8; 32], &prev, b"hello");
-        assert_ne!(a, c, "key-sensitive");
-        let d = chain_step(&key, &[1u8; 32], b"hello");
-        assert_ne!(a, d, "prev-mac-sensitive");
-    }
+    // `chain_step` itself is tested in the `octravpn-audit-chain` crate
+    // (its single home); node + analytics both depend on that one impl.
 }
