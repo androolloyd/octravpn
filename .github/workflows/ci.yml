@@ -216,11 +216,10 @@ jobs:
   docker-e2e:
     name: docker-compose e2e
     runs-on: ubuntu-latest
-    # Advisory while the foundry-context build is shaking out — the
-    # Dockerfiles were just restructured to support the sibling repo
-    # checkout and haven't run end-to-end in CI yet. Flip off once
-    # the first green run lands.
-    continue-on-error: true
+    # Now a required gate: the foundry-context build + tailnet
+    # happy-path run green end-to-end in CI (default docker driver +
+    # tracked stub keys + two-step settle). Was advisory while those
+    # were shaking out.
     steps:
       - uses: actions/checkout@v4
         with: { path: octra }
