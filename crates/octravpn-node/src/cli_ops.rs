@@ -45,6 +45,7 @@ use octravpn_core::{
 };
 
 use crate::audit::{chain_step, resolve_hmac_key, AuditLog, HmacKeyError};
+use crate::cli_report::Check;
 use crate::config::NodeConfig;
 
 // ============================================================================
@@ -137,40 +138,14 @@ pub(crate) struct ReceiptVerifyArgs {
 
 #[derive(Debug, Serialize)]
 struct ConfigValidateReport {
-    schema_parsed: CheckOutcome,
-    wallet_key_loadable: CheckOutcome,
-    wg_key_loadable: CheckOutcome,
-    audit_dir_writable: CheckOutcome,
-    journal_path_writable: CheckOutcome,
-    rpc_reachable: CheckOutcome,
-    program_responsive: CheckOutcome,
+    schema_parsed: Check,
+    wallet_key_loadable: Check,
+    wg_key_loadable: Check,
+    audit_dir_writable: Check,
+    journal_path_writable: Check,
+    rpc_reachable: Check,
+    program_responsive: Check,
     overall_pass: bool,
-}
-
-#[derive(Debug, Serialize, Clone)]
-#[serde(tag = "status", rename_all = "snake_case")]
-enum CheckOutcome {
-    Ok { detail: String },
-    Fail { detail: String },
-    Skipped { detail: String },
-}
-
-impl CheckOutcome {
-    fn is_fail(&self) -> bool {
-        matches!(self, Self::Fail { .. })
-    }
-    fn label(&self) -> &'static str {
-        match self {
-            Self::Ok { .. } => "OK",
-            Self::Fail { .. } => "FAIL",
-            Self::Skipped { .. } => "SKIP",
-        }
-    }
-    fn detail(&self) -> &str {
-        match self {
-            Self::Ok { detail } | Self::Fail { detail } | Self::Skipped { detail } => detail,
-        }
-    }
 }
 
 /// Synchronous entry point. Dispatches to async-needing work via a
@@ -193,15 +168,15 @@ pub(crate) fn run_config(cmd: ConfigCmd) -> Result<i32> {
 async fn run_config_validate(args: &ConfigValidateArgs) -> ConfigValidateReport {
     // 1. Schema.
     let cfg_result: Result<NodeConfig> = NodeConfig::load(&args.path);
-    let (schema_parsed, cfg_opt): (CheckOutcome, Option<NodeConfig>) = match cfg_result {
+    let (schema_parsed, cfg_opt): (Check, Option<NodeConfig>) = match cfg_result {
         Ok(cfg) => (
-            CheckOutcome::Ok {
+            Check::Ok {
                 detail: format!("parsed {}", args.path.display()),
             },
             Some(cfg),
         ),
         Err(e) => (
-            CheckOutcome::Fail {
+            Check::Fail {
                 detail: format!("{e:#}"),
             },
             None,
@@ -212,22 +187,22 @@ async fn run_config_validate(args: &ConfigValidateArgs) -> ConfigValidateReport 
     let Some(cfg) = cfg_opt else {
         return ConfigValidateReport {
             schema_parsed,
-            wallet_key_loadable: CheckOutcome::Skipped {
+            wallet_key_loadable: Check::Skipped {
                 detail: "schema failed".into(),
             },
-            wg_key_loadable: CheckOutcome::Skipped {
+            wg_key_loadable: Check::Skipped {
                 detail: "schema failed".into(),
             },
-            audit_dir_writable: CheckOutcome::Skipped {
+            audit_dir_writable: Check::Skipped {
                 detail: "schema failed".into(),
             },
-            journal_path_writable: CheckOutcome::Skipped {
+            journal_path_writable: Check::Skipped {
                 detail: "schema failed".into(),
             },
-            rpc_reachable: CheckOutcome::Skipped {
+            rpc_reachable: Check::Skipped {
                 detail: "schema failed".into(),
             },
-            program_responsive: CheckOutcome::Skipped {
+            program_responsive: Check::Skipped {
                 detail: "schema failed".into(),
             },
             overall_pass: false,
@@ -253,10 +228,10 @@ async fn run_config_validate(args: &ConfigValidateArgs) -> ConfigValidateReport 
     // 6 + 7: chain reachability.
     let (rpc_reachable, program_responsive) = if args.offline {
         (
-            CheckOutcome::Skipped {
+            Check::Skipped {
                 detail: "--offline".into(),
             },
-            CheckOutcome::Skipped {
+            Check::Skipped {
                 detail: "--offline".into(),
             },
         )
@@ -284,41 +259,41 @@ async fn run_config_validate(args: &ConfigValidateArgs) -> ConfigValidateReport 
     }
 }
 
-fn probe_secret_file(path: &str) -> CheckOutcome {
+fn probe_secret_file(path: &str) -> Check {
     // Accept either plaintext 32-byte (raw or hex) or a sealed
     // envelope. We don't decrypt the envelope here — that needs the
     // passphrase, which the validator shouldn't ask for. Existence +
     // readability is enough.
     let p = Path::new(path);
     if !p.exists() {
-        return CheckOutcome::Fail {
+        return Check::Fail {
             detail: format!("{path}: file does not exist"),
         };
     }
     match fs::metadata(p) {
         Ok(_) => match fs::read(p) {
-            Ok(bytes) if !bytes.is_empty() => CheckOutcome::Ok {
+            Ok(bytes) if !bytes.is_empty() => Check::Ok {
                 detail: format!("{path}: {} bytes readable", bytes.len()),
             },
-            Ok(_) => CheckOutcome::Fail {
+            Ok(_) => Check::Fail {
                 detail: format!("{path}: empty file"),
             },
-            Err(e) => CheckOutcome::Fail {
+            Err(e) => Check::Fail {
                 detail: format!("{path}: read error: {e}"),
             },
         },
-        Err(e) => CheckOutcome::Fail {
+        Err(e) => Check::Fail {
             detail: format!("{path}: stat error: {e}"),
         },
     }
 }
 
-fn probe_audit_dir(dir: Option<&str>) -> CheckOutcome {
+fn probe_audit_dir(dir: Option<&str>) -> Check {
     let dir = dir.unwrap_or("./audit");
     let p = Path::new(dir);
     // Try to create the dir; the daemon does this on boot.
     if let Err(e) = fs::create_dir_all(p) {
-        return CheckOutcome::Fail {
+        return Check::Fail {
             detail: format!("{dir}: cannot create: {e}"),
         };
     }
@@ -327,23 +302,23 @@ fn probe_audit_dir(dir: Option<&str>) -> CheckOutcome {
     match fs::write(&probe, b"probe") {
         Ok(()) => {
             let _ = fs::remove_file(&probe);
-            CheckOutcome::Ok {
+            Check::Ok {
                 detail: format!("{dir}: writable"),
             }
         }
-        Err(e) => CheckOutcome::Fail {
+        Err(e) => Check::Fail {
             detail: format!("{dir}: write error: {e}"),
         },
     }
 }
 
-fn probe_journal_path(journal_path: Option<&str>) -> CheckOutcome {
+fn probe_journal_path(journal_path: Option<&str>) -> Check {
     let p = journal_path.unwrap_or("./state/receipts.bin");
     let path = Path::new(p);
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             if let Err(e) = fs::create_dir_all(parent) {
-                return CheckOutcome::Fail {
+                return Check::Fail {
                     detail: format!("{p}: cannot create parent dir: {e}"),
                 };
             }
@@ -352,39 +327,39 @@ fn probe_journal_path(journal_path: Option<&str>) -> CheckOutcome {
     // Open the journal — covers both the "does not exist yet" and
     // "exists, parses" paths. We immediately drop it.
     match ReceiptJournal::open(path) {
-        Ok(_) => CheckOutcome::Ok {
+        Ok(_) => Check::Ok {
             detail: format!("{p}: openable"),
         },
-        Err(e) => CheckOutcome::Fail {
+        Err(e) => Check::Fail {
             detail: format!("{p}: open error: {e}"),
         },
     }
 }
 
-async fn probe_chain(cfg: &NodeConfig) -> (CheckOutcome, CheckOutcome) {
+async fn probe_chain(cfg: &NodeConfig) -> (Check, Check) {
     let rpc = match cfg.chain.build_rpc_client() {
         Ok(r) => r,
         Err(e) => {
             return (
-                CheckOutcome::Fail {
+                Check::Fail {
                     detail: format!("build rpc client: {e:#}"),
                 },
-                CheckOutcome::Skipped {
+                Check::Skipped {
                     detail: "rpc unreachable".into(),
                 },
             );
         }
     };
     let rpc_outcome = match rpc.node_status().await {
-        Ok(s) => CheckOutcome::Ok {
+        Ok(s) => Check::Ok {
             detail: format!("{} reachable (epoch {})", cfg.chain.rpc_url, s.epoch),
         },
         Err(e) => {
             return (
-                CheckOutcome::Fail {
+                Check::Fail {
                     detail: format!("{}: {e}", cfg.chain.rpc_url),
                 },
-                CheckOutcome::Skipped {
+                Check::Skipped {
                     detail: "rpc unreachable".into(),
                 },
             );
@@ -398,14 +373,14 @@ async fn probe_chain(cfg: &NodeConfig) -> (CheckOutcome, CheckOutcome) {
         .contract_call(&program_addr, "get_params", &[], None)
         .await
     {
-        Ok(v) => CheckOutcome::Ok {
+        Ok(v) => Check::Ok {
             detail: format!(
                 "{}: get_params returned {}",
                 cfg.chain.program_addr,
                 trim_for_display(&v.to_string(), 64)
             ),
         },
-        Err(e) => CheckOutcome::Fail {
+        Err(e) => Check::Fail {
             detail: format!("{}: get_params failed: {e}", cfg.chain.program_addr),
         },
     };
@@ -420,33 +395,48 @@ fn trim_for_display(s: &str, max: usize) -> String {
     }
 }
 
-fn render_config_validate(report: &ConfigValidateReport, json: bool) {
+/// Render a CLI check report. `--json` dumps the (stably-shaped) report
+/// struct; otherwise a fixed-width `label / status / detail` table
+/// followed by a `<name> OK|FAILED` summary. Shared by `config validate`
+/// and `health`.
+fn render_check_report<T: serde::Serialize>(
+    report: &T,
+    json: bool,
+    name: &str,
+    rows: &[(&str, &Check)],
+    overall_pass: bool,
+) {
     if json {
         // Stable JSON shape so downstream tooling can consume it.
         match serde_json::to_string_pretty(report) {
             Ok(s) => println!("{s}"),
-            Err(e) => eprintln!("config validate: serialize report: {e}"),
+            Err(e) => eprintln!("{name}: serialize report: {e}"),
         }
         return;
     }
-    let rows: [(&str, &CheckOutcome); 7] = [
-        ("schema", &report.schema_parsed),
-        ("wallet key", &report.wallet_key_loadable),
-        ("wg key", &report.wg_key_loadable),
-        ("audit dir", &report.audit_dir_writable),
-        ("journal", &report.journal_path_writable),
-        ("rpc", &report.rpc_reachable),
-        ("program", &report.program_responsive),
-    ];
     for (label, outcome) in rows {
         println!("{:<22} {:<6} {}", label, outcome.label(), outcome.detail());
     }
     println!();
-    if report.overall_pass {
-        println!("config OK");
-    } else {
-        println!("config FAILED");
-    }
+    println!("{name} {}", if overall_pass { "OK" } else { "FAILED" });
+}
+
+fn render_config_validate(report: &ConfigValidateReport, json: bool) {
+    render_check_report(
+        report,
+        json,
+        "config",
+        &[
+            ("schema", &report.schema_parsed),
+            ("wallet key", &report.wallet_key_loadable),
+            ("wg key", &report.wg_key_loadable),
+            ("audit dir", &report.audit_dir_writable),
+            ("journal", &report.journal_path_writable),
+            ("rpc", &report.rpc_reachable),
+            ("program", &report.program_responsive),
+        ],
+        report.overall_pass,
+    );
 }
 
 // ============================================================================
@@ -455,13 +445,13 @@ fn render_config_validate(report: &ConfigValidateReport, json: bool) {
 
 #[derive(Debug, Serialize)]
 struct HealthReport {
-    schema_parsed: CheckOutcome,
-    endpoint_stake: CheckOutcome,
-    endpoint_slashed: CheckOutcome,
-    endpoint_unbonding: CheckOutcome,
-    audit_log: CheckOutcome,
-    receipt_journal: CheckOutcome,
-    remote_health: CheckOutcome,
+    schema_parsed: Check,
+    endpoint_stake: Check,
+    endpoint_slashed: Check,
+    endpoint_unbonding: Check,
+    audit_log: Check,
+    receipt_journal: Check,
+    remote_health: Check,
     overall_pass: bool,
 }
 
@@ -479,13 +469,13 @@ async fn run_health_async(args: &HealthArgs) -> HealthReport {
     let cfg_result = NodeConfig::load(&args.config);
     let (schema_parsed, cfg_opt) = match cfg_result {
         Ok(c) => (
-            CheckOutcome::Ok {
+            Check::Ok {
                 detail: format!("loaded {}", args.config.display()),
             },
             Some(c),
         ),
         Err(e) => (
-            CheckOutcome::Fail {
+            Check::Fail {
                 detail: format!("{e:#}"),
             },
             None,
@@ -494,22 +484,22 @@ async fn run_health_async(args: &HealthArgs) -> HealthReport {
     let Some(cfg) = cfg_opt else {
         return HealthReport {
             schema_parsed,
-            endpoint_stake: CheckOutcome::Skipped {
+            endpoint_stake: Check::Skipped {
                 detail: "no config".into(),
             },
-            endpoint_slashed: CheckOutcome::Skipped {
+            endpoint_slashed: Check::Skipped {
                 detail: "no config".into(),
             },
-            endpoint_unbonding: CheckOutcome::Skipped {
+            endpoint_unbonding: Check::Skipped {
                 detail: "no config".into(),
             },
-            audit_log: CheckOutcome::Skipped {
+            audit_log: Check::Skipped {
                 detail: "no config".into(),
             },
-            receipt_journal: CheckOutcome::Skipped {
+            receipt_journal: Check::Skipped {
                 detail: "no config".into(),
             },
-            remote_health: CheckOutcome::Skipped {
+            remote_health: Check::Skipped {
                 detail: "no config".into(),
             },
             overall_pass: false,
@@ -521,7 +511,7 @@ async fn run_health_async(args: &HealthArgs) -> HealthReport {
     let receipt_journal = probe_journal_file(cfg.control.receipt_journal_path.as_deref());
     let remote_health = match args.remote.as_deref() {
         Some(url) => probe_remote_health(url).await,
-        None => CheckOutcome::Skipped {
+        None => Check::Skipped {
             detail: "no --remote passed".into(),
         },
     };
@@ -546,17 +536,17 @@ async fn run_health_async(args: &HealthArgs) -> HealthReport {
     }
 }
 
-async fn probe_endpoint_state(cfg: &NodeConfig) -> (CheckOutcome, CheckOutcome, CheckOutcome) {
+async fn probe_endpoint_state(cfg: &NodeConfig) -> (Check, Check, Check) {
     let rpc = match cfg.chain.build_rpc_client() {
         Ok(r) => r,
         Err(e) => {
             let msg = format!("build rpc: {e:#}");
             return (
-                CheckOutcome::Fail { detail: msg },
-                CheckOutcome::Skipped {
+                Check::Fail { detail: msg },
+                Check::Skipped {
                     detail: "rpc unavailable".into(),
                 },
-                CheckOutcome::Skipped {
+                Check::Skipped {
                     detail: "rpc unavailable".into(),
                 },
             );
@@ -575,11 +565,11 @@ async fn probe_endpoint_state(cfg: &NodeConfig) -> (CheckOutcome, CheckOutcome, 
     {
         Ok(v) => {
             let n = v.as_u64().unwrap_or(0);
-            CheckOutcome::Ok {
+            Check::Ok {
                 detail: format!("stake = {n} OU"),
             }
         }
-        Err(e) => CheckOutcome::Fail {
+        Err(e) => Check::Fail {
             detail: format!("get_endpoint_stake: {e}"),
         },
     };
@@ -595,16 +585,16 @@ async fn probe_endpoint_state(cfg: &NodeConfig) -> (CheckOutcome, CheckOutcome, 
         Ok(v) => {
             let slashed = v.as_bool().unwrap_or_else(|| v.as_u64() == Some(1));
             if slashed {
-                CheckOutcome::Fail {
+                Check::Fail {
                     detail: "endpoint is governance-slashed (permanent)".into(),
                 }
             } else {
-                CheckOutcome::Ok {
+                Check::Ok {
                     detail: "not slashed".into(),
                 }
             }
         }
-        Err(e) => CheckOutcome::Fail {
+        Err(e) => Check::Fail {
             detail: format!("is_endpoint_slashed: {e}"),
         },
     };
@@ -620,13 +610,13 @@ async fn probe_endpoint_state(cfg: &NodeConfig) -> (CheckOutcome, CheckOutcome, 
         Ok(v) => {
             let n = v.as_u64().unwrap_or(0);
             if n > 0 {
-                CheckOutcome::Ok {
+                Check::Ok {
                     detail: format!(
                         "unbonding = {n} OU (call `octravpn-node finalize-unbond` after grace)"
                     ),
                 }
             } else {
-                CheckOutcome::Ok {
+                Check::Ok {
                     detail: "no unbonding in flight".into(),
                 }
             }
@@ -639,11 +629,11 @@ async fn probe_endpoint_state(cfg: &NodeConfig) -> (CheckOutcome, CheckOutcome, 
                 || msg.contains("not found")
                 || msg.contains("invalid method")
             {
-                CheckOutcome::Skipped {
+                Check::Skipped {
                     detail: "get_endpoint_unbonding unsupported on this program shape".into(),
                 }
             } else {
-                CheckOutcome::Fail {
+                Check::Fail {
                     detail: format!("get_endpoint_unbonding: {e}"),
                 }
             }
@@ -652,45 +642,45 @@ async fn probe_endpoint_state(cfg: &NodeConfig) -> (CheckOutcome, CheckOutcome, 
     (stake_outcome, slashed_outcome, unbonding_outcome)
 }
 
-fn probe_audit_log_file(dir: Option<&str>) -> CheckOutcome {
+fn probe_audit_log_file(dir: Option<&str>) -> Check {
     let dir = dir.unwrap_or("./audit");
     let p = Path::new(dir);
     if !p.exists() {
-        return CheckOutcome::Skipped {
+        return Check::Skipped {
             detail: format!("{dir}: not created yet (daemon hasn't booted)"),
         };
     }
     // Try to open the writer side. This both validates the HMAC key
     // is present + readable and that today's file path is openable.
     match AuditLog::open(p) {
-        Ok(_) => CheckOutcome::Ok {
+        Ok(_) => Check::Ok {
             detail: format!("{dir}: openable"),
         },
-        Err(e) => CheckOutcome::Fail {
+        Err(e) => Check::Fail {
             detail: format!("{dir}: {e:#}"),
         },
     }
 }
 
-fn probe_journal_file(path: Option<&str>) -> CheckOutcome {
+fn probe_journal_file(path: Option<&str>) -> Check {
     let p = path.unwrap_or("./state/receipts.bin");
     let path = Path::new(p);
     if !path.exists() {
-        return CheckOutcome::Skipped {
+        return Check::Skipped {
             detail: format!("{p}: not created yet"),
         };
     }
     match ReceiptJournal::open(path) {
-        Ok(j) => CheckOutcome::Ok {
+        Ok(j) => Check::Ok {
             detail: format!("{p}: {} session floor(s)", j.entries().len()),
         },
-        Err(e) => CheckOutcome::Fail {
+        Err(e) => Check::Fail {
             detail: format!("{p}: {e}"),
         },
     }
 }
 
-async fn probe_remote_health(url: &str) -> CheckOutcome {
+async fn probe_remote_health(url: &str) -> Check {
     // Use a quick raw HTTP probe via `RpcClient`-less reqwest. We pin
     // no roots; this is a localhost-or-LAN convenience. Production
     // operators with a TLS reverse proxy should pass the public URL.
@@ -707,7 +697,7 @@ async fn probe_remote_health(url: &str) -> CheckOutcome {
     {
         Ok(c) => c,
         Err(e) => {
-            return CheckOutcome::Fail {
+            return Check::Fail {
                 detail: format!("build client: {e}"),
             };
         }
@@ -717,47 +707,37 @@ async fn probe_remote_health(url: &str) -> CheckOutcome {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
             if status.is_success() {
-                CheckOutcome::Ok {
+                Check::Ok {
                     detail: format!("{target}: {status} {}", trim_for_display(&body, 80)),
                 }
             } else {
-                CheckOutcome::Fail {
+                Check::Fail {
                     detail: format!("{target}: {status} {}", trim_for_display(&body, 120)),
                 }
             }
         }
-        Err(e) => CheckOutcome::Fail {
+        Err(e) => Check::Fail {
             detail: format!("{target}: {e}"),
         },
     }
 }
 
 fn render_health(report: &HealthReport, json: bool) {
-    if json {
-        match serde_json::to_string_pretty(report) {
-            Ok(s) => println!("{s}"),
-            Err(e) => eprintln!("health: serialize: {e}"),
-        }
-        return;
-    }
-    let rows: [(&str, &CheckOutcome); 7] = [
-        ("config", &report.schema_parsed),
-        ("endpoint stake", &report.endpoint_stake),
-        ("endpoint slashed", &report.endpoint_slashed),
-        ("endpoint unbonding", &report.endpoint_unbonding),
-        ("audit log", &report.audit_log),
-        ("receipt journal", &report.receipt_journal),
-        ("remote /health", &report.remote_health),
-    ];
-    for (label, outcome) in rows {
-        println!("{:<22} {:<6} {}", label, outcome.label(), outcome.detail());
-    }
-    println!();
-    if report.overall_pass {
-        println!("health OK");
-    } else {
-        println!("health FAILED");
-    }
+    render_check_report(
+        report,
+        json,
+        "health",
+        &[
+            ("config", &report.schema_parsed),
+            ("endpoint stake", &report.endpoint_stake),
+            ("endpoint slashed", &report.endpoint_slashed),
+            ("endpoint unbonding", &report.endpoint_unbonding),
+            ("audit log", &report.audit_log),
+            ("receipt journal", &report.receipt_journal),
+            ("remote /health", &report.remote_health),
+        ],
+        report.overall_pass,
+    );
 }
 
 // ============================================================================
@@ -1211,10 +1191,10 @@ receipt_journal_path = "{journal}"
             report.overall_pass,
             "offline config validate should pass: {report:#?}"
         );
-        assert!(matches!(report.rpc_reachable, CheckOutcome::Skipped { .. }));
+        assert!(matches!(report.rpc_reachable, Check::Skipped { .. }));
         assert!(matches!(
             report.program_responsive,
-            CheckOutcome::Skipped { .. }
+            Check::Skipped { .. }
         ));
     }
 
@@ -1243,7 +1223,7 @@ receipt_journal_path = "{journal}"
         assert!(!report.overall_pass);
         assert!(matches!(
             report.wallet_key_loadable,
-            CheckOutcome::Fail { .. }
+            Check::Fail { .. }
         ));
     }
 
@@ -1263,7 +1243,7 @@ receipt_journal_path = "{journal}"
             .unwrap();
         let report = rt.block_on(run_config_validate(&args));
         assert!(!report.overall_pass);
-        assert!(matches!(report.schema_parsed, CheckOutcome::Fail { .. }));
+        assert!(matches!(report.schema_parsed, Check::Fail { .. }));
     }
 
     #[test]
@@ -1430,16 +1410,16 @@ receipt_journal_path = "{journal}"
         let rt = build_runtime();
         let report = rt.block_on(run_config_validate(&args));
         assert!(!report.overall_pass);
-        assert!(matches!(report.schema_parsed, CheckOutcome::Fail { .. }));
+        assert!(matches!(report.schema_parsed, Check::Fail { .. }));
         assert!(matches!(
             report.wallet_key_loadable,
-            CheckOutcome::Skipped { .. }
+            Check::Skipped { .. }
         ));
         assert!(matches!(
             report.wg_key_loadable,
-            CheckOutcome::Skipped { .. }
+            Check::Skipped { .. }
         ));
-        assert!(matches!(report.rpc_reachable, CheckOutcome::Skipped { .. }));
+        assert!(matches!(report.rpc_reachable, Check::Skipped { .. }));
     }
 
     #[test]
@@ -1462,7 +1442,7 @@ receipt_journal_path = "{journal}"
         let rt = build_runtime();
         let report = rt.block_on(run_config_validate(&args));
         assert!(!report.overall_pass);
-        assert!(matches!(report.wg_key_loadable, CheckOutcome::Fail { .. }));
+        assert!(matches!(report.wg_key_loadable, Check::Fail { .. }));
     }
 
     #[test]
@@ -1487,7 +1467,7 @@ receipt_journal_path = "{journal}"
         let report = rt.block_on(run_config_validate(&args));
         assert!(!report.overall_pass);
         let detail = match report.wallet_key_loadable {
-            CheckOutcome::Fail { detail } => detail,
+            Check::Fail { detail } => detail,
             other => panic!("expected Fail, got {other:?}"),
         };
         assert!(detail.contains("empty"), "got: {detail}");
@@ -1512,7 +1492,7 @@ receipt_journal_path = "{journal}"
         let rt = build_runtime();
         let report = rt.block_on(run_config_validate(&args));
         match report.rpc_reachable {
-            CheckOutcome::Skipped { detail } => assert!(detail.contains("offline")),
+            Check::Skipped { detail } => assert!(detail.contains("offline")),
             other => panic!("expected Skipped with offline marker, got {other:?}"),
         }
     }
@@ -1538,7 +1518,7 @@ receipt_journal_path = "{journal}"
         let rt = build_runtime();
         let report = rt.block_on(run_config_validate(&args));
         assert!(!report.overall_pass);
-        assert!(matches!(report.rpc_reachable, CheckOutcome::Fail { .. }));
+        assert!(matches!(report.rpc_reachable, Check::Fail { .. }));
     }
 
     #[test]
@@ -1580,7 +1560,7 @@ receipt_journal_path = "{journal}"
         let dir = tempdir().unwrap();
         let missing = dir.path().join("nope.key");
         let outcome = probe_secret_file(missing.to_str().unwrap());
-        assert!(matches!(outcome, CheckOutcome::Fail { .. }));
+        assert!(matches!(outcome, Check::Fail { .. }));
         assert!(outcome.detail().contains("does not exist"));
     }
 
@@ -1590,7 +1570,7 @@ receipt_journal_path = "{journal}"
         let key = dir.path().join("k");
         fs::write(&key, [0u8; 16]).unwrap();
         let outcome = probe_secret_file(key.to_str().unwrap());
-        assert!(matches!(outcome, CheckOutcome::Ok { .. }));
+        assert!(matches!(outcome, Check::Ok { .. }));
     }
 
     #[test]
@@ -1598,7 +1578,7 @@ receipt_journal_path = "{journal}"
         let dir = tempdir().unwrap();
         let nested = dir.path().join("does/not/exist/yet");
         let outcome = probe_audit_dir(Some(nested.to_str().unwrap()));
-        assert!(matches!(outcome, CheckOutcome::Ok { .. }));
+        assert!(matches!(outcome, Check::Ok { .. }));
         assert!(nested.exists());
     }
 
@@ -1610,14 +1590,14 @@ receipt_journal_path = "{journal}"
         j.bump(&SessionId::new([1u8; 32]), 3).unwrap();
         drop(j);
         let outcome = probe_journal_path(Some(p.to_str().unwrap()));
-        assert!(matches!(outcome, CheckOutcome::Ok { .. }));
+        assert!(matches!(outcome, Check::Ok { .. }));
     }
 
     #[test]
     fn check_outcome_helpers_are_consistent() {
-        let ok = CheckOutcome::Ok { detail: "x".into() };
-        let f = CheckOutcome::Fail { detail: "y".into() };
-        let s = CheckOutcome::Skipped { detail: "z".into() };
+        let ok = Check::Ok { detail: "x".into() };
+        let f = Check::Fail { detail: "y".into() };
+        let s = Check::Skipped { detail: "z".into() };
         assert!(!ok.is_fail());
         assert!(f.is_fail());
         assert!(!s.is_fail());
@@ -1667,7 +1647,7 @@ receipt_journal_path = "{journal}"
     fn probe_audit_log_file_skips_when_missing() {
         let dir = tempdir().unwrap();
         let outcome = probe_audit_log_file(Some(dir.path().join("missing").to_str().unwrap()));
-        assert!(matches!(outcome, CheckOutcome::Skipped { .. }));
+        assert!(matches!(outcome, Check::Skipped { .. }));
     }
 
     #[test]
@@ -1676,14 +1656,14 @@ receipt_journal_path = "{journal}"
         // Open and drop a log so the dir + key are seeded.
         let _ = AuditLog::open(dir.path()).unwrap();
         let outcome = probe_audit_log_file(Some(dir.path().to_str().unwrap()));
-        assert!(matches!(outcome, CheckOutcome::Ok { .. }));
+        assert!(matches!(outcome, Check::Ok { .. }));
     }
 
     #[test]
     fn probe_journal_file_skips_when_missing() {
         let dir = tempdir().unwrap();
         let outcome = probe_journal_file(Some(dir.path().join("nope.bin").to_str().unwrap()));
-        assert!(matches!(outcome, CheckOutcome::Skipped { .. }));
+        assert!(matches!(outcome, Check::Skipped { .. }));
     }
 
     #[test]
@@ -1696,7 +1676,7 @@ receipt_journal_path = "{journal}"
         drop(j);
         let outcome = probe_journal_file(Some(p.to_str().unwrap()));
         match outcome {
-            CheckOutcome::Ok { detail } => assert!(detail.contains("2 session"), "got: {detail}"),
+            Check::Ok { detail } => assert!(detail.contains("2 session"), "got: {detail}"),
             other => panic!("expected Ok, got {other:?}"),
         }
     }
@@ -1713,7 +1693,7 @@ receipt_journal_path = "{journal}"
         // Yield so the server is ready.
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         let outcome = probe_remote_health(&format!("http://{addr}")).await;
-        assert!(matches!(outcome, CheckOutcome::Ok { .. }), "{outcome:?}");
+        assert!(matches!(outcome, Check::Ok { .. }), "{outcome:?}");
     }
 
     #[tokio::test]
@@ -1730,14 +1710,14 @@ receipt_journal_path = "{journal}"
         });
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         let outcome = probe_remote_health(&format!("http://{addr}")).await;
-        assert!(matches!(outcome, CheckOutcome::Fail { .. }), "{outcome:?}");
+        assert!(matches!(outcome, Check::Fail { .. }), "{outcome:?}");
     }
 
     #[tokio::test]
     async fn probe_remote_health_dial_failure_is_fail() {
         // Unroutable port → connect error.
         let outcome = probe_remote_health("http://127.0.0.1:1/health").await;
-        assert!(matches!(outcome, CheckOutcome::Fail { .. }));
+        assert!(matches!(outcome, Check::Fail { .. }));
     }
 
     #[tokio::test]
@@ -1752,7 +1732,7 @@ receipt_journal_path = "{journal}"
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         let bare = format!("http://{addr}/"); // trailing slash
         let outcome = probe_remote_health(&bare).await;
-        assert!(matches!(outcome, CheckOutcome::Ok { .. }), "{outcome:?}");
+        assert!(matches!(outcome, Check::Ok { .. }), "{outcome:?}");
     }
 
     // ----------------------------------------------------------------

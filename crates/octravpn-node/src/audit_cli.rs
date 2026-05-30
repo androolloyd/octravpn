@@ -40,13 +40,14 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use serde::Serialize;
 use serde_json::Value;
 
 use octravpn_core::session::SessionId;
 
 use crate::audit::{days_to_ymd, resolve_hmac_key, AuditLog, FileVerifyReport, HmacKeyError};
+use crate::cli_report::Check;
 
 /// `octravpn-node audit …` top-level subcommand.
 #[derive(Subcommand, Debug)]
@@ -92,9 +93,24 @@ pub(crate) struct ReplayArgs {
     until: Option<u64>,
 
     /// Output format: `human` (default, one line per event) or
-    /// `json` (newline-delimited JSON for downstream tooling).
-    #[arg(long, default_value = "human")]
-    format: String,
+    /// `json` / `jsonl` (newline-delimited JSON for downstream tooling).
+    #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+    format: OutputFormat,
+}
+
+/// `audit replay --format` choices. Was a free `String` matched with a
+/// silent `_ => human` fallthrough, which swallowed typos (`--format xml`
+/// → human); a `ValueEnum` makes clap reject unknown values up front and
+/// the dispatch exhaustive.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+#[value(rename_all = "lowercase")]
+pub(crate) enum OutputFormat {
+    /// One human-readable line per event.
+    Human,
+    /// Newline-delimited JSON (alias of `jsonl`).
+    Json,
+    /// Newline-delimited JSON.
+    Jsonl,
 }
 
 #[derive(Args, Debug)]
@@ -199,9 +215,9 @@ fn run_replay(args: &ReplayArgs, out: &mut dyn Write) -> Result<()> {
             .then(a.seq.cmp(&b.seq))
     });
 
-    match args.format.as_str() {
-        "json" | "jsonl" => render_jsonl(&all, out)?,
-        _ => render_human(&all, out)?,
+    match args.format {
+        OutputFormat::Json | OutputFormat::Jsonl => render_jsonl(&all, out)?,
+        OutputFormat::Human => render_human(&all, out)?,
     }
     Ok(())
 }
@@ -397,50 +413,10 @@ fn load_journal_events(path: &Path) -> Result<Vec<TimelineEvent>> {
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct VerifyReport {
-    pub audit_log: CheckResult,
-    pub receipt_journal: CheckResult,
-    pub cross_check: CheckResult,
+    pub audit_log: Check,
+    pub receipt_journal: Check,
+    pub cross_check: Check,
     pub overall_pass: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub(crate) enum CheckResult {
-    Ok {
-        detail: String,
-    },
-    Fail {
-        detail: String,
-    },
-    /// Used when an earlier check made this one un-runnable (e.g. the
-    /// audit log was invalid, so cross-check is meaningless).
-    Skipped {
-        detail: String,
-    },
-    /// Soft warning — orphaned entries are reported here but do NOT
-    /// flip overall_pass.
-    Warn {
-        detail: String,
-    },
-}
-
-impl CheckResult {
-    fn label(&self) -> &'static str {
-        match self {
-            Self::Ok { .. } => "OK",
-            Self::Fail { .. } => "FAIL",
-            Self::Skipped { .. } => "SKIPPED",
-            Self::Warn { .. } => "WARN",
-        }
-    }
-    fn detail(&self) -> &str {
-        match self {
-            Self::Ok { detail }
-            | Self::Fail { detail }
-            | Self::Skipped { detail }
-            | Self::Warn { detail } => detail,
-        }
-    }
 }
 
 fn run_verify_cli(args: &VerifyArgs) -> i32 {
@@ -487,7 +463,7 @@ pub(crate) fn run_verify(
         )));
     }
     let (audit_log_result, audit_signed_seqs) = verify_audit_files(&key, &files);
-    let audit_log_ok = matches!(audit_log_result, CheckResult::Ok { .. });
+    let audit_log_ok = matches!(audit_log_result, Check::Ok { .. });
 
     // ---- Journal monotonicity ----
     let journal_result = if args.journal_path.exists() {
@@ -495,19 +471,19 @@ pub(crate) fn run_verify(
     } else {
         // The journal is optional — an operator who never signed a
         // receipt has no journal. Treat absence as OK with detail.
-        CheckResult::Ok {
+        Check::Ok {
             detail: format!("no journal at {}", args.journal_path.display()),
         }
     };
-    let journal_ok = matches!(journal_result, CheckResult::Ok { .. });
+    let journal_ok = matches!(journal_result, Check::Ok { .. });
 
     // ---- Cross-check ----
     let cross_check = if !audit_log_ok {
-        CheckResult::Skipped {
+        Check::Skipped {
             detail: "audit log invalid".into(),
         }
     } else if !args.journal_path.exists() {
-        CheckResult::Skipped {
+        Check::Skipped {
             detail: "no journal".into(),
         }
     } else {
@@ -517,7 +493,7 @@ pub(crate) fn run_verify(
     let overall_pass = audit_log_ok
         && journal_ok
         // Warn / Ok pass; Fail / Skipped fail.
-        && !matches!(cross_check, CheckResult::Fail { .. });
+        && !matches!(cross_check, Check::Fail { .. });
 
     let report = VerifyReport {
         audit_log: audit_log_result,
@@ -572,7 +548,7 @@ fn verify_audit_files(
     key: &[u8; 32],
     files: &[PathBuf],
 ) -> (
-    CheckResult,
+    Check,
     BTreeMap<String, std::collections::BTreeSet<u64>>,
 ) {
     let mut total: u64 = 0;
@@ -582,7 +558,7 @@ fn verify_audit_files(
             Ok(r) => r,
             Err(e) => {
                 return (
-                    CheckResult::Fail {
+                    Check::Fail {
                         detail: format!("{}: {e:#}", file.display()),
                     },
                     signed_seqs,
@@ -596,7 +572,7 @@ fn verify_audit_files(
         }
         if let Some(err) = report.first_error {
             return (
-                CheckResult::Fail {
+                Check::Fail {
                     detail: format!("{}: {err}", file.display()),
                 },
                 signed_seqs,
@@ -604,14 +580,14 @@ fn verify_audit_files(
         }
     }
     (
-        CheckResult::Ok {
+        Check::Ok {
             detail: format!("{total} entries, HMAC chain valid"),
         },
         signed_seqs,
     )
 }
 
-fn verify_journal(path: &Path) -> Result<CheckResult> {
+fn verify_journal(path: &Path) -> Result<Check> {
     // The journal's on-disk format is now append-only with per-record
     // checksums (see `octravpn_core::receipt_journal` module doc). We
     // delegate to the public API rather than re-parsing the bytes here
@@ -621,20 +597,20 @@ fn verify_journal(path: &Path) -> Result<CheckResult> {
     // the live per-session floor; the codec guarantees one entry per
     // session.
     if !path.exists() {
-        return Ok(CheckResult::Ok {
+        return Ok(Check::Ok {
             detail: "0 records (empty journal)".into(),
         });
     }
     let metadata = fs::metadata(path).with_context(|| format!("stat {}", path.display()))?;
     if metadata.len() == 0 {
-        return Ok(CheckResult::Ok {
+        return Ok(Check::Ok {
             detail: "0 records (empty journal)".into(),
         });
     }
     let journal = match octravpn_core::receipt_journal::ReceiptJournal::open(path) {
         Ok(j) => j,
         Err(e) => {
-            return Ok(CheckResult::Fail {
+            return Ok(Check::Fail {
                 detail: format!("{e}"),
             });
         }
@@ -644,7 +620,7 @@ fn verify_journal(path: &Path) -> Result<CheckResult> {
     // on every successful `bump`, so seeing 0 on disk indicates a
     // hand-edited file or a format bug.
     if let Some((sid, _)) = entries.iter().find(|(_, seq)| *seq == 0) {
-        return Ok(CheckResult::Fail {
+        return Ok(Check::Fail {
             detail: format!(
                 "session {} has floor=0 (sentinel; should never be written)",
                 sid.to_hex()
@@ -652,7 +628,7 @@ fn verify_journal(path: &Path) -> Result<CheckResult> {
         });
     }
     let sessions = entries.len();
-    Ok(CheckResult::Ok {
+    Ok(Check::Ok {
         detail: format!(
             "{sessions} records, monotonic seq for {sessions} session{}",
             if sessions == 1 { "" } else { "s" }
@@ -669,7 +645,7 @@ fn verify_journal(path: &Path) -> Result<CheckResult> {
 fn cross_check_journal(
     journal_path: &Path,
     audit_seqs: &BTreeMap<String, std::collections::BTreeSet<u64>>,
-) -> Result<CheckResult> {
+) -> Result<Check> {
     let j = octravpn_core::receipt_journal::ReceiptJournal::open(journal_path)?;
     let entries = j.entries();
     let total = entries.len();
@@ -689,7 +665,7 @@ fn cross_check_journal(
         .collect();
 
     if orphan_journal.is_empty() && orphan_audit.is_empty() {
-        Ok(CheckResult::Ok {
+        Ok(Check::Ok {
             detail: format!("{matched}/{total} journal records have audit entries"),
         })
     } else {
@@ -711,7 +687,7 @@ fn cross_check_journal(
                 .join(",");
             let _ = write!(detail, " — audit-only sessions: {list}");
         }
-        Ok(CheckResult::Warn { detail })
+        Ok(Check::Warn { detail })
     }
 }
 
@@ -827,7 +803,7 @@ mod tests {
             session: None,
             since: None,
             until: None,
-            format: "human".into(),
+            format: OutputFormat::Human,
         };
         let mut buf = Vec::new();
         run_replay(&args, &mut buf).unwrap();
@@ -857,7 +833,7 @@ mod tests {
             session: Some(sid_hex(0xAA)),
             since: None,
             until: None,
-            format: "human".into(),
+            format: OutputFormat::Human,
         };
         let mut buf = Vec::new();
         run_replay(&args, &mut buf).unwrap();
@@ -884,7 +860,7 @@ mod tests {
             session: None,
             since: Some(100),
             until: Some(200),
-            format: "human".into(),
+            format: OutputFormat::Human,
         };
         let mut buf = Vec::new();
         run_replay(&args, &mut buf).unwrap();
@@ -909,7 +885,7 @@ mod tests {
             session: None,
             since: None,
             until: None,
-            format: "json".into(),
+            format: OutputFormat::Json,
         };
         let mut buf = Vec::new();
         run_replay(&args, &mut buf).unwrap();
@@ -937,7 +913,7 @@ mod tests {
             session: None,
             since: None,
             until: None,
-            format: "human".into(),
+            format: OutputFormat::Human,
         };
         let mut buf = Vec::new();
         run_replay(&args, &mut buf).unwrap();
@@ -981,7 +957,7 @@ mod tests {
         let mut buf = Vec::new();
         let report = run_verify(&args, &mut buf).unwrap();
         assert!(report.overall_pass, "expected pass; got: {report:#?}");
-        assert!(matches!(report.audit_log, CheckResult::Ok { .. }));
+        assert!(matches!(report.audit_log, Check::Ok { .. }));
     }
 
     #[test]
@@ -1020,7 +996,7 @@ mod tests {
         let report = run_verify(&args, &mut buf).unwrap();
         assert!(!report.overall_pass);
         let detail = match &report.audit_log {
-            CheckResult::Fail { detail } => detail.clone(),
+            Check::Fail { detail } => detail.clone(),
             other => panic!("expected fail; got {other:?}"),
         };
         assert!(
@@ -1051,7 +1027,7 @@ mod tests {
         fs::write(&path, &buf).unwrap();
         let r = verify_journal(&path).unwrap();
         match r {
-            CheckResult::Ok { detail } => {
+            Check::Ok { detail } => {
                 assert!(
                     detail.contains("1 records"),
                     "expected one collapsed record; got: {detail}"
@@ -1094,7 +1070,7 @@ mod tests {
         let mut buf = Vec::new();
         let report = run_verify(&args, &mut buf).unwrap();
         assert!(
-            matches!(report.cross_check, CheckResult::Ok { .. }),
+            matches!(report.cross_check, Check::Ok { .. }),
             "expected Ok cross-check; got {:?}",
             report.cross_check
         );
@@ -1135,10 +1111,10 @@ mod tests {
         let mut buf = Vec::new();
         let report = run_verify(&args, &mut buf).unwrap();
         // audit_log + journal pass; cross-check is a Warn (not Fail).
-        assert!(matches!(report.audit_log, CheckResult::Ok { .. }));
-        assert!(matches!(report.receipt_journal, CheckResult::Ok { .. }));
+        assert!(matches!(report.audit_log, Check::Ok { .. }));
+        assert!(matches!(report.receipt_journal, Check::Ok { .. }));
         assert!(
-            matches!(report.cross_check, CheckResult::Warn { .. }),
+            matches!(report.cross_check, Check::Warn { .. }),
             "expected Warn; got {:?}",
             report.cross_check
         );
@@ -1188,7 +1164,7 @@ mod tests {
             session: Some("42".into()),
             since: None,
             until: None,
-            format: "human".into(),
+            format: OutputFormat::Human,
         };
         let mut buf = Vec::new();
         run_replay(&args, &mut buf).unwrap();
@@ -1210,7 +1186,7 @@ mod tests {
         buf.extend_from_slice(&0u64.to_be_bytes());
         fs::write(&path, &buf).unwrap();
         let r = verify_journal(&path).unwrap();
-        assert!(matches!(r, CheckResult::Fail { .. }));
+        assert!(matches!(r, Check::Fail { .. }));
     }
 
     #[test]
@@ -1220,7 +1196,7 @@ mod tests {
         fs::write(&path, b"NOTAMAGIC\0\0\0\0\0\0\0").unwrap();
         let r = verify_journal(&path).unwrap();
         match r {
-            CheckResult::Fail { detail } => assert!(detail.contains("magic"), "got: {detail}"),
+            Check::Fail { detail } => assert!(detail.contains("magic"), "got: {detail}"),
             other => panic!("expected Fail; got {other:?}"),
         }
     }
@@ -1297,7 +1273,7 @@ mod tests {
         let report = run_verify(&args, &mut buf).unwrap();
         assert!(report.overall_pass);
         let detail = match &report.audit_log {
-            CheckResult::Ok { detail } => detail,
+            Check::Ok { detail } => detail,
             other => panic!("expected Ok, got {other:?}"),
         };
         assert!(detail.contains("0 entries"));
@@ -1403,7 +1379,7 @@ mod tests {
             session: None,
             since: None,
             until: None,
-            format: "jsonl".into(),
+            format: OutputFormat::Jsonl,
         };
         let mut buf = Vec::new();
         run_replay(&args, &mut buf).unwrap();
@@ -1423,7 +1399,7 @@ mod tests {
             session: None,
             since: None,
             until: None,
-            format: "human".into(),
+            format: OutputFormat::Human,
         };
         let mut buf = Vec::new();
         run_replay(&args, &mut buf).unwrap();
@@ -1492,13 +1468,13 @@ mod tests {
 
     #[test]
     fn check_result_label_and_detail_helpers() {
-        let ok = CheckResult::Ok { detail: "x".into() };
-        let f = CheckResult::Fail { detail: "y".into() };
-        let s = CheckResult::Skipped { detail: "z".into() };
-        let w = CheckResult::Warn { detail: "q".into() };
+        let ok = Check::Ok { detail: "x".into() };
+        let f = Check::Fail { detail: "y".into() };
+        let s = Check::Skipped { detail: "z".into() };
+        let w = Check::Warn { detail: "q".into() };
         assert_eq!(ok.label(), "OK");
         assert_eq!(f.label(), "FAIL");
-        assert_eq!(s.label(), "SKIPPED");
+        assert_eq!(s.label(), "SKIP");
         assert_eq!(w.label(), "WARN");
         assert_eq!(ok.detail(), "x");
         assert_eq!(f.detail(), "y");
@@ -1529,7 +1505,7 @@ mod tests {
             session: None,
             since: None,
             until: None,
-            format: "human".into(),
+            format: OutputFormat::Human,
         });
         let code = dispatch(cmd);
         assert_eq!(code, 0);
@@ -1557,6 +1533,6 @@ mod tests {
         let mut buf = Vec::new();
         let report = run_verify(&args, &mut buf).unwrap();
         // Journal missing → cross-check is skipped (not Fail).
-        assert!(matches!(report.cross_check, CheckResult::Skipped { .. }));
+        assert!(matches!(report.cross_check, Check::Skipped { .. }));
     }
 }

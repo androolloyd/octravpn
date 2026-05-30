@@ -29,6 +29,7 @@ mod chain_v3;
 mod circle_update;
 mod cli;
 mod cli_ops;
+mod cli_report;
 mod config;
 mod control;
 mod events;
