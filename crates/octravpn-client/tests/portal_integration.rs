@@ -1,3 +1,8 @@
+// Skipped under cargo-tarpaulin: this subprocess-driven CLI test deadlocks
+// tarpaulin's ptrace coverage engine (and adds no in-process coverage).
+// Normal cargo test still runs it.
+#![cfg(not(tarpaulin))]
+
 //! End-to-end integration for the `oct://` browser portal.
 //!
 //! Spins up:

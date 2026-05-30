@@ -1,3 +1,8 @@
+// Skipped under cargo-tarpaulin: this subprocess-driven CLI test deadlocks
+// tarpaulin's ptrace coverage engine (and adds no in-process coverage).
+// Normal cargo test still runs it.
+#![cfg(not(tarpaulin))]
+
 //! Integration test for the kernel WireGuard backend (Perf-10).
 //!
 //! This file is **gated** behind:

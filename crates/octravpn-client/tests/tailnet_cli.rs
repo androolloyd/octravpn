@@ -1,3 +1,8 @@
+// Skipped under cargo-tarpaulin: this subprocess-driven CLI test deadlocks
+// tarpaulin's ptrace coverage engine (and adds no in-process coverage).
+// Normal cargo test still runs it.
+#![cfg(not(tarpaulin))]
+
 //! Smoke tests for `octravpn tailnet ...` subcommands. We exercise the
 //! help dispatch + a config-less path so the clap routing is verified
 //! end-to-end without needing a live chain.

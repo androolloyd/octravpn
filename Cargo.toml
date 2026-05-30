@@ -56,6 +56,11 @@ unreachable_pub         = "warn"
 unused_must_use         = "deny"
 trivial_casts           = "warn"
 trivial_numeric_casts   = "warn"
+# `cfg(tarpaulin)` is set by cargo-tarpaulin during coverage runs; the
+# subprocess-driven integration tests use `#![cfg(not(tarpaulin))]` to
+# opt out of its ptrace engine. Declare it so the unexpected_cfgs lint
+# (and CI's `-D warnings`) doesn't flag those guards.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)'] }
 
 [workspace.package]
 version = "0.1.0"

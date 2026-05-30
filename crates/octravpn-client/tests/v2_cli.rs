@@ -1,3 +1,8 @@
+// Skipped under cargo-tarpaulin: this subprocess-driven CLI test deadlocks
+// tarpaulin's ptrace coverage engine (and adds no in-process coverage).
+// Normal cargo test still runs it.
+#![cfg(not(tarpaulin))]
+
 //! Integration tests for the v2 (circle-native) client subcommands.
 //!
 //! The full v2 discovery / connect flow needs a live RPC and a deployed
