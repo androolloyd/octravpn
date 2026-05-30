@@ -52,6 +52,15 @@ pvac-sidecar/octra-pvac-sidecar
 !/docker/conf/demo-node*/wallet.key
 !/docker/conf/demo-node*/wg.key
 
+# e2e harness nodes (docker/conf/node{1,2,3}) + client use the same
+# deterministic stub wallet/wg keys against the mock-rpc. Tracking them
+# lets `docker/e2e.sh` bring the nodes up in a fresh CI checkout
+# (otherwise the `:/etc/octravpn:ro` mount has no wallet.key). NOT real
+# wallets.
+!/docker/conf/node*/wallet.key
+!/docker/conf/node*/wg.key
+!/docker/conf/client/wallet.key
+
 # Bench snapshots are committed (see docs/performance-limitations.md §7).
 # `target/criterion/` (under the already-ignored `/target`) holds
 # per-run criterion output; only the curated JSON under
