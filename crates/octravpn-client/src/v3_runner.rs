@@ -513,11 +513,9 @@ mod tests {
     /// committed under `circle_id`. Returns the canonical bytes of
     /// state-root.json + its on-chain anchor (hex) + the policy struct.
     fn matched_fixture(circle_id: &str) -> (Vec<u8>, String, OperatorPolicy) {
-        use base64::engine::general_purpose::STANDARD as BASE64_STD;
-        use base64::Engine as _;
         // Worked-example values from docs/v3-policy-schema.md §6.
         let raw_key = [0x11_u8; 32];
-        let wg = BASE64_STD.encode(raw_key);
+        let wg = octravpn_core::b64::encode(raw_key);
         let policy = OperatorPolicy::new_v1(
             "wg://relay.example:51820",
             wg,

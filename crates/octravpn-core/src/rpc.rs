@@ -495,8 +495,6 @@ pub struct ViewPubkeyResult {
 /// that a stray base64 body inside (say) a `PRIVATE KEY` block can't
 /// inject a fake cert.
 fn parse_pem_bundle(pem: &[u8]) -> Result<Vec<Vec<u8>>, String> {
-    use base64::engine::general_purpose::STANDARD;
-    use base64::Engine as _;
     const BEGIN: &str = "-----BEGIN CERTIFICATE-----";
     const END: &str = "-----END CERTIFICATE-----";
     let text = std::str::from_utf8(pem).map_err(|e| format!("PEM utf8: {e}"))?;
@@ -512,8 +510,7 @@ fn parse_pem_bundle(pem: &[u8]) -> Result<Vec<Vec<u8>>, String> {
             .chars()
             .filter(|c| !c.is_whitespace())
             .collect();
-        let der = STANDARD
-            .decode(b64.as_bytes())
+        let der = crate::b64::decode(b64.as_bytes())
             .map_err(|e| format!("PEM base64: {e}"))?;
         out.push(der);
         cursor = &after_begin[end_at + END.len()..];

@@ -43,7 +43,6 @@
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use octravpn_core::v3_policy::OperatorPolicy;
 use octravpn_core::v3_state_root::StateRoot;
 use sha2::{Digest, Sha256};
@@ -87,7 +86,7 @@ pub(crate) async fn run_v3_boot(inputs: &V3BootInputs<'_>) -> Result<V3BootOutco
     // --- Step 1: build the canonical state-root commitment ----------
     let wg_pub = X25519Pub::from(inputs.wg_static_secret).to_bytes();
     let wg_pubkey_hash = sha256_hex(&wg_pub);
-    let wg_pubkey_b64 = B64.encode(wg_pub);
+    let wg_pubkey_b64 = octravpn_core::b64::encode(wg_pub);
 
     // Epoch is best-effort. The state-root schema documents that it's
     // informational; a verifier doesn't reject a 0 → real jump.
@@ -172,7 +171,7 @@ pub(crate) async fn run_v3_boot(inputs: &V3BootInputs<'_>) -> Result<V3BootOutco
         .await
         .unwrap_or(false);
 
-    let receipt_pubkey_b64 = B64.encode(inputs.receipt_kp.public.0);
+    let receipt_pubkey_b64 = octravpn_core::b64::encode(inputs.receipt_kp.public.0);
 
     let outcome = if !is_registered {
         // Brand-new circle: atomic register + bond.
@@ -451,8 +450,7 @@ mod tests {
     /// matches the worked example in `docs/v3-policy-schema.md` so the
     /// hand-built expected string below is easy to cross-reference.
     fn sample_wg_pubkey_b64() -> String {
-        use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
-        B64.encode([0x11_u8; 32])
+        octravpn_core::b64::encode([0x11_u8; 32])
     }
 
     #[test]

@@ -13,8 +13,6 @@
 //! always bypasses the cache.
 
 use std::{sync::Arc, time::Instant};
-
-use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use octravpn_core::{
     circle::{decrypt_sealed_bytes, resource_key},
     rpc::RpcClient,
@@ -153,8 +151,7 @@ impl PortalChain {
             });
         };
 
-        let bytes = B64
-            .decode(b64.as_bytes())
+        let bytes = octravpn_core::b64::decode(b64.as_bytes())
             .map_err(|e| FetchAssetError::Rpc {
                 circle_id: circle_id.to_string(),
                 path: path.clone(),

@@ -83,8 +83,6 @@
 //! intentionally NOT pinned by this schema so client implementations
 //! can choose CIDR widths and prefixes per tailnet config.json).
 
-use base64::engine::general_purpose::STANDARD as BASE64_STD;
-use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -411,8 +409,7 @@ fn check_wg_pubkey(index: usize, value: &str) -> Result<(), V3MembersError> {
         });
     }
     let raw =
-        BASE64_STD
-            .decode(value.as_bytes())
+        crate::b64::decode(value.as_bytes())
             .map_err(|e| V3MembersError::BadWgPubkeyEncoding {
                 index,
                 reason: e.to_string(),
@@ -439,7 +436,7 @@ mod tests {
     /// generator.
     fn wg_pubkey(byte: u8) -> String {
         let raw = [byte; WG_PUBKEY_RAW_LEN];
-        BASE64_STD.encode(raw)
+        crate::b64::encode(raw)
     }
 
     /// Fixed `ip_salt` value used by every test fixture: 64 hex chars
@@ -782,7 +779,7 @@ mod tests {
 
     /// 32-byte WG pubkey from a seed → 44-char base64 (always valid).
     fn wg_b64_from(seed: &[u8; 32]) -> String {
-        BASE64_STD.encode(seed)
+        crate::b64::encode(seed)
     }
 
     /// 64-char lowercase-hex ip_salt from a 32-byte seed.
@@ -981,7 +978,7 @@ mod tests {
             let mut bigger = m;
             bigger.members.push(Member {
                 wallet,
-                wg_pubkey_b64: BASE64_STD.encode(new_key),
+                wg_pubkey_b64: crate::b64::encode(new_key),
                 joined_epoch: joined,
             });
             bigger.validate().expect("addition validates");

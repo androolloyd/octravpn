@@ -155,8 +155,7 @@ pub(crate) async fn get_state(
             let seed = shadow_seed_for(&id_hex, event_seq);
             let seed_b = shadow_subseed(&seed, b"bytes");
             let seed_n = shadow_subseed(&seed, b"net");
-            use base64::Engine as _;
-            let blinding_b64 = base64::engine::general_purpose::STANDARD.encode(blind.as_bytes());
+            let blinding_b64 = octravpn_core::b64::encode(blind.as_bytes());
             match signer
                 .pvac
                 .receipt_shadow(

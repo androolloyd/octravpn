@@ -146,7 +146,7 @@ impl SpkiPinVerifier {
         let raw = spki_param?;
         let mut out = Vec::new();
         for piece in raw.split(',') {
-            let decoded = decode_b64_any(piece)?;
+            let decoded = crate::b64::decode_any(piece)?;
             if decoded.len() != 32 {
                 return None;
             }
@@ -179,19 +179,6 @@ impl SpkiPinVerifier {
     pub fn pins(&self) -> &[[u8; 32]] {
         &self.pins
     }
-}
-
-/// Decode one base64 piece, trying standard then URL-safe (with and
-/// without padding). Returns the raw bytes; the caller checks the
-/// length is 32.
-fn decode_b64_any(s: &str) -> Option<Vec<u8>> {
-    use base64::engine::general_purpose::{STANDARD, URL_SAFE, URL_SAFE_NO_PAD};
-    use base64::Engine as _;
-    STANDARD
-        .decode(s)
-        .or_else(|_| URL_SAFE.decode(s))
-        .or_else(|_| URL_SAFE_NO_PAD.decode(s))
-        .ok()
 }
 
 /// Constant-time equality on the 32-byte SPKI fingerprint. Avoids a
@@ -763,12 +750,10 @@ mod tests {
     /// pins are comma-separated.
     #[test]
     fn parse_pins_from_oct_url_extracts_and_decodes() {
-        use base64::engine::general_purpose::STANDARD;
-        use base64::Engine as _;
         let pin_a = [0x11u8; 32];
         let pin_b = [0x22u8; 32];
-        let b64_a = STANDARD.encode(pin_a);
-        let b64_b = STANDARD.encode(pin_b);
+        let b64_a = crate::b64::encode(pin_a);
+        let b64_b = crate::b64::encode(pin_b);
 
         // Single pin.
         let url = format!("oct://circle/policy.json?spki={b64_a}");
@@ -791,7 +776,7 @@ mod tests {
         assert!(SpkiPinVerifier::parse_pins_from_oct_url(&url).is_none());
 
         // Wrong length → None.
-        let short = STANDARD.encode([0u8; 16]);
+        let short = crate::b64::encode([0u8; 16]);
         let url = format!("oct://circle/policy.json?spki={short}");
         assert!(SpkiPinVerifier::parse_pins_from_oct_url(&url).is_none());
     }

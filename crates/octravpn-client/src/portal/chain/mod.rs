@@ -360,9 +360,8 @@ pub(super) mod tests_common {
     /// don't care about the hash — they exercise the plaintext-passthrough
     /// branch — so this defaults to a 64-zero hash.
     pub(crate) fn plaintext_payload(plaintext: &[u8]) -> Value {
-        use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
         json!({
-            "ciphertext_b64": B64.encode(plaintext),
+            "ciphertext_b64": octravpn_core::b64::encode(plaintext),
             "plaintext_hash": "0".repeat(64),
             "key_id": "default",
         })

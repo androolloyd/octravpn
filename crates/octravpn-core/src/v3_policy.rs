@@ -75,8 +75,6 @@
 //! operator has committed to without having to fetch the (potentially
 //! larger) policy file first.
 
-use base64::engine::general_purpose::STANDARD as BASE64_STD;
-use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -319,8 +317,7 @@ fn check_wg_pubkey(value: &str) -> Result<(), V3PolicyError> {
     if value.len() != WG_PUBKEY_B64_LEN {
         return Err(V3PolicyError::BadWgPubkeyLength { len: value.len() });
     }
-    let raw = BASE64_STD
-        .decode(value.as_bytes())
+    let raw = crate::b64::decode(value.as_bytes())
         .map_err(|e| V3PolicyError::BadWgPubkeyEncoding(e.to_string()))?;
     if raw.len() != WG_PUBKEY_RAW_LEN {
         return Err(V3PolicyError::BadWgPubkeyDecodedLength { got: raw.len() });
@@ -354,7 +351,7 @@ mod tests {
     /// real WG keypair generator.
     fn sample_wg_pubkey_b64() -> String {
         let raw = [0xAB_u8; WG_PUBKEY_RAW_LEN];
-        BASE64_STD.encode(raw)
+        crate::b64::encode(raw)
     }
 
     fn sample() -> OperatorPolicy {
@@ -642,7 +639,7 @@ mod tests {
 
     /// 32-byte WG pubkey from a seed → 44-char base64 (always valid).
     fn wg_b64_from(seed: &[u8; 32]) -> String {
-        BASE64_STD.encode(seed)
+        crate::b64::encode(seed)
     }
 
     /// Strategy producing arbitrary, well-formed `OperatorPolicy`s.
@@ -844,7 +841,7 @@ mod tests {
         // Fixed WG pubkey: 32 bytes of 0x11 → known base64. This makes
         // the canonical form fully deterministic across machines.
         let raw_key = [0x11_u8; WG_PUBKEY_RAW_LEN];
-        let wg = BASE64_STD.encode(raw_key);
+        let wg = crate::b64::encode(raw_key);
         // Sanity: this is exactly 44 chars.
         assert_eq!(wg.len(), WG_PUBKEY_B64_LEN);
 

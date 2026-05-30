@@ -26,7 +26,6 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use base64::Engine;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
@@ -89,12 +88,7 @@ fn now_unix() -> u64 {
 /// Accepts both standard and URL-safe base64 (`oct://` URLs may carry
 /// either). Returns `Err` for any decoding / length mismatch.
 pub fn decode_psk(b64: &str) -> Result<[u8; 32], KnockPskError> {
-    let raw = base64::engine::general_purpose::STANDARD
-        .decode(b64)
-        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(b64))
-        .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(b64))
-        .or_else(|_| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(b64))
-        .map_err(|_| KnockPskError::Base64)?;
+    let raw = octravpn_core::b64::decode_any(b64).ok_or(KnockPskError::Base64)?;
     if raw.len() != 32 {
         return Err(KnockPskError::BadLength(raw.len()));
     }
@@ -215,7 +209,7 @@ mod tests {
 
     #[test]
     fn parse_knock_psk_query_strips_param() {
-        let mut psk_b64 = base64::engine::general_purpose::STANDARD.encode(fixed_psk());
+        let mut psk_b64 = octravpn_core::b64::encode(fixed_psk());
         // Sanity: a 32-byte PSK encodes to a stable 44-char base64.
         assert_eq!(psk_b64.len(), 44);
 
@@ -259,7 +253,7 @@ mod tests {
     #[test]
     fn decode_psk_rejects_short_input() {
         // Decodes but length wrong.
-        let short = base64::engine::general_purpose::STANDARD.encode([0u8; 16]);
+        let short = octravpn_core::b64::encode([0u8; 16]);
         assert!(matches!(
             decode_psk(&short).unwrap_err(),
             KnockPskError::BadLength(16)

@@ -26,7 +26,6 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context, Result};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64URL, Engine as _};
 use clap::Args;
 use tracing::warn;
 
@@ -260,7 +259,7 @@ async fn dispatch_to_portal(cfg: &ClientConfig, args: &OpenUrlArgs) -> Result<()
 
 /// Build the `/o/<b64>` portal URL for a given oct-URL.
 fn browser_target(bind: SocketAddr, oct_url: &str) -> String {
-    let b64 = B64URL.encode(oct_url.as_bytes());
+    let b64 = octravpn_core::b64::encode_url(oct_url.as_bytes());
     format!("http://{bind}/o/{b64}")
 }
 
@@ -410,7 +409,7 @@ mod tests {
                 |axum::Json(req): axum::Json<serde_json::Value>| async move {
                     let id = req.get("id").cloned().unwrap_or(json!(1));
                     let payload = b"hello from circle";
-                    let b64 = base64::engine::general_purpose::STANDARD.encode(payload);
+                    let b64 = octravpn_core::b64::encode(payload);
                     Json(json!({
                         "jsonrpc": "2.0",
                         "id": id,
@@ -616,14 +615,13 @@ mod tests {
     fn browser_target_b64_round_trips() {
         // browser_target() is private; reproduce its construction to
         // pin down the format the portal binary expects.
-        use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64URL, Engine as _};
         let url = "oct://circle/policy.json";
         let bind: SocketAddr = "127.0.0.1:51823".parse().unwrap();
         let got = browser_target(bind, url);
-        let b64 = B64URL.encode(url.as_bytes());
+        let b64 = octravpn_core::b64::encode_url(url.as_bytes());
         assert_eq!(got, format!("http://{bind}/o/{b64}"));
         // And the b64 must decode back to the original URL.
-        let decoded = B64URL.decode(b64.as_bytes()).unwrap();
+        let decoded = octravpn_core::b64::decode_url(b64.as_bytes()).unwrap();
         assert_eq!(decoded, url.as_bytes());
     }
 

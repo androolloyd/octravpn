@@ -269,7 +269,6 @@ mod tests {
     use super::*;
     use crate::config::{ChainCfg, ClientConfig, V2Cfg, V3Cfg, WalletCfg};
     use axum::{routing::post, Json, Router};
-    use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
     use octravpn_core::circle::{encrypt_sealed_bytes, PaddingClass};
     use serde_json::json;
     use std::net::SocketAddr;
@@ -364,7 +363,7 @@ mod tests {
     #[tokio::test]
     async fn plaintext_bytes_write_to_output_file() {
         let payload = b"hello from circle";
-        let b64 = B64.encode(payload);
+        let b64 = octravpn_core::b64::encode(payload);
         let addr = spawn_mock(json!({
             "ciphertext_b64": b64,
             "plaintext_hash": "0".repeat(64),
@@ -532,7 +531,7 @@ mod tests {
     #[tokio::test]
     async fn headers_flag_does_not_break_plaintext_path() {
         let payload = b"plain";
-        let b64 = B64.encode(payload);
+        let b64 = octravpn_core::b64::encode(payload);
         let addr = spawn_mock(json!({
             "ciphertext_b64": b64,
             "plaintext_hash": "0".repeat(64),

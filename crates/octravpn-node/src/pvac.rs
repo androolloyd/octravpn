@@ -1311,8 +1311,7 @@ mod tests {
             .await
             .unwrap();
         // 32-byte blinding, base64-encoded.
-        use base64::Engine as _;
-        let blinding = base64::engine::general_purpose::STANDARD.encode([0x09u8; 32]);
+        let blinding = octravpn_core::b64::encode([0x09u8; 32]);
         let proof = client
             .make_zero_proof(&kp.pk, &kp.sk, &ct, 42, &blinding)
             .await
@@ -1365,8 +1364,7 @@ mod tests {
         };
         let client = PvacClient::spawn(test_cfg(bin)).await.unwrap();
         let kp = client.keygen(&seed_hex(0x10)).await.unwrap();
-        use base64::Engine as _;
-        let blinding = base64::engine::general_purpose::STANDARD.encode([0x42u8; 32]);
+        let blinding = octravpn_core::b64::encode([0x42u8; 32]);
         let out = client
             .receipt_shadow(
                 &kp.pk,
@@ -1402,8 +1400,7 @@ mod tests {
         let net = 9_999_000u64;
         let seed_b = seed_hex(0x30);
         let seed_n = seed_hex(0x31);
-        use base64::Engine as _;
-        let blinding = base64::engine::general_purpose::STANDARD.encode([0x77u8; 32]);
+        let blinding = octravpn_core::b64::encode([0x77u8; 32]);
 
         // Legacy serial path: 3 round-trips.
         let legacy_enc_b = client
@@ -1474,8 +1471,7 @@ mod tests {
         // call (its `seed` validation in the sidecar never even runs
         // because the subprocess is already dead). What we're testing
         // here is the supervisor's crash handling, not the math.
-        use base64::Engine as _;
-        let blinding = base64::engine::general_purpose::STANDARD.encode([0x01u8; 32]);
+        let blinding = octravpn_core::b64::encode([0x01u8; 32]);
         let err = crashy
             .receipt_shadow(
                 "hfhe_v1|aa",
@@ -1545,8 +1541,7 @@ mod tests {
         let Ok(client) = PvacClient::spawn(cfg).await else {
             return;
         };
-        use base64::Engine as _;
-        let blinding = base64::engine::general_purpose::STANDARD.encode([0u8; 32]);
+        let blinding = octravpn_core::b64::encode([0u8; 32]);
         let start = std::time::Instant::now();
         let err = client
             .receipt_shadow(

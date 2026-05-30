@@ -440,10 +440,7 @@ async fn fetch_circle_asset_plain(
             }
         }
         if let Some(s) = obj.get("bytes").and_then(Value::as_str) {
-            use base64::engine::general_purpose::STANDARD as B64;
-            use base64::Engine as _;
-            let decoded = B64
-                .decode(s.as_bytes())
+            let decoded = octravpn_core::b64::decode(s.as_bytes())
                 .map_err(|e| anyhow!("circle_asset bytes b64: {e}"))?;
             return Ok(Some(decoded));
         }

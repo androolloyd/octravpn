@@ -55,7 +55,6 @@ use axum::{
     routing::{get, post},
     Form, Json, Router,
 };
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64URL, Engine as _};
 use hmac::{Hmac, Mac};
 use rand::RngCore;
 use serde::Deserialize;
@@ -221,7 +220,7 @@ async fn go(Query(q): Query<GoQuery>) -> Response {
     if parse_oct_url(&q.u).is_err() {
         return error_page(StatusCode::BAD_REQUEST, &q.u, "not a valid oct:// URL");
     }
-    let b64 = B64URL.encode(q.u.as_bytes());
+    let b64 = octravpn_core::b64::encode_url(q.u.as_bytes());
     Redirect::to(&format!("/o/{b64}")).into_response()
 }
 
@@ -282,7 +281,7 @@ async fn api_resolve(State(state): State<PortalState>, Query(q): Query<ResolveQu
 }
 
 async fn view_asset(State(state): State<PortalState>, Path(b64): Path<String>) -> Response {
-    let Ok(raw) = B64URL.decode(b64.as_bytes()) else {
+    let Ok(raw) = octravpn_core::b64::decode_url(b64.as_bytes()) else {
         return error_page(StatusCode::BAD_REQUEST, "", "bad base64 in URL");
     };
     let url = match std::str::from_utf8(&raw) {
@@ -702,7 +701,7 @@ fn render_shell(title: &str, url: &str, inner: &str) -> String {
 
 fn confirm_interstitial(state: &PortalState, url: &str, circle_id: &str) -> Response {
     let token = state.token_for(circle_id);
-    let next_b64 = B64URL.encode(url.as_bytes());
+    let next_b64 = octravpn_core::b64::encode_url(url.as_bytes());
     let next_path = format!("/o/{next_b64}");
     let body = format!(
         r#"<div class="confirm-card">
@@ -801,7 +800,7 @@ fn render_image(url: &str, bytes: &[u8], mime: SniffedMime) -> Response {
     // Inline as base64 data URI so we don't have to plumb a separate
     // /asset/<id> route for the raw bytes. ~33% size bloat is fine for
     // policy-size assets (4k bucket).
-    let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+    let b64 = octravpn_core::b64::encode(bytes);
     let body = format!(
         r#"<img class="asset" src="data:{ct};base64,{b64}" alt="circle asset">"#,
         ct = mime.content_type(),
@@ -813,7 +812,7 @@ fn render_raw(url: &str, bytes: &[u8], mime: SniffedMime) -> Response {
     // For PDF we serve a download link rather than embed (cross-browser
     // PDF rendering is a mess and embedding a PDF can execute JS in
     // some viewers).
-    let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+    let b64 = octravpn_core::b64::encode(bytes);
     let body = format!(
         r#"<p>Asset is a {ct} ({size} bytes). PDFs are not embedded inline — download to view.</p>
 <p><a download="circle-asset" href="data:{ct};base64,{b64}">Download</a></p>"#,
@@ -977,7 +976,7 @@ mod tests {
         let state = state_no_chain();
         let app = router(state.clone());
         let url = "oct://circleNEW/policy.json";
-        let b64 = B64URL.encode(url.as_bytes());
+        let b64 = octravpn_core::b64::encode_url(url.as_bytes());
         let resp = app
             .oneshot(
                 Request::builder()
@@ -1055,7 +1054,7 @@ mod tests {
         state.allow("circleTUN");
         let app = router(state);
         let url = "oct://circleTUN/policy.json";
-        let b64 = B64URL.encode(url.as_bytes());
+        let b64 = octravpn_core::b64::encode_url(url.as_bytes());
         let resp = app
             .oneshot(
                 Request::builder()
@@ -1105,7 +1104,7 @@ mod tests {
                     let id = req.get("id").cloned().unwrap_or(json!(1));
                     if method == "circle_asset_ciphertext_by_resource_key" {
                         let payload = b"plain text from the chain RPC";
-                        let b64 = base64::engine::general_purpose::STANDARD.encode(payload);
+                        let b64 = octravpn_core::b64::encode(payload);
                         Json(json!({
                             "jsonrpc": "2.0",
                             "id": id,
@@ -1174,7 +1173,7 @@ mod tests {
 
         // /o/<b64> must return 200 with the bytes embedded in the page.
         let url = "oct://circleMOCK/policy.txt";
-        let b64 = B64URL.encode(url.as_bytes());
+        let b64 = octravpn_core::b64::encode_url(url.as_bytes());
         let resp = app
             .oneshot(
                 Request::builder()
@@ -1539,7 +1538,7 @@ mod tests {
                 let payload = payload.clone();
                 async move {
                     let id = req.get("id").cloned().unwrap_or(json!(1));
-                    let b64 = base64::engine::general_purpose::STANDARD.encode(payload);
+                    let b64 = octravpn_core::b64::encode(payload);
                     Json(json!({
                         "jsonrpc": "2.0",
                         "id": id,
@@ -1634,7 +1633,7 @@ mod tests {
     async fn view_asset_400s_on_non_utf8_url() {
         // base64url-encode raw 0xFF bytes — decodes successfully but
         // isn't valid UTF-8 for the URL.
-        let bad = B64URL.encode([0xff, 0xfe, 0xfd]);
+        let bad = octravpn_core::b64::encode_url([0xff, 0xfe, 0xfd]);
         let app = router(state_no_chain());
         let resp = app
             .oneshot(
@@ -1652,7 +1651,7 @@ mod tests {
     async fn view_asset_400s_on_bad_oct_url() {
         let url = "https://not-oct/x";
         let app = router(state_no_chain());
-        let b64 = B64URL.encode(url.as_bytes());
+        let b64 = octravpn_core::b64::encode_url(url.as_bytes());
         let resp = app
             .oneshot(
                 Request::builder()
@@ -2014,7 +2013,7 @@ mod tests {
                 let payload = payload.clone();
                 async move {
                     let id = req.get("id").cloned().unwrap_or(json!(1));
-                    let b64 = base64::engine::general_purpose::STANDARD.encode(payload);
+                    let b64 = octravpn_core::b64::encode(payload);
                     Json(json!({
                         "jsonrpc": "2.0",
                         "id": id,

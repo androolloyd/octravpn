@@ -218,10 +218,7 @@ impl<'a> ChainCtxV3<'a> {
             // sealed-asset RPC convention).
             for key in ["bytes", "bytes_b64"] {
                 if let Some(s) = obj.get(key).and_then(Value::as_str) {
-                    use base64::engine::general_purpose::STANDARD as BASE64_STD;
-                    use base64::Engine as _;
-                    let decoded = BASE64_STD
-                        .decode(s.as_bytes())
+                    let decoded = octravpn_core::b64::decode(s.as_bytes())
                         .map_err(|e| anyhow!("circle_asset {key} base64: {e}"))?;
                     return Ok(Some(decoded));
                 }

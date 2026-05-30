@@ -12,7 +12,6 @@
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use octravpn_core::{
     earnings::{scalar_from_bytes, scalar_to_bytes},
     stealth,
@@ -323,7 +322,7 @@ impl Hub {
         // receipt_pubkey on chain is base64 (the form ed25519_ok decodes
         // natively in the v2 AML). Same Ed25519 key used in v1.1, just
         // a different encoding.
-        let receipt_pubkey_b64 = B64.encode(self.wg_kp.public.0);
+        let receipt_pubkey_b64 = octravpn_core::b64::encode(self.wg_kp.public.0);
         let hfhe_pk = self.hfhe_pubkey_placeholder();
         let hfhe_zero_ct = self.hfhe_initial_enc_zero_placeholder();
         let params = RegisterCircleParams {

@@ -9,8 +9,6 @@
 //! rather than expanding this file.
 
 use std::sync::Arc;
-
-use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use octravpn_core::address::Address;
 use tracing::{info, warn};
 use x25519_dalek::PublicKey as X25519Pub;
@@ -125,7 +123,7 @@ impl Hub {
             price_per_mb_shared: self.cfg.pricing.shared_price(),
             price_per_mb_internal: self.cfg.pricing.internal_price(),
             attestation_ts: octravpn_core::util::now_unix_secs(),
-            receipt_pubkey_b64: B64.encode(self.wg_kp.public.0),
+            receipt_pubkey_b64: octravpn_core::b64::encode(self.wg_kp.public.0),
             hfhe_pubkey: self.hfhe_pubkey_placeholder(),
             schema_version: 1,
         }

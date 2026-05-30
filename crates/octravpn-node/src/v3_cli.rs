@@ -45,7 +45,6 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use clap::{Args, Subcommand};
 use octravpn_core::{address::Address, sig::KeyPair};
 use serde_json::Value;
@@ -372,8 +371,8 @@ async fn run_slash(ctx: &ChainCtxV3, a: &SlashArgs) -> Result<()> {
     }
     let secret = read_receipt_secret(&a.receipt_key)?;
     let kp = KeyPair::from_secret_bytes(&secret);
-    let sig_a = B64.encode(kp.sign(a.payload_a.as_bytes()).0);
-    let sig_b = B64.encode(kp.sign(a.payload_b.as_bytes()).0);
+    let sig_a = octravpn_core::b64::encode(kp.sign(a.payload_a.as_bytes()).0);
+    let sig_b = octravpn_core::b64::encode(kp.sign(a.payload_b.as_bytes()).0);
 
     let (nonce, fee) = nonce_and_fee(ctx).await?;
     let params = SlashDoubleSignParams {
@@ -650,8 +649,8 @@ mod tests {
         let kp = KeyPair::from_secret_bytes(&receipt_secret);
         let payload_a = "receipt-v1|sid=99|bytes=100";
         let payload_b = "receipt-v1|sid=99|bytes=200";
-        let sig_a = B64.encode(kp.sign(payload_a.as_bytes()).0);
-        let sig_b = B64.encode(kp.sign(payload_b.as_bytes()).0);
+        let sig_a = octravpn_core::b64::encode(kp.sign(payload_a.as_bytes()).0);
+        let sig_b = octravpn_core::b64::encode(kp.sign(payload_b.as_bytes()).0);
         let params = SlashDoubleSignParams {
             circle_id: CID,
             payload_a,
@@ -669,8 +668,8 @@ mod tests {
         assert_eq!(p[1], payload_a);
         assert_eq!(p[3], payload_b);
         // Sigs must round-trip through base64 to 64 bytes.
-        let raw_a = B64.decode(p[2].as_str().unwrap()).unwrap();
-        let raw_b = B64.decode(p[4].as_str().unwrap()).unwrap();
+        let raw_a = octravpn_core::b64::decode(p[2].as_str().unwrap()).unwrap();
+        let raw_b = octravpn_core::b64::decode(p[4].as_str().unwrap()).unwrap();
         assert_eq!(raw_a.len(), 64);
         assert_eq!(raw_b.len(), 64);
         // And the two sigs must differ (different payloads → different

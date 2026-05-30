@@ -102,8 +102,7 @@ pub(crate) struct PublicKey(pub [u8; 32]);
 impl PublicKey {
     /// Format as base64 (the encoding `wg set` expects on stdin).
     pub(crate) fn to_base64(self) -> String {
-        use base64::Engine as _;
-        base64::engine::general_purpose::STANDARD.encode(self.0)
+        octravpn_core::b64::encode(self.0)
     }
 }
 
@@ -117,8 +116,7 @@ pub(crate) struct PresharedKey(pub [u8; 32]);
 
 impl PresharedKey {
     pub(crate) fn to_base64(self) -> String {
-        use base64::Engine as _;
-        base64::engine::general_purpose::STANDARD.encode(self.0)
+        octravpn_core::b64::encode(self.0)
     }
 }
 
@@ -396,9 +394,7 @@ mod tests {
         let raw = [9u8; 32];
         let pk = PublicKey(raw);
         let b64 = pk.to_base64();
-        use base64::Engine as _;
-        let dec = base64::engine::general_purpose::STANDARD
-            .decode(b64)
+        let dec = octravpn_core::b64::decode(b64)
             .unwrap();
         assert_eq!(dec, raw);
     }
