@@ -84,9 +84,9 @@ fn not_enabled() -> axum::response::Response {
 /// silently defaulting to 500.
 fn status_for(e: &EnrollError) -> (StatusCode, String) {
     match e {
-        EnrollError::BadSignature
-        | EnrollError::StaleNonce
-        | EnrollError::NonceWalletMismatch => (StatusCode::UNAUTHORIZED, e.to_string()),
+        EnrollError::BadSignature | EnrollError::StaleNonce | EnrollError::NonceWalletMismatch => {
+            (StatusCode::UNAUTHORIZED, e.to_string())
+        }
         EnrollError::WrongTailnet { .. }
         | EnrollError::WrongCircle { .. }
         | EnrollError::Members(_) => (StatusCode::BAD_REQUEST, e.to_string()),

@@ -127,7 +127,11 @@ impl EnrollRequest {
     /// proves key possession only — the caller still has to check the
     /// nonce freshness and the wallet's authorization to join.
     pub fn verify_signature(&self) -> CoreResult<()> {
-        verify(&self.wallet_pubkey, &self.signing_payload(), &self.wallet_sig)
+        verify(
+            &self.wallet_pubkey,
+            &self.signing_payload(),
+            &self.wallet_sig,
+        )
     }
 }
 
@@ -221,7 +225,10 @@ mod tests {
         let req = signed_request(&kp, 3, "octCircleAAA", "deadbeef");
         // The admitted identity is exactly Address::from_pubkey — a device
         // cannot smuggle in a different wallet string.
-        assert_eq!(req.wallet_address(), Address::from_pubkey(&kp.public.0).display());
+        assert_eq!(
+            req.wallet_address(),
+            Address::from_pubkey(&kp.public.0).display()
+        );
         assert!(req.wallet_address().starts_with("oct"));
     }
 
@@ -239,10 +246,22 @@ mod tests {
         let kp = KeyPair::generate();
         let base = enroll_signing_payload(3, "octC", &kp.public, &[7u8; 32], "n1");
         // Each field change must change the payload (no collisions).
-        assert_ne!(base, enroll_signing_payload(4, "octC", &kp.public, &[7u8; 32], "n1"));
-        assert_ne!(base, enroll_signing_payload(3, "octD", &kp.public, &[7u8; 32], "n1"));
-        assert_ne!(base, enroll_signing_payload(3, "octC", &kp.public, &[8u8; 32], "n1"));
-        assert_ne!(base, enroll_signing_payload(3, "octC", &kp.public, &[7u8; 32], "n2"));
+        assert_ne!(
+            base,
+            enroll_signing_payload(4, "octC", &kp.public, &[7u8; 32], "n1")
+        );
+        assert_ne!(
+            base,
+            enroll_signing_payload(3, "octD", &kp.public, &[7u8; 32], "n1")
+        );
+        assert_ne!(
+            base,
+            enroll_signing_payload(3, "octC", &kp.public, &[8u8; 32], "n1")
+        );
+        assert_ne!(
+            base,
+            enroll_signing_payload(3, "octC", &kp.public, &[7u8; 32], "n2")
+        );
         // Length-prefixing prevents the classic concat ambiguity:
         // ("oct","Cn1") must not collide with ("octC","n1").
         let a = enroll_signing_payload(3, "oct", &kp.public, &[7u8; 32], "Cn1");
