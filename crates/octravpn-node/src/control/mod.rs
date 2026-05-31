@@ -37,6 +37,8 @@
 //! [`crate::hub::Hub`], [`crate::tunnel`], and the rest of the node
 //! crate without per-call-site edits.
 
+pub(crate) mod enroll;
+pub(crate) mod enroll_circle;
 pub(crate) mod handlers;
 pub(crate) mod metrics;
 pub(crate) mod router;

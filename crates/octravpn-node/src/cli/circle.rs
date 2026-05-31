@@ -259,7 +259,9 @@ fn parse_blob_specs(raw: &[String]) -> Result<Vec<circle_update::BlobUpdate>> {
 
 /// Resolve the sealed-asset passphrase: CLI value, then
 /// `OCTRAVPN_SEALED_PASSPHRASE` env var, then error.
-fn resolve_sealed_passphrase(explicit: Option<&str>) -> Result<circle_update::SealedAssetCreds> {
+pub(crate) fn resolve_sealed_passphrase(
+    explicit: Option<&str>,
+) -> Result<circle_update::SealedAssetCreds> {
     if let Some(p) = explicit {
         return Ok(circle_update::SealedAssetCreds::new(p));
     }

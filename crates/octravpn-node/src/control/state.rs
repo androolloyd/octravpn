@@ -119,6 +119,12 @@ pub(crate) struct ControlState {
     /// the opener and operator agree on out-of-band, so the shadow
     /// `net` is encrypted under the same `price`. Default 0.
     pub shadow_price_per_byte: u64,
+
+    /// Wallet-native device enrollment service. `Some` when this node
+    /// hosts enrollment for a tailnet it operates (the owner-circle
+    /// `/auth` member set + allowlist); `None` (the default) leaves the
+    /// `/enroll*` routes 404. See [`super::enroll`].
+    pub enroll: Option<super::enroll::EnrollService>,
 }
 
 #[derive(Clone)]
@@ -266,6 +272,7 @@ impl ControlState {
             session_verifier: None,
             shadow_signer: None,
             shadow_price_per_byte: 0,
+            enroll: None,
         }
     }
 
@@ -296,6 +303,15 @@ impl ControlState {
 
     pub(crate) fn with_session_verifier(mut self, verifier: SessionAdmissionVerifier) -> Self {
         self.session_verifier = Some(verifier);
+        self
+    }
+
+    /// Attach a wallet-native enrollment service. When set, the
+    /// `/enroll/challenge` + `/enroll` routes admit devices into the
+    /// tailnet member set; absent, those routes 404.
+    #[allow(dead_code)] // wired by Hub when an operator hosts a tailnet
+    pub(crate) fn with_enroll(mut self, svc: super::enroll::EnrollService) -> Self {
+        self.enroll = Some(svc);
         self
     }
 
