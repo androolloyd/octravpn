@@ -937,9 +937,8 @@ mod tests {
             ..PvacConfig::default()
         };
         let res = PvacClient::spawn(cfg).await;
-        let err = match res {
-            Ok(_) => panic!("expected Spawn error, got Ok(client)"),
-            Err(e) => e,
+        let Err(err) = res else {
+            panic!("expected Spawn error, got Ok(client)");
         };
         match err {
             PvacError::Spawn { path, .. } => {

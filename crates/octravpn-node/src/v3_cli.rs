@@ -911,9 +911,8 @@ region = "test"
 listen = "0.0.0.0:51821"
 "#;
         let cfg: crate::config::NodeConfig = ::toml::from_str(toml).unwrap();
-        let err = match build_chain_ctx(&cfg) {
-            Ok(_) => panic!("expected wallet-missing error"),
-            Err(e) => e,
+        let Err(err) = build_chain_ctx(&cfg) else {
+            panic!("expected wallet-missing error");
         };
         assert!(format!("{err:#}").to_lowercase().contains("wallet"));
     }

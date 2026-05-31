@@ -237,7 +237,7 @@ fn open_or_rotate(inner: &mut Inner, date: &str, next_line_len: u64) -> Result<b
     inner.current_file_id = basename;
     // Size is recovered from disk if we're continuing an existing
     // file, else zero on a fresh file.
-    let on_disk = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    let on_disk = std::fs::metadata(&path).map_or(0, |m| m.len());
     inner.current_file_size = on_disk;
 
     // Enforce ring buffer AFTER opening the new file so we never
@@ -289,7 +289,7 @@ fn recover_chain_for_date(
         .and_then(|s| s.to_str())
         .map(String::from)
         .unwrap_or_default();
-    let latest_size = std::fs::metadata(&latest).map(|m| m.len()).unwrap_or(0);
+    let latest_size = std::fs::metadata(&latest).map_or(0, |m| m.len());
 
     // Fast path: tip file points at the latest file with a valid MAC.
     if let Some(tip) = ChainTip::load(dir) {
@@ -521,12 +521,10 @@ mod tests {
         let count = std::fs::read_dir(dir.path())
             .unwrap()
             .filter(|e| {
-                e.as_ref()
-                    .map(|e| {
-                        let n = e.file_name().to_string_lossy().to_string();
-                        n.starts_with("audit-") && is_jsonl_name(&n)
-                    })
-                    .unwrap_or(false)
+                e.as_ref().is_ok_and(|e| {
+                    let n = e.file_name().to_string_lossy().to_string();
+                    n.starts_with("audit-") && is_jsonl_name(&n)
+                })
             })
             .count();
         assert_eq!(count, 2, "expected two daily audit files");

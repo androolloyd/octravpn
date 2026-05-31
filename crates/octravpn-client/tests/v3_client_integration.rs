@@ -453,7 +453,7 @@ async fn cold_open_session_then_settle_confirm() {
         .as_str()
         .expect("get_circle_state_root returns a hex string")
         .to_string();
-    assert_eq!(anchor_str.len(), 64, "anchor must be a 64-char hex SHA-256",);
+    assert_eq!(anchor_str.len(), 64, "anchor must be a 64-char hex SHA-256");
 
     // ---- step 1b: validate the operator's sealed policy against
     //               the on-chain anchor. This is the critical step

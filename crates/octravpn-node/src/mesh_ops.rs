@@ -196,9 +196,7 @@ fn allow_invalid_certs_for_remote_with_env(remote: &str, env_override: Option<&s
     if host.eq_ignore_ascii_case("localhost") {
         return true;
     }
-    host.parse::<IpAddr>()
-        .map(|ip| ip.is_loopback())
-        .unwrap_or(false)
+    host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
 }
 
 fn url_join(remote: &str, path: &str) -> String {
@@ -400,6 +398,7 @@ fn trim(s: &str, max: usize) -> String {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)] // reserved test-fixture scaffolding (see comment above)
 pub(crate) struct MachineFixture {
     pub id: String,
     pub hostname: String,

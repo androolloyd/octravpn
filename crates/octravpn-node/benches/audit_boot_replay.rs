@@ -115,7 +115,7 @@ fn main() {
     let t0 = Instant::now();
     build_synthetic_log(&path, &key, N_LINES);
     let build_ms = t0.elapsed().as_millis();
-    let file_bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    let file_bytes = std::fs::metadata(&path).map_or(0, |m| m.len());
     println!("  built {N_LINES} lines = {file_bytes} bytes in {build_ms} ms");
 
     // Warm the disk cache identically for both paths.

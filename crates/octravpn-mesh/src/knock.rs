@@ -79,8 +79,7 @@ pub fn knock_at_window(psk: &[u8; 32], window: u64) -> String {
 fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_secs())
 }
 
 /// Decode a base64-encoded PSK string into a 32-byte secret.

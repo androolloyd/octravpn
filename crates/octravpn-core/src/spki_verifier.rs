@@ -665,7 +665,7 @@ mod tests {
             ),
             "expected ApplicationVerificationFailure, got {err:?}"
         );
-        assert_eq!(inner.count(), 0, "inner must NOT run on a mismatched SPKI",);
+        assert_eq!(inner.count(), 0, "inner must NOT run on a mismatched SPKI");
     }
 
     /// Test 3 — rotation grace: multiple pins are supported, any one

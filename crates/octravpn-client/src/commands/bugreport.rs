@@ -30,8 +30,7 @@ use crate::config::ClientConfig;
 pub(crate) fn run(config_path: &str, out_path: Option<&str>) -> Result<()> {
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_secs());
 
     let default_name = format!("./octravpn-bugreport-{ts}.tar.gz");
     let out = out_path.unwrap_or(&default_name);

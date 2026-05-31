@@ -151,11 +151,9 @@ fn bugreport_redacts_secret_contents() {
     // The wallet path string should appear *somewhere* in the bundle (so
     // the recipient knows where the wallet lives on the user's box).
     let wallet_path_str = wallet.to_string_lossy().into_owned();
-    let mentions_path = entries.iter().any(|(_, bytes)| {
-        std::str::from_utf8(bytes)
-            .map(|s| s.contains(&wallet_path_str))
-            .unwrap_or(false)
-    });
+    let mentions_path = entries
+        .iter()
+        .any(|(_, bytes)| std::str::from_utf8(bytes).is_ok_and(|s| s.contains(&wallet_path_str)));
     assert!(
         mentions_path,
         "no archive entry mentions the wallet path {wallet_path_str}"

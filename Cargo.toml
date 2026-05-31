@@ -67,7 +67,10 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 authors = ["OctraVPN contributors"]
-rust-version = "1.75"
+# Real floor: the code uses the generic `std::num::NonZero` API (stable
+# 1.79). The pinned toolchain (rust-toolchain.toml) is newer; this only
+# declares the minimum the source actually compiles on.
+rust-version = "1.79"
 
 [workspace.dependencies]
 anyhow      = "1"
