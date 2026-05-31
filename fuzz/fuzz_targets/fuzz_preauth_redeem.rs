@@ -22,7 +22,7 @@
 //!     invariant; an adversary that retries on network errors must
 //!     get exactly one success across all attempts)
 use libfuzzer_sys::fuzz_target;
-use octravpn_mesh::{PreauthMinter, RedeemError};
+use octravpn_mesh::PreauthMinter;
 use std::time::Duration;
 
 fuzz_target!(|data: &[u8]| {
@@ -79,10 +79,12 @@ fuzz_target!(|data: &[u8]| {
                             );
                         }
                     }
-                    Err(RedeemError::Unknown) | Err(RedeemError::Expired) => {
-                        // Both are fine outcomes — eviction (cap),
-                        // expiry (1ms TTL), or already-redeemed
-                        // single-use.
+                    Err(_) => {
+                        // Any rejection is a fine outcome — eviction
+                        // (cap), expiry (1ms TTL), or already-redeemed
+                        // single-use. `RedeemError` is #[non_exhaustive],
+                        // so a wildcard is required (and any future
+                        // variant is likewise a non-panic rejection here).
                     }
                 }
             }

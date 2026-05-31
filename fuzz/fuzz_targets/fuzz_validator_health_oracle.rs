@@ -28,6 +28,14 @@
 //! oracle — the oracle's role is purely set-membership lookup. This
 //! target catches the off-chain panic surface; chain-side bounded-FP
 //! analysis happens in `program/tests/` proofs.
+//!
+//! Invariant note: this target asserts only that the decode + lookup
+//! path is *total* (never panics) for any input. It deliberately does
+//! NOT assert anything about address *content* — an earlier version
+//! asserted addresses held no NUL byte, but a JSON string may legally
+//! encode one, so that assert flagged valid input as a crash (a
+//! harness false positive, not a code defect). A pathological address
+//! is stored opaquely and simply never matches a real validator.
 use libfuzzer_sys::fuzz_target;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -51,13 +59,13 @@ fuzz_target!(|data: &[u8]| {
             .filter_map(|x| x.as_str().map(String::from))
             .collect();
 
-        // 3. Membership-check invariant: every address in the set is
-        //    well-defined UTF-8 (already true by construction from
-        //    `as_str`), and the lookup function is total.
+        // 3. Membership-check invariant: the lookup is total for every
+        //    decoded address. Addresses are well-defined UTF-8 by
+        //    construction (`as_str`); any byte content — NUL and other
+        //    control chars included — must look up without panicking,
+        //    not be rejected here (see the invariant note above).
         for s in &set {
             let _ = set.contains(s);
-            // Decode-shaped string must be safe to use as map key.
-            assert!(!s.contains('\0'), "validator addr contains NUL: {s:?}");
         }
 
         // 4. Edge case the brief calls out: "wildly out-of-band
@@ -76,11 +84,10 @@ fuzz_target!(|data: &[u8]| {
     }
 
     // 5. Some oracle deployments will eventually consume per-validator
-    //    records (object shape). Pre-flight that path: any object
-    //    must walk without panicking.
+    //    records (object shape). Pre-flight that path: any object must
+    //    walk without panicking, for any key shape (NUL included).
     if let Some(obj) = v.as_object() {
-        for (k, val) in obj {
-            assert!(!k.contains('\0'), "validator key contains NUL");
+        for val in obj.values() {
             let _ = val.as_str();
             let _ = val.as_array();
         }
