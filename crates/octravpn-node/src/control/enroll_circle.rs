@@ -39,7 +39,9 @@ use octravpn_core::{circle::PaddingClass, v3_members::TailnetMembers, v3_state_r
 
 use super::enroll::{AllowList, EnrollError, EnrollState, EnrollStore};
 use crate::chain_v3::ChainCtxV3;
-use crate::circle_update::{self, AnchorOverrides, BlobUpdate, SealedAssetCreds, SealedRead, UpdateBundle};
+use crate::circle_update::{
+    self, AnchorOverrides, BlobUpdate, SealedAssetCreds, SealedRead, UpdateBundle,
+};
 
 /// Sealed, anchored asset holding the enrolled member set (`TailnetMembers`).
 const MEMBERS_PATH: &str = "/auth/members.json";

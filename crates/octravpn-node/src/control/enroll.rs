@@ -119,7 +119,11 @@ pub(crate) struct EnrollService {
 
 impl EnrollService {
     #[allow(dead_code)] // wired by the Hub when an operator hosts a tailnet
-    pub(crate) fn new(tailnet_id: u64, circle: impl Into<String>, store: Arc<dyn EnrollStore>) -> Self {
+    pub(crate) fn new(
+        tailnet_id: u64,
+        circle: impl Into<String>,
+        store: Arc<dyn EnrollStore>,
+    ) -> Self {
         Self {
             tailnet_id,
             circle: circle.into(),
@@ -164,7 +168,8 @@ impl EnrollService {
     ) -> Result<EnrollResponse, EnrollError> {
         // 1. Possession of the wallet key (binds wallet ↔ wg key ↔
         //    tailnet ↔ circle ↔ nonce).
-        req.verify_signature().map_err(|_| EnrollError::BadSignature)?;
+        req.verify_signature()
+            .map_err(|_| EnrollError::BadSignature)?;
 
         // 2. This operator actually serves the named tailnet/circle.
         if req.tailnet_id != self.tailnet_id {
@@ -182,7 +187,10 @@ impl EnrollService {
 
         // 3. Consume the single-use nonce (replay guard). `remove`
         //    makes it one-shot; the TTL map also drops stale entries.
-        let challenge = self.challenges.remove(&req.nonce).ok_or(EnrollError::StaleNonce)?;
+        let challenge = self
+            .challenges
+            .remove(&req.nonce)
+            .ok_or(EnrollError::StaleNonce)?;
         if now > challenge.expires_at {
             return Err(EnrollError::StaleNonce);
         }
@@ -222,10 +230,8 @@ impl EnrollService {
 
         // 8. Build the response: the device's deterministic IP + every
         //    *other* member as a reachable peer.
-        let allocator = TailnetIpAllocator::with_salt(
-            self.tailnet_id.to_string(),
-            salt_u32(&members.ip_salt),
-        );
+        let allocator =
+            TailnetIpAllocator::with_salt(self.tailnet_id.to_string(), salt_u32(&members.ip_salt));
         let assigned_ip = allocator.allocate(&wallet).to_string();
         let peers = members
             .members
@@ -306,7 +312,9 @@ impl EnrollStore for InMemoryEnrollStore {
             .unwrap()
             .get(&tailnet_id)
             .cloned()
-            .unwrap_or_else(|| TailnetMembers::new_v1(tailnet_id, self.ip_salt.clone(), vec![], 0, 0));
+            .unwrap_or_else(|| {
+                TailnetMembers::new_v1(tailnet_id, self.ip_salt.clone(), vec![], 0, 0)
+            });
         Ok(EnrollState {
             allowlist: AllowList { wallets },
             members,
@@ -318,7 +326,10 @@ impl EnrollStore for InMemoryEnrollStore {
         tailnet_id: u64,
         members: &TailnetMembers,
     ) -> Result<u64, EnrollError> {
-        self.members.lock().unwrap().insert(tailnet_id, members.clone());
+        self.members
+            .lock()
+            .unwrap()
+            .insert(tailnet_id, members.clone());
         let mut v = self.version.lock().unwrap();
         let next = v.get(&tailnet_id).copied().unwrap_or(0) + 1;
         v.insert(tailnet_id, next);
@@ -334,7 +345,11 @@ mod tests {
 
     const SALT: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
 
-    fn service_with_allow(tailnet_id: u64, circle: &str, wallet: &str) -> (EnrollService, Arc<InMemoryEnrollStore>) {
+    fn service_with_allow(
+        tailnet_id: u64,
+        circle: &str,
+        wallet: &str,
+    ) -> (EnrollService, Arc<InMemoryEnrollStore>) {
         let store = Arc::new(InMemoryEnrollStore::new(SALT));
         store.allow(tailnet_id, wallet);
         let svc = EnrollService::new(tailnet_id, circle, store.clone());
@@ -364,7 +379,9 @@ mod tests {
     #[tokio::test]
     async fn happy_path_admits_and_returns_ip() {
         let kp = KeyPair::generate();
-        let wallet = octravpn_core::Address::from_pubkey(&kp.public.0).display().to_string();
+        let wallet = octravpn_core::Address::from_pubkey(&kp.public.0)
+            .display()
+            .to_string();
         let (svc, store) = service_with_allow(7, "octCircle", &wallet);
 
         let ch = svc.issue_challenge(&wallet, 1000);
@@ -383,7 +400,9 @@ mod tests {
     #[tokio::test]
     async fn unauthorized_wallet_is_rejected() {
         let kp = KeyPair::generate();
-        let wallet = octravpn_core::Address::from_pubkey(&kp.public.0).display().to_string();
+        let wallet = octravpn_core::Address::from_pubkey(&kp.public.0)
+            .display()
+            .to_string();
         // Service whose allowlist does NOT contain this wallet.
         let store = Arc::new(InMemoryEnrollStore::new(SALT));
         let svc = EnrollService::new(7, "octCircle", store.clone());
@@ -393,7 +412,13 @@ mod tests {
         let err = svc.enroll(&req, 1001).await.unwrap_err();
         assert!(matches!(err, EnrollError::NotAuthorized(_)));
         assert_eq!(
-            store.load_enroll_state(7).await.unwrap().members.members.len(),
+            store
+                .load_enroll_state(7)
+                .await
+                .unwrap()
+                .members
+                .members
+                .len(),
             0
         );
     }
@@ -401,7 +426,9 @@ mod tests {
     #[tokio::test]
     async fn nonce_is_single_use() {
         let kp = KeyPair::generate();
-        let wallet = octravpn_core::Address::from_pubkey(&kp.public.0).display().to_string();
+        let wallet = octravpn_core::Address::from_pubkey(&kp.public.0)
+            .display()
+            .to_string();
         let (svc, _store) = service_with_allow(7, "octCircle", &wallet);
 
         let ch = svc.issue_challenge(&wallet, 1000);
@@ -415,7 +442,9 @@ mod tests {
     #[tokio::test]
     async fn forged_request_without_challenge_is_rejected() {
         let kp = KeyPair::generate();
-        let wallet = octravpn_core::Address::from_pubkey(&kp.public.0).display().to_string();
+        let wallet = octravpn_core::Address::from_pubkey(&kp.public.0)
+            .display()
+            .to_string();
         let (svc, _store) = service_with_allow(7, "octCircle", &wallet);
         // A validly-signed request, but for a nonce the service never issued.
         let req = signed_request(&kp, 7, "octCircle", "never-issued");
@@ -426,7 +455,9 @@ mod tests {
     #[tokio::test]
     async fn wrong_tailnet_is_rejected() {
         let kp = KeyPair::generate();
-        let wallet = octravpn_core::Address::from_pubkey(&kp.public.0).display().to_string();
+        let wallet = octravpn_core::Address::from_pubkey(&kp.public.0)
+            .display()
+            .to_string();
         let (svc, _store) = service_with_allow(7, "octCircle", &wallet);
         let ch = svc.issue_challenge(&wallet, 1000);
         // Sign + send for tailnet 9 against a service serving tailnet 7.
@@ -438,7 +469,9 @@ mod tests {
     #[tokio::test]
     async fn re_enroll_replaces_device_key_not_duplicates() {
         let kp = KeyPair::generate();
-        let wallet = octravpn_core::Address::from_pubkey(&kp.public.0).display().to_string();
+        let wallet = octravpn_core::Address::from_pubkey(&kp.public.0)
+            .display()
+            .to_string();
         let (svc, store) = service_with_allow(7, "octCircle", &wallet);
 
         let ch1 = svc.issue_challenge(&wallet, 1000);
@@ -454,7 +487,13 @@ mod tests {
         // Same wallet, two enrollments → one member, version bumped.
         assert_eq!(v2.members_version, 2);
         assert_eq!(
-            store.load_enroll_state(7).await.unwrap().members.members.len(),
+            store
+                .load_enroll_state(7)
+                .await
+                .unwrap()
+                .members
+                .members
+                .len(),
             1
         );
     }

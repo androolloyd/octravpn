@@ -493,7 +493,13 @@ pub(crate) async fn read_sealed_asset(
     let Ok(sealed) = std::str::from_utf8(&bytes) else {
         return Ok(SealedRead::Corrupt);
     };
-    match decrypt_sealed_bytes(circle_id, key_id, creds.passphrase(), sealed.trim(), expected_hash) {
+    match decrypt_sealed_bytes(
+        circle_id,
+        key_id,
+        creds.passphrase(),
+        sealed.trim(),
+        expected_hash,
+    ) {
         Ok(plain) => Ok(SealedRead::Valid(plain)),
         Err(_) => Ok(SealedRead::Corrupt),
     }
@@ -771,9 +777,10 @@ pub(crate) async fn list_orphaned_blobs(
     for (path, _field, expected_hex) in probes {
         // A blob present on chain that doesn't decrypt/verify against its
         // anchor is exactly a `Corrupt` read; absent or valid is fine.
-        if let SealedRead::Corrupt =
-            read_sealed_asset(ctx, circle_id, path, "default", creds, expected_hex).await?
-        {
+        if matches!(
+            read_sealed_asset(ctx, circle_id, path, "default", creds, expected_hex).await?,
+            SealedRead::Corrupt
+        ) {
             orphans.push((*path).to_string());
         }
     }
@@ -782,10 +789,11 @@ pub(crate) async fn list_orphaned_blobs(
     const ATTESTATION_PATH: &str = "/attestation.json";
     match current.attestation_hash.as_deref() {
         Some(expected) => {
-            if let SealedRead::Corrupt =
+            if matches!(
                 read_sealed_asset(ctx, circle_id, ATTESTATION_PATH, "default", creds, expected)
-                    .await?
-            {
+                    .await?,
+                SealedRead::Corrupt
+            ) {
                 orphans.push(ATTESTATION_PATH.to_string());
             }
         }
