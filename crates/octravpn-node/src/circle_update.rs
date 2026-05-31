@@ -158,6 +158,14 @@ pub(crate) enum AnchoredField {
     Attestation,
     /// `/wg.pub` — binds `state_root.wg_pubkey_hash`.
     WgPubkey,
+    /// `/auth/members.json` — binds `state_root.auth_members_hash`, the
+    /// operator-hosted enrollment member set. Distinct from `Members`
+    /// (the tailnet-owner's `/members.json`, which has no operator-circle
+    /// anchor and is rejected); this one is the operator's own circle.
+    AuthMembers,
+    /// `/auth/allowed.json` — binds `state_root.auth_allowed_hash`, the
+    /// operator's enrollment allowlist (who *may* join the private mesh).
+    AuthAllowed,
 }
 
 impl AnchoredField {
@@ -169,6 +177,8 @@ impl AnchoredField {
             "/members.json" => Some(Self::Members),
             "/attestation.json" => Some(Self::Attestation),
             "/wg.pub" => Some(Self::WgPubkey),
+            "/auth/members.json" => Some(Self::AuthMembers),
+            "/auth/allowed.json" => Some(Self::AuthAllowed),
             _ => None,
         }
     }
@@ -341,6 +351,8 @@ pub(crate) fn compute_target_state_root(
                 AnchoredField::Policy => next.policy_hash = h,
                 AnchoredField::WgPubkey => next.wg_pubkey_hash = h,
                 AnchoredField::Attestation => next.attestation_hash = Some(h),
+                AnchoredField::AuthMembers => next.auth_members_hash = Some(h),
+                AnchoredField::AuthAllowed => next.auth_allowed_hash = Some(h),
                 AnchoredField::Members => {
                     return Err(UpdateError::BundleInvalid(
                         "blob /members.json belongs in the tailnet-owner circle, not the \
@@ -404,7 +416,7 @@ pub(crate) async fn fetch_current_state_root(
     Ok(Some(sr))
 }
 
-async fn fetch_circle_asset_plain(
+pub(crate) async fn fetch_circle_asset_plain(
     ctx: &ChainCtxV3,
     circle_id: &str,
     path: &str,
@@ -448,6 +460,43 @@ async fn fetch_circle_asset_plain(
     Err(anyhow!(
         "circle_asset({circle_id}, {path}): unexpected response shape: {v}"
     ))
+}
+
+/// Outcome of reading a sealed circle asset via [`read_sealed_asset`].
+pub(crate) enum SealedRead {
+    /// The asset isn't present on chain.
+    Absent,
+    /// Present, decrypted, and its plaintext matched the anchor hash.
+    Valid(Vec<u8>),
+    /// Present but non-UTF-8, or the decrypt/hash check failed — a
+    /// tampered or orphaned blob.
+    Corrupt,
+}
+
+/// Fetch a sealed circle asset and decrypt it, verifying the plaintext
+/// against the on-chain anchor `expected_hash`. The canonical sealed-asset
+/// *read* — the inverse of the `apply` write side. `Err` is reserved for a
+/// fetch (RPC) failure; a present-but-invalid blob is reported as
+/// [`SealedRead::Corrupt`] so callers can tell "couldn't reach the chain"
+/// apart from "the blob is bad".
+pub(crate) async fn read_sealed_asset(
+    ctx: &ChainCtxV3,
+    circle_id: &str,
+    path: &str,
+    key_id: &str,
+    creds: &SealedAssetCreds,
+    expected_hash: &str,
+) -> Result<SealedRead> {
+    let Some(bytes) = fetch_circle_asset_plain(ctx, circle_id, path).await? else {
+        return Ok(SealedRead::Absent);
+    };
+    let Ok(sealed) = std::str::from_utf8(&bytes) else {
+        return Ok(SealedRead::Corrupt);
+    };
+    match decrypt_sealed_bytes(circle_id, key_id, creds.passphrase(), sealed.trim(), expected_hash) {
+        Ok(plain) => Ok(SealedRead::Valid(plain)),
+        Err(_) => Ok(SealedRead::Corrupt),
+    }
 }
 
 /// Build a signed `circle_asset_put_encrypted` envelope. Mirrors
@@ -720,42 +769,34 @@ pub(crate) async fn list_orphaned_blobs(
     ];
     let mut orphans = Vec::new();
     for (path, _field, expected_hex) in probes {
-        let Some(bytes) = fetch_circle_asset_plain(ctx, circle_id, path).await? else {
-            continue;
-        };
-        let Ok(s) = std::str::from_utf8(&bytes) else {
-            orphans.push((*path).to_string());
-            continue;
-        };
-        if decrypt_sealed_bytes(
-            circle_id,
-            "default",
-            creds.passphrase(),
-            s.trim(),
-            expected_hex,
-        )
-        .is_err()
+        // A blob present on chain that doesn't decrypt/verify against its
+        // anchor is exactly a `Corrupt` read; absent or valid is fine.
+        if let SealedRead::Corrupt =
+            read_sealed_asset(ctx, circle_id, path, "default", creds, expected_hex).await?
         {
             orphans.push((*path).to_string());
         }
     }
-    // Attestation: only probe if the anchor binds one.
-    if let Some(expected) = current.attestation_hash.as_deref() {
-        if let Some(bytes) = fetch_circle_asset_plain(ctx, circle_id, "/attestation.json").await? {
-            let s = std::str::from_utf8(&bytes).ok();
-            let bound = s.is_some_and(|s| {
-                decrypt_sealed_bytes(circle_id, "default", creds.passphrase(), s.trim(), expected)
-                    .is_ok()
-            });
-            if !bound {
-                orphans.push("/attestation.json".to_string());
+    // Attestation is *optionally* anchored: when bound, verify it like any
+    // sealed asset; when unbound, its mere presence on chain is an orphan.
+    const ATTESTATION_PATH: &str = "/attestation.json";
+    match current.attestation_hash.as_deref() {
+        Some(expected) => {
+            if let SealedRead::Corrupt =
+                read_sealed_asset(ctx, circle_id, ATTESTATION_PATH, "default", creds, expected)
+                    .await?
+            {
+                orphans.push(ATTESTATION_PATH.to_string());
             }
         }
-    } else if fetch_circle_asset_plain(ctx, circle_id, "/attestation.json")
-        .await?
-        .is_some()
-    {
-        orphans.push("/attestation.json".to_string());
+        None => {
+            if fetch_circle_asset_plain(ctx, circle_id, ATTESTATION_PATH)
+                .await?
+                .is_some()
+            {
+                orphans.push(ATTESTATION_PATH.to_string());
+            }
+        }
     }
     Ok(orphans)
 }

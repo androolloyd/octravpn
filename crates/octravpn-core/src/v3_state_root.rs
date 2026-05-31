@@ -177,6 +177,28 @@ pub struct StateRoot {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub enc_anchor_hash: Option<String>,
 
+    /// SHA-256 of the sealed `oct://<circle_id>/auth/members.json` — the
+    /// wallet-native enrollment member set
+    /// ([`crate::v3_members::TailnetMembers`]) this operator admits and
+    /// serves. Distinct from the tailnet-owner's `tailnet_members_root`:
+    /// this anchors the member set an *operator* hosts via circle-resident
+    /// enrollment, so device admission is tamper-evident under the
+    /// operator's own `circle_state_root`. `None` for operators that don't
+    /// host enrollment; OMITTED from canonical JSON when `None`, so anchors
+    /// without it stay byte-identical.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub auth_members_hash: Option<String>,
+
+    /// SHA-256 of the sealed `oct://<circle_id>/auth/allowed.json` — the
+    /// operator's enrollment allowlist (the wallets *permitted* to join
+    /// the private mesh, as opposed to `auth_members_hash`'s record of who
+    /// *has* joined). Anchoring it makes the operator's admission policy
+    /// the same shared, tamper-evident artifact every operator node reads.
+    /// `None` for operators that don't gate enrollment (open mesh) or
+    /// don't host it; OMITTED from canonical JSON when `None`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub auth_allowed_hash: Option<String>,
+
     /// Forward-compatibility bucket. Any JSON keys not recognised by
     /// this decoder land here, and are re-emitted verbatim by
     /// `canonical_bytes()` so the SHA-256 round-trips for v(N+1) data
@@ -210,6 +232,8 @@ impl StateRoot {
             epoch,
             timestamp_secs,
             enc_anchor_hash: None,
+            auth_members_hash: None,
+            auth_allowed_hash: None,
             unknown: BTreeMap::new(),
         }
     }
@@ -241,6 +265,8 @@ impl StateRoot {
             epoch,
             timestamp_secs,
             enc_anchor_hash,
+            auth_members_hash: None,
+            auth_allowed_hash: None,
             unknown: BTreeMap::new(),
         }
     }
@@ -298,6 +324,12 @@ impl StateRoot {
         if let Some(h) = &self.enc_anchor_hash {
             check_hash("enc_anchor_hash", h)?;
         }
+        if let Some(h) = &self.auth_members_hash {
+            check_hash("auth_members_hash", h)?;
+        }
+        if let Some(h) = &self.auth_allowed_hash {
+            check_hash("auth_allowed_hash", h)?;
+        }
         Ok(())
     }
 
@@ -321,6 +353,12 @@ impl StateRoot {
         }
         if let Some(h) = &sr.enc_anchor_hash {
             check_hash("enc_anchor_hash", h)?;
+        }
+        if let Some(h) = &sr.auth_members_hash {
+            check_hash("auth_members_hash", h)?;
+        }
+        if let Some(h) = &sr.auth_allowed_hash {
+            check_hash("auth_allowed_hash", h)?;
         }
         Ok(sr)
     }
@@ -368,6 +406,59 @@ mod tests {
     #[test]
     fn validate_accepts_sample() {
         assert!(sample().validate().is_ok());
+    }
+
+    #[test]
+    fn auth_members_hash_omitted_when_none_but_anchors_when_set() {
+        let base = sample();
+        assert!(base.auth_members_hash.is_none());
+        // None ⇒ the key never appears in the canonical bytes, so anchors
+        // predating this field stay byte-identical.
+        let base_json = String::from_utf8(base.canonical_bytes().unwrap()).unwrap();
+        assert!(!base_json.contains("auth_members_hash"));
+
+        // Setting it validates, serializes, round-trips, and moves the anchor.
+        let with = StateRoot {
+            auth_members_hash: Some(h(0x5a)),
+            ..sample()
+        };
+        assert!(with.validate().is_ok());
+        assert_ne!(base.anchor_hex().unwrap(), with.anchor_hex().unwrap());
+        let with_json = String::from_utf8(with.canonical_bytes().unwrap()).unwrap();
+        assert!(with_json.contains("auth_members_hash"));
+        let decoded = StateRoot::decode(&with.canonical_bytes().unwrap()).unwrap();
+        assert_eq!(decoded.auth_members_hash, Some(h(0x5a)));
+    }
+
+    #[test]
+    fn auth_members_hash_rejects_non_hex() {
+        let mut sr = sample();
+        sr.auth_members_hash = Some("not-a-64-char-hex-digest".to_string());
+        assert!(sr.validate().is_err());
+    }
+
+    #[test]
+    fn auth_allowed_hash_anchors_independently_of_members() {
+        let members_only = StateRoot {
+            auth_members_hash: Some(h(0x5a)),
+            ..sample()
+        };
+        let both = StateRoot {
+            auth_members_hash: Some(h(0x5a)),
+            auth_allowed_hash: Some(h(0x6b)),
+            ..sample()
+        };
+        assert!(both.validate().is_ok());
+        // Adding the allowlist anchor moves the state-root anchor again,
+        // so a verifier detects an allowlist edit independently of members.
+        assert_ne!(
+            members_only.anchor_hex().unwrap(),
+            both.anchor_hex().unwrap()
+        );
+        let json = String::from_utf8(both.canonical_bytes().unwrap()).unwrap();
+        assert!(json.contains("auth_allowed_hash"));
+        let decoded = StateRoot::decode(&both.canonical_bytes().unwrap()).unwrap();
+        assert_eq!(decoded.auth_allowed_hash, Some(h(0x6b)));
     }
 
     #[test]

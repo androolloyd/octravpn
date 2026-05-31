@@ -48,6 +48,7 @@ use crate::config::NodeConfig;
 use crate::hub::Hub;
 
 pub(crate) mod audit;
+pub(crate) mod auth;
 pub(crate) mod bond;
 pub(crate) mod circle;
 pub(crate) mod headscale;
@@ -159,6 +160,9 @@ pub(crate) enum Cmd {
     /// rotation runbook and `crates/octravpn-node/src/circle_update.rs`
     /// for the atomicity contract.
     Circle(circle::CircleArgs),
+    /// Manage the private-mesh enrollment allowlist (who may enroll).
+    /// Sealed + anchored in the operator circle's `/auth/allowed.json`.
+    Auth(auth::AuthArgs),
     /// Mesh / Tailscale-interop control surface. Subcommands here
     /// are exercised by `docker/devnet/tailscale-interop/run-interop.sh`
     /// and by operators provisioning new tailnet members. See
@@ -294,6 +298,7 @@ fn cmd_needs_hub(cmd: &Cmd) -> bool {
         Cmd::UnsealKeys(a) => a.needs_hub(),
         Cmd::V3(a) => a.needs_hub(),
         Cmd::Circle(a) => a.needs_hub(),
+        Cmd::Auth(a) => a.needs_hub(),
         Cmd::Mesh(a) => a.needs_hub(),
         Cmd::Headscale(a) => a.needs_hub(),
         Cmd::Config(a) => a.needs_hub(),
@@ -321,6 +326,7 @@ async fn dispatch(cmd: Cmd, ctx: CliContext<'_>) -> Result<i32> {
         Cmd::UnsealKeys(a) => a.dispatch(ctx).await,
         Cmd::V3(a) => a.dispatch(ctx).await,
         Cmd::Circle(a) => a.dispatch(ctx).await,
+        Cmd::Auth(a) => a.dispatch(ctx).await,
         Cmd::Mesh(a) => a.dispatch(ctx).await,
         Cmd::Headscale(a) => a.dispatch(ctx).await,
         Cmd::Config(a) => a.dispatch(ctx).await,

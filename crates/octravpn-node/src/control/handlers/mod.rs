@@ -5,6 +5,7 @@
 
 use serde::Serialize;
 
+pub(crate) mod enroll;
 pub(crate) mod events;
 pub(crate) mod health;
 pub(crate) mod metrics;

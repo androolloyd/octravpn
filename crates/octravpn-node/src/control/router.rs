@@ -47,7 +47,12 @@ pub(crate) fn router_axum(state: Arc<ControlState>) -> Router {
         // See `docs/tailscale-interop-blocker.md` for what this
         // does *not* (yet) deliver — chiefly the real Tailscale
         // wire protocol behind `/key` + `/machine/{node_key}/…`.
-        .route("/admin/preauth", post(handlers::preauth::mint_preauth));
+        .route("/admin/preauth", post(handlers::preauth::mint_preauth))
+        // Wallet-native device enrollment. Both routes 404 when this
+        // node isn't hosting a tailnet (`ControlState::enroll` is
+        // `None`), so the surface stays invisible unless configured.
+        .route("/enroll/challenge", get(handlers::enroll::challenge))
+        .route("/enroll", post(handlers::enroll::enroll));
     let limited = if state.rate_limit_cfg.enabled {
         let rate_limiter = crate::rate_limit::RateLimiter::from_cfg(&state.rate_limit_cfg);
         limited_routes
