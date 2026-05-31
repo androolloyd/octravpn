@@ -317,7 +317,7 @@ cd octra && cargo build --workspace
 ## Quickstart — local
 
 Prereqs: **Rust** via [rustup](https://rustup.rs) (the repo's
-`rust-toolchain.toml` auto-selects 1.88.0 — no manual version pick) and the
+`rust-toolchain.toml` auto-selects 1.96.0 — no manual version pick) and the
 **two sibling repos** cloned side-by-side, per
 [Sibling repos](#sibling-repos-path-deps) above.
 

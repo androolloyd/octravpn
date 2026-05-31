@@ -174,10 +174,7 @@ impl PortalState {
     }
 
     pub(crate) fn is_allowed(&self, circle_id: &str) -> bool {
-        self.allow_set
-            .lock()
-            .map(|s| s.contains(circle_id))
-            .unwrap_or(false)
+        self.allow_set.lock().is_ok_and(|s| s.contains(circle_id))
     }
 
     pub(crate) fn allow(&self, circle_id: &str) {
@@ -403,7 +400,7 @@ async fn raw_asset(State(state): State<PortalState>, Query(q): Query<RawQuery>) 
         None => false,
     };
     if !approved_by_token && !state.is_allowed(&parsed.circle_id) {
-        let approve_url = format!("/confirm?u={}&accept=cli", urlencode_query_value(&q.u),);
+        let approve_url = format!("/confirm?u={}&accept=cli", urlencode_query_value(&q.u));
         return (
             StatusCode::PRECONDITION_FAILED,
             Json(json!({
@@ -1369,7 +1366,7 @@ mod tests {
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri(format!("/raw?u={}", urlenc("oct://circSEAL/policy.json"),))
+                    .uri(format!("/raw?u={}", urlenc("oct://circSEAL/policy.json")))
                     .body(Body::empty())
                     .unwrap(),
             )

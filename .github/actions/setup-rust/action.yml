@@ -21,7 +21,7 @@ inputs:
       Default matches the workspace's `rust-toolchain.toml` so CI
       and local builds agree on rustfmt + clippy lint sets.
     required: false
-    default: "1.88.0"
+    default: "1.96.0"
   components:
     description: "Comma-separated rustup components (clippy, rustfmt, ...)"
     required: false

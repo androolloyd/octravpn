@@ -391,7 +391,7 @@ fn check_ip_salt(value: &str) -> Result<(), V3MembersError> {
     // so verifiers don't have to case-fold).
     if !value
         .bytes()
-        .all(|b| (b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
     {
         return Err(V3MembersError::BadIpSaltEncoding);
     }

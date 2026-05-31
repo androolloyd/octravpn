@@ -67,8 +67,7 @@ pub(crate) const MAX_SHARDS: usize = 8;
 /// is the modern equivalent.
 fn default_shard_count() -> usize {
     std::thread::available_parallelism()
-        .map(std::num::NonZero::get)
-        .unwrap_or(1)
+        .map_or(1, std::num::NonZero::get)
         .clamp(1, MAX_SHARDS)
 }
 

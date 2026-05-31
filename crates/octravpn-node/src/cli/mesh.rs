@@ -633,8 +633,7 @@ fn trim_body(s: &str, max: usize) -> String {
 /// §"PSK-gated control plane" for the operator playbook.
 fn load_knock_cfg_from_env() -> octravpn_mesh::tailscale_wire::KnockConfig {
     let enabled = std::env::var("OCTRAVPN_KNOCK_ENABLED")
-        .map(|v| !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false"))
-        .unwrap_or(false);
+        .is_ok_and(|v| !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false"));
     if !enabled {
         return octravpn_mesh::tailscale_wire::KnockConfig::disabled();
     }

@@ -112,7 +112,8 @@ impl SubnetRouter {
             .filter(|a| a.cidr.contains(ip))
             .cloned()
             .collect();
-        hits.sort_by(|a, b| b.cidr.prefix_len.cmp(&a.cidr.prefix_len));
+        // Longest-prefix-match first: descending prefix_len.
+        hits.sort_by_key(|a| std::cmp::Reverse(a.cidr.prefix_len));
         hits
     }
 

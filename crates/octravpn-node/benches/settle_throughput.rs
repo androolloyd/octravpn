@@ -131,12 +131,10 @@ fn bench_receipt_journal_bump(c: &mut Criterion) {
                 for i in 1..n_sessions {
                     let _ = j.bump(&session_id_from(i as u64), 1);
                 }
-                let mut next_seq = 2u64;
                 let start = Instant::now();
-                for _ in 0..iters {
+                for next_seq in 2..2 + iters {
                     j.bump(black_box(&primary), black_box(next_seq))
                         .expect("bump");
-                    next_seq += 1;
                 }
                 start.elapsed()
             });
@@ -167,12 +165,10 @@ fn bench_receipt_journal_bump_periodic(c: &mut Criterion) {
                 for i in 1..n_sessions {
                     let _ = j.bump(&session_id_from(i as u64), 1);
                 }
-                let mut next_seq = 2u64;
                 let start = Instant::now();
-                for _ in 0..iters {
+                for next_seq in 2..2 + iters {
                     j.bump(black_box(&primary), black_box(next_seq))
                         .expect("bump");
-                    next_seq += 1;
                 }
                 start.elapsed()
             });

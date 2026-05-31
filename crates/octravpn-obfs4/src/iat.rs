@@ -30,10 +30,11 @@ use std::time::Duration;
 use rand::{Rng, RngCore};
 
 /// Selects the IAT delay distribution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IatMode {
     /// No injected delay. Cheapest; relies on length randomisation
     /// alone for traffic-shape obfuscation. Default.
+    #[default]
     Off,
     /// Uniform 0..25 ms. Cheap, defeats simple "WG sends bursts every
     /// N ms" heuristics.
@@ -42,12 +43,6 @@ pub enum IatMode {
     /// latency. Recommended only on overlay traffic that already
     /// tolerates RTT (e.g. cross-region tunnels).
     Pareto,
-}
-
-impl Default for IatMode {
-    fn default() -> Self {
-        Self::Off
-    }
 }
 
 impl IatMode {

@@ -535,21 +535,16 @@ const fn default_audit_max_file_count() -> usize {
 /// receipt_pubkey)`. v3 has no HFHE — settlement uses a sha256 hash
 /// chain of `(prev_head || sha256(settle_blinding))`. See
 /// `docs/v3-state-root-schema.md` and `crates/octravpn-core/src/v3_state_root.rs`.
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum ProtocolVersion {
     #[serde(rename = "v1.1", alias = "v1")]
+    #[default]
     V1_1,
     #[serde(rename = "v2")]
     V2,
     #[serde(rename = "v3")]
     V3,
-}
-
-impl Default for ProtocolVersion {
-    fn default() -> Self {
-        Self::V1_1
-    }
 }
 
 #[derive(Deserialize, Clone)]

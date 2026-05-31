@@ -57,7 +57,7 @@ pub(crate) async fn run_portal(chain: PortalChain, bind: SocketAddr) -> Result<(
 pub(crate) async fn is_running(addr: SocketAddr) -> bool {
     let url = format!("http://{addr}/healthz");
     let Ok(client) = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_millis(1_000))
+        .timeout(std::time::Duration::from_secs(1))
         .build()
     else {
         return false;
