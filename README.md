@@ -316,6 +316,11 @@ cd octra && cargo build --workspace
 
 ## Quickstart — local
 
+Prereqs: **Rust** via [rustup](https://rustup.rs) (the repo's
+`rust-toolchain.toml` auto-selects 1.88.0 — no manual version pick) and the
+**two sibling repos** cloned side-by-side, per
+[Sibling repos](#sibling-repos-path-deps) above.
+
 ```sh
 # Build everything (needs both sibling repos cloned side-by-side)
 cargo build --workspace --release
@@ -338,6 +343,12 @@ See [`docs/contributing-tests.md`](docs/contributing-tests.md) for the
 full surface-by-surface breakdown.
 
 ## Quickstart — Docker
+
+Prereqs: a **running Docker daemon** — Docker Desktop, [OrbStack](https://orbstack.dev),
+or Colima on macOS — plus the `octra-foundry` sibling. The nodes run
+*userspace* WireGuard (boringtun), so **no privileged container,
+`/dev/net/tun`, or kernel module is required** — the harness runs as-is on
+macOS (Apple silicon included).
 
 ```sh
 # Build the full image set (Docker context is the parent dir so
@@ -364,12 +375,25 @@ v1.1 program is in `program/main.aml`, the v2 slim registry is in
 `program/main-v2.aml`, and each operator's in-circle program is in
 `program/operator-circle.aml`.
 
-For v2 deploys via `octraforge`:
+Deploys go through `octraforge`. `--key` and `--rpc-url` are **required**,
+and constructor args are **space-separated** (not a JSON array). The five
+params are `min_session_deposit min_tailnet_deposit min_circle_stake
+session_grace_epochs unbond_grace_epochs`:
 
 ```sh
-# Slim registry (one per chain)
+# v2 slim registry (one per chain)
 octra forge create program/main-v2.aml \
-  --constructor-args '[100, 10, 1000000000, 100, 1000]'
+  --key path/to/deployer.key \
+  --rpc-url https://devnet.octrascan.io/rpc \
+  --constructor-args 100 10 1000000000 100 1000
+
+# v3 chain-minimal program (same constructor shape). This exact
+# invocation deployed + `contract_verify`'d the live devnet v3.
+octra forge create program/main-v3.aml \
+  --key path/to/deployer.key \
+  --rpc-url https://devnet.octrascan.io/rpc \
+  --constructor-args 100 1000 100000000 100 1000
+
 # Per-operator circle is automated by `octravpn-node v2 register`
 ```
 
