@@ -430,7 +430,11 @@ impl Server {
             self.shard_count,
         );
 
-        for (pk, _) in self.allowlist.snapshot() {
+        // Only the pubkey is needed to trial-decapsulate; `keys()` avoids
+        // cloning every `AllowedClient` value the way `snapshot()` did —
+        // this path is reachable by any unknown source address, so the
+        // per-packet allocation was a cheap UDP-flood amplifier.
+        for pk in self.allowlist.keys() {
             let mut tun = Tunn::new(
                 self.static_secret.clone(),
                 X25519Pub::from(pk),
