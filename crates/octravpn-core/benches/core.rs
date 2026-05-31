@@ -283,7 +283,9 @@ fn bench_bounded(c: &mut Criterion) {
     // E4: admission only needs keys (4096×32 B) — `snapshot` additionally
     // clones 4096×96 B of values for nothing.
     c.bench_function("bounded_keys_4096", |b| b.iter(|| black_box(map.keys())));
-    c.bench_function("bounded_snapshot_4096", |b| b.iter(|| black_box(map.snapshot())));
+    c.bench_function("bounded_snapshot_4096", |b| {
+        b.iter(|| black_box(map.snapshot()));
+    });
     // E1: per-packet `get` refreshes last-touch off the monotonic clock.
     c.bench_function("bounded_get", |b| {
         b.iter(|| black_box(map.get(black_box(&probe))));
