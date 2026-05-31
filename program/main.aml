@@ -35,7 +35,7 @@ contract OctraVPN {
   // ============================================================
 
   struct EndpointRecord {
-    active: int                // 1 once registered; 0 after retire
+    active: uint                // 1 once registered; 0 after retire
     endpoint: string           // public address (ip:port or .onion)
     wg_pubkey: string          // X25519 noise pubkey (hex)
     receipt_pubkey: string     // ed25519 pubkey used to sign off-chain
@@ -45,35 +45,35 @@ contract OctraVPN {
                                // the Octra account/tx-signing key.
                                // Stored as hex per docs/keys.md.
     region: string
-    price_per_mb: int
-    registered_at: int
-    reputation: int            // monotonic count of settled sessions
+    price_per_mb: uint
+    registered_at: uint
+    reputation: uint            // monotonic count of settled sessions
   }
 
   struct Tailnet {
     owner: address
-    treasury: int              // OU available for paid traffic
-    member_count: int
+    treasury: uint              // OU available for paid traffic
+    member_count: uint
     acl_policy: string         // hex of off-chain ACL doc hash
-    created_at: int
-    exit_count: int
+    created_at: uint
+    exit_count: uint
   }
 
   struct Session {
-    tailnet_id: int
+    tailnet_id: uint
     exit: address              // single configured exit (v1: single-hop)
     opener: address            // wallet that called open_session; only it can confirm settlement
-    deposit: int               // locked from tailnet treasury at open
-    opened_at: int
-    status: int                // 0=open, 1=settled, 2=refunded
+    deposit: uint               // locked from tailnet treasury at open
+    opened_at: uint
+    status: uint                // 0=open, 1=settled, 2=refunded
   }
 
   /// Operator's or client's settlement claim for a session. Two
   /// of these (one from each side) gate `settle` — see §settle.
   struct ClaimRecord {
-    set: int                   // 1 if a claim has been recorded
-    bytes_used: int
-    claimed_at: int
+    set: uint                   // 1 if a claim has been recorded
+    bytes_used: uint
+    claimed_at: uint
   }
 
   // ============================================================
@@ -85,47 +85,47 @@ contract OctraVPN {
   event EndpointRetired(addr: address)
   event KeysRotated(addr: address)
 
-  event StakeBonded(addr: address, amount: int, new_stake: int)
-  event StakeUnbondingStarted(addr: address, stake: int, unlock_epoch: int)
-  event StakeUnbondingFinalized(addr: address, amount: int)
-  event OperatorSlashed(addr: address, stake: int, burn_amt: int, bounty_amt: int)
+  event StakeBonded(addr: address, amount: uint, new_stake: uint)
+  event StakeUnbondingStarted(addr: address, stake: uint, unlock_epoch: uint)
+  event StakeUnbondingFinalized(addr: address, amount: uint)
+  event OperatorSlashed(addr: address, stake: uint, burn_amt: uint, bounty_amt: uint)
 
-  event TailnetCreated(tailnet_id: int, owner: address)
-  event TailnetMemberAdded(tailnet_id: int, member: address)
-  event TailnetMemberRemoved(tailnet_id: int, member: address)
-  event TailnetDeposit(tailnet_id: int, amount: int, new_treasury: int)
-  event TailnetExitConfigured(tailnet_id: int, exit_addr: address)
-  event TailnetAclUpdated(tailnet_id: int, acl_policy: string)
+  event TailnetCreated(tailnet_id: uint, owner: address)
+  event TailnetMemberAdded(tailnet_id: uint, member: address)
+  event TailnetMemberRemoved(tailnet_id: uint, member: address)
+  event TailnetDeposit(tailnet_id: uint, amount: uint, new_treasury: uint)
+  event TailnetExitConfigured(tailnet_id: uint, exit_addr: address)
+  event TailnetAclUpdated(tailnet_id: uint, acl_policy: string)
 
-  event SessionOpened(session_id: int, tailnet_id: int, exit: address, deposit: int, opened_at: int)
-  event SettleClaimed(session_id: int, exit: address, bytes_used: int)
-  event SettleConfirmed(session_id: int, opener: address, bytes_used: int)
-  event SettleDispute(session_id: int, operator_bytes: int, client_bytes: int)
-  event SessionSettled(session_id: int, exit: address, bytes_used: int, total_paid: int, refund: int)
-  event SessionRefunded(session_id: int, reason: string)
-  event SessionSwept(session_id: int)
-  event JoinTokenPrecommitted(tailnet_id: int, token_hash: bytes)
-  event JoinTokenRedeemed(tailnet_id: int, member: address, token_hash: bytes)
+  event SessionOpened(session_id: uint, tailnet_id: uint, exit: address, deposit: uint, opened_at: uint)
+  event SettleClaimed(session_id: uint, exit: address, bytes_used: uint)
+  event SettleConfirmed(session_id: uint, opener: address, bytes_used: uint)
+  event SettleDispute(session_id: uint, operator_bytes: uint, client_bytes: uint)
+  event SessionSettled(session_id: uint, exit: address, bytes_used: uint, total_paid: uint, refund: uint)
+  event SessionRefunded(session_id: uint, reason: string)
+  event SessionSwept(session_id: uint)
+  event JoinTokenPrecommitted(tailnet_id: uint, token_hash: bytes)
+  event JoinTokenRedeemed(tailnet_id: uint, member: address, token_hash: bytes)
 
-  event EarningsClaimed(operator: address, amount: int)
+  event EarningsClaimed(operator: address, amount: uint)
 
   event DeviceRegistered(wallet: address, device: address)
   event DeviceRevoked(wallet: address, device: address)
 
-  event ProgramTreasuryWithdrawn(to: address, amount: int)
+  event ProgramTreasuryWithdrawn(to: address, amount: uint)
 
   // ============================================================
   // Constants
   // ============================================================
 
-  const MIN_ENDPOINT_STAKE_DEFAULT: int = 1000000000   // 1000 OCT
-  const UNBOND_GRACE_DEFAULT: int = 10000              // ~30 days at 10s epochs
-  const SLASH_BURN_DEFAULT_BPS: int = 9000             // 90%
-  const SLASH_BOUNTY_DEFAULT_BPS: int = 1000           // 10%
-  const PROTOCOL_FEE_DEFAULT_BPS: int = 50             // 0.5%
-  const SWEEP_GRACE_MULT_DEFAULT: int = 10
-  const SWEEP_BOUNTY_DEFAULT_BPS: int = 100            // 1%
-  const BPS_DENOM: int = 10000
+  const MIN_ENDPOINT_STAKE_DEFAULT: uint = 1000000000   // 1000 OCT
+  const UNBOND_GRACE_DEFAULT: uint = 10000              // ~30 days at 10s epochs
+  const SLASH_BURN_DEFAULT_BPS: uint = 9000             // 90%
+  const SLASH_BOUNTY_DEFAULT_BPS: uint = 1000           // 10%
+  const PROTOCOL_FEE_DEFAULT_BPS: uint = 50             // 0.5%
+  const SWEEP_GRACE_MULT_DEFAULT: uint = 10
+  const SWEEP_BOUNTY_DEFAULT_BPS: uint = 100            // 1%
+  const BPS_DENOM: uint = 10000
 
   // ============================================================
   // State
@@ -133,67 +133,67 @@ contract OctraVPN {
 
   state {
     owner: address
-    paused: int
+    paused: uint
 
     // Endpoints
-    endpoint_count: int
-    endpoint_index: map[int]address          // counter -> addr
+    endpoint_count: uint
+    endpoint_index: map[uint]address          // counter -> addr
     endpoints: map[address]EndpointRecord
 
     // Operator stake
-    endpoint_stake: map[address]int
-    endpoint_unbonding_stake: map[address]int
-    endpoint_unbonding_unlock: map[address]int
-    endpoint_slashed: map[address]int        // 1 = permanently slashed
+    endpoint_stake: map[address]uint
+    endpoint_unbonding_stake: map[address]uint
+    endpoint_unbonding_unlock: map[address]uint
+    endpoint_slashed: map[address]uint        // 1 = permanently slashed
 
     // HFHE pubkey + zero-ciphertext per operator, plus the running
     // encrypted earnings ledger.
-    op_pk_set: map[address]int               // 1 if operator has registered an HFHE pk
+    op_pk_set: map[address]uint               // 1 if operator has registered an HFHE pk
     op_pk: map[address]string
     op_zero_ct: map[address]string
     enc_earnings: map[address]string
 
     // Tailnets
-    tailnet_count: int
-    tailnets: map[int]Tailnet
-    members: map[int]map[address]int         // tid -> addr -> 1 if member
-    tailnet_exits: map[int]map[address]int   // tid -> exit_addr -> 1
+    tailnet_count: uint
+    tailnets: map[uint]Tailnet
+    members: map[uint]map[address]uint         // tid -> addr -> 1 if member
+    tailnet_exits: map[uint]map[address]uint   // tid -> exit_addr -> 1
 
     // Sessions
-    session_count: int
-    sessions: map[int]Session
+    session_count: uint
+    sessions: map[uint]Session
 
     // Two-tx settlement: operator's claim + client's confirmation.
     // Settlement only applies when both agree on `bytes_used`. A
     // mismatch records a public dispute (both claims stay on chain).
-    operator_claims: map[int]ClaimRecord
-    client_confirms: map[int]ClaimRecord
+    operator_claims: map[uint]ClaimRecord
+    client_confirms: map[uint]ClaimRecord
 
     // Pre-auth join tokens (hash-precommit pattern: owner pre-
     // publishes sha256(preimage); anyone with the preimage redeems).
     // join_token_commits[tid][hash] = 1 means owner published it.
     // join_token_redeemed[hash] = 1 means it's been used once.
-    join_token_commits: map[int]map[bytes]int
-    join_token_redeemed: map[bytes]int
+    join_token_commits: map[uint]map[bytes]uint
+    join_token_redeemed: map[bytes]uint
 
     // Devices
     device_owner: map[address]address
 
     // Program treasury (Tier 2 fee + burn share of slashed stakes).
-    treasury: int
-    burned: int
+    treasury: uint
+    burned: uint
 
     // Params (flat — direct struct-field assign isn't supported).
-    min_session_deposit: int
-    min_tailnet_deposit: int
-    session_grace_epochs: int
-    sweep_grace_multiplier: int
-    sweep_bounty_bps: int
-    min_endpoint_stake: int
-    unbond_grace_epochs: int
-    slash_burn_bps: int
-    slash_bounty_bps: int
-    protocol_fee_bps: int
+    min_session_deposit: uint
+    min_tailnet_deposit: uint
+    session_grace_epochs: uint
+    sweep_grace_multiplier: uint
+    sweep_bounty_bps: uint
+    min_endpoint_stake: uint
+    unbond_grace_epochs: uint
+    slash_burn_bps: uint
+    slash_bounty_bps: uint
+    protocol_fee_bps: uint
   }
 
   // ============================================================
@@ -201,9 +201,9 @@ contract OctraVPN {
   // ============================================================
 
   constructor(
-    initial_min_session_deposit: int,
-    initial_min_tailnet_deposit: int,
-    initial_session_grace_epochs: int
+    initial_min_session_deposit: uint,
+    initial_min_tailnet_deposit: uint,
+    initial_session_grace_epochs: uint
   ) {
     require(initial_min_session_deposit > 0, "session deposit > 0")
     require(initial_min_tailnet_deposit > 0, "tailnet deposit > 0")
@@ -321,7 +321,7 @@ contract OctraVPN {
   // bounty, mirroring `gov_slash_operator`).
   fn slash_double_sign(
     operator_addr: address,
-    session_id: int,
+    session_id: uint,
     payload_a: string,
     sig_a: string,
     payload_b: string,
@@ -399,7 +399,7 @@ contract OctraVPN {
     hfhe_pubkey: string,
     initial_enc_zero: string,
     region: string,
-    price_per_mb: int,
+    price_per_mb: uint,
     receipt_pubkey: string
   ): bool {
     require_not_paused()
@@ -443,7 +443,7 @@ contract OctraVPN {
   // abstract state machine. The Lean lemma
   // `update_endpoint_active_only` proves the AML postconditions
   // (price update, active-only gating, stake/slashed untouched).
-  fn update_endpoint(endpoint: string, region: string, price_per_mb: int): bool {
+  fn update_endpoint(endpoint: string, region: string, price_per_mb: uint): bool {
     require_not_paused()
     require(self.endpoints[caller].active != 0, "not registered")
     require(price_per_mb > 0, "price > 0")
@@ -497,7 +497,7 @@ contract OctraVPN {
   // Tailnet lifecycle
   // ============================================================
 
-  fn create_tailnet(acl_policy: string): int {
+  fn create_tailnet(acl_policy: string): uint {
     require_not_paused()
     require(value >= self.min_tailnet_deposit, "tailnet deposit below min")
     require(len(acl_policy) > 0, "acl policy required")
@@ -520,7 +520,7 @@ contract OctraVPN {
     return tid
   }
 
-  fn add_member(tailnet_id: int, member: address): bool {
+  fn add_member(tailnet_id: uint, member: address): bool {
     require_not_paused()
     require(tailnet_id < self.tailnet_count, "tailnet not found")
     require(self.tailnets[tailnet_id].owner == caller, "not tailnet owner")
@@ -531,7 +531,7 @@ contract OctraVPN {
     return true
   }
 
-  fn remove_member(tailnet_id: int, member: address): bool {
+  fn remove_member(tailnet_id: uint, member: address): bool {
     require_not_paused()
     require(tailnet_id < self.tailnet_count, "tailnet not found")
     require(self.tailnets[tailnet_id].owner == caller, "not tailnet owner")
@@ -543,7 +543,7 @@ contract OctraVPN {
     return true
   }
 
-  fn deposit_to_tailnet(tailnet_id: int): bool {
+  fn deposit_to_tailnet(tailnet_id: uint): bool {
     require_not_paused()
     require(value > 0, "no value")
     require(tailnet_id < self.tailnet_count, "tailnet not found")
@@ -553,7 +553,7 @@ contract OctraVPN {
     return true
   }
 
-  fn configure_tailnet_exit(tailnet_id: int, exit_addr: address): bool {
+  fn configure_tailnet_exit(tailnet_id: uint, exit_addr: address): bool {
     require_not_paused()
     require(tailnet_id < self.tailnet_count, "tailnet not found")
     require(self.tailnets[tailnet_id].owner == caller, "not tailnet owner")
@@ -571,7 +571,7 @@ contract OctraVPN {
   // identity transition. The Lean lemma `update_acl_owner_only`
   // proves the AML's owner gate plus the `aclPolicy := newPolicy`
   // write.
-  fn update_acl(tailnet_id: int, new_acl_policy: string): bool {
+  fn update_acl(tailnet_id: uint, new_acl_policy: string): bool {
     require_not_paused()
     require(tailnet_id < self.tailnet_count, "tailnet not found")
     require(self.tailnets[tailnet_id].owner == caller, "not tailnet owner")
@@ -599,7 +599,7 @@ contract OctraVPN {
   // Tokens are one-shot: once redeemed, the hash is marked spent
   // and can't be redeemed again.
 
-  fn precommit_join_token(tailnet_id: int, token_hash: bytes): bool {
+  fn precommit_join_token(tailnet_id: uint, token_hash: bytes): bool {
     require_not_paused()
     require(tailnet_id < self.tailnet_count, "tailnet not found")
     require(self.tailnets[tailnet_id].owner == caller, "not tailnet owner")
@@ -611,7 +611,7 @@ contract OctraVPN {
     return true
   }
 
-  fn redeem_join_token(tailnet_id: int, token_preimage: bytes): bool {
+  fn redeem_join_token(tailnet_id: uint, token_preimage: bytes): bool {
     require_not_paused()
     require(tailnet_id < self.tailnet_count, "tailnet not found")
     require(len(token_preimage) > 0, "preimage required")
@@ -668,10 +668,10 @@ contract OctraVPN {
   // The client deposits `max_pay` from the tailnet treasury — this
   // is the ceiling the validator can ever extract.
   fn open_session(
-    tailnet_id: int,
+    tailnet_id: uint,
     exit_addr: address,
-    max_pay: int
-  ): int {
+    max_pay: uint
+  ): uint {
     require_not_paused()
     require(tailnet_id < self.tailnet_count, "tailnet not found")
 
@@ -733,11 +733,11 @@ contract OctraVPN {
   // The dispute records (both signed txs) stay on chain as evidence
   // for off-chain reputation / dispute-resolution systems.
 
-  fn settle_claim(session_id: int, bytes_used: int): bool {
+  fn settle_claim(session_id: uint, bytes_used: uint): bool {
     require_not_paused()
     require(session_id < self.session_count, "session not found")
     require(self.sessions[session_id].status == 0, "session not open")
-    require(bytes_used >= 0, "bytes >= 0")
+    require(bytes_used > 0, "bytes > 0")
     require(caller == self.sessions[session_id].exit, "not session exit")
     require(endpoint_is_active(caller), "operator inactive")
 
@@ -787,11 +787,10 @@ contract OctraVPN {
 
   // Client-side confirmation. The session opener (whoever called
   // open_session) is the only address that can confirm.
-  fn settle_confirm(session_id: int, bytes_used: int): bool {
+  fn settle_confirm(session_id: uint, bytes_used: uint): bool {
     require_not_paused()
     require(session_id < self.session_count, "session not found")
     require(self.sessions[session_id].status == 0, "session not open")
-    require(bytes_used >= 0, "bytes >= 0")
     require(caller == self.sessions[session_id].opener, "not session opener")
 
     let op_set = self.operator_claims[session_id].set
@@ -850,7 +849,7 @@ contract OctraVPN {
     return true
   }
 
-  fn claim_no_show(session_id: int): bool {
+  fn claim_no_show(session_id: uint): bool {
     require_not_paused()
     require(session_id < self.session_count, "session not found")
     require(self.sessions[session_id].status == 0, "session not open")
@@ -865,7 +864,7 @@ contract OctraVPN {
     return true
   }
 
-  fn sweep_expired_session(session_id: int): bool {
+  fn sweep_expired_session(session_id: uint): bool {
     require_not_paused()
     require(session_id < self.session_count, "session not found")
     require(self.sessions[session_id].status == 0, "session not open")
@@ -918,7 +917,7 @@ contract OctraVPN {
   // out of scope for state-machine proofs and lives in
   // `proofs/tamarin/` (see DoubleSignSlashable, ReceiptUnforgeability
   // — the FHE zero-proof soundness is not in scope for v1 Tamarin).
-  fn claim_earnings(claimed_amount: int, proof: string): bool {
+  fn claim_earnings(claimed_amount: uint, proof: string): bool {
     require_not_paused()
     require(self.endpoint_slashed[caller] == 0, "operator slashed")
     require(self.op_pk_set[caller] == 1, "no hfhe pubkey")
@@ -947,15 +946,15 @@ contract OctraVPN {
     return self.endpoints[addr]
   }
 
-  view fn get_endpoint_stake(addr: address): int {
+  view fn get_endpoint_stake(addr: address): uint {
     return self.endpoint_stake[addr]
   }
 
-  view fn get_endpoint_unbonding(addr: address): int {
+  view fn get_endpoint_unbonding(addr: address): uint {
     return self.endpoint_unbonding_stake[addr]
   }
 
-  view fn get_endpoint_unlock(addr: address): int {
+  view fn get_endpoint_unlock(addr: address): uint {
     return self.endpoint_unbonding_unlock[addr]
   }
 
@@ -963,47 +962,47 @@ contract OctraVPN {
     return self.endpoint_slashed[addr] != 0
   }
 
-  view fn get_tailnet(tailnet_id: int): Tailnet {
+  view fn get_tailnet(tailnet_id: uint): Tailnet {
     return self.tailnets[tailnet_id]
   }
 
-  view fn is_tailnet_member(tailnet_id: int, addr: address): bool {
+  view fn is_tailnet_member(tailnet_id: uint, addr: address): bool {
     return self.members[tailnet_id][addr] == 1
   }
 
-  view fn is_tailnet_exit(tailnet_id: int, addr: address): bool {
+  view fn is_tailnet_exit(tailnet_id: uint, addr: address): bool {
     return self.tailnet_exits[tailnet_id][addr] == 1
   }
 
-  view fn get_session(session_id: int): Session {
+  view fn get_session(session_id: uint): Session {
     return self.sessions[session_id]
   }
 
-  view fn get_endpoint_at(index: int): address {
+  view fn get_endpoint_at(index: uint): address {
     return self.endpoint_index[index]
   }
 
-  view fn endpoint_count_view(): int {
+  view fn endpoint_count_view(): uint {
     return self.endpoint_count
   }
 
-  view fn tailnet_count_view(): int {
+  view fn tailnet_count_view(): uint {
     return self.tailnet_count
   }
 
-  view fn session_count_view(): int {
+  view fn session_count_view(): uint {
     return self.session_count
   }
 
-  view fn get_program_treasury(): int {
+  view fn get_program_treasury(): uint {
     return self.treasury
   }
 
-  view fn get_min_endpoint_stake(): int {
+  view fn get_min_endpoint_stake(): uint {
     return self.min_endpoint_stake
   }
 
-  view fn get_protocol_fee_bps(): int {
+  view fn get_protocol_fee_bps(): uint {
     return self.protocol_fee_bps
   }
 
@@ -1023,16 +1022,16 @@ contract OctraVPN {
   // but adds no safety guarantee not already covered by the AML's
   // own `require()` checks at call time.
   fn set_params(
-    new_min_session_deposit: int,
-    new_min_tailnet_deposit: int,
-    new_session_grace_epochs: int,
-    new_sweep_grace_multiplier: int,
-    new_sweep_bounty_bps: int,
-    new_min_endpoint_stake: int,
-    new_unbond_grace_epochs: int,
-    new_slash_burn_bps: int,
-    new_slash_bounty_bps: int,
-    new_protocol_fee_bps: int
+    new_min_session_deposit: uint,
+    new_min_tailnet_deposit: uint,
+    new_session_grace_epochs: uint,
+    new_sweep_grace_multiplier: uint,
+    new_sweep_bounty_bps: uint,
+    new_min_endpoint_stake: uint,
+    new_unbond_grace_epochs: uint,
+    new_slash_burn_bps: uint,
+    new_slash_bounty_bps: uint,
+    new_protocol_fee_bps: uint
   ): bool {
     require_owner()
     require(new_min_session_deposit > 0, "session deposit > 0")
@@ -1065,7 +1064,7 @@ contract OctraVPN {
   // StateBound CONSTRAINT enforces `paused = FALSE` for explored
   // reachable states; the action's correctness (owner gate, idempotent
   // write) is proved in the Lean lemma `set_paused_owner_only`.
-  fn set_paused(v: int): bool {
+  fn set_paused(v: uint): bool {
     require_owner()
     self.paused = v
     return true
@@ -1090,7 +1089,7 @@ contract OctraVPN {
   // a paused state — e.g., to move funds for migration or to refund
   // affected users while user flows are frozen. A compromised owner
   // could unpause-then-withdraw anyway, so the gate adds no defense.
-  fn withdraw_program_treasury(to: address, amount: int): bool {
+  fn withdraw_program_treasury(to: address, amount: uint): bool {
     require_owner()
     require(amount > 0, "amount > 0")
     require(self.treasury >= amount, "treasury insufficient")
