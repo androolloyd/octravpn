@@ -48,6 +48,7 @@ fn build_state() -> (WireState, PreauthMinter, tempfile::TempDir) {
         derp_map: octravpn_mesh::tailscale_wire::DerpMapStore::shared(
             octravpn_mesh::tailscale_wire::DerpMap::default(),
         ),
+        native_derp: None,
         policy: Arc::new(headscale_api::policy::PolicyStore::default()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
         dns: std::sync::Arc::new(octra_dns_store()),
@@ -119,6 +120,53 @@ fn machine_key_from_path(path: &str) -> Option<String> {
     let rest = path.strip_prefix("/machine/nodekey:")?;
     let (node_key, suffix) = rest.split_once('/')?;
     matches!(suffix, "register" | "map").then(|| node_key.to_string())
+}
+
+#[tokio::test]
+async fn embedded_control_router_uses_stock_public_routes_without_health() {
+    let (state, _minter, _dir) = build_state();
+    let app = tailscale_wire_embedded_control_router(state);
+
+    for uri in ["/version", "/robots.txt"] {
+        let resp = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(uri)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            axum::http::StatusCode::OK,
+            "{uri} should come from headscale-rs' stock public control router",
+        );
+    }
+
+    let health = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/health")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(health.status(), axum::http::StatusCode::NOT_FOUND);
+
+    let unknown = app
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/definitely-not-an-octra-route")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unknown.status(), axum::http::StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -241,7 +289,7 @@ async fn key_then_register_then_map_round_trip() {
     let raw = to_bytes(resp.into_body(), 32 * 1024).await.unwrap();
     let mr: octravpn_mesh::tailscale_wire::MapResponse = serde_json::from_slice(&raw).unwrap();
     assert_eq!(mr.peers.len(), 1);
-    assert_eq!(mr.peers[0].name, "peer-b.octra.test");
+    assert_eq!(mr.peers[0].name, "peer-b.octra.test.");
 }
 
 /// Exercise the `drive_ts2021` framing path end-to-end against an
@@ -621,6 +669,7 @@ async fn map_response_includes_derp_map_when_configured() {
         machines: Arc::new(MachineRegistry::new()),
         registration_store: None,
         derp_map: octravpn_mesh::tailscale_wire::DerpMapStore::shared(derp_map),
+        native_derp: None,
         policy: Arc::new(headscale_api::policy::PolicyStore::default()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
         dns: std::sync::Arc::new(octra_dns_store()),
