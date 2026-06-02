@@ -62,6 +62,7 @@ fn build_app() -> (axum::Router, WireState, PolicyStore, tempfile::TempDir) {
         derp_map: octravpn_mesh::tailscale_wire::DerpMapStore::shared(
             octravpn_mesh::tailscale_wire::DerpMap::default(),
         ),
+        native_derp: None,
         policy: Arc::new(policy.clone()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
         dns: std::sync::Arc::new(octra_dns_store()),

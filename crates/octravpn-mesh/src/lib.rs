@@ -50,29 +50,18 @@ pub use headscale_api::tailscale_wire::{
 
 /// Build the Octra Hub's embedded Tailscale client-facing router.
 ///
-/// The full headscale compatibility router also contains operator
-/// diagnostics and generic routes such as `/health` and `/metrics`.
-/// The Hub already owns those paths, so its embedded wire surface only
-/// mounts the stock-client paths it needs at the root.
+/// Octra owns host-level probes such as `/health` and `/metrics`, so
+/// the embedded surface consumes headscale-rs' generic public control
+/// router with the stock `/health` route omitted.
 pub fn tailscale_wire_embedded_control_router(state: WireState) -> axum::Router {
-    use axum::routing::{get, head, post};
-
-    let knock_cfg = state.knock.clone();
-    let inner = axum::Router::new()
-        .route(
-            "/key",
-            get(headscale_api::tailscale_wire::key_handler::handle_key),
-        )
-        .route(
-            "/ts2021",
-            post(headscale_api::tailscale_wire::noise::handle_ts2021_post),
-        )
-        .route(
-            "/machine/ping-response",
-            head(headscale_api::tailscale_wire::basic_handlers::handle_ping_response),
-        )
-        .with_state(state);
-    headscale_api::tailscale_wire::knock::wrap_router(inner, knock_cfg)
+    headscale_api::tailscale_wire::control_router_with_options(
+        state,
+        headscale_api::tailscale_wire::ControlRouterOptions::without_health_route(),
+    )
+    // The stock control router's fallback is suitable for a standalone
+    // headscale listener. Octra merges this router into a larger app,
+    // so unmatched host paths must keep the normal Octra 404 posture.
+    .fallback(|| async { axum::http::StatusCode::NOT_FOUND })
 }
 
 pub use acl::{AclAction, AclDoc, AclRule, PortRef, SignedAclDoc};

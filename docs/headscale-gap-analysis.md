@@ -72,11 +72,11 @@ and the 2026-05-19 continuation §"Wire-format surprise"):
 | `POST /machine/register` (flat)  | POST   | shipped; keyed compatibility route retained |
 | `POST /machine/map` (flat)       | POST   | shipped; keyed compatibility route retained |
 | `GET /machine/ssh/action/{src}/to/{dst}` | GET | missing — required only if SSH ACLs are exposed |
-| `GET /derp/probe`                | GET    | missing — only needed if we host an embedded DERP |
+| `GET /derp/probe`                | GET    | shipped as the public DERP probe; `/derp` upgrade remains gated on native DERP |
 | `GET /derp` (upgrade)            | GET    | missing — embedded DERP not in scope for interop |
-| `GET /health`, `GET /version`, `GET /robots.txt` | GET | `/health` shipped; `/version`/`robots.txt` missing — P2 |
-| `POST /verify`                   | POST   | missing — DERP client verification — P1 (needed if relay added) |
-| `GET /register/:auth_id`, `GET /auth/:auth_id` | GET | missing — browser/OIDC flow — P2 |
+| `GET /health`, `GET /version`, `GET /robots.txt` | GET | shipped; Octra embeds the public router with headscale-rs `/health` omitted so the Hub-owned probe wins |
+| `POST /verify`                   | POST   | shipped |
+| `GET /register/:auth_id`, `GET /auth/:auth_id` | GET | shipped; OIDC-specific handlers mount when the headscale-rs OIDC runtime is provided |
 
 Upstream's `hscontrol/handlers.go` registers the public side
 (see [WebFetch summary]) and `hscontrol/noise.go` chains the inner
@@ -85,6 +85,14 @@ headscale-rs mirrors this split: public wire routes are built in
 `tailscale_wire::router`/`serve`, while the inner noise router is built
 in `tailscale_wire/noise.rs` and dispatches flat `/machine/register`
 and `/machine/map` plus the keyed compatibility routes.
+
+Octra's Hub embedding consumes that public surface through
+`tailscale_wire_embedded_control_router`, which delegates to
+`headscale_api::tailscale_wire::control_router_with_options` with
+`ControlRouterOptions::without_health_route()`. The Octra side keeps
+the Hub-owned `/health` and `/metrics` routes authoritative and resets
+the generic router fallback to the normal Octra 404 posture when merged
+into the broader control app.
 
 The `/api/v1/...` JSON routes in `http.rs:43-58` are an OctraVPN-only
 admin surface and not part of Tailscale interop; they coexist with the

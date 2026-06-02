@@ -91,6 +91,7 @@ impl WireStateBuilder {
             machines: self.machines,
             registration_store: None,
             derp_map: self.derp_map,
+            native_derp: None,
             policy: self.policy,
             knock: self.knock,
             dns: Arc::new(DnsStore::from_spec(DnsConfigSpec {
