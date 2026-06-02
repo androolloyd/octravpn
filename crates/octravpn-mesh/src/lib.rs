@@ -44,35 +44,20 @@ pub use headscale_api;
 pub use headscale_api::policy;
 pub use headscale_api::tailscale_wire;
 pub use headscale_api::tailscale_wire::{
-    router as tailscale_wire_router, MachineRecord, MachineRegistry, PingTracker, ServerNoiseKey,
-    WireError, WireState,
+    router as tailscale_wire_router, ControlRouterOptions, MachineRecord, MachineRegistry,
+    PingTracker, ServerNoiseKey, WireError, WireState,
 };
 
 /// Build the Octra Hub's embedded Tailscale client-facing router.
 ///
-/// The full headscale compatibility router also contains operator
-/// diagnostics and generic routes such as `/health` and `/metrics`.
-/// The Hub already owns those paths, so its embedded wire surface only
-/// mounts the stock-client paths it needs at the root.
+/// Octra mounts the generic headscale-rs public control listener at the Hub
+/// root, but leaves `/health` to the host control plane so the Octra
+/// attestation-freshness probe keeps its response contract.
 pub fn tailscale_wire_embedded_control_router(state: WireState) -> axum::Router {
-    use axum::routing::{get, head, post};
-
-    let knock_cfg = state.knock.clone();
-    let inner = axum::Router::new()
-        .route(
-            "/key",
-            get(headscale_api::tailscale_wire::key_handler::handle_key),
-        )
-        .route(
-            "/ts2021",
-            post(headscale_api::tailscale_wire::noise::handle_ts2021_post),
-        )
-        .route(
-            "/machine/ping-response",
-            head(headscale_api::tailscale_wire::basic_handlers::handle_ping_response),
-        )
-        .with_state(state);
-    headscale_api::tailscale_wire::knock::wrap_router(inner, knock_cfg)
+    headscale_api::tailscale_wire::control_router_with_options(
+        state,
+        ControlRouterOptions::without_health_route(),
+    )
 }
 
 pub use acl::{AclAction, AclDoc, AclRule, PortRef, SignedAclDoc};

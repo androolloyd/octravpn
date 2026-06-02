@@ -48,6 +48,7 @@ fn build_state() -> (WireState, PreauthMinter, tempfile::TempDir) {
         derp_map: octravpn_mesh::tailscale_wire::DerpMapStore::shared(
             octravpn_mesh::tailscale_wire::DerpMap::default(),
         ),
+        native_derp: None,
         policy: Arc::new(headscale_api::policy::PolicyStore::default()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
         dns: std::sync::Arc::new(octra_dns_store()),
@@ -241,7 +242,7 @@ async fn key_then_register_then_map_round_trip() {
     let raw = to_bytes(resp.into_body(), 32 * 1024).await.unwrap();
     let mr: octravpn_mesh::tailscale_wire::MapResponse = serde_json::from_slice(&raw).unwrap();
     assert_eq!(mr.peers.len(), 1);
-    assert_eq!(mr.peers[0].name, "peer-b.octra.test");
+    assert_eq!(mr.peers[0].name, "peer-b.octra.test.");
 }
 
 /// Exercise the `drive_ts2021` framing path end-to-end against an
@@ -621,6 +622,7 @@ async fn map_response_includes_derp_map_when_configured() {
         machines: Arc::new(MachineRegistry::new()),
         registration_store: None,
         derp_map: octravpn_mesh::tailscale_wire::DerpMapStore::shared(derp_map),
+        native_derp: None,
         policy: Arc::new(headscale_api::policy::PolicyStore::default()),
         knock: octravpn_mesh::tailscale_wire::KnockConfig::disabled(),
         dns: std::sync::Arc::new(octra_dns_store()),
