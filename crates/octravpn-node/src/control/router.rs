@@ -92,3 +92,78 @@ pub(crate) fn router_axum(state: Arc<ControlState>) -> Router {
 
     merged
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        body::{to_bytes, Body},
+        http::{Request, StatusCode},
+    };
+    use octravpn_core::{bounded::BoundedMap, sig::KeyPair};
+    use octravpn_mesh::{ip_alloc::TailnetIpAllocator, PreauthMinter, ServerNoiseKey};
+    use std::{sync::Arc, time::Duration};
+    use tower::ServiceExt;
+
+    fn control_state_with_wire() -> Arc<ControlState> {
+        let dir = tempfile::tempdir().unwrap();
+        let server_noise_key = Arc::new(ServerNoiseKey::load_or_generate(dir.path()).unwrap());
+        let wire_state = octravpn_mesh::WireStateBuilder::new(
+            server_noise_key,
+            Arc::new(PreauthMinter::new()),
+            Arc::new(TailnetIpAllocator::new("router-test")),
+            Arc::new(octravpn_mesh::MachineRegistry::new()),
+            Arc::new(octravpn_mesh::policy::PolicyStore::new()),
+            octravpn_mesh::tailscale_wire::DerpMapStore::shared(
+                octravpn_mesh::tailscale_wire::DerpMap::default(),
+            ),
+        )
+        .build();
+
+        let state = ControlState::new(
+            Arc::new(KeyPair::generate()),
+            Arc::new(crate::onion::OnionRouter::new()),
+            Arc::new(BoundedMap::new(10, Duration::from_secs(60))),
+        )
+        .with_rate_limit_cfg(crate::rate_limit::RateLimitCfg {
+            enabled: false,
+            ..Default::default()
+        })
+        .with_wire_state(Some(wire_state));
+
+        Arc::new(state)
+    }
+
+    #[tokio::test]
+    async fn wire_router_mounts_public_paths_without_shadowing_octra_health() {
+        let app = control_state_with_wire().router_axum();
+
+        let key_resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/key?v=113")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(key_resp.status(), StatusCode::OK);
+
+        let health_resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(health_resp.status(), StatusCode::OK);
+        let body = to_bytes(health_resp.into_body(), 4096).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "warming up");
+        assert!(json.get("uptime_s").is_some());
+        assert!(json.get("last_attestation_unix").is_some());
+    }
+}
