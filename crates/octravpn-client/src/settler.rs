@@ -21,13 +21,13 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Result};
 use octravpn_core::{
     address::Address,
-    control::{ProposedReceipt, SessionStateResponse},
+    control::{PostReceiptResponse, ProposedReceipt, SessionStateResponse},
     receipt::SignedReceipt,
     session::SessionId,
     sig::verify,
 };
 use serde_json::json;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::runner::{ActiveSession, Client};
 
@@ -88,6 +88,28 @@ pub(crate) async fn settle_active(client: &Arc<Client>, active: ActiveSession) -
         pvac_zero_proof: proposed.pvac_zero_proof.clone(),
     };
     signed.verify().context("dual-sig self-verify")?;
+
+    match post_countersigned_receipt(
+        client,
+        &exit.validator.endpoint,
+        &active.session_id,
+        &signed,
+    )
+    .await
+    {
+        Ok(()) => {
+            info!(
+                settlement_hash = %signed.settlement_hash(),
+                "countersigned receipt posted to exit"
+            );
+        }
+        Err(e) => {
+            warn!(
+                error = %e,
+                "countersigned receipt handback failed; falling back to v3 settle_confirm"
+            );
+        }
+    }
 
     submit_settle_confirm(client, &active, signed.receipt.bytes_used).await
 }
@@ -172,4 +194,36 @@ async fn fetch_proposed_receipt(
     }
     let body: SessionStateResponse = resp.json().await.context("decode session state")?;
     body.proposed.ok_or_else(|| anyhow!("no proposed receipt"))
+}
+
+async fn post_countersigned_receipt(
+    client: &Arc<Client>,
+    wg_endpoint: &str,
+    session_id: &SessionId,
+    signed: &SignedReceipt,
+) -> Result<()> {
+    let url = octravpn_core::control::receipt_url(wg_endpoint, session_id);
+    let local_hash = signed.settlement_hash();
+    let resp = client
+        .http()
+        .post(&url)
+        .json(signed)
+        .send()
+        .await
+        .context("control-plane POST receipt")?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("control POST receipt status {}", resp.status()));
+    }
+    let body: PostReceiptResponse = resp.json().await.context("decode receipt POST response")?;
+    if !body.accepted {
+        return Err(anyhow!("operator rejected countersigned receipt"));
+    }
+    if body.settlement_hash != local_hash {
+        return Err(anyhow!(
+            "settlement_hash mismatch: local={} operator={}",
+            local_hash,
+            body.settlement_hash
+        ));
+    }
+    Ok(())
 }

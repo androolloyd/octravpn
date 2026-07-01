@@ -24,6 +24,10 @@ pub fn path_state(session_id: &SessionId) -> String {
     format!("/session/{}", session_id.to_hex())
 }
 
+pub fn path_receipt(session_id: &SessionId) -> String {
+    format!("{}/receipt", path_state(session_id))
+}
+
 /// Convention: WG endpoint is `host:51820`; HTTP control plane lives at
 /// the same host on port 51821. Centralized here so client + node never
 /// disagree on the convention.
@@ -37,6 +41,11 @@ pub fn base_url_for(wg_endpoint: &str) -> String {
 /// Full URL for the per-session state endpoint on a node.
 pub fn session_state_url(wg_endpoint: &str, session_id: &SessionId) -> String {
     format!("{}{}", base_url_for(wg_endpoint), path_state(session_id))
+}
+
+/// Full URL for handing a countersigned receipt back to a node.
+pub fn receipt_url(wg_endpoint: &str, session_id: &SessionId) -> String {
+    format!("{}{}", base_url_for(wg_endpoint), path_receipt(session_id))
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -59,6 +68,12 @@ pub struct AnnounceSessionRequest {
 pub struct AnnounceSessionResponse {
     pub accepted: bool,
     pub node_pubkey: PublicKey,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PostReceiptResponse {
+    pub accepted: bool,
+    pub settlement_hash: String,
 }
 
 /// Build the deterministic payload clients sign when announcing a
@@ -118,5 +133,6 @@ mod tests {
     fn path_consistent() {
         let id = SessionId::new([1u8; 32]);
         assert!(path_state(&id).ends_with(&id.to_hex()));
+        assert_eq!(path_receipt(&id), format!("{}/receipt", path_state(&id)));
     }
 }

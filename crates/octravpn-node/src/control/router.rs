@@ -39,6 +39,10 @@ pub(crate) fn router_axum(state: Arc<ControlState>) -> Router {
     let limited_routes = Router::new()
         .route("/session", post(handlers::session::announce))
         .route("/session/:id", get(handlers::receipt::get_state))
+        .route(
+            "/session/:id/receipt",
+            post(handlers::receipt::post_receipt),
+        )
         .route("/health", get(handlers::health::health))
         .route("/metrics", get(handlers::metrics::metrics))
         // Preauth-minting surface for the Tailscale-interop bridge.

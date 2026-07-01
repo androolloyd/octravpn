@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use octravpn_core::{
     bearer::BearerCheck, bounded::BoundedMap, control::AnnounceSessionRequest,
-    receipt::ReceiptContext, receipt_journal::ReceiptJournal, rpc::RpcClient, session::SessionId,
-    sig::KeyPair,
+    receipt::ReceiptContext, receipt_journal::ReceiptJournal, receipt_vault::ReceiptVault,
+    rpc::RpcClient, session::SessionId, sig::KeyPair,
 };
 use octravpn_mesh::{PreauthMinter, WireState};
 
@@ -79,6 +79,10 @@ pub(crate) struct ControlState {
     /// be tricked into signing two receipts at the same
     /// `(session_id, seq)` even across an OOM-kill or segfault.
     pub receipt_journal: Arc<ReceiptJournal>,
+    /// v4 relay-settlement off-chain half: durable mirror of
+    /// client-countersigned receipt blobs. Separate from
+    /// `receipt_journal`, which remains a fixed-width seq-floor store.
+    pub receipt_vault: Arc<ReceiptVault>,
     /// In-memory preauth-key minter the `POST /admin/preauth`
     /// endpoint hands out tokens from. Shared with `octravpn-node`'s
     /// `mesh mint-preauth` CLI surface so a `docker exec` can mint a
@@ -265,6 +269,7 @@ impl ControlState {
             metrics_token: None,
             receipt_context,
             receipt_journal,
+            receipt_vault: Arc::new(ReceiptVault::in_memory()),
             preauth_minter: PreauthMinter::new(),
             admin_token: None,
             wire_state: None,
@@ -289,6 +294,13 @@ impl ControlState {
     ) -> Self {
         self.shadow_signer = signer;
         self.shadow_price_per_byte = price_per_byte;
+        self
+    }
+
+    /// Attach the persistent receipt-vault store used by
+    /// `POST /session/:id/receipt`.
+    pub(crate) fn with_receipt_vault(mut self, vault: Arc<ReceiptVault>) -> Self {
+        self.receipt_vault = vault;
         self
     }
 

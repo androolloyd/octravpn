@@ -22,6 +22,7 @@ pub mod enroll;
 pub mod onion;
 pub mod receipt;
 pub mod receipt_journal;
+pub mod receipt_vault;
 pub mod rpc;
 pub mod session;
 pub mod spki_verifier;
@@ -39,6 +40,7 @@ pub use address::{Address, ADDRESS_LEN};
 pub use earnings::{LedgerPoint, POINT_LEN};
 pub use enroll::{EnrollChallenge, EnrollPeer, EnrollRequest, EnrollResponse};
 pub use receipt::{Receipt, ReceiptError, SignedReceipt};
+pub use receipt_vault::{ReceiptVault, ReceiptVaultError};
 pub use session::{
     EndpointRecord, OpenSessionParams, RouteOpening, SessionId, SessionState, ValidatorRecord,
 };

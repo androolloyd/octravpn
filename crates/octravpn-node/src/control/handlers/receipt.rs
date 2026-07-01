@@ -16,8 +16,9 @@ use axum::{
     Json,
 };
 use octravpn_core::{
-    control::{ProposedReceipt, SessionStateResponse},
-    receipt::Receipt,
+    control::{PostReceiptResponse, ProposedReceipt, SessionStateResponse},
+    receipt::{Receipt, ReceiptError, SignedReceipt},
+    receipt_vault::ReceiptVaultError,
     session::SessionId,
 };
 
@@ -229,6 +230,111 @@ pub(crate) async fn get_state(
     .into_response()
 }
 
+pub(crate) async fn post_receipt(
+    State(s): State<Arc<ControlState>>,
+    Path(id_hex): Path<String>,
+    Json(sr): Json<SignedReceipt>,
+) -> impl IntoResponse {
+    let Some(id) = SessionId::from_hex(&id_hex) else {
+        return (StatusCode::BAD_REQUEST, Json(ApiError::new("bad id"))).into_response();
+    };
+
+    if let Err(e) = sr.verify() {
+        let status = match e {
+            ReceiptError::BadClientSig | ReceiptError::BadNodeSig => StatusCode::UNAUTHORIZED,
+            _ => StatusCode::BAD_REQUEST,
+        };
+        return (status, Json(ApiError::new("bad receipt signature"))).into_response();
+    }
+
+    if sr.receipt.context != *s.receipt_context {
+        return (
+            StatusCode::CONFLICT,
+            Json(ApiError::new("receipt context mismatch")),
+        )
+            .into_response();
+    }
+
+    if sr.receipt.session_id.as_bytes() != id.as_bytes() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new("receipt session id mismatch")),
+        )
+            .into_response();
+    }
+
+    if sr.node_pubkey != s.node_kp.public {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ApiError::new("receipt not signed by this node")),
+        )
+            .into_response();
+    }
+
+    let vault_floor = s.receipt_vault.current_seq(&id).unwrap_or(0);
+    if sr.receipt.seq < vault_floor {
+        return (
+            StatusCode::CONFLICT,
+            Json(ApiError::new("receipt seq below vault floor")),
+        )
+            .into_response();
+    }
+    let journal_floor = s.receipt_journal.floor(&id);
+    if sr.receipt.seq < journal_floor {
+        return (
+            StatusCode::CONFLICT,
+            Json(ApiError::new("receipt seq below journal floor")),
+        )
+            .into_response();
+    }
+
+    let settlement_hash = sr.settlement_hash();
+    if let Err(e) = s.receipt_vault.put(&id, &sr) {
+        tracing::warn!(error = %e, session = %id_hex, "receipt vault write failed");
+        let status = match e {
+            ReceiptVaultError::SeqRegressed { .. } => StatusCode::CONFLICT,
+            ReceiptVaultError::SessionMismatch { .. } => StatusCode::BAD_REQUEST,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        return (status, Json(ApiError::new("receipt vault write failed"))).into_response();
+    }
+
+    if s.events.receiver_count() > 0 {
+        s.events.publish(crate::events::Event {
+            ts_unix: octravpn_core::util::now_unix_secs(),
+            kind: "receipt_countersigned".to_string(),
+            payload: serde_json::json!({
+                "session_id": id_hex.clone(),
+                "seq": sr.receipt.seq,
+                "bytes_used": sr.receipt.bytes_used,
+                "settlement_hash": settlement_hash.clone(),
+            }),
+        });
+    }
+    if let Some(audit) = &s.audit {
+        let rec = crate::audit::AuditRecord {
+            ts_unix: octravpn_core::util::now_unix_secs(),
+            kind: "receipt_countersigned",
+            source: None,
+            session_id: Some(id_hex),
+            extra: serde_json::json!({
+                "seq": sr.receipt.seq,
+                "bytes_used": sr.receipt.bytes_used,
+                "settlement_hash": settlement_hash.clone(),
+            }),
+        };
+        if let Err(e) = audit.write_async(rec).await {
+            tracing::warn!(error = %e, "audit log receipt_countersigned write failed");
+        }
+    }
+
+    Json(PostReceiptResponse {
+        accepted: true,
+        settlement_hash,
+    })
+    .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,6 +359,48 @@ mod tests {
             .unwrap();
         assert_eq!(status, StatusCode::OK, "body = {body:?}");
         serde_json::from_slice::<SessionStateResponse>(&body).unwrap()
+    }
+
+    async fn parse_post_receipt(resp: axum::response::Response) -> PostReceiptResponse {
+        let status = resp.status();
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        assert_eq!(status, StatusCode::OK, "body = {body:?}");
+        serde_json::from_slice::<PostReceiptResponse>(&body).unwrap()
+    }
+
+    #[tokio::test]
+    async fn post_receipt_vaults_dual_signed_receipt_and_echoes_hash() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let client_kp = KeyPair::generate();
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let state = Arc::new(ControlState::new(node_kp.clone(), router, allowlist));
+        let id = SessionId::new([0x77u8; 32]);
+        let receipt = Receipt::new(
+            (*state.receipt_context).clone(),
+            id.clone(),
+            1,
+            4096,
+            octravpn_core::session::Blind::new([0x88; 32]),
+        );
+        let signed = SignedReceipt::build(receipt, &client_kp, node_kp.as_ref());
+        let want_hash = signed.settlement_hash();
+
+        let resp = post_receipt(
+            State(state.clone()),
+            Path(id.to_hex()),
+            Json(signed.clone()),
+        )
+        .await
+        .into_response();
+        let body = parse_post_receipt(resp).await;
+
+        assert!(body.accepted);
+        assert_eq!(body.settlement_hash, want_hash);
+        assert_eq!(body.settlement_hash.len(), 64);
+        assert_eq!(state.receipt_vault.get(&id), Some(signed));
     }
 
     /// P1-8/9: a fresh session starts at journal floor 0; the first

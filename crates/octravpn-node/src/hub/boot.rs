@@ -138,6 +138,21 @@ pub(super) async fn build_hub(cfg: NodeConfig) -> Result<Hub> {
         "receipt journal fsync policy set"
     );
 
+    // v4 relay-settlement off-chain half: store full client-
+    // countersigned receipts independently of the fixed-width
+    // receipt-journal floor. The POST handler fsyncs each append
+    // before ACK, so a crash does not lose a receipt the client
+    // believes the operator accepted.
+    let vault_path: std::path::PathBuf = cfg.control.receipt_vault_path.clone().map_or_else(
+        || "./state/receipt-vault.bin".into(),
+        std::path::PathBuf::from,
+    );
+    let receipt_vault = Arc::new(
+        octravpn_core::receipt_vault::ReceiptVault::open(&vault_path)
+            .with_context(|| format!("open receipt vault at {}", vault_path.display()))?,
+    );
+    info!(vault = %vault_path.display(), "receipt vault opened");
+
     // Perf-8 (audit-8 OOM-1): cap + TTL on the in-mem mirror so the
     // BTreeMap doesn't grow unbounded with every session that ever
     // opens on the node. Defaults bound the mirror at ~8.8 MB
@@ -235,6 +250,7 @@ pub(super) async fn build_hub(cfg: NodeConfig) -> Result<Hub> {
         allowlist,
         metrics,
         receipt_journal,
+        receipt_vault,
         pvac,
         wg_backend,
         wg_backend_selection,

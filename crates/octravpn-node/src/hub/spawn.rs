@@ -70,6 +70,7 @@ impl Hub {
         let metrics = self.metrics.clone();
         let receipt_context = Arc::new(self.build_receipt_context());
         let receipt_journal = self.receipt_journal.clone();
+        let receipt_vault = self.receipt_vault.clone();
         tokio::spawn(async move {
             let listen: std::net::SocketAddr = self
                 .cfg
@@ -211,6 +212,7 @@ impl Hub {
             .with_admin_token(admin_token)
             .with_session_verifier(SessionAdmissionVerifier::new(self.chain.rpc.clone()))
             .with_wire_state(wire_state.as_ref().map(|(ws, _)| ws.clone()))
+            .with_receipt_vault(receipt_vault)
             .with_shadow_signer(shadow_signer, 0);
             // Audit-3 H-1: bearer-gated routes no longer leak
             // token-presence on the wire (every reject reason returns

@@ -81,6 +81,10 @@ pub(crate) struct Hub {
     /// Shared with the control plane via an Arc — every `get_state`
     /// call consults this before signing.
     pub receipt_journal: Arc<octravpn_core::receipt_journal::ReceiptJournal>,
+    /// v4 relay-settlement receipt vault. Stores variable-length
+    /// `SignedReceipt` JSON blobs posted back by clients, independently
+    /// of the fixed-width receipt journal above.
+    pub receipt_vault: Arc<octravpn_core::receipt_vault::ReceiptVault>,
     /// Managed `octra-pvac-sidecar` subprocess for the HFHE path.
     /// `Some` iff `cfg.pvac.enabled = true` AND
     /// `PvacClient::spawn` succeeded at boot. If the operator enabled

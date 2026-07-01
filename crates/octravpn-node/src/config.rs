@@ -895,6 +895,14 @@ pub(crate) struct ControlCfg {
     /// P1-9.
     #[serde(default)]
     pub receipt_journal_path: Option<String>,
+    /// v4 relay-settlement receipt vault. Stores full client-
+    /// countersigned `SignedReceipt` JSON blobs for unilateral
+    /// relay-claim preimage recovery. Separate from
+    /// `receipt_journal_path`, whose file format is fixed-width
+    /// `[session_id, seq]` records only. `None` resolves to
+    /// `./state/receipt-vault.bin`.
+    #[serde(default)]
+    pub receipt_vault_path: Option<String>,
     /// Perf-1: durability policy for the receipt-seq journal's per-
     /// receipt `bump`. Two accepted values, default `"periodic"`:
     ///
@@ -964,6 +972,7 @@ impl Default for ControlCfg {
             events_token: None,
             metrics_token: None,
             receipt_journal_path: None,
+            receipt_vault_path: None,
             fsync_policy: None,
             admin_token: None,
             tailscale_wire_state_dir: None,
@@ -1061,6 +1070,7 @@ impl fmt::Debug for ControlCfg {
             .field("events_token", &RedactedOpt(&self.events_token))
             .field("metrics_token", &RedactedOpt(&self.metrics_token))
             .field("receipt_journal_path", &self.receipt_journal_path)
+            .field("receipt_vault_path", &self.receipt_vault_path)
             .field("fsync_policy", &self.fsync_policy)
             .field("admin_token", &RedactedOpt(&self.admin_token))
             .field("tailscale_wire_state_dir", &self.tailscale_wire_state_dir)
