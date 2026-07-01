@@ -1,0 +1,382 @@
+// OctraVPN v3 — VPN credit token (OCS01-shaped) — DRAFT / NOT WIRED.
+//
+// STATUS: draft 2026-06-30. This file is a SELF-CONTAINED sketch. It is
+// NOT spliced into program/main-v3.aml and NOT deployed anywhere. Do not
+// treat any path below as devnet-proven — see "PROVENANCE" at the bottom.
+//
+// ------------------------------------------------------------------
+// WHAT THIS IS
+// ------------------------------------------------------------------
+// A fungible, OCS01-shaped credit token ("VPN credit") that users buy
+// 1:1 with native OCT and spend inside the OctraVPN v3 economy. Shape
+// mirrors the usual OCS01/ERC20 surface — a `map[address]uint` balance
+// ledger, a `uint` supply counter, transfer/mint/burn — but adds a hard
+// native-OCT redemption path so the credit is a fully-backed claim on
+// OCT rather than an unbacked point system.
+//
+// Intended eventual home: these state fields + functions get spliced
+// into `contract OctraVPN_V3` (program/main-v3.aml) so credit can top up
+// tailnets (deposit_credit_to_tailnet) and operators can optionally be
+// paid in credit (the earn-in-credit branch of settle_confirm). To keep
+// THIS draft self-contained and independently FV-checkable, the handful
+// of fields that already live in main-v3 (tailnet_treasury,
+// tailnet_count, tailnet_retired) are re-declared locally below and
+// tagged `// SHARED-WITH-MAIN-V3`. When wiring for real, delete the
+// local re-declarations and reference main-v3's existing fields instead.
+//
+// ------------------------------------------------------------------
+// THE SOLVENCY INVARIANT  (non-negotiable)
+// ------------------------------------------------------------------
+//
+//        credit_reserve  >=  credit_supply        (always, post-tx)
+//
+// Every credit unit in circulation is backed 1:1 by OCT sequestered in
+// `credit_reserve` — a DEDICATED reservoir that is its own earmark of
+// the contract's OCT balance and is NEVER commingled with `self.treasury`.
+// This separation is the whole point: in main-v3, `self.treasury` is
+// owner-drainable via `withdraw_program_treasury(to, amount)` (see
+// main-v3.aml ~L260). If credit backing lived in `self.treasury`, a
+// single owner signature could drain the backing out from under holders
+// and leave the token insolvent. Backing therefore lives in its own
+// pool with NO owner-only withdrawal path pointed at it. The only ways
+// OCT leaves `credit_reserve` are:
+//   * redeem_credit_to_native  — holder burns credit, gets their OCT.
+//   * deposit_credit_to_tailnet — holder burns credit, backing OCT is
+//                                 re-earmarked into a tailnet treasury.
+// Both burn exactly as much credit as OCT they move, so supply and
+// reserve fall together and `reserve >= supply` is preserved. Every
+// state-mutating credit function ends with `assert_solvent()`, which
+// require()-reverts the whole tx if the invariant would break.
+//
+// ------------------------------------------------------------------
+// !!! WARNING — BLAST RADIUS OF THE SINGLE OWNER KEY !!!
+// ------------------------------------------------------------------
+// A redeemable, backing-HOLDING token materially widens the damage a
+// single compromised/hostile owner key can do. main-v3 governance today
+// is single-signature: transfer_ownership, set_paused, set_params, and
+// withdraw_program_treasury are all gated only by `caller == self.owner`.
+// Adding a pool of real OCT that users have a redemption claim on raises
+// the stakes of that one key:
+//   * A malicious REDEPLOY under a compromised owner key could ship a
+//     `withdraw_credit_reserve` that this draft deliberately omits, and
+//     drain the backing.
+//   * set_paused could be abused to FREEZE mint/spend. (This draft keeps
+//     redeem_credit_to_native NON-pause-gated precisely so pause cannot
+//     be used to trap holder backing — but a redeploy could remove that.)
+// DO NOT ship this to a network holding real value under single-owner-key
+// governance. Pair it with multisig / quorum governance (M-of-N owner
+// set, timelocked upgrades) BEFORE wiring. Until then this is testnet-only.
+//
+// ------------------------------------------------------------------
+// NATIVE VALUE-SAFETY (FV)
+// ------------------------------------------------------------------
+// Octra's compiler runs live value-safety verification (aml_safety_
+// report_v1); every value/id/amount field here is `uint` (UNSIGNED) so
+// the checker can prove no negative-value flows. Balances, supply, and
+// reserve are all uint; all subtractions are require()-guarded against
+// underflow first.
+
+contract OctraVPN_V3_Credit {
+
+  // ============================================================
+  // Constants
+  // ============================================================
+
+  // Earn-mode selector for the settle_confirm earn-in-credit branch.
+  const EARN_MODE_NATIVE: uint = 0   // default: claimable native earnings
+  const EARN_MODE_CREDIT: uint = 1   // operator opts to be paid in credit
+
+  // ============================================================
+  // Events
+  // ============================================================
+
+  event CreditMinted(to: address, amount: uint, new_supply: uint, new_reserve: uint)
+  event CreditTransferred(from: address, to: address, amount: uint)
+  event CreditRedeemed(from: address, amount: uint, new_supply: uint, new_reserve: uint)
+  event CreditDepositedToTailnet(tailnet_id: uint, from: address, amount: uint, new_treasury: uint)
+  event CreditEarned(circle: address, operator: address, amount: uint, new_supply: uint, new_reserve: uint)
+
+  // ============================================================
+  // State
+  // ============================================================
+
+  state {
+    owner: address
+    paused: uint
+
+    // --------- OCS01-shaped credit ledger ---------
+    credit_balance: map[address]uint   // holder -> credit units
+    credit_supply: uint                // sum of all credit_balance entries
+
+    // --------- Dedicated 1:1 backing reservoir ---------
+    // SEPARATE from any `self.treasury`. No owner-only path drains this.
+    // Invariant (post-tx): credit_reserve >= credit_supply.
+    credit_reserve: uint
+
+    // --------- Per-circle earn mode (opt-in for earn-in-credit) ---------
+    circle_earn_mode: map[address]uint // default 0 == EARN_MODE_NATIVE
+
+    // --------- SHARED-WITH-MAIN-V3 (local re-decls for self-containment) ---------
+    // When splicing into OctraVPN_V3, DELETE these four and use main-v3's
+    // existing tailnet_* fields (main-v3.aml ~L99-105) directly.
+    tailnet_count: uint
+    tailnet_treasury: map[uint]uint
+    tailnet_retired: map[uint]uint
+  }
+
+  // ============================================================
+  // Constructor
+  // ============================================================
+
+  constructor() {
+    self.owner = caller
+    self.paused = 0
+    self.credit_supply = 0
+    self.credit_reserve = 0
+    self.tailnet_count = 0   // SHARED-WITH-MAIN-V3: drop on splice
+  }
+
+  // ============================================================
+  // Internal helpers
+  // ============================================================
+
+  private fn require_owner() {
+    require(caller == self.owner, "not owner")
+  }
+
+  private fn require_not_paused() {
+    require(self.paused == 0, "paused")
+  }
+
+  // THE invariant, enforced as a post-condition on every mutating credit
+  // path. A failed require() reverts the whole tx, so this is a real
+  // guard, not a comment: any code path that would leave more credit in
+  // circulation than OCT in the reserve cannot commit.
+  private fn assert_solvent() {
+    require(self.credit_reserve >= self.credit_supply, "INVARIANT: reserve < supply")
+  }
+
+  // ============================================================
+  // Governance (owner-only; NOT pause-gated — matches v1.1/main-v3)
+  //
+  // NOTE the deliberate ABSENCE of any withdraw_credit_reserve(). The
+  // reserve has no owner-only exit BY DESIGN. Adding one re-opens the
+  // exact rug vector the separate reservoir exists to close — do not add
+  // it without multisig/quorum governance (see header WARNING).
+  // ============================================================
+
+  fn transfer_ownership(new_owner: address): bool {
+    require_owner()
+    require(is_address(new_owner), "invalid owner")
+    self.owner = new_owner
+    return true
+  }
+
+  fn set_paused(p: uint): bool {
+    require_owner()
+    require(p == 0 || p == 1, "p must be 0 or 1")
+    self.paused = p
+    return true
+  }
+
+  // ============================================================
+  // OCS01 core — mint / transfer / redeem
+  // ============================================================
+
+  // Buy credit 1:1 with attached OCT. The attached `value` OCT lands in
+  // the contract balance; we earmark ALL of it into credit_reserve (never
+  // self.treasury) and credit the caller the same number of units. Supply
+  // and reserve grow by exactly `value`, so the invariant is preserved.
+  payable fn mint_credit(): bool {
+    require_not_paused()
+    require(value > 0, "no OCT attached")
+    self.credit_balance[caller] = self.credit_balance[caller] + value
+    self.credit_supply = self.credit_supply + value
+    self.credit_reserve = self.credit_reserve + value
+    assert_solvent()
+    emit CreditMinted(caller, value, self.credit_supply, self.credit_reserve)
+    return true
+  }
+
+  // Plain OCS01 transfer. Moves units between holders; supply and reserve
+  // are untouched, so solvency is trivially preserved (asserted anyway).
+  fn transfer_credit(to: address, amount: uint): bool {
+    require_not_paused()
+    require(is_address(to), "invalid to")
+    require(to != caller, "self-transfer")
+    require(amount > 0, "amount > 0")
+    require(self.credit_balance[caller] >= amount, "insufficient credit")
+    self.credit_balance[caller] = self.credit_balance[caller] - amount
+    self.credit_balance[to] = self.credit_balance[to] + amount
+    assert_solvent()
+    emit CreditTransferred(caller, to, amount)
+    return true
+  }
+
+  // Burn credit, pay the caller the backing OCT out of credit_reserve.
+  //
+  // NOT pause-gated ON PURPOSE: redemption is the holder's exit. Gating
+  // it behind pause would let a hostile/compromised owner key freeze
+  // withdrawals and trap holder backing (a rug). Anti-rug > pausability
+  // for the exit path. (mint/transfer/deposit ARE pause-gated.)
+  //
+  // CEI ordering: effects (decrement balance/supply/reserve) BEFORE the
+  // external transfer(); `nonreentrant` is belt-and-suspenders on top.
+  nonreentrant fn redeem_credit_to_native(amount: uint): bool {
+    require(amount > 0, "amount > 0")
+    require(self.credit_balance[caller] >= amount, "insufficient credit")
+    // Reserve must cover the payout. If the invariant held before this
+    // tx, this can never fail (balance <= supply <= reserve); it is a
+    // loud tripwire against any future bug that inflated supply without
+    // backing it.
+    require(self.credit_reserve >= amount, "reserve underflow (INVARIANT BREACH)")
+    self.credit_balance[caller] = self.credit_balance[caller] - amount
+    self.credit_supply = self.credit_supply - amount
+    self.credit_reserve = self.credit_reserve - amount
+    require(transfer(caller, amount), "reserve payout failed")
+    assert_solvent()
+    emit CreditRedeemed(caller, amount, self.credit_supply, self.credit_reserve)
+    return true
+  }
+
+  // ============================================================
+  // Spend credit inside the v3 economy
+  // ============================================================
+
+  // Top up a tailnet treasury by BURNING credit. The backing OCT is
+  // re-earmarked from credit_reserve into tailnet_treasury — no external
+  // transfer, the OCT never leaves the contract, only its label changes
+  // from "credit backing" to "tailnet treasury". Because tailnet treasury
+  // is denominated in native OCT (sessions pay from it; withdraw_tailnet_
+  // treasury sends native), the released backing lands in the correct
+  // unit with no double-count. Supply and reserve both drop by `amount`,
+  // so `reserve >= supply` holds. Anyone may top up (membership is an
+  // off-chain ACL, matching main-v3 deposit_to_tailnet).
+  fn deposit_credit_to_tailnet(tailnet_id: uint, amount: uint): bool {
+    require_not_paused()
+    require(amount > 0, "amount > 0")
+    require(tailnet_id < self.tailnet_count, "tailnet not found")
+    require(self.tailnet_retired[tailnet_id] == 0, "tailnet retired")
+    require(self.credit_balance[caller] >= amount, "insufficient credit")
+    require(self.credit_reserve >= amount, "reserve underflow (INVARIANT BREACH)")
+    self.credit_balance[caller] = self.credit_balance[caller] - amount
+    self.credit_supply = self.credit_supply - amount
+    self.credit_reserve = self.credit_reserve - amount
+    self.tailnet_treasury[tailnet_id] = self.tailnet_treasury[tailnet_id] + amount
+    assert_solvent()
+    emit CreditDepositedToTailnet(tailnet_id, caller, amount, self.tailnet_treasury[tailnet_id])
+    return true
+  }
+
+  // Owner-set opt-in flag: does this circle's operator want native
+  // earnings (default) or credit? Draft leaves this owner-gated for
+  // simplicity; the real wiring should let the CIRCLE OWNER set their own
+  // mode (require self.circle_owner[circle] == caller from main-v3).
+  fn set_circle_earn_mode(circle: address, mode: uint): bool {
+    require_owner()
+    require(is_address(circle), "invalid circle")
+    require(mode == EARN_MODE_NATIVE || mode == EARN_MODE_CREDIT, "bad mode")
+    self.circle_earn_mode[circle] = mode
+    return true
+  }
+
+  // ============================================================
+  // earn-in-credit branch for settle_confirm  (SKETCH — DO NOT WIRE)
+  // ============================================================
+  //
+  // Context: main-v3 settle_confirm() (main-v3.aml ~L549-600) settles a
+  // session and, in its `if net_after_fee > 0 { ... }` block, adds
+  // net_after_fee to self.circle_earnings_total[circle] (claimable 1:1 as
+  // native OCT via claim_earnings). The net_after_fee OCT is ALREADY
+  // inside the contract at that point — it came out of the tailnet
+  // treasury when the session opened.
+  //
+  // The earn-in-credit variant pays the operator in credit instead. The
+  // ONLY safe way to do that is a RE-EARMARK, not a fresh deposit: move
+  // the same OCT from the "earnings" earmark to the "credit backing"
+  // earmark and mint the matching credit. Total contract OCT is unchanged,
+  // so solvency holds. The helper below does exactly that and is written
+  // so it could be called from inside settle_confirm once wired:
+  //
+  //   if net_after_fee > 0 {
+  //     if self.circle_earn_mode[circle] == EARN_MODE_CREDIT {
+  //       earn_in_credit(circle, self.circle_owner[circle], net_after_fee)
+  //     } else {
+  //       // ...existing circle_earnings_total + hash-chain commit...
+  //     }
+  //   }
+  //
+  // It is `private` and NOT reachable from any live entrypoint in this
+  // draft — settle_confirm is a SHARED main-v3 function and is NOT
+  // reproduced or edited here. Wiring it requires editing main-v3's
+  // settle_confirm and a full redeploy (see PROVENANCE).
+  private fn earn_in_credit(circle: address, operator: address, net_after_fee: uint) {
+    require(net_after_fee > 0, "nothing to earn")
+    require(is_address(operator), "invalid operator")
+    // Re-earmark: the OCT is already in-contract, so we ONLY move
+    // accounting. Caller (settle_confirm) must NOT have already added
+    // this same net_after_fee to circle_earnings_total, or it would be
+    // double-counted against the same OCT.
+    self.credit_balance[operator] = self.credit_balance[operator] + net_after_fee
+    self.credit_supply = self.credit_supply + net_after_fee
+    self.credit_reserve = self.credit_reserve + net_after_fee
+    assert_solvent()
+    emit CreditEarned(circle, operator, net_after_fee, self.credit_supply, self.credit_reserve)
+  }
+
+  // ============================================================
+  // Views (OCS01 surface + solvency introspection)
+  // ============================================================
+
+  view fn balance_of(holder: address): uint {
+    return self.credit_balance[holder]
+  }
+
+  view fn total_supply(): uint {
+    return self.credit_supply
+  }
+
+  view fn total_reserve(): uint {
+    return self.credit_reserve
+  }
+
+  // Should always be true post-any-tx. Off-chain monitors can poll this.
+  view fn is_solvent(): bool {
+    return self.credit_reserve >= self.credit_supply
+  }
+
+  // Backing held above the 1:1 floor. With exact 1:1 mint/redeem/spend
+  // this is 0; a non-zero surplus would flag a rounding or accounting bug
+  // worth investigating (or, later, an intentional over-collateral buffer).
+  view fn reserve_surplus(): uint {
+    return self.credit_reserve - self.credit_supply
+  }
+
+  view fn get_circle_earn_mode(circle: address): uint {
+    return self.circle_earn_mode[circle]
+  }
+}
+
+// ------------------------------------------------------------------
+// PROVENANCE — what is proven vs assumed (be honest)
+// ------------------------------------------------------------------
+// PROVEN elsewhere: `map[address]uint`, `payable`/`value`, `transfer()`,
+//   `nonreentrant`, `is_address()`, `require`, `emit`, and uint value-
+//   safety are all exercised by the LIVE main-v3 deployment (register_
+//   circle, deposit_to_tailnet, claim_earnings, withdraw_tailnet_treasury).
+//   So the primitives this token uses are devnet-confirmed.
+// NOT PROVEN: this specific contract has NEVER been compiled, FV-checked,
+//   or deployed. The mint/redeem/deposit_credit/earn-in-credit paths are
+//   UNCONFIRMED until a devnet redeploy + a confirmed round-trip
+//   (mint -> transfer -> redeem, and mint -> deposit_credit_to_tailnet).
+//   Do NOT wire into main-v3 or advertise redemption until then.
+// BEFORE WIRING checklist:
+//   1. Splice state + fns into contract OctraVPN_V3; delete the
+//      SHARED-WITH-MAIN-V3 local re-decls.
+//   2. Add credit_reserve init (=0) to the main-v3 constructor.
+//   3. Edit settle_confirm to call earn_in_credit on the CREDIT branch
+//      (and make it CIRCLE-OWNER-settable, not owner-only).
+//   4. Compile + FV (expect aml_safety_report_v1 clean; 0-based ids may
+//      warn benignly).
+//   5. Redeploy to devnet; confirm each new op_type executes.
+//   6. Move governance to multisig/quorum BEFORE any real value (WARNING).
