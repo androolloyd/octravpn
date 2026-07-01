@@ -98,6 +98,11 @@ impl Hub {
             // (matching the `/events` "endpoint hidden" design). The
             // PreauthMinter is shared with `/admin/preauth` so a key
             // minted via that endpoint is redeemable through `register`.
+            if self.cfg.control.derp.serve && self.cfg.control.tailscale_wire_state_dir.is_none() {
+                return Err(anyhow!(
+                    "[control.derp].serve requires [control].tailscale_wire_state_dir"
+                ));
+            }
             let wire_state = if let Some(dir) = self
                 .cfg
                 .control
@@ -143,10 +148,25 @@ impl Hub {
                 // Wall 6: optionally load a DERP-map fixture from the
                 // path advertised in OCTRAVPN_DERP_MAP_PATH. Unset ⇒
                 // empty map ⇒ matches pre-Wall-6 behaviour.
-                let derp_map = match std::env::var("OCTRAVPN_DERP_MAP_PATH") {
-                    Ok(path) if !path.is_empty() => load_derp_map(std::path::Path::new(&path))
-                        .with_context(|| format!("load DERP map from {path}"))?,
-                    _ => empty_derp_map(),
+                let native_derp = if self.cfg.control.derp.serve {
+                    let runtime = crate::native_derp::load_native_derp_runtime(&dir)?;
+                    info!(
+                        host_name = %listen.ip(),
+                        key = %dir.join("derp.key").display(),
+                        "native DERP enabled on control plane"
+                    );
+                    Some(runtime)
+                } else {
+                    None
+                };
+                let derp_map = if self.cfg.control.derp.serve {
+                    crate::native_derp::self_derp_map(listen.ip().to_string())
+                } else {
+                    match std::env::var("OCTRAVPN_DERP_MAP_PATH") {
+                        Ok(path) if !path.is_empty() => load_derp_map(std::path::Path::new(&path))
+                            .with_context(|| format!("load DERP map from {path}"))?,
+                        _ => empty_derp_map(),
+                    }
                 };
                 // The hub path is the chain-aware boot path; it predates
                 // the knock layer and leaves it disabled (the `mesh serve`
@@ -164,6 +184,7 @@ impl Hub {
                         Arc::new(octravpn_mesh::policy::PolicyStore::new()),
                         octravpn_mesh::tailscale_wire::DerpMapStore::shared(derp_map),
                     )
+                    .native_derp(native_derp.clone())
                     .build(),
                     shared_minter,
                 ))

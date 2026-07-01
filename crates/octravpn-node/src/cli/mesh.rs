@@ -120,6 +120,12 @@ pub(crate) enum MeshCmd {
         /// `OCTRAVPN_ADMIN_TOKEN` env var when unset.
         #[arg(long)]
         admin_token: Option<String>,
+        /// Serve DERP natively on `/derp` through the same HTTPS
+        /// listener and certificate as the control surface. Defaults
+        /// off; the existing Go derper sidecar path remains unchanged
+        /// unless this flag is set.
+        #[arg(long = "serve-derp")]
+        serve_derp: bool,
     },
     /// Wrap `GET /api/v1/machines` on the remote mesh-control admin
     /// surface — prints the current tailnet roster. Same auth posture
@@ -206,6 +212,7 @@ pub(crate) async fn run_mesh_cmd(sub: MeshCmd) -> Result<()> {
             state_dir,
             tailnet_id,
             admin_token,
+            serve_derp,
         } => {
             run_mesh_serve(
                 listen,
@@ -214,6 +221,7 @@ pub(crate) async fn run_mesh_cmd(sub: MeshCmd) -> Result<()> {
                 state_dir,
                 tailnet_id,
                 admin_token,
+                serve_derp,
             )
             .await
         }
@@ -260,6 +268,7 @@ async fn run_mesh_serve(
     state_dir: String,
     tailnet_id: String,
     admin_token: Option<String>,
+    serve_derp: bool,
 ) -> Result<()> {
     use axum::{
         extract::State,
@@ -283,9 +292,15 @@ async fn run_mesh_serve(
 
     // Admin token resolution: explicit > env > absent.
     let admin_token = admin_token.or_else(|| std::env::var("OCTRAVPN_ADMIN_TOKEN").ok());
+    if serve_derp && https_listen.is_empty() {
+        anyhow::bail!(
+            "mesh serve --serve-derp requires --https-listen so DERP reuses the control TLS cert"
+        );
+    }
 
+    let state_dir_path = std::path::PathBuf::from(&state_dir);
     let server_noise_key = Arc::new(
-        ServerNoiseKey::load_or_generate(&state_dir)
+        ServerNoiseKey::load_or_generate(&state_dir_path)
             .context("load tailscale_wire noise static key")?,
     );
     let minter = PreauthMinter::new();
@@ -294,17 +309,32 @@ async fn run_mesh_serve(
     // `DerpMap`. Unset (the production default) ⇒ empty map ⇒ same
     // behaviour as pre-Wall-6. See
     // `docs/tailscale-interop-blocker.md` 2026-05-19 §"Wall 6 closed".
-    let derp_map = match std::env::var("OCTRAVPN_DERP_MAP_PATH") {
-        Ok(path) if !path.is_empty() => {
-            let map = load_derp_map(std::path::Path::new(&path))
-                .with_context(|| format!("load DERP map from {path}"))?;
-            eprintln!(
-                "mesh serve: loaded DERP map from {path} ({} region(s))",
-                map.regions.len()
-            );
-            map
+    let native_derp = if serve_derp {
+        Some(crate::native_derp::load_native_derp_runtime(
+            &state_dir_path,
+        )?)
+    } else {
+        None
+    };
+    let derp_map = if serve_derp {
+        eprintln!(
+            "mesh serve: native DERP enabled on /derp (host_name={cert_hostname}, key={})",
+            state_dir_path.join("derp.key").display()
+        );
+        crate::native_derp::self_derp_map(cert_hostname.clone())
+    } else {
+        match std::env::var("OCTRAVPN_DERP_MAP_PATH") {
+            Ok(path) if !path.is_empty() => {
+                let map = load_derp_map(std::path::Path::new(&path))
+                    .with_context(|| format!("load DERP map from {path}"))?;
+                eprintln!(
+                    "mesh serve: loaded DERP map from {path} ({} region(s))",
+                    map.regions.len()
+                );
+                map
+            }
+            _ => empty_derp_map(),
         }
-        _ => empty_derp_map(),
     };
     // Shared handles: the wire layer + the admin router both need to
     // see the same `MachineRegistry` (so `GET /api/v1/machines` reflects
@@ -329,6 +359,7 @@ async fn run_mesh_serve(
         octravpn_mesh::tailscale_wire::DerpMapStore::shared(derp_map),
     )
     .knock(load_knock_cfg_from_env())
+    .native_derp(native_derp.clone())
     .build();
 
     eprintln!(
@@ -446,7 +477,6 @@ async fn run_mesh_serve(
         Some(https_listen.parse().context("parse https listen addr")?)
     };
 
-    let state_dir_path = std::path::PathBuf::from(&state_dir);
     let sans = SanConfig::with_hostname(&cert_hostname);
     let cfg = ServeConfig {
         http_addr: Some(http_addr),

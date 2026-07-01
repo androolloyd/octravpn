@@ -55,6 +55,10 @@
 //!
 //!   [control]
 //!   listen = "127.0.0.1:51821"      # set 0.0.0.0 explicitly when exposing it
+//!   # Optional native Rust DERP relay on the Tailscale-wire HTTPS listener.
+//!   # Defaults off; existing Go derper sidecar deployments are unchanged.
+//!   [control.derp]
+//!   serve = false
 //!
 //!   [attestation]
 //!   poll_interval_secs = 30          # how often to recheck operator stake
@@ -945,6 +949,11 @@ pub(crate) struct ControlCfg {
     /// operators should set this to a long stable string.
     #[serde(default)]
     pub tailscale_tailnet_id: Option<String>,
+    /// Native DERP relay knobs for the embedded Tailscale-wire control
+    /// surface. Defaults disabled so existing deployments keep their
+    /// sidecar/fixture DERP map behavior.
+    #[serde(default)]
+    pub derp: ControlDerpCfg,
 }
 
 impl Default for ControlCfg {
@@ -959,8 +968,22 @@ impl Default for ControlCfg {
             admin_token: None,
             tailscale_wire_state_dir: None,
             tailscale_tailnet_id: None,
+            derp: ControlDerpCfg::default(),
         }
     }
+}
+
+/// `[control.derp]` — native Rust DERP relay.
+#[derive(Debug, Deserialize, Clone, Copy, Default)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ControlDerpCfg {
+    /// Serve DERP through the same Tailscale-wire HTTPS listener that
+    /// stock clients already use for the control connection. `false`
+    /// by default so the existing Go `cmd/derper` sidecar and
+    /// `OCTRAVPN_DERP_MAP_PATH` fixtures remain untouched until an
+    /// operator opts in.
+    #[serde(default)]
+    pub serve: bool,
 }
 
 /// Perf-1: TOML selector for the receipt-journal fsync policy.
@@ -1042,6 +1065,7 @@ impl fmt::Debug for ControlCfg {
             .field("admin_token", &RedactedOpt(&self.admin_token))
             .field("tailscale_wire_state_dir", &self.tailscale_wire_state_dir)
             .field("tailscale_tailnet_id", &self.tailscale_tailnet_id)
+            .field("derp", &self.derp)
             .finish()
     }
 }
@@ -1113,6 +1137,17 @@ region = "eu-west"
     fn baseline_parses() {
         let cfg: NodeConfig = ::toml::from_str(MIN_TOML).expect("baseline TOML must parse");
         assert_eq!(cfg.pricing.price_per_mb, 100);
+        assert!(!cfg.control.derp.serve);
+    }
+
+    #[test]
+    fn control_derp_serve_defaults_off_and_parses_true() {
+        let default_cfg: NodeConfig = ::toml::from_str(MIN_TOML).expect("baseline TOML must parse");
+        assert!(!default_cfg.control.derp.serve);
+
+        let toml_str = format!("{MIN_TOML}\n[control.derp]\nserve = true\n");
+        let cfg: NodeConfig = ::toml::from_str(&toml_str).expect("native DERP TOML must parse");
+        assert!(cfg.control.derp.serve);
     }
 
     /// Perf-1: a default-built `ControlCfg` (operator omits the field)

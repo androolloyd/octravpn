@@ -49,6 +49,9 @@ octravpn-obfs4 = { path = "../octravpn-obfs4" }
 # by headscale-rs — this dep just folds the *operator-facing* surface
 # into our single-binary install. See `docs/operators/cli-migration.md`.
 headscale-cli = { path = "../../../headscale-rs/headscale-cli" }
+# Native DERP runtime construction needs the relay primitive that
+# `headscale-api::tailscale_wire::derp::NativeDerpRuntime` wraps.
+headscale-core = { path = "../../../headscale-rs/headscale-core" }
 
 anyhow      = { workspace = true }
 async-trait = { workspace = true }

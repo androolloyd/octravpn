@@ -3103,6 +3103,7 @@ dependencies = [
  "futures-util",
  "headscale-api",
  "headscale-cli",
+ "headscale-core",
  "hex",
  "hmac",
  "http-body-util",

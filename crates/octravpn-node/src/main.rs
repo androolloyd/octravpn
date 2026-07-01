@@ -35,6 +35,7 @@ mod control;
 mod events;
 mod hub;
 mod mesh_ops;
+mod native_derp;
 mod onion;
 mod pvac;
 mod rate_limit;
