@@ -1,0 +1,87 @@
+// Focused devnet validation of the v4 relay-settlement MECHANICS in isolation.
+//
+// The production design (program/main-v4-relay.draft.aml) weaves arm_relay /
+// relay_claim / relay_refund through the whole v3 program (tailnets, circles,
+// bonds, escrow). This contract extracts just the NOVEL core — a sha256
+// preimage hashlock over an escrowed deposit — so the money-movement + status
+// machine can be exercised end-to-end without the v3 setup mountain. The
+// settlement_hash cross-impl pin is already validated (pin-probe.aml): the
+// operator reveals SignedReceipt::settlement_preimage() and the gate
+// require(sha256(preimage) == committed_H) matches the Rust settlement_hash().
+//
+// Flow: opener arm()s an escrow (deposits `value`, commits H, names operator +
+// deadline); operator claim()s by revealing the preimage before the deadline
+// (funds -> operator); if the operator no-shows, opener refund()s after it.
+// Uses only PROVEN AML: payable/value, map[uint]*, sha256, transfer, require.
+
+contract V4RelayHtlc {
+  const ARMED: uint = 1
+  const CLAIMED: uint = 2
+  const REFUNDED: uint = 3
+
+  state {
+    next_id: uint
+    committed: map[uint]bytes      // H = SignedReceipt::settlement_hash() (64-hex)
+    net: map[uint]uint             // escrowed OCT
+    opener: map[uint]address       // who armed (can refund)
+    operator: map[uint]address     // who may claim
+    status: map[uint]uint
+    deadline: map[uint]uint         // epoch; claim before, refund at/after
+  }
+
+  constructor() {
+    self.next_id = 0
+  }
+
+  // Opener arms an escrow: deposits `value` OCT, commits H, names the operator
+  // allowed to claim and the relay window. Returns the htlc id.
+  payable fn arm(operator: address, settlement_hash: bytes, expiry_epochs: uint): uint {
+    require(value > 0, "no escrow value")
+    require(is_address(operator), "invalid operator")
+    require(len(settlement_hash) == 64, "settlement_hash must be 64-char hex")
+    let id = self.next_id
+    self.next_id = id + 1
+    self.opener[id] = caller
+    self.operator[id] = operator
+    self.committed[id] = settlement_hash
+    self.net[id] = value
+    self.status[id] = ARMED
+    self.deadline[id] = epoch + expiry_epochs
+    return id
+  }
+
+  // Operator reveals the preimage before the deadline -> escrow pays out.
+  // THE hashlock gate is the single sha256 equality (pin-validated).
+  nonreentrant fn claim(id: uint, preimage: bytes): bool {
+    require(id < self.next_id, "no such htlc")
+    require(self.status[id] == ARMED, "not armed")
+    require(caller == self.operator[id], "not the designated operator")
+    require(epoch < self.deadline[id], "relay window elapsed; opener may refund")
+    require(len(preimage) > 0, "preimage required")
+    require(sha256(preimage) == self.committed[id], "preimage does not match commitment")
+    let amt = self.net[id]
+    self.status[id] = CLAIMED
+    require(transfer(caller, amt), "payout transfer failed")
+    return true
+  }
+
+  // Opener reclaims the escrow after the deadline (operator no-show).
+  fn refund(id: uint): bool {
+    require(id < self.next_id, "no such htlc")
+    require(self.status[id] == ARMED, "not armed")
+    require(caller == self.opener[id], "not the opener")
+    require(epoch >= self.deadline[id], "still within the claim window")
+    let amt = self.net[id]
+    self.status[id] = REFUNDED
+    require(transfer(caller, amt), "refund transfer failed")
+    return true
+  }
+
+  view fn get_status(id: uint): uint {
+    return self.status[id]
+  }
+
+  view fn get_net(id: uint): uint {
+    return self.net[id]
+  }
+}
