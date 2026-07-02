@@ -50,14 +50,46 @@ pub use headscale_api::tailscale_wire::{
 
 /// Build the Octra Hub's embedded Tailscale client-facing router.
 ///
-/// Octra mounts the generic headscale-rs public control listener at the Hub
-/// root, but leaves `/health` to the host control plane so the Octra
-/// attestation-freshness probe keeps its response contract.
+/// This is the router merged into the Hub *operator* control listener,
+/// which is a private surface. The full headscale-rs
+/// [`control_router`](headscale_api::tailscale_wire::control_router) mounts a
+/// catch-all `.fallback(handle_fallback)` blank-200 plus fingerprintable
+/// public routes (`/version`, `/swagger`, `/apple`, `/windows`,
+/// `/bootstrap-dns`, `/robots.txt`, …). Merging that into the operator port
+/// would make the node trivially identifiable as headscale and answer 200 to
+/// unauthenticated probes on unmounted paths — collapsing the hidden-404
+/// posture the operator surface relies on.
+///
+/// So here we mount *only* the stock-client wire paths a Tailscale client
+/// actually hits during login/keepalive (`/key`, `/ts2021`,
+/// `/machine/ping-response`) and deliberately install NO fallback, so any
+/// unmounted path falls through to axum's empty 404. Full headscale parity
+/// (including `handle_fallback` and the public fingerprint routes) is
+/// intentionally preserved on the standalone `mesh serve` wire/DERP listener
+/// via [`tailscale_wire_router`], where stock clients connect and being
+/// fingerprintable-as-headscale is required.
 pub fn tailscale_wire_embedded_control_router(state: WireState) -> axum::Router {
-    headscale_api::tailscale_wire::control_router_with_options(
-        state,
-        ControlRouterOptions::without_health_route(),
-    )
+    use axum::routing::{get, head, post};
+
+    let knock_cfg = state.knock.clone();
+    let inner = axum::Router::new()
+        .route(
+            "/key",
+            get(headscale_api::tailscale_wire::key_handler::handle_key),
+        )
+        .route(
+            "/ts2021",
+            post(headscale_api::tailscale_wire::noise::handle_ts2021_post),
+        )
+        .route(
+            "/machine/ping-response",
+            head(headscale_api::tailscale_wire::basic_handlers::handle_ping_response),
+        )
+        .with_state(state);
+    // PSK-gated handshake shield. Default-off (KnockConfig::disabled()) is an
+    // exact pass-through; when enabled, unauthenticated requests get a
+    // canonical nginx 404 rather than any route match.
+    headscale_api::tailscale_wire::knock::wrap_router(inner, knock_cfg)
 }
 
 pub use acl::{AclAction, AclDoc, AclRule, PortRef, SignedAclDoc};
