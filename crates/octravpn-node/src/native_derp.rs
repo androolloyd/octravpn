@@ -19,7 +19,21 @@ pub(crate) fn load_native_derp_runtime(
     Ok(Arc::new(runtime))
 }
 
-pub(crate) fn self_derp_map(host_name: impl Into<String>) -> DerpMap {
+pub(crate) fn self_derp_map(host_name: impl Into<String>, derp_port: u16) -> DerpMap {
+    let region = self_derp_region(host_name, derp_port);
+    DerpMap {
+        home_params: None,
+        regions: HashMap::from([(NATIVE_DERP_REGION_ID, region)]),
+        omit_default_regions: true,
+    }
+}
+
+/// Build the single self-advertised native DERP region, pointing stock
+/// Tailscale clients at `host_name:derp_port/derp`. `derp_port` MUST be
+/// the port the DERP/HTTPS surface is actually bound to (see callers in
+/// `hub/spawn.rs` and `cli/mesh.rs`); hardcoding 443 breaks operators who
+/// serve DERP on a non-standard port.
+fn self_derp_region(host_name: impl Into<String>, derp_port: u16) -> DerpRegion {
     let node = DerpRegionNode {
         name: NATIVE_DERP_REGION_ID.to_string(),
         region_id: NATIVE_DERP_REGION_ID,
@@ -27,14 +41,14 @@ pub(crate) fn self_derp_map(host_name: impl Into<String>) -> DerpMap {
         cert_name: String::new(),
         ipv4: String::new(),
         ipv6: String::new(),
-        derp_port: 443,
+        derp_port,
         stun_port: -1,
         stun_only: false,
         insecure_for_tests: false,
         stun_test_ip: String::new(),
         can_port80: false,
     };
-    let region = DerpRegion {
+    DerpRegion {
         region_id: NATIVE_DERP_REGION_ID,
         region_code: NATIVE_DERP_REGION_CODE.to_string(),
         region_name: NATIVE_DERP_REGION_NAME.to_string(),
@@ -43,11 +57,27 @@ pub(crate) fn self_derp_map(host_name: impl Into<String>) -> DerpMap {
         avoid: false,
         no_measure_no_home: false,
         nodes: vec![node],
-    };
+    }
+}
 
-    DerpMap {
-        home_params: None,
-        regions: HashMap::from([(NATIVE_DERP_REGION_ID, region)]),
-        omit_default_regions: true,
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn self_derp_map_uses_passed_port_not_hardcoded_443() {
+        // Regression: derp_port must reflect the port the DERP/HTTPS
+        // surface actually binds, not a hardcoded 443. An operator on
+        // e.g. --https-listen 0.0.0.0:8443 must advertise :8443, or
+        // stock Tailscale clients dial host:443/derp -> nothing there.
+        let map = self_derp_map("relay.example", 8443);
+        let region = map
+            .regions
+            .get(&NATIVE_DERP_REGION_ID)
+            .expect("self region present");
+        let node = &region.nodes[0];
+        assert_eq!(node.derp_port, 8443, "must advertise the passed port");
+        assert_ne!(node.derp_port, 443, "must not hardcode 443");
+        assert_eq!(node.host_name, "relay.example");
     }
 }

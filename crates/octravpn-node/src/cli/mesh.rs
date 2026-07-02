@@ -317,11 +317,18 @@ async fn run_mesh_serve(
         None
     };
     let derp_map = if serve_derp {
+        // DERP reuses the control TLS cert on the HTTPS surface, so the
+        // self-advertised region must point at the port `--https-listen`
+        // actually binds (validated non-empty above), not a hardcoded 443.
+        let derp_port = https_listen
+            .parse::<SocketAddr>()
+            .context("parse https listen addr for DERP map")?
+            .port();
         eprintln!(
-            "mesh serve: native DERP enabled on /derp (host_name={cert_hostname}, key={})",
+            "mesh serve: native DERP enabled on /derp (host_name={cert_hostname}:{derp_port}, key={})",
             state_dir_path.join("derp.key").display()
         );
-        crate::native_derp::self_derp_map(cert_hostname.clone())
+        crate::native_derp::self_derp_map(cert_hostname.clone(), derp_port)
     } else {
         match std::env::var("OCTRAVPN_DERP_MAP_PATH") {
             Ok(path) if !path.is_empty() => {

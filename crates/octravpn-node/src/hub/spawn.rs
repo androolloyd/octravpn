@@ -161,7 +161,7 @@ impl Hub {
                     None
                 };
                 let derp_map = if self.cfg.control.derp.serve {
-                    crate::native_derp::self_derp_map(listen.ip().to_string())
+                    crate::native_derp::self_derp_map(listen.ip().to_string(), listen.port())
                 } else {
                     match std::env::var("OCTRAVPN_DERP_MAP_PATH") {
                         Ok(path) if !path.is_empty() => load_derp_map(std::path::Path::new(&path))
