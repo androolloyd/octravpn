@@ -29,7 +29,12 @@ use octravpn_core::{
 use serde_json::json;
 use tracing::{info, warn};
 
-use crate::runner::{ActiveSession, Client};
+use crate::{
+    chain_v3::{ArmRelayParams, ChainCtxV3},
+    runner::{ActiveSession, Client},
+};
+
+const BYTES_PER_MB: u64 = 1_048_576;
 
 pub(crate) async fn settle_active(client: &Arc<Client>, active: ActiveSession) -> Result<()> {
     let exit = active.route.last().ok_or_else(|| anyhow!("empty route"))?;
@@ -89,7 +94,7 @@ pub(crate) async fn settle_active(client: &Arc<Client>, active: ActiveSession) -
     };
     signed.verify().context("dual-sig self-verify")?;
 
-    match post_countersigned_receipt(
+    let receipt_posted = match post_countersigned_receipt(
         client,
         &exit.validator.endpoint,
         &active.session_id,
@@ -102,13 +107,20 @@ pub(crate) async fn settle_active(client: &Arc<Client>, active: ActiveSession) -
                 settlement_hash = %signed.settlement_hash(),
                 "countersigned receipt posted to exit"
             );
+            true
         }
         Err(e) => {
             warn!(
                 error = %e,
                 "countersigned receipt handback failed; falling back to v3 settle_confirm"
             );
+            false
         }
+    };
+
+    if receipt_posted && client.relay_config().enabled {
+        submit_arm_relay(client, &active, &signed).await?;
+        return Ok(());
     }
 
     submit_settle_confirm(client, &active, signed.receipt.bytes_used).await
@@ -175,6 +187,72 @@ async fn submit_settle_confirm(
     let r = client.rpc().submit(&signed_tx).await?;
     info!(hash = %r.hash, session = sid_u64, bytes_used, "settle_confirm submitted");
     Ok(())
+}
+
+async fn submit_arm_relay(
+    client: &Arc<Client>,
+    active: &ActiveSession,
+    signed: &SignedReceipt,
+) -> Result<()> {
+    let sid_u64 = active
+        .session_id
+        .as_u64()
+        .ok_or_else(|| anyhow!("v4 relay settlement requires u64 session ids"))?;
+    let relay_cfg = client.relay_config();
+    let net = relay_net(active, signed.receipt.bytes_used);
+    let settlement_hash = signed.settlement_hash();
+    let ctx = ChainCtxV3::new(client.rpc(), client.program_addr(), client.wallet_kp());
+    let nonce = ctx.nonce().await?;
+    let fee = ctx.fee_or_fallback("contract_call").await;
+    let params = ArmRelayParams {
+        session_id: sid_u64,
+        settlement_hash_hex: &settlement_hash,
+        net,
+        relay_expiry_epochs: relay_cfg.relay_expiry_epochs,
+        fee,
+        nonce,
+    };
+    let call = ctx.build_arm_relay_call(&params);
+    let signed_tx = ctx.sign_call(call)?;
+    let hash = ctx
+        .submit_signed(&signed_tx)
+        .await
+        .context("submit arm_relay")?;
+    info!(
+        hash = %hash,
+        session = sid_u64,
+        settlement_hash = %settlement_hash,
+        net,
+        relay_expiry_epochs = relay_cfg.relay_expiry_epochs,
+        "arm_relay submitted"
+    );
+    Ok(())
+}
+
+fn relay_net(active: &ActiveSession, bytes_used: u64) -> u64 {
+    let price_per_mb = active
+        .route
+        .last()
+        .map(|hop| hop.validator.price_per_mb)
+        .unwrap_or(0);
+    compute_relay_net(bytes_used, price_per_mb, active.deposit)
+}
+
+fn compute_relay_net(bytes_used: u64, price_per_mb: u64, deposit: u64) -> u64 {
+    let raw = (bytes_used / BYTES_PER_MB).saturating_mul(price_per_mb);
+    raw.min(deposit)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compute_relay_net_floors_to_mb_and_caps_to_deposit() {
+        assert_eq!(compute_relay_net(BYTES_PER_MB - 1, 100, 1_000), 0);
+        assert_eq!(compute_relay_net(2 * BYTES_PER_MB, 100, 1_000), 200);
+        assert_eq!(compute_relay_net(20 * BYTES_PER_MB, 100, 1_500), 1_500);
+    }
 }
 
 async fn fetch_proposed_receipt(

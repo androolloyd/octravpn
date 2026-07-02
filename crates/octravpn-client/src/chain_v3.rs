@@ -271,6 +271,23 @@ impl<'a> ChainCtxV3<'a> {
         )
     }
 
+    /// `arm_relay(session_id, settlement_hash, net, relay_expiry_epochs)` —
+    /// opener-side v4 promotion from OPEN into the unilateral relay lane.
+    /// `settlement_hash` is the 64-char hex bytes string returned by
+    /// `SignedReceipt::settlement_hash()`. Expiry is normalized by the
+    /// shared builder before encoding.
+    pub(crate) fn build_arm_relay_call(&self, p: &ArmRelayParams<'_>) -> Value {
+        self.call_builder().arm_relay_call(
+            p.session_id,
+            p.settlement_hash_hex,
+            p.net,
+            p.relay_expiry_epochs,
+            0,
+            p.fee,
+            p.nonce,
+        )
+    }
+
     /// HFHE-2 swap-ready settle-confirm builder. Two trailing
     /// positional `bytes` args carry `enc_bytes_used` + `enc_net`
     /// ciphertexts. The on-chain
@@ -305,6 +322,30 @@ impl<'a> ChainCtxV3<'a> {
     pub(crate) fn build_claim_no_show_call(&self, session_id: u64, fee: u64, nonce: u64) -> Value {
         self.call_builder()
             .claim_no_show_call(&[json!(session_id)], 0, fee, nonce)
+    }
+
+    /// `relay_refund(session_id)` — opener-side recovery after the v4
+    /// relay deadline.
+    #[allow(dead_code)] // exposed for the post-deadline recovery CLI hook.
+    pub(crate) fn build_relay_refund_call(&self, session_id: u64, fee: u64, nonce: u64) -> Value {
+        self.call_builder()
+            .relay_refund_call(session_id, 0, fee, nonce)
+    }
+
+    /// `relay_claim(session_id, preimage)` — operator-side v4
+    /// unilateral settlement. Present here so the client and node
+    /// wrappers both expose the full shared relay builder surface;
+    /// production client code does not call it.
+    #[allow(dead_code)]
+    pub(crate) fn build_relay_claim_call(
+        &self,
+        session_id: u64,
+        settlement_preimage_b64: &str,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call_builder()
+            .relay_claim_call(session_id, settlement_preimage_b64, 0, fee, nonce)
     }
 
     /// `nonreentrant sweep_expired_session(session_id)` — any caller
@@ -346,6 +387,17 @@ pub(crate) struct SettleConfirmParams<'a> {
     pub net: u64,
     /// 64-char lowercase hex of the freshly-generated 32-byte blinding.
     pub settle_blinding: &'a str,
+    pub fee: u64,
+    pub nonce: u64,
+}
+
+pub(crate) struct ArmRelayParams<'a> {
+    pub session_id: u64,
+    /// 64-char lowercase hex sha256 returned by
+    /// `SignedReceipt::settlement_hash()`.
+    pub settlement_hash_hex: &'a str,
+    pub net: u64,
+    pub relay_expiry_epochs: u64,
     pub fee: u64,
     pub nonce: u64,
 }
@@ -424,6 +476,55 @@ mod tests {
             params[3],
             "f8d1aa00bb22cc33f8d1aa00bb22cc33f8d1aa00bb22cc33f8d1aa00bb22cc33"
         );
+    }
+
+    #[test]
+    fn arm_relay_call_shape() {
+        let (rpc, prog, wallet) = fixtures();
+        let c = ctx(&rpc, &prog, &wallet);
+        let hash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+        let p = ArmRelayParams {
+            session_id: 7,
+            settlement_hash_hex: hash,
+            net: 1_000,
+            relay_expiry_epochs: 200,
+            fee: 500,
+            nonce: 25,
+        };
+        let call = c.build_arm_relay_call(&p);
+        assert_eq!(call["method"], "arm_relay");
+        assert_eq!(call["to"], prog.display());
+        assert_eq!(call["from"], c.wallet_addr().display());
+        assert_eq!(call["value"], 0);
+        assert_eq!(call["fee"], 500);
+        assert_eq!(call["nonce"], 25);
+        let params = call["params"].as_array().unwrap();
+        assert_eq!(params.len(), 4);
+        assert_eq!(params[0], 7);
+        assert_eq!(params[1], hash);
+        assert_eq!(params[2], 1_000);
+        assert_eq!(params[3], 200);
+    }
+
+    #[test]
+    fn relay_claim_and_refund_call_shapes() {
+        let (rpc, prog, wallet) = fixtures();
+        let c = ctx(&rpc, &prog, &wallet);
+        let preimage = "b2N0cmF2cG4tc2V0dGxlLXYxfA==";
+        let claim = c.build_relay_claim_call(7, preimage, 500, 26);
+        assert_eq!(claim["method"], "relay_claim");
+        assert_eq!(claim["value"], 0);
+        let claim_params = claim["params"].as_array().unwrap();
+        assert_eq!(claim_params.len(), 2);
+        assert_eq!(claim_params[0], 7);
+        assert_eq!(claim_params[1], preimage);
+
+        let call = c.build_relay_refund_call(7, 500, 27);
+        assert_eq!(call["method"], "relay_refund");
+        assert_eq!(call["value"], 0);
+        let params = call["params"].as_array().unwrap();
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0], 7);
     }
 
     #[test]

@@ -45,6 +45,7 @@ mod attestation;
 mod boot;
 mod identity;
 mod pvac;
+mod relay;
 mod spawn;
 
 pub(crate) struct Hub {

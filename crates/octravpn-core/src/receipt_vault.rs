@@ -48,6 +48,12 @@ pub enum ReceiptVaultError {
         floor: u64,
         proposed: u64,
     },
+    #[error("receipt seq {proposed} conflicts with vault floor {floor} for session {session}")]
+    SeqConflict {
+        session: String,
+        floor: u64,
+        proposed: u64,
+    },
 }
 
 pub type ReceiptVaultResult<T> = std::result::Result<T, ReceiptVaultError>;
@@ -146,8 +152,8 @@ impl ReceiptVault {
     }
 
     /// Append `receipt` and fsync before returning. The store accepts a
-    /// same-sequence replay for idempotent POST retries and rejects only
-    /// receipts below the current vault floor.
+    /// same-sequence replay only when it is byte-identical to the stored
+    /// receipt; a conflicting equal-seq receipt is rejected.
     pub fn put(&self, session_id: &SessionId, receipt: &SignedReceipt) -> ReceiptVaultResult<()> {
         if receipt.receipt.session_id.as_bytes() != session_id.as_bytes() {
             return Err(ReceiptVaultError::SessionMismatch {
@@ -159,11 +165,23 @@ impl ReceiptVault {
         }
 
         let mut g = self.inner.lock();
-        if let Some(prev) = g.by_session.get(session_id).map(|sr| sr.receipt.seq) {
-            if receipt.receipt.seq < prev {
+        if let Some(prev) = g.by_session.get(session_id) {
+            if receipt.receipt.seq < prev.receipt.seq {
                 return Err(ReceiptVaultError::SeqRegressed {
                     session: session_id.to_hex(),
-                    floor: prev,
+                    floor: prev.receipt.seq,
+                    proposed: receipt.receipt.seq,
+                });
+            }
+            if receipt.receipt.seq == prev.receipt.seq {
+                let prev_json = serde_json::to_vec(prev)?;
+                let next_json = serde_json::to_vec(receipt)?;
+                if prev_json == next_json {
+                    return Ok(());
+                }
+                return Err(ReceiptVaultError::SeqConflict {
+                    session: session_id.to_hex(),
+                    floor: prev.receipt.seq,
                     proposed: receipt.receipt.seq,
                 });
             }
@@ -279,12 +297,22 @@ fn replay_v1(
             });
         }
 
-        let replace = match out.get(&session_id) {
-            Some(cur) => receipt.receipt.seq >= cur.receipt.seq,
-            None => true,
-        };
-        if replace {
-            out.insert(session_id, receipt);
+        match out.get(&session_id) {
+            Some(cur) if receipt.receipt.seq < cur.receipt.seq => {}
+            Some(cur) if receipt.receipt.seq == cur.receipt.seq => {
+                let cur_json = serde_json::to_vec(cur)?;
+                let next_json = serde_json::to_vec(&receipt)?;
+                if cur_json != next_json {
+                    return Err(ReceiptVaultError::SeqConflict {
+                        session: session_id.to_hex(),
+                        floor: cur.receipt.seq,
+                        proposed: receipt.receipt.seq,
+                    });
+                }
+            }
+            _ => {
+                out.insert(session_id, receipt);
+            }
         }
         // This record is complete and CRC-verified: advance the
         // last-good boundary past it.
@@ -361,6 +389,40 @@ mod tests {
                 ..
             }
         ));
+        let kept = vault.get(&id).unwrap();
+        assert_eq!(kept.receipt.seq, 7);
+        assert_eq!(kept.receipt.bytes_used, 700);
+        assert_eq!(kept.settlement_hash(), latest_hash);
+    }
+
+    #[test]
+    fn equal_seq_identical_replay_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("receipt-vault.bin");
+        let id = SessionId::new([0xB2; 32]);
+        let receipt = signed(7, 700, id.clone());
+
+        let vault = ReceiptVault::open(&path).unwrap();
+        vault.put(&id, &receipt).unwrap();
+        let size_after_first = vault.file_size();
+        vault.put(&id, &receipt).unwrap();
+
+        assert_eq!(vault.file_size(), size_after_first);
+        assert_eq!(vault.get(&id), Some(receipt));
+    }
+
+    #[test]
+    fn equal_seq_conflict_is_rejected() {
+        let vault = ReceiptVault::in_memory();
+        let id = SessionId::new([0xB3; 32]);
+        let latest = signed(7, 700, id.clone());
+        let latest_hash = latest.settlement_hash();
+        vault.put(&id, &latest).unwrap();
+
+        let conflict = signed(7, 701, id.clone());
+        let err = vault.put(&id, &conflict).unwrap_err();
+
+        assert!(matches!(err, ReceiptVaultError::SeqConflict { .. }));
         let kept = vault.get(&id).unwrap();
         assert_eq!(kept.receipt.seq, 7);
         assert_eq!(kept.receipt.bytes_used, 700);

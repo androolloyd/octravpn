@@ -39,6 +39,7 @@ mod native_derp;
 mod onion;
 mod pvac;
 mod rate_limit;
+mod relay_settlement;
 mod seal;
 mod tunnel;
 mod v3_boot;

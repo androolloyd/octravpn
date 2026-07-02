@@ -51,6 +51,9 @@ pub(crate) const MIN_CIRCLE_STAKE_DEFAULT: u64 = 1_000_000_000;
 /// type. Matches the value the v2 path uses for the same situation.
 pub(crate) const CALL_FEE_FALLBACK: u64 = 1_000;
 
+/// `program/main-v4.aml` session status for an armed relay lane.
+pub(crate) const SESSION_RELAY_ARMED: u64 = 3;
+
 /// All v3 chain interactions. Holds the same RPC + wallet primitives
 /// as `ChainCtx` / `ChainCtxV2`, but talks exclusively to the v3
 /// program. Keep this struct local to the v3 code path so legacy
@@ -235,6 +238,37 @@ impl ChainCtxV3 {
             )
             .await
             .context("endpoint_stake_of")?;
+        Ok(v.as_u64().unwrap_or(0))
+    }
+
+    /// `get_session_status(sid) -> int` view. v4 relay claim uses this
+    /// to make sure the operator only reveals for armed sessions.
+    pub(crate) async fn get_session_status(&self, session_id: u64) -> Result<u64> {
+        let v = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_session_status",
+                &[json!(session_id)],
+                Some(&self.wallet_addr),
+            )
+            .await
+            .context("get_session_status")?;
+        Ok(v.as_u64().unwrap_or(0))
+    }
+
+    /// `get_relay_deadline(sid) -> int` view.
+    pub(crate) async fn get_relay_deadline(&self, session_id: u64) -> Result<u64> {
+        let v = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_relay_deadline",
+                &[json!(session_id)],
+                Some(&self.wallet_addr),
+            )
+            .await
+            .context("get_relay_deadline")?;
         Ok(v.as_u64().unwrap_or(0))
     }
 
@@ -562,6 +596,44 @@ impl ChainCtxV3 {
         )
     }
 
+    /// `arm_relay(session_id, settlement_hash, net, relay_expiry_epochs)` —
+    /// opener-side v4 promotion from OPEN into the unilateral relay lane.
+    /// `settlement_hash` is the 64-char hex bytes string returned by
+    /// `SignedReceipt::settlement_hash()`. Expiry is normalized to the
+    /// AML-accepted band before encoding.
+    pub(crate) fn build_arm_relay_call(&self, p: &ArmRelayParams<'_>) -> Value {
+        self.call_builder().arm_relay_call(
+            p.session_id,
+            p.settlement_hash_hex,
+            p.net,
+            p.relay_expiry_epochs,
+            0,
+            p.fee,
+            p.nonce,
+        )
+    }
+
+    /// `relay_claim(session_id, preimage)` — circle-owner-only v4
+    /// unilateral settlement. `preimage` is
+    /// `SignedReceipt::settlement_preimage()` (standard padded base64).
+    pub(crate) fn build_relay_claim_call(
+        &self,
+        session_id: u64,
+        settlement_preimage_b64: &str,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call_builder()
+            .relay_claim_call(session_id, settlement_preimage_b64, 0, fee, nonce)
+    }
+
+    /// `relay_refund(session_id)` — opener-side recovery after the
+    /// relay deadline.
+    pub(crate) fn build_relay_refund_call(&self, session_id: u64, fee: u64, nonce: u64) -> Value {
+        self.call_builder()
+            .relay_refund_call(session_id, 0, fee, nonce)
+    }
+
     /// HFHE-2 swap-ready settle-confirm builder. Two trailing
     /// positional `bytes` args carry `enc_bytes_used` + `enc_net`
     /// ciphertexts. Same swap-ready posture as
@@ -770,6 +842,18 @@ pub(crate) struct SettleConfirmParams<'a> {
     pub bytes_used: u64,
     pub net: u64,
     pub settle_blinding: &'a str,
+    pub fee: u64,
+    pub nonce: u64,
+}
+
+#[allow(dead_code)]
+pub(crate) struct ArmRelayParams<'a> {
+    pub session_id: u64,
+    /// 64-char lowercase hex sha256 returned by
+    /// `SignedReceipt::settlement_hash()`.
+    pub settlement_hash_hex: &'a str,
+    pub net: u64,
+    pub relay_expiry_epochs: u64,
     pub fee: u64,
     pub nonce: u64,
 }
@@ -1095,6 +1179,52 @@ mod tests {
         assert_eq!(params[1], 1_048_576);
         assert_eq!(params[2], 1000);
         assert_eq!(params[3], "f8d1aa00bb22cc33");
+    }
+
+    #[test]
+    fn arm_relay_call_shape() {
+        let c = ctx();
+        let hash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+        let p = ArmRelayParams {
+            session_id: 7,
+            settlement_hash_hex: hash,
+            net: 1_000,
+            relay_expiry_epochs: 200,
+            fee: 500,
+            nonce: 25,
+        };
+        let call = c.build_arm_relay_call(&p);
+        assert_eq!(call["method"], "arm_relay");
+        assert_eq!(call["value"], 0);
+        assert_eq!(call["fee"], 500);
+        assert_eq!(call["nonce"], 25);
+        let params = call["params"].as_array().unwrap();
+        // [sid, settlement_hash, net, relay_expiry_epochs].
+        assert_eq!(params.len(), 4);
+        assert_eq!(params[0], 7);
+        assert_eq!(params[1], hash);
+        assert_eq!(params[2], 1_000);
+        assert_eq!(params[3], 200);
+    }
+
+    #[test]
+    fn relay_claim_and_refund_call_shapes() {
+        let c = ctx();
+        let preimage = "b2N0cmF2cG4tc2V0dGxlLXYxfA==";
+        let claim = c.build_relay_claim_call(7, preimage, 500, 26);
+        assert_eq!(claim["method"], "relay_claim");
+        assert_eq!(claim["value"], 0);
+        let claim_params = claim["params"].as_array().unwrap();
+        assert_eq!(claim_params.len(), 2);
+        assert_eq!(claim_params[0], 7);
+        assert_eq!(claim_params[1], preimage);
+
+        let refund = c.build_relay_refund_call(7, 500, 27);
+        assert_eq!(refund["method"], "relay_refund");
+        assert_eq!(refund["value"], 0);
+        let refund_params = refund["params"].as_array().unwrap();
+        assert_eq!(refund_params.len(), 1);
+        assert_eq!(refund_params[0], 7);
     }
 
     #[test]

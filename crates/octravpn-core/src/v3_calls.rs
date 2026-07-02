@@ -64,12 +64,32 @@ pub mod method {
     pub const SETTLE_CLAIM: &str = "settle_claim";
     /// `nonreentrant settle_confirm(session_id, bytes_used, net, settle_blinding)`.
     pub const SETTLE_CONFIRM: &str = "settle_confirm";
+    /// `arm_relay(session_id, settlement_hash, net, relay_expiry_epochs)`.
+    pub const ARM_RELAY: &str = "arm_relay";
+    /// `relay_claim(session_id, preimage)`.
+    pub const RELAY_CLAIM: &str = "relay_claim";
+    /// `relay_refund(session_id)`.
+    pub const RELAY_REFUND: &str = "relay_refund";
     /// `claim_no_show(session_id)`.
     pub const CLAIM_NO_SHOW: &str = "claim_no_show";
     /// `nonreentrant sweep_expired_session(session_id)`.
     pub const SWEEP_EXPIRED_SESSION: &str = "sweep_expired_session";
     /// `nonreentrant claim_earnings(circle, amount)`.
     pub const CLAIM_EARNINGS: &str = "claim_earnings";
+}
+
+/// v4 relay-settlement expiry defaults from `program/main-v4.aml`.
+pub const RELAY_EXPIRY_DEFAULT_EPOCHS: u64 = 200;
+pub const RELAY_EXPIRY_MIN_EPOCHS: u64 = 10;
+pub const RELAY_EXPIRY_MAX_EPOCHS: u64 = 100_000;
+
+/// Resolve a caller-supplied relay expiry into the AML-accepted band.
+/// `0` preserves the contract's default-expiry semantics.
+pub fn normalize_relay_expiry_epochs(relay_expiry_epochs: u64) -> u64 {
+    if relay_expiry_epochs == 0 {
+        return RELAY_EXPIRY_DEFAULT_EPOCHS;
+    }
+    relay_expiry_epochs.clamp(RELAY_EXPIRY_MIN_EPOCHS, RELAY_EXPIRY_MAX_EPOCHS)
 }
 
 /// Builds the legacy `{"kind":"contract_call", ...}` JSON envelope
@@ -326,6 +346,63 @@ impl ContractCallBuilder {
     /// `params` order: `[session_id, bytes_used, net, settle_blinding]`.
     pub fn settle_confirm_call(&self, params: &[Value], value: u64, fee: u64, nonce: u64) -> Value {
         self.call(method::SETTLE_CONFIRM, params, value, fee, nonce)
+    }
+
+    /// Build an `arm_relay` call.
+    /// `params` order: `[session_id, settlement_hash_hex, net, relay_expiry_epochs]`.
+    pub fn arm_relay_call(
+        &self,
+        session_id: u64,
+        settlement_hash_hex: &str,
+        net: u64,
+        relay_expiry_epochs: u64,
+        value: u64,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call(
+            method::ARM_RELAY,
+            &[
+                json!(session_id),
+                json!(settlement_hash_hex),
+                json!(net),
+                json!(normalize_relay_expiry_epochs(relay_expiry_epochs)),
+            ],
+            value,
+            fee,
+            nonce,
+        )
+    }
+
+    /// Build a `relay_claim` call.
+    /// `params` order: `[session_id, settlement_preimage_b64]`.
+    pub fn relay_claim_call(
+        &self,
+        session_id: u64,
+        settlement_preimage_b64: &str,
+        value: u64,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call(
+            method::RELAY_CLAIM,
+            &[json!(session_id), json!(settlement_preimage_b64)],
+            value,
+            fee,
+            nonce,
+        )
+    }
+
+    /// Build a `relay_refund` call.
+    /// `params` order: `[session_id]`.
+    pub fn relay_refund_call(&self, session_id: u64, value: u64, fee: u64, nonce: u64) -> Value {
+        self.call(
+            method::RELAY_REFUND,
+            &[json!(session_id)],
+            value,
+            fee,
+            nonce,
+        )
     }
 
     /// HFHE-2 variant of [`Self::settle_confirm_call`] with two
@@ -744,6 +821,77 @@ mod tests {
     }
 
     #[test]
+    fn arm_relay_shape() {
+        let b = builder();
+        let hash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+        let got = b.arm_relay_call(7, hash, 1_000, 200, 0, 500, 25);
+        let want = json!({
+            "kind": "contract_call",
+            "from": WALLET,
+            "to": PROG,
+            "method": "arm_relay",
+            "params": [7u64, hash, 1_000u64, 200u64],
+            "value": 0u64,
+            "fee": 500u64,
+            "nonce": 25u64,
+        });
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn arm_relay_normalizes_expiry() {
+        let b = builder();
+        let hash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+        assert_eq!(
+            b.arm_relay_call(7, hash, 1_000, 0, 0, 500, 25)["params"][3],
+            RELAY_EXPIRY_DEFAULT_EPOCHS
+        );
+        assert_eq!(
+            b.arm_relay_call(7, hash, 1_000, 1, 0, 500, 25)["params"][3],
+            RELAY_EXPIRY_MIN_EPOCHS
+        );
+        assert_eq!(
+            b.arm_relay_call(7, hash, 1_000, 200_000, 0, 500, 25)["params"][3],
+            RELAY_EXPIRY_MAX_EPOCHS
+        );
+    }
+
+    #[test]
+    fn relay_claim_shape() {
+        let b = builder();
+        let preimage = "b2N0cmF2cG4tc2V0dGxlLXYxfA==";
+        let got = b.relay_claim_call(7, preimage, 0, 500, 26);
+        let want = json!({
+            "kind": "contract_call",
+            "from": WALLET,
+            "to": PROG,
+            "method": "relay_claim",
+            "params": [7u64, preimage],
+            "value": 0u64,
+            "fee": 500u64,
+            "nonce": 26u64,
+        });
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn relay_refund_shape() {
+        let b = builder();
+        let got = b.relay_refund_call(7, 0, 500, 27);
+        let want = json!({
+            "kind": "contract_call",
+            "from": WALLET,
+            "to": PROG,
+            "method": "relay_refund",
+            "params": [7u64],
+            "value": 0u64,
+            "fee": 500u64,
+            "nonce": 27u64,
+        });
+        assert_eq!(got, want);
+    }
+
+    #[test]
     fn claim_no_show_shape() {
         let b = builder();
         let got = b.claim_no_show_call(&[json!(5u64)], 0, 500, 22);
@@ -837,6 +985,9 @@ mod tests {
         assert_eq!(method::OPEN_SESSION, "open_session");
         assert_eq!(method::SETTLE_CLAIM, "settle_claim");
         assert_eq!(method::SETTLE_CONFIRM, "settle_confirm");
+        assert_eq!(method::ARM_RELAY, "arm_relay");
+        assert_eq!(method::RELAY_CLAIM, "relay_claim");
+        assert_eq!(method::RELAY_REFUND, "relay_refund");
         assert_eq!(method::CLAIM_NO_SHOW, "claim_no_show");
         assert_eq!(method::SWEEP_EXPIRED_SESSION, "sweep_expired_session");
         assert_eq!(method::CLAIM_EARNINGS, "claim_earnings");

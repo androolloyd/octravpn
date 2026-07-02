@@ -53,6 +53,7 @@ use tracing::{info, warn};
 use crate::{
     chain_v3::{ChainCtxV3, SettleConfirmParams, SlashDoubleSignParams},
     config::NodeConfig,
+    relay_settlement::submit_relay_claim_from_vault,
 };
 
 /// Top-level fan-out for every non-boot v3 entrypoint. Wired into
@@ -105,6 +106,10 @@ pub(crate) enum V3Cmd {
     /// `settle_confirm(session_id, bytes_used, net, settle_blinding)` —
     /// opener-side second half. Returns bool (accepted vs disputed).
     SettleConfirm(SettleConfirmArgs),
+    /// `relay_claim(session_id, preimage)` — load the countersigned
+    /// receipt from the configured receipt vault and claim unilaterally.
+    /// Requires `[control.relay].enabled = true`.
+    RelayClaim(RelayClaimArgs),
     /// `claim_no_show(session_id)` — opener-side abort path when the
     /// operator never called `settle_claim`.
     ClaimNoShow(ClaimNoShowArgs),
@@ -259,6 +264,12 @@ pub(crate) struct SettleConfirmArgs {
 }
 
 #[derive(Args, Debug)]
+pub(crate) struct RelayClaimArgs {
+    #[arg(long)]
+    pub session_id: u64,
+}
+
+#[derive(Args, Debug)]
 pub(crate) struct ClaimNoShowArgs {
     #[arg(long)]
     pub session_id: u64,
@@ -305,6 +316,7 @@ pub(crate) async fn dispatch(cfg_path: &Path, cmd: V3Cmd) -> Result<()> {
         V3Cmd::OpenSession(a) => run_open_session(&ctx, &a).await,
         V3Cmd::SettleClaim(a) => run_settle_claim(&ctx, &a).await,
         V3Cmd::SettleConfirm(a) => run_settle_confirm(&ctx, &a).await,
+        V3Cmd::RelayClaim(a) => run_relay_claim(&ctx, &cfg, &a).await,
         V3Cmd::ClaimNoShow(a) => run_claim_no_show(&ctx, &a).await,
         V3Cmd::SweepSession(a) => run_sweep_session(&ctx, &a).await,
         V3Cmd::ClaimEarnings(a) => run_claim_earnings(&ctx, &a).await,
@@ -456,6 +468,33 @@ async fn run_settle_confirm(ctx: &ChainCtxV3, a: &SettleConfirmArgs) -> Result<(
     submit_and_log(ctx, "settle_confirm", call, Some(ReturnLog::AcceptedBool)).await
 }
 
+async fn run_relay_claim(ctx: &ChainCtxV3, cfg: &NodeConfig, a: &RelayClaimArgs) -> Result<()> {
+    if !cfg.control.relay.enabled {
+        return Err(anyhow!(
+            "v4 relay settlement disabled; set [control.relay].enabled = true"
+        ));
+    }
+    let vault = open_receipt_vault(cfg)?;
+    let out = submit_relay_claim_from_vault(ctx, &vault, a.session_id).await?;
+    println!("relay_claim: tx_hash = {}", out.tx_hash);
+    println!("relay_claim: session_id = {}", out.session_id);
+    println!("relay_claim: receipt_seq = {}", out.receipt_seq);
+    println!("relay_claim: settlement_hash = {}", out.settlement_hash);
+    println!(
+        "relay_claim: epoch = {} deadline = {}",
+        out.current_epoch, out.relay_deadline
+    );
+    if let Some(rendered) = poll_return_value(ctx, &out.tx_hash, ReturnLog::AcceptedBool).await {
+        println!("relay_claim: return = {rendered}");
+    } else {
+        warn!(
+            hash = %out.tx_hash,
+            "relay_claim return value not available within poll window; query octra_transaction manually"
+        );
+    }
+    Ok(())
+}
+
 async fn run_claim_no_show(ctx: &ChainCtxV3, a: &ClaimNoShowArgs) -> Result<()> {
     let (nonce, fee) = nonce_and_fee(ctx).await?;
     let call = ctx.build_claim_no_show_call(a.session_id, fee, nonce);
@@ -589,6 +628,16 @@ fn read_receipt_secret(path: &Path) -> Result<[u8; 32]> {
         .ok_or_else(|| anyhow!("receipt key path not utf-8: {}", path.display()))?;
     octravpn_core::util::read_secret_32(s)
         .with_context(|| format!("read receipt key {}", path.display()))
+}
+
+fn open_receipt_vault(cfg: &NodeConfig) -> Result<octravpn_core::receipt_vault::ReceiptVault> {
+    let path: PathBuf = cfg
+        .control
+        .receipt_vault_path
+        .clone()
+        .map_or_else(|| "./state/receipt-vault.bin".into(), PathBuf::from);
+    octravpn_core::receipt_vault::ReceiptVault::open(&path)
+        .with_context(|| format!("open receipt vault at {}", path.display()))
 }
 
 // ============================================================

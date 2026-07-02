@@ -59,6 +59,9 @@
 //!   # Defaults off; existing Go derper sidecar deployments are unchanged.
 //!   [control.derp]
 //!   serve = false
+//!   [control.relay]
+//!   enabled = false
+//!   relay_expiry_epochs = 200
 //!
 //!   [attestation]
 //!   poll_interval_secs = 30          # how often to recheck operator stake
@@ -962,6 +965,11 @@ pub(crate) struct ControlCfg {
     /// sidecar/fixture DERP map behavior.
     #[serde(default)]
     pub derp: ControlDerpCfg,
+    /// v4 relay-settlement Rust caller path. Defaults disabled so v3
+    /// `settle_claim` / `settle_confirm` remains settlement-of-record
+    /// until an operator explicitly opts in.
+    #[serde(default)]
+    pub relay: ControlRelayCfg,
 }
 
 impl Default for ControlCfg {
@@ -978,6 +986,7 @@ impl Default for ControlCfg {
             tailscale_wire_state_dir: None,
             tailscale_tailnet_id: None,
             derp: ControlDerpCfg::default(),
+            relay: ControlRelayCfg::default(),
         }
     }
 }
@@ -993,6 +1002,33 @@ pub(crate) struct ControlDerpCfg {
     /// operator opts in.
     #[serde(default)]
     pub serve: bool,
+}
+
+/// `[control.relay]` — v4 relay-settlement caller path.
+#[derive(Debug, Deserialize, Clone, Copy)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ControlRelayCfg {
+    /// Master toggle. `false` by default so v3 remains the
+    /// settlement-of-record when the table is absent.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Epochs the client gives the operator to reveal the vaulted
+    /// receipt preimage after `arm_relay`.
+    #[serde(default = "default_relay_expiry_epochs")]
+    pub relay_expiry_epochs: u64,
+}
+
+impl Default for ControlRelayCfg {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            relay_expiry_epochs: default_relay_expiry_epochs(),
+        }
+    }
+}
+
+fn default_relay_expiry_epochs() -> u64 {
+    octravpn_core::v3_calls::RELAY_EXPIRY_DEFAULT_EPOCHS
 }
 
 /// Perf-1: TOML selector for the receipt-journal fsync policy.
@@ -1076,6 +1112,7 @@ impl fmt::Debug for ControlCfg {
             .field("tailscale_wire_state_dir", &self.tailscale_wire_state_dir)
             .field("tailscale_tailnet_id", &self.tailscale_tailnet_id)
             .field("derp", &self.derp)
+            .field("relay", &self.relay)
             .finish()
     }
 }
@@ -1148,6 +1185,7 @@ region = "eu-west"
         let cfg: NodeConfig = ::toml::from_str(MIN_TOML).expect("baseline TOML must parse");
         assert_eq!(cfg.pricing.price_per_mb, 100);
         assert!(!cfg.control.derp.serve);
+        assert!(!cfg.control.relay.enabled);
     }
 
     #[test]
@@ -1158,6 +1196,22 @@ region = "eu-west"
         let toml_str = format!("{MIN_TOML}\n[control.derp]\nserve = true\n");
         let cfg: NodeConfig = ::toml::from_str(&toml_str).expect("native DERP TOML must parse");
         assert!(cfg.control.derp.serve);
+    }
+
+    #[test]
+    fn control_relay_defaults_off_and_parses_true() {
+        let default_cfg: NodeConfig = ::toml::from_str(MIN_TOML).expect("baseline TOML must parse");
+        assert!(!default_cfg.control.relay.enabled);
+        assert_eq!(
+            default_cfg.control.relay.relay_expiry_epochs,
+            octravpn_core::v3_calls::RELAY_EXPIRY_DEFAULT_EPOCHS
+        );
+
+        let toml_str =
+            format!("{MIN_TOML}\n[control.relay]\nenabled = true\nrelay_expiry_epochs = 10\n");
+        let cfg: NodeConfig = ::toml::from_str(&toml_str).expect("relay TOML must parse");
+        assert!(cfg.control.relay.enabled);
+        assert_eq!(cfg.control.relay.relay_expiry_epochs, 10);
     }
 
     /// Perf-1: a default-built `ControlCfg` (operator omits the field)

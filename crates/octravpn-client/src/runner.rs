@@ -32,6 +32,7 @@ pub(crate) struct Client {
     /// clients overwrite it once they've fetched the operator's circle
     /// (see the v2 discovery path).
     receipt_context: ReceiptContext,
+    relay: crate::config::V3RelayCfg,
     pub state: Mutex<Option<ActiveSession>>,
 }
 
@@ -40,6 +41,7 @@ pub(crate) struct ActiveSession {
     pub session_kp: KeyPair,
     pub open_tx_hash: String,
     pub route: Vec<RouteHop>,
+    pub deposit: u64,
 }
 
 #[derive(Clone)]
@@ -68,6 +70,7 @@ impl Client {
         // discover circle_id from the operator's policy bundle and call
         // `set_receipt_circle` before opening a session.
         let receipt_context = ReceiptContext::v1_1(program_addr.clone(), cfg.chain.chain_id);
+        let relay = cfg.v3.relay;
         Ok(Self {
             rpc,
             http,
@@ -75,12 +78,17 @@ impl Client {
             wallet_addr,
             wallet_kp,
             receipt_context,
+            relay,
             state: Mutex::new(None),
         })
     }
 
     pub(crate) fn receipt_context(&self) -> &ReceiptContext {
         &self.receipt_context
+    }
+
+    pub(crate) fn relay_config(&self) -> crate::config::V3RelayCfg {
+        self.relay
     }
 
     /// Return a receipt context with `circle_id = Some(circle)` so v2
@@ -232,6 +240,7 @@ impl Client {
             session_kp,
             open_tx_hash: r.hash,
             route,
+            deposit,
         });
 
         // 5. Build the onion + bring up the tunnel via boringtun.

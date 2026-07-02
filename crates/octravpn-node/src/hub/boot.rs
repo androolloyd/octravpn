@@ -152,6 +152,12 @@ pub(super) async fn build_hub(cfg: NodeConfig) -> Result<Hub> {
             .with_context(|| format!("open receipt vault at {}", vault_path.display()))?,
     );
     info!(vault = %vault_path.display(), "receipt vault opened");
+    if cfg.control.relay.enabled {
+        info!(
+            relay_expiry_epochs = cfg.control.relay.relay_expiry_epochs,
+            "v4 relay settlement caller enabled"
+        );
+    }
 
     // Perf-8 (audit-8 OOM-1): cap + TTL on the in-mem mirror so the
     // BTreeMap doesn't grow unbounded with every session that ever

@@ -290,9 +290,7 @@ pub(crate) async fn post_receipt(
         if sr.client_pubkey != entry.client_pubkey {
             return (
                 StatusCode::FORBIDDEN,
-                Json(ApiError::new(
-                    "receipt client key does not match session",
-                )),
+                Json(ApiError::new("receipt client key does not match session")),
             )
                 .into_response();
         }
@@ -319,7 +317,9 @@ pub(crate) async fn post_receipt(
     if let Err(e) = s.receipt_vault.put(&id, &sr) {
         tracing::warn!(error = %e, session = %id_hex, "receipt vault write failed");
         let status = match e {
-            ReceiptVaultError::SeqRegressed { .. } => StatusCode::CONFLICT,
+            ReceiptVaultError::SeqRegressed { .. } | ReceiptVaultError::SeqConflict { .. } => {
+                StatusCode::CONFLICT
+            }
             ReceiptVaultError::SessionMismatch { .. } => StatusCode::BAD_REQUEST,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
@@ -495,13 +495,8 @@ mod tests {
         assert_eq!(kept.settlement_hash(), latest_hash);
     }
 
-    // Gap marker: v4 handback currently documents equal-seq POSTs as
-    // idempotent retries, but a strict "cannot be re-accepted" guard
-    // would need to reject this second request before any settlement
-    // worker could treat the same receipt as fresh work.
     #[tokio::test]
-    #[ignore = "current POST/vault path accepts equal-seq receipt handback as idempotent"]
-    async fn post_receipt_rejects_equal_seq_replay_before_second_acceptance() {
+    async fn post_receipt_accepts_identical_equal_seq_replay_idempotently() {
         let node_kp = Arc::new(KeyPair::generate());
         let client_kp = KeyPair::generate();
         let router = Arc::new(OnionRouter::new());
@@ -530,14 +525,71 @@ mod tests {
         )
         .await;
 
+        let body = parse_post_receipt(
+            post_receipt(
+                State(state.clone()),
+                Path(id.to_hex()),
+                Json(signed.clone()),
+            )
+            .await
+            .into_response(),
+        )
+        .await;
+
+        assert!(body.accepted);
+        assert_eq!(state.receipt_vault.get(&id), Some(signed));
+    }
+
+    #[tokio::test]
+    async fn post_receipt_rejects_conflicting_equal_seq_replay() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let client_kp = KeyPair::generate();
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let state = Arc::new(ControlState::new(node_kp.clone(), router, allowlist));
+        let id = SessionId::new([0x79u8; 32]);
+        let signed = SignedReceipt::build(
+            Receipt::new(
+                (*state.receipt_context).clone(),
+                id.clone(),
+                1,
+                4_096,
+                octravpn_core::session::Blind::new([0x8A; 32]),
+            ),
+            &client_kp,
+            node_kp.as_ref(),
+        );
+        parse_post_receipt(
+            post_receipt(
+                State(state.clone()),
+                Path(id.to_hex()),
+                Json(signed.clone()),
+            )
+            .await
+            .into_response(),
+        )
+        .await;
+
+        let conflict = SignedReceipt::build(
+            Receipt::new(
+                (*state.receipt_context).clone(),
+                id.clone(),
+                1,
+                8_192,
+                octravpn_core::session::Blind::new([0x8A; 32]),
+            ),
+            &client_kp,
+            node_kp.as_ref(),
+        );
         let (status, body) = status_and_body(
-            post_receipt(State(state), Path(id.to_hex()), Json(signed))
+            post_receipt(State(state.clone()), Path(id.to_hex()), Json(conflict))
                 .await
                 .into_response(),
         )
         .await;
 
         assert_eq!(status, StatusCode::CONFLICT, "body = {body}");
+        assert_eq!(state.receipt_vault.get(&id), Some(signed));
     }
 
     #[tokio::test]
@@ -645,13 +697,9 @@ mod tests {
             node_kp.as_ref(),
         );
         let body = parse_post_receipt(
-            post_receipt(
-                State(state.clone()),
-                Path(id.to_hex()),
-                Json(good.clone()),
-            )
-            .await
-            .into_response(),
+            post_receipt(State(state.clone()), Path(id.to_hex()), Json(good.clone()))
+                .await
+                .into_response(),
         )
         .await;
         assert!(body.accepted);

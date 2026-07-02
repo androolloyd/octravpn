@@ -130,10 +130,40 @@ pub(crate) struct V3Cfg {
     /// match `docker/devnet/v3-smoke.sh`.
     #[serde(default = "default_v3_max_pay")]
     pub max_pay: u64,
+    /// v4 relay-settlement client caller path. Defaults disabled so
+    /// v3 `settle_confirm` remains settlement-of-record until the
+    /// client explicitly opts in.
+    #[serde(default)]
+    pub relay: V3RelayCfg,
 }
 
 fn default_v3_max_pay() -> u64 {
     1_500
+}
+
+/// `[v3.relay]` — optional v4 relay-settlement arm path.
+#[derive(Debug, Deserialize, Clone, Copy)]
+pub(crate) struct V3RelayCfg {
+    /// Master toggle. `false` by default.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Epochs the operator has to reveal the receipt preimage before
+    /// the client can call `relay_refund`.
+    #[serde(default = "default_relay_expiry_epochs")]
+    pub relay_expiry_epochs: u64,
+}
+
+impl Default for V3RelayCfg {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            relay_expiry_epochs: default_relay_expiry_epochs(),
+        }
+    }
+}
+
+fn default_relay_expiry_epochs() -> u64 {
+    octravpn_core::v3_calls::RELAY_EXPIRY_DEFAULT_EPOCHS
 }
 
 /// v2-specific config. Sealed-policy passphrase + cache options.
