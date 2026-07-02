@@ -1,0 +1,46 @@
+// Minimal devnet probe for the v4 relay settlement-hash cross-impl PIN.
+//
+// The v4 relay hashlock (program/main-v4-relay.draft.aml) gates relay_claim on
+//   require(sha256(preimage) == committed_H)
+// where the operator reveals `preimage` = SignedReceipt::settlement_preimage()
+// (a standard padded base64 ASCII string) and the client committed
+//   committed_H = SignedReceipt::settlement_hash() = hex(sha256(preimage.as_bytes()))
+// computed in Rust (crates/octravpn-core/src/receipt.rs).
+//
+// If Octra AML `sha256(<base64 string>)` does NOT equal a standard sha256 of
+// that string's bytes, the entire hashlock is broken. This probe answers that
+// with ONE view call (hash_of) — no tx, no value semantics — plus a full
+// commit/claim gate exercise. Uses only sha256(), proven at main-v3.aml:590.
+
+contract SettleHashPin {
+  state {
+    committed: bytes
+  }
+
+  constructor() {
+    self.committed = "0"
+  }
+
+  // Echo exactly what the chain computes for sha256(preimage). Diff against a
+  // standard `sha256` tool to validate the pin directly.
+  view fn hash_of(preimage: bytes): bytes {
+    return sha256(preimage)
+  }
+
+  // Client commits H at arm time (= Rust settlement_hash).
+  fn commit(h: bytes): bool {
+    self.committed = h
+    return true
+  }
+
+  view fn get_committed(): bytes {
+    return self.committed
+  }
+
+  // Operator reveals the preimage; the gate is the single sha256 equality,
+  // exactly as v4 relay_claim will do it.
+  fn claim(preimage: bytes): bool {
+    require(sha256(preimage) == self.committed, "PIN MISMATCH: sha256(preimage) != committed")
+    return true
+  }
+}
