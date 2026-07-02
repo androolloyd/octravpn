@@ -206,6 +206,16 @@ pub(crate) struct ShadowSigner {
 pub(crate) struct ControlSession {
     pub last_seq: u64,
     pub last_blind: octravpn_core::session::Blind,
+    /// The ed25519 client identity key that announced this session
+    /// (`AnnounceSessionRequest::client_pubkey`). Bound here so
+    /// `POST /session/:id/receipt` can reject a dual-signed receipt
+    /// whose client countersignature is under a *different* key —
+    /// otherwise anyone who can read a live session's node-signed
+    /// proposal (`GET /session/:id`) could attach their own fresh
+    /// client key, POST it, and poison the vault's "latest" receipt so
+    /// the operator's later `relay_claim` carries an attacker-keyed
+    /// countersignature that the chain rejects.
+    pub client_pubkey: octravpn_core::sig::PublicKey,
 }
 
 impl ControlState {

@@ -69,6 +69,10 @@ pub(crate) async fn announce(
         ControlSession {
             last_seq: 0,
             last_blind: octravpn_core::session::Blind::new([0u8; 32]),
+            // Bind the announcing client's ed25519 identity to the
+            // session so `POST /session/:id/receipt` can reject a
+            // dual-signed receipt countersigned under any other key.
+            client_pubkey: req.client_pubkey,
         },
     );
     s.allowlist

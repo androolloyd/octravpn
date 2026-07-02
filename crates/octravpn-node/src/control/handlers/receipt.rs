@@ -271,6 +271,33 @@ pub(crate) async fn post_receipt(
             .into_response();
     }
 
+    // Money-path binding (HIGH): the receipt's client countersignature
+    // MUST be under the SAME ed25519 identity that announced this
+    // session. `sr.verify()` above only proves the receipt is *some*
+    // internally-consistent dual signature — an attacker who knows a
+    // live `session_id` can GET the node-signed proposal, attach their
+    // OWN fresh client keypair (verify() still passes), and POST it.
+    // Absent this check the vault stores the attacker's receipt as the
+    // "latest", so the operator's later `relay_claim` carries a client
+    // countersignature under the attacker's key and is rejected
+    // on-chain — the operator can never settle. We enforce only when
+    // the session entry is still present: the attack requires a live
+    // session to obtain the node proposal in the first place, so the
+    // binding is always available during the exploit window; an
+    // evicted session's late legitimate POST falls through to the
+    // seq-floor guards below rather than being spuriously rejected.
+    if let Some(entry) = s.sessions.get(&id) {
+        if sr.client_pubkey != entry.client_pubkey {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(ApiError::new(
+                    "receipt client key does not match session",
+                )),
+            )
+                .into_response();
+        }
+    }
+
     let vault_floor = s.receipt_vault.current_seq(&id).unwrap_or(0);
     if sr.receipt.seq < vault_floor {
         return (
@@ -548,6 +575,87 @@ mod tests {
         assert_eq!(status, StatusCode::UNAUTHORIZED, "body = {body}");
         assert!(body.contains("receipt not signed by this node"));
         assert!(state.receipt_vault.get(&id).is_none());
+    }
+
+    /// Money-path (HIGH): a well-formed dual-signed receipt whose
+    /// `client_pubkey` does NOT match the session's announced client
+    /// key is rejected with 403 and is NOT vaulted — otherwise an
+    /// attacker who reads the node-signed proposal could poison the
+    /// vault's "latest" receipt under their own key. The legitimate
+    /// client's matching receipt still succeeds and is vaulted.
+    #[tokio::test]
+    async fn post_receipt_rejects_client_key_not_bound_to_session() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let legit_client = KeyPair::generate();
+        let attacker_client = KeyPair::generate();
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let state = Arc::new(ControlState::new(node_kp.clone(), router, allowlist));
+        let id = SessionId::new([0x7Du8; 32]);
+
+        // Session is announced under the legit client's ed25519 key.
+        announce(
+            State(state.clone()),
+            Json(signed_announce(id.clone(), &legit_client, [9u8; 32])),
+        )
+        .await;
+
+        // Attacker attaches their OWN client key to a receipt the node
+        // would have signed. `verify()` passes (fresh internally-valid
+        // dual-sig) but the client key is not the one bound to the
+        // session.
+        let forged = SignedReceipt::build(
+            Receipt::new(
+                (*state.receipt_context).clone(),
+                id.clone(),
+                1,
+                4_096,
+                octravpn_core::session::Blind::new([0x8D; 32]),
+            ),
+            &attacker_client,
+            node_kp.as_ref(),
+        );
+        forged
+            .verify()
+            .expect("sanity: attacker's dual-sig is internally valid");
+
+        let (status, body) = status_and_body(
+            post_receipt(State(state.clone()), Path(id.to_hex()), Json(forged))
+                .await
+                .into_response(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "body = {body}");
+        assert!(body.contains("client key does not match session"));
+        assert!(
+            state.receipt_vault.get(&id).is_none(),
+            "poison receipt must not be vaulted"
+        );
+
+        // The legit client's matching receipt is accepted and vaulted.
+        let good = SignedReceipt::build(
+            Receipt::new(
+                (*state.receipt_context).clone(),
+                id.clone(),
+                1,
+                4_096,
+                octravpn_core::session::Blind::new([0x8D; 32]),
+            ),
+            &legit_client,
+            node_kp.as_ref(),
+        );
+        let body = parse_post_receipt(
+            post_receipt(
+                State(state.clone()),
+                Path(id.to_hex()),
+                Json(good.clone()),
+            )
+            .await
+            .into_response(),
+        )
+        .await;
+        assert!(body.accepted);
+        assert_eq!(state.receipt_vault.get(&id), Some(good));
     }
 
     #[tokio::test]
