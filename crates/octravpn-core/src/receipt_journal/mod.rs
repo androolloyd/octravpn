@@ -32,7 +32,7 @@ use tokio::task::JoinHandle;
 
 use crate::session::SessionId;
 
-use codec::encode_record;
+use codec::{encode_record, MAGIC_V1, RECORD_SIZE};
 use compact::{compact_async_worker, compact_locked, compacting_tempfile_path};
 use inner::{Inner, JournalMetrics};
 use migration::{ensure_v1_header, replay_any, write_v1_snapshot};
@@ -110,7 +110,22 @@ impl ReceiptJournal {
         // already validated any pre-existing content.
         ensure_v1_header(&path)?;
         let handle = OpenOptions::new().append(true).read(true).open(&path)?;
-        let file_size = handle.metadata()?.len();
+        // Finding #2 (shared with the receipt vault): drop any torn tail
+        // before the first append. `replay_v1` already dropped a partial
+        // trailing record from the in-mem mirror, but left it on disk;
+        // without this the next `bump` would append behind those bytes
+        // and the following restart would misalign every record and
+        // reject the file with ChecksumMismatch. The journal is
+        // fixed-width, so the last-good offset is the largest
+        // record-aligned length. A bad CRC on a *complete* record has
+        // already errored out of `replay_any` above, so anything past
+        // this boundary is necessarily a short torn tail.
+        let on_disk = handle.metadata()?.len();
+        let magic_len = MAGIC_V1.len() as u64;
+        let record_size = RECORD_SIZE as u64;
+        let good_len = magic_len + (on_disk.saturating_sub(magic_len) / record_size) * record_size;
+        crate::receipt_log::truncate_torn_tail(&handle, good_len)?;
+        let file_size = good_len;
 
         // Perf-8: seed the auxiliary recency indices with `now` for
         // every entry we just replayed off disk. The TTL clock starts

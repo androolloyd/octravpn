@@ -83,7 +83,11 @@ impl ReceiptVault {
         } else {
             Vec::new()
         };
-        let by_session = replay_v1(&raw, &path)?;
+        // `good_len` is the byte offset just past the last fully-written,
+        // CRC-verified record. Anything after it is a torn tail from a
+        // crash mid-append (a genuine bad CRC on a *complete* record still
+        // surfaces as `ChecksumMismatch` and is not treated as torn).
+        let (by_session, good_len) = replay_v1(&raw, &path)?;
         let mut handle = OpenOptions::new()
             .create(true)
             .append(true)
@@ -95,7 +99,15 @@ impl ReceiptVault {
             handle.sync_data()?;
             MAGIC_V1.len() as u64
         } else {
-            raw.len() as u64
+            // Finding #2: truncate the torn tail BEFORE any append so the
+            // next `put()` writes on a clean record boundary instead of
+            // behind leftover partial bytes. Left in place, those bytes
+            // are misread as a header on the next restart -> either the
+            // fresh receipt is silently dropped (lost relay_claim
+            // revenue) or `open` fails with ChecksumMismatch and the node
+            // refuses to boot. Shared with the journal via `receipt_log`.
+            crate::receipt_log::truncate_torn_tail(&handle, good_len)?;
+            good_len
         };
 
         Ok(Self {
@@ -188,14 +200,23 @@ fn encode_record(session_id: &SessionId, receipt: &SignedReceipt) -> ReceiptVaul
     out.extend_from_slice(session_id.as_bytes());
     out.extend_from_slice(&len.to_be_bytes());
     out.extend_from_slice(&json);
-    let crc = crc32_ieee(&out);
+    let crc = crate::receipt_log::crc32_ieee(&out);
     out.extend_from_slice(&crc.to_be_bytes());
     Ok(out)
 }
 
-fn replay_v1(raw: &[u8], path: &Path) -> ReceiptVaultResult<BTreeMap<SessionId, SignedReceipt>> {
+/// Replay a v1 vault file. Returns the recovered `(session -> receipt)`
+/// map and `good_len`: the byte offset just past the last fully-written,
+/// CRC-verified record. A torn tail (short trailing bytes from a
+/// crash mid-append) stops replay and is reflected as `good_len <
+/// raw.len()` so the caller can truncate it; a bad CRC on a *complete*
+/// record is real corruption and surfaces as `ChecksumMismatch`.
+fn replay_v1(
+    raw: &[u8],
+    path: &Path,
+) -> ReceiptVaultResult<(BTreeMap<SessionId, SignedReceipt>, u64)> {
     if raw.is_empty() {
-        return Ok(BTreeMap::new());
+        return Ok((BTreeMap::new(), 0));
     }
     let path_display = path.display().to_string();
     if raw.len() < MAGIC_V1.len() {
@@ -210,6 +231,9 @@ fn replay_v1(raw: &[u8], path: &Path) -> ReceiptVaultResult<BTreeMap<SessionId, 
 
     let mut out: BTreeMap<SessionId, SignedReceipt> = BTreeMap::new();
     let mut cursor = MAGIC_V1.len();
+    // Offset past the last complete, CRC-verified record. Starts at the
+    // header so a magic-only file reports `good_len == raw.len()`.
+    let mut good_len = MAGIC_V1.len() as u64;
     while cursor < raw.len() {
         if cursor + 32 + 4 > raw.len() {
             break;
@@ -236,7 +260,7 @@ fn replay_v1(raw: &[u8], path: &Path) -> ReceiptVaultResult<BTreeMap<SessionId, 
         crc_arr.copy_from_slice(&raw[cursor..cursor + 4]);
         cursor += 4;
         let got_crc = u32::from_be_bytes(crc_arr);
-        let expected_crc = crc32_ieee(&raw[record_start..json_end]);
+        let expected_crc = crate::receipt_log::crc32_ieee(&raw[record_start..json_end]);
         if expected_crc != got_crc {
             return Err(ReceiptVaultError::ChecksumMismatch {
                 path: path.display().to_string(),
@@ -262,33 +286,11 @@ fn replay_v1(raw: &[u8], path: &Path) -> ReceiptVaultResult<BTreeMap<SessionId, 
         if replace {
             out.insert(session_id, receipt);
         }
+        // This record is complete and CRC-verified: advance the
+        // last-good boundary past it.
+        good_len = cursor as u64;
     }
-    Ok(out)
-}
-
-fn crc32_ieee(bytes: &[u8]) -> u32 {
-    static TABLE: std::sync::OnceLock<[u32; 256]> = std::sync::OnceLock::new();
-    let table = TABLE.get_or_init(|| {
-        let mut t = [0u32; 256];
-        for (i, slot) in t.iter_mut().enumerate() {
-            let mut c = i as u32;
-            for _ in 0..8 {
-                c = if c & 1 != 0 {
-                    0xEDB8_8320 ^ (c >> 1)
-                } else {
-                    c >> 1
-                };
-            }
-            *slot = c;
-        }
-        t
-    });
-    let mut crc = 0xFFFF_FFFFu32;
-    for &b in bytes {
-        let idx = ((crc ^ b as u32) & 0xFF) as usize;
-        crc = table[idx] ^ (crc >> 8);
-    }
-    crc ^ 0xFFFF_FFFF
+    Ok((out, good_len))
 }
 
 #[cfg(test)]
@@ -395,6 +397,51 @@ mod tests {
 
         let reopened = ReceiptVault::open(&path).unwrap();
         assert_eq!(reopened.get(&id).unwrap().receipt.seq, 1);
+    }
+
+    /// Finding #2 regression: a torn tail present at open is truncated
+    /// so a subsequent `put()` + reopen preserves the last good record
+    /// with NO silent drop and NO ChecksumMismatch-on-boot. Before the
+    /// fix, the leftover partial bytes sat in front of the freshly
+    /// vaulted receipt: on the next restart replay either dropped that
+    /// receipt (lost relay_claim revenue) or the node refused to boot.
+    #[test]
+    fn torn_tail_is_truncated_so_next_put_survives_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("receipt-vault.bin");
+        let id = SessionId::new([0xE7; 32]);
+
+        // Boot 1: one durable receipt.
+        let v = ReceiptVault::open(&path).unwrap();
+        v.put(&id, &signed(1, 100, id.clone())).unwrap();
+        drop(v);
+
+        // Simulate a crash mid-append: a partially written next record.
+        // The 36-byte header (32-byte id + a 4-byte length claiming a
+        // 4096-byte body) landed, but only 10 body bytes followed and
+        // the CRC never made it to disk.
+        let mut torn = Vec::new();
+        torn.extend_from_slice(id.as_bytes());
+        torn.extend_from_slice(&4096u32.to_be_bytes());
+        torn.extend_from_slice(&[0xAB; 10]);
+        let mut f = OpenOptions::new().append(true).open(&path).unwrap();
+        f.write_all(&torn).unwrap();
+        f.sync_data().unwrap();
+
+        // Boot 2: open must drop the torn tail (no ChecksumMismatch) and
+        // recover seq=1, then a fresh put lands on a clean boundary.
+        let v2 = ReceiptVault::open(&path).unwrap();
+        assert_eq!(v2.get(&id).unwrap().receipt.seq, 1);
+        v2.put(&id, &signed(2, 200, id.clone())).unwrap();
+        drop(v2);
+
+        // Boot 3: the freshly vaulted seq=2 survives (no drop) and open
+        // succeeds (no ChecksumMismatch: the torn tail is gone, not
+        // sitting behind the new record).
+        let v3 = ReceiptVault::open(&path).unwrap();
+        let got = v3.get(&id).unwrap();
+        assert_eq!(got.receipt.seq, 2);
+        assert_eq!(got.receipt.bytes_used, 200);
     }
 
     #[test]

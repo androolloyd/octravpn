@@ -22,6 +22,7 @@ pub mod enroll;
 pub mod onion;
 pub mod receipt;
 pub mod receipt_journal;
+pub(crate) mod receipt_log;
 pub mod receipt_vault;
 pub mod rpc;
 pub mod session;

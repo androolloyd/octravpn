@@ -8,6 +8,9 @@
 use std::{collections::BTreeMap, path::Path};
 
 use crate::session::SessionId;
+// Shared with the receipt vault so the two append-log codecs can never
+// drift on the checksum that discriminates a torn tail from corruption.
+use crate::receipt_log::crc32_ieee;
 
 use super::errors::{JournalError, JournalResult};
 
@@ -65,37 +68,11 @@ pub(crate) fn replay_v1(raw: &[u8], path: &Path) -> JournalResult<BTreeMap<Sessi
             .or_insert(seq);
         cursor += RECORD_SIZE;
     }
-    // Trailing partial record (cursor < body.len()): silently dropped.
-    // See the function doc above.
+    // Trailing partial record (cursor < body.len()): silently dropped
+    // on replay. The journal's `open` path truncates that torn tail off
+    // the file (via `crate::receipt_log::truncate_torn_tail`) so a later
+    // append never lands behind it.
     Ok(out)
-}
-
-/// CRC-32 IEEE (the Ethernet / PNG / zip polynomial). Pulled inline so
-/// we don't take a new dep for ~30 lines of code; the table is built
-/// once on first call.
-pub(crate) fn crc32_ieee(bytes: &[u8]) -> u32 {
-    static TABLE: std::sync::OnceLock<[u32; 256]> = std::sync::OnceLock::new();
-    let table = TABLE.get_or_init(|| {
-        let mut t = [0u32; 256];
-        for (i, slot) in t.iter_mut().enumerate() {
-            let mut c = i as u32;
-            for _ in 0..8 {
-                c = if c & 1 != 0 {
-                    0xEDB8_8320 ^ (c >> 1)
-                } else {
-                    c >> 1
-                };
-            }
-            *slot = c;
-        }
-        t
-    });
-    let mut crc = 0xFFFF_FFFFu32;
-    for &b in bytes {
-        let idx = ((crc ^ b as u32) & 0xFF) as usize;
-        crc = table[idx] ^ (crc >> 8);
-    }
-    crc ^ 0xFFFF_FFFF
 }
 
 #[cfg(test)]
