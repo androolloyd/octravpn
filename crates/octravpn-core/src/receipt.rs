@@ -801,6 +801,93 @@ mod tests {
         assert_eq!(&decoded[..19], DOMAIN_SETTLEMENT_PREIMAGE);
     }
 
+    #[test]
+    fn settlement_hash_changes_and_verify_fails_after_signed_field_tamper() {
+        let client = fresh_kp();
+        let node = fresh_kp();
+        let receipt = Receipt::new(
+            ctx_v1(0x44),
+            SessionId::new([0x22u8; 32]),
+            17,
+            1_234_567,
+            Blind::new([0x33u8; 32]),
+        );
+        let mut sr = SignedReceipt::build(receipt, &client, &node);
+        let original_preimage = sr.settlement_preimage();
+        let original_hash = sr.settlement_hash();
+
+        sr.receipt.bytes_used += 1;
+
+        assert_ne!(sr.settlement_preimage(), original_preimage);
+        assert_ne!(sr.settlement_hash(), original_hash);
+        assert!(matches!(
+            sr.verify().unwrap_err(),
+            ReceiptError::BadClientSig
+        ));
+    }
+
+    #[test]
+    fn missing_or_garbage_countersignatures_change_hash_and_fail_verify() {
+        let client = fresh_kp();
+        let node = fresh_kp();
+        let receipt = Receipt::new(
+            ctx_v1(0x55),
+            SessionId::new([0x66u8; 32]),
+            9,
+            8192,
+            Blind::new([0x77u8; 32]),
+        );
+        let sr = SignedReceipt::build(receipt, &client, &node);
+        let original_hash = sr.settlement_hash();
+
+        let mut missing_client_sig = sr.clone();
+        missing_client_sig.client_sig = Signature([0u8; 64]);
+        assert_ne!(missing_client_sig.settlement_hash(), original_hash);
+        assert!(matches!(
+            missing_client_sig.verify().unwrap_err(),
+            ReceiptError::BadClientSig
+        ));
+
+        let mut missing_node_sig = sr.clone();
+        missing_node_sig.node_sig = Signature([0u8; 64]);
+        assert_ne!(missing_node_sig.settlement_hash(), original_hash);
+        assert!(matches!(
+            missing_node_sig.verify().unwrap_err(),
+            ReceiptError::BadNodeSig
+        ));
+    }
+
+    #[test]
+    fn cross_session_or_amount_inflation_changes_hash_and_fails_verify() {
+        let client = fresh_kp();
+        let node = fresh_kp();
+        let receipt = Receipt::new(
+            ctx_v1(0x66),
+            SessionId::new([0x10u8; 32]),
+            3,
+            4_096,
+            Blind::new([0x11u8; 32]),
+        );
+        let sr = SignedReceipt::build(receipt, &client, &node);
+        let original_hash = sr.settlement_hash();
+
+        let mut wrong_session = sr.clone();
+        wrong_session.receipt.session_id = SessionId::new([0x20u8; 32]);
+        assert_ne!(wrong_session.settlement_hash(), original_hash);
+        assert!(matches!(
+            wrong_session.verify().unwrap_err(),
+            ReceiptError::BadClientSig
+        ));
+
+        let mut inflated_amount = sr;
+        inflated_amount.receipt.bytes_used *= 2;
+        assert_ne!(inflated_amount.settlement_hash(), original_hash);
+        assert!(matches!(
+            inflated_amount.verify().unwrap_err(),
+            ReceiptError::BadClientSig
+        ));
+    }
+
     // ====================================================================
     // HFHE-2 shadow-blob tests.
     // ====================================================================

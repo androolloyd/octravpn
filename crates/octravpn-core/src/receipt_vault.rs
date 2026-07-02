@@ -341,6 +341,45 @@ mod tests {
     }
 
     #[test]
+    fn lower_seq_replay_cannot_replace_latest_receipt() {
+        let vault = ReceiptVault::in_memory();
+        let id = SessionId::new([0xB1; 32]);
+        let latest = signed(7, 700, id.clone());
+        let latest_hash = latest.settlement_hash();
+        vault.put(&id, &latest).unwrap();
+
+        let replay = signed(6, 9_999, id.clone());
+        let err = vault.put(&id, &replay).unwrap_err();
+
+        assert!(matches!(
+            err,
+            ReceiptVaultError::SeqRegressed {
+                floor: 7,
+                proposed: 6,
+                ..
+            }
+        ));
+        let kept = vault.get(&id).unwrap();
+        assert_eq!(kept.receipt.seq, 7);
+        assert_eq!(kept.receipt.bytes_used, 700);
+        assert_eq!(kept.settlement_hash(), latest_hash);
+    }
+
+    #[test]
+    fn cross_session_receipt_cannot_be_vaulted_under_another_session() {
+        let vault = ReceiptVault::in_memory();
+        let path_id = SessionId::new([0xA1; 32]);
+        let receipt_id = SessionId::new([0xA2; 32]);
+        let receipt = signed(1, 100, receipt_id.clone());
+
+        let err = vault.put(&path_id, &receipt).unwrap_err();
+
+        assert!(matches!(err, ReceiptVaultError::SessionMismatch { .. }));
+        assert!(vault.get(&path_id).is_none());
+        assert!(vault.get(&receipt_id).is_none());
+    }
+
+    #[test]
     fn replay_drops_torn_tail() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("receipt-vault.bin");
