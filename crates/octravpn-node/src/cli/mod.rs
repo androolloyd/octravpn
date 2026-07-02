@@ -175,8 +175,7 @@ pub(crate) enum Cmd {
     /// reachable here verbatim. `octravpn-node headscale users list`
     /// is byte-identical to `headscale users list` — same `--server`,
     /// `--token`, `--json` flags, same stdout, same stderr `error: …`
-    /// envelope, same exit-code contract (0/3/4/5/6 — see
-    /// `headscale_cli::admin::ExitCode`).
+    /// envelope, same exit-code contract.
     ///
     /// Why: operators used to need two binaries (`octravpn-node` +
     /// `headscale`) plus juggle bearer tokens between them. With this
@@ -266,6 +265,10 @@ pub(crate) trait Subcommand {
 /// Top-level entrypoint called from `main`. Parses the CLI, decides pre-
 /// vs post-Hub, builds the Hub if needed, and dispatches.
 pub(crate) async fn run() -> Result<i32> {
+    if let Some(code) = headscale::handle_preparse(std::env::args_os()) {
+        return Ok(code);
+    }
+
     let Cli { config, cmd } = Cli::parse();
     let needs_hub = cmd_needs_hub(&cmd);
     let hub = if needs_hub {

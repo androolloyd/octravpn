@@ -42,12 +42,13 @@ octravpn-tun = { path = "../octravpn-tun" }
 octravpn-obfs4 = { path = "../octravpn-obfs4" }
 # Embedded `headscale` admin CLI surface. The sibling repo exposes a
 # `[lib]` (`headscale_cli`) with an `AdminCmd` clap subcommand enum
-# plus a `dispatch(connect, cmd)` entry-point; we link it as a path
-# dep so `octravpn-node headscale [users|nodes|preauthkeys|policy|
-# tailnet] …` produces byte-identical output to the standalone
-# `headscale` binary. The standalone binary is still built/published
-# by headscale-rs — this dep just folds the *operator-facing* surface
-# into our single-binary install. See `docs/operators/cli-migration.md`.
+# plus a `dispatch(connect, cmd)` entry-point. The local wrapper mirrors
+# the standalone binary's small pre-dispatch envelope so
+# `octravpn-node headscale [users|nodes|preauthkeys|auth|apikeys|policy|
+# debug] …` tracks upstream output and exit codes. The standalone binary
+# is still built/published by headscale-rs — this dep just folds the
+# *operator-facing* surface into our single-binary install. See
+# `docs/operators/cli-migration.md`.
 headscale-cli = { path = "../../../headscale-rs/headscale-cli" }
 # Native DERP runtime construction needs the relay primitive that
 # `headscale-api::tailscale_wire::derp::NativeDerpRuntime` wraps.

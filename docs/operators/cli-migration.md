@@ -12,7 +12,7 @@ endpoint host:
   * `octravpn-node` — the validator-VPN daemon (chain registration,
     WireGuard data plane, receipt journal, …).
   * `headscale` — the admin CLI for the headscale-rs control plane
-    (users / nodes / preauthkeys / auth / apikeys / policy / tailnet / debug).
+    (users / nodes / preauthkeys / auth / apikeys / policy / debug).
 
 They share admin connection state (local gRPC Unix socket by default,
 or remote gRPC address + API key; legacy HTTP `--server`/`--token`
@@ -25,12 +25,17 @@ increasing the install footprint and the per-host attack surface.
 the entire admin surface under a single subcommand:
 
 ```sh
-octravpn-node headscale [users|nodes|preauthkeys|auth|apikeys|policy|tailnet|debug] …
+octravpn-node headscale [users|nodes|preauthkeys|auth|apikeys|policy|debug] …
 ```
 
 The output is **byte-identical** to the standalone binary. Both paths
-call the same `admin::run_*` dispatchers, so stdout, the stderr
-`error: …` envelope, and the exit-code contract all match.
+call the same `admin::run_*` dispatchers, and the embedded wrapper now
+mirrors the standalone binary's pre-dispatch setup, so stdout, stderr,
+and exit codes track upstream. That includes the current default-config
+local gRPC failure shape: a `WRN no config file found, using defaults`
+line, an `Error: connecting to headscale: ...` envelope, and exit code
+`1`. Legacy explicit `--server http://...` failures continue to follow
+whatever the standalone binary emits for that command group.
 
 ## Migration table
 
@@ -64,7 +69,6 @@ unchanged.
 | `headscale policy get`                                   | `octravpn-node headscale policy get`                           |
 | `headscale policy set --file <FILE>`                      | `octravpn-node headscale policy set --file <FILE>`             |
 | `headscale policy check --file <FILE>`                    | `octravpn-node headscale policy check --file <FILE>`           |
-| `headscale tailnet status`                               | `octravpn-node headscale tailnet status`                       |
 | `headscale debug create-node …`                           | `octravpn-node headscale debug create-node …`                  |
 
 Connection flags behave identically on either binary. Migrated admin
@@ -134,8 +138,10 @@ The library exports an `AdminCmd` clap subcommand enum + a
 `Cmd::Headscale { connect, cmd }` variant flattens
 `headscale_cli::ConnectArgs` (so gRPC flags, legacy HTTP flags, output
 flags, and their env-var fallbacks all appear at the same level as the
-standalone binary) and delegates to `dispatch`. Exit code is propagated
-via `std::process::exit`.
+standalone binary), applies the same default-config gRPC warning and
+`connecting to headscale:` wrapping flags that upstream `main()` applies,
+and delegates to `dispatch`. Exit code is propagated via
+`std::process::exit`.
 
 Pass-through tests live in
 `crates/octravpn-node/tests/headscale_cli_passthrough.rs`. They build
@@ -152,3 +158,7 @@ in either binary breaks CI.
     `mesh policy` with a 2026-Q3 removal target.
   * 2026-05-24 — refreshed for the gRPC-first admin surface and new
     `auth` / `apikeys` / `debug` coverage.
+  * 2026-07-02 — refreshed after the headscale-rs `origin/main` bump:
+    removed stale `tailnet` migration guidance and aligned the embedded
+    wrapper with upstream's default-config warning, connection-error
+    envelope, and exit-1 usage contract.

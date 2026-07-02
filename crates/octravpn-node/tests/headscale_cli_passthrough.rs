@@ -10,7 +10,10 @@
 //! binary supports is reachable as `octravpn-node headscale …` and
 //! produces byte-identical stdout + stderr + exit code. These tests
 //! enforce that contract by driving both binaries side-by-side
-//! through `assert_cmd` and `diff`-ing the captured output.
+//! through `assert_cmd` and `diff`-ing the captured output. The only
+//! canonicalization is the wall-clock timestamp prefix on upstream's
+//! default-config warning line; the warning text and all other output
+//! bytes remain strict.
 //!
 //! Network-touching paths are exercised through two hermetic failure
 //! modes: a definitely-missing local gRPC Unix socket for migrated
@@ -25,6 +28,7 @@ use escargot::CargoBuild;
 use std::{env, path::PathBuf, sync::OnceLock, time::Duration};
 
 const HEADSCALE_ENV_VARS: &[&str] = &[
+    "HEADSCALE_CONFIG",
     "HEADSCALE_URL",
     "HEADSCALE_ADMIN_TOKEN",
     "HEADSCALE_CLI_ADDRESS",
@@ -117,10 +121,7 @@ fn standalone(args: &[&str]) -> CommandOutput {
     CommandOutput::from(out)
 }
 
-/// Spawn the embedded CLI through the local gRPC transport, pointed at
-/// a per-process path that should not exist. This keeps the migrated
-/// command tests off the host's real `/var/run/headscale/headscale.sock`.
-fn octravpn_local_grpc(args: &[&str]) -> CommandOutput {
+fn octravpn_local_grpc_owned(args: Vec<String>) -> CommandOutput {
     let mut cmd = Command::cargo_bin("octravpn-node").expect("octravpn-node bin under test");
     scrub_headscale_env(&mut cmd);
     let out = cmd
@@ -136,9 +137,7 @@ fn octravpn_local_grpc(args: &[&str]) -> CommandOutput {
     CommandOutput::from(out)
 }
 
-/// Spawn the standalone CLI through the same local gRPC missing-socket
-/// path used for the embedded passthrough.
-fn standalone_local_grpc(args: &[&str]) -> CommandOutput {
+fn standalone_local_grpc_owned(args: Vec<String>) -> CommandOutput {
     let mut cmd = Command::new(headscale_bin());
     scrub_headscale_env(&mut cmd);
     let out = cmd
@@ -149,6 +148,15 @@ fn standalone_local_grpc(args: &[&str]) -> CommandOutput {
         .output()
         .expect("spawn standalone headscale");
     CommandOutput::from(out)
+}
+
+fn local_grpc_pair(args: &[&str]) -> (CommandOutput, CommandOutput) {
+    let _ = headscale_bin();
+    let args = args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
+    (
+        octravpn_local_grpc_owned(args.clone()),
+        standalone_local_grpc_owned(args),
+    )
 }
 
 fn missing_unix_socket_path() -> PathBuf {
@@ -177,7 +185,9 @@ impl From<std::process::Output> for CommandOutput {
     }
 }
 
-/// Assert that two runs are byte-identical on stdout + stderr + exit.
+/// Assert that two runs are byte-identical on stdout + stderr + exit, after
+/// canonicalizing the wall-clock timestamp prefix on the upstream default-config
+/// warning line.
 /// Pretty-prints the mismatch when they aren't.
 ///
 /// `clippy::manual_assert` would rewrite the body as a multi-line
@@ -186,7 +196,9 @@ impl From<std::process::Output> for CommandOutput {
 #[allow(clippy::manual_assert)]
 #[track_caller]
 fn assert_byte_identical(label: &str, embed: &CommandOutput, stand: &CommandOutput) {
-    if embed.stdout != stand.stdout || embed.stderr != stand.stderr || embed.code != stand.code {
+    let embed_stderr = canonical_stderr(&embed.stderr);
+    let stand_stderr = canonical_stderr(&stand.stderr);
+    if embed.stdout != stand.stdout || embed_stderr != stand_stderr || embed.code != stand.code {
         panic!(
             "{label}: pass-through divergence
 embed exit:   {:?}
@@ -202,6 +214,39 @@ stand stderr: {:?}",
             String::from_utf8_lossy(&embed.stderr),
             String::from_utf8_lossy(&stand.stderr),
         );
+    }
+}
+
+fn canonical_stderr(stderr: &[u8]) -> Vec<u8> {
+    let stderr = String::from_utf8_lossy(stderr);
+    let mut out = String::with_capacity(stderr.len());
+    for line in stderr.split_inclusive('\n') {
+        if let Some(rest) = line.strip_prefix_default_config_warning_timestamp() {
+            out.push_str("<timestamp>");
+            out.push_str(rest);
+        } else {
+            out.push_str(line);
+        }
+    }
+    out.into_bytes()
+}
+
+trait WarningTimestamp {
+    fn strip_prefix_default_config_warning_timestamp(&self) -> Option<&str>;
+}
+
+impl WarningTimestamp for str {
+    fn strip_prefix_default_config_warning_timestamp(&self) -> Option<&str> {
+        let marker = " WRN no config file found, using defaults";
+        let marker_start = self.find(marker)?;
+        let timestamp = &self[..marker_start];
+        let valid_timestamp = timestamp.len() == "2026-07-02T07:33:14-03:00".len()
+            && timestamp.as_bytes().get(4) == Some(&b'-')
+            && timestamp.as_bytes().get(7) == Some(&b'-')
+            && timestamp.as_bytes().get(10) == Some(&b'T')
+            && timestamp.as_bytes().get(13) == Some(&b':')
+            && timestamp.as_bytes().get(16) == Some(&b':');
+        valid_timestamp.then_some(&self[marker_start..])
     }
 }
 
@@ -226,7 +271,6 @@ fn headscale_help_lists_every_admin_subcommand() {
         "auth",
         "apikeys",
         "policy",
-        "tailnet",
         "debug",
     ] {
         assert!(
@@ -241,29 +285,25 @@ fn headscale_help_lists_every_admin_subcommand() {
 /// and fail the same way when its Unix socket is absent.
 #[test]
 fn users_list_local_grpc_missing_socket_is_byte_identical() {
-    let embed = octravpn_local_grpc(&["users", "list"]);
-    let stand = standalone_local_grpc(&["users", "list"]);
+    let (embed, stand) = local_grpc_pair(&["users", "list"]);
     assert_byte_identical("users list (local gRPC missing socket)", &embed, &stand);
 }
 
 #[test]
 fn users_create_local_grpc_missing_socket_is_byte_identical() {
-    let embed = octravpn_local_grpc(&["users", "create", "alice"]);
-    let stand = standalone_local_grpc(&["users", "create", "alice"]);
+    let (embed, stand) = local_grpc_pair(&["users", "create", "alice"]);
     assert_byte_identical("users create (local gRPC missing socket)", &embed, &stand);
 }
 
 #[test]
 fn nodes_list_local_grpc_missing_socket_is_byte_identical() {
-    let embed = octravpn_local_grpc(&["nodes", "list"]);
-    let stand = standalone_local_grpc(&["nodes", "list"]);
+    let (embed, stand) = local_grpc_pair(&["nodes", "list"]);
     assert_byte_identical("nodes list (local gRPC missing socket)", &embed, &stand);
 }
 
 #[test]
 fn preauthkeys_create_local_grpc_missing_socket_is_byte_identical() {
-    let embed = octravpn_local_grpc(&["preauthkeys", "create", "--user", "42"]);
-    let stand = standalone_local_grpc(&["preauthkeys", "create", "--user", "42"]);
+    let (embed, stand) = local_grpc_pair(&["preauthkeys", "create", "--user", "42"]);
     assert_byte_identical(
         "preauthkeys create (local gRPC missing socket)",
         &embed,
@@ -273,29 +313,25 @@ fn preauthkeys_create_local_grpc_missing_socket_is_byte_identical() {
 
 #[test]
 fn policy_get_local_grpc_missing_socket_is_byte_identical() {
-    let embed = octravpn_local_grpc(&["policy", "get"]);
-    let stand = standalone_local_grpc(&["policy", "get"]);
+    let (embed, stand) = local_grpc_pair(&["policy", "get"]);
     assert_byte_identical("policy get (local gRPC missing socket)", &embed, &stand);
 }
 
 #[test]
 fn tailnet_status_local_grpc_missing_socket_is_byte_identical() {
-    let embed = octravpn_local_grpc(&["tailnet", "status"]);
-    let stand = standalone_local_grpc(&["tailnet", "status"]);
+    let (embed, stand) = local_grpc_pair(&["tailnet", "status"]);
     assert_byte_identical("tailnet status (local gRPC missing socket)", &embed, &stand);
 }
 
 #[test]
 fn apikeys_list_local_grpc_missing_socket_is_byte_identical() {
-    let embed = octravpn_local_grpc(&["apikeys", "list"]);
-    let stand = standalone_local_grpc(&["apikeys", "list"]);
+    let (embed, stand) = local_grpc_pair(&["apikeys", "list"]);
     assert_byte_identical("apikeys list (local gRPC missing socket)", &embed, &stand);
 }
 
 #[test]
 fn auth_approve_local_grpc_missing_socket_is_byte_identical() {
-    let embed = octravpn_local_grpc(&["auth", "approve", "--auth-id", "pending-id"]);
-    let stand = standalone_local_grpc(&["auth", "approve", "--auth-id", "pending-id"]);
+    let (embed, stand) = local_grpc_pair(&["auth", "approve", "--auth-id", "pending-id"]);
     assert_byte_identical("auth approve (local gRPC missing socket)", &embed, &stand);
 }
 
@@ -363,28 +399,24 @@ fn tailnet_status_connection_refused_is_byte_identical() {
     ]);
     let stand = standalone(&["--server", "http://127.0.0.1:1", "tailnet", "status"]);
     assert_byte_identical("tailnet status (connection refused)", &embed, &stand);
-    assert_eq!(embed.code, Some(3));
+    // Upstream removed `tailnet`; it is rejected before the connection
+    // path, even if a legacy `--server` flag is present.
+    assert_eq!(embed.code, Some(2));
 }
 
-/// Clap exit code on bad usage is 2 in both binaries — same code, same
-/// usage block. (We can't byte-diff because the binary name differs in
-/// the "Usage:" line.)
+/// Upstream now maps this Cobra-compatible usage error through its
+/// binary-level error wrapper, so it exits 1 instead of clap's raw 2.
+/// Keep this assertion pinned to the standalone binary's current
+/// contract.
 #[test]
-fn bad_usage_exits_two() {
+fn bad_usage_exits_one_like_upstream() {
     let embed = octravpn(&["headscale", "users", "create"]); // missing positional
     let stand = standalone(&["users", "create"]);
-    assert_eq!(embed.code, Some(2), "missing arg should be clap exit 2");
-    assert_eq!(stand.code, Some(2));
-    // The standalone says `Usage: headscale users create <NAME>`, the
-    // embedded says `Usage: octravpn-node headscale users create
-    // <NAME>`. Otherwise the body is the same.
+    assert_byte_identical("users create missing name", &embed, &stand);
+    assert_eq!(embed.code, Some(1), "missing arg should follow upstream");
     assert!(
-        String::from_utf8_lossy(&embed.stderr).contains("Usage:"),
-        "embedded should print clap usage block"
-    );
-    assert!(
-        String::from_utf8_lossy(&stand.stderr).contains("Usage:"),
-        "standalone should print clap usage block"
+        String::from_utf8_lossy(&embed.stderr).contains("Error: missing parameters"),
+        "embedded should print upstream missing-parameters error"
     );
 }
 
