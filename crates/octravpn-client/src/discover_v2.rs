@@ -30,6 +30,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use octravpn_core::{
     address::Address,
     circle::{decrypt_sealed_bytes, resource_key},
+    rpc::next_nonce,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -376,7 +377,7 @@ pub(crate) async fn open_session_v2(
     let kp = client.wallet_kp();
     let from = Address::from_pubkey(&kp.public.0);
     let bal = client.rpc().balance(&from).await?;
-    let nonce = bal.pending_nonce.max(bal.nonce);
+    let nonce = next_nonce(&bal);
     let fee = client
         .rpc()
         .recommended_fee(Some("contract_call"))

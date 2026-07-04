@@ -39,7 +39,7 @@ use octravpn_core::{
         canonical_payload_json, circle_id_of_deploy, encrypt_sealed_bytes, resource_key,
         CircleDeployPayload, PaddingClass,
     },
-    rpc::RpcClient,
+    rpc::{next_nonce, RpcClient},
     sig::KeyPair,
     tx as octra_tx,
 };
@@ -116,14 +116,7 @@ impl ChainCtxV2 {
 
     pub(crate) async fn nonce(&self) -> Result<u64> {
         let b = self.rpc.balance(&self.wallet_addr).await?;
-        // Matches v1.1's convention (see `ChainCtx::nonce`): the
-        // existing OctraVPN code treats `pending_nonce` as the next
-        // available nonce (so `.max(nonce)` returns the value to use
-        // for the next tx). The real Octra devnet sometimes ships
-        // pending_nonce = nonce + N_in_flight; the in-process mock
-        // returns pending_nonce already pointing at the next slot.
-        // Either way, `.max(nonce)` is the value to use.
-        Ok(b.pending_nonce.max(b.nonce))
+        Ok(next_nonce(&b))
     }
 
     pub(crate) async fn fee(&self, op: &str) -> Result<u64> {

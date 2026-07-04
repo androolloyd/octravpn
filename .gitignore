@@ -61,6 +61,9 @@ pvac-sidecar/octra-pvac-sidecar
 !/docker/conf/node*/wg.key
 !/docker/conf/client/wallet.key
 
+# Devnet smoke scripts generate runtime configs and helper crates here.
+/docker/devnet/.generated/
+
 # Bench snapshots are committed (see docs/performance-limitations.md §7).
 # `target/criterion/` (under the already-ignored `/target`) holds
 # per-run criterion output; only the curated JSON under

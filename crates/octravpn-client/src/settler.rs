@@ -23,6 +23,7 @@ use octravpn_core::{
     address::Address,
     control::{PostReceiptResponse, ProposedReceipt, SessionStateResponse},
     receipt::SignedReceipt,
+    rpc::next_nonce,
     session::SessionId,
     sig::verify,
 };
@@ -135,7 +136,7 @@ pub(crate) async fn settle(_client: &Arc<Client>, _session_id: &str) -> Result<(
 pub(crate) async fn reclaim(client: &Arc<Client>, session_id_hex: &str) -> Result<()> {
     let id = SessionId::from_hex(session_id_hex).ok_or_else(|| anyhow!("bad session id hex"))?;
     let bal = client.rpc().balance(client.wallet_addr()).await?;
-    let nonce = bal.pending_nonce.max(bal.nonce);
+    let nonce = next_nonce(&bal);
     let fee = client
         .rpc()
         .recommended_fee(Some("contract_call"))
@@ -163,7 +164,7 @@ async fn submit_settle_confirm(
     bytes_used: u64,
 ) -> Result<()> {
     let bal = client.rpc().balance(client.wallet_addr()).await?;
-    let nonce = bal.pending_nonce.max(bal.nonce);
+    let nonce = next_nonce(&bal);
     let fee = client
         .rpc()
         .recommended_fee(Some("contract_call"))

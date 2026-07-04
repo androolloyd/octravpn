@@ -28,7 +28,10 @@ use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use base64::engine::general_purpose::STANDARD as BASE64_STD;
 use base64::Engine as _;
 use octravpn_core::{
-    address::Address, rpc::RpcClient, sig::KeyPair, v3_policy::OperatorPolicy,
+    address::Address,
+    rpc::{next_nonce, RpcClient},
+    sig::KeyPair,
+    v3_policy::OperatorPolicy,
     v3_state_root::StateRoot,
 };
 use parking_lot::Mutex;
@@ -53,7 +56,7 @@ struct MockState {
     /// the mock's `circle_asset` handler so v3 policy / state-root
     /// fetches resolve to the operator's published JSON.
     circle_assets: HashMap<(String, String), Vec<u8>>,
-    /// Next nonce to return from `octra_balance`.
+    /// Next nonce the mock expects callers to submit.
     next_nonce: u64,
     /// Current epoch returned by `node_status`.
     epoch: u64,
@@ -96,11 +99,12 @@ async fn rpc_handler(
         }
         "octra_balance" => {
             let g = state.lock();
+            let last_used_nonce = g.next_nonce.saturating_sub(1);
             json!({
                 "balance": "100.000000",
                 "balance_raw": "100000000",
-                "nonce": g.next_nonce,
-                "pending_nonce": g.next_nonce,
+                "nonce": last_used_nonce,
+                "pending_nonce": last_used_nonce,
             })
         }
         "octra_recommendedFee" => {
@@ -504,7 +508,7 @@ async fn cold_open_session_then_settle_confirm() {
 
     // ---- step 2: open_session -----------------------------------
     let balance = rpc.balance(&wallet_addr).await.expect("balance");
-    let nonce = balance.pending_nonce.max(balance.nonce);
+    let nonce = next_nonce(&balance);
     let fee = rpc
         .recommended_fee(Some("contract_call"))
         .await
@@ -533,7 +537,7 @@ async fn cold_open_session_then_settle_confirm() {
     let blinding_hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     let balance2 = rpc.balance(&wallet_addr).await.expect("balance");
-    let nonce2 = balance2.pending_nonce.max(balance2.nonce);
+    let nonce2 = next_nonce(&balance2);
     let prog2 = program_addr.display();
     #[allow(clippy::needless_borrow)]
     let settle_call = build_settle_confirm_call(
@@ -605,7 +609,7 @@ async fn claim_no_show_when_operator_stalls() {
 
     // ---- open_session -------------------------------------------
     let balance = rpc.balance(&wallet_addr).await.expect("balance");
-    let nonce = balance.pending_nonce.max(balance.nonce);
+    let nonce = next_nonce(&balance);
     let fee = rpc
         .recommended_fee(Some("contract_call"))
         .await
@@ -621,7 +625,7 @@ async fn claim_no_show_when_operator_stalls() {
 
     // ---- operator never claims; client runs claim_no_show -------
     let balance2 = rpc.balance(&wallet_addr).await.expect("balance");
-    let nonce2 = balance2.pending_nonce.max(balance2.nonce);
+    let nonce2 = next_nonce(&balance2);
     let prog2 = program_addr.display();
     #[allow(clippy::needless_borrow)]
     let nshow = build_claim_no_show_call(&from, &prog2, session_id, fee, nonce2);

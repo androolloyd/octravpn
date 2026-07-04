@@ -5,7 +5,7 @@
 //! touch:
 //!
 //!   * `node_status`           — returns a fixed epoch.
-//!   * `octra_balance`         — returns the next-available nonce.
+//!   * `octra_balance`         — returns devnet-style last-used nonce fields.
 //!   * `octra_recommendedFee`  — returns a fixed fee.
 //!   * `contract_call`         — answers the views the boot path reads
 //!                                (`is_circle_slashed`,
@@ -41,7 +41,12 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
-use octravpn_core::{address::Address, rpc::RpcClient, sig::KeyPair, v3_state_root::StateRoot};
+use octravpn_core::{
+    address::Address,
+    rpc::{next_nonce, RpcClient},
+    sig::KeyPair,
+    v3_state_root::StateRoot,
+};
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 use tokio::sync::oneshot;
@@ -62,7 +67,7 @@ struct MockState {
     anchors: HashMap<String, String>,
     /// Slashed circles.
     slashed: HashMap<String, bool>,
-    /// Next nonce to return from `octra_balance`.
+    /// Next nonce the mock expects callers to submit.
     next_nonce: u64,
     /// Current epoch returned by `node_status`.
     epoch: u64,
@@ -100,11 +105,12 @@ async fn rpc_handler(
         }
         "octra_balance" => {
             let g = state.lock();
+            let last_used_nonce = g.next_nonce.saturating_sub(1);
             json!({
                 "balance": "100.000000",
                 "balance_raw": "100000000",
-                "nonce": g.next_nonce,
-                "pending_nonce": g.next_nonce,
+                "nonce": last_used_nonce,
+                "pending_nonce": last_used_nonce,
             })
         }
         "octra_recommendedFee" => {
@@ -363,7 +369,7 @@ async fn cold_boot_registers_and_settle_claim() {
     // Pick up the live nonce + fee from the mock RPC (the production
     // boot path does the same thing).
     let balance = rpc.balance(&wallet_addr).await.expect("balance");
-    let nonce = balance.pending_nonce.max(balance.nonce);
+    let nonce = next_nonce(&balance);
     let fee = rpc
         .recommended_fee(Some("contract_call"))
         .await
@@ -497,7 +503,7 @@ async fn cold_boot_registers_and_settle_claim() {
     // session state per se, but we verify the call shape made it
     // through sign + submit.
     let balance2 = rpc.balance(&wallet_addr).await.expect("balance");
-    let nonce2 = balance2.pending_nonce.max(balance2.nonce);
+    let nonce2 = next_nonce(&balance2);
     let prog2 = program_addr.display();
     #[allow(clippy::needless_borrow)]
     let settle_call = build_settle_claim_call(&from, &prog2, 0, 1_048_576, fee, nonce2);
@@ -609,7 +615,7 @@ async fn anchor_drift_triggers_update() {
     assert_eq!(on_chain, stale_anchor);
 
     let balance = rpc.balance(&wallet_addr).await.expect("balance");
-    let nonce = balance.pending_nonce.max(balance.nonce);
+    let nonce = next_nonce(&balance);
     let update = json!({
         "kind": "contract_call",
         "from": from,

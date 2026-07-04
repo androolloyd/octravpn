@@ -34,7 +34,11 @@
 
 use anyhow::{anyhow, Context, Result};
 use octravpn_core::{
-    address::Address, rpc::RpcClient, sig::KeyPair, tx as octra_tx, v3_calls::ContractCallBuilder,
+    address::Address,
+    rpc::{next_nonce, RpcClient},
+    sig::KeyPair,
+    tx as octra_tx,
+    v3_calls::ContractCallBuilder,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -122,7 +126,7 @@ impl ChainCtxV3 {
 
     pub(crate) async fn nonce(&self) -> Result<u64> {
         let b = self.rpc.balance(&self.wallet_addr).await?;
-        Ok(b.pending_nonce.max(b.nonce))
+        Ok(next_nonce(&b))
     }
 
     pub(crate) async fn fee(&self, op: &str) -> Result<u64> {

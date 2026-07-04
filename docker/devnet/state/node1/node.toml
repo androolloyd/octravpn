@@ -19,5 +19,9 @@ region              = "eu-test"
 listen              = "0.0.0.0:51821"
 audit_dir           = "/tmp/octravpn-audit"
 
+[control.relay]
+enabled             = false
+relay_expiry_epochs = 200
+
 [attestation]
 poll_interval_secs  = 60

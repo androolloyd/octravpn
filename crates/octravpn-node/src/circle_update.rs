@@ -1332,11 +1332,12 @@ mod tests {
             "node_status" => json!({ "epoch": 1234 }),
             "octra_balance" => {
                 let g = state.lock();
+                let last_used_nonce = g.next_nonce.saturating_sub(1);
                 json!({
                     "balance": "100.000000",
                     "balance_raw": "100000000",
-                    "nonce": g.next_nonce,
-                    "pending_nonce": g.next_nonce,
+                    "nonce": last_used_nonce,
+                    "pending_nonce": last_used_nonce,
                 })
             }
             "octra_recommendedFee" => {

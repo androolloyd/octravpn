@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use octravpn_core::{
     address::Address,
     receipt::{Receipt, ReceiptContext, CHAIN_ID_DEVNET},
+    rpc::next_nonce,
     session::Blind,
     session::SessionId,
     sig::{self, PublicKey, Signature},
@@ -332,7 +333,7 @@ pub(crate) async fn submit(
         ],
         "value": 0u64,
         "fee": fee,
-        "nonce": bal.pending_nonce.max(bal.nonce),
+        "nonce": next_nonce(&bal),
     });
     let signed = crate::runner::sign_call(client.wallet_kp(), call)?;
     let r = client.rpc().submit(&signed).await?;

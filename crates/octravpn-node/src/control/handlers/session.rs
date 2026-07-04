@@ -1,7 +1,7 @@
 //! `POST /session` — client announces a session + client_pubkey.
 //! Validates the announce signature, optionally consults
 //! [`super::super::state::SessionAdmissionVerifier`] for the on-chain
-//! `SessionOpened` event, then inserts into the session tracker +
+//! session-open proof, then inserts into the session tracker +
 //! WireGuard allowlist and publishes `session_announced` on the SSE
 //! bus. No bearer — the announce signature is the auth.
 

@@ -370,8 +370,10 @@ pub struct NodeStatus {
     pub validator: Option<String>,
     #[serde(default)]
     pub state_root: Option<String>,
+    // Devnet returns a float unix timestamp (e.g. 1783140040.3234), so this
+    // must be f64 — Option<u64> makes serde fail to decode the whole response.
     #[serde(default)]
-    pub timestamp: Option<u64>,
+    pub timestamp: Option<f64>,
     #[serde(default)]
     pub network_version: Option<String>,
 }
@@ -388,6 +390,16 @@ pub struct BalanceResult {
     pub nonce: u64,
     pub pending_nonce: u64,
     pub public_key: Option<String>,
+}
+
+/// Return the next nonce to submit for an account balance response.
+///
+/// Octra reports `nonce`/`pending_nonce` as the last used slot on devnet, so
+/// the next tx must use one greater than the highest reported value. This also
+/// preserves queued-tx safety when `pending_nonce` is ahead of `nonce`.
+#[must_use]
+pub fn next_nonce(balance: &BalanceResult) -> u64 {
+    balance.pending_nonce.max(balance.nonce) + 1
 }
 
 impl<'de> Deserialize<'de> for BalanceResult {
@@ -420,6 +432,28 @@ impl<'de> Deserialize<'de> for BalanceResult {
                 .get("public_key")
                 .and_then(|x| x.as_str().map(str::to_string)),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{next_nonce, BalanceResult};
+
+    fn balance(nonce: u64, pending_nonce: u64) -> BalanceResult {
+        BalanceResult {
+            formatted: String::new(),
+            raw: String::new(),
+            nonce,
+            pending_nonce,
+            public_key: None,
+        }
+    }
+
+    #[test]
+    fn next_nonce_matches_octra_last_used_semantics() {
+        assert_eq!(next_nonce(&balance(68, 68)), 69);
+        assert_eq!(next_nonce(&balance(0, 0)), 1);
+        assert_eq!(next_nonce(&balance(5, 7)), 8);
     }
 }
 

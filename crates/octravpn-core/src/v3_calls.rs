@@ -114,6 +114,7 @@ pub fn normalize_relay_expiry_epochs(relay_expiry_epochs: u64) -> u64 {
 pub struct ContractCallBuilder {
     program_addr: Address,
     wallet_addr: Address,
+    timestamp: f64,
 }
 
 impl ContractCallBuilder {
@@ -121,9 +122,14 @@ impl ContractCallBuilder {
     /// `program_addr` is the deployed `program/main-v3.aml` address;
     /// `wallet_addr` is the `from` field of every emitted call.
     pub fn new(program_addr: Address, wallet_addr: Address) -> Self {
+        Self::new_with_timestamp(program_addr, wallet_addr, current_timestamp_f64())
+    }
+
+    fn new_with_timestamp(program_addr: Address, wallet_addr: Address, timestamp: f64) -> Self {
         Self {
             program_addr,
             wallet_addr,
+            timestamp,
         }
     }
 
@@ -151,6 +157,7 @@ impl ContractCallBuilder {
             "value": value,
             "fee": fee,
             "nonce": nonce,
+            "timestamp": self.timestamp,
         })
     }
 
@@ -487,6 +494,16 @@ impl ContractCallBuilder {
     }
 }
 
+/// Wall-clock timestamp matching `octra cast send` / Python `time.time()`.
+fn current_timestamp_f64() -> f64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0)
+}
+
 // ============================================================
 // Tests — one per builder method. Each pins the exact JSON shape
 // against a hand-crafted `serde_json::json!()` expected value so a
@@ -501,9 +518,14 @@ mod tests {
 
     const PROG: &str = "oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3";
     const WALLET: &str = "octB3oySs3p4qNDk2yQngLAoZWLcENWFb8X8d2QmJVtN2HM";
+    const TEST_TIMESTAMP: f64 = 1_700_000_000.125;
 
     fn builder() -> ContractCallBuilder {
-        ContractCallBuilder::new(Address::from_display(PROG), Address::from_display(WALLET))
+        ContractCallBuilder::new_with_timestamp(
+            Address::from_display(PROG),
+            Address::from_display(WALLET),
+            TEST_TIMESTAMP,
+        )
     }
 
     fn anchor_hex() -> String {
@@ -532,6 +554,7 @@ mod tests {
             "value": 150_000_000u64,
             "fee": 1_000u64,
             "nonce": 42u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
     }
@@ -549,6 +572,7 @@ mod tests {
             "value": 0u64,
             "fee": 500u64,
             "nonce": 7u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
     }
@@ -574,6 +598,7 @@ mod tests {
             "value": 0u64,
             "fee": 500u64,
             "nonce": 9u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
     }
@@ -591,6 +616,7 @@ mod tests {
             "value": 0u64,
             "fee": 500u64,
             "nonce": 10u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
     }
@@ -608,6 +634,7 @@ mod tests {
             "value": 50_000_000u64,
             "fee": 500u64,
             "nonce": 11u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
     }
@@ -625,6 +652,7 @@ mod tests {
             "value": 0u64,
             "fee": 500u64,
             "nonce": 12u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
     }
@@ -642,6 +670,7 @@ mod tests {
             "value": 0u64,
             "fee": 500u64,
             "nonce": 13u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
     }
@@ -670,6 +699,7 @@ mod tests {
             "value": 0u64,
             "fee": 500u64,
             "nonce": 14u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
     }
@@ -687,6 +717,7 @@ mod tests {
             "value": 10_000_000u64,
             "fee": 500u64,
             "nonce": 15u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
     }
@@ -704,6 +735,7 @@ mod tests {
             "value": 0u64,
             "fee": 500u64,
             "nonce": 16u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
     }
@@ -721,6 +753,7 @@ mod tests {
             "value": 0u64,
             "fee": 500u64,
             "nonce": 17u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
     }
@@ -738,6 +771,7 @@ mod tests {
             "value": 500_000u64,
             "fee": 500u64,
             "nonce": 18u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
     }
@@ -755,6 +789,7 @@ mod tests {
             "value": 0u64,
             "fee": 500u64,
             "nonce": 11u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
     }
@@ -772,6 +807,7 @@ mod tests {
             "value": 0u64,
             "fee": 500u64,
             "nonce": 19u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
     }
@@ -789,6 +825,7 @@ mod tests {
             "value": 0u64,
             "fee": 500u64,
             "nonce": 20u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
     }
@@ -816,6 +853,7 @@ mod tests {
             "value": 0u64,
             "fee": 500u64,
             "nonce": 21u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
     }
@@ -834,6 +872,7 @@ mod tests {
             "value": 0u64,
             "fee": 500u64,
             "nonce": 25u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
     }
@@ -870,8 +909,40 @@ mod tests {
             "value": 0u64,
             "fee": 500u64,
             "nonce": 26u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
+    }
+
+    #[test]
+    fn relay_claim_signed_wire_matches_cast_contract_call_envelope() {
+        let b = builder();
+        let preimage = "b2N0cmF2cG4tc2V0dGxlLXYxfA==";
+        let call = b.relay_claim_call(0, preimage, 0, 500, 26);
+        let wallet = octra_core::sig::KeyPair::from_secret_bytes(&[7u8; 32]);
+        let signed = octra_core::tx::sign_call(&wallet, call).expect("sign relay_claim");
+
+        assert_eq!(signed["from"], WALLET);
+        assert_eq!(signed["to_"], PROG);
+        assert_eq!(signed["amount"], "0");
+        assert_eq!(signed["ou"], "500");
+        assert_eq!(signed["nonce"], 26);
+        assert_eq!(signed["timestamp"], TEST_TIMESTAMP);
+        assert_eq!(signed["op_type"], "call");
+        assert_eq!(signed["encrypted_data"], "relay_claim");
+        assert!(!signed.as_object().unwrap().contains_key("value"));
+        assert!(!signed.as_object().unwrap().contains_key("params"));
+        assert!(!signed.as_object().unwrap().contains_key("method"));
+
+        let message = signed["message"].as_str().expect("message");
+        assert_eq!(message, json!([0u64, preimage]).to_string());
+        let params: Value = serde_json::from_str(message).expect("params json");
+        assert!(
+            params[0].is_number(),
+            "session_id must remain a JSON number"
+        );
+        assert_eq!(params[0], 0);
+        assert_eq!(params[1], preimage);
     }
 
     #[test]
@@ -887,6 +958,7 @@ mod tests {
             "value": 0u64,
             "fee": 500u64,
             "nonce": 27u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
     }
@@ -904,6 +976,7 @@ mod tests {
             "value": 0u64,
             "fee": 500u64,
             "nonce": 22u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
     }
@@ -921,6 +994,7 @@ mod tests {
             "value": 0u64,
             "fee": 500u64,
             "nonce": 23u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
     }
@@ -938,6 +1012,7 @@ mod tests {
             "value": 0u64,
             "fee": 500u64,
             "nonce": 24u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
     }
@@ -1010,6 +1085,7 @@ mod tests {
             "value": 0u64,
             "fee": 500u64,
             "nonce": 20u64,
+            "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
     }

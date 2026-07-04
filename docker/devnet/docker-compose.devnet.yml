@@ -44,6 +44,9 @@ services:
     volumes:
       - ../octra:/work/octra
       - ../octra-foundry:/work/octra-foundry
+      # octravpn-node path-deps the sibling headscale-rs repo (headscale-cli/
+      # core/api at ../../../headscale-rs → /work/headscale-rs in-container).
+      - ../headscale-rs:/work/headscale-rs
       - octravpn-target:/work/octra/target
       - octravpn-foundry-target:/work/octra-foundry/target
       - octravpn-cargo-registry:/usr/local/cargo/registry
@@ -54,9 +57,9 @@ services:
       - -c
       - |
         set -euo pipefail
-        if ! command -v pkg-config >/dev/null; then
+        if ! command -v pkg-config >/dev/null || ! command -v protoc >/dev/null; then
           apt-get update -qq && apt-get install -y --no-install-recommends \
-            pkg-config libssl-dev ca-certificates >/dev/null
+            pkg-config libssl-dev ca-certificates protobuf-compiler libprotobuf-dev >/dev/null
         fi
         echo "[builder] cargo build (incremental — target volume cached)…"
         cargo build --release -p octravpn-node -p octravpn-client

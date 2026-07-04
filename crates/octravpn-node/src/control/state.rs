@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use octravpn_core::{
-    bearer::BearerCheck, bounded::BoundedMap, control::AnnounceSessionRequest,
+    address::Address, bearer::BearerCheck, bounded::BoundedMap, control::AnnounceSessionRequest,
     receipt::ReceiptContext, receipt_journal::ReceiptJournal, receipt_vault::ReceiptVault,
     rpc::RpcClient, session::SessionId, sig::KeyPair,
 };
@@ -108,7 +108,9 @@ pub(crate) struct ControlState {
     /// Optional chain-backed verifier for `POST /session`. Tests can
     /// leave this unset and still exercise signature validation; hub
     /// startup wires it so production announces must point at a
-    /// transaction that emitted `SessionOpened(session_id)`.
+    /// confirmed `open_session` transaction for the configured
+    /// program. Full RPCs can prove that by event; devnet falls back
+    /// to the program's `get_session_status` view.
     pub session_verifier: Option<SessionAdmissionVerifier>,
     /// HFHE-2: optional shadow-blob signer. When `Some` the
     /// `get_state` receipt-emission path consults the PVAC sidecar
@@ -134,11 +136,12 @@ pub(crate) struct ControlState {
 #[derive(Clone)]
 pub(crate) struct SessionAdmissionVerifier {
     rpc: RpcClient,
+    program_addr: Address,
 }
 
 impl SessionAdmissionVerifier {
-    pub(crate) fn new(rpc: RpcClient) -> Self {
-        Self { rpc }
+    pub(crate) fn new(rpc: RpcClient, program_addr: Address) -> Self {
+        Self { rpc, program_addr }
     }
 
     pub(crate) async fn session_opened(
@@ -146,14 +149,81 @@ impl SessionAdmissionVerifier {
         req: &AnnounceSessionRequest,
     ) -> octravpn_core::CoreResult<bool> {
         let tx = self.rpc.transaction(&req.open_tx_hash).await?;
-        Ok(transaction_has_session_opened(&tx, &req.session_id))
+        if transaction_has_session_opened(&tx, &req.session_id) {
+            return Ok(true);
+        }
+        if !transaction_is_confirmed_call_to_program(&tx, &self.program_addr) {
+            return Ok(false);
+        }
+        let Some(session_id) = req.session_id.as_u64() else {
+            return Ok(false);
+        };
+        let Ok(status) = self
+            .rpc
+            .contract_call_raw(
+                &self.program_addr,
+                "get_session_status",
+                &[serde_json::json!(session_id)],
+                None,
+            )
+            .await
+        else {
+            return Ok(false);
+        };
+        Ok(session_status_allows_admission(&status, session_id))
     }
+}
+
+fn transaction_is_confirmed_call_to_program(
+    tx: &serde_json::Value,
+    program_addr: &Address,
+) -> bool {
+    let expected_program = program_addr.display().to_string();
+    let confirmed = tx
+        .get("status")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| s == "confirmed");
+    let call = tx
+        .get("op_type")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| s == "call");
+    let to_program = tx
+        .get("to")
+        .or_else(|| tx.get("to_"))
+        .and_then(|v| v.as_str())
+        .is_some_and(|to| to == expected_program);
+    let open_session = tx
+        .get("encrypted_data")
+        .and_then(|v| v.as_str())
+        .map_or(true, |method| method == "open_session");
+    confirmed && call && to_program && open_session
+}
+
+fn session_status_allows_admission(raw: &serde_json::Value, session_id: u64) -> bool {
+    let Some(session_count) = raw
+        .get("storage")
+        .and_then(|s| s.get("session_count"))
+        .and_then(value_as_u64)
+    else {
+        return false;
+    };
+    if session_id >= session_count {
+        return false;
+    }
+    let Some(status) = raw.get("result").and_then(value_as_u64) else {
+        return false;
+    };
+    matches!(status, 0 | 3)
+}
+
+fn value_as_u64(v: &serde_json::Value) -> Option<u64> {
+    v.as_u64()
+        .or_else(|| v.as_str().and_then(|s| s.parse::<u64>().ok()))
 }
 
 /// Inspect a chain-RPC transaction body for a `SessionOpened` event
 /// whose `session_id` matches the request. Public at module scope so
-/// the announce handler's tests can pin the matcher independently of
-/// a live RPC client.
+/// tests can pin the matcher independently of a live RPC client.
 pub(crate) fn transaction_has_session_opened(
     tx: &serde_json::Value,
     session_id: &SessionId,
@@ -425,8 +495,125 @@ impl ControlState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{extract::State as AxumState, http::StatusCode, routing::post, Json, Router};
     use octravpn_core::bounded::BoundedMap;
     use octravpn_core::sig::KeyPair;
+    use serde_json::{json, Value};
+    use std::net::SocketAddr;
+    use std::sync::Mutex;
+    use tokio::sync::oneshot;
+
+    #[derive(Clone)]
+    struct AdmissionMockRpc {
+        tx: Value,
+        status: Option<Value>,
+        session_count: Value,
+        contract_calls: Arc<Mutex<Vec<Value>>>,
+    }
+
+    async fn admission_mock_handler(
+        AxumState(mock): AxumState<AdmissionMockRpc>,
+        Json(req): Json<Value>,
+    ) -> Result<Json<Value>, StatusCode> {
+        let method = req
+            .get("method")
+            .and_then(Value::as_str)
+            .ok_or(StatusCode::BAD_REQUEST)?;
+        let id = req.get("id").cloned().unwrap_or(json!(1));
+        let params = req.get("params").cloned().unwrap_or(json!([]));
+        let body = match method {
+            "octra_transaction" => {
+                json!({ "jsonrpc": "2.0", "id": id, "result": mock.tx })
+            }
+            "contract_call" => {
+                mock.contract_calls
+                    .lock()
+                    .expect("contract calls lock")
+                    .push(params);
+                if let Some(status) = &mock.status {
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": {
+                            "result": status,
+                            "storage": { "session_count": mock.session_count },
+                        },
+                    })
+                } else {
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "error": { "code": -32099, "message": "session not found" },
+                    })
+                }
+            }
+            _ => json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": { "code": -32601, "message": "method not found" },
+            }),
+        };
+        Ok(Json(body))
+    }
+
+    async fn spawn_admission_mock(
+        tx: Value,
+        status: Option<Value>,
+        session_count: Value,
+    ) -> (RpcClient, Arc<Mutex<Vec<Value>>>, oneshot::Sender<()>) {
+        let contract_calls = Arc::new(Mutex::new(Vec::new()));
+        let mock = AdmissionMockRpc {
+            tx,
+            status,
+            session_count,
+            contract_calls: contract_calls.clone(),
+        };
+        let app = Router::new()
+            .route("/", post(admission_mock_handler))
+            .with_state(mock);
+        let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+            .await
+            .expect("bind admission mock");
+        let addr = listener.local_addr().expect("admission mock addr");
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app.into_make_service())
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await;
+        });
+        (
+            RpcClient::new(format!("http://{addr}/")),
+            contract_calls,
+            shutdown_tx,
+        )
+    }
+
+    fn program_addr() -> Address {
+        Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3")
+    }
+
+    fn announce_req(session_id: SessionId) -> AnnounceSessionRequest {
+        let kp = KeyPair::generate();
+        AnnounceSessionRequest {
+            session_id,
+            client_pubkey: kp.public,
+            client_wg_pubkey: [9u8; 32],
+            open_tx_hash: "open-tx".to_string(),
+            client_sig: kp.sign(b"admission-test"),
+        }
+    }
+
+    fn confirmed_open_tx(program: &Address) -> Value {
+        json!({
+            "status": "confirmed",
+            "tx_hash": "open-tx",
+            "to": program.display().to_string(),
+            "op_type": "call",
+            "message": "[0,\"octCircle\",1500]"
+        })
+    }
 
     #[test]
     fn transaction_open_event_matches_u64_and_hex_session_ids() {
@@ -450,6 +637,228 @@ mod tests {
             &tx,
             &SessionId::new([0xCD; 32])
         ));
+    }
+
+    #[test]
+    fn session_status_allows_only_admission_live_states() {
+        assert!(session_status_allows_admission(
+            &json!({ "result": 0, "storage": { "session_count": 43 } }),
+            42
+        ));
+        assert!(session_status_allows_admission(
+            &json!({ "result": "3", "storage": { "session_count": "43" } }),
+            42
+        ));
+        assert!(!session_status_allows_admission(
+            &json!({ "result": Value::Null, "storage": { "session_count": 43 } }),
+            42
+        ));
+        assert!(!session_status_allows_admission(
+            &json!({ "result": 0, "storage": { "session_count": 42 } }),
+            42
+        ));
+        assert!(!session_status_allows_admission(
+            &json!({ "result": 0, "storage": {} }),
+            42
+        ));
+        assert!(!session_status_allows_admission(
+            &json!({ "result": 1, "storage": { "session_count": 43 } }),
+            42
+        ));
+        assert!(!session_status_allows_admission(
+            &json!({ "result": 2, "storage": { "session_count": 43 } }),
+            42
+        ));
+        assert!(!session_status_allows_admission(
+            &json!({ "result": 4, "storage": { "session_count": 43 } }),
+            42
+        ));
+        assert!(!session_status_allows_admission(
+            &json!({ "result": 5, "storage": { "session_count": 43 } }),
+            42
+        ));
+    }
+
+    #[tokio::test]
+    async fn session_admission_event_present_accepts_without_state_read() {
+        let program = program_addr();
+        let session_id = SessionId::from_u64(42);
+        let tx = json!({
+            "events": [
+                {"name": "SessionOpened", "session_id": 42}
+            ]
+        });
+        let (rpc, contract_calls, shutdown) = spawn_admission_mock(tx, None, json!(0)).await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program);
+
+        assert!(verifier
+            .session_opened(&announce_req(session_id))
+            .await
+            .expect("session opened"));
+        assert!(contract_calls
+            .lock()
+            .expect("contract calls lock")
+            .is_empty());
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn session_admission_state_fallback_accepts_open_session() {
+        let program = program_addr();
+        let session_id = SessionId::from_u64(42);
+        let (rpc, contract_calls, shutdown) =
+            spawn_admission_mock(confirmed_open_tx(&program), Some(json!(0)), json!(43)).await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program.clone());
+
+        assert!(verifier
+            .session_opened(&announce_req(session_id))
+            .await
+            .expect("session opened"));
+        let calls = contract_calls.lock().expect("contract calls lock");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0],
+            json!([program.display().to_string(), "get_session_status", [42u64]])
+        );
+        drop(calls);
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn session_admission_state_fallback_rejects_unset_status() {
+        let program = program_addr();
+        let session_id = SessionId::from_u64(42);
+        let (rpc, _contract_calls, shutdown) =
+            spawn_admission_mock(confirmed_open_tx(&program), Some(Value::Null), json!(43)).await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program);
+
+        assert!(!verifier
+            .session_opened(&announce_req(session_id))
+            .await
+            .expect("session opened"));
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn session_admission_state_fallback_rejects_status_read_error() {
+        let program = program_addr();
+        let session_id = SessionId::from_u64(42);
+        let (rpc, _contract_calls, shutdown) =
+            spawn_admission_mock(confirmed_open_tx(&program), None, json!(43)).await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program);
+
+        assert!(!verifier
+            .session_opened(&announce_req(session_id))
+            .await
+            .expect("session opened"));
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn session_admission_state_fallback_rejects_out_of_range_session_id() {
+        let program = program_addr();
+        let session_id = SessionId::from_u64(42);
+        let (rpc, _contract_calls, shutdown) =
+            spawn_admission_mock(confirmed_open_tx(&program), Some(json!(0)), json!(42)).await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program);
+
+        assert!(!verifier
+            .session_opened(&announce_req(session_id))
+            .await
+            .expect("session opened"));
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn session_admission_state_fallback_rejects_non_u64_session_id() {
+        let program = program_addr();
+        let session_id = SessionId::new([0xAB; 32]);
+        let (rpc, contract_calls, shutdown) =
+            spawn_admission_mock(confirmed_open_tx(&program), Some(json!(0)), json!(43)).await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program);
+
+        assert!(!verifier
+            .session_opened(&announce_req(session_id))
+            .await
+            .expect("session opened"));
+        assert!(contract_calls
+            .lock()
+            .expect("contract calls lock")
+            .is_empty());
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn session_admission_state_fallback_rejects_tx_not_to_program() {
+        let program = program_addr();
+        let tx = json!({
+            "status": "confirmed",
+            "tx_hash": "open-tx",
+            "to": "octWrongProgram",
+            "op_type": "call",
+        });
+        let (rpc, contract_calls, shutdown) =
+            spawn_admission_mock(tx, Some(json!(0)), json!(43)).await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program);
+
+        assert!(!verifier
+            .session_opened(&announce_req(SessionId::from_u64(42)))
+            .await
+            .expect("session opened"));
+        assert!(contract_calls
+            .lock()
+            .expect("contract calls lock")
+            .is_empty());
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn session_admission_state_fallback_rejects_non_open_session_method_when_present() {
+        let program = program_addr();
+        let tx = json!({
+            "status": "confirmed",
+            "tx_hash": "open-tx",
+            "to": program.display().to_string(),
+            "op_type": "call",
+            "encrypted_data": "settle_claim",
+        });
+        let (rpc, contract_calls, shutdown) =
+            spawn_admission_mock(tx, Some(json!(0)), json!(43)).await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program);
+
+        assert!(!verifier
+            .session_opened(&announce_req(SessionId::from_u64(42)))
+            .await
+            .expect("session opened"));
+        assert!(contract_calls
+            .lock()
+            .expect("contract calls lock")
+            .is_empty());
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn session_admission_state_fallback_rejects_unconfirmed_tx() {
+        let program = program_addr();
+        let tx = json!({
+            "status": "pending",
+            "tx_hash": "open-tx",
+            "to": program.display().to_string(),
+            "op_type": "call",
+        });
+        let (rpc, contract_calls, shutdown) =
+            spawn_admission_mock(tx, Some(json!(0)), json!(43)).await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program);
+
+        assert!(!verifier
+            .session_opened(&announce_req(SessionId::from_u64(42)))
+            .await
+            .expect("session opened"));
+        assert!(contract_calls
+            .lock()
+            .expect("contract calls lock")
+            .is_empty());
+        let _ = shutdown.send(());
     }
 
     /// A `ControlState` constructed without a `ShadowSigner` MUST

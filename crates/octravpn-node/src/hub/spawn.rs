@@ -210,7 +210,10 @@ impl Hub {
             .with_events_token(self.cfg.control.events_token_string())
             .with_metrics_token(self.cfg.control.metrics_token_string())
             .with_admin_token(admin_token)
-            .with_session_verifier(SessionAdmissionVerifier::new(self.chain.rpc.clone()))
+            .with_session_verifier(SessionAdmissionVerifier::new(
+                self.chain.rpc.clone(),
+                self.chain.program_addr.clone(),
+            ))
             .with_wire_state(wire_state.as_ref().map(|(ws, _)| ws.clone()))
             .with_receipt_vault(receipt_vault)
             .with_shadow_signer(shadow_signer, 0);

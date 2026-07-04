@@ -9,7 +9,7 @@ use octravpn_core::{
     commit::{commit, fresh_blind},
     onion::MAX_HOPS,
     receipt::ReceiptContext,
-    rpc::RpcClient,
+    rpc::{next_nonce, RpcClient},
     session::{SessionId, ValidatorRecord},
     sig::KeyPair,
     stealth,
@@ -208,7 +208,7 @@ impl Client {
             .map(|h| h.validator.addr.display().to_string())
             .unwrap_or_default();
         let bal = self.rpc.balance(&self.wallet_addr).await?;
-        let nonce = bal.pending_nonce.max(bal.nonce);
+        let nonce = next_nonce(&bal);
         let fee = self
             .rpc
             .recommended_fee(Some("contract_call"))
