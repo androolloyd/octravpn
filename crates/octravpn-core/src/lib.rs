@@ -15,6 +15,7 @@ pub mod b64;
 pub mod backend;
 pub mod bearer;
 pub mod bounded;
+pub mod chain_tx_queue;
 pub mod commit;
 pub mod control;
 pub mod earnings;
@@ -38,6 +39,7 @@ pub mod validator_oracle;
 pub use backend::{OctraBackend, PlaceholderBackend, RpcBackend};
 
 pub use address::{Address, ADDRESS_LEN};
+pub use chain_tx_queue::ChainTxQueueHandle;
 pub use earnings::{LedgerPoint, POINT_LEN};
 pub use enroll::{EnrollChallenge, EnrollPeer, EnrollRequest, EnrollResponse};
 pub use receipt::{Receipt, ReceiptError, SignedReceipt};
