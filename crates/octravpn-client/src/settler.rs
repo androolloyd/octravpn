@@ -21,23 +21,30 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Result};
 use octravpn_core::{
     address::Address,
-    control::{PostReceiptResponse, ProposedReceipt, SessionStateResponse},
+    control::{
+        announce_signing_payload, AnnounceSessionRequest, PostReceiptResponse, ProposedReceipt,
+        SessionStateResponse,
+    },
     receipt::SignedReceipt,
     rpc::next_nonce,
     session::SessionId,
     sig::verify,
+    v3_calls::ContractCallBuilder,
 };
-use serde_json::json;
+use serde_json::{json, Value};
 use tracing::{info, warn};
 
-use crate::{
-    chain_v3::{ArmRelayParams, ChainCtxV3},
-    runner::{ActiveSession, Client},
-};
+use crate::runner::{ActiveSession, Client};
 
 const BYTES_PER_MB: u64 = 1_048_576;
 
 pub(crate) async fn settle_active(client: &Arc<Client>, active: ActiveSession) -> Result<()> {
+    if client.relay_config().enabled {
+        client
+            .open_settle_state()?
+            .record_proposed(&active.session_id)?;
+    }
+
     let exit = active.route.last().ok_or_else(|| anyhow!("empty route"))?;
     let proposed = fetch_proposed_receipt(client, &exit.validator.endpoint, &active.session_id)
         .await
@@ -120,17 +127,46 @@ pub(crate) async fn settle_active(client: &Arc<Client>, active: ActiveSession) -
     };
 
     if receipt_posted && client.relay_config().enabled {
-        submit_arm_relay(client, &active, &signed).await?;
+        let net = relay_net(&active, signed.receipt.bytes_used);
+        let store = client.open_settle_state()?;
+        store.record_countersigned(&active.session_id, &signed, net)?;
+        let env = client.arm_environment();
+        store
+            .arm_if_countersigned(client.as_ref(), &env, &active.session_id)
+            .await?;
         return Ok(());
     }
 
     submit_settle_confirm(client, &active, signed.receipt.bytes_used).await
 }
 
-pub(crate) async fn settle(_client: &Arc<Client>, _session_id: &str) -> Result<()> {
-    Err(anyhow!(
-        "stand-alone settle not yet supported; keep `connect` running until clean shutdown"
-    ))
+pub(crate) async fn arm_recorded_session(
+    client: &Arc<Client>,
+    session_id: SessionId,
+) -> Result<()> {
+    if !client.relay_config().enabled {
+        return Err(anyhow!(
+            "`settle arm` requires [v3.relay].enabled = true in client.toml"
+        ));
+    }
+    let store = client.open_settle_state()?;
+    let env = client.arm_environment();
+    match store
+        .arm_if_countersigned(client.as_ref(), &env, &session_id)
+        .await?
+    {
+        Some(submitted) => {
+            println!(
+                "arm_relay: tx_hash = {} session_id = {} settlement_hash = {} net = {}",
+                submitted.tx_hash, submitted.session_id, submitted.settlement_hash, submitted.net
+            );
+            Ok(())
+        }
+        None => Err(anyhow!(
+            "session {} is not in durable Countersigned state",
+            session_id.to_hex()
+        )),
+    }
 }
 
 pub(crate) async fn reclaim(client: &Arc<Client>, session_id_hex: &str) -> Result<()> {
@@ -190,44 +226,32 @@ async fn submit_settle_confirm(
     Ok(())
 }
 
-async fn submit_arm_relay(
-    client: &Arc<Client>,
-    active: &ActiveSession,
-    signed: &SignedReceipt,
-) -> Result<()> {
-    let sid_u64 = active
-        .session_id
-        .as_u64()
-        .ok_or_else(|| anyhow!("v4 relay settlement requires u64 session ids"))?;
-    let relay_cfg = client.relay_config();
-    let net = relay_net(active, signed.receipt.bytes_used);
-    let settlement_hash = signed.settlement_hash();
-    let ctx = ChainCtxV3::new(client.rpc(), client.program_addr(), client.wallet_kp());
-    let nonce = ctx.nonce().await?;
-    let fee = ctx.fee_or_fallback("contract_call").await;
-    let params = ArmRelayParams {
-        session_id: sid_u64,
-        settlement_hash_hex: &settlement_hash,
+pub(crate) fn build_arm_params(
+    program_addr: &Address,
+    wallet_addr: &Address,
+    session_id_u64: u64,
+    settlement_hash: &str,
+    net: u64,
+    relay_expiry_epochs: u64,
+    fee: u64,
+) -> Value {
+    ContractCallBuilder::new(program_addr.clone(), wallet_addr.clone()).arm_relay_call(
+        session_id_u64,
+        settlement_hash,
         net,
-        relay_expiry_epochs: relay_cfg.relay_expiry_epochs,
+        relay_expiry_epochs,
+        0,
         fee,
-        nonce,
-    };
-    let call = ctx.build_arm_relay_call(&params);
-    let signed_tx = ctx.sign_call(call)?;
-    let hash = ctx
-        .submit_signed(&signed_tx)
+        0,
+    )
+}
+
+pub(crate) async fn submit_arm(client: &Client, call: Value) -> Result<String> {
+    client
+        .chain_tx_queue()
+        .submit(call)
         .await
-        .context("submit arm_relay")?;
-    info!(
-        hash = %hash,
-        session = sid_u64,
-        settlement_hash = %settlement_hash,
-        net,
-        relay_expiry_epochs = relay_cfg.relay_expiry_epochs,
-        "arm_relay submitted"
-    );
-    Ok(())
+        .map_err(|e| anyhow!("chain tx queue arm_relay submit: {e}"))
 }
 
 fn relay_net(active: &ActiveSession, bytes_used: u64) -> u64 {
@@ -242,6 +266,61 @@ fn relay_net(active: &ActiveSession, bytes_used: u64) -> u64 {
 fn compute_relay_net(bytes_used: u64, price_per_mb: u64, deposit: u64) -> u64 {
     let raw = (bytes_used / BYTES_PER_MB).saturating_mul(price_per_mb);
     raw.min(deposit)
+}
+
+pub(crate) async fn announce_session_to_exit(
+    client: &Arc<Client>,
+    active: &ActiveSession,
+) -> Result<()> {
+    let exit = active.route.last().ok_or_else(|| anyhow!("empty route"))?;
+    let ctrl_endpoint =
+        octravpn_core::control::base_url_for(&normalize_control_endpoint(&exit.validator.endpoint));
+    let client_wg_secret = octravpn_core::util::derive_subkey(
+        &active.session_kp.public.0,
+        octravpn_core::util::DOMAIN_NOISE,
+    );
+    let client_wg_pubkey =
+        x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(client_wg_secret))
+            .to_bytes();
+    let body = AnnounceSessionRequest {
+        session_id: active.session_id.clone(),
+        client_pubkey: active.session_kp.public,
+        client_wg_pubkey,
+        open_tx_hash: active.open_tx_hash.clone(),
+        client_sig: active.session_kp.sign(&announce_signing_payload(
+            &active.session_id,
+            &active.session_kp.public,
+            &client_wg_pubkey,
+            &active.open_tx_hash,
+        )),
+    };
+    let resp = client
+        .http()
+        .post(format!("{ctrl_endpoint}/session"))
+        .json(&body)
+        .send()
+        .await
+        .context("announce session HTTP")?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("exit announce: status {}", resp.status()));
+    }
+    Ok(())
+}
+
+pub(crate) fn session_id_from_cli(raw: &str) -> Result<SessionId> {
+    if let Ok(id) = raw.parse::<u64>() {
+        return Ok(SessionId::from_u64(id));
+    }
+    SessionId::from_hex(raw).ok_or_else(|| anyhow!("bad session id: expected decimal u64 or hex"))
+}
+
+pub(crate) fn normalize_control_endpoint(endpoint: &str) -> String {
+    endpoint
+        .trim()
+        .strip_prefix("wg://")
+        .unwrap_or_else(|| endpoint.trim())
+        .trim_end_matches('/')
+        .to_string()
 }
 
 #[cfg(test)]
@@ -261,7 +340,8 @@ async fn fetch_proposed_receipt(
     wg_endpoint: &str,
     session_id: &SessionId,
 ) -> Result<ProposedReceipt> {
-    let url = octravpn_core::control::session_state_url(wg_endpoint, session_id);
+    let endpoint = normalize_control_endpoint(wg_endpoint);
+    let url = octravpn_core::control::session_state_url(&endpoint, session_id);
     let resp = client
         .http()
         .get(&url)
@@ -281,7 +361,8 @@ async fn post_countersigned_receipt(
     session_id: &SessionId,
     signed: &SignedReceipt,
 ) -> Result<()> {
-    let url = octravpn_core::control::receipt_url(wg_endpoint, session_id);
+    let endpoint = normalize_control_endpoint(wg_endpoint);
+    let url = octravpn_core::control::receipt_url(&endpoint, session_id);
     let local_hash = signed.settlement_hash();
     let resp = client
         .http()

@@ -17,7 +17,10 @@
 //! `ChainCfg` so the v1.1 / v2 paths can continue reading
 //! `cfg.chain.protocol_version` unchanged.
 
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -142,7 +145,7 @@ fn default_v3_max_pay() -> u64 {
 }
 
 /// `[v3.relay]` — optional v4 relay-settlement arm path.
-#[derive(Debug, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Clone)]
 pub(crate) struct V3RelayCfg {
     /// Master toggle. `false` by default.
     #[serde(default)]
@@ -151,6 +154,11 @@ pub(crate) struct V3RelayCfg {
     /// the client can call `relay_refund`.
     #[serde(default = "default_relay_expiry_epochs")]
     pub relay_expiry_epochs: u64,
+    /// Durable client-side relay settlement state. Defaults at load to
+    /// a sibling directory of `[wallet].secret_path`, then the runtime
+    /// keys files below it by wallet address.
+    #[serde(default)]
+    pub state_dir: String,
 }
 
 impl Default for V3RelayCfg {
@@ -158,6 +166,7 @@ impl Default for V3RelayCfg {
         Self {
             enabled: false,
             relay_expiry_epochs: default_relay_expiry_epochs(),
+            state_dir: String::new(),
         }
     }
 }
@@ -206,8 +215,28 @@ impl ClientConfig {
     pub(crate) fn load(path: impl AsRef<Path>) -> Result<Self> {
         let raw = fs::read_to_string(&path)
             .with_context(|| format!("read {}", path.as_ref().display()))?;
-        let cfg: Self = toml::from_str(&raw).context("parse client config TOML")?;
+        let mut cfg: Self = toml::from_str(&raw).context("parse client config TOML")?;
+        cfg.resolve_relay_state_dir()?;
         Ok(cfg)
+    }
+
+    pub(crate) fn resolve_relay_state_dir(&mut self) -> Result<()> {
+        if self.v3.relay.state_dir.trim().is_empty() {
+            self.v3.relay.state_dir = default_relay_state_dir(&self.wallet.secret_path)
+                .display()
+                .to_string();
+        }
+        let path = Path::new(&self.v3.relay.state_dir);
+        if path.as_os_str().is_empty() {
+            anyhow::bail!("[v3.relay].state_dir must not be empty");
+        }
+        if path.exists() && !path.is_dir() {
+            anyhow::bail!(
+                "[v3.relay].state_dir points at a file, not a directory: {}",
+                path.display()
+            );
+        }
+        Ok(())
     }
 
     /// Returns `true` when the config selects the v2 (circle-native)
@@ -230,5 +259,66 @@ impl ClientConfig {
     /// `cfg.chain.protocol_version` directly.
     pub(crate) fn protocol_version(&self) -> Result<ProtocolVersion> {
         ProtocolVersion::parse(&self.chain.protocol_version)
+    }
+}
+
+pub(crate) fn default_relay_state_dir(wallet_secret_path: &str) -> PathBuf {
+    let wallet_path = Path::new(wallet_secret_path);
+    let parent = wallet_path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    parent.join("settle-state")
+}
+
+pub(crate) fn chain_id_to_envelope_string(id: u32) -> String {
+    use octravpn_core::receipt::{CHAIN_ID_DEVNET, CHAIN_ID_MAINNET};
+    if id == CHAIN_ID_DEVNET {
+        "octra-devnet".to_string()
+    } else if id == CHAIN_ID_MAINNET {
+        "octra-mainnet".to_string()
+    } else {
+        format!("octra-net-{id:08x}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relay_state_dir_defaults_next_to_wallet_secret() {
+        let mut cfg: ClientConfig = toml::from_str(
+            r#"
+[chain]
+rpc_url = "http://127.0.0.1:0"
+program_addr = "oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3"
+
+[wallet]
+addr = "oct8taXQ4CvohcgzCJFYyaKrrAbcZs5mxkBCJQQYWb2Pcun"
+secret_path = "/tmp/octravpn-client/wallet.key"
+"#,
+        )
+        .unwrap();
+
+        cfg.resolve_relay_state_dir().unwrap();
+
+        assert_eq!(cfg.v3.relay.state_dir, "/tmp/octravpn-client/settle-state");
+    }
+
+    #[test]
+    fn chain_id_mapping_matches_node_envelope_names() {
+        assert_eq!(
+            chain_id_to_envelope_string(octravpn_core::receipt::CHAIN_ID_DEVNET),
+            "octra-devnet"
+        );
+        assert_eq!(
+            chain_id_to_envelope_string(octravpn_core::receipt::CHAIN_ID_MAINNET),
+            "octra-mainnet"
+        );
+        assert_eq!(
+            chain_id_to_envelope_string(0x1234_5678),
+            "octra-net-12345678"
+        );
     }
 }

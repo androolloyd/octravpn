@@ -280,6 +280,7 @@ impl<'a> ChainCtxV3<'a> {
     /// `settlement_hash` is the 64-char hex bytes string returned by
     /// `SignedReceipt::settlement_hash()`. Expiry is normalized by the
     /// shared builder before encoding.
+    #[allow(dead_code)]
     pub(crate) fn build_arm_relay_call(&self, p: &ArmRelayParams<'_>) -> Value {
         self.call_builder().arm_relay_call(
             p.session_id,
@@ -395,6 +396,7 @@ pub(crate) struct SettleConfirmParams<'a> {
     pub nonce: u64,
 }
 
+#[allow(dead_code)]
 pub(crate) struct ArmRelayParams<'a> {
     pub session_id: u64,
     /// 64-char lowercase hex sha256 returned by

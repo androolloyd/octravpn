@@ -6,6 +6,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Result};
 use octravpn_core::{
     address::Address,
+    chain_tx_queue::{self, ChainTxQueueHandle},
     commit::{commit, fresh_blind},
     onion::MAX_HOPS,
     receipt::ReceiptContext,
@@ -18,14 +19,15 @@ use parking_lot::Mutex;
 use serde_json::json;
 use tracing::{info, warn};
 
-use crate::{config::ClientConfig, discover, settler, wallet};
+use crate::{config::ClientConfig, discover, settle_state, settler, wallet};
 
 pub(crate) struct Client {
     rpc: RpcClient,
     http: reqwest::Client,
     program_addr: Address,
     wallet_addr: Address,
-    wallet_kp: KeyPair,
+    wallet_kp: Arc<KeyPair>,
+    chain_tx_queue: ChainTxQueueHandle,
     /// Deployment domain bound into every receipt the client verifies /
     /// co-signs. v1.2 P1-5: receipt is non-replayable across programs,
     /// chains, or circles. v1.1 clients leave `circle_id = None`; v2
@@ -65,22 +67,32 @@ impl Client {
             .context("build http client")?;
         let program_addr = Address::from_display(&cfg.chain.program_addr);
         let wallet_addr = Address::from_display(&cfg.wallet.addr);
-        let wallet_kp = wallet::load_keypair(&cfg.wallet.secret_path)?;
+        let wallet_kp = Arc::new(wallet::load_keypair(&cfg.wallet.secret_path)?);
         // Receipt domain: v1.1 clients leave circle_id = None; v2 clients
         // discover circle_id from the operator's policy bundle and call
         // `set_receipt_circle` before opening a session.
         let receipt_context = ReceiptContext::v1_1(program_addr.clone(), cfg.chain.chain_id);
-        let relay = cfg.v3.relay;
-        Ok(Self {
+        let relay = cfg.v3.relay.clone();
+        let chain_tx_queue = chain_tx_queue::spawn(
+            rpc.clone(),
+            wallet_kp.clone(),
+            crate::config::chain_id_to_envelope_string(cfg.chain.chain_id),
+        );
+        let client = Self {
             rpc,
             http,
             program_addr,
             wallet_addr,
             wallet_kp,
+            chain_tx_queue,
             receipt_context,
             relay,
             state: Mutex::new(None),
-        })
+        };
+        settle_state::replay_pending_for_client(&client)
+            .await
+            .context("replay pending relay settlement state")?;
+        Ok(client)
     }
 
     pub(crate) fn receipt_context(&self) -> &ReceiptContext {
@@ -88,7 +100,7 @@ impl Client {
     }
 
     pub(crate) fn relay_config(&self) -> crate::config::V3RelayCfg {
-        self.relay
+        self.relay.clone()
     }
 
     /// Return a receipt context with `circle_id = Some(circle)` so v2
@@ -122,7 +134,23 @@ impl Client {
     }
 
     pub(crate) fn wallet_kp(&self) -> &KeyPair {
-        &self.wallet_kp
+        self.wallet_kp.as_ref()
+    }
+
+    pub(crate) fn chain_tx_queue(&self) -> ChainTxQueueHandle {
+        self.chain_tx_queue.clone()
+    }
+
+    pub(crate) fn arm_environment(&self) -> settle_state::ArmEnvironment {
+        settle_state::ArmEnvironment {
+            program_addr: self.program_addr.clone(),
+            wallet_addr: self.wallet_addr.clone(),
+            relay_expiry_epochs: self.relay.relay_expiry_epochs,
+        }
+    }
+
+    pub(crate) fn open_settle_state(&self) -> Result<settle_state::SettleStateStore> {
+        settle_state::SettleStateStore::open(&self.relay.state_dir, &self.wallet_addr)
     }
 
     pub(crate) fn print_identity(&self) {
@@ -242,6 +270,9 @@ impl Client {
             route,
             deposit,
         });
+        if self.relay_config().enabled {
+            self.open_settle_state()?.record_proposed(&session_id)?;
+        }
 
         // 5. Build the onion + bring up the tunnel via boringtun.
         //    This is the data-plane piece — a real WireGuard handshake

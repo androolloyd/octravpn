@@ -34,9 +34,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
-use octravpn_core::sig::KeyPair;
 use octravpn_core::v3_policy::OperatorPolicy;
 use octravpn_core::v3_state_root::StateRoot;
+use octravpn_core::{
+    address::Address,
+    session::{SessionId, ValidatorRecord},
+    sig::{KeyPair, PublicKey},
+};
 use rand::RngCore;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -45,8 +49,8 @@ use tracing::{info, warn};
 use crate::{
     chain_v3::{ChainCtxV3, SettleConfirmParams},
     config::ClientConfig,
-    runner::Client,
-    wallet,
+    runner::{ActiveSession, Client, RouteHop},
+    settler, wallet,
 };
 
 /// One MiB in bytes. The price tier is per-MiB; we floor-divide.
@@ -171,6 +175,12 @@ pub(crate) async fn connect_v3(
     info!(tx_hash = %tx_hash, "v3 open_session submitted");
 
     let session_id = poll_session_id_v3(client, &tx_hash).await?;
+    let session_id_wrapped = SessionId::from_u64(session_id);
+    if client.relay_config().enabled {
+        client
+            .open_settle_state()?
+            .record_proposed(&session_id_wrapped)?;
+    }
     println!("v3 session opened: id={session_id}");
     println!("  tailnet_id    = {}", v3.tailnet_id);
     println!("  circle        = {}", v3.circle_id);
@@ -194,7 +204,63 @@ pub(crate) async fn connect_v3(
         return run_claim_no_show(&ctx, session_id).await;
     }
     let bytes_used = bytes_used_override.unwrap_or(0);
+    if client.relay_config().enabled {
+        let active = active_session_from_v3_policy(
+            session_id_wrapped,
+            tx_hash,
+            &v3.circle_id,
+            &policy,
+            v3.max_pay,
+        )?;
+        settler::announce_session_to_exit(client, &active)
+            .await
+            .context("announce v3 relay session to exit")?;
+        return settler::settle_active(client, active).await;
+    }
     run_settle_confirm(&ctx, session_id, bytes_used, price_per_mb).await
+}
+
+fn active_session_from_v3_policy(
+    session_id: SessionId,
+    open_tx_hash: String,
+    circle_id: &str,
+    policy: &OperatorPolicy,
+    deposit: u64,
+) -> Result<ActiveSession> {
+    let endpoint = settler::normalize_control_endpoint(&policy.endpoint);
+    let wg_pubkey = decode_policy_pubkey(&policy.wg_pubkey_b64)
+        .with_context(|| format!("decode wg_pubkey_b64 for circle {circle_id}"))?;
+    let validator = ValidatorRecord {
+        addr: Address::from_display(circle_id),
+        active: true,
+        endpoint,
+        wg_pubkey,
+        receipt_pubkey: PublicKey([0u8; 32]),
+        view_pubkey: [0u8; 32],
+        region: policy.region.clone(),
+        price_per_mb: policy.price_per_mb_shared,
+        registered_at: policy.effective_epoch,
+        reputation: 0,
+    };
+    Ok(ActiveSession {
+        session_id,
+        session_kp: KeyPair::generate(),
+        open_tx_hash,
+        route: vec![RouteHop {
+            validator,
+            blind: [0u8; 32],
+            split_bps: 10_000,
+        }],
+        deposit,
+    })
+}
+
+fn decode_policy_pubkey(raw: &str) -> Result<PublicKey> {
+    let bytes = octravpn_core::b64::decode(raw).map_err(|e| anyhow!("base64: {e}"))?;
+    let arr: [u8; 32] = bytes
+        .try_into()
+        .map_err(|v: Vec<u8>| anyhow!("expected 32 bytes, got {}", v.len()))?;
+    Ok(PublicKey(arr))
 }
 
 /// Submit the opener-side `settle_confirm` for a freshly-closed
