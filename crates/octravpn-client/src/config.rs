@@ -271,6 +271,10 @@ pub(crate) fn default_relay_state_dir(wallet_secret_path: &str) -> PathBuf {
     parent.join("settle-state")
 }
 
+// Retained for when a chain enables v2 tx-envelope chain_id binding; currently
+// the client (like the node) signs with an empty envelope chain_id (see
+// runner.rs), so this has no production caller yet.
+#[allow(dead_code)]
 pub(crate) fn chain_id_to_envelope_string(id: u32) -> String {
     use octravpn_core::receipt::{CHAIN_ID_DEVNET, CHAIN_ID_MAINNET};
     if id == CHAIN_ID_DEVNET {

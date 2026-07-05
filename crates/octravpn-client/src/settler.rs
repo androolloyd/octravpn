@@ -16,7 +16,7 @@
 //! for the same session, the AML slashes the operator's bond
 //! automatically. The client never has to do anything about it.
 
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 
 use anyhow::{anyhow, Context, Result};
 use octravpn_core::{
@@ -34,7 +34,10 @@ use octravpn_core::{
 use serde_json::{json, Value};
 use tracing::{info, warn};
 
-use crate::runner::{ActiveSession, Client};
+use crate::{
+    runner::{ActiveSession, Client},
+    settle_state::{ArmChain, ArmEnvironment, ArmSubmission, SettleStateStore},
+};
 
 const BYTES_PER_MB: u64 = 1_048_576;
 
@@ -151,22 +154,121 @@ pub(crate) async fn arm_recorded_session(
     }
     let store = client.open_settle_state()?;
     let env = client.arm_environment();
-    match store
-        .arm_if_countersigned(client.as_ref(), &env, &session_id)
-        .await?
-    {
-        Some(submitted) => {
-            println!(
-                "arm_relay: tx_hash = {} session_id = {} settlement_hash = {} net = {}",
-                submitted.tx_hash, submitted.session_id, submitted.settlement_hash, submitted.net
-            );
-            Ok(())
-        }
-        None => Err(anyhow!(
-            "session {} is not in durable Countersigned state",
-            session_id.to_hex()
-        )),
+    let submitted =
+        arm_recorded_session_from_store(client.as_ref(), &store, &env, &session_id).await?;
+    print_arm_submission(&submitted);
+    Ok(())
+}
+
+pub(crate) async fn arm_session_from_receipt(
+    client: &Arc<Client>,
+    session_id: SessionId,
+    receipt_path: &Path,
+    net: u64,
+    relay_expiry_epochs: u64,
+) -> Result<()> {
+    if !client.relay_config().enabled {
+        return Err(anyhow!(
+            "`settle arm` requires [v3.relay].enabled = true in client.toml"
+        ));
     }
+    let receipt = read_signed_receipt(receipt_path)?;
+    validate_arm_receipt(client.as_ref(), &session_id, &receipt)?;
+    let store = client.open_settle_state()?;
+    let mut env = client.arm_environment();
+    env.relay_expiry_epochs = relay_expiry_epochs;
+    let submitted = prime_and_arm_recorded_session_from_store(
+        client.as_ref(),
+        &store,
+        &env,
+        &session_id,
+        &receipt,
+        net,
+    )
+    .await?;
+    print_arm_submission(&submitted);
+    Ok(())
+}
+
+fn read_signed_receipt(path: &Path) -> Result<SignedReceipt> {
+    let raw = std::fs::read(path).with_context(|| format!("read {}", path.display()))?;
+    serde_json::from_slice(&raw).with_context(|| format!("decode SignedReceipt {}", path.display()))
+}
+
+fn validate_arm_receipt(
+    client: &Client,
+    session_id: &SessionId,
+    receipt: &SignedReceipt,
+) -> Result<()> {
+    if receipt.receipt.session_id != *session_id {
+        return Err(anyhow!(
+            "receipt session_id {} does not match CLI session_id {}",
+            receipt.receipt.session_id.to_hex(),
+            session_id.to_hex()
+        ));
+    }
+    if &receipt.receipt.context != client.receipt_context() {
+        let expected = client.receipt_context();
+        let got = &receipt.receipt.context;
+        return Err(anyhow!(
+            "receipt context mismatch: client expected program={} chain_id={} circle={:?}; \
+             receipt has program={} chain_id={} circle={:?}",
+            expected.program_addr.display(),
+            expected.chain_id,
+            expected.circle_id.as_ref().map(Address::display),
+            got.program_addr.display(),
+            got.chain_id,
+            got.circle_id.as_ref().map(Address::display),
+        ));
+    }
+    receipt.verify().context("verify countersigned receipt")?;
+    Ok(())
+}
+
+fn prime_countersigned_receipt(
+    store: &SettleStateStore,
+    session_id: &SessionId,
+    receipt: &SignedReceipt,
+    net: u64,
+) -> Result<()> {
+    store.record_proposed(session_id)?;
+    store.record_countersigned(session_id, receipt, net)
+}
+
+async fn prime_and_arm_recorded_session_from_store<C: ArmChain>(
+    chain: &C,
+    store: &SettleStateStore,
+    env: &ArmEnvironment,
+    session_id: &SessionId,
+    receipt: &SignedReceipt,
+    net: u64,
+) -> Result<ArmSubmission> {
+    prime_countersigned_receipt(store, session_id, receipt, net)?;
+    arm_recorded_session_from_store(chain, store, env, session_id).await
+}
+
+async fn arm_recorded_session_from_store<C: ArmChain>(
+    chain: &C,
+    store: &SettleStateStore,
+    env: &ArmEnvironment,
+    session_id: &SessionId,
+) -> Result<ArmSubmission> {
+    store
+        .arm_if_countersigned(chain, env, session_id)
+        .await?
+        .ok_or_else(|| {
+            anyhow!(
+                "session {} is not in durable Countersigned state",
+                session_id.to_hex()
+            )
+        })
+}
+
+fn print_arm_submission(submitted: &ArmSubmission) {
+    println!(
+        "arm_relay: tx_hash = {} session_id = {} settlement_hash = {} net = {}",
+        submitted.tx_hash, submitted.session_id, submitted.settlement_hash, submitted.net
+    );
 }
 
 pub(crate) async fn reclaim(client: &Arc<Client>, session_id_hex: &str) -> Result<()> {
@@ -326,12 +428,137 @@ pub(crate) fn normalize_control_endpoint(endpoint: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use octravpn_core::{
+        receipt::{Receipt, ReceiptContext, CHAIN_ID_TEST},
+        session::Blind,
+        sig::KeyPair,
+    };
+    use parking_lot::Mutex;
+    use serde_json::json;
 
     #[test]
     fn compute_relay_net_floors_to_mb_and_caps_to_deposit() {
         assert_eq!(compute_relay_net(BYTES_PER_MB - 1, 100, 1_000), 0);
         assert_eq!(compute_relay_net(2 * BYTES_PER_MB, 100, 1_000), 200);
         assert_eq!(compute_relay_net(20 * BYTES_PER_MB, 100, 1_500), 1_500);
+    }
+
+    #[derive(Default)]
+    struct MockChain {
+        fee_calls: Mutex<usize>,
+        submit_calls: Mutex<Vec<Value>>,
+    }
+
+    #[async_trait]
+    impl ArmChain for MockChain {
+        async fn arm_fee(&self) -> Result<u64> {
+            *self.fee_calls.lock() += 1;
+            Ok(777)
+        }
+
+        async fn submit_arm_call(&self, call: Value) -> Result<String> {
+            self.submit_calls.lock().push(call);
+            Ok("arm-from-settler-test".to_string())
+        }
+
+        async fn get_session_status(&self, _session_id: u64) -> Result<u64> {
+            Ok(0)
+        }
+    }
+
+    fn addr(byte: u8) -> Address {
+        Address::from_pubkey(&[byte; 32])
+    }
+
+    fn env(relay_expiry_epochs: u64) -> ArmEnvironment {
+        ArmEnvironment {
+            program_addr: addr(0x33),
+            wallet_addr: addr(0x44),
+            relay_expiry_epochs,
+        }
+    }
+
+    fn store(dir: &Path) -> SettleStateStore {
+        SettleStateStore::open(dir, &addr(0x44)).unwrap()
+    }
+
+    fn id(n: u64) -> SessionId {
+        SessionId::from_u64(n)
+    }
+
+    fn signed(session_id: SessionId, seq: u64, bytes_used: u64) -> SignedReceipt {
+        let client = KeyPair::from_secret_bytes(&[0x11; 32]);
+        let node = KeyPair::from_secret_bytes(&[0x22; 32]);
+        let ctx = ReceiptContext::v1_1(addr(0x33), CHAIN_ID_TEST);
+        SignedReceipt::build(
+            Receipt::new(ctx, session_id, seq, bytes_used, Blind::new([0x55; 32])),
+            &client,
+            &node,
+        )
+    }
+
+    #[tokio::test]
+    async fn from_receipt_primes_countersigned_then_arms() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(dir.path());
+        let sid = id(42);
+        let receipt = signed(sid.clone(), 2, 4_096);
+        let receipt_path = dir.path().join("receipt.json");
+        std::fs::write(&receipt_path, serde_json::to_vec_pretty(&receipt).unwrap()).unwrap();
+        let decoded = read_signed_receipt(&receipt_path).unwrap();
+        let chain = MockChain::default();
+
+        let out =
+            prime_and_arm_recorded_session_from_store(&chain, &s, &env(333), &sid, &decoded, 3_000)
+                .await
+                .unwrap();
+
+        assert_eq!(out.session_id, 42);
+        assert_eq!(out.settlement_hash, receipt.settlement_hash());
+        assert_eq!(out.net, 3_000);
+        assert_eq!(
+            s.state(&sid).unwrap(),
+            Some(crate::settle_state::SettlementState::ArmSubmitted)
+        );
+        assert_eq!(s.arm_material(&sid).unwrap(), (receipt.clone(), 3_000));
+        assert_eq!(*chain.fee_calls.lock(), 1);
+        let calls = chain.submit_calls.lock();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["method"], "arm_relay");
+        assert_eq!(
+            calls[0]["params"],
+            json!([42, receipt.settlement_hash(), 3_000, 333])
+        );
+    }
+
+    #[tokio::test]
+    async fn plain_arm_uses_pre_recorded_countersigned_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(dir.path());
+        let sid = id(43);
+        let receipt = signed(sid.clone(), 1, 8_192);
+        s.record_proposed(&sid).unwrap();
+        s.record_countersigned(&sid, &receipt, 1_500).unwrap();
+        let chain = MockChain::default();
+
+        let out = arm_recorded_session_from_store(&chain, &s, &env(200), &sid)
+            .await
+            .unwrap();
+
+        assert_eq!(out.session_id, 43);
+        assert_eq!(out.settlement_hash, receipt.settlement_hash());
+        assert_eq!(out.net, 1_500);
+        assert_eq!(
+            s.state(&sid).unwrap(),
+            Some(crate::settle_state::SettlementState::ArmSubmitted)
+        );
+        let calls = chain.submit_calls.lock();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0]["params"],
+            json!([43, receipt.settlement_hash(), 1_500, 200])
+        );
     }
 }
 

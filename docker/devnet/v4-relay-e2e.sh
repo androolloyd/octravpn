@@ -12,14 +12,10 @@
 #     which reads the vaulted receipt, computes SignedReceipt::
 #     settlement_preimage(), checks RELAY_ARMED plus deadline, and
 #     submits relay_claim.
-#
-# Known limitation:
-#   There is currently no standalone client CLI for settler.rs'
-#   submit_arm_relay() path. The production arm path is tied to the
-#   tunnel shutdown settle flow. This smoke therefore commits the
-#   settlement_hash from a real SignedReceipt, then clearly labels
-#   arm_relay as a cast fallback. The POST route and relay-claim CLI are
-#   the wired Rust paths exercised end-to-end.
+#   - The real client Rust caller path runs:
+#       octravpn settle arm <sid> --from-receipt <receipt.json> ...
+#     which primes the durable Countersigned floor and submits arm_relay
+#     through the client ChainTxQueue.
 #
 # Usage:
 #   ./docker/devnet/v4-relay-e2e.sh
@@ -65,6 +61,8 @@ COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-octra-v4-relay-e2e}"
 KEEP_STACK="${KEEP_STACK:-0}"
 RUN_STATE_REL="${RUN_STATE_REL:-docker/devnet/.generated/v4-relay-e2e-state}"
 HELPER_REL="docker/devnet/.generated/v4-relay-helper"
+CLIENT_RW_DIR="/run/octravpn"
+CLIENT_RECEIPT_JSON="$CLIENT_RW_DIR/receipt.json"
 
 G='\033[32m'; R='\033[31m'; Y='\033[33m'; D='\033[2m'; C='\033[36m'; B='\033[1m'; NC='\033[0m'
 hdr()  { printf "\n${C}== %s ==${NC}\n" "$*"; }
@@ -202,6 +200,20 @@ view_result() {
     | python3 -c 'import json,sys;d=json.load(sys.stdin);r=d.get("result") or {};print(r.get("result",""))'
 }
 
+wait_status() {
+  local sid=$1 expected=$2 label=${3:-status}
+  local status=""
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    status=$(view_result get_session_status "[$sid]" || true)
+    [[ "$status" == "$expected" ]] && {
+      ok "session $sid is $label"
+      return 0
+    }
+    sleep 3
+  done
+  fail "expected $label($expected); got ${status:-<empty>}"
+}
+
 storage_value() {
   local fn=$1 params=$2 key=$3
   rpc "contract_call" "[\"$V4\",\"$fn\",$params]" \
@@ -301,6 +313,7 @@ secret_path = "/etc/octravpn/wallet.key"
 [v3.relay]
 enabled             = true
 relay_expiry_epochs = $RELAY_EXPIRY_EPOCHS
+state_dir           = "$CLIENT_RW_DIR/settle-state"
 EOF
 }
 
@@ -349,6 +362,8 @@ async fn main() -> Result<()> {
     let control_url = arg_value(&args, "--control-url")?;
     let session_id: u64 = arg_value(&args, "--session-id")?.parse()?;
     let open_tx_hash = arg_value(&args, "--open-tx-hash")?;
+    let receipt_out = arg_value(&args, "--receipt-out")?;
+    let relay_net: u64 = arg_value(&args, "--net")?.parse()?;
 
     let id = SessionId::from_u64(session_id);
     let session_kp = KeyPair::generate();
@@ -406,6 +421,12 @@ async fn main() -> Result<()> {
     };
     signed.verify().context("dual-signed receipt self-verify")?;
     let settlement_hash = signed.settlement_hash();
+    if let Some(parent) = std::path::Path::new(&receipt_out).parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("mkdir {}", parent.display()))?;
+    }
+    std::fs::write(&receipt_out, serde_json::to_vec_pretty(&signed)?)
+        .with_context(|| format!("write {receipt_out}"))?;
 
     let post_resp = http
         .post(format!("{base}/session/{}/receipt", id.to_hex()))
@@ -437,7 +458,9 @@ async fn main() -> Result<()> {
             "session_id_hex": id.to_hex(),
             "receipt_seq": signed.receipt.seq,
             "bytes_used": signed.receipt.bytes_used,
+            "net": relay_net,
             "settlement_hash": settlement_hash,
+            "receipt_json": receipt_out,
             "posted": true
         }))?
     );
@@ -518,6 +541,8 @@ NODE1_PRICE_PER_MB="${NODE1_PRICE_PER_MB:-100}"
 NODE1_REGION="${NODE1_REGION:-relay-smoke}"
 CIRCLE_ADDR="${CIRCLE_ADDR:-$NODE1_ADDR}"
 RUN_STATE_ABS="$(mkdir -p "$(dirname "$RUN_STATE_REL")" && cd "$(dirname "$RUN_STATE_REL")" && pwd)/$(basename "$RUN_STATE_REL")"
+CLIENT_RW_HOST="$RUN_STATE_ABS/client-rw"
+mkdir -p "$CLIENT_RW_HOST"
 
 ok "rpc:        $OCTRA_RPC_URL"
 ok "client:     $CLIENT_ADDR"
@@ -602,25 +627,49 @@ HANDOFF_OUT=$(
   PROGRAM_ADDR="$V4" \
   HOST_DEVNET_DIR="$RUN_STATE_ABS" \
   OCTRA_RPC_URL="$OCTRA_RPC_URL" \
-    "${COMPOSE[@]}" run --rm --no-deps client \
+    "${COMPOSE[@]}" run --rm --no-deps \
+      --volume "$CLIENT_RW_HOST:$CLIENT_RW_DIR" \
+      client \
       /bin/octravpn/v4-relay-handback \
       --control-url http://node1:51821 \
       --session-id "$SID" \
-      --open-tx-hash "$OPEN_TX" 2>&1
+      --open-tx-hash "$OPEN_TX" \
+      --receipt-out "$CLIENT_RECEIPT_JSON" \
+      --net "$RELAY_NET" 2>&1
 ) || true
 printf '%s\n' "$HANDOFF_OUT"
 SETTLEMENT_HASH=$(printf '%s' "$HANDOFF_OUT" | extract_helper_field settlement_hash)
 RECEIPT_SEQ=$(printf '%s' "$HANDOFF_OUT" | extract_helper_field receipt_seq)
+RECEIPT_JSON=$(printf '%s' "$HANDOFF_OUT" | extract_helper_field receipt_json)
+RELAY_NET_FROM_HELPER=$(printf '%s' "$HANDOFF_OUT" | extract_helper_field net)
 [[ "$SETTLEMENT_HASH" =~ ^[0-9a-f]{64}$ ]] || fail "helper did not return a 64-char settlement_hash"
+[[ "$RECEIPT_JSON" == "$CLIENT_RECEIPT_JSON" ]] || fail "helper did not write expected receipt_json path"
+[[ "$RELAY_NET_FROM_HELPER" =~ ^[0-9]+$ ]] || fail "helper did not return numeric net"
 ok "POST route vaulted real SignedReceipt seq=$RECEIPT_SEQ hash=$SETTLEMENT_HASH"
 
-hdr "6/ arm_relay (cast fallback, real receipt hash)"
-say "cast fallback: no standalone client CLI currently invokes settler.rs::submit_arm_relay without running the tunnel shutdown flow."
-TX=$(send_tx "$CLIENT_KEY" arm_relay "$SID" "\"$SETTLEMENT_HASH\"" "$RELAY_NET" "$RELAY_EXPIRY_EPOCHS")
-wait_for_tx "$TX" "arm_relay cast fallback"
-STATUS=$(view_result get_session_status "[$SID]")
-[[ "$STATUS" == "$STATUS_RELAY_ARMED" ]] || fail "expected RELAY_ARMED($STATUS_RELAY_ARMED); got $STATUS"
-ok "session $SID is RELAY_ARMED"
+hdr "6/ arm_relay (real Rust client state machine)"
+say "arm_relay now comes from octravpn settle arm: receipt JSON -> durable Countersigned I1 gate -> ChainTxQueue."
+# TODO: add a crash-recovery assertion once the CLI has a prime-only mode:
+# first write Countersigned, then re-run plain `settle arm <sid>` from the journal.
+ARM_OUT=$(
+  COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" \
+  PROGRAM_ADDR="$V4" \
+  HOST_DEVNET_DIR="$RUN_STATE_ABS" \
+  OCTRA_RPC_URL="$OCTRA_RPC_URL" \
+    "${COMPOSE[@]}" run --rm --no-deps \
+      --volume "$CLIENT_RW_HOST:$CLIENT_RW_DIR" \
+      client \
+      /bin/octravpn/octravpn --config /etc/octravpn/client.toml \
+      settle arm "$SID" \
+      --from-receipt "$RECEIPT_JSON" \
+      --net "$RELAY_NET_FROM_HELPER" \
+      --relay-expiry "$RELAY_EXPIRY_EPOCHS" 2>&1
+) || true
+printf '%s\n' "$ARM_OUT"
+ARM_TX=$(printf '%s\n' "$ARM_OUT" | sed -n 's/^arm_relay: tx_hash = \([^ ]*\) .*$/\1/p' | head -1)
+[[ -n "$ARM_TX" ]] || fail "client settle arm did not print an arm_relay tx hash"
+wait_for_tx "$ARM_TX" "arm_relay via octravpn client CLI"
+wait_status "$SID" "$STATUS_RELAY_ARMED" "RELAY_ARMED"
 
 hdr "7/ real Rust relay-claim CLI"
 E_BEFORE=$(view_result get_earnings_total "[\"$CIRCLE_ADDR\"]")
@@ -651,5 +700,4 @@ ok "session $SID is RELAY_CLAIMED and earnings increased: $E_BEFORE -> $E_AFTER"
 
 bold ""
 bold "VERDICT: PASS"
-say "Rust-exercised: POST /session/:id/receipt route, receipt vault, octravpn-node v3 relay-claim CLI."
-say "Cast fallback: arm_relay only, using the settlement_hash from the real vaulted SignedReceipt."
+say "Rust-exercised: POST /session/:id/receipt route, client settle arm I1 gate + ChainTxQueue, receipt vault, octravpn-node v3 relay-claim CLI."

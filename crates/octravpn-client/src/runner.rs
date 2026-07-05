@@ -73,11 +73,13 @@ impl Client {
         // `set_receipt_circle` before opening a session.
         let receipt_context = ReceiptContext::v1_1(program_addr.clone(), cfg.chain.chain_id);
         let relay = cfg.v3.relay.clone();
-        let chain_tx_queue = chain_tx_queue::spawn(
-            rpc.clone(),
-            wallet_kp.clone(),
-            crate::config::chain_id_to_envelope_string(cfg.chain.chain_id),
-        );
+        // TX-ENVELOPE chain_id is left EMPTY to match the node's ChainCtxV3
+        // (all production ctors use String::new()). Devnet/mainnet do not verify
+        // a v2 tx-envelope chain_id binding: splicing one makes the signature
+        // cover a field the chain re-serializes without -> octra_submit 101
+        // "invalid signature". The RECEIPT chain_id binding (settlement_hash via
+        // receipt_context above) is a separate, needed thing and stays.
+        let chain_tx_queue = chain_tx_queue::spawn(rpc.clone(), wallet_kp.clone(), String::new());
         let client = Self {
             rpc,
             http,
