@@ -105,6 +105,18 @@ pub(crate) async fn settle_active(client: &Arc<Client>, active: ActiveSession) -
     };
     signed.verify().context("dual-sig self-verify")?;
 
+    // AUDIT #4 (I1): open the durable store + compute net BEFORE the POST, so the
+    // ONLY step between the operator's ACK (POST -> Ok, receipt fsynced in their
+    // vault) and our durable Countersigned record is a single local write. This
+    // shrinks the crash window where the operator holds the receipt but we're
+    // stuck at Proposed and would never arm.
+    let relay_prep = if client.relay_config().enabled {
+        let net = relay_net(&active, signed.receipt.bytes_used);
+        Some((client.open_settle_state()?, net))
+    } else {
+        None
+    };
+
     let receipt_posted = match post_countersigned_receipt(
         client,
         &exit.validator.endpoint,
@@ -129,15 +141,16 @@ pub(crate) async fn settle_active(client: &Arc<Client>, active: ActiveSession) -
         }
     };
 
-    if receipt_posted && client.relay_config().enabled {
-        let net = relay_net(&active, signed.receipt.bytes_used);
-        let store = client.open_settle_state()?;
-        store.record_countersigned(&active.session_id, &signed, net)?;
-        let env = client.arm_environment();
-        store
-            .arm_if_countersigned(client.as_ref(), &env, &active.session_id)
-            .await?;
-        return Ok(());
+    if receipt_posted {
+        if let Some((store, net)) = relay_prep {
+            // Only step after the ACK: the local durable write, then arm.
+            store.record_countersigned(&active.session_id, &signed, net)?;
+            let env = client.arm_environment();
+            store
+                .arm_if_countersigned(client.as_ref(), &env, &active.session_id)
+                .await?;
+            return Ok(());
+        }
     }
 
     submit_settle_confirm(client, &active, signed.receipt.bytes_used).await

@@ -192,8 +192,13 @@ impl SettleStateStore {
         if state != Some(SettlementState::Countersigned) {
             return Ok(None);
         }
-        let submitted = self.submit_arm_from_journal(chain, env, session_id).await?;
+        // AUDIT #4 (I6 write-ahead): record ArmSubmitted BEFORE broadcasting, so a
+        // crash after the tx reaches the chain (but before we could record it) does
+        // NOT leave us stuck at Countersigned and re-broadcast a duplicate arm. If
+        // the broadcast itself fails, replay sees ArmSubmitted + not-yet-armed and
+        // re-submits (idempotent), promoting to ArmConfirmed once the chain is armed.
         self.record_arm_submitted(session_id)?;
+        let submitted = self.submit_arm_from_journal(chain, env, session_id).await?;
         Ok(Some(submitted))
     }
 
