@@ -276,6 +276,22 @@ impl ChainCtxV3 {
         Ok(v.as_u64().unwrap_or(0))
     }
 
+    /// `get_relay_settlement_hash(sid) -> bytes` view: the on-chain committed
+    /// H (64-char hex) the opener armed with. Empty string if unset.
+    pub(crate) async fn get_relay_settlement_hash(&self, session_id: u64) -> Result<String> {
+        let v = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_relay_settlement_hash",
+                &[json!(session_id)],
+                Some(&self.wallet_addr),
+            )
+            .await
+            .context("get_relay_settlement_hash")?;
+        Ok(v.as_str().unwrap_or_default().to_string())
+    }
+
     // ============================================================
     // Circle registry — register / update / rotate / retire
     // ============================================================

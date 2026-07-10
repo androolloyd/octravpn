@@ -54,6 +54,23 @@ pub(crate) async fn submit_relay_claim_from_vault(
     }
 
     let settlement_hash = receipt.settlement_hash();
+
+    // AUDIT #3: never reveal a preimage that no longer matches the on-chain
+    // commitment. The vault keeps only the latest receipt per session; if a
+    // higher-seq receipt arrived AFTER arm, its settlement_hash differs from the
+    // H the opener committed -> relay_claim would revert AND we'd have leaked a
+    // useless preimage. Bail instead; the opener recovers via relay_refund.
+    // (The deep fix is vault ARMED-freeze, spec Step 2.)
+    let onchain_hash = ctx
+        .get_relay_settlement_hash(session_id)
+        .await
+        .context("get_relay_settlement_hash before relay_claim")?;
+    if !onchain_hash.is_empty() && onchain_hash != settlement_hash {
+        bail!(
+            "session {session_id}: vault receipt hash {settlement_hash} != on-chain committed hash {onchain_hash} (higher-seq receipt after arm?); refusing to reveal preimage"
+        );
+    }
+
     let preimage = receipt.settlement_preimage();
     let nonce = ctx.nonce().await.context("nonce before relay_claim")?;
     let fee = ctx.fee_or_fallback("contract_call").await;
