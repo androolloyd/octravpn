@@ -31,8 +31,8 @@ const DEVNET_CALL_TX: &str = r#"{"status":"confirmed","tx_hash":"aea25ba3b10ed75
 /// whole decode. `epoch` (what the daemon actually reads) must survive.
 #[test]
 fn node_status_decodes_devnet_float_timestamp() {
-    let ns: NodeStatus =
-        serde_json::from_str(DEVNET_NODE_STATUS).expect("NodeStatus must decode the real devnet shape");
+    let ns: NodeStatus = serde_json::from_str(DEVNET_NODE_STATUS)
+        .expect("NodeStatus must decode the real devnet shape");
     assert_eq!(ns.epoch, 1_112_267);
     assert!(
         ns.timestamp.is_some(),
@@ -45,8 +45,8 @@ fn node_status_decodes_devnet_float_timestamp() {
 /// applies — otherwise every daemon tx from a used account is `102 invalid nonce`.
 #[test]
 fn balance_decodes_and_next_nonce_is_last_used_plus_one() {
-    let b: BalanceResult =
-        serde_json::from_str(DEVNET_BALANCE).expect("BalanceResult must decode the real devnet shape");
+    let b: BalanceResult = serde_json::from_str(DEVNET_BALANCE)
+        .expect("BalanceResult must decode the real devnet shape");
     assert_eq!(b.nonce, 494);
     assert_eq!(b.pending_nonce, 494);
     assert_eq!(
