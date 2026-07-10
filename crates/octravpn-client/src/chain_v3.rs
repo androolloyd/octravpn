@@ -21,6 +21,7 @@
 use anyhow::{anyhow, Context, Result};
 use octravpn_core::{
     address::Address,
+    chain_tx_queue::ChainTxQueueHandle,
     rpc::{next_nonce, RpcClient},
     sig::KeyPair,
     tx as octra_tx,
@@ -40,16 +41,27 @@ pub(crate) struct ChainCtxV3<'a> {
     program_addr: &'a Address,
     wallet_addr: Address,
     wallet: &'a KeyPair,
+    tx_queue: Option<ChainTxQueueHandle>,
 }
 
 impl<'a> ChainCtxV3<'a> {
     pub(crate) fn new(rpc: &'a RpcClient, program_addr: &'a Address, wallet: &'a KeyPair) -> Self {
+        Self::new_with_tx_queue(rpc, program_addr, wallet, None)
+    }
+
+    pub(crate) fn new_with_tx_queue(
+        rpc: &'a RpcClient,
+        program_addr: &'a Address,
+        wallet: &'a KeyPair,
+        tx_queue: Option<ChainTxQueueHandle>,
+    ) -> Self {
         let wallet_addr = Address::from_pubkey(&wallet.public.0);
         Self {
             rpc,
             program_addr,
             wallet_addr,
             wallet,
+            tx_queue,
         }
     }
 
@@ -482,6 +494,30 @@ impl<'a> ChainCtxV3<'a> {
         let r = self.rpc.submit(signed).await?;
         Ok(r.hash)
     }
+
+    /// Submit an unsigned call through the single nonce owner when
+    /// present; otherwise preserve the legacy nonce -> sign -> submit path.
+    pub(crate) async fn submit_call(&self, mut unsigned_call: Value) -> Result<String> {
+        if let Some(tx_queue) = &self.tx_queue {
+            return tx_queue
+                .submit(unsigned_call)
+                .await
+                .map_err(|e| anyhow!("chain tx queue submit: {e}"));
+        }
+
+        let nonce = self.nonce().await?;
+        set_unsigned_nonce(&mut unsigned_call, nonce)?;
+        let signed = self.sign_call(unsigned_call)?;
+        self.submit_signed(&signed).await
+    }
+}
+
+fn set_unsigned_nonce(call: &mut Value, nonce: u64) -> Result<()> {
+    let obj = call
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("v3 submit_call expects a JSON object"))?;
+    obj.insert("nonce".to_string(), json!(nonce));
+    Ok(())
 }
 
 /// Inputs to `settle_confirm`. Borrowed so the call site doesn't need

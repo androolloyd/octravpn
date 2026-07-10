@@ -60,7 +60,6 @@
 use anyhow::{anyhow, bail, Context, Result};
 use octravpn_core::{
     circle::{decrypt_sealed_bytes, encrypt_sealed_bytes, PaddingClass},
-    tx as octra_tx,
     v3_state_root::StateRoot,
 };
 use serde_json::{json, Value};
@@ -505,15 +504,14 @@ pub(crate) async fn read_sealed_asset(
     }
 }
 
-/// Build a signed `circle_asset_put_encrypted` envelope. Mirrors
+/// Build an unsigned `circle_asset_put_encrypted` envelope. Mirrors
 /// `ChainCtxV2::build_put_encrypted_tx` but drives off the v3 ctx
-/// wallet so callers don't have to wire up a parallel v2 chain ctx.
-fn sign_blob_put_tx(
+/// wallet address so callers don't have to wire up a parallel v2 chain ctx.
+fn build_blob_put_tx(
     ctx: &ChainCtxV3,
     circle_id: &str,
     blob: &BlobUpdate,
     creds: &SealedAssetCreds,
-    nonce: u64,
     fee: u64,
 ) -> Result<(Value, String)> {
     let (ciphertext_b64, plaintext_hash) = encrypt_sealed_bytes(
@@ -541,16 +539,14 @@ fn sign_blob_put_tx(
         "from": ctx.wallet_addr.display(),
         "to_": circle_id,
         "amount": "0",
-        "nonce": nonce,
+        "nonce": 0,
         "ou": fee.to_string(),
         "timestamp": current_timestamp_f64(),
         "op_type": "circle_asset_put_encrypted",
         "encrypted_data": ciphertext_b64,
         "message": payload.to_string(),
     });
-    let signed = octra_tx::sign_call(&ctx.wallet, tx)
-        .map_err(|e| anyhow!("sign asset_put for {}: {e}", blob.asset_path))?;
-    Ok((signed, plaintext_hash))
+    Ok((tx, plaintext_hash))
 }
 
 fn current_timestamp_f64() -> f64 {
@@ -617,22 +613,14 @@ pub(crate) async fn apply(
     // Step 2: write each blob.
     let mut blob_tx_hashes = Vec::with_capacity(bundle.blobs.len());
     for (i, blob) in bundle.blobs.iter().enumerate() {
-        let nonce = ctx.nonce().await.map_err(|e| UpdateError::BlobPutFailed {
-            asset_path: blob.asset_path.clone(),
-            index: i,
-            committed_so_far: blob_tx_hashes.clone(),
-            source: e,
-        })?;
         let fee_q = ctx.fee("circle_asset_put_encrypted").await.ok();
         let fee = fee_q.filter(|f| *f > 0).unwrap_or(ASSET_PUT_FEE_FALLBACK);
-        let (signed, plaintext_hash) =
-            sign_blob_put_tx(ctx, &bundle.circle_id, blob, creds, nonce, fee).map_err(|e| {
-                UpdateError::BlobPutFailed {
-                    asset_path: blob.asset_path.clone(),
-                    index: i,
-                    committed_so_far: blob_tx_hashes.clone(),
-                    source: e,
-                }
+        let (tx, plaintext_hash) = build_blob_put_tx(ctx, &bundle.circle_id, blob, creds, fee)
+            .map_err(|e| UpdateError::BlobPutFailed {
+                asset_path: blob.asset_path.clone(),
+                index: i,
+                committed_so_far: blob_tx_hashes.clone(),
+                source: e,
             })?;
         debug!(
             asset_path = %blob.asset_path,
@@ -641,7 +629,7 @@ pub(crate) async fn apply(
             "circle-update: submitting blob put"
         );
         let hash = ctx
-            .submit_signed_tx(&signed)
+            .submit_call(tx)
             .await
             .map_err(|e| UpdateError::BlobPutFailed {
                 asset_path: blob.asset_path.clone(),
@@ -681,28 +669,22 @@ pub(crate) async fn apply(
         key_id: "default".to_string(),
         padding_class: PaddingClass::None,
     };
-    let nonce = ctx
-        .nonce()
-        .await
-        .map_err(|e| UpdateError::AnchorUpdateFailed {
-            target_anchor_hex: target_anchor_hex.clone(),
-            blob_tx_hashes: blob_tx_hashes.clone(),
-            source: e,
-        })?;
     let fee = ctx
         .fee("circle_asset_put_encrypted")
         .await
         .ok()
         .filter(|f| *f > 0)
         .unwrap_or(ASSET_PUT_FEE_FALLBACK);
-    let (signed_meta, _) = sign_blob_put_tx(ctx, &bundle.circle_id, &meta_blob, creds, nonce, fee)
-        .map_err(|e| UpdateError::AnchorUpdateFailed {
-            target_anchor_hex: target_anchor_hex.clone(),
-            blob_tx_hashes: blob_tx_hashes.clone(),
-            source: e,
+    let (meta_tx, _) =
+        build_blob_put_tx(ctx, &bundle.circle_id, &meta_blob, creds, fee).map_err(|e| {
+            UpdateError::AnchorUpdateFailed {
+                target_anchor_hex: target_anchor_hex.clone(),
+                blob_tx_hashes: blob_tx_hashes.clone(),
+                source: e,
+            }
         })?;
     let meta_hash =
-        ctx.submit_signed_tx(&signed_meta)
+        ctx.submit_call(meta_tx)
             .await
             .map_err(|e| UpdateError::AnchorUpdateFailed {
                 target_anchor_hex: target_anchor_hex.clone(),
@@ -723,19 +705,15 @@ async fn submit_anchor_update(
     circle_id: &str,
     target_anchor_hex: &str,
 ) -> Result<String> {
-    let nonce = ctx.nonce().await?;
     let fee = ctx
         .fee("contract_call")
         .await
         .ok()
         .filter(|f| *f > 0)
         .unwrap_or(ANCHOR_UPDATE_FEE_FALLBACK);
-    let call = ctx.build_update_circle_state_call(circle_id, target_anchor_hex, fee, nonce);
-    let signed = ctx
-        .sign_call(call)
-        .with_context(|| format!("sign update_circle_state for {circle_id}"))?;
+    let call = ctx.build_update_circle_state_call(circle_id, target_anchor_hex, fee, 0);
     let hash = ctx
-        .submit_signed_tx(&signed)
+        .submit_call(call)
         .await
         .with_context(|| format!("submit update_circle_state for {circle_id}"))?;
     info!(circle_id, new_anchor = target_anchor_hex, %hash, "circle-update: anchor committed");
@@ -1168,7 +1146,7 @@ mod tests {
     }
 
     #[test]
-    fn sign_blob_put_tx_emits_envelope_with_correct_plaintext_hash() {
+    fn build_blob_put_tx_emits_envelope_with_correct_plaintext_hash() {
         let ctx = ctx_offline();
         let creds = SealedAssetCreds::new(TEST_PASS);
         let blob = BlobUpdate {
@@ -1177,11 +1155,13 @@ mod tests {
             key_id: "default".into(),
             padding_class: PaddingClass::None,
         };
-        let (signed, ph) =
-            sign_blob_put_tx(&ctx, TEST_CIRCLE, &blob, &creds, 1, ASSET_PUT_FEE_FALLBACK).unwrap();
+        let (tx, ph) =
+            build_blob_put_tx(&ctx, TEST_CIRCLE, &blob, &creds, ASSET_PUT_FEE_FALLBACK).unwrap();
         let expected = hex::encode(Sha256::digest(b"hello"));
         assert_eq!(ph, expected);
-        let msg = signed.get("message").and_then(|v| v.as_str()).unwrap_or("");
+        assert_eq!(tx["nonce"], 0);
+        assert_eq!(tx["op_type"], "circle_asset_put_encrypted");
+        let msg = tx.get("message").and_then(|v| v.as_str()).unwrap_or("");
         assert!(
             msg.contains(&expected),
             "message missing plaintext_hash: {msg}"

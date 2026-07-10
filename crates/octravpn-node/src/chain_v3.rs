@@ -35,6 +35,7 @@
 use anyhow::{anyhow, Context, Result};
 use octravpn_core::{
     address::Address,
+    chain_tx_queue::ChainTxQueueHandle,
     rpc::{next_nonce, RpcClient},
     sig::KeyPair,
     tx as octra_tx,
@@ -81,6 +82,8 @@ pub(crate) struct ChainCtxV3 {
     /// v2 tx-envelope chain-id binding (P1-5b). See `ChainCtx::chain_id`.
     /// Empty ⇒ v1 wallet-compat signing.
     pub chain_id: String,
+    /// Optional single-owner tx queue for long-lived v3 operator submitters.
+    pub tx_queue: Option<ChainTxQueueHandle>,
 }
 
 // The v3 surface is wider than the boot-flow's immediate consumers
@@ -105,6 +108,16 @@ impl ChainCtxV3 {
         wallet: KeyPair,
         chain_id: String,
     ) -> Self {
+        Self::new_with_chain_id_and_queue(rpc, program_addr, wallet, chain_id, None)
+    }
+
+    pub(crate) fn new_with_chain_id_and_queue(
+        rpc: RpcClient,
+        program_addr: Address,
+        wallet: KeyPair,
+        chain_id: String,
+        tx_queue: Option<ChainTxQueueHandle>,
+    ) -> Self {
         let wallet_addr = Address::from_pubkey(&wallet.public.0);
         Self {
             rpc,
@@ -112,6 +125,7 @@ impl ChainCtxV3 {
             wallet_addr,
             wallet,
             chain_id,
+            tx_queue,
         }
     }
 
@@ -908,6 +922,30 @@ impl ChainCtxV3 {
         debug!(hash = %r.hash, "submitted tx (v3)");
         Ok(r.hash)
     }
+
+    /// Submit an unsigned tx/call through the single nonce owner when
+    /// present; otherwise preserve the legacy nonce -> sign -> submit path.
+    pub(crate) async fn submit_call(&self, mut unsigned_call: Value) -> Result<String> {
+        if let Some(tx_queue) = &self.tx_queue {
+            return tx_queue
+                .submit(unsigned_call)
+                .await
+                .map_err(|e| anyhow!("chain tx queue submit: {e}"));
+        }
+
+        let nonce = self.nonce().await?;
+        set_unsigned_nonce(&mut unsigned_call, nonce)?;
+        let signed = self.sign_call(unsigned_call)?;
+        self.submit_signed_tx(&signed).await
+    }
+}
+
+fn set_unsigned_nonce(call: &mut Value, nonce: u64) -> Result<()> {
+    let obj = call
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("v3 submit_call expects a JSON object"))?;
+    obj.insert("nonce".to_string(), json!(nonce));
+    Ok(())
 }
 
 /// HFHE-2: derive a 32-byte (64-char hex) seed from a parent seed
@@ -1048,6 +1086,12 @@ impl CircleV3State {
 mod tests {
     use super::*;
 
+    use std::{net::SocketAddr, sync::Arc};
+
+    use axum::{extract::State as AxumState, http::StatusCode, routing::post, Json, Router};
+    use parking_lot::Mutex;
+    use tokio::sync::oneshot;
+
     /// Build a `ChainCtxV3` backed by a deterministic 32-byte secret so
     /// `wallet_addr` is stable across runs and assertions can pin the
     /// `from` field. The RPC client is constructed against a bogus
@@ -1063,6 +1107,103 @@ mod tests {
     fn anchor_64() -> String {
         // Deterministic 64-char hex anchor for shape checks.
         "1111111111111111111111111111111111111111111111111111111111111111".to_string()
+    }
+
+    #[derive(Debug)]
+    struct SubmitMock {
+        last_used_nonce: u64,
+        balance_calls: usize,
+        submit_calls: u64,
+        submitted: Vec<Value>,
+    }
+
+    type SharedSubmitMock = Arc<Mutex<SubmitMock>>;
+
+    async fn submit_mock_handler(
+        AxumState(state): AxumState<SharedSubmitMock>,
+        Json(req): Json<Value>,
+    ) -> Result<Json<Value>, StatusCode> {
+        let method = req
+            .get("method")
+            .and_then(Value::as_str)
+            .ok_or(StatusCode::BAD_REQUEST)?;
+        let id = req.get("id").cloned().unwrap_or(json!(1));
+        let params = req.get("params").cloned().unwrap_or(json!([]));
+
+        let result = match method {
+            "octra_balance" => {
+                let mut g = state.lock();
+                g.balance_calls += 1;
+                json!({
+                    "balance": "100.000000",
+                    "balance_raw": "100000000",
+                    "nonce": g.last_used_nonce,
+                    "pending_nonce": g.last_used_nonce,
+                })
+            }
+            "octra_submit" => {
+                let mut g = state.lock();
+                g.submit_calls += 1;
+                let tx = params
+                    .as_array()
+                    .and_then(|a| a.first())
+                    .cloned()
+                    .ok_or(StatusCode::BAD_REQUEST)?;
+                if let Some(nonce) = tx.get("nonce").and_then(Value::as_u64) {
+                    g.last_used_nonce = g.last_used_nonce.max(nonce);
+                }
+                g.submitted.push(tx);
+                json!({
+                    "tx_hash": format!("{:064x}", g.submit_calls),
+                    "status": "accepted",
+                })
+            }
+            _ => Value::Null,
+        };
+
+        Ok(Json(
+            json!({ "jsonrpc": "2.0", "id": id, "result": result }),
+        ))
+    }
+
+    async fn spawn_submit_mock(
+        last_used_nonce: u64,
+    ) -> (String, SharedSubmitMock, oneshot::Sender<()>) {
+        let state = Arc::new(Mutex::new(SubmitMock {
+            last_used_nonce,
+            balance_calls: 0,
+            submit_calls: 0,
+            submitted: Vec::new(),
+        }));
+        let app = Router::new()
+            .route("/", post(submit_mock_handler))
+            .with_state(state.clone());
+        let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+            .await
+            .expect("bind submit mock");
+        let addr = listener.local_addr().expect("submit mock addr");
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app.into_make_service())
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await;
+        });
+        (format!("http://{addr}/"), state, shutdown_tx)
+    }
+
+    fn submitted_nonces(state: &SharedSubmitMock) -> Vec<u64> {
+        state
+            .lock()
+            .submitted
+            .iter()
+            .map(|tx| {
+                tx.get("nonce")
+                    .and_then(Value::as_u64)
+                    .expect("submitted tx nonce")
+            })
+            .collect()
     }
 
     #[test]
@@ -1623,6 +1764,71 @@ mod tests {
         assert_eq!(params[0], "octCID");
         assert_eq!(params[1], 995);
         assert_eq!(params[2], "");
+    }
+
+    #[tokio::test]
+    async fn queue_backed_submit_call_serializes_concurrent_nonces() {
+        let (url, state, _shutdown) = spawn_submit_mock(10).await;
+        let secret = [7u8; 32];
+        let wallet = KeyPair::from_secret_bytes(&secret);
+        let queue_wallet = Arc::new(KeyPair::from_secret_bytes(&secret));
+        let program_addr = Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+        let queue =
+            octravpn_core::chain_tx_queue::spawn(RpcClient::new(&url), queue_wallet, String::new());
+        let ctx = ChainCtxV3::new_with_chain_id_and_queue(
+            RpcClient::new(&url),
+            program_addr,
+            wallet,
+            String::new(),
+            Some(queue),
+        );
+        let call_a = ctx.build_bond_endpoint_call(
+            "oct8taXQ4CvohcgzCJFYyaKrrAbcZs5mxkBCJQQYWb2Pcun",
+            1_000,
+            500,
+            0,
+        );
+        let call_b = ctx.build_unbond_endpoint_call(
+            "oct8taXQ4CvohcgzCJFYyaKrrAbcZs5mxkBCJQQYWb2Pcun",
+            500,
+            0,
+        );
+
+        let (hash_a, hash_b) = tokio::join!(ctx.submit_call(call_a), ctx.submit_call(call_b));
+
+        hash_a.expect("first submit");
+        hash_b.expect("second submit");
+        assert_eq!(submitted_nonces(&state), vec![11, 12]);
+        assert_eq!(state.lock().balance_calls, 1);
+    }
+
+    #[tokio::test]
+    async fn submit_call_without_queue_matches_legacy_nonce_sign_submit_bytes() {
+        let (url, state, _shutdown) = spawn_submit_mock(10).await;
+        let wallet = KeyPair::from_secret_bytes(&[7u8; 32]);
+        let program_addr = Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+        let ctx = ChainCtxV3::new_with_chain_id(
+            RpcClient::new(&url),
+            program_addr,
+            wallet,
+            "octra-devnet".to_string(),
+        );
+        let call = ctx.build_bond_endpoint_call(
+            "oct8taXQ4CvohcgzCJFYyaKrrAbcZs5mxkBCJQQYWb2Pcun",
+            1_000,
+            500,
+            0,
+        );
+        let mut legacy_call = call.clone();
+        set_unsigned_nonce(&mut legacy_call, 11).expect("set nonce");
+        let legacy_signed = ctx.sign_call(legacy_call).expect("legacy sign_call");
+
+        ctx.submit_call(call).await.expect("submit_call fallback");
+
+        let g = state.lock();
+        assert_eq!(g.balance_calls, 1);
+        assert_eq!(g.submitted.len(), 1);
+        assert_eq!(g.submitted[0], legacy_signed);
     }
 
     #[test]

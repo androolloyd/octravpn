@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use octravpn_core::{address::Address, sig::KeyPair};
+use octravpn_core::{address::Address, chain_tx_queue, sig::KeyPair};
 use tracing::{info, warn};
 use x25519_dalek::StaticSecret;
 
@@ -42,6 +42,7 @@ pub(super) async fn build_hub(cfg: NodeConfig) -> Result<Hub> {
     let wallet = KeyPair::from_secret_bytes(&wallet_secret);
     let wallet_v2 = KeyPair::from_secret_bytes(&wallet_secret);
     let wallet_v3 = KeyPair::from_secret_bytes(&wallet_secret);
+    let wallet_v3_queue = Arc::new(KeyPair::from_secret_bytes(&wallet_secret));
 
     // v2 tx-envelope chain-id binding (P1-5b). The numeric
     // `cfg.chain.chain_id` (u32, e.g. `CHAIN_ID_DEVNET` 0x6F63_7464
@@ -70,7 +71,14 @@ pub(super) async fn build_hub(cfg: NodeConfig) -> Result<Hub> {
     );
     // v3 chain context — same wallet, same RPC, talks to the v3
     // deployment configured under `program_addr`.
-    let chain_v3 = ChainCtxV3::new_with_chain_id(rpc, program_addr, wallet_v3, chain_id_str);
+    let chain_v3_queue = chain_tx_queue::spawn(rpc.clone(), wallet_v3_queue, String::new());
+    let chain_v3 = ChainCtxV3::new_with_chain_id_and_queue(
+        rpc,
+        program_addr,
+        wallet_v3,
+        chain_id_str,
+        Some(chain_v3_queue),
+    );
 
     // The on-disk file holds a single 32-byte master secret. Two
     // independent subkeys are derived via HKDF-Expand with distinct

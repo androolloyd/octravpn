@@ -180,7 +180,6 @@ pub(crate) async fn run_v3_boot(inputs: &V3BootInputs<'_>) -> Result<V3BootOutco
             .chain
             .v3_initial_stake
             .unwrap_or(MIN_CIRCLE_STAKE_DEFAULT);
-        let nonce = inputs.chain_v3.nonce().await?;
         let fee = inputs.chain_v3.fee_or_fallback("contract_call").await;
         let params = RegisterCircleParams {
             circle_id,
@@ -188,11 +187,10 @@ pub(crate) async fn run_v3_boot(inputs: &V3BootInputs<'_>) -> Result<V3BootOutco
             receipt_pubkey_b64: &receipt_pubkey_b64,
             stake_amount: stake,
             fee,
-            nonce,
+            nonce: 0,
         };
         let call = inputs.chain_v3.build_register_circle_call(&params);
-        let signed = inputs.chain_v3.sign_call(call)?;
-        let hash = inputs.chain_v3.submit_signed_tx(&signed).await?;
+        let hash = inputs.chain_v3.submit_call(call).await?;
         info!(
             %hash,
             circle_id,

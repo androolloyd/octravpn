@@ -26,7 +26,6 @@ use octravpn_core::{
         PostReceiptResponse, ProposedReceipt, SessionStateResponse,
     },
     receipt::SignedReceipt,
-    rpc::next_nonce,
     session::SessionId,
     sig::verify,
     v3_calls::ContractCallBuilder,
@@ -286,8 +285,6 @@ fn print_arm_submission(submitted: &ArmSubmission) {
 
 pub(crate) async fn reclaim(client: &Arc<Client>, session_id_hex: &str) -> Result<()> {
     let id = SessionId::from_hex(session_id_hex).ok_or_else(|| anyhow!("bad session id hex"))?;
-    let bal = client.rpc().balance(client.wallet_addr()).await?;
-    let nonce = next_nonce(&bal);
     let fee = client
         .rpc()
         .recommended_fee(Some("contract_call"))
@@ -301,11 +298,14 @@ pub(crate) async fn reclaim(client: &Arc<Client>, session_id_hex: &str) -> Resul
         "params": [hex::encode(id.as_bytes())],
         "value": 0,
         "fee": fee,
-        "nonce": nonce,
+        "nonce": 0,
     });
-    let signed = crate::runner::sign_call(client.wallet_kp(), call)?;
-    let r = client.rpc().submit(&signed).await?;
-    info!(hash = %r.hash, "claim_no_show submitted");
+    let hash = client
+        .chain_tx_queue()
+        .submit(call)
+        .await
+        .map_err(|e| anyhow!("chain tx queue claim_no_show submit: {e}"))?;
+    info!(hash = %hash, "claim_no_show submitted");
     Ok(())
 }
 
@@ -314,8 +314,6 @@ async fn submit_settle_confirm(
     active: &ActiveSession,
     bytes_used: u64,
 ) -> Result<()> {
-    let bal = client.rpc().balance(client.wallet_addr()).await?;
-    let nonce = next_nonce(&bal);
     let fee = client
         .rpc()
         .recommended_fee(Some("contract_call"))
@@ -333,11 +331,14 @@ async fn submit_settle_confirm(
         "params": [sid_u64, bytes_used],
         "value": 0,
         "fee": fee,
-        "nonce": nonce,
+        "nonce": 0,
     });
-    let signed_tx = crate::runner::sign_call(client.wallet_kp(), call)?;
-    let r = client.rpc().submit(&signed_tx).await?;
-    info!(hash = %r.hash, session = sid_u64, bytes_used, "settle_confirm submitted");
+    let hash = client
+        .chain_tx_queue()
+        .submit(call)
+        .await
+        .map_err(|e| anyhow!("chain tx queue settle_confirm submit: {e}"))?;
+    info!(hash = %hash, session = sid_u64, bytes_used, "settle_confirm submitted");
     Ok(())
 }
 

@@ -95,7 +95,12 @@ pub(crate) async fn connect_v3(
         KeyPair::from_secret_bytes(&secret)
     };
 
-    let ctx = ChainCtxV3::new(client.rpc(), client.program_addr(), &wallet_kp);
+    let ctx = ChainCtxV3::new_with_tx_queue(
+        client.rpc(),
+        client.program_addr(),
+        &wallet_kp,
+        Some(client.chain_tx_queue()),
+    );
 
     // 2. Fetch + log the on-chain anchor. The full sealed-asset
     //    state-root.json + members.json Merkle-proof verifier is the
@@ -166,13 +171,10 @@ pub(crate) async fn connect_v3(
     }
 
     // 4. payable open_session(tailnet_id, circle, max_pay) with value=max_pay.
-    let nonce = ctx.nonce().await?;
     let fee = ctx.fee_or_fallback("contract_call").await;
-    let open_call =
-        ctx.build_open_session_call(v3.tailnet_id, &v3.circle_id, v3.max_pay, fee, nonce);
-    let signed = ctx.sign_call(open_call)?;
+    let open_call = ctx.build_open_session_call(v3.tailnet_id, &v3.circle_id, v3.max_pay, fee, 0);
     let tx_hash = ctx
-        .submit_signed(&signed)
+        .submit_call(open_call)
         .await
         .context("submit open_session")?;
     info!(tx_hash = %tx_hash, "v3 open_session submitted");
@@ -290,7 +292,6 @@ pub(crate) async fn run_settle_confirm(
         "v3 settle_confirm prepared"
     );
 
-    let nonce = ctx.nonce().await?;
     let fee = ctx.fee_or_fallback("contract_call").await;
     let p = SettleConfirmParams {
         session_id,
@@ -298,12 +299,11 @@ pub(crate) async fn run_settle_confirm(
         net,
         settle_blinding: &blinding,
         fee,
-        nonce,
+        nonce: 0,
     };
     let call = ctx.build_settle_confirm_call(&p);
-    let signed = ctx.sign_call(call)?;
     let tx_hash = ctx
-        .submit_signed(&signed)
+        .submit_call(call)
         .await
         .context("submit settle_confirm")?;
     info!(session_id, tx_hash = %tx_hash, "v3 settle_confirm submitted");
@@ -314,12 +314,10 @@ pub(crate) async fn run_settle_confirm(
 /// Submit the opener-side `claim_no_show` when the operator never
 /// claimed within session grace.
 pub(crate) async fn run_claim_no_show(ctx: &ChainCtxV3<'_>, session_id: u64) -> Result<()> {
-    let nonce = ctx.nonce().await?;
     let fee = ctx.fee_or_fallback("contract_call").await;
-    let call = ctx.build_claim_no_show_call(session_id, fee, nonce);
-    let signed = ctx.sign_call(call)?;
+    let call = ctx.build_claim_no_show_call(session_id, fee, 0);
     let tx_hash = ctx
-        .submit_signed(&signed)
+        .submit_call(call)
         .await
         .context("submit claim_no_show")?;
     info!(session_id, tx_hash = %tx_hash, "v3 claim_no_show submitted");

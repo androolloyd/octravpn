@@ -72,14 +72,9 @@ pub(crate) async fn submit_relay_claim_from_vault(
     }
 
     let preimage = receipt.settlement_preimage();
-    let nonce = ctx.nonce().await.context("nonce before relay_claim")?;
     let fee = ctx.fee_or_fallback("contract_call").await;
-    let call = ctx.build_relay_claim_call(session_id, &preimage, fee, nonce);
-    let signed = ctx.sign_call(call)?;
-    let tx_hash = ctx
-        .submit_signed_tx(&signed)
-        .await
-        .context("submit relay_claim")?;
+    let call = ctx.build_relay_claim_call(session_id, &preimage, fee, 0);
+    let tx_hash = ctx.submit_call(call).await.context("submit relay_claim")?;
 
     Ok(RelayClaimSubmission {
         session_id,

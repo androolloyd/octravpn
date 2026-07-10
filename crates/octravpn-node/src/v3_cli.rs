@@ -15,8 +15,9 @@
 //!      ops invoking a one-shot tx don't want to pay the Hub::new boot
 //!      cost (audit log dirs, receipt journal, etc.).
 //!   3. Build the `*_call` via the chain_v3 builder.
-//!   4. Sign via [`ChainCtxV3::sign_call`] and submit via
-//!      [`ChainCtxV3::submit_signed_tx`].
+//!   4. Submit via [`ChainCtxV3::submit_call`], which owns nonce
+//!      selection and falls back to the legacy sign+submit path for
+//!      this one-shot context.
 //!   5. Print the tx hash, and for entrypoints that return a useful
 //!      payload (open_session → session id, settle_claim/confirm → accepted
 //!      bool), best-effort poll `octra_transaction(hash)` and log the
@@ -34,7 +35,7 @@
 //!     then base64-encode the 64-byte sig blobs before handing them to
 //!     `build_slash_double_sign_call`. This matches what
 //!     `e2e-adversarial-v3.sh` does via `octra cast wallet sign`.
-//!   * **return-value polling**: `submit_signed_tx` returns the tx
+//!   * **return-value polling**: `submit_call` returns the tx
 //!     hash, but Octra contract returns (e.g. `open_session`'s assigned
 //!     session_id) come back via `octra_transaction(hash)`. We poll a
 //!     bounded number of times with a short backoff. If it doesn't
@@ -359,20 +360,20 @@ fn build_chain_ctx(cfg: &NodeConfig) -> Result<ChainCtxV3> {
 // ============================================================
 
 async fn run_bond(ctx: &ChainCtxV3, a: &BondArgs) -> Result<()> {
-    let (nonce, fee) = nonce_and_fee(ctx).await?;
-    let call = ctx.build_bond_endpoint_call(&a.circle, a.amount, fee, nonce);
+    let fee = call_fee(ctx).await?;
+    let call = ctx.build_bond_endpoint_call(&a.circle, a.amount, fee, 0);
     submit_and_log(ctx, "bond_endpoint", call, None).await
 }
 
 async fn run_unbond(ctx: &ChainCtxV3, a: &UnbondArgs) -> Result<()> {
-    let (nonce, fee) = nonce_and_fee(ctx).await?;
-    let call = ctx.build_unbond_endpoint_call(&a.circle, fee, nonce);
+    let fee = call_fee(ctx).await?;
+    let call = ctx.build_unbond_endpoint_call(&a.circle, fee, 0);
     submit_and_log(ctx, "unbond_endpoint", call, None).await
 }
 
 async fn run_finalize_unbond(ctx: &ChainCtxV3, a: &FinalizeUnbondArgs) -> Result<()> {
-    let (nonce, fee) = nonce_and_fee(ctx).await?;
-    let call = ctx.build_finalize_unbond_call(&a.circle, fee, nonce);
+    let fee = call_fee(ctx).await?;
+    let call = ctx.build_finalize_unbond_call(&a.circle, fee, 0);
     submit_and_log(ctx, "finalize_unbond", call, None).await
 }
 
@@ -387,7 +388,7 @@ async fn run_slash(ctx: &ChainCtxV3, a: &SlashArgs) -> Result<()> {
     let sig_a = octravpn_core::b64::encode(kp.sign(a.payload_a.as_bytes()).0);
     let sig_b = octravpn_core::b64::encode(kp.sign(a.payload_b.as_bytes()).0);
 
-    let (nonce, fee) = nonce_and_fee(ctx).await?;
+    let fee = call_fee(ctx).await?;
     let params = SlashDoubleSignParams {
         circle_id: &a.circle,
         payload_a: &a.payload_a,
@@ -395,75 +396,75 @@ async fn run_slash(ctx: &ChainCtxV3, a: &SlashArgs) -> Result<()> {
         payload_b: &a.payload_b,
         sig_b_b64: &sig_b,
         fee,
-        nonce,
+        nonce: 0,
     };
     let call = ctx.build_slash_double_sign_call(&params);
     submit_and_log(ctx, "slash_double_sign", call, None).await
 }
 
 async fn run_rotate(ctx: &ChainCtxV3, a: &RotateArgs) -> Result<()> {
-    let (nonce, fee) = nonce_and_fee(ctx).await?;
-    let call = ctx.build_rotate_receipt_pubkey_call(&a.circle, &a.new_pubkey_b64, fee, nonce);
+    let fee = call_fee(ctx).await?;
+    let call = ctx.build_rotate_receipt_pubkey_call(&a.circle, &a.new_pubkey_b64, fee, 0);
     submit_and_log(ctx, "rotate_receipt_pubkey", call, None).await
 }
 
 async fn run_retire(ctx: &ChainCtxV3, a: &RetireArgs) -> Result<()> {
-    let (nonce, fee) = nonce_and_fee(ctx).await?;
-    let call = ctx.build_retire_circle_call(&a.circle, fee, nonce);
+    let fee = call_fee(ctx).await?;
+    let call = ctx.build_retire_circle_call(&a.circle, fee, 0);
     submit_and_log(ctx, "retire_circle", call, None).await
 }
 
 async fn run_create_tailnet(ctx: &ChainCtxV3, a: &CreateTailnetArgs) -> Result<()> {
-    let (nonce, fee) = nonce_and_fee(ctx).await?;
-    let call = ctx.build_create_tailnet_call(&a.members_root, a.deposit, fee, nonce);
+    let fee = call_fee(ctx).await?;
+    let call = ctx.build_create_tailnet_call(&a.members_root, a.deposit, fee, 0);
     submit_and_log(ctx, "create_tailnet", call, Some(ReturnLog::TailnetId)).await
 }
 
 async fn run_update_members_root(ctx: &ChainCtxV3, a: &UpdateMembersArgs) -> Result<()> {
-    let (nonce, fee) = nonce_and_fee(ctx).await?;
-    let call = ctx.build_update_members_root_call(a.tailnet_id, &a.new_members_root, fee, nonce);
+    let fee = call_fee(ctx).await?;
+    let call = ctx.build_update_members_root_call(a.tailnet_id, &a.new_members_root, fee, 0);
     submit_and_log(ctx, "update_members_root", call, None).await
 }
 
 async fn run_retire_tailnet(ctx: &ChainCtxV3, a: &RetireTailnetArgs) -> Result<()> {
-    let (nonce, fee) = nonce_and_fee(ctx).await?;
-    let call = ctx.build_retire_tailnet_call(a.tailnet_id, fee, nonce);
+    let fee = call_fee(ctx).await?;
+    let call = ctx.build_retire_tailnet_call(a.tailnet_id, fee, 0);
     submit_and_log(ctx, "retire_tailnet", call, None).await
 }
 
 async fn run_deposit_tailnet(ctx: &ChainCtxV3, a: &DepositArgs) -> Result<()> {
-    let (nonce, fee) = nonce_and_fee(ctx).await?;
-    let call = ctx.build_deposit_to_tailnet_call(a.tailnet_id, a.amount, fee, nonce);
+    let fee = call_fee(ctx).await?;
+    let call = ctx.build_deposit_to_tailnet_call(a.tailnet_id, a.amount, fee, 0);
     submit_and_log(ctx, "deposit_to_tailnet", call, None).await
 }
 
 async fn run_withdraw_tailnet(ctx: &ChainCtxV3, a: &WithdrawArgs) -> Result<()> {
-    let (nonce, fee) = nonce_and_fee(ctx).await?;
-    let call = ctx.build_withdraw_tailnet_treasury_call(a.tailnet_id, a.amount, fee, nonce);
+    let fee = call_fee(ctx).await?;
+    let call = ctx.build_withdraw_tailnet_treasury_call(a.tailnet_id, a.amount, fee, 0);
     submit_and_log(ctx, "withdraw_tailnet_treasury", call, None).await
 }
 
 async fn run_open_session(ctx: &ChainCtxV3, a: &OpenSessionArgs) -> Result<()> {
-    let (nonce, fee) = nonce_and_fee(ctx).await?;
-    let call = ctx.build_open_session_call(a.tailnet_id, &a.circle, a.max_pay, fee, nonce);
+    let fee = call_fee(ctx).await?;
+    let call = ctx.build_open_session_call(a.tailnet_id, &a.circle, a.max_pay, fee, 0);
     submit_and_log(ctx, "open_session", call, Some(ReturnLog::SessionId)).await
 }
 
 async fn run_settle_claim(ctx: &ChainCtxV3, a: &SettleClaimArgs) -> Result<()> {
-    let (nonce, fee) = nonce_and_fee(ctx).await?;
-    let call = ctx.build_settle_claim_call(a.session_id, a.bytes_used, fee, nonce);
+    let fee = call_fee(ctx).await?;
+    let call = ctx.build_settle_claim_call(a.session_id, a.bytes_used, fee, 0);
     submit_and_log(ctx, "settle_claim", call, Some(ReturnLog::AcceptedBool)).await
 }
 
 async fn run_settle_confirm(ctx: &ChainCtxV3, a: &SettleConfirmArgs) -> Result<()> {
-    let (nonce, fee) = nonce_and_fee(ctx).await?;
+    let fee = call_fee(ctx).await?;
     let params = SettleConfirmParams {
         session_id: a.session_id,
         bytes_used: a.bytes_used,
         net: a.net,
         settle_blinding: &a.settle_blinding,
         fee,
-        nonce,
+        nonce: 0,
     };
     let call = ctx.build_settle_confirm_call(&params);
     submit_and_log(ctx, "settle_confirm", call, Some(ReturnLog::AcceptedBool)).await
@@ -497,20 +498,20 @@ async fn run_relay_claim(ctx: &ChainCtxV3, cfg: &NodeConfig, a: &RelayClaimArgs)
 }
 
 async fn run_claim_no_show(ctx: &ChainCtxV3, a: &ClaimNoShowArgs) -> Result<()> {
-    let (nonce, fee) = nonce_and_fee(ctx).await?;
-    let call = ctx.build_claim_no_show_call(a.session_id, fee, nonce);
+    let fee = call_fee(ctx).await?;
+    let call = ctx.build_claim_no_show_call(a.session_id, fee, 0);
     submit_and_log(ctx, "claim_no_show", call, None).await
 }
 
 async fn run_sweep_session(ctx: &ChainCtxV3, a: &SweepArgs) -> Result<()> {
-    let (nonce, fee) = nonce_and_fee(ctx).await?;
-    let call = ctx.build_sweep_expired_session_call(a.session_id, fee, nonce);
+    let fee = call_fee(ctx).await?;
+    let call = ctx.build_sweep_expired_session_call(a.session_id, fee, 0);
     submit_and_log(ctx, "sweep_expired_session", call, None).await
 }
 
 async fn run_claim_earnings(ctx: &ChainCtxV3, a: &ClaimEarningsArgs) -> Result<()> {
-    let (nonce, fee) = nonce_and_fee(ctx).await?;
-    let call = ctx.build_claim_earnings_call(&a.circle, a.amount, fee, nonce);
+    let fee = call_fee(ctx).await?;
+    let call = ctx.build_claim_earnings_call(&a.circle, a.amount, fee, 0);
     submit_and_log(ctx, "claim_earnings", call, None).await
 }
 
@@ -518,10 +519,9 @@ async fn run_claim_earnings(ctx: &ChainCtxV3, a: &ClaimEarningsArgs) -> Result<(
 // Shared helpers
 // ============================================================
 
-async fn nonce_and_fee(ctx: &ChainCtxV3) -> Result<(u64, u64)> {
-    let nonce = ctx.nonce().await?;
+async fn call_fee(ctx: &ChainCtxV3) -> Result<u64> {
     let fee = ctx.fee_or_fallback("contract_call").await;
-    Ok((nonce, fee))
+    Ok(fee)
 }
 
 /// What kind of return value to try to parse out of
@@ -551,8 +551,7 @@ async fn submit_and_log(
     call: Value,
     return_log: Option<ReturnLog>,
 ) -> Result<()> {
-    let signed = ctx.sign_call(call)?;
-    let hash = ctx.submit_signed_tx(&signed).await?;
+    let hash = ctx.submit_call(call).await?;
     println!("{method}: tx_hash = {hash}");
     info!(%hash, method, "v3 cli tx submitted");
 
