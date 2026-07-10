@@ -1831,6 +1831,42 @@ mod tests {
         assert_eq!(g.submitted[0], legacy_signed);
     }
 
+    #[tokio::test]
+    async fn r3_queue_path_omits_chain_id_even_when_ctx_has_a_non_empty_one() {
+        // R3: production builds the ctx with a (now-vestigial) envelope chain_id
+        // but the ChainTxQueue with EMPTY. The real node does not verify an
+        // envelope chain_id -- signing over one is octra_submit 101 -- so the
+        // queue path must sign WITHOUT chain_id regardless of the ctx's field.
+        let (url, state, _shutdown) = spawn_submit_mock(10).await;
+        let secret = [7u8; 32];
+        let wallet = KeyPair::from_secret_bytes(&secret);
+        let queue_wallet = Arc::new(KeyPair::from_secret_bytes(&secret));
+        let program_addr = Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+        let queue =
+            octravpn_core::chain_tx_queue::spawn(RpcClient::new(&url), queue_wallet, String::new());
+        let ctx = ChainCtxV3::new_with_chain_id_and_queue(
+            RpcClient::new(&url),
+            program_addr,
+            wallet,
+            "octra-devnet".to_string(),
+            Some(queue),
+        );
+        let call = ctx.build_bond_endpoint_call(
+            "oct8taXQ4CvohcgzCJFYyaKrrAbcZs5mxkBCJQQYWb2Pcun",
+            1_000,
+            500,
+            0,
+        );
+        ctx.submit_call(call).await.expect("submit_call via queue");
+        let g = state.lock();
+        assert_eq!(g.submitted.len(), 1);
+        assert!(
+            g.submitted[0].get("chain_id").is_none(),
+            "queue path must sign WITHOUT a chain_id field; got {:?}",
+            g.submitted[0]
+        );
+    }
+
     #[test]
     fn derive_seed_is_deterministic_and_differs_per_label() {
         let parent = "ab".repeat(32);

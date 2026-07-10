@@ -44,14 +44,17 @@ pub(super) async fn build_hub(cfg: NodeConfig) -> Result<Hub> {
     let wallet_v3 = KeyPair::from_secret_bytes(&wallet_secret);
     let wallet_v3_queue = Arc::new(KeyPair::from_secret_bytes(&wallet_secret));
 
-    // v2 tx-envelope chain-id binding (P1-5b). The numeric
-    // `cfg.chain.chain_id` (u32, e.g. `CHAIN_ID_DEVNET` 0x6F63_7464
-    // = "octd") is exposed at the tx layer as the human-readable
-    // strings the wallet + cast tooling already understand:
-    // mainnet -> "octra-mainnet", devnet -> "octra-devnet". Other
-    // values stringify to "octra-net-<hex>" so a future custom chain
-    // works without code changes.
-    let chain_id_str = chain_id_to_envelope_string(cfg.chain.chain_id);
+    // TX-ENVELOPE chain_id must be EMPTY. Reading the real node source
+    // (octra-labs/lite_node) confirmed the tx envelope has NO chain_id field
+    // (transaction.ml:156-168) — it is P2P-only — and `Transaction.verify`
+    // reconstructs the signed message WITHOUT it. Splicing a non-empty chain_id
+    // into the signed tx therefore makes the signature cover a field the chain
+    // strips -> `octra_submit` 101 invalid signature. This is confirmed
+    // empirically: the v3 queue (empty) submits fine on devnet, a non-empty one
+    // 101s. So ALL contexts sign with an empty envelope chain_id, matching the
+    // v3 queue. (The RECEIPT chain_id, bound into settlement_hash via
+    // ReceiptContext, is a SEPARATE thing and is unaffected.)
+    let chain_id_str = String::new();
 
     let chain = ChainCtx {
         rpc: rpc.clone(),
@@ -292,6 +295,11 @@ pub(super) fn read_secret_32_strict(path: &str) -> Result<zeroize::Zeroizing<[u8
 /// `octra cast send --chain-id` accepts; other values stringify to
 /// `octra-net-<hex>` so an operator on a custom network doesn't have
 /// to round-trip through this file to add a new constant.
+///
+/// Retained for if/when a chain actually verifies a tx-envelope chain_id.
+/// Today it does NOT (see the empty `chain_id_str` above), so this has no
+/// production caller.
+#[allow(dead_code)]
 pub(super) fn chain_id_to_envelope_string(id: u32) -> String {
     use octravpn_core::receipt::{CHAIN_ID_DEVNET, CHAIN_ID_MAINNET};
     if id == CHAIN_ID_DEVNET {

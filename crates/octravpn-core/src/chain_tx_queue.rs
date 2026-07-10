@@ -3,7 +3,10 @@
 //! The queue serializes operator-signed submissions behind one actor so
 //! callers cannot race by independently fetching the same account nonce.
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -18,6 +21,11 @@ use crate::{
 const QUEUE_CAPACITY: usize = 1024;
 const MAX_NONCE_RETRIES: usize = 1;
 const MAX_TRANSIENT_RETRIES: usize = 3;
+/// R5: total wall-time budget per queued submission. This single actor
+/// serializes every operator-signed tx, so a slow/hanging RPC (the 10s HTTP
+/// client timeout) across retries could otherwise stall every settle/arm/claim
+/// queued behind it. Stop retrying once this budget is spent.
+const MAX_ITEM_WALL: Duration = Duration::from_secs(20);
 
 #[derive(Clone)]
 pub struct ChainTxQueueHandle {
@@ -115,6 +123,7 @@ where
     }
 
     async fn process(&mut self, unsigned_call: Value) -> CoreResult<String> {
+        let started = Instant::now();
         let mut nonce_retries = 0usize;
         let mut transient_retries = 0usize;
 
@@ -135,6 +144,12 @@ where
                 }
                 Err(err) => {
                     let msg = core_error_message(&err);
+                    // R5: once the per-item wall-time budget is spent, stop
+                    // retrying and return -- do not hold the single queue actor
+                    // open behind one slow submission (head-of-line blocking).
+                    if started.elapsed() >= MAX_ITEM_WALL {
+                        return Err(err);
+                    }
                     if is_nonce_error(&msg) {
                         self.next = None;
                         if nonce_retries < MAX_NONCE_RETRIES {
