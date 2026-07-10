@@ -116,7 +116,12 @@ contract OctraVPN_V3 {
     tailnet_count: uint
     tailnet_owner: map[uint]address
     tailnet_treasury: map[uint]uint
+    // R1: stores the GRANT EPOCH at which an address was authorized to spend the
+    // treasury (0 = never/revoked). A grant is live iff it equals the tailnet's
+    // current tailnet_spender_epoch. transfer_tailnet_ownership bumps that epoch,
+    // atomically invalidating EVERY prior grant (a map-clear loop is un-gas-safe).
     tailnet_authorized_spenders: map[uint]map[address]uint
+    tailnet_spender_epoch: map[uint]uint
     // sha256 of /tailnet-{id}/members.json in tailnet-owner circle.
     tailnet_members_root: map[uint]bytes
     tailnet_root_version: map[uint]uint
@@ -230,7 +235,9 @@ contract OctraVPN_V3 {
     if self.tailnet_owner[tailnet_id] == who {
       return true
     }
-    return self.tailnet_authorized_spenders[tailnet_id][who] == 1
+    // R1: a grant is live ONLY if it equals the tailnet's current epoch. A prior
+    // owner's grants (made at an earlier epoch) fail this after a transfer bump.
+    return self.tailnet_authorized_spenders[tailnet_id][who] == self.tailnet_spender_epoch[tailnet_id]
   }
 
   private fn require_tailnet_spend_authorized(tailnet_id: uint) {
@@ -514,6 +521,7 @@ contract OctraVPN_V3 {
     let tid = self.tailnet_count
     self.tailnet_count = tid + 1
     self.tailnet_owner[tid] = caller
+    self.tailnet_spender_epoch[tid] = 1
     self.tailnet_treasury[tid] = value
     self.tailnet_members_root[tid] = members_root
     self.tailnet_root_version[tid] = 1
@@ -552,6 +560,9 @@ contract OctraVPN_V3 {
     require(is_address(new_owner), "invalid owner")
     let old_owner = self.tailnet_owner[tailnet_id]
     self.tailnet_owner[tailnet_id] = new_owner
+    // R1: bump the authorization epoch so EVERY grant the old owner made is
+    // invalidated atomically -- the new owner inherits a clean spender set.
+    self.tailnet_spender_epoch[tailnet_id] = self.tailnet_spender_epoch[tailnet_id] + 1
     emit TailnetOwnershipTransferred(tailnet_id, old_owner, new_owner)
     return true
   }
@@ -561,7 +572,7 @@ contract OctraVPN_V3 {
     require(tailnet_id < self.tailnet_count, "tailnet not found")
     require(self.tailnet_owner[tailnet_id] == caller, "not tailnet owner")
     require(is_address(spender), "invalid spender")
-    self.tailnet_authorized_spenders[tailnet_id][spender] = 1
+    self.tailnet_authorized_spenders[tailnet_id][spender] = self.tailnet_spender_epoch[tailnet_id]
     emit TailnetSpenderAuthorized(tailnet_id, spender)
     return true
   }

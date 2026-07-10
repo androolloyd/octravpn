@@ -65,7 +65,16 @@ pub(crate) async fn submit_relay_claim_from_vault(
         .get_relay_settlement_hash(session_id)
         .await
         .context("get_relay_settlement_hash before relay_claim")?;
-    if !onchain_hash.is_empty() && onchain_hash != settlement_hash {
+    // R2 (fail-closed): a RELAY_ARMED session ALWAYS has a non-empty committed
+    // hash (write_relay_arm sets it), so an empty response means the RPC failed
+    // or is hostile -- exactly when we must NOT reveal the preimage. Do not gate
+    // the bail on !is_empty(): treat empty as an error, then compare.
+    if onchain_hash.is_empty() {
+        bail!(
+            "session {session_id}: empty on-chain settlement hash for a RELAY_ARMED session (RPC failure or hostile RPC?); refusing to reveal preimage"
+        );
+    }
+    if onchain_hash != settlement_hash {
         bail!(
             "session {session_id}: vault receipt hash {settlement_hash} != on-chain committed hash {onchain_hash} (higher-seq receipt after arm?); refusing to reveal preimage"
         );
