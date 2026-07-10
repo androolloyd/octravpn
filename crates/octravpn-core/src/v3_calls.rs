@@ -58,8 +58,20 @@ pub mod method {
     pub const DEPOSIT_TO_TAILNET: &str = "deposit_to_tailnet";
     /// `withdraw_tailnet_treasury(tailnet_id, amount)`.
     pub const WITHDRAW_TAILNET_TREASURY: &str = "withdraw_tailnet_treasury";
-    /// `open_session(tailnet_id, circle, max_pay) -> int`.
+    /// `transfer_tailnet_ownership(tailnet_id, new_owner)`.
+    pub const TRANSFER_TAILNET_OWNERSHIP: &str = "transfer_tailnet_ownership";
+    /// `authorize_tailnet_spender(tailnet_id, spender)`.
+    pub const AUTHORIZE_TAILNET_SPENDER: &str = "authorize_tailnet_spender";
+    /// `revoke_tailnet_spender(tailnet_id, spender)`.
+    pub const REVOKE_TAILNET_SPENDER: &str = "revoke_tailnet_spender";
+    /// `payable open_session(tailnet_id, circle, max_pay) -> int`.
     pub const OPEN_SESSION: &str = "open_session";
+    /// `open_session_from_treasury(tailnet_id, circle, max_pay) -> int`.
+    pub const OPEN_SESSION_FROM_TREASURY: &str = "open_session_from_treasury";
+    /// `payable open_relay_session(tailnet_id, circle, max_pay, settlement_hash, net, relay_expiry_epochs) -> int`.
+    pub const OPEN_RELAY_SESSION: &str = "open_relay_session";
+    /// `open_relay_session_from_treasury(tailnet_id, circle, max_pay, settlement_hash, net, relay_expiry_epochs) -> int`.
+    pub const OPEN_RELAY_SESSION_FROM_TREASURY: &str = "open_relay_session_from_treasury";
     /// `settle_claim(session_id, bytes_used)`.
     pub const SETTLE_CLAIM: &str = "settle_claim";
     /// `nonreentrant settle_confirm(session_id, bytes_used, net, settle_blinding)`.
@@ -309,14 +321,149 @@ impl ContractCallBuilder {
         self.call(method::WITHDRAW_TAILNET_TREASURY, params, value, fee, nonce)
     }
 
+    /// Build a `transfer_tailnet_ownership` call.
+    /// `params` order: `[tailnet_id, new_owner]`.
+    pub fn transfer_tailnet_ownership_call(
+        &self,
+        params: &[Value],
+        value: u64,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call(
+            method::TRANSFER_TAILNET_OWNERSHIP,
+            params,
+            value,
+            fee,
+            nonce,
+        )
+    }
+
+    /// Build an `authorize_tailnet_spender` call.
+    /// `params` order: `[tailnet_id, spender]`.
+    pub fn authorize_tailnet_spender_call(
+        &self,
+        params: &[Value],
+        value: u64,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call(method::AUTHORIZE_TAILNET_SPENDER, params, value, fee, nonce)
+    }
+
+    /// Build a `revoke_tailnet_spender` call.
+    /// `params` order: `[tailnet_id, spender]`.
+    pub fn revoke_tailnet_spender_call(
+        &self,
+        params: &[Value],
+        value: u64,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call(method::REVOKE_TAILNET_SPENDER, params, value, fee, nonce)
+    }
+
     // ============================================================
     // Sessions
     // ============================================================
 
-    /// Build an `open_session` call.
+    /// Build a self-funded `open_session` call.
     /// `params` order: `[tailnet_id, circle_id, max_pay]`.
-    pub fn open_session_call(&self, params: &[Value], value: u64, fee: u64, nonce: u64) -> Value {
-        self.call(method::OPEN_SESSION, params, value, fee, nonce)
+    /// The AML is payable; the tx `value` carries the session escrow.
+    pub fn open_session_call(
+        &self,
+        tailnet_id: u64,
+        circle_id: &str,
+        max_pay: u64,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call(
+            method::OPEN_SESSION,
+            &[json!(tailnet_id), json!(circle_id), json!(max_pay)],
+            max_pay,
+            fee,
+            nonce,
+        )
+    }
+
+    /// Build a sponsored `open_session_from_treasury` call.
+    /// `params` order: `[tailnet_id, circle_id, max_pay]`.
+    pub fn open_session_from_treasury_call(
+        &self,
+        tailnet_id: u64,
+        circle_id: &str,
+        max_pay: u64,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call(
+            method::OPEN_SESSION_FROM_TREASURY,
+            &[json!(tailnet_id), json!(circle_id), json!(max_pay)],
+            0,
+            fee,
+            nonce,
+        )
+    }
+
+    /// Build a self-funded `open_relay_session` call.
+    /// `params` order: `[tailnet_id, circle_id, max_pay, settlement_hash_hex, net, relay_expiry_epochs]`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_relay_session_call(
+        &self,
+        tailnet_id: u64,
+        circle_id: &str,
+        max_pay: u64,
+        settlement_hash_hex: &str,
+        net: u64,
+        relay_expiry_epochs: u64,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call(
+            method::OPEN_RELAY_SESSION,
+            &[
+                json!(tailnet_id),
+                json!(circle_id),
+                json!(max_pay),
+                json!(settlement_hash_hex),
+                json!(net),
+                json!(normalize_relay_expiry_epochs(relay_expiry_epochs)),
+            ],
+            max_pay,
+            fee,
+            nonce,
+        )
+    }
+
+    /// Build a sponsored `open_relay_session_from_treasury` call.
+    /// `params` order: `[tailnet_id, circle_id, max_pay, settlement_hash_hex, net, relay_expiry_epochs]`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_relay_session_from_treasury_call(
+        &self,
+        tailnet_id: u64,
+        circle_id: &str,
+        max_pay: u64,
+        settlement_hash_hex: &str,
+        net: u64,
+        relay_expiry_epochs: u64,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call(
+            method::OPEN_RELAY_SESSION_FROM_TREASURY,
+            &[
+                json!(tailnet_id),
+                json!(circle_id),
+                json!(max_pay),
+                json!(settlement_hash_hex),
+                json!(net),
+                json!(normalize_relay_expiry_epochs(relay_expiry_epochs)),
+            ],
+            0,
+            fee,
+            nonce,
+        )
     }
 
     /// Build a `settle_claim` call.
@@ -795,14 +942,64 @@ mod tests {
     }
 
     #[test]
+    fn tailnet_owner_and_spender_shapes() {
+        let b = builder();
+        let transfer =
+            b.transfer_tailnet_ownership_call(&[json!(2u64), json!("octNEW")], 0, 500, 12);
+        assert_eq!(
+            transfer,
+            json!({
+                "kind": "contract_call",
+                "from": WALLET,
+                "to": PROG,
+                "method": "transfer_tailnet_ownership",
+                "params": [2u64, "octNEW"],
+                "value": 0u64,
+                "fee": 500u64,
+                "nonce": 12u64,
+                "timestamp": TEST_TIMESTAMP,
+            })
+        );
+
+        let authorize =
+            b.authorize_tailnet_spender_call(&[json!(2u64), json!("octSPENDER")], 0, 500, 13);
+        assert_eq!(authorize["method"], "authorize_tailnet_spender");
+        assert_eq!(authorize["params"], json!([2u64, "octSPENDER"]));
+        assert_eq!(authorize["value"], 0u64);
+
+        let revoke = b.revoke_tailnet_spender_call(&[json!(2u64), json!("octSPENDER")], 0, 500, 14);
+        assert_eq!(revoke["method"], "revoke_tailnet_spender");
+        assert_eq!(revoke["params"], json!([2u64, "octSPENDER"]));
+        assert_eq!(revoke["value"], 0u64);
+    }
+
+    #[test]
     fn open_session_shape() {
         let b = builder();
-        let got = b.open_session_call(&[json!(0u64), json!("octCID"), json!(1500u64)], 0, 500, 19);
+        let got = b.open_session_call(0, "octCID", 1500, 500, 19);
         let want = json!({
             "kind": "contract_call",
             "from": WALLET,
             "to": PROG,
             "method": "open_session",
+            "params": [0u64, "octCID", 1500u64],
+            "value": 1500u64,
+            "fee": 500u64,
+            "nonce": 19u64,
+            "timestamp": TEST_TIMESTAMP,
+        });
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn open_session_from_treasury_shape() {
+        let b = builder();
+        let got = b.open_session_from_treasury_call(0, "octCID", 1500, 500, 19);
+        let want = json!({
+            "kind": "contract_call",
+            "from": WALLET,
+            "to": PROG,
+            "method": "open_session_from_treasury",
             "params": [0u64, "octCID", 1500u64],
             "value": 0u64,
             "fee": 500u64,
@@ -810,6 +1007,36 @@ mod tests {
             "timestamp": TEST_TIMESTAMP,
         });
         assert_eq!(got, want);
+    }
+
+    #[test]
+    fn open_relay_session_shapes() {
+        let b = builder();
+        let hash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+        let got = b.open_relay_session_call(0, "octCID", 1500, hash, 1000, 200, 500, 29);
+        assert_eq!(
+            got,
+            json!({
+                "kind": "contract_call",
+                "from": WALLET,
+                "to": PROG,
+                "method": "open_relay_session",
+                "params": [0u64, "octCID", 1500u64, hash, 1000u64, 200u64],
+                "value": 1500u64,
+                "fee": 500u64,
+                "nonce": 29u64,
+                "timestamp": TEST_TIMESTAMP,
+            })
+        );
+
+        let sponsored =
+            b.open_relay_session_from_treasury_call(0, "octCID", 1500, hash, 1000, 200, 500, 30);
+        assert_eq!(sponsored["method"], "open_relay_session_from_treasury");
+        assert_eq!(
+            sponsored["params"],
+            json!([0u64, "octCID", 1500u64, hash, 1000u64, 200u64])
+        );
+        assert_eq!(sponsored["value"], 0u64);
     }
 
     #[test]
@@ -1028,11 +1255,11 @@ mod tests {
         let got = b.call(
             method::OPEN_SESSION,
             &[json!(0u64), json!("octCID"), json!(1500u64)],
-            0,
+            1500,
             500,
             19,
         );
-        let want = b.open_session_call(&[json!(0u64), json!("octCID"), json!(1500u64)], 0, 500, 19);
+        let want = b.open_session_call(0, "octCID", 1500, 500, 19);
         assert_eq!(got, want);
     }
 
@@ -1057,7 +1284,25 @@ mod tests {
             method::WITHDRAW_TAILNET_TREASURY,
             "withdraw_tailnet_treasury"
         );
+        assert_eq!(
+            method::TRANSFER_TAILNET_OWNERSHIP,
+            "transfer_tailnet_ownership"
+        );
+        assert_eq!(
+            method::AUTHORIZE_TAILNET_SPENDER,
+            "authorize_tailnet_spender"
+        );
+        assert_eq!(method::REVOKE_TAILNET_SPENDER, "revoke_tailnet_spender");
         assert_eq!(method::OPEN_SESSION, "open_session");
+        assert_eq!(
+            method::OPEN_SESSION_FROM_TREASURY,
+            "open_session_from_treasury"
+        );
+        assert_eq!(method::OPEN_RELAY_SESSION, "open_relay_session");
+        assert_eq!(
+            method::OPEN_RELAY_SESSION_FROM_TREASURY,
+            "open_relay_session_from_treasury"
+        );
         assert_eq!(method::SETTLE_CLAIM, "settle_claim");
         assert_eq!(method::SETTLE_CONFIRM, "settle_confirm");
         assert_eq!(method::ARM_RELAY, "arm_relay");

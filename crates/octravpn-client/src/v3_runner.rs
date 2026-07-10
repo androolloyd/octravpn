@@ -15,10 +15,11 @@
 //!      Merkle proof verification land in the 191 follow-up; for now
 //!      we log the anchor as the trust pin.
 //!   3. Fetch the tailnet's `members_root` anchor. Real Merkle proof
-//!      verification is the same follow-up; for now we log the root
-//!      and warn that membership is taken on trust.
-//!   4. Call `open_session(tailnet_id, circle, max_pay)` and capture
-//!      the returned sid from the tx's `SessionOpened` event.
+//!      verification is the same follow-up; for now it is an off-chain
+//!      admission hint only. Session escrow is self-funded by the caller.
+//!   4. Call payable `open_session(tailnet_id, circle, max_pay)` with
+//!      `value = max_pay` and capture the returned sid from the tx's
+//!      `SessionOpened` event.
 //!   5. Run the WG tunnel (deferred to the existing v2/v1 control
 //!      plane — see `runner::print_wg_config`).
 //!   6. On disconnect: compute `bytes_used` from session counters,
@@ -137,32 +138,34 @@ pub(crate) async fn connect_v3(
         "v3 operator policy validated against anchor"
     );
 
-    // 3. Fetch the tailnet's members_root. Real Merkle proof against
-    //    the client's wallet address ships in #191.
+    // 3. Fetch the tailnet's members_root. It no longer guards treasury
+    //    spend for this default flow because the client self-funds the
+    //    session escrow. Real Merkle proof against the client's wallet
+    //    address still ships in #191 for off-chain admission checks.
     match ctx.get_tailnet_members_root(v3.tailnet_id).await {
         Ok(Some(root)) => {
             info!(
                 tailnet_id = v3.tailnet_id,
                 members_root = %root,
-                "v3 tailnet members_root (membership taken on trust until 191 lands)"
+                "v3 tailnet members_root (self-funded session; off-chain admission hint)"
             );
         }
         Ok(None) => {
             warn!(
                 tailnet_id = v3.tailnet_id,
-                "no members_root anchored yet for tailnet — proceeding on trust"
+                "no members_root anchored yet for tailnet — proceeding with self-funded session"
             );
         }
         Err(e) => {
             warn!(
                 tailnet_id = v3.tailnet_id,
                 error = %e,
-                "members_root view failed — proceeding on trust"
+                "members_root view failed — proceeding with self-funded session"
             );
         }
     }
 
-    // 4. open_session(tailnet_id, circle, max_pay).
+    // 4. payable open_session(tailnet_id, circle, max_pay) with value=max_pay.
     let nonce = ctx.nonce().await?;
     let fee = ctx.fee_or_fallback("contract_call").await;
     let open_call =

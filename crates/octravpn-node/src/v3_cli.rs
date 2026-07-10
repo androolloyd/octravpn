@@ -95,9 +95,10 @@ pub(crate) enum V3Cmd {
     /// withdrawal after `retire_tailnet`. NOTE: built inline (no
     /// chain_v3 builder exists yet — see module doc judgement call).
     WithdrawTailnet(WithdrawArgs),
-    /// `open_session(tailnet_id, circle, max_pay) -> int` — open a paid
-    /// session. The assigned `session_id` is best-effort fetched from
-    /// `octra_transaction(hash)` and logged.
+    /// `payable open_session(tailnet_id, circle, max_pay) -> int` — open
+    /// a self-funded paid session with tx value = max_pay. The assigned
+    /// `session_id` is best-effort fetched from `octra_transaction(hash)`
+    /// and logged.
     OpenSession(OpenSessionArgs),
     /// `settle_claim(session_id, bytes_used)` — operator-side first
     /// half of the two-tx settle. Equivocation on `bytes_used` per sid
@@ -806,6 +807,7 @@ mod tests {
         let c = ctx();
         let call = c.build_open_session_call(0, CID, 1500, 500, 12);
         assert_eq!(call["method"], "open_session");
+        assert_eq!(call["value"], 1500);
         let p = call["params"].as_array().unwrap();
         assert_eq!(p.len(), 3);
         assert_eq!(p[0], 0);

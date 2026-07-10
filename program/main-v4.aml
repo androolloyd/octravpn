@@ -68,6 +68,9 @@ contract OctraVPN_V3 {
   event TailnetCreated(tailnet_id: uint, owner: address, members_root: bytes)
   event TailnetMembersRootUpdated(tailnet_id: uint, members_root: bytes)
   event TailnetDeposit(tailnet_id: uint, amount: uint, new_treasury: uint)
+  event TailnetOwnershipTransferred(tailnet_id: uint, old_owner: address, new_owner: address)
+  event TailnetSpenderAuthorized(tailnet_id: uint, spender: address)
+  event TailnetSpenderRevoked(tailnet_id: uint, spender: address)
 
   event SessionOpened(session_id: uint, tailnet_id: uint, circle: address, deposit: uint, opened_at: uint)
   event SettleClaimed(session_id: uint, circle: address, bytes_used: uint)
@@ -113,6 +116,7 @@ contract OctraVPN_V3 {
     tailnet_count: uint
     tailnet_owner: map[uint]address
     tailnet_treasury: map[uint]uint
+    tailnet_authorized_spenders: map[uint]map[address]uint
     // sha256 of /tailnet-{id}/members.json in tailnet-owner circle.
     tailnet_members_root: map[uint]bytes
     tailnet_root_version: map[uint]uint
@@ -126,6 +130,7 @@ contract OctraVPN_V3 {
     session_exit: map[uint]address     // circle_id of the operator
     session_tailnet: map[uint]uint
     session_opened_at: map[uint]uint
+    session_treasury_funded: map[uint]uint
 
     // Relay-settlement lane: H = SignedReceipt::settlement_hash()
     // (64-char hex), plus the committed net and claim deadline.
@@ -219,6 +224,44 @@ contract OctraVPN_V3 {
     require(e >= RELAY_EXPIRY_MIN_EPOCHS, "relay expiry too short")
     require(e <= RELAY_EXPIRY_MAX_EPOCHS, "relay expiry too long")
     return e
+  }
+
+  private fn tailnet_spend_authorized(tailnet_id: uint, who: address): bool {
+    if self.tailnet_owner[tailnet_id] == who {
+      return true
+    }
+    return self.tailnet_authorized_spenders[tailnet_id][who] == 1
+  }
+
+  private fn require_tailnet_spend_authorized(tailnet_id: uint) {
+    require(tailnet_spend_authorized(tailnet_id, caller), "not tailnet owner or spender")
+  }
+
+  private fn write_session(tailnet_id: uint, circle: address, deposit: uint, treasury_funded: uint): uint {
+    let sid = self.session_count
+    self.session_count = sid + 1
+    self.session_tailnet[sid] = tailnet_id
+    self.session_exit[sid] = circle
+    self.session_opener[sid] = caller
+    self.session_deposit[sid] = deposit
+    self.session_opened_at[sid] = epoch
+    self.session_status[sid] = SESSION_OPEN
+    self.session_treasury_funded[sid] = treasury_funded
+    emit SessionOpened(sid, tailnet_id, circle, deposit, epoch)
+    return sid
+  }
+
+  private fn refund_session_escrow(session_id: uint, amount: uint) {
+    if amount == 0 {
+      return
+    }
+    if self.session_treasury_funded[session_id] == 1 {
+      let tid = self.session_tailnet[session_id]
+      self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + amount
+      return
+    }
+    let opener = self.session_opener[session_id]
+    require(transfer(opener, amount), "refund transfer failed")
   }
 
   // Shared arm bookkeeping. Caller must have created or selected a valid
@@ -502,6 +545,37 @@ contract OctraVPN_V3 {
     return true
   }
 
+  fn transfer_tailnet_ownership(tailnet_id: uint, new_owner: address): bool {
+    require_not_paused()
+    require(tailnet_id < self.tailnet_count, "tailnet not found")
+    require(self.tailnet_owner[tailnet_id] == caller, "not tailnet owner")
+    require(is_address(new_owner), "invalid owner")
+    let old_owner = self.tailnet_owner[tailnet_id]
+    self.tailnet_owner[tailnet_id] = new_owner
+    emit TailnetOwnershipTransferred(tailnet_id, old_owner, new_owner)
+    return true
+  }
+
+  fn authorize_tailnet_spender(tailnet_id: uint, spender: address): bool {
+    require_not_paused()
+    require(tailnet_id < self.tailnet_count, "tailnet not found")
+    require(self.tailnet_owner[tailnet_id] == caller, "not tailnet owner")
+    require(is_address(spender), "invalid spender")
+    self.tailnet_authorized_spenders[tailnet_id][spender] = 1
+    emit TailnetSpenderAuthorized(tailnet_id, spender)
+    return true
+  }
+
+  fn revoke_tailnet_spender(tailnet_id: uint, spender: address): bool {
+    require_not_paused()
+    require(tailnet_id < self.tailnet_count, "tailnet not found")
+    require(self.tailnet_owner[tailnet_id] == caller, "not tailnet owner")
+    require(is_address(spender), "invalid spender")
+    self.tailnet_authorized_spenders[tailnet_id][spender] = 0
+    emit TailnetSpenderRevoked(tailnet_id, spender)
+    return true
+  }
+
   fn retire_tailnet(tailnet_id: uint): bool {
     require_not_paused()
     require(self.tailnet_owner[tailnet_id] == caller, "not tailnet owner")
@@ -530,28 +604,28 @@ contract OctraVPN_V3 {
   // values agree.
   // ============================================================
 
-  fn open_session(tailnet_id: uint, circle: address, max_pay: uint): uint {
+  payable fn open_session(tailnet_id: uint, circle: address, max_pay: uint): uint {
+    require_not_paused()
+    require(tailnet_id < self.tailnet_count, "tailnet not found")
+    require(self.tailnet_retired[tailnet_id] == 0, "tailnet retired")
+    require(circle_is_active(circle), "circle inactive or slashed")
+    require(value >= self.min_session_deposit, "deposit below min")
+    require(value >= max_pay, "value below max_pay")
+
+    return write_session(tailnet_id, circle, value, 0)
+  }
+
+  fn open_session_from_treasury(tailnet_id: uint, circle: address, max_pay: uint): uint {
     require_not_paused()
     require(tailnet_id < self.tailnet_count, "tailnet not found")
     require(self.tailnet_retired[tailnet_id] == 0, "tailnet retired")
     require(circle_is_active(circle), "circle inactive or slashed")
     require(max_pay >= self.min_session_deposit, "deposit below min")
+    require_tailnet_spend_authorized(tailnet_id)
     require(self.tailnet_treasury[tailnet_id] >= max_pay, "tailnet treasury insufficient")
 
-    // Membership = off-chain Merkle proof vs tailnet_members_root.
-    // If operator misbehaves, client recovers via claim_no_show /
-    // sweep_expired_session.
     self.tailnet_treasury[tailnet_id] = self.tailnet_treasury[tailnet_id] - max_pay
-    let sid = self.session_count
-    self.session_count = sid + 1
-    self.session_tailnet[sid] = tailnet_id
-    self.session_exit[sid] = circle
-    self.session_opener[sid] = caller
-    self.session_deposit[sid] = max_pay
-    self.session_opened_at[sid] = epoch
-    self.session_status[sid] = SESSION_OPEN
-    emit SessionOpened(sid, tailnet_id, circle, max_pay, epoch)
-    return sid
+    return write_session(tailnet_id, circle, max_pay, 1)
   }
 
   // ============================================================
@@ -571,25 +645,33 @@ contract OctraVPN_V3 {
     return true
   }
 
-  // Pre-quoted path: open a session and arm it in one tx, pulling escrow
-  // from the tailnet treasury exactly like open_session.
-  fn open_relay_session(tailnet_id: uint, circle: address, max_pay: uint, settlement_hash: bytes, net: uint, relay_expiry_epochs: uint): uint {
+  // Pre-quoted path: open a self-funded session and arm it in one tx.
+  payable fn open_relay_session(tailnet_id: uint, circle: address, max_pay: uint, settlement_hash: bytes, net: uint, relay_expiry_epochs: uint): uint {
+    require_not_paused()
+    require(tailnet_id < self.tailnet_count, "tailnet not found")
+    require(self.tailnet_retired[tailnet_id] == 0, "tailnet retired")
+    require(circle_is_active(circle), "circle inactive or slashed")
+    require(value >= self.min_session_deposit, "deposit below min")
+    require(value >= max_pay, "value below max_pay")
+
+    let sid = write_session(tailnet_id, circle, value, 0)
+    write_relay_arm(sid, settlement_hash, net, relay_expiry_epochs)
+    return sid
+  }
+
+  // Sponsored pre-quoted path: authorized tailnet owner/spender opens a
+  // relay-armed session from the tailnet treasury.
+  fn open_relay_session_from_treasury(tailnet_id: uint, circle: address, max_pay: uint, settlement_hash: bytes, net: uint, relay_expiry_epochs: uint): uint {
     require_not_paused()
     require(tailnet_id < self.tailnet_count, "tailnet not found")
     require(self.tailnet_retired[tailnet_id] == 0, "tailnet retired")
     require(circle_is_active(circle), "circle inactive or slashed")
     require(max_pay >= self.min_session_deposit, "deposit below min")
+    require_tailnet_spend_authorized(tailnet_id)
     require(self.tailnet_treasury[tailnet_id] >= max_pay, "tailnet treasury insufficient")
 
     self.tailnet_treasury[tailnet_id] = self.tailnet_treasury[tailnet_id] - max_pay
-    let sid = self.session_count
-    self.session_count = sid + 1
-    self.session_tailnet[sid] = tailnet_id
-    self.session_exit[sid] = circle
-    self.session_opener[sid] = caller
-    self.session_deposit[sid] = max_pay
-    self.session_opened_at[sid] = epoch
-    emit SessionOpened(sid, tailnet_id, circle, max_pay, epoch)
+    let sid = write_session(tailnet_id, circle, max_pay, 1)
     write_relay_arm(sid, settlement_hash, net, relay_expiry_epochs)
     return sid
   }
@@ -609,12 +691,11 @@ contract OctraVPN_V3 {
     let revealed = sha256(preimage)
     require(revealed == self.session_settlement_hash[session_id], "preimage does not match commitment")
 
-    let tid = self.session_tailnet[session_id]
     let dep = self.session_deposit[session_id]
     let net = self.session_relay_net[session_id]
 
     // Same value movement as settle_confirm: fee to protocol, net-after-fee
-    // to the earnings ledger, surplus escrow back to the tailnet treasury.
+    // to the earnings ledger, surplus escrow back to the session funder.
     let total_paid = net
     if total_paid > dep {
       total_paid = dep
@@ -625,9 +706,7 @@ contract OctraVPN_V3 {
 
     self.session_status[session_id] = SESSION_RELAY_CLAIMED
     self.treasury = self.treasury + fee
-    if refund > 0 {
-      self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + refund
-    }
+    refund_session_escrow(session_id, refund)
 
     if net_after_fee > 0 {
       self.circle_earnings_total[circle] = self.circle_earnings_total[circle] + net_after_fee
@@ -642,16 +721,15 @@ contract OctraVPN_V3 {
   }
 
   // Client recovery if the operator never reveals before the relay deadline.
-  fn relay_refund(session_id: uint): bool {
+  nonreentrant fn relay_refund(session_id: uint): bool {
     require_not_paused()
     require(session_id < self.session_count, "session not found")
     require(self.session_status[session_id] == SESSION_RELAY_ARMED, "session not armed")
     require(self.session_opener[session_id] == caller, "only opener can refund")
     require(epoch >= self.session_relay_deadline[session_id], "relay window not elapsed")
     self.session_status[session_id] = SESSION_RELAY_REFUNDED
-    let tid = self.session_tailnet[session_id]
     let dep = self.session_deposit[session_id]
-    self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + dep
+    refund_session_escrow(session_id, dep)
     emit RelayRefunded(session_id, "relay expiry: no operator claim")
     return true
   }
@@ -672,10 +750,7 @@ contract OctraVPN_V3 {
     if bounty > 0 {
       require(transfer(caller, bounty), "bounty transfer failed")
     }
-    if refund > 0 {
-      let tid = self.session_tailnet[session_id]
-      self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + refund
-    }
+    refund_session_escrow(session_id, refund)
     emit RelaySwept(session_id)
     return true
   }
@@ -683,7 +758,7 @@ contract OctraVPN_V3 {
   // Operator records bytes_used. Re-claiming a different value =
   // equivocation: refund the session; bond is burned by a follow-up
   // slash_double_sign tx.
-  fn settle_claim(session_id: uint, bytes_used: uint): bool {
+  nonreentrant fn settle_claim(session_id: uint, bytes_used: uint): bool {
     require_not_paused()
     require(session_id < self.session_count, "session not found")
     require(self.session_status[session_id] == SESSION_OPEN, "session not open")
@@ -700,10 +775,9 @@ contract OctraVPN_V3 {
       }
       // Equivocation: refund deposit, mark refunded. Slash itself
       // requires the signed receipts; that's slash_double_sign's job.
-      let tid = self.session_tailnet[session_id]
       let dep = self.session_deposit[session_id]
       self.session_status[session_id] = SESSION_REFUNDED
-      self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + dep
+      refund_session_escrow(session_id, dep)
       emit SettleDispute(session_id, prev_bytes, bytes_used)
       emit SessionRefunded(session_id, "operator equivocation")
       return false
@@ -739,10 +813,9 @@ contract OctraVPN_V3 {
     self.client_confirm_bytes[session_id] = bytes_used
 
     let circle = self.session_exit[session_id]
-    let tid = self.session_tailnet[session_id]
     let dep = self.session_deposit[session_id]
 
-    // Cap net against deposit; surplus is refunded to the tailnet.
+    // Cap net against deposit; surplus is refunded to the session funder.
     let total_paid = net
     if total_paid > dep {
       total_paid = dep
@@ -753,9 +826,7 @@ contract OctraVPN_V3 {
 
     self.session_status[session_id] = SESSION_SETTLED
     self.treasury = self.treasury + fee
-    if refund > 0 {
-      self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + refund
-    }
+    refund_session_escrow(session_id, refund)
 
     if net_after_fee > 0 {
       self.circle_earnings_total[circle] = self.circle_earnings_total[circle] + net_after_fee
@@ -772,7 +843,7 @@ contract OctraVPN_V3 {
     return true
   }
 
-  fn claim_no_show(session_id: uint): bool {
+  nonreentrant fn claim_no_show(session_id: uint): bool {
     require_not_paused()
     require(session_id < self.session_count, "session not found")
     require(self.session_status[session_id] == SESSION_OPEN, "session not open")
@@ -781,9 +852,8 @@ contract OctraVPN_V3 {
     require(epoch >= opened + self.session_grace_epochs, "grace not elapsed")
     require(self.operator_claim_set[session_id] == 0, "operator claimed")
     self.session_status[session_id] = SESSION_REFUNDED
-    let tid = self.session_tailnet[session_id]
     let dep = self.session_deposit[session_id]
-    self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + dep
+    refund_session_escrow(session_id, dep)
     emit SessionRefunded(session_id, "no-show")
     return true
   }
@@ -802,10 +872,7 @@ contract OctraVPN_V3 {
     if bounty > 0 {
       require(transfer(caller, bounty), "bounty transfer failed")
     }
-    if refund > 0 {
-      let tid = self.session_tailnet[session_id]
-      self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + refund
-    }
+    refund_session_escrow(session_id, refund)
     emit SessionSwept(session_id)
     return true
   }

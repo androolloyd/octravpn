@@ -11,8 +11,8 @@
 //!
 //! Coverage:
 //!
-//!   * `cold_open_session_then_settle_confirm` — opener calls
-//!     `open_session(tid, circle, max_pay)`, the mock records a
+//!   * `cold_open_session_then_settle_confirm` — opener calls payable
+//!     `open_session(tid, circle, max_pay)` with `value=max_pay`, the mock records a
 //!     `SessionOpened(session_id=42)` event, the client polls it
 //!     back, then submits `settle_confirm(sid, bytes_used, net,
 //!     blinding)`. Confirms the param order + wire shape.
@@ -342,7 +342,7 @@ fn build_open_session_call(
         "to": program_addr,
         "method": "open_session",
         "params": [tailnet_id, circle_id, max_pay],
-        "value": 0,
+        "value": max_pay,
         "fee": fee,
         "nonce": nonce,
     })
