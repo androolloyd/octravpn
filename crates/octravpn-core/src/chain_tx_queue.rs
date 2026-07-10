@@ -147,7 +147,11 @@ where
                     // R5: once the per-item wall-time budget is spent, stop
                     // retrying and return -- do not hold the single queue actor
                     // open behind one slow submission (head-of-line blocking).
+                    // Clear the cached nonce first: we timed out mid-flight and
+                    // cannot know whether the tx landed, so the NEXT item must
+                    // reconcile from chain rather than reuse a possibly-stale nonce.
                     if started.elapsed() >= MAX_ITEM_WALL {
+                        self.next = None;
                         return Err(err);
                     }
                     if is_nonce_error(&msg) {

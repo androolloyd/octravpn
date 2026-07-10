@@ -412,11 +412,20 @@ impl ReceiptVault {
             return Ok(());
         };
 
-        g.handle = None;
-        write_v2_snapshot(&path, &live)?;
-        let handle = OpenOptions::new().append(true).read(true).open(&path)?;
-        g.file_size = handle.metadata()?.len();
-        g.handle = Some(handle);
+        // Durability: do EVERY fallible step (snapshot write, open, metadata,
+        // atomic rename) on a temp file and only commit `g` once they all
+        // succeed. If anything fails, `g.handle`/`g.by_session` are UNTOUCHED --
+        // so put()/mark_lifecycle() keep persisting to the existing file rather
+        // than silently going in-memory-only (which would lose settlement
+        // evidence on the next restart). The temp handle stays valid across the
+        // rename (the fd follows the inode on unix).
+        let tmp = path.with_extension("ocrv2-compacting");
+        write_v2_snapshot(&tmp, &live)?;
+        let new_handle = OpenOptions::new().append(true).read(true).open(&tmp)?;
+        let new_size = new_handle.metadata()?.len();
+        std::fs::rename(&tmp, &path)?;
+        g.handle = Some(new_handle);
+        g.file_size = new_size;
         g.by_session = live;
         Ok(())
     }
@@ -1330,6 +1339,41 @@ mod tests {
         assert!(after < before, "after={after} before={before}");
         assert!(vault.get(&terminal).is_none());
         assert_eq!(vault.get(&live).unwrap().receipt.bytes_used, 100);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn compact_failure_keeps_handle_so_later_writes_still_persist() {
+        // Regression for the CRITICAL: a compaction whose snapshot write fails
+        // must NOT drop the file handle -- otherwise every later put()/mark_*()
+        // silently goes in-memory-only and settlement evidence vanishes on the
+        // next restart.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("receipt-vault.bin");
+        let a = SessionId::new([0xA1; 32]);
+        let b = SessionId::new([0xB2; 32]);
+
+        let vault = ReceiptVault::open(&path).unwrap();
+        vault.put(&a, &signed(1, 100, a.clone())).unwrap();
+
+        // Read-only dir -> compact()'s temp-snapshot create fails.
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
+        let compacted = vault.compact();
+        // Restore writability for the put + reopen + tempdir cleanup.
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(compacted.is_err(), "compact should fail with a read-only dir");
+
+        // The invariant: the failed compaction kept the handle, so this persists.
+        vault.put(&b, &signed(1, 200, b.clone())).unwrap();
+        drop(vault);
+
+        let reopened = ReceiptVault::open(&path).unwrap();
+        assert!(reopened.get(&a).is_some(), "pre-compact receipt must survive");
+        assert!(
+            reopened.get(&b).is_some(),
+            "a put AFTER a failed compaction must persist (handle not dropped)"
+        );
     }
 
     #[test]

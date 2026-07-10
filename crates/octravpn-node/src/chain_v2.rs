@@ -94,10 +94,10 @@ impl ChainCtxV2 {
         Self::new_with_chain_id(rpc, program_addr, wallet, String::new())
     }
 
-    /// Variant of [`new`] that pins a v2 chain-id binding for every tx
-    /// signed by this context. Mainnet boots pass `"octra-mainnet"`;
-    /// devnet boots pass `"octra-devnet"`. Empty string ⇒ legacy v1
-    /// (wallet-compat) signing.
+    /// Variant of [`new`] that would pin a tx-envelope chain-id. CURRENTLY
+    /// ALWAYS PASS `String::new()` (empty): the real node's tx envelope has no
+    /// chain_id field, so signing over one → `octra_submit` 101 (see the v3
+    /// equivalent + hub/boot.rs). Retained for a future chain that verifies one.
     pub(crate) fn new_with_chain_id(
         rpc: RpcClient,
         program_addr: Address,
