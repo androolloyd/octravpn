@@ -62,6 +62,11 @@ pub struct AnnounceSessionRequest {
     pub open_tx_hash: String,
     /// Signature over the announce envelope using `client_pubkey`.
     pub client_sig: Signature,
+    /// Wallet pubkey that opened the on-chain session.
+    pub opener_pubkey: PublicKey,
+    /// Signature by `opener_pubkey` binding the chain opener to this
+    /// announce envelope.
+    pub opener_sig: Signature,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -86,6 +91,24 @@ pub fn announce_signing_payload(
 ) -> Vec<u8> {
     let mut out = Vec::with_capacity(22 + 32 + 32 + 32 + 4 + open_tx_hash.len());
     out.extend_from_slice(b"octravpn:announce:v1");
+    out.extend_from_slice(session_id.as_bytes());
+    out.extend_from_slice(&client_pubkey.0);
+    out.extend_from_slice(client_wg_pubkey);
+    out.extend_from_slice(&(open_tx_hash.len() as u32).to_be_bytes());
+    out.extend_from_slice(open_tx_hash.as_bytes());
+    out
+}
+
+/// Build the deterministic payload the on-chain session opener signs
+/// to bind their wallet to the announced receipt key and WG key.
+pub fn announce_opener_binding_payload(
+    session_id: &SessionId,
+    client_pubkey: &PublicKey,
+    client_wg_pubkey: &[u8; 32],
+    open_tx_hash: &str,
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(29 + 32 + 32 + 32 + 4 + open_tx_hash.len());
+    out.extend_from_slice(b"octravpn:announce-opener:v1");
     out.extend_from_slice(session_id.as_bytes());
     out.extend_from_slice(&client_pubkey.0);
     out.extend_from_slice(client_wg_pubkey);
@@ -128,11 +151,62 @@ pub struct ProposedReceipt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sig::{verify, KeyPair};
 
     #[test]
     fn path_consistent() {
         let id = SessionId::new([1u8; 32]);
         assert!(path_state(&id).ends_with(&id.to_hex()));
         assert_eq!(path_receipt(&id), format!("{}/receipt", path_state(&id)));
+    }
+
+    #[test]
+    fn opener_binding_payload_is_distinct_and_verifiable() {
+        let opener = KeyPair::from_secret_bytes(&[0x11; 32]);
+        let client = KeyPair::from_secret_bytes(&[0x22; 32]);
+        let id = SessionId::from_u64(42);
+        let wg = [0x33; 32];
+        let open_tx_hash = "open-tx";
+        let opener_payload =
+            announce_opener_binding_payload(&id, &client.public, &wg, open_tx_hash);
+        let client_payload = announce_signing_payload(&id, &client.public, &wg, open_tx_hash);
+        assert_ne!(opener_payload, client_payload);
+
+        let sig = opener.sign(&opener_payload);
+        verify(&opener.public, &opener_payload, &sig).unwrap();
+        assert!(verify(&client.public, &opener_payload, &sig).is_err());
+    }
+
+    #[test]
+    fn announce_request_requires_opener_signature_field() {
+        let opener = KeyPair::from_secret_bytes(&[0x11; 32]);
+        let client = KeyPair::from_secret_bytes(&[0x22; 32]);
+        let id = SessionId::from_u64(42);
+        let wg = [0x33; 32];
+        let open_tx_hash = "open-tx".to_string();
+        let req = AnnounceSessionRequest {
+            session_id: id.clone(),
+            client_pubkey: client.public,
+            client_wg_pubkey: wg,
+            open_tx_hash: open_tx_hash.clone(),
+            client_sig: client.sign(&announce_signing_payload(
+                &id,
+                &client.public,
+                &wg,
+                &open_tx_hash,
+            )),
+            opener_pubkey: opener.public,
+            opener_sig: opener.sign(&announce_opener_binding_payload(
+                &id,
+                &client.public,
+                &wg,
+                &open_tx_hash,
+            )),
+        };
+        let mut value = serde_json::to_value(req).unwrap();
+        value.as_object_mut().unwrap().remove("opener_sig");
+
+        let err = serde_json::from_value::<AnnounceSessionRequest>(value).unwrap_err();
+        assert!(err.to_string().contains("opener_sig"));
     }
 }

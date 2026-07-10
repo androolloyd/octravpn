@@ -22,8 +22,8 @@ use anyhow::{anyhow, Context, Result};
 use octravpn_core::{
     address::Address,
     control::{
-        announce_signing_payload, AnnounceSessionRequest, PostReceiptResponse, ProposedReceipt,
-        SessionStateResponse,
+        announce_opener_binding_payload, announce_signing_payload, AnnounceSessionRequest,
+        PostReceiptResponse, ProposedReceipt, SessionStateResponse,
     },
     receipt::SignedReceipt,
     rpc::next_nonce,
@@ -384,17 +384,26 @@ pub(crate) async fn announce_session_to_exit(
     let client_wg_pubkey =
         x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(client_wg_secret))
             .to_bytes();
+    let client_sig_payload = announce_signing_payload(
+        &active.session_id,
+        &active.session_kp.public,
+        &client_wg_pubkey,
+        &active.open_tx_hash,
+    );
+    let opener_sig_payload = announce_opener_binding_payload(
+        &active.session_id,
+        &active.session_kp.public,
+        &client_wg_pubkey,
+        &active.open_tx_hash,
+    );
     let body = AnnounceSessionRequest {
         session_id: active.session_id.clone(),
         client_pubkey: active.session_kp.public,
         client_wg_pubkey,
         open_tx_hash: active.open_tx_hash.clone(),
-        client_sig: active.session_kp.sign(&announce_signing_payload(
-            &active.session_id,
-            &active.session_kp.public,
-            &client_wg_pubkey,
-            &active.open_tx_hash,
-        )),
+        client_sig: active.session_kp.sign(&client_sig_payload),
+        opener_pubkey: client.wallet_kp().public,
+        opener_sig: client.wallet_kp().sign(&opener_sig_payload),
     };
     let resp = client
         .http()

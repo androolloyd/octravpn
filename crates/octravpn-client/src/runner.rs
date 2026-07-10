@@ -331,19 +331,26 @@ async fn announce_to_exit(client: &Client) -> Result<()> {
         let client_wg_pubkey =
             x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(client_wg_secret))
                 .to_bytes();
+        let client_sig_payload = octravpn_core::control::announce_signing_payload(
+            &active.session_id,
+            &active.session_kp.public,
+            &client_wg_pubkey,
+            &active.open_tx_hash,
+        );
+        let opener_sig_payload = octravpn_core::control::announce_opener_binding_payload(
+            &active.session_id,
+            &active.session_kp.public,
+            &client_wg_pubkey,
+            &active.open_tx_hash,
+        );
         let body = octravpn_core::control::AnnounceSessionRequest {
             session_id: active.session_id.clone(),
             client_pubkey: active.session_kp.public,
             client_wg_pubkey,
             open_tx_hash: active.open_tx_hash.clone(),
-            client_sig: active
-                .session_kp
-                .sign(&octravpn_core::control::announce_signing_payload(
-                    &active.session_id,
-                    &active.session_kp.public,
-                    &client_wg_pubkey,
-                    &active.open_tx_hash,
-                )),
+            client_sig: active.session_kp.sign(&client_sig_payload),
+            opener_pubkey: client.wallet_kp().public,
+            opener_sig: client.wallet_kp().sign(&opener_sig_payload),
         };
         (ctrl_endpoint, body)
     };

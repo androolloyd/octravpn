@@ -340,12 +340,13 @@ TOML
 use anyhow::{anyhow, bail, Context, Result};
 use octravpn_core::{
     control::{
-        announce_signing_payload, AnnounceSessionRequest, PostReceiptResponse,
-        SessionStateResponse,
+        announce_opener_binding_payload, announce_signing_payload, AnnounceSessionRequest,
+        PostReceiptResponse, SessionStateResponse,
     },
     receipt::SignedReceipt,
     session::SessionId,
     sig::KeyPair,
+    util,
 };
 use serde_json::json;
 
@@ -362,20 +363,30 @@ async fn main() -> Result<()> {
     let control_url = arg_value(&args, "--control-url")?;
     let session_id: u64 = arg_value(&args, "--session-id")?.parse()?;
     let open_tx_hash = arg_value(&args, "--open-tx-hash")?;
+    let wallet_key = arg_value(&args, "--wallet-key")?;
     let receipt_out = arg_value(&args, "--receipt-out")?;
     let relay_net: u64 = arg_value(&args, "--net")?.parse()?;
 
     let id = SessionId::from_u64(session_id);
     let session_kp = KeyPair::generate();
+    let opener_kp = KeyPair::from_secret_bytes(&util::read_secret_32(&wallet_key)?);
     let client_wg_pubkey = [0x42u8; 32];
     let announce_payload =
         announce_signing_payload(&id, &session_kp.public, &client_wg_pubkey, &open_tx_hash);
+    let opener_payload = announce_opener_binding_payload(
+        &id,
+        &session_kp.public,
+        &client_wg_pubkey,
+        &open_tx_hash,
+    );
     let announce = AnnounceSessionRequest {
         session_id: id.clone(),
         client_pubkey: session_kp.public,
         client_wg_pubkey,
         open_tx_hash,
         client_sig: session_kp.sign(&announce_payload),
+        opener_pubkey: opener_kp.public,
+        opener_sig: opener_kp.sign(&opener_payload),
     };
 
     let http = reqwest::Client::builder()
@@ -634,6 +645,7 @@ HANDOFF_OUT=$(
       --control-url http://node1:51821 \
       --session-id "$SID" \
       --open-tx-hash "$OPEN_TX" \
+      --wallet-key /etc/octravpn/wallet.key \
       --receipt-out "$CLIENT_RECEIPT_JSON" \
       --net "$RELAY_NET" 2>&1
 ) || true

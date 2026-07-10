@@ -16,7 +16,7 @@ use octravpn_core::{
 use tracing::warn;
 
 use super::ApiError;
-use crate::control::state::{ControlSession, ControlState};
+use crate::control::state::{ControlSession, ControlState, SessionAdmission};
 
 pub(crate) async fn announce(
     State(s): State<Arc<ControlState>>,
@@ -37,11 +37,18 @@ pub(crate) async fn announce(
     }
     if let Some(verifier) = &s.session_verifier {
         match verifier.session_opened(&req).await {
-            Ok(true) => {}
-            Ok(false) => {
+            Ok(SessionAdmission::Accepted) => {}
+            Ok(SessionAdmission::SessionNotFound) => {
                 return (
                     StatusCode::UNAUTHORIZED,
                     Json(ApiError::new("session open transaction not found")),
+                )
+                    .into_response();
+            }
+            Ok(SessionAdmission::NotSignedByOpener) => {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(ApiError::new("announce not signed by session opener")),
                 )
                     .into_response();
             }
@@ -110,15 +117,20 @@ pub(crate) async fn announce(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::control::state::ControlState;
+    use crate::control::state::{ControlState, SessionAdmissionVerifier};
     use crate::onion::OnionRouter;
+    use axum::{body::to_bytes, extract::State as AxumState, routing::post, Router};
     use octravpn_core::{
+        address::Address,
         bounded::BoundedMap,
-        control::announce_signing_payload,
+        control::{announce_opener_binding_payload, announce_signing_payload},
         receipt::Receipt,
+        rpc::RpcClient,
         session::SessionId,
         sig::{verify, KeyPair},
     };
+    use serde_json::{json, Value};
+    use tokio::sync::oneshot;
 
     pub(crate) fn signed_announce(
         session_id: SessionId,
@@ -132,13 +144,53 @@ pub(crate) mod tests {
             &client_wg_pubkey,
             &open_tx_hash,
         ));
+        let opener_sig = client_kp.sign(&announce_opener_binding_payload(
+            &session_id,
+            &client_kp.public,
+            &client_wg_pubkey,
+            &open_tx_hash,
+        ));
         AnnounceSessionRequest {
             session_id,
             client_pubkey: client_kp.public,
             client_wg_pubkey,
             open_tx_hash,
             client_sig,
+            opener_pubkey: client_kp.public,
+            opener_sig,
         }
+    }
+
+    async fn tx_mock_handler(
+        AxumState(tx): AxumState<Value>,
+        Json(req): Json<Value>,
+    ) -> Result<Json<Value>, StatusCode> {
+        let id = req.get("id").cloned().unwrap_or(json!(1));
+        Ok(Json(json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": tx,
+        })))
+    }
+
+    async fn spawn_tx_mock(tx: Value) -> (RpcClient, oneshot::Sender<()>) {
+        let app = Router::new()
+            .route("/", post(tx_mock_handler))
+            .with_state(tx);
+        let listener =
+            tokio::net::TcpListener::bind(std::net::SocketAddr::from(([127, 0, 0, 1], 0)))
+                .await
+                .expect("bind tx mock");
+        let addr = listener.local_addr().expect("tx mock addr");
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app.into_make_service())
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await;
+        });
+        (RpcClient::new(format!("http://{addr}/")), shutdown_tx)
     }
 
     #[tokio::test]
@@ -160,6 +212,45 @@ pub(crate) mod tests {
         assert_eq!(state.allowlist.len(), 0);
         assert_eq!(state.metrics.announces_total.load(Ordering::Relaxed), 0);
         assert_eq!(state.metrics.session_opens_total.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn announce_rejects_opener_mismatch_with_distinct_error() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let victim_opener_kp = KeyPair::generate();
+        let attacker_kp = KeyPair::generate();
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let id = SessionId::from_u64(42);
+        let tx = json!({
+            "from": Address::from_pubkey(&victim_opener_kp.public.0).display(),
+            "events": [
+                {"name": "SessionOpened", "session_id": 42}
+            ]
+        });
+        let (rpc, shutdown) = spawn_tx_mock(tx).await;
+        let state = Arc::new(
+            ControlState::new(node_kp, router, allowlist).with_session_verifier(
+                SessionAdmissionVerifier::new(rpc, Address::from_display("octProgram")),
+            ),
+        );
+
+        let resp = announce(
+            State(state.clone()),
+            Json(signed_announce(id.clone(), &attacker_kp, [9u8; 32])),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        let body = to_bytes(resp.into_body(), 4096).await.unwrap();
+        assert_eq!(
+            body.as_ref(),
+            br#"{"error":"announce not signed by session opener"}"#
+        );
+        assert!(!state.sessions.contains_key(&id));
+        assert_eq!(state.allowlist.len(), 0);
+        let _ = shutdown.send(());
     }
 
     #[tokio::test]

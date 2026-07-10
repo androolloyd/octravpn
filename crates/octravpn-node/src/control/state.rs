@@ -10,9 +10,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use octravpn_core::{
-    address::Address, bearer::BearerCheck, bounded::BoundedMap, control::AnnounceSessionRequest,
-    receipt::ReceiptContext, receipt_journal::ReceiptJournal, receipt_vault::ReceiptVault,
-    rpc::RpcClient, session::SessionId, sig::KeyPair,
+    address::Address,
+    bearer::BearerCheck,
+    bounded::BoundedMap,
+    control::{announce_opener_binding_payload, AnnounceSessionRequest},
+    receipt::ReceiptContext,
+    receipt_journal::ReceiptJournal,
+    receipt_vault::ReceiptVault,
+    rpc::RpcClient,
+    session::SessionId,
+    sig::{verify, KeyPair},
 };
 use octravpn_mesh::{PreauthMinter, WireState};
 
@@ -139,6 +146,13 @@ pub(crate) struct SessionAdmissionVerifier {
     program_addr: Address,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SessionAdmission {
+    Accepted,
+    SessionNotFound,
+    NotSignedByOpener,
+}
+
 impl SessionAdmissionVerifier {
     pub(crate) fn new(rpc: RpcClient, program_addr: Address) -> Self {
         Self { rpc, program_addr }
@@ -147,16 +161,16 @@ impl SessionAdmissionVerifier {
     pub(crate) async fn session_opened(
         &self,
         req: &AnnounceSessionRequest,
-    ) -> octravpn_core::CoreResult<bool> {
+    ) -> octravpn_core::CoreResult<SessionAdmission> {
         let tx = self.rpc.transaction(&req.open_tx_hash).await?;
         if transaction_has_session_opened(&tx, &req.session_id) {
-            return Ok(true);
+            return Ok(opener_binding_admission(&tx, req));
         }
         if !transaction_is_confirmed_call_to_program(&tx, &self.program_addr) {
-            return Ok(false);
+            return Ok(SessionAdmission::SessionNotFound);
         }
         let Some(session_id) = req.session_id.as_u64() else {
-            return Ok(false);
+            return Ok(SessionAdmission::SessionNotFound);
         };
         let Ok(status) = self
             .rpc
@@ -168,10 +182,48 @@ impl SessionAdmissionVerifier {
             )
             .await
         else {
-            return Ok(false);
+            return Ok(SessionAdmission::SessionNotFound);
         };
-        Ok(session_status_allows_admission(&status, session_id))
+        if session_status_allows_admission(&status, session_id) {
+            Ok(opener_binding_admission(&tx, req))
+        } else {
+            Ok(SessionAdmission::SessionNotFound)
+        }
     }
+}
+
+fn opener_binding_admission(
+    tx: &serde_json::Value,
+    req: &AnnounceSessionRequest,
+) -> SessionAdmission {
+    if announce_signed_by_session_opener(tx, req) {
+        SessionAdmission::Accepted
+    } else {
+        SessionAdmission::NotSignedByOpener
+    }
+}
+
+fn announce_signed_by_session_opener(tx: &serde_json::Value, req: &AnnounceSessionRequest) -> bool {
+    let Some(tx_from) = transaction_from_address(tx) else {
+        return false;
+    };
+    let opener_addr = Address::from_pubkey(&req.opener_pubkey.0);
+    if opener_addr.display() != tx_from {
+        return false;
+    }
+    let payload = announce_opener_binding_payload(
+        &req.session_id,
+        &req.client_pubkey,
+        &req.client_wg_pubkey,
+        &req.open_tx_hash,
+    );
+    verify(&req.opener_pubkey, &payload, &req.opener_sig).is_ok()
+}
+
+fn transaction_from_address(tx: &serde_json::Value) -> Option<&str> {
+    tx.get("from")
+        .or_else(|| tx.get("from_"))
+        .and_then(|v| v.as_str())
 }
 
 fn transaction_is_confirmed_call_to_program(
@@ -594,21 +646,44 @@ mod tests {
         Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3")
     }
 
-    fn announce_req(session_id: SessionId) -> AnnounceSessionRequest {
-        let kp = KeyPair::generate();
+    fn opener_addr(opener_kp: &KeyPair) -> String {
+        Address::from_pubkey(&opener_kp.public.0)
+            .display()
+            .to_string()
+    }
+
+    fn announce_req(session_id: SessionId, opener_kp: &KeyPair) -> AnnounceSessionRequest {
+        let client_kp = KeyPair::generate();
+        let client_wg_pubkey = [9u8; 32];
+        let open_tx_hash = "open-tx".to_string();
+        let client_sig = client_kp.sign(&octravpn_core::control::announce_signing_payload(
+            &session_id,
+            &client_kp.public,
+            &client_wg_pubkey,
+            &open_tx_hash,
+        ));
+        let opener_sig = opener_kp.sign(&announce_opener_binding_payload(
+            &session_id,
+            &client_kp.public,
+            &client_wg_pubkey,
+            &open_tx_hash,
+        ));
         AnnounceSessionRequest {
             session_id,
-            client_pubkey: kp.public,
-            client_wg_pubkey: [9u8; 32],
-            open_tx_hash: "open-tx".to_string(),
-            client_sig: kp.sign(b"admission-test"),
+            client_pubkey: client_kp.public,
+            client_wg_pubkey,
+            open_tx_hash,
+            client_sig,
+            opener_pubkey: opener_kp.public,
+            opener_sig,
         }
     }
 
-    fn confirmed_open_tx(program: &Address) -> Value {
+    fn confirmed_open_tx(program: &Address, opener_kp: &KeyPair) -> Value {
         json!({
             "status": "confirmed",
             "tx_hash": "open-tx",
+            "from_": opener_addr(opener_kp),
             "to": program.display().to_string(),
             "op_type": "call",
             "message": "[0,\"octCircle\",1500]"
@@ -682,8 +757,10 @@ mod tests {
     #[tokio::test]
     async fn session_admission_event_present_accepts_without_state_read() {
         let program = program_addr();
+        let opener_kp = KeyPair::generate();
         let session_id = SessionId::from_u64(42);
         let tx = json!({
+            "from": opener_addr(&opener_kp),
             "events": [
                 {"name": "SessionOpened", "session_id": 42}
             ]
@@ -691,10 +768,13 @@ mod tests {
         let (rpc, contract_calls, shutdown) = spawn_admission_mock(tx, None, json!(0)).await;
         let verifier = SessionAdmissionVerifier::new(rpc, program);
 
-        assert!(verifier
-            .session_opened(&announce_req(session_id))
-            .await
-            .expect("session opened"));
+        assert_eq!(
+            verifier
+                .session_opened(&announce_req(session_id, &opener_kp))
+                .await
+                .expect("session opened"),
+            SessionAdmission::Accepted
+        );
         assert!(contract_calls
             .lock()
             .expect("contract calls lock")
@@ -705,15 +785,23 @@ mod tests {
     #[tokio::test]
     async fn session_admission_state_fallback_accepts_open_session() {
         let program = program_addr();
+        let opener_kp = KeyPair::generate();
         let session_id = SessionId::from_u64(42);
-        let (rpc, contract_calls, shutdown) =
-            spawn_admission_mock(confirmed_open_tx(&program), Some(json!(0)), json!(43)).await;
+        let (rpc, contract_calls, shutdown) = spawn_admission_mock(
+            confirmed_open_tx(&program, &opener_kp),
+            Some(json!(0)),
+            json!(43),
+        )
+        .await;
         let verifier = SessionAdmissionVerifier::new(rpc, program.clone());
 
-        assert!(verifier
-            .session_opened(&announce_req(session_id))
-            .await
-            .expect("session opened"));
+        assert_eq!(
+            verifier
+                .session_opened(&announce_req(session_id, &opener_kp))
+                .await
+                .expect("session opened"),
+            SessionAdmission::Accepted
+        );
         let calls = contract_calls.lock().expect("contract calls lock");
         assert_eq!(calls.len(), 1);
         assert_eq!(
@@ -725,62 +813,142 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn session_admission_state_fallback_rejects_unset_status() {
+    async fn session_admission_rejects_opener_address_mismatch() {
         let program = program_addr();
+        let opener_kp = KeyPair::generate();
+        let attacker_kp = KeyPair::generate();
         let session_id = SessionId::from_u64(42);
-        let (rpc, _contract_calls, shutdown) =
-            spawn_admission_mock(confirmed_open_tx(&program), Some(Value::Null), json!(43)).await;
+        let tx = json!({
+            "from": opener_addr(&opener_kp),
+            "events": [
+                {"name": "SessionOpened", "session_id": 42}
+            ]
+        });
+        let (rpc, contract_calls, shutdown) = spawn_admission_mock(tx, None, json!(0)).await;
         let verifier = SessionAdmissionVerifier::new(rpc, program);
 
-        assert!(!verifier
-            .session_opened(&announce_req(session_id))
-            .await
-            .expect("session opened"));
+        assert_eq!(
+            verifier
+                .session_opened(&announce_req(session_id, &attacker_kp))
+                .await
+                .expect("session opened"),
+            SessionAdmission::NotSignedByOpener
+        );
+        assert!(contract_calls
+            .lock()
+            .expect("contract calls lock")
+            .is_empty());
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn session_admission_rejects_bad_opener_signature() {
+        let program = program_addr();
+        let opener_kp = KeyPair::generate();
+        let session_id = SessionId::from_u64(42);
+        let tx = json!({
+            "from": opener_addr(&opener_kp),
+            "events": [
+                {"name": "SessionOpened", "session_id": 42}
+            ]
+        });
+        let (rpc, _contract_calls, shutdown) = spawn_admission_mock(tx, None, json!(0)).await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program);
+        let mut req = announce_req(session_id, &opener_kp);
+        req.opener_sig.0[0] ^= 1;
+
+        assert_eq!(
+            verifier.session_opened(&req).await.expect("session opened"),
+            SessionAdmission::NotSignedByOpener
+        );
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn session_admission_state_fallback_rejects_unset_status() {
+        let program = program_addr();
+        let opener_kp = KeyPair::generate();
+        let session_id = SessionId::from_u64(42);
+        let (rpc, _contract_calls, shutdown) = spawn_admission_mock(
+            confirmed_open_tx(&program, &opener_kp),
+            Some(Value::Null),
+            json!(43),
+        )
+        .await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program);
+
+        assert_eq!(
+            verifier
+                .session_opened(&announce_req(session_id, &opener_kp))
+                .await
+                .expect("session opened"),
+            SessionAdmission::SessionNotFound
+        );
         let _ = shutdown.send(());
     }
 
     #[tokio::test]
     async fn session_admission_state_fallback_rejects_status_read_error() {
         let program = program_addr();
+        let opener_kp = KeyPair::generate();
         let session_id = SessionId::from_u64(42);
         let (rpc, _contract_calls, shutdown) =
-            spawn_admission_mock(confirmed_open_tx(&program), None, json!(43)).await;
+            spawn_admission_mock(confirmed_open_tx(&program, &opener_kp), None, json!(43)).await;
         let verifier = SessionAdmissionVerifier::new(rpc, program);
 
-        assert!(!verifier
-            .session_opened(&announce_req(session_id))
-            .await
-            .expect("session opened"));
+        assert_eq!(
+            verifier
+                .session_opened(&announce_req(session_id, &opener_kp))
+                .await
+                .expect("session opened"),
+            SessionAdmission::SessionNotFound
+        );
         let _ = shutdown.send(());
     }
 
     #[tokio::test]
     async fn session_admission_state_fallback_rejects_out_of_range_session_id() {
         let program = program_addr();
+        let opener_kp = KeyPair::generate();
         let session_id = SessionId::from_u64(42);
-        let (rpc, _contract_calls, shutdown) =
-            spawn_admission_mock(confirmed_open_tx(&program), Some(json!(0)), json!(42)).await;
+        let (rpc, _contract_calls, shutdown) = spawn_admission_mock(
+            confirmed_open_tx(&program, &opener_kp),
+            Some(json!(0)),
+            json!(42),
+        )
+        .await;
         let verifier = SessionAdmissionVerifier::new(rpc, program);
 
-        assert!(!verifier
-            .session_opened(&announce_req(session_id))
-            .await
-            .expect("session opened"));
+        assert_eq!(
+            verifier
+                .session_opened(&announce_req(session_id, &opener_kp))
+                .await
+                .expect("session opened"),
+            SessionAdmission::SessionNotFound
+        );
         let _ = shutdown.send(());
     }
 
     #[tokio::test]
     async fn session_admission_state_fallback_rejects_non_u64_session_id() {
         let program = program_addr();
+        let opener_kp = KeyPair::generate();
         let session_id = SessionId::new([0xAB; 32]);
-        let (rpc, contract_calls, shutdown) =
-            spawn_admission_mock(confirmed_open_tx(&program), Some(json!(0)), json!(43)).await;
+        let (rpc, contract_calls, shutdown) = spawn_admission_mock(
+            confirmed_open_tx(&program, &opener_kp),
+            Some(json!(0)),
+            json!(43),
+        )
+        .await;
         let verifier = SessionAdmissionVerifier::new(rpc, program);
 
-        assert!(!verifier
-            .session_opened(&announce_req(session_id))
-            .await
-            .expect("session opened"));
+        assert_eq!(
+            verifier
+                .session_opened(&announce_req(session_id, &opener_kp))
+                .await
+                .expect("session opened"),
+            SessionAdmission::SessionNotFound
+        );
         assert!(contract_calls
             .lock()
             .expect("contract calls lock")
@@ -791,9 +959,11 @@ mod tests {
     #[tokio::test]
     async fn session_admission_state_fallback_rejects_tx_not_to_program() {
         let program = program_addr();
+        let opener_kp = KeyPair::generate();
         let tx = json!({
             "status": "confirmed",
             "tx_hash": "open-tx",
+            "from": opener_addr(&opener_kp),
             "to": "octWrongProgram",
             "op_type": "call",
         });
@@ -801,10 +971,13 @@ mod tests {
             spawn_admission_mock(tx, Some(json!(0)), json!(43)).await;
         let verifier = SessionAdmissionVerifier::new(rpc, program);
 
-        assert!(!verifier
-            .session_opened(&announce_req(SessionId::from_u64(42)))
-            .await
-            .expect("session opened"));
+        assert_eq!(
+            verifier
+                .session_opened(&announce_req(SessionId::from_u64(42), &opener_kp))
+                .await
+                .expect("session opened"),
+            SessionAdmission::SessionNotFound
+        );
         assert!(contract_calls
             .lock()
             .expect("contract calls lock")
@@ -815,9 +988,11 @@ mod tests {
     #[tokio::test]
     async fn session_admission_state_fallback_rejects_non_open_session_method_when_present() {
         let program = program_addr();
+        let opener_kp = KeyPair::generate();
         let tx = json!({
             "status": "confirmed",
             "tx_hash": "open-tx",
+            "from": opener_addr(&opener_kp),
             "to": program.display().to_string(),
             "op_type": "call",
             "encrypted_data": "settle_claim",
@@ -826,10 +1001,13 @@ mod tests {
             spawn_admission_mock(tx, Some(json!(0)), json!(43)).await;
         let verifier = SessionAdmissionVerifier::new(rpc, program);
 
-        assert!(!verifier
-            .session_opened(&announce_req(SessionId::from_u64(42)))
-            .await
-            .expect("session opened"));
+        assert_eq!(
+            verifier
+                .session_opened(&announce_req(SessionId::from_u64(42), &opener_kp))
+                .await
+                .expect("session opened"),
+            SessionAdmission::SessionNotFound
+        );
         assert!(contract_calls
             .lock()
             .expect("contract calls lock")
@@ -840,9 +1018,11 @@ mod tests {
     #[tokio::test]
     async fn session_admission_state_fallback_rejects_unconfirmed_tx() {
         let program = program_addr();
+        let opener_kp = KeyPair::generate();
         let tx = json!({
             "status": "pending",
             "tx_hash": "open-tx",
+            "from": opener_addr(&opener_kp),
             "to": program.display().to_string(),
             "op_type": "call",
         });
@@ -850,10 +1030,13 @@ mod tests {
             spawn_admission_mock(tx, Some(json!(0)), json!(43)).await;
         let verifier = SessionAdmissionVerifier::new(rpc, program);
 
-        assert!(!verifier
-            .session_opened(&announce_req(SessionId::from_u64(42)))
-            .await
-            .expect("session opened"));
+        assert_eq!(
+            verifier
+                .session_opened(&announce_req(SessionId::from_u64(42), &opener_kp))
+                .await
+                .expect("session opened"),
+            SessionAdmission::SessionNotFound
+        );
         assert!(contract_calls
             .lock()
             .expect("contract calls lock")
