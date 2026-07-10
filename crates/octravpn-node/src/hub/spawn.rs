@@ -19,7 +19,9 @@ use tracing::{info, warn};
 
 use super::Hub;
 use crate::{
-    control::{serve as control_serve, ControlState, SessionAdmissionVerifier},
+    control::{
+        serve as control_serve, ControlState, RelayLifecycleVerifier, SessionAdmissionVerifier,
+    },
     tunnel::Server,
 };
 
@@ -213,6 +215,11 @@ impl Hub {
             .with_session_verifier(SessionAdmissionVerifier::new(
                 self.chain.rpc.clone(),
                 self.chain.program_addr.clone(),
+            ))
+            .with_relay_lifecycle_verifier(RelayLifecycleVerifier::new(
+                self.chain_v3.rpc.clone(),
+                self.chain_v3.program_addr.clone(),
+                Some(self.chain_v3.wallet_addr.clone()),
             ))
             .with_wire_state(wire_state.as_ref().map(|(ws, _)| ws.clone()))
             .with_receipt_vault(receipt_vault)

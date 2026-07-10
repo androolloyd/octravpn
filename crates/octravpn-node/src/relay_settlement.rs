@@ -7,7 +7,10 @@
 //! `SignedReceipt::settlement_preimage()` on chain.
 
 use anyhow::{anyhow, bail, Context, Result};
-use octravpn_core::{receipt_vault::ReceiptVault, session::SessionId};
+use octravpn_core::{
+    receipt_vault::{LifecycleState, ReceiptVault},
+    session::SessionId,
+};
 
 use crate::chain_v3::{ChainCtxV3, SESSION_RELAY_ARMED};
 
@@ -27,9 +30,27 @@ pub(crate) async fn submit_relay_claim_from_vault(
     session_id: u64,
 ) -> Result<RelayClaimSubmission> {
     let vault_id = SessionId::from_u64(session_id);
-    let receipt = vault
-        .get(&vault_id)
+    let entry = vault
+        .entry(&vault_id)
         .ok_or_else(|| anyhow!("no vaulted receipt for session {session_id}"))?;
+    let receipt = entry.receipt;
+    let settlement_hash = receipt.settlement_hash();
+
+    match entry.state {
+        LifecycleState::Armed {
+            settlement_hash: pinned,
+            ..
+        } if pinned == settlement_hash => {}
+        LifecycleState::Armed {
+            settlement_hash: pinned,
+            ..
+        } => bail!(
+            "session {session_id}: vault Armed settlement hash {pinned} != receipt hash {settlement_hash}; refusing to reveal preimage"
+        ),
+        other => bail!(
+            "session {session_id}: vault entry is not Armed before relay_claim: state={other:?}"
+        ),
+    }
 
     let status = ctx
         .get_session_status(session_id)
@@ -52,8 +73,6 @@ pub(crate) async fn submit_relay_claim_from_vault(
             "relay claim window elapsed for session {session_id}: epoch={current_epoch} deadline={relay_deadline}"
         );
     }
-
-    let settlement_hash = receipt.settlement_hash();
 
     // AUDIT #3: never reveal a preimage that no longer matches the on-chain
     // commitment. The vault keeps only the latest receipt per session; if a

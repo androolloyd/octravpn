@@ -18,7 +18,7 @@ use axum::{
 use octravpn_core::{
     control::{PostReceiptResponse, ProposedReceipt, SessionStateResponse},
     receipt::{Receipt, ReceiptError, SignedReceipt},
-    receipt_vault::ReceiptVaultError,
+    receipt_vault::{LifecycleState, ReceiptVaultError},
     session::SessionId,
 };
 
@@ -313,16 +313,58 @@ pub(crate) async fn post_receipt(
             .into_response();
     }
 
+    if let (Some(verifier), Some(chain_session_id)) =
+        (s.relay_lifecycle_verifier.as_ref(), id.as_u64())
+    {
+        match verifier.armed_state(chain_session_id).await {
+            Ok(Some(armed)) => {
+                let already_pinned = matches!(
+                    s.receipt_vault.state(&id),
+                    Some(LifecycleState::Armed {
+                        settlement_hash,
+                        ..
+                    }) if settlement_hash == armed.settlement_hash
+                );
+                if !already_pinned {
+                    if let Err(e) = s.receipt_vault.mark_armed(
+                        &id,
+                        armed.deadline,
+                        armed.settlement_hash.clone(),
+                    ) {
+                        tracing::warn!(
+                            error = %e,
+                            session = %id_hex,
+                            "receipt vault arm mark failed before countersigned receipt write",
+                        );
+                        let status = receipt_vault_error_status(&e);
+                        return (
+                            status,
+                            Json(ApiError::new("receipt vault lifecycle update failed")),
+                        )
+                            .into_response();
+                    }
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    session = %id_hex,
+                    "relay armed status check failed before countersigned receipt write",
+                );
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(ApiError::new("relay armed status check failed")),
+                )
+                    .into_response();
+            }
+        }
+    }
+
     let settlement_hash = sr.settlement_hash();
     if let Err(e) = s.receipt_vault.put(&id, &sr) {
         tracing::warn!(error = %e, session = %id_hex, "receipt vault write failed");
-        let status = match e {
-            ReceiptVaultError::SeqRegressed { .. } | ReceiptVaultError::SeqConflict { .. } => {
-                StatusCode::CONFLICT
-            }
-            ReceiptVaultError::SessionMismatch { .. } => StatusCode::BAD_REQUEST,
-            _ => StatusCode::INTERNAL_SERVER_ERROR,
-        };
+        let status = receipt_vault_error_status(&e);
         return (status, Json(ApiError::new("receipt vault write failed"))).into_response();
     }
 
@@ -362,18 +404,37 @@ pub(crate) async fn post_receipt(
     .into_response()
 }
 
+fn receipt_vault_error_status(e: &ReceiptVaultError) -> StatusCode {
+    match e {
+        ReceiptVaultError::SeqRegressed { .. }
+        | ReceiptVaultError::SeqConflict { .. }
+        | ReceiptVaultError::ReceiptFrozen { .. }
+        | ReceiptVaultError::IllegalTransition { .. }
+        | ReceiptVaultError::ArmedHashMismatch { .. } => StatusCode::CONFLICT,
+        ReceiptVaultError::SessionMismatch { .. } => StatusCode::BAD_REQUEST,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::control::handlers::session::announce;
     use crate::control::handlers::session::tests::signed_announce;
     use crate::control::metrics::NodeMetrics;
-    use crate::control::state::ControlState;
+    use crate::control::state::{ControlState, RelayLifecycleVerifier};
     use crate::onion::OnionRouter;
+    use axum::{extract::State as AxumState, routing::post, Router};
     use octravpn_core::{
+        address::Address,
         bounded::BoundedMap,
+        rpc::RpcClient,
         sig::{verify, KeyPair},
     };
+    use serde_json::{json, Value};
+    use std::net::SocketAddr;
+    use std::sync::Mutex;
+    use tokio::sync::oneshot;
 
     /// Helper for the journal-wiring tests: take the JSON body off a
     /// `Response` and deserialize it as a `SessionStateResponse`.
@@ -403,6 +464,89 @@ mod tests {
             .await
             .unwrap();
         (status, String::from_utf8(body.to_vec()).unwrap())
+    }
+
+    #[derive(Clone)]
+    struct RelayLifecycleMock {
+        status: u64,
+        deadline: u64,
+        settlement_hash: String,
+        calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    async fn relay_lifecycle_mock_handler(
+        AxumState(mock): AxumState<RelayLifecycleMock>,
+        Json(req): Json<Value>,
+    ) -> Result<Json<Value>, StatusCode> {
+        let id = req.get("id").cloned().unwrap_or(json!(1));
+        let method = req
+            .get("method")
+            .and_then(Value::as_str)
+            .ok_or(StatusCode::BAD_REQUEST)?;
+        if method != "contract_call" {
+            return Ok(Json(json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": { "code": -32601, "message": "method not found" },
+            })));
+        }
+        let params = req
+            .get("params")
+            .and_then(Value::as_array)
+            .ok_or(StatusCode::BAD_REQUEST)?;
+        let view = params
+            .get(1)
+            .and_then(Value::as_str)
+            .ok_or(StatusCode::BAD_REQUEST)?;
+        mock.calls
+            .lock()
+            .expect("relay lifecycle calls lock")
+            .push(view.to_string());
+        let result = match view {
+            "get_session_status" => json!(mock.status),
+            "get_relay_deadline" => json!(mock.deadline),
+            "get_relay_settlement_hash" => json!(mock.settlement_hash),
+            _ => json!(null),
+        };
+        Ok(Json(json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": { "result": result },
+        })))
+    }
+
+    async fn spawn_relay_lifecycle_mock(
+        status: u64,
+        deadline: u64,
+        settlement_hash: String,
+    ) -> (RpcClient, Arc<Mutex<Vec<String>>>, oneshot::Sender<()>) {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let mock = RelayLifecycleMock {
+            status,
+            deadline,
+            settlement_hash,
+            calls: calls.clone(),
+        };
+        let app = Router::new()
+            .route("/", post(relay_lifecycle_mock_handler))
+            .with_state(mock);
+        let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+            .await
+            .expect("bind relay lifecycle mock");
+        let addr = listener.local_addr().expect("relay lifecycle mock addr");
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app.into_make_service())
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await;
+        });
+        (
+            RpcClient::new(format!("http://{addr}/")),
+            calls,
+            shutdown_tx,
+        )
     }
 
     #[tokio::test]
@@ -590,6 +734,82 @@ mod tests {
 
         assert_eq!(status, StatusCode::CONFLICT, "body = {body}");
         assert_eq!(state.receipt_vault.get(&id), Some(signed));
+    }
+
+    #[tokio::test]
+    async fn post_receipt_marks_armed_then_rejects_poisoning_post() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let client_kp = KeyPair::generate();
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let id = SessionId::from_u64(42);
+        let armed_receipt = SignedReceipt::build(
+            Receipt::new(
+                octravpn_core::receipt::ReceiptContext::v1_1(
+                    Address::from_pubkey(&[0u8; 32]),
+                    octravpn_core::receipt::CHAIN_ID_TEST,
+                ),
+                id.clone(),
+                1,
+                4_096,
+                octravpn_core::session::Blind::new([0x8E; 32]),
+            ),
+            &client_kp,
+            node_kp.as_ref(),
+        );
+        let armed_hash = armed_receipt.settlement_hash();
+        let (rpc, calls, shutdown) = spawn_relay_lifecycle_mock(
+            crate::chain_v3::SESSION_RELAY_ARMED,
+            123,
+            armed_hash.clone(),
+        )
+        .await;
+        let state = Arc::new(
+            ControlState::new(node_kp.clone(), router, allowlist).with_relay_lifecycle_verifier(
+                RelayLifecycleVerifier::new(rpc, Address::from_pubkey(&[9u8; 32]), None),
+            ),
+        );
+        state.receipt_vault.put(&id, &armed_receipt).unwrap();
+
+        let poison = SignedReceipt::build(
+            Receipt::new(
+                (*state.receipt_context).clone(),
+                id.clone(),
+                2,
+                8_192,
+                octravpn_core::session::Blind::new([0x8E; 32]),
+            ),
+            &client_kp,
+            node_kp.as_ref(),
+        );
+        let (status, body) = status_and_body(
+            post_receipt(State(state.clone()), Path(id.to_hex()), Json(poison))
+                .await
+                .into_response(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CONFLICT, "body = {body}");
+        let kept = state.receipt_vault.get(&id).unwrap();
+        assert_eq!(kept.receipt.seq, 1);
+        assert_eq!(kept.settlement_hash(), armed_hash);
+        assert_eq!(
+            state.receipt_vault.state(&id),
+            Some(LifecycleState::Armed {
+                deadline: 123,
+                settlement_hash: armed_hash,
+            })
+        );
+        let got_calls = calls.lock().expect("relay lifecycle calls lock").clone();
+        assert_eq!(
+            got_calls,
+            vec![
+                "get_session_status".to_string(),
+                "get_relay_deadline".to_string(),
+                "get_relay_settlement_hash".to_string(),
+            ]
+        );
+        let _ = shutdown.send(());
     }
 
     #[tokio::test]

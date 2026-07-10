@@ -23,7 +23,7 @@ use octravpn_core::{
 };
 use octravpn_mesh::{PreauthMinter, WireState};
 
-use crate::{events::EventBus, onion::OnionRouter};
+use crate::{chain_v3::SESSION_RELAY_ARMED, events::EventBus, onion::OnionRouter};
 
 use super::metrics::NodeMetrics;
 
@@ -119,6 +119,12 @@ pub(crate) struct ControlState {
     /// program. Full RPCs can prove that by event; devnet falls back
     /// to the program's `get_session_status` view.
     pub session_verifier: Option<SessionAdmissionVerifier>,
+    /// Optional read-only relay lifecycle probe for
+    /// `POST /session/:id/receipt`. Hub-built states set this so every
+    /// countersigned receipt post checks whether the chain has already
+    /// moved the session to `SESSION_RELAY_ARMED` before allowing the
+    /// vault receipt to advance.
+    pub relay_lifecycle_verifier: Option<RelayLifecycleVerifier>,
     /// HFHE-2: optional shadow-blob signer. When `Some` the
     /// `get_state` receipt-emission path consults the PVAC sidecar
     /// for `encrypt_const(bytes_used)` + `encrypt_const(net)` and
@@ -144,6 +150,19 @@ pub(crate) struct ControlState {
 pub(crate) struct SessionAdmissionVerifier {
     rpc: RpcClient,
     program_addr: Address,
+}
+
+#[derive(Clone)]
+pub(crate) struct RelayLifecycleVerifier {
+    rpc: RpcClient,
+    program_addr: Address,
+    caller: Option<Address>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RelayArmedState {
+    pub deadline: u64,
+    pub settlement_hash: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -189,6 +208,59 @@ impl SessionAdmissionVerifier {
         } else {
             Ok(SessionAdmission::SessionNotFound)
         }
+    }
+}
+
+impl RelayLifecycleVerifier {
+    pub(crate) fn new(rpc: RpcClient, program_addr: Address, caller: Option<Address>) -> Self {
+        Self {
+            rpc,
+            program_addr,
+            caller,
+        }
+    }
+
+    pub(crate) async fn armed_state(
+        &self,
+        session_id: u64,
+    ) -> octravpn_core::CoreResult<Option<RelayArmedState>> {
+        let caller = self.caller.as_ref();
+        let status = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_session_status",
+                &[serde_json::json!(session_id)],
+                caller,
+            )
+            .await?;
+        if value_as_u64(&status).unwrap_or(0) != SESSION_RELAY_ARMED {
+            return Ok(None);
+        }
+
+        let deadline = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_relay_deadline",
+                &[serde_json::json!(session_id)],
+                caller,
+            )
+            .await?;
+        let settlement_hash = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_relay_settlement_hash",
+                &[serde_json::json!(session_id)],
+                caller,
+            )
+            .await?;
+
+        Ok(Some(RelayArmedState {
+            deadline: value_as_u64(&deadline).unwrap_or(0),
+            settlement_hash: settlement_hash.as_str().unwrap_or_default().to_string(),
+        }))
     }
 }
 
@@ -407,6 +479,7 @@ impl ControlState {
             wire_state: None,
             rate_limit_cfg: crate::rate_limit::RateLimitCfg::default(),
             session_verifier: None,
+            relay_lifecycle_verifier: None,
             shadow_signer: None,
             shadow_price_per_byte: 0,
             enroll: None,
@@ -447,6 +520,14 @@ impl ControlState {
 
     pub(crate) fn with_session_verifier(mut self, verifier: SessionAdmissionVerifier) -> Self {
         self.session_verifier = Some(verifier);
+        self
+    }
+
+    pub(crate) fn with_relay_lifecycle_verifier(
+        mut self,
+        verifier: RelayLifecycleVerifier,
+    ) -> Self {
+        self.relay_lifecycle_verifier = Some(verifier);
         self
     }
 
