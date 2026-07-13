@@ -1208,6 +1208,114 @@ mod tests {
             .collect()
     }
 
+    // ---- relay-claim promotion (Fable whole-flow review regression) --------
+
+    /// Mock RPC that presents a session as RELAY_ARMED with `armed_hash` as its
+    /// committed settlement hash, plus enough of `octra_balance`/`octra_submit`
+    /// for the inline (no-queue) submit path. Lets
+    /// `submit_relay_claim_from_vault` promote a `Proposed` vault entry to
+    /// `Armed` from chain truth and reveal.
+    async fn relay_claim_mock_handler(
+        AxumState(armed_hash): AxumState<Arc<String>>,
+        Json(req): Json<Value>,
+    ) -> Json<Value> {
+        let method = req.get("method").and_then(Value::as_str).unwrap_or("");
+        let id = req.get("id").cloned().unwrap_or(json!(1));
+        let params = req.get("params").cloned().unwrap_or(json!([]));
+        let result = match method {
+            "node_status" => json!({ "epoch": 5 }),
+            "octra_balance" => json!({
+                "balance": "100.000000",
+                "balance_raw": "100000000",
+                "nonce": 0,
+                "pending_nonce": 0,
+            }),
+            "octra_submit" => json!({ "tx_hash": format!("{:064x}", 1u64), "status": "accepted" }),
+            "contract_call" => {
+                let view = params
+                    .as_array()
+                    .and_then(|a| a.get(1))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                match view {
+                    "get_session_status" => json!(3), // SESSION_RELAY_ARMED
+                    "get_relay_deadline" => json!(1_000_000), // far future vs epoch 5
+                    "get_relay_settlement_hash" => json!(armed_hash.as_str()),
+                    _ => Value::Null,
+                }
+            }
+            _ => Value::Null,
+        };
+        Json(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
+    }
+
+    #[tokio::test]
+    async fn relay_claim_promotes_proposed_entry_from_chain_truth() {
+        use octravpn_core::{
+            receipt::{Receipt, ReceiptContext, SignedReceipt, CHAIN_ID_TEST},
+            receipt_vault::{LifecycleState, ReceiptVault},
+            session::{Blind, SessionId},
+        };
+
+        // Dual-signed receipt, built exactly like the vault-side tests.
+        let session_id: u64 = 0x5151;
+        let sid = SessionId::from_u64(session_id);
+        let client = KeyPair::from_secret_bytes(&[0x11; 32]);
+        let node = KeyPair::from_secret_bytes(&[0x22; 32]);
+        let rctx = ReceiptContext::v1_1(Address::from_pubkey(&[0x33; 32]), CHAIN_ID_TEST);
+        let sr = SignedReceipt::build(
+            Receipt::new(rctx, sid.clone(), 1, 4_000_000, Blind::new([0x44; 32])),
+            &client,
+            &node,
+        );
+        let armed_hash = sr.settlement_hash();
+
+        // Canonical POST-before-arm state: the entry is Proposed, never pinned.
+        let dir = tempfile::tempdir().unwrap();
+        let vault = ReceiptVault::open(dir.path().join("receipt-vault.bin")).unwrap();
+        vault.put(&sid, &sr).unwrap();
+        assert!(matches!(vault.state(&sid), Some(LifecycleState::Proposed)));
+
+        // Chain reports the session RELAY_ARMED with the committed hash.
+        let app = Router::new()
+            .route("/", post(relay_claim_mock_handler))
+            .with_state(Arc::new(armed_hash.clone()));
+        let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app.into_make_service())
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await;
+        });
+
+        let wallet = KeyPair::from_secret_bytes(&[7u8; 32]);
+        let program_addr =
+            Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+        let c = ChainCtxV3::new(
+            RpcClient::new(&format!("http://{addr}/")),
+            program_addr,
+            wallet,
+        );
+
+        // Before the fix this bailed "vault entry is not Armed"; now it promotes
+        // Proposed -> Armed from chain truth, reveals, and records ClaimSubmitted.
+        let out = crate::relay_settlement::submit_relay_claim_from_vault(&c, &vault, session_id)
+            .await
+            .expect("relay claim should promote a Proposed entry and submit");
+        assert_eq!(out.settlement_hash, armed_hash);
+        assert!(matches!(
+            vault.state(&sid),
+            Some(LifecycleState::ClaimSubmitted { .. })
+        ));
+
+        let _ = shutdown_tx.send(());
+    }
+
     #[test]
     fn register_circle_call_shape() {
         let c = ctx();

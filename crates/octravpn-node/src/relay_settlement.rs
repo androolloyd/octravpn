@@ -36,19 +36,32 @@ pub(crate) async fn submit_relay_claim_from_vault(
     let receipt = entry.receipt;
     let settlement_hash = receipt.settlement_hash();
 
-    match entry.state {
+    // Which vault states may proceed to a claim, and do we owe a pin first?
+    // The canonical POST->ACK->arm order leaves the entry `Proposed`: the receipt
+    // POST landed while the session was still SESSION_OPEN, so the receipt handler
+    // never observed RELAY_ARMED and never called mark_armed (only a session
+    // already armed at POST time gets pinned there). We promote Proposed->Armed
+    // from the confirmed on-chain commitment below -- so the ARMED-freeze guards
+    // the claim leg too without blocking the normal flow. `ClaimSubmitted` is a
+    // prior broadcast that may have been dropped; re-revealing the same preimage
+    // is idempotent (the on-chain claim self-guards on status), so allow retry.
+    let needs_promotion = matches!(entry.state, LifecycleState::Proposed);
+    let already_claim_submitted = matches!(entry.state, LifecycleState::ClaimSubmitted { .. });
+    match &entry.state {
+        LifecycleState::Proposed => {}
         LifecycleState::Armed {
             settlement_hash: pinned,
             ..
-        } if pinned == settlement_hash => {}
+        } if *pinned == settlement_hash => {}
         LifecycleState::Armed {
             settlement_hash: pinned,
             ..
         } => bail!(
             "session {session_id}: vault Armed settlement hash {pinned} != receipt hash {settlement_hash}; refusing to reveal preimage"
         ),
+        LifecycleState::ClaimSubmitted { .. } => {}
         other => bail!(
-            "session {session_id}: vault entry is not Armed before relay_claim: state={other:?}"
+            "session {session_id}: vault entry cannot be claimed: state={other:?}"
         ),
     }
 
@@ -99,10 +112,39 @@ pub(crate) async fn submit_relay_claim_from_vault(
         );
     }
 
+    // Re-close the loop (Fable whole-flow review): the on-chain commitment is now
+    // proven equal to this receipt's hash, so promote a `Proposed` entry to
+    // `Armed` from chain truth before we reveal. The vault's Proposed->Armed guard
+    // requires pin == receipt hash (just proven), and once Armed a later
+    // higher-seq POST is frozen out -- so the freeze now guards the claim leg too,
+    // instead of being a gate the canonical flow can never satisfy. This is the
+    // spec Step-7 discovery sub-pass pulled onto the claim path.
+    if needs_promotion {
+        vault
+            .mark_armed(&vault_id, relay_deadline, onchain_hash)
+            .context("promote vault entry Proposed->Armed from chain truth before relay_claim")?;
+    }
+
     let preimage = receipt.settlement_preimage();
     let fee = ctx.fee_or_fallback("contract_call").await;
     let call = ctx.build_relay_claim_call(session_id, &preimage, fee, 0);
     let tx_hash = ctx.submit_call(call).await.context("submit relay_claim")?;
+
+    // Write the broadcast into the vault so a crash-retry (and the future
+    // confirmation watcher) can see a claim tx was already revealed for this
+    // session, and so the entry can later drain to a terminal state. Best-effort:
+    // the preimage is already on the wire, so a bookkeeping-write failure must not
+    // fail the claim. Skip when already ClaimSubmitted -- that self-transition is
+    // not legal and the record already exists.
+    if !already_claim_submitted {
+        if let Err(e) = vault.mark_claim_submitted(&vault_id, tx_hash.clone()) {
+            tracing::warn!(
+                session = session_id,
+                error = %e,
+                "vault mark_claim_submitted after relay_claim broadcast failed",
+            );
+        }
+    }
 
     Ok(RelayClaimSubmission {
         session_id,
