@@ -140,30 +140,44 @@ pub(crate) async fn settle_active(client: &Arc<Client>, active: ActiveSession) -
         }
     };
 
-    if receipt_posted {
-        if let Some((store, net)) = relay_prep {
-            if net == 0 {
-                // Nothing is owed on chain (sub-MiB usage or zero price):
-                // arm_relay requires net>0 and would revert, so there is nothing
-                // to record or arm. The countersigned receipt is already posted to
-                // the operator (and stashed in its vault) for any dispute.
-                info!(
-                    session = %active.session_id.to_hex(),
-                    bytes_used = signed.receipt.bytes_used,
-                    "relay net is 0; nothing to settle on chain, not arming"
-                );
-                return Ok(());
-            }
-            // Only step after the ACK: the local durable write, then arm.
-            store.record_countersigned(&active.session_id, &signed, net)?;
-            let env = client.arm_environment();
-            store
-                .arm_if_countersigned(client.as_ref(), &env, &active.session_id)
-                .await?;
+    if let Some((store, net)) = relay_prep {
+        // Relay lane (v3/v4): the operator settles UNILATERALLY via relay_claim
+        // AFTER we arm, so the countersigned receipt MUST reach the operator. A
+        // failed handback means arming is pointless (the operator can't compute
+        // the preimage without the receipt), and the v3 two-tx settle_confirm is
+        // the wrong mechanism here anyway (main-v4's settle_confirm needs a prior
+        // operator settle_claim and takes 4 params, not 2). Surface the failure
+        // for retry instead of burning a fee on a guaranteed revert.
+        if !receipt_posted {
+            return Err(anyhow!(
+                "relay receipt handback failed for session {}; not arming and not \
+                 falling back to settle_confirm (wrong mechanism for the relay lane)",
+                active.session_id.to_hex()
+            ));
+        }
+        if net == 0 {
+            // Nothing is owed on chain (sub-MiB usage or zero price): arm_relay
+            // requires net>0 and would revert, so there is nothing to record or
+            // arm. The countersigned receipt is already posted to the operator
+            // (and stashed in its vault) for any dispute.
+            info!(
+                session = %active.session_id.to_hex(),
+                bytes_used = signed.receipt.bytes_used,
+                "relay net is 0; nothing to settle on chain, not arming"
+            );
             return Ok(());
         }
+        // Only step after the ACK: the local durable write, then arm.
+        store.record_countersigned(&active.session_id, &signed, net)?;
+        let env = client.arm_environment();
+        store
+            .arm_if_countersigned(client.as_ref(), &env, &active.session_id)
+            .await?;
+        return Ok(());
     }
 
+    // Non-relay (v1.1) legacy lane: the operator does not pre-claim, so the
+    // client submits the confirm directly against the configured program.
     submit_settle_confirm(client, &active, signed.receipt.bytes_used).await
 }
 
