@@ -142,6 +142,18 @@ pub(crate) async fn settle_active(client: &Arc<Client>, active: ActiveSession) -
 
     if receipt_posted {
         if let Some((store, net)) = relay_prep {
+            if net == 0 {
+                // Nothing is owed on chain (sub-MiB usage or zero price):
+                // arm_relay requires net>0 and would revert, so there is nothing
+                // to record or arm. The countersigned receipt is already posted to
+                // the operator (and stashed in its vault) for any dispute.
+                info!(
+                    session = %active.session_id.to_hex(),
+                    bytes_used = signed.receipt.bytes_used,
+                    "relay net is 0; nothing to settle on chain, not arming"
+                );
+                return Ok(());
+            }
             // Only step after the ACK: the local durable write, then arm.
             store.record_countersigned(&active.session_id, &signed, net)?;
             let env = client.arm_environment();
@@ -182,6 +194,12 @@ pub(crate) async fn arm_session_from_receipt(
     if !client.relay_config().enabled {
         return Err(anyhow!(
             "`settle arm` requires [v3.relay].enabled = true in client.toml"
+        ));
+    }
+    if net == 0 {
+        return Err(anyhow!(
+            "cannot arm relay session {}: net=0 (nothing owed); arm_relay requires net>0",
+            session_id.to_hex()
         ));
     }
     let receipt = read_signed_receipt(receipt_path)?;

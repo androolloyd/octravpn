@@ -192,6 +192,19 @@ impl SettleStateStore {
         if state != Some(SettlementState::Countersigned) {
             return Ok(None);
         }
+        // A relay session that owes net==0 (sub-MiB usage or zero price) has
+        // nothing to settle on chain: arm_relay requires net>0 and would revert
+        // terminally, leaving the ladder stuck at ArmSubmitted and re-broadcasting
+        // a doomed tx on every boot. Skip arming; the countersigned receipt stays
+        // stashed for any off-chain dispute. (Defensive -- the auto path skips
+        // recording net==0 and the CLI rejects it, so nothing should record one.)
+        if self.arm_material(session_id)?.1 == 0 {
+            tracing::debug!(
+                session = %session_id.to_hex(),
+                "relay net is 0; nothing to settle on chain, skipping arm_relay"
+            );
+            return Ok(None);
+        }
         // AUDIT #4 (I6 write-ahead): record ArmSubmitted BEFORE broadcasting, so a
         // crash after the tx reaches the chain (but before we could record it) does
         // NOT leave us stuck at Countersigned and re-broadcast a duplicate arm. If
@@ -540,6 +553,34 @@ mod tests {
         assert_eq!(calls[0]["nonce"], 0);
         drop(calls);
         assert_eq!(s.state(&sid).unwrap(), Some(SettlementState::ArmSubmitted));
+    }
+
+    #[tokio::test]
+    async fn arm_if_countersigned_skips_when_net_is_zero() {
+        // A sub-MiB (or zero-price) session records net==0. arm_relay requires
+        // net>0 and would revert terminally -> the ladder must NOT advance to
+        // ArmSubmitted (that is the boot-loop poison Fable flagged): no broadcast,
+        // stays at Countersigned.
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(dir.path());
+        let sid = id(99);
+        let chain = MockChain::default();
+        s.record_proposed(&sid).unwrap();
+        s.record_countersigned(&sid, &signed(sid.clone(), 1, 500), 0)
+            .unwrap();
+
+        let out = s.arm_if_countersigned(&chain, &env(), &sid).await.unwrap();
+
+        assert!(out.is_none());
+        assert!(chain.submit_calls.lock().is_empty());
+        assert_eq!(*chain.fee_calls.lock(), 0);
+        assert_eq!(s.state(&sid).unwrap(), Some(SettlementState::Countersigned));
+
+        // And a replay must keep leaving it alone, not re-broadcast forever.
+        let summary = s.replay_pending(&chain, &env()).await.unwrap();
+        assert_eq!(summary.countersigned_armed, 0);
+        assert!(chain.submit_calls.lock().is_empty());
+        assert_eq!(s.state(&sid).unwrap(), Some(SettlementState::Countersigned));
     }
 
     #[tokio::test]
