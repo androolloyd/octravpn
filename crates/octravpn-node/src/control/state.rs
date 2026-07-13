@@ -203,11 +203,28 @@ impl SessionAdmissionVerifier {
         else {
             return Ok(SessionAdmission::SessionNotFound);
         };
-        if session_status_allows_admission(&status, session_id) {
-            Ok(opener_binding_admission(&tx, req))
-        } else {
-            Ok(SessionAdmission::SessionNotFound)
+        if !session_status_allows_admission(&status, session_id) {
+            return Ok(SessionAdmission::SessionNotFound);
         }
+        // Bind the announce to the SESSION's on-chain opener, NOT to the presented
+        // open_tx's `from`. lite_node emits no SessionOpened events, so this
+        // fallback is the PRODUCTION admission path; the presented `open_tx_hash`
+        // is never tied to the session id, so without this an attacker could show
+        // any confirmed call to the program as their open_tx and announce someone
+        // else's session. `get_session_opener` is the on-chain truth.
+        let Ok(opener) = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_session_opener",
+                &[serde_json::json!(session_id)],
+                None,
+            )
+            .await
+        else {
+            return Ok(SessionAdmission::SessionNotFound);
+        };
+        Ok(onchain_opener_binding_admission(&opener, req))
     }
 }
 
@@ -269,6 +286,36 @@ fn opener_binding_admission(
     req: &AnnounceSessionRequest,
 ) -> SessionAdmission {
     if announce_signed_by_session_opener(tx, req) {
+        SessionAdmission::Accepted
+    } else {
+        SessionAdmission::NotSignedByOpener
+    }
+}
+
+/// Fallback-path binding: accept the announce only if its `opener_pubkey` hashes
+/// to the session's on-chain opener AND `opener_sig` covers the binding payload.
+/// Unlike [`opener_binding_admission`], this trusts the chain's
+/// `session_opener[session_id]`, not the presented open-tx's `from` -- so a
+/// forged or unrelated `open_tx_hash` cannot bind the announce to another user's
+/// session. An unset opener means the session does not exist on chain.
+fn onchain_opener_binding_admission(
+    opener: &serde_json::Value,
+    req: &AnnounceSessionRequest,
+) -> SessionAdmission {
+    let onchain_opener = opener.as_str().unwrap_or("");
+    if onchain_opener.is_empty() || onchain_opener == "0" {
+        return SessionAdmission::SessionNotFound;
+    }
+    if Address::from_pubkey(&req.opener_pubkey.0).display() != onchain_opener {
+        return SessionAdmission::NotSignedByOpener;
+    }
+    let payload = announce_opener_binding_payload(
+        &req.session_id,
+        &req.client_pubkey,
+        &req.client_wg_pubkey,
+        &req.open_tx_hash,
+    );
+    if verify(&req.opener_pubkey, &payload, &req.opener_sig).is_ok() {
         SessionAdmission::Accepted
     } else {
         SessionAdmission::NotSignedByOpener
@@ -641,6 +688,7 @@ mod tests {
         tx: Value,
         status: Option<Value>,
         session_count: Value,
+        opener: Value,
         contract_calls: Arc<Mutex<Vec<Value>>>,
     }
 
@@ -659,11 +707,23 @@ mod tests {
                 json!({ "jsonrpc": "2.0", "id": id, "result": mock.tx })
             }
             "contract_call" => {
+                let view = params
+                    .as_array()
+                    .and_then(|a| a.get(1))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
                 mock.contract_calls
                     .lock()
                     .expect("contract calls lock")
                     .push(params);
-                if let Some(status) = &mock.status {
+                if view == "get_session_opener" {
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": { "result": mock.opener },
+                    })
+                } else if let Some(status) = &mock.status {
                     json!({
                         "jsonrpc": "2.0",
                         "id": id,
@@ -694,11 +754,27 @@ mod tests {
         status: Option<Value>,
         session_count: Value,
     ) -> (RpcClient, Arc<Mutex<Vec<Value>>>, oneshot::Sender<()>) {
+        // Sound default: the on-chain opener IS whoever sent the open-tx.
+        let opener = tx
+            .get("from_")
+            .or_else(|| tx.get("from"))
+            .cloned()
+            .unwrap_or(Value::Null);
+        spawn_admission_mock_with_opener(tx, status, session_count, opener).await
+    }
+
+    async fn spawn_admission_mock_with_opener(
+        tx: Value,
+        status: Option<Value>,
+        session_count: Value,
+        opener: Value,
+    ) -> (RpcClient, Arc<Mutex<Vec<Value>>>, oneshot::Sender<()>) {
         let contract_calls = Arc::new(Mutex::new(Vec::new()));
         let mock = AdmissionMockRpc {
             tx,
             status,
             session_count,
+            opener,
             contract_calls: contract_calls.clone(),
         };
         let app = Router::new()
@@ -884,12 +960,48 @@ mod tests {
             SessionAdmission::Accepted
         );
         let calls = contract_calls.lock().expect("contract calls lock");
-        assert_eq!(calls.len(), 1);
+        assert_eq!(calls.len(), 2);
         assert_eq!(
             calls[0],
             json!([program.display().to_string(), "get_session_status", [42u64]])
         );
+        assert_eq!(
+            calls[1],
+            json!([program.display().to_string(), "get_session_opener", [42u64]])
+        );
         drop(calls);
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn session_admission_fallback_rejects_foreign_session_opener() {
+        // The attack Fable flagged: with no on-chain events, the fallback is the
+        // only admission path. An attacker presents their OWN confirmed call to
+        // the program as `open_tx_hash` (so `from` == attacker) and announces a
+        // VICTIM's live session. The open-tx passes the confirmed-call gate and
+        // the status check, and the announce is validly self-signed by the
+        // attacker -- but the session's on-chain opener is the victim, so binding
+        // to `get_session_opener` must reject it. (Pre-fix this returned Accepted.)
+        let program = program_addr();
+        let attacker_kp = KeyPair::generate();
+        let victim_kp = KeyPair::generate();
+        let session_id = SessionId::from_u64(42);
+        let (rpc, _calls, shutdown) = spawn_admission_mock_with_opener(
+            confirmed_open_tx(&program, &attacker_kp), // from == attacker
+            Some(json!(0)),                            // SESSION_OPEN
+            json!(43),                                 // session exists
+            json!(opener_addr(&victim_kp)),            // real on-chain opener == victim
+        )
+        .await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program);
+
+        assert_eq!(
+            verifier
+                .session_opened(&announce_req(session_id, &attacker_kp))
+                .await
+                .expect("session opened"),
+            SessionAdmission::NotSignedByOpener
+        );
         let _ = shutdown.send(());
     }
 

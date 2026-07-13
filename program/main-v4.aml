@@ -971,4 +971,8 @@ contract OctraVPN_V3 {
   view fn get_relay_deadline(session_id: uint): uint {
     return self.session_relay_deadline[session_id]
   }
+
+  view fn get_session_opener(session_id: uint): address {
+    return self.session_opener[session_id]
+  }
 }
