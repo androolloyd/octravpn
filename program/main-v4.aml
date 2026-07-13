@@ -826,10 +826,18 @@ contract OctraVPN_V3 {
     let circle = self.session_exit[session_id]
     let dep = self.session_deposit[session_id]
 
+    // A slashed/inactive operator must not accrue earnings it can never withdraw
+    // (claim_earnings requires an unslashed circle), which would lock the tokens
+    // in the contract forever. Mirror relay_claim: an inactive operator is paid
+    // nothing, so the full deposit refunds to the funder. claim_no_show can't
+    // recover this session (operator_claim_set==1 blocks it), so settle it here.
     // Cap net against deposit; surplus is refunded to the session funder.
-    let total_paid = net
-    if total_paid > dep {
-      total_paid = dep
+    let total_paid = 0
+    if circle_is_active(circle) {
+      total_paid = net
+      if total_paid > dep {
+        total_paid = dep
+      }
     }
     let fee = total_paid * self.protocol_fee_bps / BPS_DENOM
     let net_after_fee = total_paid - fee
