@@ -14,6 +14,42 @@ enumeration/lifecycle; `hub/spawn.rs:369` spawns `run_sweeper`.
 
 ---
 
+## PART 0 — POST-HARDENING STATUS (Fable whole-flow review, 2026-07-13)
+
+A holistic review after the two adversarial audit rounds found the hardened
+pieces were individually sound but **did not compose**: the ARMED-freeze (Step 2)
+shipped without its Step-7 counterpart, so `submit_relay_claim_from_vault`
+hard-required a vault `Armed` pin that the canonical POST→ACK→arm order never
+produces — **no relay claim could succeed**. Fixed + landed:
+
+- **Claim path re-closed** — the claim now promotes `Proposed→Armed` from the
+  confirmed on-chain commitment (`get_relay_settlement_hash == receipt hash`)
+  before revealing, and write-records `ClaimSubmitted`. This is the Step-7
+  discovery sub-pass **pulled onto the claim path**, ahead of Step 6. *The spec's
+  6-before-7 order was wrong: the autonomous claimer scans `armed_unclaimed()`,
+  which is empty forever without this promotion. Step 7 (promotion) now precedes
+  Step 6.*
+- **net==0 poison killed** — a sub-MiB / zero-price session records `net==0`;
+  `arm_relay` requires `net>0` and reverts, which looped the durable ladder every
+  boot. `arm_if_countersigned` now skips `net==0`; the auto path never records it.
+- **Announce hijack closed** — the eventless production admission path now binds
+  to the on-chain `get_session_opener(session_id)`, not the presented open-tx's
+  `from` (new AML view).
+- **Relay-lane `settle_confirm` fallback removed** — a failed handback surfaces
+  for retry (arm-XOR-confirm) instead of a wire-incompatible 2-param revert.
+- **Slashed-operator earnings black hole closed** — `settle_confirm` no longer
+  credits an inactive circle's unwithdrawable ledger; it refunds the funder.
+
+**True remaining gates to default-on** (unchanged in spirit, reordered):
+re-green the devnet e2e with the freeze gates (blocked on devnet 502) → Step 6
+autonomous in-daemon claimer (also retires the CLI's dual-nonce / dual-vault-open
+hazard — Fable risk #3) → Step 8 refund watcher + node sweep → Step 9 formal
+models, then flip. Threat-model notes still open: client-can-grief-operator
+(arm a garbage hash → refund; needs operator-side detection) and the one-write
+I1 ACK→record window.
+
+---
+
 ## PART A — END STATE TO SHIP FIRST (the milestone)
 
 **Target milestone = P0-1 "real client arm on devnet," standing on the two
@@ -50,7 +86,7 @@ kill between POST-ACK and arm.
 4. **Reroute client submitters through the shared queue** — client `chain_v3.rs` `submit_call`; `Client` builds one handle, clones into every ctx. Makes step 5's re-arm idempotency real.
 5. **P0-1 client settlement state machine** (**milestone commit**) — `settle_state.rs` durable ladder `Proposed(1)→Countersigned(2)→ArmSubmitted(3)→ArmConfirmed(4)`; three entry points (tunnel-shutdown hook, `octravpn-client settle arm <sid>`, boot replay); receipt-ACK→arm happens-before. Split `submit_arm_relay` into `build_arm_params` + thin `submit_arm`. Route `connect_v3` disconnect through the driver when relay enabled. `[v3.relay].state_dir` config. **Devnet e2e = the Part A diff.**
 6. **P0-2 autonomous claim scheduler** — `relay_claimer.rs` boot-spawned actor (mirrors `run_sweeper`); scans vault for armed-unclaimed, claims when quiescent and `epoch ≤ deadline-margin`; write-ahead `mark_claim_submitted` before submit; idempotent on restart. `ControlRelayCfg` gains `auto_claim/claim_scan_period_secs/claim_margin_epochs/quiescent_ticks/...` clamped at load.
-7. **Vault-lifecycle wiring into the claim path** — write-ahead-before-broadcast fully realized; `ArmedHashMismatch` aborts a claim rather than revealing a wrong preimage; discovery sub-pass promotes `Proposed` entries by polling chain status.
+7. **Vault-lifecycle wiring into the claim path** *(discovery sub-pass DONE, pulled ahead of Step 6 — see PART 0)* — write-ahead-before-broadcast fully realized; `ArmedHashMismatch` aborts a claim rather than revealing a wrong preimage; discovery sub-pass promotes `Proposed` entries by polling chain status. **Landed:** `submit_relay_claim_from_vault` promotes `Proposed→Armed` from `get_relay_settlement_hash` and marks `ClaimSubmitted` after broadcast. Remaining for full Step 7: the standalone vault-scan promoter the autonomous claimer will call.
 8. **P0-3 client refund watcher + node relay_sweep** (default-on gate) — client auto-refund at `D+k_r`; node `relay_sweep` at `D+G+k_s`. `relay_sweep_call` + wire test. Non-overlap margins clamped. Devnet: operator-no-show→refund; client-offline→sweep; claim-at-`D-1`→watcher never refunds.
 9. **Formal models + flip default-on** — `RelaySettlement.tla` (claim-XOR-refund, window non-overlap), `relay_receipt_ack.spthy` (ACK-precedes-arm), Kani on the epoch-gate. Flip defaults **only after** step 6+8 e2e + the models are green.
 
