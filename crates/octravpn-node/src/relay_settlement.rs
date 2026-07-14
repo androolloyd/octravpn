@@ -28,6 +28,12 @@ pub(crate) async fn submit_relay_claim_from_vault(
     ctx: &ChainCtxV3,
     vault: &ReceiptVault,
     session_id: u64,
+    // Claim only while `epoch + margin <= relay_deadline`, so the claim tx can
+    // never confirm at/after the deadline (where relay_claim reverts and the
+    // client may relay_refund, wasting the revealed preimage). The manual/legacy
+    // path passes 0 (its old `epoch < deadline` behaviour); the autonomous
+    // claimer passes the clamped `[1,5]` config margin.
+    margin: u64,
 ) -> Result<RelayClaimSubmission> {
     let vault_id = SessionId::from_u64(session_id);
     let entry = vault
@@ -81,9 +87,12 @@ pub(crate) async fn submit_relay_claim_from_vault(
         .get_relay_deadline(session_id)
         .await
         .context("get_relay_deadline before relay_claim")?;
-    if current_epoch >= relay_deadline {
+    // Margin gate: refuse to claim inside `(deadline - margin, deadline]` so a
+    // claim tx cannot confirm at/after D. epoch reads are a float-truncated lower
+    // bound (see the fresh re-read below), and margin >= 1 absorbs that slack.
+    if current_epoch + margin > relay_deadline {
         bail!(
-            "relay claim window elapsed for session {session_id}: epoch={current_epoch} deadline={relay_deadline}"
+            "relay claim window too close to deadline for session {session_id}: epoch={current_epoch} + margin={margin} > deadline={relay_deadline}"
         );
     }
 
@@ -123,6 +132,20 @@ pub(crate) async fn submit_relay_claim_from_vault(
         vault
             .mark_armed(&vault_id, relay_deadline, onchain_hash)
             .context("promote vault entry Proposed->Armed from chain truth before relay_claim")?;
+    }
+
+    // Re-read the epoch immediately before revealing and re-apply the margin
+    // gate: several RPC round-trips elapsed since the first read, and the epoch
+    // may have advanced into the no-claim zone. Never leak the preimage into a tx
+    // that could confirm at/after the deadline.
+    let fresh_epoch = ctx
+        .current_epoch()
+        .await
+        .context("current_epoch re-read before revealing preimage")?;
+    if fresh_epoch + margin > relay_deadline {
+        bail!(
+            "relay claim window closed before reveal for session {session_id}: epoch={fresh_epoch} + margin={margin} > deadline={relay_deadline}"
+        );
     }
 
     let preimage = receipt.settlement_preimage();

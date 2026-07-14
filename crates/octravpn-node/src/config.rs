@@ -1016,6 +1016,23 @@ pub(crate) struct ControlRelayCfg {
     /// receipt preimage after `arm_relay`.
     #[serde(default = "default_relay_expiry_epochs")]
     pub relay_expiry_epochs: u64,
+    /// Step 6: run the in-daemon autonomous relay-claimer. Requires
+    /// `enabled = true`. Default `false` — until an operator opts in the
+    /// claimer never spawns its loop and the daemon does no relay claiming.
+    #[serde(default)]
+    pub auto_claim: bool,
+    /// Seconds between claimer scan ticks. Clamped to `[5, 3600]`.
+    #[serde(default = "default_claim_scan_period_secs")]
+    pub claim_scan_period_secs: u64,
+    /// Claim only while `epoch + margin <= relay_deadline`, so a claim tx
+    /// can never confirm at/after the deadline (where it reverts and the
+    /// client may refund). Clamped to the I3 band `[1, 5]`.
+    #[serde(default = "default_claim_margin_epochs")]
+    pub claim_margin_epochs: u64,
+    /// Ticks a just-submitted (still-unconfirmed) claim is left alone before
+    /// the claimer would consider re-submitting. Clamped to `[1, 100]`.
+    #[serde(default = "default_quiescent_ticks")]
+    pub quiescent_ticks: u32,
 }
 
 impl Default for ControlRelayCfg {
@@ -1023,12 +1040,47 @@ impl Default for ControlRelayCfg {
         Self {
             enabled: false,
             relay_expiry_epochs: default_relay_expiry_epochs(),
+            auto_claim: false,
+            claim_scan_period_secs: default_claim_scan_period_secs(),
+            claim_margin_epochs: default_claim_margin_epochs(),
+            quiescent_ticks: default_quiescent_ticks(),
         }
+    }
+}
+
+impl ControlRelayCfg {
+    /// Scan period, clamped so a typo can't spin-loop (min 5s) or stall
+    /// claiming past a reasonable window (max 1h).
+    pub(crate) fn resolved_scan_period(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.claim_scan_period_secs.clamp(5, 3600))
+    }
+    /// Claim margin in epochs, clamped to the I3 non-overlap band `[1, 5]`.
+    /// The lower bound of 1 is load-bearing: a zero margin re-opens the
+    /// window where a claim confirms at/after the deadline and reveals the
+    /// preimage into a reverting tx.
+    pub(crate) fn resolved_margin_epochs(&self) -> u64 {
+        self.claim_margin_epochs.clamp(1, 5)
+    }
+    /// In-flight grace in ticks, clamped to `[1, 100]`.
+    pub(crate) fn resolved_quiescent_ticks(&self) -> u32 {
+        self.quiescent_ticks.clamp(1, 100)
     }
 }
 
 fn default_relay_expiry_epochs() -> u64 {
     octravpn_core::v3_calls::RELAY_EXPIRY_DEFAULT_EPOCHS
+}
+
+fn default_claim_scan_period_secs() -> u64 {
+    60
+}
+
+fn default_claim_margin_epochs() -> u64 {
+    3
+}
+
+fn default_quiescent_ticks() -> u32 {
+    1
 }
 
 /// Perf-1: TOML selector for the receipt-journal fsync policy.
@@ -1212,6 +1264,45 @@ region = "eu-west"
         let cfg: NodeConfig = ::toml::from_str(&toml_str).expect("relay TOML must parse");
         assert!(cfg.control.relay.enabled);
         assert_eq!(cfg.control.relay.relay_expiry_epochs, 10);
+    }
+
+    #[test]
+    fn control_relay_auto_claim_defaults_off_and_parses() {
+        let default_cfg: NodeConfig = ::toml::from_str(MIN_TOML).expect("baseline TOML must parse");
+        assert!(!default_cfg.control.relay.auto_claim);
+        assert_eq!(default_cfg.control.relay.claim_scan_period_secs, 60);
+        assert_eq!(default_cfg.control.relay.claim_margin_epochs, 3);
+        assert_eq!(default_cfg.control.relay.quiescent_ticks, 1);
+
+        let toml_str = format!(
+            "{MIN_TOML}\n[control.relay]\nenabled = true\nauto_claim = true\nclaim_scan_period_secs = 30\nclaim_margin_epochs = 2\n"
+        );
+        let cfg: NodeConfig = ::toml::from_str(&toml_str).expect("relay TOML must parse");
+        assert!(cfg.control.relay.auto_claim);
+        assert_eq!(cfg.control.relay.claim_scan_period_secs, 30);
+        assert_eq!(cfg.control.relay.claim_margin_epochs, 2);
+    }
+
+    #[test]
+    fn control_relay_resolved_accessors_clamp() {
+        // Margin clamps to the I3 band [1,5]: a 0 margin (preimage-leak window)
+        // becomes 1; an oversized margin becomes 5.
+        let mut relay = ControlRelayCfg {
+            claim_margin_epochs: 0,
+            claim_scan_period_secs: 0,
+            quiescent_ticks: 0,
+            ..ControlRelayCfg::default()
+        };
+        assert_eq!(relay.resolved_margin_epochs(), 1);
+        assert_eq!(relay.resolved_scan_period().as_secs(), 5); // min 5s, no spin-loop
+        assert_eq!(relay.resolved_quiescent_ticks(), 1);
+
+        relay.claim_margin_epochs = 10;
+        relay.claim_scan_period_secs = 100_000;
+        relay.quiescent_ticks = 10_000;
+        assert_eq!(relay.resolved_margin_epochs(), 5);
+        assert_eq!(relay.resolved_scan_period().as_secs(), 3600); // max 1h
+        assert_eq!(relay.resolved_quiescent_ticks(), 100);
     }
 
     /// Perf-1: a default-built `ControlCfg` (operator omits the field)

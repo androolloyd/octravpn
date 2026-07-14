@@ -26,6 +26,13 @@ use crate::{
 };
 
 impl Hub {
+    /// Spawn the Step-6 in-daemon autonomous relay-claimer. It self-disables
+    /// (returns `Ok(())` immediately) unless `[control.relay].auto_claim = true`,
+    /// so this is a genuine no-op by default.
+    pub(crate) fn spawn_relay_claimer(self: Arc<Self>) -> JoinHandle<Result<()>> {
+        tokio::spawn(async move { crate::relay_claimer::run(self).await })
+    }
+
     pub(crate) fn spawn_tunnel(self: Arc<Self>) -> JoinHandle<Result<()>> {
         let allowlist = self.allowlist.clone();
         tokio::spawn(async move {

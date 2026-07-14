@@ -59,6 +59,8 @@ pub(crate) const CALL_FEE_FALLBACK: u64 = 1_000;
 /// `program/main-v4.aml` session status for an armed relay lane.
 pub(crate) const SESSION_OPEN: u64 = 0;
 pub(crate) const SESSION_RELAY_ARMED: u64 = 3;
+pub(crate) const SESSION_RELAY_CLAIMED: u64 = 4;
+pub(crate) const SESSION_RELAY_REFUNDED: u64 = 5;
 
 /// All v3 chain interactions. Holds the same RPC + wallet primitives
 /// as `ChainCtx` / `ChainCtxV2`, but talks exclusively to the v3
@@ -276,6 +278,28 @@ impl ChainCtxV3 {
             .await
             .context("get_session_status")?;
         Ok(v.as_u64().unwrap_or(0))
+    }
+
+    /// Strict `get_session_status` for the autonomous claimer's confirm-drain:
+    /// a non-numeric / hostile / empty RPC body is an **error**, not `0`
+    /// (`SESSION_OPEN`). The drain promotes a vault entry to a terminal state
+    /// purely on an EXACT positive status match (`==4`/`==5`), so an RPC failure
+    /// must become a *retry next tick*, never a phantom terminal transition
+    /// (which would `mark_claimed` a session that never paid, then `compact()`
+    /// would irreversibly drop the receipt + preimage).
+    pub(crate) async fn get_session_status_strict(&self, session_id: u64) -> Result<u64> {
+        let v = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_session_status",
+                &[json!(session_id)],
+                Some(&self.wallet_addr),
+            )
+            .await
+            .context("get_session_status_strict")?;
+        v.as_u64()
+            .ok_or_else(|| anyhow!("non-numeric session_status body for session {session_id}"))
     }
 
     /// `get_relay_deadline(sid) -> int` view.
@@ -1211,15 +1235,17 @@ mod tests {
 
     // ---- relay-claim promotion (Fable whole-flow review regression) --------
 
-    /// Mock RPC that presents a session as RELAY_ARMED with `armed_hash` as its
-    /// committed settlement hash, plus enough of `octra_balance`/`octra_submit`
-    /// for the inline (no-queue) submit path. Lets
-    /// `submit_relay_claim_from_vault` promote a `Proposed` vault entry to
-    /// `Armed` from chain truth and reveal.
+    /// Mock RPC that presents a session as RELAY_ARMED with `.0` as its committed
+    /// settlement hash and `.1` as its relay deadline (epoch is fixed at 5), plus
+    /// enough of `octra_balance`/`octra_submit` for the inline (no-queue) submit
+    /// path. Lets `submit_relay_claim_from_vault` promote a `Proposed` vault entry
+    /// to `Armed` from chain truth and reveal, and lets the margin gate be driven
+    /// by choosing a near vs far deadline.
     async fn relay_claim_mock_handler(
-        AxumState(armed_hash): AxumState<Arc<String>>,
+        AxumState(cfg): AxumState<Arc<(String, u64)>>,
         Json(req): Json<Value>,
     ) -> Json<Value> {
+        let (armed_hash, deadline) = (&cfg.0, cfg.1);
         let method = req.get("method").and_then(Value::as_str).unwrap_or("");
         let id = req.get("id").cloned().unwrap_or(json!(1));
         let params = req.get("params").cloned().unwrap_or(json!([]));
@@ -1240,7 +1266,7 @@ mod tests {
                     .unwrap_or("");
                 match view {
                     "get_session_status" => json!(3), // SESSION_RELAY_ARMED
-                    "get_relay_deadline" => json!(1_000_000), // far future vs epoch 5
+                    "get_relay_deadline" => json!(deadline),
                     "get_relay_settlement_hash" => json!(armed_hash.as_str()),
                     _ => Value::Null,
                 }
@@ -1280,7 +1306,7 @@ mod tests {
         // Chain reports the session RELAY_ARMED with the committed hash.
         let app = Router::new()
             .route("/", post(relay_claim_mock_handler))
-            .with_state(Arc::new(armed_hash.clone()));
+            .with_state(Arc::new((armed_hash.clone(), 1_000_000u64)));
         let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
             .await
             .unwrap();
@@ -1305,7 +1331,7 @@ mod tests {
 
         // Before the fix this bailed "vault entry is not Armed"; now it promotes
         // Proposed -> Armed from chain truth, reveals, and records ClaimSubmitted.
-        let out = crate::relay_settlement::submit_relay_claim_from_vault(&c, &vault, session_id)
+        let out = crate::relay_settlement::submit_relay_claim_from_vault(&c, &vault, session_id, 1)
             .await
             .expect("relay claim should promote a Proposed entry and submit");
         assert_eq!(out.settlement_hash, armed_hash);
@@ -1314,6 +1340,107 @@ mod tests {
             Some(LifecycleState::ClaimSubmitted { .. })
         ));
 
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn relay_claim_refuses_inside_the_margin_window() {
+        // Margin gate: deadline D=6, epoch=5, margin=3 -> 5+3 > 6, so revealing
+        // is refused (the claim could confirm at/after D and revert while the
+        // client refunds). The preimage is never revealed; the entry stays
+        // Proposed (the bail is before the promotion).
+        use octravpn_core::{
+            receipt::{Receipt, ReceiptContext, SignedReceipt, CHAIN_ID_TEST},
+            receipt_vault::{LifecycleState, ReceiptVault},
+            session::{Blind, SessionId},
+        };
+        let session_id: u64 = 0x6262;
+        let sid = SessionId::from_u64(session_id);
+        let client = KeyPair::from_secret_bytes(&[0x11; 32]);
+        let node = KeyPair::from_secret_bytes(&[0x22; 32]);
+        let rctx = ReceiptContext::v1_1(Address::from_pubkey(&[0x33; 32]), CHAIN_ID_TEST);
+        let sr = SignedReceipt::build(
+            Receipt::new(rctx, sid.clone(), 1, 4_000_000, Blind::new([0x44; 32])),
+            &client,
+            &node,
+        );
+        let armed_hash = sr.settlement_hash();
+        let dir = tempfile::tempdir().unwrap();
+        let vault = ReceiptVault::open(dir.path().join("receipt-vault.bin")).unwrap();
+        vault.put(&sid, &sr).unwrap();
+
+        let app = Router::new()
+            .route("/", post(relay_claim_mock_handler))
+            .with_state(Arc::new((armed_hash.clone(), 6u64)));
+        let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app.into_make_service())
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await;
+        });
+        let wallet = KeyPair::from_secret_bytes(&[7u8; 32]);
+        let program_addr =
+            Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+        let c = ChainCtxV3::new(
+            RpcClient::new(&format!("http://{addr}/")),
+            program_addr,
+            wallet,
+        );
+
+        let err = crate::relay_settlement::submit_relay_claim_from_vault(&c, &vault, session_id, 3)
+            .await
+            .expect_err("claim must refuse inside the margin window");
+        assert!(err.to_string().contains("margin"), "err = {err}");
+        assert!(matches!(vault.state(&sid), Some(LifecycleState::Proposed)));
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn get_session_status_strict_errors_on_non_numeric_body() {
+        // The drain confirms terminal state only from an EXACT numeric status.
+        // A hostile/non-numeric body must Err in the strict reader (so the drain
+        // retries), while the lenient reader collapses it to 0 (SESSION_OPEN) --
+        // exactly the footgun the strict reader exists to avoid.
+        async fn handler(Json(req): Json<Value>) -> Json<Value> {
+            let id = req.get("id").cloned().unwrap_or(json!(1));
+            let method = req.get("method").and_then(Value::as_str).unwrap_or("");
+            let result = if method == "contract_call" {
+                json!({ "result": "not-a-number" })
+            } else {
+                Value::Null
+            };
+            Json(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
+        }
+        let app = Router::new().route("/", post(handler));
+        let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app.into_make_service())
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await;
+        });
+        let wallet = KeyPair::from_secret_bytes(&[7u8; 32]);
+        let program_addr =
+            Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+        let c = ChainCtxV3::new(
+            RpcClient::new(&format!("http://{addr}/")),
+            program_addr,
+            wallet,
+        );
+
+        assert!(c.get_session_status_strict(1).await.is_err());
+        assert_eq!(c.get_session_status(1).await.unwrap(), SESSION_OPEN);
         let _ = shutdown_tx.send(());
     }
 

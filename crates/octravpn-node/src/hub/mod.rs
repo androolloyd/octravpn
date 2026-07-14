@@ -48,6 +48,8 @@ mod pvac;
 mod relay;
 mod spawn;
 
+pub(crate) use relay::DrainOutcome;
+
 pub(crate) struct Hub {
     pub cfg: NodeConfig,
     pub chain: ChainCtx,
