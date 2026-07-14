@@ -34,6 +34,16 @@ use crate::hub::{DrainOutcome, Hub};
 /// Compact the vault every N ticks (defense-in-depth GC of terminal entries).
 const COMPACT_EVERY: u64 = 60;
 
+/// Whether a claim submitted at tick `submitted_at` is still inside its in-flight
+/// grace window at tick `now`: don't re-submit for `quiesce` ticks after submit.
+/// With `quiesce = 1` (the default), a claim submitted at tick T is skipped on
+/// T+1 and re-eligible at T+2. The `<=` is load-bearing: a plain `<` makes
+/// `quiesce = 1` a no-op (the T+1 gap of 1 fails `1 < 1`, re-submitting a
+/// duplicate claim tx while the first is still in the mempool).
+fn within_grace(now: u64, submitted_at: u64, quiesce: u64) -> bool {
+    now.saturating_sub(submitted_at) <= quiesce
+}
+
 pub(crate) async fn run(hub: Arc<Hub>) -> Result<()> {
     let relay = &hub.cfg.control.relay;
     if !relay.enabled || !relay.auto_claim {
@@ -91,9 +101,12 @@ pub(crate) async fn run(hub: Arc<Hub>) -> Result<()> {
             let Some(sid) = id.as_u64() else { continue };
             // In-flight grace: leave a just-submitted (still-unconfirmed) claim
             // alone for `quiesce` ticks so we don't spam re-reveals while a claim
-            // tx is in the mempool.
+            // tx is in the mempool. Submitted at tick `t`; on tick `t + n` the gap
+            // is `n`, so `<=` gives exactly `quiesce` ticks of grace (with the
+            // default quiesce=1, skip the very next tick). A plain `<` would make
+            // quiesce=1 a no-op and re-submit immediately next tick.
             if let Some(t) = inflight.get(&id) {
-                if tick.saturating_sub(*t) < quiesce {
+                if within_grace(tick, *t, quiesce) {
                     continue;
                 }
             }
@@ -125,5 +138,24 @@ pub(crate) async fn run(hub: Arc<Hub>) -> Result<()> {
                 warn!(error = %e, "relay vault compaction failed");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::within_grace;
+
+    #[test]
+    fn grace_skips_exactly_quiesce_ticks() {
+        // Submitted at tick 10, quiesce = 1 (default): the same tick and the very
+        // next tick are inside the grace (skip), re-eligible at T+2. This is the
+        // off-by-one the review caught: a plain `<` would re-submit at T+1.
+        assert!(within_grace(10, 10, 1));
+        assert!(within_grace(11, 10, 1));
+        assert!(!within_grace(12, 10, 1));
+
+        // quiesce = 3: skip 11,12,13; re-eligible 14.
+        assert!(within_grace(13, 10, 3));
+        assert!(!within_grace(14, 10, 3));
     }
 }
