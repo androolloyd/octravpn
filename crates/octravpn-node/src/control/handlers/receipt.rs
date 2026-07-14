@@ -23,7 +23,7 @@ use octravpn_core::{
 };
 
 use super::ApiError;
-use crate::control::state::ControlState;
+use crate::control::state::{ControlState, RelayLifecycle};
 
 /// HFHE-2: derive a per-receipt encryption seed (64-char hex) from
 /// the (session_id_hex, seq) tuple. Deterministic — the auditor
@@ -316,8 +316,8 @@ pub(crate) async fn post_receipt(
     if let (Some(verifier), Some(chain_session_id)) =
         (s.relay_lifecycle_verifier.as_ref(), id.as_u64())
     {
-        match verifier.armed_state(chain_session_id).await {
-            Ok(Some(armed)) => {
+        match verifier.lifecycle(chain_session_id).await {
+            Ok(RelayLifecycle::Armed(armed)) => {
                 let already_pinned = matches!(
                     s.receipt_vault.state(&id),
                     Some(LifecycleState::Armed {
@@ -345,7 +345,26 @@ pub(crate) async fn post_receipt(
                     }
                 }
             }
-            Ok(None) => {}
+            Ok(RelayLifecycle::Open) => {}
+            Ok(RelayLifecycle::Terminal(status)) => {
+                // The on-chain session has already left the arm window into a
+                // terminal outcome (SETTLED/REFUNDED/RELAY_CLAIMED/RELAY_REFUNDED):
+                // it is closed and accepts no more receipts. Beyond being
+                // meaningless, accepting one would append a receipt record AFTER
+                // the claim's Armed/ClaimSubmitted lifecycle records -- in the CLI
+                // cross-process claim path that bricks the vault on the next
+                // reopen (ReceiptFrozen). Reject.
+                tracing::debug!(
+                    session = %id_hex,
+                    status,
+                    "rejecting receipt for a session already closed on chain",
+                );
+                return (
+                    StatusCode::CONFLICT,
+                    Json(ApiError::new("session already closed on chain")),
+                )
+                    .into_response();
+            }
             Err(e) => {
                 tracing::warn!(
                     error = %e,
@@ -809,6 +828,50 @@ mod tests {
                 "get_relay_settlement_hash".to_string(),
             ]
         );
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn post_receipt_rejects_receipt_for_a_terminal_session() {
+        // A session already claimed on chain (RELAY_CLAIMED=4) is closed and
+        // accepts no more receipts. Accepting one would append a receipt record
+        // after the claim's Armed/ClaimSubmitted lifecycle records -- in the CLI
+        // cross-process claim path that bricks the vault on reopen. Reject 409,
+        // vault nothing. (Fable re-verify, residual #3 root cause.)
+        let node_kp = Arc::new(KeyPair::generate());
+        let client_kp = KeyPair::generate();
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let id = SessionId::from_u64(77);
+        let (rpc, _calls, shutdown) =
+            spawn_relay_lifecycle_mock(4 /* SESSION_RELAY_CLAIMED */, 0, String::new()).await;
+        let state = Arc::new(
+            ControlState::new(node_kp.clone(), router, allowlist).with_relay_lifecycle_verifier(
+                RelayLifecycleVerifier::new(rpc, Address::from_pubkey(&[9u8; 32]), None),
+            ),
+        );
+        let receipt = SignedReceipt::build(
+            Receipt::new(
+                (*state.receipt_context).clone(),
+                id.clone(),
+                1,
+                4_096,
+                octravpn_core::session::Blind::new([0x8F; 32]),
+            ),
+            &client_kp,
+            node_kp.as_ref(),
+        );
+
+        let (status, body) = status_and_body(
+            post_receipt(State(state.clone()), Path(id.to_hex()), Json(receipt))
+                .await
+                .into_response(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CONFLICT, "body = {body}");
+        assert!(body.contains("already closed"), "body = {body}");
+        assert!(state.receipt_vault.get(&id).is_none());
         let _ = shutdown.send(());
     }
 

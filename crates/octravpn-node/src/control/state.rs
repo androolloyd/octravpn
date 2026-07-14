@@ -23,7 +23,11 @@ use octravpn_core::{
 };
 use octravpn_mesh::{PreauthMinter, WireState};
 
-use crate::{chain_v3::SESSION_RELAY_ARMED, events::EventBus, onion::OnionRouter};
+use crate::{
+    chain_v3::{SESSION_OPEN, SESSION_RELAY_ARMED},
+    events::EventBus,
+    onion::OnionRouter,
+};
 
 use super::metrics::NodeMetrics;
 
@@ -165,6 +169,17 @@ pub(crate) struct RelayArmedState {
     pub settlement_hash: String,
 }
 
+/// On-chain relay lifecycle of a session, as the receipt POST handler needs to
+/// see it: `Open` still accepts receipts, `Armed` pins the vault entry, and
+/// `Terminal` (SETTLED/REFUNDED/RELAY_CLAIMED/RELAY_REFUNDED) rejects further
+/// receipts — the session is closed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum RelayLifecycle {
+    Open,
+    Armed(RelayArmedState),
+    Terminal(u64),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SessionAdmission {
     Accepted,
@@ -237,10 +252,10 @@ impl RelayLifecycleVerifier {
         }
     }
 
-    pub(crate) async fn armed_state(
+    pub(crate) async fn lifecycle(
         &self,
         session_id: u64,
-    ) -> octravpn_core::CoreResult<Option<RelayArmedState>> {
+    ) -> octravpn_core::CoreResult<RelayLifecycle> {
         let caller = self.caller.as_ref();
         let status = self
             .rpc
@@ -251,8 +266,14 @@ impl RelayLifecycleVerifier {
                 caller,
             )
             .await?;
-        if value_as_u64(&status).unwrap_or(0) != SESSION_RELAY_ARMED {
-            return Ok(None);
+        let status = value_as_u64(&status).unwrap_or(SESSION_OPEN);
+        if status == SESSION_OPEN {
+            return Ok(RelayLifecycle::Open);
+        }
+        if status != SESSION_RELAY_ARMED {
+            // SETTLED/REFUNDED/RELAY_CLAIMED/RELAY_REFUNDED: the session has left
+            // the arm window; it accepts no more receipts.
+            return Ok(RelayLifecycle::Terminal(status));
         }
 
         let deadline = self
@@ -274,7 +295,7 @@ impl RelayLifecycleVerifier {
             )
             .await?;
 
-        Ok(Some(RelayArmedState {
+        Ok(RelayLifecycle::Armed(RelayArmedState {
             deadline: value_as_u64(&deadline).unwrap_or(0),
             settlement_hash: settlement_hash.as_str().unwrap_or_default().to_string(),
         }))

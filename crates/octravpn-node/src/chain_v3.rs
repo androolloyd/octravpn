@@ -57,6 +57,7 @@ pub(crate) const MIN_CIRCLE_STAKE_DEFAULT: u64 = 1_000_000_000;
 pub(crate) const CALL_FEE_FALLBACK: u64 = 1_000;
 
 /// `program/main-v4.aml` session status for an armed relay lane.
+pub(crate) const SESSION_OPEN: u64 = 0;
 pub(crate) const SESSION_RELAY_ARMED: u64 = 3;
 
 /// All v3 chain interactions. Holds the same RPC + wallet primitives
