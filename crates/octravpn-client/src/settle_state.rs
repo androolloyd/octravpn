@@ -21,7 +21,9 @@ use tracing::info;
 
 use crate::settler;
 
-/// `program/main-v4.aml` status for the relay lane.
+/// `program/main-v4.aml` session statuses. A session leaves `SESSION_OPEN` only
+/// forward: to `RELAY_ARMED` (arm landed) or straight to a terminal outcome.
+pub(crate) const SESSION_OPEN: u64 = 0;
 pub(crate) const SESSION_RELAY_ARMED: u64 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -251,14 +253,23 @@ impl SettleStateStore {
                         .get_session_status(sid)
                         .await
                         .with_context(|| format!("get_session_status({sid})"))?;
-                    if status == SESSION_RELAY_ARMED {
-                        self.record_arm_confirmed(&session_id)?;
-                        summary.submitted_confirmed += 1;
-                    } else {
+                    if status == SESSION_OPEN {
+                        // Arm not yet on chain -> re-broadcast (idempotent). ONLY
+                        // for SESSION_OPEN: any other status means the session has
+                        // moved past OPEN -- RELAY_ARMED (arm landed, awaiting
+                        // claim) or a terminal outcome (SETTLED/REFUNDED/
+                        // RELAY_CLAIMED/RELAY_REFUNDED) -- where a re-broadcast
+                        // arm_relay reverts "session not open" and burns a fee on
+                        // every boot. RELAY_CLAIMED is the mainline terminal
+                        // outcome now that claims succeed, so freeze the floor
+                        // instead of resubmitting forever.
                         self.submit_arm_from_journal(chain, env, &session_id)
                             .await?;
                         self.record_arm_submitted(&session_id)?;
                         summary.submitted_resubmitted += 1;
+                    } else {
+                        self.record_arm_confirmed(&session_id)?;
+                        summary.submitted_confirmed += 1;
                     }
                 }
                 SettlementState::ArmConfirmed => {
@@ -628,6 +639,37 @@ mod tests {
         assert_eq!(
             reopened.state(&submitted).unwrap(),
             Some(SettlementState::ArmSubmitted)
+        );
+    }
+
+    #[tokio::test]
+    async fn replay_pending_stops_resubmitting_a_settled_session() {
+        // Regression (Fable re-verify): once the operator claims (status
+        // RELAY_CLAIMED=4) — the mainline terminal outcome now that claims
+        // succeed — replay must NOT re-broadcast arm_relay. Pre-fix the
+        // non-RELAY_ARMED branch resubmitted for every status except 3, so every
+        // settled session re-armed (and reverted "session not open", burning a
+        // fee) on every boot forever.
+        let dir = tempfile::tempdir().unwrap();
+        let chain = MockChain::default();
+        chain.statuses.lock().push_back(4); // SESSION_RELAY_CLAIMED
+        let sid = id(21);
+        {
+            let s = store(dir.path());
+            s.record_proposed(&sid).unwrap();
+            s.record_countersigned(&sid, &signed(sid.clone(), 1, 30), 300)
+                .unwrap();
+            s.record_arm_submitted(&sid).unwrap();
+        }
+
+        let reopened = store(dir.path());
+        let summary = reopened.replay_pending(&chain, &env()).await.unwrap();
+
+        assert_eq!(summary.submitted_resubmitted, 0);
+        assert!(chain.submit_calls.lock().is_empty());
+        assert_eq!(
+            reopened.state(&sid).unwrap(),
+            Some(SettlementState::ArmConfirmed)
         );
     }
 
