@@ -40,13 +40,32 @@ produces — **no relay claim could succeed**. Fixed + landed:
 - **Slashed-operator earnings black hole closed** — `settle_confirm` no longer
   credits an inactive circle's unwithdrawable ledger; it refunds the funder.
 
-**True remaining gates to default-on** (unchanged in spirit, reordered):
-re-green the devnet e2e with the freeze gates (blocked on devnet 502) → Step 6
-autonomous in-daemon claimer (also retires the CLI's dual-nonce / dual-vault-open
-hazard — Fable risk #3) → Step 8 refund watcher + node sweep → Step 9 formal
-models, then flip. Threat-model notes still open: client-can-grief-operator
-(arm a garbage hash → refund; needs operator-side detection) and the one-write
-I1 ACK→record window.
+**Re-verify round (Fable, 2026-07-13).** Verdict: **the loop now closes** and the
+five fixes are individually sound and compose — but FIX 1 (claims now succeed)
+unmasked two seams, both fixed:
+
+- **Client replay re-armed settled sessions** — `replay_pending`'s `ArmSubmitted`
+  branch treated only `RELAY_ARMED` as confirmed and re-broadcast `arm_relay` for
+  every other status. `RELAY_CLAIMED` is now the mainline terminal outcome, so
+  every settled session re-armed (revert "session not open") and burned a fee on
+  every boot. Now re-broadcasts **only** on `SESSION_OPEN`; else freezes to
+  `ArmConfirmed`.
+- **Daemon accepted receipts for closed sessions** — the receipt POST handler
+  proceeded to `put()` for both `Open` and terminal statuses. Combined with the
+  CLI cross-process claim (residual #3), a post-claim receipt appended after the
+  claim's lifecycle records and bricked the vault on reopen. The handler now
+  three-ways the on-chain lifecycle (`Open` / `Armed` / `Terminal`) and rejects
+  receipts for a closed session (409). This closes the brick vector; the full
+  single-writer fix (route claims through the in-daemon `Hub::relay_claim_session`
+  instead of the CLI) is still Step 6.
+
+**True remaining gates to default-on** (reordered): re-green the devnet e2e with
+the freeze gates (blocked on devnet 502) → **Step 6 autonomous in-daemon claimer**
+(retires the CLI dual-nonce / dual-vault-writer entirely — Fable risk #3, now
+mitigated but not eliminated) → Step 8 refund watcher + node sweep → Step 9 formal
+models, then flip. Threat-model notes still open: client-can-grief-operator (arm a
+garbage hash → refund; needs operator-side detection) and the one-write I1
+ACK→record window.
 
 ---
 
