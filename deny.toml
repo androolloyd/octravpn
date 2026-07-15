@@ -5,9 +5,10 @@ yanked = "warn"
 ignore = [
   # No fixed replacement from tun-rs/netlink-packet-core yet.
   "RUSTSEC-2024-0436",
-  # Removed from the companion headscale-rs audit branch by switching
-  # to rustls-pki-types' built-in PEM parser.
-  "RUSTSEC-2025-0134",
+  # proc-macro-error2 (unmaintained): build-time-only proc-macro dep, pulled
+  # via getset -> neli -> local-ip-address -> headscale-cli. Not in the runtime
+  # binary; no fixed upstream yet. Revisit if neli/getset drop it.
+  "RUSTSEC-2026-0173",
 ]
 
 [licenses]
