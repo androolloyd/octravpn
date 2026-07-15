@@ -17,7 +17,7 @@ use octravpn_core::{
     session::SessionId,
 };
 use serde_json::Value;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::settler;
 
@@ -436,15 +436,28 @@ impl SettleStateStore {
             // WRITE-AHEAD (I6): record the intent BEFORE the broadcast so a crash
             // mid-submit does not re-refund on the next boot.
             self.record_refund_submitted(&session_id)?;
-            let fee = chain.refund_fee().await?;
+            let fee = match chain.refund_fee().await {
+                Ok(f) => f,
+                Err(e) => {
+                    debug!(session = sid, error = %e, "refund fee read failed; skip (retry next scan)");
+                    continue;
+                }
+            };
             let call =
                 settler::build_relay_refund_params(&env.program_addr, &env.wallet_addr, sid, fee);
-            let tx_hash = chain
-                .submit_refund_call(call)
-                .await
-                .with_context(|| format!("submit relay_refund({sid})"))?;
-            info!(hash = %tx_hash, session = sid, "relay_refund submitted (operator no-show)");
-            summary.refund_submitted += 1;
+            // Best-effort: the durable RefundSubmitted floor means the next scan
+            // re-submits (still RELAY_ARMED) or drains (if it actually landed), so
+            // a transient submit failure must NOT abort the scan (or, via boot,
+            // the whole client) -- refunding your own deposit has no downside.
+            match chain.submit_refund_call(call).await {
+                Ok(tx_hash) => {
+                    info!(hash = %tx_hash, session = sid, "relay_refund submitted (operator no-show)");
+                    summary.refund_submitted += 1;
+                }
+                Err(e) => {
+                    warn!(session = sid, error = %e, "relay_refund submit failed; will retry next scan");
+                }
+            }
         }
         Ok(summary)
     }
@@ -566,16 +579,20 @@ pub(crate) async fn replay_pending_for_client(client: &crate::runner::Client) ->
     // Step 8: refund watcher. Catches an operator no-show that only became
     // refundable while the client was offline for days. Always runs when relay
     // is enabled -- refunding your own deposit has no downside beyond one fee.
+    // NON-FATAL: this is best-effort background work at boot; a transient failure
+    // must never abort client startup (the write-ahead makes it self-heal on the
+    // next launch). The explicit `settle refund` CLI still surfaces errors.
     let refund_margin = client.relay_config().resolved_refund_margin_epochs();
-    let refund = store.refund_pending(client, &env, refund_margin).await?;
-    if refund != RefundSummary::default() {
-        info!(
+    match store.refund_pending(client, &env, refund_margin).await {
+        Ok(refund) if refund != RefundSummary::default() => info!(
             refund_submitted = refund.refund_submitted,
             drained_refunded = refund.drained_refunded,
             drained_settled = refund.drained_settled,
             state_dir = %store.paths().wallet_dir.display(),
             "relay refund scan complete"
-        );
+        ),
+        Ok(_) => {}
+        Err(e) => warn!(error = %e, "boot relay-refund scan failed; retrying next launch"),
     }
     Ok(())
 }
@@ -980,6 +997,7 @@ mod tests {
     struct MockRefundChain {
         status: Mutex<u64>,
         strict_err: Mutex<bool>,
+        submit_err: Mutex<bool>,
         deadline: u64,
         epoch: u64,
         submit_calls: Mutex<Vec<Value>>,
@@ -990,6 +1008,7 @@ mod tests {
             Self {
                 status: Mutex::new(status),
                 strict_err: Mutex::new(false),
+                submit_err: Mutex::new(false),
                 deadline,
                 epoch,
                 submit_calls: Mutex::new(Vec::new()),
@@ -1015,6 +1034,9 @@ mod tests {
             Ok(self.epoch)
         }
         async fn submit_refund_call(&self, call: Value) -> Result<String> {
+            if *self.submit_err.lock() {
+                return Err(anyhow!("mock submit error"));
+            }
             self.submit_calls.lock().push(call);
             Ok("refund-tx".to_string())
         }
@@ -1151,6 +1173,28 @@ mod tests {
 
         assert_eq!(out, RefundSummary::default());
         assert!(chain.submit_calls.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn refund_pending_submit_error_is_non_fatal_and_wrote_ahead() {
+        // Review finding: a transient submit failure must NOT abort the scan (or,
+        // via the boot path, client startup). refund_pending returns Ok; the
+        // write-ahead RefundSubmitted floor persists so the next scan retries.
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(dir.path());
+        let sid = id(58);
+        arm_confirmed(&s, &sid);
+        let chain = MockRefundChain::new(SESSION_RELAY_ARMED, 100, 200);
+        *chain.submit_err.lock() = true;
+
+        let out = s.refund_pending(&chain, &env(), 3).await.unwrap();
+
+        assert_eq!(out.refund_submitted, 0);
+        assert_eq!(
+            s.state(&sid).unwrap(),
+            Some(SettlementState::RefundSubmitted),
+            "write-ahead persists for retry"
+        );
     }
 
     #[test]
