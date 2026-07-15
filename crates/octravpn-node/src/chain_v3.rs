@@ -1321,8 +1321,7 @@ mod tests {
         });
 
         let wallet = KeyPair::from_secret_bytes(&[7u8; 32]);
-        let program_addr =
-            Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+        let program_addr = Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
         let c = ChainCtxV3::new(
             RpcClient::new(&format!("http://{addr}/")),
             program_addr,
@@ -1385,8 +1384,7 @@ mod tests {
                 .await;
         });
         let wallet = KeyPair::from_secret_bytes(&[7u8; 32]);
-        let program_addr =
-            Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+        let program_addr = Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
         let c = ChainCtxV3::new(
             RpcClient::new(&format!("http://{addr}/")),
             program_addr,
@@ -1431,8 +1429,7 @@ mod tests {
                 .await;
         });
         let wallet = KeyPair::from_secret_bytes(&[7u8; 32]);
-        let program_addr =
-            Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+        let program_addr = Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
         let c = ChainCtxV3::new(
             RpcClient::new(&format!("http://{addr}/")),
             program_addr,

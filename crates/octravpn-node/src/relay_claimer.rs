@@ -103,11 +103,17 @@ async fn run_tick<B: ClaimerBackend + ?Sized>(
         match backend.confirm_and_drain(sid).await {
             Ok(DrainOutcome::Claimed) => {
                 inflight.remove(&sid);
-                debug!(session = sid, "relay claim confirmed on chain; drained to Claimed");
+                debug!(
+                    session = sid,
+                    "relay claim confirmed on chain; drained to Claimed"
+                );
             }
             Ok(DrainOutcome::Refunded) => {
                 inflight.remove(&sid);
-                debug!(session = sid, "relay session refunded on chain; drained to Refunded");
+                debug!(
+                    session = sid,
+                    "relay session refunded on chain; drained to Refunded"
+                );
             }
             Ok(DrainOutcome::Pending) => {}
             Err(e) => {
@@ -282,7 +288,11 @@ mod tests {
         let mut inflight = HashMap::new();
         run_tick(&backend, &mut inflight, 1, 1, false).await; // submit at tick 1
         run_tick(&backend, &mut inflight, 2, 1, false).await; // tick 2 within grace -> skip
-        assert_eq!(*backend.claims.lock(), vec![42], "no re-submit within grace");
+        assert_eq!(
+            *backend.claims.lock(),
+            vec![42],
+            "no re-submit within grace"
+        );
         run_tick(&backend, &mut inflight, 3, 1, false).await; // tick 3 -> re-eligible
         assert_eq!(
             *backend.claims.lock(),

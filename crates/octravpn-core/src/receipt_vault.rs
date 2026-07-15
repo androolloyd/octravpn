@@ -1354,16 +1354,25 @@ mod tests {
         let armed = SessionId::new([0xD2; 32]);
 
         let vault = ReceiptVault::open(&path).unwrap();
-        vault.put(&proposed, &signed(1, 100, proposed.clone())).unwrap();
+        vault
+            .put(&proposed, &signed(1, 100, proposed.clone()))
+            .unwrap();
         let ar = signed(1, 200, armed.clone());
         vault.put(&armed, &ar).unwrap();
         vault.mark_armed(&armed, 99, ar.settlement_hash()).unwrap();
 
         let claimable: Vec<_> = vault.claimable().into_iter().map(|(id, _)| id).collect();
-        assert!(claimable.contains(&proposed), "claimable must include Proposed");
+        assert!(
+            claimable.contains(&proposed),
+            "claimable must include Proposed"
+        );
         assert!(claimable.contains(&armed));
 
-        let armed_only: Vec<_> = vault.armed_unclaimed().into_iter().map(|(id, _)| id).collect();
+        let armed_only: Vec<_> = vault
+            .armed_unclaimed()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
         assert!(
             !armed_only.contains(&proposed),
             "armed_unclaimed must exclude Proposed"
@@ -1418,14 +1427,20 @@ mod tests {
         let compacted = vault.compact();
         // Restore writability for the put + reopen + tempdir cleanup.
         std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(compacted.is_err(), "compact should fail with a read-only dir");
+        assert!(
+            compacted.is_err(),
+            "compact should fail with a read-only dir"
+        );
 
         // The invariant: the failed compaction kept the handle, so this persists.
         vault.put(&b, &signed(1, 200, b.clone())).unwrap();
         drop(vault);
 
         let reopened = ReceiptVault::open(&path).unwrap();
-        assert!(reopened.get(&a).is_some(), "pre-compact receipt must survive");
+        assert!(
+            reopened.get(&a).is_some(),
+            "pre-compact receipt must survive"
+        );
         assert!(
             reopened.get(&b).is_some(),
             "a put AFTER a failed compaction must persist (handle not dropped)"
