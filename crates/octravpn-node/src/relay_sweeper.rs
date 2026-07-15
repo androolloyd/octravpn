@@ -13,11 +13,14 @@
 //! whole range over many ticks). It has no vault to drain: a session leaves the
 //! candidate set simply by no longer being `RELAY_ARMED` on chain.
 //!
-//! Safety: the sweep window (`deadline + sweep_grace + margin`) is strictly LATER
-//! than both the operator claim window (`epoch < deadline`) and the funder refund
-//! window (`epoch >= deadline + k_r`), so a live operator/funder always resolves
-//! the session first; a keeper only ever rescues the truly-abandoned. Default-off
-//! behind `[control.relay].auto_sweep`; the actor parks otherwise.
+//! Safety: the on-chain sweep guard (`epoch >= deadline + sweep_grace`, plus the
+//! off-chain `margin` buffer here) opens strictly LATER than both the operator
+//! claim guard (`epoch < deadline`) and the on-chain funder refund guard
+//! (`epoch >= deadline` — the client watcher layers its own off-chain margin k_r
+//! on top, but the chain itself allows refund from the deadline). So a live
+//! operator/funder always resolves the session first; a keeper only ever rescues
+//! the truly-abandoned. Default-off behind `[control.relay].auto_sweep`; the
+//! actor parks otherwise.
 
 use std::collections::HashMap;
 use std::sync::Arc;
