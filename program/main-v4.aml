@@ -983,4 +983,12 @@ contract OctraVPN_V3 {
   view fn get_session_opener(session_id: uint): address {
     return self.session_opener[session_id]
   }
+
+  view fn get_session_count(): uint {
+    return self.session_count
+  }
+
+  view fn get_sweep_grace(): uint {
+    return self.session_grace_epochs * self.sweep_grace_multiplier
+  }
 }

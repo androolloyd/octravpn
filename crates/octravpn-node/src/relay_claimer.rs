@@ -41,7 +41,7 @@ const COMPACT_EVERY: u64 = 60;
 /// T+1 and re-eligible at T+2. The `<=` is load-bearing: a plain `<` makes
 /// `quiesce = 1` a no-op (the T+1 gap of 1 fails `1 < 1`, re-submitting a
 /// duplicate claim tx while the first is still in the mempool).
-fn within_grace(now: u64, submitted_at: u64, quiesce: u64) -> bool {
+pub(crate) fn within_grace(now: u64, submitted_at: u64, quiesce: u64) -> bool {
     now.saturating_sub(submitted_at) <= quiesce
 }
 

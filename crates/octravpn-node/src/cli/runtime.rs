@@ -33,9 +33,12 @@ async fn run(hub: Arc<Hub>) -> Result<()> {
     let health_task = hub.clone().spawn_validator_health_loop();
     let tunnel_task = hub.clone().spawn_tunnel();
     let control_task = hub.clone().spawn_control_plane();
-    // Step 6: in-daemon autonomous relay-claimer. No-op unless
-    // `[control.relay].auto_claim = true` (the task returns Ok immediately).
+    // Step 6: in-daemon autonomous relay-claimer. Parks unless
+    // `[control.relay].auto_claim = true`.
     let claimer_task = hub.clone().spawn_relay_claimer();
+    // Step 8b: permissionless keeper sweeper. Parks unless
+    // `[control.relay].auto_sweep = true`.
+    let sweeper_task = hub.clone().spawn_relay_sweeper();
 
     info!("octravpn-node running");
     tokio::select! {
@@ -43,6 +46,7 @@ async fn run(hub: Arc<Hub>) -> Result<()> {
         r = tunnel_task => r??,
         r = control_task => r??,
         r = claimer_task => r??,
+        r = sweeper_task => r??,
         _ = tokio::signal::ctrl_c() => {
             info!("shutdown requested");
         }

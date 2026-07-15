@@ -1033,6 +1033,24 @@ pub(crate) struct ControlRelayCfg {
     /// the claimer would consider re-submitting. Clamped to `[1, 100]`.
     #[serde(default = "default_quiescent_ticks")]
     pub quiescent_ticks: u32,
+    /// Step 8b: run the permissionless keeper sweeper — rescues a permanently-
+    /// offline funder by sweeping an armed session neither claimed nor refunded
+    /// past the sweep grace (earns a bounty). Requires `enabled = true`. Default
+    /// `false`; separate from `auto_claim` (a node can claim without sweeping).
+    #[serde(default)]
+    pub auto_sweep: bool,
+    /// Seconds between sweeper scan ticks. Clamped to `[10, 3600]`.
+    #[serde(default = "default_sweep_scan_period_secs")]
+    pub sweep_scan_period_secs: u64,
+    /// Extra epochs the sweeper waits past the on-chain sweep threshold
+    /// (`deadline + get_sweep_grace()`) before submitting, so a live funder's
+    /// own refund window always closes first. Clamped to `[1, 20]`.
+    #[serde(default = "default_sweep_margin_epochs")]
+    pub sweep_margin_epochs: u64,
+    /// Max sessions the sweeper reads per tick (cursor-bounded scan of the full
+    /// session range, so a large chain does not blow up one tick). `[16, 4096]`.
+    #[serde(default = "default_sweep_batch")]
+    pub sweep_batch: u64,
 }
 
 impl Default for ControlRelayCfg {
@@ -1044,6 +1062,10 @@ impl Default for ControlRelayCfg {
             claim_scan_period_secs: default_claim_scan_period_secs(),
             claim_margin_epochs: default_claim_margin_epochs(),
             quiescent_ticks: default_quiescent_ticks(),
+            auto_sweep: false,
+            sweep_scan_period_secs: default_sweep_scan_period_secs(),
+            sweep_margin_epochs: default_sweep_margin_epochs(),
+            sweep_batch: default_sweep_batch(),
         }
     }
 }
@@ -1065,6 +1087,21 @@ impl ControlRelayCfg {
     pub(crate) fn resolved_quiescent_ticks(&self) -> u32 {
         self.quiescent_ticks.clamp(1, 100)
     }
+    /// Sweeper scan period, clamped `[10, 3600]` (slower than claim: sweep is a
+    /// rare rescue path).
+    pub(crate) fn resolved_sweep_period(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.sweep_scan_period_secs.clamp(10, 3600))
+    }
+    /// Extra sweep margin epochs, clamped `[1, 20]`. The lower bound of 1 keeps
+    /// the sweep strictly after the on-chain sweep threshold; the buffer absorbs
+    /// epoch-read staleness so a live funder always self-refunds first.
+    pub(crate) fn resolved_sweep_margin_epochs(&self) -> u64 {
+        self.sweep_margin_epochs.clamp(1, 20)
+    }
+    /// Sessions scanned per sweeper tick, clamped `[16, 4096]`.
+    pub(crate) fn resolved_sweep_batch(&self) -> u64 {
+        self.sweep_batch.clamp(16, 4096)
+    }
 }
 
 fn default_relay_expiry_epochs() -> u64 {
@@ -1081,6 +1118,18 @@ fn default_claim_margin_epochs() -> u64 {
 
 fn default_quiescent_ticks() -> u32 {
     1
+}
+
+fn default_sweep_scan_period_secs() -> u64 {
+    300
+}
+
+fn default_sweep_margin_epochs() -> u64 {
+    3
+}
+
+fn default_sweep_batch() -> u64 {
+    256
 }
 
 /// Perf-1: TOML selector for the receipt-journal fsync policy.
@@ -1303,6 +1352,31 @@ region = "eu-west"
         assert_eq!(relay.resolved_margin_epochs(), 5);
         assert_eq!(relay.resolved_scan_period().as_secs(), 3600); // max 1h
         assert_eq!(relay.resolved_quiescent_ticks(), 100);
+    }
+
+    #[test]
+    fn control_relay_sweep_accessors_clamp_and_default_off() {
+        let d = ControlRelayCfg::default();
+        assert!(!d.auto_sweep);
+        assert_eq!(d.sweep_scan_period_secs, 300);
+        assert_eq!(d.sweep_margin_epochs, 3);
+        assert_eq!(d.sweep_batch, 256);
+
+        let mut r = ControlRelayCfg {
+            sweep_margin_epochs: 0,
+            sweep_scan_period_secs: 1,
+            sweep_batch: 1,
+            ..ControlRelayCfg::default()
+        };
+        assert_eq!(r.resolved_sweep_margin_epochs(), 1);
+        assert_eq!(r.resolved_sweep_period().as_secs(), 10); // min 10s
+        assert_eq!(r.resolved_sweep_batch(), 16); // min 16
+        r.sweep_margin_epochs = 99;
+        r.sweep_scan_period_secs = 100_000;
+        r.sweep_batch = 99_999;
+        assert_eq!(r.resolved_sweep_margin_epochs(), 20);
+        assert_eq!(r.resolved_sweep_period().as_secs(), 3600);
+        assert_eq!(r.resolved_sweep_batch(), 4096);
     }
 
     /// Perf-1: a default-built `ControlCfg` (operator omits the field)

@@ -317,6 +317,43 @@ impl ChainCtxV3 {
         Ok(v.as_u64().unwrap_or(0))
     }
 
+    /// `get_session_count() -> uint` view (STRICT). Total sessions ever opened;
+    /// the sweeper enumerates `[0, count)`. A bad body is an Err so the sweeper
+    /// skips the tick rather than mis-enumerating.
+    pub(crate) async fn get_session_count(&self) -> Result<u64> {
+        let v = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_session_count",
+                &[],
+                Some(&self.wallet_addr),
+            )
+            .await
+            .context("get_session_count")?;
+        v.as_u64()
+            .ok_or_else(|| anyhow!("non-numeric session_count body"))
+    }
+
+    /// `get_sweep_grace() -> uint` view (STRICT): `session_grace_epochs *
+    /// sweep_grace_multiplier`, the extra epochs past the relay deadline before a
+    /// session becomes sweepable on chain. The sweeper gates on
+    /// `epoch >= deadline + sweep_grace + margin`; a bad read skips the tick.
+    pub(crate) async fn get_sweep_grace(&self) -> Result<u64> {
+        let v = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_sweep_grace",
+                &[],
+                Some(&self.wallet_addr),
+            )
+            .await
+            .context("get_sweep_grace")?;
+        v.as_u64()
+            .ok_or_else(|| anyhow!("non-numeric sweep_grace body"))
+    }
+
     /// `get_relay_settlement_hash(sid) -> bytes` view: the on-chain committed
     /// H (64-char hex) the opener armed with. Empty string if unset.
     pub(crate) async fn get_relay_settlement_hash(&self, session_id: u64) -> Result<String> {
@@ -782,6 +819,11 @@ impl ChainCtxV3 {
     ) -> Value {
         self.call_builder()
             .relay_claim_call(session_id, settlement_preimage_b64, 0, fee, nonce)
+    }
+
+    pub(crate) fn build_relay_sweep_call(&self, session_id: u64, fee: u64, nonce: u64) -> Value {
+        self.call_builder()
+            .relay_sweep_call(session_id, 0, fee, nonce)
     }
 
     /// `relay_refund(session_id)` — opener-side recovery after the

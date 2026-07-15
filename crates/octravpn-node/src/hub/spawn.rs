@@ -33,6 +33,12 @@ impl Hub {
         tokio::spawn(async move { crate::relay_claimer::run(self).await })
     }
 
+    /// Spawn the Step-8b permissionless keeper sweeper. Self-disables (parks)
+    /// unless `[control.relay].auto_sweep = true`, so it is a no-op by default.
+    pub(crate) fn spawn_relay_sweeper(self: Arc<Self>) -> JoinHandle<Result<()>> {
+        tokio::spawn(async move { crate::relay_sweeper::run(self).await })
+    }
+
     pub(crate) fn spawn_tunnel(self: Arc<Self>) -> JoinHandle<Result<()>> {
         let allowlist = self.allowlist.clone();
         tokio::spawn(async move {

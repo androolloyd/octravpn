@@ -82,6 +82,9 @@ pub mod method {
     pub const RELAY_CLAIM: &str = "relay_claim";
     /// `relay_refund(session_id)`.
     pub const RELAY_REFUND: &str = "relay_refund";
+    /// `nonreentrant relay_sweep(session_id)` — permissionless keeper sweep of an
+    /// armed session neither claimed nor refunded past the sweep grace.
+    pub const RELAY_SWEEP: &str = "relay_sweep";
     /// `claim_no_show(session_id)`.
     pub const CLAIM_NO_SHOW: &str = "claim_no_show";
     /// `nonreentrant sweep_expired_session(session_id)`.
@@ -557,6 +560,10 @@ impl ContractCallBuilder {
             fee,
             nonce,
         )
+    }
+
+    pub fn relay_sweep_call(&self, session_id: u64, value: u64, fee: u64, nonce: u64) -> Value {
+        self.call(method::RELAY_SWEEP, &[json!(session_id)], value, fee, nonce)
     }
 
     /// HFHE-2 variant of [`Self::settle_confirm_call`] with two
@@ -1181,6 +1188,24 @@ mod tests {
             "from": WALLET,
             "to": PROG,
             "method": "relay_refund",
+            "params": [7u64],
+            "value": 0u64,
+            "fee": 500u64,
+            "nonce": 27u64,
+            "timestamp": TEST_TIMESTAMP,
+        });
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn relay_sweep_shape() {
+        let b = builder();
+        let got = b.relay_sweep_call(7, 0, 500, 27);
+        let want = json!({
+            "kind": "contract_call",
+            "from": WALLET,
+            "to": PROG,
+            "method": "relay_sweep",
             "params": [7u64],
             "value": 0u64,
             "fee": 500u64,

@@ -41,6 +41,7 @@ mod pvac;
 mod rate_limit;
 mod relay_claimer;
 mod relay_settlement;
+mod relay_sweeper;
 mod seal;
 mod tunnel;
 mod v3_boot;
