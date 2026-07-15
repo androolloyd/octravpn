@@ -30,9 +30,9 @@ pub(crate) async fn submit_relay_claim_from_vault(
     session_id: u64,
     // Claim only while `epoch + margin <= relay_deadline`, so the claim tx can
     // never confirm at/after the deadline (where relay_claim reverts and the
-    // client may relay_refund, wasting the revealed preimage). The manual/legacy
-    // path passes 0 (its old `epoch < deadline` behaviour); the autonomous
-    // claimer passes the clamped `[1,5]` config margin.
+    // client may relay_refund, wasting the revealed preimage). The autonomous
+    // claimer (the sole caller) passes the clamped `[1,5]` config margin; tests
+    // pass a small fixed margin.
     margin: u64,
 ) -> Result<RelayClaimSubmission> {
     let vault_id = SessionId::from_u64(session_id);

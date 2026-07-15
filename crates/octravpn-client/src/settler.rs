@@ -132,9 +132,11 @@ pub(crate) async fn settle_active(client: &Arc<Client>, active: ActiveSession) -
             true
         }
         Err(e) => {
+            // The relay lane surfaces this as an error below (arm-XOR-confirm, no
+            // settle_confirm fallback); only the non-relay v1.1 lane falls back.
             warn!(
                 error = %e,
-                "countersigned receipt handback failed; falling back to v3 settle_confirm"
+                "countersigned receipt handback failed"
             );
             false
         }

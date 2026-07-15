@@ -333,6 +333,32 @@ impl ReceiptVault {
             .collect()
     }
 
+    /// Entries the autonomous claimer may still need to submit a claim for. This
+    /// is a SUPERSET of [`armed_unclaimed`] that also includes `Proposed`: in the
+    /// canonical POST->ACK->arm order the receipt POST lands while the session is
+    /// still SESSION_OPEN, so the operator's vault entry is `Proposed` while the
+    /// chain is RELAY_ARMED. `submit_relay_claim_from_vault` promotes such a
+    /// Proposed entry to `Armed` from chain truth before revealing, so it is
+    /// designed to receive these -- the claimer scans THIS for its submit pass.
+    /// (The drain pass stays on `armed_unclaimed`: `Proposed` cannot legally
+    /// transition straight to a terminal state.)
+    pub fn claimable(&self) -> Vec<(SessionId, SessionEntry)> {
+        self.inner
+            .lock()
+            .by_session
+            .iter()
+            .filter(|(_, entry)| {
+                matches!(
+                    entry.state,
+                    LifecycleState::Proposed
+                        | LifecycleState::Armed { .. }
+                        | LifecycleState::ClaimSubmitted { .. }
+                )
+            })
+            .map(|(id, entry)| (id.clone(), entry.clone()))
+            .collect()
+    }
+
     /// Append `receipt` and fsync before returning. The store accepts a
     /// same-sequence replay only when it is byte-identical to the stored
     /// receipt; a conflicting equal-seq receipt is rejected. Once a
@@ -1313,6 +1339,36 @@ mod tests {
         );
         let err = reopened.mark_armed(&id, 88, hash).unwrap_err();
         assert!(matches!(err, ReceiptVaultError::IllegalTransition { .. }));
+    }
+
+    #[test]
+    fn claimable_includes_proposed_but_armed_unclaimed_does_not() {
+        // Regression (Step-6 review): the autonomous claimer scans `claimable`
+        // for its submit pass, and that MUST include Proposed -- the canonical
+        // POST->ACK->arm order leaves the operator's vault entry Proposed while
+        // the chain is RELAY_ARMED. `armed_unclaimed` deliberately excludes
+        // Proposed (drain pass only, since Proposed cannot drain to terminal).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("receipt-vault.bin");
+        let proposed = SessionId::new([0xD1; 32]);
+        let armed = SessionId::new([0xD2; 32]);
+
+        let vault = ReceiptVault::open(&path).unwrap();
+        vault.put(&proposed, &signed(1, 100, proposed.clone())).unwrap();
+        let ar = signed(1, 200, armed.clone());
+        vault.put(&armed, &ar).unwrap();
+        vault.mark_armed(&armed, 99, ar.settlement_hash()).unwrap();
+
+        let claimable: Vec<_> = vault.claimable().into_iter().map(|(id, _)| id).collect();
+        assert!(claimable.contains(&proposed), "claimable must include Proposed");
+        assert!(claimable.contains(&armed));
+
+        let armed_only: Vec<_> = vault.armed_unclaimed().into_iter().map(|(id, _)| id).collect();
+        assert!(
+            !armed_only.contains(&proposed),
+            "armed_unclaimed must exclude Proposed"
+        );
+        assert!(armed_only.contains(&armed));
     }
 
     #[test]
