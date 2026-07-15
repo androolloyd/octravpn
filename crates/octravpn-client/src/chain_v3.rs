@@ -158,6 +158,53 @@ impl<'a> ChainCtxV3<'a> {
         Ok(v.as_u64().unwrap_or(0))
     }
 
+    /// Strict `get_session_status` for the refund watcher's confirm-drain: a
+    /// non-numeric/hostile/empty RPC body is an `Err` (retry), NOT a phantom
+    /// `0 = SESSION_OPEN`. The watcher drives the durable ladder to a terminal
+    /// state only on an EXACT positive status match, so a bad read must never
+    /// phantom-drain a live session. Mirrors the node reader.
+    pub(crate) async fn get_session_status_strict(&self, session_id: u64) -> Result<u64> {
+        let v = self
+            .rpc
+            .contract_call(
+                self.program_addr,
+                "get_session_status",
+                &[json!(session_id)],
+                Some(&self.wallet_addr),
+            )
+            .await
+            .context("get_session_status_strict")?;
+        v.as_u64()
+            .ok_or_else(|| anyhow!("non-numeric session_status body for session {session_id}"))
+    }
+
+    /// `get_relay_deadline(sid) -> int`, STRICT. The refund gate is
+    /// `epoch >= deadline + margin`; a lenient `unwrap_or(0)` deadline would make
+    /// the gate `epoch >= margin` (always true) and refund BEFORE the real
+    /// deadline, colliding with a still-valid operator claim. A bad read must
+    /// therefore skip (Err), not proceed.
+    pub(crate) async fn get_relay_deadline(&self, session_id: u64) -> Result<u64> {
+        let v = self
+            .rpc
+            .contract_call(
+                self.program_addr,
+                "get_relay_deadline",
+                &[json!(session_id)],
+                Some(&self.wallet_addr),
+            )
+            .await
+            .context("get_relay_deadline")?;
+        v.as_u64()
+            .ok_or_else(|| anyhow!("non-numeric relay_deadline body for session {session_id}"))
+    }
+
+    /// Current chain epoch. This is a float-truncated LOWER bound (devnet reports
+    /// a float unix-ish epoch); never round it up — a conservative (low) read only
+    /// ever DELAYS a refund, which is safe.
+    pub(crate) async fn current_epoch(&self) -> Result<u64> {
+        Ok(self.rpc.node_status().await?.epoch)
+    }
+
     /// `get_earnings_total(circle) -> int` — sanity-display only.
     #[allow(dead_code)]
     pub(crate) async fn get_earnings_total(&self, circle: &str) -> Result<u64> {

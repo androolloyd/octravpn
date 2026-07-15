@@ -17,21 +17,37 @@ use octravpn_core::{
     session::SessionId,
 };
 use serde_json::Value;
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::settler;
 
-/// `program/main-v4.aml` session statuses. A session leaves `SESSION_OPEN` only
-/// forward: to `RELAY_ARMED` (arm landed) or straight to a terminal outcome.
+/// `program/main-v4.aml` ON-CHAIN session statuses (what `get_session_status`
+/// returns). Distinct namespace from the durable ladder codes below (they
+/// overlap numerically but are used in different contexts). A session leaves
+/// `SESSION_OPEN` only forward: to `RELAY_ARMED` or straight to a terminal.
 pub(crate) const SESSION_OPEN: u64 = 0;
 pub(crate) const SESSION_RELAY_ARMED: u64 = 3;
+pub(crate) const SESSION_RELAY_CLAIMED: u64 = 4;
+pub(crate) const SESSION_RELAY_REFUNDED: u64 = 5;
 
+/// Durable client settlement ladder (the `settle_state.bin` floor per session).
+/// Forward-only; terminals (`Refunded`/`Settled`) are appended strictly ABOVE
+/// the `RefundSubmitted` write-ahead rung so a drain always bumps. Because the
+/// AML makes relay_claim (`epoch < D`) and relay_refund (`epoch >= D`) disjoint,
+/// exactly one terminal is ever written per session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum SettlementState {
     Proposed = 1,
     Countersigned = 2,
     ArmSubmitted = 3,
     ArmConfirmed = 4,
+    /// Write-ahead: `relay_refund` broadcast, not yet confirmed. Non-terminal.
+    RefundSubmitted = 5,
+    /// Terminal: chain confirmed `SESSION_RELAY_REFUNDED` (deposit returned).
+    Refunded = 6,
+    /// Terminal: chain confirmed `SESSION_RELAY_CLAIMED` (operator won; the
+    /// client must NOT refund).
+    Settled = 7,
 }
 
 impl SettlementState {
@@ -46,6 +62,9 @@ impl SettlementState {
             2 => Some(Self::Countersigned),
             3 => Some(Self::ArmSubmitted),
             4 => Some(Self::ArmConfirmed),
+            5 => Some(Self::RefundSubmitted),
+            6 => Some(Self::Refunded),
+            7 => Some(Self::Settled),
             other => bail!("unknown settle_state floor code {other}"),
         })
     }
@@ -108,6 +127,26 @@ pub(crate) trait ArmChain: Send + Sync {
     async fn arm_fee(&self) -> Result<u64>;
     async fn submit_arm_call(&self, call: Value) -> Result<String>;
     async fn get_session_status(&self, session_id: u64) -> Result<u64>;
+}
+
+/// The chain surface the refund watcher needs. Extracted as a trait (like
+/// `ArmChain`) so the two-pass drain/submit logic is testable with a mock chain.
+#[async_trait]
+pub(crate) trait RefundChain: Send + Sync {
+    async fn refund_fee(&self) -> Result<u64>;
+    /// STRICT: a bad body is an Err (skip/retry), never a phantom 0.
+    async fn get_session_status_strict(&self, session_id: u64) -> Result<u64>;
+    async fn get_relay_deadline(&self, session_id: u64) -> Result<u64>;
+    /// Current epoch (float-truncated LOWER bound; only ever delays a refund).
+    async fn current_epoch(&self) -> Result<u64>;
+    async fn submit_refund_call(&self, call: Value) -> Result<String>;
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RefundSummary {
+    pub(crate) refund_submitted: usize,
+    pub(crate) drained_refunded: usize,
+    pub(crate) drained_settled: usize,
 }
 
 impl SettleStateStore {
@@ -225,6 +264,23 @@ impl SettleStateStore {
         self.bump_state(session_id, SettlementState::ArmConfirmed)
     }
 
+    /// Write-ahead (I6): record a `relay_refund` broadcast BEFORE it hits the
+    /// wire, so a crash mid-broadcast does not re-refund on the next boot.
+    pub(crate) fn record_refund_submitted(&self, session_id: &SessionId) -> Result<()> {
+        self.bump_state(session_id, SettlementState::RefundSubmitted)
+    }
+
+    /// Terminal: chain confirmed the deposit was refunded to the funder.
+    pub(crate) fn record_refunded(&self, session_id: &SessionId) -> Result<()> {
+        self.bump_state(session_id, SettlementState::Refunded)
+    }
+
+    /// Terminal: chain confirmed the operator claimed (RELAY_CLAIMED); the client
+    /// must stop trying to refund this session.
+    pub(crate) fn record_settled(&self, session_id: &SessionId) -> Result<()> {
+        self.bump_state(session_id, SettlementState::Settled)
+    }
+
     pub(crate) async fn replay_pending<C: ArmChain>(
         &self,
         chain: &C,
@@ -275,7 +331,120 @@ impl SettleStateStore {
                 SettlementState::ArmConfirmed => {
                     summary.already_confirmed += 1;
                 }
+                // The refund watcher (a separate pass) owns these rungs; the arm
+                // replay leaves them strictly alone. Explicit arms, never a
+                // `_ =>` catch-all: a future ladder state must force a compile
+                // error here rather than silently re-arming a terminal session.
+                SettlementState::RefundSubmitted
+                | SettlementState::Refunded
+                | SettlementState::Settled => {}
             }
+        }
+        Ok(summary)
+    }
+
+    /// Funder-side mirror of the node claimer: refund an armed session whose
+    /// operator NO-SHOWED (never claimed) so the deposit returns to the funder.
+    /// Two ordered passes over the durable ladder, candidates in
+    /// `{ArmConfirmed, RefundSubmitted}`:
+    ///   1. DRAIN — promote to a terminal (`Refunded`/`Settled`) purely from an
+    ///      EXACT positive strict on-chain status match; a bad read leaves it.
+    ///   2. SUBMIT — reveal a `relay_refund` only when the session is still
+    ///      RELAY_ARMED and `epoch >= deadline + margin` (the I3 refund window,
+    ///      strictly after the claim window), write-ahead first.
+    /// One-shot (boot scan + CLI), so no in-flight-grace loop is needed; a
+    /// still-unconfirmed refund is naturally re-attempted only on the next run.
+    pub(crate) async fn refund_pending<C: RefundChain>(
+        &self,
+        chain: &C,
+        env: &ArmEnvironment,
+        refund_margin: u64,
+    ) -> Result<RefundSummary> {
+        let mut summary = RefundSummary::default();
+
+        // ---- PASS 1: DRAIN (terminal only from an exact positive strict match) ----
+        for (session_id, state) in self.state_entries()? {
+            if !matches!(
+                state,
+                SettlementState::ArmConfirmed | SettlementState::RefundSubmitted
+            ) {
+                continue;
+            }
+            let Some(sid) = session_id.as_u64() else {
+                continue;
+            };
+            match chain.get_session_status_strict(sid).await {
+                Ok(SESSION_RELAY_REFUNDED) => {
+                    self.record_refunded(&session_id)?;
+                    summary.drained_refunded += 1;
+                }
+                Ok(SESSION_RELAY_CLAIMED) => {
+                    // Operator won the race; stop trying to refund this session.
+                    self.record_settled(&session_id)?;
+                    summary.drained_settled += 1;
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    debug!(session = sid, error = %e, "refund confirm-drain read failed; retry next scan");
+                }
+            }
+        }
+
+        // ---- PASS 2: SUBMIT (fresh strict re-read + margin gate pre-broadcast) ----
+        for (session_id, state) in self.state_entries()? {
+            if !matches!(
+                state,
+                SettlementState::ArmConfirmed | SettlementState::RefundSubmitted
+            ) {
+                continue;
+            }
+            let Some(sid) = session_id.as_u64() else {
+                continue;
+            };
+            let status = match chain.get_session_status_strict(sid).await {
+                Ok(s) => s,
+                Err(e) => {
+                    debug!(session = sid, error = %e, "refund status read failed; skip this scan");
+                    continue;
+                }
+            };
+            // Only a still-RELAY_ARMED session is refundable; a claimed/refunded
+            // one is handled by the drain pass, not re-submitted here.
+            if status != SESSION_RELAY_ARMED {
+                continue;
+            }
+            let deadline = match chain.get_relay_deadline(sid).await {
+                Ok(d) => d,
+                Err(e) => {
+                    debug!(session = sid, error = %e, "relay deadline read failed; skip");
+                    continue;
+                }
+            };
+            let epoch = match chain.current_epoch().await {
+                Ok(e) => e,
+                Err(e) => {
+                    debug!(session = sid, error = %e, "current epoch read failed; skip");
+                    continue;
+                }
+            };
+            // I3 refund window [D + k_r, inf): strictly after the operator's claim
+            // window (-inf, D - k_c]. epoch is a LOWER bound, so a conservative
+            // read only delays -- it can never fire early into the claim window.
+            if epoch < deadline.saturating_add(refund_margin) {
+                continue;
+            }
+            // WRITE-AHEAD (I6): record the intent BEFORE the broadcast so a crash
+            // mid-submit does not re-refund on the next boot.
+            self.record_refund_submitted(&session_id)?;
+            let fee = chain.refund_fee().await?;
+            let call =
+                settler::build_relay_refund_params(&env.program_addr, &env.wallet_addr, sid, fee);
+            let tx_hash = chain
+                .submit_refund_call(call)
+                .await
+                .with_context(|| format!("submit relay_refund({sid})"))?;
+            info!(hash = %tx_hash, session = sid, "relay_refund submitted (operator no-show)");
+            summary.refund_submitted += 1;
         }
         Ok(summary)
     }
@@ -393,6 +562,21 @@ pub(crate) async fn replay_pending_for_client(client: &crate::runner::Client) ->
             "settlement replay scan complete"
         );
     }
+
+    // Step 8: refund watcher. Catches an operator no-show that only became
+    // refundable while the client was offline for days. Always runs when relay
+    // is enabled -- refunding your own deposit has no downside beyond one fee.
+    let refund_margin = client.relay_config().resolved_refund_margin_epochs();
+    let refund = store.refund_pending(client, &env, refund_margin).await?;
+    if refund != RefundSummary::default() {
+        info!(
+            refund_submitted = refund.refund_submitted,
+            drained_refunded = refund.drained_refunded,
+            drained_settled = refund.drained_settled,
+            state_dir = %store.paths().wallet_dir.display(),
+            "relay refund scan complete"
+        );
+    }
     Ok(())
 }
 
@@ -417,6 +601,42 @@ impl ArmChain for crate::runner::Client {
         let ctx =
             crate::chain_v3::ChainCtxV3::new(self.rpc(), self.program_addr(), self.wallet_kp());
         ctx.get_session_status(session_id).await
+    }
+}
+
+#[async_trait]
+impl RefundChain for crate::runner::Client {
+    async fn refund_fee(&self) -> Result<u64> {
+        Ok(self
+            .rpc()
+            .recommended_fee(Some("contract_call"))
+            .await
+            .ok()
+            .map(|f| f.recommended)
+            .filter(|f| *f > 0)
+            .unwrap_or(crate::chain_v3::CALL_FEE_FALLBACK))
+    }
+
+    async fn get_session_status_strict(&self, session_id: u64) -> Result<u64> {
+        let ctx =
+            crate::chain_v3::ChainCtxV3::new(self.rpc(), self.program_addr(), self.wallet_kp());
+        ctx.get_session_status_strict(session_id).await
+    }
+
+    async fn get_relay_deadline(&self, session_id: u64) -> Result<u64> {
+        let ctx =
+            crate::chain_v3::ChainCtxV3::new(self.rpc(), self.program_addr(), self.wallet_kp());
+        ctx.get_relay_deadline(session_id).await
+    }
+
+    async fn current_epoch(&self) -> Result<u64> {
+        let ctx =
+            crate::chain_v3::ChainCtxV3::new(self.rpc(), self.program_addr(), self.wallet_kp());
+        ctx.current_epoch().await
+    }
+
+    async fn submit_refund_call(&self, call: Value) -> Result<String> {
+        settler::submit_refund(self, call).await
     }
 }
 
@@ -753,5 +973,210 @@ mod tests {
             reopened.state(&sid).unwrap(),
             Some(SettlementState::Countersigned)
         );
+    }
+
+    // ---- Step 8: refund watcher --------------------------------------------
+
+    struct MockRefundChain {
+        status: Mutex<u64>,
+        strict_err: Mutex<bool>,
+        deadline: u64,
+        epoch: u64,
+        submit_calls: Mutex<Vec<Value>>,
+    }
+
+    impl MockRefundChain {
+        fn new(status: u64, deadline: u64, epoch: u64) -> Self {
+            Self {
+                status: Mutex::new(status),
+                strict_err: Mutex::new(false),
+                deadline,
+                epoch,
+                submit_calls: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl RefundChain for MockRefundChain {
+        async fn refund_fee(&self) -> Result<u64> {
+            Ok(500)
+        }
+        async fn get_session_status_strict(&self, _sid: u64) -> Result<u64> {
+            if *self.strict_err.lock() {
+                return Err(anyhow!("mock strict status read error"));
+            }
+            Ok(*self.status.lock())
+        }
+        async fn get_relay_deadline(&self, _sid: u64) -> Result<u64> {
+            Ok(self.deadline)
+        }
+        async fn current_epoch(&self) -> Result<u64> {
+            Ok(self.epoch)
+        }
+        async fn submit_refund_call(&self, call: Value) -> Result<String> {
+            self.submit_calls.lock().push(call);
+            Ok("refund-tx".to_string())
+        }
+    }
+
+    /// Drive a session to the `ArmConfirmed` floor (the refund watcher's entry
+    /// candidate).
+    fn arm_confirmed(s: &SettleStateStore, sid: &SessionId) {
+        s.record_proposed(sid).unwrap();
+        s.record_countersigned(sid, &signed(sid.clone(), 1, 100), 200)
+            .unwrap();
+        s.record_arm_submitted(sid).unwrap();
+        s.record_arm_confirmed(sid).unwrap();
+    }
+
+    #[tokio::test]
+    async fn refund_pending_submits_when_armed_and_past_deadline() {
+        // Operator no-show: still RELAY_ARMED, epoch = D + k_r -> refund submitted,
+        // floor write-ahead to RefundSubmitted.
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(dir.path());
+        let sid = id(50);
+        arm_confirmed(&s, &sid);
+        let chain = MockRefundChain::new(SESSION_RELAY_ARMED, 100, 103);
+
+        let out = s.refund_pending(&chain, &env(), 3).await.unwrap();
+
+        assert_eq!(out.refund_submitted, 1);
+        assert_eq!(chain.submit_calls.lock().len(), 1);
+        assert_eq!(chain.submit_calls.lock()[0]["method"], "relay_refund");
+        assert_eq!(chain.submit_calls.lock()[0]["params"], json!([50]));
+        assert_eq!(
+            s.state(&sid).unwrap(),
+            Some(SettlementState::RefundSubmitted)
+        );
+    }
+
+    #[tokio::test]
+    async fn refund_pending_skips_inside_the_quiet_zone() {
+        // epoch = D + k_r - 1 -> inside the quiet zone -> no refund, floor stays.
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(dir.path());
+        let sid = id(51);
+        arm_confirmed(&s, &sid);
+        let chain = MockRefundChain::new(SESSION_RELAY_ARMED, 100, 102);
+
+        let out = s.refund_pending(&chain, &env(), 3).await.unwrap();
+
+        assert_eq!(out.refund_submitted, 0);
+        assert!(chain.submit_calls.lock().is_empty());
+        assert_eq!(s.state(&sid).unwrap(), Some(SettlementState::ArmConfirmed));
+    }
+
+    #[tokio::test]
+    async fn refund_pending_records_settled_when_operator_claimed() {
+        // Operator won the race (RELAY_CLAIMED): drain to Settled, never refund.
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(dir.path());
+        let sid = id(52);
+        arm_confirmed(&s, &sid);
+        let chain = MockRefundChain::new(SESSION_RELAY_CLAIMED, 100, 999);
+
+        let out = s.refund_pending(&chain, &env(), 3).await.unwrap();
+
+        assert_eq!(out.drained_settled, 1);
+        assert_eq!(out.refund_submitted, 0);
+        assert!(chain.submit_calls.lock().is_empty());
+        assert_eq!(s.state(&sid).unwrap(), Some(SettlementState::Settled));
+    }
+
+    #[tokio::test]
+    async fn refund_pending_strict_read_error_leaves_entry() {
+        // A hostile/failed status read must NOT phantom-drain or submit.
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(dir.path());
+        let sid = id(53);
+        arm_confirmed(&s, &sid);
+        let chain = MockRefundChain::new(SESSION_RELAY_ARMED, 100, 999);
+        *chain.strict_err.lock() = true;
+
+        let out = s.refund_pending(&chain, &env(), 3).await.unwrap();
+
+        assert_eq!(out, RefundSummary::default());
+        assert!(chain.submit_calls.lock().is_empty());
+        assert_eq!(s.state(&sid).unwrap(), Some(SettlementState::ArmConfirmed));
+    }
+
+    #[tokio::test]
+    async fn refund_pending_no_double_submit_then_drains_on_confirm() {
+        // Full no-show sequence over one store, across two scans: submit once,
+        // then (once chain shows REFUNDED) drain to terminal with no re-submit.
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(dir.path());
+        let sid = id(54);
+        arm_confirmed(&s, &sid);
+        let chain = MockRefundChain::new(SESSION_RELAY_ARMED, 100, 200);
+
+        let first = s.refund_pending(&chain, &env(), 3).await.unwrap();
+        assert_eq!(first.refund_submitted, 1);
+        assert_eq!(
+            s.state(&sid).unwrap(),
+            Some(SettlementState::RefundSubmitted)
+        );
+
+        // The refund confirmed on chain.
+        *chain.status.lock() = SESSION_RELAY_REFUNDED;
+        let second = s.refund_pending(&chain, &env(), 3).await.unwrap();
+
+        assert_eq!(second.drained_refunded, 1);
+        assert_eq!(second.refund_submitted, 0);
+        assert_eq!(
+            chain.submit_calls.lock().len(),
+            1,
+            "exactly one refund tx total"
+        );
+        assert_eq!(s.state(&sid).unwrap(), Some(SettlementState::Refunded));
+    }
+
+    #[tokio::test]
+    async fn refund_pending_ignores_non_armed_floors() {
+        // Countersigned (net==0 stuck) and a fresh Proposed must never be a
+        // refund candidate.
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(dir.path());
+        let cs = id(55);
+        s.record_proposed(&cs).unwrap();
+        s.record_countersigned(&cs, &signed(cs.clone(), 1, 100), 200)
+            .unwrap();
+        let prop = id(56);
+        s.record_proposed(&prop).unwrap();
+        let chain = MockRefundChain::new(SESSION_RELAY_ARMED, 100, 999);
+
+        let out = s.refund_pending(&chain, &env(), 3).await.unwrap();
+
+        assert_eq!(out, RefundSummary::default());
+        assert!(chain.submit_calls.lock().is_empty());
+    }
+
+    #[test]
+    fn ladder_from_code_round_trips_new_terminals() {
+        assert_eq!(
+            SettlementState::from_code(5).unwrap(),
+            Some(SettlementState::RefundSubmitted)
+        );
+        assert_eq!(
+            SettlementState::from_code(6).unwrap(),
+            Some(SettlementState::Refunded)
+        );
+        assert_eq!(
+            SettlementState::from_code(7).unwrap(),
+            Some(SettlementState::Settled)
+        );
+        assert!(SettlementState::from_code(8).is_err());
+        // Forward-only: RefundSubmitted -> Refunded bumps; backward is a no-op.
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(dir.path());
+        let sid = id(57);
+        arm_confirmed(&s, &sid);
+        s.record_refund_submitted(&sid).unwrap();
+        s.record_refunded(&sid).unwrap();
+        assert_eq!(s.state(&sid).unwrap(), Some(SettlementState::Refunded));
+        s.record_refund_submitted(&sid).unwrap(); // backward
+        assert_eq!(s.state(&sid).unwrap(), Some(SettlementState::Refunded));
     }
 }

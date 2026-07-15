@@ -19,6 +19,11 @@ pub(crate) enum SettleCmd {
         #[arg(long = "relay-expiry")]
         relay_expiry: Option<u64>,
     },
+    /// Refund armed relay sessions whose operator no-showed (deposit back to the
+    /// funder). Scans the durable journal and refunds every session that is
+    /// still RELAY_ARMED past its deadline + margin. Also runs automatically at
+    /// client boot; this is the explicit trigger.
+    Refund,
 }
 
 pub(crate) async fn run(client: &Arc<Client>, cmd: SettleCmd) -> Result<()> {
@@ -41,5 +46,6 @@ pub(crate) async fn run(client: &Arc<Client>, cmd: SettleCmd) -> Result<()> {
                 )),
             }
         }
+        SettleCmd::Refund => settler::refund_no_show(client).await,
     }
 }

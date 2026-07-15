@@ -159,6 +159,13 @@ pub(crate) struct V3RelayCfg {
     /// keys files below it by wallet address.
     #[serde(default)]
     pub state_dir: String,
+    /// Step 8: the refund watcher submits `relay_refund` only once
+    /// `epoch >= deadline + refund_margin_epochs`. This margin is the client
+    /// half of the I3 quiet zone: with the node's claim margin `k_c`, the claim
+    /// window `(-inf, D - k_c]` and the refund window `[D + k_r, inf)` cannot
+    /// overlap for any positive margins. Clamped to `[1, 5]` at use.
+    #[serde(default = "default_refund_margin_epochs")]
+    pub refund_margin_epochs: u64,
 }
 
 impl Default for V3RelayCfg {
@@ -167,12 +174,26 @@ impl Default for V3RelayCfg {
             enabled: false,
             relay_expiry_epochs: default_relay_expiry_epochs(),
             state_dir: String::new(),
+            refund_margin_epochs: default_refund_margin_epochs(),
         }
+    }
+}
+
+impl V3RelayCfg {
+    /// Refund margin `k_r`, clamped to `[1, 5]`. The lower bound of 1 is
+    /// load-bearing: a `0` margin would collapse the I3 quiet zone and let a
+    /// refund fire the same epoch a still-valid operator claim could confirm.
+    pub(crate) fn resolved_refund_margin_epochs(&self) -> u64 {
+        self.refund_margin_epochs.clamp(1, 5)
     }
 }
 
 fn default_relay_expiry_epochs() -> u64 {
     octravpn_core::v3_calls::RELAY_EXPIRY_DEFAULT_EPOCHS
+}
+
+fn default_refund_margin_epochs() -> u64 {
+    3
 }
 
 /// v2-specific config. Sealed-policy passphrase + cache options.
@@ -289,6 +310,21 @@ pub(crate) fn chain_id_to_envelope_string(id: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn refund_margin_defaults_and_clamps() {
+        assert_eq!(V3RelayCfg::default().refund_margin_epochs, 3);
+        // Clamp to the I3 band [1,5]: a 0 (quiet-zone collapse) becomes 1.
+        let mut r = V3RelayCfg {
+            refund_margin_epochs: 0,
+            ..V3RelayCfg::default()
+        };
+        assert_eq!(r.resolved_refund_margin_epochs(), 1);
+        r.refund_margin_epochs = 9;
+        assert_eq!(r.resolved_refund_margin_epochs(), 5);
+        r.refund_margin_epochs = 3;
+        assert_eq!(r.resolved_refund_margin_epochs(), 3);
+    }
 
     #[test]
     fn relay_state_dir_defaults_next_to_wallet_secret() {

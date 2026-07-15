@@ -200,6 +200,26 @@ pub(crate) async fn arm_recorded_session(
     Ok(())
 }
 
+/// `settle refund` — explicit trigger for the funder-side refund watcher (also
+/// runs at client boot). Refunds every durable session still RELAY_ARMED past
+/// its deadline + margin (operator no-show), returning the deposit to the funder.
+pub(crate) async fn refund_no_show(client: &Arc<Client>) -> Result<()> {
+    if !client.relay_config().enabled {
+        return Err(anyhow!(
+            "`settle refund` requires [v3.relay].enabled = true in client.toml"
+        ));
+    }
+    let store = client.open_settle_state()?;
+    let env = client.arm_environment();
+    let margin = client.relay_config().resolved_refund_margin_epochs();
+    let summary = store.refund_pending(client.as_ref(), &env, margin).await?;
+    println!(
+        "relay refund scan: submitted={} refunded={} settled={}",
+        summary.refund_submitted, summary.drained_refunded, summary.drained_settled
+    );
+    Ok(())
+}
+
 pub(crate) async fn arm_session_from_receipt(
     client: &Arc<Client>,
     session_id: SessionId,
@@ -402,6 +422,31 @@ pub(crate) async fn submit_arm(client: &Client, call: Value) -> Result<String> {
         .submit(call)
         .await
         .map_err(|e| anyhow!("chain tx queue arm_relay submit: {e}"))
+}
+
+/// Build a `relay_refund(session_id)` call (opener refunds a no-show operator's
+/// armed session after the deadline). Value is 0; the deposit is returned by the
+/// program to the funder.
+pub(crate) fn build_relay_refund_params(
+    program_addr: &Address,
+    wallet_addr: &Address,
+    session_id_u64: u64,
+    fee: u64,
+) -> Value {
+    ContractCallBuilder::new(program_addr.clone(), wallet_addr.clone()).relay_refund_call(
+        session_id_u64,
+        0,
+        fee,
+        0,
+    )
+}
+
+pub(crate) async fn submit_refund(client: &Client, call: Value) -> Result<String> {
+    client
+        .chain_tx_queue()
+        .submit(call)
+        .await
+        .map_err(|e| anyhow!("chain tx queue relay_refund submit: {e}"))
 }
 
 fn relay_net(active: &ActiveSession, bytes_used: u64) -> u64 {
