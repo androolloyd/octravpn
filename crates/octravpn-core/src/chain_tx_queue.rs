@@ -23,7 +23,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::{
     address::Address,
     rpc::{next_nonce, BalanceResult, RpcClient, SubmitResult},
-    tx, CoreError, CoreResult, KeyPair,
+    CoreError, CoreResult, KeyPair,
 };
 
 const QUEUE_CAPACITY: usize = 1024;
@@ -356,8 +356,14 @@ fn sign_with_nonce(
         .as_object_mut()
         .ok_or_else(|| CoreError::Rpc("chain tx queue call must be a JSON object".to_string()))?;
     obj.insert("nonce".to_string(), json!(nonce));
-    tx::sign_call(wallet, call)
-        .map_err(|e| CoreError::Crypto(format!("chain tx queue sign_call: {e}")))
+    // Sign with OUR canonical port, not octra-foundry's `tx::sign_call`.
+    // The foundry renders the timestamp with Rust's `Display for f64`,
+    // which prints an integral value as `1755400000`; yojson — and so the
+    // node's own `serialize_for_signing` — prints `1755400000.0`. That one
+    // byte is a code 101, and it has stayed latent only because
+    // `as_secs_f64()` lands on an exact second with vanishing probability.
+    crate::tx_signer::sign_call_canonical(wallet, &call)
+        .map_err(|e| CoreError::Crypto(format!("chain tx queue canonical sign: {e}")))
 }
 
 fn core_error_message(err: &CoreError) -> String {

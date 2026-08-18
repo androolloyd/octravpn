@@ -311,6 +311,103 @@ fn strip_trailing_fraction_zeros(s: &str) -> &str {
     s.trim_end_matches('0').trim_end_matches('.')
 }
 
+/// Build a [`CanonicalTx`] from the JSON call shapes our daemons already
+/// construct, so existing call sites can move onto the canonical signer
+/// without being rewritten.
+///
+/// Two shapes are accepted, mirroring what `octra-foundry`'s
+/// `to_octra_tx` took:
+///
+///   * the legacy `{kind:"contract_call", from, to, value, fee, nonce,
+///     timestamp, method, params}` form, which becomes `op_type="call"`
+///     with `encrypted_data` = the bare method name and `message` = the
+///     params array as a JSON string (webcli's `main.cpp` does the same);
+///   * an already-envelope-shaped object using either `to_` or `to`, with
+///     `amount`/`ou` as quoted strings or bare integers.
+///
+/// A `chain_id` key is rejected rather than ignored. The foundry treated
+/// it as opt-in "v2" binding and wove it into the signed bytes; the real
+/// envelope has no such field (`transaction.ml:273-325`), so those bytes
+/// are ones the node can never recompute — every such tx fails code 101.
+/// Failing loudly keeps an operator from believing they have cross-chain
+/// replay protection the chain does not provide.
+pub fn canonical_tx_from_call(call: &Value) -> Result<CanonicalTx, String> {
+    let map = call
+        .as_object()
+        .ok_or_else(|| "tx must be a JSON object".to_string())?;
+
+    if map.contains_key("chain_id") {
+        return Err(
+            "chain_id is not part of the Octra signing preimage (transaction.ml:273-325); \
+             remove it — signing with it fails on-chain verification (code 101)"
+                .to_string(),
+        );
+    }
+
+    let s = |k: &str| map.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    // amount/ou travel as quoted decimal strings on the wire but as bare
+    // integers in most of our call sites; accept both.
+    let num = |k: &str| -> Result<u64, String> {
+        match map.get(k) {
+            None | Some(Value::Null) => Ok(0),
+            Some(Value::Number(n)) => n
+                .as_u64()
+                .ok_or_else(|| format!("{k} must be a non-negative integer")),
+            Some(Value::String(t)) => t.parse::<u64>().map_err(|e| format!("{k} parse: {e}")),
+            Some(_) => Err(format!("{k} must be an integer or decimal string")),
+        }
+    };
+    let timestamp = map
+        .get("timestamp")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| "timestamp is required and must be a number".to_string())?;
+
+    if map.contains_key("kind") {
+        // Legacy contract-call shape.
+        let params = map
+            .get("params")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(vec![]));
+        return Ok(CanonicalTx {
+            from: s("from"),
+            to: s("to"),
+            amount: num("value")?,
+            nonce: num("nonce")?,
+            ou: num("fee")?,
+            timestamp,
+            op_type: OP_CALL.to_string(),
+            encrypted_data: Some(s("method")),
+            message: Some(params.to_string()),
+        });
+    }
+
+    let to = match map.get("to_").or_else(|| map.get("to")) {
+        Some(Value::String(t)) => t.clone(),
+        _ => String::new(),
+    };
+    let opt = |k: &str| map.get(k).and_then(Value::as_str).map(str::to_string);
+    Ok(CanonicalTx {
+        from: s("from"),
+        to,
+        amount: num("amount")?,
+        nonce: num("nonce")?,
+        ou: num("ou")?,
+        timestamp,
+        op_type: s("op_type"),
+        encrypted_data: opt("encrypted_data"),
+        message: opt("message"),
+    })
+}
+
+/// Sign a call object with the canonical preimage and return the wire
+/// envelope. Drop-in replacement for `octra_core::tx::sign_call`, whose
+/// float renderer emits `1755400000` where yojson emits `1755400000.0` —
+/// one byte of drift, and a guaranteed code 101 whenever the timestamp
+/// lands on an exact second.
+pub fn sign_call_canonical(kp: &KeyPair, call: &Value) -> Result<Value, String> {
+    Ok(canonical_tx_from_call(call)?.signed_envelope(kp))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -373,6 +470,51 @@ mod tests {
     /// what a real node verifies against and earns a code 101. See
     /// docs/octra-upstream-delta-2026-08-17.md §5.1 and
     /// `transaction.ml:309-326`, which has no such field to serialize.
+    /// The bug this whole port exists to kill: an integral timestamp must
+    /// render `.0`. octra-foundry's `write_kv_float` uses Rust's
+    /// `Display for f64`, which prints `1755400000` — one byte adrift from
+    /// yojson (and so from the node's own `serialize_for_signing`), and a
+    /// guaranteed code 101. Latent only because `as_secs_f64()` rarely
+    /// lands on an exact second.
+    #[test]
+    fn integral_timestamp_keeps_its_dot_zero_through_the_call_shapes() {
+        for call in [
+            // legacy {kind:"contract_call", ...}
+            serde_json::json!({
+                "kind": "contract_call", "from": "octAAAA", "to": "octBBBB",
+                "value": 0, "fee": 1000, "nonce": 7,
+                "timestamp": 1_755_400_000.0f64,
+                "method": "settle_claim", "params": [1, 2],
+            }),
+            // already-envelope-shaped
+            serde_json::json!({
+                "from": "octAAAA", "to_": "octBBBB", "amount": "0",
+                "nonce": 7, "ou": "1000",
+                "timestamp": 1_755_400_000.0f64, "op_type": "call",
+            }),
+        ] {
+            let pre = canonical_tx_from_call(&call).expect("parses").signing_preimage();
+            assert!(
+                pre.contains(r#""timestamp":1755400000.0"#),
+                "integral timestamp lost its .0 — this is the code-101 bug: {pre}"
+            );
+        }
+    }
+
+    /// A chain_id must be refused outright, not silently dropped: the
+    /// foundry wove it into the signed bytes, which the node can never
+    /// recompute.
+    #[test]
+    fn call_shape_rejects_chain_id() {
+        let call = serde_json::json!({
+            "from": "octAAAA", "to_": "octBBBB", "amount": "0", "nonce": 1,
+            "ou": "1000", "timestamp": 1_755_400_000.5f64, "op_type": "call",
+            "chain_id": "octra-devnet-9871-cluster",
+        });
+        let err = canonical_tx_from_call(&call).expect_err("must reject");
+        assert!(err.contains("chain_id"), "{err}");
+    }
+
     #[test]
     fn preimage_has_no_chain_id() {
         assert!(!fixture().signing_preimage().contains("chain_id"));
