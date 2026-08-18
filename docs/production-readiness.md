@@ -35,12 +35,29 @@ fragmented state from `production-checklist.md` (v1 gates),
 > moves no money and has no hashlock, so the v4 AML HTLC is the permanent
 > settlement design rather than a stopgap.
 >
-> **What that leaves.** The gap is no longer "can a client join" or "can we
-> talk to the chain" — both are answered. It is the **join point**: a real
-> session that opens, meters, and settles end-to-end on devnet, with the v4
-> loop switched on. That is unproven, and the mock harness that greenlit it
-> is known to be structurally wrong (0% response-shape parity, executes no
-> AML), so treat its green suites as unverified rather than passing.
+> **The join point is now closed too (2026-08-18).** A real session opened,
+> metered, and settled end-to-end on live devnet against a freshly deployed
+> `main-v4` at `octEX1mUYv6hw4eQH937zBh14EcjbUPUuBxQaTyuTTdPw38`, driven by
+> `docker/devnet/v4-relay-e2e.sh` through the real daemons — the
+> `POST /session/:id/receipt` route, the client settle-arm I1 gate,
+> ChainTxQueue on the canonical signer, the receipt vault, and the in-daemon
+> autonomous relay-claimer. Verified by independent chain reads, not the
+> script's own verdict:
+>
+> | on-chain | value |
+> |---|---|
+> | `get_session_status(0)` | `4` — RELAY_CLAIMED |
+> | `circle_earnings_total` | `2985` |
+> | `treasury` | `15` (50 bps of net 3000, exactly) |
+> | `get_relay_settlement_hash(0)` | equals the off-chain receipt's `settlement_hash` byte for byte |
+>
+> Caveats worth keeping honest: this is one single-operator session on devnet
+> with `min_session_deposit` set to 100 OU (a shakeout value, not an economic
+> floor); `auto_sweep` is untested (its grace is 1,000 epochs ≈ 2.8h); and the
+> mesh and money planes still meet only in principle — `v4-relay-e2e.sh` rides
+> the node's own boringtun tunnel and does not involve tailscale at all. The
+> remaining P0s (2-5: mainnet ceremony, operator CLI, audit CLI, runbook) are
+> untouched by this.
 
 **Operator persona.** A single operator: one wallet, one bonded circle on
 Octra mainnet, one tailnet hosting 5–50 stock-`tailscale` clients, real
