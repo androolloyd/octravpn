@@ -1,0 +1,251 @@
+name: octra release canary
+
+# octra-labs ships MANDATORY, epoch-gated node releases roughly weekly.
+# Consensus rules change under us and our frozen devnet fixtures
+# (crates/octravpn-core/tests/devnet_rpc_contract.rs, the docker/devnet
+# e2e suites) rot silently when they do. This canary fetches the SIGNED
+# release marker at https://releases.octra.network/v1/devnet/latest.json,
+# verifies it exactly the way the upstream operator tooling does
+# (lite_node controls/lib/release.py — ed25519 over the canonical field
+# array, ~72h expiry window, anti-rollback), and diffs source_commit +
+# consensus_rules_id against the committed baseline at
+# docs/audit/octra-release-baseline.json.
+#
+# Behaviour:
+#   - DRIFT (or missing baseline): commit an updated status file (with
+#     [skip ci]) and open — or comment on an already-open — GitHub issue
+#     with the re-verification checklist. The baseline is only re-seeded
+#     by a human after that checklist is done, so the issue stays the
+#     single source of truth for "fixtures are stale".
+#   - In sync (the expected case): just write a workflow summary; do not
+#     open an issue, do not commit the status file unless the canary
+#     state itself transitioned.
+#   - Fetch/verify failure: the JOB FAILS. An unverified canary is worse
+#     than none — it invites trusting a spoofed response — so a red run
+#     here means "the canary is blind", never "no news".
+#
+# This workflow is informational only: nothing it does gates the main
+# CI lane. It runs in its own scheduled context.
+
+on:
+  schedule:
+    # 05:47 UTC daily. Releases land ~weekly but the marker is re-signed
+    # every ~72h, so daily keeps both the drift check and the signature
+    # freshness check meaningful.
+    - cron: "47 5 * * *"
+  workflow_dispatch:
+    inputs:
+      force_issue:
+        description: "Open issue even on in-sync outcome (for testing)"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  canary:
+    name: verify devnet release marker
+    runs-on: ubuntu-latest
+    env:
+      BASELINE_FILE: "docs/audit/octra-release-baseline.json"
+      STATUS_FILE: "docs/audit/octra-release-canary-status.json"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch, verify, and diff the signed release marker
+        id: canary
+        run: |
+          set -u
+          # The script appends its key=value outputs to $GITHUB_OUTPUT
+          # itself. Exit codes: 0 in-sync, 10 drift/unseeded, 2 broken.
+          set +e
+          ./scripts/octra-release-canary.sh \
+            --baseline "$BASELINE_FILE" \
+            --marker-out /tmp/marker.json
+          rc=$?
+          set -e
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 10 ]; then
+            echo "::error::release marker fetch/verification FAILED — the canary is blind (origin down, marker expired, or signature bad). This is not an 'in sync' result."
+            exit 1
+          fi
+
+      - name: Read previous status
+        id: prev
+        run: |
+          set -u
+          if [ -f "$STATUS_FILE" ]; then
+            prev=$(jq -r '.canary_status // "unknown"' "$STATUS_FILE")
+          else
+            prev="unknown"
+          fi
+          echo "previous=$prev" >> "$GITHUB_OUTPUT"
+
+      - name: Update status JSON
+        id: write
+        run: |
+          set -u
+          now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          case '${{ steps.canary.outputs.outcome }}' in
+            in_sync)  color=brightgreen; message="in sync (seq ${{ steps.canary.outputs.sequence }})" ;;
+            drift)    color=red;         message="drift (seq ${{ steps.canary.outputs.sequence }})" ;;
+            unseeded) color=orange;      message="baseline missing" ;;
+            *)        color=lightgrey;   message="unknown" ;;
+          esac
+          # shields.io endpoint-shape: schemaVersion, label, message, color
+          jq -nc \
+            --arg schemaVersion "1" \
+            --arg label "octra release" \
+            --arg message "$message" \
+            --arg color "$color" \
+            --arg status '${{ steps.canary.outputs.outcome }}' \
+            --arg last_check "$now" \
+            --arg sequence '${{ steps.canary.outputs.sequence }}' \
+            --arg source_commit '${{ steps.canary.outputs.source_commit }}' \
+            --arg rules '${{ steps.canary.outputs.consensus_rules_id }}' \
+            --arg base_commit '${{ steps.canary.outputs.baseline_source_commit }}' \
+            --arg base_rules '${{ steps.canary.outputs.baseline_consensus_rules_id }}' \
+            --arg changed '${{ steps.canary.outputs.changed_fields }}' \
+            '{schemaVersion:($schemaVersion|tonumber), label:$label, message:$message,
+              color:$color, canary_status:$status, last_check:$last_check,
+              release:{sequence:($sequence|tonumber), source_commit:$source_commit,
+                       consensus_rules_id:$rules},
+              baseline:{source_commit:$base_commit, consensus_rules_id:$base_rules},
+              changed_fields:$changed,
+              workflow:"octra-release-canary",
+              source:"scripts/octra-release-canary.sh (mirrors lite_node controls/lib/release.py)"}' \
+            > "$STATUS_FILE"
+          echo "diff:"
+          git --no-pager diff -- "$STATUS_FILE" || true
+
+      - name: Workflow summary
+        run: |
+          {
+            echo "# octra release canary — $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo
+            echo "| field | signed marker | baseline |"
+            echo "|-------|---------------|----------|"
+            echo "| sequence | ${{ steps.canary.outputs.sequence }} | ${{ steps.canary.outputs.baseline_sequence }} |"
+            echo "| source_commit | \`${{ steps.canary.outputs.source_commit }}\` | \`${{ steps.canary.outputs.baseline_source_commit }}\` |"
+            echo "| consensus_rules_id | \`${{ steps.canary.outputs.consensus_rules_id }}\` | \`${{ steps.canary.outputs.baseline_consensus_rules_id }}\` |"
+            echo
+            echo "**Outcome:** \`${{ steps.canary.outputs.outcome }}\`"
+            echo "**Previous run:** \`${{ steps.prev.outputs.previous }}\`"
+            echo "**Marker action/notice:** \`${{ steps.canary.outputs.action }}\` / \`${{ steps.canary.outputs.notice_code }}\`"
+            echo "**Marker window:** ${{ steps.canary.outputs.issued_at }} -> ${{ steps.canary.outputs.expires_at }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit status JSON on transition
+        if: steps.canary.outputs.outcome != steps.prev.outputs.previous
+        run: |
+          set -u
+          git config user.name  "octravpn-bot"
+          git config user.email "octravpn-bot@users.noreply.github.com"
+          git add "$STATUS_FILE"
+          if git diff --cached --quiet; then
+            echo "no change to commit"
+            exit 0
+          fi
+          git commit -m "audit(release-canary): ${{ steps.prev.outputs.previous }} -> ${{ steps.canary.outputs.outcome }} [skip ci]"
+          git push
+
+      - name: Open or update drift issue
+        if: >
+          steps.canary.outputs.outcome != 'in_sync' ||
+          github.event.inputs.force_issue == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = fs.readFileSync('/tmp/marker.json', 'utf8').trim();
+            const outcome = '${{ steps.canary.outputs.outcome }}';
+            const seq = '${{ steps.canary.outputs.sequence }}';
+            const rules = '${{ steps.canary.outputs.consensus_rules_id }}';
+            const title = outcome === 'unseeded'
+              ? 'Octra release canary has no committed baseline'
+              : `Octra devnet release drift — seq ${seq} (${rules})`;
+            const body = [
+              `The scheduled release canary detected \`${outcome}\` against the signed devnet release marker.`,
+              '',
+              '| field | baseline (last verified) | signed marker (now) |',
+              '|-------|--------------------------|---------------------|',
+              '| source_commit | `${{ steps.canary.outputs.baseline_source_commit }}` | `${{ steps.canary.outputs.source_commit }}` |',
+              '| consensus_rules_id | `${{ steps.canary.outputs.baseline_consensus_rules_id }}` | `${{ steps.canary.outputs.consensus_rules_id }}` |',
+              '| sequence | ${{ steps.canary.outputs.baseline_sequence }} | ${{ steps.canary.outputs.sequence }} |',
+              '',
+              'Changed fields: `${{ steps.canary.outputs.changed_fields }}`',
+              '',
+              // The signed marker carries no free-form release notes and no
+              // explicit activation epoch; action + notice_code + the 72h
+              // signing window are the closest upstream publishes. An
+              // action of `required` means validators MUST upgrade inside
+              // the window — i.e. devnet behavior flips no later than
+              // expires_at.
+              'Release notes (as much as the signed marker carries):',
+              '- action: `${{ steps.canary.outputs.action }}`',
+              '- notice_code: `${{ steps.canary.outputs.notice_code }}`',
+              '- activation window: issued ${{ steps.canary.outputs.issued_at }}, expires ${{ steps.canary.outputs.expires_at }}',
+              '- upstream source diff: https://github.com/octra-labs/lite_node/compare/${{ steps.canary.outputs.baseline_source_commit }}...${{ steps.canary.outputs.source_commit }}',
+              '',
+              'Full verified marker:',
+              '',
+              '```json',
+              marker,
+              '```',
+              '',
+              'Re-verification checklist (do these BEFORE re-seeding the baseline):',
+              '',
+              '- [ ] Diff upstream `octra-labs/lite_node` between the commits above; check the consensus-visible surface first: `transaction.ml` (signing preimage), `tx_view.ml` (verifier/timestamps), `rpc_view.ml` (RPC shapes + 4096 slice), `ledger.ml` (nonce), `epoch_time.ml`, `contract_vm.ml`.',
+              '- [ ] Re-run the frozen RPC contract fixtures: `crates/octravpn-core/tests/devnet_rpc_contract.rs` against live devnet.',
+              '- [ ] Re-run the devnet e2e suites (docker-compose harness): `docker/devnet/e2e.sh`, `docker/devnet/e2e-full.sh`, `docker/devnet/e2e-adversarial-v3.sh`, `docker/devnet/v4-relay-e2e.sh`, `docker/devnet/v4-relay-integration.sh` (or dispatch `.github/workflows/v4-relay-devnet-e2e.yml`).',
+              '- [ ] If the signing preimage or RPC surface changed, update `docs/octra-upstream-delta-2026-08-17.md` (or successor) and the affected memory notes.',
+              '- [ ] Re-seed `docs/audit/octra-release-baseline.json` with the new marker VERBATIM from the origin (`curl -sS https://releases.octra.network/v1/devnet/latest.json`), re-run `scripts/octra-release-canary.sh` locally to confirm `in_sync`, then close this issue.',
+              '',
+              '(opened automatically by `.github/workflows/octra-release-canary.yml`)',
+            ].join('\n');
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'release-canary',
+              per_page: 50,
+            });
+            const dup = existing.data.find(i => i.title === title);
+            if (dup) {
+              core.info(`already-open issue ${dup.html_url}; not duplicating`);
+              return;
+            }
+            // A still-open canary issue for an OLDER drift: upstream moved
+            // again before we finished re-verifying. Update that issue
+            // rather than fragmenting the checklist across several.
+            const open = existing.data[0];
+            if (open) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: open.number,
+                body: [
+                  `Upstream moved again before this was resolved. New state:`,
+                  '',
+                  body,
+                ].join('\n'),
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: open.number,
+                title,
+              });
+              core.info(`updated ${open.html_url}`);
+              return;
+            }
+            const created = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['release-canary', 'devnet-fixtures'],
+            });
+            core.info(`opened ${created.data.html_url}`);

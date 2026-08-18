@@ -4,38 +4,55 @@
 # circle-call-object-probe.sh. It knows how to build, SIGN, and SUBMIT an
 # arbitrary Octra `op_type` transaction envelope, then classify the
 # chain's response into a decisive verdict token.
+# (One offline exception: `bash _oplib.sh selftest` prints and checks the
+# signing preimage against pinned vectors — no RPC, no octra binary.)
 #
 # ── Why this exists ────────────────────────────────────────────────────
 # The foundry `octra` CLI has dedicated builders for exactly three
 # op_types: `deploy_circle`, `circle_asset_put`, `circle_asset_put_encrypted`
 # (see octra-foundry crates/octra-cli/src/cast/circle.rs) plus the AML
 # `contract_call` path (`cast send`). It has NO builder for the native
-# relay / object ops we are probing (`circle_outbox_open`, `relay_claim`,
-# `relay_cancel`, `ingress_commit`, `circle_call`). So we hand-build the
-# envelope here.
+# relay / object ops we are probing (`circle_outbox_open`,
+# `circle_relay_claim`, `circle_relay_cancel`, `circle_ingress_commit`,
+# `circle_call` — those are the node's canonical strings, see
+# op_type_of_string in lite_node transaction.ml:198-239; the bare
+# `relay_claim`-style names do NOT parse). So we hand-build the envelope
+# here.
 #
 # ── How signing stays honest (no reimplemented crypto) ─────────────────
-# The bytes a wallet signs are `OctraTx::to_canonical_json()` — a fixed
-# insertion-order JSON string (octra-foundry crates/octra-core/src/tx.rs):
+# The bytes a wallet signs are what the NODE recomputes in
+# `Transaction.serialize_for_signing` (lite_node lib/core/transaction.ml:
+# 309-326; verified at admission via `Transaction.verify`, called from
+# node_runtime/tx_view.ml:1146). That is a compact Yojson object in this
+# EXACT field order — no chain_id anywhere:
 #
 #   {"from":"..","to_":"..","amount":"<int>","nonce":<int>,"ou":"<int>",
 #    "timestamp":<float>,"op_type":".."[,"encrypted_data":".."][,"message":".."]}
 #
-# We reconstruct that exact string in Python, then hand it to
-# `octra cast wallet sign` (real ed25519 over the UTF-8 bytes) — we never
-# re-implement the signature. We use an INTEGER `timestamp` (epoch
-# seconds) on purpose: Rust's f64 `Display` prints an integral float
-# WITHOUT a trailing `.0` (e.g. `1717000000`), and a JSON integer
-# deserializes into the tx's `f64 timestamp` and re-serializes to the
-# same string — so the bytes we sign are byte-identical to the bytes the
-# chain recomputes in `verify_envelope_signature`. This sidesteps the one
-# real footgun (float formatting divergence between Python and Rust).
+# We reconstruct that exact string in Python (a byte-faithful port of
+# Yojson 3.0.0's writer), then hand it to `octra cast wallet sign` (real
+# ed25519 over the UTF-8 bytes, base64 output) — we never re-implement
+# the signature.
+#
+# The one real footgun is float rendering: Yojson prints an INTEGRAL
+# float WITH a trailing `.0` (e.g. `1717000000.0`). An earlier version
+# of this lib signed the bare-integer rendering (`1717000000`) on the
+# theory that the verifier used Rust f64 `Display` semantics — the node
+# is OCaml, so every op it signed failed verification. That single
+# divergence is what parked P2.1/P2.2 as TOOLING_BADSIG. Do NOT "fix"
+# this back by imitating octra-foundry's `OctraTx::to_canonical_json`
+# (octra-core/src/tx.rs write_kv_float): it uses Rust `{}` Display and
+# drops the `.0`, i.e. it disagrees with the chain on integral floats.
+# `bash _oplib.sh selftest` pins the expected bytes.
 #
 # If the signature were ever wrong, the chain rejects with a signature
 # error BEFORE dispatching on op_type — which would masquerade as
 # "op unsupported". `classify_verdict` detects that case explicitly and
 # returns TOOLING_BADSIG so a probe can never turn a signing bug into a
-# false negative.
+# false negative. (Related landmine: a MISSING op_type key does not
+# error — of_yojson silently falls back to Standard (transaction.ml:296),
+# whose amount>0 check then rejects our amount-"0" relay ops with a
+# bogus "amount must be positive". Always send op_type explicitly.)
 #
 # Requires (same contract as docker/devnet/v3-smoke.sh):
 #   * pre-built `octra` binary at $OCTRA_BIN (default:
@@ -98,33 +115,51 @@ except Exception:
 }
 
 # Build the canonical signing string for an op envelope, EXACTLY matching
-# OctraTx::to_canonical_json (octra-core/src/tx.rs). Optional fields
-# (encrypted_data, message) appear only when non-empty, in that order.
+# the node's Transaction.serialize_for_signing (lite_node transaction.ml:
+# 309-326), i.e. Yojson.Safe.to_string of the assoc. Optional fields
+# (encrypted_data, message) appear only when non-empty, in THAT order —
+# encrypted_data is appended before message (transaction.ml:318-325).
 # Prints the canonical string on one line.
 _oplib_canonical() {
   FROM="$1" TO="$2" AMOUNT="$3" NONCE="$4" OU="$5" TS="$6" OPTYPE="$7" ED="$8" MSG="$9" \
   python3 - <<'PY'
 import os
-def esc(s):  # port of push_json_str: escape ", \, control chars; pass ASCII/UTF-8 through
+def esc(s):
+    # Port of Yojson 3.0.0 write.ml string escaping: named escapes for
+    # " \ \b \f \n \r \t; other C0 controls AND 0x7f as lowercase \u00xx;
+    # everything else (incl. non-ASCII UTF-8) passes through as raw bytes.
     out=[]
     for ch in s:
         o=ord(ch)
         if ch=='"': out.append('\\"')
         elif ch=='\\': out.append('\\\\')
+        elif ch=='\b': out.append('\\b')
+        elif ch=='\f': out.append('\\f')
         elif ch=='\n': out.append('\\n')
         elif ch=='\r': out.append('\\r')
         elif ch=='\t': out.append('\\t')
-        elif o<0x20: out.append('\\u%04x'%o)
+        elif o<0x20 or o==0x7f: out.append('\\u%04x'%o)
         else: out.append(ch)
     return ''.join(out)
+def yfloat(v):
+    # Port of Yojson 3.0.0 write_float: shortest of %.16g/%.17g that
+    # round-trips, then a trailing ".0" whenever the result has no '.'
+    # or exponent (float_needs_period). This is THE line that fixes
+    # TOOLING_BADSIG: an integral epoch-seconds timestamp must render
+    # "1717000000.0", not "1717000000".
+    x=float(v)
+    s='%.16g'%x
+    if float(s)!=x: s='%.17g'%x
+    if all(c.isdigit() or c=='-' for c in s): s+='.0'
+    return s
 f=os.environ; parts=[]
 parts.append('"from":"%s"'  % esc(f["FROM"]))
-parts.append('"to_":"%s"'   % esc(f["TO"]))
-parts.append('"amount":"%s"'% esc(f["AMOUNT"]))
-parts.append('"nonce":%s'   % f["NONCE"])            # unquoted int
-parts.append('"ou":"%s"'    % esc(f["OU"]))
-parts.append('"timestamp":%s' % f["TS"])             # integer epoch secs -> Rust f64 Display drops ".0"
-parts.append('"op_type":"%s"' % esc(f["OPTYPE"]))
+parts.append('"to_":"%s"'   % esc(f["TO"]))       # trailing underscore is the wire key
+parts.append('"amount":"%s"'% esc(f["AMOUNT"]))   # string, not number
+parts.append('"nonce":%s'   % int(f["NONCE"]))    # unquoted int
+parts.append('"ou":"%s"'    % esc(f["OU"]))       # string, not number
+parts.append('"timestamp":%s' % yfloat(f["TS"]))
+parts.append('"op_type":"%s"' % esc(f["OPTYPE"])) # ALWAYS explicit (missing => silent Standard)
 if f["ED"]:  parts.append('"encrypted_data":"%s"' % esc(f["ED"]))
 if f["MSG"]: parts.append('"message":"%s"' % esc(f["MSG"]))
 print("{"+",".join(parts)+"}")
@@ -138,8 +173,12 @@ _oplib_submit_body() {
   python3 - <<'PY'
 import os,json
 f=os.environ
+# timestamp goes on the wire as a JSON float: the node's parser accepts
+# Int too and coerces (transaction.ml:290-292), so only VALUE equality
+# with the signed preimage matters here — but Python's float repr of an
+# integral value ("1717000000.0") happens to byte-match Yojson anyway.
 env={"from":f["FROM"],"to_":f["TO"],"amount":f["AMOUNT"],"nonce":int(f["NONCE"]),
-     "ou":f["OU"],"timestamp":int(f["TS"]),"op_type":f["OPTYPE"]}
+     "ou":f["OU"],"timestamp":float(f["TS"]),"op_type":f["OPTYPE"]}
 if f["ED"]:  env["encrypted_data"]=f["ED"]
 if f["MSG"]: env["message"]=f["MSG"]
 env["signature"]=f["SIG"]; env["public_key"]=f["PK"]
@@ -256,3 +295,50 @@ classify_verdict() {
   # rejected/failed with a logic-y reason == the op ran and refused.
   if [[ -n "$rs" ]]; then echo REVERTED; else echo REJECTED; fi
 }
+
+# ── offline preimage self-test ────────────────────────────────────────
+# `bash _oplib.sh selftest` — exercises _oplib_canonical against vectors
+# whose expected bytes were derived by hand from the node source
+# (transaction.ml:309-326 + Yojson 3.0.0's writer). Diff these against
+# the node's own serialize_for_signing without spending a tx. Exits
+# nonzero on any mismatch, so probes/CI can gate on it before signing.
+_oplib_selftest() {
+  local fail=0
+  _st_case() {  # _st_case NAME EXPECTED <canonical-args...>
+    local name="$1" want="$2"; shift 2
+    local got; got=$(_oplib_canonical "$@")
+    echo "[$name]"
+    echo "  preimage: $got"
+    if [[ "$got" != "$want" ]]; then
+      echo "  MISMATCH, expected: $want"
+      fail=1
+    fi
+  }
+  # 1. The shape both parked probes sign: a relay op, amount "0", no
+  #    optional fields. The trailing ".0" on the timestamp is the whole
+  #    P2.1/P2.2 bug — if this vector regresses, everything regresses.
+  _st_case relay_no_optionals \
+    '{"from":"octAAAA","to_":"octBBBB","amount":"0","nonce":7,"ou":"1000","timestamp":1717000000.0,"op_type":"relay_claim"}' \
+    octAAAA octBBBB 0 7 1000 1717000000 relay_claim "" ""
+  # 2. Both optional fields present: encrypted_data must precede message.
+  _st_case both_optionals \
+    '{"from":"octAAAA","to_":"octBBBB","amount":"5","nonce":8,"ou":"5000","timestamp":1717000000.0,"op_type":"circle_call","encrypted_data":"QUJD","message":"hi"}' \
+    octAAAA octBBBB 5 8 5000 1717000000 circle_call QUJD hi
+  # 3. Escaping + a non-integral timestamp (no ".0" appended): quotes and
+  #    backslashes get named escapes, C0 controls and DEL get \u00xx.
+  _st_case escaping_and_fractional_ts \
+    '{"from":"octAAAA","to_":"octBBBB","amount":"0","nonce":9,"ou":"1000","timestamp":1717000000.5,"op_type":"circle_outbox_open","message":"a\"b\\c\t\n\u0001\u007f"}' \
+    octAAAA octBBBB 0 9 1000 1717000000.5 circle_outbox_open "" "$(printf 'a"b\\c\t\n\001\177')"
+  if [[ "$fail" -eq 0 ]]; then
+    echo "selftest: OK (3 vectors)"
+  else
+    echo "selftest: FAILED — do not sign with this build"
+  fi
+  return "$fail"
+}
+
+# Run the self-test when executed directly (the file is otherwise
+# source-only; sourcing must never trigger this).
+if [[ "${BASH_SOURCE[0]}" == "${0}" && "${1:-}" == "selftest" ]]; then
+  _oplib_selftest
+fi
