@@ -9,6 +9,39 @@ fragmented state from `production-checklist.md` (v1 gates),
 
 **Last updated.** 2026-05-24.
 
+> ### Status update — 2026-08-17
+>
+> Two of this document's load-bearing premises are no longer true. Re-read
+> the P0 list below with these corrections in hand; the body text has not
+> been rewritten.
+>
+> **P0 #1 (Wall 5) is CLOSED.** `docker/devnet/tailscale-interop/run-interop.sh`
+> exits **0** against `tailscale/tailscale:latest` — two stock clients join,
+> take `100.x` addresses, and ping both via our DERP and directly:
+> ```
+> pong from tsi-peer-b (100.103.151.1) via DERP(interop) in 1ms
+> pong from tsi-peer-b (100.103.151.1) via 192.168.166.5:40767 in 1ms
+> ```
+> The doc's estimate of 1–1.5 person-weeks and the claim that "no real client
+> joins" are both obsolete. Note the scope: this proves the **mesh control
+> plane**. The harness does not touch the chain, so nothing here validates
+> session escrow, metering, or settlement.
+>
+> **The chain-side blockers dissolved.** `fhe_*` reverting on new contracts
+> was one of five distinct misdiagnoses; octra-labs published the full node
+> source and four of our six long-standing blockers turned out to be our own
+> bugs. See [`octra-upstream-delta-2026-08-17.md`](octra-upstream-delta-2026-08-17.md)
+> for the ledger, and note the load-bearing negative: the native relay rail
+> moves no money and has no hashlock, so the v4 AML HTLC is the permanent
+> settlement design rather than a stopgap.
+>
+> **What that leaves.** The gap is no longer "can a client join" or "can we
+> talk to the chain" — both are answered. It is the **join point**: a real
+> session that opens, meters, and settles end-to-end on devnet, with the v4
+> loop switched on. That is unproven, and the mock harness that greenlit it
+> is known to be structurally wrong (0% response-shape parity, executes no
+> AML), so treat its green suites as unverified rather than passing.
+
 **Operator persona.** A single operator: one wallet, one bonded circle on
 Octra mainnet, one tailnet hosting 5–50 stock-`tailscale` clients, real
 egress through their nodes, real OCT settled per session. They are
