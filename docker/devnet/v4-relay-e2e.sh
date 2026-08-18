@@ -226,6 +226,29 @@ print(((d.get("result") or {}).get("storage") or {}).get(key, ""))
 ' "$key"
 }
 
+# Read a scalar straight off a VIEW rather than scraping the storage
+# envelope that contract_call embeds. That envelope is a display
+# convenience -- values are sliced at 4096 bytes (rpc_view.ml:385-406) and
+# it is not a contract for which keys appear -- so a growing contract can
+# silently stop carrying the key you wanted. main-v4 exposes the counters
+# as real views; use them and retry across an epoch, because octra_submit
+# only stages and epochs apply every 10s (epoch_time.ml:10-11), so a read
+# immediately behind a confirm can still race the apply.
+view_uint() {
+  local fn=$1 params=${2:-[]} out=""
+  for _ in 1 2 3 4 5 6; do
+    out=$(rpc "contract_call" "[\"$V4\",\"$fn\",$params]" \
+      | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+print((d.get("result") or {}).get("result", ""))
+' 2>/dev/null)
+    [[ "$out" =~ ^[0-9]+$ ]] && { printf '%s' "$out"; return 0; }
+    sleep 4
+  done
+  printf '%s' "$out"
+}
+
 wait_contract_live() {
   local addr=$1
   for _ in 1 2 3 4 5 6 7 8 9 10; do
@@ -629,9 +652,15 @@ TX=$(send_value_tx "$CLIENT_KEY" "$TAILNET_DEPOSIT" create_tailnet "\"$MEMBERS_R
 wait_for_tx "$TX" "create_tailnet(client owner, tid=$TID)"
 
 say "main-v4 has no configure_tailnet_exit; open_session selects the exit circle directly."
-SID=$(storage_value get_session_status "[0]" session_count)
+SID=$(view_uint get_session_count)
 [[ "$SID" =~ ^[0-9]+$ ]] || fail "could not read session_count before open_session"
-TX=$(send_tx "$CLIENT_KEY" open_session "$TID" "\"$CIRCLE_ADDR\"" "$MAX_PAY")
+# open_session is `payable` and enforces BOTH `value >= min_session_deposit`
+# and `value >= max_pay` (main-v4.aml:623-624) -- the escrowed deposit IS
+# the session's funding, so it must go over as tx value, not just as the
+# max_pay argument. Sending it with the plain (valueless) helper reverts
+# "deposit below min".
+SESSION_DEPOSIT="${SESSION_DEPOSIT:-$MAX_PAY}"
+TX=$(send_value_tx "$CLIENT_KEY" "$SESSION_DEPOSIT" open_session "$TID" "\"$CIRCLE_ADDR\"" "$MAX_PAY")
 OPEN_TX="$TX"
 wait_for_tx "$TX" "open_session(client opener, sid=$SID)"
 STATUS=$(view_result get_session_status "[$SID]")
