@@ -26,6 +26,59 @@ and one of our Lean theorems proves a property the chain does not have.
 
 ---
 
+## 0.5 PROBE RESULTS — every [unverified] item settled on live devnet (2026-08-18)
+
+`docker/devnet/experiments/upstream-reality-probe.sh` ran against devnet at epoch
+1,340,487. **8/8 PASS.** Raw captures in `docker/devnet/.generated/upstream-reality-probe/`.
+
+| # | Item | Result |
+|---|---|---|
+| 1 | Activation gates | **All ACTIVE** — circle-exec (1,299,000), wasm-compute (1,330,000), participation set-fold (1,334,000) |
+| 2 | `op_type` acceptance | **BOTH `"call"` and `"program_exec"` accepted and executed.** Our #1 silent-breakage risk is cleared; foundry tooling is unaffected |
+| 3 | 4 KiB storage cap | **Read-side only, confirmed by write.** An 8,000-byte blob: `view=8000`, `embedded=4096`, `contractStorage default=4096 (truncated:true)`, `full=8000 (truncated:false)` |
+| 4 | `contract_receipt` | Both aliases answer; keys `{contract, effort, epoch, error, events, method, program, success, ts}` |
+| 5 | Terminal statuses | `rejected` carries our `require()` reason **verbatim** |
+| 6 | Validator RPCs | `octra_isValidator` → `-32601`; `octra_validatorSetProof` answers (`n=16 f=5 quorum=11`) |
+| 7 | PVAC status | see below |
+| 8 | `fhe_load_pk` live tx | **Decisive** (see below) |
+
+### The fhe_load_pk blocker is resolved — it was never "unwired"
+
+Probed as a live tx and read back from the receipt (a view call returns a bare
+"execution reverted" and tells you nothing — which is why this sat open from May):
+
+```
+tx.reason = "execution reverted [fhe pubkey not available: octG15XHx...]"
+```
+
+That is revert site 2 of two (`contract_vm.ml:2573-2581`). **Not** the capability gate
+("fhe_load_pk not allowed"). The bridge is wired and enabled; the probed address simply
+had no registered PVAC pubkey.
+
+And our May-registered wallet's key is **still on chain**:
+
+```
+oct8Tdgu4RLbSGah1fVoVHW4T4cLFDmsoKhTyVD8gCndNFm
+  has_pvac_pubkey   = true          pubkey_size = 3,090,247 (compressed)
+  canonical_binding = false         key_class   = historical
+  migration_route   = direct_key_switch         can_key_switch = true
+  reason            = "encrypted balance is empty"
+  target_key_class  = current
+```
+
+The chain names the migration path itself: a **direct `key_switch`**, available now,
+made simple precisely because the encrypted balance is empty. This retires open
+question #3 in §8 — we do not need to wait for the 1,330,000 migration machinery.
+
+**What this does and does not change.** It makes the HFHE path recoverable, so
+re-attempting it is now a bounded piece of work (re-vendor the sidecar ≥ pvac_hfhe_cpp
+`071b0e9`, add a Rust `key_switch` submitter). It does **not** revive HFHE as a
+settlement mechanism: `fhe_verify_*` is still view-only (`contract_vm.ml:2667-2671`),
+so it can never gate a `settle_confirm`/`claim_earnings` mutation. The sha256 hash
+chain remains settlement truth, and `swap-ready-hfhe` still cannot ship as designed.
+
+---
+
 ## 1. What shipped
 
 | Repo | Last push | What it is now |
