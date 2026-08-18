@@ -29,6 +29,7 @@ pub mod rpc;
 pub mod session;
 pub mod spki_verifier;
 pub mod stealth;
+pub mod tx_signer;
 pub mod v3_calls;
 pub mod v3_canonical;
 pub mod v3_members;
@@ -48,3 +49,6 @@ pub use session::{
     EndpointRecord, OpenSessionParams, RouteOpening, SessionId, SessionState, ValidatorRecord,
 };
 pub use sig::{KeyPair, PublicKey, Signature};
+// The chain-canonical tx signer (`transaction.ml` parity). Authoritative
+// over the re-exported `tx` module above for anything hitting a real node.
+pub use tx_signer::CanonicalTx;
