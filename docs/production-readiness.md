@@ -35,6 +35,13 @@ fragmented state from `production-checklist.md` (v1 gates),
 > moves no money and has no hashlock, so the v4 AML HTLC is the permanent
 > settlement design rather than a stopgap.
 >
+> **Sequence 4 (2026-08-22) does not reopen the chain-side list.**
+> `lite_node` HEAD `f3b6d58` keeps the same RPC surface, signing
+> preimage, `runtime_profile_hash`, and `consensus_rules_id`. See
+> [`octra-upstream-delta-2026-08-22.md`](octra-upstream-delta-2026-08-22.md).
+> Watch epoch **1,380,000** for circle object-member effort costs; our
+> AML does not emit those opcodes.
+>
 > **The join point is now closed too (2026-08-18).** A real session opened,
 > metered, and settled end-to-end on live devnet against a freshly deployed
 > `main-v4` at `octEX1mUYv6hw4eQH937zBh14EcjbUPUuBxQaTyuTTdPw38`, driven by

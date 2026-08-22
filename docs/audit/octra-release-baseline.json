@@ -2,16 +2,16 @@
   "schema": "octra-devnet-release-v2",
   "chain_id": "octra-devnet-9871-cluster",
   "key_id": "devnet-release-f912b4891be62acc",
-  "sequence": 2,
+  "sequence": 4,
   "action": "required",
   "notice_code": "consensus_recovery",
-  "public_commit": "dd342e754c91df55a41b515c510369d637af2385",
-  "source_commit": "75d9ed1d73a0e3731f7d7a4262d29b672ad3c24e",
-  "network_sha256": "26e5ca5a46753eb6f41962312991254fcbc2bdf55fb3ce73679dbf2511627a78",
+  "public_commit": "f3b6d580537294123153ef5cd1ef8fc08208501a",
+  "source_commit": "f8d868f92962ab5639d9a2be3fe206458c5ad019",
+  "network_sha256": "020de9dcf3dc99939619a22bc142a4f8d3320423c41d8351eed03695a62fc26b",
   "runtime_profile_hash": "14bac4b24aa67795bcaecf618b6c10a6ef0f3b2a113ded7f5f9117362375cee6",
   "consensus_profile": 16,
   "consensus_rules_id": "finalized_rejection_commitment",
-  "issued_at": "2026-08-16T23:33:02Z",
-  "expires_at": "2026-08-19T23:32:02Z",
-  "signature": "i7rE878xbJxxOK3HCy2l1+5CeN9JAc6KNU2EuxoEP652yTNpDtWHc3LU1R3akHa/roo24+wbXyk1X4l/5s49AQ=="
+  "issued_at": "2026-08-22T04:34:57Z",
+  "expires_at": "2026-08-25T04:33:57Z",
+  "signature": "9Ed+7wIUwgwNZQZ40+rAxRkh4wTeq1xN9tYP9NGaNufzwWrETmfSM2jzAavy7OcNWTUjb1bjZZPwk1E4ITC9DA=="
 }
