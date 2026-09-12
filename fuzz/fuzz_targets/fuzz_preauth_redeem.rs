@@ -73,10 +73,7 @@ fuzz_target!(|data: &[u8]| {
                             // token across the lifetime of this fuzz
                             // input.
                             let fresh = single_use_redeemed.insert(tok.clone());
-                            assert!(
-                                fresh,
-                                "single-use double-redemption: {tok}"
-                            );
+                            assert!(fresh, "single-use double-redemption: {tok}");
                         }
                     }
                     Err(_) => {
