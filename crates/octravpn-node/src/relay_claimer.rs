@@ -52,6 +52,11 @@ pub(crate) fn within_grace(now: u64, submitted_at: u64, quiesce: u64) -> bool {
 #[async_trait]
 pub(crate) trait ClaimerBackend: Send + Sync {
     /// Drain-pass candidates: {Armed, ClaimSubmitted} (u64 session ids).
+    /// Current chain epoch. The loop scans only when this has advanced since
+    /// the previous tick: everything a claim depends on changes at epoch
+    /// apply, so polling any faster is pure RPC load -- and if effort
+    /// metering activates upstream, pure cost.
+    async fn current_epoch(&self) -> Result<u64>;
     fn armed_unclaimed_ids(&self) -> Vec<u64>;
     /// Submit-pass candidates: {Proposed, Armed, ClaimSubmitted} (u64 ids).
     fn claimable_ids(&self) -> Vec<u64>;
@@ -62,6 +67,10 @@ pub(crate) trait ClaimerBackend: Send + Sync {
 
 #[async_trait]
 impl ClaimerBackend for Hub {
+    async fn current_epoch(&self) -> Result<u64> {
+        self.chain_v3.current_epoch().await
+    }
+
     fn armed_unclaimed_ids(&self) -> Vec<u64> {
         self.receipt_vault
             .armed_unclaimed()
@@ -188,8 +197,22 @@ pub(crate) async fn run(hub: Arc<Hub>) -> Result<()> {
     let mut inflight: HashMap<u64, u64> = HashMap::new();
     let mut tick: u64 = 0;
 
+    // Epoch-follow: scan once per epoch apply, not once per timer period. A
+
+    // failed epoch read does NOT stall the keeper; it scans anyway.
+
+    let mut last_epoch: Option<u64> = None;
+
     loop {
         tokio::time::sleep(period).await;
+        match hub.current_epoch().await {
+            Ok(epoch) if last_epoch == Some(epoch) => {
+                debug!(epoch, "relay claimer: epoch unchanged, skipping scan");
+                continue;
+            }
+            Ok(epoch) => last_epoch = Some(epoch),
+            Err(e) => debug!(error = %e, "relay claimer: epoch read failed; scanning anyway"),
+        }
         tick += 1;
         run_tick(
             hub.as_ref(),
@@ -232,6 +255,9 @@ mod tests {
 
     #[async_trait]
     impl ClaimerBackend for MockBackend {
+        async fn current_epoch(&self) -> Result<u64> {
+            Ok(1)
+        }
         fn armed_unclaimed_ids(&self) -> Vec<u64> {
             self.armed_unclaimed.clone()
         }

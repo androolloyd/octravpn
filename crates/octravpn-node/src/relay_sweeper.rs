@@ -182,8 +182,22 @@ pub(crate) async fn run(hub: Arc<Hub>) -> Result<()> {
     let mut cursor: u64 = 0;
     let mut tick: u64 = 0;
 
+    // Epoch-follow (see relay_claimer): the sweep guards are epoch-denominated,
+
+    // so nothing becomes sweepable between two reads of the same epoch.
+
+    let mut last_epoch: Option<u64> = None;
+
     loop {
         tokio::time::sleep(period).await;
+        match hub.current_epoch().await {
+            Ok(epoch) if last_epoch == Some(epoch) => {
+                debug!(epoch, "relay sweeper: epoch unchanged, skipping scan");
+                continue;
+            }
+            Ok(epoch) => last_epoch = Some(epoch),
+            Err(e) => debug!(error = %e, "relay sweeper: epoch read failed; scanning anyway"),
+        }
         tick += 1;
         run_tick(
             hub.as_ref(),

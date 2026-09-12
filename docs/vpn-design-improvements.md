@@ -105,14 +105,16 @@ self DERP map (`tsi-mesh-control:443`, same cert the peers trust). The interop h
 on it (exit 0: preauth, `tailscale up`, convergence, ping) and `Dockerfile.derper`,
 `derp-map.json` and the derp-certs step are gone.
 
-## 9. Keepers should follow epochs, not poll
+## 9. Keepers should follow epochs, not poll — DONE 2026-09-12 (node keepers)
 
 **Evidence.** Claimer, sweeper, and refund watcher poll views on timers; effort metering
 beyond floors may activate (open question to the core team). Retention is per-epoch;
 `octra_epochTags` and the new gRPC `Epoch` read exist.
 
-**Fix.** Drive keepers off epoch advancement (one read per epoch, act on deltas) instead of
-fixed-period view polling. Cost: small; it also makes local-node tests deterministic.
+**Done for the node keepers.** The relay claimer and sweeper read `current_epoch()` each timer
+tick and scan only when it advanced; a failed epoch read scans anyway rather than stalling.
+`ClaimerBackend` gained `current_epoch()`. The client's refund replay runs at client start
+(`runner.rs`), not on a timer, so there was nothing to gate there.
 
 ## 10. Finish hidden-exit before calling it private *(the speculative one)*
 
