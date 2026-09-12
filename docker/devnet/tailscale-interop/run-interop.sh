@@ -254,5 +254,39 @@ if ! docker exec tsi-peer-a tailscale ping --c 5 --timeout 10s "${PEER_B_IP}" >&
     exit 50
 fi
 
+# Optional: prove registrations are durable. Restart mesh-control (its
+# state dir is bind-mounted, so <state>/tailscale-wire/machines.sqlite
+# survives), wait for it to come back, and ping again WITHOUT re-running
+# `tailscale up`. If the registry were memory-only the peers would be
+# unknown to the restarted control plane and the map would empty out.
+if [ "${INTEROP_RESTART:-0}" = "1" ]; then
+  step "Step 7: restart mesh-control, peers must still be mapped (durable registrations)"
+  IP_BEFORE="$(docker exec tsi-peer-b tailscale ip -4 2>/dev/null | head -1)"
+  docker restart tsi-mesh-control >/dev/null
+  for _ in $(seq 1 40); do
+    if curl -ksf -m 3 "https://127.0.0.1:8443/derp/probe" >/dev/null 2>&1 || curl -sf -m 3 "http://127.0.0.1:51821/health" >/dev/null 2>&1; then break; fi
+    sleep 2
+  done
+  sleep 8
+  IP_AFTER="$(docker exec tsi-peer-b tailscale ip -4 2>/dev/null | head -1)"
+  if [ -z "$IP_AFTER" ] || [ "$IP_AFTER" != "$IP_BEFORE" ]; then
+    echo "RESTART FAIL: peer-b ip before=$IP_BEFORE after=$IP_AFTER (registrations not durable)" >&2
+    exit 60
+  fi
+  if ! docker exec tsi-peer-a tailscale ping -c 3 --timeout 5s "$IP_AFTER" 2>&1 | tail -3; then
+    echo "RESTART FAIL: ping after mesh-control restart failed" >&2
+    exit 60
+  fi
+  # A cached map lets the data plane survive a control-plane blip even with a
+  # memory-only registry, so the ping alone is not proof. The control plane
+  # itself must show it re-learned the machines from the store.
+  HYDRATED="$(docker logs tsi-mesh-control 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -o 'machine registrations hydrated.*nodes=[0-9]*' | tail -1 | grep -o 'nodes=[0-9]*' | cut -d= -f2)"
+  if [ -z "$HYDRATED" ] || [ "$HYDRATED" -lt 2 ]; then
+    echo "RESTART FAIL: mesh-control did not hydrate >=2 machines from machines.sqlite after restart (got '${HYDRATED:-none}')" >&2
+    docker logs tsi-mesh-control 2>&1 | tail -15 >&2
+    exit 60
+  fi
+  echo "OK: peers survived a mesh-control restart with the same IPs, and the control plane hydrated ${HYDRATED} machines from SQLite"
+fi
 echo "OK: tailscale interop succeeded" >&2
 exit 0

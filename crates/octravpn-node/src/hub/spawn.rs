@@ -191,16 +191,23 @@ impl Hub {
                 // mounted); empty ⇒ the wire layer's `allow_all_packet_filter`
                 // fallback stays in play until an operator PUTs a doc.
                 // Everything else takes the builder's octra defaults.
+                // Durable registrations (same store `mesh serve` uses):
+                // hydrate the registry from <state dir>/machines.sqlite so a
+                // daemon restart does not wipe node identities and IPs.
+                let machines = Arc::new(MachineRegistry::new());
+                let registration_store =
+                    crate::cli::mesh::open_machine_registration_store(&dir, &machines).await?;
                 Some((
                     octravpn_mesh::WireStateBuilder::new(
                         server_noise_key,
                         Arc::new(shared_minter.clone()),
                         Arc::new(TailnetIpAllocator::new(tailnet_id)),
-                        Arc::new(MachineRegistry::new()),
+                        machines,
                         Arc::new(octravpn_mesh::policy::PolicyStore::new()),
                         octravpn_mesh::tailscale_wire::DerpMapStore::shared(derp_map),
                     )
                     .native_derp(native_derp.clone())
+                    .registration_store(Some(registration_store))
                     .build(),
                     shared_minter,
                 ))

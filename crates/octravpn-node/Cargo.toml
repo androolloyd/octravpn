@@ -103,6 +103,14 @@ reqwest     = { workspace = true }
 # tokio bind because BSD-style SO_REUSEPORT doesn't flow-hash.
 # `all` feature is required for set_reuse_port + reuse-address knobs.
 socket2     = { version = "0.5", features = ["all"] }
+# The Tailscale-wire surface and its durable machine registrations. The
+# mesh crate already links headscale-api (admin + full); linking it here too
+# gives the daemon the admin types (PersistentMachineAdmin) and headscale-db
+# gives it the SQLite store under [control].tailscale_wire_state_dir, so a
+# restart keeps node identities and tailnet IPs instead of forcing every
+# client to re-register. Same path-dep style as the mesh crate.
+headscale-api = { path = "../../../headscale-rs/headscale-api", default-features = false, features = ["admin"] }
+headscale-db = { path = "../../../headscale-rs/headscale-db" }
 
 [dev-dependencies]
 octravpn-mesh = { path = "../octravpn-mesh", features = ["test-helpers"] }

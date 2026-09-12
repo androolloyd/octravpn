@@ -3125,6 +3125,7 @@ dependencies = [
  "headscale-api",
  "headscale-cli",
  "headscale-core",
+ "headscale-db",
  "hex",
  "hmac",
  "http-body-util",

@@ -261,6 +261,50 @@ pub(crate) async fn run_mesh_cmd(sub: MeshCmd) -> Result<()> {
 
 /// Hub-free wire surface entry point. See `MeshCmd::Serve` for the
 /// rationale.
+/// Open (creating if absent) the durable machine-registration store under a
+/// Tailscale-wire state dir, run migrations, and hydrate `registry` from it.
+///
+/// Without this, every registration lives only in the in-memory
+/// [`MachineRegistry`]: a daemon restart wipes node identities and tailnet
+/// IPs and every client has to re-register. The store is the same
+/// `PersistentMachineAdmin` headscale-rs' own server uses, over a SQLite
+/// file next to the noise key and DERP key.
+pub(crate) async fn open_machine_registration_store(
+    state_dir: &std::path::Path,
+    registry: &octravpn_mesh::tailscale_wire::MachineRegistry,
+) -> anyhow::Result<std::sync::Arc<dyn headscale_api::tailscale_wire::MachineRegistrationStore>> {
+    use anyhow::Context as _;
+    std::fs::create_dir_all(state_dir)
+        .with_context(|| format!("create wire state dir {}", state_dir.display()))?;
+    let path = state_dir.join("machines.sqlite");
+    // headscale-db does not set create_if_missing; an empty file is a valid
+    // new SQLite database, so create it ourselves and keep the URL plain
+    // rather than depending on how the URL's query string is parsed.
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .with_context(|| format!("create {}", path.display()))?;
+    let url = format!("sqlite://{}", path.display());
+    let db = headscale_db::Database::new(&url)
+        .await
+        .with_context(|| format!("open machine registration store {}", path.display()))?;
+    db.migrate()
+        .await
+        .context("migrate machine registration store")?;
+    let admin = headscale_api::admin::PersistentMachineAdmin::new(db.pool().clone());
+    let hydrated = admin
+        .hydrate_wire_registry(registry)
+        .await
+        .map_err(|e| anyhow::anyhow!("hydrate wire registry from {}: {e}", path.display()))?;
+    tracing::info!(
+        store = %path.display(),
+        nodes = hydrated,
+        "machine registrations hydrated from durable store"
+    );
+    Ok(std::sync::Arc::new(admin))
+}
+
 async fn run_mesh_serve(
     listen: String,
     https_listen: String,
@@ -350,6 +394,10 @@ async fn run_mesh_serve(
     // on its next poll). Cloning the `Arc`s is the standard headscale-rs
     // wiring — see `tests/policy_e2e.rs` for the in-process proof.
     let machines = Arc::new(MachineRegistry::new());
+    // Durable registrations: hydrate the in-memory registry from the SQLite
+    // store under --state-dir so a restart keeps node identities and IPs.
+    let registration_store =
+        open_machine_registration_store(&state_dir_path, &machines).await?;
     let policy = octravpn_mesh::policy::PolicyStore::new();
     // The admin surface (when mounted) holds `Arc` clones of `machines`
     // + `policy`, so a `PUT /api/v1/policy` mutates the same store the
@@ -365,6 +413,7 @@ async fn run_mesh_serve(
         Arc::new(policy.clone()),
         octravpn_mesh::tailscale_wire::DerpMapStore::shared(derp_map),
     )
+    .registration_store(Some(registration_store))
     .knock(load_knock_cfg_from_env())
     .native_derp(native_derp.clone())
     .build();

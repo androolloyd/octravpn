@@ -39,6 +39,7 @@ pub struct WireStateBuilder {
     policy: Arc<PolicyStore>,
     derp_map: Arc<DerpMapStore>,
     native_derp: Option<Arc<NativeDerpRuntime>>,
+    registration_store: Option<Arc<dyn headscale_api::tailscale_wire::MachineRegistrationStore>>,
     knock: KnockConfig,
     base_domain: String,
 }
@@ -65,6 +66,7 @@ impl WireStateBuilder {
             policy,
             derp_map,
             native_derp: None,
+            registration_store: None,
             knock: KnockConfig::disabled(),
             base_domain: "octra.test".to_string(),
         }
@@ -94,6 +96,18 @@ impl WireStateBuilder {
         self
     }
 
+    /// Durable machine registrations. `None` (the default) keeps every
+    /// registration in memory only, so a daemon restart wipes node identity
+    /// and tailnet IPs and every client must re-register -- fine for a
+    /// throwaway harness, not for an operator. Pass a
+    /// [`MachineRegistrationStore`](headscale_api::tailscale_wire::MachineRegistrationStore)
+    /// (e.g. `PersistentMachineAdmin` over a SQLite file under the wire
+    /// state dir) and hydrate the registry from it before building.
+    pub fn registration_store(mut self, store: Option<Arc<dyn headscale_api::tailscale_wire::MachineRegistrationStore>>) -> Self {
+        self.registration_store = store;
+        self
+    }
+
     /// Materialise the [`WireState`].
     #[must_use]
     pub fn build(self) -> WireState {
@@ -102,7 +116,7 @@ impl WireStateBuilder {
             preauth: self.preauth,
             ip_allocator: self.ip_allocator,
             machines: self.machines,
-            registration_store: None,
+            registration_store: self.registration_store,
             derp_map: self.derp_map,
             native_derp: self.native_derp,
             policy: self.policy,
