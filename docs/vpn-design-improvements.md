@@ -44,15 +44,16 @@ spec already says the HTLC is settlement-of-record; the source audit made it *pe
 retire the two-tx driver from the node. Fewer keepers, fewer invariants, one thing to audit.
 Cost: small, mostly deletion — after the proofs.
 
-## 3. Registration and identity must survive a restart
+## 3. Registration and identity must survive a restart — DONE 2026-09-12
 
 **Evidence.** `WireStateBuilder::build` hardcodes `registration_store: None`
 (`wire_state.rs:105`) and `hub/spawn.rs` builds `MachineRegistry::new()` inline: a node
 restart wipes node identity and tailnet IPs. A shakeout tolerates it; an operator paging
 at 3am does not.
 
-**Fix.** Persist the registration store under the node's state dir (the receipt vault and
-journal already have the durability pattern — periodic fsync, atomic rename). Cost: small.
+**Done.** `PersistentMachineAdmin` over `<wire state dir>/machines.sqlite`, hydrated at boot, in
+both the Hub and `mesh serve`. Proven by `run-interop.sh` with `INTEROP_RESTART=1`: the restarted
+control plane logs `hydrated … nodes=2`, peers keep their IPs, ping succeeds with no re-`up`.
 
 ## 4. Enforce the policy we already anchor
 

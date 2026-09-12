@@ -42,6 +42,28 @@ fragmented state from `production-checklist.md` (v1 gates),
 > Watch epoch **1,380,000** for circle object-member effort costs; our
 > AML does not emit those opcodes.
 >
+> ### Release tracker — 2026-09-12 (end of day)
+>
+> **Landed today, all on `main`:** the branch merged (68 commits); fuzz CI fixed and
+> validated (10/11 clean, the one build break fixed; ~1,100 false issues closed);
+> sequence-12 accepted with the money path verified unchanged; `forge create` /
+> `cast transfer` / the strict-mode hint fixed; the session-admission verifier no
+> longer scrapes the storage envelope (was a live 401 on sequence 12); **native Rust
+> DERP** replaces the Go derper (interop exit 0, peers homed on region `octra`);
+> **durable machine registrations** (restart keeps identities and IPs, hydration
+> asserted); sealed-key boot proven 4/4 and in the money loop.
+>
+> **Still between here and a release**, in order: (1) join the mesh and money planes
+> — the AML already supports it: tailnet owners can `authorize` a spender and
+> `open_session_from_treasury` opens sessions on a member's behalf, so the exit node
+> admits a stock WG peer on first traffic, opens a treasury session for it, and meters
+> its WG peer counters; (2) retire the two-tx driver once Step 9's proofs land, so the
+> HTLC is the only rail; (3) enforce the anchored `members_root`/policy on the wire
+> instead of `allow_all_packet_filter`; (4) keepers follow epochs rather than timers;
+> (5) the operator audit CLI designed around the 22.75h retention window;
+> (6) mainnet ceremony + runbook. Hidden-exit (per-packet nonces, then the relay hop)
+> is the only item that changes the threat model and comes last.
+>
 > **2026-09-12 — proven again on lite_node sequence 12, locally, with sealed keys.**
 > The same loop now runs green against a real sequence-12 node in docker
 > (`octra-foundry/docker/octra-node`) with node1 booted under
