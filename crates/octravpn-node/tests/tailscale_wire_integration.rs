@@ -21,8 +21,8 @@ use octravpn_mesh::{
         key_handler::OverTLSPublicKeyResponse,
         MachineRegistry,
     },
-    tailscale_wire_embedded_control_router, tailscale_wire_router, PreauthMinter, ServerNoiseKey, WireState,
-    DEFAULT_PREAUTH_TTL,
+    tailscale_wire_embedded_control_router, tailscale_wire_router, PreauthMinter, ServerNoiseKey,
+    WireState, DEFAULT_PREAUTH_TTL,
 };
 use std::sync::Arc;
 use tempfile::tempdir;
@@ -136,7 +136,12 @@ async fn embedded_control_router_hides_public_routes_and_keeps_them_on_the_wire_
     let embedded = tailscale_wire_embedded_control_router(state.clone());
     let wire = tailscale_wire_router(state);
 
-    for uri in ["/version", "/robots.txt", "/health", "/definitely-not-an-octra-route"] {
+    for uri in [
+        "/version",
+        "/robots.txt",
+        "/health",
+        "/definitely-not-an-octra-route",
+    ] {
         let resp = embedded
             .clone()
             .oneshot(

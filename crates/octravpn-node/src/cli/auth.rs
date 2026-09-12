@@ -12,13 +12,17 @@
 
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{bail, Context as _, Result};
 use async_trait::async_trait;
 use clap::{Args, Subcommand as ClapSubcommand};
+use octravpn_core::v3_members::Member;
 
 use super::{CliContext, Subcommand};
+use crate::chain_v3::ChainCtxV3;
+use crate::circle_update::SealedAssetCreds;
 use crate::config::NodeConfig;
-use crate::control::enroll_circle::CircleStore;
+use crate::control::enroll::EnrollStore;
+use crate::control::enroll_circle::{CircleEnrollStore, CircleStore};
 use crate::v3_cli;
 
 /// Operator-side management of the enrollment allowlist.
@@ -49,6 +53,41 @@ pub(crate) enum AuthCmd {
     },
     /// Print the current allowlist.
     List,
+    /// The anchored member set (`/auth/members.json`): which devices the
+    /// wire admits. Item 4 renders it into the Tailscale packet filter.
+    Members {
+        #[command(subcommand)]
+        cmd: MembersCmd,
+    },
+}
+
+#[derive(ClapSubcommand, Debug)]
+pub(crate) enum MembersCmd {
+    /// Print the anchored member set.
+    List {
+        #[arg(long, default_value_t = 0)]
+        tailnet_id: u64,
+    },
+    /// Admit a device: bind `wallet` to its WireGuard/Tailscale node key
+    /// and re-anchor the set. Re-admitting a wallet replaces its key.
+    Admit {
+        /// `oct…` wallet address the device belongs to.
+        #[arg(long)]
+        wallet: String,
+        /// Node key: `nodekey:<hex>`, bare 64-hex, or the 44-char base64
+        /// WireGuard public key. (`tailscale status --json` → `Self.PublicKey`.)
+        #[arg(long)]
+        node_key: String,
+        #[arg(long, default_value_t = 0)]
+        tailnet_id: u64,
+    },
+    /// Evict a wallet's device and re-anchor the set.
+    Evict {
+        #[arg(long)]
+        wallet: String,
+        #[arg(long, default_value_t = 0)]
+        tailnet_id: u64,
+    },
 }
 
 #[async_trait]
@@ -62,6 +101,10 @@ impl Subcommand for AuthArgs {
         let cfg = NodeConfig::load(ctx.cfg_path)?;
         let chain = Arc::new(v3_cli::build_chain_ctx_for_circle(&cfg)?);
         let creds = super::circle::resolve_sealed_passphrase(self.passphrase.as_deref())?;
+        if let AuthCmd::Members { cmd } = self.cmd {
+            run_members(chain, creds, &self.circle, cmd).await?;
+            return Ok(0);
+        }
         let store = CircleStore::new(chain, creds, self.circle.clone());
 
         match self.cmd {
@@ -98,7 +141,103 @@ impl Subcommand for AuthArgs {
                     println!("revoked {wallet} (allowlist now v{v})");
                 }
             }
+            AuthCmd::Members { .. } => unreachable!("handled above"),
         }
         Ok(0)
     }
+}
+
+/// Accept a node key as Tailscale prints it (`nodekey:<hex>`), bare hex,
+/// or the base64 WireGuard form; return the canonical `wg_pubkey_b64`.
+fn parse_node_key(raw: &str) -> Result<String> {
+    let s = raw.trim();
+    let s = s.strip_prefix("nodekey:").unwrap_or(s);
+    let bytes = if s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit()) {
+        hex::decode(s).context("node key hex")?
+    } else {
+        octravpn_core::b64::decode(s).map_err(|e| anyhow::anyhow!("node key base64: {e}"))?
+    };
+    if bytes.len() != 32 {
+        bail!("node key decodes to {} bytes, want 32", bytes.len());
+    }
+    Ok(octravpn_core::b64::encode(bytes))
+}
+
+/// Fresh 64-hex `ip_salt` for a member set that does not exist yet. An
+/// existing set keeps the salt it was created with.
+fn fresh_ip_salt() -> String {
+    hex::encode(rand::random::<[u8; 32]>())
+}
+
+async fn run_members(
+    chain: Arc<ChainCtxV3>,
+    creds: SealedAssetCreds,
+    circle: &str,
+    cmd: MembersCmd,
+) -> Result<()> {
+    let store = CircleEnrollStore::new(chain.clone(), creds, circle, fresh_ip_salt());
+    match cmd {
+        MembersCmd::List { tailnet_id } => {
+            let state = store.load_enroll_state(tailnet_id).await?;
+            let m = &state.members;
+            println!(
+                "members for circle {circle} — tailnet {} — {} device(s) — set hash {}",
+                m.tailnet_id,
+                m.members.len(),
+                m.hash_hex().unwrap_or_else(|_| "<unhashable>".into())
+            );
+            for member in &m.members {
+                let node_key = crate::members_policy::member_node_key_hex(&member.wg_pubkey_b64)
+                    .map_or_else(|_| "<invalid key>".to_string(), |h| format!("nodekey:{h}"));
+                println!(
+                    "  {}  {}  joined_epoch={}",
+                    member.wallet, node_key, member.joined_epoch
+                );
+            }
+        }
+        MembersCmd::Admit {
+            wallet,
+            node_key,
+            tailnet_id,
+        } => {
+            let wg_pubkey_b64 = parse_node_key(&node_key)?;
+            let mut members = store.load_enroll_state(tailnet_id).await?.members;
+            let joined_epoch = chain.current_epoch().await.unwrap_or(0);
+            let entry = Member {
+                wallet: wallet.clone(),
+                wg_pubkey_b64,
+                joined_epoch,
+            };
+            let replaced =
+                if let Some(existing) = members.members.iter_mut().find(|m| m.wallet == wallet) {
+                    *existing = entry;
+                    true
+                } else {
+                    members.members.push(entry);
+                    false
+                };
+            members.validate()?;
+            let v = store.commit_members(tailnet_id, &members).await?;
+            println!(
+                "{} {wallet} (members now {} device(s), circle state v{v}; applies next epoch)",
+                if replaced { "re-keyed" } else { "admitted" },
+                members.members.len()
+            );
+        }
+        MembersCmd::Evict { wallet, tailnet_id } => {
+            let mut members = store.load_enroll_state(tailnet_id).await?.members;
+            let before = members.members.len();
+            members.members.retain(|m| m.wallet != wallet);
+            if members.members.len() == before {
+                println!("not a member: {wallet}");
+                return Ok(());
+            }
+            let v = store.commit_members(tailnet_id, &members).await?;
+            println!(
+                "evicted {wallet} (members now {} device(s), circle state v{v}; applies next epoch)",
+                members.members.len()
+            );
+        }
+    }
+    Ok(())
 }

@@ -34,6 +34,7 @@ mod config;
 mod control;
 mod events;
 mod hub;
+mod members_policy;
 mod mesh_ops;
 mod native_derp;
 mod onion;

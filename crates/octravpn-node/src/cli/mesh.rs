@@ -21,8 +21,8 @@ impl Subcommand for MeshArgs {
     fn needs_hub(&self) -> bool {
         false
     }
-    async fn dispatch(self, _ctx: CliContext<'_>) -> Result<i32> {
-        run_mesh_cmd(self.sub).await?;
+    async fn dispatch(self, ctx: CliContext<'_>) -> Result<i32> {
+        run_mesh_cmd(self.sub, ctx.cfg_path).await?;
         Ok(0)
     }
 }
@@ -126,6 +126,16 @@ pub(crate) enum MeshCmd {
         /// unless this flag is set.
         #[arg(long = "serve-derp")]
         serve_derp: bool,
+        /// Item 4: enforce this circle's anchored member set on the wire.
+        /// Builds a chain context from `--config`'s `[chain]` table; the
+        /// sealed passphrase comes from `OCTRAVPN_SEALED_PASSPHRASE` or
+        /// `[chain].sealed_passphrase`. Absent ⇒ allow-all (unchanged).
+        #[arg(long)]
+        members_policy_circle: Option<String>,
+        /// Sync period for `--members-policy-circle`, seconds (default:
+        /// `[control.members_policy].sync_period_secs`, i.e. 10).
+        #[arg(long)]
+        members_policy_period_secs: Option<u64>,
     },
     /// Wrap `GET /api/v1/machines` on the remote mesh-control admin
     /// surface — prints the current tailnet roster. Same auth posture
@@ -158,7 +168,7 @@ pub(crate) enum MeshCmd {
 /// signature change. The current single arm is infallible — clippy
 /// allow is intentional.
 #[allow(clippy::unnecessary_wraps)]
-pub(crate) async fn run_mesh_cmd(sub: MeshCmd) -> Result<()> {
+pub(crate) async fn run_mesh_cmd(sub: MeshCmd, cfg_path: &str) -> Result<()> {
     match sub {
         MeshCmd::MintPreauth {
             user,
@@ -213,7 +223,23 @@ pub(crate) async fn run_mesh_cmd(sub: MeshCmd) -> Result<()> {
             tailnet_id,
             admin_token,
             serve_derp,
+            members_policy_circle,
+            members_policy_period_secs,
         } => {
+            // Resolved before the listeners come up so a bad circle /
+            // missing passphrase fails the command instead of leaving a
+            // wire that silently allows everyone.
+            let members_policy = match members_policy_circle {
+                Some(circle) => {
+                    let cfg = crate::config::NodeConfig::load(cfg_path)?;
+                    Some(crate::members_policy::MembersPolicySync::from_config(
+                        &cfg,
+                        Some(circle),
+                        members_policy_period_secs,
+                    )?)
+                }
+                None => None,
+            };
             run_mesh_serve(
                 listen,
                 https_listen,
@@ -222,6 +248,7 @@ pub(crate) async fn run_mesh_cmd(sub: MeshCmd) -> Result<()> {
                 tailnet_id,
                 admin_token,
                 serve_derp,
+                members_policy,
             )
             .await
         }
@@ -305,6 +332,7 @@ pub(crate) async fn open_machine_registration_store(
     Ok(std::sync::Arc::new(admin))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_mesh_serve(
     listen: String,
     https_listen: String,
@@ -313,6 +341,7 @@ async fn run_mesh_serve(
     tailnet_id: String,
     admin_token: Option<String>,
     serve_derp: bool,
+    members_policy: Option<crate::members_policy::MembersPolicySync>,
 ) -> Result<()> {
     use axum::{
         extract::State,
@@ -396,8 +425,7 @@ async fn run_mesh_serve(
     let machines = Arc::new(MachineRegistry::new());
     // Durable registrations: hydrate the in-memory registry from the SQLite
     // store under --state-dir so a restart keeps node identities and IPs.
-    let registration_store =
-        open_machine_registration_store(&state_dir_path, &machines).await?;
+    let registration_store = open_machine_registration_store(&state_dir_path, &machines).await?;
     let policy = octravpn_mesh::policy::PolicyStore::new();
     // The admin surface (when mounted) holds `Arc` clones of `machines`
     // + `policy`, so a `PUT /api/v1/policy` mutates the same store the
@@ -417,6 +445,11 @@ async fn run_mesh_serve(
     .knock(load_knock_cfg_from_env())
     .native_derp(native_derp.clone())
     .build();
+    // Item 4: the anchored member set replaces the allow-all fallback in
+    // the same `PolicyStore` the wire `/map` handler reads.
+    if let Some(sync) = members_policy {
+        tokio::spawn(sync.run(machines.clone(), Arc::new(policy.clone())));
+    }
 
     eprintln!(
         "mesh serve: noise pubkey mkey:{} listen={listen}",

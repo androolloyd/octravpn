@@ -119,6 +119,13 @@ impl Hub {
                     "[control.derp].serve requires [control].tailscale_wire_state_dir"
                 ));
             }
+            if self.cfg.control.members_policy.enabled
+                && self.cfg.control.tailscale_wire_state_dir.is_none()
+            {
+                return Err(anyhow!(
+                    "[control.members_policy].enabled requires [control].tailscale_wire_state_dir"
+                ));
+            }
             let wire_state = if let Some(dir) = self
                 .cfg
                 .control
@@ -197,13 +204,23 @@ impl Hub {
                 let machines = Arc::new(MachineRegistry::new());
                 let registration_store =
                     crate::cli::mesh::open_machine_registration_store(&dir, &machines).await?;
+                // Item 4: the policy store is hoisted so the members-policy
+                // sync task can replace the allow-all fallback with the
+                // packet filter rendered from the anchored member set.
+                // Config errors (no circle, no passphrase) fail boot here;
+                // the loop itself never returns.
+                let policy_store = Arc::new(octravpn_mesh::policy::PolicyStore::new());
+                if self.cfg.control.members_policy.enabled {
+                    let sync = crate::members_policy::MembersPolicySync::from_hub(&self)?;
+                    tokio::spawn(sync.run(Arc::clone(&machines), Arc::clone(&policy_store)));
+                }
                 Some((
                     octravpn_mesh::WireStateBuilder::new(
                         server_noise_key,
                         Arc::new(shared_minter.clone()),
                         Arc::new(TailnetIpAllocator::new(tailnet_id)),
                         machines,
-                        Arc::new(octravpn_mesh::policy::PolicyStore::new()),
+                        policy_store,
                         octravpn_mesh::tailscale_wire::DerpMapStore::shared(derp_map),
                     )
                     .native_derp(native_derp.clone())

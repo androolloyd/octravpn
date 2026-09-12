@@ -68,6 +68,11 @@ use tracing::{debug, info};
 
 use crate::chain_v3::ChainCtxV3;
 
+/// Path of the sealed state-root snapshot inside a circle.
+pub(crate) const STATE_ROOT_PATH: &str = "/state-root.json";
+/// Key id every `/state-root.json` is sealed under.
+pub(crate) const STATE_ROOT_KEY_ID: &str = "default";
+
 /// Default fee floor for a `circle_asset_put_encrypted` tx if the
 /// chain's `octra_recommendedFee` returns 0 / errors. Mirrors the
 /// constant the v2 path uses for the same op.
@@ -393,13 +398,32 @@ pub(crate) fn compute_target_state_root(
 pub(crate) async fn fetch_current_state_root(
     ctx: &ChainCtxV3,
     circle_id: &str,
+    creds: &SealedAssetCreds,
 ) -> Result<Option<StateRoot>> {
     let Some(anchor_hex) = ctx.get_circle_state_root(circle_id).await? else {
         return Ok(None);
     };
-    let bytes = fetch_circle_asset_plain(ctx, circle_id, "/state-root.json").await?;
-    let Some(bytes) = bytes else {
-        return Ok(None);
+    // `/state-root.json` is sealed like every other blob on a
+    // `sealed_read` circle (`apply` writes it through the same put), so
+    // it comes back through the sealed path. The anchor doubles as the
+    // expected plaintext hash: it is the sha256 of the canonical bytes,
+    // which is exactly what was sealed.
+    let bytes = match read_sealed_asset(
+        ctx,
+        circle_id,
+        STATE_ROOT_PATH,
+        STATE_ROOT_KEY_ID,
+        creds,
+        &anchor_hex,
+    )
+    .await?
+    {
+        SealedRead::Valid(bytes) => bytes,
+        SealedRead::Absent => return Ok(None),
+        SealedRead::Corrupt => bail!(
+            "state-root of circle {circle_id} does not decrypt/verify against the on-chain \
+             anchor {anchor_hex}: wrong sealed passphrase, or a drifted snapshot"
+        ),
     };
     let sr = StateRoot::decode_lenient(&bytes)
         .with_context(|| format!("decode current state-root for {circle_id}"))?;
@@ -461,6 +485,65 @@ pub(crate) async fn fetch_circle_asset_plain(
     ))
 }
 
+/// A sealed asset as `circle_asset_ciphertext` returns it.
+///
+/// lite_node sequence 12 deploys every circle as `resource_mode =
+/// sealed_read` unless the deployer opts out: a plaintext put is rejected
+/// with `circle_mode_invalid` ("sealed_read circles require encrypted
+/// asset updates") and `circle_asset` refuses a sealed path with "circle
+/// asset is sealed; use circle_asset_ciphertext". So this — not the plain
+/// read — is the read path for every blob this module writes.
+#[derive(Debug, Clone)]
+pub(crate) struct SealedAsset {
+    pub ciphertext_b64: String,
+    pub plaintext_hash: String,
+    pub key_id: String,
+}
+
+/// Fetch a sealed asset's envelope, or `None` when the path is absent.
+pub(crate) async fn fetch_circle_asset_sealed(
+    ctx: &ChainCtxV3,
+    circle_id: &str,
+    path: &str,
+) -> Result<Option<SealedAsset>> {
+    let v = match ctx
+        .rpc
+        .raw_call("circle_asset_ciphertext", json!([circle_id, path]))
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("not found") || msg.contains("no such") || msg.contains("empty result")
+            {
+                return Ok(None);
+            }
+            return Err(anyhow!("circle_asset_ciphertext({circle_id}, {path}): {e}"));
+        }
+    };
+    if v.is_null() {
+        return Ok(None);
+    }
+    let Some(ciphertext_b64) = v.get("ciphertext_b64").and_then(Value::as_str) else {
+        return Err(anyhow!(
+            "circle_asset_ciphertext({circle_id}, {path}): unexpected response shape: {v}"
+        ));
+    };
+    let field = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    Ok(Some(SealedAsset {
+        ciphertext_b64: ciphertext_b64.to_string(),
+        plaintext_hash: field("plaintext_hash"),
+        key_id: {
+            let k = field("key_id");
+            if k.is_empty() {
+                "default".to_string()
+            } else {
+                k
+            }
+        },
+    }))
+}
+
 /// Outcome of reading a sealed circle asset via [`read_sealed_asset`].
 pub(crate) enum SealedRead {
     /// The asset isn't present on chain.
@@ -486,15 +569,43 @@ pub(crate) async fn read_sealed_asset(
     creds: &SealedAssetCreds,
     expected_hash: &str,
 ) -> Result<SealedRead> {
-    let Some(bytes) = fetch_circle_asset_plain(ctx, circle_id, path).await? else {
-        return Ok(SealedRead::Absent);
-    };
-    let Ok(sealed) = std::str::from_utf8(&bytes) else {
-        return Ok(SealedRead::Corrupt);
-    };
+    // Sequence-12 path first: the chain hands back the envelope itself.
+    // A miss falls through to the plain read for legacy / `public_read`
+    // circles, where the envelope string is the asset body.
+    let (sealed, key_id) =
+        if let Some(asset) = fetch_circle_asset_sealed(ctx, circle_id, path).await? {
+            // The chain registered the plaintext hash at put time: a
+            // mismatch with what the anchor binds is a stale/orphaned blob,
+            // known before spending a decrypt on it.
+            if !asset.plaintext_hash.is_empty() && asset.plaintext_hash != expected_hash {
+                debug!(
+                    path,
+                    on_chain = %asset.plaintext_hash,
+                    expected = expected_hash,
+                    "sealed asset plaintext hash is not the anchored one"
+                );
+                return Ok(SealedRead::Corrupt);
+            }
+            // The key id the writer actually sealed under wins over the
+            // caller's assumption.
+            let key_id = if asset.key_id.is_empty() {
+                key_id.to_string()
+            } else {
+                asset.key_id
+            };
+            (asset.ciphertext_b64, key_id)
+        } else {
+            let Some(bytes) = fetch_circle_asset_plain(ctx, circle_id, path).await? else {
+                return Ok(SealedRead::Absent);
+            };
+            let Ok(sealed) = String::from_utf8(bytes) else {
+                return Ok(SealedRead::Corrupt);
+            };
+            (sealed, key_id.to_string())
+        };
     match decrypt_sealed_bytes(
         circle_id,
-        key_id,
+        &key_id,
         creds.passphrase(),
         sealed.trim(),
         expected_hash,
@@ -583,7 +694,7 @@ pub(crate) async fn apply(
         });
     }
 
-    let current = fetch_current_state_root(ctx, &bundle.circle_id)
+    let current = fetch_current_state_root(ctx, &bundle.circle_id, creds)
         .await
         .map_err(UpdateError::AnchorFetch)?
         .ok_or_else(|| {
@@ -658,15 +769,37 @@ pub(crate) async fn apply(
     // anchor flip. See module-level docs for the rationale (until the
     // HFHE-3 swap collapses this to one tx, the anchor briefly points
     // at not-yet-served meta bytes; same-block ordering covers it).
-    let state_root_bytes = target
+    let meta_hash = put_state_root(ctx, &bundle.circle_id, &target, creds)
+        .await
+        .map_err(|e| UpdateError::AnchorUpdateFailed {
+            target_anchor_hex: target_anchor_hex.clone(),
+            blob_tx_hashes: blob_tx_hashes.clone(),
+            source: e,
+        })?;
+    blob_tx_hashes.push(meta_hash);
+
+    Ok(UpdateResult {
+        new_anchor_hex: target_anchor_hex,
+        blob_tx_hashes,
+        anchor_tx_hash: Some(anchor_hash),
+    })
+}
+
+/// Seal + put `/state-root.json` for `sr`. `apply` writes it after the
+/// anchor flip; `circle bootstrap` writes a fresh circle's first one.
+pub(crate) async fn put_state_root(
+    ctx: &ChainCtxV3,
+    circle_id: &str,
+    sr: &StateRoot,
+    creds: &SealedAssetCreds,
+) -> Result<String> {
+    let state_root_bytes = sr
         .canonical_bytes()
-        .map_err(|e| UpdateError::BundleInvalid(format!("canonical_bytes: {e}")))?;
+        .map_err(|e| anyhow!("canonical_bytes: {e}"))?;
     let meta_blob = BlobUpdate {
-        asset_path: "/state-root.json".to_string(),
-        // Audit-3 H-2 wrap: Zeroizing<Vec<u8>> so the meta-blob bytes
-        // are scrubbed on drop alongside the rest.
+        asset_path: STATE_ROOT_PATH.to_string(),
         plaintext: zeroize::Zeroizing::new(state_root_bytes),
-        key_id: "default".to_string(),
+        key_id: STATE_ROOT_KEY_ID.to_string(),
         padding_class: PaddingClass::None,
     };
     let fee = ctx
@@ -675,29 +808,10 @@ pub(crate) async fn apply(
         .ok()
         .filter(|f| *f > 0)
         .unwrap_or(ASSET_PUT_FEE_FALLBACK);
-    let (meta_tx, _) =
-        build_blob_put_tx(ctx, &bundle.circle_id, &meta_blob, creds, fee).map_err(|e| {
-            UpdateError::AnchorUpdateFailed {
-                target_anchor_hex: target_anchor_hex.clone(),
-                blob_tx_hashes: blob_tx_hashes.clone(),
-                source: e,
-            }
-        })?;
-    let meta_hash =
-        ctx.submit_call(meta_tx)
-            .await
-            .map_err(|e| UpdateError::AnchorUpdateFailed {
-                target_anchor_hex: target_anchor_hex.clone(),
-                blob_tx_hashes: blob_tx_hashes.clone(),
-                source: e,
-            })?;
-    blob_tx_hashes.push(meta_hash);
-
-    Ok(UpdateResult {
-        new_anchor_hex: target_anchor_hex,
-        blob_tx_hashes,
-        anchor_tx_hash: Some(anchor_hash),
-    })
+    let (meta_tx, _) = build_blob_put_tx(ctx, circle_id, &meta_blob, creds, fee)?;
+    ctx.submit_call(meta_tx)
+        .await
+        .with_context(|| format!("submit {STATE_ROOT_PATH} put for {circle_id}"))
 }
 
 async fn submit_anchor_update(
@@ -1287,7 +1401,11 @@ mod tests {
     #[derive(Default)]
     struct MockChain {
         anchors: HashMap<String, String>,
+        /// Plaintext assets (a `public_read` circle, or a legacy seed).
         assets: HashMap<(String, String), Vec<u8>>,
+        /// Sealed assets as sequence 12 stores them: envelope b64,
+        /// registered plaintext hash, key id. `circle_asset` refuses these.
+        sealed: HashMap<(String, String), (String, String, String)>,
         submitted: Vec<(String, Value)>,
         next_nonce: u64,
         tx_counter: u64,
@@ -1332,9 +1450,50 @@ mod tests {
                     .to_string();
                 let path = arr.get(1).and_then(Value::as_str).unwrap_or("").to_string();
                 let g = state.lock();
+                if g.sealed.contains_key(&(circle.clone(), path.clone())) {
+                    // Verbatim sequence-12 behaviour for a sealed path.
+                    return Ok(Json(json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "error": {
+                            "code": -32602,
+                            "message": "invalid params",
+                            "data": "circle asset is sealed; use circle_asset_ciphertext",
+                        },
+                    })));
+                }
                 match g.assets.get(&(circle, path)) {
                     Some(bytes) => Value::String(String::from_utf8_lossy(bytes).into_owned()),
                     None => Value::Null,
+                }
+            }
+            "circle_asset_ciphertext" => {
+                let arr = params.as_array().ok_or(StatusCode::BAD_REQUEST)?;
+                let circle = arr
+                    .first()
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let path = arr.get(1).and_then(Value::as_str).unwrap_or("").to_string();
+                let g = state.lock();
+                match g.sealed.get(&(circle, path)) {
+                    Some((ciphertext_b64, plaintext_hash, key_id)) => json!({
+                        "ciphertext_b64": ciphertext_b64,
+                        "plaintext_hash": plaintext_hash,
+                        "key_id": key_id,
+                        "resource_mode": "sealed_read",
+                    }),
+                    None => {
+                        return Ok(Json(json!({
+                            "jsonrpc": "2.0",
+                            "id": id,
+                            "error": {
+                                "code": 112,
+                                "message": "not found",
+                                "data": "circle ciphertext asset not found",
+                            },
+                        })));
+                    }
                 }
             }
             "contract_call" => {
@@ -1392,8 +1551,21 @@ mod tests {
                         .get("encrypted_data")
                         .and_then(Value::as_str)
                         .unwrap_or("");
-                    g.assets
-                        .insert((circle, path), bytes_b64.as_bytes().to_vec());
+                    let field = |k: &str| {
+                        payload
+                            .get(k)
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string()
+                    };
+                    g.sealed.insert(
+                        (circle, path),
+                        (
+                            bytes_b64.to_string(),
+                            field("plaintext_hash"),
+                            field("key_id"),
+                        ),
+                    );
                 } else if method == "update_circle_state" {
                     if g.anchor_revert_remaining > 0 {
                         g.anchor_revert_remaining -= 1;
@@ -1456,11 +1628,26 @@ mod tests {
     fn seed_circle(state: &SharedMock, circle_id: &str, sr: &StateRoot) -> String {
         let bytes = sr.canonical_bytes().expect("encode");
         let anchor = sr.anchor_hex().expect("anchor");
+        // Seeded the way the chain actually holds it: sealed under the
+        // test passphrase, registered with the canonical-bytes hash.
+        let (ciphertext_b64, plaintext_hash) = encrypt_sealed_bytes(
+            circle_id,
+            STATE_ROOT_KEY_ID,
+            TEST_PASS,
+            &bytes,
+            PaddingClass::None,
+        )
+        .expect("seal state-root");
+        assert_eq!(plaintext_hash, anchor, "anchor is the canonical-bytes hash");
         let mut g = state.lock();
         g.anchors.insert(circle_id.to_string(), anchor.clone());
-        g.assets.insert(
-            (circle_id.to_string(), "/state-root.json".to_string()),
-            bytes,
+        g.sealed.insert(
+            (circle_id.to_string(), STATE_ROOT_PATH.to_string()),
+            (
+                ciphertext_b64,
+                plaintext_hash,
+                STATE_ROOT_KEY_ID.to_string(),
+            ),
         );
         anchor
     }
@@ -1658,7 +1845,7 @@ mod tests {
         let creds = SealedAssetCreds::new(TEST_PASS);
         let initial = sample_current_state_root();
         seed_circle(&state, TEST_CIRCLE, &initial);
-        let (orphan_b64, _) = encrypt_sealed_bytes(
+        let (orphan_b64, orphan_hash) = encrypt_sealed_bytes(
             TEST_CIRCLE,
             "default",
             TEST_PASS,
@@ -1666,9 +1853,9 @@ mod tests {
             PaddingClass::K4,
         )
         .unwrap();
-        state.lock().assets.insert(
+        state.lock().sealed.insert(
             (TEST_CIRCLE.to_string(), "/policy.json".to_string()),
-            orphan_b64.as_bytes().to_vec(),
+            (orphan_b64, orphan_hash, "default".to_string()),
         );
 
         let orphans = list_orphaned_blobs(&ctx, TEST_CIRCLE, &initial, &creds)

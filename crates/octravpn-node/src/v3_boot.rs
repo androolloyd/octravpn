@@ -304,7 +304,7 @@ pub(crate) fn v3_state_path(cfg: &NodeConfig) -> std::path::PathBuf {
 }
 
 /// Hash arbitrary bytes to lowercase hex sha256.
-fn sha256_hex(bytes: &[u8]) -> String {
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
 
@@ -318,7 +318,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// This does NOT call `validate()` — callers do that before sealing the
 /// policy / committing the hash, so an error surfaces with a clear
 /// `anyhow!` context rather than at the canonical-bytes step.
-fn build_operator_policy_for_v3(
+pub(crate) fn build_operator_policy_for_v3(
     cfg: &NodeConfig,
     wg_pubkey_b64: &str,
     epoch: u64,

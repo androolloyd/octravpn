@@ -42,7 +42,7 @@ use crate::{
 };
 
 mod attestation;
-mod boot;
+pub(crate) mod boot;
 mod identity;
 mod pvac;
 mod relay;
@@ -119,6 +119,17 @@ impl Hub {
     /// chain ctx → journal → metrics → optional PVAC).
     pub(crate) async fn new(cfg: NodeConfig) -> Result<Self> {
         boot::build_hub(cfg).await
+    }
+
+    /// Sealed-asset credentials for circle blobs the daemon reads at
+    /// runtime (item 4 members policy). Same resolution as the
+    /// attestation path: `OCTRAVPN_SEALED_PASSPHRASE`, else
+    /// `[chain].sealed_passphrase`.
+    pub(crate) fn sealed_asset_creds(&self) -> Result<crate::circle_update::SealedAssetCreds> {
+        let passphrase = self.sealed_passphrase()?;
+        Ok(crate::circle_update::SealedAssetCreds::new(
+            passphrase.as_str(),
+        ))
     }
 
     /// Accessor for the managed PVAC sidecar. Returns `None` when the

@@ -970,6 +970,11 @@ pub(crate) struct ControlCfg {
     /// until an operator explicitly opts in.
     #[serde(default)]
     pub relay: ControlRelayCfg,
+    /// Item 4: render the anchored member set into the Tailscale-wire
+    /// packet filter. Defaults disabled so an empty `PolicyStore` keeps
+    /// the allow-all fallback for existing deployments.
+    #[serde(default)]
+    pub members_policy: ControlMembersPolicyCfg,
 }
 
 impl Default for ControlCfg {
@@ -987,6 +992,7 @@ impl Default for ControlCfg {
             tailscale_tailnet_id: None,
             derp: ControlDerpCfg::default(),
             relay: ControlRelayCfg::default(),
+            members_policy: ControlMembersPolicyCfg::default(),
         }
     }
 }
@@ -1108,6 +1114,53 @@ fn default_relay_expiry_epochs() -> u64 {
     octravpn_core::v3_calls::RELAY_EXPIRY_DEFAULT_EPOCHS
 }
 
+/// `[control.members_policy]` — item 4 of the VPN design improvements:
+/// membership is a chain fact the mesh obeys. The tailnet's member set is
+/// sealed in the operator's circle at `/auth/members.json` and bound by
+/// `state_root.auth_members_hash` (the root itself is anchored on chain via
+/// `get_circle_state_root`). When enabled, the daemon renders that set into
+/// the packet filter every Tailscale map response carries: a registered
+/// machine is reachable only if its node key (= WireGuard key) is a member's
+/// `wg_pubkey_b64`. Disabled by default — an empty `PolicyStore` keeps the
+/// wire layer's allow-all fallback.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ControlMembersPolicyCfg {
+    /// Master toggle. Requires `[control].tailscale_wire_state_dir`.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Circle holding the sealed member set. Defaults to `[chain].circle_id`.
+    #[serde(default)]
+    pub circle_id: Option<String>,
+    /// Seconds between sync ticks. A tick re-reads the chain anchor only
+    /// when the epoch moved and re-renders only when the anchor or the
+    /// registered-machine set changed. Clamped to `[5, 3600]`.
+    #[serde(default = "default_members_sync_period_secs")]
+    pub sync_period_secs: u64,
+}
+
+impl Default for ControlMembersPolicyCfg {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            circle_id: None,
+            sync_period_secs: default_members_sync_period_secs(),
+        }
+    }
+}
+
+impl ControlMembersPolicyCfg {
+    /// Sync period clamped to `[5, 3600]` seconds.
+    pub(crate) fn resolved_sync_period(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.sync_period_secs.clamp(5, 3600))
+    }
+}
+
+/// Epochs apply every 10s; polling faster than that only burns RPC.
+fn default_members_sync_period_secs() -> u64 {
+    10
+}
+
 fn default_claim_scan_period_secs() -> u64 {
     60
 }
@@ -1214,6 +1267,7 @@ impl fmt::Debug for ControlCfg {
             .field("tailscale_tailnet_id", &self.tailscale_tailnet_id)
             .field("derp", &self.derp)
             .field("relay", &self.relay)
+            .field("members_policy", &self.members_policy)
             .finish()
     }
 }

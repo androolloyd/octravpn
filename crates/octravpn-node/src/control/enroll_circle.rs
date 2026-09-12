@@ -44,11 +44,11 @@ use crate::circle_update::{
 };
 
 /// Sealed, anchored asset holding the enrolled member set (`TailnetMembers`).
-const MEMBERS_PATH: &str = "/auth/members.json";
+pub(crate) const MEMBERS_PATH: &str = "/auth/members.json";
 /// Sealed, anchored asset holding the admission allowlist (`AllowList`).
 const ALLOWED_PATH: &str = "/auth/allowed.json";
 /// Sealed-asset key id — matches the operator circle's default key.
-const KEY_ID: &str = "default";
+pub(crate) const KEY_ID: &str = "default";
 /// Pad sealed blobs to 16 KiB so observers can't read the member /
 /// allowlist size off the on-chain ciphertext length.
 const PADDING: PaddingClass = PaddingClass::K16;
@@ -77,7 +77,7 @@ impl CircleStore {
     /// Current on-chain anchor decoded back into a `StateRoot`, or `None`
     /// if the circle has no anchor yet.
     async fn current_state_root(&self) -> Result<Option<StateRoot>, EnrollError> {
-        circle_update::fetch_current_state_root(&self.ctx, &self.circle_id)
+        circle_update::fetch_current_state_root(&self.ctx, &self.circle_id, &self.creds)
             .await
             .map_err(|e| EnrollError::Store(e.to_string()))
     }
@@ -163,7 +163,6 @@ impl CircleStore {
 }
 
 /// Production [`EnrollStore`]: a [`CircleStore`] plus the member-set salt.
-#[allow(dead_code)] // prod EnrollStore; wired by the Hub when an operator hosts a tailnet
 pub(crate) struct CircleEnrollStore {
     base: CircleStore,
     /// 64-hex salt seeded into a freshly-created member set so per-wallet
@@ -171,7 +170,6 @@ pub(crate) struct CircleEnrollStore {
     ip_salt: String,
 }
 
-#[allow(dead_code)] // constructed by the Hub; see CircleEnrollStore
 impl CircleEnrollStore {
     pub(crate) fn new(
         ctx: Arc<ChainCtxV3>,

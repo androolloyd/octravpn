@@ -227,12 +227,7 @@ impl SessionAdmissionVerifier {
         // open and the opener correct.
         let Ok(count_raw) = self
             .rpc
-            .contract_call(
-                &self.program_addr,
-                "get_session_count",
-                &[],
-                None,
-            )
+            .contract_call(&self.program_addr, "get_session_count", &[], None)
             .await
         else {
             return Ok(SessionAdmission::SessionNotFound);
