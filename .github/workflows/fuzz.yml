@@ -101,6 +101,12 @@ jobs:
             octra/fuzz
       - name: Install cargo-fuzz
         run: cargo install --locked cargo-fuzz
+      # headscale-api's build script (prost-build) shells out to protoc.
+      # Without it every target fails at BUILD, and until the build/run
+      # split below that was misreported as "found a crash" for all 12
+      # targets, every night, for ~91 nights (~1,000 false issues).
+      - name: Install protoc (headscale-api build dep)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler
 
       # Skip the matrix row when workflow_dispatch pinned a single
       # target. We can't dynamically prune the matrix from `inputs`,
@@ -129,6 +135,14 @@ jobs:
           restore-keys: |
             fuzz-corpus-${{ matrix.target }}-
 
+      # Build FIRST, as its own step: a broken build fails the job with
+      # a build error and never reaches the crash-reporting path. A
+      # toolchain or dependency break is a CI bug, not a finding.
+      - name: Build fuzz target
+        if: steps.gate.outputs.skip == '0'
+        working-directory: octra
+        run: cargo +nightly fuzz build "${{ matrix.target }}"
+
       - name: Run fuzz target
         if: steps.gate.outputs.skip == '0'
         id: run
@@ -145,12 +159,22 @@ jobs:
               -timeout=10
           rc=$?
           echo "rc=${rc}" >> "$GITHUB_OUTPUT"
-          # libfuzzer convention: 77 = no crash. Anything else means
-          # a finding (panic / sanitizer / timeout / OOM) and we want
-          # to surface the artifact.
-          if [ "$rc" -ne 0 ] && [ "$rc" -ne 77 ]; then
-            echo "::warning::fuzz target ${{ matrix.target }} reported a finding (exit $rc)"
+          # A finding is defined by what libfuzzer WROTE, not by the exit
+          # code: on a crash/timeout/OOM it drops a crash-*/timeout-*/
+          # oom-*/leak-* file under fuzz/artifacts/<target>/. Exit code
+          # alone conflated "the build broke" and "the runner killed
+          # cargo" with real findings.
+          art="fuzz/artifacts/${{ matrix.target }}"
+          n=$(find "$art" -maxdepth 1 -type f \( -name 'crash-*' -o -name 'timeout-*' -o -name 'oom-*' -o -name 'leak-*' \) 2>/dev/null | wc -l | tr -d ' ')
+          echo "artifacts=${n}" >> "$GITHUB_OUTPUT"
+          if [ "$n" -gt 0 ]; then
+            echo "::warning::fuzz target ${{ matrix.target }} produced ${n} crash artifact(s) (exit $rc)"
             echo "found=1" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" -ne 0 ] && [ "$rc" -ne 77 ]; then
+            # Non-zero with no artifact = infrastructure (killed, disk,
+            # network). Visible as a job error, but NOT a crash issue.
+            echo "::error::fuzz target ${{ matrix.target }} exited $rc with no crash artifact — infrastructure failure, not a finding"
+            echo "found=0" >> "$GITHUB_OUTPUT"
           else
             echo "found=0" >> "$GITHUB_OUTPUT"
           fi
