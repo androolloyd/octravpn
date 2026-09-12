@@ -42,6 +42,18 @@ fragmented state from `production-checklist.md` (v1 gates),
 > Watch epoch **1,380,000** for circle object-member effort costs; our
 > AML does not emit those opcodes.
 >
+> **2026-09-12 — proven again on lite_node sequence 12, locally, with sealed keys.**
+> The same loop now runs green against a real sequence-12 node in docker
+> (`octra-foundry/docker/octra-node`) with node1 booted under
+> `require_sealed_keys = true`: the autonomous claimer signs `relay_claim` with a
+> key it unsealed at boot and the chain accepts it (RELAY_CLAIMED, 2985 / 15).
+> That retires the last "unverified" on the P1-6 key-hygiene path and moves
+> integration testing off devnet — which was halted at epoch 1,500,060 for the
+> whole session — onto a node we control. It also found and fixed a production
+> bug: the session-admission verifier scraped `contract_call`'s storage envelope,
+> which sequence 12 makes opt-in, so every announce returned 401 on a node that
+> omits it. See `octra-upstream-delta-2026-09-12.md`.
+>
 > **The join point is now closed too (2026-08-18).** A real session opened,
 > metered, and settled end-to-end on live devnet against a freshly deployed
 > `main-v4` at `octEX1mUYv6hw4eQH937zBh14EcjbUPUuBxQaTyuTTdPw38`, driven by

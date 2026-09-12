@@ -120,3 +120,27 @@ envelope is present.
 so on the local node every receipt POST was refused **401 "session open transaction not
 found"** while the chain plainly showed the session open and the opener correct. Fix: read
 counts from the real views (`get_session_count`), never from the envelope.
+
+## 6. Verdict: the money loop settles on sequence 12 with a sealed operator
+
+`NODE1_SEALED=1 v4-relay-e2e.sh` against the local sequence-12 node — **PASS**:
+
+```
+node1 keys sealed (OCTRA-WALLET-V1); daemon booted require_sealed_keys=true
+create_tailnet(tid=1)  confirmed      open_session(sid=1)  confirmed → SESSION_OPEN
+POST /session/1/receipt → SignedReceipt vaulted, hash 91853fee…
+arm_relay (client settle-arm I1 gate → ChainTxQueue) → RELAY_ARMED
+autonomous in-daemon claimer → RELAY_CLAIMED, earnings 0 → 2985
+```
+
+The claimer signed `relay_claim` with the key it had to **unseal at boot**, and the chain
+accepted it: the strict key-load path is proven on a value-moving tx, not just on a boot.
+Net 3000 split 2985 / 15 at 50 bps, identical to the 2026-08-18 devnet result — the
+Rehovot-compiled v4 and the sequence-12 VM agree with the sequence-2 numbers.
+
+Four things had to be true to get here, none of which devnet would have told us:
+the harness had to stop scraping `contract_call`'s storage envelope; the **node's own
+admission verifier** had to stop scraping it too (that one was a live 401 in production
+code); `.env` had to stop overriding explicit env; and the operator's keys had to load
+sealed. Devnet's private build hid the first two by embedding storage unasked, and was
+halted for the whole session anyway. **The local node is the harness now.**
