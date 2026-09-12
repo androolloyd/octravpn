@@ -94,14 +94,15 @@ client `discover_v2`), and the map-key scheme changed under us.
 **Fix.** A lint-level rule: `contract_call` results are `result` only; storage goes through
 `octra_contractStorage`. Retire the two legacy readers with the v1.1/v2 paths. Cost: small.
 
-## 8. Commit to one DERP
+## 8. Commit to one DERP — DONE 2026-09-12: native Rust DERP, Go derper deleted
 
 **Evidence.** Interop passes with a vendored Go `derper` sidecar; the native Rust DERP
 (3,013 lines) has never been run against a real client.
 
-**Fix.** Either promote the sidecar to a first-class, versioned image, or run the native
-DERP through the interop harness and delete the sidecar. Carrying both is the worst
-option. Cost: one interop run to decide.
+**Done.** `mesh serve --serve-derp` serves the Rust DERP on `/derp` of the HTTPS listener with a
+self DERP map (`tsi-mesh-control:443`, same cert the peers trust). The interop harness passes
+on it (exit 0: preauth, `tailscale up`, convergence, ping) and `Dockerfile.derper`,
+`derp-map.json` and the derp-certs step are gone.
 
 ## 9. Keepers should follow epochs, not poll
 

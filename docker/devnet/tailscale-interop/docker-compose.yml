@@ -50,7 +50,6 @@ services:
       # empty DERPMap (the pre-Wall-6 default). See
       # `docs/tailscale-interop-blocker.md` 2026-05-19 §"Wall 6 closed"
       # for why this is load-bearing.
-      OCTRAVPN_DERP_MAP_PATH: "/work/derp-map.json"
     # Run the Tailscale-wire control plane (Hub-free).
     # `octravpn-node mesh serve` brings up:
     #   - /admin/preauth — preauth-key minter (token-gated by
@@ -71,6 +70,10 @@ services:
       # name (`tsi-mesh-control`) since both peers join the same
       # bridge network.
       - "--cert-hostname=tsi-mesh-control"
+      # Native Rust DERP on /derp of the HTTPS listener; the self DERP map
+      # points peers at tsi-mesh-control:443 under the cert they already
+      # trust. The Go derper sidecar is gone (decision: native DERP, no Go).
+      - "--serve-derp"
       - "--state-dir=/work/state/tailscale-wire"
       - "--tailnet-id=interop-test"
     ports:
@@ -96,13 +99,6 @@ services:
       - type: bind
         source: ./state
         target: /work/state
-      # Wall 6 fixture: one-region DERPMap pointing at the `derp-1`
-      # sidecar below. `OCTRAVPN_DERP_MAP_PATH` (above) tells the
-      # mesh-control daemon's wire-state loader to ingest this.
-      - type: bind
-        source: ./derp-map.json
-        target: /work/derp-map.json
-        read_only: true
     networks:
       - tsi-net
 
@@ -112,38 +108,8 @@ services:
   # other directly. We build the upstream `cmd/derper` binary from
   # the BSD-3-licensed `tailscale/tailscale` repo via
   # `Dockerfile.derper`; `run-interop.sh` mints a self-signed TLS
-  # cert into `./derp-certs/` before bringing the stack up, and the
   # mesh-control serves a one-region `DerpMap` pointing here. See
   # `docs/tailscale-interop-blocker.md` 2026-05-19 §"Wall 6 closed".
-  derp-1:
-    build:
-      context: .
-      dockerfile: Dockerfile.derper
-    image: octravpn-interop-derper:latest
-    container_name: tsi-derp-1
-    hostname: derp-1
-    command:
-      # Go-style single-dash flags (the upstream cmd/derper uses
-      # `flag.StringVar` etc., not posix double-dash).
-      - "-hostname=derp-1"
-      - "-certmode=manual"
-      - "-certdir=/derp-certs"
-      # Disable the plain-HTTP port — clients reach us via the
-      # MapResponse-advertised TLS port only.
-      - "-http-port=-1"
-      - "-a=:443"
-      # STUN is irrelevant on a single docker bridge (no NAT) — keep
-      # the surface small by disabling it.
-      - "-stun=false"
-    volumes:
-      - type: bind
-        source: ./derp-certs
-        target: /derp-certs
-        read_only: true
-    networks:
-      - tsi-net
-
-  # Two stock Tailscale containers — the actual interop subjects.
   ts-peer-a:
     image: tailscale/tailscale:latest
     container_name: tsi-peer-a
@@ -166,10 +132,6 @@ services:
       # peer can install it into its trust store. The `tls.key` is
       # also mounted-by but never copied (the peer only needs the
       # cert).
-      - type: bind
-        source: ./derp-certs
-        target: /mnt/derp-certs
-        read_only: true
     environment:
       TS_HOSTNAME: peer-a
       TS_STATE_DIR: /var/lib/tailscale
@@ -201,10 +163,6 @@ services:
             # our DerpMap makes the daemon accept it anyway, but
             # we install into the trust store too so a future
             # InsecureForTests-off configuration round-trips.
-            if [ -s /mnt/derp-certs/derp-1.crt ]; then
-                cp /mnt/derp-certs/derp-1.crt \
-                   /usr/local/share/ca-certificates/octravpn-derp-1.crt
-            fi
             update-ca-certificates 2>&1 | tail -3 || true
         else
             echo "WARN: TLS cert not present; tailscaled may fail TLS verification" >&2
@@ -237,10 +195,6 @@ services:
       # peer can install it into its trust store. The `tls.key` is
       # also mounted-by but never copied (the peer only needs the
       # cert).
-      - type: bind
-        source: ./derp-certs
-        target: /mnt/derp-certs
-        read_only: true
     environment:
       TS_HOSTNAME: peer-b
       TS_STATE_DIR: /var/lib/tailscale
@@ -272,10 +226,6 @@ services:
             # our DerpMap makes the daemon accept it anyway, but
             # we install into the trust store too so a future
             # InsecureForTests-off configuration round-trips.
-            if [ -s /mnt/derp-certs/derp-1.crt ]; then
-                cp /mnt/derp-certs/derp-1.crt \
-                   /usr/local/share/ca-certificates/octravpn-derp-1.crt
-            fi
             update-ca-certificates 2>&1 | tail -3 || true
         else
             echo "WARN: TLS cert not present; tailscaled may fail TLS verification" >&2

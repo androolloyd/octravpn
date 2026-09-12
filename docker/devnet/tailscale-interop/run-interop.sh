@@ -37,161 +37,7 @@ COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
 # key land under tailscale-wire/.
 mkdir -p "${SCRIPT_DIR}/state/tailscale-wire"
 
-# Wall 6: derper-1 sidecar's TLS material. The cert is minted by the
-# `gen-derp-cert` step below (run before the compose stack comes up)
-# and mounted read-only into both derp-1 and the peer containers
-# (which install it into their CA trust store). See
-# `docs/tailscale-interop-blocker.md` 2026-05-19 §"Wall 6 closed".
-mkdir -p "${SCRIPT_DIR}/derp-certs"
 
-# Pretty-prints a step header so the operator can tell which exit code
-# corresponds to which failure point.
-step() {
-    printf '\n=== %s ===\n' "$1" >&2
-}
-
-# Best-effort teardown. Always run on exit so a Ctrl-C doesn't leak
-# containers across the next run. Set `OCTRAVPN_INTEROP_KEEP=1` to
-# preserve the stack for post-mortem inspection.
-cleanup() {
-    if [[ -n "${OCTRAVPN_INTEROP_KEEP:-}" ]]; then
-        echo "OCTRAVPN_INTEROP_KEEP set — leaving containers running for inspection" >&2
-        return 0
-    fi
-    docker compose -f "${COMPOSE_FILE}" down -v --remove-orphans >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
-
-# ---------------------------------------------------------------------------
-# Step 1 — build a Linux-compatible octravpn-node binary.
-#
-# The compose file bind-mounts the binary into the mesh-control
-# container at /usr/local/bin/octravpn-node. On macOS hosts a host
-# `cargo build` produces a Mach-O which can't be exec'd inside a
-# Linux container; instead we run cargo build inside the existing
-# `octravpn-builder` image (or, if not present, a stock
-# `rust:1.88-bookworm`) and emit to `target/linux-debug/`. The build
-# is bind-mounted, so the second run is incremental.
-#
-# Why not a build stage in the compose file: the `octravpn-builder`
-# image already exists in the project's docker harness; reusing it
-# keeps the workspace target/ caches warm across `e2e.sh` and the
-# interop test.
-# ---------------------------------------------------------------------------
-
-step "Step 1: build octravpn-node (Linux target via container)"
-
-# The `octra-foundry` sibling provides path-deps (`octra-core`,
-# `octra-mock-rpc`). The interop build needs it bind-mounted next to
-# the repo just like the rest of the OctraVPN harness does.
-OCTRA_FOUNDRY="${REPO_ROOT}/../octra-foundry"
-if [[ ! -d "${OCTRA_FOUNDRY}" ]]; then
-    echo "BUILD FAIL: ../octra-foundry not found next to repo root" >&2
-    exit 10
-fi
-
-# The `headscale-rs` sibling provides the `headscale-api` crate which
-# hosts the Tailscale-wire layer (migrated 2026-05-19). octravpn-mesh
-# depends on it via `path = "../../../headscale-rs/headscale-api"`, so
-# the builder container needs both repos mounted side-by-side. Override
-# with HEADSCALE_RS_PATH when the checkout is not next to this repo.
-HEADSCALE_RS="${HEADSCALE_RS_PATH:-${REPO_ROOT}/../headscale-rs}"
-if [[ ! -d "${HEADSCALE_RS}" ]]; then
-    echo "BUILD FAIL: headscale-rs not found at ${HEADSCALE_RS}" >&2
-    exit 10
-fi
-
-# Prefer the project's own builder image (which already has the
-# system deps, the rust toolchain, and a warm cargo cache); fall
-# back to a stock rust:1.88-bookworm if it hasn't been built locally
-# yet.
-BUILDER_IMAGE="octravpn-builder:latest"
-if ! docker image inspect "${BUILDER_IMAGE}" >/dev/null 2>&1; then
-    echo "octravpn-builder:latest not present; falling back to rust:1.88-bookworm" >&2
-    BUILDER_IMAGE="rust:1.88-bookworm"
-fi
-
-LINUX_TARGET_DIR="${REPO_ROOT}/target/linux-debug"
-mkdir -p "${LINUX_TARGET_DIR}" \
-         "${LINUX_TARGET_DIR}/cargo-registry" \
-         "${LINUX_TARGET_DIR}/cargo-git"
-
-docker run --rm \
-    -v "${REPO_ROOT}":/work/octra \
-    -v "${OCTRA_FOUNDRY}":/work/octra-foundry \
-    -v "${HEADSCALE_RS}":/work/headscale-rs \
-    -v "${LINUX_TARGET_DIR}":/work/octra/target \
-    -v "${LINUX_TARGET_DIR}/cargo-registry":/usr/local/cargo/registry \
-    -v "${LINUX_TARGET_DIR}/cargo-git":/usr/local/cargo/git \
-    -w /work/octra \
-    "${BUILDER_IMAGE}" \
-    bash -c "cargo build --bin octravpn-node" >&2 || {
-        echo "BUILD FAIL: cargo build inside ${BUILDER_IMAGE} failed" >&2
-        exit 10
-    }
-
-LINUX_BIN="${LINUX_TARGET_DIR}/debug/octravpn-node"
-test -x "${LINUX_BIN}" || {
-    echo "BUILD FAIL: binary not at ${LINUX_BIN}" >&2
-    exit 10
-}
-echo "linux binary at ${LINUX_BIN}" >&2
-
-# ---------------------------------------------------------------------------
-# Step 1b — mint the derper sidecar's TLS material (Wall 6).
-#
-# `tailscale/cmd/derper` with `--certmode=manual` expects
-# `<certdir>/<hostname>.{crt,key}`. The cert needs `subjectAltName =
-# DNS:derp-1` so the rustls validator on each peer matches the
-# `HostName` field we emit in `MapResponse.DERPMap`. We use `openssl`
-# (already available on the host where the test is invoked) — the
-# resulting cert is bind-mounted into derp-1's /derp-certs/, and
-# each peer's entrypoint installs it into its CA trust store.
-#
-# `InsecureForTests: true` in our DERPMap means the daemon will
-# accept the cert even without trust-store install, but we install
-# anyway for symmetry with the mesh-control cert flow + so the
-# `InsecureForTests=false` configuration can be exercised in a
-# follow-up without touching this harness.
-# ---------------------------------------------------------------------------
-
-step "Step 1b: mint derp-1 self-signed cert"
-
-DERP_CERT="${SCRIPT_DIR}/derp-certs/derp-1.crt"
-DERP_KEY="${SCRIPT_DIR}/derp-certs/derp-1.key"
-if [[ ! -s "${DERP_CERT}" || ! -s "${DERP_KEY}" ]]; then
-    if ! command -v openssl >/dev/null 2>&1; then
-        echo "OPENSSL MISSING: needed to mint derp-1 self-signed cert" >&2
-        exit 10
-    fi
-    openssl req -x509 -newkey rsa:2048 -nodes \
-        -keyout "${DERP_KEY}" \
-        -out "${DERP_CERT}" \
-        -days 30 \
-        -subj "/CN=derp-1" \
-        -addext "subjectAltName=DNS:derp-1" \
-        >/dev/null 2>&1 || {
-            echo "OPENSSL FAIL: could not mint derp-1 cert" >&2
-            exit 10
-        }
-    chmod 0644 "${DERP_CERT}" "${DERP_KEY}"
-    echo "minted derp-1 cert at ${DERP_CERT}" >&2
-else
-    echo "derp-1 cert already present at ${DERP_CERT}; reusing" >&2
-fi
-
-# ---------------------------------------------------------------------------
-# Step 2 — bring up the compose stack.
-# ---------------------------------------------------------------------------
-
-step "Step 2: docker compose up"
-# Build the derper image up front so the long Go-build phase doesn't
-# get rolled into the `up -d` deadline. Subsequent runs reuse the
-# layer cache and complete in <1 s.
-docker compose -f "${COMPOSE_FILE}" build derp-1 >&2 || {
-    echo "DERPER BUILD FAIL: could not build the derper sidecar image (Wall 6)" >&2
-    exit 10
-}
 docker compose -f "${COMPOSE_FILE}" up -d >&2 || {
     echo "COMPOSE FAIL: could not start mesh-control + ts peers" >&2
     exit 10
@@ -232,6 +78,10 @@ echo "mesh-control container ready (binary present in /usr/local/bin)" >&2
 #       Catches "automation harness wants a key without an interactive
 #       shell" workflow.
 # ---------------------------------------------------------------------------
+
+step() {
+    printf '\n=== %s ===\n' "$1" >&2
+}
 
 step "Step 3: mint a preauth key (CLI + HTTP)"
 
@@ -332,28 +182,11 @@ for peer in tsi-peer-a tsi-peer-b; do
     }
 done
 
-step "Step 4c: wait for derp-1 to accept connections (Wall 6)"
-# `derper`'s health endpoint is `GET /derp/probe`; a 200 means the
-# relay accepted our TLS handshake and the magicsock client will be
-# able to upgrade. We poll from inside one of the peer containers
-# (which sits on the same docker network), bypassing the host-port
-# question entirely.
-DERP_READY=""
+step "Step 4c: wait for native DERP on mesh-control (/derp/probe)"
 for _ in $(seq 1 30); do
-    if docker exec tsi-peer-a sh -c \
-        'wget -qO- --no-check-certificate https://derp-1/derp/probe 2>/dev/null || \
-         curl -fsSk https://derp-1/derp/probe 2>/dev/null' >/dev/null 2>&1; then
-        DERP_READY=1
-        break
-    fi
-    sleep 1
+  if curl -ksf -m 3 "https://127.0.0.1:8443/derp/probe" >/dev/null 2>&1; then echo "native DERP probe endpoint reachable"; break; fi
+  sleep 2
 done
-if [[ -z "${DERP_READY}" ]]; then
-    echo "DERP-1 NOT READY: probe endpoint never returned 200 (Wall 6 gating signal)" >&2
-    docker compose -f "${COMPOSE_FILE}" logs derp-1 >&2 | tail -30 || true
-    exit 10
-fi
-echo "derp-1 probe endpoint reachable" >&2
 
 step "Step 4b: tailscale up on both peers"
 
@@ -418,7 +251,6 @@ step "Step 6: tailscale ping from peer-a to peer-b"
 # packet jitter doesn't fail the whole test.
 if ! docker exec tsi-peer-a tailscale ping --c 5 --timeout 10s "${PEER_B_IP}" >&2; then
     echo "TAILSCALE-PING FAILED despite peers being up" >&2
-    docker compose -f "${COMPOSE_FILE}" logs derp-1 >&2 | tail -20 || true
     exit 50
 fi
 
