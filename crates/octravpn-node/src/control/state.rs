@@ -218,7 +218,29 @@ impl SessionAdmissionVerifier {
         else {
             return Ok(SessionAdmission::SessionNotFound);
         };
-        if !session_status_allows_admission(&status, session_id) {
+        // The session count comes from the get_session_count VIEW (Step 8b),
+        // never from the `storage` block contract_call may embed. That block
+        // is opt-in on lite_node sequence 12 (5th positional param) and its
+        // map keys changed shape (`@aml/map/<field>/<n>#<key>`); reading it
+        // here made every announce fail 401 "session open transaction not
+        // found" on a node that omits it, while the chain showed the session
+        // open and the opener correct.
+        let Ok(count_raw) = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_session_count",
+                &[],
+                None,
+            )
+            .await
+        else {
+            return Ok(SessionAdmission::SessionNotFound);
+        };
+        let Some(session_count) = value_as_u64(&count_raw) else {
+            return Ok(SessionAdmission::SessionNotFound);
+        };
+        if !session_status_allows_admission(&status, session_count, session_id) {
             return Ok(SessionAdmission::SessionNotFound);
         }
         // Bind the announce to the SESSION's on-chain opener, NOT to the presented
@@ -391,14 +413,11 @@ fn transaction_is_confirmed_call_to_program(
     confirmed && call && to_program && open_session
 }
 
-fn session_status_allows_admission(raw: &serde_json::Value, session_id: u64) -> bool {
-    let Some(session_count) = raw
-        .get("storage")
-        .and_then(|s| s.get("session_count"))
-        .and_then(value_as_u64)
-    else {
-        return false;
-    };
+fn session_status_allows_admission(
+    raw: &serde_json::Value,
+    session_count: u64,
+    session_id: u64,
+) -> bool {
     if session_id >= session_count {
         return false;
     }
@@ -738,7 +757,13 @@ mod tests {
                     .lock()
                     .expect("contract calls lock")
                     .push(params);
-                if view == "get_session_opener" {
+                if view == "get_session_count" {
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": { "result": mock.session_count },
+                    })
+                } else if view == "get_session_opener" {
                     json!({
                         "jsonrpc": "2.0",
                         "id": id,
@@ -750,7 +775,6 @@ mod tests {
                         "id": id,
                         "result": {
                             "result": status,
-                            "storage": { "session_count": mock.session_count },
                         },
                     })
                 } else {
@@ -895,39 +919,48 @@ mod tests {
     #[test]
     fn session_status_allows_only_admission_live_states() {
         assert!(session_status_allows_admission(
-            &json!({ "result": 0, "storage": { "session_count": 43 } }),
+            &json!({ "result": 0 }),
+            43,
             42
         ));
         assert!(session_status_allows_admission(
-            &json!({ "result": "3", "storage": { "session_count": "43" } }),
+            &json!({ "result": "3" }),
+            43,
             42
         ));
         assert!(!session_status_allows_admission(
-            &json!({ "result": Value::Null, "storage": { "session_count": 43 } }),
+            &json!({ "result": Value::Null }),
+            43,
             42
         ));
         assert!(!session_status_allows_admission(
-            &json!({ "result": 0, "storage": { "session_count": 42 } }),
+            &json!({ "result": 0 }),
+            42,
             42
         ));
         assert!(!session_status_allows_admission(
-            &json!({ "result": 0, "storage": {} }),
+            &json!({ "result": 0 }),
+            0,
             42
         ));
         assert!(!session_status_allows_admission(
-            &json!({ "result": 1, "storage": { "session_count": 43 } }),
+            &json!({ "result": 1 }),
+            43,
             42
         ));
         assert!(!session_status_allows_admission(
-            &json!({ "result": 2, "storage": { "session_count": 43 } }),
+            &json!({ "result": 2 }),
+            43,
             42
         ));
         assert!(!session_status_allows_admission(
-            &json!({ "result": 4, "storage": { "session_count": 43 } }),
+            &json!({ "result": 4 }),
+            43,
             42
         ));
         assert!(!session_status_allows_admission(
-            &json!({ "result": 5, "storage": { "session_count": 43 } }),
+            &json!({ "result": 5 }),
+            43,
             42
         ));
     }
@@ -981,13 +1014,18 @@ mod tests {
             SessionAdmission::Accepted
         );
         let calls = contract_calls.lock().expect("contract calls lock");
-        assert_eq!(calls.len(), 2);
+        // status -> count -> opener: the count now comes from its own view.
+        assert_eq!(calls.len(), 3);
         assert_eq!(
             calls[0],
             json!([program.display().to_string(), "get_session_status", [42u64]])
         );
         assert_eq!(
             calls[1],
+            json!([program.display().to_string(), "get_session_count", []])
+        );
+        assert_eq!(
+            calls[2],
             json!([program.display().to_string(), "get_session_opener", [42u64]])
         );
         drop(calls);
