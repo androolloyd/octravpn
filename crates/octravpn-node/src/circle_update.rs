@@ -724,23 +724,7 @@ pub(crate) async fn apply(
     // Step 2: write each blob.
     let mut blob_tx_hashes = Vec::with_capacity(bundle.blobs.len());
     for (i, blob) in bundle.blobs.iter().enumerate() {
-        let fee_q = ctx.fee("circle_asset_put_encrypted").await.ok();
-        let fee = fee_q.filter(|f| *f > 0).unwrap_or(ASSET_PUT_FEE_FALLBACK);
-        let (tx, plaintext_hash) = build_blob_put_tx(ctx, &bundle.circle_id, blob, creds, fee)
-            .map_err(|e| UpdateError::BlobPutFailed {
-                asset_path: blob.asset_path.clone(),
-                index: i,
-                committed_so_far: blob_tx_hashes.clone(),
-                source: e,
-            })?;
-        debug!(
-            asset_path = %blob.asset_path,
-            key_id = %blob.key_id,
-            plaintext_hash = %plaintext_hash,
-            "circle-update: submitting blob put"
-        );
-        let hash = ctx
-            .submit_call(tx)
+        let hash = submit_sealed_put(ctx, &bundle.circle_id, blob, creds)
             .await
             .map_err(|e| UpdateError::BlobPutFailed {
                 asset_path: blob.asset_path.clone(),
@@ -802,16 +786,84 @@ pub(crate) async fn put_state_root(
         key_id: STATE_ROOT_KEY_ID.to_string(),
         padding_class: PaddingClass::None,
     };
-    let fee = ctx
+    submit_sealed_put(ctx, circle_id, &meta_blob, creds)
+        .await
+        .with_context(|| format!("submit {STATE_ROOT_PATH} put for {circle_id}"))
+}
+
+/// Minimum fee the chain enforces for a sealed put, by ciphertext size.
+///
+/// Observed on lite_node sequence 12 (2026-09-12): `octra_recommendedFee`
+/// answers 5000 whatever the size, but `octra_submit` rejects with
+/// `113 fee too low (min: N)` where N is 5000 up to ~4 KiB of envelope,
+/// 10000 to ~16 KiB, 20000 to ~32 KiB, 40000 to ~64 KiB, 80000 at 128 KiB
+/// — doubling per size doubling above 4 KiB, capped at 16×. The reported
+/// floor stays authoritative: [`submit_sealed_put`] resubmits at it when
+/// this estimate is under, so drift here costs one round trip, never a
+/// failed update.
+pub(crate) fn min_fee_for_sealed_put(ciphertext_len: usize) -> u64 {
+    let units = ciphertext_len.div_ceil(4096).max(1);
+    let doublings = (usize::BITS - 1 - units.leading_zeros()).min(4);
+    ASSET_PUT_FEE_FALLBACK << doublings
+}
+
+/// The floor a `fee too low (min: N)` rejection names, if any.
+pub(crate) fn parse_fee_floor(err: &str) -> Option<u64> {
+    let rest = err.split("min:").nth(1)?;
+    let digits: String = rest
+        .trim_start()
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    digits.parse().ok()
+}
+
+/// Seal, size the fee, submit — and if the chain still says the fee is
+/// under its floor, resubmit once at exactly the floor it reported.
+/// Returns the tx hash.
+async fn submit_sealed_put(
+    ctx: &ChainCtxV3,
+    circle_id: &str,
+    blob: &BlobUpdate,
+    creds: &SealedAssetCreds,
+) -> Result<String> {
+    let recommended = ctx
         .fee("circle_asset_put_encrypted")
         .await
         .ok()
         .filter(|f| *f > 0)
         .unwrap_or(ASSET_PUT_FEE_FALLBACK);
-    let (meta_tx, _) = build_blob_put_tx(ctx, circle_id, &meta_blob, creds, fee)?;
-    ctx.submit_call(meta_tx)
-        .await
-        .with_context(|| format!("submit {STATE_ROOT_PATH} put for {circle_id}"))
+    let (mut tx, plaintext_hash) = build_blob_put_tx(ctx, circle_id, blob, creds, recommended)?;
+    let ciphertext_len = tx
+        .get("encrypted_data")
+        .and_then(Value::as_str)
+        .map_or(0, |b64| b64.len() * 3 / 4);
+    let fee = recommended.max(min_fee_for_sealed_put(ciphertext_len));
+    tx["ou"] = json!(fee.to_string());
+    debug!(
+        asset_path = %blob.asset_path,
+        key_id = %blob.key_id,
+        plaintext_hash = %plaintext_hash,
+        ciphertext_len,
+        fee,
+        "circle-update: submitting sealed put"
+    );
+    match ctx.submit_call(tx.clone()).await {
+        Ok(hash) => Ok(hash),
+        Err(e) => match parse_fee_floor(&e.to_string()) {
+            Some(floor) if floor > fee => {
+                info!(
+                    asset_path = %blob.asset_path,
+                    fee,
+                    floor,
+                    "circle-update: chain floor is above the sized fee; resubmitting at the floor"
+                );
+                tx["ou"] = json!(floor.to_string());
+                ctx.submit_call(tx).await
+            }
+            _ => Err(e),
+        },
+    }
 }
 
 async fn submit_anchor_update(
@@ -1411,6 +1463,10 @@ mod tests {
         tx_counter: u64,
         anchor_revert_remaining: u32,
         blob_reject_path: Option<String>,
+        /// Sequence-12 fee floor for sealed puts: `ou` below it is rejected
+        /// synchronously with `113 fee too low (min: N)`.
+        blob_min_fee: Option<u64>,
+        fee_rejections: u32,
     }
 
     type SharedMock = Arc<Mutex<MockChain>>;
@@ -1535,6 +1591,25 @@ mod tests {
                         .and_then(Value::as_str)
                         .unwrap_or("")
                         .to_string();
+                    if let Some(min) = g.blob_min_fee {
+                        let ou: u64 = tx
+                            .get("ou")
+                            .and_then(Value::as_str)
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or(0);
+                        if ou < min {
+                            g.fee_rejections += 1;
+                            return Ok(Json(json!({
+                                "jsonrpc": "2.0",
+                                "id": id,
+                                "error": {
+                                    "code": 113,
+                                    "message": "fee too low",
+                                    "data": format!("fee too low (min: {min})"),
+                                },
+                            })));
+                        }
+                    }
                     if let Some(rej) = &g.blob_reject_path {
                         if rej == &path {
                             return Ok(Json(json!({
@@ -1834,6 +1909,74 @@ mod tests {
             .cloned()
             .unwrap_or_default();
         assert_eq!(on_chain, result.new_anchor_hex);
+    }
+
+    #[test]
+    fn sealed_put_fee_tiers_match_sequence_12() {
+        // (envelope bytes, floor the chain reported) — probed 2026-09-12.
+        for (len, floor) in [
+            (4_033, 5_000),
+            (6_033, 10_000),
+            (8_033, 10_000),
+            (12_033, 10_000),
+            (16_417, 20_000),
+            (24_033, 20_000),
+            (32_817, 40_000),
+            (131_105, 80_000),
+        ] {
+            assert_eq!(min_fee_for_sealed_put(len), floor, "len {len}");
+        }
+        assert_eq!(min_fee_for_sealed_put(0), 5_000);
+        assert_eq!(
+            parse_fee_floor("rpc octra_submit error 113: fee too low (fee too low (min: 20000))"),
+            Some(20_000)
+        );
+        assert_eq!(
+            parse_fee_floor("rpc octra_submit error 113: fee too low"),
+            None
+        );
+    }
+
+    /// A chain whose floor is above the sized fee rejects once; the put is
+    /// resubmitted at exactly the reported floor and the update completes.
+    #[tokio::test]
+    async fn apply_resubmits_sealed_put_at_the_reported_fee_floor() {
+        let (url, state, _kill) = spawn_mock().await;
+        let ctx = ctx_for(&url);
+        let creds = SealedAssetCreds::new(TEST_PASS);
+        let initial = sample_current_state_root();
+        seed_circle(&state, TEST_CIRCLE, &initial);
+        state.lock().blob_min_fee = Some(30_000);
+        let bundle = UpdateBundle {
+            circle_id: TEST_CIRCLE.into(),
+            blobs: vec![BlobUpdate {
+                asset_path: "/policy.json".into(),
+                plaintext: zeroize::Zeroizing::new(b"{\"v\":1}".to_vec()),
+                key_id: "default".into(),
+                padding_class: PaddingClass::K16,
+            }],
+            anchor_overrides: AnchorOverrides::default(),
+        };
+        let res = apply(&ctx, &creds, bundle).await.expect("apply");
+        assert_eq!(res.blob_tx_hashes.len(), 2, "policy + state-root");
+        let g = state.lock();
+        // Both sealed puts were under 30000 on the first try (16k class ⇒
+        // 20000, state-root ⇒ 5000) and landed at the floor on the retry.
+        assert_eq!(g.fee_rejections, 2);
+        let landed: Vec<String> = g
+            .submitted
+            .iter()
+            .filter(|(_, tx)| {
+                tx.get("op_type").and_then(Value::as_str) == Some("circle_asset_put_encrypted")
+            })
+            .map(|(_, tx)| {
+                tx.get("ou")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(landed, vec!["30000", "30000"], "{landed:?}");
     }
 
     /// `list_orphaned_blobs` flags a blob whose plaintext hash isn't

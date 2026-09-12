@@ -493,7 +493,9 @@ mod tests {
                 "timestamp": 1_755_400_000.0f64, "op_type": "call",
             }),
         ] {
-            let pre = canonical_tx_from_call(&call).expect("parses").signing_preimage();
+            let pre = canonical_tx_from_call(&call)
+                .expect("parses")
+                .signing_preimage();
             assert!(
                 pre.contains(r#""timestamp":1755400000.0"#),
                 "integral timestamp lost its .0 — this is the code-101 bug: {pre}"

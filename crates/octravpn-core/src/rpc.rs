@@ -58,6 +58,12 @@ struct RpcResponse<T> {
 pub struct RpcError {
     pub code: i64,
     pub message: String,
+    /// lite_node puts the actionable detail here — `"fee too low (min:
+    /// 20000)"`, `"circle asset is sealed; use circle_asset_ciphertext"` —
+    /// while `message` is the bare code text. Optional: not every error
+    /// carries it.
+    #[serde(default)]
+    pub data: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -253,8 +259,13 @@ impl RpcClient {
             .await
             .map_err(|e| CoreError::Rpc(format!("decode {method}: {e}")))?;
         if let Some(err) = resp.error {
+            let detail = match &err.data {
+                Some(Value::String(s)) if !s.is_empty() => format!(" ({s})"),
+                Some(Value::Null) | None => String::new(),
+                Some(other) => format!(" ({other})"),
+            };
             return Err(CoreError::Rpc(format!(
-                "rpc {method} error {}: {}",
+                "rpc {method} error {}: {}{detail}",
                 err.code, err.message
             )));
         }
