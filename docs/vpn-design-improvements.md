@@ -55,15 +55,53 @@ at 3am does not.
 both the Hub and `mesh serve`. Proven by `run-interop.sh` with `INTEROP_RESTART=1`: the restarted
 control plane logs `hydrated … nodes=2`, peers keep their IPs, ping succeeds with no re-`up`.
 
-## 4. Enforce the policy we already anchor
+## 4. Enforce the policy we already anchor — DONE 2026-09-12, proven live on sequence 12
 
-**Evidence.** An empty PolicyStore falls back to `allow_all_packet_filter`
-(`hub/spawn.rs:191`, `cli/mesh.rs:357`). The tailnet's `members_root` / `policy.json` are
-anchored on chain and sealed in the owner's circle — and not enforced on the wire.
+**Evidence (before).** An empty PolicyStore fell back to `allow_all_packet_filter`
+(`hub/spawn.rs`, `cli/mesh.rs`). The tailnet's member set was anchored on chain and sealed
+in the owner's circle — and not enforced on the wire.
 
-**Fix.** Render the anchored policy into the PacketFilter the map response already carries.
-Membership becomes a chain fact the mesh obeys, not a config file. Cost: medium; the
-headscale-rs policy machinery exists, it needs the chain-backed source.
+**What landed.** `crates/octravpn-node/src/members_policy.rs`: a sync task reads the circle's
+sealed `/auth/members.json` (bound by `state_root.auth_members_hash`, the root anchored via
+`get_circle_state_root`), reduces it to node keys — a Tailscale node key *is* the WireGuard
+key, so a member's `wg_pubkey_b64` is exactly the registry key — intersects with the live
+`MachineRegistry` and renders the packet filter: one `accept` rule, `src` = the matched
+machines' tailnet IPs, `dst *:*`. It follows epochs and the registry generation (no per-tick
+chain reads), calls `PolicyStore::set` only when the rendered document changed, fails closed
+at boot (deny-all until an anchor verifies) and keeps the last good policy on later read
+errors. Wired in both wire surfaces: the Hub (`[control.members_policy]`) and
+`mesh serve --members-policy-circle <id>` — the latter is what stock `tailscale up` can reach,
+since the Hub has no TLS listener. Operators admit a device with
+`octravpn-node auth --circle C members admit --wallet W --node-key nodekey:<hex>` and evict
+with `members evict`; a fresh circle gets its first anchor with `circle bootstrap --commit`.
+
+**Proof.** `docker/devnet/tailscale-interop/run-members-policy.sh` (exit 0, 2026-09-12) against
+the local lite_node sequence 12 + the deployed main-v4, with two stock `tailscale/tailscale`
+containers: no members ⇒ both ICMP pings fail; admit a ⇒ a→b pongs, b→a "no reply";
+admit b ⇒ both ways; evict a ⇒ a→b closed again, b→a still open. Each transition is a real
+sealed put + anchor flip on chain, picked up by the sync within an epoch.
+
+**What the proof surfaced and fixed on the way (all real-chain bugs, none visible to the
+mock):**
+
+- Sequence-12 circles are `resource_mode = sealed_read`: plaintext puts are rejected
+  (`circle_mode_invalid`) and `circle_asset` refuses a sealed path — every node-side circle
+  read (allowlist, members, `/state-root.json`) was broken on a real chain. Reads now go
+  through `circle_asset_ciphertext` and cross-check the chain-registered `plaintext_hash`.
+- Nothing wrote a fresh circle's first `/state-root.json`, so `circle update` / `auth allow`
+  could never run for real. `circle bootstrap` does (same policy/key derivation as `v3_boot`).
+- Sealed puts have a size-tiered fee floor `octra_recommendedFee` does not report (5000 up to
+  ~4 KiB, doubling per size doubling, 80000 at 128 KiB). Puts are sized up front and
+  resubmitted once at the floor the rejection names; `RpcError.data` is now in error strings.
+- headscale-rs: a node re-registering with its own node key after a control-plane restart
+  (`tailscale up`, or `--reset`) collided with its own IPv4 in the durable store and was left
+  logged out — the (machine key, user) lookup cannot match a row persisted without a user id.
+  Fixed upstream in the fork (`androolloyd/headscale-rs` main, 36b79ba) with a regression test.
+- The probe matters: TSMP pings are answered by tailscaled *before* the packet filter, and
+  peerapi stays reachable between netmap-visible peers, so only ICMP (or real traffic) shows
+  admission. Non-members that are still registered remain *visible* to members once any rule
+  connects them; the follow-up is registration-time enforcement — refuse `register` for a
+  node key outside the anchored set — so a non-member never appears in a member's netmap.
 
 ## 5. Chain-attested exit assignment, for free
 

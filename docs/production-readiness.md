@@ -53,16 +53,27 @@ fragmented state from `production-checklist.md` (v1 gates),
 > **durable machine registrations** (restart keeps identities and IPs, hydration
 > asserted); sealed-key boot proven 4/4 and in the money loop.
 >
+> **Landed later the same day:** **the anchored member set is enforced on the wire**
+> (design item 4) and proven live — `run-members-policy.sh` exit 0 against the local
+> sequence-12 node with two stock `tailscale` peers: deny-all with no members, per-direction
+> admission on `auth members admit`, closure on `evict`, every transition a real sealed put +
+> anchor flip. Getting there fixed four real-chain bugs the mock never showed: sealed
+> circle reads (`circle_asset_ciphertext`), the missing first `/state-root.json`
+> (`circle bootstrap`), size-tiered sealed-put fees, and a headscale-rs durable-store bug that
+> left a re-registering node logged out (fixed in the fork, 36b79ba). Keepers already follow
+> epochs (item 9).
+>
 > **Still between here and a release**, in order: (1) join the mesh and money planes
 > — the AML already supports it: tailnet owners can `authorize` a spender and
 > `open_session_from_treasury` opens sessions on a member's behalf, so the exit node
 > admits a stock WG peer on first traffic, opens a treasury session for it, and meters
 > its WG peer counters; (2) retire the two-tx driver once Step 9's proofs land, so the
-> HTLC is the only rail; (3) enforce the anchored `members_root`/policy on the wire
-> instead of `allow_all_packet_filter`; (4) keepers follow epochs rather than timers;
-> (5) the operator audit CLI designed around the 22.75h retention window;
-> (6) mainnet ceremony + runbook. Hidden-exit (per-packet nonces, then the relay hop)
-> is the only item that changes the threat model and comes last.
+> HTLC is the only rail; (3) registration-time membership enforcement (refuse `register`
+> for a node key outside the anchored set, so non-members never appear in a member's
+> netmap — today they are filtered, not invisible); (4) the operator audit CLI designed
+> around the 22.75h retention window; (5) mainnet ceremony + runbook. Hidden-exit
+> (per-packet nonces, then the relay hop) is the only item that changes the threat model
+> and comes last.
 >
 > **2026-09-12 — proven again on lite_node sequence 12, locally, with sealed keys.**
 > The same loop now runs green against a real sequence-12 node in docker

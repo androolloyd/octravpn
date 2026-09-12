@@ -65,3 +65,16 @@ and flat + keyed `/machine/{register,map}`; Octra owns the harness,
 the embedded CLI passthrough, and the compatibility `POST /admin/preauth`
 shim used to mint keys for the test. The script now exercises that
 boundary directly and asserts an actual `tailscale ping`.
+
+## Members-policy proof (`run-members-policy.sh`)
+
+Design item 4, live: the circle's anchored member set (`/auth/members.json`, sealed,
+bound by `state_root.auth_members_hash`) rendered into the Tailscale packet filter.
+Needs the local sequence-12 node (`octra-foundry/docker/octra-node`, RPC on
+`127.0.0.1:18080`), the deployed `main-v4`, the foundry `octra` binary and a Linux
+`octravpn-node` (`demo/lib/build-linux-binaries.sh`). It deploys a native circle once
+(`state/members-policy/circle.id`), bootstraps its first anchor, brings mesh-control up
+through `docker-compose.members-policy.yml` (`mesh serve --members-policy-circle`), joins
+two stock peers and asserts, with ICMP pings: deny-all with no members → admit a → admit b
+→ evict a. Exit 0 on pass; codes at the top of the script. `KEEP_STACK=1` leaves the
+containers up for inspection.

@@ -1,0 +1,29 @@
+# Overlay for run-members-policy.sh: the same mesh-control, now chain-aware.
+#
+# `mesh serve --members-policy-circle` reads `[chain]` from the node.toml
+# the harness renders under state/members-policy/ (RPC = the local
+# sequence-12 node via host.internal, operator wallet = a devkey) and
+# enforces that circle's anchored member set on the Tailscale wire. The
+# sealed passphrase reaches the daemon AND every `docker exec …
+# octravpn-node auth/circle …` the harness runs through the container env.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.members-policy.yml up -d
+services:
+  mesh-control:
+    environment:
+      OCTRAVPN_SEALED_PASSPHRASE: "${OCTRAVPN_SEALED_PASSPHRASE:-members-policy-e2e}"
+    command:
+      - "octravpn-node"
+      - "--config=/work/state/members-policy/node.toml"
+      - "mesh"
+      - "serve"
+      - "--listen=0.0.0.0:51821"
+      - "--https-listen=0.0.0.0:443"
+      - "--cert-hostname=tsi-mesh-control"
+      - "--serve-derp"
+      - "--state-dir=/work/state/tailscale-wire"
+      - "--tailnet-id=interop-test"
+      - "--members-policy-circle=${MEMBERS_POLICY_CIRCLE:?run-members-policy.sh sets this}"
+      # Epochs apply every 10s; 5s keeps the proof snappy without hammering RPC
+      # (the sync only re-reads the anchor when the epoch moved anyway).
+      - "--members-policy-period-secs=5"
