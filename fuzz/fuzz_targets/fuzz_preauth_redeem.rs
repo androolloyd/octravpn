@@ -84,6 +84,12 @@ fuzz_target!(|data: &[u8]| {
                         // expiry (1ms TTL), or already-redeemed
                         // single-use.
                     }
+                    // RedeemError is #[non_exhaustive] from this crate's
+                    // point of view, so the compiler demands a wildcard.
+                    // A new error kind is still a non-panicking outcome
+                    // for this target: the invariant under test is
+                    // single-use, not the error taxonomy.
+                    Err(_) => {}
                 }
             }
             4 => {
