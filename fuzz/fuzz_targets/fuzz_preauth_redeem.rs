@@ -73,10 +73,7 @@ fuzz_target!(|data: &[u8]| {
                             // token across the lifetime of this fuzz
                             // input.
                             let fresh = single_use_redeemed.insert(tok.clone());
-                            assert!(
-                                fresh,
-                                "single-use double-redemption: {tok}"
-                            );
+                            assert!(fresh, "single-use double-redemption: {tok}");
                         }
                     }
                     Err(_) => {
@@ -86,6 +83,12 @@ fuzz_target!(|data: &[u8]| {
                         // so a wildcard is required (and any future
                         // variant is likewise a non-panic rejection here).
                     }
+                    // RedeemError is #[non_exhaustive] from this crate's
+                    // point of view, so the compiler demands a wildcard.
+                    // A new error kind is still a non-panicking outcome
+                    // for this target: the invariant under test is
+                    // single-use, not the error taxonomy.
+                    Err(_) => {}
                 }
             }
             4 => {
