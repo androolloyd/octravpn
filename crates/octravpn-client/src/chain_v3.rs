@@ -20,7 +20,12 @@
 
 use anyhow::{anyhow, Context, Result};
 use octravpn_core::{
-    address::Address, rpc::RpcClient, sig::KeyPair, tx as octra_tx, v3_calls::ContractCallBuilder,
+    address::Address,
+    chain_tx_queue::ChainTxQueueHandle,
+    rpc::{next_nonce, RpcClient},
+    sig::KeyPair,
+    tx as octra_tx,
+    v3_calls::ContractCallBuilder,
 };
 use serde_json::{json, Value};
 
@@ -36,16 +41,27 @@ pub(crate) struct ChainCtxV3<'a> {
     program_addr: &'a Address,
     wallet_addr: Address,
     wallet: &'a KeyPair,
+    tx_queue: Option<ChainTxQueueHandle>,
 }
 
 impl<'a> ChainCtxV3<'a> {
     pub(crate) fn new(rpc: &'a RpcClient, program_addr: &'a Address, wallet: &'a KeyPair) -> Self {
+        Self::new_with_tx_queue(rpc, program_addr, wallet, None)
+    }
+
+    pub(crate) fn new_with_tx_queue(
+        rpc: &'a RpcClient,
+        program_addr: &'a Address,
+        wallet: &'a KeyPair,
+        tx_queue: Option<ChainTxQueueHandle>,
+    ) -> Self {
         let wallet_addr = Address::from_pubkey(&wallet.public.0);
         Self {
             rpc,
             program_addr,
             wallet_addr,
             wallet,
+            tx_queue,
         }
     }
 
@@ -64,7 +80,7 @@ impl<'a> ChainCtxV3<'a> {
 
     pub(crate) async fn nonce(&self) -> Result<u64> {
         let b = self.rpc.balance(&self.wallet_addr).await?;
-        Ok(b.pending_nonce.max(b.nonce))
+        Ok(next_nonce(&b))
     }
 
     /// Fee with fallback to [`CALL_FEE_FALLBACK`] if the chain returns
@@ -140,6 +156,53 @@ impl<'a> ChainCtxV3<'a> {
             .await
             .context("get_session_status")?;
         Ok(v.as_u64().unwrap_or(0))
+    }
+
+    /// Strict `get_session_status` for the refund watcher's confirm-drain: a
+    /// non-numeric/hostile/empty RPC body is an `Err` (retry), NOT a phantom
+    /// `0 = SESSION_OPEN`. The watcher drives the durable ladder to a terminal
+    /// state only on an EXACT positive status match, so a bad read must never
+    /// phantom-drain a live session. Mirrors the node reader.
+    pub(crate) async fn get_session_status_strict(&self, session_id: u64) -> Result<u64> {
+        let v = self
+            .rpc
+            .contract_call(
+                self.program_addr,
+                "get_session_status",
+                &[json!(session_id)],
+                Some(&self.wallet_addr),
+            )
+            .await
+            .context("get_session_status_strict")?;
+        v.as_u64()
+            .ok_or_else(|| anyhow!("non-numeric session_status body for session {session_id}"))
+    }
+
+    /// `get_relay_deadline(sid) -> int`, STRICT. The refund gate is
+    /// `epoch >= deadline + margin`; a lenient `unwrap_or(0)` deadline would make
+    /// the gate `epoch >= margin` (always true) and refund BEFORE the real
+    /// deadline, colliding with a still-valid operator claim. A bad read must
+    /// therefore skip (Err), not proceed.
+    pub(crate) async fn get_relay_deadline(&self, session_id: u64) -> Result<u64> {
+        let v = self
+            .rpc
+            .contract_call(
+                self.program_addr,
+                "get_relay_deadline",
+                &[json!(session_id)],
+                Some(&self.wallet_addr),
+            )
+            .await
+            .context("get_relay_deadline")?;
+        v.as_u64()
+            .ok_or_else(|| anyhow!("non-numeric relay_deadline body for session {session_id}"))
+    }
+
+    /// Current chain epoch. This is a float-truncated LOWER bound (devnet reports
+    /// a float unix-ish epoch); never round it up — a conservative (low) read only
+    /// ever DELAYS a refund, which is safe.
+    pub(crate) async fn current_epoch(&self) -> Result<u64> {
+        Ok(self.rpc.node_status().await?.epoch)
     }
 
     /// `get_earnings_total(circle) -> int` — sanity-display only.
@@ -233,9 +296,11 @@ impl<'a> ChainCtxV3<'a> {
     // Sessions
     // ============================================================
 
-    /// `open_session(tailnet_id, circle, max_pay) -> int`. The chain
-    /// returns the assigned `session_id` via the tx's `SessionOpened`
-    /// event; callers should observe it through `octra_transaction`.
+    /// `payable open_session(tailnet_id, circle, max_pay) -> int`.
+    /// The tx `value` is set to `max_pay`, which becomes the self-funded
+    /// session escrow. The chain returns the assigned `session_id` via
+    /// the tx's `SessionOpened` event; callers should observe it through
+    /// `octra_transaction`.
     pub(crate) fn build_open_session_call(
         &self,
         tailnet_id: u64,
@@ -244,8 +309,106 @@ impl<'a> ChainCtxV3<'a> {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        self.call_builder().open_session_call(
-            &[json!(tailnet_id), json!(circle_id), json!(max_pay)],
+        self.call_builder()
+            .open_session_call(tailnet_id, circle_id, max_pay, fee, nonce)
+    }
+
+    /// `open_session_from_treasury(tailnet_id, circle, max_pay) -> int`.
+    /// Sponsored path; AML allows only the tailnet owner or an authorized
+    /// spender and the tx value remains zero.
+    #[allow(dead_code)]
+    pub(crate) fn build_open_session_from_treasury_call(
+        &self,
+        tailnet_id: u64,
+        circle_id: &str,
+        max_pay: u64,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call_builder()
+            .open_session_from_treasury_call(tailnet_id, circle_id, max_pay, fee, nonce)
+    }
+
+    /// `open_relay_session(...) -> int` — self-funded open + relay arm in
+    /// one payable tx. The tx `value` is set to `max_pay`.
+    #[allow(dead_code)]
+    pub(crate) fn build_open_relay_session_call(&self, p: &OpenRelaySessionParams<'_>) -> Value {
+        self.call_builder().open_relay_session_call(
+            p.tailnet_id,
+            p.circle_id,
+            p.max_pay,
+            p.settlement_hash_hex,
+            p.net,
+            p.relay_expiry_epochs,
+            p.fee,
+            p.nonce,
+        )
+    }
+
+    /// `open_relay_session_from_treasury(...) -> int` — sponsored open +
+    /// relay arm in one zero-value tx.
+    #[allow(dead_code)]
+    pub(crate) fn build_open_relay_session_from_treasury_call(
+        &self,
+        p: &OpenRelaySessionParams<'_>,
+    ) -> Value {
+        self.call_builder().open_relay_session_from_treasury_call(
+            p.tailnet_id,
+            p.circle_id,
+            p.max_pay,
+            p.settlement_hash_hex,
+            p.net,
+            p.relay_expiry_epochs,
+            p.fee,
+            p.nonce,
+        )
+    }
+
+    /// `transfer_tailnet_ownership(tailnet_id, new_owner)`.
+    #[allow(dead_code)]
+    pub(crate) fn build_transfer_tailnet_ownership_call(
+        &self,
+        tailnet_id: u64,
+        new_owner: &str,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call_builder().transfer_tailnet_ownership_call(
+            &[json!(tailnet_id), json!(new_owner)],
+            0,
+            fee,
+            nonce,
+        )
+    }
+
+    /// `authorize_tailnet_spender(tailnet_id, spender)`.
+    #[allow(dead_code)]
+    pub(crate) fn build_authorize_tailnet_spender_call(
+        &self,
+        tailnet_id: u64,
+        spender: &str,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call_builder().authorize_tailnet_spender_call(
+            &[json!(tailnet_id), json!(spender)],
+            0,
+            fee,
+            nonce,
+        )
+    }
+
+    /// `revoke_tailnet_spender(tailnet_id, spender)`.
+    #[allow(dead_code)]
+    pub(crate) fn build_revoke_tailnet_spender_call(
+        &self,
+        tailnet_id: u64,
+        spender: &str,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call_builder().revoke_tailnet_spender_call(
+            &[json!(tailnet_id), json!(spender)],
             0,
             fee,
             nonce,
@@ -265,6 +428,24 @@ impl<'a> ChainCtxV3<'a> {
                 json!(p.net),
                 json!(p.settle_blinding),
             ],
+            0,
+            p.fee,
+            p.nonce,
+        )
+    }
+
+    /// `arm_relay(session_id, settlement_hash, net, relay_expiry_epochs)` —
+    /// opener-side v4 promotion from OPEN into the unilateral relay lane.
+    /// `settlement_hash` is the 64-char hex bytes string returned by
+    /// `SignedReceipt::settlement_hash()`. Expiry is normalized by the
+    /// shared builder before encoding.
+    #[allow(dead_code)]
+    pub(crate) fn build_arm_relay_call(&self, p: &ArmRelayParams<'_>) -> Value {
+        self.call_builder().arm_relay_call(
+            p.session_id,
+            p.settlement_hash_hex,
+            p.net,
+            p.relay_expiry_epochs,
             0,
             p.fee,
             p.nonce,
@@ -307,10 +488,34 @@ impl<'a> ChainCtxV3<'a> {
             .claim_no_show_call(&[json!(session_id)], 0, fee, nonce)
     }
 
+    /// `relay_refund(session_id)` — opener-side recovery after the v4
+    /// relay deadline.
+    #[allow(dead_code)] // exposed for the post-deadline recovery CLI hook.
+    pub(crate) fn build_relay_refund_call(&self, session_id: u64, fee: u64, nonce: u64) -> Value {
+        self.call_builder()
+            .relay_refund_call(session_id, 0, fee, nonce)
+    }
+
+    /// `relay_claim(session_id, preimage)` — operator-side v4
+    /// unilateral settlement. Present here so the client and node
+    /// wrappers both expose the full shared relay builder surface;
+    /// production client code does not call it.
+    #[allow(dead_code)]
+    pub(crate) fn build_relay_claim_call(
+        &self,
+        session_id: u64,
+        settlement_preimage_b64: &str,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call_builder()
+            .relay_claim_call(session_id, settlement_preimage_b64, 0, fee, nonce)
+    }
+
     /// `nonreentrant sweep_expired_session(session_id)` — any caller
     /// can sweep an OPEN session past the sweep-grace cutoff. Pays a
     /// `sweep_bounty_bps` bounty to the caller; the remainder refunds
-    /// the tailnet.
+    /// according to the session funding source.
     #[allow(dead_code)]
     pub(crate) fn build_sweep_expired_session_call(
         &self,
@@ -336,6 +541,30 @@ impl<'a> ChainCtxV3<'a> {
         let r = self.rpc.submit(signed).await?;
         Ok(r.hash)
     }
+
+    /// Submit an unsigned call through the single nonce owner when
+    /// present; otherwise preserve the legacy nonce -> sign -> submit path.
+    pub(crate) async fn submit_call(&self, mut unsigned_call: Value) -> Result<String> {
+        if let Some(tx_queue) = &self.tx_queue {
+            return tx_queue
+                .submit(unsigned_call)
+                .await
+                .map_err(|e| anyhow!("chain tx queue submit: {e}"));
+        }
+
+        let nonce = self.nonce().await?;
+        set_unsigned_nonce(&mut unsigned_call, nonce)?;
+        let signed = self.sign_call(unsigned_call)?;
+        self.submit_signed(&signed).await
+    }
+}
+
+fn set_unsigned_nonce(call: &mut Value, nonce: u64) -> Result<()> {
+    let obj = call
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("v3 submit_call expects a JSON object"))?;
+    obj.insert("nonce".to_string(), json!(nonce));
+    Ok(())
 }
 
 /// Inputs to `settle_confirm`. Borrowed so the call site doesn't need
@@ -346,6 +575,32 @@ pub(crate) struct SettleConfirmParams<'a> {
     pub net: u64,
     /// 64-char lowercase hex of the freshly-generated 32-byte blinding.
     pub settle_blinding: &'a str,
+    pub fee: u64,
+    pub nonce: u64,
+}
+
+#[allow(dead_code)]
+pub(crate) struct OpenRelaySessionParams<'a> {
+    pub tailnet_id: u64,
+    pub circle_id: &'a str,
+    pub max_pay: u64,
+    /// 64-char lowercase hex sha256 returned by
+    /// `SignedReceipt::settlement_hash()`.
+    pub settlement_hash_hex: &'a str,
+    pub net: u64,
+    pub relay_expiry_epochs: u64,
+    pub fee: u64,
+    pub nonce: u64,
+}
+
+#[allow(dead_code)]
+pub(crate) struct ArmRelayParams<'a> {
+    pub session_id: u64,
+    /// 64-char lowercase hex sha256 returned by
+    /// `SignedReceipt::settlement_hash()`.
+    pub settlement_hash_hex: &'a str,
+    pub net: u64,
+    pub relay_expiry_epochs: u64,
     pub fee: u64,
     pub nonce: u64,
 }
@@ -389,15 +644,113 @@ mod tests {
         assert_eq!(call["method"], "open_session");
         assert_eq!(call["to"], prog.display());
         assert_eq!(call["from"], c.wallet_addr().display());
-        assert_eq!(call["value"], 0);
+        assert_eq!(call["value"], 1_500);
         assert_eq!(call["fee"], 500);
         assert_eq!(call["nonce"], 19);
         let params = call["params"].as_array().unwrap();
-        // [tailnet_id, circle, max_pay] — matches v3-smoke.sh:77.
+        // [tailnet_id, circle, max_pay]; value carries the self-funded escrow.
         assert_eq!(params.len(), 3);
         assert_eq!(params[0], 0);
         assert_eq!(params[1], "octEPUyqvqAQ6Y6jp1WqaPVnPNghYjN4tFr95mvSuLcvFTL");
         assert_eq!(params[2], 1_500);
+    }
+
+    #[test]
+    fn sponsored_and_relay_session_call_shapes() {
+        let (rpc, prog, wallet) = fixtures();
+        let c = ctx(&rpc, &prog, &wallet);
+        let sponsored = c.build_open_session_from_treasury_call(
+            0,
+            "octEPUyqvqAQ6Y6jp1WqaPVnPNghYjN4tFr95mvSuLcvFTL",
+            1_500,
+            500,
+            20,
+        );
+        assert_eq!(sponsored["method"], "open_session_from_treasury");
+        assert_eq!(sponsored["value"], 0);
+        assert_eq!(
+            sponsored["params"],
+            json!([
+                0u64,
+                "octEPUyqvqAQ6Y6jp1WqaPVnPNghYjN4tFr95mvSuLcvFTL",
+                1_500u64
+            ])
+        );
+
+        let hash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+        let p = OpenRelaySessionParams {
+            tailnet_id: 0,
+            circle_id: "octEPUyqvqAQ6Y6jp1WqaPVnPNghYjN4tFr95mvSuLcvFTL",
+            max_pay: 1_500,
+            settlement_hash_hex: hash,
+            net: 1_000,
+            relay_expiry_epochs: 200,
+            fee: 500,
+            nonce: 21,
+        };
+        let relay = c.build_open_relay_session_call(&p);
+        assert_eq!(relay["method"], "open_relay_session");
+        assert_eq!(relay["value"], 1_500);
+        assert_eq!(
+            relay["params"],
+            json!([
+                0u64,
+                "octEPUyqvqAQ6Y6jp1WqaPVnPNghYjN4tFr95mvSuLcvFTL",
+                1_500u64,
+                hash,
+                1_000u64,
+                200u64
+            ])
+        );
+
+        let sponsored_relay = c.build_open_relay_session_from_treasury_call(&p);
+        assert_eq!(
+            sponsored_relay["method"],
+            "open_relay_session_from_treasury"
+        );
+        assert_eq!(sponsored_relay["value"], 0);
+        assert_eq!(sponsored_relay["params"], relay["params"]);
+    }
+
+    #[test]
+    fn tailnet_owner_and_spender_call_shapes() {
+        let (rpc, prog, wallet) = fixtures();
+        let c = ctx(&rpc, &prog, &wallet);
+        let transfer = c.build_transfer_tailnet_ownership_call(
+            7,
+            "octG3oQBw9W6tnPJNn7tyL9ugHHkwSaExxWy3Nbi3iFiDRh",
+            500,
+            30,
+        );
+        assert_eq!(transfer["method"], "transfer_tailnet_ownership");
+        assert_eq!(transfer["value"], 0);
+        assert_eq!(
+            transfer["params"],
+            json!([7u64, "octG3oQBw9W6tnPJNn7tyL9ugHHkwSaExxWy3Nbi3iFiDRh"])
+        );
+
+        let authorize = c.build_authorize_tailnet_spender_call(
+            7,
+            "octEPUyqvqAQ6Y6jp1WqaPVnPNghYjN4tFr95mvSuLcvFTL",
+            500,
+            31,
+        );
+        assert_eq!(authorize["method"], "authorize_tailnet_spender");
+        assert_eq!(authorize["value"], 0);
+        assert_eq!(
+            authorize["params"],
+            json!([7u64, "octEPUyqvqAQ6Y6jp1WqaPVnPNghYjN4tFr95mvSuLcvFTL"])
+        );
+
+        let revoke = c.build_revoke_tailnet_spender_call(
+            7,
+            "octEPUyqvqAQ6Y6jp1WqaPVnPNghYjN4tFr95mvSuLcvFTL",
+            500,
+            32,
+        );
+        assert_eq!(revoke["method"], "revoke_tailnet_spender");
+        assert_eq!(revoke["value"], 0);
+        assert_eq!(revoke["params"], authorize["params"]);
     }
 
     #[test]
@@ -424,6 +777,55 @@ mod tests {
             params[3],
             "f8d1aa00bb22cc33f8d1aa00bb22cc33f8d1aa00bb22cc33f8d1aa00bb22cc33"
         );
+    }
+
+    #[test]
+    fn arm_relay_call_shape() {
+        let (rpc, prog, wallet) = fixtures();
+        let c = ctx(&rpc, &prog, &wallet);
+        let hash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+        let p = ArmRelayParams {
+            session_id: 7,
+            settlement_hash_hex: hash,
+            net: 1_000,
+            relay_expiry_epochs: 200,
+            fee: 500,
+            nonce: 25,
+        };
+        let call = c.build_arm_relay_call(&p);
+        assert_eq!(call["method"], "arm_relay");
+        assert_eq!(call["to"], prog.display());
+        assert_eq!(call["from"], c.wallet_addr().display());
+        assert_eq!(call["value"], 0);
+        assert_eq!(call["fee"], 500);
+        assert_eq!(call["nonce"], 25);
+        let params = call["params"].as_array().unwrap();
+        assert_eq!(params.len(), 4);
+        assert_eq!(params[0], 7);
+        assert_eq!(params[1], hash);
+        assert_eq!(params[2], 1_000);
+        assert_eq!(params[3], 200);
+    }
+
+    #[test]
+    fn relay_claim_and_refund_call_shapes() {
+        let (rpc, prog, wallet) = fixtures();
+        let c = ctx(&rpc, &prog, &wallet);
+        let preimage = "b2N0cmF2cG4tc2V0dGxlLXYxfA==";
+        let claim = c.build_relay_claim_call(7, preimage, 500, 26);
+        assert_eq!(claim["method"], "relay_claim");
+        assert_eq!(claim["value"], 0);
+        let claim_params = claim["params"].as_array().unwrap();
+        assert_eq!(claim_params.len(), 2);
+        assert_eq!(claim_params[0], 7);
+        assert_eq!(claim_params[1], preimage);
+
+        let call = c.build_relay_refund_call(7, 500, 27);
+        assert_eq!(call["method"], "relay_refund");
+        assert_eq!(call["value"], 0);
+        let params = call["params"].as_array().unwrap();
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0], 7);
     }
 
     #[test]
@@ -468,5 +870,6 @@ mod tests {
         assert!(signed["public_key"].is_string());
         assert_eq!(signed["op_type"], "call");
         assert_eq!(signed["encrypted_data"], "open_session");
+        assert_eq!(signed["amount"], "1500");
     }
 }

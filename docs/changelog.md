@@ -10,6 +10,17 @@ Newest first.
 
 ---
 
+## 2026-08-22 — lite_node sequence 4 accepted
+
+`octra-labs/lite_node` moved from `dd342e7` (seq 2, expired) to
+`f3b6d58` (seq 4). Signing preimage, error codes, RPC method names
+(212), `runtime_profile_hash`, and `consensus_rules_id` are unchanged.
+Staging RPCs now sample; `object_cost` is gated at epoch 1,380,000.
+Baseline updated; analysis at
+[`octra-upstream-delta-2026-08-22.md`](octra-upstream-delta-2026-08-22.md).
+
+---
+
 ## 2026-05-20 — Massive consolidation pass
 
 A multi-agent landing day. The substrate didn't change but the

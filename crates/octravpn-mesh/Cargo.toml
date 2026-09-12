@@ -20,8 +20,8 @@ octravpn-core = { path = "../octravpn-core" }
 # PreauthMinter + TailnetIpAllocator (see `headscale_bridge.rs`) and
 # re-exports the wire module through `lib.rs` so existing callers
 # keep working. `full` keeps the public control-router WireState shape
-# aligned with the embedded headscale CLI build; Octra leaves native DERP
-# unset unless a future host config explicitly owns it.
+# aligned with the embedded headscale CLI build; native DERP is threaded
+# through WireStateBuilder and enabled per host via [control.derp].serve.
 headscale-api = { path = "../../../headscale-rs/headscale-api", default-features = false, features = ["admin", "full"] }
 # Canonical ACL evaluator — shared with headscale-api as of
 # 2026-05-20. Lives in the headscale-rs workspace alongside

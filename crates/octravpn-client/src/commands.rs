@@ -10,12 +10,14 @@ mod bugreport;
 pub(crate) mod fetch;
 pub(crate) mod open_url;
 pub(crate) mod serve;
+pub(crate) mod settle;
 pub(crate) mod slash;
 
 pub(crate) use bugreport::run as bugreport;
 pub(crate) use fetch::{run as run_fetch, FetchArgs};
 pub(crate) use open_url::{open_url as run_open_url, OpenUrlArgs};
 pub(crate) use serve::{run_funnel as funnel, run_serve as serve, Op as ServeOp};
+pub(crate) use settle::{run as run_settle, SettleCmd};
 pub(crate) use slash::{run as slash_evidence, submit as slash_submit, SlashCmd};
 
 /// `octravpn init` — write a fresh config + wallet key into `dir`.

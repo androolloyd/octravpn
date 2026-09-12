@@ -9,6 +9,75 @@ fragmented state from `production-checklist.md` (v1 gates),
 
 **Last updated.** 2026-05-24.
 
+> ### Status update — 2026-08-17
+>
+> Two of this document's load-bearing premises are no longer true. Re-read
+> the P0 list below with these corrections in hand; the body text has not
+> been rewritten.
+>
+> **P0 #1 (Wall 5) is CLOSED.** `docker/devnet/tailscale-interop/run-interop.sh`
+> exits **0** against `tailscale/tailscale:latest` — two stock clients join,
+> take `100.x` addresses, and ping both via our DERP and directly:
+> ```
+> pong from tsi-peer-b (100.103.151.1) via DERP(interop) in 1ms
+> pong from tsi-peer-b (100.103.151.1) via 192.168.166.5:40767 in 1ms
+> ```
+> The doc's estimate of 1–1.5 person-weeks and the claim that "no real client
+> joins" are both obsolete. Note the scope: this proves the **mesh control
+> plane**. The harness does not touch the chain, so nothing here validates
+> session escrow, metering, or settlement.
+>
+> **The chain-side blockers dissolved.** `fhe_*` reverting on new contracts
+> was one of five distinct misdiagnoses; octra-labs published the full node
+> source and four of our six long-standing blockers turned out to be our own
+> bugs. See [`octra-upstream-delta-2026-08-17.md`](octra-upstream-delta-2026-08-17.md)
+> for the ledger, and note the load-bearing negative: the native relay rail
+> moves no money and has no hashlock, so the v4 AML HTLC is the permanent
+> settlement design rather than a stopgap.
+>
+> **Sequence 4 (2026-08-22) does not reopen the chain-side list.**
+> `lite_node` HEAD `f3b6d58` keeps the same RPC surface, signing
+> preimage, `runtime_profile_hash`, and `consensus_rules_id`. See
+> [`octra-upstream-delta-2026-08-22.md`](octra-upstream-delta-2026-08-22.md).
+> Watch epoch **1,380,000** for circle object-member effort costs; our
+> AML does not emit those opcodes.
+>
+> **2026-09-12 — proven again on lite_node sequence 12, locally, with sealed keys.**
+> The same loop now runs green against a real sequence-12 node in docker
+> (`octra-foundry/docker/octra-node`) with node1 booted under
+> `require_sealed_keys = true`: the autonomous claimer signs `relay_claim` with a
+> key it unsealed at boot and the chain accepts it (RELAY_CLAIMED, 2985 / 15).
+> That retires the last "unverified" on the P1-6 key-hygiene path and moves
+> integration testing off devnet — which was halted at epoch 1,500,060 for the
+> whole session — onto a node we control. It also found and fixed a production
+> bug: the session-admission verifier scraped `contract_call`'s storage envelope,
+> which sequence 12 makes opt-in, so every announce returned 401 on a node that
+> omits it. See `octra-upstream-delta-2026-09-12.md`.
+>
+> **The join point is now closed too (2026-08-18).** A real session opened,
+> metered, and settled end-to-end on live devnet against a freshly deployed
+> `main-v4` at `octEX1mUYv6hw4eQH937zBh14EcjbUPUuBxQaTyuTTdPw38`, driven by
+> `docker/devnet/v4-relay-e2e.sh` through the real daemons — the
+> `POST /session/:id/receipt` route, the client settle-arm I1 gate,
+> ChainTxQueue on the canonical signer, the receipt vault, and the in-daemon
+> autonomous relay-claimer. Verified by independent chain reads, not the
+> script's own verdict:
+>
+> | on-chain | value |
+> |---|---|
+> | `get_session_status(0)` | `4` — RELAY_CLAIMED |
+> | `circle_earnings_total` | `2985` |
+> | `treasury` | `15` (50 bps of net 3000, exactly) |
+> | `get_relay_settlement_hash(0)` | equals the off-chain receipt's `settlement_hash` byte for byte |
+>
+> Caveats worth keeping honest: this is one single-operator session on devnet
+> with `min_session_deposit` set to 100 OU (a shakeout value, not an economic
+> floor); `auto_sweep` is untested (its grace is 1,000 epochs ≈ 2.8h); and the
+> mesh and money planes still meet only in principle — `v4-relay-e2e.sh` rides
+> the node's own boringtun tunnel and does not involve tailscale at all. The
+> remaining P0s (2-5: mainnet ceremony, operator CLI, audit CLI, runbook) are
+> untouched by this.
+
 **Operator persona.** A single operator: one wallet, one bonded circle on
 Octra mainnet, one tailnet hosting 5–50 stock-`tailscale` clients, real
 egress through their nodes, real OCT settled per session. They are

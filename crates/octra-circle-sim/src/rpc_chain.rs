@@ -8,7 +8,12 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use octravpn_core::{address::Address, rpc::RpcClient, sig::KeyPair, tx::sign_call};
+use octravpn_core::{
+    address::Address,
+    rpc::{next_nonce, RpcClient},
+    sig::KeyPair,
+    tx::sign_call,
+};
 use serde_json::{json, Value};
 
 use crate::acl::ExitClass;
@@ -123,7 +128,7 @@ impl MockChain for RpcChain {
             "params": [sid, bytes_used],
             "value": 0u64,
             "fee": fee,
-            "nonce": bal.pending_nonce.max(bal.nonce),
+            "nonce": next_nonce(&bal),
         });
         let signed = sign_call(&self.proxy_kp, call)
             .map_err(|e| ChainError::Rpc(format!("sign_call: {e}")))?;

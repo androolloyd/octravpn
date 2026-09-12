@@ -212,6 +212,160 @@ auditor's awareness:
 
 ---
 
+## Formal-proof model ↔ chain gaps (2026-08-17 upstream-source audit)
+
+The Octra node source is now public (octra-labs/lite_node, pinned at
+commit `75d9ed1d73a0e3731f7d7a4262d29b672ad3c24e` for the citations
+below). Auditing our Lean claim set against it found two places where
+a proof's *model* encodes chain behavior the chain does not have. In
+both cases the Lean theorem is sound about its model and the model
+faithfully mirrors **our own Rust client** — the gap is between the
+model and the chain, not inside the proof. Nothing here involves a
+`sorry`; the proofs build clean.
+
+### `proofs/lean/WireProtocol/RpcEnvelope.lean:222` — `chain_id_binding_rejects_replay`
+
+> A tx signed for `chain_id = X` cannot be replayed against a
+> different chain.
+
+**Class: S (assurance overstatement — the property is real but not
+chain-enforced).**
+
+What it IS: a genuine Lean `theorem` (the 2026-05-20 note about it
+being "earlier axiomatised" is historical — today it is derived from
+the modeling axiom `txCanonical_chainId_injective`,
+`RpcEnvelope.lean:138`, plus `Sha256.injective` and
+`verify_rejects_tampered_message`). The axiom faithfully mirrors the
+v2 canonical-bytes encoder in
+`octra-foundry/crates/octra-core/src/tx.rs::to_canonical_json`, and
+the Rust proptests exercise it.
+
+What it is NOT: a property of the Octra chain. Verified against the
+node source:
+
+- The chain's signing preimage has **no `chain_id` field**:
+  `serialize_for_signing` emits exactly `from, to_, amount, nonce,
+  ou, timestamp, op_type` (+ optional `encrypted_data`, `message`)
+  — `lib/core/transaction.ml:309-326`.
+- The envelope parser (`of_yojson`, `transaction.ml:273-306`) reads
+  known keys via `List.assoc_opt` and **silently drops** a
+  `chain_id` key. The chain then re-derives the preimage from the
+  parsed record — without `chain_id` — so a v2-signed tx fails
+  signature admission outright (`transaction.ml:335-341`, reached
+  from `signature_admission` in `node_runtime/tx_view.ml`). The v2
+  format is not merely un-enforced; it is **unusable** against the
+  real chain.
+- No production caller sets `OctraTx.chain_id` — the only
+  `chain_id: Some(..)` constructions are inside `mod tests`
+  (`tx.rs:773`, `tx.rs:827`). All real traffic is v1.
+
+What the chain actually enforces (same-chain replay resistance
+only): nonce must equal `balance.nonce + 1` and is tracked in a
+spent-nonce set (`lib/core/ledger.ml:241-247`), and the signed
+timestamp must be within ±300s of the node's clock
+(`node_runtime/tx_view.ml:1125-1129`). **There is no cross-chain
+binding of any kind in the chain's tx envelope.** A v1 tx valid on
+chain A is, at the envelope layer, also valid on a chain B that
+shares the sender's account state, within the timestamp window.
+
+What still holds: cross-chain binding for the *settle path* is
+enforced in-program at the receipt layer — the client-signed receipt
+payload binds `ReceiptContext::chain_id`
+(`crates/octravpn-core/src/receipt.rs:226`) and our AML program
+checks it (`OctraVPN_Rust.Lemmas.receipt_cross_chain_rejected`).
+The tx-envelope-layer theorem additionally holds for any verifier
+that implements the v2 rules (our `verify_envelope_signature`,
+`octra-mock-rpc`).
+
+Verdict: **(a) spec ↔ implementation mismatch** — the theorem is
+sound about its model, and the model matches our client's v2 format;
+the chain ignores-and-rejects that format. It is not vacuous, not
+false over its own domain, and not an axiom-in-disguise. The theorem
+site now carries a scope caveat (`RpcEnvelope.lean`, THM 26
+docstring), as do `WireProtocol/Theorems.md` §11 and the module
+docstring. The theorem is retained: it documents a defence we want
+the chain to adopt and that our own verifiers already enforce.
+
+Downstream citations that inherit the caveat:
+`proofs/lean/OctraVPN_Rust/EndToEnd.lean:49` (layer-4 listing) and
+`EndToEnd.lean:369` (THM 31 `cross_chain_replay_detected` cites the
+RpcEnvelope theorem as compositional support — THM 31 itself is a
+receipt-layer statement and stands on
+`receipt_cross_chain_rejected` alone).
+
+---
+
+### `proofs/lean/OctraVPN/Entrypoints.lean:521` + `proofs/lean/OctraVPN_V2/Entrypoints.lean:553` — `claimEarnings` gates a mutation on `fhe_verify_zero`
+
+> The `proofOk` proposition stands in for the on-chain
+> `fhe_verify_zero(pk, encEarn - enc(amount), proof)` check.
+
+**Class: S for any v1/v2 certification; no impact on the deployed
+v3 path.**
+
+The v1 and v2 program models (and the lemmas built on them, e.g.
+`OctraVPN/Lemmas.lean:613` `claim_requires_exact_match`) model the
+chain accepting a **mutating** `claim_earnings` call gated by
+`fhe_verify_zero`. The chain cannot execute that program: the VM's
+`FHE_VERIFY_ZERO` opcode **reverts unless `st.is_view`**
+(`lib/vm/runtime/contract_vm.ml:2667-2671`; likewise
+`FHE_VERIFY_RANGE` at 2694-2698 and `GROTH16_VERIFY_BN254` at
+~2721-2723). fhe-verification is a view-only capability — it cannot
+gate a state change inside a transaction. The v2 "PROOF GAP" list
+(`OctraVPN_V2/AmlLink.lean:32`, item 4) declares the *cryptographic
+soundness* of the zero-proof as out of scope but does not mention
+the view-only restriction; the modeled entrypoint shape is
+unimplementable on today's chain, not merely unproven.
+
+The production path is unaffected: the v3 model claims earnings
+against a plaintext `availableEarnings` bound with no FHE gate
+(`OctraVPN_V3/Invariants.lean:1008-1029`), and v3's AmlLink states
+HFHE is not present in v3 (`OctraVPN_V3/AmlLink.lean:57`). The
+HFHE modules themselves are honestly framed as a future swap-in
+("currently inert", `WireProtocol/HFHE.lean:497`;
+`OctraVPN_Rust/ShadowBlob.lean:21`).
+
+**Action for auditor:** treat v1/v2 `claimEarnings` theorems as
+verifying a *target* design contingent on Octra allowing
+fhe-verification in mutating context; do not certify them as
+properties of any deployable program.
+
+---
+
+### Swept and clean (same error class, no findings)
+
+- **Chain events.** The chain emits no tx events
+  (`octra_transaction` returns status objects only,
+  `node_runtime/tx_view.ml:93-136`; execution results live in
+  receipts). No proof models a chain event log: the TLA+
+  `settled_sids` "SessionSettled event" variable
+  (`proofs/tla/OctraVPN.tla:93`) is a ghost history variable of the
+  model's own state machine, and the "settlement event fires" prose
+  in `OctraVPN/Lemmas.lean:480` describes a state transition, not
+  an emitted log.
+- **Confirmation timing.** `octra_submit` only stages
+  (confirmation at epoch apply). No Lean/TLA theorem assumes
+  submit ⇒ confirmed; all program models are per-execution state
+  transitions, which is compatible with staged-then-applied
+  semantics. (The `EndToEnd.lean` prose "no third outcome" is about
+  an *executed* call being accepted-or-rejected; a dropped/pending
+  tx executes nothing and changes no state.)
+- **Circles holding value.** Circle execution disables transfers;
+  custody stays in the AML program. All models place custody in the
+  AML program treasury; no proof asserts a circle holds or moves
+  value.
+- **Tamarin.** `proofs/tamarin/octravpn.spthy:14-40` explicitly
+  labels its properties "TARGET, not v1" — honest framing, no
+  change needed.
+- **README theorem count.** The README claims "373 Lean 4
+  theorems"; the tree contains 377 top-level `theorem` declarations
+  and zero `sorry`/`admit`. The count is not overstated. Note that
+  118 `axiom` declarations underpin the set (hash/signature
+  primitives and encoder-injectivity modeling axioms) — standard
+  practice, and disclosed per-module in the Theorems.md files.
+
+---
+
 ## Three items to flag first for the auditor
 
 These are the items the OctraVPN team would want the auditor to

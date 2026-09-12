@@ -52,6 +52,11 @@ the format by inspecting the envelope — txs that don't carry a
 `chain_id` field continue to verify under v1 canonical bytes, so no
 chain-history re-sign is required.
 
+**Caveat (2026-08-17):** the "v2 format" is a *client-and-mock-side*
+convention only. The real chain's preimage has no `chain_id` field
+and its parser drops the key, so the chain rejects v2 signatures —
+see the scope caveat on `chain_id_binding_rejects_replay` below.
+
 ## Axioms introduced
 
 None new — we reuse `Sha256.injective`,
@@ -218,7 +223,32 @@ theorem method_binding_rejects_replay
     `chain_id_bit_flip_changes_canonical_bytes`,
     `cross_chain_replay_rejected_by_verify`, plus the mock-rpc
     integration test
-    `crates/octra-mock-rpc/tests/chain_id_binding.rs::cross_chain_replay_rejected_by_mock`). -/
+    `crates/octra-mock-rpc/tests/chain_id_binding.rs::cross_chain_replay_rejected_by_mock`).
+
+    **SCOPE CAVEAT (2026-08-17 upstream-source audit).** This theorem
+    is about the *client-side v2 canonical format*; it is NOT a
+    property the Octra chain enforces. The now-public node source
+    (octra-labs/lite_node @ 75d9ed1) shows the chain's signing
+    preimage has no `chain_id` field at all
+    (`lib/core/transaction.ml:309-326`, `serialize_for_signing`), and
+    the envelope parser drops unrecognized keys
+    (`transaction.ml:273-306`), so a v2 tx submitted to the real
+    chain is *rejected outright*: the node re-derives the preimage
+    without `chain_id` and signature admission fails
+    (`transaction.ml:335-341`). No production caller sets
+    `OctraTx.chain_id` today (only tests do), so all real traffic is
+    v1. What this theorem DOES guarantee: any verifier implementing
+    the v2 rules — our `verify_envelope_signature`, octra-mock-rpc —
+    rejects cross-chain replay of v2-signed envelopes. What the real
+    chain guarantees instead is *same-chain* replay resistance only:
+    nonce = balance.nonce+1 plus a spent-nonce set
+    (`lib/core/ledger.ml:241-247`) and a ±300s signed-timestamp
+    admission window (`node_runtime/tx_view.ml:1125-1129`). There is
+    NO cross-chain binding in the chain's tx envelope; cross-chain
+    receipt binding is enforced separately, in-program, by our AML
+    settle path (`Lemmas.receipt_cross_chain_rejected`). See
+    `docs/audit/known-limitations.md`, "Formal-proof model ↔ chain
+    gaps". -/
 theorem chain_id_binding_rejects_replay
     (sk : SecretKey) (tx tx' : TxEnvelope)
     (h_chain : tx.chainId ≠ tx'.chainId)

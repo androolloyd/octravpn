@@ -10,13 +10,24 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use octravpn_core::{
-    bearer::BearerCheck, bounded::BoundedMap, control::AnnounceSessionRequest,
-    receipt::ReceiptContext, receipt_journal::ReceiptJournal, rpc::RpcClient, session::SessionId,
-    sig::KeyPair,
+    address::Address,
+    bearer::BearerCheck,
+    bounded::BoundedMap,
+    control::{announce_opener_binding_payload, AnnounceSessionRequest},
+    receipt::ReceiptContext,
+    receipt_journal::ReceiptJournal,
+    receipt_vault::ReceiptVault,
+    rpc::RpcClient,
+    session::SessionId,
+    sig::{verify, KeyPair},
 };
 use octravpn_mesh::{PreauthMinter, WireState};
 
-use crate::{events::EventBus, onion::OnionRouter};
+use crate::{
+    chain_v3::{SESSION_OPEN, SESSION_RELAY_ARMED},
+    events::EventBus,
+    onion::OnionRouter,
+};
 
 use super::metrics::NodeMetrics;
 
@@ -79,6 +90,10 @@ pub(crate) struct ControlState {
     /// be tricked into signing two receipts at the same
     /// `(session_id, seq)` even across an OOM-kill or segfault.
     pub receipt_journal: Arc<ReceiptJournal>,
+    /// v4 relay-settlement off-chain half: durable mirror of
+    /// client-countersigned receipt blobs. Separate from
+    /// `receipt_journal`, which remains a fixed-width seq-floor store.
+    pub receipt_vault: Arc<ReceiptVault>,
     /// In-memory preauth-key minter the `POST /admin/preauth`
     /// endpoint hands out tokens from. Shared with `octravpn-node`'s
     /// `mesh mint-preauth` CLI surface so a `docker exec` can mint a
@@ -104,8 +119,16 @@ pub(crate) struct ControlState {
     /// Optional chain-backed verifier for `POST /session`. Tests can
     /// leave this unset and still exercise signature validation; hub
     /// startup wires it so production announces must point at a
-    /// transaction that emitted `SessionOpened(session_id)`.
+    /// confirmed `open_session` transaction for the configured
+    /// program. Full RPCs can prove that by event; devnet falls back
+    /// to the program's `get_session_status` view.
     pub session_verifier: Option<SessionAdmissionVerifier>,
+    /// Optional read-only relay lifecycle probe for
+    /// `POST /session/:id/receipt`. Hub-built states set this so every
+    /// countersigned receipt post checks whether the chain has already
+    /// moved the session to `SESSION_RELAY_ARMED` before allowing the
+    /// vault receipt to advance.
+    pub relay_lifecycle_verifier: Option<RelayLifecycleVerifier>,
     /// HFHE-2: optional shadow-blob signer. When `Some` the
     /// `get_state` receipt-emission path consults the PVAC sidecar
     /// for `encrypt_const(bytes_used)` + `encrypt_const(net)` and
@@ -130,26 +153,288 @@ pub(crate) struct ControlState {
 #[derive(Clone)]
 pub(crate) struct SessionAdmissionVerifier {
     rpc: RpcClient,
+    program_addr: Address,
+}
+
+#[derive(Clone)]
+pub(crate) struct RelayLifecycleVerifier {
+    rpc: RpcClient,
+    program_addr: Address,
+    caller: Option<Address>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RelayArmedState {
+    pub deadline: u64,
+    pub settlement_hash: String,
+}
+
+/// On-chain relay lifecycle of a session, as the receipt POST handler needs to
+/// see it: `Open` still accepts receipts, `Armed` pins the vault entry, and
+/// `Terminal` (SETTLED/REFUNDED/RELAY_CLAIMED/RELAY_REFUNDED) rejects further
+/// receipts — the session is closed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum RelayLifecycle {
+    Open,
+    Armed(RelayArmedState),
+    Terminal(u64),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SessionAdmission {
+    Accepted,
+    SessionNotFound,
+    NotSignedByOpener,
 }
 
 impl SessionAdmissionVerifier {
-    pub(crate) fn new(rpc: RpcClient) -> Self {
-        Self { rpc }
+    pub(crate) fn new(rpc: RpcClient, program_addr: Address) -> Self {
+        Self { rpc, program_addr }
     }
 
     pub(crate) async fn session_opened(
         &self,
         req: &AnnounceSessionRequest,
-    ) -> octravpn_core::CoreResult<bool> {
+    ) -> octravpn_core::CoreResult<SessionAdmission> {
         let tx = self.rpc.transaction(&req.open_tx_hash).await?;
-        Ok(transaction_has_session_opened(&tx, &req.session_id))
+        if transaction_has_session_opened(&tx, &req.session_id) {
+            return Ok(opener_binding_admission(&tx, req));
+        }
+        if !transaction_is_confirmed_call_to_program(&tx, &self.program_addr) {
+            return Ok(SessionAdmission::SessionNotFound);
+        }
+        let Some(session_id) = req.session_id.as_u64() else {
+            return Ok(SessionAdmission::SessionNotFound);
+        };
+        let Ok(status) = self
+            .rpc
+            .contract_call_raw(
+                &self.program_addr,
+                "get_session_status",
+                &[serde_json::json!(session_id)],
+                None,
+            )
+            .await
+        else {
+            return Ok(SessionAdmission::SessionNotFound);
+        };
+        // The session count comes from the get_session_count VIEW (Step 8b),
+        // never from the `storage` block contract_call may embed. That block
+        // is opt-in on lite_node sequence 12 (5th positional param) and its
+        // map keys changed shape (`@aml/map/<field>/<n>#<key>`); reading it
+        // here made every announce fail 401 "session open transaction not
+        // found" on a node that omits it, while the chain showed the session
+        // open and the opener correct.
+        let Ok(count_raw) = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_session_count",
+                &[],
+                None,
+            )
+            .await
+        else {
+            return Ok(SessionAdmission::SessionNotFound);
+        };
+        let Some(session_count) = value_as_u64(&count_raw) else {
+            return Ok(SessionAdmission::SessionNotFound);
+        };
+        if !session_status_allows_admission(&status, session_count, session_id) {
+            return Ok(SessionAdmission::SessionNotFound);
+        }
+        // Bind the announce to the SESSION's on-chain opener, NOT to the presented
+        // open_tx's `from`. lite_node emits no SessionOpened events, so this
+        // fallback is the PRODUCTION admission path; the presented `open_tx_hash`
+        // is never tied to the session id, so without this an attacker could show
+        // any confirmed call to the program as their open_tx and announce someone
+        // else's session. `get_session_opener` is the on-chain truth.
+        let Ok(opener) = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_session_opener",
+                &[serde_json::json!(session_id)],
+                None,
+            )
+            .await
+        else {
+            return Ok(SessionAdmission::SessionNotFound);
+        };
+        Ok(onchain_opener_binding_admission(&opener, req))
     }
+}
+
+impl RelayLifecycleVerifier {
+    pub(crate) fn new(rpc: RpcClient, program_addr: Address, caller: Option<Address>) -> Self {
+        Self {
+            rpc,
+            program_addr,
+            caller,
+        }
+    }
+
+    pub(crate) async fn lifecycle(
+        &self,
+        session_id: u64,
+    ) -> octravpn_core::CoreResult<RelayLifecycle> {
+        let caller = self.caller.as_ref();
+        let status = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_session_status",
+                &[serde_json::json!(session_id)],
+                caller,
+            )
+            .await?;
+        let status = value_as_u64(&status).unwrap_or(SESSION_OPEN);
+        if status == SESSION_OPEN {
+            return Ok(RelayLifecycle::Open);
+        }
+        if status != SESSION_RELAY_ARMED {
+            // SETTLED/REFUNDED/RELAY_CLAIMED/RELAY_REFUNDED: the session has left
+            // the arm window; it accepts no more receipts.
+            return Ok(RelayLifecycle::Terminal(status));
+        }
+
+        let deadline = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_relay_deadline",
+                &[serde_json::json!(session_id)],
+                caller,
+            )
+            .await?;
+        let settlement_hash = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_relay_settlement_hash",
+                &[serde_json::json!(session_id)],
+                caller,
+            )
+            .await?;
+
+        Ok(RelayLifecycle::Armed(RelayArmedState {
+            deadline: value_as_u64(&deadline).unwrap_or(0),
+            settlement_hash: settlement_hash.as_str().unwrap_or_default().to_string(),
+        }))
+    }
+}
+
+fn opener_binding_admission(
+    tx: &serde_json::Value,
+    req: &AnnounceSessionRequest,
+) -> SessionAdmission {
+    if announce_signed_by_session_opener(tx, req) {
+        SessionAdmission::Accepted
+    } else {
+        SessionAdmission::NotSignedByOpener
+    }
+}
+
+/// Fallback-path binding: accept the announce only if its `opener_pubkey` hashes
+/// to the session's on-chain opener AND `opener_sig` covers the binding payload.
+/// Unlike [`opener_binding_admission`], this trusts the chain's
+/// `session_opener[session_id]`, not the presented open-tx's `from` -- so a
+/// forged or unrelated `open_tx_hash` cannot bind the announce to another user's
+/// session. An unset opener means the session does not exist on chain.
+fn onchain_opener_binding_admission(
+    opener: &serde_json::Value,
+    req: &AnnounceSessionRequest,
+) -> SessionAdmission {
+    let onchain_opener = opener.as_str().unwrap_or("");
+    if onchain_opener.is_empty() || onchain_opener == "0" {
+        return SessionAdmission::SessionNotFound;
+    }
+    if Address::from_pubkey(&req.opener_pubkey.0).display() != onchain_opener {
+        return SessionAdmission::NotSignedByOpener;
+    }
+    let payload = announce_opener_binding_payload(
+        &req.session_id,
+        &req.client_pubkey,
+        &req.client_wg_pubkey,
+        &req.open_tx_hash,
+    );
+    if verify(&req.opener_pubkey, &payload, &req.opener_sig).is_ok() {
+        SessionAdmission::Accepted
+    } else {
+        SessionAdmission::NotSignedByOpener
+    }
+}
+
+fn announce_signed_by_session_opener(tx: &serde_json::Value, req: &AnnounceSessionRequest) -> bool {
+    let Some(tx_from) = transaction_from_address(tx) else {
+        return false;
+    };
+    let opener_addr = Address::from_pubkey(&req.opener_pubkey.0);
+    if opener_addr.display() != tx_from {
+        return false;
+    }
+    let payload = announce_opener_binding_payload(
+        &req.session_id,
+        &req.client_pubkey,
+        &req.client_wg_pubkey,
+        &req.open_tx_hash,
+    );
+    verify(&req.opener_pubkey, &payload, &req.opener_sig).is_ok()
+}
+
+fn transaction_from_address(tx: &serde_json::Value) -> Option<&str> {
+    tx.get("from")
+        .or_else(|| tx.get("from_"))
+        .and_then(|v| v.as_str())
+}
+
+fn transaction_is_confirmed_call_to_program(
+    tx: &serde_json::Value,
+    program_addr: &Address,
+) -> bool {
+    let expected_program = program_addr.display().to_string();
+    let confirmed = tx
+        .get("status")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| s == "confirmed");
+    let call = tx
+        .get("op_type")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| s == "call");
+    let to_program = tx
+        .get("to")
+        .or_else(|| tx.get("to_"))
+        .and_then(|v| v.as_str())
+        .is_some_and(|to| to == expected_program);
+    let open_session = tx
+        .get("encrypted_data")
+        .and_then(|v| v.as_str())
+        .map_or(true, |method| method == "open_session");
+    confirmed && call && to_program && open_session
+}
+
+fn session_status_allows_admission(
+    raw: &serde_json::Value,
+    session_count: u64,
+    session_id: u64,
+) -> bool {
+    if session_id >= session_count {
+        return false;
+    }
+    let Some(status) = raw.get("result").and_then(value_as_u64) else {
+        return false;
+    };
+    matches!(status, 0 | 3)
+}
+
+fn value_as_u64(v: &serde_json::Value) -> Option<u64> {
+    v.as_u64()
+        .or_else(|| v.as_str().and_then(|s| s.parse::<u64>().ok()))
 }
 
 /// Inspect a chain-RPC transaction body for a `SessionOpened` event
 /// whose `session_id` matches the request. Public at module scope so
-/// the announce handler's tests can pin the matcher independently of
-/// a live RPC client.
+/// tests can pin the matcher independently of a live RPC client.
 pub(crate) fn transaction_has_session_opened(
     tx: &serde_json::Value,
     session_id: &SessionId,
@@ -202,6 +487,16 @@ pub(crate) struct ShadowSigner {
 pub(crate) struct ControlSession {
     pub last_seq: u64,
     pub last_blind: octravpn_core::session::Blind,
+    /// The ed25519 client identity key that announced this session
+    /// (`AnnounceSessionRequest::client_pubkey`). Bound here so
+    /// `POST /session/:id/receipt` can reject a dual-signed receipt
+    /// whose client countersignature is under a *different* key —
+    /// otherwise anyone who can read a live session's node-signed
+    /// proposal (`GET /session/:id`) could attach their own fresh
+    /// client key, POST it, and poison the vault's "latest" receipt so
+    /// the operator's later `relay_claim` carries an attacker-keyed
+    /// countersignature that the chain rejects.
+    pub client_pubkey: octravpn_core::sig::PublicKey,
 }
 
 impl ControlState {
@@ -265,11 +560,13 @@ impl ControlState {
             metrics_token: None,
             receipt_context,
             receipt_journal,
+            receipt_vault: Arc::new(ReceiptVault::in_memory()),
             preauth_minter: PreauthMinter::new(),
             admin_token: None,
             wire_state: None,
             rate_limit_cfg: crate::rate_limit::RateLimitCfg::default(),
             session_verifier: None,
+            relay_lifecycle_verifier: None,
             shadow_signer: None,
             shadow_price_per_byte: 0,
             enroll: None,
@@ -292,6 +589,13 @@ impl ControlState {
         self
     }
 
+    /// Attach the persistent receipt-vault store used by
+    /// `POST /session/:id/receipt`.
+    pub(crate) fn with_receipt_vault(mut self, vault: Arc<ReceiptVault>) -> Self {
+        self.receipt_vault = vault;
+        self
+    }
+
     /// Override the rate-limit config (defaults are the documented
     /// production profile in `crate::rate_limit`). Hub wires this from
     /// `[control.rate_limit]` in `node.toml`; tests use the default.
@@ -303,6 +607,14 @@ impl ControlState {
 
     pub(crate) fn with_session_verifier(mut self, verifier: SessionAdmissionVerifier) -> Self {
         self.session_verifier = Some(verifier);
+        self
+    }
+
+    pub(crate) fn with_relay_lifecycle_verifier(
+        mut self,
+        verifier: RelayLifecycleVerifier,
+    ) -> Self {
+        self.relay_lifecycle_verifier = Some(verifier);
         self
     }
 
@@ -403,8 +715,182 @@ impl ControlState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{extract::State as AxumState, http::StatusCode, routing::post, Json, Router};
     use octravpn_core::bounded::BoundedMap;
     use octravpn_core::sig::KeyPair;
+    use serde_json::{json, Value};
+    use std::net::SocketAddr;
+    use std::sync::Mutex;
+    use tokio::sync::oneshot;
+
+    #[derive(Clone)]
+    struct AdmissionMockRpc {
+        tx: Value,
+        status: Option<Value>,
+        session_count: Value,
+        opener: Value,
+        contract_calls: Arc<Mutex<Vec<Value>>>,
+    }
+
+    async fn admission_mock_handler(
+        AxumState(mock): AxumState<AdmissionMockRpc>,
+        Json(req): Json<Value>,
+    ) -> Result<Json<Value>, StatusCode> {
+        let method = req
+            .get("method")
+            .and_then(Value::as_str)
+            .ok_or(StatusCode::BAD_REQUEST)?;
+        let id = req.get("id").cloned().unwrap_or(json!(1));
+        let params = req.get("params").cloned().unwrap_or(json!([]));
+        let body = match method {
+            "octra_transaction" => {
+                json!({ "jsonrpc": "2.0", "id": id, "result": mock.tx })
+            }
+            "contract_call" => {
+                let view = params
+                    .as_array()
+                    .and_then(|a| a.get(1))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                mock.contract_calls
+                    .lock()
+                    .expect("contract calls lock")
+                    .push(params);
+                if view == "get_session_count" {
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": { "result": mock.session_count },
+                    })
+                } else if view == "get_session_opener" {
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": { "result": mock.opener },
+                    })
+                } else if let Some(status) = &mock.status {
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": {
+                            "result": status,
+                        },
+                    })
+                } else {
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "error": { "code": -32099, "message": "session not found" },
+                    })
+                }
+            }
+            _ => json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": { "code": -32601, "message": "method not found" },
+            }),
+        };
+        Ok(Json(body))
+    }
+
+    async fn spawn_admission_mock(
+        tx: Value,
+        status: Option<Value>,
+        session_count: Value,
+    ) -> (RpcClient, Arc<Mutex<Vec<Value>>>, oneshot::Sender<()>) {
+        // Sound default: the on-chain opener IS whoever sent the open-tx.
+        let opener = tx
+            .get("from_")
+            .or_else(|| tx.get("from"))
+            .cloned()
+            .unwrap_or(Value::Null);
+        spawn_admission_mock_with_opener(tx, status, session_count, opener).await
+    }
+
+    async fn spawn_admission_mock_with_opener(
+        tx: Value,
+        status: Option<Value>,
+        session_count: Value,
+        opener: Value,
+    ) -> (RpcClient, Arc<Mutex<Vec<Value>>>, oneshot::Sender<()>) {
+        let contract_calls = Arc::new(Mutex::new(Vec::new()));
+        let mock = AdmissionMockRpc {
+            tx,
+            status,
+            session_count,
+            opener,
+            contract_calls: contract_calls.clone(),
+        };
+        let app = Router::new()
+            .route("/", post(admission_mock_handler))
+            .with_state(mock);
+        let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+            .await
+            .expect("bind admission mock");
+        let addr = listener.local_addr().expect("admission mock addr");
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app.into_make_service())
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await;
+        });
+        (
+            RpcClient::new(format!("http://{addr}/")),
+            contract_calls,
+            shutdown_tx,
+        )
+    }
+
+    fn program_addr() -> Address {
+        Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3")
+    }
+
+    fn opener_addr(opener_kp: &KeyPair) -> String {
+        Address::from_pubkey(&opener_kp.public.0)
+            .display()
+            .to_string()
+    }
+
+    fn announce_req(session_id: SessionId, opener_kp: &KeyPair) -> AnnounceSessionRequest {
+        let client_kp = KeyPair::generate();
+        let client_wg_pubkey = [9u8; 32];
+        let open_tx_hash = "open-tx".to_string();
+        let client_sig = client_kp.sign(&octravpn_core::control::announce_signing_payload(
+            &session_id,
+            &client_kp.public,
+            &client_wg_pubkey,
+            &open_tx_hash,
+        ));
+        let opener_sig = opener_kp.sign(&announce_opener_binding_payload(
+            &session_id,
+            &client_kp.public,
+            &client_wg_pubkey,
+            &open_tx_hash,
+        ));
+        AnnounceSessionRequest {
+            session_id,
+            client_pubkey: client_kp.public,
+            client_wg_pubkey,
+            open_tx_hash,
+            client_sig,
+            opener_pubkey: opener_kp.public,
+            opener_sig,
+        }
+    }
+
+    fn confirmed_open_tx(program: &Address, opener_kp: &KeyPair) -> Value {
+        json!({
+            "status": "confirmed",
+            "tx_hash": "open-tx",
+            "from_": opener_addr(opener_kp),
+            "to": program.display().to_string(),
+            "op_type": "call",
+            "message": "[0,\"octCircle\",1500]"
+        })
+    }
 
     #[test]
     fn transaction_open_event_matches_u64_and_hex_session_ids() {
@@ -428,6 +914,386 @@ mod tests {
             &tx,
             &SessionId::new([0xCD; 32])
         ));
+    }
+
+    #[test]
+    fn session_status_allows_only_admission_live_states() {
+        assert!(session_status_allows_admission(
+            &json!({ "result": 0 }),
+            43,
+            42
+        ));
+        assert!(session_status_allows_admission(
+            &json!({ "result": "3" }),
+            43,
+            42
+        ));
+        assert!(!session_status_allows_admission(
+            &json!({ "result": Value::Null }),
+            43,
+            42
+        ));
+        assert!(!session_status_allows_admission(
+            &json!({ "result": 0 }),
+            42,
+            42
+        ));
+        assert!(!session_status_allows_admission(
+            &json!({ "result": 0 }),
+            0,
+            42
+        ));
+        assert!(!session_status_allows_admission(
+            &json!({ "result": 1 }),
+            43,
+            42
+        ));
+        assert!(!session_status_allows_admission(
+            &json!({ "result": 2 }),
+            43,
+            42
+        ));
+        assert!(!session_status_allows_admission(
+            &json!({ "result": 4 }),
+            43,
+            42
+        ));
+        assert!(!session_status_allows_admission(
+            &json!({ "result": 5 }),
+            43,
+            42
+        ));
+    }
+
+    #[tokio::test]
+    async fn session_admission_event_present_accepts_without_state_read() {
+        let program = program_addr();
+        let opener_kp = KeyPair::generate();
+        let session_id = SessionId::from_u64(42);
+        let tx = json!({
+            "from": opener_addr(&opener_kp),
+            "events": [
+                {"name": "SessionOpened", "session_id": 42}
+            ]
+        });
+        let (rpc, contract_calls, shutdown) = spawn_admission_mock(tx, None, json!(0)).await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program);
+
+        assert_eq!(
+            verifier
+                .session_opened(&announce_req(session_id, &opener_kp))
+                .await
+                .expect("session opened"),
+            SessionAdmission::Accepted
+        );
+        assert!(contract_calls
+            .lock()
+            .expect("contract calls lock")
+            .is_empty());
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn session_admission_state_fallback_accepts_open_session() {
+        let program = program_addr();
+        let opener_kp = KeyPair::generate();
+        let session_id = SessionId::from_u64(42);
+        let (rpc, contract_calls, shutdown) = spawn_admission_mock(
+            confirmed_open_tx(&program, &opener_kp),
+            Some(json!(0)),
+            json!(43),
+        )
+        .await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program.clone());
+
+        assert_eq!(
+            verifier
+                .session_opened(&announce_req(session_id, &opener_kp))
+                .await
+                .expect("session opened"),
+            SessionAdmission::Accepted
+        );
+        let calls = contract_calls.lock().expect("contract calls lock");
+        // status -> count -> opener: the count now comes from its own view.
+        assert_eq!(calls.len(), 3);
+        assert_eq!(
+            calls[0],
+            json!([program.display().to_string(), "get_session_status", [42u64]])
+        );
+        assert_eq!(
+            calls[1],
+            json!([program.display().to_string(), "get_session_count", []])
+        );
+        assert_eq!(
+            calls[2],
+            json!([program.display().to_string(), "get_session_opener", [42u64]])
+        );
+        drop(calls);
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn session_admission_fallback_rejects_foreign_session_opener() {
+        // The attack Fable flagged: with no on-chain events, the fallback is the
+        // only admission path. An attacker presents their OWN confirmed call to
+        // the program as `open_tx_hash` (so `from` == attacker) and announces a
+        // VICTIM's live session. The open-tx passes the confirmed-call gate and
+        // the status check, and the announce is validly self-signed by the
+        // attacker -- but the session's on-chain opener is the victim, so binding
+        // to `get_session_opener` must reject it. (Pre-fix this returned Accepted.)
+        let program = program_addr();
+        let attacker_kp = KeyPair::generate();
+        let victim_kp = KeyPair::generate();
+        let session_id = SessionId::from_u64(42);
+        let (rpc, _calls, shutdown) = spawn_admission_mock_with_opener(
+            confirmed_open_tx(&program, &attacker_kp), // from == attacker
+            Some(json!(0)),                            // SESSION_OPEN
+            json!(43),                                 // session exists
+            json!(opener_addr(&victim_kp)),            // real on-chain opener == victim
+        )
+        .await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program);
+
+        assert_eq!(
+            verifier
+                .session_opened(&announce_req(session_id, &attacker_kp))
+                .await
+                .expect("session opened"),
+            SessionAdmission::NotSignedByOpener
+        );
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn session_admission_rejects_opener_address_mismatch() {
+        let program = program_addr();
+        let opener_kp = KeyPair::generate();
+        let attacker_kp = KeyPair::generate();
+        let session_id = SessionId::from_u64(42);
+        let tx = json!({
+            "from": opener_addr(&opener_kp),
+            "events": [
+                {"name": "SessionOpened", "session_id": 42}
+            ]
+        });
+        let (rpc, contract_calls, shutdown) = spawn_admission_mock(tx, None, json!(0)).await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program);
+
+        assert_eq!(
+            verifier
+                .session_opened(&announce_req(session_id, &attacker_kp))
+                .await
+                .expect("session opened"),
+            SessionAdmission::NotSignedByOpener
+        );
+        assert!(contract_calls
+            .lock()
+            .expect("contract calls lock")
+            .is_empty());
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn session_admission_rejects_bad_opener_signature() {
+        let program = program_addr();
+        let opener_kp = KeyPair::generate();
+        let session_id = SessionId::from_u64(42);
+        let tx = json!({
+            "from": opener_addr(&opener_kp),
+            "events": [
+                {"name": "SessionOpened", "session_id": 42}
+            ]
+        });
+        let (rpc, _contract_calls, shutdown) = spawn_admission_mock(tx, None, json!(0)).await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program);
+        let mut req = announce_req(session_id, &opener_kp);
+        req.opener_sig.0[0] ^= 1;
+
+        assert_eq!(
+            verifier.session_opened(&req).await.expect("session opened"),
+            SessionAdmission::NotSignedByOpener
+        );
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn session_admission_state_fallback_rejects_unset_status() {
+        let program = program_addr();
+        let opener_kp = KeyPair::generate();
+        let session_id = SessionId::from_u64(42);
+        let (rpc, _contract_calls, shutdown) = spawn_admission_mock(
+            confirmed_open_tx(&program, &opener_kp),
+            Some(Value::Null),
+            json!(43),
+        )
+        .await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program);
+
+        assert_eq!(
+            verifier
+                .session_opened(&announce_req(session_id, &opener_kp))
+                .await
+                .expect("session opened"),
+            SessionAdmission::SessionNotFound
+        );
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn session_admission_state_fallback_rejects_status_read_error() {
+        let program = program_addr();
+        let opener_kp = KeyPair::generate();
+        let session_id = SessionId::from_u64(42);
+        let (rpc, _contract_calls, shutdown) =
+            spawn_admission_mock(confirmed_open_tx(&program, &opener_kp), None, json!(43)).await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program);
+
+        assert_eq!(
+            verifier
+                .session_opened(&announce_req(session_id, &opener_kp))
+                .await
+                .expect("session opened"),
+            SessionAdmission::SessionNotFound
+        );
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn session_admission_state_fallback_rejects_out_of_range_session_id() {
+        let program = program_addr();
+        let opener_kp = KeyPair::generate();
+        let session_id = SessionId::from_u64(42);
+        let (rpc, _contract_calls, shutdown) = spawn_admission_mock(
+            confirmed_open_tx(&program, &opener_kp),
+            Some(json!(0)),
+            json!(42),
+        )
+        .await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program);
+
+        assert_eq!(
+            verifier
+                .session_opened(&announce_req(session_id, &opener_kp))
+                .await
+                .expect("session opened"),
+            SessionAdmission::SessionNotFound
+        );
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn session_admission_state_fallback_rejects_non_u64_session_id() {
+        let program = program_addr();
+        let opener_kp = KeyPair::generate();
+        let session_id = SessionId::new([0xAB; 32]);
+        let (rpc, contract_calls, shutdown) = spawn_admission_mock(
+            confirmed_open_tx(&program, &opener_kp),
+            Some(json!(0)),
+            json!(43),
+        )
+        .await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program);
+
+        assert_eq!(
+            verifier
+                .session_opened(&announce_req(session_id, &opener_kp))
+                .await
+                .expect("session opened"),
+            SessionAdmission::SessionNotFound
+        );
+        assert!(contract_calls
+            .lock()
+            .expect("contract calls lock")
+            .is_empty());
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn session_admission_state_fallback_rejects_tx_not_to_program() {
+        let program = program_addr();
+        let opener_kp = KeyPair::generate();
+        let tx = json!({
+            "status": "confirmed",
+            "tx_hash": "open-tx",
+            "from": opener_addr(&opener_kp),
+            "to": "octWrongProgram",
+            "op_type": "call",
+        });
+        let (rpc, contract_calls, shutdown) =
+            spawn_admission_mock(tx, Some(json!(0)), json!(43)).await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program);
+
+        assert_eq!(
+            verifier
+                .session_opened(&announce_req(SessionId::from_u64(42), &opener_kp))
+                .await
+                .expect("session opened"),
+            SessionAdmission::SessionNotFound
+        );
+        assert!(contract_calls
+            .lock()
+            .expect("contract calls lock")
+            .is_empty());
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn session_admission_state_fallback_rejects_non_open_session_method_when_present() {
+        let program = program_addr();
+        let opener_kp = KeyPair::generate();
+        let tx = json!({
+            "status": "confirmed",
+            "tx_hash": "open-tx",
+            "from": opener_addr(&opener_kp),
+            "to": program.display().to_string(),
+            "op_type": "call",
+            "encrypted_data": "settle_claim",
+        });
+        let (rpc, contract_calls, shutdown) =
+            spawn_admission_mock(tx, Some(json!(0)), json!(43)).await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program);
+
+        assert_eq!(
+            verifier
+                .session_opened(&announce_req(SessionId::from_u64(42), &opener_kp))
+                .await
+                .expect("session opened"),
+            SessionAdmission::SessionNotFound
+        );
+        assert!(contract_calls
+            .lock()
+            .expect("contract calls lock")
+            .is_empty());
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn session_admission_state_fallback_rejects_unconfirmed_tx() {
+        let program = program_addr();
+        let opener_kp = KeyPair::generate();
+        let tx = json!({
+            "status": "pending",
+            "tx_hash": "open-tx",
+            "from": opener_addr(&opener_kp),
+            "to": program.display().to_string(),
+            "op_type": "call",
+        });
+        let (rpc, contract_calls, shutdown) =
+            spawn_admission_mock(tx, Some(json!(0)), json!(43)).await;
+        let verifier = SessionAdmissionVerifier::new(rpc, program);
+
+        assert_eq!(
+            verifier
+                .session_opened(&announce_req(SessionId::from_u64(42), &opener_kp))
+                .await
+                .expect("session opened"),
+            SessionAdmission::SessionNotFound
+        );
+        assert!(contract_calls
+            .lock()
+            .expect("contract calls lock")
+            .is_empty());
+        let _ = shutdown.send(());
     }
 
     /// A `ControlState` constructed without a `ShadowSigner` MUST

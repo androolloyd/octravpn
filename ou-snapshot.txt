@@ -21,7 +21,7 @@ rotate_keys 1320
 set_params 1200
 set_paused 1000
 settle_claim 1700
-settle_confirm 1740
+settle_confirm 1720
 slash_double_sign 2140
 sweep_expired_session 2080
 transfer_ownership 1020

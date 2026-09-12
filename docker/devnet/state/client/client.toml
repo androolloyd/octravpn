@@ -5,3 +5,7 @@ program_addr = "oct2YehVLezCi2RCcSkURc3nyyYtzxmspwGHHALm6pjkUvJ"
 [wallet]
 addr        = "oct6ktv5K1qQrQsFR9eZjmckZrFh5XxV6Bndbh5iwenDVGB"
 secret_path = "/etc/octravpn/wallet.key"
+
+[v3.relay]
+enabled             = false
+relay_expiry_epochs = 200

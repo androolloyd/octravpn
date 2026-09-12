@@ -19,11 +19,26 @@ use tracing::{info, warn};
 
 use super::Hub;
 use crate::{
-    control::{serve as control_serve, ControlState, SessionAdmissionVerifier},
+    control::{
+        serve as control_serve, ControlState, RelayLifecycleVerifier, SessionAdmissionVerifier,
+    },
     tunnel::Server,
 };
 
 impl Hub {
+    /// Spawn the Step-6 in-daemon autonomous relay-claimer. It self-disables
+    /// (returns `Ok(())` immediately) unless `[control.relay].auto_claim = true`,
+    /// so this is a genuine no-op by default.
+    pub(crate) fn spawn_relay_claimer(self: Arc<Self>) -> JoinHandle<Result<()>> {
+        tokio::spawn(async move { crate::relay_claimer::run(self).await })
+    }
+
+    /// Spawn the Step-8b permissionless keeper sweeper. Self-disables (parks)
+    /// unless `[control.relay].auto_sweep = true`, so it is a no-op by default.
+    pub(crate) fn spawn_relay_sweeper(self: Arc<Self>) -> JoinHandle<Result<()>> {
+        tokio::spawn(async move { crate::relay_sweeper::run(self).await })
+    }
+
     pub(crate) fn spawn_tunnel(self: Arc<Self>) -> JoinHandle<Result<()>> {
         let allowlist = self.allowlist.clone();
         tokio::spawn(async move {
@@ -70,6 +85,7 @@ impl Hub {
         let metrics = self.metrics.clone();
         let receipt_context = Arc::new(self.build_receipt_context());
         let receipt_journal = self.receipt_journal.clone();
+        let receipt_vault = self.receipt_vault.clone();
         tokio::spawn(async move {
             let listen: std::net::SocketAddr = self
                 .cfg
@@ -98,6 +114,11 @@ impl Hub {
             // (matching the `/events` "endpoint hidden" design). The
             // PreauthMinter is shared with `/admin/preauth` so a key
             // minted via that endpoint is redeemable through `register`.
+            if self.cfg.control.derp.serve && self.cfg.control.tailscale_wire_state_dir.is_none() {
+                return Err(anyhow!(
+                    "[control.derp].serve requires [control].tailscale_wire_state_dir"
+                ));
+            }
             let wire_state = if let Some(dir) = self
                 .cfg
                 .control
@@ -143,10 +164,25 @@ impl Hub {
                 // Wall 6: optionally load a DERP-map fixture from the
                 // path advertised in OCTRAVPN_DERP_MAP_PATH. Unset ⇒
                 // empty map ⇒ matches pre-Wall-6 behaviour.
-                let derp_map = match std::env::var("OCTRAVPN_DERP_MAP_PATH") {
-                    Ok(path) if !path.is_empty() => load_derp_map(std::path::Path::new(&path))
-                        .with_context(|| format!("load DERP map from {path}"))?,
-                    _ => empty_derp_map(),
+                let native_derp = if self.cfg.control.derp.serve {
+                    let runtime = crate::native_derp::load_native_derp_runtime(&dir)?;
+                    info!(
+                        host_name = %listen.ip(),
+                        key = %dir.join("derp.key").display(),
+                        "native DERP enabled on control plane"
+                    );
+                    Some(runtime)
+                } else {
+                    None
+                };
+                let derp_map = if self.cfg.control.derp.serve {
+                    crate::native_derp::self_derp_map(listen.ip().to_string(), listen.port())
+                } else {
+                    match std::env::var("OCTRAVPN_DERP_MAP_PATH") {
+                        Ok(path) if !path.is_empty() => load_derp_map(std::path::Path::new(&path))
+                            .with_context(|| format!("load DERP map from {path}"))?,
+                        _ => empty_derp_map(),
+                    }
                 };
                 // The hub path is the chain-aware boot path; it predates
                 // the knock layer and leaves it disabled (the `mesh serve`
@@ -164,6 +200,7 @@ impl Hub {
                         Arc::new(octravpn_mesh::policy::PolicyStore::new()),
                         octravpn_mesh::tailscale_wire::DerpMapStore::shared(derp_map),
                     )
+                    .native_derp(native_derp.clone())
                     .build(),
                     shared_minter,
                 ))
@@ -188,8 +225,17 @@ impl Hub {
             .with_events_token(self.cfg.control.events_token_string())
             .with_metrics_token(self.cfg.control.metrics_token_string())
             .with_admin_token(admin_token)
-            .with_session_verifier(SessionAdmissionVerifier::new(self.chain.rpc.clone()))
+            .with_session_verifier(SessionAdmissionVerifier::new(
+                self.chain.rpc.clone(),
+                self.chain.program_addr.clone(),
+            ))
+            .with_relay_lifecycle_verifier(RelayLifecycleVerifier::new(
+                self.chain_v3.rpc.clone(),
+                self.chain_v3.program_addr.clone(),
+                Some(self.chain_v3.wallet_addr.clone()),
+            ))
             .with_wire_state(wire_state.as_ref().map(|(ws, _)| ws.clone()))
+            .with_receipt_vault(receipt_vault)
             .with_shadow_signer(shadow_signer, 0);
             // Audit-3 H-1: bearer-gated routes no longer leak
             // token-presence on the wire (every reject reason returns

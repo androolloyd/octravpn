@@ -6,7 +6,7 @@ reading order, see [`README.md`](README.md) or
 [`READING_PATHS.md`](READING_PATHS.md). For a chronology, see
 [`changelog.md`](changelog.md).
 
-Count: 90 files (regenerate with
+Count: 91 files (regenerate with
 `find docs -name "*.md" | wc -l` — if this number drifts, update
 the table). Sibling agents are actively landing `docs/users/*`,
 `docs/operators/tour-*`, `docs/maintenance/*`, and
@@ -43,6 +43,8 @@ the table). Sibling agents are actively landing `docs/users/*`,
 | [`octra-dev-questions-email.md`](octra-dev-questions-email.md) | Email-form of open questions to the Octra dev team. |
 | [`octra-dev-questions.md`](octra-dev-questions.md) | Open questions to the Octra dev team (long form). |
 | [`octra-research.md`](octra-research.md) | Public-info dossier on the Octra chain. |
+| [`octra-upstream-delta-2026-08-17.md`](octra-upstream-delta-2026-08-17.md) | lite_node source drop — six blockers retired, four were our bugs. |
+| [`octra-upstream-delta-2026-08-22.md`](octra-upstream-delta-2026-08-22.md) | Sequence-4 node release — RPC/signing unchanged; staging RPCs sampled. |
 | [`operator-guide.md`](operator-guide.md) | Validator / endpoint operator guide (day-2). |
 | [`performance-limitations.md`](performance-limitations.md) | Performance limitations — measured ceilings and bottlenecks. |
 | [`production-checklist.md`](production-checklist.md) | v1 production checklist. |

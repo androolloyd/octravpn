@@ -13,6 +13,7 @@ mod discover;
 mod discover_v2;
 mod portal;
 mod runner;
+mod settle_state;
 mod settler;
 mod tailnet;
 mod v2_cache;
@@ -52,8 +53,11 @@ enum Cmd {
         #[arg(long)]
         deposit: u64,
     },
-    /// Settle a session opened earlier.
-    Settle { session_id: String },
+    /// Durable settlement recovery operations.
+    Settle {
+        #[command(subcommand)]
+        op: commands::SettleCmd,
+    },
     /// Trigger no-show refund for a session past grace.
     Reclaim { session_id: String },
 
@@ -343,7 +347,7 @@ async fn main() -> Result<()> {
             info!(hops, ?region, deposit, "connecting");
             client.connect(hops, region.as_deref(), deposit).await
         }
-        Cmd::Settle { session_id } => settler::settle(&client, &session_id).await,
+        Cmd::Settle { op } => commands::run_settle(&client, op).await,
         Cmd::Reclaim { session_id } => settler::reclaim(&client, &session_id).await,
         Cmd::Tailnet { op } => tailnet::dispatch(&client, &cfg, op).await,
         Cmd::SlashEvidence { op } => commands::slash_submit(&client, op.clone()).await,

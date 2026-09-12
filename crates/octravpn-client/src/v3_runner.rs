@@ -15,10 +15,11 @@
 //!      Merkle proof verification land in the 191 follow-up; for now
 //!      we log the anchor as the trust pin.
 //!   3. Fetch the tailnet's `members_root` anchor. Real Merkle proof
-//!      verification is the same follow-up; for now we log the root
-//!      and warn that membership is taken on trust.
-//!   4. Call `open_session(tailnet_id, circle, max_pay)` and capture
-//!      the returned sid from the tx's `SessionOpened` event.
+//!      verification is the same follow-up; for now it is an off-chain
+//!      admission hint only. Session escrow is self-funded by the caller.
+//!   4. Call payable `open_session(tailnet_id, circle, max_pay)` with
+//!      `value = max_pay` and capture the returned sid from the tx's
+//!      `SessionOpened` event.
 //!   5. Run the WG tunnel (deferred to the existing v2/v1 control
 //!      plane — see `runner::print_wg_config`).
 //!   6. On disconnect: compute `bytes_used` from session counters,
@@ -34,9 +35,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
-use octravpn_core::sig::KeyPair;
 use octravpn_core::v3_policy::OperatorPolicy;
 use octravpn_core::v3_state_root::StateRoot;
+use octravpn_core::{
+    address::Address,
+    session::{SessionId, ValidatorRecord},
+    sig::{KeyPair, PublicKey},
+};
 use rand::RngCore;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -45,8 +50,8 @@ use tracing::{info, warn};
 use crate::{
     chain_v3::{ChainCtxV3, SettleConfirmParams},
     config::ClientConfig,
-    runner::Client,
-    wallet,
+    runner::{ActiveSession, Client, RouteHop},
+    settler, wallet,
 };
 
 /// One MiB in bytes. The price tier is per-MiB; we floor-divide.
@@ -90,7 +95,12 @@ pub(crate) async fn connect_v3(
         KeyPair::from_secret_bytes(&secret)
     };
 
-    let ctx = ChainCtxV3::new(client.rpc(), client.program_addr(), &wallet_kp);
+    let ctx = ChainCtxV3::new_with_tx_queue(
+        client.rpc(),
+        client.program_addr(),
+        &wallet_kp,
+        Some(client.chain_tx_queue()),
+    );
 
     // 2. Fetch + log the on-chain anchor. The full sealed-asset
     //    state-root.json + members.json Merkle-proof verifier is the
@@ -133,44 +143,49 @@ pub(crate) async fn connect_v3(
         "v3 operator policy validated against anchor"
     );
 
-    // 3. Fetch the tailnet's members_root. Real Merkle proof against
-    //    the client's wallet address ships in #191.
+    // 3. Fetch the tailnet's members_root. It no longer guards treasury
+    //    spend for this default flow because the client self-funds the
+    //    session escrow. Real Merkle proof against the client's wallet
+    //    address still ships in #191 for off-chain admission checks.
     match ctx.get_tailnet_members_root(v3.tailnet_id).await {
         Ok(Some(root)) => {
             info!(
                 tailnet_id = v3.tailnet_id,
                 members_root = %root,
-                "v3 tailnet members_root (membership taken on trust until 191 lands)"
+                "v3 tailnet members_root (self-funded session; off-chain admission hint)"
             );
         }
         Ok(None) => {
             warn!(
                 tailnet_id = v3.tailnet_id,
-                "no members_root anchored yet for tailnet — proceeding on trust"
+                "no members_root anchored yet for tailnet — proceeding with self-funded session"
             );
         }
         Err(e) => {
             warn!(
                 tailnet_id = v3.tailnet_id,
                 error = %e,
-                "members_root view failed — proceeding on trust"
+                "members_root view failed — proceeding with self-funded session"
             );
         }
     }
 
-    // 4. open_session(tailnet_id, circle, max_pay).
-    let nonce = ctx.nonce().await?;
+    // 4. payable open_session(tailnet_id, circle, max_pay) with value=max_pay.
     let fee = ctx.fee_or_fallback("contract_call").await;
-    let open_call =
-        ctx.build_open_session_call(v3.tailnet_id, &v3.circle_id, v3.max_pay, fee, nonce);
-    let signed = ctx.sign_call(open_call)?;
+    let open_call = ctx.build_open_session_call(v3.tailnet_id, &v3.circle_id, v3.max_pay, fee, 0);
     let tx_hash = ctx
-        .submit_signed(&signed)
+        .submit_call(open_call)
         .await
         .context("submit open_session")?;
     info!(tx_hash = %tx_hash, "v3 open_session submitted");
 
     let session_id = poll_session_id_v3(client, &tx_hash).await?;
+    let session_id_wrapped = SessionId::from_u64(session_id);
+    if client.relay_config().enabled {
+        client
+            .open_settle_state()?
+            .record_proposed(&session_id_wrapped)?;
+    }
     println!("v3 session opened: id={session_id}");
     println!("  tailnet_id    = {}", v3.tailnet_id);
     println!("  circle        = {}", v3.circle_id);
@@ -194,7 +209,63 @@ pub(crate) async fn connect_v3(
         return run_claim_no_show(&ctx, session_id).await;
     }
     let bytes_used = bytes_used_override.unwrap_or(0);
+    if client.relay_config().enabled {
+        let active = active_session_from_v3_policy(
+            session_id_wrapped,
+            tx_hash,
+            &v3.circle_id,
+            &policy,
+            v3.max_pay,
+        )?;
+        settler::announce_session_to_exit(client, &active)
+            .await
+            .context("announce v3 relay session to exit")?;
+        return settler::settle_active(client, active).await;
+    }
     run_settle_confirm(&ctx, session_id, bytes_used, price_per_mb).await
+}
+
+fn active_session_from_v3_policy(
+    session_id: SessionId,
+    open_tx_hash: String,
+    circle_id: &str,
+    policy: &OperatorPolicy,
+    deposit: u64,
+) -> Result<ActiveSession> {
+    let endpoint = settler::normalize_control_endpoint(&policy.endpoint);
+    let wg_pubkey = decode_policy_pubkey(&policy.wg_pubkey_b64)
+        .with_context(|| format!("decode wg_pubkey_b64 for circle {circle_id}"))?;
+    let validator = ValidatorRecord {
+        addr: Address::from_display(circle_id),
+        active: true,
+        endpoint,
+        wg_pubkey,
+        receipt_pubkey: PublicKey([0u8; 32]),
+        view_pubkey: [0u8; 32],
+        region: policy.region.clone(),
+        price_per_mb: policy.price_per_mb_shared,
+        registered_at: policy.effective_epoch,
+        reputation: 0,
+    };
+    Ok(ActiveSession {
+        session_id,
+        session_kp: KeyPair::generate(),
+        open_tx_hash,
+        route: vec![RouteHop {
+            validator,
+            blind: [0u8; 32],
+            split_bps: 10_000,
+        }],
+        deposit,
+    })
+}
+
+fn decode_policy_pubkey(raw: &str) -> Result<PublicKey> {
+    let bytes = octravpn_core::b64::decode(raw).map_err(|e| anyhow!("base64: {e}"))?;
+    let arr: [u8; 32] = bytes
+        .try_into()
+        .map_err(|v: Vec<u8>| anyhow!("expected 32 bytes, got {}", v.len()))?;
+    Ok(PublicKey(arr))
 }
 
 /// Submit the opener-side `settle_confirm` for a freshly-closed
@@ -221,7 +292,6 @@ pub(crate) async fn run_settle_confirm(
         "v3 settle_confirm prepared"
     );
 
-    let nonce = ctx.nonce().await?;
     let fee = ctx.fee_or_fallback("contract_call").await;
     let p = SettleConfirmParams {
         session_id,
@@ -229,12 +299,11 @@ pub(crate) async fn run_settle_confirm(
         net,
         settle_blinding: &blinding,
         fee,
-        nonce,
+        nonce: 0,
     };
     let call = ctx.build_settle_confirm_call(&p);
-    let signed = ctx.sign_call(call)?;
     let tx_hash = ctx
-        .submit_signed(&signed)
+        .submit_call(call)
         .await
         .context("submit settle_confirm")?;
     info!(session_id, tx_hash = %tx_hash, "v3 settle_confirm submitted");
@@ -245,12 +314,10 @@ pub(crate) async fn run_settle_confirm(
 /// Submit the opener-side `claim_no_show` when the operator never
 /// claimed within session grace.
 pub(crate) async fn run_claim_no_show(ctx: &ChainCtxV3<'_>, session_id: u64) -> Result<()> {
-    let nonce = ctx.nonce().await?;
     let fee = ctx.fee_or_fallback("contract_call").await;
-    let call = ctx.build_claim_no_show_call(session_id, fee, nonce);
-    let signed = ctx.sign_call(call)?;
+    let call = ctx.build_claim_no_show_call(session_id, fee, 0);
     let tx_hash = ctx
-        .submit_signed(&signed)
+        .submit_call(call)
         .await
         .context("submit claim_no_show")?;
     info!(session_id, tx_hash = %tx_hash, "v3 claim_no_show submitted");

@@ -34,7 +34,12 @@
 
 use anyhow::{anyhow, Context, Result};
 use octravpn_core::{
-    address::Address, rpc::RpcClient, sig::KeyPair, tx as octra_tx, v3_calls::ContractCallBuilder,
+    address::Address,
+    chain_tx_queue::ChainTxQueueHandle,
+    rpc::{next_nonce, RpcClient},
+    sig::KeyPair,
+    tx as octra_tx,
+    v3_calls::ContractCallBuilder,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -50,6 +55,12 @@ pub(crate) const MIN_CIRCLE_STAKE_DEFAULT: u64 = 1_000_000_000;
 /// `octra_recommendedFee` returns 0 / unreachable for an unknown op
 /// type. Matches the value the v2 path uses for the same situation.
 pub(crate) const CALL_FEE_FALLBACK: u64 = 1_000;
+
+/// `program/main-v4.aml` session status for an armed relay lane.
+pub(crate) const SESSION_OPEN: u64 = 0;
+pub(crate) const SESSION_RELAY_ARMED: u64 = 3;
+pub(crate) const SESSION_RELAY_CLAIMED: u64 = 4;
+pub(crate) const SESSION_RELAY_REFUNDED: u64 = 5;
 
 /// All v3 chain interactions. Holds the same RPC + wallet primitives
 /// as `ChainCtx` / `ChainCtxV2`, but talks exclusively to the v3
@@ -74,6 +85,8 @@ pub(crate) struct ChainCtxV3 {
     /// v2 tx-envelope chain-id binding (P1-5b). See `ChainCtx::chain_id`.
     /// Empty ⇒ v1 wallet-compat signing.
     pub chain_id: String,
+    /// Optional single-owner tx queue for long-lived v3 operator submitters.
+    pub tx_queue: Option<ChainTxQueueHandle>,
 }
 
 // The v3 surface is wider than the boot-flow's immediate consumers
@@ -88,15 +101,27 @@ impl ChainCtxV3 {
         Self::new_with_chain_id(rpc, program_addr, wallet, String::new())
     }
 
-    /// Variant of [`new`] that pins a v2 chain-id binding for every tx
-    /// signed by this context (P1-5b). Mainnet boots pass
-    /// `"octra-mainnet"`; devnet boots pass `"octra-devnet"`. Empty
-    /// string ⇒ legacy v1 (wallet-compat) signing.
+    /// Variant of [`new`] that would pin a tx-envelope chain-id (P1-5b).
+    /// CURRENTLY ALWAYS PASS `String::new()` (empty): reading the real node
+    /// (octra-labs/lite_node) confirmed the tx envelope has NO chain_id field
+    /// and `Transaction.verify` reconstructs the signed message without it, so
+    /// signing over a non-empty chain_id → `octra_submit` 101. Retained only for
+    /// if/when a chain actually verifies one. (Separate from the RECEIPT chain_id.)
     pub(crate) fn new_with_chain_id(
         rpc: RpcClient,
         program_addr: Address,
         wallet: KeyPair,
         chain_id: String,
+    ) -> Self {
+        Self::new_with_chain_id_and_queue(rpc, program_addr, wallet, chain_id, None)
+    }
+
+    pub(crate) fn new_with_chain_id_and_queue(
+        rpc: RpcClient,
+        program_addr: Address,
+        wallet: KeyPair,
+        chain_id: String,
+        tx_queue: Option<ChainTxQueueHandle>,
     ) -> Self {
         let wallet_addr = Address::from_pubkey(&wallet.public.0);
         Self {
@@ -105,6 +130,7 @@ impl ChainCtxV3 {
             wallet_addr,
             wallet,
             chain_id,
+            tx_queue,
         }
     }
 
@@ -119,7 +145,7 @@ impl ChainCtxV3 {
 
     pub(crate) async fn nonce(&self) -> Result<u64> {
         let b = self.rpc.balance(&self.wallet_addr).await?;
-        Ok(b.pending_nonce.max(b.nonce))
+        Ok(next_nonce(&b))
     }
 
     pub(crate) async fn fee(&self, op: &str) -> Result<u64> {
@@ -236,6 +262,112 @@ impl ChainCtxV3 {
             .await
             .context("endpoint_stake_of")?;
         Ok(v.as_u64().unwrap_or(0))
+    }
+
+    /// `get_session_status(sid) -> int` view. v4 relay claim uses this
+    /// to make sure the operator only reveals for armed sessions.
+    pub(crate) async fn get_session_status(&self, session_id: u64) -> Result<u64> {
+        let v = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_session_status",
+                &[json!(session_id)],
+                Some(&self.wallet_addr),
+            )
+            .await
+            .context("get_session_status")?;
+        Ok(v.as_u64().unwrap_or(0))
+    }
+
+    /// Strict `get_session_status` for the autonomous claimer's confirm-drain:
+    /// a non-numeric / hostile / empty RPC body is an **error**, not `0`
+    /// (`SESSION_OPEN`). The drain promotes a vault entry to a terminal state
+    /// purely on an EXACT positive status match (`==4`/`==5`), so an RPC failure
+    /// must become a *retry next tick*, never a phantom terminal transition
+    /// (which would `mark_claimed` a session that never paid, then `compact()`
+    /// would irreversibly drop the receipt + preimage).
+    pub(crate) async fn get_session_status_strict(&self, session_id: u64) -> Result<u64> {
+        let v = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_session_status",
+                &[json!(session_id)],
+                Some(&self.wallet_addr),
+            )
+            .await
+            .context("get_session_status_strict")?;
+        v.as_u64()
+            .ok_or_else(|| anyhow!("non-numeric session_status body for session {session_id}"))
+    }
+
+    /// `get_relay_deadline(sid) -> int` view.
+    pub(crate) async fn get_relay_deadline(&self, session_id: u64) -> Result<u64> {
+        let v = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_relay_deadline",
+                &[json!(session_id)],
+                Some(&self.wallet_addr),
+            )
+            .await
+            .context("get_relay_deadline")?;
+        Ok(v.as_u64().unwrap_or(0))
+    }
+
+    /// `get_session_count() -> uint` view (STRICT). Total sessions ever opened;
+    /// the sweeper enumerates `[0, count)`. A bad body is an Err so the sweeper
+    /// skips the tick rather than mis-enumerating.
+    pub(crate) async fn get_session_count(&self) -> Result<u64> {
+        let v = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_session_count",
+                &[],
+                Some(&self.wallet_addr),
+            )
+            .await
+            .context("get_session_count")?;
+        v.as_u64()
+            .ok_or_else(|| anyhow!("non-numeric session_count body"))
+    }
+
+    /// `get_sweep_grace() -> uint` view (STRICT): `session_grace_epochs *
+    /// sweep_grace_multiplier`, the extra epochs past the relay deadline before a
+    /// session becomes sweepable on chain. The sweeper gates on
+    /// `epoch >= deadline + sweep_grace + margin`; a bad read skips the tick.
+    pub(crate) async fn get_sweep_grace(&self) -> Result<u64> {
+        let v = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_sweep_grace",
+                &[],
+                Some(&self.wallet_addr),
+            )
+            .await
+            .context("get_sweep_grace")?;
+        v.as_u64()
+            .ok_or_else(|| anyhow!("non-numeric sweep_grace body"))
+    }
+
+    /// `get_relay_settlement_hash(sid) -> bytes` view: the on-chain committed
+    /// H (64-char hex) the opener armed with. Empty string if unset.
+    pub(crate) async fn get_relay_settlement_hash(&self, session_id: u64) -> Result<String> {
+        let v = self
+            .rpc
+            .contract_call(
+                &self.program_addr,
+                "get_relay_settlement_hash",
+                &[json!(session_id)],
+                Some(&self.wallet_addr),
+            )
+            .await
+            .context("get_relay_settlement_hash")?;
+        Ok(v.as_str().unwrap_or_default().to_string())
     }
 
     // ============================================================
@@ -452,13 +584,65 @@ impl ChainCtxV3 {
         )
     }
 
+    /// `transfer_tailnet_ownership(tailnet_id, new_owner)` — current
+    /// tailnet owner transfers owner-gated authority.
+    pub(crate) fn build_transfer_tailnet_ownership_call(
+        &self,
+        tailnet_id: u64,
+        new_owner: &str,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call_builder().transfer_tailnet_ownership_call(
+            &[json!(tailnet_id), json!(new_owner)],
+            0,
+            fee,
+            nonce,
+        )
+    }
+
+    /// `authorize_tailnet_spender(tailnet_id, spender)` — owner-managed
+    /// delegation for sponsored session funding.
+    pub(crate) fn build_authorize_tailnet_spender_call(
+        &self,
+        tailnet_id: u64,
+        spender: &str,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call_builder().authorize_tailnet_spender_call(
+            &[json!(tailnet_id), json!(spender)],
+            0,
+            fee,
+            nonce,
+        )
+    }
+
+    /// `revoke_tailnet_spender(tailnet_id, spender)` — clear sponsored
+    /// session funding delegation.
+    pub(crate) fn build_revoke_tailnet_spender_call(
+        &self,
+        tailnet_id: u64,
+        spender: &str,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call_builder().revoke_tailnet_spender_call(
+            &[json!(tailnet_id), json!(spender)],
+            0,
+            fee,
+            nonce,
+        )
+    }
+
     // ============================================================
     // Sessions
     // ============================================================
 
-    /// `open_session(tailnet_id, circle, max_pay) -> int`. The chain
-    /// returns the assigned `session_id`; callers read it via
-    /// `octra_transaction(hash)`.
+    /// `payable open_session(tailnet_id, circle, max_pay) -> int`.
+    /// The tx `value` is set to `max_pay`, which becomes the self-funded
+    /// session escrow. The chain returns the assigned `session_id`; callers
+    /// read it via `octra_transaction(hash)`.
     pub(crate) fn build_open_session_call(
         &self,
         tailnet_id: u64,
@@ -467,11 +651,55 @@ impl ChainCtxV3 {
         fee: u64,
         nonce: u64,
     ) -> Value {
-        self.call_builder().open_session_call(
-            &[json!(tailnet_id), json!(circle_id), json!(max_pay)],
-            0,
-            fee,
-            nonce,
+        self.call_builder()
+            .open_session_call(tailnet_id, circle_id, max_pay, fee, nonce)
+    }
+
+    /// `open_session_from_treasury(tailnet_id, circle, max_pay) -> int`.
+    /// Sponsored path; AML allows only the tailnet owner or an authorized
+    /// spender and the tx value remains zero.
+    pub(crate) fn build_open_session_from_treasury_call(
+        &self,
+        tailnet_id: u64,
+        circle_id: &str,
+        max_pay: u64,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call_builder()
+            .open_session_from_treasury_call(tailnet_id, circle_id, max_pay, fee, nonce)
+    }
+
+    /// `open_relay_session(...) -> int` — self-funded open + relay arm in
+    /// one payable tx. The tx `value` is set to `max_pay`.
+    pub(crate) fn build_open_relay_session_call(&self, p: &OpenRelaySessionParams<'_>) -> Value {
+        self.call_builder().open_relay_session_call(
+            p.tailnet_id,
+            p.circle_id,
+            p.max_pay,
+            p.settlement_hash_hex,
+            p.net,
+            p.relay_expiry_epochs,
+            p.fee,
+            p.nonce,
+        )
+    }
+
+    /// `open_relay_session_from_treasury(...) -> int` — sponsored open +
+    /// relay arm in one zero-value tx.
+    pub(crate) fn build_open_relay_session_from_treasury_call(
+        &self,
+        p: &OpenRelaySessionParams<'_>,
+    ) -> Value {
+        self.call_builder().open_relay_session_from_treasury_call(
+            p.tailnet_id,
+            p.circle_id,
+            p.max_pay,
+            p.settlement_hash_hex,
+            p.net,
+            p.relay_expiry_epochs,
+            p.fee,
+            p.nonce,
         )
     }
 
@@ -560,6 +788,49 @@ impl ChainCtxV3 {
             p.fee,
             p.nonce,
         )
+    }
+
+    /// `arm_relay(session_id, settlement_hash, net, relay_expiry_epochs)` —
+    /// opener-side v4 promotion from OPEN into the unilateral relay lane.
+    /// `settlement_hash` is the 64-char hex bytes string returned by
+    /// `SignedReceipt::settlement_hash()`. Expiry is normalized to the
+    /// AML-accepted band before encoding.
+    pub(crate) fn build_arm_relay_call(&self, p: &ArmRelayParams<'_>) -> Value {
+        self.call_builder().arm_relay_call(
+            p.session_id,
+            p.settlement_hash_hex,
+            p.net,
+            p.relay_expiry_epochs,
+            0,
+            p.fee,
+            p.nonce,
+        )
+    }
+
+    /// `relay_claim(session_id, preimage)` — circle-owner-only v4
+    /// unilateral settlement. `preimage` is
+    /// `SignedReceipt::settlement_preimage()` (standard padded base64).
+    pub(crate) fn build_relay_claim_call(
+        &self,
+        session_id: u64,
+        settlement_preimage_b64: &str,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call_builder()
+            .relay_claim_call(session_id, settlement_preimage_b64, 0, fee, nonce)
+    }
+
+    pub(crate) fn build_relay_sweep_call(&self, session_id: u64, fee: u64, nonce: u64) -> Value {
+        self.call_builder()
+            .relay_sweep_call(session_id, 0, fee, nonce)
+    }
+
+    /// `relay_refund(session_id)` — opener-side recovery after the
+    /// relay deadline.
+    pub(crate) fn build_relay_refund_call(&self, session_id: u64, fee: u64, nonce: u64) -> Value {
+        self.call_builder()
+            .relay_refund_call(session_id, 0, fee, nonce)
     }
 
     /// HFHE-2 swap-ready settle-confirm builder. Two trailing
@@ -720,6 +991,30 @@ impl ChainCtxV3 {
         debug!(hash = %r.hash, "submitted tx (v3)");
         Ok(r.hash)
     }
+
+    /// Submit an unsigned tx/call through the single nonce owner when
+    /// present; otherwise preserve the legacy nonce -> sign -> submit path.
+    pub(crate) async fn submit_call(&self, mut unsigned_call: Value) -> Result<String> {
+        if let Some(tx_queue) = &self.tx_queue {
+            return tx_queue
+                .submit(unsigned_call)
+                .await
+                .map_err(|e| anyhow!("chain tx queue submit: {e}"));
+        }
+
+        let nonce = self.nonce().await?;
+        set_unsigned_nonce(&mut unsigned_call, nonce)?;
+        let signed = self.sign_call(unsigned_call)?;
+        self.submit_signed_tx(&signed).await
+    }
+}
+
+fn set_unsigned_nonce(call: &mut Value, nonce: u64) -> Result<()> {
+    let obj = call
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("v3 submit_call expects a JSON object"))?;
+    obj.insert("nonce".to_string(), json!(nonce));
+    Ok(())
 }
 
 /// HFHE-2: derive a 32-byte (64-char hex) seed from a parent seed
@@ -770,6 +1065,32 @@ pub(crate) struct SettleConfirmParams<'a> {
     pub bytes_used: u64,
     pub net: u64,
     pub settle_blinding: &'a str,
+    pub fee: u64,
+    pub nonce: u64,
+}
+
+#[allow(dead_code)]
+pub(crate) struct OpenRelaySessionParams<'a> {
+    pub tailnet_id: u64,
+    pub circle_id: &'a str,
+    pub max_pay: u64,
+    /// 64-char lowercase hex sha256 returned by
+    /// `SignedReceipt::settlement_hash()`.
+    pub settlement_hash_hex: &'a str,
+    pub net: u64,
+    pub relay_expiry_epochs: u64,
+    pub fee: u64,
+    pub nonce: u64,
+}
+
+#[allow(dead_code)]
+pub(crate) struct ArmRelayParams<'a> {
+    pub session_id: u64,
+    /// 64-char lowercase hex sha256 returned by
+    /// `SignedReceipt::settlement_hash()`.
+    pub settlement_hash_hex: &'a str,
+    pub net: u64,
+    pub relay_expiry_epochs: u64,
     pub fee: u64,
     pub nonce: u64,
 }
@@ -834,6 +1155,12 @@ impl CircleV3State {
 mod tests {
     use super::*;
 
+    use std::{net::SocketAddr, sync::Arc};
+
+    use axum::{extract::State as AxumState, http::StatusCode, routing::post, Json, Router};
+    use parking_lot::Mutex;
+    use tokio::sync::oneshot;
+
     /// Build a `ChainCtxV3` backed by a deterministic 32-byte secret so
     /// `wallet_addr` is stable across runs and assertions can pin the
     /// `from` field. The RPC client is constructed against a bogus
@@ -849,6 +1176,311 @@ mod tests {
     fn anchor_64() -> String {
         // Deterministic 64-char hex anchor for shape checks.
         "1111111111111111111111111111111111111111111111111111111111111111".to_string()
+    }
+
+    #[derive(Debug)]
+    struct SubmitMock {
+        last_used_nonce: u64,
+        balance_calls: usize,
+        submit_calls: u64,
+        submitted: Vec<Value>,
+    }
+
+    type SharedSubmitMock = Arc<Mutex<SubmitMock>>;
+
+    async fn submit_mock_handler(
+        AxumState(state): AxumState<SharedSubmitMock>,
+        Json(req): Json<Value>,
+    ) -> Result<Json<Value>, StatusCode> {
+        let method = req
+            .get("method")
+            .and_then(Value::as_str)
+            .ok_or(StatusCode::BAD_REQUEST)?;
+        let id = req.get("id").cloned().unwrap_or(json!(1));
+        let params = req.get("params").cloned().unwrap_or(json!([]));
+
+        let result = match method {
+            "octra_balance" => {
+                let mut g = state.lock();
+                g.balance_calls += 1;
+                json!({
+                    "balance": "100.000000",
+                    "balance_raw": "100000000",
+                    "nonce": g.last_used_nonce,
+                    "pending_nonce": g.last_used_nonce,
+                })
+            }
+            "octra_submit" => {
+                let mut g = state.lock();
+                g.submit_calls += 1;
+                let tx = params
+                    .as_array()
+                    .and_then(|a| a.first())
+                    .cloned()
+                    .ok_or(StatusCode::BAD_REQUEST)?;
+                if let Some(nonce) = tx.get("nonce").and_then(Value::as_u64) {
+                    g.last_used_nonce = g.last_used_nonce.max(nonce);
+                }
+                g.submitted.push(tx);
+                json!({
+                    "tx_hash": format!("{:064x}", g.submit_calls),
+                    "status": "accepted",
+                })
+            }
+            _ => Value::Null,
+        };
+
+        Ok(Json(
+            json!({ "jsonrpc": "2.0", "id": id, "result": result }),
+        ))
+    }
+
+    async fn spawn_submit_mock(
+        last_used_nonce: u64,
+    ) -> (String, SharedSubmitMock, oneshot::Sender<()>) {
+        let state = Arc::new(Mutex::new(SubmitMock {
+            last_used_nonce,
+            balance_calls: 0,
+            submit_calls: 0,
+            submitted: Vec::new(),
+        }));
+        let app = Router::new()
+            .route("/", post(submit_mock_handler))
+            .with_state(state.clone());
+        let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+            .await
+            .expect("bind submit mock");
+        let addr = listener.local_addr().expect("submit mock addr");
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app.into_make_service())
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await;
+        });
+        (format!("http://{addr}/"), state, shutdown_tx)
+    }
+
+    fn submitted_nonces(state: &SharedSubmitMock) -> Vec<u64> {
+        state
+            .lock()
+            .submitted
+            .iter()
+            .map(|tx| {
+                tx.get("nonce")
+                    .and_then(Value::as_u64)
+                    .expect("submitted tx nonce")
+            })
+            .collect()
+    }
+
+    // ---- relay-claim promotion (Fable whole-flow review regression) --------
+
+    /// Mock RPC that presents a session as RELAY_ARMED with `.0` as its committed
+    /// settlement hash and `.1` as its relay deadline (epoch is fixed at 5), plus
+    /// enough of `octra_balance`/`octra_submit` for the inline (no-queue) submit
+    /// path. Lets `submit_relay_claim_from_vault` promote a `Proposed` vault entry
+    /// to `Armed` from chain truth and reveal, and lets the margin gate be driven
+    /// by choosing a near vs far deadline.
+    async fn relay_claim_mock_handler(
+        AxumState(cfg): AxumState<Arc<(String, u64)>>,
+        Json(req): Json<Value>,
+    ) -> Json<Value> {
+        let (armed_hash, deadline) = (&cfg.0, cfg.1);
+        let method = req.get("method").and_then(Value::as_str).unwrap_or("");
+        let id = req.get("id").cloned().unwrap_or(json!(1));
+        let params = req.get("params").cloned().unwrap_or(json!([]));
+        let result = match method {
+            "node_status" => json!({ "epoch": 5 }),
+            "octra_balance" => json!({
+                "balance": "100.000000",
+                "balance_raw": "100000000",
+                "nonce": 0,
+                "pending_nonce": 0,
+            }),
+            "octra_submit" => json!({ "tx_hash": format!("{:064x}", 1u64), "status": "accepted" }),
+            "contract_call" => {
+                let view = params
+                    .as_array()
+                    .and_then(|a| a.get(1))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                match view {
+                    "get_session_status" => json!(3), // SESSION_RELAY_ARMED
+                    "get_relay_deadline" => json!(deadline),
+                    "get_relay_settlement_hash" => json!(armed_hash.as_str()),
+                    _ => Value::Null,
+                }
+            }
+            _ => Value::Null,
+        };
+        Json(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
+    }
+
+    #[tokio::test]
+    async fn relay_claim_promotes_proposed_entry_from_chain_truth() {
+        use octravpn_core::{
+            receipt::{Receipt, ReceiptContext, SignedReceipt, CHAIN_ID_TEST},
+            receipt_vault::{LifecycleState, ReceiptVault},
+            session::{Blind, SessionId},
+        };
+
+        // Dual-signed receipt, built exactly like the vault-side tests.
+        let session_id: u64 = 0x5151;
+        let sid = SessionId::from_u64(session_id);
+        let client = KeyPair::from_secret_bytes(&[0x11; 32]);
+        let node = KeyPair::from_secret_bytes(&[0x22; 32]);
+        let rctx = ReceiptContext::v1_1(Address::from_pubkey(&[0x33; 32]), CHAIN_ID_TEST);
+        let sr = SignedReceipt::build(
+            Receipt::new(rctx, sid.clone(), 1, 4_000_000, Blind::new([0x44; 32])),
+            &client,
+            &node,
+        );
+        let armed_hash = sr.settlement_hash();
+
+        // Canonical POST-before-arm state: the entry is Proposed, never pinned.
+        let dir = tempfile::tempdir().unwrap();
+        let vault = ReceiptVault::open(dir.path().join("receipt-vault.bin")).unwrap();
+        vault.put(&sid, &sr).unwrap();
+        assert!(matches!(vault.state(&sid), Some(LifecycleState::Proposed)));
+
+        // Chain reports the session RELAY_ARMED with the committed hash.
+        let app = Router::new()
+            .route("/", post(relay_claim_mock_handler))
+            .with_state(Arc::new((armed_hash.clone(), 1_000_000u64)));
+        let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app.into_make_service())
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await;
+        });
+
+        let wallet = KeyPair::from_secret_bytes(&[7u8; 32]);
+        let program_addr = Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+        let c = ChainCtxV3::new(
+            RpcClient::new(&format!("http://{addr}/")),
+            program_addr,
+            wallet,
+        );
+
+        // Before the fix this bailed "vault entry is not Armed"; now it promotes
+        // Proposed -> Armed from chain truth, reveals, and records ClaimSubmitted.
+        let out = crate::relay_settlement::submit_relay_claim_from_vault(&c, &vault, session_id, 1)
+            .await
+            .expect("relay claim should promote a Proposed entry and submit");
+        assert_eq!(out.settlement_hash, armed_hash);
+        assert!(matches!(
+            vault.state(&sid),
+            Some(LifecycleState::ClaimSubmitted { .. })
+        ));
+
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn relay_claim_refuses_inside_the_margin_window() {
+        // Margin gate: deadline D=6, epoch=5, margin=3 -> 5+3 > 6, so revealing
+        // is refused (the claim could confirm at/after D and revert while the
+        // client refunds). The preimage is never revealed; the entry stays
+        // Proposed (the bail is before the promotion).
+        use octravpn_core::{
+            receipt::{Receipt, ReceiptContext, SignedReceipt, CHAIN_ID_TEST},
+            receipt_vault::{LifecycleState, ReceiptVault},
+            session::{Blind, SessionId},
+        };
+        let session_id: u64 = 0x6262;
+        let sid = SessionId::from_u64(session_id);
+        let client = KeyPair::from_secret_bytes(&[0x11; 32]);
+        let node = KeyPair::from_secret_bytes(&[0x22; 32]);
+        let rctx = ReceiptContext::v1_1(Address::from_pubkey(&[0x33; 32]), CHAIN_ID_TEST);
+        let sr = SignedReceipt::build(
+            Receipt::new(rctx, sid.clone(), 1, 4_000_000, Blind::new([0x44; 32])),
+            &client,
+            &node,
+        );
+        let armed_hash = sr.settlement_hash();
+        let dir = tempfile::tempdir().unwrap();
+        let vault = ReceiptVault::open(dir.path().join("receipt-vault.bin")).unwrap();
+        vault.put(&sid, &sr).unwrap();
+
+        let app = Router::new()
+            .route("/", post(relay_claim_mock_handler))
+            .with_state(Arc::new((armed_hash.clone(), 6u64)));
+        let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app.into_make_service())
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await;
+        });
+        let wallet = KeyPair::from_secret_bytes(&[7u8; 32]);
+        let program_addr = Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+        let c = ChainCtxV3::new(
+            RpcClient::new(&format!("http://{addr}/")),
+            program_addr,
+            wallet,
+        );
+
+        let err = crate::relay_settlement::submit_relay_claim_from_vault(&c, &vault, session_id, 3)
+            .await
+            .expect_err("claim must refuse inside the margin window");
+        assert!(err.to_string().contains("margin"), "err = {err}");
+        assert!(matches!(vault.state(&sid), Some(LifecycleState::Proposed)));
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn get_session_status_strict_errors_on_non_numeric_body() {
+        // The drain confirms terminal state only from an EXACT numeric status.
+        // A hostile/non-numeric body must Err in the strict reader (so the drain
+        // retries), while the lenient reader collapses it to 0 (SESSION_OPEN) --
+        // exactly the footgun the strict reader exists to avoid.
+        async fn handler(Json(req): Json<Value>) -> Json<Value> {
+            let id = req.get("id").cloned().unwrap_or(json!(1));
+            let method = req.get("method").and_then(Value::as_str).unwrap_or("");
+            let result = if method == "contract_call" {
+                json!({ "result": "not-a-number" })
+            } else {
+                Value::Null
+            };
+            Json(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
+        }
+        let app = Router::new().route("/", post(handler));
+        let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app.into_make_service())
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await;
+        });
+        let wallet = KeyPair::from_secret_bytes(&[7u8; 32]);
+        let program_addr = Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+        let c = ChainCtxV3::new(
+            RpcClient::new(&format!("http://{addr}/")),
+            program_addr,
+            wallet,
+        );
+
+        assert!(c.get_session_status_strict(1).await.is_err());
+        assert_eq!(c.get_session_status(1).await.unwrap(), SESSION_OPEN);
+        let _ = shutdown_tx.send(());
     }
 
     #[test]
@@ -1045,6 +1677,46 @@ mod tests {
     }
 
     #[test]
+    fn tailnet_owner_and_spender_call_shapes() {
+        let c = ctx();
+        let transfer = c.build_transfer_tailnet_ownership_call(
+            7,
+            "octG3oQBw9W6tnPJNn7tyL9ugHHkwSaExxWy3Nbi3iFiDRh",
+            500,
+            30,
+        );
+        assert_eq!(transfer["method"], "transfer_tailnet_ownership");
+        assert_eq!(transfer["value"], 0);
+        assert_eq!(
+            transfer["params"],
+            json!([7u64, "octG3oQBw9W6tnPJNn7tyL9ugHHkwSaExxWy3Nbi3iFiDRh"])
+        );
+
+        let authorize = c.build_authorize_tailnet_spender_call(
+            7,
+            "octEPUyqvqAQ6Y6jp1WqaPVnPNghYjN4tFr95mvSuLcvFTL",
+            500,
+            31,
+        );
+        assert_eq!(authorize["method"], "authorize_tailnet_spender");
+        assert_eq!(authorize["value"], 0);
+        assert_eq!(
+            authorize["params"],
+            json!([7u64, "octEPUyqvqAQ6Y6jp1WqaPVnPNghYjN4tFr95mvSuLcvFTL"])
+        );
+
+        let revoke = c.build_revoke_tailnet_spender_call(
+            7,
+            "octEPUyqvqAQ6Y6jp1WqaPVnPNghYjN4tFr95mvSuLcvFTL",
+            500,
+            32,
+        );
+        assert_eq!(revoke["method"], "revoke_tailnet_spender");
+        assert_eq!(revoke["value"], 0);
+        assert_eq!(revoke["params"], authorize["params"]);
+    }
+
+    #[test]
     fn open_session_call_shape() {
         let c = ctx();
         let call = c.build_open_session_call(
@@ -1055,12 +1727,69 @@ mod tests {
             19,
         );
         assert_eq!(call["method"], "open_session");
+        assert_eq!(call["value"], 1500);
         let params = call["params"].as_array().unwrap();
-        // [tailnet_id, circle, max_pay] — matches v3-smoke.sh:77.
+        // [tailnet_id, circle, max_pay]; value carries the self-funded escrow.
         assert_eq!(params.len(), 3);
         assert_eq!(params[0], 0);
         assert_eq!(params[1], "octEPUyqvqAQ6Y6jp1WqaPVnPNghYjN4tFr95mvSuLcvFTL");
         assert_eq!(params[2], 1500);
+    }
+
+    #[test]
+    fn sponsored_and_relay_session_call_shapes() {
+        let c = ctx();
+        let sponsored = c.build_open_session_from_treasury_call(
+            0,
+            "octEPUyqvqAQ6Y6jp1WqaPVnPNghYjN4tFr95mvSuLcvFTL",
+            1_500,
+            500,
+            20,
+        );
+        assert_eq!(sponsored["method"], "open_session_from_treasury");
+        assert_eq!(sponsored["value"], 0);
+        assert_eq!(
+            sponsored["params"],
+            json!([
+                0u64,
+                "octEPUyqvqAQ6Y6jp1WqaPVnPNghYjN4tFr95mvSuLcvFTL",
+                1_500u64
+            ])
+        );
+
+        let hash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+        let p = OpenRelaySessionParams {
+            tailnet_id: 0,
+            circle_id: "octEPUyqvqAQ6Y6jp1WqaPVnPNghYjN4tFr95mvSuLcvFTL",
+            max_pay: 1_500,
+            settlement_hash_hex: hash,
+            net: 1_000,
+            relay_expiry_epochs: 200,
+            fee: 500,
+            nonce: 21,
+        };
+        let relay = c.build_open_relay_session_call(&p);
+        assert_eq!(relay["method"], "open_relay_session");
+        assert_eq!(relay["value"], 1_500);
+        assert_eq!(
+            relay["params"],
+            json!([
+                0u64,
+                "octEPUyqvqAQ6Y6jp1WqaPVnPNghYjN4tFr95mvSuLcvFTL",
+                1_500u64,
+                hash,
+                1_000u64,
+                200u64
+            ])
+        );
+
+        let sponsored_relay = c.build_open_relay_session_from_treasury_call(&p);
+        assert_eq!(
+            sponsored_relay["method"],
+            "open_relay_session_from_treasury"
+        );
+        assert_eq!(sponsored_relay["value"], 0);
+        assert_eq!(sponsored_relay["params"], relay["params"]);
     }
 
     #[test]
@@ -1095,6 +1824,52 @@ mod tests {
         assert_eq!(params[1], 1_048_576);
         assert_eq!(params[2], 1000);
         assert_eq!(params[3], "f8d1aa00bb22cc33");
+    }
+
+    #[test]
+    fn arm_relay_call_shape() {
+        let c = ctx();
+        let hash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+        let p = ArmRelayParams {
+            session_id: 7,
+            settlement_hash_hex: hash,
+            net: 1_000,
+            relay_expiry_epochs: 200,
+            fee: 500,
+            nonce: 25,
+        };
+        let call = c.build_arm_relay_call(&p);
+        assert_eq!(call["method"], "arm_relay");
+        assert_eq!(call["value"], 0);
+        assert_eq!(call["fee"], 500);
+        assert_eq!(call["nonce"], 25);
+        let params = call["params"].as_array().unwrap();
+        // [sid, settlement_hash, net, relay_expiry_epochs].
+        assert_eq!(params.len(), 4);
+        assert_eq!(params[0], 7);
+        assert_eq!(params[1], hash);
+        assert_eq!(params[2], 1_000);
+        assert_eq!(params[3], 200);
+    }
+
+    #[test]
+    fn relay_claim_and_refund_call_shapes() {
+        let c = ctx();
+        let preimage = "b2N0cmF2cG4tc2V0dGxlLXYxfA==";
+        let claim = c.build_relay_claim_call(7, preimage, 500, 26);
+        assert_eq!(claim["method"], "relay_claim");
+        assert_eq!(claim["value"], 0);
+        let claim_params = claim["params"].as_array().unwrap();
+        assert_eq!(claim_params.len(), 2);
+        assert_eq!(claim_params[0], 7);
+        assert_eq!(claim_params[1], preimage);
+
+        let refund = c.build_relay_refund_call(7, 500, 27);
+        assert_eq!(refund["method"], "relay_refund");
+        assert_eq!(refund["value"], 0);
+        let refund_params = refund["params"].as_array().unwrap();
+        assert_eq!(refund_params.len(), 1);
+        assert_eq!(refund_params[0], 7);
     }
 
     #[test]
@@ -1266,6 +2041,107 @@ mod tests {
         assert_eq!(params[0], "octCID");
         assert_eq!(params[1], 995);
         assert_eq!(params[2], "");
+    }
+
+    #[tokio::test]
+    async fn queue_backed_submit_call_serializes_concurrent_nonces() {
+        let (url, state, _shutdown) = spawn_submit_mock(10).await;
+        let secret = [7u8; 32];
+        let wallet = KeyPair::from_secret_bytes(&secret);
+        let queue_wallet = Arc::new(KeyPair::from_secret_bytes(&secret));
+        let program_addr = Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+        let queue =
+            octravpn_core::chain_tx_queue::spawn(RpcClient::new(&url), queue_wallet, String::new());
+        let ctx = ChainCtxV3::new_with_chain_id_and_queue(
+            RpcClient::new(&url),
+            program_addr,
+            wallet,
+            String::new(),
+            Some(queue),
+        );
+        let call_a = ctx.build_bond_endpoint_call(
+            "oct8taXQ4CvohcgzCJFYyaKrrAbcZs5mxkBCJQQYWb2Pcun",
+            1_000,
+            500,
+            0,
+        );
+        let call_b = ctx.build_unbond_endpoint_call(
+            "oct8taXQ4CvohcgzCJFYyaKrrAbcZs5mxkBCJQQYWb2Pcun",
+            500,
+            0,
+        );
+
+        let (hash_a, hash_b) = tokio::join!(ctx.submit_call(call_a), ctx.submit_call(call_b));
+
+        hash_a.expect("first submit");
+        hash_b.expect("second submit");
+        assert_eq!(submitted_nonces(&state), vec![11, 12]);
+        assert_eq!(state.lock().balance_calls, 1);
+    }
+
+    #[tokio::test]
+    async fn submit_call_without_queue_matches_legacy_nonce_sign_submit_bytes() {
+        let (url, state, _shutdown) = spawn_submit_mock(10).await;
+        let wallet = KeyPair::from_secret_bytes(&[7u8; 32]);
+        let program_addr = Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+        let ctx = ChainCtxV3::new_with_chain_id(
+            RpcClient::new(&url),
+            program_addr,
+            wallet,
+            "octra-devnet".to_string(),
+        );
+        let call = ctx.build_bond_endpoint_call(
+            "oct8taXQ4CvohcgzCJFYyaKrrAbcZs5mxkBCJQQYWb2Pcun",
+            1_000,
+            500,
+            0,
+        );
+        let mut legacy_call = call.clone();
+        set_unsigned_nonce(&mut legacy_call, 11).expect("set nonce");
+        let legacy_signed = ctx.sign_call(legacy_call).expect("legacy sign_call");
+
+        ctx.submit_call(call).await.expect("submit_call fallback");
+
+        let g = state.lock();
+        assert_eq!(g.balance_calls, 1);
+        assert_eq!(g.submitted.len(), 1);
+        assert_eq!(g.submitted[0], legacy_signed);
+    }
+
+    #[tokio::test]
+    async fn r3_queue_path_omits_chain_id_even_when_ctx_has_a_non_empty_one() {
+        // R3: production builds the ctx with a (now-vestigial) envelope chain_id
+        // but the ChainTxQueue with EMPTY. The real node does not verify an
+        // envelope chain_id -- signing over one is octra_submit 101 -- so the
+        // queue path must sign WITHOUT chain_id regardless of the ctx's field.
+        let (url, state, _shutdown) = spawn_submit_mock(10).await;
+        let secret = [7u8; 32];
+        let wallet = KeyPair::from_secret_bytes(&secret);
+        let queue_wallet = Arc::new(KeyPair::from_secret_bytes(&secret));
+        let program_addr = Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
+        let queue =
+            octravpn_core::chain_tx_queue::spawn(RpcClient::new(&url), queue_wallet, String::new());
+        let ctx = ChainCtxV3::new_with_chain_id_and_queue(
+            RpcClient::new(&url),
+            program_addr,
+            wallet,
+            "octra-devnet".to_string(),
+            Some(queue),
+        );
+        let call = ctx.build_bond_endpoint_call(
+            "oct8taXQ4CvohcgzCJFYyaKrrAbcZs5mxkBCJQQYWb2Pcun",
+            1_000,
+            500,
+            0,
+        );
+        ctx.submit_call(call).await.expect("submit_call via queue");
+        let g = state.lock();
+        assert_eq!(g.submitted.len(), 1);
+        assert!(
+            g.submitted[0].get("chain_id").is_none(),
+            "queue path must sign WITHOUT a chain_id field; got {:?}",
+            g.submitted[0]
+        );
     }
 
     #[test]

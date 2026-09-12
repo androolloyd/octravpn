@@ -39,7 +39,7 @@ use octravpn_core::{
         canonical_payload_json, circle_id_of_deploy, encrypt_sealed_bytes, resource_key,
         CircleDeployPayload, PaddingClass,
     },
-    rpc::RpcClient,
+    rpc::{next_nonce, RpcClient},
     sig::KeyPair,
     tx as octra_tx,
 };
@@ -94,10 +94,10 @@ impl ChainCtxV2 {
         Self::new_with_chain_id(rpc, program_addr, wallet, String::new())
     }
 
-    /// Variant of [`new`] that pins a v2 chain-id binding for every tx
-    /// signed by this context. Mainnet boots pass `"octra-mainnet"`;
-    /// devnet boots pass `"octra-devnet"`. Empty string ⇒ legacy v1
-    /// (wallet-compat) signing.
+    /// Variant of [`new`] that would pin a tx-envelope chain-id. CURRENTLY
+    /// ALWAYS PASS `String::new()` (empty): the real node's tx envelope has no
+    /// chain_id field, so signing over one → `octra_submit` 101 (see the v3
+    /// equivalent + hub/boot.rs). Retained for a future chain that verifies one.
     pub(crate) fn new_with_chain_id(
         rpc: RpcClient,
         program_addr: Address,
@@ -116,14 +116,7 @@ impl ChainCtxV2 {
 
     pub(crate) async fn nonce(&self) -> Result<u64> {
         let b = self.rpc.balance(&self.wallet_addr).await?;
-        // Matches v1.1's convention (see `ChainCtx::nonce`): the
-        // existing OctraVPN code treats `pending_nonce` as the next
-        // available nonce (so `.max(nonce)` returns the value to use
-        // for the next tx). The real Octra devnet sometimes ships
-        // pending_nonce = nonce + N_in_flight; the in-process mock
-        // returns pending_nonce already pointing at the next slot.
-        // Either way, `.max(nonce)` is the value to use.
-        Ok(b.pending_nonce.max(b.nonce))
+        Ok(next_nonce(&b))
     }
 
     pub(crate) async fn fee(&self, op: &str) -> Result<u64> {

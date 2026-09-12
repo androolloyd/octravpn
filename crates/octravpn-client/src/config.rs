@@ -17,7 +17,10 @@
 //! `ChainCfg` so the v1.1 / v2 paths can continue reading
 //! `cfg.chain.protocol_version` unchanged.
 
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -130,10 +133,67 @@ pub(crate) struct V3Cfg {
     /// match `docker/devnet/v3-smoke.sh`.
     #[serde(default = "default_v3_max_pay")]
     pub max_pay: u64,
+    /// v4 relay-settlement client caller path. Defaults disabled so
+    /// v3 `settle_confirm` remains settlement-of-record until the
+    /// client explicitly opts in.
+    #[serde(default)]
+    pub relay: V3RelayCfg,
 }
 
 fn default_v3_max_pay() -> u64 {
     1_500
+}
+
+/// `[v3.relay]` — optional v4 relay-settlement arm path.
+#[derive(Debug, Deserialize, Clone)]
+pub(crate) struct V3RelayCfg {
+    /// Master toggle. `false` by default.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Epochs the operator has to reveal the receipt preimage before
+    /// the client can call `relay_refund`.
+    #[serde(default = "default_relay_expiry_epochs")]
+    pub relay_expiry_epochs: u64,
+    /// Durable client-side relay settlement state. Defaults at load to
+    /// a sibling directory of `[wallet].secret_path`, then the runtime
+    /// keys files below it by wallet address.
+    #[serde(default)]
+    pub state_dir: String,
+    /// Step 8: the refund watcher submits `relay_refund` only once
+    /// `epoch >= deadline + refund_margin_epochs`. This margin is the client
+    /// half of the I3 quiet zone: with the node's claim margin `k_c`, the claim
+    /// window `(-inf, D - k_c]` and the refund window `[D + k_r, inf)` cannot
+    /// overlap for any positive margins. Clamped to `[1, 5]` at use.
+    #[serde(default = "default_refund_margin_epochs")]
+    pub refund_margin_epochs: u64,
+}
+
+impl Default for V3RelayCfg {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            relay_expiry_epochs: default_relay_expiry_epochs(),
+            state_dir: String::new(),
+            refund_margin_epochs: default_refund_margin_epochs(),
+        }
+    }
+}
+
+impl V3RelayCfg {
+    /// Refund margin `k_r`, clamped to `[1, 5]`. The lower bound of 1 is
+    /// load-bearing: a `0` margin would collapse the I3 quiet zone and let a
+    /// refund fire the same epoch a still-valid operator claim could confirm.
+    pub(crate) fn resolved_refund_margin_epochs(&self) -> u64 {
+        self.refund_margin_epochs.clamp(1, 5)
+    }
+}
+
+fn default_relay_expiry_epochs() -> u64 {
+    octravpn_core::v3_calls::RELAY_EXPIRY_DEFAULT_EPOCHS
+}
+
+fn default_refund_margin_epochs() -> u64 {
+    3
 }
 
 /// v2-specific config. Sealed-policy passphrase + cache options.
@@ -176,8 +236,28 @@ impl ClientConfig {
     pub(crate) fn load(path: impl AsRef<Path>) -> Result<Self> {
         let raw = fs::read_to_string(&path)
             .with_context(|| format!("read {}", path.as_ref().display()))?;
-        let cfg: Self = toml::from_str(&raw).context("parse client config TOML")?;
+        let mut cfg: Self = toml::from_str(&raw).context("parse client config TOML")?;
+        cfg.resolve_relay_state_dir()?;
         Ok(cfg)
+    }
+
+    pub(crate) fn resolve_relay_state_dir(&mut self) -> Result<()> {
+        if self.v3.relay.state_dir.trim().is_empty() {
+            self.v3.relay.state_dir = default_relay_state_dir(&self.wallet.secret_path)
+                .display()
+                .to_string();
+        }
+        let path = Path::new(&self.v3.relay.state_dir);
+        if path.as_os_str().is_empty() {
+            anyhow::bail!("[v3.relay].state_dir must not be empty");
+        }
+        if path.exists() && !path.is_dir() {
+            anyhow::bail!(
+                "[v3.relay].state_dir points at a file, not a directory: {}",
+                path.display()
+            );
+        }
+        Ok(())
     }
 
     /// Returns `true` when the config selects the v2 (circle-native)
@@ -200,5 +280,85 @@ impl ClientConfig {
     /// `cfg.chain.protocol_version` directly.
     pub(crate) fn protocol_version(&self) -> Result<ProtocolVersion> {
         ProtocolVersion::parse(&self.chain.protocol_version)
+    }
+}
+
+pub(crate) fn default_relay_state_dir(wallet_secret_path: &str) -> PathBuf {
+    let wallet_path = Path::new(wallet_secret_path);
+    let parent = wallet_path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    parent.join("settle-state")
+}
+
+// Retained for when a chain enables v2 tx-envelope chain_id binding; currently
+// the client (like the node) signs with an empty envelope chain_id (see
+// runner.rs), so this has no production caller yet.
+#[allow(dead_code)]
+pub(crate) fn chain_id_to_envelope_string(id: u32) -> String {
+    use octravpn_core::receipt::{CHAIN_ID_DEVNET, CHAIN_ID_MAINNET};
+    if id == CHAIN_ID_DEVNET {
+        "octra-devnet".to_string()
+    } else if id == CHAIN_ID_MAINNET {
+        "octra-mainnet".to_string()
+    } else {
+        format!("octra-net-{id:08x}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refund_margin_defaults_and_clamps() {
+        assert_eq!(V3RelayCfg::default().refund_margin_epochs, 3);
+        // Clamp to the I3 band [1,5]: a 0 (quiet-zone collapse) becomes 1.
+        let mut r = V3RelayCfg {
+            refund_margin_epochs: 0,
+            ..V3RelayCfg::default()
+        };
+        assert_eq!(r.resolved_refund_margin_epochs(), 1);
+        r.refund_margin_epochs = 9;
+        assert_eq!(r.resolved_refund_margin_epochs(), 5);
+        r.refund_margin_epochs = 3;
+        assert_eq!(r.resolved_refund_margin_epochs(), 3);
+    }
+
+    #[test]
+    fn relay_state_dir_defaults_next_to_wallet_secret() {
+        let mut cfg: ClientConfig = toml::from_str(
+            r#"
+[chain]
+rpc_url = "http://127.0.0.1:0"
+program_addr = "oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3"
+
+[wallet]
+addr = "oct8taXQ4CvohcgzCJFYyaKrrAbcZs5mxkBCJQQYWb2Pcun"
+secret_path = "/tmp/octravpn-client/wallet.key"
+"#,
+        )
+        .unwrap();
+
+        cfg.resolve_relay_state_dir().unwrap();
+
+        assert_eq!(cfg.v3.relay.state_dir, "/tmp/octravpn-client/settle-state");
+    }
+
+    #[test]
+    fn chain_id_mapping_matches_node_envelope_names() {
+        assert_eq!(
+            chain_id_to_envelope_string(octravpn_core::receipt::CHAIN_ID_DEVNET),
+            "octra-devnet"
+        );
+        assert_eq!(
+            chain_id_to_envelope_string(octravpn_core::receipt::CHAIN_ID_MAINNET),
+            "octra-mainnet"
+        );
+        assert_eq!(
+            chain_id_to_envelope_string(0x1234_5678),
+            "octra-net-12345678"
+        );
     }
 }

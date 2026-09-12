@@ -1,0 +1,109 @@
+name: headscale-go parity
+
+# Docker-free, differential headscale-go parity gate (P0.1).
+#
+# Proves that octravpn's vendored headscale-api / headscale-api-acl surface
+# stays behaviourally identical to upstream headscale-go v0.29.0-beta.2. The
+# harness itself lives in the headscale-rs sibling (tools/parity/*); octravpn
+# compiles the very same crates (crates/octravpn-mesh/Cargo.toml), so a
+# regression caught here IS a regression in octravpn's control plane.
+#
+# This is a NEW workflow and is intentionally separate from ci.yml — it must
+# not be merged into that file.
+#
+# What runs (all hermetic w.r.t. upstream network state):
+#   1. check_parity_golden.py     — metadata + golden coverage (no build)
+#   2. check_headscale_go_refs.py — pin consistency, LOCAL only (see note)
+#   3. headscale_go_diff.sh       — build Rust + Go engines, diff 98 scenarios
+#                                   against each other and the checked-in golden
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  parity:
+    name: headscale-go differential parity
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        # The harness scripts are invoked relative to the headscale-rs
+        # checkout root (scripts/headscale_go_diff.sh,
+        # scripts/check_parity_golden.py, scripts/check_headscale_go_refs.py).
+        working-directory: headscale-rs
+    steps:
+      # --- 3-sibling checkout preamble (mirrors ci.yml) -----------------
+      # octra must be checked out because this job's toolchain step is the
+      # composite action at ./octra/.github/actions/setup-rust. octra-foundry
+      # is included to match the workspace's standard sibling layout.
+      - uses: actions/checkout@v4
+        with: { path: octra }
+      - uses: actions/checkout@v4
+        with: { repository: androolloyd/octra-foundry, path: octra-foundry }
+      - uses: actions/checkout@v4
+        with:
+          repository: androolloyd/headscale-rs
+          path: headscale-rs
+          # PINNED for a deterministic golden. The differential golden
+          # (tools/parity/golden/headscale-go-v0.29.0-beta.2.json) plus the
+          # 98 checked-in scenarios are only meaningful against a fixed
+          # harness revision; a floating `main` would let the golden drift
+          # out from under this gate.
+          #
+          # To bump: check out androolloyd/headscale-rs main, run
+          #   git rev-parse HEAD
+          # paste the full 40-char SHA below, re-run this workflow, and
+          # confirm the golden still matches (refresh it deliberately with
+          # PARITY_UPDATE_GOLDEN=1 ./scripts/headscale_go_diff.sh if the
+          # bump intentionally changes observable output).
+          # Short SHA today: 41f817d.
+          ref: 41f817d6ff624b59fd18c8066a61f281810fb34e
+
+      # --- toolchains ---------------------------------------------------
+      # setup-rust also installs protoc (headscale-api's tonic build script
+      # needs it). cache:"false" — this job builds the standalone
+      # tools/parity/headscale-rs crate, not octra's workspace, so the
+      # octra-scoped Swatinem cache would never hit.
+      - uses: ./octra/.github/actions/setup-rust
+        with:
+          cache: "false"
+
+      # Go for the headscale-go side of the diff. The version is read from
+      # the harness go.mod (currently `go 1.26.3`) so it always tracks the
+      # pinned upstream module and never silently diverges.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: headscale-rs/tools/parity/headscale-go/go.mod
+          cache-dependency-path: headscale-rs/tools/parity/headscale-go/go.sum
+
+      # Ruby drives the JSON diff / golden comparison inside
+      # headscale_go_diff.sh (stdlib json + fileutils only).
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      # --- checks -------------------------------------------------------
+      - name: Parity metadata + golden coverage
+        # Verifies the pinned go.mod version has a matching active golden,
+        # that scenario filenames equal their `name` fields, and that the
+        # pinned + current-head goldens cover the scenario sets exactly.
+        run: python3 scripts/check_parity_golden.py
+
+      - name: headscale-go pin consistency (local, no network)
+        # LOCAL variant only. We deliberately DROP `--remote`: that mode does
+        # a live `git ls-remote https://github.com/juanfont/headscale` against
+        # a moving `main`, which is non-deterministic and couples CI to
+        # upstream network state. The local check still asserts go.mod agrees
+        # with the real-client baseline/current pins.
+        run: python3 scripts/check_headscale_go_refs.py
+
+      - name: headscale-go differential parity (98 scenarios)
+        # Builds the Rust parity binary + the Go engine, runs every scenario
+        # through both, asserts Rust == Go, then asserts Go == checked-in
+        # golden. Any drift fails the job loudly.
+        run: ./scripts/headscale_go_diff.sh

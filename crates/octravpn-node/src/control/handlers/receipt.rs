@@ -16,13 +16,14 @@ use axum::{
     Json,
 };
 use octravpn_core::{
-    control::{ProposedReceipt, SessionStateResponse},
-    receipt::Receipt,
+    control::{PostReceiptResponse, ProposedReceipt, SessionStateResponse},
+    receipt::{Receipt, ReceiptError, SignedReceipt},
+    receipt_vault::{LifecycleState, ReceiptVaultError},
     session::SessionId,
 };
 
 use super::ApiError;
-use crate::control::state::ControlState;
+use crate::control::state::{ControlState, RelayLifecycle};
 
 /// HFHE-2: derive a per-receipt encryption seed (64-char hex) from
 /// the (session_id_hex, seq) tuple. Deterministic — the auditor
@@ -229,18 +230,230 @@ pub(crate) async fn get_state(
     .into_response()
 }
 
+pub(crate) async fn post_receipt(
+    State(s): State<Arc<ControlState>>,
+    Path(id_hex): Path<String>,
+    Json(sr): Json<SignedReceipt>,
+) -> impl IntoResponse {
+    let Some(id) = SessionId::from_hex(&id_hex) else {
+        return (StatusCode::BAD_REQUEST, Json(ApiError::new("bad id"))).into_response();
+    };
+
+    if let Err(e) = sr.verify() {
+        let status = match e {
+            ReceiptError::BadClientSig | ReceiptError::BadNodeSig => StatusCode::UNAUTHORIZED,
+            _ => StatusCode::BAD_REQUEST,
+        };
+        return (status, Json(ApiError::new("bad receipt signature"))).into_response();
+    }
+
+    if sr.receipt.context != *s.receipt_context {
+        return (
+            StatusCode::CONFLICT,
+            Json(ApiError::new("receipt context mismatch")),
+        )
+            .into_response();
+    }
+
+    if sr.receipt.session_id.as_bytes() != id.as_bytes() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new("receipt session id mismatch")),
+        )
+            .into_response();
+    }
+
+    if sr.node_pubkey != s.node_kp.public {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ApiError::new("receipt not signed by this node")),
+        )
+            .into_response();
+    }
+
+    // Money-path binding (HIGH): the receipt's client countersignature
+    // MUST be under the SAME ed25519 identity that announced this
+    // session. `sr.verify()` above only proves the receipt is *some*
+    // internally-consistent dual signature — an attacker who knows a
+    // live `session_id` can GET the node-signed proposal, attach their
+    // OWN fresh client keypair (verify() still passes), and POST it.
+    // Absent this check the vault stores the attacker's receipt as the
+    // "latest", so the operator's later `relay_claim` carries a client
+    // countersignature under the attacker's key and is rejected
+    // on-chain — the operator can never settle. We enforce only when
+    // the session entry is still present: the attack requires a live
+    // session to obtain the node proposal in the first place, so the
+    // binding is always available during the exploit window; an
+    // evicted session's late legitimate POST falls through to the
+    // seq-floor guards below rather than being spuriously rejected.
+    if let Some(entry) = s.sessions.get(&id) {
+        if sr.client_pubkey != entry.client_pubkey {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(ApiError::new("receipt client key does not match session")),
+            )
+                .into_response();
+        }
+    }
+
+    let vault_floor = s.receipt_vault.current_seq(&id).unwrap_or(0);
+    if sr.receipt.seq < vault_floor {
+        return (
+            StatusCode::CONFLICT,
+            Json(ApiError::new("receipt seq below vault floor")),
+        )
+            .into_response();
+    }
+    let journal_floor = s.receipt_journal.floor(&id);
+    if sr.receipt.seq < journal_floor {
+        return (
+            StatusCode::CONFLICT,
+            Json(ApiError::new("receipt seq below journal floor")),
+        )
+            .into_response();
+    }
+
+    if let (Some(verifier), Some(chain_session_id)) =
+        (s.relay_lifecycle_verifier.as_ref(), id.as_u64())
+    {
+        match verifier.lifecycle(chain_session_id).await {
+            Ok(RelayLifecycle::Armed(armed)) => {
+                let already_pinned = matches!(
+                    s.receipt_vault.state(&id),
+                    Some(LifecycleState::Armed {
+                        settlement_hash,
+                        ..
+                    }) if settlement_hash == armed.settlement_hash
+                );
+                if !already_pinned {
+                    if let Err(e) = s.receipt_vault.mark_armed(
+                        &id,
+                        armed.deadline,
+                        armed.settlement_hash.clone(),
+                    ) {
+                        tracing::warn!(
+                            error = %e,
+                            session = %id_hex,
+                            "receipt vault arm mark failed before countersigned receipt write",
+                        );
+                        let status = receipt_vault_error_status(&e);
+                        return (
+                            status,
+                            Json(ApiError::new("receipt vault lifecycle update failed")),
+                        )
+                            .into_response();
+                    }
+                }
+            }
+            Ok(RelayLifecycle::Open) => {}
+            Ok(RelayLifecycle::Terminal(status)) => {
+                // The on-chain session has already left the arm window into a
+                // terminal outcome (SETTLED/REFUNDED/RELAY_CLAIMED/RELAY_REFUNDED):
+                // it is closed and accepts no more receipts. Beyond being
+                // meaningless, accepting one would append a receipt record AFTER
+                // the claim's Armed/ClaimSubmitted lifecycle records -- in the CLI
+                // cross-process claim path that bricks the vault on the next
+                // reopen (ReceiptFrozen). Reject.
+                tracing::debug!(
+                    session = %id_hex,
+                    status,
+                    "rejecting receipt for a session already closed on chain",
+                );
+                return (
+                    StatusCode::CONFLICT,
+                    Json(ApiError::new("session already closed on chain")),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    session = %id_hex,
+                    "relay armed status check failed before countersigned receipt write",
+                );
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(ApiError::new("relay armed status check failed")),
+                )
+                    .into_response();
+            }
+        }
+    }
+
+    let settlement_hash = sr.settlement_hash();
+    if let Err(e) = s.receipt_vault.put(&id, &sr) {
+        tracing::warn!(error = %e, session = %id_hex, "receipt vault write failed");
+        let status = receipt_vault_error_status(&e);
+        return (status, Json(ApiError::new("receipt vault write failed"))).into_response();
+    }
+
+    if s.events.receiver_count() > 0 {
+        s.events.publish(crate::events::Event {
+            ts_unix: octravpn_core::util::now_unix_secs(),
+            kind: "receipt_countersigned".to_string(),
+            payload: serde_json::json!({
+                "session_id": id_hex.clone(),
+                "seq": sr.receipt.seq,
+                "bytes_used": sr.receipt.bytes_used,
+                "settlement_hash": settlement_hash.clone(),
+            }),
+        });
+    }
+    if let Some(audit) = &s.audit {
+        let rec = crate::audit::AuditRecord {
+            ts_unix: octravpn_core::util::now_unix_secs(),
+            kind: "receipt_countersigned",
+            source: None,
+            session_id: Some(id_hex),
+            extra: serde_json::json!({
+                "seq": sr.receipt.seq,
+                "bytes_used": sr.receipt.bytes_used,
+                "settlement_hash": settlement_hash.clone(),
+            }),
+        };
+        if let Err(e) = audit.write_async(rec).await {
+            tracing::warn!(error = %e, "audit log receipt_countersigned write failed");
+        }
+    }
+
+    Json(PostReceiptResponse {
+        accepted: true,
+        settlement_hash,
+    })
+    .into_response()
+}
+
+fn receipt_vault_error_status(e: &ReceiptVaultError) -> StatusCode {
+    match e {
+        ReceiptVaultError::SeqRegressed { .. }
+        | ReceiptVaultError::SeqConflict { .. }
+        | ReceiptVaultError::ReceiptFrozen { .. }
+        | ReceiptVaultError::IllegalTransition { .. }
+        | ReceiptVaultError::ArmedHashMismatch { .. } => StatusCode::CONFLICT,
+        ReceiptVaultError::SessionMismatch { .. } => StatusCode::BAD_REQUEST,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::control::handlers::session::announce;
     use crate::control::handlers::session::tests::signed_announce;
     use crate::control::metrics::NodeMetrics;
-    use crate::control::state::ControlState;
+    use crate::control::state::{ControlState, RelayLifecycleVerifier};
     use crate::onion::OnionRouter;
+    use axum::{extract::State as AxumState, routing::post, Router};
     use octravpn_core::{
+        address::Address,
         bounded::BoundedMap,
+        rpc::RpcClient,
         sig::{verify, KeyPair},
     };
+    use serde_json::{json, Value};
+    use std::net::SocketAddr;
+    use std::sync::Mutex;
+    use tokio::sync::oneshot;
 
     /// Helper for the journal-wiring tests: take the JSON body off a
     /// `Response` and deserialize it as a `SessionStateResponse`.
@@ -253,6 +466,562 @@ mod tests {
             .unwrap();
         assert_eq!(status, StatusCode::OK, "body = {body:?}");
         serde_json::from_slice::<SessionStateResponse>(&body).unwrap()
+    }
+
+    async fn parse_post_receipt(resp: axum::response::Response) -> PostReceiptResponse {
+        let status = resp.status();
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        assert_eq!(status, StatusCode::OK, "body = {body:?}");
+        serde_json::from_slice::<PostReceiptResponse>(&body).unwrap()
+    }
+
+    async fn status_and_body(resp: axum::response::Response) -> (StatusCode, String) {
+        let status = resp.status();
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        (status, String::from_utf8(body.to_vec()).unwrap())
+    }
+
+    #[derive(Clone)]
+    struct RelayLifecycleMock {
+        status: u64,
+        deadline: u64,
+        settlement_hash: String,
+        calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    async fn relay_lifecycle_mock_handler(
+        AxumState(mock): AxumState<RelayLifecycleMock>,
+        Json(req): Json<Value>,
+    ) -> Result<Json<Value>, StatusCode> {
+        let id = req.get("id").cloned().unwrap_or(json!(1));
+        let method = req
+            .get("method")
+            .and_then(Value::as_str)
+            .ok_or(StatusCode::BAD_REQUEST)?;
+        if method != "contract_call" {
+            return Ok(Json(json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": { "code": -32601, "message": "method not found" },
+            })));
+        }
+        let params = req
+            .get("params")
+            .and_then(Value::as_array)
+            .ok_or(StatusCode::BAD_REQUEST)?;
+        let view = params
+            .get(1)
+            .and_then(Value::as_str)
+            .ok_or(StatusCode::BAD_REQUEST)?;
+        mock.calls
+            .lock()
+            .expect("relay lifecycle calls lock")
+            .push(view.to_string());
+        let result = match view {
+            "get_session_status" => json!(mock.status),
+            "get_relay_deadline" => json!(mock.deadline),
+            "get_relay_settlement_hash" => json!(mock.settlement_hash),
+            _ => json!(null),
+        };
+        Ok(Json(json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": { "result": result },
+        })))
+    }
+
+    async fn spawn_relay_lifecycle_mock(
+        status: u64,
+        deadline: u64,
+        settlement_hash: String,
+    ) -> (RpcClient, Arc<Mutex<Vec<String>>>, oneshot::Sender<()>) {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let mock = RelayLifecycleMock {
+            status,
+            deadline,
+            settlement_hash,
+            calls: calls.clone(),
+        };
+        let app = Router::new()
+            .route("/", post(relay_lifecycle_mock_handler))
+            .with_state(mock);
+        let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+            .await
+            .expect("bind relay lifecycle mock");
+        let addr = listener.local_addr().expect("relay lifecycle mock addr");
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app.into_make_service())
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await;
+        });
+        (
+            RpcClient::new(format!("http://{addr}/")),
+            calls,
+            shutdown_tx,
+        )
+    }
+
+    #[tokio::test]
+    async fn post_receipt_vaults_dual_signed_receipt_and_echoes_hash() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let client_kp = KeyPair::generate();
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let state = Arc::new(ControlState::new(node_kp.clone(), router, allowlist));
+        let id = SessionId::new([0x77u8; 32]);
+        let receipt = Receipt::new(
+            (*state.receipt_context).clone(),
+            id.clone(),
+            1,
+            4096,
+            octravpn_core::session::Blind::new([0x88; 32]),
+        );
+        let signed = SignedReceipt::build(receipt, &client_kp, node_kp.as_ref());
+        let want_hash = signed.settlement_hash();
+
+        let resp = post_receipt(
+            State(state.clone()),
+            Path(id.to_hex()),
+            Json(signed.clone()),
+        )
+        .await
+        .into_response();
+        let body = parse_post_receipt(resp).await;
+
+        assert!(body.accepted);
+        assert_eq!(body.settlement_hash, want_hash);
+        assert_eq!(body.settlement_hash.len(), 64);
+        assert_eq!(state.receipt_vault.get(&id), Some(signed));
+    }
+
+    #[tokio::test]
+    async fn post_receipt_rejects_lower_seq_replay_and_keeps_latest() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let client_kp = KeyPair::generate();
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let state = Arc::new(ControlState::new(node_kp.clone(), router, allowlist));
+        let id = SessionId::new([0x78u8; 32]);
+        let latest = SignedReceipt::build(
+            Receipt::new(
+                (*state.receipt_context).clone(),
+                id.clone(),
+                5,
+                5_000,
+                octravpn_core::session::Blind::new([0x89; 32]),
+            ),
+            &client_kp,
+            node_kp.as_ref(),
+        );
+        let latest_hash = latest.settlement_hash();
+        parse_post_receipt(
+            post_receipt(
+                State(state.clone()),
+                Path(id.to_hex()),
+                Json(latest.clone()),
+            )
+            .await
+            .into_response(),
+        )
+        .await;
+
+        let replay = SignedReceipt::build(
+            Receipt::new(
+                (*state.receipt_context).clone(),
+                id.clone(),
+                4,
+                9_999,
+                octravpn_core::session::Blind::new([0x89; 32]),
+            ),
+            &client_kp,
+            node_kp.as_ref(),
+        );
+        let (status, body) = status_and_body(
+            post_receipt(State(state.clone()), Path(id.to_hex()), Json(replay))
+                .await
+                .into_response(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CONFLICT, "body = {body}");
+        assert!(body.contains("receipt seq below vault floor"));
+        let kept = state.receipt_vault.get(&id).unwrap();
+        assert_eq!(kept.receipt.seq, 5);
+        assert_eq!(kept.receipt.bytes_used, 5_000);
+        assert_eq!(kept.settlement_hash(), latest_hash);
+    }
+
+    #[tokio::test]
+    async fn post_receipt_accepts_identical_equal_seq_replay_idempotently() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let client_kp = KeyPair::generate();
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let state = Arc::new(ControlState::new(node_kp.clone(), router, allowlist));
+        let id = SessionId::new([0x79u8; 32]);
+        let signed = SignedReceipt::build(
+            Receipt::new(
+                (*state.receipt_context).clone(),
+                id.clone(),
+                1,
+                4_096,
+                octravpn_core::session::Blind::new([0x8A; 32]),
+            ),
+            &client_kp,
+            node_kp.as_ref(),
+        );
+        parse_post_receipt(
+            post_receipt(
+                State(state.clone()),
+                Path(id.to_hex()),
+                Json(signed.clone()),
+            )
+            .await
+            .into_response(),
+        )
+        .await;
+
+        let body = parse_post_receipt(
+            post_receipt(
+                State(state.clone()),
+                Path(id.to_hex()),
+                Json(signed.clone()),
+            )
+            .await
+            .into_response(),
+        )
+        .await;
+
+        assert!(body.accepted);
+        assert_eq!(state.receipt_vault.get(&id), Some(signed));
+    }
+
+    #[tokio::test]
+    async fn post_receipt_rejects_conflicting_equal_seq_replay() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let client_kp = KeyPair::generate();
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let state = Arc::new(ControlState::new(node_kp.clone(), router, allowlist));
+        let id = SessionId::new([0x79u8; 32]);
+        let signed = SignedReceipt::build(
+            Receipt::new(
+                (*state.receipt_context).clone(),
+                id.clone(),
+                1,
+                4_096,
+                octravpn_core::session::Blind::new([0x8A; 32]),
+            ),
+            &client_kp,
+            node_kp.as_ref(),
+        );
+        parse_post_receipt(
+            post_receipt(
+                State(state.clone()),
+                Path(id.to_hex()),
+                Json(signed.clone()),
+            )
+            .await
+            .into_response(),
+        )
+        .await;
+
+        let conflict = SignedReceipt::build(
+            Receipt::new(
+                (*state.receipt_context).clone(),
+                id.clone(),
+                1,
+                8_192,
+                octravpn_core::session::Blind::new([0x8A; 32]),
+            ),
+            &client_kp,
+            node_kp.as_ref(),
+        );
+        let (status, body) = status_and_body(
+            post_receipt(State(state.clone()), Path(id.to_hex()), Json(conflict))
+                .await
+                .into_response(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CONFLICT, "body = {body}");
+        assert_eq!(state.receipt_vault.get(&id), Some(signed));
+    }
+
+    #[tokio::test]
+    async fn post_receipt_marks_armed_then_rejects_poisoning_post() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let client_kp = KeyPair::generate();
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let id = SessionId::from_u64(42);
+        let armed_receipt = SignedReceipt::build(
+            Receipt::new(
+                octravpn_core::receipt::ReceiptContext::v1_1(
+                    Address::from_pubkey(&[0u8; 32]),
+                    octravpn_core::receipt::CHAIN_ID_TEST,
+                ),
+                id.clone(),
+                1,
+                4_096,
+                octravpn_core::session::Blind::new([0x8E; 32]),
+            ),
+            &client_kp,
+            node_kp.as_ref(),
+        );
+        let armed_hash = armed_receipt.settlement_hash();
+        let (rpc, calls, shutdown) = spawn_relay_lifecycle_mock(
+            crate::chain_v3::SESSION_RELAY_ARMED,
+            123,
+            armed_hash.clone(),
+        )
+        .await;
+        let state = Arc::new(
+            ControlState::new(node_kp.clone(), router, allowlist).with_relay_lifecycle_verifier(
+                RelayLifecycleVerifier::new(rpc, Address::from_pubkey(&[9u8; 32]), None),
+            ),
+        );
+        state.receipt_vault.put(&id, &armed_receipt).unwrap();
+
+        let poison = SignedReceipt::build(
+            Receipt::new(
+                (*state.receipt_context).clone(),
+                id.clone(),
+                2,
+                8_192,
+                octravpn_core::session::Blind::new([0x8E; 32]),
+            ),
+            &client_kp,
+            node_kp.as_ref(),
+        );
+        let (status, body) = status_and_body(
+            post_receipt(State(state.clone()), Path(id.to_hex()), Json(poison))
+                .await
+                .into_response(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CONFLICT, "body = {body}");
+        let kept = state.receipt_vault.get(&id).unwrap();
+        assert_eq!(kept.receipt.seq, 1);
+        assert_eq!(kept.settlement_hash(), armed_hash);
+        assert_eq!(
+            state.receipt_vault.state(&id),
+            Some(LifecycleState::Armed {
+                deadline: 123,
+                settlement_hash: armed_hash,
+            })
+        );
+        let got_calls = calls.lock().expect("relay lifecycle calls lock").clone();
+        assert_eq!(
+            got_calls,
+            vec![
+                "get_session_status".to_string(),
+                "get_relay_deadline".to_string(),
+                "get_relay_settlement_hash".to_string(),
+            ]
+        );
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn post_receipt_rejects_receipt_for_a_terminal_session() {
+        // A session already claimed on chain (RELAY_CLAIMED=4) is closed and
+        // accepts no more receipts. Accepting one would append a receipt record
+        // after the claim's Armed/ClaimSubmitted lifecycle records -- in the CLI
+        // cross-process claim path that bricks the vault on reopen. Reject 409,
+        // vault nothing. (Fable re-verify, residual #3 root cause.)
+        let node_kp = Arc::new(KeyPair::generate());
+        let client_kp = KeyPair::generate();
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let id = SessionId::from_u64(77);
+        let (rpc, _calls, shutdown) =
+            spawn_relay_lifecycle_mock(4 /* SESSION_RELAY_CLAIMED */, 0, String::new()).await;
+        let state = Arc::new(
+            ControlState::new(node_kp.clone(), router, allowlist).with_relay_lifecycle_verifier(
+                RelayLifecycleVerifier::new(rpc, Address::from_pubkey(&[9u8; 32]), None),
+            ),
+        );
+        let receipt = SignedReceipt::build(
+            Receipt::new(
+                (*state.receipt_context).clone(),
+                id.clone(),
+                1,
+                4_096,
+                octravpn_core::session::Blind::new([0x8F; 32]),
+            ),
+            &client_kp,
+            node_kp.as_ref(),
+        );
+
+        let (status, body) = status_and_body(
+            post_receipt(State(state.clone()), Path(id.to_hex()), Json(receipt))
+                .await
+                .into_response(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CONFLICT, "body = {body}");
+        assert!(body.contains("already closed"), "body = {body}");
+        assert!(state.receipt_vault.get(&id).is_none());
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn post_receipt_rejects_swapped_node_signer_even_with_valid_dual_sig() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let rogue_node_kp = KeyPair::generate();
+        let client_kp = KeyPair::generate();
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let state = Arc::new(ControlState::new(node_kp.clone(), router, allowlist));
+        let id = SessionId::new([0x7Au8; 32]);
+        let forged = SignedReceipt::build(
+            Receipt::new(
+                (*state.receipt_context).clone(),
+                id.clone(),
+                1,
+                4_096,
+                octravpn_core::session::Blind::new([0x8B; 32]),
+            ),
+            &client_kp,
+            &rogue_node_kp,
+        );
+        forged
+            .verify()
+            .expect("sanity: internally dual-signed by the swapped node key");
+        assert_ne!(forged.node_pubkey, node_kp.public);
+
+        let (status, body) = status_and_body(
+            post_receipt(State(state.clone()), Path(id.to_hex()), Json(forged))
+                .await
+                .into_response(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "body = {body}");
+        assert!(body.contains("receipt not signed by this node"));
+        assert!(state.receipt_vault.get(&id).is_none());
+    }
+
+    /// Money-path (HIGH): a well-formed dual-signed receipt whose
+    /// `client_pubkey` does NOT match the session's announced client
+    /// key is rejected with 403 and is NOT vaulted — otherwise an
+    /// attacker who reads the node-signed proposal could poison the
+    /// vault's "latest" receipt under their own key. The legitimate
+    /// client's matching receipt still succeeds and is vaulted.
+    #[tokio::test]
+    async fn post_receipt_rejects_client_key_not_bound_to_session() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let legit_client = KeyPair::generate();
+        let attacker_client = KeyPair::generate();
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let state = Arc::new(ControlState::new(node_kp.clone(), router, allowlist));
+        let id = SessionId::new([0x7Du8; 32]);
+
+        // Session is announced under the legit client's ed25519 key.
+        announce(
+            State(state.clone()),
+            Json(signed_announce(id.clone(), &legit_client, [9u8; 32])),
+        )
+        .await;
+
+        // Attacker attaches their OWN client key to a receipt the node
+        // would have signed. `verify()` passes (fresh internally-valid
+        // dual-sig) but the client key is not the one bound to the
+        // session.
+        let forged = SignedReceipt::build(
+            Receipt::new(
+                (*state.receipt_context).clone(),
+                id.clone(),
+                1,
+                4_096,
+                octravpn_core::session::Blind::new([0x8D; 32]),
+            ),
+            &attacker_client,
+            node_kp.as_ref(),
+        );
+        forged
+            .verify()
+            .expect("sanity: attacker's dual-sig is internally valid");
+
+        let (status, body) = status_and_body(
+            post_receipt(State(state.clone()), Path(id.to_hex()), Json(forged))
+                .await
+                .into_response(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "body = {body}");
+        assert!(body.contains("client key does not match session"));
+        assert!(
+            state.receipt_vault.get(&id).is_none(),
+            "poison receipt must not be vaulted"
+        );
+
+        // The legit client's matching receipt is accepted and vaulted.
+        let good = SignedReceipt::build(
+            Receipt::new(
+                (*state.receipt_context).clone(),
+                id.clone(),
+                1,
+                4_096,
+                octravpn_core::session::Blind::new([0x8D; 32]),
+            ),
+            &legit_client,
+            node_kp.as_ref(),
+        );
+        let body = parse_post_receipt(
+            post_receipt(State(state.clone()), Path(id.to_hex()), Json(good.clone()))
+                .await
+                .into_response(),
+        )
+        .await;
+        assert!(body.accepted);
+        assert_eq!(state.receipt_vault.get(&id), Some(good));
+    }
+
+    #[tokio::test]
+    async fn post_receipt_rejects_cross_session_path_replay_before_vaulting() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let client_kp = KeyPair::generate();
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let state = Arc::new(ControlState::new(node_kp.clone(), router, allowlist));
+        let signed_id = SessionId::new([0x7Bu8; 32]);
+        let path_id = SessionId::new([0x7Cu8; 32]);
+        let signed = SignedReceipt::build(
+            Receipt::new(
+                (*state.receipt_context).clone(),
+                signed_id.clone(),
+                1,
+                4_096,
+                octravpn_core::session::Blind::new([0x8C; 32]),
+            ),
+            &client_kp,
+            node_kp.as_ref(),
+        );
+        signed.verify().unwrap();
+
+        let (status, body) = status_and_body(
+            post_receipt(State(state.clone()), Path(path_id.to_hex()), Json(signed))
+                .await
+                .into_response(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST, "body = {body}");
+        assert!(body.contains("receipt session id mismatch"));
+        assert!(state.receipt_vault.get(&path_id).is_none());
+        assert!(state.receipt_vault.get(&signed_id).is_none());
     }
 
     /// P1-8/9: a fresh session starts at journal floor 0; the first

@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use octravpn_core::{address::Address, sig::KeyPair};
+use octravpn_core::{address::Address, chain_tx_queue, sig::KeyPair};
 use tracing::{info, warn};
 use x25519_dalek::StaticSecret;
 
@@ -42,15 +42,19 @@ pub(super) async fn build_hub(cfg: NodeConfig) -> Result<Hub> {
     let wallet = KeyPair::from_secret_bytes(&wallet_secret);
     let wallet_v2 = KeyPair::from_secret_bytes(&wallet_secret);
     let wallet_v3 = KeyPair::from_secret_bytes(&wallet_secret);
+    let wallet_v3_queue = Arc::new(KeyPair::from_secret_bytes(&wallet_secret));
 
-    // v2 tx-envelope chain-id binding (P1-5b). The numeric
-    // `cfg.chain.chain_id` (u32, e.g. `CHAIN_ID_DEVNET` 0x6F63_7464
-    // = "octd") is exposed at the tx layer as the human-readable
-    // strings the wallet + cast tooling already understand:
-    // mainnet -> "octra-mainnet", devnet -> "octra-devnet". Other
-    // values stringify to "octra-net-<hex>" so a future custom chain
-    // works without code changes.
-    let chain_id_str = chain_id_to_envelope_string(cfg.chain.chain_id);
+    // TX-ENVELOPE chain_id must be EMPTY. Reading the real node source
+    // (octra-labs/lite_node) confirmed the tx envelope has NO chain_id field
+    // (transaction.ml:156-168) — it is P2P-only — and `Transaction.verify`
+    // reconstructs the signed message WITHOUT it. Splicing a non-empty chain_id
+    // into the signed tx therefore makes the signature cover a field the chain
+    // strips -> `octra_submit` 101 invalid signature. This is confirmed
+    // empirically: the v3 queue (empty) submits fine on devnet, a non-empty one
+    // 101s. So ALL contexts sign with an empty envelope chain_id, matching the
+    // v3 queue. (The RECEIPT chain_id, bound into settlement_hash via
+    // ReceiptContext, is a SEPARATE thing and is unaffected.)
+    let chain_id_str = String::new();
 
     let chain = ChainCtx {
         rpc: rpc.clone(),
@@ -70,7 +74,14 @@ pub(super) async fn build_hub(cfg: NodeConfig) -> Result<Hub> {
     );
     // v3 chain context — same wallet, same RPC, talks to the v3
     // deployment configured under `program_addr`.
-    let chain_v3 = ChainCtxV3::new_with_chain_id(rpc, program_addr, wallet_v3, chain_id_str);
+    let chain_v3_queue = chain_tx_queue::spawn(rpc.clone(), wallet_v3_queue, String::new());
+    let chain_v3 = ChainCtxV3::new_with_chain_id_and_queue(
+        rpc,
+        program_addr,
+        wallet_v3,
+        chain_id_str,
+        Some(chain_v3_queue),
+    );
 
     // The on-disk file holds a single 32-byte master secret. Two
     // independent subkeys are derived via HKDF-Expand with distinct
@@ -137,6 +148,27 @@ pub(super) async fn build_hub(cfg: NodeConfig) -> Result<Hub> {
         journal = %journal_path.display(),
         "receipt journal fsync policy set"
     );
+
+    // v4 relay-settlement off-chain half: store full client-
+    // countersigned receipts independently of the fixed-width
+    // receipt-journal floor. The POST handler fsyncs each append
+    // before ACK, so a crash does not lose a receipt the client
+    // believes the operator accepted.
+    let vault_path: std::path::PathBuf = cfg.control.receipt_vault_path.clone().map_or_else(
+        || "./state/receipt-vault.bin".into(),
+        std::path::PathBuf::from,
+    );
+    let receipt_vault = Arc::new(
+        octravpn_core::receipt_vault::ReceiptVault::open(&vault_path)
+            .with_context(|| format!("open receipt vault at {}", vault_path.display()))?,
+    );
+    info!(vault = %vault_path.display(), "receipt vault opened");
+    if cfg.control.relay.enabled {
+        info!(
+            relay_expiry_epochs = cfg.control.relay.relay_expiry_epochs,
+            "v4 relay settlement caller enabled"
+        );
+    }
 
     // Perf-8 (audit-8 OOM-1): cap + TTL on the in-mem mirror so the
     // BTreeMap doesn't grow unbounded with every session that ever
@@ -235,6 +267,7 @@ pub(super) async fn build_hub(cfg: NodeConfig) -> Result<Hub> {
         allowlist,
         metrics,
         receipt_journal,
+        receipt_vault,
         pvac,
         wg_backend,
         wg_backend_selection,
@@ -262,6 +295,11 @@ pub(super) fn read_secret_32_strict(path: &str) -> Result<zeroize::Zeroizing<[u8
 /// `octra cast send --chain-id` accepts; other values stringify to
 /// `octra-net-<hex>` so an operator on a custom network doesn't have
 /// to round-trip through this file to add a new constant.
+///
+/// Retained for if/when a chain actually verifies a tx-envelope chain_id.
+/// Today it does NOT (see the empty `chain_id_str` above), so this has no
+/// production caller.
+#[allow(dead_code)]
 pub(super) fn chain_id_to_envelope_string(id: u32) -> String {
     use octravpn_core::receipt::{CHAIN_ID_DEVNET, CHAIN_ID_MAINNET};
     if id == CHAIN_ID_DEVNET {

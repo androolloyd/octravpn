@@ -154,6 +154,19 @@ jobs:
           cd proofs/tla
           java -cp /tmp/tla2tools.jar tlc2.TLC \
             -workers auto -deadlock OctraVPN_V2 -config OctraVPN_V2.cfg
+      - name: Run TLC (v4 relay settlement)
+        run: |
+          cd proofs/tla
+          java -cp /tmp/tla2tools.jar tlc2.TLC \
+            -workers auto -deadlock RelaySettlement -config RelaySettlement.cfg
+      - name: Run TLC (v4 relay quiet-zone negative control - must break at margin 0)
+        run: |
+          cd proofs/tla
+          out=$(java -cp /tmp/tla2tools.jar tlc2.TLC \
+            -workers auto -deadlock RelaySettlement -config RelaySettlement_NoMargin.cfg 2>&1 || true)
+          echo "$out" | grep -q "Invariant QuietZone is violated" \
+            || { echo "FAIL: expected QuietZone violation at zero margin (the margin clamp >= 1 is load-bearing)"; echo "$out" | tail -20; exit 1; }
+          echo "OK: zero-margin config breaks QuietZone as expected"
 
   tamarin:
     name: Tamarin prove

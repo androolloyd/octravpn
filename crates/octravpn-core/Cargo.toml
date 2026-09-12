@@ -48,7 +48,6 @@ aws-lc-rs       = { version = "1.17", default-features = false, features = ["aws
 hkdf            = { workspace = true }
 parking_lot     = { workspace = true }
 x25519-dalek    = { workspace = true }
-num-bigint-dig  = { workspace = true }
 num-integer     = { workspace = true }
 num-traits      = { workspace = true }
 subtle          = { workspace = true }

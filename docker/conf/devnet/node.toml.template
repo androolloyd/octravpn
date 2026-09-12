@@ -19,6 +19,13 @@ region              = "${REGION}"
 listen              = "0.0.0.0:51821"
 audit_dir           = "/tmp/octravpn-audit"
 
+# v4 relay-settlement caller path. Default-off for ordinary devnet
+# nodes; docker/devnet/v4-relay-e2e.sh renders a generated node1
+# config with this enabled for the relay-claim smoke.
+[control.relay]
+enabled             = false
+relay_expiry_epochs = 200
+
 [attestation]
 poll_interval_secs  = 60
 

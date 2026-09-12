@@ -463,13 +463,11 @@ impl Hub {
                 Ok(())
             }
             ProtocolVersion::V3 => {
-                let nonce = self.chain_v3.nonce().await?;
                 let fee = self.chain_v3.fee_or_fallback("contract_call").await;
                 let call = self
                     .chain_v3
-                    .build_settle_claim_call(session_id, bytes_used, fee, nonce);
-                let signed = self.chain_v3.sign_call(call)?;
-                let hash = self.chain_v3.submit_signed_tx(&signed).await?;
+                    .build_settle_claim_call(session_id, bytes_used, fee, 0);
+                let hash = self.chain_v3.submit_call(call).await?;
                 info!(%hash, session_id, bytes_used, "settle_claim (v3) submitted");
                 Ok(())
             }

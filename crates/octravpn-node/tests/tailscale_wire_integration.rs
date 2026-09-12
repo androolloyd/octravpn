@@ -21,7 +21,7 @@ use octravpn_mesh::{
         key_handler::OverTLSPublicKeyResponse,
         MachineRegistry,
     },
-    tailscale_wire_embedded_control_router, PreauthMinter, ServerNoiseKey, WireState,
+    tailscale_wire_embedded_control_router, tailscale_wire_router, PreauthMinter, ServerNoiseKey, WireState,
     DEFAULT_PREAUTH_TTL,
 };
 use std::sync::Arc;
@@ -123,12 +123,54 @@ fn machine_key_from_path(path: &str) -> Option<String> {
 }
 
 #[tokio::test]
-async fn embedded_control_router_uses_stock_public_routes_without_health() {
+async fn embedded_control_router_hides_public_routes_and_keeps_them_on_the_wire_listener() {
+    // The operator control port is a PRIVATE surface. 4343fdf restored its
+    // hidden-404 posture: only the stock-client wire paths (/key, /ts2021,
+    // /machine/ping-response) are mounted there and nothing else answers,
+    // so the node is not fingerprintable as headscale through the operator
+    // port. Full parity — including the public fingerprint routes — lives on
+    // the standalone wire listener (`tailscale_wire_router`). This test pins
+    // BOTH halves; an earlier version asserted /version and /robots.txt were
+    // 200 on the embedded router, which is the posture the fix removed.
     let (state, _minter, _dir) = build_state();
-    let app = tailscale_wire_embedded_control_router(state);
+    let embedded = tailscale_wire_embedded_control_router(state.clone());
+    let wire = tailscale_wire_router(state);
+
+    for uri in ["/version", "/robots.txt", "/health", "/definitely-not-an-octra-route"] {
+        let resp = embedded
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(uri)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            axum::http::StatusCode::NOT_FOUND,
+            "{uri} must not answer on the operator control port (hidden-404 posture)",
+        );
+    }
+
+    let key = embedded
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/key")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_ne!(
+        key.status(),
+        axum::http::StatusCode::NOT_FOUND,
+        "/key is a stock-client wire path and must be served on the operator port",
+    );
 
     for uri in ["/version", "/robots.txt"] {
-        let resp = app
+        let resp = wire
             .clone()
             .oneshot(
                 axum::http::Request::builder()
@@ -141,34 +183,10 @@ async fn embedded_control_router_uses_stock_public_routes_without_health() {
         assert_eq!(
             resp.status(),
             axum::http::StatusCode::OK,
-            "{uri} should come from headscale-rs' stock public control router",
+            "{uri} must keep full headscale parity on the standalone wire listener",
         );
     }
-
-    let health = app
-        .clone()
-        .oneshot(
-            axum::http::Request::builder()
-                .uri("/health")
-                .body(axum::body::Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(health.status(), axum::http::StatusCode::NOT_FOUND);
-
-    let unknown = app
-        .oneshot(
-            axum::http::Request::builder()
-                .uri("/definitely-not-an-octra-route")
-                .body(axum::body::Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(unknown.status(), axum::http::StatusCode::NOT_FOUND);
 }
-
 #[tokio::test]
 async fn key_then_register_then_map_round_trip() {
     let (state, minter, _dir) = build_state();

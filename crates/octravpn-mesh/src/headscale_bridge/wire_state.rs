@@ -23,8 +23,9 @@ use std::sync::Arc;
 use headscale_api::dns::{DnsConfigSpec, DnsStore};
 use headscale_api::policy::PolicyStore;
 use headscale_api::tailscale_wire::{
-    DerpMapStore, IpAllocator, KnockConfig, MachineRegistry, MapResponseDebugStore, PingTracker,
-    PreauthRedeemer, RegistrationCache, RuntimeConfigSnapshot, ServerNoiseKey, WireState,
+    derp::NativeDerpRuntime, DerpMapStore, IpAllocator, KnockConfig, MachineRegistry,
+    MapResponseDebugStore, PingTracker, PreauthRedeemer, RegistrationCache, RuntimeConfigSnapshot,
+    ServerNoiseKey, WireState,
 };
 
 /// Builds a [`WireState`] from the handles an octra wire surface must
@@ -37,6 +38,7 @@ pub struct WireStateBuilder {
     machines: Arc<MachineRegistry>,
     policy: Arc<PolicyStore>,
     derp_map: Arc<DerpMapStore>,
+    native_derp: Option<Arc<NativeDerpRuntime>>,
     knock: KnockConfig,
     base_domain: String,
 }
@@ -62,6 +64,7 @@ impl WireStateBuilder {
             machines,
             policy,
             derp_map,
+            native_derp: None,
             knock: KnockConfig::disabled(),
             base_domain: "octra.test".to_string(),
         }
@@ -81,6 +84,16 @@ impl WireStateBuilder {
         self
     }
 
+    /// Mount the native Rust DERP relay runtime at `/derp`.
+    ///
+    /// Defaults to `None`, preserving the existing sidecar-owned DERP
+    /// route unless the caller explicitly supplies a runtime.
+    #[must_use]
+    pub fn native_derp(mut self, native_derp: Option<Arc<NativeDerpRuntime>>) -> Self {
+        self.native_derp = native_derp;
+        self
+    }
+
     /// Materialise the [`WireState`].
     #[must_use]
     pub fn build(self) -> WireState {
@@ -91,7 +104,7 @@ impl WireStateBuilder {
             machines: self.machines,
             registration_store: None,
             derp_map: self.derp_map,
-            native_derp: None,
+            native_derp: self.native_derp,
             policy: self.policy,
             knock: self.knock,
             dns: Arc::new(DnsStore::from_spec(DnsConfigSpec {

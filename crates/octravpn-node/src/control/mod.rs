@@ -52,7 +52,9 @@ use tracing::info;
 
 pub(crate) use handlers::sweeper::run_sweeper;
 pub(crate) use metrics::NodeMetrics;
-pub(crate) use state::{ControlState, SessionAdmissionVerifier, ShadowSigner};
+pub(crate) use state::{
+    ControlState, RelayLifecycleVerifier, SessionAdmissionVerifier, ShadowSigner,
+};
 
 pub(crate) async fn serve(state: Arc<ControlState>, addr: SocketAddr) -> Result<()> {
     let router = state.router_axum();

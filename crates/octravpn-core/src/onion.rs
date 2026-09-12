@@ -92,6 +92,18 @@ struct HopHeader {
 /// `hops` lists the hops in order: entry, [middle...], exit. The exit
 /// hop's header is `HopAction::Egress` and the others' are `Forward`.
 /// The innermost layer carries `inner` plaintext.
+///
+/// SECURITY (audit F1 — do not remove without reading): every layer seals with
+/// a ZERO AEAD nonce (`wrap_layer`), which is safe ONLY because each call draws
+/// a fresh per-layer ephemeral key (Sphinx convention) AND this function has NO
+/// production caller — it is exercised only by tests + benches. A production
+/// caller that reuses a *stable* per-session ephemeral across packets (the
+/// Perf-#9 pinned-key path) would seal two packets under the same key + nonce =
+/// catastrophic ChaCha20-Poly1305 keystream reuse (plaintext recovery + Poly1305
+/// forgery). Before wiring a production caller, adopt a per-packet counter nonce
+/// (carried in the wire format) for the pinned-session path, or re-derive a
+/// fresh ephemeral per packet. The `build_onion_has_no_production_callers` test
+/// guards this invariant.
 pub fn build_onion(hops: &[HopBuildInput], inner: &[u8]) -> Result<Vec<u8>, OnionError> {
     if hops.is_empty() {
         return Err(OnionError::EmptyRoute);
@@ -416,6 +428,52 @@ fn parse_layer(plaintext: &[u8]) -> Result<PeeledLayer, OnionError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// SECURITY GUARD (audit F1): `build_onion` seals with a zero AEAD nonce and
+    /// is safe ONLY while it has no production caller (see its doc comment). This
+    /// test fails if any `crates/*/src/**` file OTHER than this one references
+    /// `build_onion`, i.e. a production caller appeared. If that is intentional,
+    /// a per-packet nonce for the pinned-session seal MUST land first — then
+    /// update this guard.
+    #[test]
+    fn build_onion_has_no_production_callers() {
+        fn scan(dir: &std::path::Path, self_file: &std::path::Path, hits: &mut Vec<String>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    // Only descend into `src` trees; skip benches/tests/target.
+                    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    if matches!(name, "target" | "benches" | "tests") {
+                        continue;
+                    }
+                    scan(&p, self_file, hits);
+                } else if p.extension().and_then(|x| x.to_str()) == Some("rs")
+                    && p != self_file
+                    && p.components().any(|c| c.as_os_str() == "src")
+                {
+                    if let Ok(s) = std::fs::read_to_string(&p) {
+                        if s.contains("build_onion") {
+                            hits.push(p.display().to_string());
+                        }
+                    }
+                }
+            }
+        }
+        // CARGO_MANIFEST_DIR = .../crates/octravpn-core; walk the crates/ root.
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let self_file = manifest.join("src/onion.rs");
+        let crates_root = manifest.parent().expect("crates/ dir");
+        let mut hits = Vec::new();
+        scan(crates_root, &self_file, &mut hits);
+        assert!(
+            hits.is_empty(),
+            "build_onion has a production caller (zero-nonce seal is unsafe until \
+             a per-packet nonce lands — see build_onion's SECURITY note): {hits:?}"
+        );
+    }
 
     fn fresh_static() -> ([u8; 32], StaticSecret) {
         let s = StaticSecret::random_from_rng(OsRng);

@@ -366,7 +366,17 @@ theorem mismatched_program_addr_detected
 
     Composes:
     `OctraVPN_Rust.Lemmas.receipt_cross_chain_rejected` +
-    `OctraVPN.WireProtocol.RpcEnvelope.chain_id_binding_rejects_replay`. -/
+    `OctraVPN.WireProtocol.RpcEnvelope.chain_id_binding_rejects_replay`.
+
+    Scope note (2026-08-17): this theorem is a *receipt-layer*
+    statement and stands on `receipt_cross_chain_rejected` alone —
+    the receipt's `chain_id` is bound in the client-signed payload
+    our AML program verifies in-program. The cited RpcEnvelope
+    theorem carries a scope caveat: the tx-envelope `chain_id`
+    binding is client/mock-side only; the real chain's envelope has
+    no `chain_id` field (see the caveat on
+    `chain_id_binding_rejects_replay` and
+    `docs/audit/known-limitations.md`). -/
 theorem cross_chain_replay_detected
     (circle : RegisteredCircle) (clientPk : PublicKey)
     (sessionId : SessionId) (seq : Nat) (bytesUsed price : Nat)

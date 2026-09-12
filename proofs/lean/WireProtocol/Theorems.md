@@ -469,6 +469,24 @@ Axioms introduced in `RpcEnvelope.lean`:
   `tx.rs::prop_chain_id_binding_rejects_replay` +
   `crates/octra-mock-rpc/tests/chain_id_binding.rs`.
 
+**Scope caveat on `chain_id_binding_rejects_replay` (2026-08-17
+upstream-source audit).** The v2 `chain_id` binding is a
+*client-and-mock-side* convention, not a chain-enforced property.
+The now-public node source (octra-labs/lite_node @ 75d9ed1) shows
+the chain's signing preimage has no `chain_id` field
+(`lib/core/transaction.ml:309-326`) and the parser drops unknown
+keys (`transaction.ml:273-306`), so the real chain *rejects* v2
+signatures outright (preimage re-derived without `chain_id`,
+`transaction.ml:335-341`). No production caller sets `chain_id`;
+real traffic is v1, which carries no cross-chain binding at the
+envelope layer. The chain's own replay resistance is same-chain
+only: nonce + spent-nonce set (`lib/core/ledger.ml:241-247`) and
+the ±300s timestamp window (`node_runtime/tx_view.ml:1125-1129`).
+Cross-chain binding for the settle path is enforced in-program at
+the receipt layer (`OctraVPN_Rust.Lemmas.receipt_cross_chain_rejected`).
+Full write-up: `docs/audit/known-limitations.md`, "Formal-proof
+model ↔ chain gaps".
+
 Theorem count: 5.
 
 ---

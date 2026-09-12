@@ -86,6 +86,12 @@ fuzz_target!(|data: &[u8]| {
                         // so a wildcard is required (and any future
                         // variant is likewise a non-panic rejection here).
                     }
+                    // RedeemError is #[non_exhaustive] from this crate's
+                    // point of view, so the compiler demands a wildcard.
+                    // A new error kind is still a non-panicking outcome
+                    // for this target: the invariant under test is
+                    // single-use, not the error taxonomy.
+                    Err(_) => {}
                 }
             }
             4 => {

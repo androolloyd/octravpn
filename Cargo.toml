@@ -106,7 +106,6 @@ curve25519-dalek = { version = "4", features = ["serde", "digest", "rand_core"] 
 chacha20poly1305 = "0.10"
 hkdf            = "0.12"
 x25519-dalek    = { version = "2", features = ["static_secrets"] }
-num-bigint-dig  = { version = "0.8", features = ["serde", "rand"] }
 num-integer     = "0.1"
 num-traits      = "0.2"
 subtle          = "2"

@@ -5,3 +5,10 @@ program_addr = "${PROGRAM_ADDR}"
 [wallet]
 addr        = "${CLIENT_ADDR}"
 secret_path = "/etc/octravpn/wallet.key"
+
+# v4 relay-settlement client arm path. Default-off for normal devnet
+# client use; docker/devnet/v4-relay-e2e.sh enables it in its generated
+# smoke config and labels any cast fallback explicitly.
+[v3.relay]
+enabled             = false
+relay_expiry_epochs = 200

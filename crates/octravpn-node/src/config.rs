@@ -55,6 +55,13 @@
 //!
 //!   [control]
 //!   listen = "127.0.0.1:51821"      # set 0.0.0.0 explicitly when exposing it
+//!   # Optional native Rust DERP relay on the Tailscale-wire HTTPS listener.
+//!   # Defaults off; existing Go derper sidecar deployments are unchanged.
+//!   [control.derp]
+//!   serve = false
+//!   [control.relay]
+//!   enabled = false
+//!   relay_expiry_epochs = 200
 //!
 //!   [attestation]
 //!   poll_interval_secs = 30          # how often to recheck operator stake
@@ -891,6 +898,14 @@ pub(crate) struct ControlCfg {
     /// P1-9.
     #[serde(default)]
     pub receipt_journal_path: Option<String>,
+    /// v4 relay-settlement receipt vault. Stores full client-
+    /// countersigned `SignedReceipt` JSON blobs for unilateral
+    /// relay-claim preimage recovery. Separate from
+    /// `receipt_journal_path`, whose file format is fixed-width
+    /// `[session_id, seq]` records only. `None` resolves to
+    /// `./state/receipt-vault.bin`.
+    #[serde(default)]
+    pub receipt_vault_path: Option<String>,
     /// Perf-1: durability policy for the receipt-seq journal's per-
     /// receipt `bump`. Two accepted values, default `"periodic"`:
     ///
@@ -945,6 +960,16 @@ pub(crate) struct ControlCfg {
     /// operators should set this to a long stable string.
     #[serde(default)]
     pub tailscale_tailnet_id: Option<String>,
+    /// Native DERP relay knobs for the embedded Tailscale-wire control
+    /// surface. Defaults disabled so existing deployments keep their
+    /// sidecar/fixture DERP map behavior.
+    #[serde(default)]
+    pub derp: ControlDerpCfg,
+    /// v4 relay-settlement Rust caller path. Defaults disabled so v3
+    /// `settle_claim` / `settle_confirm` remains settlement-of-record
+    /// until an operator explicitly opts in.
+    #[serde(default)]
+    pub relay: ControlRelayCfg,
 }
 
 impl Default for ControlCfg {
@@ -955,12 +980,156 @@ impl Default for ControlCfg {
             events_token: None,
             metrics_token: None,
             receipt_journal_path: None,
+            receipt_vault_path: None,
             fsync_policy: None,
             admin_token: None,
             tailscale_wire_state_dir: None,
             tailscale_tailnet_id: None,
+            derp: ControlDerpCfg::default(),
+            relay: ControlRelayCfg::default(),
         }
     }
+}
+
+/// `[control.derp]` — native Rust DERP relay.
+#[derive(Debug, Deserialize, Clone, Copy, Default)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ControlDerpCfg {
+    /// Serve DERP through the same Tailscale-wire HTTPS listener that
+    /// stock clients already use for the control connection. `false`
+    /// by default so the existing Go `cmd/derper` sidecar and
+    /// `OCTRAVPN_DERP_MAP_PATH` fixtures remain untouched until an
+    /// operator opts in.
+    #[serde(default)]
+    pub serve: bool,
+}
+
+/// `[control.relay]` — v4 relay-settlement caller path.
+#[derive(Debug, Deserialize, Clone, Copy)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ControlRelayCfg {
+    /// Master toggle. `false` by default so v3 remains the
+    /// settlement-of-record when the table is absent.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Epochs the client gives the operator to reveal the vaulted
+    /// receipt preimage after `arm_relay`.
+    #[serde(default = "default_relay_expiry_epochs")]
+    pub relay_expiry_epochs: u64,
+    /// Step 6: run the in-daemon autonomous relay-claimer. Requires
+    /// `enabled = true`. Default `false` — until an operator opts in the
+    /// claimer never spawns its loop and the daemon does no relay claiming.
+    #[serde(default)]
+    pub auto_claim: bool,
+    /// Seconds between claimer scan ticks. Clamped to `[5, 3600]`.
+    #[serde(default = "default_claim_scan_period_secs")]
+    pub claim_scan_period_secs: u64,
+    /// Claim only while `epoch + margin <= relay_deadline`, so a claim tx
+    /// can never confirm at/after the deadline (where it reverts and the
+    /// client may refund). Clamped to the I3 band `[1, 5]`.
+    #[serde(default = "default_claim_margin_epochs")]
+    pub claim_margin_epochs: u64,
+    /// Ticks a just-submitted (still-unconfirmed) claim is left alone before
+    /// the claimer would consider re-submitting. Clamped to `[1, 100]`.
+    #[serde(default = "default_quiescent_ticks")]
+    pub quiescent_ticks: u32,
+    /// Step 8b: run the permissionless keeper sweeper — rescues a permanently-
+    /// offline funder by sweeping an armed session neither claimed nor refunded
+    /// past the sweep grace (earns a bounty). Requires `enabled = true`. Default
+    /// `false`; separate from `auto_claim` (a node can claim without sweeping).
+    #[serde(default)]
+    pub auto_sweep: bool,
+    /// Seconds between sweeper scan ticks. Clamped to `[10, 3600]`.
+    #[serde(default = "default_sweep_scan_period_secs")]
+    pub sweep_scan_period_secs: u64,
+    /// Extra epochs the sweeper waits past the on-chain sweep threshold
+    /// (`deadline + get_sweep_grace()`) before submitting, so a live funder's
+    /// own refund window always closes first. Clamped to `[1, 20]`.
+    #[serde(default = "default_sweep_margin_epochs")]
+    pub sweep_margin_epochs: u64,
+    /// Max sessions the sweeper reads per tick (cursor-bounded scan of the full
+    /// session range, so a large chain does not blow up one tick). `[16, 4096]`.
+    #[serde(default = "default_sweep_batch")]
+    pub sweep_batch: u64,
+}
+
+impl Default for ControlRelayCfg {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            relay_expiry_epochs: default_relay_expiry_epochs(),
+            auto_claim: false,
+            claim_scan_period_secs: default_claim_scan_period_secs(),
+            claim_margin_epochs: default_claim_margin_epochs(),
+            quiescent_ticks: default_quiescent_ticks(),
+            auto_sweep: false,
+            sweep_scan_period_secs: default_sweep_scan_period_secs(),
+            sweep_margin_epochs: default_sweep_margin_epochs(),
+            sweep_batch: default_sweep_batch(),
+        }
+    }
+}
+
+impl ControlRelayCfg {
+    /// Scan period, clamped so a typo can't spin-loop (min 5s) or stall
+    /// claiming past a reasonable window (max 1h).
+    pub(crate) fn resolved_scan_period(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.claim_scan_period_secs.clamp(5, 3600))
+    }
+    /// Claim margin in epochs, clamped to the I3 non-overlap band `[1, 5]`.
+    /// The lower bound of 1 is load-bearing: a zero margin re-opens the
+    /// window where a claim confirms at/after the deadline and reveals the
+    /// preimage into a reverting tx.
+    pub(crate) fn resolved_margin_epochs(&self) -> u64 {
+        self.claim_margin_epochs.clamp(1, 5)
+    }
+    /// In-flight grace in ticks, clamped to `[1, 100]`.
+    pub(crate) fn resolved_quiescent_ticks(&self) -> u32 {
+        self.quiescent_ticks.clamp(1, 100)
+    }
+    /// Sweeper scan period, clamped `[10, 3600]` (slower than claim: sweep is a
+    /// rare rescue path).
+    pub(crate) fn resolved_sweep_period(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.sweep_scan_period_secs.clamp(10, 3600))
+    }
+    /// Extra sweep margin epochs, clamped `[1, 20]`. The lower bound of 1 keeps
+    /// the sweep strictly after the on-chain sweep threshold; the buffer absorbs
+    /// epoch-read staleness so a live funder always self-refunds first.
+    pub(crate) fn resolved_sweep_margin_epochs(&self) -> u64 {
+        self.sweep_margin_epochs.clamp(1, 20)
+    }
+    /// Sessions scanned per sweeper tick, clamped `[16, 4096]`.
+    pub(crate) fn resolved_sweep_batch(&self) -> u64 {
+        self.sweep_batch.clamp(16, 4096)
+    }
+}
+
+fn default_relay_expiry_epochs() -> u64 {
+    octravpn_core::v3_calls::RELAY_EXPIRY_DEFAULT_EPOCHS
+}
+
+fn default_claim_scan_period_secs() -> u64 {
+    60
+}
+
+fn default_claim_margin_epochs() -> u64 {
+    3
+}
+
+fn default_quiescent_ticks() -> u32 {
+    1
+}
+
+fn default_sweep_scan_period_secs() -> u64 {
+    300
+}
+
+fn default_sweep_margin_epochs() -> u64 {
+    3
+}
+
+fn default_sweep_batch() -> u64 {
+    256
 }
 
 /// Perf-1: TOML selector for the receipt-journal fsync policy.
@@ -1038,10 +1207,13 @@ impl fmt::Debug for ControlCfg {
             .field("events_token", &RedactedOpt(&self.events_token))
             .field("metrics_token", &RedactedOpt(&self.metrics_token))
             .field("receipt_journal_path", &self.receipt_journal_path)
+            .field("receipt_vault_path", &self.receipt_vault_path)
             .field("fsync_policy", &self.fsync_policy)
             .field("admin_token", &RedactedOpt(&self.admin_token))
             .field("tailscale_wire_state_dir", &self.tailscale_wire_state_dir)
             .field("tailscale_tailnet_id", &self.tailscale_tailnet_id)
+            .field("derp", &self.derp)
+            .field("relay", &self.relay)
             .finish()
     }
 }
@@ -1113,6 +1285,98 @@ region = "eu-west"
     fn baseline_parses() {
         let cfg: NodeConfig = ::toml::from_str(MIN_TOML).expect("baseline TOML must parse");
         assert_eq!(cfg.pricing.price_per_mb, 100);
+        assert!(!cfg.control.derp.serve);
+        assert!(!cfg.control.relay.enabled);
+    }
+
+    #[test]
+    fn control_derp_serve_defaults_off_and_parses_true() {
+        let default_cfg: NodeConfig = ::toml::from_str(MIN_TOML).expect("baseline TOML must parse");
+        assert!(!default_cfg.control.derp.serve);
+
+        let toml_str = format!("{MIN_TOML}\n[control.derp]\nserve = true\n");
+        let cfg: NodeConfig = ::toml::from_str(&toml_str).expect("native DERP TOML must parse");
+        assert!(cfg.control.derp.serve);
+    }
+
+    #[test]
+    fn control_relay_defaults_off_and_parses_true() {
+        let default_cfg: NodeConfig = ::toml::from_str(MIN_TOML).expect("baseline TOML must parse");
+        assert!(!default_cfg.control.relay.enabled);
+        assert_eq!(
+            default_cfg.control.relay.relay_expiry_epochs,
+            octravpn_core::v3_calls::RELAY_EXPIRY_DEFAULT_EPOCHS
+        );
+
+        let toml_str =
+            format!("{MIN_TOML}\n[control.relay]\nenabled = true\nrelay_expiry_epochs = 10\n");
+        let cfg: NodeConfig = ::toml::from_str(&toml_str).expect("relay TOML must parse");
+        assert!(cfg.control.relay.enabled);
+        assert_eq!(cfg.control.relay.relay_expiry_epochs, 10);
+    }
+
+    #[test]
+    fn control_relay_auto_claim_defaults_off_and_parses() {
+        let default_cfg: NodeConfig = ::toml::from_str(MIN_TOML).expect("baseline TOML must parse");
+        assert!(!default_cfg.control.relay.auto_claim);
+        assert_eq!(default_cfg.control.relay.claim_scan_period_secs, 60);
+        assert_eq!(default_cfg.control.relay.claim_margin_epochs, 3);
+        assert_eq!(default_cfg.control.relay.quiescent_ticks, 1);
+
+        let toml_str = format!(
+            "{MIN_TOML}\n[control.relay]\nenabled = true\nauto_claim = true\nclaim_scan_period_secs = 30\nclaim_margin_epochs = 2\n"
+        );
+        let cfg: NodeConfig = ::toml::from_str(&toml_str).expect("relay TOML must parse");
+        assert!(cfg.control.relay.auto_claim);
+        assert_eq!(cfg.control.relay.claim_scan_period_secs, 30);
+        assert_eq!(cfg.control.relay.claim_margin_epochs, 2);
+    }
+
+    #[test]
+    fn control_relay_resolved_accessors_clamp() {
+        // Margin clamps to the I3 band [1,5]: a 0 margin (preimage-leak window)
+        // becomes 1; an oversized margin becomes 5.
+        let mut relay = ControlRelayCfg {
+            claim_margin_epochs: 0,
+            claim_scan_period_secs: 0,
+            quiescent_ticks: 0,
+            ..ControlRelayCfg::default()
+        };
+        assert_eq!(relay.resolved_margin_epochs(), 1);
+        assert_eq!(relay.resolved_scan_period().as_secs(), 5); // min 5s, no spin-loop
+        assert_eq!(relay.resolved_quiescent_ticks(), 1);
+
+        relay.claim_margin_epochs = 10;
+        relay.claim_scan_period_secs = 100_000;
+        relay.quiescent_ticks = 10_000;
+        assert_eq!(relay.resolved_margin_epochs(), 5);
+        assert_eq!(relay.resolved_scan_period().as_secs(), 3600); // max 1h
+        assert_eq!(relay.resolved_quiescent_ticks(), 100);
+    }
+
+    #[test]
+    fn control_relay_sweep_accessors_clamp_and_default_off() {
+        let d = ControlRelayCfg::default();
+        assert!(!d.auto_sweep);
+        assert_eq!(d.sweep_scan_period_secs, 300);
+        assert_eq!(d.sweep_margin_epochs, 3);
+        assert_eq!(d.sweep_batch, 256);
+
+        let mut r = ControlRelayCfg {
+            sweep_margin_epochs: 0,
+            sweep_scan_period_secs: 1,
+            sweep_batch: 1,
+            ..ControlRelayCfg::default()
+        };
+        assert_eq!(r.resolved_sweep_margin_epochs(), 1);
+        assert_eq!(r.resolved_sweep_period().as_secs(), 10); // min 10s
+        assert_eq!(r.resolved_sweep_batch(), 16); // min 16
+        r.sweep_margin_epochs = 99;
+        r.sweep_scan_period_secs = 100_000;
+        r.sweep_batch = 99_999;
+        assert_eq!(r.resolved_sweep_margin_epochs(), 20);
+        assert_eq!(r.resolved_sweep_period().as_secs(), 3600);
+        assert_eq!(r.resolved_sweep_batch(), 4096);
     }
 
     /// Perf-1: a default-built `ControlCfg` (operator omits the field)

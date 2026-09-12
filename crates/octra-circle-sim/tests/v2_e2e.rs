@@ -10,7 +10,12 @@
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use octra_circle_sim::{AclRule, CircleConfig, CircleSim, ExitClass, MemberTag, RpcChain};
-use octravpn_core::{address::Address, rpc::RpcClient, sig::KeyPair, tx::sign_call};
+use octravpn_core::{
+    address::Address,
+    rpc::{next_nonce, RpcClient},
+    sig::KeyPair,
+    tx::sign_call,
+};
 use serde_json::json;
 use tokio::time::sleep;
 
@@ -51,7 +56,7 @@ async fn submit(
         "params": params,
         "value": value,
         "fee": fee,
-        "nonce": bal.pending_nonce.max(bal.nonce),
+        "nonce": next_nonce(&bal),
     });
     let signed = sign_call(kp, call).expect("sign");
     let r = rpc.submit(&signed).await.expect("submit");

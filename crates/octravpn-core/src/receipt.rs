@@ -54,6 +54,7 @@ use crate::{
 };
 
 pub const DOMAIN_RECEIPT: &[u8] = b"octravpn-receipt-v1";
+pub const DOMAIN_SETTLEMENT_PREIMAGE: &[u8] = b"octravpn-settle-v1|";
 
 /// Stable chain-id constants. Octra doesn't expose a native `chain_id`
 /// on its JSON-RPC (the network identity is a property of the
@@ -308,6 +309,36 @@ impl SignedReceipt {
     /// True iff the receipt carries any HFHE-2 shadow blob fields.
     pub fn has_shadow(&self) -> bool {
         self.enc_bytes_used.is_some() || self.enc_net.is_some() || self.pvac_zero_proof.is_some()
+    }
+
+    /// Canonical settlement PREIMAGE: a deterministic, domain-tagged
+    /// ASCII string that binds the metering payload and both signatures.
+    ///
+    /// Encoding:
+    ///   b"octravpn-settle-v1|"
+    ///   || signing_payload() (32 B)
+    ///   || client_pubkey.0   (32 B)
+    ///   || client_sig.0      (64 B)
+    ///   || node_pubkey.0     (32 B)
+    ///   || node_sig.0        (64 B)
+    /// then standard padded base64 of the whole buffer.
+    pub fn settlement_preimage(&self) -> String {
+        let signing_payload = self.receipt.signing_payload();
+        let mut raw = Vec::with_capacity(DOMAIN_SETTLEMENT_PREIMAGE.len() + 32 + 32 + 64 + 32 + 64);
+        raw.extend_from_slice(DOMAIN_SETTLEMENT_PREIMAGE);
+        raw.extend_from_slice(&signing_payload);
+        raw.extend_from_slice(&self.client_pubkey.0);
+        raw.extend_from_slice(&self.client_sig.0);
+        raw.extend_from_slice(&self.node_pubkey.0);
+        raw.extend_from_slice(&self.node_sig.0);
+        crate::b64::encode(raw)
+    }
+
+    /// 64-char lowercase-hex sha256 of `settlement_preimage()`'s raw
+    /// UTF-8 bytes. This matches AML `sha256(preimage)` for the
+    /// base64 ASCII string passed to `relay_claim`.
+    pub fn settlement_hash(&self) -> String {
+        hex::encode(Sha256::digest(self.settlement_preimage().as_bytes()))
     }
 
     pub fn verify(&self) -> Result<(), ReceiptError> {
@@ -734,6 +765,127 @@ mod tests {
             Blind::new([0u8; 32]),
         );
         assert_eq!(r.signing_payload().len(), 32);
+    }
+
+    #[test]
+    fn settlement_hash_is_deterministic_and_matches_documented_preimage_layout() {
+        let client = KeyPair::from_secret_bytes(&[0xC1; 32]);
+        let node = KeyPair::from_secret_bytes(&[0xA7; 32]);
+        let receipt = Receipt::new(
+            ctx_v1(0x44),
+            SessionId::new([0x22u8; 32]),
+            17,
+            1_234_567,
+            Blind::new([0x33u8; 32]),
+        );
+        let sr = SignedReceipt::build(receipt, &client, &node);
+
+        let mut raw = Vec::new();
+        raw.extend_from_slice(DOMAIN_SETTLEMENT_PREIMAGE);
+        raw.extend_from_slice(&sr.receipt.signing_payload());
+        raw.extend_from_slice(&sr.client_pubkey.0);
+        raw.extend_from_slice(&sr.client_sig.0);
+        raw.extend_from_slice(&sr.node_pubkey.0);
+        raw.extend_from_slice(&sr.node_sig.0);
+
+        let expected_preimage = crate::b64::encode(&raw);
+        let expected_hash = hex::encode(Sha256::digest(expected_preimage.as_bytes()));
+
+        assert_eq!(sr.settlement_preimage(), expected_preimage);
+        assert_eq!(sr.settlement_hash(), expected_hash);
+        assert_eq!(sr.settlement_hash(), sr.settlement_hash());
+
+        let decoded = crate::b64::decode(sr.settlement_preimage()).unwrap();
+        assert_eq!(decoded, raw);
+        assert_eq!(decoded.len(), 19 + 32 + 32 + 64 + 32 + 64);
+        assert_eq!(&decoded[..19], DOMAIN_SETTLEMENT_PREIMAGE);
+    }
+
+    #[test]
+    fn settlement_hash_changes_and_verify_fails_after_signed_field_tamper() {
+        let client = fresh_kp();
+        let node = fresh_kp();
+        let receipt = Receipt::new(
+            ctx_v1(0x44),
+            SessionId::new([0x22u8; 32]),
+            17,
+            1_234_567,
+            Blind::new([0x33u8; 32]),
+        );
+        let mut sr = SignedReceipt::build(receipt, &client, &node);
+        let original_preimage = sr.settlement_preimage();
+        let original_hash = sr.settlement_hash();
+
+        sr.receipt.bytes_used += 1;
+
+        assert_ne!(sr.settlement_preimage(), original_preimage);
+        assert_ne!(sr.settlement_hash(), original_hash);
+        assert!(matches!(
+            sr.verify().unwrap_err(),
+            ReceiptError::BadClientSig
+        ));
+    }
+
+    #[test]
+    fn missing_or_garbage_countersignatures_change_hash_and_fail_verify() {
+        let client = fresh_kp();
+        let node = fresh_kp();
+        let receipt = Receipt::new(
+            ctx_v1(0x55),
+            SessionId::new([0x66u8; 32]),
+            9,
+            8192,
+            Blind::new([0x77u8; 32]),
+        );
+        let sr = SignedReceipt::build(receipt, &client, &node);
+        let original_hash = sr.settlement_hash();
+
+        let mut missing_client_sig = sr.clone();
+        missing_client_sig.client_sig = Signature([0u8; 64]);
+        assert_ne!(missing_client_sig.settlement_hash(), original_hash);
+        assert!(matches!(
+            missing_client_sig.verify().unwrap_err(),
+            ReceiptError::BadClientSig
+        ));
+
+        let mut missing_node_sig = sr.clone();
+        missing_node_sig.node_sig = Signature([0u8; 64]);
+        assert_ne!(missing_node_sig.settlement_hash(), original_hash);
+        assert!(matches!(
+            missing_node_sig.verify().unwrap_err(),
+            ReceiptError::BadNodeSig
+        ));
+    }
+
+    #[test]
+    fn cross_session_or_amount_inflation_changes_hash_and_fails_verify() {
+        let client = fresh_kp();
+        let node = fresh_kp();
+        let receipt = Receipt::new(
+            ctx_v1(0x66),
+            SessionId::new([0x10u8; 32]),
+            3,
+            4_096,
+            Blind::new([0x11u8; 32]),
+        );
+        let sr = SignedReceipt::build(receipt, &client, &node);
+        let original_hash = sr.settlement_hash();
+
+        let mut wrong_session = sr.clone();
+        wrong_session.receipt.session_id = SessionId::new([0x20u8; 32]);
+        assert_ne!(wrong_session.settlement_hash(), original_hash);
+        assert!(matches!(
+            wrong_session.verify().unwrap_err(),
+            ReceiptError::BadClientSig
+        ));
+
+        let mut inflated_amount = sr;
+        inflated_amount.receipt.bytes_used *= 2;
+        assert_ne!(inflated_amount.settlement_hash(), original_hash);
+        assert!(matches!(
+            inflated_amount.verify().unwrap_err(),
+            ReceiptError::BadClientSig
+        ));
     }
 
     // ====================================================================

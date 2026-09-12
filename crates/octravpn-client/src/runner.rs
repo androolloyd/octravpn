@@ -6,10 +6,11 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Result};
 use octravpn_core::{
     address::Address,
+    chain_tx_queue::{self, ChainTxQueueHandle},
     commit::{commit, fresh_blind},
     onion::MAX_HOPS,
     receipt::ReceiptContext,
-    rpc::RpcClient,
+    rpc::{next_nonce, RpcClient},
     session::{SessionId, ValidatorRecord},
     sig::KeyPair,
     stealth,
@@ -18,20 +19,22 @@ use parking_lot::Mutex;
 use serde_json::json;
 use tracing::{info, warn};
 
-use crate::{config::ClientConfig, discover, settler, wallet};
+use crate::{config::ClientConfig, discover, settle_state, settler, wallet};
 
 pub(crate) struct Client {
     rpc: RpcClient,
     http: reqwest::Client,
     program_addr: Address,
     wallet_addr: Address,
-    wallet_kp: KeyPair,
+    wallet_kp: Arc<KeyPair>,
+    chain_tx_queue: ChainTxQueueHandle,
     /// Deployment domain bound into every receipt the client verifies /
     /// co-signs. v1.2 P1-5: receipt is non-replayable across programs,
     /// chains, or circles. v1.1 clients leave `circle_id = None`; v2
     /// clients overwrite it once they've fetched the operator's circle
     /// (see the v2 discovery path).
     receipt_context: ReceiptContext,
+    relay: crate::config::V3RelayCfg,
     pub state: Mutex<Option<ActiveSession>>,
 }
 
@@ -40,6 +43,7 @@ pub(crate) struct ActiveSession {
     pub session_kp: KeyPair,
     pub open_tx_hash: String,
     pub route: Vec<RouteHop>,
+    pub deposit: u64,
 }
 
 #[derive(Clone)]
@@ -63,24 +67,42 @@ impl Client {
             .context("build http client")?;
         let program_addr = Address::from_display(&cfg.chain.program_addr);
         let wallet_addr = Address::from_display(&cfg.wallet.addr);
-        let wallet_kp = wallet::load_keypair(&cfg.wallet.secret_path)?;
+        let wallet_kp = Arc::new(wallet::load_keypair(&cfg.wallet.secret_path)?);
         // Receipt domain: v1.1 clients leave circle_id = None; v2 clients
         // discover circle_id from the operator's policy bundle and call
         // `set_receipt_circle` before opening a session.
         let receipt_context = ReceiptContext::v1_1(program_addr.clone(), cfg.chain.chain_id);
-        Ok(Self {
+        let relay = cfg.v3.relay.clone();
+        // TX-ENVELOPE chain_id is left EMPTY to match the node's ChainCtxV3
+        // (all production ctors use String::new()). Devnet/mainnet do not verify
+        // a v2 tx-envelope chain_id binding: splicing one makes the signature
+        // cover a field the chain re-serializes without -> octra_submit 101
+        // "invalid signature". The RECEIPT chain_id binding (settlement_hash via
+        // receipt_context above) is a separate, needed thing and stays.
+        let chain_tx_queue = chain_tx_queue::spawn(rpc.clone(), wallet_kp.clone(), String::new());
+        let client = Self {
             rpc,
             http,
             program_addr,
             wallet_addr,
             wallet_kp,
+            chain_tx_queue,
             receipt_context,
+            relay,
             state: Mutex::new(None),
-        })
+        };
+        settle_state::replay_pending_for_client(&client)
+            .await
+            .context("replay pending relay settlement state")?;
+        Ok(client)
     }
 
     pub(crate) fn receipt_context(&self) -> &ReceiptContext {
         &self.receipt_context
+    }
+
+    pub(crate) fn relay_config(&self) -> crate::config::V3RelayCfg {
+        self.relay.clone()
     }
 
     /// Return a receipt context with `circle_id = Some(circle)` so v2
@@ -114,7 +136,23 @@ impl Client {
     }
 
     pub(crate) fn wallet_kp(&self) -> &KeyPair {
-        &self.wallet_kp
+        self.wallet_kp.as_ref()
+    }
+
+    pub(crate) fn chain_tx_queue(&self) -> ChainTxQueueHandle {
+        self.chain_tx_queue.clone()
+    }
+
+    pub(crate) fn arm_environment(&self) -> settle_state::ArmEnvironment {
+        settle_state::ArmEnvironment {
+            program_addr: self.program_addr.clone(),
+            wallet_addr: self.wallet_addr.clone(),
+            relay_expiry_epochs: self.relay.relay_expiry_epochs,
+        }
+    }
+
+    pub(crate) fn open_settle_state(&self) -> Result<settle_state::SettleStateStore> {
+        settle_state::SettleStateStore::open(&self.relay.state_dir, &self.wallet_addr)
     }
 
     pub(crate) fn print_identity(&self) {
@@ -200,7 +238,7 @@ impl Client {
             .map(|h| h.validator.addr.display().to_string())
             .unwrap_or_default();
         let bal = self.rpc.balance(&self.wallet_addr).await?;
-        let nonce = bal.pending_nonce.max(bal.nonce);
+        let nonce = next_nonce(&bal);
         let fee = self
             .rpc
             .recommended_fee(Some("contract_call"))
@@ -232,7 +270,11 @@ impl Client {
             session_kp,
             open_tx_hash: r.hash,
             route,
+            deposit,
         });
+        if self.relay_config().enabled {
+            self.open_settle_state()?.record_proposed(&session_id)?;
+        }
 
         // 5. Build the onion + bring up the tunnel via boringtun.
         //    This is the data-plane piece — a real WireGuard handshake
@@ -289,19 +331,26 @@ async fn announce_to_exit(client: &Client) -> Result<()> {
         let client_wg_pubkey =
             x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(client_wg_secret))
                 .to_bytes();
+        let client_sig_payload = octravpn_core::control::announce_signing_payload(
+            &active.session_id,
+            &active.session_kp.public,
+            &client_wg_pubkey,
+            &active.open_tx_hash,
+        );
+        let opener_sig_payload = octravpn_core::control::announce_opener_binding_payload(
+            &active.session_id,
+            &active.session_kp.public,
+            &client_wg_pubkey,
+            &active.open_tx_hash,
+        );
         let body = octravpn_core::control::AnnounceSessionRequest {
             session_id: active.session_id.clone(),
             client_pubkey: active.session_kp.public,
             client_wg_pubkey,
             open_tx_hash: active.open_tx_hash.clone(),
-            client_sig: active
-                .session_kp
-                .sign(&octravpn_core::control::announce_signing_payload(
-                    &active.session_id,
-                    &active.session_kp.public,
-                    &client_wg_pubkey,
-                    &active.open_tx_hash,
-                )),
+            client_sig: active.session_kp.sign(&client_sig_payload),
+            opener_pubkey: client.wallet_kp().public,
+            opener_sig: client.wallet_kp().sign(&opener_sig_payload),
         };
         (ctrl_endpoint, body)
     };

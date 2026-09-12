@@ -84,3 +84,9 @@ name = "fuzz_preauth_redeem"
 path = "fuzz_targets/fuzz_preauth_redeem.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "fuzz_vault_record_decode"
+path = "fuzz_targets/fuzz_vault_record_decode.rs"
+test = false
+doc = false

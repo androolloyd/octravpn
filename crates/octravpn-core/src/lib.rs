@@ -15,6 +15,7 @@ pub mod b64;
 pub mod backend;
 pub mod bearer;
 pub mod bounded;
+pub mod chain_tx_queue;
 pub mod commit;
 pub mod control;
 pub mod earnings;
@@ -22,10 +23,13 @@ pub mod enroll;
 pub mod onion;
 pub mod receipt;
 pub mod receipt_journal;
+pub(crate) mod receipt_log;
+pub mod receipt_vault;
 pub mod rpc;
 pub mod session;
 pub mod spki_verifier;
 pub mod stealth;
+pub mod tx_signer;
 pub mod v3_calls;
 pub mod v3_canonical;
 pub mod v3_members;
@@ -36,10 +40,15 @@ pub mod validator_oracle;
 pub use backend::{OctraBackend, PlaceholderBackend, RpcBackend};
 
 pub use address::{Address, ADDRESS_LEN};
+pub use chain_tx_queue::ChainTxQueueHandle;
 pub use earnings::{LedgerPoint, POINT_LEN};
 pub use enroll::{EnrollChallenge, EnrollPeer, EnrollRequest, EnrollResponse};
 pub use receipt::{Receipt, ReceiptError, SignedReceipt};
+pub use receipt_vault::{ReceiptVault, ReceiptVaultError};
 pub use session::{
     EndpointRecord, OpenSessionParams, RouteOpening, SessionId, SessionState, ValidatorRecord,
 };
 pub use sig::{KeyPair, PublicKey, Signature};
+// The chain-canonical tx signer (`transaction.ml` parity). Authoritative
+// over the re-exported `tx` module above for anything hitting a real node.
+pub use tx_signer::CanonicalTx;

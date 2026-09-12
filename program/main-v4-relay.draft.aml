@@ -1,0 +1,492 @@
+// OctraVPN v4 — RELAY-SETTLEMENT FALLBACK (DRAFT, not wired, not deployed).
+//
+// STATUS: DESIGN DRAFT. This file is the AML surface for the P0.3
+// unilateral relay-settlement rail. It is NOT compiled into any deploy
+// and is NOT the on-chain program today. Companion design doc:
+//   docs/design/v4-relay-settlement.md
+//
+// ============================================================
+// WHAT HOLE THIS CLOSES
+// ============================================================
+//
+// The live v3 program (program/main-v3.aml) settles a session in TWO
+// txs: the operator records bytes via `settle_claim`, then the CLIENT
+// finalises payment via `settle_confirm`. That second tx is gated at
+// program/main-v3.aml:553 by:
+//
+//     require(self.session_opener[session_id] == caller, "only opener can confirm")
+//
+// So settlement is CLIENT-DRIVEN and terminal only when the client
+// submits it. If the client goes dark after the session — a crash, a
+// dropped link, a killed process, or plain griefing — the operator
+// gets NOTHING even though a valid, dual-signed receipt already
+// exists: crates/octravpn-client/src/settler.rs builds the
+// countersigned `SignedReceipt` (settler.rs:80-90) and stashes it
+// locally; the chain never sees the client's countersignature. After
+// the grace window anyone can `sweep_expired_session`
+// (program/main-v3.aml:618) and the deposit is refunded to the tailnet
+// treasury — the operator, who actually served the traffic, is paid 0.
+//
+// ============================================================
+// THE FIX: a sha256-preimage hashlock (HTLC-shaped)
+// ============================================================
+//
+// We add an OPERATOR-driven, UNILATERAL settlement path gated by a
+// sha256 preimage reveal. No `fhe_*` host calls, no native circle_call
+// / circle_outbox ops — only `sha256()`, which is PROVEN on devnet at
+// program/main-v3.aml:590 (`let bh = sha256(settle_blinding)`). This is
+// the READY-NOW fallback with zero chain-side unknowns.
+//
+// Mechanism (full walk-through in the design doc):
+//
+//   1. Client and operator run the session and exchange incremental
+//      receipts exactly as in v3 (crates/.../control/handlers/receipt.rs
+//      GET /session/:id). The operator streams service only as long as
+//      the client keeps countersigning — the operator's exposure is
+//      bounded to one receipt interval, unchanged from today.
+//
+//   2. At the final checkpoint the client countersigns the final
+//      dual-signed receipt R (settler.rs:80). It computes the
+//      commitment
+//
+//          H = sha256( SignedReceipt::settlement_preimage(R) )
+//
+//      where `settlement_preimage` is a canonical STRING that binds the
+//      receipt payload AND BOTH signatures (see receipt.rs design in
+//      the doc). H is a 64-char lowercase-hex sha256 digest — the exact
+//      shape v3 already stores for `circle_state_root` etc.
+//
+//   3. The client hands R back to the operator over a NEW control route
+//      `POST /session/:id/receipt` (design doc; new handler in
+//      crates/octravpn-node/src/control/handlers/receipt.rs, new route
+//      in crates/octravpn-node/src/control/router.rs). The operator
+//      verifies the dual-sig, confirms `sha256(preimage)==H`, and
+//      persists R to a NEW variable-length receipt-vault store (design
+//      doc; NOT a receipt_journal extension — that journal is a
+//      fixed-width 44-byte record, see
+//      crates/octravpn-core/src/receipt_journal/codec.rs:17).
+//
+//   4. The client ARMS the escrow on-chain (`arm_relay`, or opens
+//      straight into the armed state via `open_relay_session`),
+//      committing `(H, net)` and a `relay_deadline`. This is the LAST
+//      client-liveness point — after this the client may vanish.
+//
+//   5. The operator, holding R (== the preimage), calls
+//      `relay_claim(session_id, preimage)` UNILATERALLY. The gate is a
+//      single sha256 equality:
+//
+//          require(sha256(preimage) == self.session_settlement_hash[sid], ...)
+//
+//      Possessing the preimage proves the client countersigned R for
+//      exactly `net` (its signature is inside the preimage), so the
+//      reveal is self-authorising. The operator is credited `net` in
+//      the same earnings ledger + hash-chain v3 uses.
+//
+//   6. If the operator never reveals before `relay_deadline`, the
+//      client reclaims the deposit with `relay_refund` (no-show). A
+//      longer `relay_sweep` grace lets anyone recover funds if BOTH
+//      parties vanish, mirroring `sweep_expired_session`.
+//
+// ============================================================
+// HONEST CAVEATS
+// ============================================================
+//
+//  * The AML checks ONLY `sha256(preimage) == H`. It does NOT parse the
+//    receipt or verify ed25519 — an AML `string`/`bytes` param is an
+//    undecoded JSON string (`len()` is char count). Metering
+//    correctness comes from the OFF-CHAIN dual-sig exchange: the
+//    operator refuses to persist / claim against a preimage whose
+//    embedded `net` disagrees with what it metered, and the client
+//    only commits H for a receipt it actually countersigned. The chain
+//    enforces "operator can pull at most `net`, and only by revealing
+//    the client-agreed preimage."
+//
+//  * Arming (step 4) is still a client tx. This rail moves the last
+//    required client action EARLIER (as soon as the final receipt is
+//    agreed, decoupled from teardown) and shifts the TERMINAL, paying
+//    action to the OPERATOR — who has every incentive to complete it.
+//    `open_relay_session` collapses the client's liveness requirement to
+//    a single tx at session start (pre-quoted deposit).
+//
+//  * This is the AML FALLBACK (works with today's proven op-set). The
+//    native `circle_outbox_open` / `relay_claim` circle-call rail
+//    (roadmap P2.1) is UNCONFIRMED on devnet — native circle_call +
+//    relay ops execution has never been observed to settle. Do not
+//    build on it until a probe confirms it. This draft deliberately
+//    does not.
+//
+// ============================================================
+// PRESENTATION
+// ============================================================
+//
+// This draft is written as the ADDITIVE surface to MERGE INTO the
+// existing `contract OctraVPN_V3` in program/main-v3.aml. Members
+// marked `// [v3]` already exist there (shown only for context, with
+// `// ...` eliding the rest of the block) and MUST NOT be
+// re-declared on merge. Members marked `// [NEW v4-relay]` are the
+// additions. All value / id / amount fields are UNSIGNED (`uint`) to
+// satisfy the compiler's native value-safety verifier
+// (aml_safety_report_v1).
+
+contract OctraVPN_V3 {
+
+  // ============================================================
+  // Constants
+  // ============================================================
+
+  const BPS_DENOM: uint = 10000               // [v3]
+  const PROTOCOL_FEE_DEFAULT_BPS: uint = 50   // [v3]
+  // ... other v3 constants elided ...
+
+  // session.status — [v3] values 0..2 already defined:
+  //   SESSION_OPEN = 0, SESSION_SETTLED = 1, SESSION_REFUNDED = 2
+  const SESSION_OPEN: uint = 0                 // [v3]
+  const SESSION_SETTLED: uint = 1              // [v3]
+  const SESSION_REFUNDED: uint = 2             // [v3]
+
+  // [NEW v4-relay] relay-lane session statuses. Kept in a distinct
+  // numeric range so the v3 settle_claim / settle_confirm / sweep
+  // paths — all of which `require(status == SESSION_OPEN)` — lock out
+  // automatically the instant a session is armed into the relay lane.
+  const SESSION_RELAY_ARMED: uint = 3          // [NEW v4-relay]
+  const SESSION_RELAY_CLAIMED: uint = 4        // [NEW v4-relay]
+  const SESSION_RELAY_REFUNDED: uint = 5       // [NEW v4-relay]
+
+  // [NEW v4-relay] Default number of epochs the operator has to reveal
+  // the preimage before the client may refund. Chosen >= v3
+  // session_grace_epochs so an operator that is briefly offline at
+  // teardown is not griefed out of a settlement it earned. Callers may
+  // pass a per-session override bounded by relay_expiry_min/max below.
+  const RELAY_EXPIRY_DEFAULT_EPOCHS: uint = 200   // [NEW v4-relay]
+  const RELAY_EXPIRY_MIN_EPOCHS: uint = 10        // [NEW v4-relay]
+  const RELAY_EXPIRY_MAX_EPOCHS: uint = 100000    // [NEW v4-relay]
+
+  // ============================================================
+  // Events
+  // ============================================================
+
+  // [v3] SessionOpened / SettleConfirmed / SessionSettled /
+  // SessionRefunded / EarningsCommitted already defined — reused below.
+  event SessionSettled(session_id: uint, circle: address, net: uint, refund: uint)      // [v3]
+  event EarningsCommitted(circle: address, new_total: uint, chain_head: bytes)          // [v3]
+
+  // [NEW v4-relay]
+  event RelaySessionArmed(session_id: uint, circle: address, settlement_hash: bytes, net: uint, deadline: uint)
+  event RelaySettled(session_id: uint, circle: address, net: uint, refund: uint)
+  event RelayRefunded(session_id: uint, reason: string)
+  event RelaySwept(session_id: uint)
+
+  // ============================================================
+  // State
+  // ============================================================
+
+  state {
+    // ---- [v3] fields referenced by the relay lane (already declared
+    // ---- in program/main-v3.aml:79-142; DO NOT re-declare on merge) ----
+    owner: address                            // [v3]
+    paused: uint                              // [v3]
+    treasury: uint                            // [v3]
+    protocol_fee_bps: uint                    // [v3]
+    session_grace_epochs: uint                // [v3]
+    sweep_grace_multiplier: uint              // [v3]
+    sweep_bounty_bps: uint                    // [v3]
+
+    circle_owner: map[address]address         // [v3]
+    circle_active: map[address]uint           // [v3]
+    circle_slashed: map[address]uint          // [v3]
+    circle_earnings_total: map[address]uint   // [v3]
+    circle_earnings_chain: map[address]bytes  // [v3]
+
+    tailnet_treasury: map[uint]uint           // [v3]
+    tailnet_retired: map[uint]uint            // [v3]
+
+    session_count: uint                       // [v3]
+    session_deposit: map[uint]uint            // [v3]
+    session_status: map[uint]uint             // [v3]
+    session_opener: map[uint]address          // [v3]
+    session_exit: map[uint]address            // [v3]
+    session_tailnet: map[uint]uint            // [v3]
+    session_opened_at: map[uint]uint          // [v3]
+
+    // ---- [NEW v4-relay] additive state ----
+
+    // sha256 (64-char lowercase hex) of the operator-revealed preimage,
+    // i.e. SignedReceipt::settlement_hash(). Committed by the client at
+    // arm time; checked verbatim by relay_claim. Stored as `bytes` to
+    // match the 64-hex anchor convention v3 uses for circle_state_root.
+    session_settlement_hash: map[uint]bytes   // [NEW v4-relay]
+
+    // Plaintext credit the operator may pull on a successful reveal.
+    // Committed at arm time; capped against session_deposit in
+    // relay_claim. This mirrors the v3 `net` argument to settle_confirm
+    // (program/main-v3.aml:549) but is fixed at arm time so the reveal
+    // needs no client-supplied amount.
+    session_relay_net: map[uint]uint          // [NEW v4-relay]
+
+    // Absolute epoch after which relay_claim is refused and relay_refund
+    // becomes available. Set = epoch + relay_expiry_epochs at arm time.
+    session_relay_deadline: map[uint]uint     // [NEW v4-relay]
+  }
+
+  // ============================================================
+  // [v3] helpers reused below (already defined in main-v3.aml):
+  //   private fn require_not_paused()
+  //   private fn circle_is_active(c: address): bool
+  // ============================================================
+
+  private fn require_not_paused() {           // [v3] — shown for context
+    require(self.paused == 0, "paused")
+  }
+
+  private fn circle_is_active(c: address): bool {   // [v3] — shown for context
+    if self.circle_slashed[c] != 0 {
+      return false
+    }
+    return self.circle_active[c] == 1
+  }
+
+  // [NEW v4-relay] Clamp a caller-supplied expiry to the allowed band,
+  // defaulting to RELAY_EXPIRY_DEFAULT_EPOCHS when 0 is passed. Pure
+  // arithmetic — no state, no external calls.
+  private fn relay_expiry_or_default(relay_expiry_epochs: uint): uint {
+    let e = relay_expiry_epochs
+    if e == 0 {
+      e = RELAY_EXPIRY_DEFAULT_EPOCHS
+    }
+    require(e >= RELAY_EXPIRY_MIN_EPOCHS, "relay expiry too short")
+    require(e <= RELAY_EXPIRY_MAX_EPOCHS, "relay expiry too long")
+    return e
+  }
+
+  // [NEW v4-relay] Shared arm bookkeeping: validates + writes the three
+  // relay fields onto an already-created session record and emits the
+  // armed event. Caller MUST have set session_deposit / session_exit /
+  // session_tailnet / session_opener and gated auth. `net` is capped
+  // against the deposit here so relay_claim can pay it blindly.
+  private fn write_relay_arm(sid: uint, settlement_hash: bytes, net: uint, relay_expiry_epochs: uint) {
+    require(len(settlement_hash) == 64, "settlement_hash must be 64-char hex sha256")
+    require(net > 0, "net > 0")
+    let dep = self.session_deposit[sid]
+    require(net <= dep, "net exceeds deposit")
+    let ttl = relay_expiry_or_default(relay_expiry_epochs)
+    let deadline = epoch + ttl
+    self.session_settlement_hash[sid] = settlement_hash
+    self.session_relay_net[sid] = net
+    self.session_relay_deadline[sid] = deadline
+    self.session_status[sid] = SESSION_RELAY_ARMED
+    let circle = self.session_exit[sid]
+    emit RelaySessionArmed(sid, circle, settlement_hash, net, deadline)
+  }
+
+  // ============================================================
+  // [NEW v4-relay] ARM — two entry points
+  // ============================================================
+
+  // Metered path: promote an EXISTING v3 SESSION_OPEN session into the
+  // relay lane once the final dual-signed receipt is agreed off-chain.
+  // Auth: caller == session_opener (the client). Flipping status to
+  // SESSION_RELAY_ARMED disables every v3 settle/sweep path for this
+  // session (they all require SESSION_OPEN), so there is no double-spend
+  // between the two settlement rails.
+  //
+  // This is the general path: the operator meters, the client
+  // countersigns the final receipt, then arms — the arm can fire the
+  // instant the final receipt exists, decoupled from tunnel teardown.
+  fn arm_relay(session_id: uint, settlement_hash: bytes, net: uint, relay_expiry_epochs: uint): bool {
+    require_not_paused()
+    require(session_id < self.session_count, "session not found")
+    require(self.session_status[session_id] == SESSION_OPEN, "session not open")
+    require(self.session_opener[session_id] == caller, "only opener can arm")
+    let circle = self.session_exit[session_id]
+    require(circle_is_active(circle), "operator inactive or slashed")
+    write_relay_arm(session_id, settlement_hash, net, relay_expiry_epochs)
+    return true
+  }
+
+  // Pre-quoted path: open a session STRAIGHT into the armed state. The
+  // deposit is pulled from the tailnet treasury exactly like
+  // open_session (program/main-v3.aml:486) — this is NOT payable. Use
+  // when the price is agreed up front (fixed quote) so the client's
+  // ENTIRE on-chain liveness requirement is a single tx at session
+  // start; after this the client may go dark and the operator can still
+  // settle by revealing the preimage.
+  //
+  // NOTE: for a pre-quoted open the client commits H for the receipt it
+  // EXPECTS to hold at teardown. The off-chain protocol still requires
+  // the operator to obtain that exact countersigned receipt before it
+  // can claim; if service diverges from the quote the parties fall back
+  // to the metered `arm_relay` path (open a plain v3 session instead).
+  fn open_relay_session(tailnet_id: uint, circle: address, max_pay: uint, settlement_hash: bytes, net: uint, relay_expiry_epochs: uint): uint {
+    require_not_paused()
+    // (see note) STUB — restore `require(tailnet_id < self.tailnet_count,
+    // "tailnet not found")` on merge; tailnet_count is elided from this
+    // fragment's [v3] state list. Left as an obvious TODO, not faked.
+    require(self.tailnet_retired[tailnet_id] == 0, "tailnet retired")
+    require(circle_is_active(circle), "circle inactive or slashed")
+    require(max_pay > 0, "deposit > 0")
+    require(self.tailnet_treasury[tailnet_id] >= max_pay, "tailnet treasury insufficient")
+
+    // Escrow the deposit out of the tailnet treasury (mirrors
+    // open_session at program/main-v3.aml:497).
+    self.tailnet_treasury[tailnet_id] = self.tailnet_treasury[tailnet_id] - max_pay
+    let sid = self.session_count
+    self.session_count = sid + 1
+    self.session_tailnet[sid] = tailnet_id
+    self.session_exit[sid] = circle
+    self.session_opener[sid] = caller
+    self.session_deposit[sid] = max_pay
+    self.session_opened_at[sid] = epoch
+    // write_relay_arm validates (H len, net<=deposit, expiry band),
+    // writes the relay fields, flips status to SESSION_RELAY_ARMED and
+    // emits RelaySessionArmed.
+    write_relay_arm(sid, settlement_hash, net, relay_expiry_epochs)
+    return sid
+  }
+
+  // ============================================================
+  // [NEW v4-relay] CLAIM — operator-driven, UNILATERAL
+  // ============================================================
+
+  // The operator reveals the preimage (canonical string form of the
+  // dual-signed SignedReceipt, == SignedReceipt::settlement_preimage())
+  // to pull `net`. This is the whole point: NO client tx is required
+  // here. The sha256 gate is the same builtin proven at
+  // program/main-v3.aml:590.
+  //
+  // `nonreentrant` for parity with settle_confirm — this path performs
+  // no external transfer (it credits the earnings ledger the operator
+  // later pulls via claim_earnings), but the annotation keeps the
+  // settlement family uniform and future-proofs a direct-transfer swap.
+  nonreentrant fn relay_claim(session_id: uint, preimage: string): bool {
+    require_not_paused()
+    require(session_id < self.session_count, "session not found")
+    require(self.session_status[session_id] == SESSION_RELAY_ARMED, "session not armed")
+    let circle = self.session_exit[session_id]
+    require(self.circle_owner[circle] == caller, "not circle owner")
+    require(circle_is_active(circle), "operator inactive or slashed")
+    require(epoch < self.session_relay_deadline[session_id], "relay window elapsed; client may refund")
+    require(len(preimage) > 0, "preimage required")
+
+    // THE GATE. sha256() returns 64-char hex; the stored commitment is
+    // 64-char hex. Equality proves the operator holds the exact
+    // client-countersigned receipt the client committed to.
+    let revealed = sha256(preimage)
+    require(revealed == self.session_settlement_hash[session_id], "preimage does not match commitment")
+
+    let tid = self.session_tailnet[session_id]
+    let dep = self.session_deposit[session_id]
+    let net = self.session_relay_net[session_id]
+
+    // Cap net against deposit (belt-and-braces; write_relay_arm already
+    // enforced net <= dep). Surplus refunds to the tailnet treasury.
+    let total_paid = net
+    if total_paid > dep {
+      total_paid = dep
+    }
+    let fee = total_paid * self.protocol_fee_bps / BPS_DENOM
+    let net_after_fee = total_paid - fee
+    let refund = dep - total_paid
+
+    self.session_status[session_id] = SESSION_RELAY_CLAIMED
+    self.treasury = self.treasury + fee
+    if refund > 0 {
+      self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + refund
+    }
+
+    if net_after_fee > 0 {
+      self.circle_earnings_total[circle] = self.circle_earnings_total[circle] + net_after_fee
+      // Extend the earnings hash chain, reusing the v3 shape
+      // (program/main-v3.aml:590-593). The per-settle entropy is
+      // sha256(preimage) — unique per session and already computed
+      // above as `revealed`.
+      let prev_head = self.circle_earnings_chain[circle]
+      let new_head = sha256(prev_head + revealed)
+      self.circle_earnings_chain[circle] = new_head
+      emit EarningsCommitted(circle, self.circle_earnings_total[circle], new_head)
+    }
+
+    emit RelaySettled(session_id, circle, net_after_fee, refund)
+    return true
+  }
+
+  // ============================================================
+  // [NEW v4-relay] REFUND / SWEEP — client & keeper recovery
+  // ============================================================
+
+  // Client no-show refund: the operator never revealed a valid preimage
+  // before the deadline (operator offline, lost the receipt, or the
+  // parties never completed the off-chain handback). Opener recovers the
+  // full deposit back into the tailnet treasury.
+  fn relay_refund(session_id: uint): bool {
+    require_not_paused()
+    require(session_id < self.session_count, "session not found")
+    require(self.session_status[session_id] == SESSION_RELAY_ARMED, "session not armed")
+    require(self.session_opener[session_id] == caller, "only opener can refund")
+    require(epoch >= self.session_relay_deadline[session_id], "relay window not elapsed")
+    self.session_status[session_id] = SESSION_RELAY_REFUNDED
+    let tid = self.session_tailnet[session_id]
+    let dep = self.session_deposit[session_id]
+    self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + dep
+    emit RelayRefunded(session_id, "relay expiry: no operator claim")
+    return true
+  }
+
+  // Keeper sweep: if BOTH parties vanish, an armed session's deposit
+  // must not be permanently stuck. After a longer grace
+  // (relay_deadline stretched by sweep_grace_multiplier), anyone can
+  // sweep, taking a sweep_bounty_bps bounty; the remainder refunds the
+  // tailnet. Mirrors sweep_expired_session (program/main-v3.aml:618).
+  nonreentrant fn relay_sweep(session_id: uint): bool {
+    require_not_paused()
+    require(session_id < self.session_count, "session not found")
+    require(self.session_status[session_id] == SESSION_RELAY_ARMED, "session not armed")
+    let deadline = self.session_relay_deadline[session_id]
+    // Additional grace beyond the client-refund deadline, scaled by the
+    // same multiplier the v3 sweep uses.
+    let extra = self.session_grace_epochs * self.sweep_grace_multiplier
+    require(epoch >= deadline + extra, "sweep grace not elapsed")
+    self.session_status[session_id] = SESSION_RELAY_REFUNDED
+    let dep = self.session_deposit[session_id]
+    let bounty = dep * self.sweep_bounty_bps / BPS_DENOM
+    let refund = dep - bounty
+    if bounty > 0 {
+      require(transfer(caller, bounty), "bounty transfer failed")
+    }
+    if refund > 0 {
+      let tid = self.session_tailnet[session_id]
+      self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + refund
+    }
+    emit RelaySwept(session_id)
+    return true
+  }
+
+  // ============================================================
+  // [NEW v4-relay] Views
+  // ============================================================
+
+  view fn get_relay_settlement_hash(session_id: uint): bytes {
+    return self.session_settlement_hash[session_id]
+  }
+
+  view fn get_relay_net(session_id: uint): uint {
+    return self.session_relay_net[session_id]
+  }
+
+  view fn get_relay_deadline(session_id: uint): uint {
+    return self.session_relay_deadline[session_id]
+  }
+}
+
+// ============================================================
+// KNOWN-DRAFT ISSUE (intentionally left for review, not silently
+// "fixed"): the `open_relay_session` tailnet-id bounds check on the
+// line marked "(see note)" is a placeholder. In v3, open_session
+// checks `tailnet_id < self.tailnet_count`; that field is elided from
+// this fragment's state block, so the real merge must restore the
+// proper `require(tailnet_id < self.tailnet_count, "tailnet not found")`
+// guard (and declare tailnet_count in the [v3] context list). It is
+// stubbed here rather than fabricated so a reviewer catches the merge
+// dependency instead of trusting a bogus check. The metered `arm_relay`
+// path has no such dependency and is the recommended primary entry
+// point.
+// ============================================================

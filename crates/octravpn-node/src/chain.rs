@@ -11,7 +11,11 @@
 //! op_type="stealth" tx if they want unlinkable payout.
 
 use anyhow::{Context, Result};
-use octravpn_core::{address::Address, rpc::RpcClient, sig::KeyPair};
+use octravpn_core::{
+    address::Address,
+    rpc::{next_nonce, RpcClient},
+    sig::KeyPair,
+};
 use serde_json::{json, Value};
 use tracing::{debug, info};
 
@@ -254,7 +258,7 @@ impl ChainCtx {
 
     pub(crate) async fn nonce(&self) -> Result<u64> {
         let b = self.rpc.balance(&self.validator_addr).await?;
-        Ok(b.pending_nonce.max(b.nonce))
+        Ok(next_nonce(&b))
     }
 
     pub(crate) async fn fee(&self, op: &str) -> Result<u64> {
