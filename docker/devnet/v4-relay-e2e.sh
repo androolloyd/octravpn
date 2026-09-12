@@ -31,6 +31,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
+# Explicit environment beats .env. Sourcing assigns unconditionally, which
+# used to let docker/devnet/.env's OCTRA_RPC_URL / V4_PROGRAM_ADDR /
+# PROGRAM_ADDR silently overwrite values passed on the command line -- so a
+# run aimed at a LOCAL node quietly targeted devnet. Snapshot what the
+# caller set, source, then restore.
+_pre_rpc="${OCTRA_RPC_URL-}"; _pre_rpc_host="${OCTRA_RPC_URL_HOST-}"
+_pre_v4="${V4_PROGRAM_ADDR-}"; _pre_prog="${PROGRAM_ADDR-}"
 if [[ -f docker/devnet/.env ]]; then
   # shellcheck source=/dev/null
   source docker/devnet/.env
@@ -39,8 +46,28 @@ if [[ -f docker/devnet/hosts.env ]]; then
   # shellcheck source=/dev/null
   source docker/devnet/hosts.env
 fi
+[[ -n "$_pre_rpc" ]]      && OCTRA_RPC_URL="$_pre_rpc"
+[[ -n "$_pre_rpc_host" ]] && OCTRA_RPC_URL_HOST="$_pre_rpc_host"
+[[ -n "$_pre_v4" ]]       && V4_PROGRAM_ADDR="$_pre_v4"
+[[ -n "$_pre_prog" ]]     && PROGRAM_ADDR="$_pre_prog"
+unset _pre_rpc _pre_rpc_host _pre_v4 _pre_prog
 
+# Repo root, independent of the caller's cwd (the sealed-key mode runs
+# the host-built octravpn-node from $ROOT/target).
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OCTRA_RPC_URL="${OCTRA_RPC_URL:-https://devnet.octrascan.io/rpc}"
+# Host-side RPC. Identical to OCTRA_RPC_URL for devnet. For a LOCAL node the
+# containers must use http://host.internal:18080/rpc (OrbStack's host alias)
+# while the host itself uses http://127.0.0.1:18080/rpc -- so the two are
+# split. Everything that runs on the host (curl, cast) uses this one.
+OCTRA_RPC_URL_HOST="${OCTRA_RPC_URL_HOST:-$OCTRA_RPC_URL}"
+# NODE1_SEALED=1 boots node1 with sealed keys + [chain].require_sealed_keys,
+# exercising the P1-6 strict key-load path end to end (the autonomous claimer
+# then signs relay_claim with the UNSEALED key). Passphrase from
+# OCTRAVPN_KEY_PASSPHRASE (default below is a test value, not a secret).
+NODE1_SEALED="${NODE1_SEALED:-0}"
+OCTRAVPN_KEY_PASSPHRASE="${OCTRAVPN_KEY_PASSPHRASE:-v4-relay-e2e-test-passphrase}"
+export OCTRAVPN_KEY_PASSPHRASE
 OCTRA_BIN="${OCTRA_BIN:-../octra-foundry/target/release/octra}"
 V4_AML="${V4_AML:-program/main-v4.aml}"
 
@@ -103,7 +130,7 @@ require_file() {
 }
 
 rpc() {
-  curl -s -m 10 -X POST "$OCTRA_RPC_URL" -H "Content-Type: application/json" \
+  curl -s -m 10 -X POST "$OCTRA_RPC_URL_HOST" -H "Content-Type: application/json" \
     -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$1\",\"params\":$2}"
 }
 
@@ -164,7 +191,7 @@ send_tx() {
   local key=$1; shift
   local method=$1; shift
   local out hash
-  out=$("$OCTRA_BIN" cast send --key "$key" --rpc-url "$OCTRA_RPC_URL" \
+  out=$("$OCTRA_BIN" cast send --key "$key" --rpc-url "$OCTRA_RPC_URL_HOST" \
     --fee "$TX_FEE" "$V4" "$method" "$@" 2>&1) || {
       printf '%s\n' "$out" >&2
       return 1
@@ -182,7 +209,7 @@ send_value_tx() {
   local value=$1; shift
   local method=$1; shift
   local out hash
-  out=$("$OCTRA_BIN" cast send --key "$key" --rpc-url "$OCTRA_RPC_URL" \
+  out=$("$OCTRA_BIN" cast send --key "$key" --rpc-url "$OCTRA_RPC_URL_HOST" \
     --value "$value" --fee "$TX_FEE" "$V4" "$method" "$@" 2>&1) || {
       printf '%s\n' "$out" >&2
       return 1
@@ -216,14 +243,26 @@ wait_status() {
 }
 
 storage_value() {
-  local fn=$1 params=$2 key=$3
-  rpc "contract_call" "[\"$V4\",\"$fn\",$params]" \
+  # $1 is kept for call-site compatibility (it used to name a view whose
+  # embedded storage envelope was scraped); only $3, the key, matters now.
+  local _fn=$1 _params=$2 key=$3
+  # Read the key through octra_contractStorage, the authoritative path.
+  # The `storage` envelope that contract_call embeds is a display
+  # convenience, not a contract: on the sequence-12 public commit it is
+  # EMPTY (even non-zero keys are absent) while devnet still populates it.
+  # A key that was never written comes back as value=null -> "0", which is
+  # what an unincremented counter means; "" only on RPC error.
+  rpc "octra_contractStorage" "[\"$V4\",\"$key\",\"full\"]" \
     | python3 -c '
 import json, sys
-key = sys.argv[1]
 d = json.load(sys.stdin)
-print(((d.get("result") or {}).get("storage") or {}).get(key, ""))
-' "$key"
+res = d.get("result")
+if res is None:
+    print("")
+else:
+    v = res.get("value")
+    print("0" if v is None else v)
+'
 }
 
 # Read a scalar straight off a VIEW rather than scraping the storage
@@ -283,6 +322,49 @@ write_smoke_configs() {
   cp "$CLIENT_KEY" "$RUN_STATE_ABS/client/wallet.key"
   chmod 600 "$RUN_STATE_ABS"/node1/*.key "$RUN_STATE_ABS"/client/*.key 2>/dev/null || true
 
+  # Optional strict key-load path: seal node1's keys on the host with the
+  # same octravpn-node binary (an offline file operation, not a running
+  # node), keep the plaintext OUT of the mounted dir, and have the daemon
+  # boot under require_sealed_keys = true. Strict mode must refuse a
+  # plaintext file, so removing the plaintext is what makes the test mean
+  # something.
+  NODE1_WALLET_PATH="/etc/octravpn/wallet.key"
+  NODE1_WG_PATH="/etc/octravpn/wg.key"
+  NODE1_STRICT_LINE=""
+  if [[ "$NODE1_SEALED" == "1" ]]; then
+    local seal_bin
+    seal_bin=$(ls -t "$ROOT"/target/release/octravpn-node "$ROOT"/target/debug/octravpn-node 2>/dev/null | head -1) || true
+    [[ -n "$seal_bin" ]] || fail "NODE1_SEALED=1 needs a host-built octravpn-node (cargo build -p octravpn-node) to seal keys"
+    cat > "$RUN_STATE_ABS/node1/seal.toml" <<EOF
+[chain]
+rpc_url = "$OCTRA_RPC_URL_HOST"
+program_addr = "$V4"
+validator_addr = "$NODE1_ADDR"
+wallet_secret_path = "$RUN_STATE_ABS/node1/wallet.key"
+[tunnel]
+public_endpoint = "$NODE1_PUBLIC_ENDPOINT"
+listen = "0.0.0.0:51820"
+wg_secret_path = "$RUN_STATE_ABS/node1/wg.key"
+[pricing]
+price_per_mb = $NODE1_PRICE_PER_MB
+region = "$NODE1_REGION"
+[control]
+listen = "0.0.0.0:51821"
+audit_dir = "/tmp/octravpn-v4-relay-e2e/audit"
+EOF
+    printf '%s\n' "$OCTRAVPN_KEY_PASSPHRASE" > "$RUN_STATE_ABS/node1/passphrase.txt"
+    "$seal_bin" --config "$RUN_STATE_ABS/node1/seal.toml" seal-keys \
+      --passphrase-file "$RUN_STATE_ABS/node1/passphrase.txt" --remove-plaintext >/dev/null \
+      || fail "seal-keys failed for node1"
+    rm -f "$RUN_STATE_ABS/node1/seal.toml" "$RUN_STATE_ABS/node1/passphrase.txt"
+    [[ -f "$RUN_STATE_ABS/node1/wallet.key.sealed" && ! -f "$RUN_STATE_ABS/node1/wallet.key" ]] \
+      || fail "expected node1/wallet.key.sealed with plaintext removed"
+    NODE1_WALLET_PATH="/etc/octravpn/wallet.key.sealed"
+    NODE1_WG_PATH="/etc/octravpn/wg.key.sealed"
+    NODE1_STRICT_LINE="require_sealed_keys = true"
+    ok "node1 keys sealed (OCTRA-WALLET-V1); daemon will boot in strict sealed-only mode"
+  fi
+
   cat > "$RUN_STATE_ABS/node1/node.toml" <<EOF
 # Generated by docker/devnet/v4-relay-e2e.sh.
 # This config deliberately leaves [chain].protocol_version at its
@@ -293,12 +375,13 @@ write_smoke_configs() {
 rpc_url             = "$OCTRA_RPC_URL"
 program_addr        = "$V4"
 validator_addr      = "$NODE1_ADDR"
-wallet_secret_path  = "/etc/octravpn/wallet.key"
+wallet_secret_path  = "$NODE1_WALLET_PATH"
+$NODE1_STRICT_LINE
 
 [tunnel]
 public_endpoint     = "$NODE1_PUBLIC_ENDPOINT"
 listen              = "0.0.0.0:51820"
-wg_secret_path      = "/etc/octravpn/wg.key"
+wg_secret_path      = "$NODE1_WG_PATH"
 
 [pricing]
 price_per_mb        = $NODE1_PRICE_PER_MB
@@ -584,7 +667,7 @@ RUN_STATE_ABS="$(mkdir -p "$(dirname "$RUN_STATE_REL")" && cd "$(dirname "$RUN_S
 CLIENT_RW_HOST="$RUN_STATE_ABS/client-rw"
 mkdir -p "$CLIENT_RW_HOST"
 
-ok "rpc:        $OCTRA_RPC_URL"
+ok "rpc:        $OCTRA_RPC_URL (host-side: $OCTRA_RPC_URL_HOST)"
 ok "client:     $CLIENT_ADDR"
 ok "node1:      $NODE1_ADDR"
 ok "circle:     $CIRCLE_ADDR"
@@ -596,7 +679,7 @@ if [[ -n "${V4_PROGRAM_ADDR:-}" ]]; then
   ok "using V4_PROGRAM_ADDR=$V4"
 else
   OUT=$("$OCTRA_BIN" forge create "$V4_AML" \
-    --key "$DEPLOYER_KEY" --rpc-url "$OCTRA_RPC_URL" \
+    --key "$DEPLOYER_KEY" --rpc-url "$OCTRA_RPC_URL_HOST" \
     --constructor-args 100 1000 100000000 100 1000 2>&1)
   V4=$(printf '%s' "$OUT" | json_field_or_regex address)
   DEPLOY_TX=$(printf '%s' "$OUT" | json_field_or_regex tx_hash)
@@ -646,7 +729,17 @@ case "$ACTIVE" in
     ;;
 esac
 
-TID=$(storage_value get_tailnet_treasury "[0]" tailnet_count)
+# get_tailnet_treasury(0) REVERTS on a fresh contract (no tailnet 0 yet), so its
+# storage envelope is empty and the scrape fails -- devnet masked this because
+# tailnets from earlier runs already existed. get_session_count() never reverts
+# and its envelope carries tailnet_count (the constructor writes it as 0). Retry
+# across an epoch for the same reason view_uint does.
+TID=""
+for _ in 1 2 3 4 5 6; do
+  TID=$(storage_value get_session_count "[]" tailnet_count)
+  [[ "$TID" =~ ^[0-9]+$ ]] && break
+  sleep 4
+done
 [[ "$TID" =~ ^[0-9]+$ ]] || fail "could not read tailnet_count before create_tailnet"
 TX=$(send_value_tx "$CLIENT_KEY" "$TAILNET_DEPOSIT" create_tailnet "\"$MEMBERS_ROOT\"")
 wait_for_tx "$TX" "create_tailnet(client owner, tid=$TID)"

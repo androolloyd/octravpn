@@ -75,3 +75,48 @@ reads a receipt must do so inside that window; the operator audit CLI (P0 #4)
 must be designed around it. And with devnet capable of halting for hours, the
 local sequence-12 node is now the primary integration target — devnet is a
 spot-check, not the harness.
+
+## 5. Tooling and key-load verification on the sequence-12 node (same day)
+
+| Check | Result |
+|---|---|
+| `forge create` → local seq-12 node | main-v4 deployed, `confirmed: true`, predicted == receipt address |
+| `forge create` → devnet | tx staged and stuck `pending` — devnet consensus halted, not a tooling fault; the new terminal-status wait made that visible instead of silent |
+| `cast transfer` twice in a row | **bug**: reused a staged nonce → `105 duplicate nonce`; fixed to `max(nonce, pending_nonce)+1` (foundry `5ccd4af`) |
+| `octra_compileAml` on main-v4 | clean, `1.0 Rehovot`, 7,248 instr |
+| Sealed-boot matrix (`experiments/sealed-boot-matrix.sh`) | **4/4**: sealed+correct boots; sealed+wrong passphrase refused (`wallet decryption failed`); plaintext+strict refused (`plaintext key on disk`); plaintext+lax boots |
+| Strict-mode hint text | **bug**: advertised `seal-keys --in/--out`, flags that don't exist; fixed to the real `--config … seal-keys --passphrase-file` (foundry `a3e12dc`) |
+| Env-var test race in `octra-core::util` | pre-existing flake under parallel tests; serialized with a lock (same commit) |
+| Money loop with node1 **sealed**, on the local node | keys sealed → daemon booted strict sealed-only → `/health` 200 → `register_circle` **confirmed**. Two harness bugs fixed on the way: explicit env lost to `.env` (targeted devnet by accident), and `tailnet_count` was scraped from a view that reverts on a fresh contract. Final verdict: see §6 |
+| Nightly fuzz | **1,121 open "found a crash" issues, all false**: `protoc` missing on the runner → every target failed at build → misreported as a crash. Fixed (`ac20b18`): install protoc, build as its own step, decide "found" from libfuzzer artifacts |
+
+Container → local node path: `http://host.internal:18080/rpc` (OrbStack alias;
+`host.docker.internal` does not resolve here). `v4-relay-e2e.sh` now takes
+`OCTRA_RPC_URL` (container view) and `OCTRA_RPC_URL_HOST` (host view) separately, and
+`NODE1_SEALED=1` runs the operator under strict sealed keys.
+
+### 5.1 The `contract_call` storage envelope is opt-in and paged
+
+On the public sequence-12 commit `contract_call` embeds storage only when the
+**fifth positional param** is true — `contract_call [addr, method, params, caller,
+include_storage]` (`contract_rpc.ml:1219`, `Rpc.param_json params 4`) — and then pages it
+at `view_storage_key_limit = 64` keys / 4096 bytes per value, reporting `storage_limit`.
+Devnet's private build still returned it unasked, which is how the harness's
+storage-envelope scrapes kept working there and failed on the local node (empty envelope,
+even for non-zero keys). Read keys with `octra_contractStorage [addr, key, "full"]`;
+`v4-relay-e2e.sh`'s `storage_value` now does exactly that, treating a never-written
+counter (`value: null`) as 0.
+
+### 5.2 Map keys in the envelope changed too — and our node scraped it
+
+With `include_storage=true`, sequence 12 renders map entries as
+`@aml/map/<field>/<n>#<key>` (e.g. `@aml/map/circle_earnings_chain/47#octG15X…`) where
+sequence 4 rendered `<field>:<key>`; scalar keys (`burned`, `slash_bounty_bps`) are
+unchanged. Any client that scraped `session_status:<sid>`-style keys breaks even where the
+envelope is present.
+
+**This bit the node itself.** `SessionAdmissionVerifier::session_opened` read
+`session_count` from the envelope (`control/state.rs`, `session_status_allows_admission`),
+so on the local node every receipt POST was refused **401 "session open transaction not
+found"** while the chain plainly showed the session open and the opener correct. Fix: read
+counts from the real views (`get_session_count`), never from the envelope.
