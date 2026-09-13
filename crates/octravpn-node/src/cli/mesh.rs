@@ -433,6 +433,14 @@ async fn run_mesh_serve(
     // falls back to `allow_all_packet_filter`. The PSK-gated knock layer
     // is opt-in via `[control.knock]` in node.toml (env-sourced here);
     // every other field takes the builder's octra defaults.
+    // Item 4: the anchored member set replaces the allow-all fallback in
+    // the same `PolicyStore` the wire `/map` handler reads, and — unless the
+    // operator turned enforcement off — also gates registration, so a
+    // non-member never reaches the roster at all. The gate is taken before
+    // `run` consumes the sync; both share one membership snapshot.
+    let registration_gate = members_policy
+        .as_ref()
+        .and_then(crate::members_policy::MembersPolicySync::registration_gate);
     let ws = octravpn_mesh::WireStateBuilder::new(
         server_noise_key.clone(),
         Arc::new(minter.clone()),
@@ -441,14 +449,17 @@ async fn run_mesh_serve(
         Arc::new(policy.clone()),
         octravpn_mesh::tailscale_wire::DerpMapStore::shared(derp_map),
     )
-    .registration_store(Some(registration_store))
+    .registration_store(Some(registration_store.clone()))
+    .registration_gate(registration_gate)
     .knock(load_knock_cfg_from_env())
     .native_derp(native_derp.clone())
     .build();
-    // Item 4: the anchored member set replaces the allow-all fallback in
-    // the same `PolicyStore` the wire `/map` handler reads.
     if let Some(sync) = members_policy {
-        tokio::spawn(sync.run(machines.clone(), Arc::new(policy.clone())));
+        tokio::spawn(sync.run(crate::members_policy::MembersPolicyWiring {
+            machines: machines.clone(),
+            policy: Arc::new(policy.clone()),
+            registration_store: Some(registration_store),
+        }));
     }
 
     eprintln!(

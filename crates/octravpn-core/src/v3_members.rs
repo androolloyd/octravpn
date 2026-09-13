@@ -107,6 +107,9 @@ pub const WG_PUBKEY_B64_LEN: usize = 44;
 /// Expected decoded length of a WireGuard public key, in bytes.
 pub const WG_PUBKEY_RAW_LEN: usize = 32;
 
+/// Hex length of a Tailscale machine key (32 raw bytes, lowercase hex).
+pub const MACHINE_KEY_HEX_LEN: usize = 64;
+
 /// Required prefix on every Octra address (`oct...`). The tailnet schema
 /// does not validate the address payload — only that it is non-empty and
 /// carries the family prefix. Full address validation lives in
@@ -141,6 +144,14 @@ pub enum V3MembersError {
         "member at index {index}: wg_pubkey_b64 decodes to {got} bytes, expected {WG_PUBKEY_RAW_LEN}"
     )]
     BadWgPubkeyDecodedLength { index: usize, got: usize },
+    #[error("member at index {index}: has neither a wg_pubkey_b64 nor a machine_key_hex")]
+    NoMemberIdentity { index: usize },
+    #[error(
+        "member at index {index}: machine_key_hex length is {len}, expected {MACHINE_KEY_HEX_LEN}"
+    )]
+    BadMachineKeyLength { index: usize, len: usize },
+    #[error("member at index {index}: machine_key_hex is not lowercase hex")]
+    BadMachineKeyEncoding { index: usize },
     #[error("duplicate wallet {wallet:?} at indices {first} and {second}")]
     DuplicateWallet {
         wallet: String,
@@ -175,7 +186,28 @@ pub struct Member {
     /// Base64-encoded WireGuard public key (32 raw bytes → 44 chars
     /// including one `=` pad). Validation enforces both the textual
     /// length and that it decodes cleanly to exactly 32 bytes.
+    ///
+    /// May be empty for a member identified by [`Self::machine_key_hex`]
+    /// alone — a stock Tailscale device, whose WireGuard key is its *node
+    /// key* and is regenerated on every re-authentication. At least one of
+    /// the two identities must be present.
     pub wg_pubkey_b64: String,
+
+    /// Tailscale machine key (64-char lowercase hex, no `mkey:` prefix):
+    /// the device's long-lived noise identity.
+    ///
+    /// This is what a stock client can be admitted by. Its node key is
+    /// not usable as an admission identity: a refused registration burns
+    /// the node key and the client immediately retries with a fresh one,
+    /// so anything keyed on it is stale before an operator can act. The
+    /// machine key survives re-auth, logout and node-key rotation.
+    ///
+    /// Empty for members that carry only a WireGuard key (octravpn's own
+    /// client, which owns a stable key). Skipped when serialising while
+    /// empty, so member sets written before this field existed hash
+    /// exactly as they did.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub machine_key_hex: String,
 
     /// Chain epoch at which the member joined the tailnet.
     pub joined_epoch: u64,
@@ -366,7 +398,17 @@ fn validate_common(m: &TailnetMembers) -> Result<(), V3MembersError> {
                 prefix: WALLET_PREFIX,
             });
         }
-        check_wg_pubkey(index, &member.wg_pubkey_b64)?;
+        // A member needs at least one identity the wire can match: a
+        // WireGuard/node key, a machine key, or both.
+        if member.wg_pubkey_b64.is_empty() && member.machine_key_hex.is_empty() {
+            return Err(V3MembersError::NoMemberIdentity { index });
+        }
+        if !member.wg_pubkey_b64.is_empty() {
+            check_wg_pubkey(index, &member.wg_pubkey_b64)?;
+        }
+        if !member.machine_key_hex.is_empty() {
+            check_machine_key(index, &member.machine_key_hex)?;
+        }
         if let Some(&first) = seen.get(&member.wallet) {
             return Err(V3MembersError::DuplicateWallet {
                 wallet: member.wallet.clone(),
@@ -401,6 +443,24 @@ fn check_ip_salt(value: &str) -> Result<(), V3MembersError> {
 /// Validate a base64 WireGuard public key string for a specific member
 /// index. Checks the textual length, the base64 alphabet, and the
 /// decoded byte length.
+/// A machine key must be exactly 64 lowercase hex chars. Lowercase is
+/// enforced so two sets naming the same device cannot differ by case.
+fn check_machine_key(index: usize, value: &str) -> Result<(), V3MembersError> {
+    if value.len() != MACHINE_KEY_HEX_LEN {
+        return Err(V3MembersError::BadMachineKeyLength {
+            index,
+            len: value.len(),
+        });
+    }
+    if !value
+        .bytes()
+        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err(V3MembersError::BadMachineKeyEncoding { index });
+    }
+    Ok(())
+}
+
 fn check_wg_pubkey(index: usize, value: &str) -> Result<(), V3MembersError> {
     if value.len() != WG_PUBKEY_B64_LEN {
         return Err(V3MembersError::BadWgPubkeyLength {
@@ -448,6 +508,7 @@ mod tests {
         Member {
             wallet: format!("oct{addr_suffix}"),
             wg_pubkey_b64: wg_pubkey(key_byte),
+            machine_key_hex: String::new(),
             joined_epoch: 100,
         }
     }
@@ -582,6 +643,73 @@ mod tests {
         ));
     }
 
+    /// A stock Tailscale device is admitted by machine key alone: its node
+    /// key rotates on every re-auth, so the set cannot name it.
+    #[test]
+    fn member_with_only_a_machine_key_is_valid() {
+        let mut m = sample();
+        m.members[0].wg_pubkey_b64 = String::new();
+        m.members[0].machine_key_hex = "ab".repeat(32);
+        m.validate()
+            .expect("machine-key-only member is a valid member");
+    }
+
+    #[test]
+    fn member_with_no_identity_at_all_is_rejected() {
+        let mut m = sample();
+        m.members[0].wg_pubkey_b64 = String::new();
+        let err = m.validate().expect_err("must reject");
+        assert!(
+            matches!(err, V3MembersError::NoMemberIdentity { index: 0 }),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn bad_machine_key_rejected() {
+        let mut m = sample();
+        m.members[0].machine_key_hex = "ab".repeat(31);
+        assert!(matches!(
+            m.validate().expect_err("short"),
+            V3MembersError::BadMachineKeyLength { index: 0, len: 62 }
+        ));
+        m.members[0].machine_key_hex = "AB".repeat(32);
+        assert!(matches!(
+            m.validate().expect_err("uppercase"),
+            V3MembersError::BadMachineKeyEncoding { index: 0 }
+        ));
+    }
+
+    /// The field is skipped while empty, so every member set written before
+    /// it existed still hashes to the same anchor. Anything else would
+    /// invalidate live anchors on upgrade.
+    #[test]
+    fn empty_machine_key_is_absent_from_the_canonical_bytes() {
+        let m = sample();
+        let bytes = m.canonical_bytes().unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(
+            !text.contains("machine_key_hex"),
+            "an unset machine key must not appear: {text}"
+        );
+        let mut with_key = m.clone();
+        with_key.members[0].machine_key_hex = "cd".repeat(32);
+        assert_ne!(
+            with_key.hash_hex().unwrap(),
+            m.hash_hex().unwrap(),
+            "binding a machine key must change the anchor"
+        );
+        let text = String::from_utf8(with_key.canonical_bytes().unwrap()).unwrap();
+        assert!(text.contains(&format!("\"machine_key_hex\":\"{}\"", "cd".repeat(32))));
+        // …and it survives a decode/encode round trip byte for byte.
+        let decoded = TailnetMembers::decode(&with_key.canonical_bytes().unwrap()).unwrap();
+        assert_eq!(
+            decoded.canonical_bytes().unwrap(),
+            with_key.canonical_bytes().unwrap()
+        );
+        assert_eq!(decoded.members[0].machine_key_hex, "cd".repeat(32));
+    }
+
     #[test]
     fn duplicate_wallet_rejected() {
         let mut m = sample();
@@ -589,6 +717,7 @@ mod tests {
         let dup = Member {
             wallet: m.members[0].wallet.clone(),
             wg_pubkey_b64: wg_pubkey(0x44),
+            machine_key_hex: String::new(),
             joined_epoch: 200,
         };
         m.members.push(dup);
@@ -824,6 +953,7 @@ mod tests {
                         Member {
                             wallet,
                             wg_pubkey_b64: key,
+                            machine_key_hex: String::new(),
                             joined_epoch: je,
                         }
                     })
@@ -978,6 +1108,7 @@ mod tests {
             bigger.members.push(Member {
                 wallet,
                 wg_pubkey_b64: crate::b64::encode(new_key),
+                machine_key_hex: String::new(),
                 joined_epoch: joined,
             });
             bigger.validate().expect("addition validates");
@@ -1033,16 +1164,19 @@ mod tests {
         let alice = Member {
             wallet: "octalice00000000000000000000000000000000000000".to_string(),
             wg_pubkey_b64: wg_pubkey(0x11),
+            machine_key_hex: String::new(),
             joined_epoch: 100,
         };
         let bob = Member {
             wallet: "octbob0000000000000000000000000000000000000000".to_string(),
             wg_pubkey_b64: wg_pubkey(0x22),
+            machine_key_hex: String::new(),
             joined_epoch: 105,
         };
         let carol = Member {
             wallet: "octcarol00000000000000000000000000000000000000".to_string(),
             wg_pubkey_b64: wg_pubkey(0x33),
+            machine_key_hex: String::new(),
             joined_epoch: 110,
         };
 

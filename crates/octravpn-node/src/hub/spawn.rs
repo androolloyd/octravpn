@@ -210,9 +210,17 @@ impl Hub {
                 // Config errors (no circle, no passphrase) fail boot here;
                 // the loop itself never returns.
                 let policy_store = Arc::new(octravpn_mesh::policy::PolicyStore::new());
+                let mut registration_gate = None;
                 if self.cfg.control.members_policy.enabled {
                     let sync = crate::members_policy::MembersPolicySync::from_hub(&self)?;
-                    tokio::spawn(sync.run(Arc::clone(&machines), Arc::clone(&policy_store)));
+                    // Taken before `run` consumes the sync — the gate and the
+                    // loop share one membership snapshot.
+                    registration_gate = sync.registration_gate();
+                    tokio::spawn(sync.run(crate::members_policy::MembersPolicyWiring {
+                        machines: Arc::clone(&machines),
+                        policy: Arc::clone(&policy_store),
+                        registration_store: Some(Arc::clone(&registration_store)),
+                    }));
                 }
                 Some((
                     octravpn_mesh::WireStateBuilder::new(
@@ -225,6 +233,7 @@ impl Hub {
                     )
                     .native_derp(native_derp.clone())
                     .registration_store(Some(registration_store))
+                    .registration_gate(registration_gate)
                     .build(),
                     shared_minter,
                 ))

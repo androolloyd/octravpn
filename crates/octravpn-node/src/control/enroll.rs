@@ -216,6 +216,7 @@ impl EnrollService {
         let entry = Member {
             wallet: wallet.clone(),
             wg_pubkey_b64,
+            machine_key_hex: String::new(),
             joined_epoch: now,
         };
         match members.members.iter_mut().find(|m| m.wallet == wallet) {

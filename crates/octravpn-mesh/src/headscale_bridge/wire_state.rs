@@ -40,6 +40,7 @@ pub struct WireStateBuilder {
     derp_map: Arc<DerpMapStore>,
     native_derp: Option<Arc<NativeDerpRuntime>>,
     registration_store: Option<Arc<dyn headscale_api::tailscale_wire::MachineRegistrationStore>>,
+    registration_gate: Option<Arc<dyn headscale_api::tailscale_wire::RegistrationGate>>,
     knock: KnockConfig,
     base_domain: String,
 }
@@ -67,6 +68,7 @@ impl WireStateBuilder {
             derp_map,
             native_derp: None,
             registration_store: None,
+            registration_gate: None,
             knock: KnockConfig::disabled(),
             base_domain: "octra.test".to_string(),
         }
@@ -103,8 +105,27 @@ impl WireStateBuilder {
     /// [`MachineRegistrationStore`](headscale_api::tailscale_wire::MachineRegistrationStore)
     /// (e.g. `PersistentMachineAdmin` over a SQLite file under the wire
     /// state dir) and hydrate the registry from it before building.
-    pub fn registration_store(mut self, store: Option<Arc<dyn headscale_api::tailscale_wire::MachineRegistrationStore>>) -> Self {
+    pub fn registration_store(
+        mut self,
+        store: Option<Arc<dyn headscale_api::tailscale_wire::MachineRegistrationStore>>,
+    ) -> Self {
         self.registration_store = store;
+        self
+    }
+
+    /// Gate registration on membership. `None` (the default) lets every
+    /// node key that clears the preauth flow register, and the
+    /// [`PolicyStore`] decides what its packets may do. Pass a
+    /// [`RegistrationGate`](headscale_api::tailscale_wire::RegistrationGate)
+    /// — octra's is backed by the chain-anchored member set — to make a
+    /// non-member unable to register at all, so it never appears in any
+    /// peer's netmap.
+    #[must_use]
+    pub fn registration_gate(
+        mut self,
+        gate: Option<Arc<dyn headscale_api::tailscale_wire::RegistrationGate>>,
+    ) -> Self {
+        self.registration_gate = gate;
         self
     }
 
@@ -117,6 +138,7 @@ impl WireStateBuilder {
             ip_allocator: self.ip_allocator,
             machines: self.machines,
             registration_store: self.registration_store,
+            registration_gate: self.registration_gate,
             derp_map: self.derp_map,
             native_derp: self.native_derp,
             policy: self.policy,

@@ -60,6 +60,7 @@ fn build_state() -> (WireState, tempfile::TempDir) {
         ip_allocator: Arc::new(TailnetIpAllocator::new("raw-tls-test")),
         machines: Arc::new(MachineRegistry::new()),
         registration_store: None,
+        registration_gate: None,
         derp_map: octravpn_mesh::tailscale_wire::DerpMapStore::shared(
             octravpn_mesh::tailscale_wire::DerpMap::default(),
         ),

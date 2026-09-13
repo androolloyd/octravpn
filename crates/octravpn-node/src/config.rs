@@ -1137,6 +1137,17 @@ pub(crate) struct ControlMembersPolicyCfg {
     /// registered-machine set changed. Clamped to `[5, 3600]`.
     #[serde(default = "default_members_sync_period_secs")]
     pub sync_period_secs: u64,
+    /// Make membership the tailnet's admission rule, not just its
+    /// firewall: a node key outside the anchored set cannot register
+    /// (`tailscale up` fails with the reason), and a device removed from
+    /// the set has its registration deleted, so it disappears from every
+    /// peer's netmap instead of lingering as a peer whose packets are
+    /// dropped. On by default wherever `enabled` is — enforcement is the
+    /// point of anchoring membership. Set `false` to keep the
+    /// packet-filter-only behaviour (every key may register; the filter
+    /// decides what it can reach).
+    #[serde(default = "default_enforce_registration")]
+    pub enforce_registration: bool,
 }
 
 impl Default for ControlMembersPolicyCfg {
@@ -1145,6 +1156,7 @@ impl Default for ControlMembersPolicyCfg {
             enabled: false,
             circle_id: None,
             sync_period_secs: default_members_sync_period_secs(),
+            enforce_registration: default_enforce_registration(),
         }
     }
 }
@@ -1159,6 +1171,12 @@ impl ControlMembersPolicyCfg {
 /// Epochs apply every 10s; polling faster than that only burns RPC.
 fn default_members_sync_period_secs() -> u64 {
     10
+}
+
+/// Anchoring membership and then not enforcing it is the bug this whole
+/// path exists to fix, so enforcement defaults on.
+fn default_enforce_registration() -> bool {
+    true
 }
 
 fn default_claim_scan_period_secs() -> u64 {

@@ -23,19 +23,34 @@
 //!    packet filter and wakes every parked `/map` long-poller — but only
 //!    when the rendered document actually changed.
 //!
+//! With `enforce_registration` on (the default), membership is also the
+//! tailnet's *admission* rule rather than only its firewall:
+//! [`MembersRegistrationGate`] refuses `register` for a node key outside
+//! the anchored set, and each fetch deletes the registrations of devices
+//! that have left it. A non-member therefore never appears in a member's
+//! netmap at all — the packet filter alone leaves it visible-but-mute.
+//!
 //! Failure posture is fail-closed at boot and sticky afterwards: with no
-//! good anchor loaded yet the wire gets a deny-all filter (an unreachable
-//! chain must not degrade to allow-all), and once a good anchor has been
-//! applied a later read failure keeps that last good policy and logs.
+//! good anchor loaded yet the wire gets a deny-all filter and refuses
+//! registration (an unreachable chain must not degrade to allow-all), and
+//! once a good anchor has been applied a later read failure keeps that
+//! last good policy and set. Eviction only ever runs off a *verified*
+//! fetch, so a chain outage cannot delete an operator's tailnet.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
+use parking_lot::RwLock;
+
 use anyhow::{anyhow, Context, Result};
 use octravpn_core::v3_members::TailnetMembers;
 use octravpn_mesh::policy::{parse_hujson_policy, PolicyDoc, PolicyStore};
-use octravpn_mesh::tailscale_wire::{MachineRecord, MachineRegistry};
+use octravpn_mesh::tailscale_wire::{
+    MachineRecord, MachineRegistrationStore, MachineRegistry, RegistrationAdmission,
+    RegistrationGate,
+};
 use tracing::{debug, info, warn};
 
 use crate::chain_v3::ChainCtxV3;
@@ -44,15 +59,26 @@ use crate::config::NodeConfig;
 use crate::control::enroll_circle::{KEY_ID, MEMBERS_PATH};
 use crate::hub::Hub;
 
-/// The anchored member set reduced to what the wire needs: the node keys
-/// (lowercase hex of the 32-byte WireGuard public key) allowed to talk,
-/// plus the anchor they were verified against.
+/// The anchored member set reduced to what the wire needs: the two
+/// identities a registered device can be recognised by, plus the anchor
+/// they were verified against.
+///
+/// Two, because the wire has two kinds of member. octravpn's own client
+/// owns a stable WireGuard key, which is also its Tailscale *node* key —
+/// that is the identity the packet filter and IP derivation use. A stock
+/// `tailscale` device regenerates its node key on every
+/// re-authentication (a refused registration burns it immediately), so
+/// the only identity an operator can name ahead of time is its *machine*
+/// key. A member matches on either.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AnchoredMembers {
     /// `state_root.auth_members_hash` the blob was verified against;
     /// `None` when the circle has no anchor (or no member set) yet.
     pub root: Option<String>,
+    /// Lowercase hex of each member's WireGuard/node key.
     pub node_keys: BTreeSet<String>,
+    /// Lowercase hex of each member's Tailscale machine key.
+    pub machine_keys: BTreeSet<String>,
 }
 
 impl AnchoredMembers {
@@ -60,21 +86,49 @@ impl AnchoredMembers {
         Self {
             root,
             node_keys: BTreeSet::new(),
+            machine_keys: BTreeSet::new(),
         }
     }
 
-    /// Reduce a verified member set to node keys. A member whose key does
-    /// not decode to 32 bytes fails the whole set: the anchored blob is
-    /// validated on write, so this is corruption, not a per-member nit,
-    /// and the caller keeps its last good policy.
+    /// Reduce a verified member set to the identities the wire matches on.
+    /// A member whose WireGuard key does not decode to 32 bytes fails the
+    /// whole set: the anchored blob is validated on write, so this is
+    /// corruption, not a per-member nit, and the caller keeps its last
+    /// good policy.
     pub(crate) fn from_members(root: Option<String>, members: &TailnetMembers) -> Result<Self> {
         let mut node_keys = BTreeSet::new();
+        let mut machine_keys = BTreeSet::new();
         for m in &members.members {
-            let key = member_node_key_hex(&m.wg_pubkey_b64)
-                .with_context(|| format!("member {}", m.wallet))?;
-            node_keys.insert(key);
+            if !m.wg_pubkey_b64.is_empty() {
+                let key = member_node_key_hex(&m.wg_pubkey_b64)
+                    .with_context(|| format!("member {}", m.wallet))?;
+                node_keys.insert(key);
+            }
+            if !m.machine_key_hex.is_empty() {
+                machine_keys.insert(m.machine_key_hex.to_ascii_lowercase());
+            }
         }
-        Ok(Self { root, node_keys })
+        Ok(Self {
+            root,
+            node_keys,
+            machine_keys,
+        })
+    }
+
+    /// How many devices this set names.
+    pub(crate) fn len(&self) -> usize {
+        self.node_keys.len() + self.machine_keys.len()
+    }
+
+    /// Does this set name the device behind `(node_key, machine_key)`?
+    /// Either identity is enough; both arrive from the wire in whatever
+    /// case the client sent.
+    pub(crate) fn admits(&self, node_key_hex: &str, machine_key_hex: &str) -> bool {
+        (!node_key_hex.is_empty() && self.node_keys.contains(&node_key_hex.to_ascii_lowercase()))
+            || (!machine_key_hex.is_empty()
+                && self
+                    .machine_keys
+                    .contains(&machine_key_hex.to_ascii_lowercase()))
     }
 }
 
@@ -116,10 +170,7 @@ pub(crate) fn render_policy(
     let mut srcs: BTreeSet<String> = BTreeSet::new();
     let mut matched = 0usize;
     for rec in machines.values() {
-        if !anchored
-            .node_keys
-            .contains(&rec.node_key_hex.to_ascii_lowercase())
-        {
+        if !anchored.admits(&rec.node_key_hex, &rec.machine_key_hex) {
             continue;
         }
         matched += 1;
@@ -148,7 +199,7 @@ pub(crate) fn render_policy(
     let raw = format!(
         "// octravpn members-policy: circle={circle_id} auth_members_hash={} members={} matched={matched}\n{body}\n",
         anchored.root.as_deref().unwrap_or("-"),
-        anchored.node_keys.len(),
+        anchored.len(),
     );
     let doc = parse_hujson_policy(&raw).map_err(|e| anyhow!("render members policy: {e}"))?;
     Ok(RenderedPolicy { doc, raw, matched })
@@ -188,6 +239,95 @@ pub(crate) async fn fetch_anchored_members(
             "members policy: {MEMBERS_PATH} failed hash/decrypt verification against auth_members_hash={expected}"
         )),
     }
+}
+
+/// Refusal text for a key that is not in the anchored set. It reaches the
+/// person running `tailscale up`, so it says what to do about it.
+pub(crate) const NOT_A_MEMBER_REFUSAL: &str =
+    "this device is not in the tailnet's anchored member set — ask the operator to admit its \
+     machine key with `octravpn-node auth members admit --machine-key …`; this login completes \
+     on its own once they do";
+/// Refusal text before any anchor has verified. Fail-closed, and a stock
+/// client retries registration on its own.
+pub(crate) const MEMBERS_NOT_LOADED_REFUSAL: &str =
+    "the tailnet's member set has not been read from chain yet — retry shortly";
+
+/// The anchored set as the registration gate sees it.
+///
+/// The sync task publishes each verified fetch here; the gate reads it on
+/// every `register`. `None` means "nothing has verified yet", which the
+/// gate treats as deny — the same posture as the deny-all packet filter.
+#[derive(Clone, Default)]
+pub(crate) struct SharedMembership {
+    inner: Arc<RwLock<Option<AnchoredMembers>>>,
+}
+
+impl SharedMembership {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    fn publish(&self, anchored: &AnchoredMembers) {
+        *self.inner.write() = Some(anchored.clone());
+    }
+
+    /// Admission verdict for a device, by either identity (hex, either
+    /// case). `Err` carries the reason the client is shown.
+    pub(crate) fn admit(&self, node_key_hex: &str, machine_key_hex: &str) -> Result<(), String> {
+        let guard = self.inner.read();
+        let Some(anchored) = guard.as_ref() else {
+            return Err(MEMBERS_NOT_LOADED_REFUSAL.to_string());
+        };
+        if anchored.admits(node_key_hex, machine_key_hex) {
+            Ok(())
+        } else {
+            Err(NOT_A_MEMBER_REFUSAL.to_string())
+        }
+    }
+}
+
+/// Registration gate backed by the anchored member set: membership on
+/// chain is what admits a device to the tailnet.
+pub(crate) struct MembersRegistrationGate {
+    membership: SharedMembership,
+}
+
+impl MembersRegistrationGate {
+    pub(crate) fn new(membership: SharedMembership) -> Self {
+        Self { membership }
+    }
+}
+
+#[async_trait]
+impl RegistrationGate for MembersRegistrationGate {
+    async fn admit(&self, req: RegistrationAdmission<'_>) -> Result<(), String> {
+        self.membership.admit(req.node_key_hex, req.machine_key_hex)
+    }
+}
+
+/// The wire handles the sync task drives: the registry and policy store the
+/// wire surface reads, plus the durable store to delete evicted rows from.
+pub(crate) struct MembersPolicyWiring {
+    pub machines: Arc<MachineRegistry>,
+    pub policy: Arc<PolicyStore>,
+    pub registration_store: Option<Arc<dyn MachineRegistrationStore>>,
+}
+
+/// Node keys that hold a registration but are not in `anchored`.
+///
+/// Case-folded on the registry side: the wire stores the key as the client
+/// sent it, while the anchored set is lowercase hex.
+pub(crate) fn non_member_registrations(
+    registered: &HashMap<String, MachineRecord>,
+    anchored: &AnchoredMembers,
+) -> Vec<String> {
+    let mut stale: Vec<String> = registered
+        .iter()
+        .filter(|(node_key, rec)| !anchored.admits(node_key, &rec.machine_key_hex))
+        .map(|(node_key, _)| node_key.clone())
+        .collect();
+    stale.sort();
+    stale
 }
 
 /// What one tick does, decided from the epoch and registry generation.
@@ -263,6 +403,12 @@ pub(crate) struct MembersPolicySync {
     circle_id: String,
     creds: SealedAssetCreds,
     period: Duration,
+    /// Published on every verified fetch; read by the registration gate.
+    membership: SharedMembership,
+    /// Refuse registration for non-members and delete the registrations of
+    /// devices that leave the set. See `[control.members_policy]
+    /// enforce_registration`.
+    enforce_registration: bool,
 }
 
 impl MembersPolicySync {
@@ -287,6 +433,8 @@ impl MembersPolicySync {
             circle_id,
             creds,
             period: cfg.resolved_sync_period(),
+            membership: SharedMembership::new(),
+            enforce_registration: cfg.enforce_registration,
         })
     }
 
@@ -325,14 +473,35 @@ impl MembersPolicySync {
             circle_id,
             creds: SealedAssetCreds::new(passphrase.as_str()),
             period,
+            membership: SharedMembership::new(),
+            enforce_registration: mp.enforce_registration,
         })
     }
 
+    /// The gate to hand `WireStateBuilder::registration_gate`, or `None`
+    /// when this deployment enforces membership with the packet filter
+    /// only. Must be taken before [`Self::run`] consumes the sync — both
+    /// share one [`SharedMembership`].
+    pub(crate) fn registration_gate(&self) -> Option<Arc<dyn RegistrationGate>> {
+        if !self.enforce_registration {
+            return None;
+        }
+        Some(Arc::new(MembersRegistrationGate::new(
+            self.membership.clone(),
+        )))
+    }
+
     /// The sync loop. Never returns; dropped on shutdown with the runtime.
-    pub(crate) async fn run(self, machines: Arc<MachineRegistry>, policy: Arc<PolicyStore>) {
+    pub(crate) async fn run(self, wiring: MembersPolicyWiring) {
+        let MembersPolicyWiring {
+            machines,
+            policy,
+            registration_store,
+        } = wiring;
         info!(
             circle = %self.circle_id,
             period_secs = self.period.as_secs(),
+            enforce_registration = self.enforce_registration,
             "members policy sync started"
         );
         let generation_rx = machines.subscribe_gen();
@@ -355,9 +524,16 @@ impl MembersPolicySync {
                             info!(
                                 circle = %self.circle_id,
                                 auth_members_hash = a.root.as_deref().unwrap_or("-"),
-                                members = a.node_keys.len(),
+                                members = a.len(),
                                 "members policy: anchored member set loaded"
                             );
+                        }
+                        // Publish before evicting: the gate must already be
+                        // refusing a key by the time its registration goes,
+                        // or the client would simply re-register.
+                        self.membership.publish(&a);
+                        if self.enforce_registration {
+                            evict_non_members(&machines, registration_store.as_ref(), &a).await;
                         }
                         state.anchored = Some(a);
                     }
@@ -384,7 +560,7 @@ impl MembersPolicySync {
                         info!(
                             matched = rendered.matched,
                             registered = snapshot.len(),
-                            members = effective.node_keys.len(),
+                            members = effective.len(),
                             auth_members_hash = effective.root.as_deref().unwrap_or("-"),
                             "members policy applied to wire packet filter"
                         );
@@ -400,6 +576,41 @@ impl MembersPolicySync {
             tokio::time::sleep(self.period).await;
         }
     }
+}
+
+/// Delete every registration that is no longer a member, from both the live
+/// registry (which wakes each peer's `/map` with a `peers_removed`) and the
+/// durable store. Returns how many were dropped.
+///
+/// Only ever called with a freshly verified anchor: a chain read failure
+/// must not be able to dissolve an operator's tailnet.
+async fn evict_non_members(
+    machines: &MachineRegistry,
+    store: Option<&Arc<dyn MachineRegistrationStore>>,
+    anchored: &AnchoredMembers,
+) -> usize {
+    let stale = non_member_registrations(&machines.snapshot(), anchored);
+    let mut dropped = 0usize;
+    for node_key in &stale {
+        let removed = machines.delete(node_key);
+        if let Some(store) = store {
+            if let Err(e) = store.delete_machine_registration(node_key).await {
+                warn!(
+                    node_key = %node_key,
+                    error = %e,
+                    "members policy: could not delete the durable registration of an evicted device"
+                );
+            }
+        }
+        if removed {
+            dropped += 1;
+            info!(
+                node_key = %node_key,
+                "members policy: registration deleted — the device is no longer an anchored member"
+            );
+        }
+    }
+    dropped
 }
 
 #[cfg(test)]
@@ -461,11 +672,13 @@ mod tests {
                 Member {
                     wallet: "octA".into(),
                     wg_pubkey_b64: a_b64,
+                    machine_key_hex: String::new(),
                     joined_epoch: 1,
                 },
                 Member {
                     wallet: "octB".into(),
                     wg_pubkey_b64: b_b64,
+                    machine_key_hex: String::new(),
                     joined_epoch: 2,
                 },
             ],
@@ -492,6 +705,7 @@ mod tests {
         let anchored = AnchoredMembers {
             root: Some("deadbeef".into()),
             node_keys: BTreeSet::from([a_hex.clone(), b_hex.clone()]),
+            machine_keys: BTreeSet::new(),
         };
         let mut registry = HashMap::new();
         registry.insert(
@@ -559,6 +773,272 @@ mod tests {
         let store = PolicyStore::new();
         store.set(rendered.doc, rendered.raw);
         assert!(store.is_loaded());
+    }
+
+    #[test]
+    fn gate_admits_members_refuses_strangers_and_fails_closed_before_the_first_anchor() {
+        let (_, member_hex) = key(0x21);
+        let (_, stranger_hex) = key(0x22);
+        let membership = SharedMembership::new();
+
+        // Nothing verified yet ⇒ deny, with the retry-shaped reason.
+        assert_eq!(
+            membership.admit(&member_hex, ""),
+            Err(MEMBERS_NOT_LOADED_REFUSAL.to_string())
+        );
+
+        membership.publish(&AnchoredMembers {
+            root: Some("deadbeef".into()),
+            node_keys: BTreeSet::from([member_hex.clone()]),
+            machine_keys: BTreeSet::new(),
+        });
+        assert_eq!(membership.admit(&member_hex, ""), Ok(()));
+        // The wire hands the key back as the client sent it.
+        assert_eq!(
+            membership.admit(&member_hex.to_ascii_uppercase(), ""),
+            Ok(())
+        );
+        assert_eq!(
+            membership.admit(&stranger_hex, ""),
+            Err(NOT_A_MEMBER_REFUSAL.to_string())
+        );
+
+        // An empty verified set denies everyone — it does not fall back to
+        // "not loaded yet".
+        membership.publish(&AnchoredMembers::empty(None));
+        assert_eq!(
+            membership.admit(&member_hex, ""),
+            Err(NOT_A_MEMBER_REFUSAL.to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn gate_answers_through_the_wire_trait() {
+        let (_, member_hex) = key(0x23);
+        let membership = SharedMembership::new();
+        membership.publish(&AnchoredMembers {
+            root: None,
+            node_keys: BTreeSet::from([member_hex.clone()]),
+            machine_keys: BTreeSet::new(),
+        });
+        let gate = MembersRegistrationGate::new(membership);
+        let req = |node_key_hex: &'static str| RegistrationAdmission {
+            node_key_hex,
+            machine_key_hex: "bb",
+            hostname: Some("peer-a"),
+        };
+        let leaked: &'static str = Box::leak(member_hex.into_boxed_str());
+        assert!(gate.admit(req(leaked)).await.is_ok());
+        assert!(gate.admit(req("ff")).await.is_err());
+    }
+
+    /// A stock device is named by its machine key, which is the only
+    /// identity that survives the node-key rotation a refusal triggers.
+    #[test]
+    fn machine_key_admits_a_device_whose_node_key_rotates() {
+        let (_, mkey) = key(0x51);
+        let membership = SharedMembership::new();
+        membership.publish(&AnchoredMembers {
+            root: Some("r".into()),
+            node_keys: BTreeSet::new(),
+            machine_keys: BTreeSet::from([mkey.clone()]),
+        });
+        // Three successive registration attempts, each with a fresh node
+        // key: all admitted, because the machine key is the same device.
+        for fill in [0x60u8, 0x61, 0x62] {
+            let (_, rotated) = key(fill);
+            assert_eq!(membership.admit(&rotated, &mkey), Ok(()));
+        }
+        // Same node keys, a different machine ⇒ refused.
+        let (_, other) = key(0x52);
+        assert_eq!(
+            membership.admit(&key(0x60).1, &other),
+            Err(NOT_A_MEMBER_REFUSAL.to_string())
+        );
+        // An absent identity never matches an empty set entry.
+        assert_eq!(
+            membership.admit("", ""),
+            Err(NOT_A_MEMBER_REFUSAL.to_string())
+        );
+    }
+
+    /// `from_members` reads both identities off the anchored set, and a
+    /// machine-key-only member contributes no node key.
+    #[test]
+    fn from_members_collects_both_identities() {
+        let (wg_b64, wg_hex) = key(0x71);
+        let mkey = "ab".repeat(32);
+        let members = TailnetMembers::new_v1(
+            7,
+            "00".repeat(32),
+            vec![
+                Member {
+                    wallet: "octStock".into(),
+                    wg_pubkey_b64: String::new(),
+                    machine_key_hex: mkey.clone(),
+                    joined_epoch: 1,
+                },
+                Member {
+                    wallet: "octOctravpn".into(),
+                    wg_pubkey_b64: wg_b64,
+                    machine_key_hex: String::new(),
+                    joined_epoch: 2,
+                },
+            ],
+            0,
+            0,
+        );
+        members.validate().expect("valid set");
+        let anchored = AnchoredMembers::from_members(None, &members).unwrap();
+        assert_eq!(anchored.node_keys, BTreeSet::from([wg_hex.clone()]));
+        assert_eq!(anchored.machine_keys, BTreeSet::from([mkey.clone()]));
+        assert_eq!(anchored.len(), 2);
+        assert!(anchored.admits(&wg_hex, ""));
+        assert!(anchored.admits("", &mkey));
+        assert!(!anchored.admits(&key(0x72).1, ""));
+    }
+
+    /// The filter and the eviction pass both match a machine-key member, so
+    /// a stock device is reachable and is not evicted the moment it joins.
+    #[test]
+    fn machine_key_members_are_rendered_and_kept() {
+        let (_, node_hex) = key(0x81);
+        let mkey = "cd".repeat(32);
+        let mut rec = machine(&node_hex, Ipv4Addr::new(100, 64, 0, 21));
+        rec.machine_key_hex = mkey.clone();
+        let mut registered = HashMap::new();
+        registered.insert(node_hex, rec);
+        let anchored = AnchoredMembers {
+            root: Some("r".into()),
+            node_keys: BTreeSet::new(),
+            machine_keys: BTreeSet::from([mkey]),
+        };
+        let rendered = render_policy("octCircle", &anchored, &registered).unwrap();
+        assert_eq!(rendered.matched, 1, "matched by machine key");
+        assert!(non_member_registrations(&registered, &anchored).is_empty());
+    }
+
+    #[test]
+    fn non_member_registrations_is_case_insensitive_and_leaves_members_alone() {
+        let (_, member_hex) = key(0x31);
+        let (_, stranger_hex) = key(0x32);
+        let mut registered = HashMap::new();
+        // Registered under mixed case, as a client may send it.
+        registered.insert(
+            member_hex.to_ascii_uppercase(),
+            machine(&member_hex, Ipv4Addr::new(100, 64, 0, 1)),
+        );
+        registered.insert(
+            stranger_hex.clone(),
+            machine(&stranger_hex, Ipv4Addr::new(100, 64, 0, 2)),
+        );
+        let anchored = AnchoredMembers {
+            root: Some("r".into()),
+            node_keys: BTreeSet::from([member_hex]),
+            machine_keys: BTreeSet::new(),
+        };
+        assert_eq!(
+            non_member_registrations(&registered, &anchored),
+            vec![stranger_hex]
+        );
+        // Everyone a member ⇒ nothing to evict.
+        let all = AnchoredMembers {
+            root: Some("r".into()),
+            node_keys: registered.keys().map(|k| k.to_ascii_lowercase()).collect(),
+            machine_keys: BTreeSet::new(),
+        };
+        assert!(non_member_registrations(&registered, &all).is_empty());
+    }
+
+    /// Eviction drops the live registration *and* the durable row, so the
+    /// device leaves every peer's netmap and cannot be hydrated back at the
+    /// next restart.
+    #[tokio::test]
+    async fn evict_non_members_deletes_from_registry_and_durable_store() {
+        #[derive(Default)]
+        struct RecordingStore {
+            deleted: parking_lot::Mutex<Vec<String>>,
+        }
+        #[async_trait]
+        impl MachineRegistrationStore for RecordingStore {
+            async fn create_or_update_auth_key_registration(
+                &self,
+                record: MachineRecord,
+                _policy: &octravpn_mesh::policy::PolicyStore,
+                _auth_key_id: Option<i64>,
+            ) -> std::result::Result<
+                octravpn_mesh::tailscale_wire::PersistedMachineRegistration,
+                String,
+            > {
+                Ok(
+                    octravpn_mesh::tailscale_wire::PersistedMachineRegistration {
+                        record,
+                        replaced_node_key_hex: None,
+                    },
+                )
+            }
+            async fn delete_machine_registration(
+                &self,
+                node_key_hex: &str,
+            ) -> std::result::Result<(), String> {
+                self.deleted.lock().push(node_key_hex.to_string());
+                Ok(())
+            }
+        }
+
+        let (_, member_hex) = key(0x41);
+        let (_, stranger_hex) = key(0x42);
+        let registry = MachineRegistry::new();
+        registry.upsert(
+            member_hex.clone(),
+            machine(&member_hex, Ipv4Addr::new(100, 64, 0, 5)),
+        );
+        registry.upsert(
+            stranger_hex.clone(),
+            machine(&stranger_hex, Ipv4Addr::new(100, 64, 0, 6)),
+        );
+        let store: Arc<dyn MachineRegistrationStore> = Arc::new(RecordingStore::default());
+        let anchored = AnchoredMembers {
+            root: Some("r".into()),
+            node_keys: BTreeSet::from([member_hex.clone()]),
+            machine_keys: BTreeSet::new(),
+        };
+
+        let dropped = evict_non_members(&registry, Some(&store), &anchored).await;
+        assert_eq!(dropped, 1);
+        assert!(registry.get(&member_hex).is_some(), "the member stays");
+        assert!(
+            registry.get(&stranger_hex).is_none(),
+            "the stranger is gone"
+        );
+
+        // Idempotent: a second pass finds nothing left to drop.
+        assert_eq!(
+            evict_non_members(&registry, Some(&store), &anchored).await,
+            0
+        );
+    }
+
+    /// `enforce_registration = false` keeps the packet-filter-only posture:
+    /// no gate is installed, so any key may still register.
+    #[test]
+    fn registration_gate_is_absent_when_enforcement_is_off() {
+        fn sync(enforce: bool) -> MembersPolicySync {
+            MembersPolicySync {
+                chain: ChainHandle::Owned(Arc::new(ChainCtxV3::new(
+                    octravpn_core::rpc::RpcClient::new("http://127.0.0.1:1/"),
+                    octravpn_core::address::Address::from_display("octCircle"),
+                    octravpn_core::sig::KeyPair::from_secret_bytes(&[7u8; 32]),
+                ))),
+                circle_id: "octCircle".into(),
+                creds: SealedAssetCreds::new("pass"),
+                period: Duration::from_secs(10),
+                membership: SharedMembership::new(),
+                enforce_registration: enforce,
+            }
+        }
+        assert!(sync(false).registration_gate().is_none());
+        assert!(sync(true).registration_gate().is_some());
     }
 
     #[test]

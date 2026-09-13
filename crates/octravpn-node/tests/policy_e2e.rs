@@ -59,6 +59,7 @@ fn build_app() -> (axum::Router, WireState, PolicyStore, tempfile::TempDir) {
         ip_allocator: Arc::new(TailnetIpAllocator::new("policy-e2e")),
         machines: machines.clone(),
         registration_store: None,
+        registration_gate: None,
         derp_map: octravpn_mesh::tailscale_wire::DerpMapStore::shared(
             octravpn_mesh::tailscale_wire::DerpMap::default(),
         ),
