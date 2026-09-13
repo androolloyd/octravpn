@@ -66,9 +66,23 @@ the embedded CLI passthrough, and the compatibility `POST /admin/preauth`
 shim used to mint keys for the test. The script now exercises that
 boundary directly and asserts an actual `tailscale ping`.
 
-## Members-policy proof (`run-members-policy.sh`)
+## Members-policy proofs (`run-members-policy.sh`, `run-members-registration.sh`)
 
-Design item 4, live: the circle's anchored member set (`/auth/members.json`, sealed,
+Two postures of design item 4, sharing `lib-members-policy.sh` (which also carries the
+exit-code table and the env knobs):
+
+- `run-members-policy.sh` — **filter**: every device registers, and the anchored member set
+  decides what it may reach. A non-member is a visible peer with no connectivity.
+- `run-members-registration.sh` — **admission** (`enforce_registration = true`, the default):
+  the anchored set decides who may register at all. A non-member is refused, is absent from
+  every member's netmap, and a device removed from the set loses its registration. Admission
+  binds the device's **machine key** — a refused registration burns the node key and the
+  client retries with a new one — and the refusal names it; the client's own retry completes
+  the login once admitted, so nobody re-runs `tailscale up`.
+
+
+
+Design item 4 in its filter posture, live: the circle's anchored member set (`/auth/members.json`, sealed,
 bound by `state_root.auth_members_hash`) rendered into the Tailscale packet filter.
 Needs the local sequence-12 node (`octra-foundry/docker/octra-node`, RPC on
 `127.0.0.1:18080`), the deployed `main-v4`, the foundry `octra` binary and a Linux

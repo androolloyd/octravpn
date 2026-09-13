@@ -99,9 +99,41 @@ mock):**
   Fixed upstream in the fork (`androolloyd/headscale-rs` main, 36b79ba) with a regression test.
 - The probe matters: TSMP pings are answered by tailscaled *before* the packet filter, and
   peerapi stays reachable between netmap-visible peers, so only ICMP (or real traffic) shows
-  admission. Non-members that are still registered remain *visible* to members once any rule
-  connects them; the follow-up is registration-time enforcement — refuse `register` for a
-  node key outside the anchored set — so a non-member never appears in a member's netmap.
+  admission.
+
+**Follow-up, also done 2026-09-13: membership is admission, not just a firewall.** With the
+filter alone a non-member registers, takes an IP and shows up as a peer everyone can see and
+nobody can reach. `[control.members_policy] enforce_registration` (on by default wherever
+members_policy is enabled) closes that: headscale-rs gained an optional `RegistrationGate` on
+`WireState`, octravpn backs it with the anchored set, and each verified fetch deletes the
+registrations of devices that have left the set — from the live registry and the durable
+store. A non-member is absent from every member's netmap; a revoked one disappears from it
+within an epoch. `enforce_registration = false` keeps the filter-only posture.
+
+`docker/devnet/tailscale-interop/run-members-registration.sh` proves it live (exit 0,
+2026-09-13, real sequence-12 node, two stock peers): refusal with nothing in the roster →
+admit → the client's own retry joins → the second peer is still refused and invisible →
+admit → both reachable → evict → registration deleted, gone from the netmap, cannot rejoin.
+
+Two corrections the live run forced, both worth keeping in mind:
+
+- **Admission binds the machine key, not the node key.** A refused registration *burns* the
+  node key — the client retries every ~20s with a fresh one (measured) — so a node key read
+  out of a refusal is stale before an operator can act on it. The Tailscale *machine* key is
+  the device's long-lived noise identity and survives re-auth, logout and rotation. `Member`
+  therefore carries an optional `machine_key_hex` (skipped while empty, so member sets written
+  before it hash unchanged) and the gate, the packet filter and the eviction pass all match on
+  either identity: octravpn's own client keeps its stable WireGuard key, stock devices use the
+  machine key. The refusal log names it, and the client's own retry completes the login once
+  admitted — the operator never re-runs `tailscale up` (doing so would rotate the key again).
+- **Chain edits must wait to apply.** Every `auth` edit is a read-modify-write of a sealed
+  blob applied at the next epoch, so two edits issued back to back dropped the first. `auth
+  members`/`auth allow` now poll until a fresh read returns what they wrote (`--no-wait` opts
+  out).
+
+Still open here: the operator learns a pending device's machine key by reading the daemon's
+refusal log. A first-class pending list (an admin route plus `auth members pending`) is the
+obvious next increment.
 
 ## 5. Chain-attested exit assignment, for free
 

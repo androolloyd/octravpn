@@ -63,17 +63,28 @@ fragmented state from `production-checklist.md` (v1 gates),
 > left a re-registering node logged out (fixed in the fork, 36b79ba). Keepers already follow
 > epochs (item 9).
 >
+> **2026-09-13 — membership is now admission.** `enforce_registration` (default on with
+> members_policy) refuses `register` for a device outside the anchored set and deletes the
+> registration of one that leaves it, so a non-member never appears in a member's netmap;
+> `run-members-registration.sh` proves the whole cycle live against the sequence-12 node with
+> two stock peers. Getting there corrected the identity the set binds — a refused registration
+> burns the node key and the client retries with a fresh one every ~20s, so admission binds
+> the *machine* key (`Member.machine_key_hex`, `auth members admit --machine-key`) — and made
+> `auth` edits wait for the chain to apply them, since back-to-back edits were silently
+> dropping each other. It also fixed a second headscale-rs durable-store bug: with no users
+> store, a rotated node key inserted a duplicate row, so one device showed up twice in every
+> netmap (fork main, eb9d573).
+>
 > **Still between here and a release**, in order: (1) join the mesh and money planes
 > — the AML already supports it: tailnet owners can `authorize` a spender and
 > `open_session_from_treasury` opens sessions on a member's behalf, so the exit node
 > admits a stock WG peer on first traffic, opens a treasury session for it, and meters
 > its WG peer counters; (2) retire the two-tx driver once Step 9's proofs land, so the
-> HTLC is the only rail; (3) registration-time membership enforcement (refuse `register`
-> for a node key outside the anchored set, so non-members never appear in a member's
-> netmap — today they are filtered, not invisible); (4) the operator audit CLI designed
-> around the 22.75h retention window; (5) mainnet ceremony + runbook. Hidden-exit
-> (per-packet nonces, then the relay hop) is the only item that changes the threat model
-> and comes last.
+> HTLC is the only rail; (3) a first-class pending-device list (admin route + `auth members
+> pending`) so an operator admits a stock client without reading the daemon's refusal log;
+> (4) the operator audit CLI designed around the 22.75h retention window; (5) mainnet
+> ceremony + runbook. Hidden-exit (per-packet nonces, then the relay hop) is the only item
+> that changes the threat model and comes last.
 >
 > **2026-09-12 — proven again on lite_node sequence 12, locally, with sealed keys.**
 > The same loop now runs green against a real sequence-12 node in docker
