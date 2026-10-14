@@ -283,12 +283,7 @@ async fn open(
     .await
     .unwrap()
 }
-fn execute(
-    view: &Committed,
-    circle: &[u8],
-    authority: &finality_host::Authority,
-) -> (Vec<u8>, ExecutedEpoch) {
-    let epoch = view.head().cursor.epoch.0 + 1;
+fn circle_call(epoch: u64, circle: &[u8]) -> Transaction {
     let key = SigningKey::from_bytes(&[42; 32]);
     let public = STANDARD.encode(key.verifying_key().to_bytes()).into_bytes();
     let mut tx = Transaction {
@@ -307,6 +302,15 @@ fn execute(
     tx.signature = STANDARD
         .encode(key.sign(&tx.signing_bytes().unwrap()).to_bytes())
         .into_bytes();
+    tx
+}
+fn execute(
+    view: &Committed,
+    circle: &[u8],
+    authority: &finality_host::Authority,
+) -> (Vec<u8>, ExecutedEpoch) {
+    let epoch = view.head().cursor.epoch.0 + 1;
+    let tx = circle_call(epoch, circle);
     let executed = execute_received(
         view.head(),
         StateBatch::from_snapshot(view.state().clone()),

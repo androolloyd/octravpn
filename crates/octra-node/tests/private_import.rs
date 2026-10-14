@@ -368,6 +368,53 @@ async fn finalized_mixed_import_uses_bound_key_files_and_survives_restart() {
             )
             .unwrap();
         }
+        let draft = Arc::new(
+            node.proposal_draft(
+                &executor.graph(),
+                octra_node_runtime::finality::proposal::Policy {
+                    protocol: Protocol::new(2).unwrap(),
+                    genesis_time: Some(0.),
+                },
+                b"validator-0",
+                10.,
+            )
+            .await
+            .unwrap(),
+        );
+        let inputs: Vec<Transaction> = raw
+            .txs_json
+            .iter()
+            .map(|raw| {
+                Transaction::from_document(
+                    &octra_node_protocol::native_json::Document::parse(raw).unwrap(),
+                )
+                .unwrap()
+            })
+            .collect();
+        let normalized = RawBundle {
+            // Incoming archive documents include explicit null fields; native
+            // bundle serialization omits absent fields after decoding.
+            txs_json: inputs
+                .iter()
+                .map(|tx| tx.to_json_bytes().unwrap())
+                .collect(),
+            ..raw.clone()
+        };
+        let built = executor.build_proposal(draft, inputs).await;
+        if scenario == "valid" {
+            let built = built.unwrap();
+            assert_eq!(built.plan().header, proposal.header);
+            assert_eq!(built.bundle(), &normalized);
+            assert_eq!(
+                built.execution().state.root().unwrap(),
+                expected.root().unwrap()
+            );
+        } else {
+            assert!(
+                matches!(built, Err(ProposalError::Unavailable(_))),
+                "{scenario}"
+            );
+        }
         let verified = executor
             .verify_proposal(candidate(proposal.clone()).await, &raw)
             .await;

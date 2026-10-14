@@ -8730,5 +8730,17 @@
     "funded_vpn_end_to_end": false,
     "audit_remaining": "RUSTSEC-2024-0449 through headscale CLI",
     "foundry_commit": "995e51af02155bc7178af629c00a74ab0f8f5816"
+  },
+  "selected_proposal_construction_qualification": {
+    "status": "selected proposal construction qualified; full node remains open",
+    "summary": "checkpoints/2026-10-14/proposal-build-summary.json",
+    "evidence": "checkpoints/2026-10-14/proposal-build.json",
+    "tests_passed": 19,
+    "sources_unchanged": true,
+    "source_count": 2159,
+    "final_leader_evidence": "checkpoints/2026-10-14/proposal-build-leader.json",
+    "final_leader_tests_passed": 7,
+    "full_node_end_to_end": false,
+    "funded_vpn_end_to_end": false
   }
 }

@@ -2027,3 +2027,64 @@ funded VPN settlement remain open. This is not full-node or mainnet qualificatio
 - [Node source hashes and test command](checkpoints/2026-10-14/security-build.json)
 - [Node test log](checkpoints/2026-10-14/security-build.log)
 - [Current audit findings](checkpoints/2026-10-14/security-audit.json)
+
+
+### Selected proposal construction (2026-10-14)
+
+`Publisher::proposal_build_context` captures the next epoch, authorized creator,
+receipt policy, historical execution rules and authenticated parent certificate
+before execution. It derives time from the signed parent (or explicit genesis
+configuration), enforces the native interval and checks canonical freshness again
+after asynchronous reads. `Node::proposal_draft` binds that context to a serving
+snapshot and revocation lease. It grants no finality privileges.
+
+`Native::build_proposal` now derives proposal commitments from a selected staging
+batch: signature/payload/budget admission, local private proofs, Circle capture,
+candidate outcomes, stable confirmed/charged replay, state/index root and exact
+receipt bytes. Build and verification share proof preparation and the staged
+operation host. Invalid or unavailable work cannot produce a fallback root.
+The live four-validator service test now builds from signed pending transactions;
+it no longer supplies a precomputed header or bundle to the leader. The previous
+fixture execution remains an independent expected-state assertion.
+
+The builder accepts an already selected canonical batch. Full native staging
+selection, private slots, Circle turn/refill, bounded stabilization retry, round
+freezing and the production activation/precommit/startup host remain open.
+In particular, an ordinary failed VM call followed by a dependent successor can
+change the finalized partition; this adapter defers that batch. The host must
+reselect it using native policy before retrying. This is an implemented execution
+boundary, not a claim that the complete upstream proposal scheduler is ported.
+
+The checkpoint passes **19 tests across 5 suites**, with **2,159 unchanged source hashes**. It covers real private proofs with absent/corrupt/valid key files, exact native
+private-state expectations, empty and rejected candidate construction, invalid
+signatures, unstable partitions, parent/time authority, concurrent canonical
+advancement, lease revocation, native preverification/partition fixtures and live
+Circle/browser/VPN/ExEx publication and restart. Strict Clippy passes for both
+changed crates and all their targets. Development activation and VPN escrow remain
+fixtures; full cross-language node and funded settlement qualification are open.
+
+A final integration refinement retains locally built execution evidence for the
+leader's durable precommit; it need not wait for its own proposal to return through
+a peer. Both locally built and peer-verified evidence must still have a current
+canonical lease. All **seven service tests** and strict Clippy passed again with
+the final source hashes. Only that test host and the `Built` API comment changed
+after the 19-test checkpoint; both earlier sources are retained and checked against
+its source hashes.
+
+The latest GitHub AML run executed all 41 positive tests but its negative-control
+log check failed because `rg` was absent. The script now uses standard `grep`;
+41 tests and all four negative controls pass with `PATH=/usr/bin:/bin` locally.
+The published parent revision passed Lean, TLC, Tamarin, Kani, Clippy, formatting,
+headscale parity and privileged WireGuard smoke. Its audit still rejects the
+headscale YAML maintenance advisory. Docker built successfully but node startup
+failed opening `./state/receipt-vault.bin` as the unprivileged container user;
+that writable-directory fix and the old signed lifecycle assumptions remain
+required. The benchmark comparison remains unresolved.
+
+- [Scope, remaining gates and evidence hashes](checkpoints/2026-10-14/proposal-build-summary.json)
+- [Test log](checkpoints/2026-10-14/proposal-build.log)
+- [Source checkpoint](checkpoints/2026-10-14/proposal-build.json)
+- [Clippy log](checkpoints/2026-10-14/proposal-build-clippy.log)
+- [Final leader checkpoint](checkpoints/2026-10-14/proposal-build-leader.json)
+- [Final service log](checkpoints/2026-10-14/proposal-build-leader.log)
+- [Portable AML checks](checkpoints/2026-10-14/aml-portable.log)

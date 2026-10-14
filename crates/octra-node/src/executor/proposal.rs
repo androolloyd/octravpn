@@ -14,7 +14,6 @@ use octra_node_runtime::{
     canonical,
     consensus_bundle::{self, Accepted, RawBundle},
     epoch_partition::Partition,
-    preverify_batch,
     state_batch::StateBatch,
 };
 use std::{collections::BTreeMap, sync::Arc};
@@ -33,10 +32,10 @@ impl std::fmt::Display for ProposalError {
     }
 }
 impl std::error::Error for ProposalError {}
-fn invalid(e: impl std::fmt::Display) -> ProposalError {
+pub(super) fn invalid(e: impl std::fmt::Display) -> ProposalError {
     ProposalError::Invalid(e.to_string())
 }
-fn unavailable(e: impl std::fmt::Display) -> ProposalError {
+pub(super) fn unavailable(e: impl std::fmt::Display) -> ProposalError {
     ProposalError::Unavailable(e.to_string())
 }
 
@@ -116,39 +115,7 @@ impl Native {
             &ledger,
         )
         .map_err(invalid)?;
-        let batch = preverify_batch::prepare(inputs, true, &rules.stealth_minimum, |tx| {
-            Ok(self.prove(
-                tx,
-                &ledger,
-                candidate.state(),
-                parent.ledger_root.as_bytes(),
-                self.private_profile(bound, header.epoch_id),
-                &rules.stealth_minimum,
-            ))
-        })
-        .map_err(unavailable)?;
-        let hashes = inputs
-            .iter()
-            .map(Transaction::hash)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(unavailable)?;
-        let ready = batch
-            .ready
-            .iter()
-            .map(|r| hashes[r.index])
-            .collect::<Vec<_>>();
-        if ready != hashes || !batch.skipped.is_empty() {
-            return Err(if batch.may_retry(inputs).map_err(unavailable)? {
-                unavailable("preverify_unavailable")
-            } else {
-                invalid("local_preverify_mismatch")
-            });
-        }
-        let local = batch
-            .ready
-            .into_iter()
-            .filter_map(|r| r.receipt)
-            .collect::<Vec<_>>();
+        let local = self.proposal_proofs(parent, candidate.state(), bound, inputs, rules)?;
         let keys = context
             .authority()
             .validators

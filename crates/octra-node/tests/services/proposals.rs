@@ -96,6 +96,31 @@ async fn local_proposal_capture_checks_receipts_outcomes_and_commitment() {
     sign(&mut proposal);
     let executor =
         ImportExecutor::with_protocol(&authority, &node, Protocol::new(2).unwrap()).native;
+    let draft = Arc::new(
+        node.proposal_draft(
+            &Graph::new(proposal.chain_id.clone(), None),
+            octra_node_runtime::finality::proposal::Policy {
+                protocol: Protocol::new(2).unwrap(),
+                genesis_time: Some(0.),
+            },
+            b"validator-0",
+            10.,
+        )
+        .await
+        .unwrap(),
+    );
+    let built = executor
+        .build_proposal(draft.clone(), vec![circle_call(1, circle.as_bytes())])
+        .await
+        .unwrap();
+    assert_eq!(built.plan().header, proposal.header);
+    assert_eq!(built.bundle(), &raw);
+    assert_eq!(
+        built.execution().state.root().unwrap(),
+        expected.state.root().unwrap()
+    );
+    assert!(node.draft_current(built.draft()));
+    assert!(built.draft().context().rules().authority().is_err());
     let prepared = executor
         .verify_proposal(candidate(&node, &proposal).await, &raw)
         .await
@@ -192,6 +217,62 @@ async fn local_proposal_capture_checks_receipts_outcomes_and_commitment() {
         replayed.execution().state.root().unwrap(),
         expected.state.root().unwrap()
     );
+    let inputs = transaction_outcome::merge(std::slice::from_ref(&tx), &rejections).unwrap();
+    let built_rejections = executor
+        .build_proposal(draft.clone(), inputs)
+        .await
+        .unwrap();
+    assert_eq!(built_rejections.plan().header, proposal_outcomes.header);
+    assert_eq!(built_rejections.bundle(), &outcomes);
+    assert_eq!(
+        built_rejections.execution().state.root().unwrap(),
+        expected.state.root().unwrap()
+    );
+    let empty = executor
+        .build_proposal(draft.clone(), vec![])
+        .await
+        .unwrap();
+    assert_eq!(empty.plan().header.txid_hi, view.head().txid_hi);
+    assert!(empty.bundle().txs_json.is_empty());
+    let mut empty_proposal = proposal.clone();
+    empty_proposal.header = empty.plan().header.clone();
+    empty_proposal.tx_hashes.clear();
+    sign(&mut empty_proposal);
+    executor
+        .verify_proposal(candidate(&node, &empty_proposal).await, empty.bundle())
+        .await
+        .unwrap();
+    let mut forged = tx.clone();
+    forged.signature[0] ^= 1;
+    assert!(matches!(
+        executor.build_proposal(draft.clone(), vec![forged]).await,
+        Err(ProposalError::Invalid(_))
+    ));
+    // A failed VM call advances the nonce in candidate preview. Its public
+    // successor cannot survive finalized replay after that ordinary rejection
+    // is removed. Construction must defer instead of publishing preview state.
+    let mut failed_call = tx.clone();
+    failed_call.encrypted_data = Some(b"missing_method".to_vec());
+    let mut successor = tx.clone();
+    successor.op_type = OpType::Standard;
+    successor.nonce = Nonce::new(2).unwrap();
+    successor.encrypted_data = None;
+    successor.message = None;
+    for tx in [&mut failed_call, &mut successor] {
+        tx.signature = STANDARD
+            .encode(
+                SigningKey::from_bytes(&[42; 32])
+                    .sign(&tx.signing_bytes().unwrap())
+                    .to_bytes(),
+            )
+            .into_bytes();
+    }
+    let error = executor
+        .build_proposal(draft.clone(), vec![failed_call, successor])
+        .await
+        .err()
+        .expect("unstable partition was built");
+    assert!(matches!(error, ProposalError::Unavailable(_)), "{error}");
     let mut wrong = rejections;
     wrong[0].reason = b"invented rejection".to_vec();
     outcomes.receipts_json = transaction_outcome::encode(&raw.receipts_json, &wrong).unwrap();
@@ -212,6 +293,11 @@ async fn local_proposal_capture_checks_receipts_outcomes_and_commitment() {
     node.suspend("prepared proposal revocation");
     assert!(!node.proposal_current(prepared.candidate()));
     node.resume().await.unwrap();
+    assert!(!node.draft_current(&draft));
+    assert!(matches!(
+        executor.build_proposal(draft, vec![tx]).await,
+        Err(ProposalError::Unavailable(_))
+    ));
     assert!(!node.proposal_current(prepared.candidate()));
     node.shutdown().await.unwrap();
 }

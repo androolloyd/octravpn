@@ -59,6 +59,50 @@ fn skip(kind: Kind, reason: impl Into<Vec<u8>>) -> Checked {
     }
 }
 impl Native {
+    pub(super) fn proposal_proofs(
+        &self,
+        parent: &octra_node_runtime::canonical::Head,
+        state: &Snapshot,
+        bound: &octra_node_runtime::execution_rules::Bound,
+        inputs: &[Transaction],
+        rules: &octra_node_runtime::consensus_bundle::Rules,
+    ) -> Result<Vec<Receipt>, super::ProposalError> {
+        use super::proposal::{invalid, unavailable};
+        use octra_node_runtime::{account_store, preverify_batch, state_batch::StateBatch};
+        let ledger = account_store::ledger(&StateBatch::from_snapshot(state.clone()))
+            .map_err(unavailable)?;
+        let epoch = i64::try_from(parent.cursor.epoch.0 + 1).map_err(unavailable)?;
+        let batch = preverify_batch::prepare(inputs, true, &rules.stealth_minimum, |tx| {
+            Ok(self.prove(
+                tx,
+                &ledger,
+                state,
+                parent.ledger_root.as_bytes(),
+                self.private_profile(bound, epoch),
+                &rules.stealth_minimum,
+            ))
+        })
+        .map_err(unavailable)?;
+        let hashes = inputs
+            .iter()
+            .map(Transaction::hash)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(unavailable)?;
+        let ready = batch
+            .ready
+            .iter()
+            .map(|r| hashes[r.index])
+            .collect::<Vec<_>>();
+        if ready != hashes || !batch.skipped.is_empty() {
+            return Err(if batch.may_retry(inputs).map_err(unavailable)? {
+                unavailable("preverify_unavailable")
+            } else {
+                invalid("local_preverify_mismatch")
+            });
+        }
+        Ok(batch.ready.into_iter().filter_map(|r| r.receipt).collect())
+    }
+
     pub(super) fn prove(
         &self,
         tx: &Transaction,

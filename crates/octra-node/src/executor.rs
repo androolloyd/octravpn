@@ -1,6 +1,7 @@
 //! Staged native execution for proposals and finalized imports. The publisher
 //! owns finality, canonical commits and ExEx; this host owns no canonical writer.
 mod admission;
+mod build;
 mod proofs;
 mod proposal;
 mod stage;
@@ -8,6 +9,7 @@ use crate::import::{Execution, Executor};
 pub use admission::Limits;
 use anyhow::{ensure, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
+pub use build::Built;
 use octra_node_protocol::{
     consensus::{policy::Protocol, reward_attribution, EpochHeader},
     control_payload::{BondedReady, LegacyReady},

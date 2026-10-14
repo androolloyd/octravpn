@@ -1,0 +1,90 @@
+{
+  "status": "selected proposal construction qualified; full node remains open",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "sources_unchanged": true,
+  "source_count": 2159,
+  "tests": {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-p",
+      "octra-node",
+      "-p",
+      "octra-node-runtime",
+      "--test",
+      "services",
+      "--test",
+      "private_import",
+      "--test",
+      "proposal_authentication",
+      "--test",
+      "preverify_batch",
+      "--test",
+      "epoch_partition"
+    ],
+    "exit_code": 0,
+    "suites": 5,
+    "passed": 19,
+    "failed": 0,
+    "ignored": 0,
+    "log": "/private/tmp/octra-proposal-build-checkpoint-20261014.log",
+    "log_sha256": "ba1cdd2aa72df9b93ce146d0884f060c1600fd3dd1acd63a9cc14c4b23d9b222"
+  },
+  "final_leader_tests": {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-p",
+      "octra-node",
+      "--test",
+      "services"
+    ],
+    "exit_code": 0,
+    "suites": 1,
+    "passed": 7,
+    "failed": 0,
+    "ignored": 0,
+    "log": "/private/tmp/octra-proposal-build-leader-checkpoint-20261014.log",
+    "log_sha256": "12fe02f1a72f8c1e94abf55a089286e9156014f19abb6ee20eac39b8e2f7ad13"
+  },
+  "changed_since_base_checkpoint": [
+    "crates/octra-node/src/executor/build.rs",
+    "crates/octra-node/tests/services/live.rs"
+  ],
+  "clippy": "passed for octra-node and octra-node-runtime, all targets",
+  "aml": {
+    "passed": 41,
+    "negative_controls": 4,
+    "path": "/usr/bin:/bin",
+    "script_sha256": "36aecde0f596981756e2255a0e4ece4e2cd1d3cd3abc1f65bea96fc96d72b399"
+  },
+  "full_node_end_to_end": false,
+  "funded_vpn_end_to_end": false,
+  "remaining": [
+    "native staging selection, private slots, Circle turn/refill and bounded stabilization retry",
+    "production driver activation, round freezing, precommit host and executable startup",
+    "remaining private/VM/Circle operations, concrete HFHE callbacks and wallet/peer intake",
+    "cross-language full node sync and recovery, funded VPN settlement and OS oct:// launching",
+    "headscale unsafe-libyaml replacement and repository-wide CI",
+    "Docker receipt vault writable state directory and signed lifecycle migration",
+    "benchmark regression investigation"
+  ],
+  "limitations": [
+    "Construction takes a selected canonical staging batch; changing rejection partitions defer construction until the host refills or reselects.",
+    "The live integration uses development validator activation and synthetic VPN escrow. The proposal header/receipts/state now come from the Native builder.",
+    "Tests use recorded local sibling working trees, not fresh remote clones.",
+    "After the 19-test checkpoint, only the Built API comment and live service test host changed. All seven service tests and strict lints passed again; original two sources are retained with matching hashes."
+  ],
+  "evidence_sha256": {
+    "proposal-build.json": "097ea14feb67ac8a7e993d10d22a9f82b5c52ee87e87d8bb9718c77378f10359",
+    "proposal-build.log": "ba1cdd2aa72df9b93ce146d0884f060c1600fd3dd1acd63a9cc14c4b23d9b222",
+    "proposal-build-clippy.log": "3a348ae9dd7cad1a6d68943bdb564f87fdd7ac163361588e1e0f6c349e64191a",
+    "proposal-build-leader.json": "b13847c4e08d8845b8acb9a72b88bcdada26ea8c45707fd2cd1d8c0b3cafa8d3",
+    "proposal-build-leader.log": "12fe02f1a72f8c1e94abf55a089286e9156014f19abb6ee20eac39b8e2f7ad13",
+    "aml-portable.log": "87ca032d10cbf7004c58e13ae4ab0776e886e3b0677ee8f6288402179592ed76"
+  }
+}

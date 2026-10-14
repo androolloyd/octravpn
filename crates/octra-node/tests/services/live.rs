@@ -30,8 +30,8 @@ use std::sync::{
 };
 use tokio::sync::watch;
 
-// Proposal generation remains a fixed local fixture. Finalized publication
-// uses Native and requires the authority captured from its authenticated QC.
+// Development activation and staging remain explicit inputs. Construction,
+// verification and finalized publication use the reusable Native executor.
 fn protocol() -> Protocol {
     // The first retained epoch has no parent QC. Use the native legacy startup
     // interval explicitly, then require a parent certificate from epoch two.
@@ -66,7 +66,8 @@ struct LiveHost {
     authority: finality_host::Authority,
     executor: octra_node::executor::Native,
     prepared: Mutex<Option<octra_node::executor::Prepared>>,
-    header: EpochHeader,
+    built: Mutex<Option<octra_node::executor::Built>>,
+    inputs: Vec<octra_node_protocol::transaction::Transaction>,
     ready: Arc<AtomicBool>,
     warnings: Arc<Mutex<Vec<String>>>,
 }
@@ -95,20 +96,47 @@ impl Host for LiveHost {
         }
         Ok(())
     }
-    async fn build(&self, _: i64) -> Result<Option<ProposalPlan>, Error> {
-        let raw = self
-            .peer
-            .cached
-            .lock()
-            .unwrap()
-            .get(&hash::proposal_id(&self.header)?)
-            .cloned()
-            .ok_or("leader bundle unavailable")?;
-        Ok(Some(ProposalPlan {
-            header: self.header.clone(),
-            tx_hashes: raw.tx_hashes,
-            parent_commit: None,
-        }))
+    async fn build(&self, epoch: i64) -> Result<Option<ProposalPlan>, Error> {
+        let graph = octra_node_protocol::rules::Graph::new(
+            self.authority.chain.chain_id.as_bytes().to_vec(),
+            None,
+        );
+        let draft = Arc::new(
+            self.node
+                .proposal_draft(
+                    &graph,
+                    octra_node_runtime::finality::proposal::Policy {
+                        protocol: protocol(),
+                        genesis_time: Some(0.),
+                    },
+                    format!("validator-{}", self.id).as_bytes(),
+                    10.,
+                )
+                .await
+                .map_err(|e| Error::from(e.to_string()))?,
+        );
+        if draft.context().header().epoch_id != epoch {
+            return Ok(None);
+        }
+        let built = self
+            .executor
+            .build_proposal(draft, self.inputs.clone())
+            .await
+            .map_err(|e| Error::from(e.to_string()))?;
+        if !self.node.draft_current(built.draft()) {
+            return Ok(None);
+        }
+        self.peer.cached.lock().unwrap().insert(
+            hash::proposal_id(&built.plan().header)?,
+            built.bundle().clone(),
+        );
+        let plan = ProposalPlan {
+            header: built.plan().header.clone(),
+            tx_hashes: built.plan().tx_hashes.clone(),
+            parent_commit: built.plan().parent_commit.clone(),
+        };
+        *self.built.lock().unwrap() = Some(built);
+        Ok(Some(plan))
     }
     async fn verify(&self, p: &Proposal) -> Result<Verdict, Error> {
         let candidate = match self
@@ -181,13 +209,18 @@ impl Host for LiveHost {
                 .snapshot()
                 .map_err(|e| Error::from(e.to_string()))?;
             let proposal = Proposal::decode(&record.proposal_wire)?;
-            let verified = self.prepared.lock().unwrap();
-            let verified = verified
-                .as_ref()
-                .ok_or("local proposal execution missing")?;
-            if !self.node.proposal_current(verified.candidate())
-                || verified.candidate().context().proposal().header != proposal.header
-            {
+            // Native leaders prevote their own execution without first
+            // receiving their proposal back through a peer. Both local builds
+            // and verified peer candidates must retain their canonical lease.
+            let local = self.built.lock().unwrap();
+            let received = self.prepared.lock().unwrap();
+            let current = local.as_ref().is_some_and(|built| {
+                self.node.draft_current(built.draft()) && built.plan().header == proposal.header
+            }) || received.as_ref().is_some_and(|prepared| {
+                self.node.proposal_current(prepared.candidate())
+                    && prepared.candidate().context().proposal().header == proposal.header
+            });
+            if !current {
                 return Err("local proposal execution expired".into());
             }
             let rules = proposal_rules(&proposal.header);
@@ -357,13 +390,6 @@ async fn live_quorum_publishes_circle_vpn_and_exex_atomically() {
         .await
         .unwrap();
     assert!(nodes[0].proposal_current(&candidate));
-    let raw = network_bundle(&executed);
-    peers[0]
-        .authority
-        .cached
-        .lock()
-        .unwrap()
-        .insert(hash::proposal_id(&planned.header).unwrap(), raw);
     // Uncommitted bundles must be served by the proposal cache, while durable
     // history supplies committed range/root queries after publication.
     *peers[0].authority.history.lock().unwrap() = None;
@@ -431,7 +457,8 @@ async fn live_quorum_publishes_circle_vpn_and_exex_atomically() {
             authority: authority.clone(),
             executor: executor.native.clone(),
             prepared: Mutex::new(None),
-            header: planned.header.clone(),
+            built: Mutex::new(None),
+            inputs: vec![super::circle_call(1, circle.as_bytes())],
             ready: ready.clone(),
             warnings: warnings.clone(),
         };
@@ -491,6 +518,14 @@ async fn live_quorum_publishes_circle_vpn_and_exex_atomically() {
     );
     assert_eq!(records.lock().unwrap().len(), 1);
     let committed_root = nodes[0].head().await.unwrap().cursor.state_root;
+    assert_eq!(
+        committed_root.0.as_slice(),
+        planned.header.proposed_state_root
+    );
+    assert_eq!(
+        nodes[0].snapshot().unwrap().state().root().unwrap(),
+        executed.state.root().unwrap()
+    );
     for node in &nodes {
         assert_eq!(node.head().await.unwrap().cursor.state_root, committed_root);
     }

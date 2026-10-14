@@ -18,7 +18,7 @@ for fixture in false-result wrong-revert host-operation; do
     echo "FAIL: negative control unexpectedly passed: $fixture" >&2; exit 1
   fi
   # A setup/compiler failure is not the intended negative-control result.
-  if ! rg -q '^AML result: 0 passed; 1 failed' "$log"; then
+  if ! grep -q '^AML result: 0 passed; 1 failed' "$log"; then
     cat "$log"; rm -f "$log"
     echo "FAIL: negative control did not execute: $fixture" >&2; exit 1
   fi
@@ -29,6 +29,6 @@ log=$(mktemp)
 if "$OCTRA_BIN" forge test --contract program/main-v4.aml --root program/tests/v4 --amlc "$AMLC" --filter no_such_method >"$log" 2>&1; then
   cat "$log"; rm -f "$log"; echo 'FAIL: empty selection passed' >&2; exit 1
 fi
-rg -q 'no AML test methods matched' "$log"
+grep -q 'no AML test methods matched' "$log"
 rm -f "$log"
 echo 'PASS: empty test selection fails'

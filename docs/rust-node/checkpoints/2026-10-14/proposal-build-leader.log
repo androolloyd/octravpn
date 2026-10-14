@@ -1,0 +1,37 @@
+    Blocking waiting for file lock on build directory
+warning: field `key_id` is never read
+   --> vendor/octra-circle-wasm-host/src/lib.rs:353:5
+    |
+352 | struct HfheActiveKey {
+    |        ------------- field in this struct
+353 |     key_id: String,
+    |     ^^^^^^
+    |
+    = note: `HfheActiveKey` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: variant `Release` is never constructed
+    --> vendor/octra-circle-wasm-host/src/lib.rs:1112:5
+     |
+1110 | enum CacheMessage {
+     |      ------------ variant in this enum
+1111 |     Hold { key: String, root: String, entries: usize, bytes: usize },
+1112 |     Release(u64),
+     |     ^^^^^^^
+
+warning: `octra_circle_wasm_host` (lib) generated 2 warnings
+   Compiling octra-node v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 27.25s
+     Running tests/services.rs (target/debug/deps/services-0eaa52a68c5dadc3)
+
+running 7 tests
+test empty_finalized_import_needs_no_peer_and_rejects_wrong_parent ... ok
+test newer_pause_cannot_be_undone_and_cancellation_releases_services ... ok
+test proposals::local_proposal_capture_checks_receipts_outcomes_and_commitment ... ok
+test peer_import_drives_browser_wireguard_exex_and_restart ... ok
+test agreed_ranges_recover_canonical_services_and_exex_after_restart ... ok
+test consecutive_peer_recovery_resumes_after_missing_bundle_and_restart ... ok
+test live::live_quorum_publishes_circle_vpn_and_exex_atomically ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.21s
+

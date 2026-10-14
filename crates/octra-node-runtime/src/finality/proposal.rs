@@ -6,6 +6,8 @@ use octra_node_protocol::{
     consensus::{driver_policy, hash, parent, policy, qc, ParentCommit, Proposal},
     rules::Graph,
 };
+mod build;
+pub use build::BuildContext;
 
 /// Trusted startup inputs. A genesis timestamp must come from the chain's
 /// genesis data; local database commit dates are never consensus timestamps.
@@ -70,23 +72,7 @@ impl<A: ValidatorHistory> Publisher<A> {
         {
             return Err(invalid(format!("proposal frame: {}", reason.label())));
         }
-        let expected = if base.cursor.epoch.0 == 0 {
-            if proposal.epoch_id >= policy.protocol.activation_epoch() {
-                return Err(invalid("parent finality entry is missing"));
-            }
-            None
-        } else {
-            // record() reauthenticates the retained QC against its own local
-            // activation history, not against the candidate's advertised set.
-            let record = self.record(base.cursor.sequence).await?;
-            let proof = record
-                .finality
-                .ok_or_else(|| invalid("parent commit journal is missing"))?;
-            Some(ParentCommit {
-                certificate: proof.finalize.certificate(),
-                validator_set: proof.validator_set,
-            })
-        };
+        let expected = self.proposal_parent(base, policy).await?;
         check_parent(expected.as_ref(), proposal.parent_commit.as_ref())?;
         let previous = expected
             .as_ref()
@@ -132,6 +118,27 @@ impl<A: ValidatorHistory> Publisher<A> {
             rules,
             authority,
         })
+    }
+
+    async fn proposal_parent(&self, base: &Head, policy: Policy) -> Result<Option<ParentCommit>> {
+        if base.cursor.epoch.0 == 0 {
+            let epoch = i64::try_from(base.cursor.epoch.0 + 1).map_err(invalid)?;
+            if epoch >= policy.protocol.activation_epoch() {
+                return Err(invalid("parent finality entry is missing"));
+            }
+            Ok(None)
+        } else {
+            // record() reauthenticates the retained QC against its own local
+            // activation history, not against the candidate's advertised set.
+            let record = self.record(base.cursor.sequence).await?;
+            let proof = record
+                .finality
+                .ok_or_else(|| invalid("parent commit journal is missing"))?;
+            Ok(Some(ParentCommit {
+                certificate: proof.finalize.certificate(),
+                validator_set: proof.validator_set,
+            }))
+        }
     }
 
     async fn proposal_parent_current(&self, base: &Head) -> Result<()> {

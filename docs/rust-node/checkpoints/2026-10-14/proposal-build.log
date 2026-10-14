@@ -1,0 +1,75 @@
+    Blocking waiting for file lock on build directory
+warning: field `key_id` is never read
+   --> vendor/octra-circle-wasm-host/src/lib.rs:353:5
+    |
+352 | struct HfheActiveKey {
+    |        ------------- field in this struct
+353 |     key_id: String,
+    |     ^^^^^^
+    |
+    = note: `HfheActiveKey` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: variant `Release` is never constructed
+    --> vendor/octra-circle-wasm-host/src/lib.rs:1112:5
+     |
+1110 | enum CacheMessage {
+     |      ------------ variant in this enum
+1111 |     Hold { key: String, root: String, entries: usize, bytes: usize },
+1112 |     Release(u64),
+     |     ^^^^^^^
+
+warning: `octra_circle_wasm_host` (lib) generated 2 warnings
+   Compiling octra-node-runtime v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node-runtime)
+   Compiling octra-node v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.31s
+     Running tests/private_import.rs (target/debug/deps/private_import-a70959a8d050ba03)
+
+running 1 test
+test finalized_mixed_import_uses_bound_key_files_and_survives_restart has been running for over 60 seconds
+test finalized_mixed_import_uses_bound_key_files_and_survives_restart ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 156.81s
+
+     Running tests/services.rs (target/debug/deps/services-0eaa52a68c5dadc3)
+
+running 7 tests
+test empty_finalized_import_needs_no_peer_and_rejects_wrong_parent ... ok
+test newer_pause_cannot_be_undone_and_cancellation_releases_services ... ok
+test proposals::local_proposal_capture_checks_receipts_outcomes_and_commitment ... ok
+test peer_import_drives_browser_wireguard_exex_and_restart ... ok
+test agreed_ranges_recover_canonical_services_and_exex_after_restart ... ok
+test consecutive_peer_recovery_resumes_after_missing_bundle_and_restart ... ok
+test live::live_quorum_publishes_circle_vpn_and_exex_atomically ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.19s
+
+     Running tests/epoch_partition.rs (target/debug/deps/epoch_partition-1977e3017bd58b11)
+
+running 2 tests
+test finalized_replay_excludes_vm_fees_and_atomically_checks_charged_outcomes ... ok
+test native_finalized_selection_and_candidate_partition_refusals ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.16s
+
+     Running tests/preverify_batch.rs (target/debug/deps/preverify_batch-36c4dac405ecff69)
+
+running 1 test
+test native_dependency_isolation_ordered_work_and_retry ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+
+     Running tests/proposal_authentication.rs (target/debug/deps/proposal_authentication-53a3c4cbc7bae0d8)
+
+running 8 tests
+test startup_requires_explicit_time_and_parent_activation_evidence ... ok
+test proposal_frame_and_canonical_bindings_reject_forgery_without_publication ... ok
+test canonical_proposal_captures_authority_without_finalized_privileges ... ok
+test local_build_context_uses_signed_history_and_never_grants_finality ... ok
+test local_build_refuses_missing_authority_time_and_stale_parent ... ok
+test parent_qc_must_match_local_finality_but_may_have_different_quorum_signers ... ok
+test historical_reproposal_retains_native_time_policy ... ok
+test concurrent_canonical_commit_invalidates_in_flight_authentication ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+

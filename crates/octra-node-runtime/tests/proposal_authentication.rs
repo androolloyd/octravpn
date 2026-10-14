@@ -227,6 +227,85 @@ async fn canonical_proposal_captures_authority_without_finalized_privileges() {
 }
 
 #[tokio::test]
+async fn local_build_context_uses_signed_history_and_never_grants_finality() {
+    let fixture = Fixture::new("proposal-build-context").await;
+    for epoch in [1, 2] {
+        if epoch == 2 {
+            fixture.publish_first().await;
+        }
+        let base = fixture.store.head().await.unwrap();
+        let time = f64::from(u32::try_from(epoch).unwrap()) * 10.;
+        let context = fixture
+            .publisher
+            .proposal_build_context(&base, &fixture.graph, fixture.policy, b"validator-0", time)
+            .await
+            .unwrap();
+        assert_eq!(context.parent(), &base);
+        assert_eq!(context.header().epoch_id, epoch as i64);
+        assert_eq!(context.header().prev_state_root, base.cursor.state_root.0);
+        assert_eq!(context.header().ts.to_bits(), time.to_bits());
+        assert_eq!(
+            context.authority().validators,
+            fixture.fixed.validators(&base, epoch).unwrap()
+        );
+        assert_eq!(context.parent_commit().is_some(), epoch == 2);
+        assert!(context.rules().authority().is_err());
+        assert_eq!(fixture.store.head().await.unwrap(), base);
+    }
+}
+
+#[tokio::test]
+async fn local_build_refuses_missing_authority_time_and_stale_parent() {
+    let fixture = Fixture::new("proposal-build-context").await;
+    let base = fixture.store.head().await.unwrap();
+    let attempt = |policy, creator: &'static [u8], now| {
+        fixture
+            .publisher
+            .proposal_build_context(&base, &fixture.graph, policy, creator, now)
+    };
+    assert!(matches!(
+        attempt(fixture.policy, b"unknown", 10.).await,
+        Err(Error::Invalid(_))
+    ));
+    for now in [0., 9.999, f64::NAN, f64::INFINITY] {
+        assert!(attempt(fixture.policy, b"validator-0", now).await.is_err());
+    }
+    assert!(matches!(
+        attempt(
+            Policy {
+                genesis_time: None,
+                ..fixture.policy
+            },
+            b"validator-0",
+            10.
+        )
+        .await,
+        Err(Error::Unavailable(_))
+    ));
+    assert!(matches!(
+        attempt(
+            Policy {
+                protocol: Protocol::default(),
+                ..fixture.policy
+            },
+            b"validator-0",
+            10.
+        )
+        .await,
+        Err(Error::Invalid(_))
+    ));
+    fixture.publish_first().await;
+    assert!(matches!(
+        attempt(fixture.policy, b"validator-0", 20.).await,
+        Err(Error::Unavailable(_))
+    ));
+    assert_eq!(
+        fixture.store.source().head().await.unwrap().sequence,
+        Sequence(1)
+    );
+}
+
+#[tokio::test]
 async fn startup_requires_explicit_time_and_parent_activation_evidence() {
     let mut fixture = Fixture::new("proposal-auth-fixture").await;
     let (base, mut proposal) = fixture.proposal().await;
@@ -471,39 +550,65 @@ async fn concurrent_canonical_commit_invalidates_in_flight_authentication() {
             Ok(authority)
         }
     }
-    let fixture = Fixture::new("proposal-auth-race").await;
-    let (base, proposal) = fixture.proposal().await;
-    let executed = Fixture::executed();
-    let mut finalized = finality_host::certificate(&base, &executed, &fixture.fixed);
-    finalized.header.proto_version = 3;
-    finality_host::sign(&mut finalized, 1);
-    let commit = fixture
-        .publisher
-        .prepare(&base, &finalized.encode().unwrap(), executed)
+    for local_build in [false, true] {
+        let fixture = Fixture::new("proposal-auth-race").await;
+        let (base, proposal) = fixture.proposal().await;
+        let executed = Fixture::executed();
+        let mut finalized = finality_host::certificate(&base, &executed, &fixture.fixed);
+        finalized.header.proto_version = 3;
+        finality_host::sign(&mut finalized, 1);
+        let commit = fixture
+            .publisher
+            .prepare(&base, &finalized.encode().unwrap(), executed)
+            .await
+            .unwrap();
+        let (entered, waiting) = oneshot::channel();
+        let (resume, paused) = oneshot::channel();
+        let publisher = Publisher::open(
+            fixture.store.clone(),
+            Paused {
+                fixed: fixture.fixed.clone(),
+                entered: Mutex::new(Some(entered)),
+                resume: Mutex::new(Some(paused)),
+            },
+        )
         .await
         .unwrap();
-    let (entered, waiting) = oneshot::channel();
-    let (resume, paused) = oneshot::channel();
-    let publisher = Publisher::open(
-        fixture.store.clone(),
-        Paused {
-            fixed: fixture.fixed.clone(),
-            entered: Mutex::new(Some(entered)),
-            resume: Mutex::new(Some(paused)),
-        },
-    )
-    .await
-    .unwrap();
-    let (result, ()) = tokio::join!(
-        publisher.authenticate_proposal(&base, &proposal, &fixture.graph, fixture.policy, 20.),
-        async {
-            waiting.await.unwrap();
-            commit.commit().await.unwrap();
-            resume.send(()).unwrap();
-        }
-    );
-    assert!(
-        matches!(result, Err(Error::Unavailable(e)) if e == "proposal parent is no longer current")
-    );
-    assert_eq!(fixture.store.head().await.unwrap().cursor.epoch.0, 1);
+        let (result, ()) = tokio::join!(
+            async {
+                if local_build {
+                    publisher
+                        .proposal_build_context(
+                            &base,
+                            &fixture.graph,
+                            fixture.policy,
+                            b"validator-0",
+                            20.,
+                        )
+                        .await
+                        .map(|_| ())
+                } else {
+                    publisher
+                        .authenticate_proposal(
+                            &base,
+                            &proposal,
+                            &fixture.graph,
+                            fixture.policy,
+                            20.,
+                        )
+                        .await
+                        .map(|_| ())
+                }
+            },
+            async {
+                waiting.await.unwrap();
+                commit.commit().await.unwrap();
+                resume.send(()).unwrap();
+            }
+        );
+        assert!(
+            matches!(result, Err(Error::Unavailable(e)) if e == "proposal parent is no longer current")
+        );
+        assert_eq!(fixture.store.head().await.unwrap().cursor.epoch.0, 1);
+    }
 }
