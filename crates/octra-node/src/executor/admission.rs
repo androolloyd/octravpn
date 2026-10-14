@@ -1,31 +1,15 @@
 use anyhow::{ensure, Result};
-use num_bigint::BigInt;
 use octra_node_protocol::{
     state::Ledger,
     transaction, transaction_outcome,
     transaction_policy::{self, Profile},
 };
+pub use octra_node_runtime::proposal_select::Limits;
 use octra_node_runtime::{
     admission,
     consensus_bundle::{Accepted, Rules},
 };
 
-/// Native proposal limits count canonical JSON bytes and scheduled operation
-/// costs, including rejected candidates, rather than the fees offered by users.
-pub struct Limits {
-    transactions: usize,
-    bytes: usize,
-    ou: BigInt,
-}
-impl Limits {
-    pub fn new(transactions: usize, bytes: usize, ou: BigInt) -> Self {
-        Self {
-            transactions: transactions.max(1),
-            bytes: bytes.max(1024),
-            ou,
-        }
-    }
-}
 pub(super) fn check(
     profile: &Profile,
     limits: &Limits,
@@ -50,16 +34,8 @@ pub(super) fn check(
             "underpriced transaction"
         );
     }
-    let mut bytes = 0_usize;
-    let mut ou = BigInt::from(0);
-    for tx in &inputs {
-        bytes = bytes
-            .checked_add(tx.to_json_bytes()?.len())
-            .ok_or_else(|| anyhow::anyhow!("bundle size overflow"))?;
-        ou += transaction_policy::ou_cost(tx, &rules.stealth_minimum);
-    }
     ensure!(
-        inputs.len() <= limits.transactions && bytes <= limits.bytes && ou <= limits.ou,
+        limits.within(&inputs, &rules.stealth_minimum)?,
         "bundle limit exceeded"
     );
     for tx in &inputs {

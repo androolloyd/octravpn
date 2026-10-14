@@ -17,14 +17,13 @@ separate. The [canary candidate](docs/audit/2026-10-11-canary-security.md)
 remains unqualified for launch. [First-party integration](docs/octra-vpn-inclusion.md)
 tracks Circle applications, ExEx and the incomplete Rust node port.
 
-**Rust node development (2026-10-14):** local proposal verification now prepares
-private proofs, captures Circle receipts and checks both execution partitions
-before voting. It shares staged execution with finalized imports; the live local
-quorum integrates Circle browsing, VPN admission and canonical ExEx. The latest
-[development checkpoint](docs/rust-node/native-runtime.md#production-proposal-execution-2026-10-14)
-passes 35 tests across 11 suites, including 502 native selection cases.
-Production startup/building, remaining execution operations, funded VPN settlement
-and repository-wide CI repairs remain open. This is not a mainnet release.
+**Rust node development (2026-10-14):** the `octra-node` executable connects the
+native validator driver, authenticated peers, transaction intake, canonical
+commits, ExEx and Circle browsing. The [local devnet guide](docs/rust-node/devnet.md)
+runs four persistent validator processes, each with embedded VPN sockets.
+VPN session admission remains closed until a real settlement Circle is configured.
+Remaining VM/HFHE operations, funded VPN integration and public-network qualification
+remain open. See the [implementation evidence](docs/rust-node/native-runtime.md).
 
 > **Status (2026-05-20).** Three AML deployments are live on devnet
 > and run in parallel, gated by the node/client `protocol_version` config:

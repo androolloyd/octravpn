@@ -23,18 +23,21 @@ axum.workspace = true
 hex.workspace = true
 tokio.workspace = true
 serde_json.workspace = true
+serde.workspace = true
+clap.workspace = true
+rand.workspace = true
+x25519-dalek.workspace = true
 sha2.workspace = true
 tower = { version = "0.5", features = ["util"] }
+ed25519-dalek.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["fs"] }
 
 [dev-dependencies]
 boringtun.workspace = true
-ed25519-dalek.workspace = true
 reqwest.workspace = true
 tempfile.workspace = true
-x25519-dalek.workspace = true
 
 [lints]
 workspace = true

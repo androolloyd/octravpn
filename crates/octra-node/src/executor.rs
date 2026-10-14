@@ -2,6 +2,7 @@
 //! owns finality, canonical commits and ExEx; this host owns no canonical writer.
 mod admission;
 mod build;
+mod pending;
 mod proofs;
 mod proposal;
 mod stage;
@@ -29,6 +30,7 @@ use octra_node_runtime::{
     execution_rules::Bound,
     finality::{history::History, ExecutedEpoch},
 };
+pub use pending::Pending;
 pub use proposal::{Prepared, ProposalError};
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use tokio::sync::Semaphore;

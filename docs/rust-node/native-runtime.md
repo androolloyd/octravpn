@@ -2155,3 +2155,48 @@ source hashes and remaining full-node gates.
 - [Linux regression before](checkpoints/2026-10-14/hfhe-budget-linux-before.log)
 - [Linux regression after](checkpoints/2026-10-14/hfhe-budget-linux-after.log)
 - [Linux encryption/decryption regressions](checkpoints/2026-10-14/hfhe-linux-crypto.log)
+
+
+## Executable local devnet (2026-10-14)
+
+The [local devnet launcher](devnet.md) runs four persistent Rust validators with
+authenticated peer services, canonical proposal execution/publication, ExEx,
+transaction RPC/gossip, Circle browsing and embedded VPN sockets. Validator
+startup now captures canonical membership, restores durable pending locks after
+local replay, and catches up through authenticated peer history. Proposals freeze
+per round and precommits require current execution evidence plus a durable journal.
+Queue admission has a separate canonical lease, so the native proposal time
+interval cannot prevent transactions from entering staging between epochs.
+
+Native staging now supplies fee/nonce ordering, selection caps, private slots,
+Circle turns and parent-bundle checks to bounded proposal recovery. Confirmed
+transactions and recorded refusals retire after canonical publication. The new
+selection corpus matches **962 cases** generated from the adopted unmodified
+OCaml source; the previous bounded-recovery corpus still passes.
+
+The final combined checkpoint passed **15 tests across six suites**, with
+unchanged source hashes. It covers signed transfer propagation, a committed
+Circle asset, progress with one of four validators offline, restart/catch-up,
+identical transfer ExEx events, genesis tamper rejection, private proof execution
+and the existing VPN/browser/recovery integration cases. Strict Clippy, format
+and native source integrity checks pass. A separate four-process deployment
+was started, cleanly stopped and restarted with retained keys and journals;
+all four processes resumed with matching committed roots.
+
+The Docker runtime now owns its relative state directory. A built image running
+as its unprivileged user successfully writes the declared volume while its root
+filesystem is read-only. This validates the permission repair, not the entire
+container deployment or workspace CI.
+
+The local launcher denies funded VPN sessions until a settlement Circle is
+configured; it does not synthesize escrow. Circle HFHE callbacks remain
+unavailable. Remaining VM/private operations, complete RPC compatibility,
+persisted pending queues, legacy lock reconciliation, public-node interoperability,
+OS URL registration and broader CI gates are still open. This checkpoint does
+not qualify the complete lite node or a mainnet deployment.
+
+- [Scope and evidence hashes](checkpoints/2026-10-14/native-devnet-summary.json)
+- [Source checkpoint](checkpoints/2026-10-14/native-devnet.json)
+- [Combined tests](checkpoints/2026-10-14/native-devnet.log)
+- [Strict Clippy](checkpoints/2026-10-14/native-devnet-clippy.log)
+- [Persistent deployment after restart](checkpoints/2026-10-14/native-devnet-restarted.jsonl)

@@ -17,7 +17,7 @@ DIRECTORIES = [
     'crates',
     'crates/octravpn-node', 'crates/octravpn-core', 'crates/octravpn-tun',
     'crates/octra-hfhe', 'vendor/octra-circle-wasm-host',
-    'scripts/node-port', 'scripts/circle-apps', 'crates/octravpn-circle-registry',
+    'scripts/node-port', 'scripts/devnet', 'scripts/circle-apps', 'crates/octravpn-circle-registry',
     '../headscale-rs', '../octra-foundry',
 ]
 SUFFIXES = {'.rs', '.json', '.js', '.mjs', '.toml', '.ml', '.py', '.proto', '.bin'}

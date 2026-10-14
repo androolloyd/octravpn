@@ -101,11 +101,13 @@ impl Host for Script<'_> {
             value: (),
         })
     }
-    fn refuse(&mut self, tx: &Transaction) {
+    fn refuse(&mut self, tx: &Transaction) -> Result<(), Error> {
         self.refused.push(label(tx));
+        Ok(())
     }
-    fn hold(&mut self, tx: &Transaction) {
+    fn hold(&mut self, tx: &Transaction) -> Result<(), Error> {
         self.held.push(label(tx));
+        Ok(())
     }
 }
 

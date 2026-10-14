@@ -6,7 +6,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /work/octra/target/release/octravpn-node /usr/local/bin/octravpn-node
 
-RUN useradd -r -s /bin/false octravpn
+RUN useradd --system --user-group --home-dir /var/lib/octravpn --shell /bin/false octravpn \
+    && install -d -m 0750 -o octravpn -g octravpn /var/lib/octravpn/state
+WORKDIR /var/lib/octravpn
+VOLUME ["/var/lib/octravpn/state"]
 USER octravpn
 
 EXPOSE 51820/udp 51821/tcp

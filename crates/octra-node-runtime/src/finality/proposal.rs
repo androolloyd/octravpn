@@ -120,7 +120,12 @@ impl<A: ValidatorHistory> Publisher<A> {
         })
     }
 
-    async fn proposal_parent(&self, base: &Head, policy: Policy) -> Result<Option<ParentCommit>> {
+    /// Reauthenticate the retained parent certificate for a local driver view.
+    pub async fn proposal_parent(
+        &self,
+        base: &Head,
+        policy: Policy,
+    ) -> Result<Option<ParentCommit>> {
         if base.cursor.epoch.0 == 0 {
             let epoch = i64::try_from(base.cursor.epoch.0 + 1).map_err(invalid)?;
             if epoch >= policy.protocol.activation_epoch() {
@@ -151,7 +156,11 @@ impl<A: ValidatorHistory> Publisher<A> {
     }
 }
 
-fn check_parent(expected: Option<&ParentCommit>, incoming: Option<&ParentCommit>) -> Result<()> {
+/// Compare an incoming parent with independently authenticated local finality.
+pub fn check_parent(
+    expected: Option<&ParentCommit>,
+    incoming: Option<&ParentCommit>,
+) -> Result<()> {
     match (expected, incoming) {
         (None, None) => Ok(()),
         (None, Some(_)) => Err(invalid("unexpected parent commit")),

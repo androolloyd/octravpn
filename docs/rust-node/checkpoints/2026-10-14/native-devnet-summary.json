@@ -1,0 +1,69 @@
+{
+  "date": "2026-10-14",
+  "status": "passed",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "scope": "Isolated Rust devnet using the executable host: authenticated quorum, signed transaction propagation, canonical Circle asset, peer catch-up after restart, persistent ExEx; native proposal selection and recovery parity plus existing private proof and service regressions. VPN settlement remains unconfigured in the launcher.",
+  "tests": {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-p",
+      "octra-node",
+      "-p",
+      "octra-node-runtime",
+      "--test",
+      "devnet",
+      "--test",
+      "services",
+      "--test",
+      "private_import",
+      "--test",
+      "proposal_build",
+      "--test",
+      "proposal_selection",
+      "--test",
+      "epoch_partition"
+    ],
+    "exit_code": 0,
+    "suites": 6,
+    "passed": 15,
+    "failed": 0,
+    "ignored": 0,
+    "log": "/private/tmp/native-devnet-checkpoint-20261014.log",
+    "log_sha256": "88eb2bf606834f763cc6bc6eddbf7503ada9feeeb44265468a5354a71c2b3e20"
+  },
+  "sources_unchanged": true,
+  "full_node_end_to_end": false,
+  "funded_vpn_end_to_end": false,
+  "local_executable_devnet": true,
+  "persistent_processes": 4,
+  "process_restart_rehearsal": "passed",
+  "proposal_selection_native_cases": 962,
+  "validation": {
+    "clippy": "cargo clippy --offline --locked -p octra-node -p octra-node-runtime --all-targets -- -D warnings",
+    "format": "cargo fmt -p octra-node -p octra-node-runtime -- --check",
+    "native_source_integrity": "pinned upstream and reproduced Rust Circle API patch",
+    "docker": "non-root runtime can write declared state volume with read-only root filesystem; local existing builder binary, not full rebuilt workspace image qualification"
+  },
+  "remaining": [
+    "funded Circle VPN settlement adapter and lifecycle",
+    "full Circle HFHE backend and remaining VM operations",
+    "complete upstream REST and public network interoperability",
+    "pending queue persistence and full legacy startup reconciliation",
+    "OS oct:// registration",
+    "broader CI audit and benchmark gates"
+  ],
+  "evidence_sha256": {
+    "native-devnet.json": "f4462d81cb74274be08dae01efcf3c24846d87575fdfa2f0614df2f21300faba",
+    "native-devnet.log": "88eb2bf606834f763cc6bc6eddbf7503ada9feeeb44265468a5354a71c2b3e20",
+    "native-devnet-clippy.log": "01a1a89e46bf0babcd841fa02ad3ea2a2a94da6f1ebe223496adf671b6d30787",
+    "native-devnet-fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-devnet-integrity.log": "eccc8c6abb90f29519ebe9191329e0589a3b6ca0f00aa86727fec7c3e5f3c893",
+    "native-devnet-running.jsonl": "c52a977a640436cbdc46b4ecf04a09d51e5b9c05a1aeb71c2ac0866fdf58ea57",
+    "native-devnet-restarted.jsonl": "6d9262ab3b26d4ad988e9830b0f3c65526da91098c20dd96c2cb7ee98ca9a620",
+    "vpn-docker-state.log": "e71544006b50222949c829c7f985525c853dadb07534f60b9fd6ce3b636c7e0d",
+    "vpn-docker-build.log": "a1b2de07bacb6e9ec031140d1a9e2ae5c0ce8d7ef7f4d30d4594f170dc97b1db"
+  }
+}

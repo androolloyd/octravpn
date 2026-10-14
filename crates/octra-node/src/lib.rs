@@ -5,10 +5,15 @@
 //! A host must exclusively own the canonical writer and explicitly resume
 //! serving after catch-up. Restart starts suspended, even with valid history.
 pub mod consensus;
+pub mod devnet;
+pub mod driver;
 pub mod executor;
 pub mod import;
+pub mod peers;
 pub mod proposal;
+pub mod rpc;
 mod services;
+mod storage;
 pub mod sync;
 pub mod vpn;
 

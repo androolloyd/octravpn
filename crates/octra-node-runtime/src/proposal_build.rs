@@ -34,8 +34,8 @@ pub trait Host {
     fn current(&self) -> bool;
     fn select(&mut self, inputs: &[Transaction]) -> Result<Selection, Error>;
     fn preview(&mut self, inputs: &[Transaction]) -> Result<Preview<Self::Value>, Failure>;
-    fn refuse(&mut self, tx: &Transaction);
-    fn hold(&mut self, tx: &Transaction);
+    fn refuse(&mut self, tx: &Transaction) -> Result<(), Error>;
+    fn hold(&mut self, tx: &Transaction) -> Result<(), Error>;
 }
 pub struct Built<T> {
     pub confirmed: Vec<Transaction>,
@@ -108,7 +108,7 @@ impl Recovery {
         for tx in first(&self.refusals) {
             let hash = tx.hash().map_err(error)?;
             if !removed.contains(&hash) && self.held.insert(hash) {
-                host.hold(&tx);
+                host.hold(&tx)?;
             }
         }
         Ok(())
@@ -214,7 +214,7 @@ impl Recovery {
                     .collect::<Vec<_>>();
                 let rejections = outcome::build(&inputs, &rows, &charged).map_err(error)?;
                 for tx in &refused {
-                    host.refuse(tx);
+                    host.refuse(tx)?;
                     self.removed.push(tx.clone());
                 }
                 if !host.current() {

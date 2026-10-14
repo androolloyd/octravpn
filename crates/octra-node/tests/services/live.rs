@@ -67,7 +67,7 @@ struct LiveHost {
     executor: octra_node::executor::Native,
     prepared: Mutex<Option<octra_node::executor::Prepared>>,
     built: Mutex<Option<octra_node::executor::Built>>,
-    inputs: Vec<octra_node_protocol::transaction::Transaction>,
+    pending: Arc<octra_node::executor::Pending>,
     refused: Arc<Mutex<Vec<Vec<u8>>>>,
     ready: Arc<AtomicBool>,
     warnings: Arc<Mutex<Vec<String>>>,
@@ -121,7 +121,7 @@ impl Host for LiveHost {
         }
         let built = self
             .executor
-            .build_proposal(draft, self.inputs.clone())
+            .build_pending(draft, self.pending.clone(), 10_000_000_000_u64.into(), 4)
             .await
             .map_err(|e| Error::from(e.to_string()))?;
         if !self.node.draft_current(built.draft()) {
@@ -436,20 +436,25 @@ async fn live_quorum_publishes_circle_vpn_and_exex_atomically() {
             .unwrap()["result"]["result"],
         "4"
     );
-    // A failing transfer and its successor force native sender cutoffs before
+    // An admitted exit from an unbonded validator and its successor force sender cutoffs before
     // this leader can publish the independently expected Circle transition.
     use base64::Engine as _;
     use octra_node_protocol::transaction::{Nonce, OpType};
     let call = super::circle_call(1, circle.as_bytes());
     let mut rejected = call.clone();
-    rejected.op_type = OpType::Standard;
+    rejected.op_type = OpType::ValidatorExit;
     rejected.nonce = Nonce::new(2).unwrap();
-    rejected.amount = 1_000_000.into();
+    rejected.amount = 0.into();
+    rejected.to = rejected.from.clone();
     rejected.encrypted_data = None;
     rejected.message = None;
     let mut successor = rejected.clone();
+    successor.op_type = OpType::Standard;
+    successor.to = circle.as_bytes().to_vec();
     successor.nonce = Nonce::new(3).unwrap();
-    successor.amount = 0.into();
+    successor.amount = 1.into();
+    successor.encrypted_data = None;
+    successor.message = None;
     for tx in [&mut rejected, &mut successor] {
         tx.signature = base64::engine::general_purpose::STANDARD
             .encode(
@@ -460,13 +465,14 @@ async fn live_quorum_publishes_circle_vpn_and_exex_atomically() {
             .into_bytes();
     }
     let refused_hash = rejected.hash().unwrap().to_vec();
-    let inputs = vec![call, rejected, successor];
+    let inputs = vec![call.clone(), rejected.clone(), successor.clone()];
     let refused = Arc::new(Mutex::new(vec![]));
     let ready = Arc::new(AtomicBool::new(false));
     let warnings = Arc::new(Mutex::new(vec![]));
     let mut tasks = vec![];
     let mut handles = vec![];
     let mut stops = vec![];
+    let mut queues = vec![];
     for id in 0..4usize {
         let journal = JournalOwner::open(dir.path().join(format!("journal-{id}"))).unwrap();
         let mut engine = Engine::new(
@@ -479,6 +485,8 @@ async fn live_quorum_publishes_circle_vpn_and_exex_atomically() {
         );
         engine.realign_round(round).unwrap();
         let executor = ImportExecutor::with_protocol(&authority, &nodes[id], protocol());
+        let pending = super::pending::admitted(nodes[id].snapshot().unwrap().state(), &inputs);
+        queues.push(pending.clone());
         let host = LiveHost {
             node: nodes[id].clone(),
             id: id as u8,
@@ -490,7 +498,7 @@ async fn live_quorum_publishes_circle_vpn_and_exex_atomically() {
             executor: executor.native.clone(),
             prepared: Mutex::new(None),
             built: Mutex::new(None),
-            inputs: inputs.clone(),
+            pending,
             refused: refused.clone(),
             ready: ready.clone(),
             warnings: warnings.clone(),
@@ -498,7 +506,8 @@ async fn live_quorum_publishes_circle_vpn_and_exex_atomically() {
         let publication =
             Canonical::new(nodes[id].clone(), peers[id].bundles.clone(), executor, 3.)
                 .await
-                .unwrap();
+                .unwrap()
+                .with_pending(queues[id].clone());
         let (handle, driver) = Driver::new(
             engine,
             journal,
@@ -556,6 +565,10 @@ async fn live_quorum_publishes_circle_vpn_and_exex_atomically() {
         .unwrap()
         .iter()
         .all(|hash| hash == &refused_hash));
+    for queue in &queues {
+        assert_eq!(queue.transactions().unwrap(), vec![successor.clone()],
+            "canonical cleanup must retire confirmations and refusals, retaining the dependent successor");
+    }
     let committed_root = nodes[0].head().await.unwrap().cursor.state_root;
     assert_eq!(
         committed_root.0.as_slice(),

@@ -23,6 +23,7 @@ pub struct Canonical<A: Host, B: BundleHost, E: Executor> {
     head: AtomicI64,
     restore_services: AtomicBool,
     importing: Mutex<()>,
+    pending: Option<Arc<crate::executor::Pending>>,
 }
 impl<A: Host, B: BundleHost, E: Executor> Canonical<A, B, E> {
     pub async fn new(
@@ -44,7 +45,14 @@ impl<A: Host, B: BundleHost, E: Executor> Canonical<A, B, E> {
             head: AtomicI64::new(head),
             restore_services: AtomicBool::new(false),
             importing: Mutex::new(()),
+            pending: None,
         })
+    }
+    /// Share the proposal queue with canonical publication. Durable confirmed
+    /// transactions and recorded refusals retire only after authenticated commit.
+    pub fn with_pending(mut self, pending: Arc<crate::executor::Pending>) -> Self {
+        self.pending = Some(pending);
+        self
     }
     async fn publish(&self, finalized: &Finalize) -> anyhow::Result<()> {
         let wire = finalized.encode()?;
@@ -80,6 +88,14 @@ impl<A: Host, B: BundleHost, E: Executor> Canonical<A, B, E> {
                     .is_some(),
                 "finalized bundle unavailable"
             );
+        }
+        if let Some(pending) = &self.pending {
+            let record = self
+                .node
+                .publisher
+                .record(Sequence(u64::try_from(finalized.epoch_id)?))
+                .await?;
+            pending.committed(&record)?;
         }
         self.head.store(finalized.epoch_id, Ordering::Release);
         Ok(())

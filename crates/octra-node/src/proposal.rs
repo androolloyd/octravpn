@@ -24,12 +24,45 @@ impl Candidate {
     }
 }
 
+/// A queue-admission lease cannot be passed to the proposal builder.
+pub struct Admission(Draft);
+impl Admission {
+    pub(crate) fn draft(&self) -> &Draft {
+        &self.0
+    }
+}
+
 pub struct Draft {
     context: BuildContext,
     state: Snapshot,
     revocation: octravpn_node::admission::Revocation,
+    shared: std::sync::Weak<crate::Shared>,
 }
 impl Draft {
+    /// Keep short queue operations atomic with canonical suspension. Never run
+    /// proof work, disk I/O or an await inside this closure.
+    pub(crate) fn with_current<T>(
+        &self,
+        action: impl FnOnce() -> anyhow::Result<T>,
+    ) -> anyhow::Result<T> {
+        let shared = self
+            .shared
+            .upgrade()
+            .ok_or_else(|| anyhow::anyhow!("node stopped"))?;
+        let state = shared
+            .0
+            .try_lock()
+            .map_err(|_| anyhow::anyhow!("canonical view busy"))?;
+        anyhow::ensure!(
+            self.live()
+                && state
+                    .serving
+                    .as_ref()
+                    .is_some_and(|s| s.committed.head() == self.context.parent()),
+            "proposal snapshot was revoked"
+        );
+        action()
+    }
     pub(crate) fn live(&self) -> bool {
         !self.revocation.is_revoked()
     }
@@ -42,6 +75,34 @@ impl Draft {
 }
 
 impl<A: Host> Node<A> {
+    pub async fn admission_capture(
+        &self,
+        graph: &Graph,
+        policy: Policy,
+        creator: &[u8],
+        now: f64,
+    ) -> Result<Admission, finality::Error> {
+        let serving = self
+            .shared
+            .current()
+            .map_err(|e| finality::Error::Unavailable(e.to_string()))?;
+        let context = self
+            .publisher
+            .admission_context(serving.committed.head(), graph, policy, creator, now)
+            .await?;
+        if serving.revocation.is_revoked() {
+            return Err(finality::Error::Unavailable(
+                "admission snapshot was revoked".into(),
+            ));
+        }
+        Ok(Admission(Draft {
+            context,
+            state: serving.committed.state().clone(),
+            revocation: serving.revocation.clone(),
+            shared: std::sync::Arc::downgrade(&self.shared),
+        }))
+    }
+
     /// Capture a local build at the serving parent. The driver still owns
     /// leader/round selection, signing, durable precommit and finality.
     pub async fn proposal_draft(
@@ -68,6 +129,7 @@ impl<A: Host> Node<A> {
             context,
             state: serving.committed.state().clone(),
             revocation: serving.revocation.clone(),
+            shared: std::sync::Arc::downgrade(&self.shared),
         })
     }
 

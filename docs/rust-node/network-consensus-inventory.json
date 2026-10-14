@@ -8759,5 +8759,26 @@
       "whole OCaml/Rust node sync/recovery, funded VPN settlement and OS oct:// launching",
       "headscale unsafe-libyaml replacement, Docker writable state and signed lifecycle migration, repository-wide CI and benchmark investigation"
     ]
+  },
+  "local_executable_devnet_qualification": {
+    "status": "passed",
+    "scope": "Isolated Rust devnet using the executable host: authenticated quorum, signed transaction propagation, canonical Circle asset, peer catch-up after restart, persistent ExEx; native proposal selection and recovery parity plus existing private proof and service regressions. VPN settlement remains unconfigured in the launcher.",
+    "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+    "summary": "docs/rust-node/checkpoints/2026-10-14/native-devnet-summary.json",
+    "entrypoint": "crates/octra-node/src/main.rs",
+    "guide": "docs/rust-node/devnet.md",
+    "native_selection_cases": 962,
+    "tests": 15,
+    "full_consensus_execution": false,
+    "public_peer_interoperability": false,
+    "funded_vpn_end_to_end": false,
+    "remaining": [
+      "funded Circle VPN settlement adapter and lifecycle",
+      "full Circle HFHE backend and remaining VM operations",
+      "complete upstream REST and public network interoperability",
+      "pending queue persistence and full legacy startup reconciliation",
+      "OS oct:// registration",
+      "broader CI audit and benchmark gates"
+    ]
   }
 }

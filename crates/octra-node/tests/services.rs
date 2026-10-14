@@ -1950,5 +1950,7 @@ async fn agreed_ranges_recover_canonical_services_and_exex_after_restart() {
 
 #[path = "services/live.rs"]
 mod live;
+#[path = "services/pending.rs"]
+mod pending;
 #[path = "services/proposals.rs"]
 mod proposals;

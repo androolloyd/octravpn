@@ -66,19 +66,38 @@ impl Partition {
     pub fn transactions(&self) -> &[Transaction] {
         &self.inputs
     }
-    fn tx(&self, index: usize) -> Result<&Transaction, Error> {
-        self.inputs
-            .get(index)
-            .ok_or_else(|| error("execution artifact input index is invalid"))
-    }
     /// Compare hashes in their native order, then normalized rejection bytes.
     /// Positions in execution artifacts are not used by the native verifier.
     pub fn verify(&self, result: Result<&Artifacts, &Error>) -> Result<(), Error> {
+        self.verify_order(&self.inputs, result)
+    }
+    /// Staging chooses by fee priority; execution returns canonical outcomes.
+    /// Input indices still refer to the staging order on an initial preview.
+    pub fn verify_input_order(
+        &self,
+        inputs: &[Transaction],
+        artifacts: &Artifacts,
+    ) -> Result<(), Error> {
+        if outcome::executed(inputs, &[]).map_err(error)? != self.inputs {
+            return Err(error("preview_partition_mismatch"));
+        }
+        self.verify_order(inputs, Ok(artifacts))
+    }
+    fn verify_order(
+        &self,
+        inputs: &[Transaction],
+        result: Result<&Artifacts, &Error>,
+    ) -> Result<(), Error> {
         let artifacts = result.map_err(|e| error(format!("preview_failed:{e}")))?;
+        let tx = |index| {
+            inputs
+                .get(index)
+                .ok_or_else(|| error("execution artifact input index is invalid"))
+        };
         let actual = artifacts
             .confirmed
             .iter()
-            .map(|(index, _)| self.tx(*index)?.hash().map_err(error))
+            .map(|(index, _)| tx(*index)?.hash().map_err(error))
             .collect::<Result<Vec<_>, _>>()?;
         let expected = self
             .confirmed
@@ -91,7 +110,7 @@ impl Partition {
         let mut rejected = Vec::new();
         let mut charged = Vec::new();
         for r in &artifacts.rejected {
-            let tx = self.tx(r.input_index)?;
+            let tx = tx(r.input_index)?;
             rejected.push((
                 tx.clone(),
                 r.refusal.error_type.clone(),

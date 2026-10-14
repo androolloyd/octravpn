@@ -68,21 +68,7 @@ impl Native {
         rules: &octra_node_runtime::consensus_bundle::Rules,
     ) -> Result<Vec<Receipt>, super::ProposalError> {
         use super::proposal::{invalid, unavailable};
-        use octra_node_runtime::{account_store, preverify_batch, state_batch::StateBatch};
-        let ledger = account_store::ledger(&StateBatch::from_snapshot(state.clone()))
-            .map_err(unavailable)?;
-        let epoch = i64::try_from(parent.cursor.epoch.0 + 1).map_err(unavailable)?;
-        let batch = preverify_batch::prepare(inputs, true, &rules.stealth_minimum, |tx| {
-            Ok(self.prove(
-                tx,
-                &ledger,
-                state,
-                parent.ledger_root.as_bytes(),
-                self.private_profile(bound, epoch),
-                &rules.stealth_minimum,
-            ))
-        })
-        .map_err(unavailable)?;
+        let batch = self.prepare_proofs(parent, state, bound, inputs, rules)?;
         let hashes = inputs
             .iter()
             .map(Transaction::hash)
@@ -101,6 +87,32 @@ impl Native {
             });
         }
         Ok(batch.ready.into_iter().filter_map(|r| r.receipt).collect())
+    }
+
+    pub(super) fn prepare_proofs(
+        &self,
+        parent: &octra_node_runtime::canonical::Head,
+        state: &Snapshot,
+        bound: &octra_node_runtime::execution_rules::Bound,
+        inputs: &[Transaction],
+        rules: &octra_node_runtime::consensus_bundle::Rules,
+    ) -> Result<octra_node_runtime::preverify_batch::Batch, super::ProposalError> {
+        use super::proposal::unavailable;
+        use octra_node_runtime::{account_store, preverify_batch, state_batch::StateBatch};
+        let ledger = account_store::ledger(&StateBatch::from_snapshot(state.clone()))
+            .map_err(unavailable)?;
+        let epoch = i64::try_from(parent.cursor.epoch.0 + 1).map_err(unavailable)?;
+        preverify_batch::prepare(inputs, true, &rules.stealth_minimum, |tx| {
+            Ok(self.prove(
+                tx,
+                &ledger,
+                state,
+                parent.ledger_root.as_bytes(),
+                self.private_profile(bound, epoch),
+                &rules.stealth_minimum,
+            ))
+        })
+        .map_err(unavailable)
     }
 
     pub(super) fn prove(

@@ -1,0 +1,78 @@
+    Blocking waiting for file lock on build directory
+warning: field `key_id` is never read
+   --> vendor/octra-circle-wasm-host/src/lib.rs:353:5
+    |
+352 | struct HfheActiveKey {
+    |        ------------- field in this struct
+353 |     key_id: String,
+    |     ^^^^^^
+    |
+    = note: `HfheActiveKey` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: variant `Release` is never constructed
+    --> vendor/octra-circle-wasm-host/src/lib.rs:1112:5
+     |
+1110 | enum CacheMessage {
+     |      ------------ variant in this enum
+1111 |     Hold { key: String, root: String, entries: usize, bytes: usize },
+1112 |     Release(u64),
+     |     ^^^^^^^
+
+warning: `octra_circle_wasm_host` (lib) generated 2 warnings
+   Compiling octra-node-runtime v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node-runtime)
+   Compiling octra-node v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 26.06s
+     Running tests/devnet.rs (target/debug/deps/devnet-4a9111bee40aa3ec)
+
+running 2 tests
+test genesis_settings_cannot_reuse_a_chain_identity ... ok
+test executable_devnet_transfers_browses_and_recovers has been running for over 60 seconds
+test executable_devnet_transfers_browses_and_recovers ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 88.65s
+
+     Running tests/private_import.rs (target/debug/deps/private_import-9a313ff8196eb4ef)
+
+running 1 test
+test finalized_mixed_import_uses_bound_key_files_and_survives_restart has been running for over 60 seconds
+test finalized_mixed_import_uses_bound_key_files_and_survives_restart ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 161.71s
+
+     Running tests/services.rs (target/debug/deps/services-4103d07c55a7d506)
+
+running 8 tests
+test pending::pending_fee_order_recovery_and_stale_queue_isolation ... ok
+test empty_finalized_import_needs_no_peer_and_rejects_wrong_parent ... ok
+test newer_pause_cannot_be_undone_and_cancellation_releases_services ... ok
+test proposals::local_proposal_capture_checks_receipts_outcomes_and_commitment ... ok
+test peer_import_drives_browser_wireguard_exex_and_restart ... ok
+test agreed_ranges_recover_canonical_services_and_exex_after_restart ... ok
+test consecutive_peer_recovery_resumes_after_missing_bundle_and_restart ... ok
+test live::live_quorum_publishes_circle_vpn_and_exex_atomically ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.78s
+
+     Running tests/epoch_partition.rs (target/debug/deps/epoch_partition-1977e3017bd58b11)
+
+running 2 tests
+test finalized_replay_excludes_vm_fees_and_atomically_checks_charged_outcomes ... ok
+test native_finalized_selection_and_candidate_partition_refusals ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.33s
+
+     Running tests/proposal_build.rs (target/debug/deps/proposal_build-e66fda7eefda9113)
+
+running 1 test
+test native_ordered_recovery_traces_and_rejection_bytes ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+
+     Running tests/proposal_selection.rs (target/debug/deps/proposal_selection-78b0aee9a422ec9e)
+
+running 1 test
+test native_selection_caps_slots_turns_and_parent_bundles ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.47s
+

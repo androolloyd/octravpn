@@ -1,0 +1,1 @@
+PASS: non-root runtime can write its persistent state volume

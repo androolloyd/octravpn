@@ -45,6 +45,42 @@ impl<A: ValidatorHistory> Publisher<A> {
         creator: &[u8],
         now: f64,
     ) -> Result<BuildContext> {
+        let context = self
+            .admission_context(base, graph, policy, creator, now)
+            .await?;
+        let previous = context
+            .parent_commit
+            .as_ref()
+            .map(|p| p.certificate.header.ts)
+            .or(policy.genesis_time)
+            .ok_or_else(|| Error::Unavailable("previous_epoch_time_unavailable".into()))?;
+        // The native builder waits for this interval even under historical rules.
+        if policy::next_delay_ms(now, previous) > 0 {
+            return Err(Error::Unavailable(
+                "proposal epoch time interval has not elapsed".into(),
+            ));
+        }
+        policy::check_proposal_time(
+            policy::time_rule(context.header.chain_id.as_slice(), context.header.epoch_id),
+            policy::ProposalKind::Fresh,
+            now,
+            Some(policy::time_of_seconds(previous).map_err(invalid)?),
+            now,
+        )
+        .map_err(invalid)?;
+        Ok(context)
+    }
+
+    /// Bind queue preverification to the next epoch without authorizing a timed
+    /// proposal. Callers must use proposal_build_context before construction.
+    pub async fn admission_context(
+        &self,
+        base: &Head,
+        graph: &Graph,
+        policy: Policy,
+        creator: &[u8],
+        now: f64,
+    ) -> Result<BuildContext> {
         self.proposal_parent_current(base).await?;
         let epoch = base
             .cursor
@@ -62,25 +98,6 @@ impl<A: ValidatorHistory> Publisher<A> {
             return Err(invalid("proposal creator is not an active validator"));
         }
         let parent_commit = self.proposal_parent(base, policy).await?;
-        let previous = parent_commit
-            .as_ref()
-            .map(|p| p.certificate.header.ts)
-            .or(policy.genesis_time)
-            .ok_or_else(|| Error::Unavailable("previous_epoch_time_unavailable".into()))?;
-        // The native builder waits for this interval even under historical rules.
-        if policy::next_delay_ms(now, previous) > 0 {
-            return Err(Error::Unavailable(
-                "proposal epoch time interval has not elapsed".into(),
-            ));
-        }
-        policy::check_proposal_time(
-            policy::time_rule(chain.chain_id.as_bytes(), epoch as i64),
-            policy::ProposalKind::Fresh,
-            now,
-            Some(policy::time_of_seconds(previous).map_err(invalid)?),
-            now,
-        )
-        .map_err(invalid)?;
         let version = policy.protocol.version_at(epoch as i64);
         if version == LEGACY_VERSION && parent_commit.is_some() {
             return Err(invalid("legacy proposal has parent commit"));
