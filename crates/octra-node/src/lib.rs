@@ -8,6 +8,7 @@ pub mod consensus;
 pub mod devnet;
 pub mod driver;
 pub mod executor;
+pub mod gateway;
 pub mod import;
 pub mod peers;
 pub mod proposal;

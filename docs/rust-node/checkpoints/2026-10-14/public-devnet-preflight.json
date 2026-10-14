@@ -1,0 +1,39 @@
+{
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "checked_on": "2026-10-14",
+  "network_config_url": "https://raw.githubusercontent.com/octra-labs/lite_node/7f9be4489870645cfcc95439638cde40f5da9f50/config/network.env",
+  "network_config_sha256": "db87b3323080e7d7090e01aa2d7636985f49ba4c639ec26c78673a1c43a15c07",
+  "expected_chain_id": "octra-devnet-9871-cluster",
+  "expected_consensus_config_hash": "89c4deb7de2144dd2193f9abdc7fc87e2ed6889e4700def42d8c1d0ee756ccd9",
+  "rpc_observation": {
+    "url": "https://devnet.octrascan.io/rpc",
+    "method": "node_status",
+    "http_status": 200,
+    "head_epoch": 1692994,
+    "state_root": "50fc04d56ff1019f9b9f82f80a88ac9909521b952f24f197efba2f53907a4b27",
+    "authenticated_finality": false
+  },
+  "manifest_attempts": [
+    {
+      "url": "https://devnet.octrascan.io/state-sync/primary/state-sync/manifest",
+      "http_status": 403
+    },
+    {
+      "url": "https://devnet.octrascan.io/state-sync/secondary/state-sync/manifest",
+      "http_status": 403
+    }
+  ],
+  "relayer_balance_check": {
+    "method": "octra_balance",
+    "http_status": 403,
+    "balance_known": false
+  },
+  "public_deployment": false,
+  "broadcasts": 0,
+  "remaining": [
+    "Authenticated public snapshot download/import into the Rust canonical store",
+    "Public-chain startup profile and forward execution qualification",
+    "Funded VPN Circle initialization and settlement integration"
+  ],
+  "scope": "Read-only observations from this host; HTTP status is not authenticated chain state. The running four-validator deployment and Circle address remain on the isolated local chain."
+}

@@ -1,0 +1,47 @@
+    Blocking waiting for file lock on build directory
+   Compiling octra-browser v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-browser)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 22.09s
+     Running unittests src/lib.rs (target/debug/deps/octra_browser-74c7fae01b6f2ad8)
+
+running 1 test
+test application::bridge::tests::expired_sessions_and_reviews_cannot_reach_host_and_capacity_is_bounded ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/application.rs (target/debug/deps/application-f1572fe6bbfeb011)
+
+running 4 tests
+test revoked_session_cannot_receive_an_in_flight_wallet_reply ... ok
+test active_documents_are_opt_in_and_never_contain_session_credentials ... ok
+test sessions_bind_context_and_require_origin_and_explicit_single_use_review ... ok
+test decline_close_failure_and_oversized_input_never_create_replayable_calls ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/http.rs (target/debug/deps/http-d84cb73ee41c0351)
+
+running 7 tests
+test gateway_rejects_ambiguous_or_non_https_origins ... ok
+test gateway_preserves_case_bytes_and_head_for_nonbrowser_clients ... ok
+test gateway_cannot_publish_unverified_or_private_resources ... ok
+test gateway_serves_documents_directly_and_pins_subresources ... ok
+test root_documents_and_cross_circle_links_keep_the_snapshot_scope ... ok
+test wrong_host_scope_and_changed_snapshot_never_serve_assets ... ok
+test gateway_rejects_host_spoofing_stale_scopes_and_provenance_changes ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/navigation.rs (target/debug/deps/navigation-bfb9ad4059625b8d)
+
+running 2 tests
+test browser_authority_traversal_and_external_urls_are_refused ... ok
+test relative_navigation_preserves_query_fragment_and_literal_percent_bytes ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests octra_browser
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

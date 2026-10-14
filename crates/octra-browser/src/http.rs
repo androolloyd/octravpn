@@ -16,6 +16,9 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{net::IpAddr, sync::Arc};
 
+mod gateway;
+pub use gateway::Gateway;
+
 #[derive(Clone)]
 pub struct Browser {
     resolver: Arc<dyn AssetResolver>,
@@ -284,6 +287,16 @@ async fn serve_asset(
         Ok(url) => url,
         Err(error) => return failure(&error),
     };
+    resolved_asset(browser, origin, url, executable, false).await
+}
+
+async fn resolved_asset(
+    browser: Browser,
+    origin: String,
+    url: OctUrl,
+    executable: bool,
+    gateway: bool,
+) -> Response {
     let found = match browser.resolver.resolve(&url).await {
         Err(Error::NotFound) if url.is_directory() => match url.resolve("index.html") {
             Ok(index) => browser.resolver.resolve(&index).await,
@@ -310,12 +323,17 @@ async fn serve_asset(
         .to_ascii_lowercase();
     let is_html = content_type == "text/html";
     let bytes = if is_html {
-        let rewrite = if executable {
-            render::rewrite_app
+        let rewritten = if gateway {
+            render::rewrite_gateway(&asset.bytes, &url, &browser.scope)
         } else {
-            render::rewrite_html
+            let rewrite = if executable {
+                render::rewrite_app
+            } else {
+                render::rewrite_html
+            };
+            rewrite(&asset.bytes, &url, &browser.prefix, &browser.scope)
         };
-        match rewrite(&asset.bytes, &url, &browser.prefix, &browser.scope) {
+        match rewritten {
             Ok(bytes) => bytes,
             Err(error) => return failure(&error),
         }
@@ -366,12 +384,19 @@ async fn serve_asset(
             HeaderValue::from_static("attachment; filename=\"circle-asset\""),
         );
     }
-    let csp = if executable && is_html {
-        render::app_csp
+    let csp = if gateway {
+        render::public_asset_csp(&format!(
+            "{origin}/snapshots/{}/{}/",
+            browser.scope, url.circle_id
+        ))
     } else {
-        render::asset_csp
+        let csp = if executable && is_html {
+            render::app_csp
+        } else {
+            render::asset_csp
+        };
+        csp(&origin, &browser.prefix, &browser.scope, &url.circle_id)
     };
-    let csp = csp(&origin, &browser.prefix, &browser.scope, &url.circle_id);
     response.headers_mut().insert(
         header::CONTENT_SECURITY_POLICY,
         HeaderValue::from_str(&csp).expect("validated CSP source"),
@@ -388,6 +413,20 @@ async fn serve_asset(
         header::ACCESS_CONTROL_ALLOW_ORIGIN,
         HeaderValue::from_static("*"),
     );
+    if gateway {
+        if let Provenance::Canonical(snapshot) = &browser.provenance {
+            for (key, value) in [
+                ("x-octra-chain", snapshot.chain_id.clone()),
+                ("x-octra-epoch", snapshot.epoch.to_string()),
+                ("x-octra-state-root", snapshot.state_root.clone()),
+            ] {
+                let Ok(value) = HeaderValue::from_str(&value) else {
+                    return failure(&Error::Invalid("invalid snapshot identity".into()));
+                };
+                response.headers_mut().insert(key, value);
+            }
+        }
+    }
     response
 }
 

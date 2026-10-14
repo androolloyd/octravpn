@@ -26,7 +26,9 @@ pub fn rewrite_html(
     prefix: &str,
     scope: &str,
 ) -> Result<Vec<u8>, Error> {
-    rewrite(input, base, prefix, scope, false)
+    rewrite(input, base, false, |kind, url| {
+        route(prefix, scope, kind, url)
+    })
 }
 
 pub(crate) fn rewrite_app(
@@ -35,15 +37,31 @@ pub(crate) fn rewrite_app(
     prefix: &str,
     scope: &str,
 ) -> Result<Vec<u8>, Error> {
-    rewrite(input, base, prefix, scope, true)
+    rewrite(input, base, true, |kind, url| {
+        route(prefix, scope, kind, url)
+    })
+}
+
+pub(crate) fn gateway_route(scope: Option<&str>, url: &OctUrl) -> String {
+    let suffix = url.as_string();
+    let suffix = suffix.strip_prefix("oct://").expect("Circle URL");
+    scope.map_or_else(
+        || format!("/circles/{suffix}"),
+        |scope| format!("/snapshots/{scope}/{suffix}"),
+    )
+}
+
+pub(crate) fn rewrite_gateway(input: &[u8], base: &OctUrl, scope: &str) -> Result<Vec<u8>, Error> {
+    rewrite(input, base, false, |kind, url| {
+        gateway_route((kind == "asset").then_some(scope), url)
+    })
 }
 
 fn rewrite(
     input: &[u8],
     base: &OctUrl,
-    prefix: &str,
-    scope: &str,
     executable: bool,
+    route: impl Fn(&str, &OctUrl) -> String,
 ) -> Result<Vec<u8>, Error> {
     if input.len() > MAX_ASSET_BYTES {
         return Err(Error::TooLarge);
@@ -117,7 +135,7 @@ fn rewrite(
                                 &format!("#{}", target.fragment.as_deref().unwrap_or_default()),
                             )?;
                         } else {
-                            el.set_attribute(name, &route(prefix, scope, "view", &target))?;
+                            el.set_attribute(name, &route("view", &target))?;
                             el.set_attribute("target", "_top")?;
                             el.set_attribute("rel", "noreferrer noopener")?;
                             if executable {
@@ -126,7 +144,7 @@ fn rewrite(
                         }
                     }
                     Ok(target) if target.circle_id == base.circle_id => {
-                        el.set_attribute(name, &route(prefix, scope, "asset", &target))?;
+                        el.set_attribute(name, &route("asset", &target))?;
                     }
                     _ => el.remove_attribute(name),
                 }
@@ -163,6 +181,10 @@ fn rewrite(
 /// network APIs, nested frames, form submission, or same-origin privileges.
 pub fn asset_csp(origin: &str, prefix: &str, scope: &str, circle: &str) -> String {
     let source = format!("{origin}{prefix}/asset/{scope}/{}/", encode_path(circle));
+    public_asset_csp(&source)
+}
+
+pub(crate) fn public_asset_csp(source: &str) -> String {
     format!("default-src 'none'; script-src 'none'; style-src 'unsafe-inline' {source}; img-src {source}; font-src {source}; media-src {source}; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-top-navigation-by-user-activation")
 }
 

@@ -37,6 +37,58 @@ Use `http://127.0.0.1:19872/open?u=oct://<circle>/index.html`. The browser resol
 assets from a committed snapshot; a new commit invalidates URLs tied to the old
 snapshot. This launcher does not install an OS-wide `oct://` handler.
 
+## HTTPS access through Tailscale
+
+The optional gateway translates ordinary HTTPS requests into canonical Circle
+asset reads. Any HTTP client on the tailnet can use the same URL, including a
+browser, `curl`, or an application fetching JSON. No protocol handler or browser
+extension is required. The URL is:
+
+```text
+https://<node>.<tailnet>.ts.net/circles/<CircleAddress>/index.html
+```
+
+The Circle address stays in the path because its case is significant. DNS names
+cannot preserve that distinction. This translates Circle HTTPS URLs; arbitrary
+applications still cannot interpret a bare `oct://` scheme through DNS.
+
+After connecting the host to Tailscale, obtain its `Self.DNSName` from
+`tailscale status --json` (remove the trailing dot). Add this optional field to
+`out/native-devnet/node-0/config.json`, using that exact hostname:
+
+```json
+"gateway": {
+  "listen": "127.0.0.1:19875",
+  "origin": "https://<node>.<tailnet>.ts.net"
+}
+```
+
+Restart with the existing state, inspect `tailscale serve status --json` for
+conflicting routes, then publish the gateway privately:
+
+```sh
+python3 scripts/devnet/native.py stop
+python3 scripts/devnet/native.py start
+tailscale serve --bg --https=443 http://127.0.0.1:19875
+tailscale serve status
+```
+
+Tailscale Serve supplies HTTPS and tailnet access control. Keep the backend on
+loopback and publish only this gateway port. Its exact Host check is independent
+of forwarded headers. The local browser's wallet/application routes and node RPC
+are not mounted on the gateway.
+
+The gateway serves published public resources. Sealed resources and resources
+requiring local approval remain denied. JSON/binary bodies preserve their bytes;
+HTML uses the existing bounded, script-free renderer. Links resolve automatically,
+and subresource URLs carry the captured snapshot. Responses include
+`X-Octra-Chain`, `X-Octra-Epoch` and `X-Octra-State-Root`. During synchronization,
+requests return 503; stale snapshot resources fail rather than mix roots.
+
+An HTTPS gateway backed by this local launcher still serves the isolated local
+chain. Tailscale connectivity does not join Octra's public devnet. Public joining
+needs the authenticated snapshot import and public-chain startup implementation.
+
 Stop and restart without deleting state:
 
 ```sh

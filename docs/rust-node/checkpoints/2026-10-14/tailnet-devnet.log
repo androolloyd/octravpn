@@ -1,0 +1,54 @@
+   Compiling octra-browser v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-browser)
+warning: field `key_id` is never read
+   --> vendor/octra-circle-wasm-host/src/lib.rs:353:5
+    |
+352 | struct HfheActiveKey {
+    |        ------------- field in this struct
+353 |     key_id: String,
+    |     ^^^^^^
+    |
+    = note: `HfheActiveKey` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: variant `Release` is never constructed
+    --> vendor/octra-circle-wasm-host/src/lib.rs:1112:5
+     |
+1110 | enum CacheMessage {
+     |      ------------ variant in this enum
+1111 |     Hold { key: String, root: String, entries: usize, bytes: usize },
+1112 |     Release(u64),
+     |     ^^^^^^^
+
+warning: `octra_circle_wasm_host` (lib) generated 2 warnings
+   Compiling octra-node-runtime v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node-runtime)
+   Compiling octra-node v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 27.06s
+     Running tests/devnet.rs (target/debug/deps/devnet-dbef19171b73ed35)
+
+running 2 tests
+test genesis_settings_cannot_reuse_a_chain_identity ... ok
+devnet serving: RPC http://127.0.0.1:53128 browser http://127.0.0.1:53129/open?u=oct://octBSPxqb4VCV5Zz25WNsUXitxgkKCVZLJ9zuPgxAMV1UBy/index.html
+devnet serving: RPC http://127.0.0.1:53118 browser http://127.0.0.1:53119/open?u=oct://octBSPxqb4VCV5Zz25WNsUXitxgkKCVZLJ9zuPgxAMV1UBy/index.html
+devnet serving: RPC http://127.0.0.1:53098 browser http://127.0.0.1:53099/open?u=oct://octBSPxqb4VCV5Zz25WNsUXitxgkKCVZLJ9zuPgxAMV1UBy/index.html
+devnet serving: RPC http://127.0.0.1:53108 browser http://127.0.0.1:53109/open?u=oct://octBSPxqb4VCV5Zz25WNsUXitxgkKCVZLJ9zuPgxAMV1UBy/index.html
+consensus: outcome verification unavailable: proposal epoch time interval has not elapsed
+consensus: outcome verification unavailable: proposal epoch time interval has not elapsed
+consensus: outcome verification unavailable: proposal epoch time interval has not elapsed
+consensus: outcome verification unavailable: proposal epoch time interval has not elapsed
+consensus: outcome verification unavailable: proposal epoch time interval has not elapsed
+consensus: outcome verification unavailable: proposal epoch time interval has not elapsed
+consensus: outcome verification unavailable: proposal epoch time interval has not elapsed
+consensus: outcome verification unavailable: proposal epoch time interval has not elapsed
+consensus: outcome verification unavailable: proposal epoch time interval has not elapsed
+consensus: outcome verification unavailable: proposal epoch time interval has not elapsed
+consensus: outcome verification unavailable: proposal epoch time interval has not elapsed
+checkpoint: quorum and committed Circle asset
+checkpoint: signed transfer committed on a peer
+test executable_devnet_transfers_browses_and_recovers has been running for over 60 seconds
+checkpoint: quorum advanced with one validator stopped
+devnet serving: RPC http://127.0.0.1:53128 browser http://127.0.0.1:53129/open?u=oct://octBSPxqb4VCV5Zz25WNsUXitxgkKCVZLJ9zuPgxAMV1UBy/index.html
+checkpoint: restarted validator caught up
+test executable_devnet_transfers_browses_and_recovers ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 88.67s
+

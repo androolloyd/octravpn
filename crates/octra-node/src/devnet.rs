@@ -72,6 +72,8 @@ pub struct Config {
     pub browser: SocketAddr,
     pub control: SocketAddr,
     pub tunnel: SocketAddr,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gateway: Option<crate::gateway::Config>,
     pub peers: Vec<SocketAddr>,
 }
 fn key() -> SigningKey {
@@ -229,6 +231,7 @@ pub async fn init(directory: &Path, base: u16) -> Result<Vec<PathBuf>> {
             browser: socket(2),
             control: socket(3),
             tunnel: socket(4),
+            gateway: None,
             peers: peers.iter().copied().filter(|p| p != &peers[i]).collect(),
         };
         let file = data.join("config.json");
@@ -595,6 +598,10 @@ pub async fn run(config: Config, mut shutdown: watch::Receiver<bool>) -> Result<
             )
             .await?;
         tasks.spawn(services.run(stop.subscribe()));
+        if let Some(config) = config.gateway.clone() {
+            let gateway = node.bind_gateway(config).await?;
+            tasks.spawn(gateway.run(stop.subscribe()));
+        }
         eprintln!(
             "devnet serving: RPC http://{} browser http://{}/open?u=oct://{}/index.html",
             config.rpc, config.browser, config.genesis.circle

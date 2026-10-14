@@ -71,7 +71,14 @@ async fn executable_devnet_transfers_browses_and_recovers() {
         .unwrap();
     let configs = paths
         .iter()
-        .map(|p| devnet::read(p).unwrap())
+        .map(|p| {
+            let mut config = devnet::read(p).unwrap();
+            config.gateway = Some(octra_node::gateway::Config {
+                listen: (std::net::Ipv4Addr::LOCALHOST, config.p2p.port() + 5).into(),
+                origin: "https://circles.example.ts.net".into(),
+            });
+            config
+        })
         .collect::<Vec<_>>();
     let mut running = configs.iter().cloned().map(start).collect::<Vec<_>>();
     let http = reqwest::Client::builder()
@@ -122,6 +129,7 @@ async fn executable_devnet_transfers_browses_and_recovers() {
     .await
     .unwrap();
     eprintln!("checkpoint: quorum and committed Circle asset");
+    gateway_read(&http, &configs[0]).await;
     let key = devnet::read_key(&configs[0].faucet).unwrap();
     let public = STANDARD.encode(key.verifying_key().as_bytes()).into_bytes();
     let mut tx = Transaction {
@@ -199,6 +207,7 @@ async fn executable_devnet_transfers_browses_and_recovers() {
     running.push(start(configs[3].clone()));
     reached(&http, &configs[3], before + 4).await;
     eprintln!("checkpoint: restarted validator caught up");
+    gateway_read(&http, &configs[3]).await;
     for (stop, task) in running {
         stopped(stop, task).await;
     }
@@ -227,6 +236,46 @@ async fn executable_devnet_transfers_browses_and_recovers() {
     assert!(configs
         .iter()
         .all(|c| c.data.join("validator_journal.lock").exists()));
+}
+
+async fn gateway_read(http: &reqwest::Client, config: &Config) {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let response = http
+                .get(format!(
+                    "http://{}/circles/{}/index.html",
+                    config.gateway.as_ref().unwrap().listen,
+                    config.genesis.circle
+                ))
+                .header("host", "circles.example.ts.net")
+                .send()
+                .await
+                .unwrap();
+            if response.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE {
+                tokio::time::sleep(Duration::from_millis(30)).await;
+                continue;
+            }
+            assert!(response.status().is_success());
+            assert_eq!(
+                response.headers()["x-octra-chain"],
+                config.genesis.chain.chain_id
+            );
+            assert!(
+                response.headers()["x-octra-epoch"]
+                    .to_str()
+                    .unwrap()
+                    .parse::<u64>()
+                    .unwrap()
+                    >= 2
+            );
+            let document = response.text().await.unwrap();
+            assert!(document.contains("Octra Rust devnet"));
+            assert!(!document.contains("<iframe"));
+            break;
+        }
+    })
+    .await
+    .unwrap();
 }
 
 #[tokio::test]

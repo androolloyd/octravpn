@@ -1,0 +1,95 @@
+{
+  "date": "2026-10-14",
+  "status": "passed",
+  "scope": "Canonical public Circle assets served directly over tailnet HTTPS; local isolated Rust devnet only.",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "browser_tests": 14,
+  "devnet_tests": 2,
+  "clippy": "passed",
+  "format": "passed",
+  "devnet_test": "Four real validators, signed transfer, canonical browser and gateway reads, restart/peer catch-up and ExEx agreement.",
+  "https_client": "curl and Python urllib with normal DNS and TLS certificate verification on the connected host",
+  "second_device_tested": false,
+  "http_controls": {
+    "head_status": 200,
+    "rpc_status": 404,
+    "wallet_status": 404,
+    "write_status": 405
+  },
+  "deployment": {
+    "https": {
+      "status": 200,
+      "tls_certificate_verified": true,
+      "body_sha256": "999a5d075d8c63d5b3be7ef0ea9cca9e5e219874ef15bfc7fdc8c56d7ccc8ff0",
+      "chain": "octra-rust-local-f9c1b96205bbb19f",
+      "epoch": 378,
+      "state_root": "bb7d5fddd2439b3d0ca8bbafde73971f3977234147d14ab6283f47d45f04a868",
+      "bytes": 232,
+      "portal_required": false,
+      "public_funnel": false
+    },
+    "nodes": [
+      {
+        "chain_id": "octra-rust-local-f9c1b96205bbb19f",
+        "epoch": 378,
+        "peers": 3,
+        "pending": 0,
+        "serving": true,
+        "state_root": "bb7d5fddd2439b3d0ca8bbafde73971f3977234147d14ab6283f47d45f04a868",
+        "vpn_settlement": "unconfigured"
+      },
+      {
+        "chain_id": "octra-rust-local-f9c1b96205bbb19f",
+        "epoch": 378,
+        "peers": 3,
+        "pending": 0,
+        "serving": true,
+        "state_root": "bb7d5fddd2439b3d0ca8bbafde73971f3977234147d14ab6283f47d45f04a868",
+        "vpn_settlement": "unconfigured"
+      },
+      {
+        "chain_id": "octra-rust-local-f9c1b96205bbb19f",
+        "epoch": 378,
+        "peers": 3,
+        "pending": 0,
+        "serving": true,
+        "state_root": "bb7d5fddd2439b3d0ca8bbafde73971f3977234147d14ab6283f47d45f04a868",
+        "vpn_settlement": "unconfigured"
+      },
+      {
+        "chain_id": "octra-rust-local-f9c1b96205bbb19f",
+        "epoch": 378,
+        "peers": 3,
+        "pending": 0,
+        "serving": true,
+        "state_root": "bb7d5fddd2439b3d0ca8bbafde73971f3977234147d14ab6283f47d45f04a868",
+        "vpn_settlement": "unconfigured"
+      }
+    ],
+    "binary_sha256": "5ac909fb22bd5d2193a32d2d0c2de49011844cb3c9f71761324484c636e7d71c"
+  },
+  "source_sha256": {
+    "crates/octra-browser/src/http.rs": "618d6d76ebd6e15420430aece0f81eae17c11bb036d5c51f8c881cecf5e742b1",
+    "crates/octra-browser/src/render.rs": "a51dddd9bda14e1344fa0430240bedeb7ca0b487cb81828a9834a5efb9a90f27",
+    "crates/octra-browser/tests/http.rs": "04d5026bc03503ebda545c2e66b08b9718d97e99cbca2fe4ebbb420471b73b3f",
+    "crates/octra-node/src/devnet.rs": "5a280b26262d3994df708d02e092bf325a92779806dd660aed4b4cbff3be44f5",
+    "crates/octra-node/src/lib.rs": "fa75d30c6da2a1a5136c2a5d097ec7075123709645c62141720c471ae591a71c",
+    "crates/octra-node/tests/devnet.rs": "3c8c8f3cd920e78395cf9704fbe12606b3f43c64b6efd98da9e35e0b9f17e6bc",
+    "crates/octra-browser/src/http/gateway.rs": "9e44d4a5e711b9bed5b08c66d2ac90405322c97d2403bfa1f8cb5ad8bf7ca555",
+    "crates/octra-node/src/gateway.rs": "083de727d66eb52b8cdccf70599217bf5e9776fca615b2dc6be5804cfa806a3b"
+  },
+  "log_sha256": {
+    "tailnet-browser.log": "80c26c58eb615ed7a5a9855ba192acad794ee50d1c2d91c7a5305512e91aea4f",
+    "tailnet-devnet.log": "a5c0fc14a8258f50e1b2c0c9633d8df63e95947e96834aefca6c5ed8a68e99b8",
+    "tailnet-clippy.log": "45ba1bc1f1dec633d65198205c3c6ba84e494816ee9a6b96fa8aca3219b59356",
+    "tailnet-build.log": "26f11f34420a5bd882804c1070d838fd9284fdc9f3fc2ed3b457a1b5deb5dadd"
+  },
+  "public_devnet_joined": false,
+  "funded_vpn_settlement": false,
+  "remaining": [
+    "Public-chain startup and authenticated state import",
+    "VPN Circle initialization and funded settlement",
+    "Cross-device tailnet validation"
+  ],
+  "privacy": "Tailnet hostname and local keys are retained only in ignored deployment state."
+}
