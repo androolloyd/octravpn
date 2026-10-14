@@ -1,6 +1,6 @@
 //! Production finalized executor with native private ciphertext/proof material.
-//! A local historical profile exercises certified transitions and real blob IO;
-//! active proof verification is qualified separately in the runtime oracle tests.
+//! Local proposal checks verify real proofs before independently certified
+//! historical import. Both routes use content-addressed public key files.
 use base64::{engine::general_purpose::STANDARD, Engine};
 use ed25519_dalek::{Signer, SigningKey};
 use octra_exex::{
@@ -8,11 +8,12 @@ use octra_exex::{
     ChainIdentity, CommittedEpochSource, Sequence, StateRoot,
 };
 use octra_node::{
-    executor::{Config, Limits, Native},
+    executor::{Config, Limits, Native, ProposalError},
     import::{Execution, Executor},
+    Node,
 };
 use octra_node_protocol::{
-    consensus::{codec::Wire, policy::Protocol},
+    consensus::{codec::Wire, hash, policy::Protocol, Proposal},
     emission::Schedule,
     preverify_receipt::{self, Binding, Receipt, State},
     rules::Graph,
@@ -40,6 +41,11 @@ mod common;
 
 #[derive(Clone)]
 struct Authority(common::Authority);
+impl octra_node::Host for Authority {
+    fn check_views(&self, _: &Head) -> Result<(), String> {
+        Ok(())
+    }
+}
 #[async_trait::async_trait]
 impl ValidatorHistory for Authority {
     async fn resolve(
@@ -97,6 +103,9 @@ async fn finalized_mixed_import_uses_bound_key_files_and_survives_restart() {
     let sender = address_from_public_key(&public_signing);
     let mut initial = StateBatch::default();
     initial.begin().unwrap();
+    initial
+        .set(&[b"meta", b"last_epoch"], b"0".to_vec())
+        .unwrap();
     account_store::set(
         &mut initial,
         &sender,
@@ -144,7 +153,7 @@ async fn finalized_mixed_import_uses_bound_key_files_and_survives_restart() {
     );
     let config = Config {
         graph: Graph::new(chain.chain_id.as_bytes().to_vec(), None),
-        protocol: Protocol::default(),
+        protocol: Protocol::new(2).unwrap(),
         profile: Profile {
             private_v1: true,
             ..Profile::default()
@@ -274,9 +283,10 @@ async fn finalized_mixed_import_uses_bound_key_files_and_survives_restart() {
         date: 1,
         message: b"private import expectation".to_vec(),
     };
-    let certificate = common::certificate(&parent, &planned, &authority.0)
-        .encode()
-        .unwrap();
+    let mut finalized = common::certificate(&parent, &planned, &authority.0);
+    finalized.header.proto_version = Protocol::new(2).unwrap().version_at(1);
+    common::sign(&mut finalized, 1);
+    let certificate = finalized.encode().unwrap();
     let raw = RawBundle {
         tx_hashes: planned
             .transactions
@@ -289,6 +299,60 @@ async fn finalized_mixed_import_uses_bound_key_files_and_survives_restart() {
             .map(|tx| tx.transaction.clone())
             .collect(),
         receipts_json: vec![receipt],
+    };
+    let node = Node::open(
+        CanonicalStore::open(&database, &chain).await.unwrap(),
+        authority.clone(),
+        circle_host::runtime(),
+        Arc::new(octra_browser::application::UnavailableHost),
+        Arc::new(
+            octra_exex::sqlite::SqliteCheckpoints::open(&dir.path().join("exex.db"))
+                .await
+                .unwrap(),
+        ),
+    )
+    .await
+    .unwrap();
+    node.resume().await.unwrap();
+    let set = authority.0.validators(&parent, 1).unwrap();
+    let mut proposal = Proposal {
+        chain_id: finalized.chain_id.clone(),
+        epoch_id: 1,
+        round: (0..32)
+            .find(|&r| set.leader(1, r).unwrap().address == b"validator-0")
+            .unwrap(),
+        valid_round: None,
+        header: finalized.header.clone(),
+        tx_hashes: raw.tx_hashes.clone(),
+        parent_commit: None,
+        proposer: b"validator-0".to_vec(),
+        signature: vec![],
+    };
+    let sign = |p: &mut Proposal| {
+        p.signature = SigningKey::from_bytes(&[1; 32])
+            .sign(&hash::propose_sign_bytes(p).unwrap())
+            .to_bytes()
+            .to_vec();
+    };
+    sign(&mut proposal);
+    let candidate = |p: Proposal| {
+        let node = &node;
+        let graph = executor.graph();
+        async move {
+            Arc::new(
+                node.proposal_candidate(
+                    &p,
+                    &graph,
+                    octra_node_runtime::finality::proposal::Policy {
+                        protocol: Protocol::new(2).unwrap(),
+                        genesis_time: Some(0.),
+                    },
+                    10.,
+                )
+                .await
+                .unwrap(),
+            )
+        }
     };
     let mut result = None;
     for scenario in ["missing", "corrupt", "valid"] {
@@ -303,6 +367,88 @@ async fn finalized_mixed_import_uses_bound_key_files_and_survives_restart() {
                 },
             )
             .unwrap();
+        }
+        let verified = executor
+            .verify_proposal(candidate(proposal.clone()).await, &raw)
+            .await;
+        if scenario == "valid" {
+            let verified = verified.unwrap();
+            assert_eq!(
+                verified.execution().state.root().unwrap(),
+                expected.root().unwrap()
+            );
+            assert!(node.proposal_current(verified.candidate()));
+            let mut forged = raw.clone();
+            let mut receipt = Receipt::parse(&forged.receipts_json[0]).unwrap();
+            let Binding::Private(binding) = &mut receipt.binding else {
+                panic!("private receipt")
+            };
+            binding.transition_hash = Some(vec![b'0'; 64]);
+            receipt.input_hash = receipt.binding.input_hash(&tx).unwrap();
+            receipt.output_hash = receipt.binding.output_hash(&tx, b"ok").unwrap();
+            forged.receipts_json[0] = receipt.canonical();
+            let mut malicious = proposal.clone();
+            malicious.header.receipt_root =
+                hash::receipt_root(&forged.receipts_json).unwrap().to_vec();
+            sign(&mut malicious);
+            let error = executor
+                .verify_proposal(candidate(malicious).await, &forged)
+                .await
+                .err()
+                .unwrap();
+            assert!(
+                matches!(error, ProposalError::Invalid(_))
+                    && error
+                        .to_string()
+                        .contains("local_preverify_receipt_mismatch"),
+                "{error}"
+            );
+        } else {
+            let error = verified.err().unwrap();
+            assert!(
+                matches!(error, ProposalError::Unavailable(_)),
+                "{scenario}: {error}"
+            );
+        }
+        if scenario == "valid" {
+            // A self-consistent transition receipt cannot excuse an invalid
+            // proof, even under the historical non-strict execution profile.
+            let mut bad_tx = tx.clone();
+            let mut payload: Value =
+                serde_json::from_slice(bad_tx.encrypted_data.as_ref().unwrap()).unwrap();
+            payload["zero_proof"] = Value::String("invalid".into());
+            bad_tx.encrypted_data = Some(serde_json::to_vec(&payload).unwrap());
+            bad_tx.signature = STANDARD
+                .encode(signer.sign(&bad_tx.signing_bytes().unwrap()).to_bytes())
+                .into_bytes();
+            let mut forged = raw.clone();
+            forged.tx_hashes[0] = hex::encode(bad_tx.hash().unwrap()).into_bytes();
+            forged.txs_json[0] = bad_tx.to_json_bytes().unwrap();
+            let mut receipt = Receipt::parse(&forged.receipts_json[0]).unwrap();
+            receipt.tx_hash = forged.tx_hashes[0].clone();
+            receipt.input_hash = receipt.binding.input_hash(&bad_tx).unwrap();
+            receipt.output_hash = receipt.binding.output_hash(&bad_tx, b"ok").unwrap();
+            receipt.cost =
+                octra_node_protocol::resource_lanes::cost(&bad_tx, &5000.into()).unwrap();
+            forged.receipts_json[0] = receipt.canonical();
+            let mut malicious = proposal.clone();
+            malicious.tx_hashes = forged.tx_hashes.clone();
+            malicious.header.tx_list_hash =
+                octra_node_protocol::consensus::engine::tx_list_hash_for_header(&forged.tx_hashes)
+                    .to_vec();
+            malicious.header.receipt_root =
+                hash::receipt_root(&forged.receipts_json).unwrap().to_vec();
+            sign(&mut malicious);
+            let error = executor
+                .verify_proposal(candidate(malicious).await, &forged)
+                .await
+                .err()
+                .unwrap();
+            assert!(
+                matches!(error, ProposalError::Invalid(_))
+                    && error.to_string().contains("local_preverify_mismatch"),
+                "{error}"
+            );
         }
         let (finalized, context) = publisher
             .verify_execution(&parent, &certificate, &executor.graph())
@@ -341,6 +487,8 @@ async fn finalized_mixed_import_uses_bound_key_files_and_survives_restart() {
         assert_eq!(store.head().await.unwrap(), parent);
         assert!(store.source().load(Sequence(1)).await.unwrap().is_none());
     }
+    node.shutdown().await.unwrap();
+    drop(node);
     let executed = result.unwrap();
     assert_eq!(
         StateBatch::from_snapshot(executed.state.clone())

@@ -1,8 +1,8 @@
 //! This composes the real live engines, peer bundle requests, canonical SQL,
 //! Circle WASM views, VPN revocation and ExEx. Genesis escrow is still a fixture.
 use super::{
-    announce, bundle_peer, counter, execute, execute_received, finality_host, genesis,
-    network_bundle, open, reached, vpn_config, Authority, ImportExecutor, Recorder,
+    announce, bundle_peer, counter, execute, finality_host, genesis, network_bundle, open, reached,
+    vpn_config, Authority, ImportExecutor, Recorder,
 };
 use ed25519_dalek::{Signer, SigningKey};
 use octra_exex::{sqlite::SqliteCheckpoints, ChainIdentity, StateRoot};
@@ -22,7 +22,6 @@ use octra_node_runtime::{
     consensus_driver::{Driver, Host, ProposalPlan, Publication, Verdict},
     consensus_recovery,
     consensus_votes::{Precommit, Readiness},
-    state_batch::StateBatch,
 };
 use octravpn_node::admission::SessionAuthority;
 use std::sync::{
@@ -65,6 +64,8 @@ struct LiveHost {
     peer: bundle_peer::Authority,
     bundles: octra_node_runtime::bundle_queries::Bundles<bundle_peer::Authority>,
     authority: finality_host::Authority,
+    executor: octra_node::executor::Native,
+    prepared: Mutex<Option<octra_node::executor::Prepared>>,
     header: EpochHeader,
     ready: Arc<AtomicBool>,
     warnings: Arc<Mutex<Vec<String>>>,
@@ -126,47 +127,43 @@ impl Host for LiveHost {
             )
             .await
         {
-            Ok(candidate) => candidate,
+            Ok(candidate) => Arc::new(candidate),
             Err(octra_node_runtime::finality::Error::Invalid(_)) => return Ok(Verdict::Reject),
             Err(e) => {
                 self.warning(&e.to_string());
                 return Ok(Verdict::Wait);
             }
         };
-        let rules = proposal_rules(&p.header);
+        let rules = self
+            .executor
+            .proposal_rules(&candidate)
+            .map_err(|e| Error::from(e.to_string()))?;
         // This fetch shares the connection that delivered the proposal. It
         // would deadlock if the peer reader awaited the consensus actor.
         let Some((_, bundle)) = self
             .bundles
             .query(p.epoch_id, hash::proposal_id(&p.header)?, 3., |r| {
-                Ok(consensus_bundle::finalized(&p.header, &r.bundle, &rules).ok())
+                Ok(consensus_bundle::proposal_wire(p, &r.bundle, &rules).ok())
             })
             .await?
         else {
             return Ok(Verdict::Wait);
         };
-        // This fixture prepares successful Circle proposals only. Rejection
-        // proposals need an independent full-candidate preview before replay.
-        if !bundle.rejections.is_empty() {
-            return Err("fixture proposal outcome preview unavailable".into());
-        }
-        let replay = bundle.replay(rules.envelope)?;
-        let bundle = replay.bundle();
-        let executed = execute_received(
-            candidate.context().parent(),
-            StateBatch::from_snapshot(candidate.state().clone()),
-            &bundle.txs,
-            &self.authority,
-            Some(&replay),
-            None,
-        )
-        .map_err(|e| Error::from(e.to_string()))?;
-        let mut expected =
-            finality_host::certificate(candidate.context().parent(), &executed, &self.authority);
-        expected.header.proto_version = protocol().version_at(p.epoch_id);
-        if expected.header != p.header {
-            return Ok(Verdict::Reject);
-        }
+        let prepared = match self
+            .executor
+            .verify_proposal(candidate.clone(), &bundle.to_raw()?)
+            .await
+        {
+            Ok(prepared) => prepared,
+            Err(error @ octra_node::executor::ProposalError::Invalid(_)) => {
+                self.warning(&error.to_string());
+                return Ok(Verdict::Reject);
+            }
+            Err(error) => {
+                self.warning(&error.to_string());
+                return Ok(Verdict::Wait);
+            }
+        };
         if !self.node.proposal_current(&candidate) {
             return Ok(Verdict::Wait);
         }
@@ -174,7 +171,8 @@ impl Host for LiveHost {
             .cached
             .lock()
             .unwrap()
-            .insert(hash::proposal_id(&p.header)?, bundle.to_raw()?);
+            .insert(hash::proposal_id(&p.header)?, prepared.bundle().clone());
+        *self.prepared.lock().unwrap() = Some(prepared);
         Ok(Verdict::Accept)
     }
     async fn before_precommit(&self, record: Precommit) -> bool {
@@ -183,6 +181,15 @@ impl Host for LiveHost {
                 .snapshot()
                 .map_err(|e| Error::from(e.to_string()))?;
             let proposal = Proposal::decode(&record.proposal_wire)?;
+            let verified = self.prepared.lock().unwrap();
+            let verified = verified
+                .as_ref()
+                .ok_or("local proposal execution missing")?;
+            if !self.node.proposal_current(verified.candidate())
+                || verified.candidate().context().proposal().header != proposal.header
+            {
+                return Err("local proposal execution expired".into());
+            }
             let rules = proposal_rules(&proposal.header);
             let raw = self
                 .peer
@@ -413,6 +420,7 @@ async fn live_quorum_publishes_circle_vpn_and_exex_atomically() {
             TimeoutConfig::default(),
         );
         engine.realign_round(round).unwrap();
+        let executor = ImportExecutor::with_protocol(&authority, &nodes[id], protocol());
         let host = LiveHost {
             node: nodes[id].clone(),
             id: id as u8,
@@ -421,11 +429,12 @@ async fn live_quorum_publishes_circle_vpn_and_exex_atomically() {
             peer: peers[id].authority.clone(),
             bundles: peers[id].bundles.clone(),
             authority: authority.clone(),
+            executor: executor.native.clone(),
+            prepared: Mutex::new(None),
             header: planned.header.clone(),
             ready: ready.clone(),
             warnings: warnings.clone(),
         };
-        let executor = ImportExecutor::with_protocol(&authority, &nodes[id], protocol());
         let publication =
             Canonical::new(nodes[id].clone(), peers[id].bundles.clone(), executor, 3.)
                 .await

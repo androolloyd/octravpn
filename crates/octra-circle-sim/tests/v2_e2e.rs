@@ -9,7 +9,7 @@ use octravpn_core::{
     address::Address,
     rpc::{next_nonce, RpcClient},
     sig::KeyPair,
-    tx::sign_call,
+    tx_signer::sign_call_canonical,
 };
 use serde_json::json;
 
@@ -84,7 +84,7 @@ async fn submit(
         "fee": fee,
         "nonce": next_nonce(&bal),
     });
-    let signed = sign_call(kp, call).expect("sign");
+    let signed = sign_call_canonical(kp, &call).expect("sign");
     let r = rpc.submit(&signed).await.expect("submit");
     model_events(app, rpc, &r.hash).await
 }

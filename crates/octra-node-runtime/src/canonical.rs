@@ -604,7 +604,9 @@ fn transaction_commitment(
     Ok((hex::encode(hash), hex::encode(root), txid_hi))
 }
 
-pub(crate) fn execution_root(
+/// Compute the native ledger/index commitment without publishing state. This
+/// is shared by proposal verification and authenticated canonical publication.
+pub fn execution_root(
     base: &Head,
     epoch: u64,
     state: &Snapshot,

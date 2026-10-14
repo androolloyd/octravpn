@@ -37,6 +37,7 @@ pub mod p2p_transaction;
 pub mod octb;
 pub mod pending_reconciliation;
 pub mod preverify;
+pub mod preverify_batch;
 pub mod preverify_state;
 pub mod private_crypto;
 pub mod private_balance;

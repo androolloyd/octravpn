@@ -1,12 +1,13 @@
-//! Staged native execution for authenticated finalized imports. The publisher
+//! Staged native execution for proposals and finalized imports. The publisher
 //! owns finality, canonical commits and ExEx; this host owns no canonical writer.
 mod admission;
+mod proofs;
+mod proposal;
+mod stage;
 use crate::import::{Execution, Executor};
 pub use admission::Limits;
 use anyhow::{ensure, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use octra_exex::native_history::{ArchiveProof, NativeTransaction};
-use octra_hfhe::scalar::ScalarRule;
 use octra_node_protocol::{
     consensus::{policy::Protocol, reward_attribution, EpochHeader},
     control_payload::{BondedReady, LegacyReady},
@@ -20,17 +21,13 @@ use octra_node_runtime::{
     account_store,
     canonical::Head,
     circle::CircleRuntime,
-    circle_transaction,
     consensus_bundle::Rules,
-    epoch_execution::{self, Effect},
     epoch_footer,
-    execution::{Error, OperationHost, Route},
+    execution::Error,
     execution_rules::Bound,
     finality::{history::History, ExecutedEpoch},
-    private_balance,
-    private_crypto::ResultPolicy,
-    private_epoch, validator_epoch, validator_transaction,
 };
+pub use proposal::{Prepared, ProposalError};
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use tokio::sync::Semaphore;
 
@@ -72,16 +69,21 @@ impl Native {
         })
     }
 
-    async fn ready_roots(&self, request: &Execution<'_>) -> Result<BTreeMap<i64, Option<Vec<u8>>>> {
+    async fn ready_roots(
+        &self,
+        parent: &Head,
+        context: &Bound,
+        transactions: &[octra_node_protocol::transaction::Transaction],
+    ) -> Result<BTreeMap<i64, Option<Vec<u8>>>> {
         let mut roots = BTreeMap::new();
-        if request.rules.fold.context().ready_exec_mode == RuleMode::Active {
+        if context.fold.context().ready_exec_mode == RuleMode::Active {
             return Ok(roots);
         }
         roots.insert(
-            i64::try_from(request.parent.cursor.epoch.0)?,
-            Some(request.parent.cursor.state_root.0.to_vec()),
+            i64::try_from(parent.cursor.epoch.0)?,
+            Some(parent.cursor.state_root.0.to_vec()),
         );
-        for tx in request.bundle.partition().transactions() {
+        for tx in transactions {
             if tx.op_type != OpType::ValidatorReady {
                 continue;
             }
@@ -92,7 +94,7 @@ impl Native {
                 continue;
             };
             if roots.contains_key(&head)
-                || !u64::try_from(head).is_ok_and(|height| height <= request.parent.cursor.epoch.0)
+                || !u64::try_from(head).is_ok_and(|height| height <= parent.cursor.epoch.0)
             {
                 continue;
             }
@@ -108,7 +110,7 @@ impl Native {
     ) -> Result<ExecutedEpoch> {
         let Execution {
             parent,
-            mut state,
+            state,
             finalized,
             reward_source: source,
             bundle,
@@ -116,11 +118,7 @@ impl Native {
         } = request;
         let config = &self.config;
         let rules = self.rules(parent, &finalized.header, &context)?;
-        ensure!(
-            hex::encode(state.published_root()?) == parent.ledger_root,
-            "execution snapshot differs from canonical parent"
-        );
-        let mut ledger = account_store::ledger(&state)?;
+        let ledger = account_store::ledger(&state)?;
         admission::check(
             &config.profile,
             &config.bundle,
@@ -134,10 +132,6 @@ impl Native {
             .validators
             .iter()
             .map(|v| (v.address.clone(), STANDARD.encode(&v.pubkey).into_bytes()))
-            .collect::<Vec<_>>();
-        let members = keys
-            .iter()
-            .map(|(address, _)| address.clone())
             .collect::<Vec<_>>();
         let epoch = finalized.epoch_id;
         let reward = match source {
@@ -154,133 +148,25 @@ impl Native {
         let reward = reward_attribution::bind_finality(&authority.validators, finalized, &reward)?;
         let receipts = transaction_outcome::split(&bundle.bundle().receipts_json, true)?;
         let gate = Gate::parse(&receipts.preverify).map_err(anyhow::Error::msg)?;
-        let previous = hex::encode(parent.cursor.state_root.0);
-        let mut calls = circle_transaction::Calls::new(
-            &self.runtime,
-            context.circle,
-            epoch,
-            finalized.header.ts,
-            previous.as_bytes(),
-            circle_transaction::Verification::Consume {
-                root: parent.ledger_root.as_bytes(),
+        let staged = self.stage(
+            stage::Stage {
+                parent,
+                state,
+                header: &finalized.header,
+                context: &context,
+                rules: &rules,
+                validators: &authority.validators,
+                reward: &reward,
+                transactions: bundle.partition().transactions(),
                 gate: &gate,
+                capture: false,
             },
-        );
-        let fold = context.fold.context();
-        let mut private = private_epoch::Epoch::new(
-            private_balance::Profile {
-                fields: context.private_payload,
-                strict: fold.standard_mode == RuleMode::Active,
-                math: if fold.math {
-                    ScalarRule::Wide
-                } else {
-                    ScalarRule::Prior
-                },
-                result: if epoch >= config.private_result_activation {
-                    ResultPolicy::Recoverable
-                } else {
-                    ResultPolicy::Legacy
-                },
-            },
-            config.max_fhe,
-            Some(&gate),
-        );
-        let root_at = |head| roots.get(&head).cloned().flatten();
-        let mut validators = validator_transaction::Host {
-            chain: &finalized.chain_id,
-            epoch,
-            policy: &config.validators,
-            fold: context.fold.clone(),
-            ready: validator_transaction::ReadyEnvironment {
-                prev_state_root: previous.as_bytes(),
-                max_lag: config.ready_max_lag,
-                root_at: Some(&root_at),
-            },
-        };
-        let committed = state.snapshot();
-        state.begin()?;
-        let request = epoch_execution::Request {
-            validators: validator_epoch::Request {
-                chain: &finalized.chain_id,
-                epoch,
-                policy: &config.validators,
-                legacy_members: &members,
-                previous_root: previous.as_bytes(),
-                committed_head: Some(&committed),
-            },
-            envelope: rules.envelope,
-            sender_key_activation: config.sender_key_activation,
-            preverification: Some(epoch_execution::Preverification {
-                gate: &gate,
-                crypto_active: rules.crypto_active,
-                minimum: &rules.stealth_minimum,
-            }),
-            emission: &config.emission,
-            reward: &reward,
-            validator_keys: &keys,
-        };
-        let executed = bundle.partition().execute(
-            &request,
-            &context.fold,
-            &mut ledger,
-            &mut state,
-            |tx, ledger, state| {
-                if transaction_policy::is_validator(tx.op_type) {
-                    return Effect::from_completion(
-                        tx,
-                        validators.execute(Route::Validator, tx, ledger, state)?,
-                    );
-                }
-                match tx.op_type {
-                    OpType::Standard | OpType::Op01Burn => {
-                        epoch_execution::public(tx, ledger, state)
-                    }
-                    OpType::Encrypt
-                    | OpType::Decrypt
-                    | OpType::Stealth
-                    | OpType::Claim
-                    | OpType::KeySwitch => {
-                        private.process(tx, ledger, state, |hash| self.key_blob(hash))
-                    }
-                    OpType::CircleCall | OpType::CircleDeploy | OpType::CircleProgramUpdate => {
-                        calls.process(tx, ledger, state)
-                    }
-                    _ => Err(Error(format!(
-                        "execution host unavailable for {}",
-                        tx.op_type.as_str()
-                    ))),
-                }
-            },
+            roots,
         )?;
-        let transactions = executed
-            .artifacts
-            .confirmed
-            .iter()
-            .enumerate()
-            .map(|(offset, (input, _))| {
-                let tx = &bundle.partition().transactions()[*input];
-                let hash = hex::encode(tx.hash()?);
-                let identity = tx.identity_bytes()?;
-                Ok(NativeTransaction {
-                    txid: parent
-                        .txid_hi
-                        .checked_add(
-                            i64::try_from(offset)?
-                                .checked_add(1)
-                                .context("transaction index exhausted")?,
-                        )
-                        .context("transaction index exhausted")?,
-                    hash: hash.clone(),
-                    identity: identity.clone(),
-                    transaction: identity,
-                    proof: ArchiveProof::Exact,
-                    receipt: calls.receipts().get(&hash).cloned(),
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
+        bundle.partition().verify(Ok(&staged.artifacts))?;
         Ok(ExecutedEpoch {
-            state: state.snapshot(),
-            transactions,
+            state: staged.state,
+            transactions: staged.transactions,
             consensus_receipts: bundle.bundle().receipts_json.clone(),
             reward_source: reward_attribution::to_source(&reward)?,
             date: epoch,
@@ -288,6 +174,36 @@ impl Native {
         })
     }
 
+    fn bundle_rules(
+        &self,
+        parent: &Head,
+        header: &EpochHeader,
+        receipts: &octra_node_runtime::finality::ReceiptRules,
+    ) -> Result<Rules> {
+        ensure!(
+            header.chain_id == self.config.graph.chain_id()
+                && parent.cursor.epoch.0.checked_add(1) == u64::try_from(header.epoch_id).ok()
+                && header.prev_state_root == parent.cursor.state_root.0
+                && header.proto_version == self.config.protocol.version_at(header.epoch_id),
+            "execution configuration differs from finalized header"
+        );
+
+        ensure!(
+            receipts.crypto_active == self.config.profile.private_v1,
+            "execution crypto profile differs from authenticated policy"
+        );
+        let mode = |rule| rules::at(&header.chain_id, rule, header.epoch_id);
+        Ok(Rules {
+            payload: self.config.payload,
+            crypto_active: receipts.crypto_active,
+            stealth_minimum: receipts.stealth_minimum.clone(),
+            envelope: transaction_outcome::Rules {
+                envelope: mode(Rule::TxEnvelope),
+                compute: mode(Rule::VmBytes),
+                settle: mode(Rule::Settle),
+            },
+        })
+    }
     fn key_blob(&self, hash: &[u8]) -> Result<Option<Vec<u8>>, Error> {
         if hash.len() != 64
             || !hash
@@ -314,33 +230,17 @@ impl Executor for Native {
         self.config.graph.clone()
     }
     fn rules(&self, parent: &Head, header: &EpochHeader, context: &Bound) -> Result<Rules> {
-        ensure!(
-            header.chain_id == self.config.graph.chain_id()
-                && parent.cursor.epoch.0.checked_add(1) == u64::try_from(header.epoch_id).ok()
-                && header.prev_state_root == parent.cursor.state_root.0
-                && header.proto_version == self.config.protocol.version_at(header.epoch_id),
-            "execution configuration differs from finalized header"
-        );
-        let receipts = &context.authority()?.receipts;
-        ensure!(
-            receipts.crypto_active == self.config.profile.private_v1,
-            "execution crypto profile differs from authenticated policy"
-        );
-        let mode = |rule| rules::at(&header.chain_id, rule, header.epoch_id);
-        Ok(Rules {
-            payload: self.config.payload,
-            crypto_active: receipts.crypto_active,
-            stealth_minimum: receipts.stealth_minimum.clone(),
-            envelope: transaction_outcome::Rules {
-                envelope: mode(Rule::TxEnvelope),
-                compute: mode(Rule::VmBytes),
-                settle: mode(Rule::Settle),
-            },
-        })
+        self.bundle_rules(parent, header, &context.authority()?.receipts)
     }
     async fn execute(&self, request: Execution<'_>) -> Result<ExecutedEpoch> {
         self.rules(request.parent, &request.finalized.header, &request.rules)?;
-        let roots = self.ready_roots(&request).await?;
+        let roots = self
+            .ready_roots(
+                request.parent,
+                &request.rules,
+                request.bundle.partition().transactions(),
+            )
+            .await?;
         let host = self.clone();
         let parent = request.parent.clone();
         let finalized = request.finalized.clone();

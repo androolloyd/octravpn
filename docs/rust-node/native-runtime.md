@@ -1922,11 +1922,63 @@ Publicly retained evidence:
 - [Combined test log](checkpoints/2026-10-14/proposal-authentication.log)
 - [Clippy log](checkpoints/2026-10-14/proposal-authentication-clippy.log)
 
-This qualifies proposal **authentication**, not proposal execution or a vote.
-Production local proof preparation, Circle receipt capture, full candidate outcome
-preview and final replay remain the next integration boundary. The live test
-still supplies successful proposal fixtures and synthetic VPN funding. Executable
+That checkpoint qualifies proposal **authentication**, not proposal execution or
+a vote. The subsequent execution integration is described below. Executable
 startup, remaining private/VM/Circle operations, the concrete HFHE callback,
 funded settlement, OS `oct://` launching and whole-node native/Rust qualification
 remain open. The GitHub development checkpoint retains the accumulated work and
 native fixtures without claiming those gates are complete.
+
+### Production proposal execution (2026-10-14)
+
+`executor::Native::verify_proposal` now consumes an authenticated, revocable
+candidate and runs local proof preparation, Circle receipt capture, the complete
+candidate outcome preview, and the final confirmed/charged partition. It compares
+locally generated receipt bytes, rejection records, the ledger/index root and
+transaction index against the signed proposal. It returns execution evidence
+without granting finality authority or publishing state.
+
+Proposal execution and finalized imports share one staged operation host and
+bounded blocking worker. Cancellation retains the worker permit until the job
+ends. Private encrypt/decrypt preparation verifies proofs even under historical
+non-strict profiles; an incoming transition receipt cannot bypass verification.
+Missing or corrupt content-addressed public key files remain unavailable rather
+than invalidating the peer's proposal. Circle calls capture their own transcript.
+The live consensus test now uses this verifier and checks its candidate again
+before durable precommit. Proposal construction and activation are still supplied
+by the development fixture.
+
+`preverify_batch` matches **502** cases from the adopted OCaml implementation:
+private dependencies, snapshot isolation, ordered Circle capture admission,
+resource work limits, callback order and retry coverage. The native oracle exports
+an existing private helper through a recorded `.mli` prefix; it does not change
+the implementation. Proof verdicts in this selection oracle are supplied inputs,
+not a cryptographic qualification. Separate integration tests exercise actual
+private proofs and reject forged transition receipts and invalid proof payloads.
+
+The new proposal regression also checks a Circle call with an ordinary rejected
+public successor, false rejection reasons, forged Circle bindings, state-root and
+transaction-index mismatches, and prepared-candidate revocation across suspension
+and resume. Private proposal execution is compared with the golden native
+ciphertext/state, then independently finalized, archived, delivered through ExEx
+and reopened. These are local fixtures, not whole-node OCaml/Rust interoperability
+or funded VPN settlement evidence.
+
+The repository-wide GitHub checks for checkpoint `c90f47a` are not green. The
+simulator used the legacy signer and the privileged WireGuard test had an invalid
+length peer key; both are corrected in this change. Remaining failures include
+unpublished sibling octra-foundry CLI/Kani changes, formatting of maintained and
+vendored sources, Docker build context/toolchain drift, a client test Clippy lint,
+benchmark regressions, and dependency advisories. The audit reports Quinn
+`0.11.16` and Rustls `0.23.45` vulnerabilities, plus maintenance/yanked warnings.
+Those checks remain required; the focused node checkpoint does not replace them.
+
+Recorded qualification: **35 tests across 11 suites**, with **2045 unchanged
+source hashes**. Two ignored tests are recorded: the process-crash helper is
+invoked by its parent test, while the privileged Linux WireGuard lifecycle is
+not exercised on this macOS host. Scoped strict Clippy and formatting pass.
+
+- [Checkpoint and source hashes](checkpoints/2026-10-14/proposal-execution.json)
+- [Combined test log](checkpoints/2026-10-14/proposal-execution.log)
+- [Clippy log](checkpoints/2026-10-14/proposal-execution-clippy.log)
+- [Earlier GitHub CI failures](checkpoints/2026-10-14/github-ci.json)

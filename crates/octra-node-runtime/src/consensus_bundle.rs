@@ -190,6 +190,20 @@ pub fn proposal(
         rejections,
     })
 }
+/// Live consensus frames carry raw hashes, whereas the native bundle verifier
+/// uses hexadecimal hashes. Keep this conversion at the wire boundary.
+pub fn proposal_wire(
+    frame: &octra_node_protocol::consensus::Proposal,
+    raw: &RawBundle,
+    rules: &Rules,
+) -> Result<Accepted, Error> {
+    let hashes = frame
+        .tx_hashes
+        .iter()
+        .map(|h| hash_hex(h))
+        .collect::<Vec<_>>();
+    proposal(&frame.header, &hashes, raw, rules)
+}
 pub(crate) fn hash_hex(bytes: &[u8]) -> Bytes {
     if bytes.len() == 32 {
         hex::encode(bytes).into_bytes()

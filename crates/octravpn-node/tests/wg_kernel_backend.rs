@@ -30,6 +30,7 @@
 // capability-detection helper instead, plus shell out to `wg show` to
 // verify the interface bring-up worked.
 
+use base64::{engine::general_purpose::STANDARD, Engine};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -127,13 +128,15 @@ fn kernel_backend_e2e_lifecycle() {
     assert!(up.status.success(), "ip link set up failed: {up:?}");
 
     // 4. Add a peer.
-    let peer_b64 = "QXdvbm5kZXJ5b3VzcGVla2VkYXR0aGUzMmJ5dGVwa2V5cw==";
+    let peer_b64 = STANDARD.encode(
+        x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from([73_u8; 32])).as_bytes(),
+    );
     let set_peer = Command::new("wg")
         .args([
             "set",
             iface,
             "peer",
-            peer_b64,
+            &peer_b64,
             "allowed-ips",
             "10.0.0.42/32",
         ])
@@ -151,7 +154,7 @@ fn kernel_backend_e2e_lifecycle() {
         .expect("spawn wg show");
     let peers = String::from_utf8_lossy(&show.stdout);
     assert!(
-        peers.contains(peer_b64),
+        peers.contains(&peer_b64),
         "expected peer in `wg show {iface} peers`, got: {peers}"
     );
 

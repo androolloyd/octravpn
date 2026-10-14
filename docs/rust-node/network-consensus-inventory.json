@@ -8647,5 +8647,79 @@
       "OS oct:// launch",
       "native/Rust whole-node sync and recovery qualification"
     ]
+  },
+  "local_proposal_execution_qualification": {
+    "date": "2026-10-14",
+    "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+    "status": "production_proposal_execution_locally_qualified",
+    "full_node_end_to_end": false,
+    "funded_vpn_end_to_end": false,
+    "implementation": [
+      "crates/octra-node/src/executor/proposal.rs",
+      "crates/octra-node/src/executor/stage.rs",
+      "crates/octra-node/src/executor/proofs.rs",
+      "crates/octra-node-runtime/src/preverify_batch.rs"
+    ],
+    "native_selection_cases": 502,
+    "native_selection_fixture": "crates/octra-node-runtime/tests/fixtures/preverify-batch.json",
+    "scope": "Actual private proof preparation, ordered Circle capture, independent candidate rejection and final execution partitions, native state/index commitment, shared finalized host and revocable precommit evidence. Development validators and synthetic VPN funding.",
+    "remaining": [
+      "Production proposal construction, activation and executable startup",
+      "Remaining private, OCTB, OCPG and Circle operations and concrete HFHE callback",
+      "Sender KAT, key discovery and verified artifact reuse",
+      "Funded Circle VPN settlement and OS oct:// registration",
+      "Cross-language whole-node sync, restart and recovery qualification",
+      "Repository-wide CI repair, including sibling publication and dependency advisories"
+    ],
+    "checkpoint": {
+      "path": "docs/rust-node/checkpoints/2026-10-14/proposal-execution.json",
+      "sha256": "12107720ebfad8aaaabd679a745b2cfb96fb5fddc97821ff89e324a9632fba91",
+      "tests": {
+        "command": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "-p",
+          "octra-node",
+          "-p",
+          "octra-node-runtime",
+          "-p",
+          "octra-circle-sim",
+          "-p",
+          "octravpn-node",
+          "--test",
+          "proposal_authentication",
+          "--test",
+          "execution_rules",
+          "--test",
+          "finality_publication",
+          "--test",
+          "services",
+          "--test",
+          "private_import",
+          "--test",
+          "canonical_recovery",
+          "--test",
+          "epoch_partition",
+          "--test",
+          "preverify_state",
+          "--test",
+          "preverify_batch",
+          "--test",
+          "v2_e2e",
+          "--test",
+          "wg_kernel_backend"
+        ],
+        "exit_code": 0,
+        "suites": 11,
+        "passed": 35,
+        "failed": 0,
+        "ignored": 2,
+        "log": "/private/tmp/native-proposal-execution-checkpoint-20261014.log",
+        "log_sha256": "c0ad27d5d46bfba873fed6f17bb1920ec29aee2e8bfbf5f7a4eb74c98e18f43c"
+      },
+      "source_count": 2045
+    }
   }
 }

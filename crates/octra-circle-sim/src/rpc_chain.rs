@@ -12,7 +12,7 @@ use octravpn_core::{
     address::Address,
     rpc::{next_nonce, RpcClient},
     sig::KeyPair,
-    tx::sign_call,
+    tx_signer::sign_call_canonical,
 };
 use serde_json::{json, Value};
 
@@ -131,7 +131,7 @@ impl MockChain for RpcChain {
             "fee": fee,
             "nonce": next_nonce(&bal),
         });
-        let signed = sign_call(&self.proxy_kp, call)
+        let signed = sign_call_canonical(&self.proxy_kp, &call)
             .map_err(|e| ChainError::Rpc(format!("sign_call: {e}")))?;
         self.rpc
             .submit(&signed)

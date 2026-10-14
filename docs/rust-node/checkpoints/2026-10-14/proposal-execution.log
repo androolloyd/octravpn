@@ -1,0 +1,176 @@
+   Compiling tokio v1.52.3
+   Compiling sqlx-core v0.8.6
+   Compiling tracing-subscriber v0.3.23
+   Compiling prost-build v0.14.3
+warning: field `key_id` is never read
+   --> vendor/octra-circle-wasm-host/src/lib.rs:353:5
+    |
+352 | struct HfheActiveKey {
+    |        ------------- field in this struct
+353 |     key_id: String,
+    |     ^^^^^^
+    |
+    = note: `HfheActiveKey` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: variant `Release` is never constructed
+    --> vendor/octra-circle-wasm-host/src/lib.rs:1112:5
+     |
+1110 | enum CacheMessage {
+     |      ------------ variant in this enum
+1111 |     Hold { key: String, root: String, entries: usize, bytes: usize },
+1112 |     Release(u64),
+     |     ^^^^^^^
+
+   Compiling octra-hfhe v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-hfhe)
+warning: `octra_circle_wasm_host` (lib) generated 2 warnings
+   Compiling octra-core v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octra-core)
+   Compiling sqlx-sqlite v0.8.6
+   Compiling tokio-util v0.7.18
+   Compiling tokio-tungstenite v0.24.0
+   Compiling tokio-rustls v0.26.4
+   Compiling octra-node-protocol v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node-protocol)
+   Compiling headscale-resources v0.1.0 (/Users/androolloyd/Development/headscale-rs/headscale-resources)
+   Compiling tun-rs v2.8.3
+   Compiling h2 v0.4.16
+   Compiling tower v0.5.3
+   Compiling tokio-stream v0.1.18
+   Compiling tun v0.7.22
+   Compiling sqlx-macros-core v0.8.6
+   Compiling tonic-prost-build v0.14.6
+   Compiling tower-http v0.6.11
+   Compiling axum v0.8.9
+   Compiling headscale-core v0.1.0 (/Users/androolloyd/Development/headscale-rs/headscale-core)
+   Compiling hyper v1.9.0
+   Compiling sqlx-macros v0.8.6
+   Compiling headscale-api v0.1.0 (/Users/androolloyd/Development/headscale-rs/headscale-api)
+   Compiling hyper-util v0.1.20
+   Compiling axum v0.7.9
+   Compiling hyper-rustls v0.27.9
+   Compiling hyper-timeout v0.5.2
+   Compiling sqlx v0.8.6
+   Compiling reqwest v0.12.28
+   Compiling instant-acme v0.8.5
+   Compiling tonic v0.14.6
+   Compiling octra-browser v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-browser)
+   Compiling octravpn-analytics v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-analytics)
+   Compiling octra-mock-rpc v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octra-mock-rpc)
+   Compiling octravpn-core v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-core)
+   Compiling octravpn-tun v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-tun)
+   Compiling tonic-prost v0.14.6
+   Compiling tonic-reflection v0.14.6
+   Compiling octravpn-obfs4 v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-obfs4)
+   Compiling octra-circle-sim v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-circle-sim)
+   Compiling octra-exex v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-exex)
+   Compiling headscale-payments v0.1.0 (/Users/androolloyd/Development/headscale-rs/headscale-payments)
+   Compiling headscale-db v0.1.0 (/Users/androolloyd/Development/headscale-rs/headscale-db)
+   Compiling octra-node-runtime v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node-runtime)
+   Compiling octravpn-mesh v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-mesh)
+   Compiling headscale-cli v0.1.0 (/Users/androolloyd/Development/headscale-rs/headscale-cli)
+   Compiling octravpn-node v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-node)
+   Compiling octra-node v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4m 16s
+     Running tests/v2_e2e.rs (target/debug/deps/v2_e2e-1ceb4b600e270351)
+
+running 1 test
+test v2_full_lifecycle_against_mock ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/private_import.rs (target/debug/deps/private_import-24c23f1f66f3d3b0)
+
+running 1 test
+test finalized_mixed_import_uses_bound_key_files_and_survives_restart has been running for over 60 seconds
+test finalized_mixed_import_uses_bound_key_files_and_survives_restart ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 111.38s
+
+     Running tests/services.rs (target/debug/deps/services-457542f5c45e01e6)
+
+running 7 tests
+test empty_finalized_import_needs_no_peer_and_rejects_wrong_parent ... ok
+test newer_pause_cannot_be_undone_and_cancellation_releases_services ... ok
+test proposals::local_proposal_capture_checks_receipts_outcomes_and_commitment ... ok
+test peer_import_drives_browser_wireguard_exex_and_restart ... ok
+test agreed_ranges_recover_canonical_services_and_exex_after_restart ... ok
+test consecutive_peer_recovery_resumes_after_missing_bundle_and_restart ... ok
+test live::live_quorum_publishes_circle_vpn_and_exex_atomically ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.26s
+
+     Running tests/canonical_recovery.rs (target/debug/deps/canonical_recovery-fb40d10160fe22fe)
+
+running 7 tests
+test crash_worker ... ignored, spawned by process_crash_recovery at a controlled commit boundary
+test concurrent_hosts_cannot_publish_against_the_same_parent ... ok
+test state_and_outbox_publish_together_or_rollback_and_survive_restart ... ok
+test refuses_wrong_roots_archive_mutation_and_partial_database_writes ... ok
+test altered_object_or_missing_anchor_fails_recovery ... ok
+test process_crash_recovery ... ok
+test exex_recovers_commit_without_notification_and_resumes_its_checkpoint ... ok
+
+test result: ok. 6 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.27s
+
+     Running tests/epoch_partition.rs (target/debug/deps/epoch_partition-283c308e9db4f2dd)
+
+running 2 tests
+test finalized_replay_excludes_vm_fees_and_atomically_checks_charged_outcomes ... ok
+test native_finalized_selection_and_candidate_partition_refusals ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.31s
+
+     Running tests/execution_rules.rs (target/debug/deps/execution_rules-b5ae6315c04ac9ea)
+
+running 3 tests
+test historical_rules_bind_the_captured_parent_and_cache_faults ... ok
+test execution_and_catchup_keep_the_authority_that_verified_the_certificate ... ok
+test native_preview_rule_selection_and_fault_precedence ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+
+     Running tests/finality_publication.rs (target/debug/deps/finality_publication-3f7b32183466fe41)
+
+running 5 tests
+test valid_quorum_cannot_bypass_receipt_bindings_or_missing_rule_history ... ok
+test rejects_certificates_and_execution_that_do_not_share_one_commitment ... ok
+test receipt_storage_failure_rolls_back_state_history_and_exex ... ok
+test restart_reauthenticates_history_and_detects_missing_or_modified_evidence ... ok
+test committed_history_serves_bundles_ranges_and_rejects_reward_corruption ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.40s
+
+     Running tests/preverify_batch.rs (target/debug/deps/preverify_batch-b67b417cc6f1151f)
+
+running 1 test
+test native_dependency_isolation_ordered_work_and_retry ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+
+     Running tests/preverify_state.rs (target/debug/deps/preverify_state-9646367c6750e150)
+
+running 1 test
+test native_committed_receipt_bindings_and_fault_precedence ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/proposal_authentication.rs (target/debug/deps/proposal_authentication-3d8289ee9b8208fb)
+
+running 6 tests
+test startup_requires_explicit_time_and_parent_activation_evidence ... ok
+test proposal_frame_and_canonical_bindings_reject_forgery_without_publication ... ok
+test canonical_proposal_captures_authority_without_finalized_privileges ... ok
+test concurrent_canonical_commit_invalidates_in_flight_authentication ... ok
+test parent_qc_must_match_local_finality_but_may_have_different_quorum_signers ... ok
+test historical_reproposal_retains_native_time_policy ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+     Running tests/wg_kernel_backend.rs (target/debug/deps/wg_kernel_backend-b3b2cd54c5dc576c)
+
+running 3 tests
+test kernel_backend_e2e_lifecycle ... ignored, needs CAP_NET_ADMIN + wireguard kernel module; run with --ignored in privileged CI
+test probe_kernel_wg_capability_matches_host ... ok
+test auto_selection_picks_boringtun_on_this_host ... ok
+
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

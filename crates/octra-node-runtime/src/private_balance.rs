@@ -240,7 +240,17 @@ pub fn verify(
     pubkey: Option<&[u8]>,
     profile: Profile,
 ) -> Result<Verified, Error> {
-    resolve(ledger, tx, profile, Evidence::Proof, || Ok(pubkey))
+    verify_with_key(ledger, tx, profile, || Ok(pubkey))
+}
+/// Load a bound key only after native payload checks. This always verifies
+/// proofs; a caller-supplied receipt cannot select the certified replay path.
+pub fn verify_with_key<B: AsRef<[u8]>>(
+    ledger: &Ledger,
+    tx: &Transaction,
+    profile: Profile,
+    pubkey: impl FnOnce() -> Result<Option<B>, Error>,
+) -> Result<Verified, Error> {
+    resolve(ledger, tx, profile, Evidence::Proof, pubkey)
 }
 /// Historical certificates authorize only their exact prepared transition.
 /// This route stays inside the epoch host; public verification always checks proofs.
