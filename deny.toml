@@ -31,6 +31,16 @@ allow = [
 ]
 confidence-threshold = 0.8
 
+# Unmodified Servo parser dependencies of the Circle browser's lol_html.
+# Keep their MPL notices/source available with distributions; this exception
+# is limited to these packages rather than changing the workspace license list.
+exceptions = [
+  { name = "cssparser", version = "=0.36.0", allow = ["MPL-2.0"] },
+  { name = "cssparser-macros", version = "=0.6.1", allow = ["MPL-2.0"] },
+  { name = "dtoa-short", version = "=0.3.5", allow = ["MPL-2.0"] },
+  { name = "selectors", version = "=0.37.0", allow = ["MPL-2.0"] },
+]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "allow"

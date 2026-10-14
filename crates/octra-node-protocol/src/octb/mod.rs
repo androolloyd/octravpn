@@ -5,9 +5,9 @@
 pub mod admission;
 mod instruction;
 mod metadata;
-pub mod work;
 #[cfg(test)]
 mod tests;
+pub mod work;
 use crate::native_integer::parse_integer;
 pub use instruction::Instruction;
 pub use metadata::{Emission, Metadata, StorageKind, Veil};

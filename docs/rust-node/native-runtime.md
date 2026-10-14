@@ -1982,3 +1982,48 @@ not exercised on this macOS host. Scoped strict Clippy and formatting pass.
 - [Combined test log](checkpoints/2026-10-14/proposal-execution.log)
 - [Clippy log](checkpoints/2026-10-14/proposal-execution-clippy.log)
 - [Earlier GitHub CI failures](checkpoints/2026-10-14/github-ci.json)
+
+### Dependency and build qualification (2026-10-14)
+
+The signed HTTP lifecycle exposed a deterministic JSON transport bug: the default
+float parser changed `1791993600.0000021` to `1791993600.000002`, invalidating the
+signature. The shared native signer now requires correctly rounded float parsing.
+The regression fails before the fix and passes across 4,096 adjacent timestamp
+values afterward. Foundry wallet commands reuse the existing native encoder;
+the explicit model signing domain remains separate. No consensus rules changed.
+
+Foundry's AML runner, fail-closed compilation/deployment checks, wallet work bound,
+Kani visibility repair and zero-commission mock settlement are published on main.
+All 20 sibling checkouts in this repository's workflows pin commit
+`995e51af02155bc7178af629c00a74ab0f8f5816`. Regular build/lint jobs use Rust 1.96.0,
+matching the repository pin; fuzzing keeps its required nightly toolchain.
+The Foundry full suite passed 351 tests; after its dependency security updates,
+103 HTTP/CLI/adapter tests, full workspace Clippy and strict audit passed.
+
+The workspace lockfile updates Rustls to 0.23.46, Quinn-proto to 0.11.18, and the
+yanked ChaCha20 release to 0.10.2. Its audit has zero known vulnerabilities but
+still fails on `unsafe-libyaml` through the headscale CLI. The two build-time
+maintenance exceptions already documented in `deny.toml` now also apply to
+`cargo audit`. Browser MPL dependencies have package/version-specific license
+entries. These are explicit policies, not a claim that every audit warning was
+removed.
+
+The Docker builder includes the required vendor tree and uses the pinned compiler
+and locked manifests. Both VPN binaries and mock RPC build successfully. The old
+Compose lifecycle scripts still assume legacy unsigned submission/events and are
+not qualified by this build. Formatting checks every maintained workspace member;
+vendor hashes are checked separately. The Circle session adaptation's stale
+manifest/patch was regenerated and independently reproduced from the adopted pin.
+
+Recorded node qualification: **17 tests across 7 suites**, no failures or ignored tests,
+with **2157 unchanged source hashes**. Both workspace Clippy configurations,
+the timestamp regression, and 41 AML tests plus four negative controls passed.
+Local source hashes include sibling working trees; fresh-checkout CI remains a
+separate gate. Production proposal construction/startup, remaining private and VM
+operations, concrete Circle HFHE callbacks, full cross-language recovery and
+funded VPN settlement remain open. This is not full-node or mainnet qualification.
+
+- [Checkpoint summary and remaining gates](checkpoints/2026-10-14/security-build-summary.json)
+- [Node source hashes and test command](checkpoints/2026-10-14/security-build.json)
+- [Node test log](checkpoints/2026-10-14/security-build.log)
+- [Current audit findings](checkpoints/2026-10-14/security-audit.json)

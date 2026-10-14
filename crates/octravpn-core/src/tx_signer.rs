@@ -413,6 +413,26 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
+    #[test]
+    fn signed_timestamps_survive_json_transport() {
+        let key = KeyPair::from_secret_bytes(&[29; 32]);
+        let start = 1_791_993_600_f64.to_bits();
+        for offset in 0..4096 {
+            let tx = CanonicalTx {
+                timestamp: f64::from_bits(start + offset),
+                ..fixture()
+            };
+            let encoded = serde_json::to_vec(&tx.signed_envelope(&key)).unwrap();
+            let decoded: Value = serde_json::from_slice(&encoded).unwrap();
+            let received = canonical_tx_from_call(&decoded).unwrap();
+            assert_eq!(
+                tx.signing_preimage(),
+                received.signing_preimage(),
+                "JSON transport changed timestamp bits at offset {offset}"
+            );
+        }
+    }
+
     fn fixture() -> CanonicalTx {
         CanonicalTx {
             from: "octFROM".into(),

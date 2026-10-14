@@ -4,7 +4,8 @@ use sha2::{Digest, Sha256};
 mod common;
 #[test]
 fn native_raw_zero_proof_wire_acceptance_and_canonical_output() {
-    let fixture: Value = serde_json::from_str(include_str!("fixtures/proof_raw_wire.json")).unwrap();
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/proof_raw_wire.json")).unwrap();
     let sources: Value =
         serde_json::from_str(include_str!("../../../docs/rust-node/source-map.json")).unwrap();
     common::assert_source_pin(&fixture, &sources);

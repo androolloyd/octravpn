@@ -77,6 +77,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: androolloyd/octra-foundry
+          ref: 995e51af02155bc7178af629c00a74ab0f8f5816
           path: octra-foundry
       - name: Checkout headscale-rs
         uses: actions/checkout@v4
@@ -85,14 +86,10 @@ jobs:
           path: headscale-rs
 
       - name: Install Rust toolchain
-        # Matches the existing CI lane (`.github/actions/setup-rust`,
-        # default `toolchain: stable`). When `rust-toolchain.toml`
-        # pins a specific version cargo will pull that version on
-        # first invocation; the `stable` channel installed here just
-        # bootstraps the toolchain manager and the cross target.
+        # Install the exact workspace toolchain and its cross target.
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: stable
+          toolchain: "1.96.0"
           targets: ${{ matrix.target }}
 
       - name: Rust build cache

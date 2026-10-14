@@ -62,7 +62,9 @@ jobs:
           sudo dpkg -i /tmp/vhs.deb
           vhs --version
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.0"
 
       - uses: Swatinem/rust-cache@v2
 
@@ -420,7 +422,9 @@ jobs:
           sudo dpkg -i /tmp/vhs.deb
           vhs --version
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.0"
 
       - uses: Swatinem/rust-cache@v2
         with:

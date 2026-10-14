@@ -4,6 +4,11 @@
 #      cargo deny check
 [advisories]
 ignore = [
+  # Same reviewed build-time-only maintenance exceptions as deny.toml.
+  # No runtime vulnerability or fixed release is reported. Keep the proof
+  # circuit dependency pinned until a replacement has key-compatibility evidence.
+  "RUSTSEC-2024-0388", # derivative via ark-crypto-primitives 0.5.0
+  "RUSTSEC-2026-0173", # proc-macro-error2 via headscale CLI macros
   # No fixed release as of the 2026-05-20 audit; pulled only through
   # sqlx-mysql in the sibling headscale checkout. The companion
   # headscale-rs audit branch removes this path from normal builds.

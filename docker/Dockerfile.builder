@@ -11,7 +11,7 @@
 # mounted target volume, or building the binaries on the host and
 # mounting them into the runtime images. Both are tracked as
 # follow-ups.
-FROM rust:1.88-bookworm AS builder
+FROM rust:1.96.0-bookworm AS builder
 
 WORKDIR /work
 
@@ -33,6 +33,7 @@ COPY headscale-rs ./headscale-rs
 COPY octra/Cargo.toml octra/Cargo.lock* ./octra/
 COPY octra/rust-toolchain.toml* ./octra/
 COPY octra/crates ./octra/crates
+COPY octra/vendor ./octra/vendor
 COPY octra/tests ./octra/tests
 COPY octra/program ./octra/program
 # pvac-sidecar/ipc-tests is a workspace member referenced from the
@@ -42,11 +43,8 @@ COPY octra/program ./octra/program
 COPY octra/pvac-sidecar ./octra/pvac-sidecar
 
 WORKDIR /work/octra
-# octra-mock-rpc lives in the sibling octra-foundry workspace but is
-# co-built here because Dockerfile.mock-rpc copies it out of this
-# image's target/release/ directory.
-RUN cargo build --release -p octravpn-node -p octravpn-client && \
-    cd /work/octra-foundry && \
-    cargo build --release -p octra-mock-rpc && \
-    cp /work/octra-foundry/target/release/octra-mock-rpc \
-       /work/octra/target/release/octra-mock-rpc
+# The mock is a dev-only path dependency, so release builds select it via
+# Foundry's own locked manifest. Share the output directory used by runtime images.
+RUN cargo build --locked --release -p octravpn-node -p octravpn-client && \
+    CARGO_TARGET_DIR=/work/octra/target cargo build --locked --release \
+        --manifest-path /work/octra-foundry/Cargo.toml -p octra-mock-rpc

@@ -22,18 +22,79 @@
 +wasmparser = { version = "=0.222.0", default-features = false, features = ["std"] }
 +[features]
 +rust-host = []
+--- a/src/call_step.rs
++++ b/src/call_step.rs
+@@ -203,7 +203,11 @@
+ }
+ 
+ impl Port {
+-    fn step(&self, input: &[u8]) -> Result<(i32, String), (i32, String)> {
++    pub(crate) fn new() -> Self {
++        Self(Mutex::new(Phase::New))
++    }
++
++    pub(crate) fn step(&self, input: &[u8]) -> Result<(i32, String), (i32, String)> {
+         let mut phase = self.0.try_lock().map_err(|_| (2, "circle session busy".to_owned()))?;
+         let previous = std::mem::replace(&mut *phase, Phase::Closed);
+         let (mut session, output) = match previous {
+@@ -412,6 +416,38 @@
+             "effort": 10, "storage_pairs": []})
+     }
+ 
++    #[cfg(feature = "rust-host")]
++    #[test]
++    fn rust_api_session_resumes_native_requests_and_closes_once() {
++        use crate::rust_api::{CallSession, CallStep, Error, HfheBackend};
++        struct NoHfhe;
++        impl HfheBackend for NoHfhe {
++            fn call(&self, _: &JsonValue) -> Result<JsonValue, Error> {
++                panic!("public call unexpectedly requested HFHE")
++            }
++        }
++        let ops = [I::I32Const(0), I::I32Const(19), I::Call(0), I::Drop];
++        let input = serde_json::to_vec(&payload(&ops)).unwrap();
++        let mut session = CallSession::new(Arc::new(NoHfhe));
++        let CallStep::Request(request) = session.step(&input).unwrap() else {
++            panic!("call_value must suspend the interpreter")
++        };
++        let request: JsonValue = serde_json::from_slice(&request).unwrap();
++        assert_eq!(request["method"], "call_value");
++        let response = serde_json::to_vec(&reply(&request)).unwrap();
++        let CallStep::Complete(output) = session.step(&response).unwrap() else {
++            panic!("the answered invocation must finish")
++        };
++        assert_eq!(serde_json::from_slice::<JsonValue>(&output).unwrap()["success"], true);
++        assert!(matches!(session.step(&response), Err(Error::Unavailable(reason)) if reason == "circle session closed"));
++        let mut abandoned = CallSession::new(Arc::new(NoHfhe));
++        assert!(matches!(abandoned.step(&input), Ok(CallStep::Request(_))));
++        drop(abandoned);
++        let mut invalid = CallSession::new(Arc::new(NoHfhe));
++        assert!(matches!(invalid.step(b"{"), Err(Error::Rejected(_))));
++        assert!(matches!(invalid.step(&input), Err(Error::Unavailable(reason)) if reason == "circle session closed"));
++    }
++
+     #[test]
+     fn allocator_fault() {
+         let method = "fhe_encrypt_zero";
+@@ -558,4 +594,4 @@
+         input["update_policy"] = json!(false);
+         assert_eq!(next(&port, input).unwrap_err().0, 1);
+     }
+-}
+\ No newline at end of file
++}
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -16,6 +16,9 @@
-     Instance, Linker, Module, ResourceLimiter, Store, StoreLimits, StoreLimitsBuilder,
+@@ -17,6 +17,9 @@
  };
  use wasmi::errors::{MemoryError, TableError};
-+
+ 
 +#[cfg(feature = "rust-host")]
 +pub mod rust_api;
- 
++
  mod deterministic_tensor;
  mod float_ops;
+ #[cfg(test)]
 @@ -1508,7 +1511,7 @@
      String(String),
  }
@@ -84,9 +145,9 @@
  unsafe fn copy_and_free_malloc_string(ptr: *mut u8, len: usize) -> String {
      if ptr.is_null() || len == 0 {
          if !ptr.is_null() {
---- /dev/null
+--- a/src/rust_api.rs
 +++ b/src/rust_api.rs
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,132 @@
 +// SPDX-License-Identifier: BSD-3-Clause
 +// Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
 +//! Safe host entry point. The WASM interpreter and effect rules remain upstream.
@@ -155,6 +216,43 @@
 +        super::run_reply_bytes(input).map(Reply).map_err(Error::from)
 +    }))
 +    .unwrap_or_else(|_| Err(Error::Unavailable("octra_circle_wasm_host: panic".into())))
++}
++
++/// A suspended upstream interpreter. Dropping this owner releases its WASM
++/// memory and invocation, including when the host cannot answer a request.
++pub struct CallSession {
++    port: super::call_step::Port,
++    backend: Arc<dyn HfheBackend>,
++}
++
++pub enum CallStep {
++    Complete(Vec<u8>),
++    Request(Vec<u8>),
++}
++
++impl CallSession {
++    pub fn new(backend: Arc<dyn HfheBackend>) -> Self {
++        Self { port: super::call_step::Port::new(), backend }
++    }
++
++    /// The first input is an authenticated execution payload. Further inputs
++    /// answer the preceding request using the native call-session JSON schema.
++    pub fn step(&mut self, input: &[u8]) -> Result<CallStep, Error> {
++        if input.len() > 64 * 1024 * 1024 {
++            return Err(Error::Unavailable("circle session input invalid".into()));
++        }
++        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
++            let _scope = BackendScope(BACKEND.with(|slot| slot.replace(Some(self.backend.clone()))));
++            match self.port.step(input) {
++                Ok((0, body)) => Ok(CallStep::Complete(body.into_bytes())),
++                Ok((3, body)) => Ok(CallStep::Request(body.into_bytes())),
++                Err((1, reason)) => Err(Error::Rejected(reason)),
++                Err((_, reason)) => Err(Error::Unavailable(reason)),
++                Ok((_, _)) => Err(Error::Unavailable("invalid Circle session status".into())),
++            }
++        }))
++        .unwrap_or_else(|_| Err(Error::Unavailable("circle session failed".into())))
++    }
 +}
 +
 +pub(super) fn invoke_backend(request: &Value) -> Result<Value, HostFailure> {

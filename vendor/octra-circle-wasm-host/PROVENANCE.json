@@ -20,7 +20,7 @@
   "adapted_sha256": {
     "Cargo.toml": "1d56fdbfef5843f2dcdaf1006ab6d3b8550d58e36f1576c98ba560bc7d01a4e8",
     "Cargo.lock": "c3c6e2e05bad621856ed5efc5924acbc9e6549da7d6886df39c5f0a0d4bbc762",
-    "src/call_step.rs": "6b065ff7d1faca146d35912a24e589cd41efb588e02518209d080217178c94d2",
+    "src/call_step.rs": "df8007cdab4674c6c0ab53784f3ebf050e99cdff568bd368ee6ae61749dd9b1e",
     "src/compute_replay.rs": "d607211ba60e27ac65fab1d1f3acbd4521add78ee45c7520a53fb06a35e292bb",
     "src/deterministic_tensor.rs": "730f71348353955c610a1950f732de4de3c445131028990a82dddc4fb53f3d5b",
     "src/float_cases.rs": "4b29ced3759f51399a31cae0c6f1e4897f8d91da769c0c19cf5919b3408f865f",
@@ -29,7 +29,7 @@
     "src/native_bytes.rs": "7499907438644814672af2d6d478aabab33b94550ce230edb4be5bdbd8bdfbc7",
     "src/parse_memory.rs": "5b543060c24f2879a90adae6a1efc0e13051f62e4aa91a2f0616ba1d52b9a621",
     "src/reply.rs": "1d945b71b5ac0c6a5f8e03ea9536bc85ba858727bfcd213b73f77ca1b969d2f2",
-    "src/rust_api.rs": "771823a99b2a990d9ab6abe268e85c455f6dc79861e92bb0eefac55b9c9cb661"
+    "src/rust_api.rs": "b53d11948b2165bb250bde8c121cec32f78e0a4aa646696dcbe672f62463ac49"
   },
-  "patch_sha256": "f3bf745fd75b97cccc91006725d2d8b8da2b3ed6fca9fdb5a229bd45c967b245"
+  "patch_sha256": "ef7612f31bec82b874ff141800475ae751b2c88a450056da1de5a5c4e1c6a3af"
 }

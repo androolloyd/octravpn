@@ -1,10 +1,10 @@
 //! Browser services consume a fixed read capability. An optional application
 //! host receives allowlisted reads and explicitly reviewed transaction intents.
 //! Wallet loading, chain execution and signing remain host responsibilities.
-pub mod url;
-pub mod render;
-pub mod http;
 pub mod application;
+pub mod http;
+pub mod render;
+pub mod url;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -34,7 +34,9 @@ pub enum Provenance {
 impl Provenance {
     pub fn id(&self) -> String {
         use sha2::{Digest, Sha256};
-        hex::encode(Sha256::digest(serde_json::to_vec(self).expect("provenance serialization")))
+        hex::encode(Sha256::digest(
+            serde_json::to_vec(self).expect("provenance serialization"),
+        ))
     }
 }
 

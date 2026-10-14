@@ -1,0 +1,51 @@
+status = pass command = check program = OctraVPN_V3 declaration = contract instructions = 5637 bytes = 27421 sha256 = 4822adde9d818c70d75868188077ec1515242e9fff3833a5395acb889271182d
+status = pass command = check program = OctraVPN_V3 declaration = contract instructions = 7816 bytes = 37560 sha256 = f3ebd81016b9512f8cdbb0cb26a548b219792f5311f63b216c855f3c703d8440
+status = pass command = check program = OctraVPN_V5 declaration = contract instructions = 8761 bytes = 42658 sha256 = a2b8e2ba5fdb50d23deca0a90640287ef1729200b37838db4a8b5b9c49bccc3a
+status = pass command = check program = OctraVPNPrivateAdminFactory declaration = contract instructions = 87 bytes = 515 sha256 = 15e30e37c7586475e9df603840d3a2be5ea303d8a1b5be4990dcdb8b50f5560a
+[PASS] program/tests/v4/security.t.aml::test_retired_circle_cannot_be_reclaimed
+[PASS] program/tests/v4/security.t.aml::test_unapproved_registration_rejected
+[PASS] program/tests/v4/security.t.aml::test_wrong_approved_owner_rejected
+[PASS] program/tests/v4/security.t.aml::test_approval_cannot_replace_registered_owner
+[PASS] program/tests/v4/security.t.aml::test_stake_required_at_registration
+[PASS] program/tests/v4/security.t.aml::test_active_circle_cannot_unbond
+[PASS] program/tests/v4/security.t.aml::test_retired_circle_stake_moves_to_slashable_unbond
+[PASS] program/tests/v4/security.t.aml::test_unbond_waits_for_funded_sessions
+[PASS] program/tests/v4/security.t.aml::test_active_requires_minimum_stake
+[PASS] program/tests/v4/security.t.aml::test_active_rejects_unbonding
+[PASS] program/tests/v4/security.t.aml::test_opaque_signed_messages_cannot_slash
+[PASS] program/tests/v4/security.t.aml::test_open_tracks_outstanding_session
+[PASS] program/tests/v4/security.t.aml::test_confirm_closes_session_once_and_accounts_earnings
+[PASS] program/tests/v4/security.t.aml::test_terminal_session_cannot_close_twice
+[PASS] program/tests/v4/security.t.aml::test_dispute_preserves_session_and_stake_lock
+[PASS] program/tests/v4/security.t.aml::test_relay_claim_closes_session_and_accounts_earnings
+[PASS] program/tests/v4/security.t.aml::test_relay_claim_at_deadline_rejected
+[PASS] program/tests/v4/security.t.aml::test_session_exit_rejects_missing_session
+AML result: 18 passed; 0 failed (real amlc VM, isolated state per method)
+[PASS] program/tests/v5/security.t.aml::test_retired_circle_cannot_be_reclaimed
+[PASS] program/tests/v5/security.t.aml::test_unapproved_registration_rejected
+[PASS] program/tests/v5/security.t.aml::test_wrong_approved_owner_rejected
+[PASS] program/tests/v5/security.t.aml::test_stake_required_at_registration
+[PASS] program/tests/v5/security.t.aml::test_active_circle_cannot_unbond
+[PASS] program/tests/v5/security.t.aml::test_retired_circle_stake_moves_to_slashable_unbond
+[PASS] program/tests/v5/security.t.aml::test_unbond_waits_for_funded_sessions
+[PASS] program/tests/v5/security.t.aml::test_active_requires_minimum_stake
+[PASS] program/tests/v5/security.t.aml::test_active_rejects_unbonding
+[PASS] program/tests/v5/security.t.aml::test_opaque_signed_messages_cannot_slash
+[PASS] program/tests/v5/security.t.aml::test_open_tracks_outstanding_session
+[PASS] program/tests/v5/security.t.aml::test_confirm_closes_session_once_and_accounts_earnings
+[PASS] program/tests/v5/security.t.aml::test_terminal_session_cannot_close_twice
+[PASS] program/tests/v5/security.t.aml::test_dispute_preserves_session_and_stake_lock
+[PASS] program/tests/v5/security.t.aml::test_relay_claim_closes_session_and_accounts_earnings
+[PASS] program/tests/v5/security.t.aml::test_relay_claim_at_deadline_rejected
+[PASS] program/tests/v5/security.t.aml::test_session_exit_rejects_missing_session
+[PASS] program/tests/v5/security.t.aml::test_admin_nonce_mismatch
+[PASS] program/tests/v5/security.t.aml::test_admin_missing_private_proof
+[PASS] program/tests/v5/security.t.aml::test_admin_nonce_exhaustion
+[PASS] program/tests/v5/security.t.aml::test_admin_pending_freezes_governance
+[PASS] program/tests/v5/security.t.aml::test_admin_reused_credential_rejected
+[PASS] program/tests/v5/security.t.aml::test_paused_exit_remains_recoverable
+AML result: 23 passed; 0 failed (real amlc VM, isolated state per method)
+PASS: negative control fails as expected: false-result
+PASS: negative control fails as expected: wrong-revert
+PASS: negative control fails as expected: host-operation
+PASS: empty test selection fails

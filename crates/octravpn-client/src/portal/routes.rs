@@ -1869,7 +1869,7 @@ mod tests {
     async fn image_render_emits_data_uri() {
         let png: Vec<u8> = b"\x89PNG\r\n\x1a\n"
             .iter()
-            .chain(std::iter::repeat(&0u8).take(32))
+            .chain(std::iter::repeat_n(&0u8, 32))
             .copied()
             .collect();
         let resp = render_bytes("oct://c/img.png", png.clone(), sniff(&png));

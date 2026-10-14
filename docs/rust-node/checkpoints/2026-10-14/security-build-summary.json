@@ -1,0 +1,99 @@
+{
+  "status": "bounded checks passed; repository-wide CI and full node remain open",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "foundry_commit": "995e51af02155bc7178af629c00a74ab0f8f5816",
+  "tests": {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-p",
+      "octra-node",
+      "-p",
+      "octra-node-protocol",
+      "-p",
+      "octra-node-runtime",
+      "-p",
+      "octra-circle-sim",
+      "--test",
+      "services",
+      "--test",
+      "private_import",
+      "--test",
+      "preverify_batch",
+      "--test",
+      "transaction_archive_parity",
+      "--test",
+      "transaction_state_parity",
+      "--test",
+      "consensus_wire_parity",
+      "--test",
+      "v2_e2e"
+    ],
+    "exit_code": 0,
+    "suites": 7,
+    "passed": 17,
+    "failed": 0,
+    "ignored": 0,
+    "log": "/private/tmp/octra-security-build-tests-20261014.log",
+    "log_sha256": "51a78957280c4afa4999ee0ea9f4e04006152a9c063924f8020ce3854b0d5011"
+  },
+  "sources_unchanged": true,
+  "source_count": 2157,
+  "foundry_tests": {
+    "full_suite_passed": 351,
+    "post_dependency_update_passed": 103,
+    "strict_clippy": "passed",
+    "strict_audit": "passed"
+  },
+  "aml_tests": {
+    "passed": 41,
+    "negative_controls": 4
+  },
+  "timestamp_regression": {
+    "before": "failed deterministically at offset 9",
+    "after": "4096 adjacent f64 timestamps pass"
+  },
+  "octra_audit": {
+    "known_vulnerabilities": 0,
+    "blocking_maintenance_advisory": "RUSTSEC-2024-0449",
+    "reviewed_macro_exceptions": [
+      "RUSTSEC-2024-0388",
+      "RUSTSEC-2026-0173"
+    ]
+  },
+  "docker": {
+    "build": "passed",
+    "image": "sha256:f55f4ab1cbc335f8d052a7637b4f30d33262663f897721010678a8d3115d6913",
+    "compose_lifecycle": "not run in this checkpoint"
+  },
+  "remaining": [
+    "replace headscale CLI unsafe-libyaml",
+    "requalify all GitHub CI lanes",
+    "update old Docker lifecycle assumptions",
+    "investigate benchmark comparison",
+    "complete production node startup/proposal construction and remaining runtime operations",
+    "funded VPN settlement and cross-language full-node recovery"
+  ],
+  "limitations": [
+    "Local integration snapshot includes the recorded sibling working trees; it is not proof that fresh remote checkouts pass.",
+    "Full Foundry suite preceded transport patch updates; HTTP-facing CLI and chain-adapter tests plus all workspace lints and audit were rerun after the updates.",
+    "Native activation and proposal construction still use development fixtures. VPN settlement remains synthetic."
+  ],
+  "evidence_sha256": {
+    "security-build.json": "368e9aff95862cb72f18f425a41adc8ea0ade1ab313b81d7f1f3011ac613e524",
+    "security-build.log": "51a78957280c4afa4999ee0ea9f4e04006152a9c063924f8020ce3854b0d5011",
+    "security-build-clippy.log": "7b3411fc77f6c26c73c9d186a602d4e14d851e396c727acef1b06d991e73b561",
+    "security-build-clippy-helpers.log": "8c2b9ae0d6b48bf47c8293a5454d9074abcef770a7509e9836728994f94f70aa",
+    "timestamp-transport-before.log": "6df05c794a1ccf949d15217330f8b72c7f80dcc81c1d252d218a927fbfb4cfdc",
+    "timestamp-transport-after.log": "696b717c3e3b5726eebeeab443454e7d4e6c07fcf5af0884747218e23330ef9c",
+    "foundry-full-tests.log": "1dfb77418b68c990e0a2fd66251dd19ff1a566ca32b78c9943fc332a208cc41f",
+    "foundry-security-tests.log": "c2096f4162eafc392eaae36251800fdc3f5d7434ef5efa51345a1881493001dc",
+    "foundry-security-clippy.log": "e2aeacb6a0246fa68b6b9d0c07bf2f5b40367c8432b90e4b9b74c4ec837bc020",
+    "foundry-security-audit.json": "8da776d90ee1fe8b3d54251fd4d18a186072828f757eb3ba157f4e926e64ebb5",
+    "security-audit.json": "c1f36a1466c2be2235514f23b00778673696042c34fd65efe0b889ede1de8df3",
+    "aml-security.log": "87ca032d10cbf7004c58e13ae4ab0776e886e3b0677ee8f6288402179592ed76",
+    "docker-builder.log": "fad89991a46f7619beb09fca14983f7cf748c8e7813210a982b7abf1d2030c7f"
+  }
+}

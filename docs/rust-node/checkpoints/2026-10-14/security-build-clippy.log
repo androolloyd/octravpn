@@ -1,0 +1,68 @@
+    Checking serde_json v1.0.149
+    Checking octra-hfhe v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-hfhe)
+    Checking octravpn-audit-chain v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-audit-chain)
+   Compiling octra-pvac v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-pvac)
+    Checking axum v0.7.9
+    Checking octra-node-protocol v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node-protocol)
+    Checking tracing-subscriber v0.3.23
+    Checking reqwest v0.12.28
+    Checking octra_circle_wasm_host v0.1.0 (/Users/androolloyd/Development/octra/vendor/octra-circle-wasm-host)
+    Checking headscale-identity v0.1.0 (/Users/androolloyd/Development/headscale-rs/headscale-identity)
+    Checking jsonwebtoken v9.3.1
+    Checking headscale-api-acl v0.1.0 (/Users/androolloyd/Development/headscale-rs/headscale-api-acl)
+    Checking tinytemplate v1.2.1
+    Checking instant-acme v0.8.5
+    Checking escargot v0.5.15
+    Checking pvac-sidecar-ipc-tests v0.1.0 (/Users/androolloyd/Development/octra/pvac-sidecar/ipc-tests)
+    Checking octravpn-circle-registry v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-circle-registry)
+    Checking headscale-resources v0.1.0 (/Users/androolloyd/Development/headscale-rs/headscale-resources)
+    Checking headscale-core v0.1.0 (/Users/androolloyd/Development/headscale-rs/headscale-core)
+    Checking criterion v0.5.1
+    Checking octra-core v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octra-core)
+    Checking octravpn-tun v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-tun)
+warning: field `key_id` is never read
+   --> vendor/octra-circle-wasm-host/src/lib.rs:353:5
+    |
+352 | struct HfheActiveKey {
+    |        ------------- field in this struct
+353 |     key_id: String,
+    |     ^^^^^^
+    |
+    = note: `HfheActiveKey` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: variant `Release` is never constructed
+    --> vendor/octra-circle-wasm-host/src/lib.rs:1112:5
+     |
+1110 | enum CacheMessage {
+     |      ------------ variant in this enum
+1111 |     Hold { key: String, root: String, entries: usize, bytes: usize },
+1112 |     Release(u64),
+     |     ^^^^^^^
+
+warning: `octra_circle_wasm_host` (lib) generated 2 warnings
+    Checking ark-relations v0.5.1 (/Users/androolloyd/Development/octra/vendor/ark-relations)
+    Checking octravpn-analytics v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-analytics)
+    Checking octra-browser v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-browser)
+    Checking octra-exex v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-exex)
+    Checking headscale-payments v0.1.0 (/Users/androolloyd/Development/headscale-rs/headscale-payments)
+    Checking octravpn-core v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-core)
+    Checking octra-mock-rpc v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octra-mock-rpc)
+    Checking headscale-db v0.1.0 (/Users/androolloyd/Development/headscale-rs/headscale-db)
+    Checking octravpn-obfs4 v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-obfs4)
+    Checking octra-circle-sim v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-circle-sim)
+    Checking octravpn-e2e v0.1.0 (/Users/androolloyd/Development/octra/tests/e2e)
+    Checking octra-node-runtime v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node-runtime)
+    Checking headscale-api v0.1.0 (/Users/androolloyd/Development/headscale-rs/headscale-api)
+    Checking ark-r1cs-std v0.5.0
+    Checking ark-snark v0.5.1
+    Checking octravpn-mesh v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-mesh)
+    Checking headscale-cli v0.1.0 (/Users/androolloyd/Development/headscale-rs/headscale-cli)
+    Checking ark-crypto-primitives v0.5.0
+    Checking octravpn-admin-ui v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-admin-ui)
+    Checking octravpn-node v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-node)
+    Checking octravpn-client v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-client)
+    Checking ark-groth16 v0.5.0
+    Checking octravpn-private-admin v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-private-admin)
+    Checking octra-node v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7m 55s

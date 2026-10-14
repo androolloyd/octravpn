@@ -1,0 +1,596 @@
+   Compiling serde_json v1.0.149
+   Compiling tracing-subscriber v0.3.23
+   Compiling axum v0.7.9
+   Compiling reqwest v0.12.28
+   Compiling octra-core v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octra-core)
+   Compiling octra-devkeys v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octra-devkeys)
+   Compiling octra-mock-rpc v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octra-mock-rpc)
+   Compiling octraforge v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octraforge)
+   Compiling octra-chain-backend v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octra-chain-backend)
+   Compiling octra-cli v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octra-cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.87s
+     Running unittests src/lib.rs (target/debug/deps/octra_chain_backend-74fe8a795902817e)
+
+running 28 tests
+test backend::tests::next_nonce_counts_from_pending_when_staging_is_not_empty ... ok
+test backend::tests::next_nonce_is_plus_one_not_the_reported_nonce ... ok
+test backend::tests::staged_has_no_way_to_claim_confirmation ... ok
+test backend::tests::unknown_status_is_not_terminal ... ok
+test backend::tests::tx_status_parses_every_terminal_shape ... ok
+test backend::tests::receipt_without_success_key_is_not_success ... ok
+test backend::tests::view_result_normalises_both_tier_shapes ... ok
+test harness::tests::money_path_policy_excludes_tier_one ... ok
+test mock::tests::as_mock_succeeds_on_the_mock ... ok
+test harness::tests::mock_tier_is_always_available ... ok
+test mock::tests::unknown_accounts_are_not_secretly_rich ... ok
+test node::tests::endpoint_defaults_are_per_tier ... ok
+test mock::tests::views_respect_the_contract_address ... ok
+test mock::tests::advance_epochs_advances_exactly_n ... ok
+test tier::tests::money_path_policy_rejects_mock_only ... ok
+test node::tests::wire_u64_accepts_the_node_string_encoding_and_bare_ints ... ok
+test tier::tests::parses_every_tier_and_is_case_insensitive ... ok
+test tier::tests::round_trips_through_display ... ok
+test mock::tests::signed_envelopes_get_the_chain_tx_hash ... ok
+test tier::tests::unknown_tier_is_an_error_not_a_default ... ok
+test mock::tests::submit_only_stages ... ok
+test mock::tests::nonce_errors_use_the_chain_codes ... ok
+test mock::tests::advance_epochs_applies_staged_work ... ok
+test mock::tests::await_confirmation_drives_the_epoch_itself ... ok
+test mock::tests::a_refused_tx_surfaces_as_a_terminal_failure_not_a_success ... ok
+test node::tests::as_mock_is_a_loud_failure_on_a_node ... ok
+test harness::tests::an_absent_node_skips_with_instructions ... ok
+test node::tests::an_absent_node_is_a_transport_error_not_a_hang ... ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.02s
+
+     Running tests/chain_backend_contract.rs (target/debug/deps/chain_backend_contract-038b15bcec33eb74)
+
+running 8 tests
+test as_mock_names_the_cheat_and_the_tier_it_was_refused_on ... ok
+test cheats_are_reachable_only_through_the_concrete_mock_type ... ok
+test a_tx_no_epoch_ever_applies_times_out_rather_than_lying ... ok
+test the_money_path_harness_refuses_tier_one ... ok
+test the_mock_tier_never_needs_a_service_to_be_running ... ok
+test the_trait_is_object_safe_and_usable_dynamically ... ok
+test confirmation_works_through_a_trait_object ... ok
+test submit_and_confirm_composes_the_two_steps ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/node_backend_live.rs (target/debug/deps/node_backend_live-bfe2ffd828534435)
+
+running 4 tests
+test views_against_an_undeployed_address_fail_on_the_node_too ... ok
+test mock_only_cheats_fail_against_a_real_node ... ok
+test advance_epochs_really_waits_for_the_chain ... ok
+test a_transfer_stages_then_applies_at_an_epoch ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.92s
+
+     Running unittests src/lib.rs (target/debug/deps/octra_cli-a5a65c156ecbb7e6)
+
+running 14 tests
+test forge::trace::tests::parse_basic_run ... ok
+test forge::trace::tests::parse_failed_capture ... ok
+test cast::pvac::tests::signature_verifies_under_wallet_pubkey ... ok
+test cast::pvac::tests::rejects_empty_pvac_pk ... ok
+test forge::verification::tests::parses_live_aml_safety_report ... ok
+test forge::verification::tests::clean_contract_passes ... ok
+test forge::verification::tests::render_fails_on_verification_errors ... ok
+test cast::pvac::tests::canonical_message_format_matches_spec ... ok
+test cast::pvac::tests::rejects_non_hex_kat ... ok
+test cast::circle_call::tests::native_circle_envelope_binds_operation_method_and_params ... ok
+test cast::pvac::tests::rejects_non_base64_pvac_pk ... ok
+test cast::pvac::tests::print_only_produces_signed_envelope_without_network ... ok
+test cast::pvac::tests::kat_hex_is_passed_through_unchanged ... ok
+test cast::pvac::tests::deterministic_same_key_same_pk ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src/main.rs (target/debug/deps/octra-c108fafdcd714d7b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/anvil.rs (target/debug/deps/anvil-28d21f9fb46e105d)
+
+running 1 test
+test anvil_serves_node_status ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.76s
+
+     Running tests/cast_call.rs (target/debug/deps/cast_call-d08004748fa0dd3e)
+
+running 4 tests
+test cast_call_get_params_returns_param_object ... ok
+test cast_block_fetches_epoch ... ok
+test cast_call_list_active_endpoints_inprocess ... ok
+test cast_send_with_key_signs_and_submits ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/cast_circle_put.rs (target/debug/deps/cast_circle_put-6b3b62e3978267f9)
+
+running 5 tests
+test put_is_listed_in_circle_help ... ok
+test put_help_renders ... ok
+test put_envelope_accepted_by_mock_rpc ... ok
+test put_encrypted_envelope_also_accepted ... ok
+test put_and_put_encrypted_share_summary_keys ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.74s
+
+     Running tests/cast_hash.rs (target/debug/deps/cast_hash-aca767fa710aca8d)
+
+running 2 tests
+test keccak_aliases_sha256 ... ok
+test sha256_empty_hex ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/cast_in_process.rs (target/debug/deps/cast_in_process-7c49a587f8ace12e)
+
+running 6 tests
+test contract_call_list_active_endpoints ... ok
+test rpc_node_status_against_in_process ... ok
+test rpc_call_unknown_method_errors ... ok
+test submit_through_in_process_persists_tx ... ok
+test compile_aml_produces_artifact ... ok
+test cast_rpc_via_cli_with_inprocess ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/cast_register_pvac.rs (target/debug/deps/cast_register_pvac-7efb35e163564f46)
+
+running 3 tests
+test rejects_bad_pvac_pk ... ok
+test help_renders ... ok
+test print_only_does_not_dial_network ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/cast_wallet.rs (target/debug/deps/cast_wallet-41b4e65c8fc76e6b)
+
+running 4 tests
+test wallet_new_default_refuses_to_print_secret ... ok
+test wallet_new_show_secret_opts_in ... ok
+test wallet_sign_returns_base64 ... ok
+test wallet_new_and_addr_roundtrip ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/chisel.rs (target/debug/deps/chisel-6d4fe2f12e0f89eb)
+
+running 1 test
+test chisel_quits_on_eof ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/cli_basics.rs (target/debug/deps/cli_basics-643724d269e6d4fc)
+
+running 4 tests
+test version_runs ... ok
+test help_lists_subcommands ... ok
+test completions_bash ... ok
+test completions_zsh ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/forge_bind.rs (target/debug/deps/forge_bind-ae73082b7c176c41)
+
+running 1 test
+test bind_generates_compileable_file ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.20s
+
+     Running tests/forge_build.rs (target/debug/deps/forge_build-2624067b8486a1f5)
+
+running 4 tests
+test real_build_missing_compiler_never_emits_synthetic_artifacts ... ok
+test rpc_compile_failure_never_falls_back_to_synthetic_artifacts ... ok
+test build_offline_synthetic_aml_file ... ok
+test build_offline_against_program_dir ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/forge_create.rs (target/debug/deps/forge_create-330eff738ceaec51)
+
+running 5 tests
+test create_in_process_returns_deploy_address ... ok
+test explicit_no_wait_reports_prediction_as_unconfirmed ... ok
+test default_create_rejects_staged_unconfirmed_transaction ... ok
+test default_create_rejects_receipt_without_actual_address ... ok
+test default_create_rejects_failed_execution_receipt ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/forge_inspect.rs (target/debug/deps/forge_inspect-185795faa33fc585)
+
+running 2 tests
+test inspect_aml_file_dumps_bytecode ... ok
+test inspect_aml_file_dumps_abi ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/forge_snapshot.rs (target/debug/deps/forge_snapshot-b90a7062e8305c67)
+
+running 2 tests
+test snapshot_within_tolerance_is_clean ... ok
+test snapshot_regression_above_tolerance_is_flagged ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/forge_test.rs (target/debug/deps/forge_test-bee3079958713f3e)
+
+running 1 test
+test render_test_output_pretty_prints_pass_and_fail ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/tool_parity.rs (target/debug/deps/tool_parity-6629ebd62e4c29bc)
+
+running 4 tests
+test forge_view_matches_cast_inprocess_view ... ok
+test forge_submit_matches_cast_inprocess_submit ... ok
+test http_anvil_matches_inprocess_view ... ok
+test http_anvil_register_then_list_matches_forge ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+
+     Running unittests src/lib.rs (target/debug/deps/octra_core-67bef81376aa9e08)
+
+running 87 tests
+test address::tests::try_from_display_rejects_wrong_length ... ok
+test address::tests::try_from_display_rejects_bad_prefix ... ok
+test address::tests::from_display_fallback_does_not_panic ... ok
+test circle::tests::padding_class_round_trip ... ok
+test circle::tests::length_prefix_means_concat_does_not_collide ... ok
+test circle::tests::h256_raw_is_deterministic_and_tag_separated ... ok
+test circle::tests::default_payload_canonical_json_includes_nulls ... ok
+test circle::tests::circle_id_is_oct_prefixed_47_chars ... ok
+test circle::tests::circle_id_changes_with_nonce ... ok
+test address::tests::from_pubkey_round_trip ... ok
+test circle::tests::padded_frame_pads_to_class ... ok
+test address::tests::prop_address_shape ... ok
+test address::tests::prop_from_pubkey_deterministic ... ok
+test address::tests::prop_distinct_pubkeys_distinct_addresses ... ok
+test address::tests::prop_display_round_trip ... ok
+test circle::tests::resource_key_matches_js_shape ... ok
+test circle::tests::prop_h256_raw_deterministic ... ok
+test circle::tests::prop_h256_raw_split_doesnt_collide_with_joined ... ok
+test coverage::tests::record_round_trip_and_noop_when_disabled ... ok
+test native_tx::tests::call_shape_rejects_chain_id ... ok
+test native_tx::tests::golden_preimage_bytes_full ... ok
+test native_tx::tests::golden_preimage_bytes_minimal ... ok
+test native_tx::tests::integral_timestamp_keeps_its_dot_zero_through_the_call_shapes ... ok
+test native_tx::tests::mirror_has_not_drifted_from_octravpn_core ... ok
+test native_tx::tests::preimage_has_no_chain_id ... ok
+test native_tx::tests::signed_envelope_carries_to_underscore_and_string_amounts ... ok
+test circle::tests::prop_h256_raw_tag_separated ... ok
+test native_tx::tests::tx_hash_is_not_the_signing_preimage ... ok
+test tx::tests::canonical_bytes_equals_canonical_json_bytes ... ok
+test tx::tests::canonical_json_roundtrip_octratx ... ok
+test tx::tests::chain_id_bit_flip_changes_canonical_bytes ... ok
+test tx::tests::cross_chain_replay_rejected_by_verify ... ok
+test tx::tests::empty_chain_id_rejected ... ok
+test tx::tests::legacy_contract_call_propagates_chain_id_to_v2_envelope ... ok
+test tx::tests::legacy_contract_call_translates_to_call_envelope ... ok
+test tx::tests::mixed_v1_and_v2_envelopes_both_verify ... ok
+test tx::tests::octratx_input_round_trips_envelope ... ok
+test tx::tests::prop_address_display_round_trip ... ok
+test tx::tests::prop_address_from_pubkey_function ... ok
+test tx::tests::prop_canonical_bytes_is_function ... ok
+test tx::tests::prop_canonical_bytes_legacy_shape_order_invariant ... ok
+test circle::tests::prop_circle_id_shape ... ok
+test circle::tests::prop_circle_id_of_deploy_determinism ... ok
+test circle::tests::sealed_envelope_starts_with_magic ... ok
+test native_tx::tests::signed_timestamps_survive_json_transport ... ok
+test tx::tests::sign_then_verify_envelope_round_trip ... ok
+test tx::tests::signed_bytes_match_webcli_algorithm ... ok
+test tx::tests::signing_roundtrip ... ok
+test tx::tests::tx_format_version_is_v2 ... ok
+test tx::tests::v1_canonical_bytes_hash_stable_across_format_bump ... ok
+test tx::tests::v1_canonical_bytes_omit_chain_id ... ok
+test tx::tests::v2_canonical_bytes_include_chain_id ... ok
+test tx::tests::v2_sign_verify_roundtrip ... ok
+test tx::tests::verify_envelope_rejects_address_mismatch ... ok
+test tx::tests::verify_envelope_rejects_tampered_canonical_bytes ... ok
+test util::tests::hex_to_array_rejects_wrong_length ... ok
+test util::tests::hex_to_array_round_trip ... ok
+test util::tests::read_secret_32_envelope_paths ... ok
+test util::tests::read_secret_32_or_sealed_env_passphrase ... ok
+test util::tests::read_secret_32_or_sealed_hint_passphrase ... ok
+test util::tests::read_secret_32_or_sealed_rejects_plaintext_hex ... ok
+test util::tests::read_secret_32_or_sealed_rejects_raw_bytes ... ok
+test wallet_enc::tests::encrypt_decrypt_round_trip ... ok
+test wallet_enc::tests::looks_like_envelope_detects_plain_hex ... ok
+test circle::tests::prop_circle_id_distinct_inputs ... ok
+test wallet_enc::tests::prop_wallet_envelope_starts_with_magic ... ok
+test tx::tests::prop_sign_verify_rejects_wrong_pubkey ... ok
+test wallet_enc::tests::prop_wallet_truncated_envelope_fails ... ok
+test tx::tests::prop_sign_verify_rejects_tamper ... ok
+test wallet_enc::tests::truncated_envelope_fails ... ok
+test wallet_enc::tests::untrusted_work_factor_rejected_before_key_derivation ... ok
+test wallet_enc::tests::wrong_passphrase_fails ... ok
+test wallet_enc::tests::prop_wallet_seal_unseal_identity ... ok
+test tx::tests::prop_chain_id_binding_rejects_replay ... ok
+test wallet_enc::tests::prop_wallet_wrong_passphrase_fails ... ok
+test tx::tests::prop_sign_verify_roundtrip ... ok
+test circle::tests::sealed_envelope_roundtrips ... ok
+test circle::tests::sealed_envelope_wrong_passphrase_fails ... ok
+test wallet_enc::tests::prop_wallet_rejects_bit_flip ... ok
+test circle::tests::prop_padded_frame_length_invariant ... ok
+test circle::tests::prop_sealed_envelope_starts_with_magic ... ok
+test circle::tests::prop_sealed_envelope_rejects_single_bit_flip has been running for over 60 seconds
+test circle::tests::prop_sealed_envelope_rejects_wrong_plaintext_hash has been running for over 60 seconds
+test circle::tests::prop_sealed_envelope_roundtrip has been running for over 60 seconds
+test circle::tests::prop_sealed_envelope_wrong_circle_id_always_fails has been running for over 60 seconds
+test circle::tests::prop_sealed_envelope_wrong_key_id_always_fails has been running for over 60 seconds
+test circle::tests::prop_sealed_envelope_wrong_passphrase_always_fails has been running for over 60 seconds
+test circle::tests::prop_sealed_envelope_rejects_wrong_plaintext_hash ... ok
+test circle::tests::prop_sealed_envelope_rejects_single_bit_flip ... ok
+test circle::tests::prop_sealed_envelope_wrong_key_id_always_fails ... ok
+test circle::tests::prop_sealed_envelope_wrong_circle_id_always_fails ... ok
+test circle::tests::prop_sealed_envelope_wrong_passphrase_always_fails ... ok
+test circle::tests::prop_sealed_envelope_roundtrip ... ok
+
+test result: ok. 87 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 66.75s
+
+     Running unittests src/lib.rs (target/debug/deps/octra_devkeys-385108eec09814f5)
+
+running 5 tests
+test tests::wallet_json_parses_and_matches ... ok
+test tests::seeds_round_trip_through_signing_key ... ok
+test tests::addresses_are_well_formed ... ok
+test tests::golden_addresses_are_stable ... ok
+test tests::validators_env_matches_goldens ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/octra_devkeys-e7b92e0adbb7a7cf)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/octra_mock_rpc-610f7bd2fbfa1e16)
+
+running 61 tests
+test aml::host_fhe::tests::t04_deser_malformed_short_errors ... ok
+test aml::host_fhe::tests::t12_add_const_pubkey_mismatch_errors ... ok
+test aml::host_fhe::tests::t06_deser_wrong_tag_errors ... ok
+test aml::host_fhe::tests::t07_deser_nonce_length_mismatch_errors ... ok
+test aml::host_fhe::tests::t05_deser_bad_magic_errors ... ok
+test aml::host_fhe::tests::t13_ser_roundtrip_identity ... ok
+test aml::host_fhe::tests::t10_add_pubkey_mismatch_errors ... ok
+test aml::host_fhe::tests::t11_add_const_happy ... ok
+test aml::host_fhe::tests::t03_encrypt_then_deser_happy ... ok
+test aml::host_fhe::tests::t08_add_happy_e2e_encrypt_5_plus_3_eq_8 ... ok
+test aml::host_fhe::tests::t09_add_three_way_e2e_1_plus_2_plus_4_eq_7 ... ok
+test aml::host_fhe::tests::t15_verify_zero_rejects_nonzero_ct ... ok
+test aml::host_fhe::tests::t14_verify_zero_happy_path ... ok
+test aml::host_fhe::tests::t16_verify_zero_rejects_swapped_pk ... ok
+test aml::host_fhe::tests::t02_load_pk_unregistered_errors ... ok
+test aml::host_fhe::tests::t01_load_pk_happy_path ... ok
+test aml::host_fhe::tests::t17_verify_zero_rejects_proof_from_other_ct ... ok
+test aml::host_fhe::tests::t21_load_pk_after_keygen_matches ... ok
+test aml::host_fhe::tests::t19_add_is_commutative_on_wire ... ok
+test aml::host_fhe::tests::t20_cross_process_roundtrip_via_bytes_only ... ok
+test aml::host_fhe::tests::t22_settle_path_simulation_5_plus_3_then_claim_8 ... ok
+test aml::host_fhe::tests::t23_overclaim_rejected_by_verify_zero ... ok
+test chain_shape_tests::contract_storage_slices_at_4096_and_full_at_4mib ... ok
+test chain_shape_tests::balance_key_set_and_unknown_account ... ok
+test chain_shape_tests::contract_call_wraps_result_and_honours_the_address ... ok
+test chain_shape_tests::invented_methods_are_method_not_found ... ok
+test chain_shape_tests::missing_receipt_and_tx_are_112 ... ok
+test chain_shape_tests::stale_timestamp_is_105 ... ok
+test chain_shape_tests::preimage_matches_node_layout ... ok
+test chain_shape_tests::submit_returns_accepted_not_confirmed ... ok
+test cheats::tests::aliases_classify_as_node_methods ... ok
+test chain_shape_tests::revert_surfaces_as_rejected_with_the_reason ... ok
+test chain_shape_tests::staged_tx_is_pending_until_an_epoch_applies_it ... ok
+test cheats::tests::cheats_are_not_node_methods ... ok
+test chain_shape_tests::transaction_view_has_no_events_and_receipt_does ... ok
+test cheats::tests::cheat_disabled_is_indistinguishable_from_method_not_found ... ok
+test cheats::tests::cheats_are_sorted_and_unique ... ok
+test cheats::tests::classify_covers_the_three_cases ... ok
+test cheats::tests::error_response_omits_absent_data ... ok
+test cheats::tests::fiction_stays_dead ... ok
+test aml::host_fhe::tests::t18_determinism_100_trials ... ok
+test cheats::tests::method_not_found_matches_the_node_envelope ... ok
+test cheats::tests::only_the_test_namespace_may_cheat ... ok
+test cheats::tests::removed_fiction_is_sorted_and_unique ... ok
+test cheats::tests::the_pvac_methods_are_real_and_must_not_be_confused_with_the_fhe_fiction ... ok
+test cheats::tests::tier_gate_denies_non_mock_tiers ... ok
+test methods::generated_tests::fiction_is_absent ... ok
+test methods::generated_tests::method_not_found_matches_the_node ... ok
+test methods::generated_tests::aliases_and_primaries_are_both_live ... ok
+test methods::generated_tests::methods_are_sorted_and_unique ... ok
+test chain_shape_tests::unknown_sender_is_100_once_a_ledger_exists ... ok
+test methods::generated_tests::plausible_method_count ... ok
+test tests::circle_asset_isolates_circles ... ok
+test tests::circle_asset_isolates_paths ... ok
+test tests::circle_asset_rejects_malformed_params ... ok
+test tests::circle_asset_returns_null_when_unseeded ... ok
+test chain_shape_tests::pending_nonce_reflects_staging ... ok
+test tests::circle_asset_returns_plaintext_when_seeded ... ok
+test chain_shape_tests::overspend_is_104 ... ok
+test chain_shape_tests::bad_signature_is_101 ... ok
+test chain_shape_tests::nonce_window_uses_the_node_codes ... ok
+
+test result: ok. 61 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/octra_mock_rpc-4bce442f40b86d41)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/chain_id_binding.rs (target/debug/deps/chain_id_binding-18caf9847bb6779b)
+
+running 5 tests
+test missing_chain_id_rejected_by_gated_mock ... ok
+test chain_id_gate_precedes_handler_dispatch ... ok
+test cross_chain_replay_rejected_by_mock ... ok
+test matching_chain_id_accepted_by_gated_mock ... ok
+test no_gate_accepts_any_chain_id ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/v2_dispatch.rs (target/debug/deps/v2_dispatch-f937fa1a9f9680f6)
+
+running 15 tests
+test open_session_fails_without_proxy_authorization ... ok
+test proxy_register_keys_idempotency_and_required_fields ... ok
+test open_session_fails_for_non_member ... ok
+test revoking_proxy_blocks_subsequent_claim ... ok
+test set_charge_internal_traffic_owner_only ... ok
+test settle_claim_only_by_proxy ... ok
+test v1_and_v2_session_counters_are_independent ... ok
+test internal_class_with_charge_one_bills_normally ... ok
+test claim_earnings_v2_clears_balance_and_credits_payout ... ok
+test full_v2_lifecycle_shared_class ... ok
+test equivocation_refunds_session_and_emits_proxy_bond_slashed ... ok
+test settle_confirm_only_by_opener ... ok
+test settle_confirm_mismatch_records_dispute ... ok
+test internal_class_with_charge_zero_settles_to_zero ... ok
+test authorize_and_revoke_proxy_emit_events_and_gate_state ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/octraforge-162f2d7da30aca13)
+
+running 24 tests
+test forge_std::assertions::tests::approx_abs_ok ... ok
+test forge_std::assertions::tests::approx_rel_ok ... ok
+test aml_coverage::tests::enumerates_branches_for_simple_method ... ok
+test aml_coverage::tests::report_counts_hits_and_misses ... ok
+test forge_std::std_utils::tests::bound_clamps ... ok
+test forge_std::assertions::tests::decimal_format_panic_message ... ok
+test forge_std::assertions::tests::approx_abs_too_far - should panic ... ok
+test fs::tests::env_set_get ... ok
+test forge_std::assertions::tests::approx_rel_too_far - should panic ... ok
+test aml_invariants::tests::rogue_unstaked_endpoint_violates_active_stake_invariant ... ok
+test forge_std::std_utils::tests::sha256_known ... ok
+test ou::tests::diff_flags_regressions ... ok
+test aml_invariants::tests::fresh_context_satisfies_all_invariants ... ok
+test ou_cost_model::tests::cost_grows_with_crypto_ops ... ok
+test ou_cost_model::tests::extracts_simple_method_body ... ok
+test ou_cost_model::tests::format_is_deterministic ... ok
+test ou_cost_model::tests::skips_view_and_private ... ok
+test aml_invariants::tests::tailnet_owner_is_always_member ... ok
+test wallet::tests::labels_pretty_print ... ok
+test wallet::tests::create_labeled_round_trip ... ok
+test fs::tests::read_write_round_trip ... ok
+test ou::tests::snapshot_round_trip ... ok
+test wallet::tests::sign_verify_round_trip ... ok
+test fs::tests::ffi_echo ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/aml_coverage.rs (target/debug/deps/aml_coverage-237c51ff4ea0060a)
+
+running 1 test
+test coverage_records_branches_during_happy_and_revert_paths ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/aml_fuzz.rs (target/debug/deps/aml_fuzz-27e7e482083e5955)
+
+running 1 test
+test fuzz_random_aml_call_sequences_preserve_invariants ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/bond_slash.rs (target/debug/deps/bond_slash-31becabb55f1202c)
+
+running 6 tests
+test non_owner_cannot_gov_slash ... ok
+test slashed_operator_cannot_re_register ... ok
+test bond_endpoint_records_stake_and_enables_register ... ok
+test gov_slash_burns_stake_and_pays_bounty ... ok
+test unbond_deactivates_endpoint_and_grace_blocks_finalize ... ok
+test cannot_slash_twice ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cheatcodes.rs (target/debug/deps/cheatcodes-9cce35f68792f839)
+
+running 23 tests
+test assertion_library_smoke ... ok
+test bound_clamps_into_range ... ok
+test forks_isolate_state ... ok
+test deal_and_balance ... ok
+test hoax_combines_deal_and_prank ... ok
+test expect_no_emit_passes_when_no_event ... ok
+test named_snapshots_work ... ok
+test mock_submit_revert_short_circuits ... ok
+test mock_view_returns_canned ... ok
+test expect_no_emit_fails_when_event_present ... ok
+test invariant_runner_checks_balance_monotonic ... ok
+test expect_emit_fields_strict_match ... ok
+test mock_submit_ok_returns_canned ... ok
+test expect_emit_fields_mismatch_fails ... ok
+test prank_with_origin_sets_both ... ok
+test record_and_take_logs ... ok
+test sha256_known_vector ... ok
+test snapshot_revert_restores_state ... ok
+test make_addr_labels_the_address ... ok
+test sticky_prank_survives_calls_until_stop ... ok
+test store_builder_writes_directly ... ok
+test warp_and_roll_epoch ... ok
+test ou_recorder_round_trip ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/demo.rs (target/debug/deps/demo-bc6ac816f4557c7c)
+
+running 7 tests
+test wrong_revert_substring_surfaces_diff ... ok
+test unbonded_address_cannot_register_endpoint ... ok
+test deploy_then_register ... ok
+test warp_and_age_endpoint ... ok
+test snapshot_and_revert ... ok
+test expect_revert_on_bad_settle ... ok
+test full_lifecycle_endpoint_tailnet_session_claim ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/multidevice.rs (target/debug/deps/multidevice-5dcc1b9fe67b17e2)
+
+running 6 tests
+test idempotent_self_register_is_noop ... ok
+test device_cannot_be_attached_to_two_wallets ... ok
+test wallet_can_register_two_devices ... ok
+test unattached_addr_cannot_open_session ... ok
+test revoke_only_by_owner ... ok
+test device_opens_session_on_behalf_of_owner ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/ou_snapshot.rs (target/debug/deps/ou_snapshot-c679643722158085)
+
+running 1 test
+test ou_snapshot_matches_committed_file ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/slash_double_sign.rs (target/debug/deps/slash_double_sign-93afc36a960ee6bb)
+
+running 5 tests
+test slash_double_sign_rejects_identical_payloads ... ok
+test slash_double_sign_rejects_missing_receipt_pubkey ... ok
+test slash_double_sign_rejects_bad_signature ... ok
+test slash_double_sign_happy_path ... ok
+test slash_double_sign_idempotent_after_already_slashed ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/v2_lifecycle.rs (target/debug/deps/v2_lifecycle-9a1b7f632d35f0be)
+
+running 1 test
+test v2_full_lifecycle_shared_then_internal ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

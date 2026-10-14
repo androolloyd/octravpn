@@ -1,0 +1,17 @@
+    Blocking waiting for file lock on build directory
+   Compiling serde_json v1.0.149
+   Compiling tinytemplate v1.2.1
+   Compiling tracing-subscriber v0.3.23
+   Compiling axum v0.7.9
+   Compiling reqwest v0.12.28
+   Compiling criterion v0.5.1
+   Compiling octra-core v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octra-core)
+   Compiling octravpn-core v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3m 18s
+     Running unittests src/lib.rs (target/debug/deps/octravpn_core-3839d1ae4a24cb62)
+
+running 1 test
+test tx_signer::tests::signed_timestamps_survive_json_transport ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 407 filtered out; finished in 0.33s
+

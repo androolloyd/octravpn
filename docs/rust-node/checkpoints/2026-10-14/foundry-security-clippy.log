@@ -1,0 +1,8 @@
+    Checking anyhow v1.0.103
+    Checking octra-core v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octra-core)
+    Checking octra-mock-rpc v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octra-mock-rpc)
+    Checking octra-devkeys v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octra-devkeys)
+    Checking octraforge v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octraforge)
+    Checking octra-chain-backend v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octra-chain-backend)
+    Checking octra-cli v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octra-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.91s

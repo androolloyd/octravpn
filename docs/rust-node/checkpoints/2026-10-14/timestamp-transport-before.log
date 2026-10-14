@@ -1,0 +1,30 @@
+    Blocking waiting for file lock on build directory
+   Compiling rustls v0.23.46
+   Compiling octra-core v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octra-core)
+   Compiling tokio-rustls v0.26.4
+   Compiling hyper-rustls v0.27.9
+   Compiling reqwest v0.12.28
+   Compiling octravpn-core v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6m 46s
+     Running unittests src/lib.rs (target/debug/deps/octravpn_core-a12b69f873d0d6d1)
+
+running 1 test
+test tx_signer::tests::signed_timestamps_survive_json_transport ... FAILED
+
+failures:
+
+---- tx_signer::tests::signed_timestamps_survive_json_transport stdout ----
+
+thread 'tx_signer::tests::signed_timestamps_survive_json_transport' (55667412) panicked at crates/octravpn-core/src/tx_signer.rs:428:13:
+assertion `left == right` failed: JSON transport changed timestamp bits at offset 9
+  left: "{\"from\":\"octFROM\",\"to_\":\"octTO\",\"amount\":\"100\",\"nonce\":7,\"ou\":\"1000\",\"timestamp\":1791993600.0000021,\"op_type\":\"circle_relay_claim\",\"encrypted_data\":\"payload\",\"message\":\"hi\"}"
+ right: "{\"from\":\"octFROM\",\"to_\":\"octTO\",\"amount\":\"100\",\"nonce\":7,\"ou\":\"1000\",\"timestamp\":1791993600.000002,\"op_type\":\"circle_relay_claim\",\"encrypted_data\":\"payload\",\"message\":\"hi\"}"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    tx_signer::tests::signed_timestamps_survive_json_transport
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 407 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p octravpn-core --lib`

@@ -1,0 +1,237 @@
+   Compiling anyhow v1.0.103
+   Compiling octra-core v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octra-core)
+   Compiling octra-mock-rpc v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octra-mock-rpc)
+   Compiling octra-devkeys v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octra-devkeys)
+   Compiling octraforge v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octraforge)
+   Compiling octra-chain-backend v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octra-chain-backend)
+   Compiling octra-cli v0.1.0 (/Users/androolloyd/Development/octra-foundry/crates/octra-cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.92s
+     Running unittests src/lib.rs (target/debug/deps/octra_chain_backend-8c4d55c361481cfa)
+
+running 28 tests
+test backend::tests::next_nonce_counts_from_pending_when_staging_is_not_empty ... ok
+test backend::tests::next_nonce_is_plus_one_not_the_reported_nonce ... ok
+test backend::tests::staged_has_no_way_to_claim_confirmation ... ok
+test backend::tests::unknown_status_is_not_terminal ... ok
+test backend::tests::tx_status_parses_every_terminal_shape ... ok
+test backend::tests::receipt_without_success_key_is_not_success ... ok
+test backend::tests::view_result_normalises_both_tier_shapes ... ok
+test harness::tests::mock_tier_is_always_available ... ok
+test harness::tests::money_path_policy_excludes_tier_one ... ok
+test mock::tests::as_mock_succeeds_on_the_mock ... ok
+test mock::tests::unknown_accounts_are_not_secretly_rich ... ok
+test mock::tests::advance_epochs_advances_exactly_n ... ok
+test mock::tests::signed_envelopes_get_the_chain_tx_hash ... ok
+test mock::tests::nonce_errors_use_the_chain_codes ... ok
+test mock::tests::a_refused_tx_surfaces_as_a_terminal_failure_not_a_success ... ok
+test mock::tests::submit_only_stages ... ok
+test mock::tests::advance_epochs_applies_staged_work ... ok
+test mock::tests::await_confirmation_drives_the_epoch_itself ... ok
+test mock::tests::views_respect_the_contract_address ... ok
+test node::tests::endpoint_defaults_are_per_tier ... ok
+test node::tests::as_mock_is_a_loud_failure_on_a_node ... ok
+test node::tests::wire_u64_accepts_the_node_string_encoding_and_bare_ints ... ok
+test tier::tests::money_path_policy_rejects_mock_only ... ok
+test tier::tests::parses_every_tier_and_is_case_insensitive ... ok
+test tier::tests::round_trips_through_display ... ok
+test tier::tests::unknown_tier_is_an_error_not_a_default ... ok
+test harness::tests::an_absent_node_skips_with_instructions ... ok
+test node::tests::an_absent_node_is_a_transport_error_not_a_hang ... ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.03s
+
+     Running tests/chain_backend_contract.rs (target/debug/deps/chain_backend_contract-c81cb8b712a7e56a)
+
+running 8 tests
+test the_money_path_harness_refuses_tier_one ... ok
+test the_mock_tier_never_needs_a_service_to_be_running ... ok
+test the_trait_is_object_safe_and_usable_dynamically ... ok
+test cheats_are_reachable_only_through_the_concrete_mock_type ... ok
+test a_tx_no_epoch_ever_applies_times_out_rather_than_lying ... ok
+test submit_and_confirm_composes_the_two_steps ... ok
+test confirmation_works_through_a_trait_object ... ok
+test as_mock_names_the_cheat_and_the_tier_it_was_refused_on ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/node_backend_live.rs (target/debug/deps/node_backend_live-8fc97ba89a9d29cf)
+
+running 4 tests
+test views_against_an_undeployed_address_fail_on_the_node_too ... ok
+test mock_only_cheats_fail_against_a_real_node ... ok
+test advance_epochs_really_waits_for_the_chain ... ok
+test a_transfer_stages_then_applies_at_an_epoch ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.60s
+
+     Running unittests src/lib.rs (target/debug/deps/octra_cli-2e481195de7bb655)
+
+running 14 tests
+test forge::trace::tests::parse_failed_capture ... ok
+test forge::trace::tests::parse_basic_run ... ok
+test forge::verification::tests::clean_contract_passes ... ok
+test forge::verification::tests::render_fails_on_verification_errors ... ok
+test forge::verification::tests::parses_live_aml_safety_report ... ok
+test cast::pvac::tests::rejects_non_base64_pvac_pk ... ok
+test cast::pvac::tests::rejects_non_hex_kat ... ok
+test cast::pvac::tests::rejects_empty_pvac_pk ... ok
+test cast::pvac::tests::signature_verifies_under_wallet_pubkey ... ok
+test cast::pvac::tests::kat_hex_is_passed_through_unchanged ... ok
+test cast::pvac::tests::canonical_message_format_matches_spec ... ok
+test cast::pvac::tests::print_only_produces_signed_envelope_without_network ... ok
+test cast::pvac::tests::deterministic_same_key_same_pk ... ok
+test cast::circle_call::tests::native_circle_envelope_binds_operation_method_and_params ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/octra-81ee066dbb9c8eaa)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/anvil.rs (target/debug/deps/anvil-b42a69464ae97f6a)
+
+running 1 test
+test anvil_serves_node_status ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.60s
+
+     Running tests/cast_call.rs (target/debug/deps/cast_call-970405741e838f67)
+
+running 4 tests
+test cast_call_get_params_returns_param_object ... ok
+test cast_block_fetches_epoch ... ok
+test cast_send_with_key_signs_and_submits ... ok
+test cast_call_list_active_endpoints_inprocess ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/cast_circle_put.rs (target/debug/deps/cast_circle_put-539ffb6844e91e14)
+
+running 5 tests
+test put_help_renders ... ok
+test put_is_listed_in_circle_help ... ok
+test put_envelope_accepted_by_mock_rpc ... ok
+test put_encrypted_envelope_also_accepted ... ok
+test put_and_put_encrypted_share_summary_keys ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.88s
+
+     Running tests/cast_hash.rs (target/debug/deps/cast_hash-acdbc0c60c2dcf70)
+
+running 2 tests
+test keccak_aliases_sha256 ... ok
+test sha256_empty_hex ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/cast_in_process.rs (target/debug/deps/cast_in_process-88ce388ebc3f30e3)
+
+running 6 tests
+test rpc_call_unknown_method_errors ... ok
+test rpc_node_status_against_in_process ... ok
+test contract_call_list_active_endpoints ... ok
+test compile_aml_produces_artifact ... ok
+test submit_through_in_process_persists_tx ... ok
+test cast_rpc_via_cli_with_inprocess ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/cast_register_pvac.rs (target/debug/deps/cast_register_pvac-bb3203251bdce3fa)
+
+running 3 tests
+test rejects_bad_pvac_pk ... ok
+test help_renders ... ok
+test print_only_does_not_dial_network ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/cast_wallet.rs (target/debug/deps/cast_wallet-6952b4b0c07b4456)
+
+running 4 tests
+test wallet_new_default_refuses_to_print_secret ... ok
+test wallet_new_show_secret_opts_in ... ok
+test wallet_sign_returns_base64 ... ok
+test wallet_new_and_addr_roundtrip ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/chisel.rs (target/debug/deps/chisel-f6f61945d0123dec)
+
+running 1 test
+test chisel_quits_on_eof ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli_basics.rs (target/debug/deps/cli_basics-8f09615e04f07ced)
+
+running 4 tests
+test version_runs ... ok
+test help_lists_subcommands ... ok
+test completions_bash ... ok
+test completions_zsh ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/forge_bind.rs (target/debug/deps/forge_bind-67b57f78c92308f6)
+
+running 1 test
+test bind_generates_compileable_file ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.39s
+
+     Running tests/forge_build.rs (target/debug/deps/forge_build-d3792542a315f2a2)
+
+running 4 tests
+test real_build_missing_compiler_never_emits_synthetic_artifacts ... ok
+test rpc_compile_failure_never_falls_back_to_synthetic_artifacts ... ok
+test build_offline_against_program_dir ... ok
+test build_offline_synthetic_aml_file ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/forge_create.rs (target/debug/deps/forge_create-96bb529ce3856834)
+
+running 5 tests
+test create_in_process_returns_deploy_address ... ok
+test default_create_rejects_failed_execution_receipt ... ok
+test default_create_rejects_staged_unconfirmed_transaction ... ok
+test explicit_no_wait_reports_prediction_as_unconfirmed ... ok
+test default_create_rejects_receipt_without_actual_address ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/forge_inspect.rs (target/debug/deps/forge_inspect-7ff1e37ef153a4d1)
+
+running 2 tests
+test inspect_aml_file_dumps_bytecode ... ok
+test inspect_aml_file_dumps_abi ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/forge_snapshot.rs (target/debug/deps/forge_snapshot-b801c53c84db0a7c)
+
+running 2 tests
+test snapshot_regression_above_tolerance_is_flagged ... ok
+test snapshot_within_tolerance_is_clean ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/forge_test.rs (target/debug/deps/forge_test-2a1047afae350118)
+
+running 1 test
+test render_test_output_pretty_prints_pass_and_fail ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/tool_parity.rs (target/debug/deps/tool_parity-e90d8f2292b46cb3)
+
+running 4 tests
+test forge_view_matches_cast_inprocess_view ... ok
+test forge_submit_matches_cast_inprocess_submit ... ok
+test http_anvil_matches_inprocess_view ... ok
+test http_anvil_register_then_list_matches_forge ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+

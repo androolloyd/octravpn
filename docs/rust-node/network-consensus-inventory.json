@@ -8721,5 +8721,14 @@
       },
       "source_count": 2045
     }
+  },
+  "dependency_build_qualification": {
+    "evidence": "checkpoints/2026-10-14/security-build-summary.json",
+    "node_tests_passed": 17,
+    "source_hashes_unchanged": true,
+    "full_node_end_to_end": false,
+    "funded_vpn_end_to_end": false,
+    "audit_remaining": "RUSTSEC-2024-0449 through headscale CLI",
+    "foundry_commit": "995e51af02155bc7178af629c00a74ab0f8f5816"
   }
 }

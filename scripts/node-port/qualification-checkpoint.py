@@ -14,7 +14,7 @@ import subprocess
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PACKAGES = ['octra-node', 'octra-node-protocol', 'octra-node-runtime', 'octra-exex', 'octra-browser']
 DIRECTORIES = [
-    *['crates/' + name for name in PACKAGES],
+    'crates',
     'crates/octravpn-node', 'crates/octravpn-core', 'crates/octravpn-tun',
     'crates/octra-hfhe', 'vendor/octra-circle-wasm-host',
     'scripts/node-port', 'scripts/circle-apps', 'crates/octravpn-circle-registry',

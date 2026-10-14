@@ -36,7 +36,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { path: octra }
       - uses: actions/checkout@v4
-        with: { repository: androolloyd/octra-foundry, path: octra-foundry }
+        with: { repository: androolloyd/octra-foundry, ref: 995e51af02155bc7178af629c00a74ab0f8f5816, path: octra-foundry }
       - uses: actions/checkout@v4
         with: { repository: androolloyd/headscale-rs, path: headscale-rs }
       - uses: ./octra/.github/actions/setup-rust
