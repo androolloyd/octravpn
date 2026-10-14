@@ -247,6 +247,17 @@ impl Hub {
             // path emits no shadow data (wire-identical to the
             // pre-HFHE-2 build).
             let shadow_signer = self.build_shadow_signer();
+            let operator_addr = match &receipt_context.circle_id {
+                Some(circle) => circle.clone(),
+                None if self.cfg.chain.protocol_version == crate::config::ProtocolVersion::V1_1 => {
+                    octravpn_core::Address::from_pubkey(&self.chain.wallet.public.0)
+                }
+                None => {
+                    return Err(anyhow!(
+                        "session admission requires the operator circle identity"
+                    ))
+                }
+            };
             let mut state = ControlState::with_metrics(
                 self.wg_kp.clone(),
                 self.router.clone(),
@@ -255,12 +266,14 @@ impl Hub {
                 receipt_context,
                 receipt_journal,
             )
+            .with_receipt_totals(self.receipt_totals.clone())
             .with_events_token(self.cfg.control.events_token_string())
             .with_metrics_token(self.cfg.control.metrics_token_string())
             .with_admin_token(admin_token)
             .with_session_verifier(SessionAdmissionVerifier::new(
                 self.chain.rpc.clone(),
                 self.chain.program_addr.clone(),
+                operator_addr,
             ))
             .with_relay_lifecycle_verifier(RelayLifecycleVerifier::new(
                 self.chain_v3.rpc.clone(),

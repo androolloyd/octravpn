@@ -54,7 +54,7 @@ pub(crate) async fn submit_relay_claim_from_vault(
     let needs_promotion = matches!(entry.state, LifecycleState::Proposed);
     let already_claim_submitted = matches!(entry.state, LifecycleState::ClaimSubmitted { .. });
     match &entry.state {
-        LifecycleState::Proposed => {}
+        LifecycleState::Proposed | LifecycleState::ClaimSubmitted { .. } => {}
         LifecycleState::Armed {
             settlement_hash: pinned,
             ..
@@ -65,7 +65,6 @@ pub(crate) async fn submit_relay_claim_from_vault(
         } => bail!(
             "session {session_id}: vault Armed settlement hash {pinned} != receipt hash {settlement_hash}; refusing to reveal preimage"
         ),
-        LifecycleState::ClaimSubmitted { .. } => {}
         other => bail!(
             "session {session_id}: vault entry cannot be claimed: state={other:?}"
         ),
@@ -90,7 +89,7 @@ pub(crate) async fn submit_relay_claim_from_vault(
     // Margin gate: refuse to claim inside `(deadline - margin, deadline]` so a
     // claim tx cannot confirm at/after D. epoch reads are a float-truncated lower
     // bound (see the fresh re-read below), and margin >= 1 absorbs that slack.
-    if current_epoch + margin > relay_deadline {
+    if !octravpn_core::relay_window::claim_window_open(current_epoch, relay_deadline, margin) {
         bail!(
             "relay claim window too close to deadline for session {session_id}: epoch={current_epoch} + margin={margin} > deadline={relay_deadline}"
         );
@@ -142,7 +141,7 @@ pub(crate) async fn submit_relay_claim_from_vault(
         .current_epoch()
         .await
         .context("current_epoch re-read before revealing preimage")?;
-    if fresh_epoch + margin > relay_deadline {
+    if !octravpn_core::relay_window::claim_window_open(fresh_epoch, relay_deadline, margin) {
         bail!(
             "relay claim window closed before reveal for session {session_id}: epoch={fresh_epoch} + margin={margin} > deadline={relay_deadline}"
         );

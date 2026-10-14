@@ -84,6 +84,7 @@ pub(crate) struct Hub {
     /// Shared with the control plane via an Arc — every `get_state`
     /// call consults this before signing.
     pub receipt_journal: Arc<octravpn_core::receipt_journal::ReceiptJournal>,
+    pub receipt_totals: Arc<octravpn_core::receipt_journal::ReceiptJournal>,
     /// v4 relay-settlement receipt vault. Stores variable-length
     /// `SignedReceipt` JSON blobs posted back by clients, independently
     /// of the fixed-width receipt journal above.

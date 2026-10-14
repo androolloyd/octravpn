@@ -308,3 +308,16 @@ compaction is already in flight. 10 MB ≈ 240k v1 records — well
 above any realistic tailnet's live session count, so compaction is
 rare in production. Tests use `set_compaction_watermark` to drop the
 threshold to a handful of records and exercise the path quickly.
+
+### Durable cache misses and embedded writer lifetime
+
+Persistent cache misses always recover their floor from disk. The bounded
+recent-eviction ring is diagnostic and cannot establish that a session is new.
+Receipt issuance uses `try_floor` and rejects I/O or corruption failures; the
+compatibility `floor` accessor returns an exhausted floor on failure. This
+linear scan preserves correctness but requires a durable index before scaling
+to very large lifetime session counts.
+
+An embedded host attaches its directory lock with `retain_writer_guard` before
+publishing the journal. The shared storage state retains that guard across
+request handlers and detached compaction, including service cancellation.

@@ -846,9 +846,8 @@ theorem settle_confirm_mismatch_dispute_stays_open
   show (Map.update _ sid _ : SessionId → Option Session) sid = some ss
   unfold Map.update; simp
 
-/-- FEE GOES TO PROGRAM TREASURY. `main-v3.aml:583`.
-    Validates the protocol-fee accounting path. -/
-theorem settle_confirm_fee_to_program_treasury
+/-- Traffic settlement never credits the program treasury. -/
+theorem settle_confirm_no_protocol_commission
     (s s' : ProgramState) (caller : Addr) (sid : SessionId)
     (bytesUsed net : Nat) (blinding : Bytes) (sess : Session)
     (hp : s.paused = false)
@@ -859,13 +858,34 @@ theorem settle_confirm_fee_to_program_treasury
     (hclaim : sess.operatorClaim = some bytesUsed)
     (hbl : blinding ≠ [])
     (h : settleConfirm s caller sid bytesUsed net blinding = some s') :
-    let totalPaid := if net > sess.deposit then sess.deposit else net
-    let fee := totalPaid * s.params.protocolFeeBps / BPS_DENOM
-    s'.programTreasury = s.programTreasury + fee := by
+    s'.programTreasury = s.programTreasury := by
   unfold settleConfirm at h
   simp [hp, Nat.not_le.mpr hc, hsess, hst, hop, hclaim, hbl] at h
   subst h
   rfl
+
+/-- The full agreed charge is credited even if legacy fee state is nonzero. -/
+theorem settle_confirm_full_operator_payment
+    (s s' : ProgramState) (caller : Addr) (sid : SessionId)
+    (bytesUsed net : Nat) (blinding : Bytes) (sess : Session)
+    (hp : s.paused = false)
+    (hc : sid < s.sessionCount)
+    (hsess : s.sessions sid = some sess)
+    (hst : sess.status = SessionStatus.open)
+    (hop : sess.opener = caller)
+    (hclaim : sess.operatorClaim = some bytesUsed)
+    (hbl : blinding ≠ [])
+    (h : settleConfirm s caller sid bytesUsed net blinding = some s') :
+    let paid := if net > sess.deposit then sess.deposit else net
+    s'.circleEarningsTotal sess.circle = s.circleEarningsTotal sess.circle + paid := by
+  unfold settleConfirm at h
+  simp [hp, Nat.not_le.mpr hc, hsess, hst, hop, hclaim, hbl] at h
+  subst h
+  by_cases positive : (if net > sess.deposit then sess.deposit else net) > 0
+  · simp [positive, Map.update]
+  · have zero : (if net > sess.deposit then sess.deposit else net) = 0 :=
+      Nat.eq_zero_of_not_pos positive
+    simp [zero]
 
 /-- CLAIM-NO-SHOW OPENER-ONLY. `main-v3.aml:607`. -/
 theorem claim_no_show_only_opener

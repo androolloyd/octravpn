@@ -1,0 +1,20 @@
+--- a/lib/core/tx_staging.ml
++++ b/lib/core/tx_staging.ml
+@@ -386,9 +386,15 @@
+     Hashtbl.replace virtual_nonces addr nonce;
+     Ok ()
+   end else if Hashtbl.mem virtual_balances addr
+-              && Hashtbl.mem virtual_nonces addr then
++              && Hashtbl.mem virtual_nonces addr then begin
++    let balance = match lookup addr with
++      | Some (balance, _) -> balance | None -> Z.zero in
++    let reserved = sender_entries addr
++      |> List.fold_left (fun total entry ->
++        Z.add total (public_balance_cost entry.tx)) Z.zero in
++    Hashtbl.replace virtual_balances addr (Z.sub balance reserved);
+     Ok ()
+-  else
++  end else
+     Error "staging sender state is inconsistent"
+ 
+ let check_virtual_balance addr amount =

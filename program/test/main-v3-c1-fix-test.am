@@ -9,7 +9,7 @@
 //   - `set_params` defaults are unchanged except where noted; in
 //     particular `dispute_grace_epochs = 7`,
 //     `session_grace_epochs = 100`, `slash_burn_bps = 9000`,
-//     `protocol_fee_bps = 50`, `sweep_bounty_bps = 100`.
+//     `protocol_fee_bps = 0`, `sweep_bounty_bps = 100`.
 //   - Three actors: TAILNET_OWNER (T), OPERATOR (O whose circle is C),
 //     STRANGER (S). Bond on C = 1e10 OctRaw. Tailnet treasury seeded
 //     to 1e10. Each scenario opens with `setup_session()` which:

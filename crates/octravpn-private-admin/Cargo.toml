@@ -1,0 +1,33 @@
+[package]
+name = "octravpn-private-admin"
+version.workspace = true
+edition.workspace = true
+rust-version = "1.89"
+license.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+ark-bn254 = "=0.5.0"
+ark-crypto-primitives = { version = "=0.5.0", features = ["crh", "r1cs"] }
+ark-ec = "=0.5.0"
+ark-ff = "=0.5.0"
+ark-groth16 = "=0.5.0"
+ark-r1cs-std = "=0.5.0"
+ark-relations = "=0.5.1"
+ark-serialize = "=0.5.0"
+base64.workspace = true
+clap.workspace = true
+hex.workspace = true
+libc = "0.2"
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -1,3 +1,17 @@
+> Latest RC evidence: [canary security review](audit/2026-10-11-canary-security.md).
+> Zero-escrow mainnet qualification is prepared; the relayer is unfunded and
+> stateful target proof execution remains unverified. Custom multi-hop forwarding
+> is disabled until authenticated transport is implemented.
+
+> Current candidate: [v5 private administration](private-administration.md).
+> v5 supersedes the public-owner v4 candidate; its circuit/setup and target-profile
+> checks remain launch prerequisites. Earlier evidence: [2026-10-11 v4 review](audit/2026-10-11-mainnet-readiness.md).
+> The historical status below predates the revised v4 contract. Its slashing,
+> multisig ceremony and money-path claims are not launch approval for this candidate.
+
+Economics update (2026-10-12): current source has zero VPN commission.
+The dated settlement figures below refer to earlier deployed bytecode.
+
 # OctraVPN — production readiness checklist
 
 **Scope.** Single source of truth answering "how close are we to shipping

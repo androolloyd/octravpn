@@ -23,6 +23,7 @@ tracing     = { workspace = true }
 thiserror   = { workspace = true }
 
 [dev-dependencies]
+axum = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 octra-mock-rpc = { path = "../../../octra-foundry/crates/octra-mock-rpc" }
 

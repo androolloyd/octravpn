@@ -1,0 +1,30 @@
+[package]
+name = "octra-node-protocol"
+version.workspace = true
+edition.workspace = true
+license = "BSD-3-Clause AND ISC"
+rust-version.workspace = true
+description = "Evidence-backed protocol primitives for the Octra Rust node port."
+publish = false
+
+[dependencies]
+base64.workspace = true
+blake2 = "0.10.6"
+bs58.workspace = true
+curve25519-dalek.workspace = true
+ed25519-dalek.workspace = true
+hex.workspace = true
+num-bigint = "0.4"
+num-traits.workspace = true
+rand.workspace = true
+rustix = { version = "1.1.4", features = ["fs"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+
+[lints]
+workspace = true

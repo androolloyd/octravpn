@@ -34,7 +34,7 @@ contract OctraVPN_V3 {
 
   const BPS_DENOM: uint = 10000
   const SLASH_BURN_DEFAULT_BPS: uint = 9000   // 90% burn, 10% bounty
-  const PROTOCOL_FEE_DEFAULT_BPS: uint = 50
+  const PROTOCOL_FEE_DEFAULT_BPS: uint = 0
   const SWEEP_GRACE_MULT_DEFAULT: uint = 10
   const SWEEP_BOUNTY_DEFAULT_BPS: uint = 100
 
@@ -82,7 +82,12 @@ contract OctraVPN_V3 {
 
     // --------- Circle registry (thin) ---------
     circle_owner: map[address]address
-    // Base64 ed25519 pubkey (44 chars) — used by slash_double_sign.
+    // Pilot onboarding: governance verifies native circle ownership externally.
+    circle_authorized_owner: map[address]address
+    circle_registration_approved: map[address]uint
+    // Stake remains slashable until every funded session has terminated.
+    circle_open_sessions: map[address]uint
+    // Base64 ed25519 attestation key. Opaque evidence is governance-only.
     circle_receipt_pk: map[address]string
     // sha256 of the operator's canonical /state-root.json (32B).
     circle_state_root: map[address]bytes
@@ -188,7 +193,7 @@ contract OctraVPN_V3 {
     if self.circle_slashed[c] != 0 {
       return false
     }
-    return self.circle_active[c] == 1
+    return self.circle_active[c] == 1 && self.circle_bond[c] >= self.min_circle_stake && self.circle_unbonding[c] == 0
   }
 
   // Common slash settlement. Burns + bounties out the total stake,
@@ -243,7 +248,7 @@ contract OctraVPN_V3 {
     require(new_unbond_grace_epochs >= 1000, "unbond grace too short")
     require(new_slash_burn_bps >= 5000, "burn share too low")
     require(new_slash_burn_bps + new_slash_bounty_bps == BPS_DENOM, "slash bps sum")
-    require(new_protocol_fee_bps <= 200, "protocol fee > 2%")
+    require(new_protocol_fee_bps == 0, "protocol fee disabled")
     self.min_session_deposit = new_min_session_deposit
     self.min_tailnet_deposit = new_min_tailnet_deposit
     self.session_grace_epochs = new_session_grace_epochs
@@ -253,7 +258,7 @@ contract OctraVPN_V3 {
     self.unbond_grace_epochs = new_unbond_grace_epochs
     self.slash_burn_bps = new_slash_burn_bps
     self.slash_bounty_bps = new_slash_bounty_bps
-    self.protocol_fee_bps = new_protocol_fee_bps
+    self.protocol_fee_bps = 0
     return true
   }
 
@@ -274,10 +279,25 @@ contract OctraVPN_V3 {
 
   // state_root = sha256 of the operator's canonical /state-root.json
   // sealed inside the circle. register + bond are atomic.
+  // A native circle's owner cannot currently be read by this AML contract.
+  // Bind the first registration to an independently checked operator wallet.
+  fn approve_circle_registration(circle: address, operator: address): bool {
+    require_owner()
+    require(is_address(circle), "invalid circle id")
+    require(is_address(operator), "invalid operator")
+    require(self.circle_state_version[circle] == 0, "circle already registered")
+    self.circle_authorized_owner[circle] = operator
+    self.circle_registration_approved[circle] = 1
+    return true
+  }
+
   payable fn register_circle(circle: address, state_root: bytes, receipt_pubkey: string): bool {
     require_not_paused()
     require(is_address(circle), "invalid circle id")
+    require(self.circle_registration_approved[circle] == 1, "registration not approved")
+    require(self.circle_authorized_owner[circle] == caller, "not approved circle owner")
     require(self.circle_active[circle] == 0, "circle already active")
+    require(self.circle_state_version[circle] == 0, "circle already registered")
     require(self.circle_slashed[circle] == 0, "previously slashed")
     require(len(state_root) == 64, "state_root must be 64-char hex sha256")
     require(len(receipt_pubkey) > 0, "receipt pubkey required")
@@ -324,7 +344,7 @@ contract OctraVPN_V3 {
   }
 
   // Rotate the on-chain attestation pubkey. Old pubkey is dropped:
-  // future slash uses the new one. Off-chain witnesses must adopt
+  // governance must retain old evidence keys. Off-chain witnesses must adopt
   // the new key from this epoch on.
   fn rotate_receipt_pubkey(circle: address, new_pubkey: string): bool {
     require_not_paused()
@@ -363,6 +383,7 @@ contract OctraVPN_V3 {
   fn unbond_endpoint(circle: address): bool {
     require_not_paused()
     require(self.circle_owner[circle] == caller, "not circle owner")
+    require(self.circle_active[circle] == 0, "retire circle before unbonding")
     let amt = self.circle_bond[circle]
     require(amt > 0, "no stake")
     require(self.circle_unbonding[circle] == 0, "already unbonding")
@@ -377,6 +398,8 @@ contract OctraVPN_V3 {
   nonreentrant fn finalize_unbond(circle: address): bool {
     require_not_paused()
     require(self.circle_owner[circle] == caller, "not circle owner")
+    require(self.circle_active[circle] == 0, "retire circle before unbonding")
+    require(self.circle_open_sessions[circle] == 0, "funded sessions still open")
     let amt = self.circle_unbonding[circle]
     require(amt > 0, "nothing unbonding")
     require(epoch >= self.circle_unbond_unlock_epoch[circle], "unbond grace not elapsed")
@@ -392,15 +415,11 @@ contract OctraVPN_V3 {
   // ============================================================
 
   fn slash_double_sign(circle: address, payload_a: string, sig_a: string, payload_b: string, sig_b: string): bool {
-    require_not_paused()
-    require(self.circle_slashed[circle] == 0, "already slashed")
-    require(payload_a != payload_b, "payloads identical")
-    let receipt_pk = self.circle_receipt_pk[circle]
-    require(len(receipt_pk) > 0, "circle has no receipt pubkey")
-    require(ed25519_ok(receipt_pk, payload_a, sig_a), "sig_a invalid")
-    require(ed25519_ok(receipt_pk, payload_b, sig_b), "sig_b invalid")
-    apply_slash(circle)
-    return true
+    // Opaque payloads do not prove same-session, same-sequence equivocation.
+    // Keep the ABI to reject old clients safely; governance adjudicates
+    // off-chain evidence until a structured, VM-verifiable receipt ABI exists.
+    require(false, "opaque slashing disabled; submit evidence to governance")
+    return false
   }
 
   fn gov_slash_operator(circle: address): bool {
@@ -487,6 +506,7 @@ contract OctraVPN_V3 {
     require_not_paused()
     require(tailnet_id < self.tailnet_count, "tailnet not found")
     require(self.tailnet_retired[tailnet_id] == 0, "tailnet retired")
+    require(self.tailnet_owner[tailnet_id] == caller, "not tailnet owner")
     require(circle_is_active(circle), "circle inactive or slashed")
     require(max_pay >= self.min_session_deposit, "deposit below min")
     require(self.tailnet_treasury[tailnet_id] >= max_pay, "tailnet treasury insufficient")
@@ -499,6 +519,7 @@ contract OctraVPN_V3 {
     self.session_count = sid + 1
     self.session_tailnet[sid] = tailnet_id
     self.session_exit[sid] = circle
+    self.circle_open_sessions[circle] = self.circle_open_sessions[circle] + 1
     self.session_opener[sid] = caller
     self.session_deposit[sid] = max_pay
     self.session_opened_at[sid] = epoch
@@ -509,7 +530,7 @@ contract OctraVPN_V3 {
 
   // Operator records bytes_used. Re-claiming a different value =
   // equivocation: refund the session; bond is burned by a follow-up
-  // slash_double_sign tx.
+  // governance adjudication.
   fn settle_claim(session_id: uint, bytes_used: uint): bool {
     require_not_paused()
     require(session_id < self.session_count, "session not found")
@@ -526,10 +547,12 @@ contract OctraVPN_V3 {
         return true
       }
       // Equivocation: refund deposit, mark refunded. Slash itself
-      // requires the signed receipts; that's slash_double_sign's job.
+      // is adjudicated by governance using the signed receipts.
       let tid = self.session_tailnet[session_id]
       let dep = self.session_deposit[session_id]
       self.session_status[session_id] = SESSION_REFUNDED
+    let funded_circle = self.session_exit[session_id]
+    self.circle_open_sessions[funded_circle] = self.circle_open_sessions[funded_circle] - 1
       self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + dep
       emit SettleDispute(session_id, prev_bytes, bytes_used)
       emit SessionRefunded(session_id, "operator equivocation")
@@ -574,12 +597,12 @@ contract OctraVPN_V3 {
     if total_paid > dep {
       total_paid = dep
     }
-    let fee = total_paid * self.protocol_fee_bps / BPS_DENOM
-    let net_after_fee = total_paid - fee
+    let net_after_fee = total_paid
     let refund = dep - total_paid
 
     self.session_status[session_id] = SESSION_SETTLED
-    self.treasury = self.treasury + fee
+    let funded_circle = self.session_exit[session_id]
+    self.circle_open_sessions[funded_circle] = self.circle_open_sessions[funded_circle] - 1
     if refund > 0 {
       self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + refund
     }
@@ -608,6 +631,8 @@ contract OctraVPN_V3 {
     require(epoch >= opened + self.session_grace_epochs, "grace not elapsed")
     require(self.operator_claim_set[session_id] == 0, "operator claimed")
     self.session_status[session_id] = SESSION_REFUNDED
+    let funded_circle = self.session_exit[session_id]
+    self.circle_open_sessions[funded_circle] = self.circle_open_sessions[funded_circle] - 1
     let tid = self.session_tailnet[session_id]
     let dep = self.session_deposit[session_id]
     self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + dep
@@ -623,6 +648,8 @@ contract OctraVPN_V3 {
     let sweep_grace = self.session_grace_epochs * self.sweep_grace_multiplier
     require(epoch >= opened + sweep_grace, "sweep grace not elapsed")
     self.session_status[session_id] = SESSION_REFUNDED
+    let funded_circle = self.session_exit[session_id]
+    self.circle_open_sessions[funded_circle] = self.circle_open_sessions[funded_circle] - 1
     let dep = self.session_deposit[session_id]
     let bounty = dep * self.sweep_bounty_bps / BPS_DENOM
     let refund = dep - bounty
@@ -647,7 +674,6 @@ contract OctraVPN_V3 {
   nonreentrant fn claim_earnings(circle: address, amount: uint): bool {
     require_not_paused()
     require(self.circle_owner[circle] == caller, "not circle owner")
-    require(self.circle_slashed[circle] == 0, "operator slashed")
     require(amount > 0, "amount > 0")
     let avail = self.circle_earnings_total[circle] - self.circle_earnings_claimed[circle]
     require(amount <= avail, "amount exceeds available earnings")
@@ -661,8 +687,11 @@ contract OctraVPN_V3 {
   // Views
   // ============================================================
 
+  view fn get_owner(): address { return self.owner }
+  view fn get_circle_open_sessions(circle: address): uint { return self.circle_open_sessions[circle] }
+
   view fn get_circle_active(circle: address): bool {
-    return self.circle_active[circle] == 1
+    return circle_is_active(circle)
   }
 
   view fn is_circle_slashed(circle: address): bool {
@@ -707,5 +736,17 @@ contract OctraVPN_V3 {
 
   view fn get_session_status(session_id: uint): uint {
     return self.session_status[session_id]
+  }
+
+  view fn get_session_exit(session_id: uint): address {
+    require(session_id < self.session_count, "session not found")
+    return self.session_exit[session_id]
+  }
+  view fn get_session_opener(session_id: uint): address {
+    require(session_id < self.session_count, "session not found")
+    return self.session_opener[session_id]
+  }
+  view fn get_session_count(): uint {
+    return self.session_count
   }
 }

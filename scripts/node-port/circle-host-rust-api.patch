@@ -1,0 +1,184 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -2,10 +2,11 @@
+ name = "octra_circle_wasm_host"
+ version = "0.1.0"
+ edition = "2021"
++rust-version = "1.82"
+ 
+ [lib]
+ name = "octra_circle_wasm_host"
+-crate-type = ["staticlib"]
++crate-type = ["staticlib", "rlib"]
+ 
+ [dependencies]
+ base64 = "0.22"
+@@ -17,4 +18,6 @@
+ sha2 = "0.10"
+ wasmi = "0.40"
+ wasm-encoder = { version = "=0.222.0", default-features = false, features = ["wasmparser"] }
+-wasmparser = { version = "=0.222.0", default-features = false, features = ["std"] }
+\ No newline at end of file
++wasmparser = { version = "=0.222.0", default-features = false, features = ["std"] }
++[features]
++rust-host = []
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -16,6 +16,9 @@
+     Instance, Linker, Module, ResourceLimiter, Store, StoreLimits, StoreLimitsBuilder,
+ };
+ use wasmi::errors::{MemoryError, TableError};
++
++#[cfg(feature = "rust-host")]
++pub mod rust_api;
+ 
+ mod deterministic_tensor;
+ mod float_ops;
+@@ -1508,7 +1511,7 @@
+     String(String),
+ }
+ 
+-#[cfg(not(test))]
++#[cfg(not(any(test, feature = "rust-host")))]
+ extern "C" {
+     fn octra_circle_wasm_host_hfhe_call_json(
+         input_ptr: *const u8,
+@@ -1520,7 +1523,7 @@
+     ) -> i32;
+ }
+ 
+-#[cfg(test)]
++#[cfg(all(test, not(feature = "rust-host")))]
+ unsafe fn octra_circle_wasm_host_hfhe_call_json(
+     _input_ptr: *const u8,
+     _input_len: usize,
+@@ -1625,6 +1628,10 @@
+     } else {
+         unsafe { slice::from_raw_parts(input_ptr, input_len) }
+     };
++    run_reply_bytes(input)
++}
++
++fn run_reply_bytes(input: &[u8]) -> Result<native_bytes::Value, HostFailure> {
+     let input_text = std::str::from_utf8(input)
+         .map_err(|e| format!("octra_circle_wasm_host: invalid utf8 input: {e}"))?;
+     let payload: Payload = serde_json::from_str(input_text)
+@@ -8087,6 +8094,12 @@
+     call_hfhe_backend(payload)
+ }
+ 
++#[cfg(feature = "rust-host")]
++fn call_hfhe_backend(payload: JsonValue) -> Result<JsonValue, HostFailure> {
++    rust_api::invoke_backend(&payload)
++}
++
++#[cfg(not(feature = "rust-host"))]
+ fn call_hfhe_backend(payload: JsonValue) -> Result<JsonValue, HostFailure> {
+     let input = serde_json::to_string(&payload)
+         .map_err(|e| HostFailure::Unavailable(format!("hfhe payload encode failed: {e}")))?;
+@@ -8133,6 +8146,7 @@
+     }
+ }
+ 
++#[cfg(not(feature = "rust-host"))]
+ unsafe fn copy_and_free_malloc_string(ptr: *mut u8, len: usize) -> String {
+     if ptr.is_null() || len == 0 {
+         if !ptr.is_null() {
+--- /dev/null
++++ b/src/rust_api.rs
+@@ -0,0 +1,95 @@
++// SPDX-License-Identifier: BSD-3-Clause
++// Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
++//! Safe host entry point. The WASM interpreter and effect rules remain upstream.
++use std::{cell::RefCell, fmt, sync::Arc};
++
++use serde_json::Value;
++
++use super::{native_bytes, HostFailure};
++
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub enum Error {
++    Rejected(String),
++    Unavailable(String),
++}
++
++impl fmt::Display for Error {
++    fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
++        match self {
++            Self::Rejected(reason) | Self::Unavailable(reason) => output.write_str(reason),
++        }
++    }
++}
++impl std::error::Error for Error {}
++
++impl From<HostFailure> for Error {
++    fn from(failure: HostFailure) -> Self {
++        match failure {
++            HostFailure::Rejected(reason) => Self::Rejected(reason),
++            HostFailure::Unavailable(reason) => Self::Unavailable(reason),
++        }
++    }
++}
++
++/// A trusted host capability. Rejections are deterministic; unavailable resources
++/// must cause retry/abort rather than becoming an execution result.
++pub trait HfheBackend: Send + Sync {
++    fn call(&self, request: &Value) -> Result<Value, Error>;
++}
++
++/// Keeps the upstream memory lease alive until the caller releases the reply.
++pub struct Reply(native_bytes::Value);
++
++impl AsRef<[u8]> for Reply {
++    fn as_ref(&self) -> &[u8] {
++        self.0.as_slice()
++    }
++}
++
++thread_local! {
++    static BACKEND: RefCell<Option<Arc<dyn HfheBackend>>> = const { RefCell::new(None) };
++}
++
++struct BackendScope(Option<Arc<dyn HfheBackend>>);
++impl Drop for BackendScope {
++    fn drop(&mut self) {
++        BACKEND.with(|slot| slot.replace(self.0.take()));
++    }
++}
++
++/// Executes synchronously; run it on the host's bounded execution pool.
++/// Input and output use the existing native JSON schema. Caller/epoch/storage
++/// must come from authenticated host state, never an untrusted RPC request.
++pub fn run(input: &[u8], backend: Arc<dyn HfheBackend>) -> Result<Reply, Error> {
++    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
++        let _scope = BackendScope(BACKEND.with(|slot| slot.replace(Some(backend))));
++        super::run_reply_bytes(input).map(Reply).map_err(Error::from)
++    }))
++    .unwrap_or_else(|_| Err(Error::Unavailable("octra_circle_wasm_host: panic".into())))
++}
++
++pub(super) fn invoke_backend(request: &Value) -> Result<Value, HostFailure> {
++    let backend = BACKEND.with(|slot| slot.borrow().clone())
++        .ok_or_else(|| HostFailure::Unavailable("Rust HFHE backend not installed".into()))?;
++    backend.call(request).map_err(|error| match error {
++        Error::Rejected(reason) => HostFailure::Rejected(reason),
++        Error::Unavailable(reason) => HostFailure::Unavailable(reason),
++    })
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    struct Backend;
++    impl HfheBackend for Backend {
++        fn call(&self, _: &Value) -> Result<Value, Error> {
++            Err(Error::Rejected("fixture rejection".into()))
++        }
++    }
++    #[test]
++    fn safe_api_classifies_errors_and_releases_backend_scope() {
++        assert!(matches!(run(b"not-json", Arc::new(Backend)), Err(Error::Rejected(_))));
++        assert!(BACKEND.with(|slot| slot.borrow().is_none()));
++        assert!(matches!(invoke_backend(&Value::Null), Err(HostFailure::Unavailable(_))));
++    }
++}

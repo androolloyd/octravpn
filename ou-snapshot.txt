@@ -22,7 +22,7 @@ set_params 1200
 set_paused 1000
 settle_claim 1700
 settle_confirm 1720
-slash_double_sign 2140
+slash_double_sign 1020
 sweep_expired_session 2080
 transfer_ownership 1020
 unbond_endpoint 1440

@@ -446,8 +446,7 @@ SettleConfirm(sid, caller, bytes) ==
              /\ bytes <= sessions[sid].deposit
              /\ LET op  == sessions[sid].exit
                     t   == sessions[sid].tailnet
-                    fee == (bytes * 50) \div 10000  \* 0.5%
-                    net_pay      == bytes - fee
+                    net_pay      == bytes  \* Full traffic payment; no commission
                     extra_refund == sessions[sid].deposit - bytes
                 IN  /\ sessions' = [sessions EXCEPT
                             ![sid] = [sessions[sid] EXCEPT
@@ -459,7 +458,7 @@ SettleConfirm(sid, caller, bytes) ==
                             ![op] = enc_earn[op] + net_pay]
                     /\ treasury'         = [treasury EXCEPT
                             ![t] = treasury[t] + extra_refund]
-                    /\ program_treasury' = program_treasury + fee
+                    /\ program_treasury' = program_treasury
                     /\ refunded'         = refunded + extra_refund
                     /\ settled_sids'     = settled_sids \cup {sid}
              /\ UNCHANGED << registered, endpoint_stake, endpoint_slashed,

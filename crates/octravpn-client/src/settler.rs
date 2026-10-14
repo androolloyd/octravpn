@@ -453,8 +453,7 @@ fn relay_net(active: &ActiveSession, bytes_used: u64) -> u64 {
     let price_per_mb = active
         .route
         .last()
-        .map(|hop| hop.validator.price_per_mb)
-        .unwrap_or(0);
+        .map_or(0, |hop| hop.validator.price_per_mb);
     compute_relay_net(bytes_used, price_per_mb, active.deposit)
 }
 
@@ -470,13 +469,7 @@ pub(crate) async fn announce_session_to_exit(
     let exit = active.route.last().ok_or_else(|| anyhow!("empty route"))?;
     let ctrl_endpoint =
         octravpn_core::control::base_url_for(&normalize_control_endpoint(&exit.validator.endpoint));
-    let client_wg_secret = octravpn_core::util::derive_subkey(
-        &active.session_kp.public.0,
-        octravpn_core::util::DOMAIN_NOISE,
-    );
-    let client_wg_pubkey =
-        x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(client_wg_secret))
-            .to_bytes();
+    let client_wg_pubkey = crate::wireguard::public_key(&active.session_kp);
     let client_sig_payload = announce_signing_payload(
         &active.session_id,
         &active.session_kp.public,
@@ -525,6 +518,59 @@ pub(crate) fn normalize_control_endpoint(endpoint: &str) -> String {
         .unwrap_or_else(|| endpoint.trim())
         .trim_end_matches('/')
         .to_string()
+}
+
+async fn fetch_proposed_receipt(
+    client: &Arc<Client>,
+    wg_endpoint: &str,
+    session_id: &SessionId,
+) -> Result<ProposedReceipt> {
+    let endpoint = normalize_control_endpoint(wg_endpoint);
+    let url = octravpn_core::control::session_state_url(&endpoint, session_id);
+    let resp = client
+        .http()
+        .get(&url)
+        .send()
+        .await
+        .context("control-plane GET")?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("control GET status {}", resp.status()));
+    }
+    let body: SessionStateResponse = resp.json().await.context("decode session state")?;
+    body.proposed.ok_or_else(|| anyhow!("no proposed receipt"))
+}
+
+async fn post_countersigned_receipt(
+    client: &Arc<Client>,
+    wg_endpoint: &str,
+    session_id: &SessionId,
+    signed: &SignedReceipt,
+) -> Result<()> {
+    let endpoint = normalize_control_endpoint(wg_endpoint);
+    let url = octravpn_core::control::receipt_url(&endpoint, session_id);
+    let local_hash = signed.settlement_hash();
+    let resp = client
+        .http()
+        .post(&url)
+        .json(signed)
+        .send()
+        .await
+        .context("control-plane POST receipt")?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("control POST receipt status {}", resp.status()));
+    }
+    let body: PostReceiptResponse = resp.json().await.context("decode receipt POST response")?;
+    if !body.accepted {
+        return Err(anyhow!("operator rejected countersigned receipt"));
+    }
+    if body.settlement_hash != local_hash {
+        return Err(anyhow!(
+            "settlement_hash mismatch: local={} operator={}",
+            local_hash,
+            body.settlement_hash
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -662,57 +708,4 @@ mod tests {
             json!([43, receipt.settlement_hash(), 1_500, 200])
         );
     }
-}
-
-async fn fetch_proposed_receipt(
-    client: &Arc<Client>,
-    wg_endpoint: &str,
-    session_id: &SessionId,
-) -> Result<ProposedReceipt> {
-    let endpoint = normalize_control_endpoint(wg_endpoint);
-    let url = octravpn_core::control::session_state_url(&endpoint, session_id);
-    let resp = client
-        .http()
-        .get(&url)
-        .send()
-        .await
-        .context("control-plane GET")?;
-    if !resp.status().is_success() {
-        return Err(anyhow!("control GET status {}", resp.status()));
-    }
-    let body: SessionStateResponse = resp.json().await.context("decode session state")?;
-    body.proposed.ok_or_else(|| anyhow!("no proposed receipt"))
-}
-
-async fn post_countersigned_receipt(
-    client: &Arc<Client>,
-    wg_endpoint: &str,
-    session_id: &SessionId,
-    signed: &SignedReceipt,
-) -> Result<()> {
-    let endpoint = normalize_control_endpoint(wg_endpoint);
-    let url = octravpn_core::control::receipt_url(&endpoint, session_id);
-    let local_hash = signed.settlement_hash();
-    let resp = client
-        .http()
-        .post(&url)
-        .json(signed)
-        .send()
-        .await
-        .context("control-plane POST receipt")?;
-    if !resp.status().is_success() {
-        return Err(anyhow!("control POST receipt status {}", resp.status()));
-    }
-    let body: PostReceiptResponse = resp.json().await.context("decode receipt POST response")?;
-    if !body.accepted {
-        return Err(anyhow!("operator rejected countersigned receipt"));
-    }
-    if body.settlement_hash != local_hash {
-        return Err(anyhow!(
-            "settlement_hash mismatch: local={} operator={}",
-            local_hash,
-            body.settlement_hash
-        ));
-    }
-    Ok(())
 }

@@ -1,0 +1,35 @@
+[package]
+name = "octravpn-circle-registry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "VPN operator discovery as an Octra WASM Circle application."
+publish = false
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+bs58.workspace = true
+thiserror.workspace = true
+url = "2"
+
+[features]
+default = []
+host = ["dep:octra-exex", "dep:sqlx", "dep:tokio", "dep:sha2"]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+octra-exex = { path = "../octra-exex", optional = true }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"], optional = true }
+tokio = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -150,7 +150,7 @@ struct ArmedPin {
     settlement_hash: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionEntry {
     pub receipt: SignedReceipt,
     pub state: LifecycleState,
@@ -180,7 +180,8 @@ impl SessionEntry {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)] // One decoded wire record; boxing would add an allocation per replay.
 pub enum VaultRecord {
     Receipt {
         session_id: SessionId,
@@ -192,7 +193,7 @@ pub enum VaultRecord {
     },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodedRecord {
     pub record: VaultRecord,
     pub bytes_consumed: usize,
@@ -209,9 +210,15 @@ struct Inner {
     path: Option<PathBuf>,
     handle: Option<std::fs::File>,
     file_size: u64,
+    writer_guard: Option<std::sync::Arc<std::fs::File>>,
 }
 
 impl ReceiptVault {
+    /// Keep the host's exclusive writer lock alive for every vault handle.
+    pub fn retain_writer_guard(&self, guard: std::sync::Arc<std::fs::File>) {
+        self.inner.lock().writer_guard.get_or_insert(guard);
+    }
+
     /// Open or initialise a vault at `path`. OCRV1 files are migrated
     /// once to OCRV2. On replay, the highest receipt sequence per
     /// session wins until the session is armed; after that the receipt
@@ -264,6 +271,7 @@ impl ReceiptVault {
                 path: Some(path),
                 handle: Some(handle),
                 file_size: file_size.max(MAGIC_V2.len() as u64),
+                writer_guard: None,
             }),
         })
     }
@@ -277,6 +285,7 @@ impl ReceiptVault {
                 path: None,
                 handle: None,
                 file_size: 0,
+                writer_guard: None,
             }),
         }
     }
@@ -580,7 +589,6 @@ fn validate_lifecycle_transition(
             }
             Ok(())
         }
-        (LifecycleState::Proposed, _) => Err(illegal_transition(session_id, &entry.state, next)),
         (
             LifecycleState::Armed { .. },
             LifecycleState::ClaimSubmitted { .. }
@@ -944,7 +952,7 @@ fn replay_v2(
                 receipt,
             } => fold_receipt_v2(&mut slots, &session_id, receipt)?,
             VaultRecord::Lifecycle { session_id, state } => {
-                fold_lifecycle_v2(&mut slots, &session_id, state)?
+                fold_lifecycle_v2(&mut slots, &session_id, state)?;
             }
         }
         good_len = cursor as u64;
@@ -1624,7 +1632,7 @@ mod tests {
                 encode_receipt_record(&id, &receipt).unwrap(),
                 encode_lifecycle_record(&id, &LifecycleState::Armed {
                     deadline: 123,
-                    settlement_hash: hash.clone(),
+                    settlement_hash: hash,
                 }).unwrap(),
             ];
             if terminal == 1 {

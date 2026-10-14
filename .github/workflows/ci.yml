@@ -115,20 +115,37 @@ jobs:
           BENCH_REGRESSION_QUICK: "1"
         run: ./scripts/bench-regression.sh
 
-  aml-compile:
-    name: AML compile-gate (real Octra)
+  aml-tests:
+    name: AML compile and real VM security tests
     runs-on: ubuntu-latest
-    # Stays advisory: don't block CI on a transient Octra RPC outage,
-    # but always run and surface the result.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - name: Install python3 + curl
+        with: { path: octra }
+      - uses: actions/checkout@v4
+        with: { repository: androolloyd/octra-foundry, path: octra-foundry }
+      - uses: actions/checkout@v4
+        with:
+          repository: octra-labs/amlc
+          ref: 3a183bc8892b1795f2e1059848f1f331ce1a3a51
+          path: amlc
+      - uses: ocaml/setup-ocaml@v3
+        with: { ocaml-compiler: 4.14.2 }
+      - working-directory: amlc
         run: |
-          sudo apt-get update -y >/dev/null
-          sudo apt-get install -y python3 curl >/dev/null
-      - name: Compile program/main.aml on https://octra.network/rpc
-        run: ./scripts/compile-check.sh
+          git apply ../octra/scripts/private-admin/standalone-label-fix.patch
+          opam install . --deps-only --yes
+          sh scripts/build.sh
+      - uses: dtolnay/rust-toolchain@stable
+      - working-directory: octra-foundry
+        run: cargo build --locked -p octra-cli
+      - working-directory: octra
+        env:
+          AMLC: ${{ github.workspace }}/amlc/_build/install/default/bin/amlc
+        run: |
+          python3 scripts/private-admin/test-compiler-labels.py --amlc "$AMLC"
+          bash scripts/test-aml.sh
+          python3 scripts/private-admin/test-deployment-verifier.py
+          python3 scripts/private-admin/test-canary-runner.py
 
   tla:
     name: TLC model check
@@ -143,7 +160,8 @@ jobs:
       - name: Download TLA+ tools
         run: |
           curl -L -o /tmp/tla2tools.jar \
-            https://github.com/tlaplus/tlaplus/releases/latest/download/tla2tools.jar
+            https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
+          echo "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88  /tmp/tla2tools.jar" | sha256sum -c -
       - name: Run TLC (v1.1)
         run: |
           cd proofs/tla
@@ -169,25 +187,22 @@ jobs:
           echo "OK: zero-margin config breaks QuietZone as expected"
 
   tamarin:
-    name: Tamarin prove
+    name: Tamarin protocol safety
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Tamarin
+      - name: Install pinned Tamarin
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends maude graphviz
-          curl -L -o /tmp/tamarin.zip \
-            https://github.com/tamarin-prover/tamarin-prover/releases/latest/download/tamarin-prover-1.10.0-linux64-ubuntu.tar.gz \
-            || true
-      - name: Run prove (best-effort; advisory only)
-        run: |
-          if command -v tamarin-prover; then
-            cd proofs/tamarin && tamarin-prover --prove octravpn.spthy
-          else
-            echo "tamarin-prover not installed in this runner; skipping"
-          fi
-        continue-on-error: true
+          curl -fSL -o /tmp/tamarin.tar.gz https://github.com/tamarin-prover/tamarin-prover/releases/download/1.12.0/tamarin-prover-1.12.0-linux64-ubuntu.tar.gz
+          echo "201be06f469e47cff554df6ca93db8366fc2c69d70c61fcbd1370a1074b469c6  /tmp/tamarin.tar.gz" | sha256sum -c -
+          mkdir /tmp/tamarin
+          tar -xzf /tmp/tamarin.tar.gz -C /tmp/tamarin
+          find /tmp/tamarin -type f -name tamarin-prover -exec sudo install -m 755 {} /usr/local/bin/tamarin-prover \;
+          tamarin-prover --version
+      - name: Verify every required lemma
+        run: scripts/run-tamarin.sh
 
   lean:
     name: Lean build
@@ -219,12 +234,11 @@ jobs:
       - uses: ./octra/.github/actions/setup-rust
       - name: Install Kani
         run: |
-          cargo install --locked kani-verifier || true
-          cargo kani setup || true
+          cargo install --locked kani-verifier --version 0.68.0
+          cargo kani setup
       - name: Run harnesses
         run: |
-          cd proofs/kani && cargo kani || echo "::warning::Kani run skipped."
-        continue-on-error: true
+          cargo kani --manifest-path proofs/kani/Cargo.toml
 
   docker-e2e:
     name: docker-compose e2e

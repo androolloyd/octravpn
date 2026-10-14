@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-rust-version.workspace = true
+rust-version = "1.85"
 description = "OctraVPN client CLI: pick a route, open session, run tunnel, settle."
 
 [[bin]]
@@ -12,6 +12,7 @@ name = "octravpn"
 path = "src/main.rs"
 
 [dependencies]
+octra-browser = { path = "../octra-browser" }
 octravpn-core = { path = "../octravpn-core" }
 octravpn-mesh = { path = "../octravpn-mesh" }
 octravpn-tun  = { path = "../octravpn-tun" }

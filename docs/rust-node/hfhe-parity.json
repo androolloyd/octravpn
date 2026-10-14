@@ -1,0 +1,236 @@
+{
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "backend_target": "pure_rust_after_exact_compatibility_qualification",
+  "switch_completed": false,
+  "full_backend_complete": false,
+  "verified_components": {
+    "mersenne_field": {
+      "native_cases": 1629,
+      "fixture": "crates/octra-hfhe/tests/fixtures/field.json"
+    },
+    "seeded_aes_rng": {
+      "native_cases": 140,
+      "fixture": "crates/octra-hfhe/tests/fixtures/rng.json"
+    },
+    "seeded_key_generation": {
+      "native_cases": 53,
+      "valid_cases": 41,
+      "parameter_refusals": 12,
+      "profiles": [
+        "MIMC_X3_V6",
+        "MIMC_X5_V7"
+      ],
+      "comparison": "Complete bytes for small v5 keys; SHA-256 over every raw and packed byte for one standard full-size public key; complete secret key bytes",
+      "fixture": "crates/octra-hfhe/tests/fixtures/keys.json"
+    },
+    "matrix_sampling": {
+      "native_cases": 44,
+      "fixture": "crates/octra-hfhe/tests/fixtures/keys.json"
+    },
+    "adaptive_compression": {
+      "native_cases": 118,
+      "fixture": "crates/octra-hfhe/tests/fixtures/keys.json"
+    },
+    "legacy_key_imports": {
+      "native_cases": 848,
+      "accepted_cases": 145,
+      "malformed_refusals": 703,
+      "wire_versions": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "fixture": "crates/octra-hfhe/tests/fixtures/keys.json"
+    },
+    "retained_lpn_prf": {
+      "native_cases": 18,
+      "fixture": "crates/octra-hfhe/tests/fixtures/lpn.json"
+    },
+    "toeplitz_127": {
+      "native_cases": 130,
+      "native_implementations": [
+        "scalar",
+        "hardware"
+      ],
+      "fixture": "crates/octra-hfhe/tests/fixtures/lpn.json"
+    },
+    "active_circuit_prf": {
+      "native_cases": 260,
+      "profiles": [
+        "MIMC_X3_V6",
+        "MIMC_X5_V7"
+      ],
+      "scope": "Round constants, powers, masks, layer transcripts, LPN-v2 noise and full Toeplitz windows",
+      "fixture": "crates/octra-hfhe/tests/fixtures/circuit-prf.json"
+    },
+    "signed_pedersen_commitments": {
+      "native_cases": 2178,
+      "fixture": "crates/octra-hfhe/tests/fixtures/commitments.json"
+    },
+    "ciphertext_wire": {
+      "native_cases": 2219,
+      "wire_versions": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "export_version": 3,
+      "fixture": "crates/octra-hfhe/tests/fixtures/cipher-wire.json"
+    },
+    "linear_arithmetic_commitments_ubk": {
+      "native_cases": 530,
+      "fixture": "crates/octra-hfhe/tests/fixtures/arithmetic.json"
+    },
+    "seeded_products": {
+      "native_cases": 234,
+      "math_modes": [
+        "retained",
+        "active"
+      ],
+      "negative_imported_noise_weight_cases": 24,
+      "fixture": "crates/octra-hfhe/tests/fixtures/products.json"
+    },
+    "seeded_encryption": {
+      "native_cases": 54,
+      "complete_pipeline_cases": 4,
+      "comparison": "Full serialized bytes, refusals and decrypted fields; includes default parameters",
+      "fixture": "crates/octra-hfhe/tests/fixtures/encrypt.json"
+    },
+    "decryption": {
+      "native_cases": 76,
+      "policies": [
+        "STANDARD",
+        "NATIVE_LOCAL",
+        "LEGACY_MASK"
+      ],
+      "fixture": "crates/octra-hfhe/tests/fixtures/decrypt.json"
+    },
+    "noise_budget": {
+      "native_cases": 326,
+      "native_target_executions": 652,
+      "fixture": "crates/octra-hfhe/tests/fixtures/noise-budget.json",
+      "targets": [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin via Rosetta"
+      ],
+      "cross_target_budget_differences": 27,
+      "scope": "Matches each observed native target, not proof of cross-platform equality"
+    },
+    "scalar_profiles": {
+      "native_cases": 2764,
+      "profiles": [
+        "Prior",
+        "Wide"
+      ],
+      "fixture": "crates/octra-hfhe/tests/fixtures/scalars.json"
+    },
+    "proof_foundations": {
+      "native_cases": 211,
+      "scope": "transcripts, generators, hash-to-point, group helpers, MSM and size limits",
+      "fixture": "crates/octra-hfhe/tests/fixtures/proof-foundation.json"
+    },
+    "inner_product_proof": {
+      "native_cases": 192,
+      "complete_proofs": 72,
+      "verifier_outcomes": 1728,
+      "scope": "complete proof bytes, raw/weighted acceptance and post-call transcript",
+      "fixture": "crates/octra-hfhe/tests/fixtures/inner-product.json"
+    },
+    "r1cs_proof": {
+      "native_cases": 96,
+      "complete_proofs": 88,
+      "prover_refusals": 8,
+      "verifier_outcomes": 1936,
+      "scope": "same entropy tape; complete proof bytes, consumption, post-call transcript and acceptance",
+      "fixture": "crates/octra-hfhe/tests/fixtures/r1cs.json"
+    },
+    "proof_gadgets": {
+      "native_cases": 168,
+      "scope": "Exact constraints and witness layout; 40 complete native proofs with identical entropy",
+      "fixture": "crates/octra-hfhe/tests/fixtures/gadgets.json",
+      "complete_proofs": 40
+    },
+    "zero_bound_proofs": {
+      "native_cases": 46,
+      "scope": "Native zero and bound proof circuits; 11 complete proof bytes, entropy and transcripts, including 84833-gate key-bound profile",
+      "fixture": "crates/octra-hfhe/tests/fixtures/zero.json",
+      "complete_proofs": 11
+    },
+    "aggregate_range_proofs": {
+      "native_cases": 8,
+      "scope": "Eight aggregate circuits and four complete native proof outputs; native aggregated verifier remains disabled",
+      "fixture": "crates/octra-hfhe/tests/fixtures/range.json",
+      "complete_proofs": 4
+    },
+    "unseeded_and_scoped_encryption": {
+      "native_cases": 90,
+      "scope": "Native randomized encryption entropy consumption and complete ciphertext bytes, including scoped native/reusable encryption",
+      "fixture": "crates/octra-hfhe/tests/fixtures/random_encrypt.json"
+    },
+    "legacy_recryption": {
+      "native_cases": 130,
+      "scope": "Complete seeded reset and rebalancing ciphertexts, rank safety and public shape decisions; not full reusable recryption",
+      "fixture": "crates/octra-hfhe/tests/fixtures/recrypt_legacy.json"
+    },
+    "reset_proof_profiles": {
+      "native_cases": 240,
+      "scope": "Native resource arithmetic, unsigned boundaries and profile decisions",
+      "fixture": "crates/octra-hfhe/tests/fixtures/reset_profiles.json"
+    },
+    "zero_proof_envelope": {
+      "native_cases": 1016,
+      "scope": "Native PVAC zero proof envelope acceptance, exact errors and canonical bytes",
+      "fixture": "crates/octra-hfhe/tests/fixtures/proof_wire.json"
+    },
+    "zero_proof_raw_ffi": {
+      "native_cases": 3410,
+      "scope": "Actual OCaml FFI raw proof encoding; ignores trailing bytes as native does",
+      "fixture": "crates/octra-hfhe/tests/fixtures/proof_raw_wire.json"
+    },
+    "range_proof_envelopes": {
+      "native_cases": 1276,
+      "scope": "Native legacy, aggregate and bound range encodings, exact errors and canonical bytes",
+      "fixture": "crates/octra-hfhe/tests/fixtures/range_wire.json"
+    },
+    "hidden_coefficient_policy": {
+      "native_cases": 248,
+      "scope": "Native hidden coefficient commitments, chosen statement binding and reusable budget decisions; not full certificate implementation",
+      "fixture": "crates/octra-hfhe/tests/fixtures/hidden.json"
+    },
+    "composable_commitments": {
+      "native_cases": 234,
+      "scope": "Native commitment openings, expression digests and acceptance; bare claims remain refused",
+      "fixture": "crates/octra-hfhe/tests/fixtures/com.json"
+    },
+    "reusable_recryption_keys": {
+      "native_cases": 90,
+      "scope": "Complete encrypted secret-word ciphertext bytes and public/secret/domain/view hashes; mutation and production profile decisions; not hidden-carrier evaluation",
+      "fixture": "crates/octra-hfhe/tests/fixtures/reusable.json"
+    },
+    "public_recryption_proofs": {
+      "native_cases": 8,
+      "complete_proofs": 8,
+      "scope": "Both native circuit profiles; complete equality-proof/ciphertext bytes, seeded bundle outputs, entropy consumption, true/false verification and shape/bound mutations",
+      "fixture": "crates/octra-hfhe/tests/fixtures/public_recrypt.json"
+    }
+  },
+  "remaining_gates": [
+    "Complete native reset certificates, hidden-carrier arithmetic and reusable recryption evaluation; independently qualify public equality prover wrapper",
+    "Complete verification acceptance and refusal, full backend key/profile policy and resource limits",
+    "All retained and active execution/proof profiles through the backend adapter",
+    "Side-channel and secret lifetime review, including SHA-256/SHAKE state and compiler copies",
+    "Isolated verifier worker, Circle backend and native node integration",
+    "Cross-architecture differential qualification and performance"
+  ],
+  "total_native_fixture_cases": 19076,
+  "resource_diagnostics": "Accepted uncapped legacy slot counts fail allocation without panic; backend must map resource failure to operational Unavailable, not deterministic rejection",
+  "native_limitations_preserved": [
+    "Aggregated legacy range verification returns false in pinned native source",
+    "Ordinary legacy 64-bit range construction reaches a linear-combination ciphertext beyond the native zero-proof base-layer limit; embedded bound range remains a separate supported path",
+    "ru_cipher/nat_cipher reject materialized source ciphers; abstract hidden-carrier recryption paths remain active and require porting"
+  ]
+}

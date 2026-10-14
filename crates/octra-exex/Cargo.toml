@@ -1,0 +1,28 @@
+[package]
+name = "octra-exex"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Replayable execution extensions for an Octra Rust node."
+publish = false
+
+[dependencies]
+octra-node-protocol = { path = "../octra-node-protocol" }
+hex.workspace = true
+sha2.workspace = true
+base64.workspace = true
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
+async-trait = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile = { workspace = true }

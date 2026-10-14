@@ -81,23 +81,23 @@ services:
       # reach /admin/preauth. The peer containers reach it via
       # docker-network DNS (`http://tsi-mesh-control:51821`) and
       # don't need the host port.
-      - "51821:51821"
+      - "127.0.0.1:51821:51821"
       # Publish 443 so curl from the host can verify the TLS
       # listener too. Stock `tailscale up` v1.78+ forces a parallel
       # HTTPS-on-443 dial after the initial /key probe — see
       # `docs/tailscale-interop-blocker.md` 2026-05-19 §"Wire-format
       # surprise".
-      - "8443:443"
+      - "127.0.0.1:8443:443"
     # The TLS cert is minted under /work/state/tailscale-wire/tls.crt.
     # Expose that path to the peer containers via a shared bind mount
     # below so `run-interop.sh` can copy it into their trust stores.
     volumes:
       - type: bind
-        source: ../../../target/linux-debug/debug/octravpn-node
+        source: ${OCTRAVPN_INTEROP_BINARY:-../../../target/linux-debug/debug/octravpn-node}
         target: /usr/local/bin/octravpn-node
         read_only: true
       - type: bind
-        source: ./state
+        source: ${OCTRAVPN_INTEROP_STATE_DIR:-./state}
         target: /work/state
     networks:
       - tsi-net
@@ -125,7 +125,7 @@ services:
       # `update-ca-certificates` dance once the mesh-control has
       # minted the cert.
       - type: bind
-        source: ./state
+        source: ${OCTRAVPN_INTEROP_STATE_DIR:-./state}
         target: /mnt/mesh-control-state
         read_only: true
       # Wall 6: read-only access to the derper sidecar's cert so each
@@ -188,7 +188,7 @@ services:
     volumes:
       - tsi-peer-b-state:/var/lib/tailscale
       - type: bind
-        source: ./state
+        source: ${OCTRAVPN_INTEROP_STATE_DIR:-./state}
         target: /mnt/mesh-control-state
         read_only: true
       # Wall 6: read-only access to the derper sidecar's cert so each

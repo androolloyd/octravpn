@@ -1,0 +1,427 @@
+{
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "wasm_sha256": "682280f126684e6a4b1d19a982c010c447fc95ec174c11b3c20f53bba5629084",
+  "source_sha256": {
+    "lib/core/circle_wasm_native/Cargo.toml": "9743e4fd5aa87c02d4c6f22ae698f178d97f787bf94450e618b086ef0f17b40a",
+    "lib/core/circle_wasm_native/Cargo.lock": "c3c6e2e05bad621856ed5efc5924acbc9e6549da7d6886df39c5f0a0d4bbc762",
+    "lib/core/circle_wasm_native/src/call_step.rs": "6b065ff7d1faca146d35912a24e589cd41efb588e02518209d080217178c94d2",
+    "lib/core/circle_wasm_native/src/compute_replay.rs": "d607211ba60e27ac65fab1d1f3acbd4521add78ee45c7520a53fb06a35e292bb",
+    "lib/core/circle_wasm_native/src/deterministic_tensor.rs": "730f71348353955c610a1950f732de4de3c445131028990a82dddc4fb53f3d5b",
+    "lib/core/circle_wasm_native/src/float_cases.rs": "4b29ced3759f51399a31cae0c6f1e4897f8d91da769c0c19cf5919b3408f865f",
+    "lib/core/circle_wasm_native/src/float_ops.rs": "5380b06120667c0d1c6ae0e44d9b4fdd76efa8e0fb0a395e87b17203d9b00730",
+    "lib/core/circle_wasm_native/src/lib.rs": "247d00dd7043e5ed8bedfc1eec8a15c23220c19a5b2072d19e1e3fbedc8c7e1a",
+    "lib/core/circle_wasm_native/src/native_bytes.rs": "7499907438644814672af2d6d478aabab33b94550ce230edb4be5bdbd8bdfbc7",
+    "lib/core/circle_wasm_native/src/parse_memory.rs": "5b543060c24f2879a90adae6a1efc0e13051f62e4aa91a2f0616ba1d52b9a621",
+    "lib/core/circle_wasm_native/src/reply.rs": "1d945b71b5ac0c6a5f8e03ea9536bc85ba858727bfcd213b73f77ca1b969d2f2"
+  },
+  "app_source_sha256": {
+    "crates/octravpn-circle-registry/Cargo.toml": "b6c0703cfbbd8092a69303d0a4e56d143ec7afcc102ba09d771c248ebaee7ef5",
+    "Cargo.lock": "cb5641194b20cb73498deedf63ec223042a6ba7696b9e9e19c5620e8bb6a050c",
+    "crates/octravpn-circle-registry/src/codec.rs": "f27f591c478d08afc6b2dfff5f8e197fa6a9dd2c6677d865976564246c74f6d1",
+    "crates/octravpn-circle-registry/src/guest.rs": "0b79437db796592d2cbf519153466bb9dc971312d4ebe7aad65cfcfb2cdf539a",
+    "crates/octravpn-circle-registry/src/lib.rs": "b24b82f806fdba2c0c6b85ac7f3821be89826ce7f9aa04bbb798e6fa11473053",
+    "crates/octravpn-circle-registry/src/projection.rs": "7feb422fb67fb8170a470255af5fbf6ce2344597a1bdd5d403bd66778de65648"
+  },
+  "scope": "golden outputs of unmodified native engine; HFHE backend unused by registry",
+  "cases": [
+    {
+      "expected": {
+        "exports": [
+          {
+            "kind": "global",
+            "name": "__data_end"
+          },
+          {
+            "kind": "global",
+            "name": "__heap_base"
+          },
+          {
+            "kind": "memory",
+            "name": "memory"
+          },
+          {
+            "kind": "function",
+            "name": "octra_alloc"
+          },
+          {
+            "kind": "function",
+            "name": "octra_manifest"
+          },
+          {
+            "kind": "function",
+            "name": "octra_query"
+          },
+          {
+            "kind": "function",
+            "name": "octra_update"
+          }
+        ],
+        "manifest": {
+          "methods": [
+            {
+              "name": "publish",
+              "view": false
+            },
+            {
+              "name": "retire",
+              "view": false
+            },
+            {
+              "name": "operator",
+              "view": true
+            }
+          ],
+          "schema": "octra_circle_manifest_v1"
+        }
+      },
+      "input": {
+        "action": "describe",
+        "code_b64": "$registry_wasm"
+      }
+    },
+    {
+      "expected": {
+        "assets": [],
+        "compute_operations": null,
+        "compute_steps": null,
+        "compute_trace_root": null,
+        "effort_used": 75555,
+        "encrypted_assets": [],
+        "error": null,
+        "events": [
+          {
+            "data_b64": "eyJvcGVyYXRvciI6Im9jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEyIiwicmV2aXNpb24iOjEsInVwZGF0ZWRfZXBvY2giOjEwLCJyZXRpcmVkIjpmYWxzZSwib2ZmZXIiOnsic2V0dGxlbWVudF9jaXJjbGUiOiJvY3QxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExNCIsImNvbnRyb2xfdXJsIjoiaHR0cHM6Ly92cG4uZXhhbXBsZS9jb250cm9sIiwid2lyZWd1YXJkX2VuZHBvaW50IjoiMjAzLjAuMTEzLjc6NTE4MjAiLCJ3aXJlZ3VhcmRfa2V5X2hleCI6IjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJyZWNlaXB0X2tleV9oZXgiOiIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyIiwicmVnaW9uIjoiQ0EiLCJleGl0Ijp0cnVlLCJyZWxheSI6ZmFsc2UsInByaWNlX291X3Blcl9taWIiOjEwMH19",
+            "topic_b64": "b2N0cmEudnBuLm9wZXJhdG9yLnYx"
+          }
+        ],
+        "hfhe_receipt_entries": [],
+        "response_b64": "T0NXUzEEAAAB/nsib3BlcmF0b3IiOiJvY3QxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMiIsInJldmlzaW9uIjoxLCJ1cGRhdGVkX2Vwb2NoIjoxMCwicmV0aXJlZCI6ZmFsc2UsIm9mZmVyIjp7InNldHRsZW1lbnRfY2lyY2xlIjoib2N0MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTQiLCJjb250cm9sX3VybCI6Imh0dHBzOi8vdnBuLmV4YW1wbGUvY29udHJvbCIsIndpcmVndWFyZF9lbmRwb2ludCI6IjIwMy4wLjExMy43OjUxODIwIiwid2lyZWd1YXJkX2tleV9oZXgiOiIxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExIiwicmVjZWlwdF9rZXlfaGV4IjoiMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMiIsInJlZ2lvbiI6IkNBIiwiZXhpdCI6dHJ1ZSwicmVsYXkiOmZhbHNlLCJwcmljZV9vdV9wZXJfbWliIjoxMDB9fQ==",
+        "spawns": [],
+        "status_code": 0,
+        "storage_pairs": [
+          {
+            "key_b64": "dnBuL29wZXJhdG9yL29jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEy",
+            "value_b64": "eyJvcGVyYXRvciI6Im9jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEyIiwicmV2aXNpb24iOjEsInVwZGF0ZWRfZXBvY2giOjEwLCJyZXRpcmVkIjpmYWxzZSwib2ZmZXIiOnsic2V0dGxlbWVudF9jaXJjbGUiOiJvY3QxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExNCIsImNvbnRyb2xfdXJsIjoiaHR0cHM6Ly92cG4uZXhhbXBsZS9jb250cm9sIiwid2lyZWd1YXJkX2VuZHBvaW50IjoiMjAzLjAuMTEzLjc6NTE4MjAiLCJ3aXJlZ3VhcmRfa2V5X2hleCI6IjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJyZWNlaXB0X2tleV9oZXgiOiIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyIiwicmVnaW9uIjoiQ0EiLCJleGl0Ijp0cnVlLCJyZWxheSI6ZmFsc2UsInByaWNlX291X3Blcl9taWIiOjEwMH19"
+          }
+        ],
+        "success": true,
+        "unavailable": null
+      },
+      "input": {
+        "action": "execute",
+        "address": "oct11111111111111111111111111111111111111111115",
+        "caller": "oct11111111111111111111111111111111111111111112",
+        "code_b64": "$registry_wasm",
+        "current_epoch": 10,
+        "export_name": "octra_update",
+        "fuel_limit": 20000000,
+        "hfhe_strict": false,
+        "is_view": false,
+        "request_b64": "T0NXUjEAB3B1Ymxpc2gAAQQAAAGneyJleHBlY3RlZF9yZXZpc2lvbiI6MCwib2ZmZXIiOnsiY29udHJvbF91cmwiOiJodHRwczovL3Zwbi5leGFtcGxlL2NvbnRyb2wiLCJleGl0Ijp0cnVlLCJwcmljZV9vdV9wZXJfbWliIjoxMDAsInJlY2VpcHRfa2V5X2hleCI6IjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIiLCJyZWdpb24iOiJDQSIsInJlbGF5IjpmYWxzZSwic2V0dGxlbWVudF9jaXJjbGUiOiJvY3QxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExNCIsIndpcmVndWFyZF9lbmRwb2ludCI6IjIwMy4wLjExMy43OjUxODIwIiwid2lyZWd1YXJkX2tleV9oZXgiOiIxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExIn19",
+        "storage_pairs": [],
+        "update_policy": true
+      }
+    },
+    {
+      "expected": {
+        "assets": [],
+        "compute_operations": null,
+        "compute_steps": null,
+        "compute_trace_root": null,
+        "effort_used": 83867,
+        "encrypted_assets": [],
+        "error": "wasm export returned 1",
+        "events": [],
+        "hfhe_receipt_entries": [],
+        "response_b64": "T0NXUzEEAAAAJnsiZXJyb3IiOiJvcGVyYXRvciByZXZpc2lvbiBtaXNtYXRjaCJ9",
+        "spawns": [],
+        "status_code": 1,
+        "storage_pairs": [
+          {
+            "key_b64": "dnBuL29wZXJhdG9yL29jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEy",
+            "value_b64": "eyJvcGVyYXRvciI6Im9jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEyIiwicmV2aXNpb24iOjEsInVwZGF0ZWRfZXBvY2giOjEwLCJyZXRpcmVkIjpmYWxzZSwib2ZmZXIiOnsic2V0dGxlbWVudF9jaXJjbGUiOiJvY3QxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExNCIsImNvbnRyb2xfdXJsIjoiaHR0cHM6Ly92cG4uZXhhbXBsZS9jb250cm9sIiwid2lyZWd1YXJkX2VuZHBvaW50IjoiMjAzLjAuMTEzLjc6NTE4MjAiLCJ3aXJlZ3VhcmRfa2V5X2hleCI6IjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJyZWNlaXB0X2tleV9oZXgiOiIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyIiwicmVnaW9uIjoiQ0EiLCJleGl0Ijp0cnVlLCJyZWxheSI6ZmFsc2UsInByaWNlX291X3Blcl9taWIiOjEwMH19"
+          }
+        ],
+        "success": false,
+        "unavailable": null
+      },
+      "input": {
+        "action": "execute",
+        "address": "oct11111111111111111111111111111111111111111115",
+        "caller": "oct11111111111111111111111111111111111111111112",
+        "code_b64": "$registry_wasm",
+        "current_epoch": 10,
+        "export_name": "octra_update",
+        "fuel_limit": 20000000,
+        "hfhe_strict": false,
+        "is_view": false,
+        "request_b64": "T0NXUjEAB3B1Ymxpc2gAAQQAAAGneyJleHBlY3RlZF9yZXZpc2lvbiI6MCwib2ZmZXIiOnsiY29udHJvbF91cmwiOiJodHRwczovL3Zwbi5leGFtcGxlL2NvbnRyb2wiLCJleGl0Ijp0cnVlLCJwcmljZV9vdV9wZXJfbWliIjoxMDAsInJlY2VpcHRfa2V5X2hleCI6IjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIiLCJyZWdpb24iOiJDQSIsInJlbGF5IjpmYWxzZSwic2V0dGxlbWVudF9jaXJjbGUiOiJvY3QxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExNCIsIndpcmVndWFyZF9lbmRwb2ludCI6IjIwMy4wLjExMy43OjUxODIwIiwid2lyZWd1YXJkX2tleV9oZXgiOiIxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExIn19",
+        "storage_pairs": [
+          {
+            "key_b64": "dnBuL29wZXJhdG9yL29jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEy",
+            "value_b64": "eyJvcGVyYXRvciI6Im9jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEyIiwicmV2aXNpb24iOjEsInVwZGF0ZWRfZXBvY2giOjEwLCJyZXRpcmVkIjpmYWxzZSwib2ZmZXIiOnsic2V0dGxlbWVudF9jaXJjbGUiOiJvY3QxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExNCIsImNvbnRyb2xfdXJsIjoiaHR0cHM6Ly92cG4uZXhhbXBsZS9jb250cm9sIiwid2lyZWd1YXJkX2VuZHBvaW50IjoiMjAzLjAuMTEzLjc6NTE4MjAiLCJ3aXJlZ3VhcmRfa2V5X2hleCI6IjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJyZWNlaXB0X2tleV9oZXgiOiIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyIiwicmVnaW9uIjoiQ0EiLCJleGl0Ijp0cnVlLCJyZWxheSI6ZmFsc2UsInByaWNlX291X3Blcl9taWIiOjEwMH19"
+          }
+        ],
+        "update_policy": true
+      }
+    },
+    {
+      "expected": {
+        "assets": [],
+        "compute_operations": null,
+        "compute_steps": null,
+        "compute_trace_root": null,
+        "effort_used": 56828,
+        "encrypted_assets": [],
+        "error": null,
+        "events": [],
+        "hfhe_receipt_entries": [],
+        "response_b64": "T0NXUzEEAAAB/nsib3BlcmF0b3IiOiJvY3QxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMiIsInJldmlzaW9uIjoxLCJ1cGRhdGVkX2Vwb2NoIjoxMCwicmV0aXJlZCI6ZmFsc2UsIm9mZmVyIjp7InNldHRsZW1lbnRfY2lyY2xlIjoib2N0MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTQiLCJjb250cm9sX3VybCI6Imh0dHBzOi8vdnBuLmV4YW1wbGUvY29udHJvbCIsIndpcmVndWFyZF9lbmRwb2ludCI6IjIwMy4wLjExMy43OjUxODIwIiwid2lyZWd1YXJkX2tleV9oZXgiOiIxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExIiwicmVjZWlwdF9rZXlfaGV4IjoiMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMiIsInJlZ2lvbiI6IkNBIiwiZXhpdCI6dHJ1ZSwicmVsYXkiOmZhbHNlLCJwcmljZV9vdV9wZXJfbWliIjoxMDB9fQ==",
+        "spawns": [],
+        "status_code": 0,
+        "storage_pairs": null,
+        "success": true,
+        "unavailable": null
+      },
+      "input": {
+        "action": "execute",
+        "address": "oct11111111111111111111111111111111111111111115",
+        "caller": "oct11111111111111111111111111111111111111111112",
+        "code_b64": "$registry_wasm",
+        "current_epoch": 10,
+        "export_name": "octra_query",
+        "fuel_limit": 20000000,
+        "hfhe_strict": false,
+        "is_view": true,
+        "request_b64": "T0NXUjEACG9wZXJhdG9yAAEEAAAAL29jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEy",
+        "storage_pairs": [
+          {
+            "key_b64": "dnBuL29wZXJhdG9yL29jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEy",
+            "value_b64": "eyJvcGVyYXRvciI6Im9jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEyIiwicmV2aXNpb24iOjEsInVwZGF0ZWRfZXBvY2giOjEwLCJyZXRpcmVkIjpmYWxzZSwib2ZmZXIiOnsic2V0dGxlbWVudF9jaXJjbGUiOiJvY3QxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExNCIsImNvbnRyb2xfdXJsIjoiaHR0cHM6Ly92cG4uZXhhbXBsZS9jb250cm9sIiwid2lyZWd1YXJkX2VuZHBvaW50IjoiMjAzLjAuMTEzLjc6NTE4MjAiLCJ3aXJlZ3VhcmRfa2V5X2hleCI6IjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJyZWNlaXB0X2tleV9oZXgiOiIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyIiwicmVnaW9uIjoiQ0EiLCJleGl0Ijp0cnVlLCJyZWxheSI6ZmFsc2UsInByaWNlX291X3Blcl9taWIiOjEwMH19"
+          }
+        ],
+        "update_policy": true
+      }
+    },
+    {
+      "expected": {
+        "assets": [],
+        "compute_operations": null,
+        "compute_steps": null,
+        "compute_trace_root": null,
+        "effort_used": 18469,
+        "encrypted_assets": [],
+        "error": "wasm export returned 1",
+        "events": [],
+        "hfhe_receipt_entries": [],
+        "response_b64": "T0NXUzEEAAAAI3siZXJyb3IiOiJvcGVyYXRvciBub3QgcmVnaXN0ZXJlZCJ9",
+        "spawns": [],
+        "status_code": 1,
+        "storage_pairs": [
+          {
+            "key_b64": "dnBuL29wZXJhdG9yL29jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEy",
+            "value_b64": "eyJvcGVyYXRvciI6Im9jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEyIiwicmV2aXNpb24iOjEsInVwZGF0ZWRfZXBvY2giOjEwLCJyZXRpcmVkIjpmYWxzZSwib2ZmZXIiOnsic2V0dGxlbWVudF9jaXJjbGUiOiJvY3QxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExNCIsImNvbnRyb2xfdXJsIjoiaHR0cHM6Ly92cG4uZXhhbXBsZS9jb250cm9sIiwid2lyZWd1YXJkX2VuZHBvaW50IjoiMjAzLjAuMTEzLjc6NTE4MjAiLCJ3aXJlZ3VhcmRfa2V5X2hleCI6IjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJyZWNlaXB0X2tleV9oZXgiOiIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyIiwicmVnaW9uIjoiQ0EiLCJleGl0Ijp0cnVlLCJyZWxheSI6ZmFsc2UsInByaWNlX291X3Blcl9taWIiOjEwMH19"
+          }
+        ],
+        "success": false,
+        "unavailable": null
+      },
+      "input": {
+        "action": "execute",
+        "address": "oct11111111111111111111111111111111111111111115",
+        "caller": "oct11111111111111111111111111111111111111111113",
+        "code_b64": "$registry_wasm",
+        "current_epoch": 10,
+        "export_name": "octra_update",
+        "fuel_limit": 20000000,
+        "hfhe_strict": false,
+        "is_view": false,
+        "request_b64": "T0NXUjEABnJldGlyZQABAwAAAAEx",
+        "storage_pairs": [
+          {
+            "key_b64": "dnBuL29wZXJhdG9yL29jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEy",
+            "value_b64": "eyJvcGVyYXRvciI6Im9jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEyIiwicmV2aXNpb24iOjEsInVwZGF0ZWRfZXBvY2giOjEwLCJyZXRpcmVkIjpmYWxzZSwib2ZmZXIiOnsic2V0dGxlbWVudF9jaXJjbGUiOiJvY3QxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExNCIsImNvbnRyb2xfdXJsIjoiaHR0cHM6Ly92cG4uZXhhbXBsZS9jb250cm9sIiwid2lyZWd1YXJkX2VuZHBvaW50IjoiMjAzLjAuMTEzLjc6NTE4MjAiLCJ3aXJlZ3VhcmRfa2V5X2hleCI6IjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJyZWNlaXB0X2tleV9oZXgiOiIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyIiwicmVnaW9uIjoiQ0EiLCJleGl0Ijp0cnVlLCJyZWxheSI6ZmFsc2UsInByaWNlX291X3Blcl9taWIiOjEwMH19"
+          }
+        ],
+        "update_policy": true
+      }
+    },
+    {
+      "expected": {
+        "assets": [],
+        "compute_operations": null,
+        "compute_steps": null,
+        "compute_trace_root": null,
+        "effort_used": 72992,
+        "encrypted_assets": [],
+        "error": null,
+        "events": [
+          {
+            "data_b64": "eyJvcGVyYXRvciI6Im9jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEyIiwicmV2aXNpb24iOjIsInVwZGF0ZWRfZXBvY2giOjEwLCJyZXRpcmVkIjp0cnVlLCJvZmZlciI6eyJzZXR0bGVtZW50X2NpcmNsZSI6Im9jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE0IiwiY29udHJvbF91cmwiOiJodHRwczovL3Zwbi5leGFtcGxlL2NvbnRyb2wiLCJ3aXJlZ3VhcmRfZW5kcG9pbnQiOiIyMDMuMC4xMTMuNzo1MTgyMCIsIndpcmVndWFyZF9rZXlfaGV4IjoiMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMSIsInJlY2VpcHRfa2V5X2hleCI6IjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIiLCJyZWdpb24iOiJDQSIsImV4aXQiOnRydWUsInJlbGF5IjpmYWxzZSwicHJpY2Vfb3VfcGVyX21pYiI6MTAwfX0=",
+            "topic_b64": "b2N0cmEudnBuLm9wZXJhdG9yLnYx"
+          }
+        ],
+        "hfhe_receipt_entries": [],
+        "response_b64": "T0NXUzEEAAAB/Xsib3BlcmF0b3IiOiJvY3QxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMiIsInJldmlzaW9uIjoyLCJ1cGRhdGVkX2Vwb2NoIjoxMCwicmV0aXJlZCI6dHJ1ZSwib2ZmZXIiOnsic2V0dGxlbWVudF9jaXJjbGUiOiJvY3QxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExNCIsImNvbnRyb2xfdXJsIjoiaHR0cHM6Ly92cG4uZXhhbXBsZS9jb250cm9sIiwid2lyZWd1YXJkX2VuZHBvaW50IjoiMjAzLjAuMTEzLjc6NTE4MjAiLCJ3aXJlZ3VhcmRfa2V5X2hleCI6IjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJyZWNlaXB0X2tleV9oZXgiOiIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyIiwicmVnaW9uIjoiQ0EiLCJleGl0Ijp0cnVlLCJyZWxheSI6ZmFsc2UsInByaWNlX291X3Blcl9taWIiOjEwMH19",
+        "spawns": [],
+        "status_code": 0,
+        "storage_pairs": [
+          {
+            "key_b64": "dnBuL29wZXJhdG9yL29jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEy",
+            "value_b64": "eyJvcGVyYXRvciI6Im9jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEyIiwicmV2aXNpb24iOjIsInVwZGF0ZWRfZXBvY2giOjEwLCJyZXRpcmVkIjp0cnVlLCJvZmZlciI6eyJzZXR0bGVtZW50X2NpcmNsZSI6Im9jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE0IiwiY29udHJvbF91cmwiOiJodHRwczovL3Zwbi5leGFtcGxlL2NvbnRyb2wiLCJ3aXJlZ3VhcmRfZW5kcG9pbnQiOiIyMDMuMC4xMTMuNzo1MTgyMCIsIndpcmVndWFyZF9rZXlfaGV4IjoiMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMSIsInJlY2VpcHRfa2V5X2hleCI6IjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIiLCJyZWdpb24iOiJDQSIsImV4aXQiOnRydWUsInJlbGF5IjpmYWxzZSwicHJpY2Vfb3VfcGVyX21pYiI6MTAwfX0="
+          }
+        ],
+        "success": true,
+        "unavailable": null
+      },
+      "input": {
+        "action": "execute",
+        "address": "oct11111111111111111111111111111111111111111115",
+        "caller": "oct11111111111111111111111111111111111111111112",
+        "code_b64": "$registry_wasm",
+        "current_epoch": 10,
+        "export_name": "octra_update",
+        "fuel_limit": 20000000,
+        "hfhe_strict": false,
+        "is_view": false,
+        "request_b64": "T0NXUjEABnJldGlyZQABAwAAAAEx",
+        "storage_pairs": [
+          {
+            "key_b64": "dnBuL29wZXJhdG9yL29jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEy",
+            "value_b64": "eyJvcGVyYXRvciI6Im9jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEyIiwicmV2aXNpb24iOjEsInVwZGF0ZWRfZXBvY2giOjEwLCJyZXRpcmVkIjpmYWxzZSwib2ZmZXIiOnsic2V0dGxlbWVudF9jaXJjbGUiOiJvY3QxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExNCIsImNvbnRyb2xfdXJsIjoiaHR0cHM6Ly92cG4uZXhhbXBsZS9jb250cm9sIiwid2lyZWd1YXJkX2VuZHBvaW50IjoiMjAzLjAuMTEzLjc6NTE4MjAiLCJ3aXJlZ3VhcmRfa2V5X2hleCI6IjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJyZWNlaXB0X2tleV9oZXgiOiIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyIiwicmVnaW9uIjoiQ0EiLCJleGl0Ijp0cnVlLCJyZWxheSI6ZmFsc2UsInByaWNlX291X3Blcl9taWIiOjEwMH19"
+          }
+        ],
+        "update_policy": true
+      }
+    },
+    {
+      "expected": {
+        "assets": [],
+        "compute_operations": null,
+        "compute_steps": null,
+        "compute_trace_root": null,
+        "effort_used": 103470,
+        "encrypted_assets": [],
+        "error": null,
+        "events": [
+          {
+            "data_b64": "eyJvcGVyYXRvciI6Im9jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEyIiwicmV2aXNpb24iOjMsInVwZGF0ZWRfZXBvY2giOjEwLCJyZXRpcmVkIjpmYWxzZSwib2ZmZXIiOnsic2V0dGxlbWVudF9jaXJjbGUiOiJvY3QxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExNCIsImNvbnRyb2xfdXJsIjoiaHR0cHM6Ly92cG4uZXhhbXBsZS9jb250cm9sIiwid2lyZWd1YXJkX2VuZHBvaW50IjoiMjAzLjAuMTEzLjc6NTE4MjAiLCJ3aXJlZ3VhcmRfa2V5X2hleCI6IjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJyZWNlaXB0X2tleV9oZXgiOiIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyIiwicmVnaW9uIjoiQ0EiLCJleGl0Ijp0cnVlLCJyZWxheSI6ZmFsc2UsInByaWNlX291X3Blcl9taWIiOjEwMH19",
+            "topic_b64": "b2N0cmEudnBuLm9wZXJhdG9yLnYx"
+          }
+        ],
+        "hfhe_receipt_entries": [],
+        "response_b64": "T0NXUzEEAAAB/nsib3BlcmF0b3IiOiJvY3QxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMiIsInJldmlzaW9uIjozLCJ1cGRhdGVkX2Vwb2NoIjoxMCwicmV0aXJlZCI6ZmFsc2UsIm9mZmVyIjp7InNldHRsZW1lbnRfY2lyY2xlIjoib2N0MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTQiLCJjb250cm9sX3VybCI6Imh0dHBzOi8vdnBuLmV4YW1wbGUvY29udHJvbCIsIndpcmVndWFyZF9lbmRwb2ludCI6IjIwMy4wLjExMy43OjUxODIwIiwid2lyZWd1YXJkX2tleV9oZXgiOiIxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExIiwicmVjZWlwdF9rZXlfaGV4IjoiMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMiIsInJlZ2lvbiI6IkNBIiwiZXhpdCI6dHJ1ZSwicmVsYXkiOmZhbHNlLCJwcmljZV9vdV9wZXJfbWliIjoxMDB9fQ==",
+        "spawns": [],
+        "status_code": 0,
+        "storage_pairs": [
+          {
+            "key_b64": "dnBuL29wZXJhdG9yL29jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEy",
+            "value_b64": "eyJvcGVyYXRvciI6Im9jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEyIiwicmV2aXNpb24iOjMsInVwZGF0ZWRfZXBvY2giOjEwLCJyZXRpcmVkIjpmYWxzZSwib2ZmZXIiOnsic2V0dGxlbWVudF9jaXJjbGUiOiJvY3QxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExNCIsImNvbnRyb2xfdXJsIjoiaHR0cHM6Ly92cG4uZXhhbXBsZS9jb250cm9sIiwid2lyZWd1YXJkX2VuZHBvaW50IjoiMjAzLjAuMTEzLjc6NTE4MjAiLCJ3aXJlZ3VhcmRfa2V5X2hleCI6IjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJyZWNlaXB0X2tleV9oZXgiOiIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyIiwicmVnaW9uIjoiQ0EiLCJleGl0Ijp0cnVlLCJyZWxheSI6ZmFsc2UsInByaWNlX291X3Blcl9taWIiOjEwMH19"
+          }
+        ],
+        "success": true,
+        "unavailable": null
+      },
+      "input": {
+        "action": "execute",
+        "address": "oct11111111111111111111111111111111111111111115",
+        "caller": "oct11111111111111111111111111111111111111111112",
+        "code_b64": "$registry_wasm",
+        "current_epoch": 10,
+        "export_name": "octra_update",
+        "fuel_limit": 20000000,
+        "hfhe_strict": false,
+        "is_view": false,
+        "request_b64": "T0NXUjEAB3B1Ymxpc2gAAQQAAAGneyJleHBlY3RlZF9yZXZpc2lvbiI6Miwib2ZmZXIiOnsiY29udHJvbF91cmwiOiJodHRwczovL3Zwbi5leGFtcGxlL2NvbnRyb2wiLCJleGl0Ijp0cnVlLCJwcmljZV9vdV9wZXJfbWliIjoxMDAsInJlY2VpcHRfa2V5X2hleCI6IjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIiLCJyZWdpb24iOiJDQSIsInJlbGF5IjpmYWxzZSwic2V0dGxlbWVudF9jaXJjbGUiOiJvY3QxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExNCIsIndpcmVndWFyZF9lbmRwb2ludCI6IjIwMy4wLjExMy43OjUxODIwIiwid2lyZWd1YXJkX2tleV9oZXgiOiIxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExIn19",
+        "storage_pairs": [
+          {
+            "key_b64": "dnBuL29wZXJhdG9yL29jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEy",
+            "value_b64": "eyJvcGVyYXRvciI6Im9jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEyIiwicmV2aXNpb24iOjIsInVwZGF0ZWRfZXBvY2giOjEwLCJyZXRpcmVkIjp0cnVlLCJvZmZlciI6eyJzZXR0bGVtZW50X2NpcmNsZSI6Im9jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE0IiwiY29udHJvbF91cmwiOiJodHRwczovL3Zwbi5leGFtcGxlL2NvbnRyb2wiLCJ3aXJlZ3VhcmRfZW5kcG9pbnQiOiIyMDMuMC4xMTMuNzo1MTgyMCIsIndpcmVndWFyZF9rZXlfaGV4IjoiMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMSIsInJlY2VpcHRfa2V5X2hleCI6IjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIiLCJyZWdpb24iOiJDQSIsImV4aXQiOnRydWUsInJlbGF5IjpmYWxzZSwicHJpY2Vfb3VfcGVyX21pYiI6MTAwfX0="
+          }
+        ],
+        "update_policy": true
+      }
+    },
+    {
+      "expected": {
+        "assets": [],
+        "compute_operations": null,
+        "compute_steps": null,
+        "compute_trace_root": null,
+        "effort_used": 14285,
+        "encrypted_assets": [],
+        "error": "wasm export returned 1",
+        "events": [],
+        "hfhe_receipt_entries": [],
+        "response_b64": "T0NXUzEEAAAAKnsiZXJyb3IiOiJ1bmtub3duIHZpZXcgb3IgaW52YWxpZCBwYXJhbXMifQ==",
+        "spawns": [],
+        "status_code": 1,
+        "storage_pairs": null,
+        "success": false,
+        "unavailable": null
+      },
+      "input": {
+        "action": "execute",
+        "address": "oct11111111111111111111111111111111111111111115",
+        "caller": "oct11111111111111111111111111111111111111111112",
+        "code_b64": "$registry_wasm",
+        "current_epoch": 10,
+        "export_name": "octra_query",
+        "fuel_limit": 20000000,
+        "hfhe_strict": false,
+        "is_view": true,
+        "request_b64": "T0NXUjEAB3B1Ymxpc2gAAQQAAAGneyJleHBlY3RlZF9yZXZpc2lvbiI6Miwib2ZmZXIiOnsiY29udHJvbF91cmwiOiJodHRwczovL3Zwbi5leGFtcGxlL2NvbnRyb2wiLCJleGl0Ijp0cnVlLCJwcmljZV9vdV9wZXJfbWliIjoxMDAsInJlY2VpcHRfa2V5X2hleCI6IjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIiLCJyZWdpb24iOiJDQSIsInJlbGF5IjpmYWxzZSwic2V0dGxlbWVudF9jaXJjbGUiOiJvY3QxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExNCIsIndpcmVndWFyZF9lbmRwb2ludCI6IjIwMy4wLjExMy43OjUxODIwIiwid2lyZWd1YXJkX2tleV9oZXgiOiIxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExIn19",
+        "storage_pairs": [
+          {
+            "key_b64": "dnBuL29wZXJhdG9yL29jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEy",
+            "value_b64": "eyJvcGVyYXRvciI6Im9jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEyIiwicmV2aXNpb24iOjEsInVwZGF0ZWRfZXBvY2giOjEwLCJyZXRpcmVkIjpmYWxzZSwib2ZmZXIiOnsic2V0dGxlbWVudF9jaXJjbGUiOiJvY3QxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExNCIsImNvbnRyb2xfdXJsIjoiaHR0cHM6Ly92cG4uZXhhbXBsZS9jb250cm9sIiwid2lyZWd1YXJkX2VuZHBvaW50IjoiMjAzLjAuMTEzLjc6NTE4MjAiLCJ3aXJlZ3VhcmRfa2V5X2hleCI6IjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJyZWNlaXB0X2tleV9oZXgiOiIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyIiwicmVnaW9uIjoiQ0EiLCJleGl0Ijp0cnVlLCJyZWxheSI6ZmFsc2UsInByaWNlX291X3Blcl9taWIiOjEwMH19"
+          }
+        ],
+        "update_policy": true
+      }
+    },
+    {
+      "expected": {
+        "assets": [],
+        "compute_operations": null,
+        "compute_steps": null,
+        "compute_trace_root": null,
+        "effort_used": 13059,
+        "encrypted_assets": [],
+        "error": "wasm export returned 1",
+        "events": [],
+        "hfhe_receipt_entries": [],
+        "response_b64": "T0NXUzEEAAAAKHsiZXJyb3IiOiJpbnZhbGlkIENpcmNsZSByZXF1ZXN0IGZyYW1lIn0=",
+        "spawns": [],
+        "status_code": 1,
+        "storage_pairs": [
+          {
+            "key_b64": "dnBuL29wZXJhdG9yL29jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEy",
+            "value_b64": "eyJvcGVyYXRvciI6Im9jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEyIiwicmV2aXNpb24iOjIsInVwZGF0ZWRfZXBvY2giOjEwLCJyZXRpcmVkIjp0cnVlLCJvZmZlciI6eyJzZXR0bGVtZW50X2NpcmNsZSI6Im9jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE0IiwiY29udHJvbF91cmwiOiJodHRwczovL3Zwbi5leGFtcGxlL2NvbnRyb2wiLCJ3aXJlZ3VhcmRfZW5kcG9pbnQiOiIyMDMuMC4xMTMuNzo1MTgyMCIsIndpcmVndWFyZF9rZXlfaGV4IjoiMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMSIsInJlY2VpcHRfa2V5X2hleCI6IjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIiLCJyZWdpb24iOiJDQSIsImV4aXQiOnRydWUsInJlbGF5IjpmYWxzZSwicHJpY2Vfb3VfcGVyX21pYiI6MTAwfX0="
+          }
+        ],
+        "success": false,
+        "unavailable": null
+      },
+      "input": {
+        "action": "execute",
+        "address": "oct11111111111111111111111111111111111111111115",
+        "caller": "oct11111111111111111111111111111111111111111112",
+        "code_b64": "$registry_wasm",
+        "current_epoch": 10,
+        "export_name": "octra_update",
+        "fuel_limit": 20000000,
+        "hfhe_strict": false,
+        "is_view": false,
+        "request_b64": "T0NXUjEABnJldGlyZQABAwAAAAEzAA==",
+        "storage_pairs": [
+          {
+            "key_b64": "dnBuL29wZXJhdG9yL29jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEy",
+            "value_b64": "eyJvcGVyYXRvciI6Im9jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEyIiwicmV2aXNpb24iOjIsInVwZGF0ZWRfZXBvY2giOjEwLCJyZXRpcmVkIjp0cnVlLCJvZmZlciI6eyJzZXR0bGVtZW50X2NpcmNsZSI6Im9jdDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE0IiwiY29udHJvbF91cmwiOiJodHRwczovL3Zwbi5leGFtcGxlL2NvbnRyb2wiLCJ3aXJlZ3VhcmRfZW5kcG9pbnQiOiIyMDMuMC4xMTMuNzo1MTgyMCIsIndpcmVndWFyZF9rZXlfaGV4IjoiMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMSIsInJlY2VpcHRfa2V5X2hleCI6IjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIiLCJyZWdpb24iOiJDQSIsImV4aXQiOnRydWUsInJlbGF5IjpmYWxzZSwicHJpY2Vfb3VfcGVyX21pYiI6MTAwfX0="
+          }
+        ],
+        "update_policy": true
+      }
+    }
+  ]
+}

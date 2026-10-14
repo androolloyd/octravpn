@@ -22,6 +22,13 @@ pub(crate) async fn announce(
     State(s): State<Arc<ControlState>>,
     Json(req): Json<AnnounceSessionRequest>,
 ) -> impl IntoResponse {
+    if s.native_stop.is_revoked() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ApiError::new("VPN is stopping")),
+        )
+            .into_response();
+    }
     let payload = announce_signing_payload(
         &req.session_id,
         &req.client_pubkey,
@@ -35,32 +42,141 @@ pub(crate) async fn announce(
         )
             .into_response();
     }
-    if let Some(verifier) = &s.session_verifier {
-        match verifier.session_opened(&req).await {
-            Ok(SessionAdmission::Accepted) => {}
-            Ok(SessionAdmission::SessionNotFound) => {
+    let native_permit = if let Some(authority) = &s.native_authority {
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            authority.authorize(&req, &s.receipt_context),
+        )
+        .await
+        {
+            Ok(Ok(Some(permit))) if permit.matches(&req, &s.receipt_context) => {
+                Some(permit.with_service_stop(s.native_stop.clone()))
+            }
+            Ok(Ok(_)) => {
                 return (
                     StatusCode::UNAUTHORIZED,
-                    Json(ApiError::new("session open transaction not found")),
+                    Json(ApiError::new(
+                        "session not authorized at the committed head",
+                    )),
                 )
-                    .into_response();
+                    .into_response()
             }
-            Ok(SessionAdmission::NotSignedByOpener) => {
-                return (
-                    StatusCode::UNAUTHORIZED,
-                    Json(ApiError::new("announce not signed by session opener")),
-                )
-                    .into_response();
-            }
-            Err(e) => {
-                warn!(error = %e, "session admission verifier failed");
+            _ => {
                 return (
                     StatusCode::SERVICE_UNAVAILABLE,
-                    Json(ApiError::new("session admission verifier unavailable")),
+                    Json(ApiError::new("committed session authority unavailable")),
+                )
+                    .into_response()
+            }
+        }
+    } else {
+        None
+    };
+    if s.native_authority.is_none() {
+        if let Some(verifier) = &s.session_verifier {
+            match verifier.session_opened(&req).await {
+                Ok(SessionAdmission::Accepted) => {}
+                Ok(SessionAdmission::SessionNotFound) => {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        Json(ApiError::new("session open transaction not found")),
+                    )
+                        .into_response();
+                }
+                Ok(SessionAdmission::NotSignedByOpener) => {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        Json(ApiError::new("announce not signed by session opener")),
+                    )
+                        .into_response();
+                }
+                Ok(SessionAdmission::WrongOperator) => {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        Json(ApiError::new("session is funded for another operator")),
+                    )
+                        .into_response();
+                }
+                Err(e) => {
+                    warn!(error = %e, "session admission verifier failed");
+                    return (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        Json(ApiError::new("session admission verifier unavailable")),
+                    )
+                        .into_response();
+                }
+            }
+        }
+    }
+    let session_id_hex = req.session_id.to_hex();
+    {
+        if s.native_stop.is_revoked() {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ApiError::new("VPN is stopping")),
+            )
+                .into_response();
+        }
+        // Serialize bindings with lease refreshes. Never hold this lock across RPC.
+        let _guard = s.admission_lock.lock();
+        if s.allowlist
+            .get(&req.client_wg_pubkey)
+            .is_some_and(|binding| {
+                binding.request.session_id != req.session_id
+                    && binding.expires_at > std::time::Instant::now()
+            })
+        {
+            return (
+                StatusCode::CONFLICT,
+                Json(ApiError::new(
+                    "WireGuard key already bound to another live session",
+                )),
+            )
+                .into_response();
+        }
+        if let Some(existing) = s.sessions.get(&req.session_id) {
+            if existing.client_pubkey != req.client_pubkey {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(ApiError::new("session client identity already bound")),
                 )
                     .into_response();
             }
+        } else {
+            let byte_floor = match s.receipt_totals.try_floor(&req.session_id) {
+                Ok(floor) => floor,
+                Err(error) => {
+                    warn!(%error, "receipt byte floor unavailable at admission");
+                    return (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        Json(ApiError::new("receipt storage unavailable")),
+                    )
+                        .into_response();
+                }
+            };
+            s.sessions.insert(
+                req.session_id.clone(),
+                ControlSession {
+                    byte_offset: byte_floor.saturating_sub(
+                        s.router
+                            .bytes(&req.session_id)
+                            .map_or(0, |(i, o)| i.saturating_add(o)),
+                    ),
+                    last_seq: 0,
+                    last_blind: octravpn_core::session::Blind::new([0u8; 32]),
+                    client_pubkey: req.client_pubkey,
+                },
+            );
         }
+        for (key, binding) in s.allowlist.snapshot() {
+            if binding.request.session_id == req.session_id && key != req.client_wg_pubkey {
+                s.allowlist.remove(&key);
+            }
+        }
+        s.allowlist.insert(
+            req.client_wg_pubkey,
+            crate::tunnel::AllowedClient::new(req.clone()).with_permit(native_permit),
+        );
     }
     s.metrics.announces_total.fetch_add(1, Ordering::Relaxed);
     // `session_opens_total` mirrors `announces_total` today (every
@@ -70,20 +186,6 @@ pub(crate) async fn announce(
     s.metrics
         .session_opens_total
         .fetch_add(1, Ordering::Relaxed);
-    let session_id_hex = req.session_id.to_hex();
-    s.sessions.insert(
-        req.session_id,
-        ControlSession {
-            last_seq: 0,
-            last_blind: octravpn_core::session::Blind::new([0u8; 32]),
-            // Bind the announcing client's ed25519 identity to the
-            // session so `POST /session/:id/receipt` can reject a
-            // dual-signed receipt countersigned under any other key.
-            client_pubkey: req.client_pubkey,
-        },
-    );
-    s.allowlist
-        .insert(req.client_wg_pubkey, crate::tunnel::AllowedClient);
     // Fan out to SSE subscribers. We publish the client's WireGuard
     // pubkey (hex) — this is the public identity the client already
     // exposed via the announce request; not a secret.
@@ -223,6 +325,7 @@ pub(crate) mod tests {
         let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
         let id = SessionId::from_u64(42);
         let tx = json!({
+            "status": "confirmed", "to": "octProgram", "op_type": "call", "encrypted_data": "open_session",
             "from": Address::from_pubkey(&victim_opener_kp.public.0).display(),
             "events": [
                 {"name": "SessionOpened", "session_id": 42}
@@ -231,7 +334,11 @@ pub(crate) mod tests {
         let (rpc, shutdown) = spawn_tx_mock(tx).await;
         let state = Arc::new(
             ControlState::new(node_kp, router, allowlist).with_session_verifier(
-                SessionAdmissionVerifier::new(rpc, Address::from_display("octProgram")),
+                SessionAdmissionVerifier::new(
+                    rpc,
+                    Address::from_display("octProgram"),
+                    Address::from_display("octCircle"),
+                ),
             ),
         );
 
@@ -306,5 +413,58 @@ pub(crate) mod tests {
         .await;
         let after = state.metrics.session_opens_total.load(Ordering::Relaxed);
         assert_eq!(after, before + 1);
+    }
+    #[tokio::test]
+    async fn reannounce_preserves_receipt_state_and_revokes_old_wg_key() {
+        let key = KeyPair::generate();
+        let id = SessionId::from_u64(42);
+        let state = Arc::new(ControlState::new(
+            Arc::new(KeyPair::generate()),
+            Arc::new(OnionRouter::new()),
+            Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60))),
+        ));
+        let req = signed_announce(id.clone(), &key, [1; 32]);
+        assert_eq!(
+            announce(State(state.clone()), Json(req))
+                .await
+                .into_response()
+                .status(),
+            StatusCode::OK
+        );
+        state.sessions.modify(&id, |row| row.last_seq = 99);
+        let req = signed_announce(id.clone(), &key, [2; 32]);
+        assert_eq!(
+            announce(State(state.clone()), Json(req))
+                .await
+                .into_response()
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(state.sessions.get(&id).unwrap().last_seq, 99);
+        assert!(!state.allowlist.contains_key(&[1; 32]));
+        assert_eq!(
+            state.allowlist.get(&[2; 32]).unwrap().request.session_id,
+            id
+        );
+        let req = signed_announce(id.clone(), &KeyPair::generate(), [3; 32]);
+        assert_eq!(
+            announce(State(state.clone()), Json(req))
+                .await
+                .into_response()
+                .status(),
+            StatusCode::CONFLICT
+        );
+        assert!(!state.allowlist.contains_key(&[3; 32]));
+        let other = signed_announce(SessionId::from_u64(43), &key, [2; 32]);
+        assert_eq!(
+            announce(State(state.clone()), Json(other))
+                .await
+                .into_response()
+                .status(),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(state.sessions.get(&id).unwrap().last_seq, 99);
+        crate::control::handlers::sweeper::refresh_admissions(&state).await;
+        assert!(state.allowlist.get(&[2; 32]).unwrap().expires_at <= std::time::Instant::now());
     }
 }

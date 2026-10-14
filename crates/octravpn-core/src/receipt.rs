@@ -848,7 +848,7 @@ mod tests {
             ReceiptError::BadClientSig
         ));
 
-        let mut missing_node_sig = sr.clone();
+        let mut missing_node_sig = sr;
         missing_node_sig.node_sig = Signature([0u8; 64]);
         assert_ne!(missing_node_sig.settlement_hash(), original_hash);
         assert!(matches!(

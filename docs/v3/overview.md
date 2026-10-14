@@ -7,7 +7,7 @@ program ([`program/main-v3.aml`](../../program/main-v3.aml), 712 lines)
 holds only what cannot be enforced off-chain:
 
 - OU custody for operator bonds, session escrow, tailnet treasuries,
-  and a protocol fee treasury;
+  and slashing treasury accounting; traffic payments have no commission;
 - monotonic state-version + permanent slash flags;
 - ed25519 verification of equivocating receipt signatures;
 - a 32-byte (64-char hex) SHA-256 anchor per role pointing at a

@@ -112,7 +112,7 @@ def setParams (s : ProgramState) (caller : Addr) (p : Params) :
   else if p.unbondGraceEpochs < 1000 then none
   else if p.slashBurnBps < 5000 then none
   else if p.slashBurnBps + p.slashBountyBps ≠ BPS_DENOM then none
-  else if p.protocolFeeBps > 200 then none
+  else if p.protocolFeeBps ≠ 0 then none
   else if p.disputeGraceEpochs = 0 then none
   else if p.disputeGraceEpochs > p.sessionGraceEpochs * 2 then none
   else some { s with params := p }
@@ -458,7 +458,7 @@ def settleClaim
     Opener-only; requires the operator to have claimed first.
     Mismatched bytes records a dispute (`clientConfirm` set, status
     stays open). Match settles: caps net against deposit, takes
-    protocol fee, refunds surplus to tailnet, credits the operator
+    no protocol commission, refunds surplus to tailnet, credits the operator
     earnings ledger AND extends the hash chain. -/
 def settleConfirm
     (s : ProgramState) (caller : Addr) (sid : SessionId)
@@ -485,8 +485,8 @@ def settleConfirm
             -- Match: apply settlement.
             let dep := sess.deposit
             let totalPaid := if net > dep then dep else net
-            let fee := totalPaid * s.params.protocolFeeBps / BPS_DENOM
-            let netAfterFee := totalPaid - fee
+
+            let operatorPay := totalPaid
             let refund := dep - totalPaid
             let upd : Session :=
               { sess with status := SessionStatus.settled,
@@ -500,13 +500,13 @@ def settleConfirm
               { s with
                   sessions := s.sessions.update sid (some upd),
                   tailnets := s.tailnets.update sess.tailnetId t',
-                  programTreasury := s.programTreasury + fee,
+
                   circleEarningsTotal :=
-                    if netAfterFee > 0 then
-                      s.circleEarningsTotal.update sess.circle (curTotal + netAfterFee)
+                    if operatorPay > 0 then
+                      s.circleEarningsTotal.update sess.circle (curTotal + operatorPay)
                     else s.circleEarningsTotal,
                   circleEarningsChain :=
-                    if netAfterFee > 0 then
+                    if operatorPay > 0 then
                       s.circleEarningsChain.update sess.circle newHead
                     else s.circleEarningsChain }
             some s'
@@ -560,8 +560,8 @@ def settleResolve
               let postSlashDep :=
                 if chosenOp then dep - clSlashAmt else dep
               let totalPaid := if acceptedBytes > postSlashDep then postSlashDep else acceptedBytes
-              let fee := totalPaid * s.params.protocolFeeBps / BPS_DENOM
-              let netAfterFee := totalPaid - fee
+
+              let operatorPay := totalPaid
               let refund := postSlashDep - totalPaid
               let curBond := s.circleBond sess.circle
               let curTotal := s.circleEarningsTotal sess.circle
@@ -576,14 +576,14 @@ def settleResolve
                     tailnets := s.tailnets.update sess.tailnetId t',
                     circleBond := s.circleBond.update sess.circle (curBond - opSlashAmt),
                     programTreasury :=
-                      s.programTreasury + fee + opSlashAmt + clSlashAmt,
+                      s.programTreasury + opSlashAmt + clSlashAmt,
                     burned := s.burned + opSlashAmt + clSlashAmt,
                     circleEarningsTotal :=
-                      if netAfterFee > 0 then
-                        s.circleEarningsTotal.update sess.circle (curTotal + netAfterFee)
+                      if operatorPay > 0 then
+                        s.circleEarningsTotal.update sess.circle (curTotal + operatorPay)
                       else s.circleEarningsTotal,
                     circleEarningsChain :=
-                      if netAfterFee > 0 then
+                      if operatorPay > 0 then
                         s.circleEarningsChain.update sess.circle newHead
                       else s.circleEarningsChain }
               some (s', opSlashAmt + clSlashAmt)
@@ -610,8 +610,8 @@ def claimDisputedNoShow
         | some clBytes =>
           let dep := sess.deposit
           let totalPaid := if clBytes > dep then dep else clBytes
-          let fee := totalPaid * s.params.protocolFeeBps / BPS_DENOM
-          let netAfterFee := totalPaid - fee
+
+          let operatorPay := totalPaid
           let refund := dep - totalPaid
           let bounty := refund * s.params.sweepBountyBps / BPS_DENOM
           let refundAfterBounty := refund - bounty
@@ -623,10 +623,10 @@ def claimDisputedNoShow
             { s with
                 sessions := s.sessions.update sid (some upd),
                 tailnets := s.tailnets.update sess.tailnetId t',
-                programTreasury := s.programTreasury + fee,
+
                 circleEarningsTotal :=
-                  if netAfterFee > 0 then
-                    s.circleEarningsTotal.update sess.circle (curTotal + netAfterFee)
+                  if operatorPay > 0 then
+                    s.circleEarningsTotal.update sess.circle (curTotal + operatorPay)
                   else s.circleEarningsTotal }
           some (s', bounty)
 

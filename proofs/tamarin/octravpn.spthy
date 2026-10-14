@@ -1,231 +1,48 @@
-/*
- * OctraVPN protocol model in Tamarin.
- *
- * **SCOPE NOTE — v1 vs target**:
- *
- *   This file models the *target* cryptographic guarantees we want
- *   OctraVPN to satisfy: dual-signed receipt unforgeability +
- *   double-sign slashable evidence + route-commitment unlinkability.
- *
- *   In **v1** these properties depend on Octra exposing `verify_ed25519`
- *   as an AML host call. Today it isn't (see `docs/aml-gap-analysis.md`
- *   and `docs/octra-research.md §6`). So the v1 AML drops in-program
- *   signature verification, replaces receipts with validator-only settle
- *   (economic-ceiling integrity, not cryptographic), and replaces
- *   equivocation slashing with governance slash.
- *
- *   This Tamarin theory therefore captures the **v1.1+ target** — the
- *   crypto properties we'll guarantee once Octra adds the needed host
- *   calls. We retain it as the formal specification of the eventual
- *   guarantee. The v1 AML state machine itself is verified in Lean
- *   (`proofs/lean/`) and TLA+ (`proofs/tla/`).
- *
- * What the adversary can do (under Dolev-Yao):
- *   - Read all network messages (Out facts).
- *   - Inject any message it can derive (In facts).
- *   - Compromise individual endpoint long-term keys (Reveal_Validator).
- *   - Compromise individual session ephemeral keys (Reveal_Session).
- *
- * Properties checked (TARGET, not v1):
- *   1. ReceiptUnforgeability: no settled receipt exists for a session
- *      whose ephemeral session key was never compromised AND was never
- *      signed by the legitimate client.
- *   2. DoubleSignSlashable: any two distinct receipts signed by the same
- *      endpoint key for the same (session, seq) implies a slash event.
- *   3. NoLinkBeforeSettle: while a session is "open", the chain message
- *      stream contains no fact linking a particular endpoint address to
- *      this session_id (commitments only).
- *
- * Tamarin command:  tamarin-prover --prove octravpn.spthy
- */
-
-theory OctraVPN
+/* Symbolic receipt authentication specification. This is not AML refinement.
+   Opaque on-chain evidence is disabled in the release candidate. */
+theory OctraVPNReceiptAuthentication
 begin
+builtins: signing, hashing
 
-builtins: signing, hashing, asymmetric-encryption
+rule Register_Node:
+  [ Fr(~n), Fr(~nk) ] --[ NodeRegistered(~n) ]->
+  [ !Node(~n, ~nk), Out(<~n, pk(~nk)>) ]
+rule Reveal_Node:
+  [ !Node(n, nk) ] --[ NodeRevealed(n) ]-> [ Out(nk) ]
+rule Open:
+  [ !Node(n, nk), Fr(~s), Fr(~ck) ] --[ Opened(~s) ]->
+  [ !Session(~s, n, ~ck), Out(<~s, n, pk(~ck)>) ]
+rule Reveal_Client:
+  [ !Session(s, n, ck) ] --[ ClientRevealed(s) ]-> [ Out(ck) ]
+rule Sign_Client:
+  let m = <'octravpn-receipt', s, n, seq, bytes>
+  in
+  [ !Session(s, n, ck), In(<seq, bytes>) ]
+  --[ ClientSigned(s, seq, bytes) ]->
+  [ Out(<'client', s, seq, bytes, sign(m, ck)>) ]
+rule Sign_Node:
+  let m = <'octravpn-receipt', s, n, seq, bytes>
+  in
+  [ !Session(s, n, ck), !Node(n, nk),
+    In(<'client', s, seq, bytes, sign(m, ck)>) ]
+  --[ NodeSigned(n, s, seq, bytes) ]->
+  [ Out(<'dual', s, seq, bytes, sign(m, ck), sign(m, nk)>) ]
+rule Accept_Receipt:
+  let m = <'octravpn-receipt', s, n, seq, bytes>
+  in
+  [ !Session(s, n, ck), !Node(n, nk),
+    In(<'dual', s, seq, bytes, sign(m, ck), sign(m, nk)>) ]
+  --[ Accepted(n, s, seq, bytes) ]-> [ ]
 
-functions:
-    commit/2,           // commit(addr, blind)
-    open/2 [private]    // (just to compute openings off-chain)
-
-equations:
-    /* Pedersen-style commitment opening — for the model we treat the
-       commitment as a hash with a unique opening. */
-
-/* ---------- Setup: register validator with long-term key ---------- */
-
-rule Register_Validator:
-    [ Fr(~vsk) ]
-  --[ ValidatorRegistered($V, pk(~vsk)) ]->
-    [ !Validator($V, ~vsk, pk(~vsk)),
-      Out(<'register', $V, pk(~vsk)>) ]
-
-/* Reveal a validator's long-term key (adversary compromise). */
-rule Reveal_Validator:
-    [ !Validator($V, ~vsk, vp) ]
-  --[ Reveal_Validator($V) ]->
-    [ Out(~vsk) ]
-
-/* ---------- Session establishment ---------- */
-
-/* Client picks an ephemeral session key, picks a validator V, and
-   publishes a commitment to V (along with a fresh blind). */
-rule Open_Session:
-    [ Fr(~ssk),
-      Fr(~blind),
-      !Validator($V, ~vsk, vp) ]
-  --[ SessionOpened($S, ~ssk, $V, ~blind) ]->
-    [ !Session($S, ~ssk, pk(~ssk), $V, ~blind),
-      Out(<'open_session', $S, pk(~ssk), commit($V, ~blind)>) ]
-
-/* Reveal an ephemeral session key (adversary compromise). */
-rule Reveal_Session:
-    [ !Session($S, ~ssk, sp, $V, ~blind) ]
-  --[ Reveal_Session($S) ]->
-    [ Out(~ssk) ]
-
-/* ---------- Receipts ---------- */
-
-/* Client signs a receipt with the ephemeral session key. */
-rule Sign_Client_Receipt:
-    [ !Session($S, ~ssk, sp, $V, ~blind),
-      In($seq), In($ct) ]
-  --[ ClientSigned($S, $seq, $ct, sp) ]->
-    [ Out(<'client_receipt', $S, $seq, $ct,
-            sign(<'octravpn-receipt', $S, $seq, $ct>, ~ssk),
-            sp>) ]
-
-/* Validator signs a receipt with its long-term key. The act of signing
-   is what the chain uses to detect double-signing. */
-rule Sign_Validator_Receipt:
-    [ !Validator($V, ~vsk, vp),
-      In($S), In($seq), In($ct) ]
-  --[ ValidatorSigned($V, $S, $seq, $ct, vp) ]->
-    [ Out(<'node_receipt', $V, $S, $seq, $ct,
-            sign(<'octravpn-receipt', $S, $seq, $ct>, ~vsk),
-            vp>) ]
-
-/* ---------- Settlement on chain ---------- */
-
-rule Settle_Session:
-    let m = <'octravpn-receipt', $S, $seq, $ct>
-    in
-    [ !Session($S, ~ssk, sp, $V, ~blind),
-      In(<'settle', $S, $seq, $V, ~blind, $ct, sigC, sp>) ]
-  --[ Settled($S, $seq, $V, $ct),
-      VerifyClientSig($S, sigC, sp, m) ]->
-    [ Out(<'settled', $S, $seq, $V>) ]
-
-restriction client_sig_ok:
-    "All s sig p m #i. VerifyClientSig(s, sig, p, m)@i ==>
-        Ex #j. ClientSigned(s, fst(snd(m)), fst(snd(snd(m))), p) @ j & j < i"
-
-/* ---------- Slashing on double-sign ---------- */
-
-rule Slash_DoubleSign:
-    [ In(<'evidence', $V, $S, $seq, $ctA, sigA, $ctB, sigB, vp>),
-      !Validator($V, ~vsk, vp) ]
-  --[ Slashed($V, $S, $seq),
-      Equivocated($V, $S, $seq, $ctA, $ctB) ]->
-    [ Out(<'slashed', $V>) ]
-
-restriction equivocation_real:
-    "All v s seq ca cb #i. Equivocated(v, s, seq, ca, cb) @ i ==>
-        ca <> cb &
-        Ex pa #ja. ValidatorSigned(v, s, seq, ca, pa) @ ja & ja < i &
-        Ex pb #jb. ValidatorSigned(v, s, seq, cb, pb) @ jb & jb < i"
-
-/* ---------- Multi-hop: 2-hop and 3-hop session models ---------- */
-
-/* Open a 2-hop session: client commits to V1 (entry) and V2 (exit). */
-rule Open_Session_2Hop:
-    [ Fr(~ssk), Fr(~b1), Fr(~b2),
-      !Validator($V1, ~v1sk, vp1),
-      !Validator($V2, ~v2sk, vp2) ]
-  --[ SessionOpened2($S, ~ssk, $V1, $V2, ~b1, ~b2) ]->
-    [ !Session2($S, ~ssk, pk(~ssk), $V1, $V2, ~b1, ~b2),
-      Out(<'open_session2', $S, pk(~ssk), commit($V1, ~b1), commit($V2, ~b2)>) ]
-
-rule Open_Session_3Hop:
-    [ Fr(~ssk), Fr(~b1), Fr(~b2), Fr(~b3),
-      !Validator($V1, ~v1sk, vp1),
-      !Validator($V2, ~v2sk, vp2),
-      !Validator($V3, ~v3sk, vp3) ]
-  --[ SessionOpened3($S, ~ssk, $V1, $V2, $V3, ~b1, ~b2, ~b3) ]->
-    [ !Session3($S, ~ssk, pk(~ssk), $V1, $V2, $V3, ~b1, ~b2, ~b3),
-      Out(<'open_session3', $S, pk(~ssk),
-            commit($V1, ~b1), commit($V2, ~b2), commit($V3, ~b3)>) ]
-
-/* In multi-hop, only the EXIT signs the receipt jointly with the client.
-   Intermediate hops earn via the same final receipt + their stored
-   commitments (revealed at settle). The exit-side signature is what
-   matters for unforgeability. */
-
-rule Settle_Session_3Hop:
-    let m = <'octravpn-receipt-v1', $S, $seq, $ct>
-    in
-    [ !Session3($S, ~ssk, sp, $V1, $V2, $V3, ~b1, ~b2, ~b3),
-      !Validator($V3, ~v3sk, vp3),
-      In(<'settle3', $S, $seq, $V1, $V2, $V3, ~b1, ~b2, ~b3, $ct, sigC, sigE, sp, vp3>) ]
-  --[ Settled3($S, $seq, $V1, $V2, $V3, $ct),
-      VerifyClientSig($S, sigC, sp, m),
-      VerifyExitSig($S, sigE, vp3, m) ]->
-    [ Out(<'settled3', $S, $seq, $V1, $V2, $V3>) ]
-
-restriction exit_sig_ok:
-    "All s sig vp m #i. VerifyExitSig(s, sig, vp, m)@i ==>
-        Ex v ct #j.
-            ValidatorSigned(v, s, fst(snd(m)), ct, vp) @ j & j < i"
-
-/* =================== PROPERTIES =================== */
-
-/* P1: Settled receipt implies a real client signature
-   (or the session key was compromised). */
-lemma ReceiptUnforgeability:
-    "All s seq v ct #i.
-        Settled(s, seq, v, ct) @ i
-        ==> (Ex p #j. ClientSigned(s, seq, ct, p) @ j & j < i)
-            | (Ex #j. Reveal_Session(s) @ j & j < i)"
-
-/* P1b: Same property for 3-hop settlement — the exit's settle requires
-   both client and exit signatures over the same message. */
-lemma ReceiptUnforgeability_3Hop:
-    "All s seq v1 v2 v3 ct #i.
-        Settled3(s, seq, v1, v2, v3, ct) @ i
-        ==> (Ex p #j. ClientSigned(s, seq, ct, p) @ j & j < i)
-            | (Ex #j. Reveal_Session(s) @ j & j < i)"
-
-/* P2: Double-sign always yields a slash event with concrete evidence. */
-lemma DoubleSignSlashable:
-    "All v s seq ca pa cb pb #i #j.
-        ValidatorSigned(v, s, seq, ca, pa) @ i &
-        ValidatorSigned(v, s, seq, cb, pb) @ j &
-        not(ca = cb)
-        ==> Ex #k. Slashed(v, s, seq) @ k"
-
-/* P3 (single-hop): adversary cannot derive validator V from observation
-   alone for an open session — route commitment hides it. */
-lemma NoLinkBeforeSettle:
-    "All s v b #i. SessionOpened(s, _, v, b) @ i
-        ==> not(Ex #j. KU(v) @ j & j < i)
-            | (Ex vsk #k. Reveal_Validator(v) @ k & k < i)"
-
-/* P3b: 2-hop unlinkability — neither V1 nor V2 is derivable. */
-lemma NoLinkBeforeSettle_2Hop:
-    "All s v1 v2 b1 b2 #i. SessionOpened2(s, _, v1, v2, b1, b2) @ i
-        ==> (not(Ex #j. KU(v1) @ j & j < i) &
-             not(Ex #k. KU(v2) @ k & k < i))
-            | (Ex #j. Reveal_Validator(v1) @ j & j < i)
-            | (Ex #k. Reveal_Validator(v2) @ k & k < i)"
-
-/* P3c: 3-hop unlinkability — entry / middle / exit all hidden. */
-lemma NoLinkBeforeSettle_3Hop:
-    "All s v1 v2 v3 b1 b2 b3 #i. SessionOpened3(s, _, v1, v2, v3, b1, b2, b3) @ i
-        ==> (not(Ex #j. KU(v1) @ j & j < i) &
-             not(Ex #k. KU(v2) @ k & k < i) &
-             not(Ex #l. KU(v3) @ l & l < i))
-            | (Ex #j. Reveal_Validator(v1) @ j & j < i)
-            | (Ex #k. Reveal_Validator(v2) @ k & k < i)
-            | (Ex #l. Reveal_Validator(v3) @ l & l < i)"
-
+lemma ClientAuthentication:
+  "All n s seq b #i. Accepted(n,s,seq,b)@i ==>
+     (Ex #j. ClientSigned(s,seq,b)@j & j < i) |
+     (Ex #j. ClientRevealed(s)@j & j < i)"
+lemma NodeAuthentication:
+  "All n s seq b #i. Accepted(n,s,seq,b)@i ==>
+     (Ex #j. NodeSigned(n,s,seq,b)@j & j < i) |
+     (Ex #j. NodeRevealed(n)@j & j < i)"
+lemma HonestReceiptReachable: exists-trace
+  "Ex n s seq b #i. Accepted(n,s,seq,b)@i &
+     not (Ex #j. ClientRevealed(s)@j) & not (Ex #j. NodeRevealed(n)@j)"
 end

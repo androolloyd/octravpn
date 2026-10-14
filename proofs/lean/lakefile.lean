@@ -24,3 +24,7 @@ lean_lib OctraVPN_Rust where
 @[default_target]
 lean_lib WireProtocol where
   roots := #[`WireProtocol]
+
+@[default_target]
+lean_lib OctraVPN_V4 where
+  roots := #[`OctraVPN_V4]

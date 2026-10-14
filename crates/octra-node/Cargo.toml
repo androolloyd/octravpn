@@ -1,0 +1,40 @@
+[package]
+name = "octra-node"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version = "1.85"
+publish = false
+description = "Canonical service coordination for the Rust Octra node."
+
+[dependencies]
+octra-node-runtime = { path = "../octra-node-runtime" }
+octra-node-protocol = { path = "../octra-node-protocol" }
+octra-browser = { path = "../octra-browser" }
+octra-exex = { path = "../octra-exex" }
+octra-hfhe = { path = "../octra-hfhe" }
+octravpn-node = { path = "../octravpn-node" }
+octravpn-core = { path = "../octravpn-core" }
+anyhow.workspace = true
+base64.workspace = true
+num-bigint = "0.4"
+async-trait.workspace = true
+axum.workspace = true
+hex.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+tower = { version = "0.5", features = ["util"] }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs"] }
+
+[dev-dependencies]
+boringtun.workspace = true
+ed25519-dalek.workspace = true
+reqwest.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+x25519-dalek.workspace = true
+
+[lints]
+workspace = true

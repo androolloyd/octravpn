@@ -40,7 +40,7 @@ Major v3 deltas vs v2 modelled here:
   - Constructor / `set_params` minimum: `min_circle_stake ≥ 1e8`,
     `unbond_grace_epochs ≥ 1000`, `slash_burn_bps ≥ 5000`,
     `slash_burn_bps + slash_bounty_bps = BPS_DENOM`,
-    `protocol_fee_bps ≤ 200` (`main-v3.aml:148-173, 244-246`).
+    `protocol_fee_bps == 0` (`main-v3.aml:148-173, 244-246`).
 
   - Pause halts USER flows only; governance (`transfer_ownership`,
     `set_paused`, `set_params`, `withdraw_program_treasury`,

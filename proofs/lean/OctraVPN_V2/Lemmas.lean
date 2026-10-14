@@ -820,7 +820,7 @@ theorem settle_confirm_internal_free_when_toggle_off
   simp [hopen', hcaller', hbytes_eq] at h
   -- The settlement path uses class_ to pick the effective price.
   -- With class=INTERNAL and chargeInternalTraffic=0, effPrice=0,
-  -- so totalRaw=0, totalPaid=0, fee=0, net=0, refund=deposit.
+  -- so totalRaw=0, totalPaid=0, net=0, refund=deposit.
   rw [hclass] at h
   simp [htoggle] at h
   subst h
@@ -1068,7 +1068,7 @@ theorem set_params_owner_only
   · simp [h1, h2, h3, h4, h5, h6, h7, h8, h9] at h
   by_cases h10 : p.slashBurnBps + p.slashBountyBps ≠ 10000
   · simp [h1, h2, h3, h4, h5, h6, h7, h8, h9, h10] at h
-  by_cases h11 : p.protocolFeeBps > 200
+  by_cases h11 : p.protocolFeeBps ≠ 0
   · simp [h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11] at h
   · simp [h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11] at h
     subst h

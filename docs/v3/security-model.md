@@ -118,7 +118,7 @@ file:line of the enforcement + a cross-reference to the Lean theorem
 | I7  | Slashed circles cannot claim earnings                                        | [`main-v3.aml:651`](../../program/main-v3.aml)                     | C3                                                                          |
 | I8  | `circle_earnings_claimed ≤ circle_earnings_total`                            | [`main-v3.aml:653-654`](../../program/main-v3.aml)                 | C4; smoke step 8 (overclaim)                                                |
 | I9  | `slash_burn_bps + slash_bounty_bps == BPS_DENOM`                             | [`main-v3.aml:245`](../../program/main-v3.aml) (set_params guard)  | Implicit by construction; F3 (non-owner reject)                              |
-| I10 | `protocol_fee_bps ≤ 200` (2%)                                                | [`main-v3.aml:246`](../../program/main-v3.aml)                     | Implicit                                                                    |
+| I10 | `protocol_fee_bps == 0` (no commission)                                                | [`main-v3.aml:246`](../../program/main-v3.aml)                     | Implicit                                                                    |
 | I11 | Bond can't be withdrawn before unbond grace                                  | [`main-v3.aml:382`](../../program/main-v3.aml)                     | B4 (finalize-without-unbond reject)                                          |
 | I12 | Session deposit caps operator earnings                                       | [`main-v3.aml:574-577`](../../program/main-v3.aml) (net ≤ deposit) | E5–E11; structural — net is `min(net, deposit)`                              |
 | I13 | Equivocating settle_claim refunds deposit (chain-only; slash needs sigs)     | [`main-v3.aml:528-536`](../../program/main-v3.aml)                 | E5, E6 (negative); equivocation positive is currently only exercised by `slash_double_sign` S5 |
@@ -248,7 +248,7 @@ When reviewing a v3 deploy, verify on-chain:
 - [ ] `paused == 0` for normal operation.
 - [ ] `min_circle_stake >= 100_000_000` (the floor `set_params` enforces).
 - [ ] `slash_burn_bps >= 5000`; `slash_burn_bps + slash_bounty_bps == 10000`.
-- [ ] `protocol_fee_bps <= 200`.
+- [ ] `protocol_fee_bps == 0`.
 - [ ] `unbond_grace_epochs >= 1000`.
 
 And off-chain:

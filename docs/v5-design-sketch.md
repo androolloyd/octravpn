@@ -15,7 +15,7 @@ WireGuard specifics and what remains is:
 | Supply | staked operators (circles, `min_circle_stake`), announce with `price_per_mb` + region | price vector is bytes-only |
 | Demand | sessions with escrow (`open_session` is payable; `value >= max_pay`) | no |
 | Metering | off-chain signed receipts, sha256 hash-chained, counter-signed | receipt carries `bytes_used` |
-| Settlement | two-tx claim → confirm, or the v4 relay HTLC for unilateral settle; 50 bps protocol fee | **no** — `main-v4.aml:611`: *"sessions are class- and price-agnostic on chain; class/price live in the operator's signed off-chain receipt"* |
+| Settlement | two-tx claim → confirm, or the v4 relay HTLC for unilateral settle; zero protocol commission | **no** — `main-v4.aml:611`: *"sessions are class- and price-agnostic on chain; class/price live in the operator's signed off-chain receipt"* |
 | Enforcement | disputes, slashing, sweeper, refund watcher, `RELAY_ARMED` mutex | no |
 | Identity | sealed operator keys, canonical signer, ChainTxQueue | no |
 | Transport | Tailscale-compatible mesh, DERP, exit selection by region/price | bytes-only today |
@@ -93,7 +93,7 @@ one client, one wallet, one session model.**
 - Stake per resource class (a GPU operator stakes more than a bytes relay).
 - Price discovery stays in announces; generalize `price_per_mb` to a price vector
   `{bytes, gpu_sec, tokens_in, tokens_out, gb_hour}`.
-- Keep the 50 bps fee and the escrow model. **Do not** copy the stake-for-capacity
+- Keep the escrow model with zero protocol commission. **Do not** copy the stake-for-capacity
   entitlement (Venice's DIEM): the independent analysis showed it prices as a ~50%
   discount-rate perpetual on an unsecured, upgradeable claim, injects no cash, and
   becomes a growing real liability as compute gets cheaper. Pay-per-session is already

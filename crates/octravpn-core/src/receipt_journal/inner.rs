@@ -64,6 +64,8 @@ pub(crate) struct Inner {
     /// is set but the handle has been deliberately dropped (compaction
     /// re-opens it).
     pub(crate) handle: Option<File>,
+    /// Retained by the shared storage state, including detached compaction workers.
+    pub(crate) writer_guard: Option<Arc<File>>,
     /// Current on-disk file size in bytes (header + records). Tracked
     /// so we can decide when to auto-compact without a `metadata()`
     /// syscall per call.
@@ -111,10 +113,8 @@ pub(crate) struct Inner {
     /// the README's "Perf-8 LRU bookkeeping" note.
     pub(crate) lru_index: BTreeSet<(Instant, SessionId)>,
     /// "Recently evicted" LRU: session_ids that have been evicted from
-    /// `by_session` since the last bump landed for them. The hot path
-    /// consults this to skip the redundant disk-resurrect when the
-    /// same session was bumped, evicted, and bumped again within a
-    /// short window (flapping). Bounded at
+    /// `by_session` since the last bump landed for them. This is
+    /// diagnostic history, never evidence of absence on disk. Bounded at
     /// [`DEFAULT_RECENTLY_EVICTED_CAP`] entries (~64 KB) so the LRU
     /// can never itself become an OOM vector. Stored as a deque so
     /// FIFO insertion-order eviction is O(1).

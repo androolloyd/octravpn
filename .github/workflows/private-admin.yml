@@ -1,0 +1,38 @@
+name: Private administration native integration
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'program/main-v5.aml'
+      - 'program/private-admin-factory.aml'
+      - 'crates/octravpn-private-admin/**'
+      - 'scripts/private-admin/**'
+      - 'docker/private-admin/**'
+      - 'Cargo.lock'
+      - 'vendor/ark-relations/**'
+      - '.github/workflows/private-admin.yml'
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: octra }
+      - uses: actions/checkout@v4
+        with: { repository: androolloyd/octra-foundry, path: octra-foundry }
+      - uses: actions/checkout@v4
+        with: { repository: androolloyd/headscale-rs, path: headscale-rs }
+      - uses: ./octra/.github/actions/setup-rust
+      - name: Circuit constraints and typed transcript
+        working-directory: octra
+        run: cargo test -p octravpn-private-admin --all-targets
+      - name: Native private handoff, rotation and replay protection
+        working-directory: octra
+        run: bash scripts/private-admin/run-e2e.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: private-admin-native-evidence
+          path: octra/out/private-admin-e2e/

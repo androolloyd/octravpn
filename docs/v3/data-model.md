@@ -29,7 +29,7 @@ Defined at [`program/main-v3.aml:35-44`](../../program/main-v3.aml).
 | ------------------------------ | ----- | ---------------------------------------------------------------------- |
 | `BPS_DENOM`                    | 10000 | Slash + sweep + protocol-fee bps math                                  |
 | `SLASH_BURN_DEFAULT_BPS`       | 9000  | Initial 90/10 burn/bounty split (`apply_slash`)                        |
-| `PROTOCOL_FEE_DEFAULT_BPS`     | 50    | 0.5% of `net` on settle                                                |
+| `PROTOCOL_FEE_DEFAULT_BPS`     | 0     | No VPN commission                                                |
 | `SWEEP_GRACE_MULT_DEFAULT`     | 10    | `sweep_grace = session_grace_epochs * 10`                              |
 | `SWEEP_BOUNTY_DEFAULT_BPS`     | 100   | 1% of swept deposit to caller                                          |
 | `SESSION_OPEN` / `_SETTLED` / `_REFUNDED` | 0 / 1 / 2 | Session FSM (see [`state-machine.md`](state-machine.md))    |
@@ -50,7 +50,7 @@ Declared at [`program/main-v3.aml:79-142`](../../program/main-v3.aml).
 | `session_grace_epochs`, `unbond_grace_epochs`                        | `int`     | Grace windows                                                           |
 | `sweep_grace_multiplier`, `sweep_bounty_bps`                         | `int`     | Sweep economics                                                         |
 | `slash_burn_bps`, `slash_bounty_bps`                                 | `int`     | Slash split; `set_params` invariant: must sum to `BPS_DENOM` ([`program/main-v3.aml:245`](../../program/main-v3.aml)) |
-| `protocol_fee_bps`                                                   | `int`     | Cap: 200 (2%) via `set_params` ([`program/main-v3.aml:246`](../../program/main-v3.aml)) |
+| `protocol_fee_bps`                                                   | `int`     | Fixed at zero via `set_params` ([`program/main-v3.aml:246`](../../program/main-v3.aml)) |
 
 ## Circle registry
 

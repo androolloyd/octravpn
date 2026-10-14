@@ -1,24 +1,18 @@
-# Kani harnesses
+# Kani verification
 
-Bounded model checks for the Rust crypto/parsing surface.
+The five required harnesses execute production `SessionId` codecs and the shared
+`relay_window` claim/refund/sweep arithmetic over symbolic 64-bit inputs. They
+check padding rejection, round trips, strict deadline separation and disjoint
+windows, including overflow. They do not establish cryptographic unforgeability.
 
-## Harnesses
-
-- **payload_deterministic** — `Receipt::signing_payload` is deterministic.
-- **round_trip_signed_receipt** — sign-then-verify never panics and always
-  succeeds for any 32-byte session id and 64-bit seq.
-- **monotonic_iff_strictly_greater** — `check_monotonic(prev)` accepts iff
-  the new seq is strictly greater than `prev`.
-
-## Running
-
-```
-cargo install kani-verifier
+```sh
+cargo install --locked kani-verifier --version 0.68.0
 cargo kani setup
-cd proofs/kani
-cargo kani
+cargo kani --manifest-path proofs/kani/Cargo.toml
 ```
 
-These harnesses are intentionally small so they verify in seconds. The
-proptest suite (`cargo test -p octravpn-core --tests prop`) covers the
-same properties at unbounded sizes for runtime confidence.
+The proof crate is explicitly excluded from the root workspace. Its own lockfile
+pins verification dependencies. CI treats installation or proof failures as errors.
+The former receipt harnesses were stale and never actually ran; they have been
+replaced with these executable checks. Property tests complement verification,
+but do not quantify over all inputs.

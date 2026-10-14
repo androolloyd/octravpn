@@ -48,3 +48,14 @@ this spec to the compiled OCTB bytecode (or, easier, to the AML source's
 operational semantics). Octra's Applied compiler exposes ABI + disassembly
 on every compile, which gives us the surface we'd need to relate AML to a
 formal semantics.
+
+## Current v4 scope (2026-10-11)
+
+`OctraVPN_V4.lean` proves six abstract stake lifecycle properties, including
+retirement before unbonding and funded sessions blocking finalization. Historical
+v1-v3 models now use full traffic payments with zero commission. Their other
+historical abstractions do not establish correctness of the revised AML slashing
+or onboarding paths. Crypto/protocol models contain
+explicit axioms and opaque definitions. There is no compiler/bytecode refinement
+proof, and a successful `lake build` does not certify deployment safety. Real AML
+regressions and native host money tests are separate checks.

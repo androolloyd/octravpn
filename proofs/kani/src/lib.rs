@@ -1,87 +1,54 @@
-//! Kani harnesses for the OctraVPN crypto / parsing surface.
-//!
-//! Kani is a bounded model checker for Rust. The harnesses here treat
-//! input bytes as nondeterministic and verify properties (panics, slack
-//! invariants, round-trips) hold across all bounded inputs.
-//!
-//! Run with:
-//!     cargo kani --harness round_trip_signed_receipt
-//!
-//! For CI we keep harness sizes small so verification finishes in
-//! seconds; the full unbounded versions of these properties live in the
-//! companion proptest suite (`crates/octravpn-core/tests/`).
-
-#![cfg_attr(kani, no_std)]
-
+//! Bounded verification of production session codecs and relay epoch guards.
+//! Cryptographic unforgeability is an assumption, not a Kani proof here.
 #[cfg(kani)]
-extern crate alloc;
+use octravpn_core::{relay_window::{claim_window_open, recovery_window_open}, session::SessionId};
 
-#[cfg(kani)]
-use alloc::vec::Vec;
-
-#[cfg(kani)]
-use octravpn_core::{
-    receipt::{Receipt, SignedReceipt, canonical_payload},
-    session::SessionId,
-    sig::KeyPair,
-};
-
-/// `Receipt::signing_payload` is deterministic and canonical: same input
-/// → same bytes. Verified bounded-symbolically over a small ciphertext.
 #[cfg(kani)]
 #[kani::proof]
-fn payload_deterministic() {
-    let session: [u8; 32] = kani::any();
-    let seq: u64 = kani::any();
-    let len: usize = kani::any_where(|n: &usize| *n <= 16);
-    let mut ct = Vec::with_capacity(len);
-    for _ in 0..len {
-        ct.push(kani::any::<u8>());
-    }
-    let a = canonical_payload(&SessionId(session), seq, &ct).unwrap();
-    let b = canonical_payload(&SessionId(session), seq, &ct).unwrap();
-    assert!(a == b);
+#[kani::unwind(33)]
+fn session_u64_round_trip() {
+    let id: u64 = kani::any();
+    assert_eq!(SessionId::from_u64(id).as_u64(), Some(id));
 }
 
-/// Sign-then-verify round-trip never panics and always succeeds.
 #[cfg(kani)]
 #[kani::proof]
-#[kani::unwind(4)]
-fn round_trip_signed_receipt() {
-    let session: [u8; 32] = kani::any();
-    let seq: u64 = kani::any();
-    let secret: [u8; 32] = kani::any();
-    let kp = KeyPair::from_secret_bytes(&secret);
-    let r = Receipt {
-        session_id: SessionId(session),
-        seq,
-        ciphertext: alloc::vec::Vec::new(),
-    };
-    let sr = SignedReceipt::sign(r, &kp).unwrap();
-    assert!(sr.verify().is_ok());
+#[kani::unwind(33)]
+fn session_nonzero_padding_rejected() {
+    let bytes: [u8; 32] = kani::any();
+    let has_padding = bytes[8..].iter().any(|b| *b != 0);
+    assert_eq!(SessionId::new(bytes).as_u64().is_none(), has_padding);
 }
 
-/// `check_monotonic` accepts iff seq strictly increases.
 #[cfg(kani)]
 #[kani::proof]
-fn monotonic_iff_strictly_greater() {
-    let session: [u8; 32] = kani::any();
-    let prev: u64 = kani::any();
-    let seq: u64 = kani::any();
-    let secret: [u8; 32] = kani::any();
-    let kp = KeyPair::from_secret_bytes(&secret);
-    let r = Receipt {
-        session_id: SessionId(session),
-        seq,
-        ciphertext: alloc::vec::Vec::new(),
-    };
-    let sr = SignedReceipt::sign(r, &kp).unwrap();
-    let res = sr.check_monotonic(prev);
-    assert!(res.is_ok() == (seq > prev));
+fn claim_never_at_or_after_deadline() {
+    let now: u64 = kani::any();
+    let deadline: u64 = kani::any();
+    let margin: u64 = kani::any();
+    if claim_window_open(now, deadline, margin) { assert!(now < deadline); }
 }
 
-// Stub crate-level item so `cargo build` still succeeds without kani:
-// the harness functions are only compiled under `cfg(kani)`.
-pub fn build_marker() -> &'static str {
-    "octravpn-kani"
+#[cfg(kani)]
+#[kani::proof]
+fn recovery_never_at_or_before_deadline() {
+    let now: u64 = kani::any();
+    let deadline: u64 = kani::any();
+    let grace: u64 = kani::any();
+    let margin: u64 = kani::any();
+    if recovery_window_open(now, deadline, grace, margin) { assert!(now > deadline); }
 }
+
+#[cfg(kani)]
+#[kani::proof]
+fn claim_and_recovery_windows_disjoint() {
+    let now: u64 = kani::any();
+    let deadline: u64 = kani::any();
+    let claim_margin: u64 = kani::any();
+    let refund_margin: u64 = kani::any();
+    let grace: u64 = kani::any();
+    assert!(!(claim_window_open(now, deadline, claim_margin)
+        && recovery_window_open(now, deadline, grace, refund_margin)));
+}
+
+pub fn build_marker() -> &'static str { "octravpn-kani" }

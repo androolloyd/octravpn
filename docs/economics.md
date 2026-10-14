@@ -1,5 +1,9 @@
 # OctraVPN: Economic Design
 
+The traffic commission was removed on 2026-10-12. Directory/signaling pricing
+and older encrypted-accounting sections below include design proposals; they
+are not a claim that the current RC implements every service.
+
 This document specifies the economic model: who pays whom, in what
 direction, at what price, with what incentives, and why we believe
 the protocol is incentive-compatible against the threat model in
@@ -42,20 +46,14 @@ Six non-negotiable choices shape every other decision below:
 
 ---
 
-## 2. Three-tier fee structure
+## 2. Traffic payments in OCT
 
-The phrase "Octra as control plane for hire" cashes out as three
-distinct payment tiers. Every OU spent in the system flows through
-exactly one of them.
+Users pay the agreed traffic charge in OCT. Settlement credits the entire
+charge to the serving operator; OctraVPN takes no commission. Ordinary
+Octra transaction fees pay for chain inclusion separately.
 
-| Tier | Paid to                       | Mechanism                                       | What you're buying                                                       |
-| ---- | ----------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------ |
-| 1    | Octra protocol validators     | Per-tx gas fees                                 | Chain inclusion — global agreement on state changes                       |
-| 2    | OctraVPN program treasury     | 0.5 % of settlements (governance-tunable ≤ 2 %) | Protocol maintenance, audits, bug bounties, dispute resolution            |
-| 3    | OctraVPN operators            | Per-operation service fees                      | Off-chain work: relay bytes, directory lookups, signaling assists         |
-
-Tier 1: you use the chain. Tier 2: you fund the protocol. Tier 3:
-operators get paid for work.
+`protocol_fee_bps` is a legacy ABI field fixed at zero. Administration cannot
+raise it. Escrow and operator stake are recoverable balances, not fees.
 
 ---
 
@@ -76,9 +74,7 @@ operators get paid for work.
         │ on settle / claim_no_show / sweep_expired      │
         └────────────────────────────────────────────────┘
                           │
-                          ├── protocol fee (Tier 2) ──► [Program treasury]
-                          │
-                          └── operator pay (Tier 3) ──► [Operator earnings]
+                          └── full traffic payment ──► [Operator earnings]
 
 
   [Operator wallet] ─ bond_endpoint(stake) ──► [endpoint_stake[addr]]
@@ -125,18 +121,14 @@ mesh runs over the public internet, only paid hops cost.
 Stake recovers via `unbond_endpoint` after `unbond_grace_epochs`
 elapse (default 30 days of epochs).
 
-### 3.4 Program treasury (Tier 2)
+### 3.4 Program treasury
 
-Funded by the 0.5 % protocol fee on settlements and by the 90 % burn
-share of slashed stakes. Governance (the deployer's wallet) can
-disburse for:
+Traffic settlement never credits the program treasury. The current AML
+retains the treasury for slashing accounting and explicit administration.
+Its `burned` counter does not itself destroy OCT: the slash share remains
+in contract custody and the withdrawal policy needs separate review.
 
-- Bug bounty payouts
-- Formal-verification audit engagements
-- Protocol upgrade development
-- Dispute-resolution costs
-
-This is the only mechanism keeping the protocol funded long-term.
+Protocol maintenance requires funding outside traffic settlement.
 
 ---
 
@@ -262,15 +254,14 @@ fresh.
 
 ## 5. Pricing per service
 
-### 5.1 Relay (Tier 3a)
+### 5.1 Relay traffic
 
 Per-byte to the exit operator. On `settle_confirm` (after the
 matching `settle_claim`):
 
 ```
 total    = bytes_used × endpoints[exit].price_per_mb
-fee      = total × PROTOCOL_FEE_BPS / 10000
-net_pay  = total − fee                              // → exit operator (HFHE)
+net_pay  = total                              // → exit operator (HFHE)
 refund   = deposit − total                          // → tailnet treasury
 ```
 
@@ -281,7 +272,7 @@ once the AML schema also records per-hop splits.
 Defaults: `min_price_per_mb = 1 OU`, governance can raise but not
 lower below the constructor floor.
 
-### 5.2 Directory (Tier 3b)
+### 5.2 Directory (earlier service pricing proposal)
 
 Per signed lookup. Settled in batches via `settle_directory_batch`
 where the operator submits N client-signed query receipts and
@@ -292,7 +283,7 @@ Defaults: `min_price_per_lookup = 10 OU` (≈ 0.00001 OCT). Floor
 exists because a zero-priced directory operator could serve
 poisoned responses with no economic cost.
 
-### 5.3 Signaling (Tier 3c)
+### 5.3 Signaling (earlier service pricing proposal)
 
 Per assist (STUN response or handshake relay). Settled identically
 to directory.
@@ -310,8 +301,8 @@ to open-time state).
 
 ### 5.5 No transit-time overhead
 
-Protocol fee is taken at *settle*, not per-operation. Operators see
-no overhead during service — the bandwidth they pay for is the
+No VPN commission is taken during service or settlement. Operators see
+no protocol payment overhead during service — the bandwidth they pay for is the
 bandwidth that hits the wire; the lookup they execute is the lookup
 the client gets.
 
@@ -425,18 +416,10 @@ There is no on-chain state where OU is permanently stuck. Lean
 lemma `settle_returns_refund_to_treasury` and TLA+
 `StakeUnlockReachable` formalise this.
 
-### 7.3 Treasury draining via fee
+### 7.3 No traffic commission
 
-The protocol fee draws from each settled `total_paid`. At a generous
-estimate of 500 GB/month/tailnet at 50 OU/MB:
-
-```
-month_spend  = 500 000 MB × 50 OU/MB        = 25 000 000 OU
-fee_share    = 25 000 000 × 50 / 10 000     =     125 000 OU
-                                             = 0.125 OCT
-```
-
-That's 0.5 % of throughput. Reasonable.
+A settled charge of 1,000 OU credits 1,000 OU to the operator. The treasury
+receives zero. A legacy nonzero stored fee value cannot reduce the payout.
 
 ---
 
@@ -625,27 +608,9 @@ Sybil farming; we want real usage, not identity count.
 
 ## 12. Long-term sustainability
 
-The Tier 2 protocol fee + 90 % burn share of slashes funds the
-program treasury indefinitely.
-
-### 12.1 Revenue at scale
-
-| Scale                              | Daily bandwidth | Daily fee at 50 OU/MB | Annual fee  |
-| ---------------------------------- | --------------- | --------------------- | ----------- |
-| 1 tailnet, 5 users                 | 5 GB            | 1 250 OU              | 456k OU     |
-| 100 tailnets, 5 users each         | 500 GB          | 125k OU               | 45.6M OU    |
-| 1 000 tailnets, 50 users each      | 50 TB           | 12.5M OU              | 4.56B OU    |
-| 10 000 tailnets, 100 users each    | 1 PB            | 250M OU               | 91B OU      |
-
-At 1 PB/day throughput (a small ISP's worth), Tier 2 sustains a
-multi-engineer team plus annual audits without external funding.
-Breakeven for "covers one annual audit" (~$100k = ~100M OU at
-$1/OCT) is ~10 TB/day total throughput.
-
-### 12.2 Adjustment lever
-
-`set_params` can raise `protocol_fee_bps` up to the 2 % cap. Cap is
-constructor-enforced; no governance proposal can silently lift it.
+Operators earn from serving traffic. Protocol development and audits need
+separate funding; there is no treasury revenue proportional to VPN usage.
+`set_params` rejects any nonzero protocol commission.
 
 ---
 
@@ -684,7 +649,7 @@ Set in the `OctraVPN` constructor (`program/main.aml`). Governance
 | `min_price_per_mb`         | 1 OU          | > 0            | Floors relay pricing; zero is a Sybil vector.                                        |
 | `min_price_per_lookup`     | 10 OU         | > 0            | Floors directory pricing.                                                            |
 | `min_price_per_assist`     | 100 OU        | > 0            | Floors signaling pricing.                                                            |
-| `protocol_fee_bps`         | 50 (0.5 %)    | ≤ 200 (2 %)    | Funds Tier 2.                                                                        |
+| `protocol_fee_bps` | 0 | == 0 | Reserved for ABI compatibility; no VPN commission. |
 | `max_hops`                 | 3             | ≥ 1, ≤ 5       | Privacy-routing depth; deeper costs more bandwidth without proportional gain.        |
 | `receipt_seq_bits`         | 32            | ≥ 16           | Per-session receipt counter width; 32 bits ≈ 4B receipts per session is forever.     |
 

@@ -1,0 +1,11 @@
+{
+  "repository": "https://github.com/octra-labs/lite_node",
+  "commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "release_source_marker": "f7637a7eda10b78702ad56844707f7fd308db0e3",
+  "consensus_baseline": "upstream",
+  "fork_policy": "Circle apps first; separately specify and activate any required runtime capability",
+  "full_rust_node_complete": false,
+  "source_equivalent_commits": [
+    "d3e834919bd586e81f947d0dae91becc6c43c756"
+  ]
+}

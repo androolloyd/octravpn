@@ -14,7 +14,7 @@
 # or raw-bytes contents of a deployer.key) funded with enough OCT to deploy
 # main-v4 and fund two fresh test wallets (~5 OCT is plenty). The job funds a
 # fresh node1 + client wallet from it each run, so only this one key is needed.
-# If the secret is absent the job self-skips (green no-op) rather than failing.
+# An absent secret fails explicitly: a skipped money-path test is not evidence.
 name: v4-relay-devnet-e2e
 
 on:
@@ -44,13 +44,14 @@ jobs:
 
       - name: Gate on the deployer secret
         id: gate
+        env:
+          DEPLOYER_KEY: ${{ secrets.OCTRA_DEVNET_DEPLOYER_KEY }}
         run: |
-          if [ -z "${{ secrets.OCTRA_DEVNET_DEPLOYER_KEY }}" ]; then
-            echo "OCTRA_DEVNET_DEPLOYER_KEY not set — skipping the devnet daemon e2e."
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=true" >> "$GITHUB_OUTPUT"
+          if [ -z "$DEPLOYER_KEY" ]; then
+            echo "::error::Missing OCTRA_DEVNET_DEPLOYER_KEY; native daemon settlement was not tested."
+            exit 1
           fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
 
       - name: Install protobuf compiler (headscale-api build.rs)
         if: steps.gate.outputs.run == 'true'
@@ -69,11 +70,12 @@ jobs:
         working-directory: octra
         env:
           OCTRA_BIN: ${{ github.workspace }}/octra-foundry/target/release/octra
+          DEPLOYER_KEY: ${{ secrets.OCTRA_DEVNET_DEPLOYER_KEY }}
         run: |
           set -euo pipefail
           mkdir -p docker/devnet/state/node1 docker/devnet/state/client
           # Deployer key from the secret (foundry accepts raw-hex or raw bytes).
-          printf '%s' "${{ secrets.OCTRA_DEVNET_DEPLOYER_KEY }}" > docker/devnet/state/deployer.key
+          printf '%s' "$DEPLOYER_KEY" > docker/devnet/state/deployer.key
           chmod 600 docker/devnet/state/deployer.key
           DEP=$("$OCTRA_BIN" cast wallet addr --key docker/devnet/state/deployer.key)
           echo "deployer: $DEP"
@@ -86,7 +88,7 @@ jobs:
           # Fund: node1 needs the circle stake (~1 OCT) + fees; client needs
           # tailnet + session deposits. Overshoot; the deployer holds the float.
           rpc(){ curl -s -m 15 -X POST "$OCTRA_RPC_URL" -H 'content-type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$1\",\"params\":$2}"; }
-          fund(){ "$OCTRA_BIN" cast send --key docker/devnet/state/deployer.key --rpc-url "$OCTRA_RPC_URL" --fee 1000 --value "$2" "$1" \
+          fund(){ "$OCTRA_BIN" cast transfer "$1" "$2" --key docker/devnet/state/deployer.key --rpc-url "$OCTRA_RPC_URL" --ou 1000 \
                     | grep -oE '"tx_hash":\s*"[a-f0-9]+"' | head -1 | sed 's/.*"\([a-f0-9]*\)"/\1/'; }
           wait_tx(){ for _ in $(seq 1 25); do sleep 3; s=$(rpc octra_transaction "[\"$1\"]" | python3 -c 'import json,sys;print((json.load(sys.stdin).get("result") or {}).get("status",""))'); case "$s" in confirmed) return 0;; failed|rejected) echo "fund $1 -> $s"; return 1;; esac; done; }
           T1=$(fund "$N1" 300000000); echo "fund node1 tx=$T1";  wait_tx "$T1"

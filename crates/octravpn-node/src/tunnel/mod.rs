@@ -22,8 +22,7 @@
 //!     datagram to the public internet target encoded inside the inner
 //!     payload.
 //!   - Forward hop: decrypt incoming WG packet → onion-peel → forward
-//!     the inner blob to the next hop's WG endpoint as another WG
-//!     packet (re-encapsulated under the next hop's static pubkey).
+//!     packet is dropped until authenticated inter-hop transport is implemented.
 //!
 //! In both cases byte counters on the `OnionRouter` advance so receipt
 //! signing reflects actual served bandwidth.
@@ -35,7 +34,9 @@ use std::{
 };
 
 use anyhow::Result;
-use boringtun::noise::{Tunn, TunnResult};
+use boringtun::noise::{
+    handshake::parse_handshake_anon, rate_limiter::RateLimiter, Packet, Tunn, TunnResult,
+};
 use octravpn_core::onion::SessionKeyStore;
 use octravpn_tun::amnezia::{AmneziaConfig, AmneziaShield};
 use parking_lot::Mutex;
@@ -98,6 +99,7 @@ pub(crate) fn shard_for_4tuple(
 /// driven by the shard's owning task. 4-tuple hash picks the shard
 /// for any incoming packet.
 pub(crate) struct Peer {
+    client_pubkey: [u8; 32],
     /// Per-shard boringtun state. `tuns[shard_for_4tuple(...)]` is the
     /// one used for any packet from this peer. The first shard
     /// (`tuns[0]`) is always populated; additional shards are spawned
@@ -134,11 +136,41 @@ impl Peer {
 pub(crate) const PEERS_CAP: usize = 4096;
 pub(crate) const PEER_IDLE_TTL: std::time::Duration = std::time::Duration::from_secs(600);
 
-/// Per-peer policy attached to an allowlisted X25519 pubkey. Empty
-/// today (the pubkey itself is the lookup key). Reserved for future
-/// per-peer rate limits / bandwidth caps without changing the type.
-#[derive(Clone, Default)]
-pub(crate) struct AllowedClient;
+/// Absolute authorization lease. Packet traffic cannot extend chain freshness.
+pub(crate) const ADMISSION_LEASE: std::time::Duration = std::time::Duration::from_secs(120);
+
+#[derive(Clone)]
+pub(crate) struct AllowedClient {
+    pub request: Arc<octravpn_core::control::AnnounceSessionRequest>,
+    pub admitted_at: std::time::Instant,
+    pub expires_at: std::time::Instant,
+    pub permit: Option<crate::admission::SessionPermit>,
+}
+
+impl AllowedClient {
+    pub(crate) fn new(request: octravpn_core::control::AnnounceSessionRequest) -> Self {
+        let now = std::time::Instant::now();
+        Self {
+            request: Arc::new(request),
+            admitted_at: now,
+            expires_at: now + ADMISSION_LEASE,
+            permit: None,
+        }
+    }
+
+    pub(crate) fn with_permit(mut self, permit: Option<crate::admission::SessionPermit>) -> Self {
+        self.permit = permit;
+        self
+    }
+
+    fn live(&self) -> bool {
+        std::time::Instant::now() < self.expires_at
+            && self
+                .permit
+                .as_ref()
+                .map_or(true, crate::admission::SessionPermit::live)
+    }
+}
 
 pub(crate) struct Server {
     /// Perf-Data-Plane #7: SO_REUSEPORT multi-queue UDP. On Linux/FreeBSD
@@ -153,6 +185,7 @@ pub(crate) struct Server {
     /// 4-tuple hashing on inbound packets.
     local_addr: SocketAddr,
     static_secret: StaticSecret,
+    handshake_limiter: Arc<RateLimiter>,
     router: Arc<OnionRouter>,
     /// Perf-Data-Plane #9 — session-pinned onion keys. The data plane
     /// drops the per-packet X25519+HKDF and runs AEAD-only against the
@@ -225,6 +258,7 @@ impl Server {
         Ok(Self {
             socks,
             local_addr,
+            handshake_limiter: Arc::new(RateLimiter::new(&X25519Pub::from(&static_secret), 100)),
             static_secret,
             router,
             session_keys: Arc::new(SessionKeyStore::new()),
@@ -242,6 +276,10 @@ impl Server {
     pub(crate) fn with_metrics(mut self, metrics: Arc<crate::control::NodeMetrics>) -> Self {
         self.metrics = Some(metrics);
         self
+    }
+
+    pub(crate) fn local_addr(&self) -> SocketAddr {
+        self.local_addr
     }
 
     /// Run the UDP receive loop forever.
@@ -331,17 +369,32 @@ impl Server {
     }
 
     async fn handle_packet(&self, packet: &[u8], src: SocketAddr, work: &mut [u8]) {
+        self.handshake_limiter.reset_count();
         let Some(peer) = self.peers.get(&src) else {
             self.try_admit_peer(packet, src, work).await;
             return;
         };
+
+        if !self
+            .allowlist
+            .get(&peer.client_pubkey)
+            .is_some_and(|binding| binding.live())
+        {
+            if let Some(binding) = self.allowlist.get(&peer.client_pubkey) {
+                self.session_keys.evict(&binding.request.session_id);
+            }
+            self.peers.remove(&src);
+            return;
+        }
 
         // Perf-Data-Plane #2: route this packet to the shard for the
         // 4-tuple. Same flow → same shard, so the WG seq-counter on
         // `peer.tuns[shard]` is monotone across the flow.
         let shard = peer.shard_for(src, self.local_addr);
         // boringtun decapsulation. The Tunn handles handshake + transport.
-        let res = peer.tuns[shard].lock().decapsulate(None, packet, work);
+        let res = peer.tuns[shard]
+            .lock()
+            .decapsulate(Some(src.ip()), packet, work);
         self.handle_tunn_result(res, src).await;
     }
 
@@ -367,10 +420,10 @@ impl Server {
                 debug!(?src, n, "wg control packet replied");
             }
             TunnResult::WriteToTunnelV4(bytes, _src_ip) => {
-                self.dispatch_inner(bytes, src).await;
+                self.dispatch_frame(bytes, src).await;
             }
             TunnResult::WriteToTunnelV6(bytes, _src_ip) => {
-                self.dispatch_inner(bytes, src).await;
+                self.dispatch_frame(bytes, src).await;
             }
             TunnResult::Done => {}
             TunnResult::Err(e) => {
@@ -405,11 +458,12 @@ impl Server {
                     None,
                     None,
                     0,
-                    None,
+                    Some(self.handshake_limiter.clone()),
                 )));
             }
         }
         Arc::new(Peer {
+            client_pubkey: peer_pk,
             tuns,
             shard_count: self.shard_count,
         })
@@ -429,50 +483,63 @@ impl Server {
             self.shard_count,
         );
 
-        // Only the pubkey is needed to trial-decapsulate; `keys()` avoids
-        // cloning every `AllowedClient` value the way `snapshot()` did —
-        // this path is reachable by any unknown source address, so the
-        // per-packet allocation was a cheap UDP-flood amplifier.
-        for pk in self.allowlist.keys() {
-            let mut tun = Tunn::new(
-                self.static_secret.clone(),
-                X25519Pub::from(pk),
-                None,
-                None,
-                0,
-                None,
-            );
-            match tun.decapsulate(None, packet, work) {
-                TunnResult::WriteToNetwork(bytes) => {
-                    let response = bytes.to_vec();
-                    let peer = self.build_peer(pk, admit_shard, tun);
-                    self.peers.insert(src, peer);
-                    if let Some(m) = self.metrics.as_ref() {
-                        m.record_wg_handshake(true);
-                    }
-                    let n = response.len();
-                    if let Err(e) = self.shielded_send_to(&response, src).await {
-                        warn!(error = %e, "send_to failed");
-                    }
-                    debug!(?src, n, shard = admit_shard, "wg peer admitted");
-                    return;
-                }
-                TunnResult::WriteToTunnelV4(bytes, _src_ip) => {
-                    let inner = bytes.to_vec();
-                    let peer = self.build_peer(pk, admit_shard, tun);
-                    self.peers.insert(src, peer);
-                    self.dispatch_inner(&inner, src).await;
-                    return;
-                }
-                TunnResult::WriteToTunnelV6(bytes, _src_ip) => {
-                    let inner = bytes.to_vec();
-                    let peer = self.build_peer(pk, admit_shard, tun);
-                    self.peers.insert(src, peer);
-                    self.dispatch_inner(&inner, src).await;
-                    return;
-                }
-                TunnResult::Done | TunnResult::Err(_) => {}
+        // Verify MAC/cookie first, then decrypt the peer's static identity once.
+        // Admission cost does not grow with the funded-session allowlist.
+        self.handshake_limiter.reset_count();
+        let mut cookie = [0u8; 256];
+        let parsed = match self
+            .handshake_limiter
+            .verify_packet(Some(src.ip()), packet, &mut cookie)
+        {
+            Ok(Packet::HandshakeInit(init)) => init,
+            Err(TunnResult::WriteToNetwork(reply)) => {
+                let _ = self.shielded_send_to(reply, src).await;
+                return;
             }
+            _ => return,
+        };
+        let Ok(identity) = parse_handshake_anon(
+            &self.static_secret,
+            &X25519Pub::from(&self.static_secret),
+            &parsed,
+        ) else {
+            return;
+        };
+        let pk = identity.peer_static_public;
+        if !self
+            .allowlist
+            .get(&pk)
+            .is_some_and(|binding| binding.live())
+        {
+            return;
+        }
+        let mut tun = Tunn::new(
+            self.static_secret.clone(),
+            X25519Pub::from(pk),
+            None,
+            None,
+            0,
+            Some(self.handshake_limiter.clone()),
+        );
+        match tun.decapsulate(Some(src.ip()), packet, work) {
+            TunnResult::WriteToNetwork(bytes) => {
+                let response = bytes.to_vec();
+                let peer = self.build_peer(pk, admit_shard, tun);
+                self.peers.insert(src, peer);
+                if let Some(m) = self.metrics.as_ref() {
+                    m.record_wg_handshake(true);
+                }
+                let _ = self.shielded_send_to(&response, src).await;
+                return;
+            }
+            TunnResult::WriteToTunnelV4(bytes, _) | TunnResult::WriteToTunnelV6(bytes, _) => {
+                let inner = bytes.to_vec();
+                let peer = self.build_peer(pk, admit_shard, tun);
+                self.peers.insert(src, peer);
+                self.dispatch_frame(&inner, src).await;
+                return;
+            }
+            TunnResult::Done | TunnResult::Err(_) => {}
         }
 
         if let Some(m) = self.metrics.as_ref() {
@@ -495,6 +562,12 @@ impl Server {
     ///     as the Egress payload. A debug-only assertion guards
     ///     against the privacy regression of skipping on a relay
     ///     session.
+    async fn dispatch_frame(&self, packet: &[u8], src: SocketAddr) {
+        if let Ok(layer) = octravpn_core::tunnel_frame::decode(packet) {
+            self.dispatch_inner(layer, src).await;
+        }
+    }
+
     async fn dispatch_inner(&self, layer: &[u8], src: SocketAddr) {
         // The first 32 bytes of `layer` carry the per-session id we
         // assigned at session-announce. We expect the client to prefix
@@ -508,6 +581,16 @@ impl Server {
         let onion = &layer[32..];
 
         let session_id = octravpn_core::session::SessionId::new(sid);
+        let Some(peer) = self.peers.get(&src) else {
+            return;
+        };
+        let Some(binding) = self.allowlist.get(&peer.client_pubkey) else {
+            return;
+        };
+        if !binding.live() || binding.request.session_id != session_id {
+            debug!(?src, "dropping packet outside authenticated session lease");
+            return;
+        }
 
         // Perf-Data-Plane #3 — onion-skip on direct sessions.
         //
@@ -548,8 +631,12 @@ impl Server {
         );
         match peeled_result {
             Ok(peeled) => {
-                self.router
-                    .install(session_id.clone(), peeled.action.clone());
+                if !self
+                    .router
+                    .install(session_id.clone(), peeled.action.clone())
+                {
+                    return;
+                }
                 self.router
                     .record_bytes(&session_id, Direction::In, layer.len() as u64);
 
@@ -587,25 +674,15 @@ impl Server {
     async fn forward_to(
         &self,
         endpoint: &str,
-        session: &octravpn_core::session::SessionId,
-        blob: &[u8],
+        _session: &octravpn_core::session::SessionId,
+        _blob: &[u8],
     ) {
-        // Prefix with session_id again so the next hop knows which
-        // session this belongs to.
-        let mut payload = Vec::with_capacity(32 + blob.len());
-        payload.extend_from_slice(session.as_bytes());
-        payload.extend_from_slice(blob);
-        match endpoint.parse::<SocketAddr>() {
-            Ok(addr) => {
-                if let Err(e) = self.shielded_send_to(&payload, addr).await {
-                    warn!(?addr, error = %e, "forward send_to failed");
-                } else {
-                    self.router
-                        .record_bytes(session, Direction::Out, payload.len() as u64);
-                }
-            }
-            Err(e) => warn!(endpoint, error = %e, "bad next endpoint"),
-        }
+        // Inter-hop WG authentication and per-hop funding are not implemented.
+        // Sending a decrypted onion as raw UDP would bypass both boundaries.
+        warn!(
+            endpoint,
+            "multi-hop forwarding unavailable; dropping packet"
+        );
     }
 
     async fn egress(&self, payload: &[u8]) {
@@ -615,11 +692,33 @@ impl Server {
         }
         let ip = std::net::Ipv4Addr::new(payload[0], payload[1], payload[2], payload[3]);
         let port = u16::from_be_bytes([payload[4], payload[5]]);
+        if port == 0 || !public_egress_ip(ip) {
+            debug!(%ip, port, "refusing non-public egress target");
+            return;
+        }
         let target = SocketAddr::new(std::net::IpAddr::V4(ip), port);
         if let Err(e) = self.outbound_sock().send_to(&payload[6..], target).await {
             warn!(?target, error = %e, "egress send_to failed");
         }
     }
+}
+
+/// Refuse loopback, LAN, link-local, CGNAT, multicast and reserved destinations.
+fn public_egress_ip(ip: std::net::Ipv4Addr) -> bool {
+    let [a, b, c, _] = ip.octets();
+    !(a == 0
+        || a == 10
+        || a == 127
+        || a >= 224
+        || (a == 100 && (64..=127).contains(&b))
+        || (a == 169 && b == 254)
+        || (a == 172 && (16..=31).contains(&b))
+        || (a == 192 && b == 168)
+        || (a == 192 && b == 0 && c == 0)
+        || (a == 192 && b == 0 && c == 2)
+        || (a == 198 && (b == 18 || b == 19))
+        || (a == 198 && b == 51 && c == 100)
+        || (a == 203 && b == 0 && c == 113))
 }
 
 fn is_wg_handshake_initiation(packet: &[u8]) -> bool {
@@ -721,6 +820,104 @@ fn build_reuseport_socket(addr: SocketAddr) -> Result<UdpSocket> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn egress_cannot_reach_operator_lan_or_metadata() {
+        for addr in [
+            "0.0.0.0",
+            "10.0.0.1",
+            "127.0.0.1",
+            "169.254.169.254",
+            "172.16.0.1",
+            "192.168.0.1",
+            "100.64.0.1",
+            "224.0.0.1",
+            "255.255.255.255",
+            "198.18.0.1",
+        ] {
+            assert!(!public_egress_ip(addr.parse().unwrap()), "{addr}");
+        }
+        assert!(public_egress_ip("8.8.8.8".parse().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn authenticated_peer_is_bound_to_live_session_and_revocation() {
+        use octravpn_core::{
+            control::AnnounceSessionRequest,
+            session::SessionId,
+            sig::{KeyPair, Signature},
+        };
+        let node_secret = StaticSecret::random_from_rng(rand::rngs::OsRng);
+        let client_secret = StaticSecret::random_from_rng(rand::rngs::OsRng);
+        let client_pk = X25519Pub::from(&client_secret).to_bytes();
+        let id = SessionId::from_u64(42);
+        let key = KeyPair::generate();
+        let binding = AllowedClient::new(AnnounceSessionRequest {
+            session_id: id.clone(),
+            client_pubkey: key.public,
+            client_wg_pubkey: client_pk,
+            open_tx_hash: "fixture".into(),
+            client_sig: Signature([0; 64]),
+            opener_pubkey: key.public,
+            opener_sig: Signature([0; 64]),
+        });
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(octravpn_core::bounded::BoundedMap::new(16, ADMISSION_LEASE));
+        allowlist.insert(client_pk, binding.clone());
+        let server = Server::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            node_secret.clone(),
+            router.clone(),
+            allowlist.clone(),
+        )
+        .await
+        .unwrap();
+        let src: SocketAddr = "127.0.0.1:23456".parse().unwrap();
+        let mut client = Tunn::new(
+            client_secret,
+            X25519Pub::from(&node_secret),
+            None,
+            None,
+            0,
+            None,
+        );
+        let mut handshake = [0; 2048];
+        let TunnResult::WriteToNetwork(packet) =
+            client.format_handshake_initiation(&mut handshake, false)
+        else {
+            panic!("handshake");
+        };
+        let packet = packet.to_vec();
+        let mut work = [0; 4096];
+        server.handle_packet(&packet, src, &mut work).await;
+        assert!(server.peers.contains_key(&src), "real WG identity admitted");
+        // Exercise the exact post-decapsulation dispatch boundary separately:
+        // the current client has no session framing driver (documented RC limit).
+        let mut payload = SessionId::from_u64(43).as_bytes().to_vec();
+        payload.extend_from_slice(&[0; 64]);
+        server.dispatch_inner(&payload, src).await;
+        assert!(router.bytes(&SessionId::from_u64(43)).is_none());
+        router.install(id.clone(), octravpn_core::onion::HopAction::Egress);
+        router.set_onion_peel_required(&id, false);
+        payload[..32].copy_from_slice(id.as_bytes());
+        server.dispatch_inner(&payload, src).await;
+        let served = router.bytes(&id).unwrap().0;
+        assert_eq!(served, payload.len() as u64);
+        let mut expired = binding.clone();
+        expired.expires_at = std::time::Instant::now();
+        allowlist.insert(client_pk, expired);
+        server.dispatch_inner(&payload, src).await;
+        assert_eq!(router.bytes(&id).unwrap().0, served);
+        allowlist.insert(client_pk, binding);
+        allowlist.remove(&client_pk);
+        server.handle_packet(&packet, src, &mut work).await;
+        assert!(
+            !server.peers.contains_key(&src),
+            "revoked established peer removed"
+        );
+        server.dispatch_inner(&payload, src).await;
+        assert_eq!(router.bytes(&id).unwrap().0, served);
+    }
 
     #[tokio::test]
     async fn server_binds_and_returns_pubkey() {

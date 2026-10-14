@@ -1,0 +1,29 @@
+[package]
+name = "octra-pvac"
+version.workspace = true
+edition.workspace = true
+license = "BSD-3-Clause"
+rust-version.workspace = true
+description = "Safe Rust ownership over the pinned native Octra PVAC implementation."
+publish = false
+
+[dependencies]
+thiserror.workspace = true
+
+[build-dependencies]
+cc = "1"
+
+[features]
+benchmark = []
+
+[[example]]
+name = "boundary_bench"
+required-features = ["benchmark"]
+
+[dev-dependencies]
+hex.workspace = true
+sha2.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

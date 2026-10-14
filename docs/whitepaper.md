@@ -41,10 +41,8 @@ The novel contributions are:
   calls. Claims are a two-step: AML verifies the zero-proof and
   transfers plaintext OU; the operator's wallet wraps the funds in a
   native `op_type="stealth"` tx for unlinkable payout.
-- **Three-tier fee structure.** Tier 1 (gas to Octra protocol
-  validators) + Tier 2 (0.5 % of settlements funds the program
-  treasury for audits + maintenance) + Tier 3 (per-byte pay to
-  OctraVPN operators).
+- **Traffic payments in OCT.** Operators receive the full agreed charge.
+  No VPN protocol commission; ordinary Octra transaction fees are separate.
 - **Tailnet treasuries.** Per-tailnet OU pools fund sessions;
   refunds return to the same pool. No per-user balances on chain.
 - **Validator-only settlement with economic ceiling.** v1 is
@@ -206,8 +204,7 @@ require caller == s.exit
 require s.status == open
 let total_paid = bytes_used * price_per_mb
 require total_paid <= s.deposit                 // economic ceiling
-let fee = total_paid * protocol_fee_bps / 10000
-let net_pay = total_paid - fee
+let net_pay = total_paid                         // full traffic payment
 let refund = s.deposit - total_paid
 
 // Effects (CEI ordering):
@@ -347,8 +344,8 @@ asks that close these gaps.
 Summarised in `docs/economics.md`. Key points:
 
 - Single token (OU); no app-specific currency; no issuance.
-- Three-tier fees: Tier 1 (Octra gas) + Tier 2 (0.5 % protocol fee
-  funds program treasury) + Tier 3 (per-op operator pay).
+- Traffic payments in OCT go entirely to operators. No VPN protocol
+  commission; ordinary Octra transaction fees remain separate.
 - One bonded operator role. Stake `MIN_ENDPOINT_STAKE` = 1 000 OCT
   (1B OU). Slashable atomically on equivocation evidence (90 % burn
   / 10 % submitter bounty / permanent ineligibility).
@@ -359,7 +356,7 @@ Summarised in `docs/economics.md`. Key points:
   the commitment device.
 - Default parameters: `min_session_deposit = 10 OU`,
   `min_tailnet_deposit = 100 OU`, `session_grace_epochs = 100`,
-  `sweep_bounty_bps = 100`, `protocol_fee_bps = 50`,
+  `sweep_bounty_bps = 100`, `protocol_fee_bps = 0`,
   `MIN_ENDPOINT_STAKE = 10⁹ OU`. Governance-mutable within
   constructor-enforced bounds.
 

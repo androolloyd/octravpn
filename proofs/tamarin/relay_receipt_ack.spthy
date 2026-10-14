@@ -1,0 +1,39 @@
+/* Persistence-before-ACK protocol model, assuming durable storage survives restart.
+   Models the ACK order, not OS fsync semantics, code refinement or exactly once. */
+theory OctraVPNRelayReceiptAck
+begin
+builtins: signing
+rule Register_Node:
+  [ Fr(~n), Fr(~k) ] --[ Registered(~n) ]->
+  [ !Node(~n, ~k), Out(<~n, pk(~k)>) ]
+rule Reveal_Node:
+  [ !Node(n, k) ] --[ Revealed(n) ]-> [ Out(k) ]
+rule Persist_Receipt:
+  [ !Node(n, k), In(<s, seq, digest>) ]
+  --[ VaultPersisted(n,s,seq,digest) ]->
+  [ !Durable(n,s,seq,digest), PendingAck(n,s,seq,digest) ]
+rule Send_Ack:
+  [ !Node(n,k), PendingAck(n,s,seq,digest), !Durable(n,s,seq,digest) ]
+  --[ AckSent(n,s,seq,digest) ]->
+  [ Out(<'ack',n,s,seq,digest,sign(<'octravpn-ack',n,s,seq,digest>,k)>) ]
+rule Crash_Before_Ack:
+  [ PendingAck(n,s,seq,digest) ] --[ Crash(n) ]-> [ ]
+rule Restart_Replay:
+  [ !Durable(n,s,seq,digest) ] --[ Replayed(n,s,seq,digest) ]->
+  [ PendingAck(n,s,seq,digest) ]
+rule Accept_Ack:
+  [ !Node(n,k), In(<'ack',n,s,seq,digest,sign(<'octravpn-ack',n,s,seq,digest>,k)>) ]
+  --[ AckAccepted(n,s,seq,digest) ]-> [ ]
+lemma AckRequiresDurableReceipt:
+  "All n s seq d #i. AckAccepted(n,s,seq,d)@i ==>
+     (Ex #j. VaultPersisted(n,s,seq,d)@j & j < i) |
+     (Ex #j. Revealed(n)@j & j < i)"
+lemma SendAlwaysAfterPersistence:
+  "All n s seq d #i. AckSent(n,s,seq,d)@i ==>
+     Ex #j. VaultPersisted(n,s,seq,d)@j & j < i"
+lemma RecoveryCanDeliverAck: exists-trace
+  "Ex n s seq d #p #c #r #a.
+     VaultPersisted(n,s,seq,d)@p & Crash(n)@c & Replayed(n,s,seq,d)@r &
+     AckAccepted(n,s,seq,d)@a & p < c & c < r & r < a &
+     not (Ex #j. Revealed(n)@j)"
+end

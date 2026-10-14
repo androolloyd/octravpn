@@ -1,0 +1,3369 @@
+{
+  "upstream_commit": "d3e834919bd586e81f947d0dae91becc6c43c756",
+  "source_sha256": {
+    "pvac/include/pvac/core/bitvec.hpp": "b100c917583e09694f86dd3f8c40a1dd8b47e85526111f6834827a21f45149a7",
+    "pvac/include/pvac/core/config.hpp": "1912fbaf58b8c4f777c36454742e2859b6a5e9fb00155807fc0805773f4a7e40",
+    "pvac/include/pvac/core/ct_safe.hpp": "7d1179bb7b8d729e953dedd531d646595c3e20bc786fcdf7b8819afee5b20eb1",
+    "pvac/include/pvac/core/field.hpp": "8e13993d70a956443187a5f1fc146f56b501be2f69b76ef92df17db6f338ffe2",
+    "pvac/include/pvac/core/hash.hpp": "973f09a869f7cd25fd091110196164e45b5e47ea781f4a9ce28e435c8a4a5a4f",
+    "pvac/include/pvac/core/pvac_compress.hpp": "8e5aeb2497f3487f5a93ccab9acf597547bbabcc06b36c966bab6a4dce6b7d8d",
+    "pvac/include/pvac/core/random.hpp": "7b59e5ee4c120973113505b60aa8b62bff85ac7686d50ce9fe7b5e1cac9efa1e",
+    "pvac/include/pvac/core/seedable_rng.hpp": "204dde45bb99429827a4758a51121ffcb6a8e911c2ecfaed49ab5d374dc2d616",
+    "pvac/include/pvac/core/types.hpp": "d1f00321448e08a5b2079f484d8bb6923641f7cd375b2948eea058123625d3ca",
+    "pvac/include/pvac/crypto/bulletproofs/gadgets.hpp": "ded9002736fe5caf7607fded2a783d7c204fe69e430d684dfc63a0537cf5dbe4",
+    "pvac/include/pvac/crypto/bulletproofs/generators.hpp": "54541edda0e7a8bc4d91d8d57064e69f23a3dc0df41406fc4c9febedf03f9749",
+    "pvac/include/pvac/crypto/bulletproofs/inner_product.hpp": "2ee2b6c3bea7606881ad9ac492786686ec7fb8f65ba2ba8ca555dadb52c405d8",
+    "pvac/include/pvac/crypto/bulletproofs/r1cs.hpp": "5aa169749faf4b54189158ebc936a605e10f822c68df453e3dfae471a72e327a",
+    "pvac/include/pvac/crypto/bulletproofs/r1cs_limits.hpp": "cad8ceb8bf6b470fc4e8eb6988d5476dbd406d5bd98ed15c3b0d97c34778febf",
+    "pvac/include/pvac/crypto/bulletproofs/r1cs_prover.hpp": "decf51b93b7b1d68a2cc681147654c2ba27285976c06e1a1101d5a38cf286348",
+    "pvac/include/pvac/crypto/bulletproofs/r1cs_types.hpp": "e7d1a0bbf38767e5de757afbd73f9c4153d17035aee667fb46a4212b3c24bc67",
+    "pvac/include/pvac/crypto/bulletproofs/r1cs_verifier.hpp": "a0e21cc2526fa6b02c0d45f4110f87f829e1ba09620ed6f3a65fba9e0384597a",
+    "pvac/include/pvac/crypto/bulletproofs/transcript.hpp": "075423f25e6449e526a84d5a3837a402238fdb11fbd2a4673fb5fb027c3ca45d",
+    "pvac/include/pvac/crypto/circuit_prf_profile.hpp": "4a990388677b657aa7e71c2bb37867880adf32d99554664d3cd6d4099d811ba0",
+    "pvac/include/pvac/crypto/keygen.hpp": "9628f6ab957ce05c6a511534e079903b2184fa823c245a36c84efe15e2994066",
+    "pvac/include/pvac/crypto/legacy_profile.hpp": "ff0d5db6fabad10cb2992b137f179afa55548255cc57d3b1b13c9188cb812027",
+    "pvac/include/pvac/crypto/lpn.hpp": "3e3ba1826d3bf4e8f82ea423a8c80ad93d8d7d2e35d1a3f923f250aeb6bec80c",
+    "pvac/include/pvac/crypto/lpn_v2.hpp": "3e8cc9374211a4fa73361db9573d01a2d2c56591e2032632fa52713ea9ae2524",
+    "pvac/include/pvac/crypto/matrix.hpp": "a7f5732c5a59517b82acb9d61c53b9733b45fd7d40b319c64799491a65f9e6a5",
+    "pvac/include/pvac/crypto/ristretto255.hpp": "be7c04653d4856bdc89718c317c44b550cefd6df434628a1a7fd481e86a41956",
+    "pvac/include/pvac/crypto/toeplitz.hpp": "75361810219017961de38b7a7d9e837fbee074f018f877d3ffe6d6f74ba9bbeb",
+    "pvac/include/pvac/crypto/toeplitz_full.hpp": "630830831a4f5fc25fec1f265b301cc11d5ad7fb454275ae641f3be6c46f28cb",
+    "pvac/include/pvac/ops/arithmetic.hpp": "5a0f71daae1bf57778669671517990cfdc0e37c50b8d9776faf50f0133d88d79",
+    "pvac/include/pvac/ops/commit.hpp": "b6f546a0b7495e37b2f058d7aaa79dba04c391774adcb1fee5565ddf632e8183",
+    "pvac/include/pvac/ops/decrypt.hpp": "87e70d2d974914face97b37f73d7bfd47a307620458fbb101455a805c5e0a207",
+    "pvac/include/pvac/ops/encrypt.hpp": "84378bf1eda7d65fb5856dc2753a8aab7aaa8627721a732c22340d3305f3ba7d",
+    "pvac/include/pvac/ops/layer_coeffs.hpp": "a69bff914ae319a907b44c9c961cf31b61faba29a7d11c0aaf128455d371dd49",
+    "pvac/include/pvac/ops/range_proof.hpp": "fd44a098d79c20bb62576084fc255f7a1454440ccce74100696405bb27de388c",
+    "pvac/include/pvac/ops/recrypt.hpp": "156aeba8d18c85e2991f5d8a027a5b923b1021a20df9b78f1e5802c339aa977c",
+    "pvac/include/pvac/ops/recrypt_arith_proof.hpp": "8a2267b9801806183c551d4659026177be1cb5045a98b55cad818a5d71961d5d",
+    "pvac/include/pvac/ops/recrypt_capsule.hpp": "c87fab0962ead501ecdbacbd7b2796e5e3a1f7929b6a3f499a5dbc51f8351403",
+    "pvac/include/pvac/ops/recrypt_chosen_privacy.hpp": "ef3c0f49fc60f209147fd4e0208c76183db1f9d4f37130f2ee8fea7f9b8dadfa",
+    "pvac/include/pvac/ops/recrypt_com.hpp": "10671817bbba0b438fdba905fb6160cd0567f72d1b3140485bc82385e7477bd0",
+    "pvac/include/pvac/ops/recrypt_com_reset.hpp": "52400133fb4fb93be455bad3f70893bf9f74a6756ec74af4ed0af62bb051e036",
+    "pvac/include/pvac/ops/recrypt_eval.hpp": "271057b0ccf26f0b6ca8a7d548f591e031fc004fe1cabea97396534195c0e82e",
+    "pvac/include/pvac/ops/recrypt_field_native.hpp": "adab90b0e181878817f20f91c6e07c9f323239f11af4f662dfc572824923866b",
+    "pvac/include/pvac/ops/recrypt_field_native_cipher.hpp": "0a5c854c6a3c249e6a1747f013b2757fc31b85da40fd934a9a6d2af57ff01672",
+    "pvac/include/pvac/ops/recrypt_fold.hpp": "4ea080bb594a9ea7e9d9d70b7ee0277c6a5fcb591de73df3f77c3d34666d6ae9",
+    "pvac/include/pvac/ops/recrypt_hidden_coeff.hpp": "cb8fe5f9c4f89ba004f1fdfaecd56a6ae61a3957519aa13ff1dc37f44cf4a0c9",
+    "pvac/include/pvac/ops/recrypt_layer_proof.hpp": "8d3b8e5fe66f7f2ddde80bf866eefe5bcff34e5dee5fb20ecda4639242e5013b",
+    "pvac/include/pvac/ops/recrypt_legacy.hpp": "df2a716414bf42d31db37638cb08e01a30347c402a03a8db9a7dff44db7f97a4",
+    "pvac/include/pvac/ops/recrypt_mat.hpp": "3f7df275ebb01a9e91050dd1bd96b383995d8d1cf7e3aaad7963cfced2cf7937",
+    "pvac/include/pvac/ops/recrypt_native.hpp": "1b48ccbb847ef84f876e9587cf1da02db0286f24bff27f2cb5efa9f5b4754cec",
+    "pvac/include/pvac/ops/recrypt_native_cert.hpp": "f92ec3301cac82b45cc288f2379bac9b3f26fae9e04458da51362db7c82138d0",
+    "pvac/include/pvac/ops/recrypt_proof_profile.hpp": "d910e954c0066d5ce6d88c3696f084a94de56881cbb27e59f678e7853645ec75",
+    "pvac/include/pvac/ops/recrypt_public.hpp": "a00b09c76c5266515019117d4f12a70acff2d48eb6dc87e620218a4a2d8d2bb1",
+    "pvac/include/pvac/ops/recrypt_ru.hpp": "1f3f0241f716274d1adcb7429bc26185fc4faaa55e3c523eb0bcadbdb54ef370",
+    "pvac/include/pvac/ops/recrypt_runtime_eval.hpp": "dbd56fef7f40fc5fcab52c9a858c2a69efe7b39032c0627579e4cf0297fc3495",
+    "pvac/include/pvac/ops/recrypt_sha_compat.hpp": "db5acfe0d0a2264f9a9fcb2c5294254d079c60999f55c7380884e0070d371cc3",
+    "pvac/include/pvac/ops/recrypt_src.hpp": "e71368bac894851cfd4bb914f45b096b2aeb7776835e4dc8f25a4f43275210f7",
+    "pvac/include/pvac/ops/recrypt_src_core.hpp": "9b841af17661a8623f16767f26c458bb9bb46ebc53b8f0930cf1c1ded7592c65",
+    "pvac/include/pvac/ops/recrypt_stage_eval.hpp": "ebd42274c304f906a418b3848f630cb063da79c2ea344e169455899c9badb00c",
+    "pvac/include/pvac/ops/recrypt_stage_link.hpp": "9ff552071c0e3a05b9015fb318bda93935aa3dc23db9bdb3befcf63b9e0d96e6",
+    "pvac/include/pvac/ops/recrypt_stmt_legacy.hpp": "0bc1e206544f56c0a970f0678db7102c6cd83716640b7ffc28a9b978b9c35085",
+    "pvac/include/pvac/ops/sha256_hidden_trace.hpp": "cead51438c32f5acd4e6e043cef4809ee8978a16ade8407d2a0320143e3132e3",
+    "pvac/include/pvac/ops/sha256_trace.hpp": "628e1dcb9a7433e544ade49e1eecf6fa335bd82233d1d7cb51e6ee25a50969bd",
+    "pvac/include/pvac/ops/tape_verify.hpp": "00d9205e81d0f846988e63543ca49f7f9247b85e57e1ce45ef7c947d97f92c9b",
+    "pvac/include/pvac/ops/verify_zero.hpp": "c52f6d942254aa8b75ef9b37b29646d6bb8ae77b5bc9e579a06cf01b16995ac2",
+    "pvac/include/pvac/ops/verify_zero_circuit.hpp": "a702f02202aa7260ea3853cd9f7c532b01f9424a8a2138dfbde1fac494fd20fc",
+    "pvac/include/pvac/pvac.hpp": "3adee622e764cb9f82a6aae5e78fac19797936164f2200dfbf97c03fe798cedb",
+    "pvac/include/pvac/pvac_native.hpp": "45ef4ff7245752594680ee51b645be048699512ce0849ad97664c911d1eed9e6",
+    "pvac/include/pvac/pvac_recrypt_experimental.hpp": "90eb0270501039e03b2abc831673d40fc701d4ef3422c39c92428b1a24ec3a84",
+    "pvac/include/pvac/pvac_sha_compat.hpp": "e5a24791964d289f4497a56bb3ae553478b68694b1b308c65a5548330f20ad23",
+    "pvac/include/pvac/research/cipher_sim.hpp": "5adf9e92fa271657016ec4fe6febfaac30703cf7b209309c88388187c6238bc4",
+    "pvac/include/pvac/research/mask_profile.hpp": "556246fa87e3f6fbc6a8d9dacb3642f414e666cbcb655b9e837dc26ad3adae6c",
+    "pvac/include/pvac/utils/metrics.hpp": "391a1e7b67db66f63b5518299726fec7a948373acba17022490a6bcc96aa09c4",
+    "pvac/include/pvac/utils/text.hpp": "67a0dfb05f88c64aa447907665dbe88add957a18e495f39303b221d0f7440cff",
+    "pvac/pvac_c_api.cpp": "5e60c148352656bf9a43b234a784a8f4d51c6caaea198e3fd5883c9fb8c8d590",
+    "pvac/pvac_c_api.h": "2099dfe09e0e21bca780acd35c379a2fbf850761e79cb846957bc2623311fc00",
+    "pvac_ffi/pvac_serialize.hpp": "aed4b62117bc1fb9d80e64220a9aa1b6060c626bd9c1721c38c673fd8bae87cc"
+  },
+  "architecture": "arm64",
+  "oracle_sha256": "d6a071db7db1d5f620beb12fe888852c37724f7592cfd2387a753c1d27e8fcab",
+  "scope": "Decryption policy, native sources, legacy/active/product masks and malformed inputs; not complete HFHE parity",
+  "cases": [
+    {
+      "seed": "8f1b2759008538e43ccb2eaefd425e268e34ea0942d55b7fda566ddcb15511b3",
+      "profile": 1,
+      "slots": 1,
+      "kind": "empty",
+      "nonce": [
+        "9036181168566732039",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000000000000000000000000000000000000000000000000000",
+        "native_tag": "8094102571952198794",
+        "native_affine": "b9fc8dbf5dda5e83e2c31a07409d154f",
+        "native_masks": [
+          "1f3d32ee5842483da244ec8e2705c235"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "00000000000000000000000000000000"
+            ],
+            "value": "00000000000000000000000000000000",
+            "slot0": "00000000000000000000000000000000"
+          },
+          {
+            "values": [
+              "00000000000000000000000000000000"
+            ],
+            "value": "00000000000000000000000000000000",
+            "slot0": "00000000000000000000000000000000"
+          },
+          {
+            "values": [
+              "00000000000000000000000000000000"
+            ],
+            "value": "00000000000000000000000000000000",
+            "slot0": "00000000000000000000000000000000"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "88e0c382e0d3933cee18ecad5d59d21fb04d186441bebd2c5ab9d645936d9c3f",
+      "profile": 1,
+      "slots": 3,
+      "kind": "empty",
+      "nonce": [
+        "1157817144823236966",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000300000000000000000000000000000000000000000000000000000000000000",
+        "native_tag": "8384661680169598842",
+        "native_affine": "d87ebc89cb3a6eb4f0ec7d577194cf39",
+        "native_masks": [
+          "c6d037bb2e6e06112f697a34471c6f77",
+          "0f4d9868f36d0c786bd6139647974d31",
+          "93404f56e2a86644490afb5702d49631"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "00000000000000000000000000000000",
+              "00000000000000000000000000000000",
+              "00000000000000000000000000000000"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "00000000000000000000000000000000"
+          },
+          {
+            "values": [
+              "00000000000000000000000000000000",
+              "00000000000000000000000000000000",
+              "00000000000000000000000000000000"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "00000000000000000000000000000000"
+          },
+          {
+            "values": [
+              "00000000000000000000000000000000",
+              "00000000000000000000000000000000",
+              "00000000000000000000000000000000"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "00000000000000000000000000000000"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "aad94c7eaceffd7305792805a7fcc1395ef2fa6d5411475f1cd4ffcc4c162722",
+      "profile": 1,
+      "slots": 1,
+      "kind": "clear",
+      "nonce": [
+        "4993466965900878409",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "505641430300010000000000000000000000000000000100000000000000050000000000000000000000000000000000000000000000",
+        "native_tag": "7891067052639735138",
+        "native_affine": "a283cb1c90509cbb2ebd9f2bfbf4c21b",
+        "native_masks": [
+          "1ec432b7a9aadb901801779d18314951"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "05000000000000000000000000000000"
+            ],
+            "value": "05000000000000000000000000000000",
+            "slot0": "05000000000000000000000000000000"
+          },
+          {
+            "values": [
+              "05000000000000000000000000000000"
+            ],
+            "value": "05000000000000000000000000000000",
+            "slot0": "05000000000000000000000000000000"
+          },
+          {
+            "values": [
+              "05000000000000000000000000000000"
+            ],
+            "value": "05000000000000000000000000000000",
+            "slot0": "05000000000000000000000000000000"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "1c93e80220c6174176c06b0d7d4cd435979d140766e26d4abb9b8aef793e776a",
+      "profile": 1,
+      "slots": 3,
+      "kind": "clear",
+      "nonce": [
+        "15298780592016340264",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "50564143030003000000000000000000000000000000030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f070000000000000000000000000000000000000000000000",
+        "native_tag": "782513314575974143",
+        "native_affine": "92c09aa9ad1464911017182b8b0dcb1a",
+        "native_masks": [
+          "0d857525e8e7be653140fac4eb71a025",
+          "2d812ce7dfc38ce600775d3ac59d3415",
+          "3e356f17ad66db358c6221ab7112b551"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "05000000000000000000000000000000",
+              "f9ffffffffffffffffffffffffffff7f",
+              "07000000000000000000000000000000"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "05000000000000000000000000000000"
+          },
+          {
+            "values": [
+              "05000000000000000000000000000000",
+              "f9ffffffffffffffffffffffffffff7f",
+              "07000000000000000000000000000000"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "05000000000000000000000000000000"
+          },
+          {
+            "values": [
+              "05000000000000000000000000000000",
+              "f9ffffffffffffffffffffffffffff7f",
+              "07000000000000000000000000000000"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "05000000000000000000000000000000"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "686abe933fb2142aca456cf79ed94ba833e4e674ca85b970d3779d920ce3ed0c",
+      "profile": 1,
+      "slots": 1,
+      "kind": "active",
+      "nonce": [
+        "12100850957256444175",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000010000000000000000bb5d652901f57a0b0f493723d5dbeea700000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000066ed97d8e98c27f22ee10a8b1f42ca70a88f390897a5ab2e9c6d093f7a80721701000000000000002496baa24a47d2ee1a8342bcb7b88a56dd4c8d3fec0ca004959afd9f5080f7700100000000000000050000000000000000000000000000000100000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "3745507987379696840",
+        "native_affine": "ba1a405dbf7f68b37d58d0439cd79a19",
+        "native_masks": [
+          "195c533481dc14de6dd9e79aee25667d"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "42e93ffe697621f8e935aee6083c290e"
+            ],
+            "value": "42e93ffe697621f8e935aee6083c290e",
+            "slot0": "42e93ffe697621f8e935aee6083c290e"
+          },
+          {
+            "values": [
+              "42e93ffe697621f8e935aee6083c290e"
+            ],
+            "value": "42e93ffe697621f8e935aee6083c290e",
+            "slot0": "42e93ffe697621f8e935aee6083c290e"
+          },
+          {
+            "values": [
+              "3e7e9357a474b6149e3372ba03641564"
+            ],
+            "value": "3e7e9357a474b6149e3372ba03641564",
+            "slot0": "3e7e9357a474b6149e3372ba03641564"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "92382c483a8ab797aacd3b5d83ecca0a0e2b052f305e018a92c2688437c1b62c",
+      "profile": 1,
+      "slots": 3,
+      "kind": "active",
+      "nonce": [
+        "13008450080483194653",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000300000000000000010000000000000000c1b84eebee063ac11d379a2d6d4c87b40000000000000000000000000000000000000000000000000000000000000000000000000000000003000000000000000e51948ab313cf1315c1c63456487c7de25ad363ec2ba21dd9f4dc9937abaf05c0de0dd0f59ab2491600b463e22604bae741bfbbb825282c72167480f74a4f593629fb1c8bbba1a83def9109b96f0bfeb01418e46c3dcbbb55a09abcf4da0e0e0300000000000000e456304e65512268612797177e0996e575f429e5126ecdcd1c0608386a326715d8ec3de9330d0b36303472390fd8155bafb6ad78be005a5b2d0fc52d368e640d0a848e49ce102922478f973f1b354a4e0c6b3910b3ea0237d3de93389a770736030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f0700000000000000000000000000000001000000000000000000000003000003000000000000000300000000000000000000000000004004000000000000000000000000000000050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "4786264126422698649",
+        "native_affine": "ad80f811706c4b4a8df3455f5f5cc348",
+        "native_masks": [
+          "9f41acbd44fc62c5e1811acc766b797b",
+          "e8b26fd4e661362aadbda1062f78ed4c",
+          "9998f1b043a55e91611c748997c3cd22"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "e29ed68b5d0610235e49d9fc212bfb6a",
+              "e5ec4ccb863df9de111b96513e0df41a",
+              "6f7b5d952c2d843d662da6a5e0cd7c4d"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "e29ed68b5d0610235e49d9fc212bfb6a"
+          },
+          {
+            "values": [
+              "e29ed68b5d0610235e49d9fc212bfb6a",
+              "e5ec4ccb863df9de111b96513e0df41a",
+              "6f7b5d952c2d843d662da6a5e0cd7c4d"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "e29ed68b5d0610235e49d9fc212bfb6a"
+          },
+          {
+            "values": [
+              "941f68f809cd972a8166b354ecb6270c",
+              "c6a0737c0622e953b895827e92b88e23",
+              "9769f1c290b716e941ec47ddc8b58208"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "941f68f809cd972a8166b354ecb6270c"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "71f4c56816d15cc38ad0db77eed2359c44243d1006a54a3d9b85285bd8105f82",
+      "profile": 1,
+      "slots": 1,
+      "kind": "legacy",
+      "nonce": [
+        "6267892329303994805",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000010000000000000000a9e5b4c087c9afa1b5718f62dd06fc56ffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000050000000000000000000000000000000100000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "6709428503222638262",
+        "native_affine": "78c6d86b2384ebab4e6ba7e70b40b562",
+        "native_masks": [
+          "63673a79fc89ef28f0a2b233e97c314c"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "fd766d4971d0e53eb1292fea89a3ec5b"
+            ],
+            "value": "fd766d4971d0e53eb1292fea89a3ec5b",
+            "slot0": "fd766d4971d0e53eb1292fea89a3ec5b"
+          },
+          {
+            "values": [
+              "fd766d4971d0e53eb1292fea89a3ec5b"
+            ],
+            "value": "fd766d4971d0e53eb1292fea89a3ec5b",
+            "slot0": "fd766d4971d0e53eb1292fea89a3ec5b"
+          },
+          {
+            "values": [
+              "fd766d4971d0e53eb1292fea89a3ec5b"
+            ],
+            "value": "fd766d4971d0e53eb1292fea89a3ec5b",
+            "slot0": "fd766d4971d0e53eb1292fea89a3ec5b"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "80463c6f3506396d6af1daccae2b401b11638b92931a4d437e6d07401719f452",
+      "profile": 1,
+      "slots": 3,
+      "kind": "legacy",
+      "nonce": [
+        "12329500196375971480",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "5056414303000300000000000000010000000000000000656d4a0419c10658984619a71a2f1babffffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f0700000000000000000000000000000001000000000000000000000003000003000000000000000300000000000000000000000000004004000000000000000000000000000000050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "289421104038899607",
+        "native_affine": "465b91bac1bd275629778f67d758661e",
+        "native_masks": [
+          "ac323f465373ad7669c095f5be970747",
+          "e1dea53fe01efcb0addd216b7b46072b",
+          "62d8f9e1dfcc7408cb7b4166ab6a4c09"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "8f8d1b744f0c06529aaab75b6b15bb66",
+              "c2a7bd348efd5d1bd33fd5ab0229b200",
+              "3acdf527a5014c254f4ecdf82b734805"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "8f8d1b744f0c06529aaab75b6b15bb66"
+          },
+          {
+            "values": [
+              "8f8d1b744f0c06529aaab75b6b15bb66",
+              "c2a7bd348efd5d1bd33fd5ab0229b200",
+              "3acdf527a5014c254f4ecdf82b734805"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "8f8d1b744f0c06529aaab75b6b15bb66"
+          },
+          {
+            "values": [
+              "8f8d1b744f0c06529aaab75b6b15bb66",
+              "c2a7bd348efd5d1bd33fd5ab0229b200",
+              "3acdf527a5014c254f4ecdf82b734805"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "8f8d1b744f0c06529aaab75b6b15bb66"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "ac194659c5d654f34563c4d983ae3054825ac829f6b38f5fb77d8489107dc53c",
+      "profile": 1,
+      "slots": 1,
+      "kind": "native",
+      "nonce": [
+        "17760290168089833344",
+        "0"
+      ],
+      "expected": {
+        "bytes": "50564143030001000000000000000100000000000000006ea107e1fd47e622806fdb50cf3979f6000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000a00bddff2e2d0bc71c30fe450c17154bbfc656c8ec5df23f41de56bd48c5b27d01000000000000006805e8fe3a7c6f14f8e101c06fbce571b6f6bd78a1dcdacd69751f14af36a44c0100000000000000050000000000000000000000000000000100000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "2514776597660672366",
+        "native_affine": "d2581bf7474deacd1a2aaf2240165b6f",
+        "native_masks": [
+          "9754ae6aa9d997a89dceeca28ad6bd3b"
+        ],
+        "import_error": null,
+        "native_source": true,
+        "policies": [
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: native source decrypt rejected",
+            "slot0_error": "pvac: native source decrypt rejected"
+          },
+          {
+            "values": [
+              "ea75fb7dba619f67f03112b880be3542"
+            ],
+            "value": "ea75fb7dba619f67f03112b880be3542",
+            "slot0": "ea75fb7dba619f67f03112b880be3542"
+          },
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: native source decrypt rejected",
+            "slot0_error": "pvac: native source decrypt rejected"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "b8db7d67f85630059b8b7338402f6b45459d7a43c11142fb41c00f45ae9b29a1",
+      "profile": 1,
+      "slots": 3,
+      "kind": "native",
+      "nonce": [
+        "11710431039678506261",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000300000000000000010000000000000000f635bf09b891dd9f15e5be6efcce83a200000000000000000000000000000000000000000000000000000000000000000000000000000000030000000000000092d312b641f98cd8dc2a10b255a9a5212738d3cfacb031728f9f0f5989a1406c600e87fd76b5c1068ec453bf768fca312be8d94c4745383f51e1da3495ebd33e5c4e178a36b482ec884c5e6bce367fd3d038803072c0d5617ff8fbe229bcdd7f0300000000000000700bdaaa473137f5a3e21653b43e65e81b75871dad2a55757e76ed395caf0507684b621a6589162880823e31fafb4db31fc44c73bc0b5e0accd6df8d304eae0d2e37bd2dd3b69299b7e5115c4f4b589d589e7327331929774c0e662f802e3953030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f0700000000000000000000000000000001000000000000000000000003000003000000000000000300000000000000000000000000004004000000000000000000000000000000050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "11519523641507132918",
+        "native_affine": "b66818cf81db53de9f844c70cd74eb7a",
+        "native_masks": [
+          "23e7f3ca9878b927336487b281936e62",
+          "df10e238c1eb3a92c5e5aeadd8d58814",
+          "d7e009c9040d413b3ee3b2809162fe57"
+        ],
+        "import_error": null,
+        "native_source": true,
+        "policies": [
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: native source decrypt rejected"
+          },
+          {
+            "values": [
+              "7da0136daac4b4a25ae40a3c00679d5c",
+              "17e3cbc9bc4a7e742af4db2a8b1d3608",
+              "76618d3b74df6cd36cb9a86e292cbe32"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "7da0136daac4b4a25ae40a3c00679d5c"
+          },
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: native source decrypt rejected"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "852da5834c9d8d11449382b507905ea0dddf3065724fd635120e0f42593ee4c2",
+      "profile": 1,
+      "slots": 1,
+      "kind": "native_unused",
+      "nonce": [
+        "533549454995145419",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "50564143030001000000000000000100000000000000005aa3461afe0ca600cbc21607678c6707ffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000010000000000000010414907438288429a0836771c883863ede31bca34e31f17f1a351d9f50dd23e01000000000000007cd72c541f1c8031873a986eeb31c671fa3910f77cf1083974aa21d42dac0a2e0100000000000000050000000000000000000000000000000000000000000000",
+        "native_tag": "46739131636032346",
+        "native_affine": "3152f4bd04b988a831e7245c8f118d0b",
+        "native_masks": [
+          "0f49bced724ec9624a5bb6745070793f"
+        ],
+        "import_error": null,
+        "native_source": true,
+        "policies": [
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: native source decrypt rejected",
+            "slot0_error": "pvac: native source decrypt rejected"
+          },
+          {
+            "values": [
+              "05000000000000000000000000000000"
+            ],
+            "value": "05000000000000000000000000000000",
+            "slot0": "05000000000000000000000000000000"
+          },
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: native source decrypt rejected",
+            "slot0_error": "pvac: native source decrypt rejected"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "9eaf960d0eb443e884c2e051c848d6ea71454ef32c43d084e95defde5abac1e5",
+      "profile": 1,
+      "slots": 3,
+      "kind": "native_unused",
+      "nonce": [
+        "2142328667937543158",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "50564143030003000000000000000100000000000000005c7c9aaa6df2964ef6938dac9214bb1dffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000030000000000000056acec8928ebefa463b981fc0992456595d01dfddcbe0540ed034cfdf2644b450ee16046ea69fef1effce9aff193e15765ee8bd67ed2ed9ed951d9bc58978f6a0ac842ff5b9ae585cd267105ae19035929fa5323e292577f1c97e71c3248f13903000000000000006e232da41d71998a45d770424b2770c5eddac1e0ff1d0a2d7edba62ed11c5d43bc05833f677ed226706386d0b06e6faf7ae63ace0953d342af4ecc053a9fa551f46f1c3d77c07c95a28d025a4000e5eaf39c8733a2702b65ee2d39636962c26f030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f070000000000000000000000000000000000000000000000",
+        "native_tag": "5662980134292585564",
+        "native_affine": "9c4753f601f0f6be6468695502a32406",
+        "native_masks": [
+          "8e327dc0449fbba68828a7e1d385b84b",
+          "a6ce829e74c79198a0486614d2675442",
+          "9d7aba60490f8a08c72e742c2fa7c054"
+        ],
+        "import_error": null,
+        "native_source": true,
+        "policies": [
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: native source decrypt rejected"
+          },
+          {
+            "values": [
+              "05000000000000000000000000000000",
+              "f9ffffffffffffffffffffffffffff7f",
+              "07000000000000000000000000000000"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "05000000000000000000000000000000"
+          },
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: native source decrypt rejected"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "99d41f385959296b1d9133c1199e3cd551b02f663dbad3e6f60be686e573da2d",
+      "profile": 1,
+      "slots": 1,
+      "kind": "product",
+      "nonce": [
+        "9094165686195260083",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000030000000000000000f0e493bd951df676b30a373682f7347e000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000ae11e8d1677f0044a7fe6f9583000b5866acaec02c6453cb15c0410a5396115d0100000000000000ac520f26388924e7d80e8cee3b8b8f81f18ac1e5d4fd38e3b22e40d59780e07300a7a95d7121ea72b6ba0a373682f7347ef9ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000050000000000000000000000000000000300000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000010000001400010100000000000000030000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000020000002500000100000000000000030000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "4111464327688240739",
+        "native_affine": "317bdaae74f5c9e4e9291c800cf9e972",
+        "native_masks": [
+          "abf32c3c417a62adb4a2a1f2e83ca67c"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "cf56f4205d9c97f8849a16d02edea308"
+            ],
+            "value": "cf56f4205d9c97f8849a16d02edea308",
+            "slot0": "cf56f4205d9c97f8849a16d02edea308"
+          },
+          {
+            "values": [
+              "cf56f4205d9c97f8849a16d02edea308"
+            ],
+            "value": "cf56f4205d9c97f8849a16d02edea308",
+            "slot0": "cf56f4205d9c97f8849a16d02edea308"
+          },
+          {
+            "values": [
+              "e4a63cd0030550ff7ec77454326e6e56"
+            ],
+            "value": "e4a63cd0030550ff7ec77454326e6e56",
+            "slot0": "e4a63cd0030550ff7ec77454326e6e56"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "1a2a51a25bf4a36aaa279b0bd333274bd1e7e5d435751d46b030f5f41dc31a69",
+      "profile": 1,
+      "slots": 3,
+      "kind": "product",
+      "nonce": [
+        "10902525656204633711",
+        "0"
+      ],
+      "expected": {
+        "bytes": "505641430300030000000000000003000000000000000028d30138a53fd1fd6fe6a8fc518d4d9700000000000000000000000000000000000000000000000000000000000000000000000000000000030000000000000026d433196a6cb4eaa8447b93b0d99956d789ce05582463282034c792fb99d067bec47d0a6f1dee34612d759b05a5e1b9e881699001f8aa0f65351246701f0e1740f47edadaab65536e0c991487e92ba5a52621e004b7268f0a29ecf3ef28351903000000000000004e7b5c193790f8fffec5046934d8161320b884a65f8f88bf2d49efcd4439225f805803ab56e8259d22070320910f7f55ca8d65002414c64098b5eabcb029715cf210ad8f14ae2299d70a10a046bc361122909934055e0fbdf6e723ae9137864b00cd27f8015cd753e276e6a8fc518d4d97f9ffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f070000000000000000000000000000000300000000000000000000000300000300000000000000030000000000000000000000000000400400000000000000000000000000000005000000000000000000000000000000410000000000000002000000000000000000000000000000000000000000000001000000140001030000000000000003000000000000000000000000000000040000000000000000000000000000000500000000000000000000000000004041000000000000000200000000000000000000000000000000000000000000000200000025000003000000000000000300000000000000000000000000000004000000000000000000000000000040050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "13131638852251805850",
+        "native_affine": "4b0c42e22414b3add36bd31daecd9806",
+        "native_masks": [
+          "69f4e2bdaf2838c7fa0020e5c7dec729",
+          "69e7e5643ee42b3a77c6eb5b75fa5f13",
+          "d419a3f3540aa22af745edeeb5122e3b"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "35b3460f07eee622c3d6b9e10d4d1a24",
+              "913ce4656f218b49b86561477ce42929",
+              "258301d3f516caf5acafdd9abde98a71"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "35b3460f07eee622c3d6b9e10d4d1a24"
+          },
+          {
+            "values": [
+              "35b3460f07eee622c3d6b9e10d4d1a24",
+              "913ce4656f218b49b86561477ce42929",
+              "258301d3f516caf5acafdd9abde98a71"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "35b3460f07eee622c3d6b9e10d4d1a24"
+          },
+          {
+            "values": [
+              "ac0b7e1ee7455c8f1bd2d4156d0e066d",
+              "6ed46e899faadf078f308319bcfaf016",
+              "978d2c2cecd6fce3cc2e39c0ed432856"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "ac0b7e1ee7455c8f1bd2d4156d0e066d"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "13e4d7d1c66c685860d08353a92760ce4ef0d6a193f4805527fbc0d70381d676",
+      "profile": 1,
+      "slots": 1,
+      "kind": "native_product",
+      "nonce": [
+        "4036017149052338374",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000030000000000000000ea8c1b3dbfd13033c640a69c36d00238ffffffffffffffff000000000000000000000000000000000000000000000000000000000000000001000000000000007c4d1751ceef86a58fe6ca159c50d6b20e68a73f9e125efc51ba6b0e7f5e6a1701000000000000003c8fcb9e941495b972d38425614f4caa55696c98affd9fe1803df5029d57725f008711f707ca4a0244cd40a69c36d00238f8ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000050000000000000000000000000000000300000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000010000001400010100000000000000030000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000020000002500000100000000000000030000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "9576885753977793171",
+        "native_affine": "61d9e5b9dc622bf56f54cb45aac7d63f",
+        "native_masks": [
+          "fe04f2fb0cba29c82a09b4934fae7532"
+        ],
+        "import_error": null,
+        "native_source": true,
+        "policies": [
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: native source decrypt rejected",
+            "slot0_error": "pvac: native source decrypt rejected"
+          },
+          {
+            "values": [
+              "b74ca6947deabf81e5b006fe183eb179"
+            ],
+            "value": "b74ca6947deabf81e5b006fe183eb179",
+            "slot0": "b74ca6947deabf81e5b006fe183eb179"
+          },
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: native source decrypt rejected",
+            "slot0_error": "pvac: native source decrypt rejected"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "aa855cc89713cb6d78cc16ba8249f320259617225e1f1992b1ce5deebc2cc496",
+      "profile": 1,
+      "slots": 3,
+      "kind": "native_product",
+      "nonce": [
+        "4362316186194883966",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "5056414303000300000000000000030000000000000000e69e0fc61a55cd0f7e351574750f8a3cffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000300000000000000726f765fb89d2731bd94dd8e2ef95bdb5dda35f31418efdfba88f47b42451f459eb314a8918fda233a39bcdccc4c0ac62463110c30b2a0f7c2d2d83f73a03e30782d14724de36720b66a9b1078ef1417b6736891a6ce1e10400253f8c3e4b0730300000000000000a6014cf1c23a18b78d0f71b698862362572d4bcacf9255884c9be3e617785931300f4d886c415f209a9aa5240f473868e5a9660508d670db9bc61b853f909102f88c5895bff3620114ac5bdd2c5ddaf98ab5b683812c8c1d6bd4cfc76ecc5b4a006e9ebccf3025972b85351574750f8a3cf8ffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f070000000000000000000000000000000300000000000000000000000300000300000000000000030000000000000000000000000000400400000000000000000000000000000005000000000000000000000000000000410000000000000002000000000000000000000000000000000000000000000001000000140001030000000000000003000000000000000000000000000000040000000000000000000000000000000500000000000000000000000000004041000000000000000200000000000000000000000000000000000000000000000200000025000003000000000000000300000000000000000000000000000004000000000000000000000000000040050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "13609108123765501886",
+        "native_affine": "5801f73620d5eed06013be129c79680e",
+        "native_masks": [
+          "c1b6f166afecf371860522fcacb99a4d",
+          "46a30609bf35f966e951d7f858f65311",
+          "3c694968466d36863c9bdeb2e945df03"
+        ],
+        "import_error": null,
+        "native_source": true,
+        "policies": [
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: native source decrypt rejected"
+          },
+          {
+            "values": [
+              "ec740955b526c33bd295cf463e44613d",
+              "64f1bd6e007c5f9774fce38747c7bb1e",
+              "b81e4af931a9183001ca7dfa599a1c30"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "ec740955b526c33bd295cf463e44613d"
+          },
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: native source decrypt rejected"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "07e5c506795f034185ccd0f0387d219a6addc8101ff38109943f6f50349314e1",
+      "profile": 1,
+      "slots": 1,
+      "kind": "nested",
+      "nonce": [
+        "15439742505723646127",
+        "0"
+      ],
+      "expected": {
+        "bytes": "50564143030001000000000000000500000000000000006eee42c035a8948aaf50287501fc44d600000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000030d278d9334ba75e6aef36e47da70d4d842e37c2c0433445346fcf61cf36c21b0100000000000000305be2cf75ab783128828081b7f0d7def9ade0fa044d020f672b66a59f39ae5d0083953e116f1182b1b650287501fc44d6f9ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000102000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000102000000030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000050000000000000000000000000000000500000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000010000001400010100000000000000030000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000020000002500000100000000000000030000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000030000003600010100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000040000004700000100000000000000030000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "18420185260561228544",
+        "native_affine": "96a827fa393279aea58c53bb183e2e61",
+        "native_masks": [
+          "16bf66d53b7f81c00cdc87690d5d5545"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "7cbb34e50d5b00c6a13ad747701c337a"
+            ],
+            "value": "7cbb34e50d5b00c6a13ad747701c337a",
+            "slot0": "7cbb34e50d5b00c6a13ad747701c337a"
+          },
+          {
+            "values": [
+              "7cbb34e50d5b00c6a13ad747701c337a"
+            ],
+            "value": "7cbb34e50d5b00c6a13ad747701c337a",
+            "slot0": "7cbb34e50d5b00c6a13ad747701c337a"
+          },
+          {
+            "values": [
+              "1d0ed4899bd439649298e282da28de57"
+            ],
+            "value": "1d0ed4899bd439649298e282da28de57",
+            "slot0": "1d0ed4899bd439649298e282da28de57"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "75971ffd0965d54a1d59da0013873b9bfbae35cc819f841ee53f9c436d84211e",
+      "profile": 1,
+      "slots": 3,
+      "kind": "nested",
+      "nonce": [
+        "277179742438760898",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000300000000000000050000000000000000c3e64b396566e5a3c221ffd681bdd803000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000d406f097967f0fa16971afe71ea74305c7e8a2c344bb4ea8cb22dbe93dd04d1ba84459e140f09e57c1aaa8f72770e092e8ea5f2dfaca82e1e9c63ae7cb0a71693837b610ba35f8f02c03f05e38b79bd47155f1f4c47356d99a943dd13308712f0300000000000000fa9e8e7fe4d283858c36833fdf5f072ad85e6ac7e6b50008b13da279dd0bd174ec98466a7abe6f69fb0faf0f267ea0b646ccacb49300bd79fe1819914707754da6b8b02ee0fcb7eefd47a9e0bc7df0e8b9f8b78ee019578b6f980189a4b7956f0056a2b5b001f94992c921ffd681bdd803f9ffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010200000003000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f07000000000000000000000000000000050000000000000000000000030000030000000000000003000000000000000000000000000040040000000000000000000000000000000500000000000000000000000000000041000000000000000200000000000000000000000000000000000000000000000100000014000103000000000000000300000000000000000000000000000004000000000000000000000000000000050000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000020000002500000300000000000000030000000000000000000000000000000400000000000000000000000000004005000000000000000000000000000000410000000000000002000000000000000000000000000000000000000000000003000000360001030000000000000003000000000000000000000000000040040000000000000000000000000000000500000000000000000000000000000041000000000000000200000000000000000000000000000000000000000000000400000047000003000000000000000300000000000000000000000000000004000000000000000000000000000000050000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "2538960135511128583",
+        "native_affine": "4b39ff46b706e7b2a69ba523c2c4be2f",
+        "native_masks": [
+          "6de55e32dd475d00cdca51e87342b83e",
+          "db51f17c654aed9c0f31fb0b361fe002",
+          "853a52ed7f6cb44b8f39e72265d7ff45"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "c4ace209fb27047ce3d249686bd3232f",
+              "af15af6884948269d66e0e3552be1723",
+              "92700b601009f18c0fc1aac3b9c34b35"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "c4ace209fb27047ce3d249686bd3232f"
+          },
+          {
+            "values": [
+              "c4ace209fb27047ce3d249686bd3232f",
+              "af15af6884948269d66e0e3552be1723",
+              "92700b601009f18c0fc1aac3b9c34b35"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "c4ace209fb27047ce3d249686bd3232f"
+          },
+          {
+            "values": [
+              "91aea1129589dbde56437d04a4eac345",
+              "2a2db8bdda88f0640429859173df5e0d",
+              "c868c2ee3ef7af56ed1da37780cfea78"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "91aea1129589dbde56437d04a4eac345"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "2f27966c5f16399fb40b0c7f40d1c90a48ad03ecbce62f9f0f26427a02498418",
+      "profile": 1,
+      "slots": 1,
+      "kind": "pc_only",
+      "nonce": [
+        "1954102892731859871",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000010000000000000000b75dacb8e5acb2099f83d8473a5e1e1bffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000050000000000000000000000000000000100000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "6851304569830758487",
+        "native_affine": "e617f432a5f008a7a73fdcf04199a252",
+        "native_masks": [
+          "04f632f495276a69a17b27958ece8805"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "72377a323af335400e63fe48c86bbb65"
+            ],
+            "value": "72377a323af335400e63fe48c86bbb65",
+            "slot0": "72377a323af335400e63fe48c86bbb65"
+          },
+          {
+            "values": [
+              "72377a323af335400e63fe48c86bbb65"
+            ],
+            "value": "72377a323af335400e63fe48c86bbb65",
+            "slot0": "72377a323af335400e63fe48c86bbb65"
+          },
+          {
+            "values": [
+              "72377a323af335400e63fe48c86bbb65"
+            ],
+            "value": "72377a323af335400e63fe48c86bbb65",
+            "slot0": "72377a323af335400e63fe48c86bbb65"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "4c3d8936dc41007b81c788de31a89fc3a6f1042777db5611a0b0118ac761e935",
+      "profile": 1,
+      "slots": 3,
+      "kind": "pc_only",
+      "nonce": [
+        "9196389504414182633",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "5056414303000300000000000000010000000000000000f4e9a9f036e0a652e9ecbc9a8723a07fffffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f0700000000000000000000000000000001000000000000000000000003000003000000000000000300000000000000000000000000004004000000000000000000000000000000050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "7617635673796898671",
+        "native_affine": "e4ff84efe073282b10e9b0f6d8ad454e",
+        "native_masks": [
+          "aeca4ae604c106beaea67994afc99d7d",
+          "1c4528f9d56387e5bdc1922c582e1c22",
+          "66c58e0d792e702348c1c6c1b3308a3b"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "2e68b263a2acce7aa8c82cfec8aee744",
+              "cea8d5c2234b00639a42de582fc16042",
+              "9037e754b58d6577117a0424cbed4435"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "2e68b263a2acce7aa8c82cfec8aee744"
+          },
+          {
+            "values": [
+              "2e68b263a2acce7aa8c82cfec8aee744",
+              "cea8d5c2234b00639a42de582fc16042",
+              "9037e754b58d6577117a0424cbed4435"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "2e68b263a2acce7aa8c82cfec8aee744"
+          },
+          {
+            "values": [
+              "2e68b263a2acce7aa8c82cfec8aee744",
+              "cea8d5c2234b00639a42de582fc16042",
+              "9037e754b58d6577117a0424cbed4435"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "2e68b263a2acce7aa8c82cfec8aee744"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "46a9dd28e8bb20586e41f5f2fe392964fdaee7bca1febdcb37c2806e0f17fe55",
+      "profile": 1,
+      "slots": 1,
+      "kind": "r_pc_only",
+      "nonce": [
+        "18203442220367062682",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000010000000000000000fdbedbe40cb7e1339aa653e2409e9ffc00000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000072cdb3f9293c421d3924b5864b33099b83ce0aa22d6899bad1327bf60472013e00000000000000000100000000000000050000000000000000000000000000000100000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "527297076802870917",
+        "native_affine": "c564fd9f0cbdb0fe32f985d070c18b3a",
+        "native_masks": [
+          "97579d8995fb422beb7abd7cdddc483e"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "4d653a91b295aa35f3c35bdf25559816"
+            ],
+            "value": "4d653a91b295aa35f3c35bdf25559816",
+            "slot0": "4d653a91b295aa35f3c35bdf25559816"
+          },
+          {
+            "values": [
+              "4d653a91b295aa35f3c35bdf25559816"
+            ],
+            "value": "4d653a91b295aa35f3c35bdf25559816",
+            "slot0": "4d653a91b295aa35f3c35bdf25559816"
+          },
+          {
+            "values": [
+              "334c885c79ef5505413eac9cd6e50025"
+            ],
+            "value": "334c885c79ef5505413eac9cd6e50025",
+            "slot0": "334c885c79ef5505413eac9cd6e50025"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "a37ee786de1f6add1d50f12472bf2b1dbd6c8592418cf21aa3260a36ccf283f1",
+      "profile": 1,
+      "slots": 3,
+      "kind": "r_pc_only",
+      "nonce": [
+        "2883639052435057550",
+        "0"
+      ],
+      "expected": {
+        "bytes": "505641430300030000000000000001000000000000000052b5c98853f7d3298eebd5a470be042800000000000000000000000000000000000000000000000000000000000000000000000000000000030000000000000054b69a2313238eea7a5806e574c34d4b3c77ac14e5f205b7cc866b76de247822fe4646cd18294d3df7d562a83f5d3c0b35ca96717183a51bb00f01e6ec88db3546a02a99d9ae40a6de4c7c014c60dd16e809db447e5281498372ac7e456f5e2f0000000000000000030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f0700000000000000000000000000000001000000000000000000000003000003000000000000000300000000000000000000000000004004000000000000000000000000000000050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "592100350221422530",
+        "native_affine": "46713af6f0b017a6feeddfebbb008101",
+        "native_masks": [
+          "bded3a6e9a2a730dba01eaaf21fc682f",
+          "14fd70cde4e5dca159480318fcf95e3c",
+          "62023d3a752bea22c5ab24e16e9a7e2f"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "2d21b8b3de3951d36cb0622e1abc2b41",
+              "c8b928adff8e69bfe32eab611fe2ef6d",
+              "91b625f81d650b769f17a1e05c6ea410"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "2d21b8b3de3951d36cb0622e1abc2b41"
+          },
+          {
+            "values": [
+              "2d21b8b3de3951d36cb0622e1abc2b41",
+              "c8b928adff8e69bfe32eab611fe2ef6d",
+              "91b625f81d650b769f17a1e05c6ea410"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "2d21b8b3de3951d36cb0622e1abc2b41"
+          },
+          {
+            "values": [
+              "120e18fb8d11fa8f092ec1b944cdce17",
+              "6e28fa9b6d2ea9ca37b1317497edbb68",
+              "0e50755d90599de0ecf108c125d0e46d"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "120e18fb8d11fa8f092ec1b944cdce17"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "40253e5a0a5753d1f3808280235bbc2391c9e05428c0ae57e965eef5c7e9a200",
+      "profile": 1,
+      "slots": 1,
+      "kind": "native_tag_flip",
+      "nonce": [
+        "8447857888028550864",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000010000000000000000d75157f0ed860c0ad066ec90fdd13c75ffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000010000000000000040892f15f27fac67d65a97dad1dc2510f257dbdd331725f3e9f9533c44ba2b5e0100000000000000cac8b2acddf1699cc33d409aaeca9fd7f38266850d130a49c370ab055bfc3d780100000000000000050000000000000000000000000000000100000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "724101996597432790",
+        "native_affine": "d6cdc54baa6a708c7972e0e916254f07",
+        "native_masks": [
+          "58f9fcc1766ce9a309a73980e3ed1055"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "458e342c3927f90d9d65910e305fe838"
+            ],
+            "value": "458e342c3927f90d9d65910e305fe838",
+            "slot0": "458e342c3927f90d9d65910e305fe838"
+          },
+          {
+            "values": [
+              "458e342c3927f90d9d65910e305fe838"
+            ],
+            "value": "458e342c3927f90d9d65910e305fe838",
+            "slot0": "458e342c3927f90d9d65910e305fe838"
+          },
+          {
+            "values": [
+              "650e3d47836d95eea70e26da1d90f244"
+            ],
+            "value": "650e3d47836d95eea70e26da1d90f244",
+            "slot0": "650e3d47836d95eea70e26da1d90f244"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "37082b518ee6f5e5cfc3d8a8f1a8c9d8889e54067777e2f495ee6ea157387967",
+      "profile": 1,
+      "slots": 3,
+      "kind": "native_tag_flip",
+      "nonce": [
+        "15285453987840613519",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "50564143030003000000000000000100000000000000001ddce82d8382de528f5cd1876ad720d4ffffffffffffffff000000000000000000000000000000000000000000000000000000000000000003000000000000005ca46e5903c1812ce1b6dd3c79f637e3e82de17a533c371ea60c8d8b43aedb46b4fe8141e3d3e791b535a3539a6783f63fbc6bb94f84d08b5d7b26ee80aede2cf6033c936d36709972ff2843666c43a24ace0f36fc7666f57015fa8e13f1e13e0300000000000000b836526a8565aeb5eedbe9c986c20a39889b617f7c5a15e55f3b7e26d6d1793d6662e2182798b65fadb55c9d8488c72318c919f02479aa22957e376d944f9467c0bb59d877963e135daa181a3244416851ddda196f43ac30dc3d48cc66b0121e030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f0700000000000000000000000000000001000000000000000000000003000003000000000000000300000000000000000000000000004004000000000000000000000000000000050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "5971353655862418460",
+        "native_affine": "3df74a934a269c48d716806cb641b702",
+        "native_masks": [
+          "0cb4861f38c15d79d16da89fb4f63602",
+          "75711b487e7ac64e60519f91821a0d44",
+          "d8a4f2965edbf68b36307061c1104378"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "471675beadd19f5a7c869f15e6415327",
+              "1cb6f7594d803884109f816e3894b81c",
+              "f12d6011710f4e2c6dafc10cacdcb02e"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "471675beadd19f5a7c869f15e6415327"
+          },
+          {
+            "values": [
+              "471675beadd19f5a7c869f15e6415327",
+              "1cb6f7594d803884109f816e3894b81c",
+              "f12d6011710f4e2c6dafc10cacdcb02e"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "471675beadd19f5a7c869f15e6415327"
+          },
+          {
+            "values": [
+              "070cadf1d0fd8fafc63201a6c7ef4338",
+              "61462063f0f0810962d754f88bfda867",
+              "c5864c9017b79ef78fb1cffb1503b45e"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "070cadf1d0fd8fafc63201a6c7ef4338"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "6dfc328d8bf0ad1ad2db09693666d0f817b41d58b07456e69328d34d73f47b40",
+      "profile": 1,
+      "slots": 1,
+      "kind": "implicit_zero",
+      "nonce": [
+        "7755822519523741844",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000010000000000000000497fa53f8a75d9ca941030497d37a26b000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000ae69e0b40a76009a4f9786504ffb13106eb85dbb24662b5f1c321e2fd68e3c44010000000000000080bdd6b7ce762fb2fd4a4e96621e60aff5ec71b04aac3a81648d209e0f8a316900000000000000000100000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "1243980561201180760",
+        "native_affine": "0bfbdc3599546634a971c5d688f5fe23",
+        "native_masks": [
+          "815913b54aed10873904f0f3ef54ae59"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "bad98982ae20aa79bc0db4e3f0838860"
+            ],
+            "value": "bad98982ae20aa79bc0db4e3f0838860",
+            "slot0": "bad98982ae20aa79bc0db4e3f0838860"
+          },
+          {
+            "values": [
+              "bad98982ae20aa79bc0db4e3f0838860"
+            ],
+            "value": "bad98982ae20aa79bc0db4e3f0838860",
+            "slot0": "bad98982ae20aa79bc0db4e3f0838860"
+          },
+          {
+            "values": [
+              "ed87038c44f4d51126b872f4ec6be921"
+            ],
+            "value": "ed87038c44f4d51126b872f4ec6be921",
+            "slot0": "ed87038c44f4d51126b872f4ec6be921"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "0ef14d90b49206d041360094d5cfcafcf1c2aadfa569443e48263f15753be1ee",
+      "profile": 1,
+      "slots": 3,
+      "kind": "implicit_zero",
+      "nonce": [
+        "3596623123284986212",
+        "0"
+      ],
+      "expected": {
+        "bytes": "50564143030003000000000000000100000000000000002057e03507317c1164895bc6acc5e9310000000000000000000000000000000000000000000000000000000000000000000000000000000003000000000000004880ef8a23ef97ff5b761464add8f4470c15edc3a12af0052ef94f0c1eb7d2359a8922bb4ef0dc9a8186d2fa8cb0a9cf4d62b94153653ddb004c1f1f994b84004eba67abeaa2f7a41ffa4095fe77d7c6e85a055ca8c06bfda657a14bf28f9f480300000000000000d2136c84c1859902958b6b67310ffa1b688f891273d435ab162696ccce595f06c84d5f0ce5456f7ce9a6a833c326e1e152b4d52acf485e32db1d7e56f3cc2d73420e86c87a417857bf76f2b65ebc0f608402345f3c061d15231d7c5c468a2d5a000000000000000001000000000000000000000003000003000000000000000300000000000000000000000000004004000000000000000000000000000000050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "7915170354785739693",
+        "native_affine": "5d9658e30383f122520bf869978c6958",
+        "native_masks": [
+          "554b4bc8d7b5da70bee7b56745aa667f",
+          "17468cbc7656cfe306bfa84ca3a8f962",
+          "0e9035d37bf01a6f63febd1a6455412c"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "6633927362cde4802cdf159ace2c7b57",
+              "925dc5a635bb0b3f7dad781779b05614",
+              "b1055da01479642df33be9e810927d0a"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "6633927362cde4802cdf159ace2c7b57"
+          },
+          {
+            "values": [
+              "6633927362cde4802cdf159ace2c7b57",
+              "925dc5a635bb0b3f7dad781779b05614",
+              "b1055da01479642df33be9e810927d0a"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "6633927362cde4802cdf159ace2c7b57"
+          },
+          {
+            "values": [
+              "e968728472a6b97bc50a327b22e2fc6c",
+              "8fab8463b0f18a15ec01dbc730f52221",
+              "3fa0b25c1e42969e0673396fb6e35f73"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "e968728472a6b97bc50a327b22e2fc6c"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "e8952dbd034aed56c25cf45a7f6fe74882bcf9ff0fb054a0cb4afd3cc8b0a6e6",
+      "profile": 1,
+      "slots": 1,
+      "kind": "wrong_sigma",
+      "nonce": [
+        "13792384031889526429",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "505641430300010000000000000001000000000000000015e98917649ce15e9d8e8baa336468bfffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000100000000000000ac501f8772ef8ef04bc8ea31b1ba06efe408981988b95ec957dbe1ad2ba67d610100000000000000a866cde632518ff0351105ef4d590d4ef5da61c5fe387bb7b5ec8cb888e6dc20010000000000000005000000000000000000000000000000010000000000000000000000030000010000000000000003000000000000000000000000000040400000000000000001000000000000000000000000000000",
+        "native_tag": "16562733832913490326",
+        "native_affine": "22793a4903578a0e66a4a13315ebc352",
+        "native_masks": [
+          "1e971470e419173fa7759e58ffe7ad69"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "d82d3ad27449745829f6863cb24f97bc11f6a26297520d91c91b8199876dfc97",
+      "profile": 1,
+      "slots": 3,
+      "kind": "wrong_sigma",
+      "nonce": [
+        "16126747659357445801",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "50564143030003000000000000000100000000000000002ddca3eaa82294fba9de5c928db7cddfffffffffffffffff000000000000000000000000000000000000000000000000000000000000000003000000000000005278c1d3cee45b4d3f3195e052316a8ba880b87ae7541648e4bd42a03582de058e96ebaf6e9708c0b0b8e1c5902849dfcb764a2c5bd7c4fa625770830053eb3106c13cb9c18c1289c130b2b52bbc58f14d8d19c4e98794755ee14c4fa087856e0300000000000000c8046d7f646246ec125156aade8c44e87dca7907424353342092c757980b4762d8ea1742a5d9f7f17017886af055de28cf33c918089bbd899e0b372307d51d3a446c9825bcf52fea21fb0653f90603f5ba165a20ea44f62d06040e6b9f42ce2a030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f070000000000000000000000000000000100000000000000000000000300000300000000000000030000000000000000000000000000400400000000000000000000000000000005000000000000000000000000000000400000000000000001000000000000000000000000000000",
+        "native_tag": "2469570079309115504",
+        "native_affine": "eee29aa514249fcb4fdc675840d6f24e",
+        "native_masks": [
+          "d3950f24dd8e8a4138e65f7066d41b22",
+          "22ac712d51628cf5ea927c1616c4a44c",
+          "1408508f52e6f5f84e323c340f538f31"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "adb8d846f570dc8acb6645e22faafc04b2352527da1991bb98c280b6d8e468e9",
+      "profile": 1,
+      "slots": 1,
+      "kind": "wrong_index",
+      "nonce": [
+        "4848031156246853728",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000010000000000000000b32a860484a226f260b81e90a6aa47430000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000004a70642dbc48c362dc40ba6ef2392472fd2c7e532dd7d5f54125b56b69715b55010000000000000018044568623b052eb511220f834372a8b09958a272668624d49621d1d989c2240100000000000000050000000000000000000000000000000100000000000000000000005101000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "2792762544520903685",
+        "native_affine": "8c00fe036c4ac392fd90bd3dd50d821e",
+        "native_masks": [
+          "e7fd62f706cd08a9ebd482815285973c"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "14a889ddc200038242ece4e7d6ac15964472e7d077bf2433a055033a009baa87",
+      "profile": 1,
+      "slots": 3,
+      "kind": "wrong_index",
+      "nonce": [
+        "15074964568750751934",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000300000000000000010000000000000000926d6939a6689d19be00fd99670835d1000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000c2828c6dff0330d08deaf1ae10334efcfe275fcd2910d42dc0c6ede54a7035770482e68563aa29367a69aef254c81f71d554a015c8ed8f888b46a0420eb7167cf01a845d170e9bd3c7d6e65f53f2d8e3c6e869dc66b5eea5288869adfe49bf2c0300000000000000f23ba6b95d4b3da652ea08a5c37d693b98a24a34425ce69f6bf1556a8ee19d5fd6810ad7dbf2b4c614ba9c2809a6bed844729fe8a294ba64302c04732d45bb0d4258c33dcb1a99057345982aa973c46885b0380e8eb5fa817f50e0caa4506965030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f0700000000000000000000000000000001000000000000000000000051010003000000000000000300000000000000000000000000004004000000000000000000000000000000050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "4928066566546048643",
+        "native_affine": "8bafa7ebd85902fbed0b449865c7a242",
+        "native_masks": [
+          "6ec06f5b36a65ce94bf06cd9b376362b",
+          "0e5b30e72d3a6521c7baf553829fd505",
+          "5fdf15976ea880e9c0fec40e92c61b4f"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "c11f4cc4c33b0347acf624739e17ab7abcb5f49ba407cd83cdc6dbfdd79af93a",
+      "profile": 1,
+      "slots": 1,
+      "kind": "bad_parent",
+      "nonce": [
+        "15606595469641415320",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "50564143030001000000000000000300000000000000008103d753d7f5c27f987a3271e4c395d8ffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000100000000000000eac06186e8ba963556a5d4685049344b21d5e02938c11a8ea59aa264e8d547660100000000000000acc3c0a7038c00eba6135e153f7b5fd42f10594aff92a9853ae7ae4335ef87480021edaef8c8e148499f7a3271e4c395d8f8ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000102000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000050000000000000000000000000000000300000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000010000001400010100000000000000030000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000020000002500000100000000000000030000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "17012597431061449528",
+        "native_affine": "a5aca678848725b5219c60c6b0d7a90c",
+        "native_masks": [
+          "fdd7b8f2f81aa011cec08cf78e7f0464"
+        ],
+        "import_error": "pvac_ser: invalid product parent",
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "1e1769ac431d15d49da382ee48f1ff4663ce30a0f7ea25036a9b2eb07e9c2b5e",
+      "profile": 1,
+      "slots": 3,
+      "kind": "bad_parent",
+      "nonce": [
+        "18419100140411808241",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "5056414303000300000000000000030000000000000000be8e553a64dcefb9f1e99737fdc99dffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000300000000000000a20a32c7b52af4f532183a194dc051ba5beeb3cbb8e8d2219125973fe97b333e32a9b6c3ddc35d28d2560ee9acfb3bd0a0536a2e5a83f55e8c373aaf9fbb80090e69cbb00b4c45644306d1d31885eb44b97849a30320fa8cc8f016dea11d1b7d03000000000000003825f2ffad393324a3e9be70ac65793d996c2fe5daa71c2c87f05fd189b25b264489566df1194189f89f747baf7e2b7489a4926810f7fb4b24d5f458c9d1357238d221a5814b00c19a276ee61bc6ca06b638f564056e173108f4c6bc3646100e00f906781daf4b2948f8e99737fdc99dfff8ffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010200000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f070000000000000000000000000000000300000000000000000000000300000300000000000000030000000000000000000000000000400400000000000000000000000000000005000000000000000000000000000000410000000000000002000000000000000000000000000000000000000000000001000000140001030000000000000003000000000000000000000000000000040000000000000000000000000000000500000000000000000000000000004041000000000000000200000000000000000000000000000000000000000000000200000025000003000000000000000300000000000000000000000000000004000000000000000000000000000040050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "7891759722984650062",
+        "native_affine": "e04a2157ca65f10576443504d57bea06",
+        "native_masks": [
+          "fe42cd1fd137c48133cbd1a5137b9052",
+          "ec79c4391f8f253d4cc7f3b148d1f233",
+          "a49935300f18caf7e03ba3386f036372"
+        ],
+        "import_error": "pvac_ser: invalid product parent",
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "d86b4db965833ab2e8572ae60b18c046cda4e33ae4ad76b3511eda869e29512e",
+      "profile": 1,
+      "slots": 1,
+      "kind": "bad_sign",
+      "nonce": [
+        "17154968462156947335",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000010000000000000000b6900b10ea5bdbcc87dfe4e7ecb012ee0000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000002a819dd6f810abefffc7ecbf504bd3a4ca852eace3b54f72f8357cf8f6e20d6e01000000000000009c4b1800df9334dc1479e7cbd381f0f23da61d0d8de81b0cb5314bd5dd9622240100000000000000050000000000000000000000000000000100000000000000000000000300020100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "11087078560695917749",
+        "native_affine": "cbcebc942367d9a68b04644445db7652",
+        "native_masks": [
+          "f7e2bfc9e5df414a14eb579f4fa12a76"
+        ],
+        "import_error": "pvac_ser: invalid edge sign",
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "0bcb76896bb9b7679459138b02744a4079d0184e353be7ac0adf5c1e8421225e",
+      "profile": 1,
+      "slots": 3,
+      "kind": "bad_sign",
+      "nonce": [
+        "9532699995537713482",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000300000000000000010000000000000000a258638957f5cada4aa964b823f44a84000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000ec418e986b309fb68727c1a20a5daab316dfc620ba40367c9de746d859303e382851c1c71184f9a43b5cac7154d64ea809065cd2e8cc019291643117e839094cc4548485afa3cb1207dfd261ff147a9fbea77e8865a44fa8e687434b8464846903000000000000008259f617424e04073b7a41d5bb0c6c41a25a6607ef1f56e5764e40d07552d54f0809700312d349eaf08766ff82a5b9f8aeba1d6538c2734395f38dcb4302301b30f8a460085520fbce6a55b7074b599964628d81714cefed813c1dcfb3036b60030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f0700000000000000000000000000000001000000000000000000000003000203000000000000000300000000000000000000000000004004000000000000000000000000000000050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "13833581223777140421",
+        "native_affine": "660f20c4dc10cb2e4c54439272fa4a64",
+        "native_masks": [
+          "8faeb8c12e581a6fd22b562aac3ff72d",
+          "d3ff811e83aa24fd6655cf9225b65c14",
+          "64a835afeb7a975b1e20b6a09a4ff55e"
+        ],
+        "import_error": "pvac_ser: invalid edge sign",
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "e282e2e2c2c0a05f5027721fd6147619ee9a60eac0422c1fdfbe9a324e207574",
+      "profile": 1,
+      "slots": 1,
+      "kind": "bad_weights",
+      "nonce": [
+        "7407290393371058276",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000010000000000000000f1867effda430b5864a00b055efbcb66ffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000100000000000000c65304cbdc52ee909d4798077252e7939db7653fb4ba8d4624cc75942e7ee81e0100000000000000bab72f5aabfa5ef9513081fa656f74d4440e26bf4fa2cb0a28f0293aedb4523501000000000000000500000000000000000000000000000001000000000000000000000003000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "9473752764750539061",
+        "native_affine": "72d57e81536534cc7e3c35901d862607",
+        "native_masks": [
+          "5d41346a528883a24c4e9bbee8d79013"
+        ],
+        "import_error": "pvac_ser: edge weight/slots size mismatch",
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "41cd083565b5d2b35bb22a600145d49caca28ae1fdd7b26415f8619c5bf83c5b",
+      "profile": 1,
+      "slots": 3,
+      "kind": "bad_weights",
+      "nonce": [
+        "1604792956702629681",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "50564143030003000000000000000100000000000000009dfc8e15f2c01473311f4f0ab15e4516ffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000300000000000000fc72b9cc16fc9b32b553948cbbe16bd9e718e469b2ac867ab0d016882afa9b6090304d83690e38e9687f9c1760aeb3c70b1cd0be29334f194326a85ff511442cf8b1b6867505767f1e8eba3b8431924f7a2a6d0067c98f7d779a9f447207de0c030000000000000046000d3947e2444153720f66ba4773fbaebf12a9682b5e3a2c40e48093948e2d94aa9232705a331371bca06879b58c61697b61b2d47b576f1615f7f059e646606c308a3a0e3d18a6f1c37f0e7897f9ac6466743c8f77d59e5162e13eef4e0637030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f0700000000000000000000000000000001000000000000000000000003000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "1016152108344740776",
+        "native_affine": "6dd8e60b244508bca5ec139e954d8e1e",
+        "native_masks": [
+          "877bab5f1c6458c455e0fdb94d74f77e",
+          "14ae9d9bde5d5332ef2d79b965a3fe5f",
+          "a166296a544d39e5ec105e71029f1e3e"
+        ],
+        "import_error": "pvac_ser: edge weight/slots size mismatch",
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "cebc19c2d6d868d8ed277a65dd06c63ac56821d39619d6b675bbf0939fafdce1",
+      "profile": 1,
+      "slots": 1,
+      "kind": "bad_c0",
+      "nonce": [
+        "17281160019557693017",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000010000000000000000daabd2b8fb19543f59366b707a03d3ef00000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000074d4888431aa5cde2870debb16ad7b6fc7013a0dd4e2f8bfc0382973132075370100000000000000728fc35929305faf28bcbeb1a41c12472cceaa19fd05ce5f73bb2625168f4d0b020000000000000005000000000000000000000000000000000000000000000000000000000000000100000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "15219887602635854442",
+        "native_affine": "45be11ae4c9c40e019da499dad1ec93a",
+        "native_masks": [
+          "dde360a1f5b93fbbcb77edc0e7a1ef4d"
+        ],
+        "import_error": "pvac_ser: c0/slots size mismatch",
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "86b58354b29f26e90d8ced025adaa6c55ad43daa0b9fe092495b9678a48f886e",
+      "profile": 1,
+      "slots": 3,
+      "kind": "bad_c0",
+      "nonce": [
+        "13856898819848556722",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000300000000000000010000000000000000c61359d891823b95b2509a450f984dc0000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000c272976a28c5d2fac37fc0bcad441077f02db348c529538e695adafaf305fa3a7ea93357ca6a4361333b3d1eede08d2fcfaa501bfe9a2258556177431f40194c9a1419c0ac2f22e50ab210cae9855721ba209b0c5aab2c61bc772dd71370e1490300000000000000b88bb21a4caa398c71c017ff69daa81f44a7feead7af952bc35295bf5a6e773b2e78cd9e3e61a1679fd7b844d3e3488641f316fb5adf89172e302c9220965664ced731e25fc346bcc6d7f9ef7b372b71309d3751c653f22953e8ceb45bff2620040000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f070000000000000000000000000000000000000000000000000000000000000001000000000000000000000003000003000000000000000300000000000000000000000000004004000000000000000000000000000000050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "8819360330775977359",
+        "native_affine": "faca098a4afee561b747caee1cb8a931",
+        "native_masks": [
+          "1002330b3de4cfe409035a48ac9e2817",
+          "02ed3148fa7ff1dddba4a5a34816c32e",
+          "6309dbd7b6aa376e6e64102164228303"
+        ],
+        "import_error": "pvac_ser: c0/slots size mismatch",
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "c81bf9ec801f99e3ca72b3e47cbf92e2e91c7806f59c3843533ac67c9d276d7e",
+      "profile": 2,
+      "slots": 1,
+      "kind": "empty",
+      "nonce": [
+        "11446040032360145757",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000000000000000000000000000000000000000000000000000",
+        "native_tag": "14247296539724521285",
+        "native_affine": "7c4974f519d0caf17f022052f09dc320",
+        "native_masks": [
+          "a0568daaadda5e6af38b79268e310b68"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "00000000000000000000000000000000"
+            ],
+            "value": "00000000000000000000000000000000",
+            "slot0": "00000000000000000000000000000000"
+          },
+          {
+            "values": [
+              "00000000000000000000000000000000"
+            ],
+            "value": "00000000000000000000000000000000",
+            "slot0": "00000000000000000000000000000000"
+          },
+          {
+            "values": [
+              "00000000000000000000000000000000"
+            ],
+            "value": "00000000000000000000000000000000",
+            "slot0": "00000000000000000000000000000000"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "4d3d1c68cfec002f7674b4fc7da49f3364aa94cb1b33dd60c3dc5eda0be482fa",
+      "profile": 2,
+      "slots": 3,
+      "kind": "empty",
+      "nonce": [
+        "12163554034286358802",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000300000000000000000000000000000000000000000000000000000000000000",
+        "native_tag": "18233363709888477792",
+        "native_affine": "5cc6a907e2fa0cdbc74717034de28e36",
+        "native_masks": [
+          "3a4606ede1f7bdcfa0b11faa86bcd25b",
+          "e7eed919ea23810e8d217290dd90cb7b",
+          "e0cb49f7db0d97123452651c5c422610"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "00000000000000000000000000000000",
+              "00000000000000000000000000000000",
+              "00000000000000000000000000000000"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "00000000000000000000000000000000"
+          },
+          {
+            "values": [
+              "00000000000000000000000000000000",
+              "00000000000000000000000000000000",
+              "00000000000000000000000000000000"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "00000000000000000000000000000000"
+          },
+          {
+            "values": [
+              "00000000000000000000000000000000",
+              "00000000000000000000000000000000",
+              "00000000000000000000000000000000"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "00000000000000000000000000000000"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "b5fb16c0eee76cd51087ddc767549a1bb7216f448f01b246a4841062a0e8c8c5",
+      "profile": 2,
+      "slots": 1,
+      "kind": "clear",
+      "nonce": [
+        "2571417924689409549",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "505641430300010000000000000000000000000000000100000000000000050000000000000000000000000000000000000000000000",
+        "native_tag": "17167121368353032720",
+        "native_affine": "6d11bfb37e768bc584eca9787a7fca58",
+        "native_masks": [
+          "7b7c68de7771367edb160a1b7e81c270"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "05000000000000000000000000000000"
+            ],
+            "value": "05000000000000000000000000000000",
+            "slot0": "05000000000000000000000000000000"
+          },
+          {
+            "values": [
+              "05000000000000000000000000000000"
+            ],
+            "value": "05000000000000000000000000000000",
+            "slot0": "05000000000000000000000000000000"
+          },
+          {
+            "values": [
+              "05000000000000000000000000000000"
+            ],
+            "value": "05000000000000000000000000000000",
+            "slot0": "05000000000000000000000000000000"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "fde09d6bf00dd2742a61145591aa082d8d1045a29c7824776e2ad82f9805a038",
+      "profile": 2,
+      "slots": 3,
+      "kind": "clear",
+      "nonce": [
+        "15480922497002537118",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "50564143030003000000000000000000000000000000030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f070000000000000000000000000000000000000000000000",
+        "native_tag": "14814986908988796556",
+        "native_affine": "999941e0fabf504cf1bdb9222f325945",
+        "native_masks": [
+          "cccd6186cfc2da234639bee28e8e6841",
+          "f4dd12744b13bcc2b52e9ef540afe347",
+          "162fc641ee0a8196d9d46c086d51662a"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "05000000000000000000000000000000",
+              "f9ffffffffffffffffffffffffffff7f",
+              "07000000000000000000000000000000"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "05000000000000000000000000000000"
+          },
+          {
+            "values": [
+              "05000000000000000000000000000000",
+              "f9ffffffffffffffffffffffffffff7f",
+              "07000000000000000000000000000000"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "05000000000000000000000000000000"
+          },
+          {
+            "values": [
+              "05000000000000000000000000000000",
+              "f9ffffffffffffffffffffffffffff7f",
+              "07000000000000000000000000000000"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "05000000000000000000000000000000"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "a612e6328c230633177ba2fa5b3560aaddab242a50443ce266b707472faf673c",
+      "profile": 2,
+      "slots": 1,
+      "kind": "active",
+      "nonce": [
+        "2511640943425564628",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000010000000000000000fb57010be5568637d42f357c2124db22000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000ee165bc5e5bb8690626b5dd17aa1228936d91e94e6c973da16e26136817c380601000000000000001e89a3f58607fa9ebd386ca1bff9c807b8cf83bd966ed795a37f5ad069872e5f0100000000000000050000000000000000000000000000000100000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "18267101861723467455",
+        "native_affine": "aef1941fda42463d9523401a98b70467",
+        "native_masks": [
+          "9b9a99fcc9a2d070123ba9d635d56417"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "71898b2caca2947e6bac11e9d735af48"
+            ],
+            "value": "71898b2caca2947e6bac11e9d735af48",
+            "slot0": "71898b2caca2947e6bac11e9d735af48"
+          },
+          {
+            "values": [
+              "71898b2caca2947e6bac11e9d735af48"
+            ],
+            "value": "71898b2caca2947e6bac11e9d735af48",
+            "slot0": "71898b2caca2947e6bac11e9d735af48"
+          },
+          {
+            "values": [
+              "3d58b65dab8ba8dc27087cc3f0282143"
+            ],
+            "value": "3d58b65dab8ba8dc27087cc3f0282143",
+            "slot0": "3d58b65dab8ba8dc27087cc3f0282143"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "c86617edc234bf734ee912f52f4ed83351cf0a07e7b3ee5bd607687817fad42d",
+      "profile": 2,
+      "slots": 3,
+      "kind": "active",
+      "nonce": [
+        "14640745723866440544",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000300000000000000010000000000000000f10df7e142eefa8d60e3e075aa602ecb00000000000000000000000000000000000000000000000000000000000000000000000000000000030000000000000088086cc10f4eb55db0bf837e0683b40fabe7b238018685eb56aa283aa98a686f52acf68cd30eaf40efeb97b81b44db06a45fffca361403db5467638bc4a3427d6460a01e4c2a4276bb0464d158256f1d93126cf49608ec0c0f6f4d094ebef6290300000000000000ca5f52afd38a03bef4bb50d9bc549b0b11dcc3abf2af006ad1ad7f98cf6abb51dc50827fd7caad24d1e0e56f34a0a3eda5289b1a7744dae32cc97da89ebeef60686c5d27a7925dddcffaa17b9dffa1f11716574d5acaf4437444a73b83a97451030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f0700000000000000000000000000000001000000000000000000000003000003000000000000000300000000000000000000000000004004000000000000000000000000000000050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "833473745685835103",
+        "native_affine": "bc6dde62b64cd134924a2e1bc6bb8f00",
+        "native_masks": [
+          "90184834d1f55822ebbd354725168a4e",
+          "6af9138d56a3ba39a7ef5933da000e11",
+          "aa1524971950c49c9ed34e74ca3a7a6d"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "98b7d73c01998f8ebb0f4bc7edcc3a58",
+              "a284353b42ca1d4f784150c411a83318",
+              "60adcc4227ccdefff53ece974e34ea6e"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "98b7d73c01998f8ebb0f4bc7edcc3a58"
+          },
+          {
+            "values": [
+              "98b7d73c01998f8ebb0f4bc7edcc3a58",
+              "a284353b42ca1d4f784150c411a83318",
+              "60adcc4227ccdefff53ece974e34ea6e"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "98b7d73c01998f8ebb0f4bc7edcc3a58"
+          },
+          {
+            "values": [
+              "58223319e020fc5e8ec1eea1647dda03",
+              "222549a18c60c792e5e84a427247c00c",
+              "9cb4a569b23af2c52cfdcbf440c8301f"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "58223319e020fc5e8ec1eea1647dda03"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "48c93a126a309dfedc1ce2cc9ef1d0b7e4a369f4fd7457fa5edfbf86684130c1",
+      "profile": 2,
+      "slots": 1,
+      "kind": "legacy",
+      "nonce": [
+        "16215320793060182220",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000010000000000000000450a8b77fd2fa31fcc885b4d596408e1ffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000050000000000000000000000000000000100000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "2100478277656119500",
+        "native_affine": "a42d20a2e317073a0cfc4428a3432239",
+        "native_masks": [
+          "5acb4dcfb3595a11e1e6299b87908d63"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "c616f20237d5fa06bf2637e08fad4749"
+            ],
+            "value": "c616f20237d5fa06bf2637e08fad4749",
+            "slot0": "c616f20237d5fa06bf2637e08fad4749"
+          },
+          {
+            "values": [
+              "c616f20237d5fa06bf2637e08fad4749"
+            ],
+            "value": "c616f20237d5fa06bf2637e08fad4749",
+            "slot0": "c616f20237d5fa06bf2637e08fad4749"
+          },
+          {
+            "values": [
+              "c616f20237d5fa06bf2637e08fad4749"
+            ],
+            "value": "c616f20237d5fa06bf2637e08fad4749",
+            "slot0": "c616f20237d5fa06bf2637e08fad4749"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "ebaa4f51be45e7fd1d6329c7d11edbd6035dc39b90c166aa8edc0dd14c9b842a",
+      "profile": 2,
+      "slots": 3,
+      "kind": "legacy",
+      "nonce": [
+        "8510754497333142922",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "5056414303000300000000000000010000000000000000212fff45b09410958aa519981f461c76ffffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f0700000000000000000000000000000001000000000000000000000003000003000000000000000300000000000000000000000000004004000000000000000000000000000000050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "16151345323488626835",
+        "native_affine": "9a033edd28aa123b7f95bec6b46db54d",
+        "native_masks": [
+          "54076adb63b3df4e7953d7c94875325a",
+          "038792c775252f4c65475b8f924a5966",
+          "f4f2851b94b4a72f9d24666c0a4c4e5e"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "54dba03328e215666e22d6212a5bab6b",
+              "0fa2da8b1c99750bdb04a573be47d523",
+              "f223507aefc9420bd657b453eb2a5534"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "54dba03328e215666e22d6212a5bab6b"
+          },
+          {
+            "values": [
+              "54dba03328e215666e22d6212a5bab6b",
+              "0fa2da8b1c99750bdb04a573be47d523",
+              "f223507aefc9420bd657b453eb2a5534"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "54dba03328e215666e22d6212a5bab6b"
+          },
+          {
+            "values": [
+              "54dba03328e215666e22d6212a5bab6b",
+              "0fa2da8b1c99750bdb04a573be47d523",
+              "f223507aefc9420bd657b453eb2a5534"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "54dba03328e215666e22d6212a5bab6b"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "f3ed82cbff58e45a486eb54aa6293ce75034887e6ab8548175dc024401023787",
+      "profile": 2,
+      "slots": 1,
+      "kind": "native",
+      "nonce": [
+        "15186071196754235048",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000010000000000000000635fa6a2b2dae4eda8ce53504bc3bfd20000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000008eadf900c67192205acb3eed25e54cd8e094fa1e22efe98ac8f73eaef4ecc71b01000000000000000ccd3079bbf2014ed8b583ca30151feffe79d702b5a890d7985a2780b90b4c7b0100000000000000050000000000000000000000000000000100000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "17142066542446796643",
+        "native_affine": "b6a0bf1d0b586d1662ac605653427e7b",
+        "native_masks": [
+          "5a86042cf3b68cd81ae706b44355111e"
+        ],
+        "import_error": null,
+        "native_source": true,
+        "policies": [
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: native source decrypt rejected",
+            "slot0_error": "pvac: native source decrypt rejected"
+          },
+          {
+            "values": [
+              "31fd020185f4fdfdaaae4ba73a158534"
+            ],
+            "value": "31fd020185f4fdfdaaae4ba73a158534",
+            "slot0": "31fd020185f4fdfdaaae4ba73a158534"
+          },
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: native source decrypt rejected",
+            "slot0_error": "pvac: native source decrypt rejected"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "01d1a22179d53c9450e7f8a0a2ecd3e4fb6857eb1761f14d95d346e88bbf20be",
+      "profile": 2,
+      "slots": 3,
+      "kind": "native",
+      "nonce": [
+        "12267422583900566489",
+        "0"
+      ],
+      "expected": {
+        "bytes": "50564143030003000000000000000100000000000000009ddd386bc7b35b04d973ff2ed8a33eaa00000000000000000000000000000000000000000000000000000000000000000000000000000000030000000000000054aa9039b757ef3c02b930f0c259fc69040dd50f824fe5de0ea557c1afdda61e6af737715d77a25707df960c3cd29fb08b90ca658a677500b72166c42a909f161099a68dc6a69438c9fa39f9119a78bd5283648dc9f9594554615e78b213580c0300000000000000344d3ef0f5b57875e32e537c1dbb782086fa7f91dc88c8d1baa9f4374229cd0dd6f68878af7a9a99653f17505418f51c3f94d37d3cd2799827322f9684ae8e7622b1818021e780188b0c3098bb91314cabc81a1ceff1f75f941eb191aca6e969030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f0700000000000000000000000000000001000000000000000000000003000003000000000000000300000000000000000000000000004004000000000000000000000000000000050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "314042268111134109",
+        "native_affine": "75d248466207712df3a0b6f1fd9b5171",
+        "native_masks": [
+          "f2575cda7b54f3393c5e649d299c913b",
+          "cda7d8db743edc91f46ad85527f49968",
+          "23a9a8201df8300dfcdc4a146d951314"
+        ],
+        "import_error": null,
+        "native_source": true,
+        "policies": [
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: native source decrypt rejected"
+          },
+          {
+            "values": [
+              "c76f1bd9f02b0617bf8e56723d975935",
+              "c49b0e4efb43d13ad9a9659de49c2d0c",
+              "d608dbe6089df42c16b74be3dd8b190f"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "c76f1bd9f02b0617bf8e56723d975935"
+          },
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: native source decrypt rejected"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "f14c3b0d94a43e49cb76cf4cea3dbf06561899f1d610fa4682156f339aa81ca5",
+      "profile": 2,
+      "slots": 1,
+      "kind": "native_unused",
+      "nonce": [
+        "16422683481505868625",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "50564143030001000000000000000100000000000000009a77ecf21c13c454512bd5859d17e9e3ffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000100000000000000f8b43c7ef890bb6a75d4ee9fb4b5fe6e823332ef5ac8f63c4800dc13ee0bca7b01000000000000008020458ef66a48a3841029c421eb1593eb362555e3666e7c8eeb9e1488c8b55c0100000000000000050000000000000000000000000000000000000000000000",
+        "native_tag": "6108028009676830618",
+        "native_affine": "e6a63e583ef7ea44c6df160d81c7cb3e",
+        "native_masks": [
+          "eb132b7345099f7f4ee0860396a92339"
+        ],
+        "import_error": null,
+        "native_source": true,
+        "policies": [
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: native source decrypt rejected",
+            "slot0_error": "pvac: native source decrypt rejected"
+          },
+          {
+            "values": [
+              "05000000000000000000000000000000"
+            ],
+            "value": "05000000000000000000000000000000",
+            "slot0": "05000000000000000000000000000000"
+          },
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: native source decrypt rejected",
+            "slot0_error": "pvac: native source decrypt rejected"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "4a0e3c2f90892efd2c899d5a799421e0b26e2500c64e2691c641c6f58d692ed4",
+      "profile": 2,
+      "slots": 3,
+      "kind": "native_unused",
+      "nonce": [
+        "14868332851315247254",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "50564143030003000000000000000100000000000000005477e67e3ed22c649688ead4f3ed56ceffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000300000000000000b0abb583e08c983c189aef31a1e0c487159a0099c7eb24b4d4e07088569f2a4fa625510a3c944cd9602eacb004d6f8a8012c0cd64c103bc262bc0b959064062c74f614828826d37ce66912f7f038ca4b50928f4716f500dfcd74a0d05d97e52e03000000000000008afa13feec1bf6f3ef9d8e91a18809858d78575a4498b57f95b1c72901d6bc3e420c3d26a35b02c7dd9a7b9588ad601b89267d63349e89e107b925da932d0403b43b218d62c4c8f6853fbc6fbe6440b1de574acc82577022a87203f01241a86d030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f070000000000000000000000000000000000000000000000",
+        "native_tag": "7218375468626900820",
+        "native_affine": "f5928b5abe17e624249b25679ad9b91c",
+        "native_masks": [
+          "7fe8ab099d21c72ca74c26deb8053417",
+          "cf06ddcf9065534d8ab417dc2dd4aa4e",
+          "e3435546c58b46572724e53f8d6afe24"
+        ],
+        "import_error": null,
+        "native_source": true,
+        "policies": [
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: native source decrypt rejected"
+          },
+          {
+            "values": [
+              "05000000000000000000000000000000",
+              "f9ffffffffffffffffffffffffffff7f",
+              "07000000000000000000000000000000"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "05000000000000000000000000000000"
+          },
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: native source decrypt rejected"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "13bca8df30e948d46ddf740a9b2952d710153e06e4acee3c7baf8bc70f88c65c",
+      "profile": 2,
+      "slots": 1,
+      "kind": "product",
+      "nonce": [
+        "15486533685047834952",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000030000000000000000b6d49b7b53b5fa1148b965db5538ebd6000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000d0da5935fe5c269980552b82de5b740e0a2c18f22c1d2fc535bd051ace26ea5701000000000000001c8a7aae50cde1c06560ff6f497e442bfdbdc1d322610d8d406591c07f8067040082b7144cd6d6e7e84fb965db5538ebd6f9ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000050000000000000000000000000000000300000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000010000001400010100000000000000030000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000020000002500000100000000000000030000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "5200382068548877529",
+        "native_affine": "2c0922b7e299100e127f82dd6ae61457",
+        "native_masks": [
+          "8fdeed2fb685ac3653e480adc7e4f404"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "3ad2677a9813dca67b40c3956662cf2d"
+            ],
+            "value": "3ad2677a9813dca67b40c3956662cf2d",
+            "slot0": "3ad2677a9813dca67b40c3956662cf2d"
+          },
+          {
+            "values": [
+              "3ad2677a9813dca67b40c3956662cf2d"
+            ],
+            "value": "3ad2677a9813dca67b40c3956662cf2d",
+            "slot0": "3ad2677a9813dca67b40c3956662cf2d"
+          },
+          {
+            "values": [
+              "47821deb80503adba7aa823876a3196b"
+            ],
+            "value": "47821deb80503adba7aa823876a3196b",
+            "slot0": "47821deb80503adba7aa823876a3196b"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "9aac85ee4440ca0b19880aaaa8a9f65ce154ae91bf05469149141fe7e5892cac",
+      "profile": 2,
+      "slots": 3,
+      "kind": "product",
+      "nonce": [
+        "7183546650429798921",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000300000000000000030000000000000000ab2c75da52d224fa09ba50569e15b1630000000000000000000000000000000000000000000000000000000000000000000000000000000003000000000000006a0e98e55f82ae5f01da3f94b16724329c259fa1e835b665324d0a32963b2141368b8c613db4a2141407e4c4089c76947adf0bae5b2a02f8605b514b53379243f4d525bfa7702c1e17ab3e908f0da9c0d1dc16abef569bf5b322029ef7d8fb510300000000000000ccf6fe4c2c204ae32b2402f79bf131a288b278fd7c7d36c180d7992071c662731ade097e06c6907d7d929f6abb66b1a68145a0c06748e44e013c46376c774430fe098396722ab8a40e28e5a377b4c37256cc36dfaa31bd80a8d181ed6c0b830000455c889f8bea7ad110ba50569e15b163f9ffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f070000000000000000000000000000000300000000000000000000000300000300000000000000030000000000000000000000000000400400000000000000000000000000000005000000000000000000000000000000410000000000000002000000000000000000000000000000000000000000000001000000140001030000000000000003000000000000000000000000000000040000000000000000000000000000000500000000000000000000000000004041000000000000000200000000000000000000000000000000000000000000000200000025000003000000000000000300000000000000000000000000000004000000000000000000000000000040050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "1394091544861509081",
+        "native_affine": "591be459854b0b0ae53a6e811cf45a6a",
+        "native_masks": [
+          "57d3500f35a7021e1ba498fea73c5744",
+          "5bc687f51e453afbcc579477590b9e6c",
+          "7200170d0b303ed8cd5cca135289bc44"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "a274cf96887158cd804c7bba49d9ec33",
+              "bb5ddd0ed839dbfdb2b3db1dea63cc01",
+              "22f9c8b5ffc03c84b83ac3dc4ccbe173"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "a274cf96887158cd804c7bba49d9ec33"
+          },
+          {
+            "values": [
+              "a274cf96887158cd804c7bba49d9ec33",
+              "bb5ddd0ed839dbfdb2b3db1dea63cc01",
+              "22f9c8b5ffc03c84b83ac3dc4ccbe173"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "a274cf96887158cd804c7bba49d9ec33"
+          },
+          {
+            "values": [
+              "40d862a7efe8c5bac0991c5258617602",
+              "5e4f0f7210b24384249da6a8b89fe716",
+              "9b69079a4e0f14491dd894552deb765a"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "40d862a7efe8c5bac0991c5258617602"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "652bbc6023c74b4b61c6b5ee1a4a3be57e3dde7d0dd3f350efb7bc767613beda",
+      "profile": 2,
+      "slots": 1,
+      "kind": "native_product",
+      "nonce": [
+        "8183374009930841678",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000030000000000000000c19e814b822713ce4e7e17fe4d2f9171ffffffffffffffff000000000000000000000000000000000000000000000000000000000000000001000000000000008c5b23ca933838e3f1f5c3a5cb865da6ab33ff157dfc1a2fb63c94cbf62bbf040100000000000000a2384f2b131f94e46f394a588848e6e102cff0e32ffd55b349e478c722fb5340009214174c3f6f6fa0557e17fe4d2f9171f8ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000050000000000000000000000000000000300000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000010000001400010100000000000000030000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000020000002500000100000000000000030000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "8691826049641695159",
+        "native_affine": "ea17346bd07570ead7a1c746da12197c",
+        "native_masks": [
+          "5b89e9ca26cd7aef7d7dc01b5cd4d538"
+        ],
+        "import_error": null,
+        "native_source": true,
+        "policies": [
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: native source decrypt rejected",
+            "slot0_error": "pvac: native source decrypt rejected"
+          },
+          {
+            "values": [
+              "108566c48299fb0b1b9513226cf02969"
+            ],
+            "value": "108566c48299fb0b1b9513226cf02969",
+            "slot0": "108566c48299fb0b1b9513226cf02969"
+          },
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: native source decrypt rejected",
+            "slot0_error": "pvac: native source decrypt rejected"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "decd979a06b9a980dde94cdb9f8d084d2324555b4ab1df41420ba37d0880cd6f",
+      "profile": 2,
+      "slots": 3,
+      "kind": "native_product",
+      "nonce": [
+        "2650606697665976475",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "505641430300030000000000000003000000000000000051a1a3298aae5e669bd8a67dbfd8c824ffffffffffffffff000000000000000000000000000000000000000000000000000000000000000003000000000000008cac4e58184b1f4b5837e53ac538605e7b80675898e85c9de301f32720ec441f94574661c87694493d061ec9f0cb302f8882168329edc5a7d5176db82e285f28e870aed19f4a611e11066bca87e4d0d9f3b29e5b24e8845949ebc3bb7fc5866e030000000000000044ee38885847b240d0448c4475f802fc980c760334300764a943efa6bd88dc5cc6e01de739e5febc5b3029dc46f42cb9bc40585dbe13a73af8412479ac5f4f4d70705486c00ab1b78be3e1092a28f91ca740140969222034c4a3f0885fc729350086465b31ea9992f6a2d8a67dbfd8c824f8ffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f070000000000000000000000000000000300000000000000000000000300000300000000000000030000000000000000000000000000400400000000000000000000000000000005000000000000000000000000000000410000000000000002000000000000000000000000000000000000000000000001000000140001030000000000000003000000000000000000000000000000040000000000000000000000000000000500000000000000000000000000004041000000000000000200000000000000000000000000000000000000000000000200000025000003000000000000000300000000000000000000000000000004000000000000000000000000000040050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "77983878898391542",
+        "native_affine": "ab4b9898fe4f3d764d087b1fecbc226f",
+        "native_masks": [
+          "d8bd4c713520ce664051b33be180ba3b",
+          "09da0900b44d513117e8cebfea44f03b",
+          "e01e79a4879efb57bd10e561481b4574"
+        ],
+        "import_error": null,
+        "native_source": true,
+        "policies": [
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: native source decrypt rejected"
+          },
+          {
+            "values": [
+              "59ac3b670355ff9119cb928bfa4cd42d",
+              "9a6158f08d309819ce7a272a95a4e058",
+              "5dabe790c4af3023372851e13216f45d"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "59ac3b670355ff9119cb928bfa4cd42d"
+          },
+          {
+            "values_error": "pvac: native source decrypt rejected",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: native source decrypt rejected"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "ca165df8ce5f40bd779a848afbed4bbb8b60c9c0092ca602cce312f99460fc67",
+      "profile": 2,
+      "slots": 1,
+      "kind": "nested",
+      "nonce": [
+        "2872231928829871350",
+        "0"
+      ],
+      "expected": {
+        "bytes": "50564143030001000000000000000500000000000000008e77129057056ca9f68470b6b837dc27000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000dc688fa1403183d207d807765bd8ef71b618e207d2a68455166c6ae845cbf81001000000000000008ce0c04952f4a067a16aaaa5f758dffdb685fc720162eeb6ae6915edb96c1d72000d55a1e8ae8e3fd7fd8470b6b837dc27f9ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000102000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000102000000030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000050000000000000000000000000000000500000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000010000001400010100000000000000030000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000020000002500000100000000000000030000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000030000003600010100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000040000004700000100000000000000030000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "7311097408483288668",
+        "native_affine": "30c08022bece428739042bb6b4be333a",
+        "native_masks": [
+          "6a6a246cda2f02047788655d20e42f10"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "c074dff9b828fdc5f783b226189ae700"
+            ],
+            "value": "c074dff9b828fdc5f783b226189ae700",
+            "slot0": "c074dff9b828fdc5f783b226189ae700"
+          },
+          {
+            "values": [
+              "c074dff9b828fdc5f783b226189ae700"
+            ],
+            "value": "c074dff9b828fdc5f783b226189ae700",
+            "slot0": "c074dff9b828fdc5f783b226189ae700"
+          },
+          {
+            "values": [
+              "a6484cb193da81b0f588eb6cb1708778"
+            ],
+            "value": "a6484cb193da81b0f588eb6cb1708778",
+            "slot0": "a6484cb193da81b0f588eb6cb1708778"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "b61f51a935d4adb1bb5ebf21782eb39f5a5739aca944eec2bb522efd79af6772",
+      "profile": 2,
+      "slots": 3,
+      "kind": "nested",
+      "nonce": [
+        "10212719510321249405",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000300000000000000050000000000000000817c4a385afec9d57d3c660b49deba8d00000000000000000000000000000000000000000000000000000000000000000000000000000000030000000000000072a610fedd65c53608608014488895255abeb77558db615a9c166813434aa71080f3c9111a1e8c462c16ad54bdba77a28b624ec37bc3426447c5d68d42ba2f77561b17be397aab38ddb61c96cf1e711ccbf237a4501ac5f4315a0918f8c28f1a03000000000000007ab1a02a7201074e93966616afe7a6fd9b1135f9f6f53ea6736860a777ec920b040b2365707d1cc89d1419bea5ef552724959075065e94d96922118f2b1ddc43bcae47b61557aab4eada93ba726563d5b3f5d92f5244eb3e3c398ee2d2d9cf2e004057e4d91f4236b5843c660b49deba8df9ffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010200000003000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f07000000000000000000000000000000050000000000000000000000030000030000000000000003000000000000000000000000000040040000000000000000000000000000000500000000000000000000000000000041000000000000000200000000000000000000000000000000000000000000000100000014000103000000000000000300000000000000000000000000000004000000000000000000000000000000050000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000020000002500000300000000000000030000000000000000000000000000000400000000000000000000000000004005000000000000000000000000000000410000000000000002000000000000000000000000000000000000000000000003000000360001030000000000000003000000000000000000000000000040040000000000000000000000000000000500000000000000000000000000000041000000000000000200000000000000000000000000000000000000000000000400000047000003000000000000000300000000000000000000000000000004000000000000000000000000000000050000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "15150943701626864086",
+        "native_affine": "db6d8e14eca06ba387d73de014dbe072",
+        "native_masks": [
+          "78af5b6e05972656b741127acd47721d",
+          "273cead7636233bf450b8d14a858ee39",
+          "ae6247c24e8364018deca56d3749b31e"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "7e46c0ed2db5808dc89914bc3dad8662",
+              "bf04de269dce8fd35750a5783abe4d55",
+              "0b0989bdf681bcdde1de07136c147465"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "7e46c0ed2db5808dc89914bc3dad8662"
+          },
+          {
+            "values": [
+              "7e46c0ed2db5808dc89914bc3dad8662",
+              "bf04de269dce8fd35750a5783abe4d55",
+              "0b0989bdf681bcdde1de07136c147465"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "7e46c0ed2db5808dc89914bc3dad8662"
+          },
+          {
+            "values": [
+              "9b28683ecf4c8a7e405b2fbab862035a",
+              "0382bc5284825349c82e1b41111e9629",
+              "036f189694b5f9cfbc8c8e7cbb2f271c"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "9b28683ecf4c8a7e405b2fbab862035a"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "2e9a627d73b7b9dd3267ea3ce236246cca77307740de13db7085af14ab5e337b",
+      "profile": 2,
+      "slots": 1,
+      "kind": "pc_only",
+      "nonce": [
+        "5298681842730715703",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000010000000000000000638ba46ef868efbb37cac6f50fb38849ffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000050000000000000000000000000000000100000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "2516150928564717525",
+        "native_affine": "6d5aa4131f9d796abb5ebb5c57bcb26a",
+        "native_masks": [
+          "cd533f8378420be4bcac3a2f7a874727"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "848590aeb8c1c651475eb424e7333c25"
+            ],
+            "value": "848590aeb8c1c651475eb424e7333c25",
+            "slot0": "848590aeb8c1c651475eb424e7333c25"
+          },
+          {
+            "values": [
+              "848590aeb8c1c651475eb424e7333c25"
+            ],
+            "value": "848590aeb8c1c651475eb424e7333c25",
+            "slot0": "848590aeb8c1c651475eb424e7333c25"
+          },
+          {
+            "values": [
+              "848590aeb8c1c651475eb424e7333c25"
+            ],
+            "value": "848590aeb8c1c651475eb424e7333c25",
+            "slot0": "848590aeb8c1c651475eb424e7333c25"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "ca9ceae786bcba8c9a57850290a53c1bbeb0a273ea42ae70afb0c6a92e61943b",
+      "profile": 2,
+      "slots": 3,
+      "kind": "pc_only",
+      "nonce": [
+        "3467099617452995233",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "5056414303000300000000000000010000000000000000228a636f95f0b48fa1b22d8bbb9c1d30ffffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f0700000000000000000000000000000001000000000000000000000003000003000000000000000300000000000000000000000000004004000000000000000000000000000000050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "16432877441598716897",
+        "native_affine": "798be483f46284133e70a178835f1d78",
+        "native_masks": [
+          "cf3622c6c3375b7815a21f3823578475",
+          "77d4442fd892ce080f1c12a57469661d",
+          "c6c5f0589800ac02c84c96413502e561"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "4203e38bf40546e6f7b257ce3691df79",
+              "de39e5502a5642abff144c8bd72f8740",
+              "5f0f0ce3fea161222d6e59d3c4d31b2d"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "4203e38bf40546e6f7b257ce3691df79"
+          },
+          {
+            "values": [
+              "4203e38bf40546e6f7b257ce3691df79",
+              "de39e5502a5642abff144c8bd72f8740",
+              "5f0f0ce3fea161222d6e59d3c4d31b2d"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "4203e38bf40546e6f7b257ce3691df79"
+          },
+          {
+            "values": [
+              "4203e38bf40546e6f7b257ce3691df79",
+              "de39e5502a5642abff144c8bd72f8740",
+              "5f0f0ce3fea161222d6e59d3c4d31b2d"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "4203e38bf40546e6f7b257ce3691df79"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "12ecd0e79ae790cb2e2f9960d21dc01fffe2785042dce99924cba165ebf454d8",
+      "profile": 2,
+      "slots": 1,
+      "kind": "r_pc_only",
+      "nonce": [
+        "6638128421776536555",
+        "0"
+      ],
+      "expected": {
+        "bytes": "50564143030001000000000000000100000000000000003490b3e25b9517b1eb336a19a15e1f5c000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000ecf675d3b10d7cafda22f7fb7e0cb4be0818f7f4a5b69d28ddbc8e443cadbe6300000000000000000100000000000000050000000000000000000000000000000100000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "7967694449539632258",
+        "native_affine": "9eb1bfebb31b165e634be7eeb60fec23",
+        "native_masks": [
+          "3542b7387db35730710cbd8cc1a5ff05"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "0731a0f07ef8217cea2b8b191524f26d"
+            ],
+            "value": "0731a0f07ef8217cea2b8b191524f26d",
+            "slot0": "0731a0f07ef8217cea2b8b191524f26d"
+          },
+          {
+            "values": [
+              "0731a0f07ef8217cea2b8b191524f26d"
+            ],
+            "value": "0731a0f07ef8217cea2b8b191524f26d",
+            "slot0": "0731a0f07ef8217cea2b8b191524f26d"
+          },
+          {
+            "values": [
+              "45dbb99e25ff55dad6d4e1026a236965"
+            ],
+            "value": "45dbb99e25ff55dad6d4e1026a236965",
+            "slot0": "45dbb99e25ff55dad6d4e1026a236965"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "5241baa7ac065d882a66e2fbb347acf936de2467ec052816b5de69a91d4bdc6a",
+      "profile": 2,
+      "slots": 3,
+      "kind": "r_pc_only",
+      "nonce": [
+        "13811492984293798124",
+        "0"
+      ],
+      "expected": {
+        "bytes": "50564143030003000000000000000100000000000000001f96c581488dcaa3ecb0a15ab147acbf00000000000000000000000000000000000000000000000000000000000000000000000000000000030000000000000012ff4414a23414e85f1478fef39f9dea36d5687cbbb8e4d5053e0e43095d325636b10447ee86a63f51f102c5eb2949923134887969629347c5499902654a3c5a0caa45bdc31d68f7e5f9ad6ae3a762e89ca7dc9e09797f529bc4d143c9eb980c0000000000000000030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f0700000000000000000000000000000001000000000000000000000003000003000000000000000300000000000000000000000000004004000000000000000000000000000000050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "105095844749759204",
+        "native_affine": "d85099fef86330560da7801b1c601f4c",
+        "native_masks": [
+          "7ef55366107c2d09e6c2974eb1fe1752",
+          "f596cf2c6e7fed5ccf8c6f4dc1df4a56",
+          "68b3d39beba31dde420950c458cc1834"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "95cf456aeaa3c94e6925840debf9f273",
+              "13fb486322b95e827bd77a7d34f2437a",
+              "6b5a06f4789a599d0399cf0dcceade57"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "95cf456aeaa3c94e6925840debf9f273"
+          },
+          {
+            "values": [
+              "95cf456aeaa3c94e6925840debf9f273",
+              "13fb486322b95e827bd77a7d34f2437a",
+              "6b5a06f4789a599d0399cf0dcceade57"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "95cf456aeaa3c94e6925840debf9f273"
+          },
+          {
+            "values": [
+              "3c423a3c936945b037809fa093849d6a",
+              "38e81f6e13ec2e49ea4e6f08e8518f08",
+              "be6d45e0d1a3a3a65554266ffc7af220"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "3c423a3c936945b037809fa093849d6a"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "3f5a8c8200154ddf6c77d14f04ad860069bc21fbf27b0f8531fbaff5abdbb50f",
+      "profile": 2,
+      "slots": 1,
+      "kind": "native_tag_flip",
+      "nonce": [
+        "5449183293050079099",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000010000000000000000b3203c1e75ded3547b473e8255639f4bffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000100000000000000beb1a5a6efe155d77ea46c4a84d3d0a7d6869c2588debe8340084a7d6064140d01000000000000007c8a28535aae36115ff78bc2966d51d8917f0ff3f2fffcaeb64f8c4a0a37896d0100000000000000050000000000000000000000000000000100000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "6112473713871691954",
+        "native_affine": "4c6351296395e3669c97d2527bca4248",
+        "native_masks": [
+          "bdd6a29b7b9b59f4c77468f01c21b666"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "b088782608197cdc7f4e136b1751c52e"
+            ],
+            "value": "b088782608197cdc7f4e136b1751c52e",
+            "slot0": "b088782608197cdc7f4e136b1751c52e"
+          },
+          {
+            "values": [
+              "b088782608197cdc7f4e136b1751c52e"
+            ],
+            "value": "b088782608197cdc7f4e136b1751c52e",
+            "slot0": "b088782608197cdc7f4e136b1751c52e"
+          },
+          {
+            "values": [
+              "aba69e5baacdaf98bfc1a79b6d114a0f"
+            ],
+            "value": "aba69e5baacdaf98bfc1a79b6d114a0f",
+            "slot0": "aba69e5baacdaf98bfc1a79b6d114a0f"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "693491810281b40e7c179c03d27e3e37e9d917b3560c279e5999c08ad300eea2",
+      "profile": 2,
+      "slots": 3,
+      "kind": "native_tag_flip",
+      "nonce": [
+        "723639978203033043",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "5056414303000300000000000000010000000000000000cf7e19fc5fa732c8d32d10e6b9e20a0affffffffffffffff00000000000000000000000000000000000000000000000000000000000000000300000000000000604b5fac1c5bd665508ccee107818983ee72dcd24c223bebe5a9b8d9ab7f1b5dc42b368303cf9971796fcdf80599103df19189209647546f3a2e85d7db13ba37b8591754b73240beb734861d53848eebf365f762a5cb26ed004a063dc71d49340300000000000000d033f0cac840abb7fc239f8facf97fd592a663de7c5c97804a53f89c9ef2f235a6b89319021a760375cbe6ea83b0539cbe9b956e7524f4cf8767a3d6e456cb641a1dd64c99558135f1f4f2e392d7cc20c6b71b68c92fe6ad7eb6e975c062cc54030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f0700000000000000000000000000000001000000000000000000000003000003000000000000000300000000000000000000000000004004000000000000000000000000000000050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "14425776587114381006",
+        "native_affine": "669101f9fc27e50ebdcb14a6fc3bc965",
+        "native_masks": [
+          "af506964b2a3a292cc885c4ac507a71a",
+          "ff44cb70a85acf8cd622171bf767806e",
+          "278714451c6299b15e1e16f3a648c55f"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "83fbbf2a732c609a5ea97a4f83b1600f",
+              "d8a3af0cff6350d24e8bab3ec28a4514",
+              "845d4f24a6893ae7b2d464bf0e65f95d"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "83fbbf2a732c609a5ea97a4f83b1600f"
+          },
+          {
+            "values": [
+              "83fbbf2a732c609a5ea97a4f83b1600f",
+              "d8a3af0cff6350d24e8bab3ec28a4514",
+              "845d4f24a6893ae7b2d464bf0e65f95d"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "83fbbf2a732c609a5ea97a4f83b1600f"
+          },
+          {
+            "values": [
+              "2aa5acda15016d947f71cf192d4da056",
+              "b010e20321ab915f4719f19b2285a20d",
+              "832415235b54e4daebf99d5a1c661478"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "2aa5acda15016d947f71cf192d4da056"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "f1434d1b7faae3828af2978fb81e3e0efd5f623eb92b2a777afc38d2ddfd5e40",
+      "profile": 2,
+      "slots": 1,
+      "kind": "implicit_zero",
+      "nonce": [
+        "2327388067366303680",
+        "0"
+      ],
+      "expected": {
+        "bytes": "50564143030001000000000000000100000000000000005913368c01b2ea68c0f7d9c11d8b4c200000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000009490cc91d2c4f6a0603ba29ede5f380a511000294a6382c1851d7fe7e721a5380100000000000000d2755d12042122338ba672f17fb5439b0e2bdbb556d87484e22c4b0fa7c6511e00000000000000000100000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "15328870270609021708",
+        "native_affine": "5df87121a5e57c8acd98a91a5bcf2842",
+        "native_masks": [
+          "b64cc5379dd3b757679f9c10f375d660"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "ce98d50c87c70315d67d2eb2a851a818"
+            ],
+            "value": "ce98d50c87c70315d67d2eb2a851a818",
+            "slot0": "ce98d50c87c70315d67d2eb2a851a818"
+          },
+          {
+            "values": [
+              "ce98d50c87c70315d67d2eb2a851a818"
+            ],
+            "value": "ce98d50c87c70315d67d2eb2a851a818",
+            "slot0": "ce98d50c87c70315d67d2eb2a851a818"
+          },
+          {
+            "values": [
+              "8ccb33be0544507ad7996e2feba8da17"
+            ],
+            "value": "8ccb33be0544507ad7996e2feba8da17",
+            "slot0": "8ccb33be0544507ad7996e2feba8da17"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "3c8e1d75bf9f592070f311bf61835298b01202501fbe6b853a82fcbc501063e3",
+      "profile": 2,
+      "slots": 3,
+      "kind": "implicit_zero",
+      "nonce": [
+        "10564310404562781128",
+        "0"
+      ],
+      "expected": {
+        "bytes": "50564143030003000000000000000100000000000000009cc216e1f948abacc883ed4057f89b920000000000000000000000000000000000000000000000000000000000000000000000000000000003000000000000005443646086689f36359e787f7460402bc3472a8bfa3f41bfac02bc0699a9a114e4faac94de86783b40f7ea116427fd1acbebd7feae890fc32580fd98349132243e0d30775aa6429a6008948ebb40b502e9cd6b29664663c408bbc70d2646740a0300000000000000eeef3fa83758721cf8a548625aa4071e5e2f2f1e3db4406fd5a3e66f2ee15f1bc2d4e62df3762ec93723aeb93ddb74dd825db1f4c8a914064331abc8facb8459503aa728ae78c6437b1698ba9d99d51af995dcb7a7d1f0a278bc4d31038f0209000000000000000001000000000000000000000003000003000000000000000300000000000000000000000000004004000000000000000000000000000000050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "8890848729472137213",
+        "native_affine": "12a361178fca6a999ffcfa6232e0bb69",
+        "native_masks": [
+          "03a4d62aa1ab5ae4ea6f17c63754a841",
+          "198fddaa2d9bddd8b52b39325164f915",
+          "570cf5683bc564afcec7854606ba0d17"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values": [
+              "fe652ce7514f93f8aea1e654e399a804",
+              "b9a2e9cf13756afa17acef0c6e28d020",
+              "9e80b54f86f32c1069dcfa3d060c2218"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "fe652ce7514f93f8aea1e654e399a804"
+          },
+          {
+            "values": [
+              "fe652ce7514f93f8aea1e654e399a804",
+              "b9a2e9cf13756afa17acef0c6e28d020",
+              "9e80b54f86f32c1069dcfa3d060c2218"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "fe652ce7514f93f8aea1e654e399a804"
+          },
+          {
+            "values": [
+              "f6063297e472d34d9fceb34d947fde68",
+              "81ccb77faa87419686b593ba6b78b44b",
+              "8552ffb8cff9eee85b45da6c8516751d"
+            ],
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0": "f6063297e472d34d9fceb34d947fde68"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "9f94db65be6864e945c85476727bda5655ae32a2ccb8e783957dfde4e708a1a9",
+      "profile": 2,
+      "slots": 1,
+      "kind": "wrong_sigma",
+      "nonce": [
+        "17671530796312908256",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000010000000000000000e3e6e233472e7b2fe0519ba7a1e33df5ffffffffffffffff000000000000000000000000000000000000000000000000000000000000000001000000000000008a3a871f644b72056382d04980fffc29a07d22b4496dcdf2f1e9fcdd2ed014630100000000000000ac86757b4f2811c442edf10ae883d4d09c8fc79fe2a239d9414d8d64a3ec3d1f010000000000000005000000000000000000000000000000010000000000000000000000030000010000000000000003000000000000000000000000000040400000000000000001000000000000000000000000000000",
+        "native_tag": "914778214107910857",
+        "native_affine": "ed31bb45fa2c079e9f4830f651748a2e",
+        "native_masks": [
+          "d00261e13273355114adfc3ef051903a"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "7953471fcb65fb4b2b8d2ee3fe8f2a24f9a9d23b6f65a6a1f7b0b6a676c46c58",
+      "profile": 2,
+      "slots": 3,
+      "kind": "wrong_sigma",
+      "nonce": [
+        "4176080757498525272",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "5056414303000300000000000000010000000000000000a9b97aa50e72013058360bb8526bf439ffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000300000000000000aef7099ec8b40aa0a8355df50c61873c29a15203619c08cd3a607e57a871761f9e9c2ceb59c48c703cdff14eadcd075104c8004d3b8b551947bb76a482225d53e01d2388ca79f0b719b60ed9895e8237ae4fbd73d33dbc5edcf6c63807f1350703000000000000009c8c8f0e50e0276ecb1d9dbdbec70d1c21b3b7795766734daf277eec5082db4886aa2022f985841a7f8ae935d5f81d46fb02d15ab12c0d479f4751a4be442e0f82d7c3f29fbd87357a7b03d2c883851145c56b14aab241a93958ca7a19460542030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f070000000000000000000000000000000100000000000000000000000300000300000000000000030000000000000000000000000000400400000000000000000000000000000005000000000000000000000000000000400000000000000001000000000000000000000000000000",
+        "native_tag": "6183473654451647152",
+        "native_affine": "c9198a68363416965b86751c9c89fd5f",
+        "native_masks": [
+          "1f6a382d2d95d0f6589bb8208807be38",
+          "3d8ce7351a330c19c23963c4cd1d0972",
+          "15eb3169e2f695905e83e06ab2133130"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "fde95a01c273d2b636706fc470c8db895db988e3aa3dcf3a05e28aa22fc1b3c3",
+      "profile": 2,
+      "slots": 1,
+      "kind": "wrong_index",
+      "nonce": [
+        "13310940037166835017",
+        "0"
+      ],
+      "expected": {
+        "bytes": "50564143030001000000000000000100000000000000003874933d71f8197e49a5da7d70f5b9b80000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000484e546ebd18e94cf259a5d38a14f447ac9c07b7cf3803d61388ce8998a3e180100000000000000e27a59b3ccdb225b77ccca2946046dc417600a709a77048589a05949f89cae480100000000000000050000000000000000000000000000000100000000000000000000005101000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "4918294379535170293",
+        "native_affine": "564782921822b8c07efb65ab89c6f369",
+        "native_masks": [
+          "68a35994605acec20c600eb4aeaa0a26"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "031ecb7e75868d76c5d9ced9f03b1005e826bb02fb454d285de65cd1b43bac12",
+      "profile": 2,
+      "slots": 3,
+      "kind": "wrong_index",
+      "nonce": [
+        "18308676847921124463",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000300000000000000010000000000000000835862ff70bd75966fd4c1f3967c15fe00000000000000000000000000000000000000000000000000000000000000000000000000000000030000000000000060b0cc230871b4641b86629df399e3d50c9f8373d680caa8719ef3acb43d2377b089afb22f1de2c8ce4e9092e7064b8ebd3bb80fe8e84a184892f0b47e8948007c4d1ec9a8a83b10e6c10519e5bb18fb4dba8d603d0d1f930fd3c6d605234c150300000000000000800b76bb33932ac54896a6d709c7666a93ac5b153e4f002e4cc8945a6c7c15591a109ed970d31df126dc66588b180653b82859c6f095f825fe63af58b093c614062dbd9a90f5a8446c87ffccedccd3beb27a4be3cd08002eb76e2ff10b3f0a49030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f0700000000000000000000000000000001000000000000000000000051010003000000000000000300000000000000000000000000004004000000000000000000000000000000050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "15586605760413375",
+        "native_affine": "53b1920ff867a17b274342f55d337229",
+        "native_masks": [
+          "f003c25322c86c40bc49720409266655",
+          "ace62d6dc9d2abfc5ae385e920309426",
+          "cd27d3b852eca2450d8d35039c553675"
+        ],
+        "import_error": null,
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "dbb4e1ad7a7bd089803abcc0b8065525ad75a546620b43cdfede5e9d69b45b7b",
+      "profile": 2,
+      "slots": 1,
+      "kind": "bad_parent",
+      "nonce": [
+        "3711696873349057045",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000030000000000000000236cb21d0a17440f150ae611a4988233ffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000010000000000000094dd69fa6dae5e7c54a57684c03697b95a41161c8dcfdc603e581e5cc7e8e37c0100000000000000f0a844ca1eee92f74d7eb3daed4d0645f4100bc67a264d08ad1dbb992827ae0a0070bcb01c2632ca6a1c0ae611a4988233f8ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000102000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000050000000000000000000000000000000300000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000010000001400010100000000000000030000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000020000002500000100000000000000030000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "560330770505080209",
+        "native_affine": "7c6ab09ad5601b31a83a5f6831ce5774",
+        "native_masks": [
+          "e93d9d828733a25be16a925b1da81318"
+        ],
+        "import_error": "pvac_ser: invalid product parent",
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "3cb4ca36d31c8f4db836fdaba7b1d78ecec6fd5d9c5b1c810fa6506bf40513ce",
+      "profile": 2,
+      "slots": 3,
+      "kind": "bad_parent",
+      "nonce": [
+        "3977806417084055474",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "50564143030003000000000000000300000000000000006f418a1ec7bfd483b27f906bdc013437ffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000030000000000000094d095d855c0d0f7e934326892703f506da00f7cd2a134c92663590dcf90440d16b33e77d57dc2ff0272ed08f3aaba27adbc8e240c238694ec52c33cce9120317cbcf11e46f7a29e24360bf674ee877e85adae5ca46263b0d0d8a49077ba017103000000000000002c5537ddf03a9b60543af6e9c4130132420dd2879389e8cd214005949437731590a6dc341b248e798db9f58ad7d7ce30ac2436b974c54323e3d794e143ab2166a6c81b87199a0babbe7146ba36d49c25fa190bbb65333a50a6c7920ffec58720009451e16c25dde6a8b97f906bdc013437f8ffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010200000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f070000000000000000000000000000000300000000000000000000000300000300000000000000030000000000000000000000000000400400000000000000000000000000000005000000000000000000000000000000410000000000000002000000000000000000000000000000000000000000000001000000140001030000000000000003000000000000000000000000000000040000000000000000000000000000000500000000000000000000000000004041000000000000000200000000000000000000000000000000000000000000000200000025000003000000000000000300000000000000000000000000000004000000000000000000000000000040050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "16354852830522142438",
+        "native_affine": "c65908cde168918cd797fb9c088b7537",
+        "native_masks": [
+          "ad5b7de29a09d98a494da37604144423",
+          "38d83456e1605c0973e6a8130d464702",
+          "aff32339058c5abe4dd0eb37e61a583b"
+        ],
+        "import_error": "pvac_ser: invalid product parent",
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "9b7a4450ce591bf21b775e9f68b84a2d64e3bc0952ec9f9b2560f280bb5bf301",
+      "profile": 2,
+      "slots": 1,
+      "kind": "bad_sign",
+      "nonce": [
+        "6947408847050617262",
+        "0"
+      ],
+      "expected": {
+        "bytes": "50564143030001000000000000000100000000000000003782f8b1bbca6ecaaeb1db9589276a60000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000bec5928df033e7bc215cbd71f9eac562bd0ec4dffce764de0dafdbb725cf537a010000000000000070f2c6c00166a2c636d37c66a1c5552ad9733cff3a00d997942be185c62e6e380100000000000000050000000000000000000000000000000100000000000000000000000300020100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "8239901694856933361",
+        "native_affine": "08badb71f1241d2bbedf0ea0be519b4d",
+        "native_masks": [
+          "209a023c638310bc4bfbc783212e5e18"
+        ],
+        "import_error": "pvac_ser: invalid edge sign",
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "60b8d55581378c5a74bed225c6d2b04d810c3e7b806dbac70c839adf192c47ae",
+      "profile": 2,
+      "slots": 3,
+      "kind": "bad_sign",
+      "nonce": [
+        "10223757135939252539",
+        "0"
+      ],
+      "expected": {
+        "bytes": "505641430300030000000000000001000000000000000035548ef0b0f479113b318685f214e28d000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000d814f5b07804f46343a3c54e8c73d5cb5742c44c311cf61cb4051425a98fcd432ca6016fbc3dafb0c2b51ce1f67e32b2ed04111d48ce10219aa58f2fc328830f8464354b17e05777077c3d173cfcbede9d26e1546ce8264f97456abc7afbe62c03000000000000008ee5d9d254fc2f8d375cfc58d02594bc0920eef7da5433f8d11d7095b77fc623a43a1839a18c43d98427e5a176756a2b6787ab0c5bcf2e6f6c1b5b986773e4315c5aeb5492721b1e96c8222fffb2a811264ea65df12fdfff5317279627cc3902030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f0700000000000000000000000000000001000000000000000000000003000203000000000000000300000000000000000000000000004004000000000000000000000000000000050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "9747689886255223684",
+        "native_affine": "b1a2a4d3d274d842801ceda8feb75b6e",
+        "native_masks": [
+          "415c65bec57791bf4d5bb3d0ce935479",
+          "655fc41bb47e0851e9d030171ac2a600",
+          "7c17ede7ea316b0769503efa819feb43"
+        ],
+        "import_error": "pvac_ser: invalid edge sign",
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "c4f73bb8c902bcfe55b9d2d72a5e88a135f6933fb20117fd5986df0038f7246f",
+      "profile": 2,
+      "slots": 1,
+      "kind": "bad_weights",
+      "nonce": [
+        "237146395094740793",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "5056414303000100000000000000010000000000000000cb6186fd67f25a7039ef62cf63834a03ffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000100000000000000a46f275526fd4e751afb1759fe27a5144e6f5d79e23c1b8c0359d90be738682b0100000000000000fe9b7ee27ea976cd00aed132cf81567ed195d5743c4fd04bb8e925508c87e81701000000000000000500000000000000000000000000000001000000000000000000000003000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "10693264047587463514",
+        "native_affine": "bef39248b315f00a78bb33cc4425a53d",
+        "native_masks": [
+          "d2ddb6fc40bf8bf3e2ee9e117ad2ec3c"
+        ],
+        "import_error": "pvac_ser: edge weight/slots size mismatch",
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "d5e68d42c91944b5cef41da4eb0b192a337208becbf290acd0010521f6125713",
+      "profile": 2,
+      "slots": 3,
+      "kind": "bad_weights",
+      "nonce": [
+        "14241281811893292283",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bytes": "5056414303000300000000000000010000000000000000fdfb8d88d878617efb8c21b85a32a3c5ffffffffffffffff000000000000000000000000000000000000000000000000000000000000000003000000000000000a59e234891d365b321e4b8890aeea489a35fd7674ac73eea1bfb27927b23a64b8b61c12ace1bd97bb44643ebce51edb4a3456d10df99e18d553ca8c75e03153f4e5eda4fb9a370bd4e0c97c6f0b904207ba0ce200c283484d90a3af3eedd0150300000000000000f8108015d82ffb29ef35489804d6c008c047055a606b1dd4f4f0fa0fbf885d000c84e37827df19e49e4d485aef38a8c5a00396fe4a4e76857770ff5a2b70704f26499f92a716ce278cecb1a685d8a1d1d8b7cdb4c4d84432290ecdddcc231029030000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f0700000000000000000000000000000001000000000000000000000003000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "1838457178890748067",
+        "native_affine": "26ef2c8be08259503dcfb07b7831710d",
+        "native_masks": [
+          "14ec67e36d64872853389f1302a95a57",
+          "3212e9e1cf08ebb6cc3ec0a9d50f7042",
+          "014ed437d2c2096578c9d54e1013d344"
+        ],
+        "import_error": "pvac_ser: edge weight/slots size mismatch",
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "31dbe1e7374778af7717b95c76dadffc9658c47d86d5ea2ee5ddd717ba9b7522",
+      "profile": 2,
+      "slots": 1,
+      "kind": "bad_c0",
+      "nonce": [
+        "9406379978741102833",
+        "0"
+      ],
+      "expected": {
+        "bytes": "50564143030001000000000000000100000000000000000a73c5af09e9e861f1b835e7c02c8a82000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000886c44be8567fcf489836d693336b7bd9854f0102df832ba872997d10360bf7d0100000000000000c886abedf0b60ffde477d10473518bbdf19eb33087c879a4e933363b2344bf11020000000000000005000000000000000000000000000000000000000000000000000000000000000100000000000000000000000300000100000000000000030000000000000000000000000000404100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "12350398931211763218",
+        "native_affine": "8b47da1240ce1400b46c08b515488034",
+        "native_masks": [
+          "1937a0c64fd8276387a29b99d0ea4e3a"
+        ],
+        "import_error": "pvac_ser: c0/slots size mismatch",
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: cipher/pubkey mismatch",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "seed": "d751286896ec0002548e8a723c12ed62022faed07bb55bdc95e9c63a3611e5ac",
+      "profile": 2,
+      "slots": 3,
+      "kind": "bad_c0",
+      "nonce": [
+        "13841013617230399019",
+        "0"
+      ],
+      "expected": {
+        "bytes": "5056414303000300000000000000010000000000000000a208d33a6e4151522bc65c528d2815c0000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000200346128143c3a4a94ab532a0332b409ce7ea67c94dacb4915606a8d84bf01cc4e04860788247c9249988297e34fcf0b2a4bdc2a0ea6c2d4b7c20dc488adb51e2c8dd8367eecc0763281577cf0c97b7052f21ee9fc806ad8ac8aeeacaf86f0d0300000000000000b8452b88166a27b273bc30144a5922c6cbfb66e75eb44c11f683fe70d9cc7f0526f9a46e938d0a2b91071a34a439b9465144d24051e48e05b2d43de5cf7b133c9aee0e85857d26a00314e579d6739c7b4b369f575c74d44aaaa9f544d38a9618040000000000000005000000000000000000000000000000f9ffffffffffffffffffffffffffff7f070000000000000000000000000000000000000000000000000000000000000001000000000000000000000003000003000000000000000300000000000000000000000000004004000000000000000000000000000000050000000000000000000000000000004100000000000000020000000000000000000000000000000000000000000000",
+        "native_tag": "9995664392831255481",
+        "native_affine": "d490410cac443f46b4f781a7740e3660",
+        "native_masks": [
+          "36c851d7ea5ed2ae944576580e5ecd15",
+          "7f9edfc317fc2ed93cdc9aad1773086f",
+          "7074a86676be39b0a76f997716e4fa2c"
+        ],
+        "import_error": "pvac_ser: c0/slots size mismatch",
+        "native_source": false,
+        "policies": [
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          },
+          {
+            "values_error": "pvac: cipher/pubkey mismatch",
+            "value_error": "pvac: dec_value: cipher has multi-slot payload; use dec_values for vector decryption or dec_value_slot0 to explicitly coerce",
+            "slot0_error": "pvac: cipher/pubkey mismatch"
+          }
+        ]
+      }
+    }
+  ]
+}

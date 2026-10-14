@@ -87,9 +87,7 @@ settle_confirm(session_id, bytes_used)      // client second
         emit SettleDispute  (session stays open)
     else:
         total = bytes_used * endpoints[exit].price_per_mb
-        protocol_fee = total * fee_bps / 10000
-        enc_earnings[exit] += (total - protocol_fee)   // HFHE add_const
-        treasury += protocol_fee
+        enc_earnings[exit] += total   // full traffic payment, HFHE add_const
         tailnet.treasury += deposit - total            // refund
         sessions[s].status = settled
 

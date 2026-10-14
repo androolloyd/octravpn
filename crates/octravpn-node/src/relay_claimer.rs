@@ -86,7 +86,7 @@ impl ClaimerBackend for Hub {
             .collect()
     }
     async fn confirm_and_drain(&self, session_id: u64) -> Result<DrainOutcome> {
-        Hub::relay_confirm_and_drain(self, session_id).await
+        Self::relay_confirm_and_drain(self, session_id).await
     }
     async fn claim(&self, session_id: u64) -> Result<RelayClaimSubmission> {
         self.relay_claim_session(session_id).await

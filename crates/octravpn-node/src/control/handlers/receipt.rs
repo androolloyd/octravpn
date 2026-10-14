@@ -68,47 +68,80 @@ pub(crate) async fn get_state(
         return (StatusCode::BAD_REQUEST, Json(ApiError::new("bad id"))).into_response();
     };
 
-    let bytes = s.router.bytes(&id).map_or(0, |(i, o)| i + o);
-
-    let Some(entry) = s.sessions.get(&id) else {
-        return (StatusCode::NOT_FOUND, Json(ApiError::new("not announced"))).into_response();
+    // Serialize issuance with announcements so sequence and cumulative byte
+    // floors describe one receipt. Persist both before any signature leaves.
+    let (next_seq, bytes, blind) = {
+        let _guard = s.admission_lock.lock();
+        let Some(entry) = s.sessions.get(&id) else {
+            return (StatusCode::NOT_FOUND, Json(ApiError::new("not announced"))).into_response();
+        };
+        let current = s.router.bytes(&id).unwrap_or((0, 0));
+        let Some(bytes) = current
+            .0
+            .checked_add(current.1)
+            .and_then(|value| value.checked_add(entry.byte_offset))
+        else {
+            return (
+                StatusCode::CONFLICT,
+                Json(ApiError::new("receipt byte counter exhausted")),
+            )
+                .into_response();
+        };
+        let floor = match s.receipt_totals.try_floor(&id) {
+            Ok(floor) => floor,
+            Err(error) => {
+                tracing::warn!(%error, "receipt byte floor read failed");
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(ApiError::new("receipt storage unavailable")),
+                )
+                    .into_response();
+            }
+        };
+        let bytes = bytes.max(floor);
+        if bytes > floor {
+            if let Err(error) = s.receipt_totals.bump(&id, bytes) {
+                tracing::warn!(%error, "receipt byte floor write failed");
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(ApiError::new("receipt byte floor unavailable")),
+                )
+                    .into_response();
+            }
+        }
+        let sequence_floor = match s.receipt_journal.try_floor(&id) {
+            Ok(floor) => floor,
+            Err(error) => {
+                tracing::warn!(%error, "receipt sequence floor read failed");
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(ApiError::new("receipt storage unavailable")),
+                )
+                    .into_response();
+            }
+        };
+        let Some(next_seq) = entry.last_seq.max(sequence_floor).checked_add(1) else {
+            return (
+                StatusCode::CONFLICT,
+                Json(ApiError::new("receipt sequence exhausted")),
+            )
+                .into_response();
+        };
+        if let Err(error) = s.receipt_journal.bump(&id, next_seq) {
+            tracing::warn!(%error, "receipt sequence write failed");
+            return (
+                StatusCode::CONFLICT,
+                Json(ApiError::new(
+                    "receipt seq floor violation; refusing to sign",
+                )),
+            )
+                .into_response();
+        }
+        s.sessions
+            .modify(&id, |session| session.last_seq = next_seq);
+        (next_seq, bytes, entry.last_blind)
     };
 
-    // P1-8/9: consult the persistent journal floor BEFORE choosing a
-    // seq. After a restart `entry.last_seq` resets to 0; but the
-    // journal preserves the highest seq we ever signed for this
-    // session. Pick a seq that is strictly greater than BOTH the
-    // in-memory tracker and the persistent floor, then atomically
-    // record it via `bump` (fsync inside) — only sign after the journal
-    // is durable. A crash between the journal write and the signature
-    // means we lose this proposal; the client retries with no harm.
-    let journal_floor = s.receipt_journal.floor(&id);
-    let next_seq = std::cmp::max(entry.last_seq, journal_floor) + 1;
-    if let Err(e) = s.receipt_journal.bump(&id, next_seq) {
-        // The only failure mode is `SeqNotMonotonic`, which would
-        // mean another writer raced us. With the BoundedMap holding
-        // per-session state in-process this should never trigger;
-        // surface it loudly if it does so the operator notices the
-        // race condition.
-        tracing::warn!(error = %e, session = %id_hex, "receipt journal bump rejected; refusing to sign");
-        return (
-            StatusCode::CONFLICT,
-            Json(ApiError::new(
-                "receipt seq floor violation; refusing to sign",
-            )),
-        )
-            .into_response();
-    }
-    // Persist the in-memory tracker too so successive lookups within
-    // this same boot pass advance monotonically. The journal alone
-    // would also do this, but keeping the in-memory mirror saves a
-    // disk read on every receipt fetch — the lock is held by `bump`
-    // for the disk write, but `floor()` is a cheap mutex read.
-    s.sessions.modify(&id, |cs| {
-        cs.last_seq = next_seq;
-    });
-
-    let blind = entry.last_blind;
     let r = Receipt {
         context: (*s.receipt_context).clone(),
         session_id: id,
@@ -224,7 +257,7 @@ pub(crate) async fn get_state(
 
     Json(SessionStateResponse {
         bytes_served: bytes,
-        last_seq: entry.last_seq,
+        last_seq: next_seq,
         proposed: Some(proposed),
     })
     .into_response()
@@ -271,29 +304,25 @@ pub(crate) async fn post_receipt(
             .into_response();
     }
 
-    // Money-path binding (HIGH): the receipt's client countersignature
-    // MUST be under the SAME ed25519 identity that announced this
-    // session. `sr.verify()` above only proves the receipt is *some*
-    // internally-consistent dual signature — an attacker who knows a
-    // live `session_id` can GET the node-signed proposal, attach their
-    // OWN fresh client keypair (verify() still passes), and POST it.
-    // Absent this check the vault stores the attacker's receipt as the
-    // "latest", so the operator's later `relay_claim` carries a client
-    // countersignature under the attacker's key and is rejected
-    // on-chain — the operator can never settle. We enforce only when
-    // the session entry is still present: the attack requires a live
-    // session to obtain the node proposal in the first place, so the
-    // binding is always available during the exploit window; an
-    // evicted session's late legitimate POST falls through to the
-    // seq-floor guards below rather than being spuriously rejected.
-    if let Some(entry) = s.sessions.get(&id) {
-        if sr.client_pubkey != entry.client_pubkey {
-            return (
-                StatusCode::FORBIDDEN,
-                Json(ApiError::new("receipt client key does not match session")),
-            )
-                .into_response();
-        }
+    // Signature validity does not authorize the receipt's client key. Bind it
+    // to the identity admitted by the session opener. A cached public proposal
+    // remains usable after eviction, so missing admission state must fail closed.
+    // The opener can restore the binding by re-announcing after TTL or restart.
+    let Some(entry) = s.sessions.get(&id) else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiError::new(
+                "session not announced; re-announce before posting a receipt",
+            )),
+        )
+            .into_response();
+    };
+    if sr.client_pubkey != entry.client_pubkey {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiError::new("receipt client key does not match session")),
+        )
+            .into_response();
     }
 
     let vault_floor = s.receipt_vault.current_seq(&id).unwrap_or(0);
@@ -304,7 +333,17 @@ pub(crate) async fn post_receipt(
         )
             .into_response();
     }
-    let journal_floor = s.receipt_journal.floor(&id);
+    let journal_floor = match s.receipt_journal.try_floor(&id) {
+        Ok(floor) => floor,
+        Err(error) => {
+            tracing::warn!(%error, "receipt sequence floor read failed");
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ApiError::new("receipt storage unavailable")),
+            )
+                .into_response();
+        }
+    };
     if sr.receipt.seq < journal_floor {
         return (
             StatusCode::CONFLICT,
@@ -313,10 +352,32 @@ pub(crate) async fn post_receipt(
             .into_response();
     }
 
-    if let (Some(verifier), Some(chain_session_id)) =
+    let lifecycle = if let Some(authority) = &s.native_authority {
+        Some(
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                authority.lifecycle(&id, &s.receipt_context),
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(error) => Err(error.into()),
+            },
+        )
+    } else if let (Some(verifier), Some(chain_session_id)) =
         (s.relay_lifecycle_verifier.as_ref(), id.as_u64())
     {
-        match verifier.lifecycle(chain_session_id).await {
+        Some(
+            verifier
+                .lifecycle(chain_session_id)
+                .await
+                .map_err(Into::into),
+        )
+    } else {
+        None
+    };
+    if let Some(lifecycle) = lifecycle {
+        match lifecycle {
             Ok(RelayLifecycle::Armed(armed)) => {
                 let already_pinned = matches!(
                     s.receipt_vault.state(&id),
@@ -326,11 +387,10 @@ pub(crate) async fn post_receipt(
                     }) if settlement_hash == armed.settlement_hash
                 );
                 if !already_pinned {
-                    if let Err(e) = s.receipt_vault.mark_armed(
-                        &id,
-                        armed.deadline,
-                        armed.settlement_hash.clone(),
-                    ) {
+                    if let Err(e) =
+                        s.receipt_vault
+                            .mark_armed(&id, armed.deadline, armed.settlement_hash)
+                    {
                         tracing::warn!(
                             error = %e,
                             session = %id_hex,
@@ -468,6 +528,30 @@ mod tests {
         serde_json::from_slice::<SessionStateResponse>(&body).unwrap()
     }
 
+    // Explicit admission fixture for tests that construct receipts directly.
+    // Identity-rejection tests retain their previously announced binding.
+    async fn post_announced_receipt(
+        state: State<Arc<ControlState>>,
+        path: Path<String>,
+        receipt: Json<SignedReceipt>,
+    ) -> axum::response::Response {
+        let id = receipt.0.receipt.session_id.clone();
+        if !state.0.sessions.contains_key(&id) {
+            state.0.sessions.insert(
+                id,
+                crate::control::state::ControlSession {
+                    byte_offset: 0,
+                    last_seq: 0,
+                    last_blind: octravpn_core::session::Blind::new([0; 32]),
+                    client_pubkey: receipt.0.client_pubkey,
+                },
+            );
+        }
+        super::post_receipt(state, path, receipt)
+            .await
+            .into_response()
+    }
+
     async fn parse_post_receipt(resp: axum::response::Response) -> PostReceiptResponse {
         let status = resp.status();
         let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
@@ -586,7 +670,7 @@ mod tests {
         let signed = SignedReceipt::build(receipt, &client_kp, node_kp.as_ref());
         let want_hash = signed.settlement_hash();
 
-        let resp = post_receipt(
+        let resp = post_announced_receipt(
             State(state.clone()),
             Path(id.to_hex()),
             Json(signed.clone()),
@@ -622,7 +706,7 @@ mod tests {
         );
         let latest_hash = latest.settlement_hash();
         parse_post_receipt(
-            post_receipt(
+            post_announced_receipt(
                 State(state.clone()),
                 Path(id.to_hex()),
                 Json(latest.clone()),
@@ -644,7 +728,7 @@ mod tests {
             node_kp.as_ref(),
         );
         let (status, body) = status_and_body(
-            post_receipt(State(state.clone()), Path(id.to_hex()), Json(replay))
+            post_announced_receipt(State(state.clone()), Path(id.to_hex()), Json(replay))
                 .await
                 .into_response(),
         )
@@ -678,7 +762,7 @@ mod tests {
             node_kp.as_ref(),
         );
         parse_post_receipt(
-            post_receipt(
+            post_announced_receipt(
                 State(state.clone()),
                 Path(id.to_hex()),
                 Json(signed.clone()),
@@ -689,7 +773,7 @@ mod tests {
         .await;
 
         let body = parse_post_receipt(
-            post_receipt(
+            post_announced_receipt(
                 State(state.clone()),
                 Path(id.to_hex()),
                 Json(signed.clone()),
@@ -723,7 +807,7 @@ mod tests {
             node_kp.as_ref(),
         );
         parse_post_receipt(
-            post_receipt(
+            post_announced_receipt(
                 State(state.clone()),
                 Path(id.to_hex()),
                 Json(signed.clone()),
@@ -745,7 +829,7 @@ mod tests {
             node_kp.as_ref(),
         );
         let (status, body) = status_and_body(
-            post_receipt(State(state.clone()), Path(id.to_hex()), Json(conflict))
+            post_announced_receipt(State(state.clone()), Path(id.to_hex()), Json(conflict))
                 .await
                 .into_response(),
         )
@@ -802,7 +886,7 @@ mod tests {
             node_kp.as_ref(),
         );
         let (status, body) = status_and_body(
-            post_receipt(State(state.clone()), Path(id.to_hex()), Json(poison))
+            post_announced_receipt(State(state.clone()), Path(id.to_hex()), Json(poison))
                 .await
                 .into_response(),
         )
@@ -863,7 +947,7 @@ mod tests {
         );
 
         let (status, body) = status_and_body(
-            post_receipt(State(state.clone()), Path(id.to_hex()), Json(receipt))
+            post_announced_receipt(State(state.clone()), Path(id.to_hex()), Json(receipt))
                 .await
                 .into_response(),
         )
@@ -901,7 +985,7 @@ mod tests {
         assert_ne!(forged.node_pubkey, node_kp.public);
 
         let (status, body) = status_and_body(
-            post_receipt(State(state.clone()), Path(id.to_hex()), Json(forged))
+            post_announced_receipt(State(state.clone()), Path(id.to_hex()), Json(forged))
                 .await
                 .into_response(),
         )
@@ -955,7 +1039,7 @@ mod tests {
             .expect("sanity: attacker's dual-sig is internally valid");
 
         let (status, body) = status_and_body(
-            post_receipt(State(state.clone()), Path(id.to_hex()), Json(forged))
+            post_announced_receipt(State(state.clone()), Path(id.to_hex()), Json(forged))
                 .await
                 .into_response(),
         )
@@ -980,7 +1064,7 @@ mod tests {
             node_kp.as_ref(),
         );
         let body = parse_post_receipt(
-            post_receipt(State(state.clone()), Path(id.to_hex()), Json(good.clone()))
+            post_announced_receipt(State(state.clone()), Path(id.to_hex()), Json(good.clone()))
                 .await
                 .into_response(),
         )
@@ -1012,7 +1096,7 @@ mod tests {
         signed.verify().unwrap();
 
         let (status, body) = status_and_body(
-            post_receipt(State(state.clone()), Path(path_id.to_hex()), Json(signed))
+            post_announced_receipt(State(state.clone()), Path(path_id.to_hex()), Json(signed))
                 .await
                 .into_response(),
         )
@@ -1300,5 +1384,58 @@ mod tests {
         assert!(!j.contains("enc_bytes_used"), "wire: {j}");
         assert!(!j.contains("enc_net"));
         assert!(!j.contains("pvac_zero_proof"));
+    }
+    #[tokio::test]
+    async fn receipt_identity_is_required_after_session_eviction() {
+        let node_kp = Arc::new(KeyPair::generate());
+        let legit = KeyPair::generate();
+        let attacker = KeyPair::generate();
+        let (rpc, _, shutdown) = spawn_relay_lifecycle_mock(0, 0, String::new()).await;
+        let state = Arc::new(
+            ControlState::new(
+                node_kp,
+                Arc::new(OnionRouter::new()),
+                Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60))),
+            )
+            .with_relay_lifecycle_verifier(RelayLifecycleVerifier::new(
+                rpc,
+                Address::from_display("octProgram"),
+                None,
+            )),
+        );
+        let id = SessionId::from_u64(42);
+        announce(
+            State(state.clone()),
+            Json(signed_announce(id.clone(), &legit, [9; 32])),
+        )
+        .await;
+        let proposal = parse_state(
+            get_state(State(state.clone()), Path(id.to_hex()))
+                .await
+                .into_response(),
+        )
+        .await
+        .proposed
+        .unwrap();
+        let receipt = proposal.receipt;
+        let forged = SignedReceipt {
+            client_sig: attacker.sign(&receipt.signing_payload()),
+            client_pubkey: attacker.public,
+            receipt,
+            node_pubkey: proposal.node_pubkey,
+            node_sig: proposal.node_sig,
+            enc_bytes_used: None,
+            enc_net: None,
+            pvac_zero_proof: None,
+        };
+        forged.verify().unwrap();
+        state.sessions.remove(&id);
+        let resp = super::post_receipt(State(state.clone()), Path(id.to_hex()), Json(forged))
+            .await
+            .into_response();
+        let (status, body) = status_and_body(resp).await;
+        let _ = shutdown.send(());
+        assert_eq!(status, StatusCode::FORBIDDEN, "a captured public proposal must not become writable by another key after eviction: {body}");
+        assert!(state.receipt_vault.get(&id).is_none());
     }
 }

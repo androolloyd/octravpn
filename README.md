@@ -11,6 +11,20 @@ their cost in OU, traffic flows over WireGuard, and settlement is
 **two-tx** (operator claims bytes_used → client confirms → AML
 settles or records a public dispute). Misbehavior is slashed in-AML.
 
+**Current economics:** operators receive the full traffic payment in OCT.
+There is no VPN protocol commission; ordinary Octra transaction fees are
+separate. The [canary candidate](docs/audit/2026-10-11-canary-security.md)
+remains unqualified for launch. [First-party integration](docs/octra-vpn-inclusion.md)
+tracks Circle applications, ExEx and the incomplete Rust node port.
+
+**Rust node development (2026-10-14):** authenticated finalized imports,
+canonical ExEx publication, Circle browsing and VPN admission are integrated in
+local tests. Proposal authentication now binds local validator history, parent
+certificates, signed timestamps and revocable snapshots. The latest
+[development checkpoint](docs/rust-node/native-runtime.md#canonical-proposal-authentication-2026-10-14)
+passes 30 tests across eight suites. Production proposal execution, the complete
+runtime and funded VPN settlement remain unfinished; this is not a mainnet release.
+
 > **Status (2026-05-20).** Three AML deployments are live on devnet
 > and run in parallel, gated by the node/client `protocol_version` config:
 >
@@ -51,6 +65,7 @@ File index: [`docs/INDEX.md`](docs/INDEX.md). Master demo tour:
 [`demo/recordings/00-master-tour.mp4`](demo/recordings/00-master-tour.mp4).
 
 [v3 design-doc set](docs/v3/) ·
+[v5 private administration](docs/private-administration.md) ·
 [v3 circle-resident architecture](docs/v3-circle-resident-architecture.md) ·
 [v3 threat model](docs/security/threat-model-v3.md) ·
 [v3 mainnet ceremony](docs/mainnet-ceremony.md) ·
@@ -477,3 +492,5 @@ all FIXED in source as of `d6b3930`**).
 MIT OR Apache-2.0 for the Rust workspace + AML programs.
 GPL-2+ (with OpenSSL exemption) for `pvac-sidecar/` — isolated as a
 separate process; no GPL symbols cross into the Rust crates.
+
+Latest RC status and deployment instructions: [canary security review](docs/audit/2026-10-11-canary-security.md).

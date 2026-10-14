@@ -10,8 +10,8 @@
 //!    `max_in_mem_sessions` after a bump, we pop the oldest
 //!    `(last_seen, id)` from `lru_index` and drop the corresponding
 //!    `by_session` entry. The evicted session_id is recorded in the
-//!    bounded `recently_evicted` LRU so subsequent bumps know to
-//!    consult disk (rather than treating it as a first-touch).
+//!    bounded `recently_evicted` LRU for diagnostics. That history
+//!    cannot prove whether a session exists on disk.
 //!
 //! 2. **TTL sweep**: a background task calls `sweep_ttl` on a timer
 //!    (default 60 s). Any entry whose `last_seen` is older than
@@ -19,7 +19,7 @@
 //!    cap.
 //!
 //! 3. **Disk resurrect on miss**: a bump whose `session_id` is not in
-//!    `by_session` BUT is in `recently_evicted` must read the durable
+//!    `by_session` must always read the durable
 //!    on-disk state to recover the floor before the monotonicity
 //!    check. **This is the load-bearing equivocation defence**: an
 //!    attacker who forces an eviction (e.g. by flooding unique
@@ -39,9 +39,9 @@
 //! ## Resurrect cost
 //!
 //! Worst-case `O(file_size / RECORD_SIZE)` linear scan of the journal
-//! file, capped by the compaction watermark (10 MB / 44 B = ~240k
-//! records). On warm-page-cache: ~5-10 ms per scan. On cold disk:
-//! up to ~50 ms (one disk seek + sequential read).
+//! file. The compaction watermark triggers cleanup but does not cap
+//! the number of distinct durable sessions. A durable indexed store
+//! is needed before increasing the supported long-term session scale.
 //!
 //! ## Why `BTreeSet<(Instant, SessionId)>` and not a linked-list LRU?
 //!
@@ -53,7 +53,6 @@
 //! ~1.5× the primary `by_session` cost.
 
 use std::{
-    collections::BTreeMap,
     fs,
     sync::{atomic::Ordering, Arc},
     time::Instant,
@@ -158,9 +157,7 @@ pub(super) fn resurrect_floor_from_disk(
     // seq seen for each id in the file. Cheap to do — the file is
     // already bounded by the compaction watermark (10 MB ~ 240k
     // records).
-    let map = if raw.is_empty() {
-        BTreeMap::new()
-    } else if raw.starts_with(super::codec::MAGIC_V1) {
+    let map = if raw.starts_with(super::codec::MAGIC_V1) {
         replay_v1(&raw, &path)?
     } else {
         // Any non-v1 prefix is a migration target (v0). The journal's

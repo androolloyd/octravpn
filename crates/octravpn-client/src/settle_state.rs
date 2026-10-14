@@ -352,6 +352,7 @@ impl SettleStateStore {
     ///   2. SUBMIT — reveal a `relay_refund` only when the session is still
     ///      RELAY_ARMED and `epoch >= deadline + margin` (the I3 refund window,
     ///      strictly after the claim window), write-ahead first.
+    ///
     /// One-shot (boot scan + CLI), so no in-flight-grace loop is needed; a
     /// still-unconfirmed refund is naturally re-attempted only on the next run.
     pub(crate) async fn refund_pending<C: RefundChain>(
@@ -430,7 +431,8 @@ impl SettleStateStore {
             // I3 refund window [D + k_r, inf): strictly after the operator's claim
             // window (-inf, D - k_c]. epoch is a LOWER bound, so a conservative
             // read only delays -- it can never fire early into the claim window.
-            if epoch < deadline.saturating_add(refund_margin) {
+            if !octravpn_core::relay_window::recovery_window_open(epoch, deadline, 0, refund_margin)
+            {
                 continue;
             }
             // WRITE-AHEAD (I6): record the intent BEFORE the broadcast so a crash
@@ -468,7 +470,7 @@ impl SettleStateStore {
             .get(session_id)
             .ok_or_else(|| anyhow!("missing client receipt for session {}", session_id.to_hex()))?;
         let net = self
-            .arm_net(session_id)?
+            .arm_net(session_id)
             .ok_or_else(|| anyhow!("missing arm net for session {}", session_id.to_hex()))?;
         Ok((receipt, net))
     }
@@ -551,9 +553,13 @@ impl SettleStateStore {
             .with_context(|| format!("record arm net for session {}", session_id.to_hex()))
     }
 
-    fn arm_net(&self, session_id: &SessionId) -> Result<Option<u64>> {
+    fn arm_net(&self, session_id: &SessionId) -> Option<u64> {
         let raw = self.arm_net.floor(session_id);
-        Ok(if raw == 0 { None } else { Some(raw - 1) })
+        if raw == 0 {
+            None
+        } else {
+            Some(raw - 1)
+        }
     }
 }
 

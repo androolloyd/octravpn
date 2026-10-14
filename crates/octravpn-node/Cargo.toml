@@ -112,6 +112,9 @@ socket2     = { version = "0.5", features = ["all"] }
 headscale-api = { path = "../../../headscale-rs/headscale-api", default-features = false, features = ["admin"] }
 headscale-db = { path = "../../../headscale-rs/headscale-db" }
 
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs"] }
+
 [dev-dependencies]
 octravpn-mesh = { path = "../octravpn-mesh", features = ["test-helpers"] }
 # `policy_e2e.rs` exercises the admin CRUD surface, which lives behind

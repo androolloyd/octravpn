@@ -20,6 +20,7 @@ mod v2_cache;
 mod v2_runner;
 mod v3_runner;
 mod wallet;
+mod wireguard;
 
 use config::{ClientConfig, ProtocolVersion};
 

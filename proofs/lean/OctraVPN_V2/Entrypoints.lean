@@ -487,8 +487,7 @@ def settleConfirm
           let totalRaw := effPrice * bytesUsed
           -- The AML clamps `total_paid` to the deposit. We mirror.
           let totalPaid := if totalRaw > sess.deposit then sess.deposit else totalRaw
-          let fee := totalPaid * s.params.protocolFeeBps / 10000
-          let net := totalPaid - fee
+          let net := totalPaid
           let refund := sess.deposit - totalPaid
           let t' := { t with treasury := t.treasury + refund }
           let upd : Session :=
@@ -499,8 +498,7 @@ def settleConfirm
           some { s with
                   sessions := s.sessions.update sid (some upd),
                   tailnets := s.tailnets.update sess.tailnetId t',
-                  encEarn := s.encEarn.update sess.circle (curEarn + net),
-                  programTreasury := s.programTreasury + fee }
+                  encEarn := s.encEarn.update sess.circle (curEarn + net) }
 
 /-- `claim_no_show`. Caller must be the opener; grace must have
     elapsed; operator must not have claimed. -/
@@ -598,7 +596,7 @@ def setParams
   else if p.unbondGraceEpochs < 1000 then none
   else if p.slashBurnBps < 5000 then none
   else if p.slashBurnBps + p.slashBountyBps ≠ 10000 then none
-  else if p.protocolFeeBps > 200 then none
+  else if p.protocolFeeBps ≠ 0 then none
   else some { s with params := p }
 
 def withdrawProgramTreasury

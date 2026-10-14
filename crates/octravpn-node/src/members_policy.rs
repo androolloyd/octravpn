@@ -362,9 +362,6 @@ impl SyncState {
         let generation_moved = self.last_generation != Some(generation);
         let fetch = epoch_moved || self.anchored.is_none();
         let render = fetch || generation_moved || self.applied_raw.is_none();
-        if let Some(e) = epoch {
-            self.last_epoch = Some(e);
-        }
         self.last_generation = Some(generation);
         Plan { fetch, render }
     }
@@ -536,6 +533,7 @@ impl MembersPolicySync {
                             evict_non_members(&machines, registration_store.as_ref(), &a).await;
                         }
                         state.anchored = Some(a);
+                        state.last_epoch = epoch;
                     }
                     Err(e) if state.anchored.is_some() => {
                         warn!(error = %e, "members policy: anchor read failed; keeping last good policy");
@@ -1053,6 +1051,7 @@ mod tests {
             }
         );
         s.anchored = Some(AnchoredMembers::empty(None));
+        s.last_epoch = Some(10); // committed only after a successful fetch
         s.applied_raw = Some("x".into());
         // Same epoch, same registry ⇒ idle.
         assert_eq!(
@@ -1095,5 +1094,17 @@ mod tests {
                 render: true
             }
         );
+    }
+    #[test]
+    fn member_sync_retries_failed_fetch_within_epoch() {
+        let mut state = SyncState {
+            last_epoch: Some(10),
+            last_generation: Some(1),
+            anchored: Some(AnchoredMembers::empty(None)),
+            applied_raw: Some("old".into()),
+        };
+        assert!(state.plan(Some(11), 1).fetch);
+        // Fetch failed; the production Err branch keeps the previous anchor.
+        assert!(state.plan(Some(11), 1).fetch, "the changed anchor must be retried after an I/O failure even while the epoch is unchanged");
     }
 }

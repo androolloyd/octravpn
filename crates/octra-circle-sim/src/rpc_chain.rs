@@ -122,6 +122,7 @@ impl MockChain for RpcChain {
             .recommended;
         let call = json!({
             "kind": "contract_call",
+            "timestamp": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("clock before Unix epoch").as_secs_f64(),
             "from": self.proxy_addr.display(),
             "to": self.program_addr.display(),
             "method": "settle_claim_v2",

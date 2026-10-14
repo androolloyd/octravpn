@@ -1,38 +1,18 @@
-# Tamarin model for OctraVPN
+# Tamarin protocol verification
 
-`octravpn.spthy` models the OctraVPN crypto-protocol surface under a
-Dolev-Yao adversary. Tamarin checks unforgeability and slashing properties
-mechanically.
+Run `scripts/run-tamarin.sh` with Tamarin 1.12.0 and Maude installed. The script
+requires the exact six lemma results, all verified, including reachable honest
+traces to check that the models are not vacuous. Installation, execution, an
+unknown result, a counterexample or a missing lemma fails CI.
 
-## Properties
+`octravpn.spthy` checks dual-signature receipt authentication with explicit node
+and client compromise exceptions. `relay_receipt_ack.spthy` checks persistence
+before acknowledgement and recovery after a crash, under an explicit durable
+storage assumption. These are symbolic specifications, not proofs of the Rust,
+OS persistence implementation or compiled AML.
 
-- **ReceiptUnforgeability** — settled receipts always trace back to a real
-  client signature or a compromised session key.
-- **DoubleSignSlashable** — two distinct validator signatures for the same
-  `(session, seq)` always yield a slash trace.
-- **NoLinkBeforeSettle** — no observation by the network adversary
-  reveals the validator address for an open session without compromising
-  the long-term key (the route commitment hides it).
-
-## Running
-
-```
-tamarin-prover --prove octravpn.spthy
-```
-
-The model intentionally simplifies the multi-hop case to single-hop. The
-extension to N hops is structural: each hop adds an independent commitment
-and an independent receipt sig path; the unforgeability lemma generalizes
-unchanged.
-
-## Adversary capabilities
-
-- Network read/write (Dolev-Yao) — `In` and `Out` facts.
-- Static-key compromise — `Reveal_Validator` reveals a chosen validator's
-  long-term key.
-- Session-key compromise — `Reveal_Session` reveals a chosen session's
-  ephemeral key.
-
-This matches the real-world threat model: an attacker can break into a
-node OS or steal an ephemeral key from a client; the lemmas characterize
-exactly what must hold *unless* such a compromise occurs.
+The former `octravpn-legacy-target.spthy` is archived for research. Its restrictions
+assumed some properties it purported to prove, its spontaneous-slashing liveness
+claim was invalid, and its anonymity claim conflicts with public registration.
+It is not included in the release gate. Opaque on-chain slashing is disabled in
+the candidate; no current model certifies permissionless slashing.

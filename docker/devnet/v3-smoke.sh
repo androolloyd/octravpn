@@ -97,8 +97,8 @@ else
   fail "hash-chain mismatch: on-chain=$ON_CHAIN, expected=$EXPECTED"
 fi
 
-hdr "7. claim_earnings (net 1000 - 0.5% fee = 995 available)"
-wait_tx "$(send_tx 0 claim_earnings "\"$OPCIRCLE\"" 995)" "claim_earnings(995)"
+hdr "7. claim_earnings (full traffic charge = 1000 available)"
+wait_tx "$(send_tx 0 claim_earnings "\"$OPCIRCLE\"" 1000)" "claim_earnings(1000)"
 
 hdr "8. overclaim rejection"
 TX=$(send_tx 0 claim_earnings "\"$OPCIRCLE\"" 100)

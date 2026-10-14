@@ -1,0 +1,6908 @@
+{
+  "upstream_commit": "d3e834919bd586e81f947d0dae91becc6c43c756",
+  "source_sha256": {
+    "pvac/include/pvac/core/bitvec.hpp": "b100c917583e09694f86dd3f8c40a1dd8b47e85526111f6834827a21f45149a7",
+    "pvac/include/pvac/core/config.hpp": "1912fbaf58b8c4f777c36454742e2859b6a5e9fb00155807fc0805773f4a7e40",
+    "pvac/include/pvac/core/ct_safe.hpp": "7d1179bb7b8d729e953dedd531d646595c3e20bc786fcdf7b8819afee5b20eb1",
+    "pvac/include/pvac/core/field.hpp": "8e13993d70a956443187a5f1fc146f56b501be2f69b76ef92df17db6f338ffe2",
+    "pvac/include/pvac/core/hash.hpp": "973f09a869f7cd25fd091110196164e45b5e47ea781f4a9ce28e435c8a4a5a4f",
+    "pvac/include/pvac/core/pvac_compress.hpp": "8e5aeb2497f3487f5a93ccab9acf597547bbabcc06b36c966bab6a4dce6b7d8d",
+    "pvac/include/pvac/core/random.hpp": "7b59e5ee4c120973113505b60aa8b62bff85ac7686d50ce9fe7b5e1cac9efa1e",
+    "pvac/include/pvac/core/seedable_rng.hpp": "204dde45bb99429827a4758a51121ffcb6a8e911c2ecfaed49ab5d374dc2d616",
+    "pvac/include/pvac/core/types.hpp": "d1f00321448e08a5b2079f484d8bb6923641f7cd375b2948eea058123625d3ca",
+    "pvac/include/pvac/crypto/bulletproofs/gadgets.hpp": "ded9002736fe5caf7607fded2a783d7c204fe69e430d684dfc63a0537cf5dbe4",
+    "pvac/include/pvac/crypto/bulletproofs/generators.hpp": "54541edda0e7a8bc4d91d8d57064e69f23a3dc0df41406fc4c9febedf03f9749",
+    "pvac/include/pvac/crypto/bulletproofs/inner_product.hpp": "2ee2b6c3bea7606881ad9ac492786686ec7fb8f65ba2ba8ca555dadb52c405d8",
+    "pvac/include/pvac/crypto/bulletproofs/r1cs.hpp": "5aa169749faf4b54189158ebc936a605e10f822c68df453e3dfae471a72e327a",
+    "pvac/include/pvac/crypto/bulletproofs/r1cs_limits.hpp": "cad8ceb8bf6b470fc4e8eb6988d5476dbd406d5bd98ed15c3b0d97c34778febf",
+    "pvac/include/pvac/crypto/bulletproofs/r1cs_prover.hpp": "decf51b93b7b1d68a2cc681147654c2ba27285976c06e1a1101d5a38cf286348",
+    "pvac/include/pvac/crypto/bulletproofs/r1cs_types.hpp": "e7d1a0bbf38767e5de757afbd73f9c4153d17035aee667fb46a4212b3c24bc67",
+    "pvac/include/pvac/crypto/bulletproofs/r1cs_verifier.hpp": "a0e21cc2526fa6b02c0d45f4110f87f829e1ba09620ed6f3a65fba9e0384597a",
+    "pvac/include/pvac/crypto/bulletproofs/transcript.hpp": "075423f25e6449e526a84d5a3837a402238fdb11fbd2a4673fb5fb027c3ca45d",
+    "pvac/include/pvac/crypto/circuit_prf_profile.hpp": "4a990388677b657aa7e71c2bb37867880adf32d99554664d3cd6d4099d811ba0",
+    "pvac/include/pvac/crypto/keygen.hpp": "9628f6ab957ce05c6a511534e079903b2184fa823c245a36c84efe15e2994066",
+    "pvac/include/pvac/crypto/legacy_profile.hpp": "ff0d5db6fabad10cb2992b137f179afa55548255cc57d3b1b13c9188cb812027",
+    "pvac/include/pvac/crypto/lpn.hpp": "3e3ba1826d3bf4e8f82ea423a8c80ad93d8d7d2e35d1a3f923f250aeb6bec80c",
+    "pvac/include/pvac/crypto/lpn_v2.hpp": "3e8cc9374211a4fa73361db9573d01a2d2c56591e2032632fa52713ea9ae2524",
+    "pvac/include/pvac/crypto/matrix.hpp": "a7f5732c5a59517b82acb9d61c53b9733b45fd7d40b319c64799491a65f9e6a5",
+    "pvac/include/pvac/crypto/ristretto255.hpp": "be7c04653d4856bdc89718c317c44b550cefd6df434628a1a7fd481e86a41956",
+    "pvac/include/pvac/crypto/toeplitz.hpp": "75361810219017961de38b7a7d9e837fbee074f018f877d3ffe6d6f74ba9bbeb",
+    "pvac/include/pvac/crypto/toeplitz_full.hpp": "630830831a4f5fc25fec1f265b301cc11d5ad7fb454275ae641f3be6c46f28cb",
+    "pvac/include/pvac/ops/arithmetic.hpp": "5a0f71daae1bf57778669671517990cfdc0e37c50b8d9776faf50f0133d88d79",
+    "pvac/include/pvac/ops/commit.hpp": "b6f546a0b7495e37b2f058d7aaa79dba04c391774adcb1fee5565ddf632e8183",
+    "pvac/include/pvac/ops/decrypt.hpp": "87e70d2d974914face97b37f73d7bfd47a307620458fbb101455a805c5e0a207",
+    "pvac/include/pvac/ops/encrypt.hpp": "84378bf1eda7d65fb5856dc2753a8aab7aaa8627721a732c22340d3305f3ba7d",
+    "pvac/include/pvac/ops/layer_coeffs.hpp": "a69bff914ae319a907b44c9c961cf31b61faba29a7d11c0aaf128455d371dd49",
+    "pvac/include/pvac/ops/range_proof.hpp": "fd44a098d79c20bb62576084fc255f7a1454440ccce74100696405bb27de388c",
+    "pvac/include/pvac/ops/recrypt.hpp": "156aeba8d18c85e2991f5d8a027a5b923b1021a20df9b78f1e5802c339aa977c",
+    "pvac/include/pvac/ops/recrypt_arith_proof.hpp": "8a2267b9801806183c551d4659026177be1cb5045a98b55cad818a5d71961d5d",
+    "pvac/include/pvac/ops/recrypt_capsule.hpp": "c87fab0962ead501ecdbacbd7b2796e5e3a1f7929b6a3f499a5dbc51f8351403",
+    "pvac/include/pvac/ops/recrypt_chosen_privacy.hpp": "ef3c0f49fc60f209147fd4e0208c76183db1f9d4f37130f2ee8fea7f9b8dadfa",
+    "pvac/include/pvac/ops/recrypt_com.hpp": "10671817bbba0b438fdba905fb6160cd0567f72d1b3140485bc82385e7477bd0",
+    "pvac/include/pvac/ops/recrypt_com_reset.hpp": "52400133fb4fb93be455bad3f70893bf9f74a6756ec74af4ed0af62bb051e036",
+    "pvac/include/pvac/ops/recrypt_eval.hpp": "271057b0ccf26f0b6ca8a7d548f591e031fc004fe1cabea97396534195c0e82e",
+    "pvac/include/pvac/ops/recrypt_field_native.hpp": "adab90b0e181878817f20f91c6e07c9f323239f11af4f662dfc572824923866b",
+    "pvac/include/pvac/ops/recrypt_field_native_cipher.hpp": "0a5c854c6a3c249e6a1747f013b2757fc31b85da40fd934a9a6d2af57ff01672",
+    "pvac/include/pvac/ops/recrypt_fold.hpp": "4ea080bb594a9ea7e9d9d70b7ee0277c6a5fcb591de73df3f77c3d34666d6ae9",
+    "pvac/include/pvac/ops/recrypt_hidden_coeff.hpp": "cb8fe5f9c4f89ba004f1fdfaecd56a6ae61a3957519aa13ff1dc37f44cf4a0c9",
+    "pvac/include/pvac/ops/recrypt_layer_proof.hpp": "8d3b8e5fe66f7f2ddde80bf866eefe5bcff34e5dee5fb20ecda4639242e5013b",
+    "pvac/include/pvac/ops/recrypt_legacy.hpp": "df2a716414bf42d31db37638cb08e01a30347c402a03a8db9a7dff44db7f97a4",
+    "pvac/include/pvac/ops/recrypt_mat.hpp": "3f7df275ebb01a9e91050dd1bd96b383995d8d1cf7e3aaad7963cfced2cf7937",
+    "pvac/include/pvac/ops/recrypt_native.hpp": "1b48ccbb847ef84f876e9587cf1da02db0286f24bff27f2cb5efa9f5b4754cec",
+    "pvac/include/pvac/ops/recrypt_native_cert.hpp": "f92ec3301cac82b45cc288f2379bac9b3f26fae9e04458da51362db7c82138d0",
+    "pvac/include/pvac/ops/recrypt_proof_profile.hpp": "d910e954c0066d5ce6d88c3696f084a94de56881cbb27e59f678e7853645ec75",
+    "pvac/include/pvac/ops/recrypt_public.hpp": "a00b09c76c5266515019117d4f12a70acff2d48eb6dc87e620218a4a2d8d2bb1",
+    "pvac/include/pvac/ops/recrypt_ru.hpp": "1f3f0241f716274d1adcb7429bc26185fc4faaa55e3c523eb0bcadbdb54ef370",
+    "pvac/include/pvac/ops/recrypt_runtime_eval.hpp": "dbd56fef7f40fc5fcab52c9a858c2a69efe7b39032c0627579e4cf0297fc3495",
+    "pvac/include/pvac/ops/recrypt_sha_compat.hpp": "db5acfe0d0a2264f9a9fcb2c5294254d079c60999f55c7380884e0070d371cc3",
+    "pvac/include/pvac/ops/recrypt_src.hpp": "e71368bac894851cfd4bb914f45b096b2aeb7776835e4dc8f25a4f43275210f7",
+    "pvac/include/pvac/ops/recrypt_src_core.hpp": "9b841af17661a8623f16767f26c458bb9bb46ebc53b8f0930cf1c1ded7592c65",
+    "pvac/include/pvac/ops/recrypt_stage_eval.hpp": "ebd42274c304f906a418b3848f630cb063da79c2ea344e169455899c9badb00c",
+    "pvac/include/pvac/ops/recrypt_stage_link.hpp": "9ff552071c0e3a05b9015fb318bda93935aa3dc23db9bdb3befcf63b9e0d96e6",
+    "pvac/include/pvac/ops/recrypt_stmt_legacy.hpp": "0bc1e206544f56c0a970f0678db7102c6cd83716640b7ffc28a9b978b9c35085",
+    "pvac/include/pvac/ops/sha256_hidden_trace.hpp": "cead51438c32f5acd4e6e043cef4809ee8978a16ade8407d2a0320143e3132e3",
+    "pvac/include/pvac/ops/sha256_trace.hpp": "628e1dcb9a7433e544ade49e1eecf6fa335bd82233d1d7cb51e6ee25a50969bd",
+    "pvac/include/pvac/ops/tape_verify.hpp": "00d9205e81d0f846988e63543ca49f7f9247b85e57e1ce45ef7c947d97f92c9b",
+    "pvac/include/pvac/ops/verify_zero.hpp": "c52f6d942254aa8b75ef9b37b29646d6bb8ae77b5bc9e579a06cf01b16995ac2",
+    "pvac/include/pvac/ops/verify_zero_circuit.hpp": "a702f02202aa7260ea3853cd9f7c532b01f9424a8a2138dfbde1fac494fd20fc",
+    "pvac/include/pvac/pvac.hpp": "3adee622e764cb9f82a6aae5e78fac19797936164f2200dfbf97c03fe798cedb",
+    "pvac/include/pvac/pvac_native.hpp": "45ef4ff7245752594680ee51b645be048699512ce0849ad97664c911d1eed9e6",
+    "pvac/include/pvac/pvac_recrypt_experimental.hpp": "90eb0270501039e03b2abc831673d40fc701d4ef3422c39c92428b1a24ec3a84",
+    "pvac/include/pvac/pvac_sha_compat.hpp": "e5a24791964d289f4497a56bb3ae553478b68694b1b308c65a5548330f20ad23",
+    "pvac/include/pvac/research/cipher_sim.hpp": "5adf9e92fa271657016ec4fe6febfaac30703cf7b209309c88388187c6238bc4",
+    "pvac/include/pvac/research/mask_profile.hpp": "556246fa87e3f6fbc6a8d9dacb3642f414e666cbcb655b9e837dc26ad3adae6c",
+    "pvac/include/pvac/utils/metrics.hpp": "391a1e7b67db66f63b5518299726fec7a948373acba17022490a6bcc96aa09c4",
+    "pvac/include/pvac/utils/text.hpp": "67a0dfb05f88c64aa447907665dbe88add957a18e495f39303b221d0f7440cff",
+    "pvac/pvac_c_api.cpp": "5e60c148352656bf9a43b234a784a8f4d51c6caaea198e3fd5883c9fb8c8d590",
+    "pvac/pvac_c_api.h": "2099dfe09e0e21bca780acd35c379a2fbf850761e79cb846957bc2623311fc00",
+    "pvac_ffi/pvac_serialize.hpp": "aed4b62117bc1fb9d80e64220a9aa1b6060c626bd9c1721c38c673fd8bae87cc"
+  },
+  "architecture": "arm64",
+  "oracle_sha256": "18132f4db3030d2902284e263b1a9a7fbb5d358e544d15e5798680caf5264a43",
+  "scope": "Active circuit PRFs, layer commitments and LPN-v2 noise; not complete HFHE parity",
+  "rounds": [
+    {
+      "profile": 1,
+      "round": "0",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "406878029aceae508cb33965e7c1ad18",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "1",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "6d6e9b8bab8e4b54529d79425556b77e",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "2",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "a2d718975049c68b0f64e2439b0d743d",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "3",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "f3ec8774439ccda22fbf91870fbd461d",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "4",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "5e1a0cfdee513e0bf8a38c6762ed5165",
+        "power": "03000000000000000000000000000030",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "5",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "dc1a0903a531f97577cd7367d75e1576",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "6",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "0c8b9065457173307f5f4e8c5122aa1f",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "7",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "2d3614dbe167534c0634c3526541bb3d",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "8",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "8358240d1991f5d0c3c968227f354473",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "9",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "78199bdf058be27dd2363a43616b8564",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "10",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "42a045026e318ed887abf156d4978a00",
+        "power": "03000000000000000000000000000030",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "11",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "c288d7f96f53974bdba0aa74efb27316",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "12",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "3c57f756c1dd65d8b28181fdda548565",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "13",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "73f5631edd036d43b03225f201629a62",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "14",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "b7aeebff8001b678408e4ac5d5582329",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "15",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "ea48f5c5e5b3b2cc7b18781e1c5cd900",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "16",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "7b13af9932d922269c077cb11594cc10",
+        "power": "03000000000000000000000000000030",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "17",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "9bd9510aa333ad654999543095f2711a",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "18",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "2862dc0d0b646ac15c881839f7717d74",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "19",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "f147463e77b68aa1803b716a11592459",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "20",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "6b7520942340825d613159132a7a8a4c",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "21",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "8beeeb891e7f85e2b43585bb76bb5a66",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "22",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "0ffea262915955f5521472ac92cdcb73",
+        "power": "03000000000000000000000000000030",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "23",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "3e996a0df134afcd2b96700aa1b8383f",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "24",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "ae01feced8ebad7373935f0f1020576a",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "25",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "358fd2257d4c7043f962b6f2e85e392c",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "26",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "d803c29603b8b5405ee0fb6846cd971d",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "27",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "b3771e0c0419cfc3c2a6f229d68c4f1d",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "28",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "665edd8f86c10898b9dcbb28cc63cd2e",
+        "power": "03000000000000000000000000000030",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "29",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "32d90dc03cf7bcc8f64e40638edc5d34",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "30",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "af0d8c9b7052f14d64d750092024604f",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "31",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "adc096f1a9a65310ae4e6cdc2b7e406d",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "32",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "4ed1d95d3519fa8c3d303c88139d8b40",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "33",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "d45d286ba348083b391aec9a6db5870d",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "34",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "0c43dbc1eca6d7bdef6fb0c194c90639",
+        "power": "03000000000000000000000000000030",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "35",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "c97eed2012af1ad6a0a5de8cd56bed41",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "36",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "07750a49b808eefcbb27df35c0692c61",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "37",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "05c1ddf3ef9e8369b65ce030430e4f3f",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "38",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "b3a2782bc47f37a9fa09e8b920ad8d0c",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "39",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "5a8470e5b32d1636fd366bf7fedd8c13",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "40",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "9796cdd1a6663ed85f77458b5f5fbf32",
+        "power": "03000000000000000000000000000030",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "41",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "27607e5a0c3c45d445f6169a22f04e38",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "42",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "2b51c239bc172d42a2060410cd53f90f",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "43",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "b699ed392a5e21e7933208e76542de14",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "44",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "fa79baf091cfcbab3afa35157d627d6e",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "45",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "f05dac1abcaf22f172d9a0b71d817000",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "46",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "4b4514b85fd86b60f18fba37de3d8b05",
+        "power": "03000000000000000000000000000030",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "47",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "cc1bc489f8e6c9d0feb43bf7e8a0e92d",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "48",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "8996c7946ce311f4c74f1ce3469e2075",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "49",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "8bebfe297acd68372b4d2959cfd77630",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "50",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "0b27b3a3fc8cdc7a97c1551a130e0b2f",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "51",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "87b1f2dc489e92e0a764e3c97e34b279",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "52",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "72eb3d56c2450e5f2853ab6d407fb943",
+        "power": "03000000000000000000000000000030",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "53",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "617eab0fdc99f6cd2dbdaeaadad82e16",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "54",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "aaf7bfb652630792e30b1bb911318865",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "55",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "facdbbe54585bc98b449325162843a6e",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "56",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "f59fe11ba12406d5799e65e614ed300b",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "57",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "c6586d0a0e14b61b3998e885ed714b01",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "58",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "deb28dadc0675dd6389def6f1f83e522",
+        "power": "03000000000000000000000000000030",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "59",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "ee8664f9aa9d5301d0215e3f9f18f717",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "60",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "396d862a531bc56f5318bf4924509e37",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "61",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "9798a4f7c3eaddee8cea85b06f894e30",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "62",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "27e5f3718c09a45c42aad0276e621777",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "63",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "f2140b421ee8c7d452f3536055d3bd1b",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "64",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "7c0dc5c2ee7db91f5bee3b0b6b635928",
+        "power": "03000000000000000000000000000030",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "65",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "b6ddd5a06a60022729baa0665b2cfe6d",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "66",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "09dbcba3694dc69edc62de4fc36ecd66",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "67",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "0da9f6f32288a19e1e631021ed08e23f",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "68",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "b31795451a87d4c162d5a719673c750b",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "69",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "47aa7d15836df7effb4a5600ed97ca60",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "70",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "362a191dae88f7fe0a8e7bece30f343e",
+        "power": "03000000000000000000000000000030",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "71",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "4807cf010cff0b8efbaec20ce093d20f",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "72",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "7ef5a0b84e885021b6321b5a6e59b95d",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "73",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "f87e8a2c33457ba687dfc8825a64e93c",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "74",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "1f788c709e2f1a544c2b37f0307e8757",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "75",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "9ee256de8c49e2d7dec8ed953ed8cd02",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "76",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "90ba70320b6b5aa57e1e736742faf927",
+        "power": "03000000000000000000000000000030",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "77",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "c3ea557c453a69fd461fd89feaf63c4b",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "78",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "0997c9079f67ba54030b6f548038a621",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "79",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "083624c9e6ff5b74ec0f39b15aaa0535",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "80",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "e7d634ad1e8675f4828e966dc23aee5b",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "81",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "a2c7572f02001634e349aaa6ef87f41d",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "82",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "1ade556bf88d62408283d5b549b49d29",
+        "power": "03000000000000000000000000000030",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "83",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "32b5210785193879e95397288461b857",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "84",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "3e274a95696f6ad03f843479d73bcf3f",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "85",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "d8916d727e4390e47abdc6ea326fdb72",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "86",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "19a2821316586b7c8a1814c81b5bcb49",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "87",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "03315d2f8b1b9951337e4b7b7f927178",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "88",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "c17e576809efbb938fbfa703a2d6c73e",
+        "power": "03000000000000000000000000000030",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "89",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "1db9166116910d2f212cc407db77392d",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "90",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "6573ba89a4d81ff6c82b78e646b35d41",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "127",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "7399dc74401a5b39a8b71cc2f8cb7e2d",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "255",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "5cd7145cbd16cb9a5ed789dce7582b55",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 1,
+      "round": "18446744073709551615",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "821cc6a34b5677cc16b01261e909953e",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v6-key-bound",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "0",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "d861eedff4a5719ec9789333b777444b",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "1",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "ce734363155c2aed09ced141c32be352",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "2",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "778436cf8b61db0ad5bf6645eb5d1a45",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "3",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "40f4e9f535a7ad38377b37ffb32e6b4a",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "4",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "a38bac908bf0418819e34b4cd3e8c458",
+        "power": "0700000000000000000000000000004c",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "5",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "deb777f67b6cb16e5ccde919d8483032",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "6",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "8db71a4f24d15b29a857cfa49af99350",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "7",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "480e9f012665891106a1710173acc53c",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "8",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "3250e893c7ebcf25e699a5884edbbe14",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "9",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "7007b83f1b4ef0434d2c60ffca97ea36",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "10",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "b121d0285772a767a1e40b7f0fac061a",
+        "power": "0700000000000000000000000000004c",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "11",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "eba150e7d6fa5f9d32da6a967c59bb10",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "12",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "e21f6db2c21e1bf4c2cc8fa687f7f40c",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "13",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "aa2c7e239fa2a34d9258618d92c7c64c",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "14",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "60c57d9ed71128cdae79f59c5821306d",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "15",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "4df0d5c04c4de38c72ca6e834cfe861d",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "16",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "99edfd0438cbd87248bfa9bdab4e8a18",
+        "power": "0700000000000000000000000000004c",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "17",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "a572083919b15d017ee53cff621ad31a",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "18",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "ede33124187d05016850ccc6a37bb87f",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "19",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "1c208ebd98d198e4e508d9bfd2a63068",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "20",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "258f6e3e7534e24a99b87e6916b3840b",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "21",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "06b9478df9ae3d6920075f7db5f5b948",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "22",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "e996f8fdde7064a67a644be20601d970",
+        "power": "0700000000000000000000000000004c",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "23",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "3fc67c80e518766f1dc792f95b6fbc3f",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "24",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "6814b1f5f01ac4bc84bde89903af400a",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "25",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "ebc06dd76d7c4ba871fb976bb7f03803",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "26",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "4e3d4249ad051471e91442a2eb314e05",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "27",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "03953d8227d1915c988ed0fd36c10342",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "28",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "e8fa766849f4ef43ee5ee30daca80633",
+        "power": "0700000000000000000000000000004c",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "29",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "f95e3837a9fd90be41caa5079db5cc06",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "30",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "53f237d93482a7c4c510fc65a54c6d10",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "31",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "0d9ebcb09f7f3f43595aec7082ecdb7b",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "32",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "09f0d4007cb547f44add55e978d4ad39",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "33",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "ee6dcb9d54305f171e7d505329595617",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "34",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "a864c2e9d6638d6534ee5600d8aa6e07",
+        "power": "0700000000000000000000000000004c",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "35",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "7d7da6897989266b4c416b645d002d3d",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "36",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "ebaceeed5e75955de1664f280c212767",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "37",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "95c040cb8e0450cd5e6d860b1296cc39",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "38",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "9e04e5f962dd0c7d99e775c73a3ffa3d",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "39",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "f68c28f344b005d352535042b1c6a835",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "40",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "2102dd545c5a6666c03b9dad7c6b2f30",
+        "power": "0700000000000000000000000000004c",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "41",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "a63411b9147f099c8789b6fac0a4d83a",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "42",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "69526b0fbfb2e45baae600c2ba7e063c",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "43",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "89dfb7035d0d157b02ab9dc894685e00",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "44",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "29d94065e2df2d54f58a69428146c921",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "45",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "f49c22669708edd00370aee2a741ef47",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "46",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "f97d33f2a513fb45da784fcfbaa4ac4e",
+        "power": "0700000000000000000000000000004c",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "47",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "70c29063c53c9787bf5c5c4a05f51c4f",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "48",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "16cee0b9dfe7fb47bbec16e1705b5d03",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "49",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "2966017173f872d3a2f47f7f47748f56",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "50",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "9179a58813a75a247a7aa5755846046a",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "51",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "b5e19d3ed5d61fb84fba36241ca0a079",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "52",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "9d97c45a44412b5c5764869ec25d9a1a",
+        "power": "0700000000000000000000000000004c",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "53",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "b4bd4e016d4cb05735ecc5f03d34fa47",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "54",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "25384d595eb978c7df2ab29a4eddda6f",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "55",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "3acf7dbae8020eeb165596bf0380fd06",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "56",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "7b2cc96f628e177df813b41245f07a20",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "57",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "1ef725e7e3212993bd90db0a1ca11654",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "58",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "bae43edbc8589d6b78d78f9d145e3474",
+        "power": "0700000000000000000000000000004c",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "59",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "eab618a94bb3d7db17d1013eb4684e4b",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "60",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "14c84ca5d229770d85e404a54f91c24f",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "61",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "dbc4a6d3c21289eb7b7abede95da055c",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "62",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "0a48b0ed3c648a8bb1994bd93db5e677",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "63",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "5f60954d645cfe0ce73b9f2304ab110a",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "64",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "0efc1f1aeb15dcbcf44bad832f204a45",
+        "power": "0700000000000000000000000000004c",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "65",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "9311c098bf9ee24ee6f1a68b2f62c942",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "66",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "a1cb91b0c5d5b2ec1a87f81f54c61f40",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "67",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "0239d9dfc8cb807f70426fb77519eb5c",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "68",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "a45e2a09f8eb3f751216d68cf60fb347",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "69",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "c851c7adfb6ff602da357f3637ab554c",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "70",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "2a898faf80260815a5106fc3e6db690f",
+        "power": "0700000000000000000000000000004c",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "71",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "e16a9b441711ed41ac66ef13a01a0149",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "72",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "9137697e5a2215bbf1ad38de1448384a",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "73",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "3b2322aab271c94f839569e998db0f33",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "74",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "44bde726e34f366a62281ba4a9609a5d",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "75",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "ad7d2f00082b3dd137ee99705466c11c",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "76",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "109857a65fb7b36e56438fd69a240a37",
+        "power": "0700000000000000000000000000004c",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "77",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "0b2579662b307ec1512f3d191b7eee42",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "78",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "8fd5eaa632181ddcda2bc880072d6b35",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "79",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "0d17a11e2a81bf8644562006d21fc521",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "80",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "882169722abbe1826216f9ffa4a73804",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "81",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "ebe75c20f26ee10301443e065a2d3335",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "82",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "59a4151a542a8f9a644e09a8c423b808",
+        "power": "0700000000000000000000000000004c",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "83",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "232497f23974c262a275a5af17dfe10f",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "84",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "39f23f66cdc54fad51969ecfbc07301d",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "85",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "db7d2277353dff34fb45e05d3c6efb73",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "86",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "ed21926f6ee376ce3c42607ab13e0736",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "87",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "b803af580f7e3e636006ee0f17edc252",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "88",
+      "value": [
+        "1",
+        "4611686018427387904"
+      ],
+      "expected": {
+        "constant": "cacb62a5e64b5b08e3f0df58f399f81f",
+        "power": "0700000000000000000000000000004c",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "89",
+      "value": [
+        "0",
+        "9223372036854775808"
+      ],
+      "expected": {
+        "constant": "f61a98dfb913ca4c6c3d3cf13dba0f79",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "90",
+      "value": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "constant": "6d62f364e41605b505ff8f544c84975d",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "127",
+      "value": [
+        "1",
+        "0"
+      ],
+      "expected": {
+        "constant": "502a6dcde06e792c5913dc6b6fb49818",
+        "power": "01000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "255",
+      "value": [
+        "18446744073709551614",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "db5d8221f1545206ee6c47c5fe73e626",
+        "power": "feffffffffffffffffffffffffffff7f",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    },
+    {
+      "profile": 2,
+      "round": "18446744073709551615",
+      "value": [
+        "18446744073709551615",
+        "9223372036854775807"
+      ],
+      "expected": {
+        "constant": "ad856df8e7bb8e488b2eb3537c037e29",
+        "power": "00000000000000000000000000000000",
+        "version": "pvac-v7-key-bound-x5",
+        "rounds": 91
+      }
+    }
+  ],
+  "cases": [
+    {
+      "seed": "8b5434d8be47db5f422f1330dc9c37e06dbd57d960106b247dab82d58b7bc67b",
+      "profile": 1,
+      "n": 1,
+      "t": 1,
+      "num": -1,
+      "den": 8,
+      "tag": "0",
+      "nonce": [
+        "2054122960006747232",
+        "0"
+      ],
+      "count": 0,
+      "index": "0",
+      "gid": 0,
+      "kind": 0,
+      "expected": {
+        "challenge": "c90cff30b75ebde186ae5dae97bd600f",
+        "r": "13aa63c2b6c6447d8e7c6175f2e17478",
+        "rho_prod": "fffeb64c74d76d8c291666e7f7cacdbfcf6d4d7299f7102f7cf670a8bac06405",
+        "r_alpha": "7d1b47c00a5953909bf69b292b4edcc124414c9216a84285ebb433305534750a",
+        "masks": [],
+        "delta": [],
+        "scalar_delta": "e0e4f1e4e9fa09294f39053266176b30",
+        "noise_core": "01000000000000000000000000000000",
+        "noise": "f2b747d7127c0ad3157cf2aa5dc30e2f",
+        "base_commitment": "acf69395ee8c088562fc22ca41e38bf63fd710a3b74f9c0fb42a19289a5be859",
+        "product_commitment": "8da5e49e93cdcdd6fe13500d67d3547496b277ffd28067323043a024b9789447",
+        "r_pc": [],
+        "pc": [],
+        "product_pc": [],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "1ff0f0e585e3896d3dfc70369430da2d146d6aafa5dfc132101f25a4edc598e8",
+      "profile": 2,
+      "n": 63,
+      "t": 64,
+      "num": 0,
+      "den": 8,
+      "tag": "18446744073709551615",
+      "nonce": [
+        "2771773001962448687",
+        "18446744073709551615"
+      ],
+      "count": 1,
+      "index": "1",
+      "gid": 1,
+      "kind": 1,
+      "expected": {
+        "challenge": "47051cd386e14516dad2f4bdacc82503",
+        "r": "9c2841f8ad7a910cea733cbe5705bd16",
+        "rho_prod": "8f24d52582b71b3271819c2fb6d0cef9393a820bf2c961cd338067a644547b02",
+        "r_alpha": "04bc22d80dc4ec2ad0a2a6cbfcc56dbddb0f3b82128c354ff69d8f5380a7170f",
+        "masks": [
+          "2b955513bf04bfe9681da6e232a56d35"
+        ],
+        "delta": [
+          "2aa1cc463e3031b75d4d38431755e23b"
+        ],
+        "scalar_delta": "2aa1cc463e3031b75d4d38431755e23b",
+        "noise_core": "da557278c15ebf268f34fcdc9fe74d44",
+        "noise": "d38f94ac838548afcc7f914a0247c031",
+        "base_commitment": "da9b45df0d3bb007a57b9ab009591f21cc408a05fe3502a70a5a9de4813265a0",
+        "product_commitment": "af15ff6d947ba8093dfd52ec791bc0d53bb67b9570d8523cc6295d0a2c8628de",
+        "r_pc": [
+          "78a8517b650628710dc77d508ac53e1f7110a8fc226de4cc14c98cd03b56503a"
+        ],
+        "pc": [
+          "9c3efe04f284b22d566ba9f21298dd1a3e2d2dfdbffd1abda7f6a40c5e2d8f3c"
+        ],
+        "product_pc": [
+          "308815b169898525cdb1b8bb2ca5f995106af9fe57ebb21bac7c9fd3d85d0773"
+        ],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "914ad784462412f6ce0c455123582b7aa31f97fe8c60902e3d0bf1949774af27",
+      "profile": 1,
+      "n": 65,
+      "t": 127,
+      "num": 1,
+      "den": 8,
+      "tag": "7273159299117198480",
+      "nonce": [
+        "5921525589985803744",
+        "0"
+      ],
+      "count": 2,
+      "index": "18446744073709551615",
+      "gid": 4294967295,
+      "kind": 255,
+      "expected": {
+        "challenge": "6efc80c55eb9624d91ac71764eabcc28",
+        "r": "d760e6285696e76491ab8ba05248b90a",
+        "rho_prod": "6bb745f6fef1e9ed384940882c4ac6243f605a896ed53e3da4fe6f2aeb4b5c06",
+        "r_alpha": "f3ba363205b199f40abb9fc790cc2b21e0ff1822bb007d2e05153feb63463c0c",
+        "masks": [
+          "5f13aa561c7ece0b2d58902dd325b821",
+          "4d1e5d822bf9bab157959f1aa2612855"
+        ],
+        "delta": [
+          "32bfb012e204ed83ff7dc4f8b71c8e02",
+          "078a5d21140c75a7b774e50dcbb85214"
+        ],
+        "scalar_delta": "62a016d63d4e15923d3b285581084559",
+        "noise_core": "cabe2d0c9c880bb8866a548ae2c4cf05",
+        "noise": "464837ce946bc36424478f9a2d06635e",
+        "base_commitment": "a5b24baa625e3bec9db0551586a6deadfc7ca5e3b3da48e18a3d219a4b3da76c",
+        "product_commitment": "67cf2a300772cb3741034a20f81e22b42ade5252ff2559fd0e87fa537c9caf23",
+        "r_pc": [
+          "1066bb9a099d5e139c4cdc729b47cd63046d4081ad6d83321783f2c6368b8b29",
+          "2e7e7120fc0f35fe76cdca49b169e772c6305ac49eb1d70d54b9ebe78baeae21"
+        ],
+        "pc": [
+          "4e90a938b0cb74ad485d800bc354de4b0313458b3502f728ced85d656883c970",
+          "1ef893de4f5d983e9f2ab99720c353dd5b299eb1b4a6dc77b69522cd3ef3d732"
+        ],
+        "product_pc": [
+          "48806a2cd33cf8e6067e4118f0f9a1c1956f1ecf0efca5f67e7883690198541a",
+          "e82bd4dda9731ddccd54c8cca3083fac5cdddbb003ada9f1697859898c501b0b"
+        ],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "e6c3d7bdebb0ff1085692c1dcb007452c4652b7040d64ceb1d6bbd016fa323bd",
+      "profile": 2,
+      "n": 129,
+      "t": 257,
+      "num": 8,
+      "den": 8,
+      "tag": "0",
+      "nonce": [
+        "5977894634162948095",
+        "18446744073709551615"
+      ],
+      "count": 5,
+      "index": "2608655089500999205",
+      "gid": 4022090937,
+      "kind": 0,
+      "expected": {
+        "challenge": "f1affd2339b5ad17dc6a47ff2e5a4a28",
+        "r": "6537d2f80f762f44e92d03d9cd28a40a",
+        "rho_prod": "0dce78213b6ed6b94077b51cfffb98b7296f053bebebb7192f1bc4c1d794b00e",
+        "r_alpha": "a500c2a32bb1a16fbd75dcfbc8365f457b96b367d4c28409bf98ebafd7b19c0d",
+        "masks": [
+          "fa4a313f9483a4ca45c4305d7e87d370",
+          "0c45022406073bcc316ea032d9c63439",
+          "d30669068cb3ee048fece964da23be4b",
+          "321eb96536d77ed69ffc8ead05bd6823",
+          "02e535632108e58504a27868903b2e68"
+        ],
+        "delta": [
+          "3a283380fe29228cc98c3d924a898c09",
+          "45681d2affc5e6b74c44ed510aa4477f",
+          "e936ca001bc85f4f4f0e0b93d40c972f",
+          "0583309f6f3cdd00761b5ad27b65693b",
+          "1f6564b16a603543be1de92446bcd516"
+        ],
+        "scalar_delta": "e802f155220718d45db1df803be09418",
+        "noise_core": "69dc4cb305fbd227b48eb2d1d8e3925f",
+        "noise": "70a81b1c938443bcdebb976529788871",
+        "base_commitment": "c3c6f889dcf547ac441376edef47a72fad3c4842515b44987d36bb38d193b02b",
+        "product_commitment": "db479f1acbd0da74da74b203b37571414d1cceebac6db33f33aaa9a2c2d0d77b",
+        "r_pc": [
+          "54d2225569e3c30d430dcf308e2d53616c2a40b589838ee61dd00958efd4ff48",
+          "28b665a9431e8e8940fba6cfad5377eb61acd2def2f2e2293d749354786c4956",
+          "cea3b5324c422056b48207fccb5e6c3dcdc556f90ad23eb5e60bce893d1baa27",
+          "8c89b0be5ec7334cc32fe87933e7f259ac46a096d188faaa6ec38bbb84a1077b",
+          "b2d49e737f8783a6a310a08a93be94b89970cb008a996c659742a34da34f1946"
+        ],
+        "pc": [
+          "e83307aa0bd1a61083e7963e6f0074ef700d9edec31406666670517a2bd94d65",
+          "3ca223522d3fa214292c41e343c772f1e396e1efa0a814b4dd76b029a94a992c",
+          "a479e4f747cc2f38364c95b37cd4dc8c72370b9d10aa9b2e8a8a23d702d14d62",
+          "e424a827f548c736f8623162f69df491e01aabff9e1b795515bd85509c7cce3f",
+          "764f29595b231ae8759b7eb1c355c3ddbf0ce1f114c82df0065610e7d6a81772"
+        ],
+        "product_pc": [
+          "786dc542e8de664714dde5afe1fd3fb4a28cc58cdda076cc546f884640649b65",
+          "502d62f9a814a595f4726053db46cc8d03181fb3583327f3d4a188d47cabc64d",
+          "504e9685d1653b395896f31190f919a6216c70bcb4ec7d11ef1b8d35a3ace03c",
+          "9cbf6a730a8697ea942174b81e78a48aa694022656de0a3f0d1cdf76c8d9c418",
+          "14051177ee10f7ffe8ecaa8dc99fb38a43b2f69ea1761006e5d08f1a77add010"
+        ],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "42b05f7d1b3575e90a5352000f772ce34f6ca39027469b9dc11034cf69b6a997",
+      "profile": 1,
+      "n": 127,
+      "t": 129,
+      "num": 9,
+      "den": 8,
+      "tag": "18446744073709551615",
+      "nonce": [
+        "9467439402209302179",
+        "0"
+      ],
+      "count": 10,
+      "index": "0",
+      "gid": 0,
+      "kind": 1,
+      "expected": {
+        "challenge": "202df4de56d5c4bcebbc6d143b393855",
+        "r": "8cb21bde789955efed750907aaa34222",
+        "rho_prod": "78c1e524c695ad998a145251e1a4daf56c17af3bb1926c865aceabbd4f566501",
+        "r_alpha": "55a6d87de37a6b212df1be8d739e3aed259d44363a26ffa310ea678dcdd65d01",
+        "masks": [
+          "8cb21bde789955efed750907aaa34222",
+          "8906f1c96cfb347db65f9c4d78e0a63a",
+          "480fbff9eacb2f06687597db418bb725",
+          "6190ea6f8092cc3189d2840c6cdfd167",
+          "0f0cf4d4de88e7d7e496967db006f938",
+          "e991baa7dc454c8873abfb8ff2b8a500",
+          "38329ed0ba093bb9215824cd32ce2014",
+          "bdecea64fe19704224e7ca9133547f2a",
+          "70cbee51b920baee95149baa96f5bf13",
+          "34afa03563cf7cd04d1092a4ea022958"
+        ],
+        "delta": [
+          "68c0a3e832a25c7bfdb68deebcf7cc4e",
+          "90e69db47f59b3d9defe58fa5d7fed6d",
+          "c36fbbc1705776569882f7c2f247913a",
+          "9ef9ac4a7f16d78e3b4b91e31e30d234",
+          "d3b2274151d2a6dae58ca1f63e391f6d",
+          "7060024ee91492ab79c3b27038335e7e",
+          "04cb000eeb35a825def898d1e55f4169",
+          "1a86ecb557ef7c0005642db5f73fac48",
+          "a20790126cdeb4992ff1a974f94c0909",
+          "fac2602b057f74097bb52682419cfe7e"
+        ],
+        "scalar_delta": "9a9d7bf08fe90902ea3466683458813a",
+        "noise_core": "3d286fe289c9f9fd7442b1ea48c8420a",
+        "noise": "12c68795d46894e1747b23f1069f661c",
+        "base_commitment": "9b20f27febd0838b636a635991f895c4f72ba61fa3bae18352b021b697e07d6a",
+        "product_commitment": "e6cc339023868b228700c39cf7e1a653a2c1f1408de7add19fdca6ad0a121f27",
+        "r_pc": [
+          "0ea63b70e8044c5a9dbd0e71abb08d7af8c824a18c397d72956073dc3aad3d02",
+          "f8df994c183b6596a5316917ed44ca5a4875c60c5a7617bfe6b564ae95244c6e",
+          "7a141d296073bd26bcc662b0f06926bb27c51e455a7f3a3738640e43d6436d7a",
+          "1a31641ec7c07b7a6af9a4ccb36465f6663083375974c496a7bff2c4a9a2d72d",
+          "9c550c0c635ea89f3125bfc2fba7739ea4a51ff8c4ea5be30c29013344021f6e",
+          "5ee8917f18d7894f141ed068d171aa17871432d582c218fd9ba95ddca5172c1a",
+          "1a06c76c00437ddad26b6e069ecf4126714465d8ad0649bd2167e8a0e4588937",
+          "046999f6d59be9ed5a7d2c17e21195cfe14193f5ed5ed00b01a24e03221c0a41",
+          "b006245e4efe8016e837f3b4f4d20fb132d62a1d13f1f7698ea3fa69f1e1174b",
+          "c61c3d588014deb18cf893b66e22c0945ae8c616833fc70e06b24f6df10e7e34"
+        ],
+        "pc": [
+          "a6555820e115ce07c7dc4184c207be965d4db7e5e3339c34d8512cf73af78031",
+          "40c328b206439f5f4858979efed22d48e25b3413c8d918a9f86aa9c00a0c8815",
+          "8eee29165e43ddfff931d8edd05ba34c54c7c929f7c5388c9f88e728e917f670",
+          "08e6f040b1cded9c7f1b00a5a94c0a768b248ad12c7829fd6b0aa24ec74b5e21",
+          "2a56635238d88e9d0dcef03f3a87244d444d72994f67c83e2fdd731151940959",
+          "e4323184fb07fa5df148ca858ea01b78ea6ce01d0f97a9853ebf9bee954ceb0e",
+          "4a4363d7d2981f54a352236487cc7f114fd8ac1ae4e507d0d487ead742e41345",
+          "5e40a156d8c6fb508d98b1166d6da1d45ba49b16739aff8cfcf663265e53bc13",
+          "3ca7754c35819959e5650567b238484792be1b593d966981d31d8faebfadd429",
+          "725b6b5fc7e8e6c5fc34db89604a931f9f5e1addf1aecfa5be7496c9abbc555f"
+        ],
+        "product_pc": [
+          "1cb424db056745ecad2c236a866430ceba4dc0a42a0d8f87c0edbd7bacfc1f66",
+          "de48fdf3d11079fa2f7c0c5c3dfd61f26f9d3f6ab27b68574b6c891a11a78222",
+          "246cc0658a152023278090f2521eb0d876a476058e833e2f8a87b22bad9afe63",
+          "d48cca6bfa0709617ea7d47ef457b89d5861a88267247065bf8828dda0cc8879",
+          "4a3c1f77d6a8a12af2f49cc23219d5929650ef27fbcfaebeaf44af47779efe15",
+          "3e80ede12265ab6fdf9eb3c1b7a431891111675957b9f3a3998b1418ec0f566f",
+          "9e79f514b7bbefd3bc12025beb48d8300659c23a5db8ff2a60bf4f5d76d70416",
+          "be53a4f6b49eedf0c9daeadf655cb4b4ac314d08477e919376b7b9baffb28142",
+          "acb930f8d91fcfb307b04d23570fa170365089d7239ea99bad221bcc9d82c409",
+          "ace1a34901f5ae991a34caf33df2f3f8c4925724389a73405c6c62cd3b399e28"
+        ],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "15caff786f3e8b8948ab35f1fe3f77c4f435c1ea1ba578c59b759568af1c6d52",
+      "profile": 2,
+      "n": 65,
+      "t": 1,
+      "num": -1,
+      "den": 8,
+      "tag": "12490335458527691521",
+      "nonce": [
+        "822396569771301176",
+        "18446744073709551615"
+      ],
+      "count": 0,
+      "index": "1",
+      "gid": 1,
+      "kind": 255,
+      "expected": {
+        "challenge": "529dec01b57ad7d03edee76bf9fe5037",
+        "r": "fd7e6a9be29e7ffe43f40bc3c6a01e20",
+        "rho_prod": "0b7bf979f1303b6cd0d849f3260acad51772acada694ce86031c62241445f003",
+        "r_alpha": "eb9531f89b06c28e85815460e9a89b1098fb14f67f697e131c4eb6b409eccf08",
+        "masks": [],
+        "delta": [],
+        "scalar_delta": "a3d32dc708a9081965cab9b6c84f3e2f",
+        "noise_core": "01000000000000000000000000000000",
+        "noise": "1f7e5d847476fc6f267d42c319bb3d71",
+        "base_commitment": "51544e9327e19a72eec1e9c9df7e570384f70ced4dfd4399b2d028027e14c863",
+        "product_commitment": "ec11e9c8ab1979ff72bd764089452e273d90964eeef15e343adb7572dbe50849",
+        "r_pc": [],
+        "pc": [],
+        "product_pc": [],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "e5424e94bd9d0938a5212edab7f52fd0a2967099e74373664e42b9c6062e4486",
+      "profile": 1,
+      "n": 1,
+      "t": 1,
+      "num": 0,
+      "den": 8,
+      "tag": "0",
+      "nonce": [
+        "4347930281045480582",
+        "0"
+      ],
+      "count": 1,
+      "index": "18446744073709551615",
+      "gid": 4294967295,
+      "kind": 0,
+      "expected": {
+        "challenge": "739d2337c302af05f680296e5d3f605c",
+        "r": "fcf4522fe3e9ebdd24722cdd9ea85353",
+        "rho_prod": "649b0b4868a5fcf14ba050d79bc6cc2c91671a82582566890d021dee9da6410e",
+        "r_alpha": "e43689068aac7815633c57547310055a11b4fe4d02629bc44709c264b0448504",
+        "masks": [
+          "2f07e962fded4c71650eb7da847f9e38"
+        ],
+        "delta": [
+          "01000000000000000000000000000000"
+        ],
+        "scalar_delta": "01000000000000000000000000000000",
+        "noise_core": "01000000000000000000000000000000",
+        "noise": "01000000000000000000000000000000",
+        "base_commitment": "4ff0b9f414f9e452b86cd865a5aeeec2c5de6d922637b19a6bb497bb1d06e537",
+        "product_commitment": "79125a60678d6096d985e628e24fd07bbaeefdf6e7c8e63f537b2e43706de0b2",
+        "r_pc": [
+          "2ac2749085939ea3fe21b67db6f8dd9a6f41c97835b57bf0c515ba093e4ae751"
+        ],
+        "pc": [
+          "5ee29ced2420ad1d3f79a8e6e7882be4a0c6e7fc817b550f8090030fb7303e1b"
+        ],
+        "product_pc": [
+          "b6f958a5ced66509b04738755ae01ccfdeadd16ee0368b10fd6fdf70d20db87b"
+        ],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "9df17308913e45e1eb6e6aac98a37ed03c0219f658fe25f0d7cc52f882d688a3",
+      "profile": 2,
+      "n": 63,
+      "t": 64,
+      "num": 1,
+      "den": 8,
+      "tag": "18446744073709551615",
+      "nonce": [
+        "1064451273416576017",
+        "18446744073709551615"
+      ],
+      "count": 2,
+      "index": "7799268031367150886",
+      "gid": 1174692045,
+      "kind": 1,
+      "expected": {
+        "challenge": "df5b8aa070703d78fda94541e7752210",
+        "r": "624378d5485d0cd3aeb361086d7c146b",
+        "rho_prod": "0c710e72da8579eb9b6759832dbde265f0351aeb9f8478f07f5c146d3259c307",
+        "r_alpha": "d69a76edbd2df4049a0eccea1abd22513069df885aeb100481238d0742cdc309",
+        "masks": [
+          "4aefb3fc521ec28fbd88d04a8d182b19",
+          "a70d3b5740fe8f1119ea0e018f7f0d33"
+        ],
+        "delta": [
+          "4b48ca0886dac8f1600bf7baee401a0b",
+          "2f2ac3b054ae7a615e8ae20f803f2458"
+        ],
+        "scalar_delta": "9eb1451b2757f7b0b219ad30208c6f6c",
+        "noise_core": "b9d8fb24c8add5832b4bab489e64ab38",
+        "noise": "726272c48d4ee068ea97357d2ca1ef7b",
+        "base_commitment": "73f0e1fa15eb473a23b8f84e89e38ddab908a571da0d57454f202691f1b2905e",
+        "product_commitment": "a8509801366555bc387eac124b51a9bc597c1be53b3f6595880c03712646040a",
+        "r_pc": [
+          "96bab02ecea49e60b02a4216cab65fc06c55c7f3826c3426682cf2322bb8cc35",
+          "9a1b57211d404c73cee42fddc0e611e7b1017cf1424c024db23612c60543b64b"
+        ],
+        "pc": [
+          "fe3fdb1c6016de24b98297ec5ad977cb0044baa6598886e8788d478589e72e54",
+          "742ce344d181974abc1cdf7afa1822c0b5d09b7916a63a17e684ef67969eed29"
+        ],
+        "product_pc": [
+          "72e5a1e66dc56b4a782c019405016f4accd18dee1c69f1c5fb34f1da26554a70",
+          "200ddd71ae4fa65fabe22768be0f6944fc29de5f91281a4c0178d1ceb1455023"
+        ],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "870194099916a1c9ec86a8e66e399ce6b2a756c6976c176fb0b898451571216b",
+      "profile": 1,
+      "n": 65,
+      "t": 127,
+      "num": 8,
+      "den": 8,
+      "tag": "5919822807840635677",
+      "nonce": [
+        "3157417344283442801",
+        "0"
+      ],
+      "count": 5,
+      "index": "0",
+      "gid": 0,
+      "kind": 255,
+      "expected": {
+        "challenge": "0accef407c08852463e07524b93d3c3a",
+        "r": "ac5ef3fe35ab7fb1672f31ad7dbd5617",
+        "rho_prod": "dcbe796151d5ed19821f94c890c20a177d8005fa80806329b85c72a2c635cb0d",
+        "r_alpha": "83255262bf72a033ddd2fd30e0afc982c306df41a15fdb6e8f1c3a32c7f2bf0b",
+        "masks": [
+          "ac5ef3fe35ab7fb1672f31ad7dbd5617",
+          "023c477535cc81601a2f74cf4bdf4d1a",
+          "af34ccb8298d9b8197d4064240d2dc72",
+          "582767b9e7e8fe518df9f1bbfe592407",
+          "b43226722718ade12e246b31cf3b0460"
+        ],
+        "delta": [
+          "c7a27eb918501ac64ebc918170f09a02",
+          "f49df22920cefb269c5decde3e3d4871",
+          "6247a05ece67f070dffc3a9ca05d097a",
+          "37897b8f0992a2c70eec71c5f104fa57",
+          "1edbe4be0587a509e04e711a084a867f"
+        ],
+        "scalar_delta": "15435fd778b943e42adc27abda6c3c11",
+        "noise_core": "7cc383815c9c76027b015d0af391202e",
+        "noise": "b77d244b5b99e9b7c8c94b060990d814",
+        "base_commitment": "ce571fb41888acbb64577b823b77f9fe5d17e9b18ca10d50a6fa3c022a79a45d",
+        "product_commitment": "89d9a6c58e1b3013d70d95dc7d4e57722137afee634849111a046f7ff11a80b4",
+        "r_pc": [
+          "babf9c96c5481c05ea67a5e44221aaa806beaf8b1f1fc9d7a905bb15d8bad721",
+          "9011736c65d88faf7e3167d776d7293d3cee91f9d3ce3eb346f42e4517215b0e",
+          "828496a138d4af5c458dd60b1f39366f0021c1455ce1b630b22fc151cf6bb20b",
+          "2eea97119b9fde20c57343aa27407e1c1536818255ab3905e8582c7286c28f60",
+          "14071f533ec7a949d7318390e9df019427109a78730ebf43c6b397c6b5378517"
+        ],
+        "pc": [
+          "04dc4a2b5aa41c6a9bebd132f07d0c3950b83a8b57837ff96337ad398bec2773",
+          "86fd6e6d52c1f155af53beacae9f2ece6c41d50fc29f8ca5b365a2ed3a07f156",
+          "f6596dc2398a126053fcf477f4b90aab54c96a5aeaa7cb471f2e7d65e2f4aa3b",
+          "de2dc7af755e721cf33f2721b7631da278666c0aed1c2761086426d4bdf29a26",
+          "ca1b1b2cd2046d76294bd2a1aae10a70f1e114c59ae336c280667af80d78303d"
+        ],
+        "product_pc": [
+          "f635fe8373cd9d251ee41513d0714cf5adbdccfcd637920f8e727d0b540fb217",
+          "86815bd3a873c5faf82de4599cf0a20df5b4aaa9d912dcb7b8fb8c111f8afb61",
+          "f22649ecfd901a7d8e0256f4cb2377623afb03239ce0505801cb32670d71fb49",
+          "d85aa60eb7f977eb60a4bbfe40b2c538885f70774818e24d95dd73e8397c230d",
+          "9e9c4cec2a83cea8ef9c74f69e5d1af89830c43c699630f5bd55b88e3b006f72"
+        ],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "7d652005f5d892d835fb9dfb6ea246ff4f784da14ed2c5681d4ef750374aa09b",
+      "profile": 2,
+      "n": 129,
+      "t": 257,
+      "num": 9,
+      "den": 8,
+      "tag": "0",
+      "nonce": [
+        "5369487857949025710",
+        "18446744073709551615"
+      ],
+      "count": 10,
+      "index": "1",
+      "gid": 1,
+      "kind": 0,
+      "expected": {
+        "challenge": "97a019c3cf85c0438a41679594563c4e",
+        "r": "1c490052708a5ef9895b71a9b6fd693f",
+        "rho_prod": "98283bd194ca743cc46d99d40707498237ff063ed1b73c70bba87519d2fbb200",
+        "r_alpha": "fbb536fe77004daffb74950c6085594347e82a2e3a0dfa6eabb0ad7b5058250c",
+        "masks": [
+          "02b8b02e4dcce40a836e417a08048c70",
+          "1c490052708a5ef9895b71a9b6fd693f",
+          "f2004921e73353bb46d94336b5eba445",
+          "da5b0210bf00d24abc32fd18193cae6b",
+          "7093b845a34cd521c4783960c4e5926f",
+          "6c03fc6bb3ca7e1310284e721e64fc23",
+          "d9983794203ccb0f02de284b43551b52",
+          "07caa61f1f934a7eec87236768e36239",
+          "c37d3977e63fc79f8b8a85da6af07270",
+          "b615a79f6b51d4dfd102777b9d24c51d"
+        ],
+        "delta": [
+          "bc34aa9d7478c3dd9c36f95727a4e244",
+          "2337c38da1d5dd086a4b9975f9edde72",
+          "ebd080c05945619faac4c9e5a39fba09",
+          "208c8297eabfd661475081007b4e3140",
+          "87ebf13347d785cb78a2612141c5784b",
+          "f0e7ae3d79e432cfe0b74924490a894b",
+          "7e56151ece7f580670a59f74dd48cb7d",
+          "76fdea7ab0e09679d6c244825024ff14",
+          "349a1988a25109259539454df7902006",
+          "96cedfa2947dad0430bea30aee97821e"
+        ],
+        "scalar_delta": "92479dd5a28b04738ec5a9c355efe93e",
+        "noise_core": "9dcdf7100a9d976592c800348d4c590c",
+        "noise": "3fb889a74b59a8d4f1d0928c544dca16",
+        "base_commitment": "f5241b9e68ad93f164881455845c58aa36ddd9f316c297a575af22d1bebf2bb7",
+        "product_commitment": "bfcc00cb1403353af4c1216cf8910e677904271c6dfcd5c0c50a02a4c0fd9064",
+        "r_pc": [
+          "704c91205685b8649c1fd02965909289d593b0a837941d5e2b288a1d007eb716",
+          "38111b221a3768207d325b276f3d0b54a236c6fdaac9f4ec7474709784823a17",
+          "aed91b199c8b8ead6de732f9422ca4ffa91d88807643d585235e1526dafb594b",
+          "12279e64f2598866600c26bcc2deb8c1061947771703b6aec0061a3f36ce2722",
+          "2ab7eae9754d7820b5b21aff331e4f405c9bc7afd06063ed83fbf1e7747cbd1c",
+          "3aec1def4eada039f7e2c5d3f4e4b2d3e31e6019477fe5692a28c7c107301a12",
+          "4cd5c25eea317676728a9e8c3b7bcf5b5f6d248a00497d67b57fb8f1f0aa2552",
+          "bc05dba03c2cc97738dea349f66a6f95457344809ecc1903a5b67a2bd292d576",
+          "c24f627657e67336ca7bf1e1c12fb7145902601c0ca888c94999ff36953d150f",
+          "84bf3a45c386eee8f24cfdc166e03668ac2fa381e54ca5582f90b839b9c38f7d"
+        ],
+        "pc": [
+          "76abd906f14d9c4efa321e043e9a61c7208332464e8ae972fe785e6d8cdf6100",
+          "1ac1ab21041c58768dcbb080ac9e77a2ff87688d059cf61978e302489d8b0d2c",
+          "1883352d3e69774aeff8d94cc868b2e89e11ea6f36b9e070acffcbb0c5d51765",
+          "401b1acfa7b83dd85d9fe3c3475f91fa95f33b22edd22c8aa2fa9ca611a77f4f",
+          "b0891d3acc831de84722ecb6c4d5bfd42bbce7d841eaf46e6d45672135e22739",
+          "68582aaaef2dbd8daa3c93c390fb68c91897ffb74fc5a7a43f24cbb125a24c4d",
+          "1af1257bb98a7bf43eecfbfacc3ecaca12b3b0bb212fdcbb90067a8a6b96a80c",
+          "d8f75241e19c1e3ef78f58f4506696c0e2fcc82445397f3bfcdb8aea701a9f10",
+          "4041a57ce55f886f0015ba725e76c6edce5bdaaec7f835442c30c2618965bd2c",
+          "40866100507462ea2059f6e5c704736cd9dbff58f9a2b17e472b214131b23512"
+        ],
+        "product_pc": [
+          "869b77b85a767992b78a3bba70de00181cc4ee7a839067e6677d3c5a4ddd4b6e",
+          "0a4b4bd3e51bbd49443e1ea8d6ebe58e4ddebfee8d936b3264091b85c9197027",
+          "e450d0c00da29dbc98cec4c0b23396eb7ae6de0a4dc7746d7b33ac57c57dec77",
+          "66d7d67793b99429ac57ce85a3ee13fc7458969bda4d2abb26d957b24a997504",
+          "4e2c3da7b1ad52f7577f7d729a295d599e4aa5942dd0c57e5b6f89de07b74879",
+          "0a493f5f80c3cebe203eb68f75be550876095c74dbbfff85e920dfebcda47369",
+          "d22e437241a87e28fd3966d1af72f228b74e4d1f0282736a2c4225da8b95731c",
+          "f09f17d22c96a6a866af057e686bbe381379d2cbc9989303a7978ad1d8fba854",
+          "66e1dcc7f05db1e5b8f3064200abe419abd560716335ca775d39cad8aba48403",
+          "3480241604f0387f4943a5e40e480f3ad4c6ddfaa2b2464282393baa7f85296e"
+        ],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "1530d8cd421458574f24ab7989076c3984ca41304c293508841ca88ec8dab91a",
+      "profile": 1,
+      "n": 127,
+      "t": 129,
+      "num": -1,
+      "den": 8,
+      "tag": "18446744073709551615",
+      "nonce": [
+        "15145086102882701811",
+        "0"
+      ],
+      "count": 0,
+      "index": "18446744073709551615",
+      "gid": 4294967295,
+      "kind": 1,
+      "expected": {
+        "challenge": "73a6d8dcf3b4a4c8ae58c44948bbc412",
+        "r": "6fe5919847febbde837be29494c0ae7b",
+        "rho_prod": "d9aeb835ddd210f84aa11079769f8a54f5ca18a75c5844d21a419c927feece05",
+        "r_alpha": "2baa8a329d9999671e92e2e0efe346223c5fcdf7f3c06c0f564e67d855b8c505",
+        "masks": [],
+        "delta": [],
+        "scalar_delta": "d3a238ef1ffa78b15fefeaeb8b047664",
+        "noise_core": "b4e5be67276d6320a0aa8d8ef1715418",
+        "noise": "f52431b568118c190071515071342742",
+        "base_commitment": "c4b8f0725473d13466a7e706b2d907c173b33c59d6c4a09ef1a95d9d4fbbc5f0",
+        "product_commitment": "ab08e69169df321dcfab422492d57a9d22f433160c3709a4e3c64948dfa8a68a",
+        "r_pc": [],
+        "pc": [],
+        "product_pc": [],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "83c2b77d33d5c19e9a62a0050ba9f14a979a35f93e6e46847cf8ffe926e6a40a",
+      "profile": 2,
+      "n": 65,
+      "t": 1,
+      "num": 0,
+      "den": 8,
+      "tag": "12670355270489134309",
+      "nonce": [
+        "18121752908301179853",
+        "18446744073709551615"
+      ],
+      "count": 1,
+      "index": "17668861699879050247",
+      "gid": 3580985943,
+      "kind": 255,
+      "expected": {
+        "challenge": "f70ad26332bc7728490e405c0dcee258",
+        "r": "a4f3e1bfb169e867cbed7ee6c300cd2d",
+        "rho_prod": "0fc3bc03fbba566a5d4cd753b2158353183da6d6028c84d72ecaccfabec87b04",
+        "r_alpha": "4447e172077222c0b00fde20826c163b1a3adf2ce149fda5985778f6b9b2eb02",
+        "masks": [
+          "422dcd9c4b207ae38f9637b0652f1a4f"
+        ],
+        "delta": [
+          "798a691d9f121040ab19ac6f02e52b42"
+        ],
+        "scalar_delta": "798a691d9f121040ab19ac6f02e52b42",
+        "noise_core": "8ab738d2759b618f71ac189c4066741c",
+        "noise": "a0f93e2df026dc346e7b7b58328f3a50",
+        "base_commitment": "2b5cbb0b04810e0ed7f1106688a9311ad471adbd95027328177e07a1ad267bed",
+        "product_commitment": "69d1896269ec1e628cde5115d5e5ad20220427c23b22c425ce8da799d26dd6f6",
+        "r_pc": [
+          "8e4892287b577c355e489f4abc8cdc8af479adc822ec8d5df82c99194d287739"
+        ],
+        "pc": [
+          "76307da0bb507e1de5f184628fc5c275ecf3d6f0442e38566244bbde64a14e6d"
+        ],
+        "product_pc": [
+          "fe8ccffcfd1b1f29da57dec8cd0e9b907f6f0db9b85ea3fa5e334f39b18fd167"
+        ],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "258e09b612f41216fa5599ef501ea9b9bb2bbf234a42c665a999fb6a0ad47a38",
+      "profile": 1,
+      "n": 1,
+      "t": 1,
+      "num": 1,
+      "den": 8,
+      "tag": "0",
+      "nonce": [
+        "8486137170288985136",
+        "0"
+      ],
+      "count": 2,
+      "index": "0",
+      "gid": 0,
+      "kind": 0,
+      "expected": {
+        "challenge": "0ab7d9bacb3dd5ab04904047ee0ce92d",
+        "r": "2e8febc1f8b86eced5d469fa37895448",
+        "rho_prod": "0a4dc6ed5c13067891a4741e3c6772b867acda99466907b9fbb81def0ad5e20a",
+        "r_alpha": "15d3e5ecbf0eb6113792aad9f5b412f23bcab6fb0300c8eb43745552e1ebb80d",
+        "masks": [
+          "2e8febc1f8b86eced5d469fa37895448",
+          "a7906d00b6c1ca3c6dead236742fbc3a"
+        ],
+        "delta": [
+          "9bc4a7594a7bb8b22c0092a016e81010",
+          "02976b6cbc7452da18dcb274fae06c29"
+        ],
+        "scalar_delta": "01000000000000000000000000000000",
+        "noise_core": "01000000000000000000000000000000",
+        "noise": "5995bf15e096ba9f84ee722f7274b701",
+        "base_commitment": "f17645501fa497782db44bcac63c6c0fb09ae5ef2c9b10cfbdc644870e7e607b",
+        "product_commitment": "edf1115afe1dc09a31a79559ca278bad01ef40b1d9700ebcc505b38192a8f0f3",
+        "r_pc": [
+          "38d9044cca7e662291ca9334826b65595d182a8d59cb3fc1b9882a19700eba1d",
+          "e40bbc02939d68c284ae89972d5e8e73a763075bfb04e4c084b61d4dd1c5be65"
+        ],
+        "pc": [
+          "8ed803ba49ea8d59bd1dc5cce4bf60b8adc27ffd0c5f60c9404145ff78382a07",
+          "b865a568ee751592720cb69adcd63510f74c0d780f97f588d8517bfc86719166"
+        ],
+        "product_pc": [
+          "d8137c5e781667b602d7f6e322cf149e47f58cd4d19bb8726a9dbb0f8f62556d",
+          "58038b281d2ea90803ee56b5f938c614b11e4f241f8689940ee1f06586faf958"
+        ],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "228a82857cba1233e2bf1b7c7b39f022adc8e402317b379be2067cfb36892d4d",
+      "profile": 2,
+      "n": 63,
+      "t": 64,
+      "num": 8,
+      "den": 8,
+      "tag": "18446744073709551615",
+      "nonce": [
+        "13788920784882995640",
+        "18446744073709551615"
+      ],
+      "count": 5,
+      "index": "1",
+      "gid": 1,
+      "kind": 1,
+      "expected": {
+        "challenge": "f7d1dbc3dcb82157d25be61ee327682a",
+        "r": "65b8e76f559093f769b278626911c34a",
+        "rho_prod": "d17db3face834d8a4f2051c94711306b266df8bd96f32f816ccf484d1167aa08",
+        "r_alpha": "e1817dda4c4b173a4015c3c626181b3551cb81e0e8332d9a288b91676536d907",
+        "masks": [
+          "c07fea93f1ee9435dcf09d9c5fb9bc5b",
+          "65b8e76f559093f769b278626911c34a",
+          "c9788d80d9116364af5072c639416d6f",
+          "c5a756c0ef8448ae5ee30eeed0da334d",
+          "a2185018c34d81f9523db5b3df5f3b4b"
+        ],
+        "delta": [
+          "e7fe5f347ce922c51c7bfe6290d69012",
+          "2a8544574a683a9e85d519eb9d2f8a41",
+          "77f83356d968c767e77228dc87bd1834",
+          "eae4ffebc5f576653cfb46e5aa0ab72c",
+          "8ce198205570a5b83162ecbedae96d26"
+        ],
+        "scalar_delta": "91a5f75da57d57db9c0ad1904b450313",
+        "noise_core": "14289c46810967cf6b23314550dcd554",
+        "noise": "d80128896f8881e49e15411f4d9c2d7a",
+        "base_commitment": "9bd5b52b620708201d3776d64973f6bdc3212a392cf0cb676aab04d5f95814c9",
+        "product_commitment": "08f8ac5256f9e98ff7c94db99aabf50e10e77e90f54ec1137a28eeb9070024ae",
+        "r_pc": [
+          "56b6ec905da66704e3ac02b1219dccff1909d765f8c37a7906515c110e60f75c",
+          "e84fa08a0739d73139368b931cae5b118b27936d3c00daee20d0680f15f7d16f",
+          "d23ea728e2b47239521f48ff392cd73c0cdd98e53c35939cb66f583268836146",
+          "52bd2aea9e6b15a3ce282b351ef28211c2517c538a5ffd7120cf32c67ae1f87f",
+          "8a9f07a88d7457372858e552535dc5acea4e1286a4be3e799a82d7dc9015e931"
+        ],
+        "pc": [
+          "4ecf47ccb6ed36b2c03e64629e2bdd991ab8e3bbe9ed3f491f8bb4469f6cf62f",
+          "a4918be0cafc93a2f2dd29ade56940c81d819384830197090f5633fb8a59f57a",
+          "800cdea8c13172cc3e4280b7fd9d35dd9af59c039e6042893402a24e7660632d",
+          "bcbf69c8171e83508270770f6eb65a68ba0e4b4fda62b45447a8a4791fedff4b",
+          "b0f4b0c31ca9e73394239da314a98a8d2d0fa5051c1f54715c707940d2aa9445"
+        ],
+        "product_pc": [
+          "70142f274b5894f84d3c033b242cf57ac527d077d4f7934fa7a4ecba52ff3527",
+          "e4bf8d10a2c1fe494bc2a99ca6b96b9f196ea0853b401c899c564cacc0ec8268",
+          "04d3fb0c3c264e009a637c5929acc985636135fa2036c70b34337d8dad2ac20d",
+          "94baa8d572b186f680d0f3fa4ea6f1139a51fab6dc60ca2eba3cb71e38de453b",
+          "865685943f877bab9f22808f1d7b87986b822ce487d8cb5414a72dc31819ab2a"
+        ],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "0d6c0f0dff6851b539f2a6960a87dfc33c5e5879114915e926ff7eb77e623ded",
+      "profile": 1,
+      "n": 65,
+      "t": 127,
+      "num": 9,
+      "den": 8,
+      "tag": "17007496924629782760",
+      "nonce": [
+        "6938540465242730885",
+        "0"
+      ],
+      "count": 10,
+      "index": "18446744073709551615",
+      "gid": 4294967295,
+      "kind": 255,
+      "expected": {
+        "challenge": "52b52043655f1890cffeaf66f3516e03",
+        "r": "9b70f4d45179d33a949739fe4a5ec14a",
+        "rho_prod": "631224c8b679f9cc62a093e57d9e11bfdc15bc3b93dd33d1bf8fc8fd939d4c03",
+        "r_alpha": "c5c9b0539d34b217862b506accfee98b3bad67d655e5e67b382dfbf9aaa3bf02",
+        "masks": [
+          "14884e02bc22087d2ff6716074c7ef63",
+          "e2d35af338d9a3042ea1dc7ddb2ce30f",
+          "d382bd7d1b197678c034b4b1a0ae436b",
+          "b77a298ff33ea7fc2b2ee181826a1119",
+          "c412766eae821eeb940aa84514c8c400",
+          "90e9ac541b8dfec4bf84a2d3a255424c",
+          "06586b2c25aac5fdb187ae01fe777006",
+          "8334396560d7d658f0b4e083a0917e64",
+          "948873b0e10517a4c1fca80e276bc91d",
+          "a69627c0190fb2b353a57707d81e9e50"
+        ],
+        "delta": [
+          "4c9c2d61202292b5b65863ff2616eb11",
+          "1122d5642b1586acf1dc3989625dce07",
+          "27724d5014e1fc2f0197d7b8fc4a7770",
+          "9fa4a9fc698f14ee37f26bab622cd924",
+          "37bea83c74169d54763701c8fb926f24",
+          "614dda76da66b7c3092aadf37138571f",
+          "ac1803877375d10a17d10dc60bb92c64",
+          "fe05ca0e19dd6d025d5b5d0bbe10160b",
+          "7481f20e6c5a088c15d8bcc74517e858",
+          "c70f3a625e0b8a99beb61f6545f1a35e"
+        ],
+        "scalar_delta": "97eaf31f903833a0edc5348c827da93a",
+        "noise_core": "01f293d04bc2c92aff155c88498d176c",
+        "noise": "962630a6cf55f237d1e72b95ffe68a51",
+        "base_commitment": "5e59b09f635920886366d72b858085fc6de05eed024d804ae66a0a37e3cb44fa",
+        "product_commitment": "4c80a78c4f367435456a6613d67607b3b2ca174036d5aeab0ce821f8ed72683e",
+        "r_pc": [
+          "fc51dac8ac1a438d4b85b1f763ee07610f7dff679a2422cec53326b927f27274",
+          "2a0656ddbdac17d8b66e77af714d69ca2221d8571fe1c2797e9a336790341d4e",
+          "30a3fda4ad6ed27f19427bbfcd6a7d684c853c06dbe18b727cf6ef94c3829544",
+          "a0d5dc3d4a9925e858a388ed7647a5229ef2c1987075ea0426bf5b03899c7a45",
+          "7c62321c3a187abf4585ac9249d3583ec56ccaf6fe1952d8e19adbb26800001d",
+          "6efe55a1915179c60502049e99c6dab72c470617d526fa8e86400d6ec59d5e1b",
+          "9e8abe62faff760845bcce2ec6172affa9b6dc58dc3d381b43722e4c8745d177",
+          "f4de0bcdbf780a71afa721479931ba239cc5c4f492fe89778bb79c735b5bdc00",
+          "c6907e95ff869aed7dc0a741d7b4d00690171b173a6cff52c879ef7fb0c0df50",
+          "a418b4ccc9faf077384541431f3903202cc7c2c3f529e5a31a7b9fd0f552054e"
+        ],
+        "pc": [
+          "d206575de24ee82494bedd514206f78e04431b9d8c6f8874bfdd78b482dbdb77",
+          "a4801e2731799955dc2e31d3af75245c5afa84a78b11c9f70d7628c9f9460f22",
+          "2ca1bfed25824b64ef9f140df3e38de49e3f66d292509806b3155c936680403a",
+          "96ed4fa62bc6829c26dea0578511a731030ed387030024189d18ed3fc259e202",
+          "e0c86848445cb9eb7e9d29460efdf118f19e21fb74b3d24a64b08b649150a15d",
+          "cc14f286af92b8c155f92790645b3fcfe795873e9be5f7a9f4c62011f68ab044",
+          "14b8bbccf9d12a794ecc8c772facb7f45b4605f9fda175d54883f0bb2ab59722",
+          "6a4063512109d1f976413bff5ed579d3b953ec01e9d070c6a4ee42343b726c0b",
+          "4e7cb5bcd04e87197b68dbaae2b370e4983eeabeacc9165e36c5e8ba6ffbc737",
+          "006d650734fd0fde5240b8d80d05ae47685ffb55213358acb774a97f66fa5a20"
+        ],
+        "product_pc": [
+          "a2e746932949ca1f36e3bc376deafcb4aa57d4c5ec64c929439cff31e3c5e50f",
+          "0255dacf21818952d58cfee67f9188c2b05eacd8eaea07eef16ff233ed0f4337",
+          "907e819e60fcbf97b789d442feefa9a16753d7b5ac0c08fc1ef854670b886e17",
+          "0aa9188dd63fd834153661b6b2a3d004321e0defe45ae698bf9ece30a3cde816",
+          "24ac537e3f0544154c3c1a0ebe89f26e820221a86063c19d1ac4b6bcf7646418",
+          "561b06a1817d2f9827b3a94bce4c71db32c1ffa64c8d8a72b2a7098aebe7716c",
+          "5e5a6d0da3aefbda381251f0010de4dcfb8978bbc8f05728ac8defa655624360",
+          "382819d73a645ceb45ebd70665a50096cb72d8fa7c8e5f164ed9e90b22725c33",
+          "908217d3ed47efa14896ca84fff9f3a31f272c8de98bc4e4cbbba9cff1e8134f",
+          "b66eccaee85f9bf5d4bf4fcd5751896888430437376977ae4489e993bac6d345"
+        ],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "8b2cf897b4162a0ca6472328fdb8c46aedad0777ddf93dba4b7c937afefabc92",
+      "profile": 2,
+      "n": 129,
+      "t": 257,
+      "num": -1,
+      "den": 8,
+      "tag": "0",
+      "nonce": [
+        "15638060018318953446",
+        "18446744073709551615"
+      ],
+      "count": 0,
+      "index": "10407162769974216201",
+      "gid": 3678090320,
+      "kind": 0,
+      "expected": {
+        "challenge": "fa98fb2fcbb4329c870eb861d0a35049",
+        "r": "bfda8813fd6ca180ca4f25bd7f0dcf73",
+        "rho_prod": "ea3978a3215789a74486b62354470485688043b34049b60eb0c93b82a712f000",
+        "r_alpha": "16fb1385caa54950db0936db3aceb7dc6fe4e2d33de7db87d7ef3f05a9a2cf09",
+        "masks": [],
+        "delta": [],
+        "scalar_delta": "b3134f6156c0b319c3eb899c186b2574",
+        "noise_core": "043ebc31b77767e6a1a08737f6998806",
+        "noise": "65f43ed55663b5d5f282a01ab67f1573",
+        "base_commitment": "ae0c2585de2a6f3a86340bd3a156d0d1446fada6e4f5f7c7f82e14263af29cd5",
+        "product_commitment": "f260f84a4f4a1730fb7b0456953f66c94b0e7487a38b6442638086da5e3e6182",
+        "r_pc": [],
+        "pc": [],
+        "product_pc": [],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "6d68cc27177749867fd76be2fda597efe2d31cef62b27aad8c327fc1f04ba40c",
+      "profile": 1,
+      "n": 127,
+      "t": 129,
+      "num": 0,
+      "den": 8,
+      "tag": "18446744073709551615",
+      "nonce": [
+        "2611549073387982753",
+        "0"
+      ],
+      "count": 1,
+      "index": "0",
+      "gid": 0,
+      "kind": 1,
+      "expected": {
+        "challenge": "414d8b1ceefb0ff0d09d6516ea863537",
+        "r": "3539080241582d799c6a7313016dc337",
+        "rho_prod": "517bcc0ae0b65155500a591e6d513f67347eeb0503a0b96f64c6b8683842d005",
+        "r_alpha": "aa942688170713f50074107bc2f560f14f99f284e3a8fef83bf59282b9b5ec02",
+        "masks": [
+          "3539080241582d799c6a7313016dc337"
+        ],
+        "delta": [
+          "3b594233c8f0acaf77fe938fa8ad9b16"
+        ],
+        "scalar_delta": "3b594233c8f0acaf77fe938fa8ad9b16",
+        "noise_core": "70b79b37a5868c0a6a9fcac81a2ded38",
+        "noise": "3c44cbb905aaf07cb7d9ddffe8b21416",
+        "base_commitment": "268c11f49fbde50482d0a500244c7bf35cbe14356850ada8ae0cf4e5c02052bd",
+        "product_commitment": "c87d8bb3d7f7d38ea3310b7a5c832ee4fdfe28742de5670eb6d5f3aa953e3a87",
+        "r_pc": [
+          "6c19452702a6a26a48f1b5ea4d16aea670b037d06d904ea65b05ba3acd92b241"
+        ],
+        "pc": [
+          "ea1082377fc684a008e51804d75eee41820e47c5120804f412e711499b064464"
+        ],
+        "product_pc": [
+          "9aa31b646ae10dc39fcbad6b3ada987ef95085bff265266d09d7cbf5466ef921"
+        ],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "f25c4bb1027bbe616cd971812ef18d2c72a83770f8dbdb53df1b0f6b82973d9a",
+      "profile": 2,
+      "n": 65,
+      "t": 1,
+      "num": 1,
+      "den": 8,
+      "tag": "12753805948429515329",
+      "nonce": [
+        "8838940882915867433",
+        "18446744073709551615"
+      ],
+      "count": 2,
+      "index": "1",
+      "gid": 1,
+      "kind": 255,
+      "expected": {
+        "challenge": "3f4cc7ef4f56a81fcbe299f078871e13",
+        "r": "0c75b5c2e4b3bcd7ecdd91b59f4e2456",
+        "rho_prod": "6e2fcf86932ae92349994cfc960e6c48a1316ac87f9ab918907911f347e88506",
+        "r_alpha": "a7dc9ef1755e947231af765a814261d5d990219492fc1294c8c0e3c8a4010a03",
+        "masks": [
+          "ca8125ae3b2f876892815f6600b81f20",
+          "0c75b5c2e4b3bcd7ecdd91b59f4e2456"
+        ],
+        "delta": [
+          "df09f5933dd9cf9c018e5c7b8b47b830",
+          "33d05c4afe35fac6cb6af3e9dcbc9223"
+        ],
+        "scalar_delta": "1f852440b1c185929871477b0f17505b",
+        "noise_core": "d7fd47ea033c13af176486d9564eac6e",
+        "noise": "55f257c37d1841692c1de2e63507c943",
+        "base_commitment": "558ba9cb2e70a7f1fb4dc5f849d28da0ce59ebbe879670a4b5c2b07183e274ec",
+        "product_commitment": "20de4a974c0b82517ecdb573e6799c16632f13ba99bbf18afa409060898f8513",
+        "r_pc": [
+          "3a17129165162433262c794e0674d621bb2cea9dd9dc3f70e94090131e65ea57",
+          "f270e7eca76680298a0f96e90bb5367adf0469157401df8f6fd7353d38c6e35b"
+        ],
+        "pc": [
+          "2e383f5e637f0686eac932fe2a11b1db3955e1a1361a37aee9a47b06dabe204a",
+          "4c5c294c032735b72323eb768123121772da19516ba66e38fb7269f3cb84611a"
+        ],
+        "product_pc": [
+          "6cfcc01f162daadf82f4d0be91696e9fb7ec9fa908cf2cbc1c9ad2257e53565e",
+          "740ddae57fa1ce222cbdf3a028b6bb4473b59ad2760e0ac4105e501ea964842b"
+        ],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "5a381bd3a7dcbc20c21048e4f097b05765ebb65eeb01a2ca8af56f6856e55903",
+      "profile": 1,
+      "n": 1,
+      "t": 1,
+      "num": 8,
+      "den": 8,
+      "tag": "0",
+      "nonce": [
+        "12045827875279309661",
+        "0"
+      ],
+      "count": 5,
+      "index": "18446744073709551615",
+      "gid": 4294967295,
+      "kind": 0,
+      "expected": {
+        "challenge": "52380b3bb66f1710905c7eabb124697d",
+        "r": "30915eff3b6bc951134c3ebea133fa7e",
+        "rho_prod": "5619faf538a16c93d0b0d432abf34f236f75ff3fb863a4adb27c59cc443ad902",
+        "r_alpha": "7e5fcc5a8abdbc7640490b21fc282fbabbfd3ca7533cdb91e5520ace1bb4a803",
+        "masks": [
+          "6216d91b64d5acd6209ede3e036cd52e",
+          "04eaced566795c06ae5acf9964a20a0a",
+          "135d4d208c474e720ff0f69fe5a67324",
+          "8934d08fd0e97896e4be6a1cdee59545",
+          "8b5a77ac4ec937ac3e085c713408c974"
+        ],
+        "delta": [
+          "265f4cbeba8f7c766c35b193647d9539",
+          "87649794fa7dcfc1876b5c47e35bd21c",
+          "e0e556c7df76c17da5af80bde6477144",
+          "fff02408a9d8100bde34f7159026717b",
+          "7244ba7ec69fe838534daee471512c6d"
+        ],
+        "scalar_delta": "1b458392f52600eb4153cb6b5f888301",
+        "noise_core": "e5b99f077fcb7af5e44ee82785529e54",
+        "noise": "57e38f8ddc7fbd8754a80eeca7239551",
+        "base_commitment": "aee048d7f1bf2a05bd8a0ac5ca6b7969763f59592e0b7b23562aa65ad2a7298d",
+        "product_commitment": "5f17c37ce1512a107bf54f4d4d5a5990d2089fdb4777526ded4d6c1cb3b0c8b8",
+        "r_pc": [
+          "dc98eff6f1ef5161929c2dfe9427b44b4885fa6218f99588b887cf3a9ee2225f",
+          "187689da4467fa1c5644bad989c3055cb31700c08953176d0b52343aae65bf43",
+          "7caa5fc29f03a3f545d90a29d517ffbcac2e6b5173b0a0aa2e537fd20e385624",
+          "a024e4dc2574036ac967c950a16c4886ed2e67ea2b22432f96cf373aff3e575b",
+          "46614c29dd95489b233242559692d7ac0bf352fbc5c804c9c3d122b014a97856"
+        ],
+        "pc": [
+          "569027dbd7d042e59e866d26c3c23221629bc063d83c614af2bbdf7cc33b356b",
+          "dae592eaffc78fc49312066bed8ce610bbcbbe099ccf6fb6f7020ae97e0b7541",
+          "f413f19d39e9aacdc76bfb5f52628d2721cc50a9091846b615348c2852146722",
+          "c0dd3334aac2c47f7c80c43cb7b946f81a9c26b76cf7803b3a0944c744048745",
+          "c2a2bb9e803c77081f7e109d163464dd553a4eacc876a2636d85b84fbdab754f"
+        ],
+        "product_pc": [
+          "9245726d2e13d55b33ecc60d9acb2a7a6807b39b00e1dd5dfee5ec7e9fbf394b",
+          "4c0f978dd922ee4fa8480ed0b20738186d8bd8cbe741fcaac3947cb4e56baf65",
+          "0c61f7790b10980a6d165dbe3eb19a8ed1087df7924d5de6a8c73fbb75d21038",
+          "fea99e06f9d960351bae16ebf6070d8764e34bd8ddb5b2b49bf5507d6f8d8849",
+          "b83821df067eb10586366815f57bfebf1021511fcd43accfee9cc4dd434c3752"
+        ],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "247059383fd38efc485e3c91323f83b8787701bf60980900c2a1c5bf9477d1eb",
+      "profile": 2,
+      "n": 63,
+      "t": 64,
+      "num": 9,
+      "den": 8,
+      "tag": "18446744073709551615",
+      "nonce": [
+        "1844529388595765592",
+        "18446744073709551615"
+      ],
+      "count": 10,
+      "index": "5600437218136313832",
+      "gid": 1094987632,
+      "kind": 1,
+      "expected": {
+        "challenge": "313cd7d2c214ab9cb0978803841a932f",
+        "r": "49317673843a63ab571a4676d565017e",
+        "rho_prod": "d19791372b4ff4f8895797999a9a98e21ab8c0d369007bf56ee3069624e6670c",
+        "r_alpha": "d55ec06d8c9d96d88044e68a9317e3e0aeb5d8ed14a9c51f1acd696102699d02",
+        "masks": [
+          "e85ea5520880e43e1d2f7ea46ae3cc15",
+          "6c7b64fc72a51af12833aea5376ed86e",
+          "cfd42000f7dc61c23fa2970a60e0fe16",
+          "88f77ed030738068ea5fddc9d6d01e7c",
+          "2f8a4a83d1d4658356f17c34818ec003",
+          "b62e051198454941d86657f364a80f20",
+          "c06c7bbacd5c9c9f3ef9b24032d19b52",
+          "b7bacc7e95b786bb23aa13a411dc1206",
+          "2a4f501115b5e01ed9b09726bce50a39",
+          "44b37d61da3793e89b020970377f8476"
+        ],
+        "delta": [
+          "cad5ea5e1893282cb9f0041e27a8c159",
+          "0bb686ed88870685956f4f1d996f1665",
+          "ac5fcb5c2ce8cb727db5332b08516218",
+          "e84278b791ae0c4b0a198ce5606aa221",
+          "a6fd433a06938314225f7954e4f1bc65",
+          "0b496f0e0cd5f770c894d699f6f1be66",
+          "8d8e6996a9aa74b8fc2fd7178375975a",
+          "c816c982176f278495668fa5f8a58552",
+          "cb96e5d3e222f92c22496d248d903945",
+          "46bed55158c5c3f398f24d34a7355173"
+        ],
+        "scalar_delta": "154fbe1496d5d93e902f2760a72eef32",
+        "noise_core": "698ae72d77cfd8a9e40edc7e6e87970e",
+        "noise": "e64fdc1b9ebc7f1d4a77bb4c18d48127",
+        "base_commitment": "c259b2b835e7b91c777db2ba739710928e35c5c6001bfd9c2fa6496e5163c5a7",
+        "product_commitment": "c94e08431ecd1da7208e4a7e1891f4a20bfe513b33ea09431b088780ea27edd9",
+        "r_pc": [
+          "98f50afd45a48d9c238965486039548551eea6bf369951018c05d0bd0968dc25",
+          "66444fed6ec93bc3de2d73e0ae4d2a201974d1b06b8661c6f4bdfc219a4bf511",
+          "e06a363ed4d4def46539af40680daaba613d609bf6413cfe4488388d14a19e32",
+          "f0c425666afe08e29252caeda988a9faf57bb42fdcc55b858e4c3ac7c5184516",
+          "86f7d38e6a55be401765f8ffb11d74364eda2c1e565d9a55777d104159d09101",
+          "fccc7e1d49405e2720dda293edbe9816ea7762dc251db057491ffd3154a3c260",
+          "20cf17399572a7460642e80ea7b769c1c0280574ed4667a14d2c20572f18f069",
+          "02e8ff9faf3a1aa917aeb1d440aa3fdd9cf2c2a7bb59423cbb476d9f5a206827",
+          "6c8d3d822f2c34a1059546f30af134b9355e26270291ea3be28e0e7d6dd54742",
+          "4affcce21cb0aa473df46b8ed76b1f0f9a2a30f1d5bb5613da96c7bd142dea47"
+        ],
+        "pc": [
+          "8c5ff446bb3273848c9f9e69c1418ccec2ed2c3b374d4d136aa7d4c4b577c14b",
+          "4ef2316639b23a6dd130c6e4c96bd147734f69cad341c4e3411585baa4912957",
+          "ec6a624ba6e46b99a78e9230823b0e59783615fb0abefbe08bc6b3c4f026563d",
+          "d4f90840821892a28d7dc266c849c52d308ea085198c3a179bccb36d38e6776a",
+          "a4db7aa9979d8c7238d7013c17ec9be821daa060e0d9b084dcbca8119a92983c",
+          "c8a88d7aa7d0eb5a8354dc704f2e2e53fae1a57c37f76dae9f2f0f2e447e1111",
+          "cc206b28f450fd711b5889d0ff0bfcbdc252a4e27901ff92eb74b92cb61c3b1f",
+          "34a0f3830dc3dde658c4103f2aee12ad6a5cfdabe96e4bcac67c43b0bca8045a",
+          "5460fa409ea734d2b58b0bf27a477ac537ea2c4d54b7a8fc31c9e863877a5440",
+          "26e16a8e0a2acca21826f45ac538bffa27a29f6b6017ea3fc67f766cab38b67c"
+        ],
+        "product_pc": [
+          "9c756cd2a24da775c3251572d297b72f9b24becec70d4da0099771ebffa58159",
+          "12aa568a45a338053b1aae1df34205b6116dfe130d3b781fee54f60ad98b0b73",
+          "ead473e957b8a5df106329d5fd20192067048eacc75d0a8a30e532e80218d701",
+          "bca08fa61fcde391a86f6ed1e864b8ec797277399ba8c876bcff19303e063506",
+          "d41669f37765816598fb86ac4c4cdc9f9734c38e4457daf025cb9fb616a61707",
+          "98dbec9972a66cf44f6e96e06efe1d2957efe2511fcad38ab1afadfdf8166149",
+          "cea1adf023e015cacbf1298d402efa722b216247410252dec214a1398213aa46",
+          "4cd19a7a5174ce6804819f1f86b7943b1d5089a5df01c2c89dfe358ac74b3479",
+          "5cbc25d66d6d69bf9376a4d6c609d57c34e2ee1844ed04e4eca7fc7e3091cf7e",
+          "ee01505f3bad1dc91a9c84668a7a45ad804856fb30cacbaa08e35ceecdb93147"
+        ],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "6f03135f712f42965a64e581e59d6177b7b2a9d6fcc4e09d068f767ba098df25",
+      "profile": 1,
+      "n": 65,
+      "t": 127,
+      "num": -1,
+      "den": 8,
+      "tag": "17560720474540556857",
+      "nonce": [
+        "13716023362581991220",
+        "0"
+      ],
+      "count": 0,
+      "index": "0",
+      "gid": 0,
+      "kind": 255,
+      "expected": {
+        "challenge": "768308c371e78c89089f051f83d0344e",
+        "r": "053e98fa7ab7b18a38363da75c1f447e",
+        "rho_prod": "99a736b72749c622d7a1b186a90e62909aea44f00892cc0ffb0c128674443000",
+        "r_alpha": "6e95e61e55226e4bb721afddc339ba4c2690fbd8fed80a8d881382052d837a09",
+        "masks": [],
+        "delta": [],
+        "scalar_delta": "0382100ca284240a9cc7a0a445e30f2c",
+        "noise_core": "f4c05445face38cf96f87949d3a6b22d",
+        "noise": "48ac4c60fe8973678db1d8da259fe732",
+        "base_commitment": "47c2b368e1245bc847fc0cc7049bc7902f810ce462919c81987e48c002349143",
+        "product_commitment": "4f6b0fc2456aff3114b68af68aaf79f450409ebb2d22c64325cc629625a3fe70",
+        "r_pc": [],
+        "pc": [],
+        "product_pc": [],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "9d62455344e0541cee807b2b40c2f00818d507738ece794168eb656c5508a808",
+      "profile": 2,
+      "n": 129,
+      "t": 257,
+      "num": 0,
+      "den": 8,
+      "tag": "0",
+      "nonce": [
+        "7042187667511326017",
+        "18446744073709551615"
+      ],
+      "count": 1,
+      "index": "1",
+      "gid": 1,
+      "kind": 0,
+      "expected": {
+        "challenge": "5edf184b55707448d23d5e57a8331b77",
+        "r": "fac1937f81ad11b98d30620ecb08af79",
+        "rho_prod": "74282df9705eb64c5a51e03e277fd03dc55c8554174619dbabd39f4527f4cb0b",
+        "r_alpha": "297615235ff7edacd3aaf05de6656324fc338d9bb885c1a439fe9b0fa58a4007",
+        "masks": [
+          "d1a6d66943e88fa610279463df84bd79"
+        ],
+        "delta": [
+          "0e4617d9124e479b94f17a80bbe99e11"
+        ],
+        "scalar_delta": "0e4617d9124e479b94f17a80bbe99e11",
+        "noise_core": "94e525229d1eb975a3163fc3e3fd366d",
+        "noise": "0fcbd208d2df9b25225cff27d4d2a610",
+        "base_commitment": "bc226fb75f236ff0b8c42ef2cbd6305c35b039a5349d49e53b00c0b778bbf138",
+        "product_commitment": "e8cb0e58c53ee8b41db89b84130648820da7a7e7ea1310529b63b1347354c4a2",
+        "r_pc": [
+          "2ee42246d0517d0d8699decde448001e6a7f5304eb2732b4062d3b09135d034a"
+        ],
+        "pc": [
+          "7881af3eca79990aa8f75cebfc2d9ee45975fb784690ac1c28414f2f37dfae35"
+        ],
+        "product_pc": [
+          "fa5fcb38d8b56bb3eea8bc144f06fcd44e5aabb12121adedc765f593c97ffc34"
+        ],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "76884257a662fd2400cdece07828b2fffc70c47010cfe2aeb4d9c5c6046b08a5",
+      "profile": 1,
+      "n": 4096,
+      "t": 16384,
+      "num": 1,
+      "den": 8,
+      "tag": "18446744073709551615",
+      "nonce": [
+        "10386908806329525163",
+        "0"
+      ],
+      "count": 2,
+      "index": "18446744073709551615",
+      "gid": 4294967295,
+      "kind": 1,
+      "expected": {
+        "challenge": "99a0a012eb47154db2a994a0eb35480f",
+        "r": "7905b13bb0cedcae53926b590bd68b41",
+        "rho_prod": "668091935c12935ccbda3edec2898149b891ca43ceab6bf56e18313ba18b140b",
+        "r_alpha": "72d99cd0e7f21060da120a4d3c489b043276d21719f22056ac188143abc6d70d",
+        "masks": [
+          "89431f516d9ea5651d8d1eabe4a7da70",
+          "42ae421edea918f3d2d1e433eb0bfa74"
+        ],
+        "delta": [
+          "f93e916c1f048fb68743d8e02cc1e129",
+          "9b1106c9bc5339ef942a8f9612b23223"
+        ],
+        "scalar_delta": "3195ebb8377743afe49d52199614d77a",
+        "noise_core": "d25a18f9f0a482a9edcb66cadd717377",
+        "noise": "35bbc7782668371416b33e54751c0c2e",
+        "base_commitment": "2d84b39a3443a7c0640ace611dc8447c054b9f413f3d930b49b5be5083490e7c",
+        "product_commitment": "452be0c1ee91a3588106b30849859391fbcf8333db5d7ab2c414357887e65b48",
+        "r_pc": [
+          "e8273920b4b5ac66fd2a28ddc922f1b81a095f93840dd0b02f352c0dd921a254",
+          "f03638b403fcf683ab89ebe3e92d04e138ea44e1dfae24212d76821c6ae6fc61"
+        ],
+        "pc": [
+          "c6c049c617c76438cb71c37d9e6e5f60537b4085efb8dec26a95d0c11ef5d237",
+          "d0bf94f57b0a219f3ba83058e97b1fbe17f7e3386525ddd5c1491250e1051019"
+        ],
+        "product_pc": [
+          "409cdd9370baaf49637ba08001fc8fd6324f8a13129f8ebfc4db546eb6772d23",
+          "eabc655e894eafcbf9122d2002ea598cd328179174bfeb2693a5f9bba8b3ba1d"
+        ],
+        "nonzero": true
+      }
+    },
+    {
+      "seed": "4655760a0f35fe2e13fec2772bf184405ed4f87ae56b6104f621989efcbe28e2",
+      "profile": 2,
+      "n": 4096,
+      "t": 16384,
+      "num": 8,
+      "den": 8,
+      "tag": "3592186689848453245",
+      "nonce": [
+        "3807722402490309844",
+        "18446744073709551615"
+      ],
+      "count": 5,
+      "index": "6066036991539291544",
+      "gid": 594509187,
+      "kind": 255,
+      "expected": {
+        "challenge": "54185352a41f920bd68fb2c90e03d53b",
+        "r": "ae86f44322ec312f68e7868d92e2ea13",
+        "rho_prod": "129b32d77137d6abefa179cd19e019c3eef9676a862056cf02be847086c4b103",
+        "r_alpha": "7259aec55ccdf06eb6c21eded3630ee72317f15af007c898f06a9038f531ce07",
+        "masks": [
+          "ec34fda14e9cedd3fe6b3382c675f568",
+          "127361d931d8883f796f6d671919427a",
+          "9e90606375c056f6701150486646b70b",
+          "cbe445ff74225d34fc8380d1484f556b",
+          "b3441331faa00e3cac3d797f9f017f6f"
+        ],
+        "delta": [
+          "0ed30705bd420a02a4c7cd81e4af2c2f",
+          "81643efb3931bbeacf6f6ac074f94a74",
+          "b7794303031a2b9f6d970a79e525e721",
+          "f836aea5ceb5f12de0e834b25e1e895b",
+          "2913ebc77a34c567bc61b42b96c8c104"
+        ],
+        "scalar_delta": "82ffa2d69b910190f367e2f598937c54",
+        "noise_core": "ed757e0f934bd5b309dc6f4875bd5457",
+        "noise": "c095f968ee6a8d6f9b770b4f0bed780c",
+        "base_commitment": "adf641f0557a3feb244c874b479508dfe1bbfef1ab7f0ba5f937dc14bb301df5",
+        "product_commitment": "f2b5149e8e5167aa6ac5e1e552d8b71da79b7899d9f838e25432ecc2717cc414",
+        "r_pc": [
+          "da436d2ae374b8cb843702750ab1556a30b141ba27eba6e549fbb329b658f113",
+          "9297a705948d3850af374c5dd5c95b47d07a26501180968f36f9fe121f0e4840",
+          "f8cf90a2ced6999890a875ff93fee5b9099827918e2f6afc5f6f9a5950613d6d",
+          "6ad2a54adf7e6b62567d999231b47bccc65185f661577b1eac906b59d75d3834",
+          "b42b854b291e2a24bcd643bcecccaa050f6ef2c60651e851d0e054c12172822d"
+        ],
+        "pc": [
+          "34e71a071b56e47b280114110ec2a25c8b6b87ff458c16e5479b10234e9f660c",
+          "d46ae2448da139fbd3e4e25626ecaf1fbc715e1403c8c4534999dd97df91891c",
+          "c893fd2d2e5d20dc20eb862afccf58a532e58ffa9c4551c87697b0c3996f695a",
+          "7a3144b94d41ea52f1ed2358128fe7c11582358b8350d59661c71fb87da7b134",
+          "7876254b34f8d4c46a537e7d23cce963a3d5b95f356ef6728ceea3ee026ddd04"
+        ],
+        "product_pc": [
+          "6cd031504bd4f6f3d066359af9f40eeebe6914a24b8bd6d944cfba704bf93c2d",
+          "0652be9a2e09e8a8de706e93fbf5ac19fbe8f7cacb686f4a258f7db95bc4952f",
+          "26d55310f947548d19ebbc3f84cf54c160982e10172d85a41121186448a29e6d",
+          "2a24d2c1b700daf2545b574f14d7fc439fafa333912840a5c4635f8829eb6453",
+          "de59931f25bd045748f49f6e02514ce492a9188cc9a751c405b6e63e1703f635"
+        ],
+        "nonzero": true
+      }
+    }
+  ],
+  "toeplitz": [
+    {
+      "bits": 1,
+      "top": [
+        "0",
+        "0"
+      ],
+      "y": [
+        "0"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 1,
+      "top": [
+        "1",
+        "1"
+      ],
+      "y": [
+        "1"
+      ],
+      "expected": {
+        "bits": "01000000000000000100000000000000"
+      }
+    },
+    {
+      "bits": 1,
+      "top": [
+        "18446744073709551615",
+        "18446744073709551615"
+      ],
+      "y": [
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bits": "ffffffffffffffffffffffffffffff7f"
+      }
+    },
+    {
+      "bits": 1,
+      "top": [
+        "1174036800588596377",
+        "1804913758408999283"
+      ],
+      "y": [
+        "3334024419229298292"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 2,
+      "top": [
+        "0",
+        "0"
+      ],
+      "y": [
+        "0"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 2,
+      "top": [
+        "1",
+        "1"
+      ],
+      "y": [
+        "1"
+      ],
+      "expected": {
+        "bits": "00000000000000800000000000000000"
+      }
+    },
+    {
+      "bits": 2,
+      "top": [
+        "18446744073709551615",
+        "18446744073709551615"
+      ],
+      "y": [
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 2,
+      "top": [
+        "6093757325562127881",
+        "6354094416695637274"
+      ],
+      "y": [
+        "18091831036192745452"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 63,
+      "top": [
+        "0",
+        "0",
+        "0"
+      ],
+      "y": [
+        "0"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 63,
+      "top": [
+        "1",
+        "1",
+        "1"
+      ],
+      "y": [
+        "1"
+      ],
+      "expected": {
+        "bits": "04000000000000000400000000000000"
+      }
+    },
+    {
+      "bits": 63,
+      "top": [
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615"
+      ],
+      "y": [
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bits": "ffffffffffffffffffffffffffffff7f"
+      }
+    },
+    {
+      "bits": 63,
+      "top": [
+        "13858016422228174711",
+        "13263274294216164222",
+        "2213002749205763380"
+      ],
+      "y": [
+        "12871116360091162756"
+      ],
+      "expected": {
+        "bits": "7964cad27c26f0b5486236c709acc268"
+      }
+    },
+    {
+      "bits": 64,
+      "top": [
+        "0",
+        "0",
+        "0"
+      ],
+      "y": [
+        "0"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 64,
+      "top": [
+        "1",
+        "1",
+        "1"
+      ],
+      "y": [
+        "1"
+      ],
+      "expected": {
+        "bits": "02000000000000000200000000000000"
+      }
+    },
+    {
+      "bits": 64,
+      "top": [
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615"
+      ],
+      "y": [
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 64,
+      "top": [
+        "14657132602631316008",
+        "1950773501944730188",
+        "8728776657568942194"
+      ],
+      "y": [
+        "6690912069049472046"
+      ],
+      "expected": {
+        "bits": "4ef90bc7383b96ef36f8a6d2be1e511b"
+      }
+    },
+    {
+      "bits": 65,
+      "top": [
+        "0",
+        "0",
+        "0"
+      ],
+      "y": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 65,
+      "top": [
+        "1",
+        "1",
+        "1"
+      ],
+      "y": [
+        "1",
+        "1"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 65,
+      "top": [
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615"
+      ],
+      "y": [
+        "18446744073709551615",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bits": "ffffffffffffffffffffffffffffff7f"
+      }
+    },
+    {
+      "bits": 65,
+      "top": [
+        "14301376634769425150",
+        "380311964095744434",
+        "9906542361579686563"
+      ],
+      "y": [
+        "18017714658870283888",
+        "11650417065045484647"
+      ],
+      "expected": {
+        "bits": "bf2873ecac9de60fbf01fa80dc0ee465"
+      }
+    },
+    {
+      "bits": 127,
+      "top": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "y": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 127,
+      "top": [
+        "1",
+        "1",
+        "1",
+        "1"
+      ],
+      "y": [
+        "1",
+        "1"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 127,
+      "top": [
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615"
+      ],
+      "y": [
+        "18446744073709551615",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bits": "ffffffffffffffffffffffffffffff7f"
+      }
+    },
+    {
+      "bits": 127,
+      "top": [
+        "1168008808357525179",
+        "9921945052138294233",
+        "3370514536657829558",
+        "9135499764785288816"
+      ],
+      "y": [
+        "14231490919540758184",
+        "13005787893807187251"
+      ],
+      "expected": {
+        "bits": "0ac610b4e7e2b4d6139f8592e9a76a68"
+      }
+    },
+    {
+      "bits": 128,
+      "top": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "y": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 128,
+      "top": [
+        "1",
+        "1",
+        "1",
+        "1"
+      ],
+      "y": [
+        "1",
+        "1"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 128,
+      "top": [
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615"
+      ],
+      "y": [
+        "18446744073709551615",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 128,
+      "top": [
+        "8893902828313964826",
+        "16124845269189472087",
+        "17398185054571414272",
+        "5314263047111072587"
+      ],
+      "y": [
+        "5201133621609459927",
+        "16451877488193616221"
+      ],
+      "expected": {
+        "bits": "08ac805551c2af17a30f4e92ce103407"
+      }
+    },
+    {
+      "bits": 129,
+      "top": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "y": [
+        "0",
+        "0",
+        "0"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 129,
+      "top": [
+        "1",
+        "1",
+        "1",
+        "1"
+      ],
+      "y": [
+        "1",
+        "1",
+        "1"
+      ],
+      "expected": {
+        "bits": "01000000000000000100000000000000"
+      }
+    },
+    {
+      "bits": 129,
+      "top": [
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615"
+      ],
+      "y": [
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bits": "ffffffffffffffffffffffffffffff7f"
+      }
+    },
+    {
+      "bits": 129,
+      "top": [
+        "13941560049623845548",
+        "4082849642358039234",
+        "13234297211365465190",
+        "13702766167199163508"
+      ],
+      "y": [
+        "4000847952643217391",
+        "3258014826601288001",
+        "17089252656776659466"
+      ],
+      "expected": {
+        "bits": "b72f0ecb9e484811478253dd49701b38"
+      }
+    },
+    {
+      "bits": 257,
+      "top": [
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "y": [
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 257,
+      "top": [
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1"
+      ],
+      "y": [
+        "1",
+        "1",
+        "1",
+        "1",
+        "1"
+      ],
+      "expected": {
+        "bits": "01000000000000000100000000000000"
+      }
+    },
+    {
+      "bits": 257,
+      "top": [
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615"
+      ],
+      "y": [
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bits": "ffffffffffffffffffffffffffffff7f"
+      }
+    },
+    {
+      "bits": 257,
+      "top": [
+        "1489507448941063219",
+        "12965931403609751604",
+        "9954734270475772731",
+        "3044637934219634372",
+        "10268781184359666579",
+        "7229352886387208775"
+      ],
+      "y": [
+        "1105775422675886901",
+        "3149239297009987259",
+        "16360093241362811428",
+        "14974697247473875192",
+        "4035285021940026528"
+      ],
+      "expected": {
+        "bits": "14385ff55542ee5430f33b8c7a3c6926"
+      }
+    },
+    {
+      "bits": 1024,
+      "top": [
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "y": [
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 1024,
+      "top": [
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1"
+      ],
+      "y": [
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 1024,
+      "top": [
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615"
+      ],
+      "y": [
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 1024,
+      "top": [
+        "8734468982018525445",
+        "15558780347790041674",
+        "5286477072694066814",
+        "6332170895728411844",
+        "13108357972307952642",
+        "10808261983190270430",
+        "45841324771600535",
+        "15476912258721661298",
+        "701584735064147701",
+        "2146608014231780839",
+        "7168219227507307208",
+        "10842529359866395113",
+        "14998539254827281752",
+        "9812728755267595348",
+        "4248325015466478769",
+        "11106373322905982792",
+        "13247599338420137762",
+        "369394923809632420"
+      ],
+      "y": [
+        "3054262947546819950",
+        "7297149909625139071",
+        "10751720101328055225",
+        "6379675770588193893",
+        "15601171583561858776",
+        "11164847337151361283",
+        "11985652849883639366",
+        "2032284056763455248",
+        "5216734666200654987",
+        "1198660760005506560",
+        "6996378663095993555",
+        "17304186625459982858",
+        "10331138742966015439",
+        "7598704365021461097",
+        "11938748244606844070",
+        "973197909515927684"
+      ],
+      "expected": {
+        "bits": "92a6d3ce0100b0e5b88776866962a10c"
+      }
+    },
+    {
+      "bits": 16384,
+      "top": [
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "y": [
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 16384,
+      "top": [
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1"
+      ],
+      "y": [
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 16384,
+      "top": [
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615"
+      ],
+      "y": [
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615",
+        "18446744073709551615"
+      ],
+      "expected": {
+        "bits": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "bits": 16384,
+      "top": [
+        "14509437597534230596",
+        "16187494606493231405",
+        "9358184543852079552",
+        "8678133392895318255",
+        "12403671788439368176",
+        "3981074384153803103",
+        "4182505051136923630",
+        "7809196641445044300",
+        "2211397355497604856",
+        "5423579024807721445",
+        "17466260634610480627",
+        "18329241449359322511",
+        "2027644779078679915",
+        "14763769277332039960",
+        "12580710289376915408",
+        "582483816451784300",
+        "2477046370484352226",
+        "17225655346986915674",
+        "4308465137403496441",
+        "6183395275850799176",
+        "2586777477087726176",
+        "16691541619523008228",
+        "468807505594328451",
+        "12671948973394043358",
+        "14230691160479926083",
+        "8009442486350334380",
+        "741492803903881551",
+        "13945704491317154951",
+        "4911029141375131340",
+        "2046125867741842271",
+        "674824184386925692",
+        "12330217202149318931",
+        "13606559692607918783",
+        "6157653708050296046",
+        "9362087206799510488",
+        "42810436965096958",
+        "14059728211917807610",
+        "8981814280007864770",
+        "2638381957453594259",
+        "8584267211560657999",
+        "6382229855287720044",
+        "9061319081535318486",
+        "2429667342273738880",
+        "11442641855062361884",
+        "6608013662649042112",
+        "3024967770194788332",
+        "6965737116818154914",
+        "17518201828521208090",
+        "16388416761326602950",
+        "14091623815485220221",
+        "9101472650351735443",
+        "11287037981863838626",
+        "4495918366393205373",
+        "10764225311977260383",
+        "15408868205949446181",
+        "6515089755321201728",
+        "17791746645981328359",
+        "17994582402027682962",
+        "5398540358320701367",
+        "1135163932902779317",
+        "7423082771227582039",
+        "6422064102214808945",
+        "4621866468673453003",
+        "7739198861560307127",
+        "11436641441189483531",
+        "8242824351381481577",
+        "16111339758180092452",
+        "2826757140036850240",
+        "17252333789040905947",
+        "12960345308066119305",
+        "2330894123844846727",
+        "17643148503352853580",
+        "10190725852954382566",
+        "16304625734939744849",
+        "3469171938056592007",
+        "17487596247179875260",
+        "9650575375095595038",
+        "1059922877717640850",
+        "6098752054625146140",
+        "7011873025818478626",
+        "10092915034171952737",
+        "14351618438188200826",
+        "387789518836917739",
+        "10079393039481634191",
+        "4331742753601676244",
+        "2021107268224639300",
+        "12640593900540744874",
+        "43364270114783359",
+        "18218416522756971061",
+        "4362629284412989231",
+        "10954071256538509901",
+        "5526193684392471294",
+        "18005672310374154708",
+        "10090141814580111731",
+        "6958322013456852557",
+        "3488537799179569619",
+        "6405784346300170961",
+        "6958520903300356864",
+        "1730589336018811745",
+        "18065500383298860694",
+        "16480175135678846340",
+        "17859688881915915744",
+        "16767412859288549373",
+        "10390217635510106684",
+        "855514437488566624",
+        "16679369260967558730",
+        "14540108243089341003",
+        "4034746668085317367",
+        "17937433754870282641",
+        "8045991787638804853",
+        "1986426449242784985",
+        "11041728571768072093",
+        "738470041050375291",
+        "12697757718788138221",
+        "17716583129411036360",
+        "15772335742739132485",
+        "11767486791788445997",
+        "11207069433546461158",
+        "2079573302727437724",
+        "2929466447823523071",
+        "13726848213286087390",
+        "6522096543302181131",
+        "15267430727330134912",
+        "457511223785100282",
+        "18202650086901852931",
+        "16766331424530060287",
+        "16848209376642670675",
+        "14751758675172034229",
+        "191269102234379440",
+        "15531159207981986358",
+        "10743785766654690787",
+        "5456437939529467529",
+        "13975125794478865617",
+        "11386996110130684824",
+        "7085955412053991877",
+        "15698648624206155799",
+        "15082080883059955167",
+        "5317996302378804513",
+        "12374661654270213366",
+        "12615847847967062810",
+        "13916911019497516631",
+        "11512265771864714686",
+        "14548074915827450920",
+        "2672620674311913193",
+        "11043697509881473681",
+        "15918288560914223485",
+        "5650516845698029117",
+        "10572515909906435485",
+        "13140977258824299719",
+        "4190949390613292927",
+        "8993805678685695499",
+        "8451762046724142802",
+        "213452991807631234",
+        "4839748165432015172",
+        "10827043667197527313",
+        "12901132110915693686",
+        "4553145496940096761",
+        "12397853080273648579",
+        "10099813102708749832",
+        "13634190995022650362",
+        "1901735512313129391",
+        "5920083260232550344",
+        "8232416346101573765",
+        "14466935524470321081",
+        "4839225039471011184",
+        "17351814735192121883",
+        "5588809902553072829",
+        "13417957240491352683",
+        "17516936640768027695",
+        "12657707536044536020",
+        "965663496495428456",
+        "11593336241321120567",
+        "8747997863806097576",
+        "3709783389110646705",
+        "14220355544647338650",
+        "2274988828978456712",
+        "4750485881592244476",
+        "14499882121908742099",
+        "14647565058230567807",
+        "4598158858077727760",
+        "662301222003087930",
+        "6359055036171894309",
+        "10246695546057235303",
+        "4877868940058245771",
+        "10586719331384086583",
+        "6856755334152817585",
+        "8905673875801052302",
+        "10721203219074095485",
+        "15648539324075543186",
+        "8294122793096884759",
+        "739909971804110868",
+        "2842894928055720343",
+        "11917513624230318166",
+        "12613851106591629771",
+        "16548151569207289923",
+        "11391760358156156116",
+        "6931099107988488205",
+        "9170902275819931892",
+        "13987874414358810684",
+        "16482193574201087009",
+        "4388515185047916851",
+        "1839134239263432628",
+        "8917067824427707704",
+        "14753911080545099132",
+        "12964156070029499199",
+        "9125821511009218150",
+        "14085247709610344352",
+        "12892491278570496119",
+        "14588244641849149962",
+        "3766243152589015172",
+        "7786208385303743831",
+        "4844326684426666514",
+        "2372501064920113706",
+        "14470748695815262728",
+        "9128466521156618745",
+        "4044413694993529719",
+        "15886648425460591211",
+        "15971142661208177617",
+        "10527292374532544375",
+        "10505614974786945812",
+        "853013825733991918",
+        "11787253638283950364",
+        "8424980666464540642",
+        "18422555974335615947",
+        "4641809040211434541",
+        "12680092246371745965",
+        "10768248647372618430",
+        "3717589566845941463",
+        "12317589915133212228",
+        "4207819514715064544",
+        "5850547941350989989",
+        "9940520475890642777",
+        "5802045013165979597",
+        "856117690369827195",
+        "6046290926251399784",
+        "12564514232649317665",
+        "15554432129866208991",
+        "4307382713423047796",
+        "501735910194898024",
+        "12847172927884882691",
+        "13162609981998410196",
+        "15889413972997096478",
+        "4413959310948081458",
+        "2691369378379350208",
+        "11849410959355518057",
+        "17765870858872095510",
+        "12252487492392879809",
+        "9211723738405423516",
+        "12383233129675736609",
+        "11524393946203824078",
+        "13354986183478647145",
+        "13516186952918654560",
+        "405267239062403475",
+        "9473312107762117289",
+        "16070302644350153530",
+        "16829961536294275215",
+        "17814131443176195153",
+        "4977409590458843026"
+      ],
+      "y": [
+        "6727580033492467168",
+        "14837084952062056417",
+        "3984193801232925702",
+        "2367030621520151290",
+        "12927962318693398781",
+        "5650317998090041403",
+        "1909899949925439298",
+        "16706552345058053547",
+        "13203316325965513001",
+        "10489405749321706607",
+        "15007319704547876345",
+        "10113542015969715995",
+        "15151110481133391779",
+        "15874991280056638153",
+        "13493776935706788683",
+        "3857385341574593122",
+        "17304783452097661609",
+        "15900358934895955355",
+        "10615177729627166132",
+        "5976980888823356080",
+        "15321198025625793638",
+        "15134138226448873210",
+        "5547440770337157754",
+        "15695761076378825966",
+        "9283240467016813019",
+        "15485262878672386797",
+        "17034900253872231192",
+        "11784843875862503547",
+        "9752775871351747557",
+        "4503619829166713858",
+        "17608911308292405465",
+        "13665780130572646084",
+        "12814573512233267787",
+        "459320815070977482",
+        "14163734660447060790",
+        "1619795462508659503",
+        "473661983109776747",
+        "7405276489418981543",
+        "684732117300525326",
+        "8728157450382960976",
+        "17037822536625378946",
+        "12184425376475500991",
+        "17386551281163497118",
+        "88591308981949612",
+        "5715508237307981641",
+        "12516453915678518020",
+        "5192672298173105630",
+        "3436298777329084698",
+        "15352060636728185812",
+        "12773059552940715335",
+        "7011667236975641341",
+        "5336336222106650207",
+        "15573445906322943254",
+        "2934930951701281438",
+        "14817728376964587396",
+        "14319827415049399345",
+        "10979177105873256135",
+        "5950409520266901297",
+        "12299871744796501796",
+        "1643941446334558584",
+        "18316429167279558653",
+        "3111202358610223770",
+        "15745339318749666032",
+        "5717593905641861702",
+        "2468287927800698256",
+        "3126432772879236019",
+        "1773225951849181378",
+        "6572317254961185040",
+        "9621863632348524410",
+        "12117947426566979866",
+        "4112390521388533060",
+        "9411976438076487649",
+        "1182924853343363591",
+        "9583949671414508758",
+        "16404348900724788220",
+        "5950256534483840557",
+        "8401886125532140027",
+        "4976739896668974728",
+        "13468280064808658448",
+        "10856390966235651525",
+        "14817718210469133372",
+        "435770668507583590",
+        "11569886463684606163",
+        "12799091943046086607",
+        "5195636355968135933",
+        "4119475891881925055",
+        "12767976318885146963",
+        "6684040605653663105",
+        "16295181136621844163",
+        "13577559319888655349",
+        "13403902287676792489",
+        "8303774924085675729",
+        "15568205407087999422",
+        "5955375622713410221",
+        "1967044386590138079",
+        "8102997529896922584",
+        "916746652783183516",
+        "522538386613069597",
+        "9477233964375786288",
+        "1514607394339826423",
+        "826830494000844068",
+        "3579956034914091801",
+        "12857328164926858564",
+        "7998140298890497917",
+        "17100833162691377180",
+        "1322165335734877622",
+        "905490057685836483",
+        "8333037783817513037",
+        "6082128344370806697",
+        "12705340209924820287",
+        "3406266709818708880",
+        "5724777529556964095",
+        "1959508286315864847",
+        "6203054216068982792",
+        "6380127219542479299",
+        "2182311061772275010",
+        "5947322602225064104",
+        "18018987116718210215",
+        "5027933356464425986",
+        "5735365999258394743",
+        "1193453941636444139",
+        "9949052850030812543",
+        "5582197527645485269",
+        "13212733534303260827",
+        "6833772931805244615",
+        "16813297721596821124",
+        "11583297847853566251",
+        "7162208883116971367",
+        "16426181785222429249",
+        "11591457968564917024",
+        "4030569074130474488",
+        "10555737186704419118",
+        "16867774507333078094",
+        "10410304409904579459",
+        "7347902844834332805",
+        "14684358616536034015",
+        "11388532997513755329",
+        "2775092054528761286",
+        "18018894209491391092",
+        "14505239501182261669",
+        "18142434985418476400",
+        "13414082463764736822",
+        "2928493461034534160",
+        "13722427025329879986",
+        "11121573025631068783",
+        "3640787861176711023",
+        "9408272728439996693",
+        "4701035631221077533",
+        "5367002975152720517",
+        "11705843307770900833",
+        "14779364907660291107",
+        "1095036250942762637",
+        "13883422609060000600",
+        "284071867426056244",
+        "7490767442722473102",
+        "16917895573164025911",
+        "2053017825571577203",
+        "13886980171016922428",
+        "16093678053107473345",
+        "13647396328031177771",
+        "15505011904158382044",
+        "10552325291399751833",
+        "7268249096684638230",
+        "6168642882834976844",
+        "7817454806282606712",
+        "5639222209708083760",
+        "2839053849491929282",
+        "3778174224183256790",
+        "17333413024932275475",
+        "14626872389677408152",
+        "17076784363214771376",
+        "5187530660865707206",
+        "12320967166146149051",
+        "16684913790837935489",
+        "4867013140773588522",
+        "12800974455723750381",
+        "14037717432712347529",
+        "7984936881077144876",
+        "7035190764356287299",
+        "7612038925366730873",
+        "4074123875654750598",
+        "16315031614136219440",
+        "7835688373939960387",
+        "405929920950657212",
+        "8202370982495755574",
+        "16340924596263259954",
+        "2099613977185116684",
+        "11738990053760168678",
+        "9612079387449953795",
+        "8039578302792367803",
+        "7343336288253857616",
+        "8165723401675546538",
+        "17063211525041066201",
+        "9440608404485967759",
+        "11227343360433159406",
+        "17446914294994730181",
+        "5795285700181462754",
+        "4885805543749863447",
+        "13798335068620978697",
+        "11543066456070691608",
+        "10037566446147757960",
+        "14217028371885899523",
+        "1955727545641979424",
+        "13120210566433439315",
+        "8500046895555773105",
+        "11875702086452037849",
+        "1893241083242890513",
+        "16128329479596468868",
+        "2505406828480074268",
+        "17489682966652790626",
+        "2037904860525963022",
+        "3123685063719821225",
+        "7071673367262965357",
+        "2363601579113663891",
+        "11482217361552593795",
+        "5856449463737085125",
+        "4737529592712112610",
+        "12882303683357567363",
+        "9858997013655720056",
+        "15680097842512522308",
+        "12361202125762598010",
+        "15334480955005439070",
+        "5240446030912613104",
+        "4252479100554779551",
+        "5089415399139430",
+        "2309298549080734462",
+        "8360907400062875711",
+        "8379898984690904634",
+        "4835663074400203435",
+        "18347954037261947601",
+        "14650134463063473483",
+        "914834946798200064",
+        "9008058860270804567",
+        "16414295164524493012",
+        "524701317889450565",
+        "8545048231839411753",
+        "16604140346144600004",
+        "7033717945439375162",
+        "6338197987222021281",
+        "6963978859789047578",
+        "11558343998338751922",
+        "12351622496552294764",
+        "826194976575363687",
+        "5801632688697873808",
+        "9249788706814618962",
+        "18126232568929746846",
+        "11510108602090871526",
+        "1275907582644198276",
+        "12985137478852333262",
+        "2864003298933713899",
+        "5777196353992482245",
+        "307501703985962237",
+        "12181108527265481221",
+        "8370945663710166667",
+        "8886795959232780393",
+        "15389300804761113963"
+      ],
+      "expected": {
+        "bits": "2f13de6dfc25635ebca73b57f7c12a60"
+      }
+    },
+    {
+      "bits": 0,
+      "top": [],
+      "y": [],
+      "expected": {
+        "error": "pvac: toeplitz width rejected"
+      }
+    },
+    {
+      "bits": 1,
+      "top": [
+        "0"
+      ],
+      "y": [
+        "0"
+      ],
+      "expected": {
+        "error": "pvac: toeplitz shape rejected"
+      }
+    },
+    {
+      "bits": 64,
+      "top": [
+        "0",
+        "0",
+        "0"
+      ],
+      "y": [],
+      "expected": {
+        "error": "pvac: toeplitz shape rejected"
+      }
+    },
+    {
+      "bits": 65,
+      "top": [
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "y": [
+        "0",
+        "0"
+      ],
+      "expected": {
+        "error": "pvac: toeplitz shape rejected"
+      }
+    }
+  ]
+}

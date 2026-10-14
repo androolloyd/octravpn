@@ -686,12 +686,8 @@ async fn up(
     let stun_addr: SocketAddr = stun.parse().context("parse stun addr")?;
     let dns_addr: SocketAddr = dns_upstream.parse().context("parse dns upstream")?;
 
-    // Derive a device WG pubkey from the wallet master via HKDF so a
-    // peer with our wallet pubkey can compute our WG pubkey too.
-    let wg_secret =
-        octravpn_core::util::derive_subkey(&kp.public.0, octravpn_core::util::DOMAIN_NOISE);
-    let wg_kp_for_pubkey_only = KeyPair::from_secret_bytes(&wg_secret);
-    let wg_pubkey = wg_kp_for_pubkey_only.public.0;
+    // Publish the X25519 identity derived from the private wallet master.
+    let wg_pubkey = crate::wireguard::public_key(&kp);
 
     let mgr = Arc::new(MeshManager::new(self_addr.clone(), wg_pubkey));
 

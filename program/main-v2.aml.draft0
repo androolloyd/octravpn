@@ -130,7 +130,7 @@ contract OctraVPN_V2 {
   const CLASS_SHARED: int = 0
   const CLASS_INTERNAL: int = 1
 
-  const PROTOCOL_FEE_DEFAULT_BPS: int = 50      // 0.5 %
+  const PROTOCOL_FEE_DEFAULT_BPS: int = 0       // no protocol commission
   const BPS_DENOM: int = 10000
   const SWEEP_GRACE_MULT_DEFAULT: int = 10
   const SWEEP_BOUNTY_DEFAULT_BPS: int = 100
@@ -422,8 +422,7 @@ contract OctraVPN_V2 {
     let total_paid = bytes_used * s_price * charge_mult
     require(total_paid <= s_deposit, "claim exceeds escrow")
 
-    let protocol_fee = total_paid * self.protocol_fee_bps / BPS_DENOM
-    let net_pay = total_paid - protocol_fee
+    let net_pay = total_paid
     let refund = s_deposit - total_paid
 
     self.sessions[session_id].status = 1
@@ -431,9 +430,6 @@ contract OctraVPN_V2 {
     self.client_confirms[session_id].bytes_used = bytes_used
     self.client_confirms[session_id].claimed_at = epoch
 
-    if protocol_fee > 0 {
-      self.treasury = self.treasury + protocol_fee
-    }
     if refund > 0 {
       self.tailnets[tid].treasury = self.tailnets[tid].treasury + refund
     }

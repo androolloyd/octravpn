@@ -117,7 +117,7 @@ The split: **main-net handles money, the Circle handles identity + policy + mete
 - `sessions : map[u64]SessionRecord` — `opener`, `circle_proxy: address`, `deposit`, `status`, `operator_claim`, `client_confirm`. The session no longer holds an `exit: address` — it holds the proxy address of the Circle that runs the exit.
 - The two-tx `settle_claim` + `settle_confirm` pattern unchanged. The proxy contract submits `settle_claim` on behalf of the Circle.
 - Equivocation slash (proxy-level), dispute recording.
-- Tailnet treasury + protocol fee + the encrypted earnings ledger (this could also live in the Circle — see §4.4).
+- Tailnet treasury + the encrypted earnings ledger (zero protocol commission) (this could also live in the Circle — see §4.4).
 
 It drops:
 

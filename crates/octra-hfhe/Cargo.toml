@@ -1,0 +1,24 @@
+[package]
+name = "octra-hfhe"
+version.workspace = true
+edition.workspace = true
+license = "BSD-3-Clause"
+rust-version.workspace = true
+description = "Pure Rust HFHE port, gated on exact compatibility with pinned Octra PVAC."
+publish = false
+
+[dependencies]
+aes = { version = "=0.8.4", features = ["zeroize"] }
+curve25519-dalek.workspace = true
+rand.workspace = true
+sha2.workspace = true
+sha3 = "0.10"
+thiserror.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+hex.workspace = true
+
+[lints]
+workspace = true

@@ -14,44 +14,17 @@
 //!      AML `claim_earnings` with FHE zero-proof + native stealth payout
 //!      by the operator's wallet).
 //!
-//! The CLI surface lives entirely under [`cli`]. `main` is a thin
+//! The CLI surface lives entirely under `octravpn_node`. `main` is a thin
 //! wrapper: init tracing, hand off to `cli::run`, exit with the returned
 //! code. Adding a new subcommand never requires touching this file —
 //! see `cli/mod.rs` for the contract.
 
 use anyhow::Result;
 
-mod audit;
-mod audit_cli;
-mod chain;
-mod chain_v2;
-mod chain_v3;
-mod circle_update;
-mod cli;
-mod cli_ops;
-mod cli_report;
-mod config;
-mod control;
-mod events;
-mod hub;
-mod members_policy;
-mod mesh_ops;
-mod native_derp;
-mod onion;
-mod pvac;
-mod rate_limit;
-mod relay_claimer;
-mod relay_settlement;
-mod relay_sweeper;
-mod seal;
-mod tunnel;
-mod v3_boot;
-mod v3_cli;
-
 #[tokio::main]
 async fn main() -> Result<()> {
     octravpn_core::util::init_tracing("info,octravpn_node=debug");
-    let code = cli::run().await?;
+    let code = octravpn_node::run_cli().await?;
     if code != 0 {
         std::process::exit(code);
     }

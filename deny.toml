@@ -3,6 +3,11 @@
 [advisories]
 yanked = "warn"
 ignore = [
+  # ark-crypto-primitives 0.5.0 uses derivative only as a build-time derive
+  # macro. RUSTSEC-2024-0388 is a maintenance notice, with no fixed release
+  # or reported runtime vulnerability. Keep the reviewed circuit dependency
+  # pinned; migrate only with circuit/key compatibility evidence (2026-10-11).
+  "RUSTSEC-2024-0388",
   # No fixed replacement from tun-rs/netlink-packet-core yet.
   "RUSTSEC-2024-0436",
   # proc-macro-error2 (unmaintained): build-time-only proc-macro dep, pulled

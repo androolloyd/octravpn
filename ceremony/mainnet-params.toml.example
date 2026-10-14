@@ -1,3 +1,5 @@
+# HISTORICAL v3 worksheet. Superseded by mainnet-candidate.toml.example.
+# The addresses/hashes below identify an old devnet deployment, not mainnet approval.
 # OctraVPN v3 mainnet deploy — parameter sheet for the owner-wallet
 # ceremony. This file is committed as the example; copy to
 # `ceremony/mainnet-params.toml` and harden the values before signing
@@ -62,47 +64,13 @@ contract_source_sha256_expected = "ed290ee7d60a37c986d8804d826e7de42d75a973b7c6c
 #               unbond_grace_epochs)
 # ---------------------------------------------------------------
 
-# Smallest session escrow a client can open. 1 OCT = 10^9 nOCT.
-#
-# Rationale: a session pays per byte; min_session_deposit caps the
-# operator's worst-case "client opens session and abandons it"
-# liability before sweep_grace_multiplier * session_grace_epochs
-# triggers. 1 OCT is large enough to disincentivise spammy
-# half-sessions (each one costs 1 OCT to park) and small enough that
-# a real consumer client opening a few MB session is not asked to
-# escrow tens of dollars worth of OCT up front.
-#
-# Devnet uses 100 nOCT (constructor arg #1 in v3-smoke.sh). That is
-# fine for testing the path but is a footgun on mainnet — a single OU
-# of escrow is meaningless against spam.
-min_session_deposit = 1000000000   # 1 OCT in nOCT
-
-# Smallest deposit to create a tailnet. 10 OCT.
-#
-# Rationale: a tailnet costs storage on chain (one entry in
-# tailnet_members_root, plus the treasury slot) and has no operator
-# behind it to amortise. 10 OCT makes "spin up a tailnet to grief
-# the registry" cost real money. Devnet uses 1000 nOCT (~0.000001
-# OCT) which is appropriate for tests but trivial for an attacker on
-# mainnet.
-min_tailnet_deposit = 10000000000  # 10 OCT in nOCT
-
-# Smallest stake an operator's circle must post to be considered
-# active. 100 OCT.
-#
-# Rationale: this is the lower bound that gates `circle_is_active()`.
-# The AML enforces a floor of 100_000_000 nOCT (0.1 OCT) — see
-# `require(min_circle_stake >= 100000000, ...)` at line 151. Devnet
-# uses exactly that floor. For mainnet we want the bond large enough
-# that a 50% slash (see slash_burn_bps below) is unambiguously
-# painful for the operator and unambiguously recoverable as a bounty
-# for the slasher. 100 OCT is a working v0.1 number; revisit once we
-# have telemetry on operator revenue and slash-incident frequency.
-#
-# TODO(p1.0): tune for mainnet once the first 5 operators have run
-# for ≥ 30 days. Likely target: median weekly operator revenue × 4.
-min_circle_stake = 10000000000     # 10 OCT in nOCT (NOTE: P0 value;
-                                   # raise once telemetry exists)
+# Historical proposed amounts retained as raw native units, without approval.
+# Native balances use 1 OCT = 1,000,000 OU (six decimal places).
+# Earlier nine-decimal annotations were incorrect. Review actual OCT values
+# and choose new economics in mainnet-candidate.toml.example before launch.
+min_session_deposit = 1000000000   # 1,000 OCT
+min_tailnet_deposit = 10000000000  # 10,000 OCT
+min_circle_stake = 10000000000     # 10,000 OCT; contract floor is 100 OCT
 
 # Epochs before a session can be swept after settle expiry. Octra
 # epoch ≈ 14 s on mainnet (per docs/economics.md). 100 epochs ≈ 23
@@ -139,9 +107,8 @@ unbond_grace_epochs = 1000
 slash_burn_bps = 5000              # 50% burn (task brief)
 slash_bounty_bps = 5000            # 50% bounty
 
-# Per-claim protocol fee in bps. v3 default is 50 (0.5%). Keep the
-# audited default; revisit only with a governance proposal.
-protocol_fee_bps = 50
+# Reserved legacy ABI field. Nonzero VPN commission is rejected.
+protocol_fee_bps = 0
 
 # Sweep grace multiplier — how many `session_grace_epochs` of slack
 # before a stranded session can be swept. v3 default is 10.

@@ -1,0 +1,64 @@
+name: VPN Circle application
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'crates/octravpn-circle-registry/**'
+      - 'crates/octra-exex/**'
+      - 'crates/octra-node-protocol/**'
+      - 'crates/octra-node-runtime/**'
+      - 'crates/octra-pvac/**'
+      - 'crates/octra-hfhe/**'
+      - 'vendor/octra-circle-wasm-host/**'
+      - 'vendor/octra-pvac/**'
+      - 'scripts/circle-apps/**'
+      - 'scripts/node-port/**'
+      - 'docs/rust-node/**'
+      - 'Cargo.lock'
+      - '.github/workflows/circle-vpn.yml'
+permissions:
+  contents: read
+jobs:
+  circle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: octra }
+      - uses: actions/checkout@v4
+        with: { repository: androolloyd/octra-foundry, path: octra-foundry }
+      - uses: actions/checkout@v4
+        with: { repository: androolloyd/headscale-rs, path: headscale-rs }
+      - uses: actions/checkout@v4
+        with:
+          repository: octra-labs/lite_node
+          ref: 7f9be4489870645cfcc95439638cde40f5da9f50
+          path: lite-node
+      - uses: ./octra/.github/actions/setup-rust
+      - run: rustup target add wasm32-unknown-unknown
+      - name: Build registry artifact for runtime parity cases
+        working-directory: octra
+        run: cargo build --locked -p octravpn-circle-registry --release --target wasm32-unknown-unknown
+      - name: Circle application and durable ExEx delivery
+        working-directory: octra
+        env:
+          OCTRA_HFHE_BUDGET_FIXTURE: ${{ github.workspace }}/octra/out/hfhe-budget-native.json
+        run: |
+          python3 scripts/node-port/hfhe-budget-fixtures.py --mode native --upstream ../lite-node --out out/hfhe-budget-native.json
+          cargo test --locked -p octra-hfhe -p octra-node-runtime -p octra-pvac -p octra-node-protocol -p octra-exex -p octravpn-circle-registry --all-features
+          cargo clippy --locked -p octra-hfhe -p octra-node-runtime -p octra-pvac -p octra-node-protocol -p octra-exex -p octravpn-circle-registry --all-targets --all-features -- -D warnings
+          cargo clippy --locked -p octravpn-circle-registry --target wasm32-unknown-unknown --lib -- -D warnings
+      - name: Pinned native host ABI and unsigned package
+        working-directory: octra
+        run: |
+          python3 scripts/node-port/inventory.py --upstream ../lite-node --check
+          python3 scripts/node-port/check-native-sources.py --upstream ../lite-node
+          python3 scripts/circle-apps/test-registry-native.py --upstream ../lite-node --out out/registry-native.json
+          python3 scripts/circle-apps/prepare-registry.py --evidence out/registry-native.json --out out/registry-package
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vpn-circle-application
+          path: |
+            octra/out/registry*
+            octra/out/hfhe-budget-native.json

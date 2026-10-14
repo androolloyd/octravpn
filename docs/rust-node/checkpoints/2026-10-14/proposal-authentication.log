@@ -1,0 +1,103 @@
+warning: field `key_id` is never read
+   --> vendor/octra-circle-wasm-host/src/lib.rs:353:5
+    |
+352 | struct HfheActiveKey {
+    |        ------------- field in this struct
+353 |     key_id: String,
+    |     ^^^^^^
+    |
+    = note: `HfheActiveKey` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: variant `Release` is never constructed
+    --> vendor/octra-circle-wasm-host/src/lib.rs:1112:5
+     |
+1110 | enum CacheMessage {
+     |      ------------ variant in this enum
+1111 |     Hold { key: String, root: String, entries: usize, bytes: usize },
+1112 |     Release(u64),
+     |     ^^^^^^^
+
+warning: `octra_circle_wasm_host` (lib) generated 2 warnings
+   Compiling octra-node-runtime v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node-runtime)
+   Compiling octra-node v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.35s
+     Running tests/private_import.rs (target/debug/deps/private_import-2e82f2e096c0b543)
+
+running 1 test
+test finalized_mixed_import_uses_bound_key_files_and_survives_restart ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+     Running tests/services.rs (target/debug/deps/services-6a94d8aee6ea7238)
+
+running 6 tests
+test empty_finalized_import_needs_no_peer_and_rejects_wrong_parent ... ok
+test newer_pause_cannot_be_undone_and_cancellation_releases_services ... ok
+test peer_import_drives_browser_wireguard_exex_and_restart ... ok
+test agreed_ranges_recover_canonical_services_and_exex_after_restart ... ok
+test consecutive_peer_recovery_resumes_after_missing_bundle_and_restart ... ok
+test live::live_quorum_publishes_circle_vpn_and_exex_atomically ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.13s
+
+     Running tests/canonical_recovery.rs (target/debug/deps/canonical_recovery-5a3bbc6064191205)
+
+running 7 tests
+test crash_worker ... ignored, spawned by process_crash_recovery at a controlled commit boundary
+test concurrent_hosts_cannot_publish_against_the_same_parent ... ok
+test refuses_wrong_roots_archive_mutation_and_partial_database_writes ... ok
+test state_and_outbox_publish_together_or_rollback_and_survive_restart ... ok
+test altered_object_or_missing_anchor_fails_recovery ... ok
+test exex_recovers_commit_without_notification_and_resumes_its_checkpoint ... ok
+test process_crash_recovery ... ok
+
+test result: ok. 6 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.31s
+
+     Running tests/epoch_partition.rs (target/debug/deps/epoch_partition-d49a554798e19adb)
+
+running 2 tests
+test finalized_replay_excludes_vm_fees_and_atomically_checks_charged_outcomes ... ok
+test native_finalized_selection_and_candidate_partition_refusals ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.19s
+
+     Running tests/execution_rules.rs (target/debug/deps/execution_rules-86febcde6069ce33)
+
+running 3 tests
+test execution_and_catchup_keep_the_authority_that_verified_the_certificate ... ok
+test historical_rules_bind_the_captured_parent_and_cache_faults ... ok
+test native_preview_rule_selection_and_fault_precedence ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+
+     Running tests/finality_publication.rs (target/debug/deps/finality_publication-fcc116c16493ed87)
+
+running 5 tests
+test valid_quorum_cannot_bypass_receipt_bindings_or_missing_rule_history ... ok
+test receipt_storage_failure_rolls_back_state_history_and_exex ... ok
+test rejects_certificates_and_execution_that_do_not_share_one_commitment ... ok
+test restart_reauthenticates_history_and_detects_missing_or_modified_evidence ... ok
+test committed_history_serves_bundles_ranges_and_rejects_reward_corruption ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.44s
+
+     Running tests/preverify_state.rs (target/debug/deps/preverify_state-e02ac3c32dc336e2)
+
+running 1 test
+test native_committed_receipt_bindings_and_fault_precedence ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/proposal_authentication.rs (target/debug/deps/proposal_authentication-f4070a40cf9b7b77)
+
+running 6 tests
+test startup_requires_explicit_time_and_parent_activation_evidence ... ok
+test proposal_frame_and_canonical_bindings_reject_forgery_without_publication ... ok
+test concurrent_canonical_commit_invalidates_in_flight_authentication ... ok
+test canonical_proposal_captures_authority_without_finalized_privileges ... ok
+test parent_qc_must_match_local_finality_but_may_have_different_quorum_signers ... ok
+test historical_reproposal_retains_native_time_policy ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+

@@ -349,7 +349,7 @@ also on the node side.
 | Prereqs         | Not paused; session OPEN; caller is opener; operator has claimed                    |
 | Checks          | `net >= 0`; `len(settle_blinding) > 0`                                              |
 | State (bytes mismatch)  | `client_confirm_set = 1`; emit `SettleDispute`; session stays OPEN          |
-| State (bytes agree)     | `client_confirm_set = 1`; cap `net <= deposit`; deduct `fee = net * protocol_fee_bps / BPS_DENOM` to `treasury`; refund `deposit - net` to tailnet; if `net_after_fee > 0` then bump `circle_earnings_total` and extend hash chain `head' = sha256(head ‖ sha256(blinding))`; status → SETTLED |
+| State (bytes agree)     | `client_confirm_set = 1`; cap `net <= deposit`; credit the full `net` to the operator; refund `deposit - net` to tailnet; if `net > 0` then bump `circle_earnings_total` and extend hash chain `head' = sha256(head ‖ sha256(blinding))`; status → SETTLED |
 | Events          | `SettleConfirmed`; `SessionSettled`; `SettleDispute` (mismatch) or `EarningsCommitted` (agree, net > 0) |
 | Revert reasons  | `"session not found"`, `"session not open"`, `"only opener can confirm"`, `"no operator claim yet"`, `"net >= 0"`, `"blinding required"` |
 | Adversarial     | E7, E8, E9, E11; positive in smoke L84                                              |
@@ -434,7 +434,7 @@ is a regression guard.
 `set_params` enforces invariants on the *new* values:
 `min_circle_stake >= 100_000_000`, `unbond_grace_epochs >= 1000`,
 `slash_burn_bps + slash_bounty_bps == BPS_DENOM`,
-`protocol_fee_bps <= 200`, `sweep_bounty_bps <= 1000`. Source:
+`protocol_fee_bps == 0`, `sweep_bounty_bps <= 1000`. Source:
 [`program/main-v3.aml:235-258`](../../program/main-v3.aml).
 
 ---

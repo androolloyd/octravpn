@@ -1,0 +1,4 @@
+contract WrongRevert {
+  // expect-revert test_revert "required reason"
+  fn test_revert(): bool { require(false, "different reason") return true }
+}

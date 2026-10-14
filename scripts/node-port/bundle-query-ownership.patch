@@ -1,0 +1,59 @@
+--- a/lib/consensus/c_driver.ml
++++ b/lib/consensus/c_driver.ml
+@@ -251,6 +251,7 @@
+   mutable pace : pace_wait option;
+   mutable epoch_root_queries : epoch_root_response_record C_root_query.t;
+   bundle_responses : (string, bundle_response_record list) Hashtbl.t;
++  bundle_query_gates : (string, Lwt_mutex.t * int ref) Hashtbl.t;
+   catchup_responses : (string, catchup_range_response_record list) Hashtbl.t;
+   peer_states : (string, peer_state_record) Hashtbl.t;
+   round_peers : (string, round_peer_record) Hashtbl.t;
+@@ -461,6 +462,7 @@
+     pace = None;
+     epoch_root_queries = C_root_query.empty;
+     bundle_responses = Hashtbl.create 16;
++    bundle_query_gates = Hashtbl.create 16;
+     catchup_responses = Hashtbl.create 8;
+     peer_states = Hashtbl.create 16;
+     round_peers = Hashtbl.create 32;
+@@ -4638,7 +4640,7 @@
+   | Some _
+   | None -> max_epochs
+ 
+-let query_bundle t ~epoch_id ~proposal_id ~timeout_seconds
++let query_bundle_unlocked t ~epoch_id ~proposal_id ~timeout_seconds
+     ~(validate : bundle_response_record -> bool) =
+   let open Lwt.Syntax in
+   Hashtbl.replace t.bundle_responses proposal_id [];
+@@ -4704,8 +4706,30 @@
+       wait_valid deadline
+     | waves -> query_waves waves
+   in
+-  Hashtbl.remove t.bundle_responses proposal_id;
+   Lwt.return result
++
++let query_bundle t ~epoch_id ~proposal_id ~timeout_seconds ~validate =
++  let gate, users =
++    match Hashtbl.find_opt t.bundle_query_gates proposal_id with
++    | Some owned -> owned
++    | None ->
++      let owned = Lwt_mutex.create (), ref 0 in
++      Hashtbl.add t.bundle_query_gates proposal_id owned;
++      owned
++  in
++  incr users;
++  Lwt.finalize
++    (fun () -> Lwt_mutex.with_lock gate (fun () ->
++      Lwt.finalize
++        (fun () -> query_bundle_unlocked t
++          ~epoch_id ~proposal_id ~timeout_seconds ~validate)
++        (fun () ->
++          Hashtbl.remove t.bundle_responses proposal_id;
++          Lwt.return_unit)))
++    (fun () ->
++      decr users;
++      if !users = 0 then Hashtbl.remove t.bundle_query_gates proposal_id;
++      Lwt.return_unit)
+ 
+ let query_catchup_range t ~from_epoch ~max_epochs ~timeout_seconds
+     ~(validate : catchup_range_response_record -> bool) =

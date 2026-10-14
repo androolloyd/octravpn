@@ -1,0 +1,15 @@
+diff --git a/lib/vm/compile/oct_gen.ml b/lib/vm/compile/oct_gen.ml
+--- a/lib/vm/compile/oct_gen.ml
++++ b/lib/vm/compile/oct_gen.ml
+@@ -3418,8 +3418,9 @@
+     make_env syntax ct.declaration ct.structs ct.enums ct.consts ct.state ct.events
+       ct.errors ct.funcs forms direct
+   in
+-  if forms <> [] then
+-    env.next_label <- Int.max env.next_label (200 + List.length ct.funcs * 100);
++  (* Reserve every dispatcher entry in both legacy and form-based programs.
++     Large test suites otherwise collide with branch labels starting at 10000. *)
++  env.next_label <- Int.max env.next_label (200 + List.length ct.funcs * 100);
+   List.iteri (fun i f ->
+     let label = 200 + i * 100 in
+     let label = if split_guard env f then alloc_label env else label in

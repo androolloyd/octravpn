@@ -15,7 +15,7 @@ The v1 model is single-hop with a TWO-TX settlement flow:
   re-claim with DIFFERENT bytes is equivocation, slashes the
   operator and force-refunds the session.
 - `settleConfirm` is client-only (`caller = sess.opener`). Matching
-  bytes finalize settlement (FHE earnings credit, fee, refund of
+  bytes finalize settlement (FHE earnings credit, refund of
   unused deposit). Mismatching bytes record the dispute; the session
   stays open.
 - `precommitJoinToken` lets the tailnet owner publish a
@@ -384,7 +384,7 @@ def settleClaim
 Only the session opener may submit. There must be a prior
 `operatorClaim`. If the client's `bytesUsed` matches the operator's,
 settlement applies: status → settled, FHE earnings credited by
-`bytesUsed * pricePerMb − fee`, the unused deposit refunds to the
+the full `bytesUsed * pricePerMb`, the unused deposit refunds to the
 tailnet treasury, and reputation increments. If the bytes mismatch,
 the client confirm is recorded as a dispute; the session stays
 open. -/
@@ -411,8 +411,7 @@ def settleConfirm
           let totalPaid := epRec.pricePerMb * bytesUsed
           if totalPaid > sess.deposit then none
           else
-            let fee := totalPaid * s.params.protocolFeeBps / 10000
-            let netPay := totalPaid - fee
+            let netPay := totalPaid
             let refund := sess.deposit - totalPaid
             let t := s.tailnets sess.tailnetId
             let t' := { t with treasury := t.treasury + refund }
@@ -427,7 +426,6 @@ def settleConfirm
               sessions := s.sessions.update sid (some upd),
               tailnets := s.tailnets.update sess.tailnetId t',
               encEarn := s.encEarn.update sess.exit (curEarn + netPay),
-              programTreasury := s.programTreasury + fee,
               endpoints := s.endpoints.update sess.exit recBumped }
 
 /-- No-show refund: after grace, the deposit returns to the

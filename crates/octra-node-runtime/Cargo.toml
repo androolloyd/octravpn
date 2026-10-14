@@ -1,0 +1,36 @@
+[package]
+name = "octra-node-runtime"
+version.workspace = true
+edition.workspace = true
+license = "(MIT OR Apache-2.0) AND BSD-3-Clause"
+rust-version = "1.85"
+description = "Native execution services for the Octra Rust node."
+publish = false
+
+[dependencies]
+async-trait.workspace = true
+futures.workspace = true
+octra-browser = { path = "../octra-browser" }
+octra-node-protocol = { path = "../octra-node-protocol" }
+octra-exex = { path = "../octra-exex" }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
+tokio.workspace = true
+octra-hfhe = { path = "../octra-hfhe" }
+num-bigint = "0.4"
+num-traits.workspace = true
+octra_circle_wasm_host = { path = "../../vendor/octra-circle-wasm-host", features = ["rust-host"] }
+base64.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sha3 = "0.10"
+hex.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+ed25519-dalek.workspace = true
+axum.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

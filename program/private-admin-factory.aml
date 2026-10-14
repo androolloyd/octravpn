@@ -1,0 +1,12 @@
+// The child metadata owner becomes this program address, not an operator wallet.
+// Existing native upgrades require a signed transaction from that metadata owner.
+// This factory exposes deployment only; it has no child-upgrade capability.
+// Review the returned child's code, credential commitment, domain and circuit key.
+contract OctraVPNPrivateAdminFactory {
+  event VPNDeployed(child: address)
+  fn deploy_vpn(bytecode: string, min_session_deposit: uint, min_tailnet_deposit: uint, min_circle_stake: uint, session_grace_epochs: uint, unbond_grace_epochs: uint, admin_commitment: string, admin_verification_key: string, admin_domain: string, max_locked_value: uint): address {
+    let child = deploy(bytecode, min_session_deposit, min_tailnet_deposit, min_circle_stake, session_grace_epochs, unbond_grace_epochs, admin_commitment, admin_verification_key, admin_domain, max_locked_value)
+    emit VPNDeployed(child)
+    return child
+  }
+}

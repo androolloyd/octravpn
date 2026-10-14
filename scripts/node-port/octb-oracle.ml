@@ -1,0 +1,186 @@
+(* SPDX-License-Identifier: BSD-3-Clause *)
+(* Copyright (c) 2023-2026 Octra Labs <dev@octra.org> *)
+module B = Octra_vm.Bytecode
+module V = Octra_vm.Contract_vm
+open Yojson.Basic.Util
+let text s = `String s
+let int n = `Int n
+let bytes s = `Assoc ["bytes", text (Base64.encode_exn s)]
+let value = function
+ | V.VInt z -> `Assoc ["int",text (Z.to_string z)]
+ | V.VBool b -> `Assoc ["bool",`Bool b]
+ | V.VString s -> `Assoc ["str",text (Base64.encode_exn s)]
+ | V.VBytes s -> `Assoc ["bytes",text (Base64.encode_exn s)]
+ | V.VAddr s -> `Assoc ["addr",text (Base64.encode_exn s)]
+ | _ -> failwith "nonconstant bytecode value"
+let args = function
+ | V.ADD (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.SUB (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.MUL (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.DIV (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.MOD (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.NEG (x0,x1) -> `List [int x0;int x1]
+ | V.ABS (x0,x1) -> `List [int x0;int x1]
+ | V.EQ (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.LT (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.GT (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.NEQ (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.LDI (x0,x1) -> `List [int x0;value x1]
+ | V.MOV (x0,x1) -> `List [int x0;int x1]
+ | V.SLOAD (x0,x1) -> `List [int x0;bytes x1]
+ | V.SSTORE (x0,x1) -> `List [bytes x0;int x1]
+ | V.SDEL (x0) -> `List [bytes x0]
+ | V.SLOADK (x0,x1) -> `List [int x0;int x1]
+ | V.SSTOREK (x0,x1) -> `List [int x0;int x1]
+ | V.MLOAD (x0,x1) -> `List [int x0;int x1]
+ | V.MSTORE (x0,x1) -> `List [int x0;int x1]
+ | V.JMP (x0) -> `List [int x0]
+ | V.JIF (x0,x1) -> `List [int x0;int x1]
+ | V.JDEST (x0) -> `List [int x0]
+ | V.STOP -> `List []
+ | V.REVERT -> `List []
+ | V.CALLER (x0) -> `List [int x0]
+ | V.ORIGIN (x0) -> `List [int x0]
+ | V.SELF (x0) -> `List [int x0]
+ | V.EPOCH (x0) -> `List [int x0]
+ | V.VALUE (x0) -> `List [int x0]
+ | V.BALANCE (x0,x1) -> `List [int x0;int x1]
+ | V.TREEHASH (x0) -> `List [int x0]
+ | V.NODEID (x0) -> `List [int x0]
+ | V.XCALL (x0,x1,x2,x3,x4) -> `List [int x0;int x1;int x2;int x3;int x4]
+ | V.SPAWN (x0,x1) -> `List [int x0;int x1]
+ | V.TRANSFER (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.CHECKPOINT -> `List []
+ | V.ROLLBACK -> `List []
+ | V.COMMIT -> `List []
+ | V.EMIT (x0,x1) -> `List [bytes x0;`List (List.map int x1)]
+ | V.CONCAT (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.ASSERT (x0) -> `List [int x0]
+ | V.EFFORT (x0) -> `List [int x0]
+ | V.NOP -> `List []
+ | V.STRLEN (x0,x1) -> `List [int x0;int x1]
+ | V.CALL_INT (x0,x1) -> `List [int x0;int x1]
+ | V.MLOADR (x0,x1) -> `List [int x0;int x1]
+ | V.MSTORER (x0,x1) -> `List [int x0;int x1]
+ | V.FHE_LOAD_PK (x0,x1) -> `List [int x0;int x1]
+ | V.FHE_ADD (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.FHE_SUB (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.FHE_SCALE (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.FHE_ADD_CONST (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.FHE_SUB_CONST (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.FHE_VERIFY_ZERO (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.FHE_VERIFY_RANGE (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.FHE_VERIFY_BOUND (x0,x1,x2,x3,x4) -> `List [int x0;int x1;int x2;int x3;int x4]
+ | V.FHE_COMMIT (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.FHE_PEDERSEN (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.FHE_SER (x0,x1) -> `List [int x0;int x1]
+ | V.FHE_DESER (x0,x1) -> `List [int x0;int x1]
+ | V.FHE_SER_PK (x0,x1) -> `List [int x0;int x1]
+ | V.FHE_DESER_PK (x0,x1) -> `List [int x0;int x1]
+ | V.GROTH16_VERIFY_BN254 (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.PARSE_INTS (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.ISADDR (x0,x1) -> `List [int x0;int x1]
+ | V.ASSERT_ADDR (x0) -> `List [int x0]
+ | V.SUBSTR (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.INDEXOF (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.SHA256 (x0,x1) -> `List [int x0;int x1]
+ | V.KECCAK256 (x0,x1) -> `List [int x0;int x1]
+ | V.BITAND (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.BITOR (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.BITXOR (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.BITSHL (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.BITSHR (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.SKEYS (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.SLOADN (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.SSTOREN (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.FSTORE (x0,x1) -> `List [int x0;int x1]
+ | V.FLOAD (x0,x1) -> `List [int x0;int x1]
+ | V.SKEYS_PAGE (x0,x1,x2,x3,x4) -> `List [int x0;int x1;int x2;int x3;int x4]
+ | V.ISHEX (x0,x1) -> `List [int x0;int x1]
+ | V.SPAWN2 (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.SDELK (x0) -> `List [int x0]
+ | V.ED25519_OK (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.STATE_PATH_KEY (x0,x1) -> `List [int x0;int x1]
+ | V.OBJECT_TRANSITION_APPLY (x0,x1,x2,x3,x4,x5,x6,x7,x8,x9,x10) -> `List [int x0;int x1;int x2;int x3;int x4;int x5;int x6;int x7;int x8;int x9;int x10]
+ | V.OBJECT_MEMBER_COUNT (x0,x1) -> `List [int x0;int x1]
+ | V.OBJECT_HAS_MEMBER (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.OBJECT_MEMBER_REF_AT (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.FHE_MUL (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.FHE_DIV_CONST (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.FHE_PEDERSEN_ADD (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.FHE_PEDERSEN_SUB (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.FHE_PEDERSEN_IDENTITY (x0) -> `List [int x0]
+ | V.MATMUL (x0,x1,x2,x3,x4,x5) -> `List [int x0;int x1;int x2;int x3;int x4;int x5]
+ | V.VECDOT (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.EXP_LUT (x0,x1) -> `List [int x0;int x1]
+ | V.SOFTMAX_INPLACE (x0,x1) -> `List [int x0;int x1]
+ | V.LAYERNORM_INPLACE (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.RELU_INPLACE (x0,x1) -> `List [int x0;int x1]
+ | V.RMSNORM_INPLACE (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.SILU_INPLACE (x0,x1) -> `List [int x0;int x1]
+ | V.ELEMWISE_MUL_INPLACE (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.LOAD_INT8_BYTES_TO_MEM (x0,x1,x2,x3,x4) -> `List [int x0;int x1;int x2;int x3;int x4]
+ | V.RESIDUAL_ADD (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.ROPE_APPLY (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.LOAD_INT8_B64_TO_MEM (x0,x1,x2,x3,x4) -> `List [int x0;int x1;int x2;int x3;int x4]
+ | V.MATMUL_Q16 (x0,x1,x2,x3,x4,x5) -> `List [int x0;int x1;int x2;int x3;int x4;int x5]
+ | V.SHIFT_ROUND_INPLACE (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.MATMUL_FP (x0,x1,x2,x3,x4,x5) -> `List [int x0;int x1;int x2;int x3;int x4;int x5]
+ | V.RMSNORM_FP (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.SILU_FP (x0,x1) -> `List [int x0;int x1]
+ | V.ELEMWISE_MUL_FP (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.RESIDUAL_ADD_FP (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.ROPE_APPLY_FP (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.LOAD_INT8_FP (x0,x1,x2,x3,x4) -> `List [int x0;int x1;int x2;int x3;int x4]
+ | V.VECDOT_FP (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.ARGMAX_FP (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.ATTENTION_KV_FP (x0,x1,x2,x3,x4,x5,x6,x7) -> `List [int x0;int x1;int x2;int x3;int x4;int x5;int x6;int x7]
+ | V.APPEND_VEC_FP (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.TXHASH (x0) -> `List [int x0]
+ | V.EPOCH_TIME (x0) -> `List [int x0]
+ | V.EXP_Q16 (x0,x1) -> `List [int x0;int x1]
+ | V.SOFTMAX_Q16_INPLACE (x0,x1) -> `List [int x0;int x1]
+ | V.LAYERNORM_Q16_INPLACE (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.RMSNORM_Q16_INPLACE (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.SILU_Q16_INPLACE (x0,x1) -> `List [int x0;int x1]
+ | V.ROPE_APPLY_Q16 (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.ATTENTION_KV_Q16 (x0,x1,x2,x3,x4,x5,x6,x7) -> `List [int x0;int x1;int x2;int x3;int x4;int x5;int x6;int x7]
+ | V.VECDOT_Q16 (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.ELEMWISE_MUL_Q16 (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.RESIDUAL_ADD_Q16 (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.LOAD_INT8_Q16 (x0,x1,x2,x3,x4) -> `List [int x0;int x1;int x2;int x3;int x4]
+ | V.APPEND_VEC_Q16 (x0,x1,x2,x3) -> `List [int x0;int x1;int x2;int x3]
+ | V.ARGMAX_Q16 (x0,x1,x2) -> `List [int x0;int x1;int x2]
+ | V.CAP_CHECK (x0,x1) -> `List [`Assoc ["int",text (Z.to_string x0)];int x1]
+ | V.CAP_CLOSE (x0,x1) -> `List [`Assoc ["int",text (Z.to_string x0)];int x1]
+let option f = function None -> `Null | Some v -> f v
+let state rows = `List (List.map (fun (name,kind)->`List [text (Base64.encode_exn name);int (B.state_tag kind)]) rows)
+let emission = function B.Lowered->text "lowered" | B.Specialized->text "specialized"
+let veil (v:B.veil) = `Assoc ["count",text (Z.to_string v.count);"depth",text (Z.to_string v.depth)]
+let image active raw =
+ match B.decode_image ~active raw with
+ | Error error -> `Assoc ["error",text error]
+ | Ok image ->
+   let consts=Array.to_list image.consts |> List.map (fun (c:B.const_cell)->`Assoc ["id",int c.id;"at",int c.at;"size",int c.size;"tag",int c.tag;"data",text (Base64.encode_exn c.data)]) in
+   let cells=Array.to_list image.cells |> List.map (fun (c:B.code_cell)->`Assoc ["pc",int c.pc;"at",int c.at;"size",int c.size]) in
+   let code=Array.to_list image.code |> List.map (fun instr -> `Assoc ["opcode",int (B.op_tag instr);"args",args instr]) in
+   let encoded=B.encode ~active ?state:image.state ?proof:image.proof ?emission:image.emission ?veil:image.veil image.code in
+   `Assoc ["consts",`List consts;"cells",`List cells;"code",`List code;"text_at",int image.text_at;
+     "state",option state image.state;"proof",option (fun v->text (Base64.encode_exn v)) image.proof;
+     "emission",option emission image.emission;"veil",option veil image.veil;
+     "encoded",text (Base64.encode_exn encoded)]
+let run case =
+ let raw=case |> member "raw" |> to_string |> Base64.decode_exn in
+ let active=case |> member "active" |> to_bool in
+ let expected=image active raw in
+ let admission=match Octra_vm.Admission.decode ~point_ops:active raw with
+  | Error error -> `Assoc ["error",text (Octra_vm.Admission.error_message error)]
+  | Ok admitted -> `Assoc ["effects",`List (List.map text (Octra_vm.Program_effects.names (Octra_vm.Admission.effects admitted)))] in
+ let readmit_prior = match B.decode ~active raw with
+  | Error _ -> `Null
+  | Ok code -> match Octra_vm.Admission.of_code ~point_ops:false code with
+    | Error error -> `Assoc ["error",text (Octra_vm.Admission.error_message error)]
+    | Ok admitted -> `Assoc ["effects",`List (List.map text (Octra_vm.Program_effects.names (Octra_vm.Admission.effects admitted)))] in
+ match case with `Assoc fields -> `Assoc (fields@["expected",expected;"admission",admission;"readmit_prior",readmit_prior]) | _ -> assert false
+let () = let cases=Yojson.Basic.from_channel stdin |> to_list in
+ Yojson.Basic.to_channel stdout (`List (List.map run cases)); print_newline ()

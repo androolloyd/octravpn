@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+exclude = ["proofs/kani", "fuzz", "vendor/ark-relations", "vendor/octra-circle-wasm-host"]
 members = [
     "crates/octravpn-analytics",
     "crates/octravpn-audit-chain",
@@ -11,6 +12,15 @@ members = [
     "crates/octravpn-mesh",
     "crates/octravpn-admin-ui",
     "crates/octra-circle-sim",
+    "crates/octra-browser",
+    "crates/octra-exex",
+    "crates/octra-node-protocol",
+    "crates/octra-node-runtime",
+    "crates/octra-node",
+    "crates/octra-pvac",
+    "crates/octra-hfhe",
+    "crates/octravpn-circle-registry",
+    "crates/octravpn-private-admin",
     "pvac-sidecar/ipc-tests",
     "tests/e2e",
 ]
@@ -112,4 +122,15 @@ subtle          = "2"
 bs58            = "0.5"
 tun-rs          = { version = "2.8", default-features = false }
 futures         = "0.3"
+
+
+[patch.crates-io]
+ark-relations = { path = "vendor/ark-relations" }
+
+[profile.test.package.octra-hfhe]
+# Native proof parity tests exercise real R1CS verification and ciphertext math.
+opt-level = 2
+
+[profile.test.package.curve25519-dalek]
+opt-level = 2
 

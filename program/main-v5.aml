@@ -1,0 +1,1142 @@
+// OctraVPN v5: v4 settlement with private, proof-authorized administration.
+// No public program-owner address. Wallet/relayer callers convey transactions only.
+// All privileged actions bind their parameters, immutable deployment domain,
+// program address and monotonically increasing nonce through Groth16 BN254.
+// Native proof verification MUST be active on the selected target profile.
+// See docs/private-administration.md for setup, privacy and recovery limitations.
+
+contract OctraVPN_V5 {
+
+  // ============================================================
+  // Constants
+  // ============================================================
+
+  const ADMIN_HEX: string = "0123456789abcdef"
+  const ADMIN_B64: string = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+  const ADMIN_ZERO_HALF: string = "00000000000000000000000000000000"
+  const ADMIN_NONCE_MAX: uint = 18446744073709551615
+  const BPS_DENOM: uint = 10000
+  const SLASH_BURN_DEFAULT_BPS: uint = 9000   // 90% burn, 10% bounty
+  const PROTOCOL_FEE_DEFAULT_BPS: uint = 0
+  const SWEEP_GRACE_MULT_DEFAULT: uint = 10
+  const SWEEP_BOUNTY_DEFAULT_BPS: uint = 100
+
+  // session.status
+  const SESSION_OPEN: uint = 0
+  const SESSION_SETTLED: uint = 1
+  const SESSION_REFUNDED: uint = 2
+
+  // Relay-settlement lane. These stay outside the v3 0..2 range so
+  // existing v3 paths guarded by SESSION_OPEN lock out once armed.
+  const SESSION_RELAY_ARMED: uint = 3
+  const SESSION_RELAY_CLAIMED: uint = 4
+  const SESSION_RELAY_REFUNDED: uint = 5
+
+  const RELAY_EXPIRY_DEFAULT_EPOCHS: uint = 200
+  const RELAY_EXPIRY_MIN_EPOCHS: uint = 10
+  const RELAY_EXPIRY_MAX_EPOCHS: uint = 100000
+
+  // ============================================================
+  // Events
+  // ============================================================
+
+  event CircleRegistered(circle: address, owner: address, state_root: bytes)
+  event CircleStateUpdated(circle: address, state_root: bytes, version: uint)
+  event CircleRetired(circle: address)
+  event StakeBonded(circle: address, amount: uint, new_total: uint)
+  event StakeUnbonded(circle: address, amount: uint, unlock_epoch: uint)
+  event StakeFinalized(circle: address, amount: uint)
+  event OperatorSlashed(circle: address, total: uint, burn: uint, bounty: uint)
+
+  event TailnetCreated(tailnet_id: uint, owner: address, members_root: bytes)
+  event TailnetMembersRootUpdated(tailnet_id: uint, members_root: bytes)
+  event TailnetDeposit(tailnet_id: uint, amount: uint, new_treasury: uint)
+  event TailnetOwnershipTransferred(tailnet_id: uint, old_owner: address, new_owner: address)
+  event TailnetSpenderAuthorized(tailnet_id: uint, spender: address)
+  event TailnetSpenderRevoked(tailnet_id: uint, spender: address)
+
+  event SessionOpened(session_id: uint, tailnet_id: uint, circle: address, deposit: uint, opened_at: uint)
+  event SettleClaimed(session_id: uint, circle: address, bytes_used: uint)
+  event SettleConfirmed(session_id: uint, opener: address, bytes_used: uint)
+  event SettleDispute(session_id: uint, operator_bytes: uint, client_bytes: uint)
+  event SessionSettled(session_id: uint, circle: address, net: uint, refund: uint)
+  event SessionRefunded(session_id: uint, reason: string)
+  event SessionSwept(session_id: uint)
+  event RelaySessionArmed(session_id: uint, circle: address, settlement_hash: bytes, net: uint, deadline: uint)
+  event RelaySettled(session_id: uint, circle: address, net: uint, refund: uint)
+  event RelayRefunded(session_id: uint, reason: string)
+  event RelaySwept(session_id: uint)
+
+  event EarningsCommitted(circle: address, new_total: uint, chain_head: bytes)
+  event EarningsClaimed(circle: address, amount: uint, claimed_total: uint)
+
+  event ProgramTreasuryWithdrawn(to: address, amount: uint)
+
+  // ============================================================
+  // State — chain-minimal. No structs over 64B; no inline blobs.
+  // ============================================================
+
+  state {
+    admin_commitment: string
+    admin_used_commitments: map[string]uint
+    max_locked_value: uint
+    admin_verification_key: string
+    admin_domain: string
+    admin_nonce: uint
+    pending_admin_commitment: string
+    admin_handoff_id: string
+    admin_handoff_kind: uint
+    paused: uint
+
+    // --------- Circle registry (thin) ---------
+    circle_owner: map[address]address
+    // Pilot onboarding: governance verifies native circle ownership externally.
+    circle_authorized_owner: map[address]address
+    circle_registration_approved: map[address]uint
+    // Stake remains slashable until every funded session has terminated.
+    circle_open_sessions: map[address]uint
+    // Base64 ed25519 attestation key. Opaque evidence is governance-only.
+    circle_receipt_pk: map[address]string
+    // sha256 of the operator's canonical /state-root.json (32B).
+    circle_state_root: map[address]bytes
+    circle_state_version: map[address]uint
+    circle_active: map[address]uint
+
+    // --------- Bonds + slash ---------
+    circle_bond: map[address]uint
+    circle_unbonding: map[address]uint
+    circle_unbond_unlock_epoch: map[address]uint
+    circle_slashed: map[address]uint
+
+    // --------- Tailnets (treasury + members-root commitment) ---------
+    tailnet_count: uint
+    tailnet_owner: map[uint]address
+    tailnet_treasury: map[uint]uint
+    // R1: stores the GRANT EPOCH at which an address was authorized to spend the
+    // treasury (0 = never/revoked). A grant is live iff it equals the tailnet's
+    // current tailnet_spender_epoch. transfer_tailnet_ownership bumps that epoch,
+    // atomically invalidating EVERY prior grant (a map-clear loop is un-gas-safe).
+    tailnet_authorized_spenders: map[uint]map[address]uint
+    tailnet_spender_epoch: map[uint]uint
+    // sha256 of /tailnet-{id}/members.json in tailnet-owner circle.
+    tailnet_members_root: map[uint]bytes
+    tailnet_root_version: map[uint]uint
+    tailnet_retired: map[uint]uint
+
+    // --------- Sessions (chain holds escrow + adjudicates) ---------
+    session_count: uint
+    session_deposit: map[uint]uint
+    session_status: map[uint]uint
+    session_opener: map[uint]address
+    session_exit: map[uint]address     // circle_id of the operator
+    session_tailnet: map[uint]uint
+    session_opened_at: map[uint]uint
+    session_treasury_funded: map[uint]uint
+
+    // Relay-settlement lane: H = SignedReceipt::settlement_hash()
+    // (64-char hex), plus the committed net and claim deadline.
+    session_settlement_hash: map[uint]bytes
+    session_relay_net: map[uint]uint
+    session_relay_deadline: map[uint]uint
+
+    // Two-tx settle (operator claim + opener confirm).
+    operator_claim_bytes: map[uint]uint
+    operator_claim_set: map[uint]uint
+    client_confirm_bytes: map[uint]uint
+    client_confirm_set: map[uint]uint
+
+    // --------- Earnings (sha256 hash-chain era; HFHE swap-ready) ---------
+    circle_earnings_total: map[address]uint
+    circle_earnings_claimed: map[address]uint
+    // head' = sha256(head || sha256(settle_blinding)) per settle
+    circle_earnings_chain: map[address]bytes
+
+    // --------- Treasury + governance params ---------
+    treasury: uint
+    burned: uint
+
+    min_session_deposit: uint
+    min_tailnet_deposit: uint
+    min_circle_stake: uint
+    session_grace_epochs: uint
+    unbond_grace_epochs: uint
+    sweep_grace_multiplier: uint
+    sweep_bounty_bps: uint
+    slash_burn_bps: uint
+    slash_bounty_bps: uint
+    protocol_fee_bps: uint
+  }
+
+  // ============================================================
+  // Constructor
+  // ============================================================
+
+  constructor(min_session_deposit: uint, min_tailnet_deposit: uint, min_circle_stake: uint, session_grace_epochs: uint, unbond_grace_epochs: uint, admin_commitment: string, admin_verification_key: string, admin_domain: string, max_locked_value: uint) {
+    require(min_session_deposit > 0, "min session deposit > 0")
+    require(min_tailnet_deposit > 0, "min tailnet deposit > 0")
+    require(min_circle_stake >= 100000000, "min circle stake floor")
+    require(session_grace_epochs > 0, "session grace > 0")
+    require(unbond_grace_epochs >= 1000, "unbond grace too short")
+
+    require(max_locked_value == 0 || max_locked_value > min_circle_stake, "fund cap must exceed stake")
+    self.max_locked_value = max_locked_value
+    self.admin_used_commitments[admin_commitment] = 1
+    require_admin_digest(admin_commitment)
+    require_admin_digest(admin_domain)
+    // Six-input OG16V1 key is 906 raw bytes / 1208 base64 characters.
+    // Deployment verification must additionally pin the reviewed circuit key hash.
+    require(len(admin_verification_key) == 1208, "invalid admin verification key size")
+    self.admin_commitment = admin_commitment
+    self.admin_verification_key = admin_verification_key
+    self.admin_domain = admin_domain
+    self.admin_nonce = 0
+    self.pending_admin_commitment = ""
+    self.admin_handoff_id = ""
+    self.admin_handoff_kind = 0
+    self.paused = 0
+
+    self.tailnet_count = 0
+    self.session_count = 0
+    self.treasury = 0
+    self.burned = 0
+
+    self.min_session_deposit = min_session_deposit
+    self.min_tailnet_deposit = min_tailnet_deposit
+    self.min_circle_stake = min_circle_stake
+    self.session_grace_epochs = session_grace_epochs
+    self.unbond_grace_epochs = unbond_grace_epochs
+    self.sweep_grace_multiplier = SWEEP_GRACE_MULT_DEFAULT
+    self.sweep_bounty_bps = SWEEP_BOUNTY_DEFAULT_BPS
+    self.slash_burn_bps = SLASH_BURN_DEFAULT_BPS
+    self.slash_bounty_bps = BPS_DENOM - SLASH_BURN_DEFAULT_BPS
+    self.protocol_fee_bps = PROTOCOL_FEE_DEFAULT_BPS
+  }
+
+  // ============================================================
+  // Internal helpers
+  // ============================================================
+
+  private fn require_admin_digest(text: string) {
+    require(len(text) == 64, "invalid admin digest")
+    let i = 0
+    while i < 64 {
+      require(index_of(ADMIN_HEX, substr(text, i, 1)) >= 0, "invalid admin digest")
+      i = i + 1
+    }
+  }
+
+  // Pack each 128-bit digest half into a canonical 32-byte BN254 scalar.
+  // Public fields are constructed HERE; relayers cannot supply trusted inputs.
+  private fn admin_packed_digest(text: string): string {
+    return concat(concat(ADMIN_ZERO_HALF, substr(text, 0, 32)), concat(ADMIN_ZERO_HALF, substr(text, 32, 32)))
+  }
+
+  private fn admin_inputs(commitment: string, challenge: string, tag: string): string {
+    let raw_hex = concat(concat(admin_packed_digest(commitment), admin_packed_digest(challenge)), admin_packed_digest(tag))
+    let encoded = ""
+    let i = 0
+    // 192 bytes is divisible by three; no base64 padding is needed.
+    while i < 384 {
+      let a = index_of(ADMIN_HEX, substr(raw_hex, i, 1)) * 16 + index_of(ADMIN_HEX, substr(raw_hex, i + 1, 1))
+      let b = index_of(ADMIN_HEX, substr(raw_hex, i + 2, 1)) * 16 + index_of(ADMIN_HEX, substr(raw_hex, i + 3, 1))
+      let c = index_of(ADMIN_HEX, substr(raw_hex, i + 4, 1)) * 16 + index_of(ADMIN_HEX, substr(raw_hex, i + 5, 1))
+      encoded = concat(encoded, substr(ADMIN_B64, a / 4, 1))
+      encoded = concat(encoded, substr(ADMIN_B64, (a % 4) * 16 + b / 16, 1))
+      encoded = concat(encoded, substr(ADMIN_B64, (b % 16) * 4 + c / 64, 1))
+      encoded = concat(encoded, substr(ADMIN_B64, c % 64, 1))
+      i = i + 6
+    }
+    return encoded
+  }
+
+  private fn consume_admin(commitment: string, action: string, nonce: uint, tag: string, proof: string) {
+    require(nonce == self.admin_nonce, "admin nonce mismatch")
+    require(nonce < ADMIN_NONCE_MAX, "admin nonce exhausted")
+    require_admin_digest(tag)
+    require(len(proof) == 352, "invalid admin proof size")
+    let context = concat(concat(concat(concat(concat(concat("OctraVPN private admin v1|", self.admin_domain), "|"), self_addr), "|"), to_string(nonce)), concat("|", action))
+    let challenge = sha256(context)
+    require(groth16_verify_bn254(self.admin_verification_key, proof, admin_inputs(commitment, challenge, tag)), "invalid admin proof")
+    // Any downstream revert must roll back this write with the business action.
+    self.admin_nonce = nonce + 1
+  }
+
+  private fn require_admin(action: string, nonce: uint, tag: string, proof: string) {
+    require(self.pending_admin_commitment == "", "admin handoff pending")
+    consume_admin(self.admin_commitment, action, nonce, tag, proof)
+  }
+
+  private fn require_fund_cap() {
+    require(self.max_locked_value == 0 || balance(self_addr) <= self.max_locked_value, "canary fund cap exceeded")
+  }
+
+  private fn require_not_paused() {
+    require(self.paused == 0, "paused")
+  }
+
+  private fn circle_is_active(c: address): bool {
+    if self.circle_slashed[c] != 0 {
+      return false
+    }
+    return self.circle_active[c] == 1 && self.circle_bond[c] >= self.min_circle_stake && self.circle_unbonding[c] == 0
+  }
+
+  private fn relay_expiry_or_default(relay_expiry_epochs: uint): uint {
+    let e = relay_expiry_epochs
+    if e == 0 {
+      e = RELAY_EXPIRY_DEFAULT_EPOCHS
+    }
+    require(e >= RELAY_EXPIRY_MIN_EPOCHS, "relay expiry too short")
+    require(e <= RELAY_EXPIRY_MAX_EPOCHS, "relay expiry too long")
+    return e
+  }
+
+  private fn tailnet_spend_authorized(tailnet_id: uint, who: address): bool {
+    if self.tailnet_owner[tailnet_id] == who {
+      return true
+    }
+    // R1: a grant is live ONLY if it equals the tailnet's current epoch. A prior
+    // owner's grants (made at an earlier epoch) fail this after a transfer bump.
+    return self.tailnet_authorized_spenders[tailnet_id][who] == self.tailnet_spender_epoch[tailnet_id]
+  }
+
+  private fn require_tailnet_spend_authorized(tailnet_id: uint) {
+    require(tailnet_spend_authorized(tailnet_id, caller), "not tailnet owner or spender")
+  }
+
+  private fn write_session(tailnet_id: uint, circle: address, deposit: uint, treasury_funded: uint): uint {
+    let sid = self.session_count
+    self.session_count = sid + 1
+    self.session_tailnet[sid] = tailnet_id
+    self.session_exit[sid] = circle
+    self.circle_open_sessions[circle] = self.circle_open_sessions[circle] + 1
+    self.session_opener[sid] = caller
+    self.session_deposit[sid] = deposit
+    self.session_opened_at[sid] = epoch
+    self.session_status[sid] = SESSION_OPEN
+    self.session_treasury_funded[sid] = treasury_funded
+    emit SessionOpened(sid, tailnet_id, circle, deposit, epoch)
+    return sid
+  }
+
+  private fn refund_session_escrow(session_id: uint, amount: uint) {
+    if amount == 0 {
+      return
+    }
+    if self.session_treasury_funded[session_id] == 1 {
+      let tid = self.session_tailnet[session_id]
+      self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + amount
+      return
+    }
+    let opener = self.session_opener[session_id]
+    require(transfer(opener, amount), "refund transfer failed")
+  }
+
+  // Shared arm bookkeeping. Caller must have created or selected a valid
+  // session and must have already checked authorization.
+  private fn write_relay_arm(sid: uint, settlement_hash: bytes, net: uint, relay_expiry_epochs: uint) {
+    require(len(settlement_hash) == 64, "settlement_hash must be 64-char hex sha256")
+    require(net > 0, "net > 0")
+    let dep = self.session_deposit[sid]
+    require(net <= dep, "net exceeds deposit")
+    let ttl = relay_expiry_or_default(relay_expiry_epochs)
+    let deadline = epoch + ttl
+    self.session_settlement_hash[sid] = settlement_hash
+    self.session_relay_net[sid] = net
+    self.session_relay_deadline[sid] = deadline
+    self.session_status[sid] = SESSION_RELAY_ARMED
+    let circle = self.session_exit[sid]
+    emit RelaySessionArmed(sid, circle, settlement_hash, net, deadline)
+  }
+
+  // Common slash settlement. Burns + bounties out the total stake,
+  // permanently bans the circle. Caller MUST have already gated on
+  // pause + already-slashed; this helper only does the bookkeeping.
+  private fn apply_slash(circle: address, bounty_to: address) {
+    let live = self.circle_bond[circle]
+    let unb = self.circle_unbonding[circle]
+    let total = live + unb
+    require(total > 0, "no stake to slash")
+    let burn_amt = total * self.slash_burn_bps / BPS_DENOM
+    let bounty_amt = total - burn_amt
+    self.circle_bond[circle] = 0
+    self.circle_unbonding[circle] = 0
+    self.circle_unbond_unlock_epoch[circle] = 0
+    self.circle_slashed[circle] = 1
+    self.circle_active[circle] = 0
+    self.treasury = self.treasury + burn_amt
+    self.burned = self.burned + burn_amt
+    if bounty_amt > 0 {
+      require(transfer(bounty_to, bounty_amt), "bounty transfer failed")
+    }
+    emit OperatorSlashed(circle, total, burn_amt, bounty_amt)
+  }
+
+  // ============================================================
+  // Governance (private administration; intentionally NOT pause-gated)
+  // ============================================================
+
+  // kind=0 transfers administration; kind=1 rotates one's own credential.
+  // In both cases the recipient generates a fresh secret and proves acceptance.
+  fn propose_admin(next_commitment: string, kind: uint, nonce: uint, tag: string, proof: string): bool {
+    require_admin_digest(next_commitment)
+    require(next_commitment != self.admin_commitment, "admin credential must change")
+    require(self.admin_used_commitments[next_commitment] == 0, "admin credential already used")
+    require(kind <= 1, "invalid admin handoff kind")
+    let action = concat(concat(concat("propose_admin|", next_commitment), "|"), to_string(kind))
+    require_admin(action, nonce, tag, proof)
+    self.pending_admin_commitment = next_commitment
+    self.admin_handoff_kind = kind
+    self.admin_handoff_id = sha256(concat(concat(concat(concat(self.admin_commitment, "|"), next_commitment), "|"), to_string(self.admin_nonce)))
+    return true
+  }
+
+  fn accept_admin(next_commitment: string, handoff_id: string, nonce: uint, tag: string, proof: string): bool {
+    require(self.pending_admin_commitment != "", "no admin handoff")
+    require(next_commitment == self.pending_admin_commitment, "wrong pending admin")
+    require(handoff_id == self.admin_handoff_id, "admin handoff mismatch")
+    let action = concat(concat(concat("accept_admin|", next_commitment), "|"), handoff_id)
+    consume_admin(next_commitment, action, nonce, tag, proof)
+    self.admin_used_commitments[next_commitment] = 1
+    self.admin_commitment = next_commitment
+    self.pending_admin_commitment = ""
+    self.admin_handoff_id = ""
+    self.admin_handoff_kind = 0
+    return true
+  }
+
+  fn cancel_admin(handoff_id: string, nonce: uint, tag: string, proof: string): bool {
+    require(self.pending_admin_commitment != "", "no admin handoff")
+    require(handoff_id == self.admin_handoff_id, "admin handoff mismatch")
+    consume_admin(self.admin_commitment, concat("cancel_admin|", handoff_id), nonce, tag, proof)
+    self.pending_admin_commitment = ""
+    self.admin_handoff_id = ""
+    self.admin_handoff_kind = 0
+    return true
+  }
+
+  fn set_paused(p: uint, nonce: uint, tag: string, proof: string): bool {
+    require_admin(concat("set_paused|", to_string(p)), nonce, tag, proof)
+    require(p == 0 || p == 1, "p must be 0 or 1")
+    self.paused = p
+    return true
+  }
+
+  fn set_params(new_min_session_deposit: uint, new_min_tailnet_deposit: uint, new_session_grace_epochs: uint, new_sweep_grace_multiplier: uint, new_sweep_bounty_bps: uint, new_min_circle_stake: uint, new_unbond_grace_epochs: uint, new_slash_burn_bps: uint, new_slash_bounty_bps: uint, new_protocol_fee_bps: uint, nonce: uint, tag: string, proof: string): bool {
+    let action = "set_params"
+    action = concat(action, concat("|", to_string(new_min_session_deposit)))
+    action = concat(action, concat("|", to_string(new_min_tailnet_deposit)))
+    action = concat(action, concat("|", to_string(new_session_grace_epochs)))
+    action = concat(action, concat("|", to_string(new_sweep_grace_multiplier)))
+    action = concat(action, concat("|", to_string(new_sweep_bounty_bps)))
+    action = concat(action, concat("|", to_string(new_min_circle_stake)))
+    action = concat(action, concat("|", to_string(new_unbond_grace_epochs)))
+    action = concat(action, concat("|", to_string(new_slash_burn_bps)))
+    action = concat(action, concat("|", to_string(new_slash_bounty_bps)))
+    action = concat(action, concat("|", to_string(new_protocol_fee_bps)))
+    require_admin(action, nonce, tag, proof)
+    require(new_min_session_deposit > 0, "session deposit > 0")
+    require(new_min_tailnet_deposit > 0, "tailnet deposit > 0")
+    require(new_session_grace_epochs > 0, "session grace > 0")
+    require(new_sweep_grace_multiplier > 0, "sweep > 0")
+    require(new_sweep_bounty_bps <= 1000, "sweep bounty <= 10%")
+    require(new_min_circle_stake >= 100000000, "stake floor too low")
+    require(new_unbond_grace_epochs >= 1000, "unbond grace too short")
+    require(new_slash_burn_bps >= 5000, "burn share too low")
+    require(new_slash_burn_bps + new_slash_bounty_bps == BPS_DENOM, "slash bps sum")
+    require(new_protocol_fee_bps == 0, "protocol fee disabled")
+    self.min_session_deposit = new_min_session_deposit
+    self.min_tailnet_deposit = new_min_tailnet_deposit
+    self.session_grace_epochs = new_session_grace_epochs
+    self.sweep_grace_multiplier = new_sweep_grace_multiplier
+    self.sweep_bounty_bps = new_sweep_bounty_bps
+    self.min_circle_stake = new_min_circle_stake
+    self.unbond_grace_epochs = new_unbond_grace_epochs
+    self.slash_burn_bps = new_slash_burn_bps
+    self.slash_bounty_bps = new_slash_bounty_bps
+    self.protocol_fee_bps = 0
+    return true
+  }
+
+  fn withdraw_program_treasury(to: address, amount: uint, nonce: uint, tag: string, proof: string): bool {
+    require_admin(concat(concat(concat("withdraw_program_treasury|", to), "|"), to_string(amount)), nonce, tag, proof)
+    require(is_address(to), "invalid to")
+    require(amount > 0, "amount > 0")
+    require(self.treasury >= amount, "treasury insufficient")
+    self.treasury = self.treasury - amount
+    require(transfer(to, amount), "transfer failed")
+    emit ProgramTreasuryWithdrawn(to, amount)
+    return true
+  }
+
+  // ============================================================
+  // Circle registry — atomic register + bond (chicken-and-egg fix)
+  // ============================================================
+
+  // state_root = sha256 of the operator's canonical /state-root.json
+  // sealed inside the circle. register + bond are atomic.
+  // A native circle's owner cannot currently be read by this AML contract.
+  // Bind the first registration to an independently checked operator wallet.
+  fn approve_circle_registration(circle: address, operator: address, nonce: uint, tag: string, proof: string): bool {
+    require_admin(concat(concat(concat("approve_circle_registration|", circle), "|"), operator), nonce, tag, proof)
+    require(is_address(circle), "invalid circle id")
+    require(is_address(operator), "invalid operator")
+    require(self.circle_state_version[circle] == 0, "circle already registered")
+    self.circle_authorized_owner[circle] = operator
+    self.circle_registration_approved[circle] = 1
+    return true
+  }
+
+  payable fn register_circle(circle: address, state_root: bytes, receipt_pubkey: string): bool {
+    require_fund_cap()
+    require_not_paused()
+    require(is_address(circle), "invalid circle id")
+    require(self.circle_registration_approved[circle] == 1, "registration not approved")
+    require(self.circle_authorized_owner[circle] == caller, "not approved circle owner")
+    require(self.circle_active[circle] == 0, "circle already active")
+    require(self.circle_state_version[circle] == 0, "circle already registered")
+    require(self.circle_slashed[circle] == 0, "previously slashed")
+    require(len(state_root) == 64, "state_root must be 64-char hex sha256")
+    require(len(receipt_pubkey) > 0, "receipt pubkey required")
+    require(
+      self.circle_bond[circle] + value >= self.min_circle_stake,
+      "initial stake below minimum"
+    )
+
+    self.circle_bond[circle] = self.circle_bond[circle] + value
+    self.circle_owner[circle] = caller
+    self.circle_receipt_pk[circle] = receipt_pubkey
+    self.circle_state_root[circle] = state_root
+    self.circle_state_version[circle] = 1
+    self.circle_active[circle] = 1
+    // Earnings ledger starts empty. Initialize the hash chain head to
+    // sha256(state_root) so audit replay doesn't depend on the AML
+    // default-value quirk (unset `bytes` reads back as the literal
+    // string "0", not the empty string). Anchoring the chain genesis
+    // to the operator's first state_root also ties the earnings log
+    // to a known commitment from epoch 0.
+    self.circle_earnings_total[circle] = 0
+    self.circle_earnings_claimed[circle] = 0
+    self.circle_earnings_chain[circle] = sha256(state_root)
+
+    emit CircleRegistered(circle, caller, state_root)
+    if value > 0 {
+      emit StakeBonded(circle, value, self.circle_bond[circle])
+    }
+    return true
+  }
+
+  // Auth: caller == circle_owner. Tx envelope is already ed25519-
+  // verified by the chain runtime, so no inline sig needed.
+  fn update_circle_state(circle: address, new_state_root: bytes): bool {
+    require_not_paused()
+    require(self.circle_owner[circle] == caller, "not circle owner")
+    require(self.circle_active[circle] == 1, "circle not active")
+    require(self.circle_slashed[circle] == 0, "previously slashed")
+    require(len(new_state_root) == 64, "state_root must be 64-char hex sha256")
+    self.circle_state_root[circle] = new_state_root
+    self.circle_state_version[circle] = self.circle_state_version[circle] + 1
+    emit CircleStateUpdated(circle, new_state_root, self.circle_state_version[circle])
+    return true
+  }
+
+  // Rotate the on-chain attestation pubkey. Old pubkey is dropped:
+  // governance must retain old evidence keys. Off-chain witnesses must adopt
+  // the new key from this epoch on.
+  fn rotate_receipt_pubkey(circle: address, new_pubkey: string): bool {
+    require_not_paused()
+    require(self.circle_owner[circle] == caller, "not circle owner")
+    require(self.circle_active[circle] == 1, "circle not active")
+    require(self.circle_slashed[circle] == 0, "previously slashed")
+    require(len(new_pubkey) > 0, "pubkey required")
+    self.circle_receipt_pk[circle] = new_pubkey
+    return true
+  }
+
+  fn retire_circle(circle: address): bool {
+    // Existing obligations remain recoverable while admission is paused.
+    require(self.circle_owner[circle] == caller, "not circle owner")
+    require(self.circle_active[circle] == 1, "circle not active")
+    self.circle_active[circle] = 0
+    emit CircleRetired(circle)
+    return true
+  }
+
+  // ============================================================
+  // Circle stake (bond / unbond / finalize)
+  // ============================================================
+
+  payable fn bond_endpoint(circle: address): bool {
+    require_fund_cap()
+    require_not_paused()
+    require(value > 0, "no value")
+    require(self.circle_slashed[circle] == 0, "previously slashed")
+    require(self.circle_unbonding[circle] == 0, "unbonding in progress")
+    require(self.circle_owner[circle] == caller, "not circle owner")
+    self.circle_bond[circle] = self.circle_bond[circle] + value
+    emit StakeBonded(circle, value, self.circle_bond[circle])
+    return true
+  }
+
+  fn unbond_endpoint(circle: address): bool {
+    // Existing obligations remain recoverable while admission is paused.
+    require(self.circle_owner[circle] == caller, "not circle owner")
+    require(self.circle_active[circle] == 0, "retire circle before unbonding")
+    let amt = self.circle_bond[circle]
+    require(amt > 0, "no stake")
+    require(self.circle_unbonding[circle] == 0, "already unbonding")
+    let unlock = epoch + self.unbond_grace_epochs
+    self.circle_unbonding[circle] = amt
+    self.circle_unbond_unlock_epoch[circle] = unlock
+    self.circle_bond[circle] = 0
+    emit StakeUnbonded(circle, amt, unlock)
+    return true
+  }
+
+  nonreentrant fn finalize_unbond(circle: address): bool {
+    // Existing obligations remain recoverable while admission is paused.
+    require(self.circle_owner[circle] == caller, "not circle owner")
+    require(self.circle_active[circle] == 0, "retire circle before unbonding")
+    require(self.circle_open_sessions[circle] == 0, "funded sessions still open")
+    let amt = self.circle_unbonding[circle]
+    require(amt > 0, "nothing unbonding")
+    require(epoch >= self.circle_unbond_unlock_epoch[circle], "unbond grace not elapsed")
+    self.circle_unbonding[circle] = 0
+    self.circle_unbond_unlock_epoch[circle] = 0
+    require(transfer(caller, amt), "transfer failed")
+    emit StakeFinalized(circle, amt)
+    return true
+  }
+
+  // ============================================================
+  // Slash
+  // ============================================================
+
+  fn slash_double_sign(circle: address, payload_a: string, sig_a: string, payload_b: string, sig_b: string): bool {
+    // Opaque payloads do not prove same-session, same-sequence equivocation.
+    // Keep the ABI to reject old clients safely; governance adjudicates
+    // off-chain evidence until a structured, VM-verifiable receipt ABI exists.
+    require(false, "opaque slashing disabled; submit evidence to governance")
+    return false
+  }
+
+  fn gov_slash_operator(circle: address, bounty_to: address, nonce: uint, tag: string, proof: string): bool {
+    require_not_paused()
+    require_admin(concat(concat(concat("gov_slash_operator|", circle), "|"), bounty_to), nonce, tag, proof)
+    require(is_address(bounty_to), "invalid bounty recipient")
+    require(self.circle_slashed[circle] == 0, "already slashed")
+    apply_slash(circle, bounty_to)
+    return true
+  }
+
+  // ============================================================
+  // Tailnets — treasury + members-root only
+  // ============================================================
+
+  // members_root = sha256 of /tailnet-{id}/members.json sealed in the
+  // tailnet-owner's circle. ACL policy is entirely off-chain.
+  payable fn create_tailnet(members_root: bytes): uint {
+    require_fund_cap()
+    require_not_paused()
+    require(value >= self.min_tailnet_deposit, "deposit below minimum")
+    require(len(members_root) == 64, "members_root must be 64-char hex sha256")
+    let tid = self.tailnet_count
+    self.tailnet_count = tid + 1
+    self.tailnet_owner[tid] = caller
+    self.tailnet_spender_epoch[tid] = 1
+    self.tailnet_treasury[tid] = value
+    self.tailnet_members_root[tid] = members_root
+    self.tailnet_root_version[tid] = 1
+    self.tailnet_retired[tid] = 0
+    emit TailnetCreated(tid, caller, members_root)
+    return tid
+  }
+
+  payable fn deposit_to_tailnet(tailnet_id: uint): bool {
+    require_fund_cap()
+    require_not_paused()
+    require(value > 0, "no deposit")
+    require(tailnet_id < self.tailnet_count, "tailnet not found")
+    require(self.tailnet_retired[tailnet_id] == 0, "tailnet retired")
+    // Anyone can top up; membership is off-chain ACL.
+    self.tailnet_treasury[tailnet_id] = self.tailnet_treasury[tailnet_id] + value
+    emit TailnetDeposit(tailnet_id, value, self.tailnet_treasury[tailnet_id])
+    return true
+  }
+
+  // Owner re-seals members.json, bumps the root here.
+  fn update_members_root(tailnet_id: uint, new_members_root: bytes): bool {
+    require_not_paused()
+    require(tailnet_id < self.tailnet_count, "tailnet not found")
+    require(self.tailnet_owner[tailnet_id] == caller, "not tailnet owner")
+    require(len(new_members_root) == 64, "members_root must be 64-char hex sha256")
+    self.tailnet_members_root[tailnet_id] = new_members_root
+    self.tailnet_root_version[tailnet_id] = self.tailnet_root_version[tailnet_id] + 1
+    emit TailnetMembersRootUpdated(tailnet_id, new_members_root)
+    return true
+  }
+
+  fn transfer_tailnet_ownership(tailnet_id: uint, new_owner: address): bool {
+    require_not_paused()
+    require(tailnet_id < self.tailnet_count, "tailnet not found")
+    require(self.tailnet_owner[tailnet_id] == caller, "not tailnet owner")
+    require(is_address(new_owner), "invalid owner")
+    let old_owner = self.tailnet_owner[tailnet_id]
+    self.tailnet_owner[tailnet_id] = new_owner
+    // R1: bump the authorization epoch so EVERY grant the old owner made is
+    // invalidated atomically -- the new owner inherits a clean spender set.
+    self.tailnet_spender_epoch[tailnet_id] = self.tailnet_spender_epoch[tailnet_id] + 1
+    emit TailnetOwnershipTransferred(tailnet_id, old_owner, new_owner)
+    return true
+  }
+
+  fn authorize_tailnet_spender(tailnet_id: uint, spender: address): bool {
+    require_not_paused()
+    require(tailnet_id < self.tailnet_count, "tailnet not found")
+    require(self.tailnet_owner[tailnet_id] == caller, "not tailnet owner")
+    require(is_address(spender), "invalid spender")
+    self.tailnet_authorized_spenders[tailnet_id][spender] = self.tailnet_spender_epoch[tailnet_id]
+    emit TailnetSpenderAuthorized(tailnet_id, spender)
+    return true
+  }
+
+  fn revoke_tailnet_spender(tailnet_id: uint, spender: address): bool {
+    // Existing obligations remain recoverable while admission is paused.
+    require(tailnet_id < self.tailnet_count, "tailnet not found")
+    require(self.tailnet_owner[tailnet_id] == caller, "not tailnet owner")
+    require(is_address(spender), "invalid spender")
+    self.tailnet_authorized_spenders[tailnet_id][spender] = 0
+    emit TailnetSpenderRevoked(tailnet_id, spender)
+    return true
+  }
+
+  fn retire_tailnet(tailnet_id: uint): bool {
+    // Existing obligations remain recoverable while admission is paused.
+    require(self.tailnet_owner[tailnet_id] == caller, "not tailnet owner")
+    self.tailnet_retired[tailnet_id] = 1
+    return true
+  }
+
+  // Withdraw any leftover treasury after retire.
+  nonreentrant fn withdraw_tailnet_treasury(tailnet_id: uint, amount: uint): bool {
+    // Existing obligations remain recoverable while admission is paused.
+    require(self.tailnet_owner[tailnet_id] == caller, "not tailnet owner")
+    require(self.tailnet_retired[tailnet_id] == 1, "tailnet not retired")
+    require(amount > 0, "amount > 0")
+    require(self.tailnet_treasury[tailnet_id] >= amount, "treasury insufficient")
+    self.tailnet_treasury[tailnet_id] = self.tailnet_treasury[tailnet_id] - amount
+    require(transfer(caller, amount), "transfer failed")
+    return true
+  }
+
+  // ============================================================
+  // Sessions — chain escrow + adjudication; no class/price logic.
+  // v3 sessions are class- and price-agnostic on chain. Class/price
+  // live in the operator's signed off-chain receipt (sealed at
+  // /receipts/{epoch}.json in the operator's circle); the chain only
+  // sees bytes_used + the pre-agreed net. Adjudication: both signed
+  // values agree.
+  // ============================================================
+
+  payable fn open_session(tailnet_id: uint, circle: address, max_pay: uint): uint {
+    require_fund_cap()
+    require_not_paused()
+    require(tailnet_id < self.tailnet_count, "tailnet not found")
+    require(self.tailnet_retired[tailnet_id] == 0, "tailnet retired")
+    require(circle_is_active(circle), "circle inactive or slashed")
+    require(value >= self.min_session_deposit, "deposit below min")
+    require(value >= max_pay, "value below max_pay")
+
+    return write_session(tailnet_id, circle, value, 0)
+  }
+
+  fn open_session_from_treasury(tailnet_id: uint, circle: address, max_pay: uint): uint {
+    require_not_paused()
+    require(tailnet_id < self.tailnet_count, "tailnet not found")
+    require(self.tailnet_retired[tailnet_id] == 0, "tailnet retired")
+    require(circle_is_active(circle), "circle inactive or slashed")
+    require(max_pay >= self.min_session_deposit, "deposit below min")
+    require_tailnet_spend_authorized(tailnet_id)
+    require(self.tailnet_treasury[tailnet_id] >= max_pay, "tailnet treasury insufficient")
+
+    self.tailnet_treasury[tailnet_id] = self.tailnet_treasury[tailnet_id] - max_pay
+    return write_session(tailnet_id, circle, max_pay, 1)
+  }
+
+  // ============================================================
+  // v4 relay settlement — additive unilateral settlement lane.
+  // ============================================================
+
+  // Promote an existing v3 SESSION_OPEN session into the relay lane once
+  // the client has committed the final dual-signed receipt hash.
+  fn arm_relay(session_id: uint, settlement_hash: bytes, net: uint, relay_expiry_epochs: uint): bool {
+    require_not_paused()
+    require(session_id < self.session_count, "session not found")
+    require(self.session_status[session_id] == SESSION_OPEN, "session not open")
+    require(self.session_opener[session_id] == caller, "only opener can arm")
+    let circle = self.session_exit[session_id]
+    require(circle_is_active(circle), "operator inactive or slashed")
+    write_relay_arm(session_id, settlement_hash, net, relay_expiry_epochs)
+    return true
+  }
+
+  // Pre-quoted path: open a self-funded session and arm it in one tx.
+  payable fn open_relay_session(tailnet_id: uint, circle: address, max_pay: uint, settlement_hash: bytes, net: uint, relay_expiry_epochs: uint): uint {
+    require_fund_cap()
+    require_not_paused()
+    require(tailnet_id < self.tailnet_count, "tailnet not found")
+    require(self.tailnet_retired[tailnet_id] == 0, "tailnet retired")
+    require(circle_is_active(circle), "circle inactive or slashed")
+    require(value >= self.min_session_deposit, "deposit below min")
+    require(value >= max_pay, "value below max_pay")
+
+    let sid = write_session(tailnet_id, circle, value, 0)
+    write_relay_arm(sid, settlement_hash, net, relay_expiry_epochs)
+    return sid
+  }
+
+  // Sponsored pre-quoted path: authorized tailnet owner/spender opens a
+  // relay-armed session from the tailnet treasury.
+  fn open_relay_session_from_treasury(tailnet_id: uint, circle: address, max_pay: uint, settlement_hash: bytes, net: uint, relay_expiry_epochs: uint): uint {
+    require_not_paused()
+    require(tailnet_id < self.tailnet_count, "tailnet not found")
+    require(self.tailnet_retired[tailnet_id] == 0, "tailnet retired")
+    require(circle_is_active(circle), "circle inactive or slashed")
+    require(max_pay >= self.min_session_deposit, "deposit below min")
+    require_tailnet_spend_authorized(tailnet_id)
+    require(self.tailnet_treasury[tailnet_id] >= max_pay, "tailnet treasury insufficient")
+
+    self.tailnet_treasury[tailnet_id] = self.tailnet_treasury[tailnet_id] - max_pay
+    let sid = write_session(tailnet_id, circle, max_pay, 1)
+    write_relay_arm(sid, settlement_hash, net, relay_expiry_epochs)
+    return sid
+  }
+
+  // Operator reveals SignedReceipt::settlement_preimage(); the chain only
+  // verifies sha256(preimage) against the client-committed hash.
+  nonreentrant fn relay_claim(session_id: uint, preimage: string): bool {
+    // Existing obligations remain recoverable while admission is paused.
+    require(session_id < self.session_count, "session not found")
+    require(self.session_status[session_id] == SESSION_RELAY_ARMED, "session not armed")
+    let circle = self.session_exit[session_id]
+    require(self.circle_owner[circle] == caller, "not circle owner")
+    require(circle_is_active(circle), "operator inactive or slashed")
+    require(epoch < self.session_relay_deadline[session_id], "relay window elapsed; client may refund")
+    require(len(preimage) > 0, "preimage required")
+
+    let revealed = sha256(preimage)
+    require(revealed == self.session_settlement_hash[session_id], "preimage does not match commitment")
+
+    let dep = self.session_deposit[session_id]
+    let net = self.session_relay_net[session_id]
+
+    // Same value movement as settle_confirm: fee to protocol, net-after-fee
+    // to the earnings ledger, surplus escrow back to the session funder.
+    let total_paid = net
+    if total_paid > dep {
+      total_paid = dep
+    }
+    let net_after_fee = total_paid
+    let refund = dep - total_paid
+
+    self.session_status[session_id] = SESSION_RELAY_CLAIMED
+    let funded_circle = self.session_exit[session_id]
+    self.circle_open_sessions[funded_circle] = self.circle_open_sessions[funded_circle] - 1
+    refund_session_escrow(session_id, refund)
+
+    if net_after_fee > 0 {
+      self.circle_earnings_total[circle] = self.circle_earnings_total[circle] + net_after_fee
+      let prev_head = self.circle_earnings_chain[circle]
+      let new_head = sha256(prev_head + revealed)
+      self.circle_earnings_chain[circle] = new_head
+      emit EarningsCommitted(circle, self.circle_earnings_total[circle], new_head)
+    }
+
+    emit RelaySettled(session_id, circle, net_after_fee, refund)
+    return true
+  }
+
+  // Client recovery if the operator never reveals before the relay deadline.
+  nonreentrant fn relay_refund(session_id: uint): bool {
+    // Existing obligations remain recoverable while admission is paused.
+    require(session_id < self.session_count, "session not found")
+    require(self.session_status[session_id] == SESSION_RELAY_ARMED, "session not armed")
+    require(self.session_opener[session_id] == caller, "only opener can refund")
+    require(epoch >= self.session_relay_deadline[session_id], "relay window not elapsed")
+    self.session_status[session_id] = SESSION_RELAY_REFUNDED
+    let funded_circle = self.session_exit[session_id]
+    self.circle_open_sessions[funded_circle] = self.circle_open_sessions[funded_circle] - 1
+    let dep = self.session_deposit[session_id]
+    refund_session_escrow(session_id, dep)
+    emit RelayRefunded(session_id, "relay expiry: no operator claim")
+    return true
+  }
+
+  // Keeper recovery for an armed session after the relay deadline plus the
+  // same stretched sweep grace v3 uses for open sessions.
+  nonreentrant fn relay_sweep(session_id: uint): bool {
+    // Existing obligations remain recoverable while admission is paused.
+    require(session_id < self.session_count, "session not found")
+    require(self.session_status[session_id] == SESSION_RELAY_ARMED, "session not armed")
+    let deadline = self.session_relay_deadline[session_id]
+    let extra = self.session_grace_epochs * self.sweep_grace_multiplier
+    require(epoch >= deadline + extra, "sweep grace not elapsed")
+    self.session_status[session_id] = SESSION_RELAY_REFUNDED
+    let funded_circle = self.session_exit[session_id]
+    self.circle_open_sessions[funded_circle] = self.circle_open_sessions[funded_circle] - 1
+    let dep = self.session_deposit[session_id]
+    let bounty = dep * self.sweep_bounty_bps / BPS_DENOM
+    let refund = dep - bounty
+    if bounty > 0 {
+      require(transfer(caller, bounty), "bounty transfer failed")
+    }
+    refund_session_escrow(session_id, refund)
+    emit RelaySwept(session_id)
+    return true
+  }
+
+  // Operator records bytes_used. Re-claiming a different value =
+  // equivocation: refund the session; bond is burned by a follow-up
+  // governance adjudication.
+  nonreentrant fn settle_claim(session_id: uint, bytes_used: uint): bool {
+    // Existing obligations remain recoverable while admission is paused.
+    require(session_id < self.session_count, "session not found")
+    require(self.session_status[session_id] == SESSION_OPEN, "session not open")
+    require(bytes_used > 0, "bytes > 0")
+    let circle = self.session_exit[session_id]
+    require(self.circle_owner[circle] == caller, "not circle owner")
+    require(circle_is_active(circle), "operator inactive")
+
+    let prev_set = self.operator_claim_set[session_id]
+    if prev_set == 1 {
+      let prev_bytes = self.operator_claim_bytes[session_id]
+      if prev_bytes == bytes_used {
+        return true
+      }
+      // Equivocation: refund deposit, mark refunded. Slash itself
+      // is adjudicated by governance using the signed receipts.
+      let dep = self.session_deposit[session_id]
+      self.session_status[session_id] = SESSION_REFUNDED
+    let funded_circle = self.session_exit[session_id]
+    self.circle_open_sessions[funded_circle] = self.circle_open_sessions[funded_circle] - 1
+      refund_session_escrow(session_id, dep)
+      emit SettleDispute(session_id, prev_bytes, bytes_used)
+      emit SessionRefunded(session_id, "operator equivocation")
+      return false
+    }
+
+    self.operator_claim_set[session_id] = 1
+    self.operator_claim_bytes[session_id] = bytes_used
+    emit SettleClaimed(session_id, circle, bytes_used)
+    return true
+  }
+
+  // Opener confirms. `net` is the operator's plaintext credit pre-
+  // agreed off-chain (price * bytes after class rules). `settle_blinding`
+  // is a per-session secret that feeds the earnings hash-chain so
+  // off-chain auditors can detect tampering with the settle stream.
+  nonreentrant fn settle_confirm(session_id: uint, bytes_used: uint, net: uint, settle_blinding: string): bool {
+    // Existing obligations remain recoverable while admission is paused.
+    require(session_id < self.session_count, "session not found")
+    require(self.session_status[session_id] == SESSION_OPEN, "session not open")
+    require(self.session_opener[session_id] == caller, "only opener can confirm")
+    require(self.operator_claim_set[session_id] == 1, "no operator claim yet")
+    require(len(settle_blinding) > 0, "blinding required")
+
+    let op_bytes = self.operator_claim_bytes[session_id]
+    if op_bytes != bytes_used {
+      self.client_confirm_set[session_id] = 1
+      self.client_confirm_bytes[session_id] = bytes_used
+      emit SettleDispute(session_id, op_bytes, bytes_used)
+      return false
+    }
+
+    self.client_confirm_set[session_id] = 1
+    self.client_confirm_bytes[session_id] = bytes_used
+
+    let circle = self.session_exit[session_id]
+    let dep = self.session_deposit[session_id]
+
+    // Inactive operators receive no new credit. Previously accrued earnings
+    // remain claimable. Refund this escrow even when an operator claim blocks
+    // the no-show path.
+    // Cap net against deposit; surplus is refunded to the session funder.
+    let total_paid = 0
+    if circle_is_active(circle) {
+      total_paid = net
+      if total_paid > dep {
+        total_paid = dep
+      }
+    }
+    let net_after_fee = total_paid
+    let refund = dep - total_paid
+
+    self.session_status[session_id] = SESSION_SETTLED
+    let funded_circle = self.session_exit[session_id]
+    self.circle_open_sessions[funded_circle] = self.circle_open_sessions[funded_circle] - 1
+    refund_session_escrow(session_id, refund)
+
+    if net_after_fee > 0 {
+      self.circle_earnings_total[circle] = self.circle_earnings_total[circle] + net_after_fee
+      // head' = sha256(head || sha256(blinding))
+      let bh = sha256(settle_blinding)
+      let prev_head = self.circle_earnings_chain[circle]
+      let new_head = sha256(prev_head + bh)
+      self.circle_earnings_chain[circle] = new_head
+      emit EarningsCommitted(circle, self.circle_earnings_total[circle], new_head)
+    }
+
+    emit SettleConfirmed(session_id, caller, bytes_used)
+    emit SessionSettled(session_id, circle, net_after_fee, refund)
+    return true
+  }
+
+  nonreentrant fn claim_no_show(session_id: uint): bool {
+    // Existing obligations remain recoverable while admission is paused.
+    require(session_id < self.session_count, "session not found")
+    require(self.session_status[session_id] == SESSION_OPEN, "session not open")
+    require(self.session_opener[session_id] == caller, "only opener")
+    let opened = self.session_opened_at[session_id]
+    require(epoch >= opened + self.session_grace_epochs, "grace not elapsed")
+    require(self.operator_claim_set[session_id] == 0, "operator claimed")
+    self.session_status[session_id] = SESSION_REFUNDED
+    let funded_circle = self.session_exit[session_id]
+    self.circle_open_sessions[funded_circle] = self.circle_open_sessions[funded_circle] - 1
+    let dep = self.session_deposit[session_id]
+    refund_session_escrow(session_id, dep)
+    emit SessionRefunded(session_id, "no-show")
+    return true
+  }
+
+  nonreentrant fn sweep_expired_session(session_id: uint): bool {
+    // Existing obligations remain recoverable while admission is paused.
+    require(session_id < self.session_count, "session not found")
+    require(self.session_status[session_id] == SESSION_OPEN, "session not open")
+    let opened = self.session_opened_at[session_id]
+    let sweep_grace = self.session_grace_epochs * self.sweep_grace_multiplier
+    require(epoch >= opened + sweep_grace, "sweep grace not elapsed")
+    self.session_status[session_id] = SESSION_REFUNDED
+    let funded_circle = self.session_exit[session_id]
+    self.circle_open_sessions[funded_circle] = self.circle_open_sessions[funded_circle] - 1
+    let dep = self.session_deposit[session_id]
+    let bounty = dep * self.sweep_bounty_bps / BPS_DENOM
+    let refund = dep - bounty
+    if bounty > 0 {
+      require(transfer(caller, bounty), "bounty transfer failed")
+    }
+    refund_session_escrow(session_id, refund)
+    emit SessionSwept(session_id)
+    return true
+  }
+
+  // ============================================================
+  // Earnings claim (hash-chain era). Plaintext running total in
+  // circle_earnings_total; sha256 hash-chain in circle_earnings_chain
+  // gives tamper-evidence for off-chain auditors. HFHE migration adds
+  // a proof + ciphertext path next to (not replacing) these fields.
+  // ============================================================
+
+  nonreentrant fn claim_earnings(circle: address, amount: uint): bool {
+    // Existing obligations remain recoverable while admission is paused.
+    require(self.circle_owner[circle] == caller, "not circle owner")
+    require(amount > 0, "amount > 0")
+    let avail = self.circle_earnings_total[circle] - self.circle_earnings_claimed[circle]
+    require(amount <= avail, "amount exceeds available earnings")
+    self.circle_earnings_claimed[circle] = self.circle_earnings_claimed[circle] + amount
+    require(transfer(caller, amount), "transfer failed")
+    emit EarningsClaimed(circle, amount, self.circle_earnings_claimed[circle])
+    return true
+  }
+
+  // ============================================================
+  // Views
+  // ============================================================
+
+  view fn get_max_locked_value(): uint { return self.max_locked_value }
+  view fn get_admin_commitment(): string { return self.admin_commitment }
+  view fn get_admin_nonce(): uint { return self.admin_nonce }
+  view fn get_admin_domain(): string { return self.admin_domain }
+  view fn get_admin_verification_key_hash(): string { return sha256(self.admin_verification_key) }
+  view fn get_pending_admin_commitment(): string { return self.pending_admin_commitment }
+  view fn get_admin_handoff_id(): string { return self.admin_handoff_id }
+  view fn get_admin_handoff_kind(): uint { return self.admin_handoff_kind }
+  view fn get_program_treasury(): uint { return self.treasury }
+  view fn get_circle_open_sessions(circle: address): uint { return self.circle_open_sessions[circle] }
+
+  view fn get_circle_active(circle: address): bool {
+    return circle_is_active(circle)
+  }
+
+  view fn is_circle_slashed(circle: address): bool {
+    return self.circle_slashed[circle] == 1
+  }
+
+  view fn get_circle_state_root(circle: address): bytes {
+    return self.circle_state_root[circle]
+  }
+
+  view fn get_circle_state_version(circle: address): uint {
+    return self.circle_state_version[circle]
+  }
+
+  view fn get_circle_owner(circle: address): address {
+    return self.circle_owner[circle]
+  }
+
+  view fn endpoint_stake_of(circle: address): uint {
+    return self.circle_bond[circle]
+  }
+
+  view fn get_tailnet_members_root(tailnet_id: uint): bytes {
+    return self.tailnet_members_root[tailnet_id]
+  }
+
+  view fn get_tailnet_treasury(tailnet_id: uint): uint {
+    return self.tailnet_treasury[tailnet_id]
+  }
+
+  view fn get_earnings_total(circle: address): uint {
+    return self.circle_earnings_total[circle]
+  }
+
+  view fn get_earnings_claimed(circle: address): uint {
+    return self.circle_earnings_claimed[circle]
+  }
+
+  view fn get_earnings_chain(circle: address): bytes {
+    return self.circle_earnings_chain[circle]
+  }
+
+  view fn get_session_status(session_id: uint): uint {
+    return self.session_status[session_id]
+  }
+
+  view fn get_relay_settlement_hash(session_id: uint): bytes {
+    return self.session_settlement_hash[session_id]
+  }
+
+  view fn get_relay_net(session_id: uint): uint {
+    return self.session_relay_net[session_id]
+  }
+
+  view fn get_relay_deadline(session_id: uint): uint {
+    return self.session_relay_deadline[session_id]
+  }
+
+  view fn get_session_opener(session_id: uint): address {
+    return self.session_opener[session_id]
+  }
+
+  view fn get_session_exit(session_id: uint): address {
+    require(session_id < self.session_count, "session not found")
+    return self.session_exit[session_id]
+  }
+
+  view fn get_session_count(): uint {
+    return self.session_count
+  }
+
+  view fn get_sweep_grace(): uint {
+    return self.session_grace_epochs * self.sweep_grace_multiplier
+  }
+}

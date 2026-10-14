@@ -19,7 +19,10 @@ use parking_lot::Mutex;
 use serde_json::json;
 use tracing::{info, warn};
 
-use crate::{config::ClientConfig, discover, settle_state, settler, wallet};
+use crate::{
+    config::{ClientConfig, ProtocolVersion},
+    discover, settle_state, settler, wallet,
+};
 
 pub(crate) struct Client {
     rpc: RpcClient,
@@ -68,10 +71,14 @@ impl Client {
         let program_addr = Address::from_display(&cfg.chain.program_addr);
         let wallet_addr = Address::from_display(&cfg.wallet.addr);
         let wallet_kp = Arc::new(wallet::load_keypair(&cfg.wallet.secret_path)?);
-        // Receipt domain: v1.1 clients leave circle_id = None; v2 clients
-        // discover circle_id from the operator's policy bundle and call
-        // `set_receipt_circle` before opening a session.
-        let receipt_context = ReceiptContext::v1_1(program_addr.clone(), cfg.chain.chain_id);
+        // Standalone settlement commands must retain the configured v3 circle
+        // across restarts, before replaying the durable receipt journal.
+        let receipt_context = configured_receipt_context(
+            program_addr.clone(),
+            cfg.chain.chain_id,
+            ProtocolVersion::parse(&cfg.chain.protocol_version)?,
+            &cfg.v3.circle_id,
+        )?;
         let relay = cfg.v3.relay.clone();
         // TX-ENVELOPE chain_id is left EMPTY to match the node's ChainCtxV3
         // (all production ctors use String::new()). Devnet/mainnet do not verify
@@ -321,16 +328,7 @@ async fn announce_to_exit(client: &Client) -> Result<()> {
         let active = g.as_ref().ok_or_else(|| anyhow!("no active session"))?;
         let exit = active.route.last().ok_or_else(|| anyhow!("empty route"))?;
         let ctrl_endpoint = octravpn_core::control::base_url_for(&exit.validator.endpoint);
-        // Derive the client's X25519 noise pubkey from the wallet
-        // pubkey via HKDF — the entry hop uses this to construct its
-        // `Tunn` peer state.
-        let client_wg_secret = octravpn_core::util::derive_subkey(
-            &active.session_kp.public.0,
-            octravpn_core::util::DOMAIN_NOISE,
-        );
-        let client_wg_pubkey =
-            x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(client_wg_secret))
-                .to_bytes();
+        let client_wg_pubkey = crate::wireguard::public_key(&active.session_kp);
         let client_sig_payload = octravpn_core::control::announce_signing_payload(
             &active.session_id,
             &active.session_kp.public,
@@ -434,4 +432,62 @@ fn build_rpc(chain: &crate::config::ChainCfg) -> Result<RpcClient> {
     }
     RpcClient::new_with_pinned_roots(&chain.rpc_url, &blobs)
         .map_err(|e| anyhow::anyhow!("pinned tls: {e}"))
+}
+
+fn configured_receipt_context(
+    program_addr: Address,
+    chain_id: u32,
+    protocol: ProtocolVersion,
+    circle: &str,
+) -> Result<ReceiptContext> {
+    let mut context = ReceiptContext::v1_1(program_addr, chain_id);
+    if protocol == ProtocolVersion::V3 {
+        if circle.trim().is_empty() {
+            return Err(anyhow!(
+                "[v3].circle_id is required for v3 receipt settlement"
+            ));
+        }
+        context.circle_id = Some(Address::from_display(circle));
+    }
+    Ok(context)
+}
+
+#[cfg(test)]
+mod receipt_context_tests {
+    use super::*;
+    #[test]
+    fn v3_settlement_context_retains_configured_circle() {
+        let context = configured_receipt_context(
+            Address::from_display("octPROGRAM"),
+            9,
+            ProtocolVersion::V3,
+            "octCIRCLE",
+        )
+        .unwrap();
+        assert_eq!(context.circle_id.as_ref().unwrap().display(), "octCIRCLE");
+        assert_eq!(context.chain_id, 9);
+        assert_eq!(context.program_addr.display(), "octPROGRAM");
+    }
+    #[test]
+    fn v3_missing_circle_fails_before_journal_replay() {
+        assert!(configured_receipt_context(
+            Address::from_display("octPROGRAM"),
+            9,
+            ProtocolVersion::V3,
+            " "
+        )
+        .is_err());
+    }
+    #[test]
+    fn legacy_receipt_domain_remains_without_circle() {
+        assert!(configured_receipt_context(
+            Address::from_display("octPROGRAM"),
+            9,
+            ProtocolVersion::V1_1,
+            "octCIRCLE"
+        )
+        .unwrap()
+        .circle_id
+        .is_none());
+    }
 }

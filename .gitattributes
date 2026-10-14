@@ -1,0 +1,7 @@
+# Native oracle vectors remain byte-exact and available for reproduction.
+# Collapse generated data and vendored sources in the GitHub review by default.
+crates/octra-node-protocol/tests/fixtures/** linguist-generated=true
+crates/octra-node-runtime/tests/fixtures/** linguist-generated=true
+crates/octra-hfhe/tests/fixtures/** linguist-generated=true
+docs/rust-node/checkpoints/** linguist-generated=true
+vendor/** linguist-vendored=true

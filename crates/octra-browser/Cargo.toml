@@ -1,0 +1,30 @@
+[package]
+name = "octra-browser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version = "1.85"
+description = "Snapshot-bound native Circle browsing and reviewed application host capabilities."
+publish = false
+
+[dependencies]
+octra-node-protocol = { path = "../octra-node-protocol" }
+async-trait.workspace = true
+axum.workspace = true
+base64.workspace = true
+hex.workspace = true
+lol_html = "3.0.1"
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+rand.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+tower = { version = "0.5", features = ["util"] }
+http-body-util.workspace = true
+
+[lints]
+workspace = true

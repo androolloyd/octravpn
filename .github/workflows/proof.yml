@@ -54,11 +54,6 @@ jobs:
         with:
           repository: androolloyd/headscale-rs
           path: headscale-rs
-        # Sibling repo is optional — some downstream forks may not have
-        # access. Falling back to a missing dir lets the workflow still
-        # try the build (it'll fail with a clear path-dep error if the
-        # repo is required).
-        continue-on-error: true
 
       - name: Checkout sibling octra-foundry
         uses: actions/checkout@v4
@@ -128,26 +123,17 @@ jobs:
       - name: Lean — lake build + theorem count
         id: lean
         working-directory: octra
-        # Best-effort: install elan if not present, then lake build.
-        # Theorem count is a simple grep of `^theorem` across all .lean
-        # files in proofs/lean. We don't gate on lake exit code here;
-        # the dedicated `lean` job in ci.yml is the hard gate.
         run: |
-          theorems=$(find proofs/lean -name '*.lean' -exec grep -h '^theorem' {} + 2>/dev/null | wc -l | tr -d ' ')
+          set -euo pipefail
+          theorems=$(find proofs/lean -maxdepth 1 -name '*.lean' -exec grep -h '^theorem' {} + | wc -l | tr -d ' ')
           echo "theorems=${theorems}" >> "$GITHUB_OUTPUT"
           if ! command -v lake >/dev/null 2>&1; then
-            curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
-              | sh -s -- -y --default-toolchain none
+            curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
             echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
             export PATH="$HOME/.elan/bin:$PATH"
           fi
-          if command -v lake >/dev/null 2>&1; then
-            (cd proofs/lean && lake build) && lake_status=ok || lake_status=fail
-          else
-            lake_status=skipped
-          fi
-          echo "lake_status=${lake_status}" >> "$GITHUB_OUTPUT"
-        continue-on-error: true
+          (cd proofs/lean && lake build)
+          echo "lake_status=ok" >> "$GITHUB_OUTPUT"
 
       # --- 6. Cached interop exit code --------------------------------------
       # The real interop script needs Docker-in-Docker + kernel WG and

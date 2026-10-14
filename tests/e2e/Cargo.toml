@@ -24,6 +24,8 @@ x25519-dalek = { workspace = true }
 rand = { workspace = true }
 
 [dev-dependencies]
+axum = { workspace = true }
+parking_lot = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]

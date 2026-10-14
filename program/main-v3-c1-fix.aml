@@ -68,7 +68,7 @@ contract OctraVPN_V3 {
 
   const BPS_DENOM: uint = 10000
   const SLASH_BURN_DEFAULT_BPS: uint = 9000   // 90% burn, 10% bounty
-  const PROTOCOL_FEE_DEFAULT_BPS: uint = 50
+  const PROTOCOL_FEE_DEFAULT_BPS: uint = 0
   const SWEEP_GRACE_MULT_DEFAULT: uint = 10
   const SWEEP_BOUNTY_DEFAULT_BPS: uint = 100
 
@@ -345,7 +345,7 @@ contract OctraVPN_V3 {
     require(new_unbond_grace_epochs >= 1000, "unbond grace too short")
     require(new_slash_burn_bps >= 5000, "burn share too low")
     require(new_slash_burn_bps + new_slash_bounty_bps == BPS_DENOM, "slash bps sum")
-    require(new_protocol_fee_bps <= 200, "protocol fee > 2%")
+    require(new_protocol_fee_bps == 0, "protocol fee disabled")
     require(new_dispute_grace_epochs >= 1, "dispute grace >= 1")
     require(new_dispute_grace_epochs <= new_session_grace_epochs * 2, "dispute grace too long")
     self.min_session_deposit = new_min_session_deposit
@@ -357,7 +357,7 @@ contract OctraVPN_V3 {
     self.unbond_grace_epochs = new_unbond_grace_epochs
     self.slash_burn_bps = new_slash_burn_bps
     self.slash_bounty_bps = new_slash_bounty_bps
-    self.protocol_fee_bps = new_protocol_fee_bps
+    self.protocol_fee_bps = 0
     self.dispute_grace_epochs = new_dispute_grace_epochs
     return true
   }
@@ -689,12 +689,10 @@ contract OctraVPN_V3 {
     if total_paid > dep {
       total_paid = dep
     }
-    let fee = total_paid * self.protocol_fee_bps / BPS_DENOM
-    let net_after_fee = total_paid - fee
+    let net_after_fee = total_paid
     let refund = dep - total_paid
 
     self.session_status[session_id] = SESSION_SETTLED
-    self.treasury = self.treasury + fee
     if refund > 0 {
       self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + refund
     }
@@ -806,12 +804,10 @@ contract OctraVPN_V3 {
     if total_paid > post_slash_deposit {
       total_paid = post_slash_deposit
     }
-    let fee = total_paid * self.protocol_fee_bps / BPS_DENOM
-    let net_after_fee = total_paid - fee
+    let net_after_fee = total_paid
     let refund = post_slash_deposit - total_paid
 
     self.session_status[session_id] = SESSION_SETTLED
-    self.treasury = self.treasury + fee
     if refund > 0 {
       self.tailnet_treasury[tid] = self.tailnet_treasury[tid] + refund
     }
@@ -855,8 +851,7 @@ contract OctraVPN_V3 {
     if total_paid > dep {
       total_paid = dep
     }
-    let fee = total_paid * self.protocol_fee_bps / BPS_DENOM
-    let net_after_fee = total_paid - fee
+    let net_after_fee = total_paid
     let refund = dep - total_paid
 
     // Sweep bounty to the caller (same sweep_bounty_bps used by
@@ -866,7 +861,6 @@ contract OctraVPN_V3 {
     let refund_after_bounty = refund - bounty
 
     self.session_status[session_id] = SESSION_SETTLED
-    self.treasury = self.treasury + fee
 
     if bounty > 0 {
       require(transfer(caller, bounty), "bounty transfer failed")

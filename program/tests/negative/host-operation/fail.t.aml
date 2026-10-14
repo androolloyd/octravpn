@@ -1,0 +1,7 @@
+contract UnsupportedHost {
+  // expect-revert test_transfer "transfer failed"
+  fn test_transfer(): bool {
+    require(transfer(caller, 1), "transfer failed")
+    return true
+  }
+}

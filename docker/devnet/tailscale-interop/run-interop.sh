@@ -35,7 +35,8 @@ COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
 # file bind-mounts ./state into /work/state on mesh-control and
 # /mnt/mesh-control-state on each peer. The TLS cert + Noise static
 # key land under tailscale-wire/.
-mkdir -p "${SCRIPT_DIR}/state/tailscale-wire"
+STATE_DIR="${OCTRAVPN_INTEROP_STATE_DIR:-${SCRIPT_DIR}/state}"
+mkdir -p "${STATE_DIR}/tailscale-wire"
 
 
 docker compose -f "${COMPOSE_FILE}" up -d >&2 || {
@@ -144,7 +145,7 @@ step "Step 4: install self-signed cert into peer trust stores"
 # bind mount at /mnt/mesh-control-state. We then copy it into
 # /usr/local/share/ca-certificates/ and run `update-ca-certificates`
 # so `tailscale up`'s forced-443 dial doesn't fail TLS verification.
-CERT_HOST_PATH="${SCRIPT_DIR}/state/tailscale-wire/tls.crt"
+CERT_HOST_PATH="${STATE_DIR}/tailscale-wire/tls.crt"
 for _ in $(seq 1 30); do
     if [[ -s "${CERT_HOST_PATH}" ]]; then
         break
@@ -254,6 +255,16 @@ if ! docker exec tsi-peer-a tailscale ping --c 5 --timeout 10s "${PEER_B_IP}" >&
     exit 50
 fi
 
+# Discovery pings alone do not traverse WireGuard. Require encrypted TSMP and
+# ICMP probes as well, using the stock userspace network stack.
+step "Step 6b: encrypted WireGuard packet exchange"
+for probe in --tsmp --icmp; do
+    if ! docker exec tsi-peer-a tailscale ping "$probe" --c 3 --timeout 10s "${PEER_B_IP}" >&2; then
+        echo "ENCRYPTED-PACKET-PING FAILED ($probe)" >&2
+        exit 50
+    fi
+done
+
 # Optional: prove registrations are durable. Restart mesh-control (its
 # state dir is bind-mounted, so <state>/tailscale-wire/machines.sqlite
 # survives), wait for it to come back, and ping again WITHOUT re-running
@@ -273,7 +284,7 @@ if [ "${INTEROP_RESTART:-0}" = "1" ]; then
     echo "RESTART FAIL: peer-b ip before=$IP_BEFORE after=$IP_AFTER (registrations not durable)" >&2
     exit 60
   fi
-  if ! docker exec tsi-peer-a tailscale ping -c 3 --timeout 5s "$IP_AFTER" 2>&1 | tail -3; then
+  if ! docker exec tsi-peer-a tailscale ping --tsmp -c 3 --timeout 5s "$IP_AFTER" 2>&1 | tail -3; then
     echo "RESTART FAIL: ping after mesh-control restart failed" >&2
     exit 60
   fi

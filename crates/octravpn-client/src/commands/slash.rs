@@ -12,7 +12,6 @@ use anyhow::{Context, Result};
 use octravpn_core::{
     address::Address,
     receipt::{Receipt, ReceiptContext, CHAIN_ID_DEVNET},
-    rpc::next_nonce,
     session::Blind,
     session::SessionId,
     sig::{self, PublicKey, Signature},
@@ -191,7 +190,7 @@ pub(crate) enum SlashCmd {
         out: std::path::PathBuf,
     },
     /// Verify a `<blob>.json` and submit `slash_double_sign` on chain.
-    /// Caller (the slasher) receives the 10 % bounty.
+    /// This legacy opaque-evidence ABI is disabled; use governance adjudication.
     Submit {
         /// Path to evidence blob (from `slash-evidence build`).
         blob: std::path::PathBuf,
@@ -260,8 +259,12 @@ pub(crate) fn run(cmd: SlashCmd) -> Result<()> {
             };
             // Round-trip verify before writing so we never serialise
             // garbage as "evidence".
-            ev.verify()
-                .context("evidence verification failed; refusing to write")?;
+            if !ev
+                .verify()
+                .context("evidence verification failed; refusing to write")?
+            {
+                anyhow::bail!("both receipts identical; refusing to write equivocation evidence");
+            }
             let body = serde_json::to_string_pretty(&ev)?;
             fs::write(&out, body).with_context(|| format!("write {}", out.display()))?;
             println!("wrote {}", out.display());
@@ -277,68 +280,12 @@ fn load(path: &Path) -> Result<EquivocationEvidence> {
 
 /// `octravpn slash-evidence submit <blob>` — verify locally, then
 /// submit `slash_double_sign` on chain. The slasher (= caller) gets
-/// the 10 % bounty.
+/// opaque on-chain slashing is disabled; evidence must be reviewed by governance.
 pub(crate) async fn submit(
-    client: &std::sync::Arc<crate::runner::Client>,
-    cmd: SlashCmd,
+    _client: &std::sync::Arc<crate::runner::Client>,
+    _cmd: SlashCmd,
 ) -> Result<()> {
-    let SlashCmd::Submit { blob } = cmd else {
-        anyhow::bail!("slash::submit dispatched on non-Submit variant");
-    };
-    let ev = load(&blob)?;
-    // Local sanity: refuse to submit garbage.
-    match ev.verify() {
-        Ok(true) => {}
-        Ok(false) => anyhow::bail!("both receipts identical — no equivocation to slash on"),
-        Err(e) => return Err(e),
-    }
-
-    // Decode session_id from the blob's 32-byte hex into the AML's
-    // u64 form (v1 ids are stored in the leading 8 bytes; see
-    // `SessionId::from_u64`).
-    let sid_bytes = decode_hex_32(&ev.session_id_hex, "session_id")?;
-    let mut sid_be = [0u8; 8];
-    sid_be.copy_from_slice(&sid_bytes[..8]);
-    let session_id = u64::from_be_bytes(sid_be);
-
-    // Build the payloads the AML's `ed25519_ok` verifies under the
-    // operator's receipt_pubkey. The canonical signing payload is the
-    // 32-byte sha256 from `Receipt::signing_payload()`; we hex-encode
-    // it so it travels as an AML `string` parameter.
-    let (ra, rb, _pk_bytes, sig_a, sig_b) = ev.receipts()?;
-    let payload_a_hex = hex::encode(ra.signing_payload());
-    let payload_b_hex = hex::encode(rb.signing_payload());
-    let sig_a_hex = hex::encode(sig_a.0);
-    let sig_b_hex = hex::encode(sig_b.0);
-
-    use serde_json::json;
-    let bal = client.rpc().balance(client.wallet_addr()).await?;
-    let fee = client
-        .rpc()
-        .recommended_fee(Some("contract_call"))
-        .await?
-        .recommended;
-    let call = json!({
-        "kind": "contract_call",
-        "from": client.wallet_addr().display(),
-        "to": client.program_addr().display(),
-        "method": "slash_double_sign",
-        "params": [
-            ev.endpoint_addr,
-            session_id,
-            payload_a_hex,
-            sig_a_hex,
-            payload_b_hex,
-            sig_b_hex,
-        ],
-        "value": 0u64,
-        "fee": fee,
-        "nonce": next_nonce(&bal),
-    });
-    let signed = crate::runner::sign_call(client.wallet_kp(), call)?;
-    let r = client.rpc().submit(&signed).await?;
-    println!("slash_double_sign submitted: {}", r.hash);
-    Ok(())
+    anyhow::bail!("opaque slashing is disabled: submit verified evidence to governance; no transaction was sent")
 }
 
 #[cfg(test)]

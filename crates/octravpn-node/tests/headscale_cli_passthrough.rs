@@ -82,10 +82,12 @@ fn octra_target_dir() -> PathBuf {
 }
 
 fn child_timeout() -> Duration {
-    Duration::from_secs(2)
+    Duration::from_secs(10)
 }
 
 fn scrub_headscale_env(cmd: &mut Command) {
+    // CLI fixtures need no CPU-sized worker pool for every concurrent child.
+    cmd.env("TOKIO_WORKER_THREADS", "2");
     for key in HEADSCALE_ENV_VARS {
         cmd.env_remove(key);
     }
@@ -198,7 +200,13 @@ impl From<std::process::Output> for CommandOutput {
 fn assert_byte_identical(label: &str, embed: &CommandOutput, stand: &CommandOutput) {
     let embed_stderr = canonical_stderr(&embed.stderr);
     let stand_stderr = canonical_stderr(&stand.stderr);
-    if embed.stdout != stand.stdout || embed_stderr != stand_stderr || embed.code != stand.code {
+    // A pair of killed children is not evidence of CLI parity.
+    if embed.code.is_none()
+        || stand.code.is_none()
+        || embed.stdout != stand.stdout
+        || embed_stderr != stand_stderr
+        || embed.code != stand.code
+    {
         panic!(
             "{label}: pass-through divergence
 embed exit:   {:?}

@@ -28,13 +28,11 @@
 //! session establishment.
 
 use std::{
-    collections::HashMap,
     io::{Cursor, Read},
     sync::Arc,
 };
 
 use hkdf::Hkdf;
-use parking_lot::RwLock;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -220,11 +218,11 @@ pub fn peel_layer(static_secret: &StaticSecret, packet: &[u8]) -> Result<PeeledL
 // first peel (or the explicit handshake message). Subsequent packets call
 // `peel_with_pinned_key` instead of `peel_layer`.
 //
-// Storage: `SessionKeyStore` keeps a `RwLock<HashMap<SessionId, Arc<OSK>>>`.
+// Storage: `SessionKeyStore` keeps a bounded idle-TTL map of `Arc<OSK>`.
 // In practice the store is read-heavy (every packet) and write-rare
 // (session-open / session-close). For pure lock-free read-side semantics
-// we'd want `arc-swap::ArcSwap`; we deliberately stick with RwLock for now
-// to keep the dep footprint minimal — see the `concurrent_pin_and_evict`
+// we'd want `arc-swap::ArcSwap`; the bounded map also enforces a hard capacity.
+// See the `concurrent_pin_and_evict`
 // proptest below for the contention shape.
 //
 // Zeroization: `OnionSessionKeys` zeroizes its key material on Drop via the
@@ -313,51 +311,54 @@ impl OnionSessionKeys {
 /// Lock-protected store of session-pinned keys. Read on every relay
 /// packet; written at session-open and session-close.
 ///
-/// We use `RwLock` from `parking_lot` (already a workspace dep) rather
-/// than `ArcSwap` to keep the dep footprint minimal. Contention is
-/// asymmetric — readers vastly outnumber writers — so the parking_lot
-/// fast-path is acceptable. A future #9.1 can swap in `arc-swap` if a
-/// load test shows the RwLock taking measurable time.
-#[derive(Default)]
+/// The bounded map has a 10,000-entry cap and sweeps idle keys on insertion.
+/// Eviction drops and zeroizes keys after the last outstanding reader releases them.
 pub struct SessionKeyStore {
-    inner: RwLock<HashMap<SessionId, Arc<OnionSessionKeys>>>,
+    inner: crate::bounded::BoundedMap<SessionId, Arc<OnionSessionKeys>>,
+}
+
+impl Default for SessionKeyStore {
+    fn default() -> Self {
+        Self {
+            inner: crate::bounded::BoundedMap::new(10_000, std::time::Duration::from_secs(600)),
+        }
+    }
 }
 
 impl SessionKeyStore {
     pub fn new() -> Self {
-        Self {
-            inner: RwLock::new(HashMap::new()),
-        }
+        Self::default()
     }
 
     /// Pin a fresh `OnionSessionKeys` for `sid`. Replaces any prior entry
     /// (zeroizing the displaced keys via Drop).
     pub fn pin(&self, sid: SessionId, keys: OnionSessionKeys) {
-        self.inner.write().insert(sid, Arc::new(keys));
+        self.inner.sweep();
+        self.inner.insert(sid, Arc::new(keys));
     }
 
     /// Look up the keys for `sid`. Returns `None` if the session was
     /// never pinned or has been evicted.
     pub fn get(&self, sid: &SessionId) -> Option<Arc<OnionSessionKeys>> {
-        self.inner.read().get(sid).cloned()
+        self.inner.get(sid)
     }
 
     /// Evict the keys for `sid`. The `Arc`'s last drop zeroizes the
     /// underlying bytes. Returns whether an entry was removed.
     pub fn evict(&self, sid: &SessionId) -> bool {
-        self.inner.write().remove(sid).is_some()
+        self.inner.remove(sid).is_some()
     }
 
     /// Number of pinned sessions. Test-only.
     #[doc(hidden)]
     pub fn len(&self) -> usize {
-        self.inner.read().len()
+        self.inner.len()
     }
 
     /// Test-only: whether the store has any pinned sessions.
     #[doc(hidden)]
     pub fn is_empty(&self) -> bool {
-        self.inner.read().is_empty()
+        self.inner.is_empty()
     }
 }
 

@@ -92,3 +92,12 @@ through `docker-compose.members-policy.yml` (`mesh serve --members-policy-circle
 two stock peers and asserts, with ICMP pings: deny-all with no members → admit a → admit b
 → evict a. Exit 0 on pass; codes at the top of the script. `KEEP_STACK=1` leaves the
 containers up for inspection.
+
+### Isolated release-binary verification
+
+Set `OCTRAVPN_INTEROP_BINARY` to a Linux node binary and
+`OCTRAVPN_INTEROP_STATE_DIR` to a fresh absolute state directory to avoid sharing
+registrations/certificates with previous tests. Choose a dedicated
+`COMPOSE_PROJECT_NAME`. The harness now requires encrypted TSMP and ICMP probes
+in addition to discovery ping. `INTEROP_RESTART=1` checks SQLite hydration and an
+encrypted TSMP ping after restarting the control plane. Host ports bind loopback.

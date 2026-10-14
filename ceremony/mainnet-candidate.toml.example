@@ -1,0 +1,17 @@
+# Unsigned v4 candidate. Network and owner are intentionally undecided.
+# These fields require an independently verified launch configuration.
+[target]
+rpc_url = ""
+chain_id = ""
+genesis_root = ""
+owner = ""
+
+# Proposed values carried forward for review; not approved economics.
+# Native balance units have SIX decimal places: 1 OCT = 1,000,000 OU.
+# Deposits below are 1,000 OCT / 10,000 OCT; stake is 10,000 OCT.
+[constructor]
+min_session_deposit = 1000000000
+min_tailnet_deposit = 10000000000
+min_circle_stake = 10000000000
+session_grace_epochs = 100
+unbond_grace_epochs = 1000

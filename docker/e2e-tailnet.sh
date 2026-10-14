@@ -141,7 +141,7 @@ echo "[tailnet-e2e]   session id = $sid"
 #    the session opener ($CLIENT) confirms the same count. Matching byte
 #    counts ⇒ `settle_confirm` emits SessionSettled; a mismatch ⇒
 #    SettleDispute instead. node1 reports bytes_used=2 → 200 OU gross,
-#    1 OU protocol fee (0.5 %), 199 net to operator earnings, 800 OU refund.
+#    zero protocol commission, 200 OU to operator earnings, 800 OU refund.
 echo "[tailnet-e2e] Settling (operator claim → client confirm)..."
 submit "$VAL1" settle_claim "[$sid,2]" >/dev/null
 resp=$(submit "$CLIENT" settle_confirm "[$sid,2]")
@@ -157,14 +157,14 @@ refund=$(echo "$tx" | event_num SessionSettled refund)
 treasury=$(call_view "get_tailnet" "[$tid]" | jget result/treasury)
 [ "$treasury" = "4800" ] || { echo "[tailnet-e2e] FAIL: treasury=$treasury expected 4800"; exit 1; }
 
-# 7. Program treasury collected the 0.5 % protocol fee = 1 OU.
+# 7. Traffic settlement never credits the program treasury.
 pt=$(call_view "get_program_treasury" "[]" | jget result)
-[ "$pt" = "1" ] || { echo "[tailnet-e2e] FAIL: program_treasury=$pt expected 1"; exit 1; }
+[ "$pt" = "0" ] || { echo "[tailnet-e2e] FAIL: program_treasury=$pt expected 0"; exit 1; }
 
-# 8. Encrypted earnings is the mock-cleartext representation of 199 OU.
+# 8. Encrypted earnings is the mock-cleartext representation of 200 OU.
 earn=$(call_view "get_encrypted_earnings" "[\"$VAL1\"]" | jget result)
-[ "$earn" = "hfhe_v1|mock|00000000000000c7" ] \
-  || { echo "[tailnet-e2e] FAIL: earnings=$earn expected hfhe_v1|mock|00000000000000c7"; exit 1; }
+[ "$earn" = "hfhe_v1|mock|00000000000000c8" ] \
+  || { echo "[tailnet-e2e] FAIL: earnings=$earn expected hfhe_v1|mock|00000000000000c8"; exit 1; }
 
 echo "[tailnet-e2e] ALL OK"
 echo "  tailnet id              : $tid"

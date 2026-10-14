@@ -114,9 +114,8 @@ async fn run_tick<B: SweeperBackend + ?Sized>(
         let sid = *cursor % count;
         *cursor = (*cursor + 1) % count;
 
-        let status = match backend.session_status(sid).await {
-            Ok(s) => s,
-            Err(_) => continue, // strict read failed for this sid; skip
+        let Ok(status) = backend.session_status(sid).await else {
+            continue; // strict read failed for this sid; skip
         };
         if status != SESSION_RELAY_ARMED {
             // Resolved (open / claimed / refunded / already swept) -> forget any
@@ -140,14 +139,14 @@ async fn run_tick<B: SweeperBackend + ?Sized>(
         // Sweep only strictly after the on-chain threshold (deadline + sweep_grace)
         // plus the margin buffer, so a live funder's refund window closes first.
         // epoch is a LOWER bound, so a conservative read only ever delays a sweep.
-        if epoch < deadline.saturating_add(grace).saturating_add(margin) {
+        if !octravpn_core::relay_window::recovery_window_open(epoch, deadline, grace, margin) {
             continue;
         }
         // Reserve before submit so a submit error still holds the grace window.
         inflight.insert(sid, tick);
         match backend.submit_sweep(sid).await {
             Ok(tx) => {
-                info!(session = sid, tx = %tx, "relay_sweep submitted (offline-funder rescue)")
+                info!(session = sid, tx = %tx, "relay_sweep submitted (offline-funder rescue)");
             }
             Err(e) => debug!(
                 session = sid,

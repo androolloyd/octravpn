@@ -1,0 +1,23 @@
+# Unsigned v5 review candidate. Do not put a private credential in this file.
+# The deployment domain is SHA256 of a reviewed protocol/chain/genesis transcript.
+# Circuit verification key must come from an independently verified multiparty setup.
+[target]
+rpc_url = ""
+chain_id = ""
+genesis_root = ""
+
+[private_admin]
+commitment = ""
+verification_key_b64 = ""
+domain = ""
+
+# Unapproved proposed economics, in native SIX-decimal OU.
+[constructor]
+min_session_deposit = 1000000000
+min_tailnet_deposit = 10000000000
+min_circle_stake = 10000000000
+session_grace_epochs = 100
+unbond_grace_epochs = 1000
+
+# Zero is unbounded. Set 200000000 for the limited mainnet canary.
+max_locked_value = 0

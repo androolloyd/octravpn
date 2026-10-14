@@ -1,13 +1,8 @@
-//! v2 end-to-end: drives the full Circle lifecycle against the real
-//! (mock) Octra RPC.
-//!
-//! Currently `#[ignore]`'d because v2 entrypoint dispatch lands in
-//! `octra-foundry`'s `octra-mock-rpc` as a parallel deliverable. Drop
-//! the `#[ignore]` once `cargo test --test v2_lifecycle` passes in
-//! octra-foundry (the test there exercises the mock surface that this
-//! test reuses).
+//! v2 model lifecycle with signed HTTP submissions and explicit inclusion.
+//! Named events below come from the internal mock model; money/VM parity
+//! is validated separately against the native node.
 
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use octra_circle_sim::{AclRule, CircleConfig, CircleSim, ExitClass, MemberTag, RpcChain};
 use octravpn_core::{
@@ -17,17 +12,46 @@ use octravpn_core::{
     tx::sign_call,
 };
 use serde_json::json;
-use tokio::time::sleep;
 
 const PROGRAM: &str = "octPROGmockaddress0000000000000000000000";
 
-async fn spawn_mock(port: u16) {
-    let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
-    let prog = PROGRAM.to_string();
+async fn spawn_mock(port: u16, program: &str) -> octra_mock_rpc::AppState {
+    let app = octra_mock_rpc::AppState {
+        state: Arc::new(parking_lot::RwLock::new(octra_mock_rpc::ChainState {
+            epoch: 1,
+            ..Default::default()
+        })),
+        program_addr: program.to_string(),
+        expected_chain_id: None,
+    };
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+        .await
+        .unwrap();
+    let router = octra_mock_rpc::build_router(app.clone());
     tokio::spawn(async move {
-        let _ = octra_mock_rpc::serve(addr, prog).await;
+        axum::serve(listener, router).await.unwrap();
     });
-    sleep(Duration::from_millis(150)).await;
+    app
+}
+async fn model_events(
+    app: &octra_mock_rpc::AppState,
+    rpc: &RpcClient,
+    hash: &str,
+) -> serde_json::Value {
+    octra_mock_rpc::advance_epoch(app);
+    let tx = rpc.transaction(hash).await.expect("confirmed transaction");
+    assert_eq!(tx["status"], "confirmed", "{tx}");
+    assert!(
+        tx.get("events").is_none(),
+        "transaction view must not fabricate events"
+    );
+    let receipt = rpc
+        .raw_call("contract_receipt", json!([hash]))
+        .await
+        .expect("execution receipt");
+    assert_eq!(receipt["success"], true, "{receipt}");
+    // Named records are the model's Rust test API, not the node wire payload.
+    serde_json::Value::Array(app.state.read().txs[hash].events.clone())
 }
 
 fn mock_url(port: u16) -> String {
@@ -35,6 +59,7 @@ fn mock_url(port: u16) -> String {
 }
 
 async fn submit(
+    app: &octra_mock_rpc::AppState,
     rpc: &RpcClient,
     kp: &KeyPair,
     from: &Address,
@@ -50,6 +75,7 @@ async fn submit(
         .recommended;
     let call = json!({
         "kind": "contract_call",
+            "timestamp": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("clock before Unix epoch").as_secs_f64(),
         "from": from.display(),
         "to": PROGRAM,
         "method": method,
@@ -60,12 +86,12 @@ async fn submit(
     });
     let signed = sign_call(kp, call).expect("sign");
     let r = rpc.submit(&signed).await.expect("submit");
-    rpc.transaction(&r.hash).await.expect("tx")
+    model_events(app, rpc, &r.hash).await
 }
 
 #[tokio::test]
 async fn v2_full_lifecycle_against_mock() {
-    spawn_mock(18301).await;
+    let app = spawn_mock(18301, PROGRAM).await;
     let rpc = Arc::new(RpcClient::new(mock_url(18301)));
 
     // Wallets.
@@ -77,8 +103,17 @@ async fn v2_full_lifecycle_against_mock() {
     let proxy_addr = Address::from_pubkey(&proxy_kp.public.0);
     let program_addr = Address::from_display(PROGRAM);
 
+    for kp in [&owner_kp, &client_kp, proxy_kp.as_ref()] {
+        app.fund(
+            Address::from_pubkey(&kp.public.0).display(),
+            1_000_000_000,
+            Some(octravpn_core::b64::encode(kp.public.0)),
+        );
+    }
+
     // 1. Owner creates a tailnet.
     let tnet_tx = submit(
+        &app,
         &rpc,
         &owner_kp,
         &owner_addr,
@@ -87,7 +122,7 @@ async fn v2_full_lifecycle_against_mock() {
         2000,
     )
     .await;
-    let tid = tnet_tx["events"]
+    let tid = tnet_tx
         .as_array()
         .and_then(|a| a.iter().find(|e| e["name"] == "TailnetCreated"))
         .and_then(|e| e["tailnet_id"].as_u64())
@@ -95,6 +130,7 @@ async fn v2_full_lifecycle_against_mock() {
 
     // 2. Owner adds the client as a member.
     submit(
+        &app,
         &rpc,
         &owner_kp,
         &owner_addr,
@@ -106,6 +142,7 @@ async fn v2_full_lifecycle_against_mock() {
 
     // 3. Owner authorizes the proxy.
     submit(
+        &app,
         &rpc,
         &owner_kp,
         &owner_addr,
@@ -117,6 +154,7 @@ async fn v2_full_lifecycle_against_mock() {
 
     // 4. Proxy registers HFHE keys.
     submit(
+        &app,
         &rpc,
         &proxy_kp,
         &proxy_addr,
@@ -131,6 +169,7 @@ async fn v2_full_lifecycle_against_mock() {
 
     // 5. Client opens a session.
     let open_tx = submit(
+        &app,
         &rpc,
         &client_kp,
         &client_addr,
@@ -145,7 +184,7 @@ async fn v2_full_lifecycle_against_mock() {
         0,
     )
     .await;
-    let sid = open_tx["events"]
+    let sid = open_tx
         .as_array()
         .and_then(|a| a.iter().find(|e| e["name"] == "SessionOpened"))
         .and_then(|e| e["session_id"].as_u64())
@@ -191,6 +230,7 @@ async fn v2_full_lifecycle_against_mock() {
 
     // 9. Client confirms matching bytes.
     let confirm_tx = submit(
+        &app,
         &rpc,
         &client_kp,
         &client_addr,
@@ -199,11 +239,11 @@ async fn v2_full_lifecycle_against_mock() {
         0,
     )
     .await;
-    let settled = confirm_tx["events"]
+    let settled = confirm_tx
         .as_array()
         .and_then(|a| a.iter().find(|e| e["name"] == "SessionSettled"))
         .expect("session settled event");
-    // total_paid = 1500 * 100 = 150_000; subject to fee.
+    // total_paid = 5 * 100 = 500; paid in full to the operator.
     let total_paid = settled["total_paid"].as_u64().expect("total_paid");
     assert!(total_paid > 0);
 }

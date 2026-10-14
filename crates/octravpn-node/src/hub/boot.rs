@@ -141,6 +141,10 @@ pub(super) async fn build_hub(cfg: NodeConfig) -> Result<Hub> {
     // to `every_write` in `[control].fsync_policy`. The 1s loss
     // window is recoverable from the audit log via
     // `octravpn-node journal rebuild --from-audit`.
+    let receipt_totals = Arc::new(octravpn_core::receipt_journal::ReceiptJournal::open(
+        journal_path.with_extension("bytes.bin"),
+    )?);
+    receipt_totals.set_fsync_policy(octravpn_core::receipt_journal::FsyncPolicy::EveryWrite);
     let fsync_policy = cfg.control.resolved_fsync_policy();
     receipt_journal.set_fsync_policy(fsync_policy);
     info!(
@@ -267,6 +271,7 @@ pub(super) async fn build_hub(cfg: NodeConfig) -> Result<Hub> {
         allowlist,
         metrics,
         receipt_journal,
+        receipt_totals,
         receipt_vault,
         pvac,
         wg_backend,

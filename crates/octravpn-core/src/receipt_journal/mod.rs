@@ -153,6 +153,7 @@ impl ReceiptJournal {
                 by_session,
                 path: Some(path),
                 handle: Some(handle),
+                writer_guard: None,
                 file_size,
                 fsync_policy: FsyncPolicy::default(),
                 last_fsync: Instant::now(),
@@ -181,6 +182,7 @@ impl ReceiptJournal {
                 by_session: std::collections::BTreeMap::new(),
                 path: None,
                 handle: None,
+                writer_guard: None,
                 file_size: 0,
                 fsync_policy: FsyncPolicy::default(),
                 last_fsync: Instant::now(),
@@ -286,8 +288,9 @@ impl ReceiptJournal {
     }
 
     /// Return the persistent floor for `session_id`. Used by the
-    /// control plane to compute `next_seq = max(in_mem, journal_floor)
-    /// + 1`. Returns 0 if the session has never been seen.
+    /// control plane to choose a sequence above its in-memory and journal floors.
+    /// Returns 0 if the session has never been seen, or u64::MAX on storage
+    /// failure. Prefer try_floor when issuing receipts.
     ///
     /// Perf-8: a miss in the in-mem mirror falls through to a disk
     /// read so an evicted entry's floor is still observable. The
@@ -296,25 +299,29 @@ impl ReceiptJournal {
     /// page-cache state — required to keep the seq-monotonic
     /// equivocation defence airtight under `FsyncPolicy::Periodic`.
     pub fn floor(&self, session_id: &SessionId) -> u64 {
-        let mut g = self.inner.lock();
-        if let Some(v) = g.by_session.get(session_id).copied() {
-            return v;
+        // Compatibility accessor: uncertainty is an exhausted floor, never zero.
+        // Security-sensitive callers should surface the error with try_floor.
+        self.try_floor(session_id).unwrap_or(u64::MAX)
+    }
+
+    /// Read the durable floor without treating cache eviction or an I/O failure
+    /// as a new session. The bounded eviction history is diagnostic only.
+    pub fn try_floor(&self, session_id: &SessionId) -> JournalResult<u64> {
+        let mut inner = self.inner.lock();
+        if let Some(value) = inner.by_session.get(session_id).copied() {
+            return Ok(value);
         }
-        // Miss path: consult disk only if the journal is persistent
-        // AND we've previously evicted this id (or might have). For
-        // pure-cold misses (never seen) the disk read would just
-        // confirm 0 — skip the syscall.
-        if g.path.is_none() {
-            return 0;
+        if inner.path.is_none() {
+            return Ok(0);
         }
-        if !g.recently_evicted_set.contains(session_id) {
-            // Cold-miss optimisation: the on-disk file is a strict
-            // superset of "everything we've ever bumped", so a session
-            // we don't remember evicting and don't have in-mem is a
-            // first-touch. Floor is 0.
-            return 0;
-        }
-        eviction::resurrect_floor_from_disk(&mut g, session_id).unwrap_or(0)
+        eviction::resurrect_floor_from_disk(&mut inner, session_id)
+    }
+
+    /// Keep the host's directory writer lock alive until all journal users and
+    /// background compaction workers have released this storage state. Attach
+    /// once before exposing the journal to request handlers.
+    pub fn retain_writer_guard(&self, guard: Arc<std::fs::File>) {
+        self.inner.lock().writer_guard.get_or_insert(guard);
     }
 
     /// Alias for `floor`. Matches the naming used in the v2 threat
@@ -360,7 +367,7 @@ impl ReceiptJournal {
         let prev = match in_mem {
             Some(v) => v,
             None => {
-                if g.path.is_some() && g.recently_evicted_set.contains(session_id) {
+                if g.path.is_some() {
                     eviction::resurrect_floor_from_disk(&mut g, session_id)?
                 } else {
                     0
@@ -806,5 +813,77 @@ mod tests {
         }
         let after_count = fs::read_dir(dir.path()).unwrap().count();
         assert_eq!(before_count, after_count, "in-memory mode wrote files");
+    }
+}
+
+#[cfg(test)]
+mod durable_miss_tests {
+    use super::*;
+    #[test]
+    fn forgotten_eviction_never_resets_a_durable_floor() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("journal");
+        let journal = ReceiptJournal::open(&path).unwrap();
+        let original = SessionId::from_u64(1);
+        journal.bump(&original, 100).unwrap();
+        journal.set_max_in_mem_sessions(1);
+        journal.bump(&SessionId::from_u64(2), 1).unwrap();
+        {
+            // Reproduce the bounded diagnostic ring forgetting an older entry,
+            // without doing thousands of redundant fsyncs in this regression.
+            let mut inner = journal.inner.lock();
+            for index in 0..=DEFAULT_RECENTLY_EVICTED_CAP {
+                inner.record_eviction(&SessionId::from_u64(index as u64 + 3));
+            }
+            assert!(!inner.by_session.contains_key(&original));
+            assert!(!inner.recently_evicted_set.contains(&original));
+        }
+        assert!(matches!(
+            journal.bump(&original, 50),
+            Err(JournalError::SeqNotMonotonic { floor: 100, .. })
+        ));
+        assert_eq!(journal.try_floor(&original).unwrap(), 100);
+        journal.bump(&original, 101).unwrap();
+        drop(journal);
+        assert_eq!(
+            ReceiptJournal::open(path)
+                .unwrap()
+                .try_floor(&original)
+                .unwrap(),
+            101
+        );
+    }
+    #[test]
+    fn absent_or_corrupt_durable_floor_refuses_reads_and_bumps() {
+        for damage in [0, 1, 2] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("journal");
+            let journal = ReceiptJournal::open(&path).unwrap();
+            let original = SessionId::from_u64(1);
+            journal.bump(&original, 100).unwrap();
+            journal.set_max_in_mem_sessions(1);
+            journal.bump(&SessionId::from_u64(2), 1).unwrap();
+            match damage {
+                0 => std::fs::remove_file(&path).unwrap(),
+                1 => std::fs::write(&path, []).unwrap(),
+                _ => std::fs::write(&path, b"bad magic").unwrap(),
+            }
+            assert!(journal.try_floor(&original).is_err());
+            assert_eq!(journal.floor(&original), u64::MAX);
+            assert!(journal.bump(&original, 101).is_err());
+            assert!(!journal.inner.lock().by_session.contains_key(&original));
+        }
+    }
+    #[test]
+    fn shared_storage_retains_writer_guard_after_public_handle_is_dropped() {
+        let directory = tempfile::tempdir().unwrap();
+        let guard = Arc::new(std::fs::File::create(directory.path().join("writer-lock")).unwrap());
+        let journal = ReceiptJournal::in_memory();
+        journal.retain_writer_guard(guard.clone());
+        let worker = journal.inner.clone();
+        drop(journal);
+        assert_eq!(Arc::strong_count(&guard), 2);
+        drop(worker);
+        assert_eq!(Arc::strong_count(&guard), 1);
     }
 }

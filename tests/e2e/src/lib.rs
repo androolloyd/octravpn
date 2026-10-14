@@ -11,7 +11,7 @@
 
 #[cfg(test)]
 mod tests {
-    use std::{net::SocketAddr, sync::Arc, time::Duration};
+    use std::sync::Arc;
 
     use octravpn_core::{
         address::Address,
@@ -23,17 +23,45 @@ mod tests {
         sig::KeyPair,
     };
     use serde_json::json;
-    use tokio::time::sleep;
     use x25519_dalek::{PublicKey as X25519Pub, StaticSecret};
 
-    async fn spawn_mock(port: u16, program: &str) -> Arc<()> {
-        let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
-        let prog = program.to_string();
+    async fn spawn_mock(port: u16, program: &str) -> octra_mock_rpc::AppState {
+        let app = octra_mock_rpc::AppState {
+            state: Arc::new(parking_lot::RwLock::new(octra_mock_rpc::ChainState {
+                epoch: 1,
+                ..Default::default()
+            })),
+            program_addr: program.to_string(),
+            expected_chain_id: None,
+        };
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+            .await
+            .unwrap();
+        let router = octra_mock_rpc::build_router(app.clone());
         tokio::spawn(async move {
-            octra_mock_rpc::serve(addr, prog).await.ok();
+            axum::serve(listener, router).await.unwrap();
         });
-        sleep(Duration::from_millis(150)).await;
-        Arc::new(())
+        app
+    }
+    async fn model_events(
+        app: &octra_mock_rpc::AppState,
+        rpc: &RpcClient,
+        hash: &str,
+    ) -> serde_json::Value {
+        octra_mock_rpc::advance_epoch(app);
+        let tx = rpc.transaction(hash).await.expect("confirmed transaction");
+        assert_eq!(tx["status"], "confirmed", "{tx}");
+        assert!(
+            tx.get("events").is_none(),
+            "transaction view must not fabricate events"
+        );
+        let receipt = rpc
+            .raw_call("contract_receipt", json!([hash]))
+            .await
+            .expect("execution receipt");
+        assert_eq!(receipt["success"], true, "{receipt}");
+        // Named records are the model's Rust test API, not the node wire payload.
+        serde_json::Value::Array(app.state.read().txs[hash].events.clone())
     }
 
     fn mock_url(port: u16) -> String {
@@ -48,7 +76,7 @@ mod tests {
 
     #[tokio::test]
     async fn node_status_round_trip() {
-        let _g = spawn_mock(18101, "octPROG").await;
+        let _app = spawn_mock(18101, "octPROG").await;
         let rpc = RpcClient::new(mock_url(18101));
         let s = rpc.node_status().await.unwrap();
         assert!(s.epoch >= 1);
@@ -56,7 +84,7 @@ mod tests {
 
     #[tokio::test]
     async fn full_lifecycle_endpoint_tailnet_session_claim() {
-        let _g = spawn_mock(18102, "octPROG").await;
+        let app = spawn_mock(18102, "octPROG").await;
         let rpc = RpcClient::new(mock_url(18102));
 
         let val = "octV1Address0000000000000000000000000001";
@@ -97,8 +125,8 @@ mod tests {
             "nonce": 0u64,
         });
         let r = rpc.submit(&create_tx).await.unwrap();
-        let tx = rpc.transaction(&r.hash).await.unwrap();
-        let tid = tx["events"]
+        let events = model_events(&app, &rpc, &r.hash).await;
+        let tid = events
             .as_array()
             .cloned()
             .unwrap()
@@ -116,7 +144,7 @@ mod tests {
             "params": [tid, client],
             "value": 0u64,
             "fee": 10u64,
-            "nonce": 1u64,
+            "nonce": 0u64,
         });
         rpc.submit(&add_member_tx).await.unwrap();
 
@@ -129,9 +157,11 @@ mod tests {
             "params": [tid, val],
             "value": 0u64,
             "fee": 10u64,
-            "nonce": 2u64,
+            "nonce": 0u64,
         });
         rpc.submit(&cfg_exit_tx).await.unwrap();
+
+        octra_mock_rpc::advance_epoch(&app);
 
         // 5. Active list shows the endpoint.
         let prog = Address::from_display("octPROG");
@@ -159,8 +189,8 @@ mod tests {
             "nonce": 0u64,
         });
         let r = rpc.submit(&open_tx).await.unwrap();
-        let tx = rpc.transaction(&r.hash).await.unwrap();
-        let sid = tx["events"]
+        let events = model_events(&app, &rpc, &r.hash).await;
+        let sid = events
             .as_array()
             .cloned()
             .unwrap()
@@ -178,11 +208,11 @@ mod tests {
             "params": [sid, 2u64],
             "value": 0u64,
             "fee": 10u64,
-            "nonce": 1u64,
+            "nonce": 0u64,
         });
         let r = rpc.submit(&claim_tx).await.unwrap();
-        let tx = rpc.transaction(&r.hash).await.unwrap();
-        let names: Vec<_> = tx["events"]
+        let events = model_events(&app, &rpc, &r.hash).await;
+        let names: Vec<_> = events
             .as_array()
             .cloned()
             .unwrap_or_default()
@@ -196,7 +226,7 @@ mod tests {
         );
 
         // 8. Client confirms with matching bytes — settlement applies:
-        //    bytes_used=2 → 200 gross, 1 fee, 199 net pay, 800 refund.
+        //    bytes_used=2 → 200 paid to the operator, 800 refund.
         let confirm_tx = json!({
             "kind": "contract_call",
             "from": client,
@@ -205,11 +235,11 @@ mod tests {
             "params": [sid, 2u64],
             "value": 0u64,
             "fee": 10u64,
-            "nonce": 2u64,
+            "nonce": 0u64,
         });
         let r = rpc.submit(&confirm_tx).await.unwrap();
-        let tx = rpc.transaction(&r.hash).await.unwrap();
-        let event = tx["events"]
+        let events = model_events(&app, &rpc, &r.hash).await;
+        let event = events
             .as_array()
             .cloned()
             .unwrap_or_default()
@@ -226,19 +256,19 @@ mod tests {
             .unwrap();
         assert_eq!(tnet["treasury"].as_u64(), Some(1800));
 
-        // 9. Program treasury collected the protocol fee (1 OU).
+        // 9. Traffic pays no protocol commission.
         let pt = rpc
             .contract_call(&prog, "get_program_treasury", &[], None)
             .await
             .unwrap();
-        assert_eq!(pt.as_u64(), Some(1));
+        assert_eq!(pt.as_u64(), Some(0));
 
-        // 10. Encrypted earnings: mock-cleartext = 199 OU.
+        // 10. Encrypted earnings: mock-cleartext = the full 200 OU.
         let earn = rpc
             .contract_call(&prog, "get_encrypted_earnings", &[json!(val)], None)
             .await
             .unwrap();
-        assert_eq!(earn.as_str(), Some("hfhe_v1|mock|00000000000000c7")); // 0xc7 = 199
+        assert_eq!(earn.as_str(), Some("hfhe_v1|mock|00000000000000c8")); // 0xc8 = 200
 
         // 11. Claim earnings: AML-side verify + plain transfer.
         let claim_tx = json!({
@@ -246,14 +276,14 @@ mod tests {
             "from": val,
             "to": "octPROG",
             "method": "claim_earnings",
-            "params": [199u64, "00".repeat(32)],
+            "params": [200u64, "00".repeat(32)],
             "value": 0u64,
             "fee": 10u64,
-            "nonce": 1u64,
+            "nonce": 0u64,
         });
         let r = rpc.submit(&claim_tx).await.unwrap();
-        let tx = rpc.transaction(&r.hash).await.unwrap();
-        let has_claimed = tx["events"]
+        let events = model_events(&app, &rpc, &r.hash).await;
+        let has_claimed = events
             .as_array()
             .cloned()
             .unwrap_or_default()
@@ -271,7 +301,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_show_refund_returns_to_treasury() {
-        let _g = spawn_mock(18104, "octPROG").await;
+        let app = spawn_mock(18104, "octPROG").await;
         let rpc = RpcClient::new(mock_url(18104));
         let val = "octV2Address0000000000000000000000000NOSH";
         let owner = "octOWNER0000000000000000000000000000NOSHO";
@@ -310,8 +340,8 @@ mod tests {
             "nonce": 0u64,
         });
         let r = rpc.submit(&create_tx).await.unwrap();
-        let tx = rpc.transaction(&r.hash).await.unwrap();
-        let tid = tx["events"]
+        let events = model_events(&app, &rpc, &r.hash).await;
+        let tid = events
             .as_array()
             .cloned()
             .unwrap()
@@ -328,7 +358,7 @@ mod tests {
             "params": [tid, client],
             "value": 0u64,
             "fee": 10u64,
-            "nonce": 1u64,
+            "nonce": 0u64,
         }))
         .await
         .unwrap();
@@ -342,7 +372,7 @@ mod tests {
             "params": [tid, val],
             "value": 0u64,
             "fee": 10u64,
-            "nonce": 2u64,
+            "nonce": 0u64,
         }))
         .await
         .unwrap();
@@ -359,8 +389,8 @@ mod tests {
             "nonce": 0u64,
         });
         let r = rpc.submit(&open_tx).await.unwrap();
-        let tx = rpc.transaction(&r.hash).await.unwrap();
-        let sid = tx["events"]
+        let events = model_events(&app, &rpc, &r.hash).await;
+        let sid = events
             .as_array()
             .cloned()
             .unwrap()
@@ -378,11 +408,11 @@ mod tests {
             "params": [sid],
             "value": 0u64,
             "fee": 10u64,
-            "nonce": 1u64,
+            "nonce": 0u64,
         });
         let r = rpc.submit(&claim_tx).await.unwrap();
-        let st = rpc.transaction(&r.hash).await.unwrap();
-        let has_refunded = st["events"]
+        let events = model_events(&app, &rpc, &r.hash).await;
+        let has_refunded = events
             .as_array()
             .cloned()
             .unwrap_or_default()

@@ -434,7 +434,7 @@ theorem settleConfirm_only_opener
 
 /-- When the client's bytes match the operator's claim, the session
     moves to `settled` and the FHE-earnings ledger gains
-    `bytesUsed * pricePerMb − fee` for the exit operator. -/
+    the full `bytesUsed * pricePerMb` for the exit operator. -/
 theorem settleConfirm_match_settles
     (s s' : ProgramState) (sid : SessionId) (bytes : Nat)
     (caller : Addr) (epoch claimedAt : Nat)
@@ -450,8 +450,7 @@ theorem settleConfirm_match_settles
     (∃ upd, s'.sessions sid = some upd ∧
             upd.status = SessionStatus.settled ∧
             upd.paidBytes = bytes) ∧
-    let fee := total * s.params.protocolFeeBps / 10000
-    s'.encEarn prev.exit = s.encEarn prev.exit + (total - fee) := by
+    s'.encEarn prev.exit = s.encEarn prev.exit + total := by
   unfold settleConfirm at h
   rw [hsess] at h
   have hopen' : ¬ prev.status ≠ SessionStatus.open := by simp [hopen]

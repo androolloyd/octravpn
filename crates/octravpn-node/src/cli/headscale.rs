@@ -42,7 +42,7 @@ fn standalone_connect_args(mut connect: headscale_cli::ConnectArgs) -> headscale
     if connect
         .address
         .as_deref()
-        .is_none_or(|address| address.trim().is_empty())
+        .map_or(true, |address| address.trim().is_empty())
     {
         connect.warn_no_config_default = true;
         connect.wrap_grpc_connect_error = true;
@@ -109,7 +109,7 @@ fn headscale_command_parts(args: &[String]) -> &[String] {
             | "--unix-socket"
                 if i + 1 < args.len() =>
             {
-                i += 2
+                i += 2;
             }
             "--force" | "--insecure" => i += 1,
             value
@@ -148,7 +148,7 @@ fn users_create_missing_name(args: &[String]) -> bool {
             | "--output"
                 if i + 1 < tail.len() =>
             {
-                i += 2
+                i += 2;
             }
             "-h" | "--help" | "-d" | "--display-name" | "-e" | "--email" | "-p"
             | "--picture-url" => return false,

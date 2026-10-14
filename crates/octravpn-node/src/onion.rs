@@ -74,19 +74,27 @@ impl OnionRouter {
     /// taken only when the entry is genuinely new; `entry().or_insert_with`
     /// still handles the race where two first-packets for the same
     /// session arrive concurrently.
-    pub(crate) fn install(&self, session: SessionId, action: HopAction) {
+    pub(crate) fn install(&self, session: SessionId, action: HopAction) -> bool {
         if self.sessions.read().contains_key(&session) {
-            return;
+            return true;
         }
-        self.sessions
-            .write()
-            .entry(session)
-            .or_insert_with(|| SessionRoute {
-                action,
-                bytes_in: AtomicU64::new(0),
-                bytes_out: AtomicU64::new(0),
-                onion_peel_required: AtomicBool::new(true),
-            });
+        let mut sessions = self.sessions.write();
+        if sessions.len() >= crate::control::state::CONTROL_SESSIONS_CAP
+            && !sessions.contains_key(&session)
+        {
+            return false;
+        }
+        sessions.entry(session).or_insert_with(|| SessionRoute {
+            action,
+            bytes_in: AtomicU64::new(0),
+            bytes_out: AtomicU64::new(0),
+            onion_peel_required: AtomicBool::new(true),
+        });
+        true
+    }
+
+    pub(crate) fn remove(&self, session: &SessionId) {
+        self.sessions.write().remove(session);
     }
 
     /// Mark a session as direct (onion-peel can be skipped). Called by
@@ -151,6 +159,7 @@ impl OnionRouter {
 #[derive(Clone, Copy)]
 pub(crate) enum Direction {
     In,
+    #[allow(dead_code)] // Outbound return-path accounting awaits the transport driver.
     Out,
 }
 

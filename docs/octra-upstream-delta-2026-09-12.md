@@ -1,5 +1,9 @@
 # Octra upstream delta — 2026-08-22 → 2026-09-12
 
+
+Economics update (2026-10-12): current source has zero VPN commission.
+The dated settlement figures below refer to earlier deployed bytecode.
+
 > What `octra-labs/lite_node` shipped between our sequence-4 pin and the
 > current sequence-12 marker, and what it changes for OctraVPN / octra-foundry.
 >
