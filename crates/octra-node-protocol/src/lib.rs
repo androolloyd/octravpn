@@ -20,6 +20,7 @@ pub mod program_wire;
 pub mod resource_lanes;
 pub mod rules;
 pub mod state;
+pub mod state_sync;
 pub mod transaction;
 pub mod transaction_archive;
 pub mod transaction_outcome;

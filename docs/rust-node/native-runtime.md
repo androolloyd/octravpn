@@ -2244,3 +2244,33 @@ that constructor. An authenticated Circle initialization/deployment path and a
 pinned canonical settlement reader remain required before funding and tunnel
 qualification. Other missing VM families, OCPG admission, Circle HFHE callbacks,
 public-network interoperability and full recovery qualification remain open.
+
+### Snapshot checkpoint and manifest verification (2026-10-14)
+
+`octra-node-protocol::state_sync` ports checkpoint commitments, manifest layout
+and hashes, draft binding, certificate parsing, signer configuration, checkpoint
+quorum and exporter signatures from the adopted `7f9be448` source. Bootstrap
+signer sets retain the native base64 public-key representation in their set
+commitments. Quorum verification uses the chain's epoch-dependent weight rules.
+
+The native oracle covers 812 cases: valid commitments and signed messages,
+duplicate fields/signers, malformed keys and signatures, hash substitution,
+expiry boundaries, chunk gaps/overlaps, path traversal, integer overflow and
+reference-snapshot file restrictions. It compiles the unmodified adopted source
+in an offline container and records every source hash. The Rust differential
+passes all 812 cases and checks the oracle, generator and runner hashes. Strict
+Clippy and formatting pass; qualification confirms unchanged source hashes
+before and after execution.
+
+Certificate parsing and draft verification do not authenticate a public
+snapshot. Finalized authority still requires the native `Sync_anchor` validator
+transition chain and Irmin state proofs, followed by authenticated snapshot
+download/import and public-network startup. No import authority or canonical
+state is produced by these low-level APIs; the running gateway remains on the
+isolated Rust devnet. Native snapshot export/signing and filesystem I/O are
+outside this checkpoint's scope.
+
+Evidence: [qualification summary](checkpoints/2026-10-14/state-sync-summary.json),
+[source checkpoint](checkpoints/2026-10-14/state-sync.json),
+[Rust comparison](checkpoints/2026-10-14/state-sync.log), and
+[strict Clippy](checkpoints/2026-10-14/state-sync-clippy.log).

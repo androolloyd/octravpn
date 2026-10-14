@@ -1,0 +1,10 @@
+    Blocking waiting for file lock on build directory
+   Compiling octra-node-protocol v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node-protocol)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 59.57s
+     Running tests/state_sync_parity.rs (target/debug/deps/state_sync_parity-80f0b5ef18220524)
+
+running 1 test
+test native_snapshot_commitments_and_signatures ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+

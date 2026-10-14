@@ -1,0 +1,73 @@
+{
+  "date": "2026-10-14",
+  "status": "passed",
+  "scope": "Native checkpoint and manifest commitments, signer configuration, quorum and exporter signatures, certificate parsing and draft binding; finality authority, authenticated import and public startup remain open.",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "native_vectors": 812,
+  "cases_by_operation": {
+    "checkpoint": 227,
+    "same": 12,
+    "manifest": 152,
+    "path": 19,
+    "reference_file": 19,
+    "file": 74,
+    "reference": 5,
+    "pubkey": 15,
+    "signature": 15,
+    "quorum": 51,
+    "exporters": 60,
+    "entries": 11,
+    "draft": 6,
+    "certificate": 146
+  },
+  "native_source_modified": false,
+  "instrumentation": {},
+  "rust_tests": {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-p",
+      "octra-node-protocol",
+      "--test",
+      "state_sync_parity"
+    ],
+    "exit_code": 0,
+    "suites": 1,
+    "passed": 1,
+    "failed": 0,
+    "ignored": 0,
+    "log": "/Users/androolloyd/Development/octra/docs/rust-node/checkpoints/2026-10-14/state-sync.log",
+    "log_sha256": "df256ea1830885ee8812c794d5b8e85391ca15fc0068e8b32df0f49374c056ff"
+  },
+  "sources_unchanged": true,
+  "clippy": "passed (all targets, warnings denied)",
+  "format": "passed",
+  "source_sha256": {
+    "crates/octra-node-protocol/src/lib.rs": "5fa348fc423d2a62c4513462d29c4815743634861395629e3682b6218d30658d",
+    "crates/octra-node-protocol/src/state_sync/checkpoint.rs": "7ff64c555907338700dd6b9a951e95585d67b401c3c4c93a175e2ebddfb346a3",
+    "crates/octra-node-protocol/src/state_sync/manifest.rs": "0dac6ebd547b0c9f9d4e05e5c8a43e503f2fed8f6d7d2c492cce378c4558c497",
+    "crates/octra-node-protocol/src/state_sync/mod.rs": "99c99bc07449bdc81a196db28ddcd4f6a55755ced31d781bbd94dec62390ee24",
+    "crates/octra-node-protocol/tests/state_sync_parity.rs": "1dbfffd73b29e657d2195586d847dda5a03c613fe35df25a844b24e4f80ee88b",
+    "crates/octra-node-protocol/tests/fixtures/state-sync.json": "d16638377446f0391e4a8b50936d9fe68f828727a2e17478c0fad73aaaf83499",
+    "scripts/node-port/state-sync-fixtures.py": "2daf979753008e9379aee330443236b2c155068adb36dffcbf29b763c350f5e4",
+    "scripts/node-port/state-sync-oracle.ml": "c8344f2932c5f2a068ead16ff1617bef1d5fe82f581d1bba453beeeb4abe6896",
+    "scripts/node-port/native-oracle.py": "b9b3362a4223a7a6a29318e2d0198bafaf6938fc4a32ec96de66a1d724832796"
+  },
+  "evidence_sha256": {
+    "state-sync.json": "25a0939f7076f32e7ac0e76a10d4f3afd3d8f53774a78c2977bd31d5be7ff2dd",
+    "state-sync.log": "df256ea1830885ee8812c794d5b8e85391ca15fc0068e8b32df0f49374c056ff",
+    "state-sync-native.log": "f359902c58119edeb24bdc6e303778607880fc4faa2079059dc907ef145b9637",
+    "state-sync-clippy.log": "318fe0cb43aa12f215341aa054fed799d2a870d054e94512182c82245af54a81"
+  },
+  "public_devnet_joined": false,
+  "funded_vpn_settlement": false,
+  "node_deployed_for_this_checkpoint": false,
+  "remaining": [
+    "Sync_anchor finality and validator transition verification with authenticated Irmin proofs",
+    "Authenticated snapshot download and canonical import",
+    "Public-network startup and interoperability",
+    "VPN Circle initialization, canonical settlement reader and funded qualification"
+  ]
+}
