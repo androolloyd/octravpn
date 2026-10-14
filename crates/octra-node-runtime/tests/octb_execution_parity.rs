@@ -182,6 +182,8 @@ fn run(v: &Value, stepped: bool) -> Value {
         depth: integer(v, "depth", 0),
     };
     let options = Options {
+        proof_exec: false,
+        math: false,
         fhe_work: flag(v, "fhe_work"),
         async_exec: flag(v, "async"),
         limit: integer(v, "limit", 1_000_000),

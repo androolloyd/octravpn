@@ -5,6 +5,7 @@
 //! execution must abort and restore the enclosing attempt, never become a verdict.
 mod data;
 mod meter;
+mod proof;
 mod spawn;
 mod value;
 use num_bigint::BigInt;
@@ -73,6 +74,8 @@ pub struct Options {
     pub typed_bytes: bool,
     pub integer_work: bool,
     pub fhe_work: bool,
+    pub proof_exec: bool,
+    pub math: bool,
     pub point_ops: bool,
     pub is_view: bool,
     /// Native suspended-host completion semantics (used by Circle execution).
@@ -87,6 +90,8 @@ impl Default for Options {
             typed_bytes: false,
             integer_work: false,
             fhe_work: false,
+            proof_exec: false,
+            math: false,
             point_ops: false,
             is_view: false,
             async_exec: false,
@@ -96,6 +101,9 @@ impl Default for Options {
 }
 /// The host supplies authenticated state. Missing state is an operational error.
 pub trait Host {
+    fn groth16(&mut self, _key: &[u8], _proof: &[u8], _inputs: &[u8]) -> Result<bool, Unavailable> {
+        Err(Unavailable("OCTB proof host is unavailable".into()))
+    }
     fn spawn(
         &mut self,
         _request: SpawnRequest<'_>,
@@ -416,7 +424,7 @@ impl Machine {
     ) -> Exec<bool> {
         // Missing execution families must remain operational errors even when
         // an incomplete meter could otherwise appear to refuse the instruction.
-        if !matches!(op.opcode(), 0x00..=0x2f | 0x40..=0x55 | 0x7a | 0x7b | 0x89 | 0x8a) {
+        if !matches!(op.opcode(), 0x00..=0x2f | 0x3f..=0x55 | 0x7a | 0x7b | 0x89 | 0x8a) {
             return Err(Unavailable(format!(
                 "OCTB opcode 0x{:02x} execution is not available",
                 op.opcode()
@@ -426,6 +434,9 @@ impl Machine {
         self.prepare(op, budget)?;
         use Instruction as I;
         match op {
+            I::Groth16VerifyBn254(dest, key, proof, inputs) => {
+                self.verify_groth16(*dest, *key, *proof, *inputs, host, budget)?;
+            }
             I::Add(d, a, b)
             | I::Sub(d, a, b)
             | I::Mul(d, a, b)

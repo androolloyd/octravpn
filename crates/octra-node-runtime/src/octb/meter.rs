@@ -110,7 +110,8 @@ impl Machine {
                     && self.get(*value)?.numeric()
                     && self.get(*count)?.numeric()
             }
-            I::Ed25519Ok(_, key, message, signature) => {
+            I::Ed25519Ok(_, key, message, signature)
+            | I::Groth16VerifyBn254(_, key, message, signature) => {
                 self.get(*key)?.is_text()
                     && self.get(*message)?.is_text()
                     && self.get(*signature)?.is_text()

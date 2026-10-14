@@ -3445,6 +3445,10 @@ dependencies = [
 name = "octra-node-runtime"
 version = "0.1.0"
 dependencies = [
+ "ark-bn254",
+ "ark-ec",
+ "ark-ff",
+ "ark-groth16",
  "async-trait",
  "axum 0.7.9",
  "base64",

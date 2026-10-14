@@ -1,0 +1,19 @@
+{
+  "development_only": true,
+  "program": "oct9ndG9jfGgCxX8Wu6vejTJErD9LEHcNcUgxoa4BjLP8mm",
+  "domain": "b9341aca938576288832570b415f083965f71a23d15be421c7789d44b5c33e1d",
+  "verification_key_b64": "T0cxNlYxAAAABgnE1lDRTmvpO00EbE8rRP9HlVUGXo1rFEUDwm9ykKCtCnCifCqXyzg9JLFCI3qivms2tX7D1ZZYRLru0Vr20c8vx5Ip1GXzNLSZ5bibCWETgq4HxwtDhkwLg3+5clZuixlukPqSRTtZ2XqaWkU3QY7FwDFcCmohsiT8OiTppjYbCcwaA//47mwNkgIpaCQD1kcp2LQudE/bhKNXTf6Oy/wLC+2I9v3P3+RRhul66vrDwJKVdEfkHUM4IG6rbdVyVwqOFmuEqgP5bUXyTL7V437eiTQOyZHo9BjgIiSTu8PkGAu3TJhnwAjxKShmd/LOLS38xBTEQCaj8c89kyvTirQs6wCypIevpSrTqRthNCk8yi7x+b5LLJzR5/xY6xmK7B9iCrk4fEKLcAln6JI22m5e62oSPYRRIytP4kQiIe3JDFhqEizjY/c3OIhofa1Hc9sT0Zlv8LkPwFADjW6F9gUkWoP5E5S+QbjoyVjJdSyUp65J7eZROdZ8TQbqHdjDrRSReMVgIyOYwkG0ISfRqVsBCNJ5o4OU8uFzuvNYp+plDhn79rjlZ105Xcz//RiUAUBIADhEXYLJtUI1ei5f9rkSZGRF/czhqzt43JXk4Ex6Qnu6S7vD1kKt1hV7hGY75wrf7gUPdZTqhF8LYVKygc+ENvOlPEdECTlCiAoTAjMCFur86dANAT7dyvrW+JCA2tO+dL2aUk0oTXcdadpvT/0KVs/IMXxey0xsuvZeekh8XkWPRo77WjCGpwwEztZNLBAuVhRHo9CZnDogDfbjaxGMAVVySgVIsuOBVuFlkBeSGy/QyXZIArcXcvGdzaMtWZX75FVz8XUGq2RGcLb8uBoUpHhUVHDjNZbQcn5zgk4f2he3kE7wllFT+f9+JwXLnBS6kXFdPYITOjd7fq/z5qwWJtNdyrJpffaOBJb8lAkqLV5ZsIRWj2SHV5HLZ3Vm/J7zkeW5WumZN0QceI1SDd4aKAP4S9asg+Mwitb1//xpC3FxGk57AE9jboZCyatP3whiSBRR5JMARdCydW8vOqVg+zhrX2eRG74C3j96PX+lIrqxkm3SKB6jdRZF7vQVViNK/2Rf3kxY1GvnP0i+o6oW4cVGLaRCQ9mIAiRFv1o6lxyhpuT/48jRdR638rXrUgjfIDBbo9iUrZ97j2QUvJ+Eew+5MvfnE9iT3xP1F103",
+  "authorization": {
+    "method": "set_paused",
+    "params": [
+      1,
+      0,
+      "bb97206f481d2d25a0e61d23acc6585aad6275beff1fe3fb4930460df23df90d",
+      "T0cxNlAxCP4DGAPYxa5vomvw7OFxyRL/PvvWWk47T/Z0HoQHGCcoxMXLRbs+8n1sezLRNHb09SZcUWn9axlfCt0jLnbIDA493ms3+XYARKPi2vhpEGOXpYdueNCSVZvn8P+IXmrAD6Z4Eal23e37y6LgcEdCssIkd4hPJfD7dMDoMKQAPGsAwqtcmtmdnE/CsaQVBKFaNvmK4HAUmmLrY8ovxbQLaSXhvSguIRxzRVVsZtFB1fXGFRFiwF1sbWgrpKdvcdxUHzipKuUpbSD1VCuH3BUR7ooF1QIjqN2dF3xbUbbPk98HPoPx5wlb5DhqYT+h4xr0tAs4swvJULz5cVn29IkYdA=="
+    ],
+    "commitment": "748fe3b5c405c47edab26df16b14e4a0747cd7d58c9ba01f1e54bf6acdac4ba5",
+    "challenge": "af33a0fb7b4403e12b76004def04ec2faddc80d74570012945e6d6a0655828d9",
+    "circuit": "sha256-credential-action-bn254-v1",
+    "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+  }
+}

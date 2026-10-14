@@ -2200,3 +2200,47 @@ not qualify the complete lite node or a mainnet deployment.
 - [Combined tests](checkpoints/2026-10-14/native-devnet.log)
 - [Strict Clippy](checkpoints/2026-10-14/native-devnet-clippy.log)
 - [Persistent deployment after restart](checkpoints/2026-10-14/native-devnet-restarted.jsonl)
+
+
+### Native Groth16 and VPN private administration (2026-10-14)
+
+The Rust VM now implements `GROTH16_VERIFY_BN254`, bringing its executable
+instruction subset to **75 of 139 forms**. It reads native `OG16V1` verification
+keys and `OG16P1` proofs with canonical big-endian BN254 coordinates and scalars,
+rejects infinity and invalid curve/subgroup points, and preserves the native
+32-public-input cap. The implementation uses the existing pinned Arkworks
+versions already used by the private-admin prover.
+
+Execution preserves the native 50,000 fixed effort and 20,000 per public input,
+including the native false result when dynamic effort is insufficient. Update
+verification requires all three native proof-execution, FHE-work and math gates.
+A verifier outage remains operational unavailability for active updates; view
+refusal and resumed-host state follow native behavior. Circle updates and views
+use this verifier through their authenticated execution context.
+
+The unmodified pinned OCaml/MCL reference supplies 169 cases for raw/base64 input,
+strict types, malformed encodings, canonical field limits, infinity, activation,
+effort, synchronous/stepped/asynchronous completion and missing workers. Public
+algebraic verifier vectors cover 0, 1, 6, 31 and 32 inputs, plus over-limit
+rejection. These vectors are not deployment keys.
+
+A second native oracle compiles the current `program/main-v5.aml` and replays its
+constructor and private administration with public development proof material.
+The Rust differential compares return values, effort, events and committed
+storage after every call. It exercises action substitution, cross-program
+replay, malformed proof rejection, successful authorization and nonce replay.
+The Circle integration test starts from the native constructor's output and
+checks real proof execution, rejected-call rollback and a subsequent nonce view.
+It does not claim a Circle deployment or funded account transition.
+
+Evidence: [qualification summary](checkpoints/2026-10-14/groth16-summary.json),
+[source checkpoint](checkpoints/2026-10-14/groth16.json), and
+[test log](checkpoints/2026-10-14/groth16.log). The checkpoint now hashes AML
+sources alongside Rust sources, fixtures and sibling dependencies.
+
+The running devnet still denies paid VPN admission. The existing VPN constructor
+uses legacy contract deployment; Circle deployment installs code without running
+that constructor. An authenticated Circle initialization/deployment path and a
+pinned canonical settlement reader remain required before funding and tunnel
+qualification. Other missing VM families, OCPG admission, Circle HFHE callbacks,
+public-network interoperability and full recovery qualification remain open.

@@ -33,6 +33,7 @@ pub mod execution;
 pub mod execution_rules;
 pub mod finality;
 pub mod finality_queries;
+pub mod groth16;
 pub mod octb;
 pub mod p2p_transaction;
 pub mod pending_reconciliation;

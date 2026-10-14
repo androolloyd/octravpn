@@ -82,7 +82,10 @@ settlement Circle: every funded session request is denied. It never fabricates
 escrow. Circle HFHE host calls report unavailable. Managed private operations
 without an implemented verifier also remain unavailable. Complete VM/HFHE parity,
 funded VPN settlement, public network qualification and OS protocol registration
-remain separate work.
+remain separate work. Groth16 private-admin proofs now execute in the Rust VM and
+Circle host. The existing VPN AML constructor still needs an authenticated Circle
+initialization path before the launcher can enable paid sessions. See the
+[proof and restart evidence](checkpoints/2026-10-14/groth16-summary.json).
 
 The end-to-end regression is:
 

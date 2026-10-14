@@ -8780,5 +8780,18 @@
       "OS oct:// registration",
       "broader CI audit and benchmark gates"
     ]
+  },
+  "private_admin_proof_qualification": {
+    "date": "2026-10-14",
+    "status": "passed",
+    "native_groth16_cases": 169,
+    "native_vpn_aml_calls": 7,
+    "integration_tests": 24,
+    "final_proof_tests": 3,
+    "runtime_sources_unchanged_between_runs": true,
+    "persistent_devnet_restart": "passed",
+    "full_node_end_to_end": false,
+    "funded_vpn_end_to_end": false,
+    "summary": "docs/rust-node/checkpoints/2026-10-14/groth16-summary.json"
   }
 }

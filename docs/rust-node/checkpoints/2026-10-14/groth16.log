@@ -1,0 +1,115 @@
+   Compiling sqlx-sqlite v0.8.6
+   Compiling sqlx-core v0.8.6
+   Compiling ark-std v0.5.0
+   Compiling headscale-identity v0.1.0 (/Users/androolloyd/Development/headscale-rs/headscale-identity)
+warning: field `key_id` is never read
+   --> vendor/octra-circle-wasm-host/src/lib.rs:353:5
+    |
+352 | struct HfheActiveKey {
+    |        ------------- field in this struct
+353 |     key_id: String,
+    |     ^^^^^^
+    |
+    = note: `HfheActiveKey` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: variant `Release` is never constructed
+    --> vendor/octra-circle-wasm-host/src/lib.rs:1112:5
+     |
+1110 | enum CacheMessage {
+     |      ------------ variant in this enum
+1111 |     Hold { key: String, root: String, entries: usize, bytes: usize },
+1112 |     Release(u64),
+     |     ^^^^^^^
+
+warning: `octra_circle_wasm_host` (lib) generated 2 warnings
+   Compiling tonic-prost v0.14.6
+   Compiling tun-rs v2.8.3
+   Compiling ark-serialize v0.5.0
+   Compiling headscale-resources v0.1.0 (/Users/androolloyd/Development/headscale-rs/headscale-resources)
+   Compiling headscale-core v0.1.0 (/Users/androolloyd/Development/headscale-rs/headscale-core)
+   Compiling octravpn-tun v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-tun)
+   Compiling ark-ff v0.5.0
+   Compiling sqlx-macros-core v0.8.6
+   Compiling sqlx-macros v0.8.6
+   Compiling octravpn-obfs4 v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-obfs4)
+   Compiling sqlx v0.8.6
+   Compiling tonic-reflection v0.14.6
+   Compiling ark-poly v0.5.0
+   Compiling ark-relations v0.5.1 (/Users/androolloyd/Development/octra/vendor/ark-relations)
+   Compiling ark-snark v0.5.1
+   Compiling ark-ec v0.5.0
+   Compiling ark-crypto-primitives v0.5.0
+   Compiling ark-bn254 v0.5.0
+   Compiling ark-groth16 v0.5.0
+   Compiling octra-exex v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-exex)
+   Compiling headscale-payments v0.1.0 (/Users/androolloyd/Development/headscale-rs/headscale-payments)
+   Compiling headscale-db v0.1.0 (/Users/androolloyd/Development/headscale-rs/headscale-db)
+   Compiling octra-node-runtime v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node-runtime)
+   Compiling headscale-api v0.1.0 (/Users/androolloyd/Development/headscale-rs/headscale-api)
+   Compiling headscale-cli v0.1.0 (/Users/androolloyd/Development/headscale-rs/headscale-cli)
+   Compiling octravpn-mesh v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-mesh)
+   Compiling octravpn-node v0.1.0 (/Users/androolloyd/Development/octra/crates/octravpn-node)
+   Compiling octra-node v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4m 57s
+     Running tests/devnet.rs (target/debug/deps/devnet-dbef19171b73ed35)
+
+running 2 tests
+test genesis_settings_cannot_reuse_a_chain_identity ... ok
+test executable_devnet_transfers_browses_and_recovers has been running for over 60 seconds
+test executable_devnet_transfers_browses_and_recovers ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 88.95s
+
+     Running tests/services.rs (target/debug/deps/services-80842d0d48a9fe39)
+
+running 8 tests
+test empty_finalized_import_needs_no_peer_and_rejects_wrong_parent ... ok
+test pending::pending_fee_order_recovery_and_stale_queue_isolation ... ok
+test newer_pause_cannot_be_undone_and_cancellation_releases_services ... ok
+test proposals::local_proposal_capture_checks_receipts_outcomes_and_commitment ... ok
+test peer_import_drives_browser_wireguard_exex_and_restart ... ok
+test agreed_ranges_recover_canonical_services_and_exex_after_restart ... ok
+test consecutive_peer_recovery_resumes_after_missing_bundle_and_restart ... ok
+test live::live_quorum_publishes_circle_vpn_and_exex_atomically ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.68s
+
+     Running tests/circle_query.rs (target/debug/deps/circle_query-a7687d16637c1226)
+
+running 3 tests
+test native_rpc_context_matches_octb_view_receipts_and_immutable_roots ... ok
+test octb_browser_refuses_stale_profiles_private_state_and_oversized_programs ... ok
+test browser_octb_metadata_and_views_match_native_receipts ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 27.73s
+
+     Running tests/circle_transaction_parity.rs (target/debug/deps/circle_transaction_parity-8e092c2405d9e7f6)
+
+running 5 tests
+test native_circle_activation_refuses_nonpersistent_imports_in_updates ... ok
+test missing_operation_or_parameter_capability_rolls_back_the_entire_attempt ... ok
+test receipt_replay_checks_snapshot_and_execution_binding_before_staging_effects ... ok
+test native_circle_transactions_match_fees_nonces_value_rollback_and_vm_receipts ... ok
+test native_bft_circle_epochs_match_production_processor_roots_and_receipts ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.90s
+
+     Running tests/groth16_parity.rs (target/debug/deps/groth16_parity-ec9a54a71f551dc9)
+
+running 3 tests
+test existing_vpn_aml_private_administration_matches_native_state_and_effort ... ok
+test circle_host_executes_private_admin_proof_and_rejects_replay ... ok
+test native_groth16_bytes_gates_effort_and_worker_outages ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.91s
+
+     Running tests/octb_execution_parity.rs (target/debug/deps/octb_execution_parity-6203ed05a33ad023)
+
+running 3 tests
+test unavailable_execution_is_never_a_consensus_refusal ... ok
+test native_octb_spawn_preserves_nonce_budget_scope_and_host_completion ... ok
+test native_octb_execution_preserves_state_cost_and_refusal_order ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.41s
+

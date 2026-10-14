@@ -156,6 +156,8 @@ impl<'a> Query<'a> {
                 limit,
                 integer_work: self.profile.int_work,
                 fhe_work: self.profile.fhe_work == RuleMode::Active,
+                proof_exec: self.profile.proof_exec == RuleMode::Active,
+                math: self.profile.math,
                 point_ops: self.profile.point_ops,
                 is_view: true,
                 async_exec: true,
@@ -256,6 +258,14 @@ struct Host<'a, 'b> {
     depth: i64,
 }
 impl octb::Host for Host<'_, '_> {
+    fn groth16(
+        &mut self,
+        key: &[u8],
+        proof: &[u8],
+        inputs: &[u8],
+    ) -> Result<bool, octb::Unavailable> {
+        Ok(crate::groth16::verify(key, proof, inputs))
+    }
     fn balance(&mut self, address: &[u8]) -> Result<BigInt, octb::Unavailable> {
         let Some(raw) = self.query.state.get(&[b"accounts", address, b"data"]) else {
             return Ok(0.into());

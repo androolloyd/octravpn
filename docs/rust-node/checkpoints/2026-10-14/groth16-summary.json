@@ -1,0 +1,101 @@
+{
+  "date": "2026-10-14",
+  "status": "passed",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "scope": "Native Groth16 verification, actual VPN AML private administration, canonical Circle host proof execution/rollback and existing local devnet regressions. Development public proofs. No funded VPN deployment claim.",
+  "native_groth16_cases": 169,
+  "native_vpn_aml_calls": 7,
+  "instruction_forms": 75,
+  "total_instruction_forms": 139,
+  "integration_tests": {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-p",
+      "octra-node-runtime",
+      "-p",
+      "octra-node",
+      "--test",
+      "groth16_parity",
+      "--test",
+      "octb_execution_parity",
+      "--test",
+      "circle_transaction_parity",
+      "--test",
+      "circle_query",
+      "--test",
+      "services",
+      "--test",
+      "devnet"
+    ],
+    "exit_code": 0,
+    "suites": 6,
+    "passed": 24,
+    "failed": 0,
+    "ignored": 0,
+    "log": "/private/tmp/groth16-checkpoint-20261014.log",
+    "log_sha256": "f81cc6d96ef2aa915ed7f3b8744481efc3c843334f303feffa3917532e35755e"
+  },
+  "final_proof_tests": {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-p",
+      "octra-node-runtime",
+      "-p",
+      "octra-node",
+      "--test",
+      "groth16_parity"
+    ],
+    "exit_code": 0,
+    "suites": 1,
+    "passed": 3,
+    "failed": 0,
+    "ignored": 0,
+    "log": "/private/tmp/groth16-final-checkpoint-20261014.log",
+    "log_sha256": "d1876d7e9030acad108a6dcd9fbd2d5ffa38cba0644cb17a6f332ae414d04c8e"
+  },
+  "sources_unchanged_during_each_run": true,
+  "source_count": 2207,
+  "changes_between_runs": [
+    "crates/octra-node-runtime/tests/groth16_parity.rs"
+  ],
+  "change_reason": "Clippy branch-style cleanup in test helper only; runtime sources identical.",
+  "validation": {
+    "clippy": "cargo clippy --offline --locked -p octra-node -p octra-node-runtime --all-targets -- -D warnings",
+    "format": "cargo fmt -p octra-node -p octra-node-runtime -- --check",
+    "native_integrity": "passed"
+  },
+  "persistent_devnet": {
+    "validators": 4,
+    "epoch": 235,
+    "state_root": "72eeea0303c825890bdddba7f9e0446ab7accb0789f947e17e6c4db3198e4f25",
+    "peers_per_validator": 3,
+    "serving": true,
+    "restart": "passed; existing keys and state retained",
+    "binary_sha256": "b533d7c305b7b0d9586397afa0984e9945403526654657990a1f7a0e41ee0acf"
+  },
+  "full_node_end_to_end": false,
+  "funded_vpn_end_to_end": false,
+  "remaining": [
+    "Circle initialization/deployment path for existing VPN AML constructor",
+    "Pinned canonical funded-session/receipt lifecycle adapter",
+    "Funded VPN deposit, traffic, settlement, refund and recovery qualification",
+    "Remaining VM/OCPG/HFHE capabilities and full upstream network compatibility"
+  ],
+  "evidence_sha256": {
+    "groth16-clippy.log": "70309e6fbdf8ea4feac19b48b8c16459d6e943cb932faae60dac45ee53f151da",
+    "groth16-devnet-before.jsonl": "6d9a59245b7eb5144058204411df452f23948a46479154113eb822ed5dad5b7b",
+    "groth16-devnet-restarted.jsonl": "a93ddbaeb553d21928d9d9d692c44b59311aeea3ff41e84b12ee14ef9c71f4ca",
+    "groth16-final.json": "e4759fd88eb2e32ff15ed95868c994e18c274ee9df10bc114870939b5d5780af",
+    "groth16-final.log": "d1876d7e9030acad108a6dcd9fbd2d5ffa38cba0644cb17a6f332ae414d04c8e",
+    "groth16-fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "groth16-integrity.log": "eccc8c6abb90f29519ebe9191329e0589a3b6ca0f00aa86727fec7c3e5f3c893",
+    "groth16.json": "9cca9fd9128717e46e7d17b26325bdb2ef7e5b7dc63f22cba7786426fb4f88e6",
+    "groth16.log": "f81cc6d96ef2aa915ed7f3b8744481efc3c843334f303feffa3917532e35755e"
+  }
+}
