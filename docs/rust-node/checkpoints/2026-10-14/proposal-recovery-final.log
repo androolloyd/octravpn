@@ -1,0 +1,39 @@
+    Blocking waiting for file lock on build directory
+   Compiling octra-hfhe v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-hfhe)
+warning: field `key_id` is never read
+   --> vendor/octra-circle-wasm-host/src/lib.rs:353:5
+    |
+352 | struct HfheActiveKey {
+    |        ------------- field in this struct
+353 |     key_id: String,
+    |     ^^^^^^
+    |
+    = note: `HfheActiveKey` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: variant `Release` is never constructed
+    --> vendor/octra-circle-wasm-host/src/lib.rs:1112:5
+     |
+1110 | enum CacheMessage {
+     |      ------------ variant in this enum
+1111 |     Hold { key: String, root: String, entries: usize, bytes: usize },
+1112 |     Release(u64),
+     |     ^^^^^^^
+
+warning: `octra_circle_wasm_host` (lib) generated 2 warnings
+   Compiling octra-node-runtime v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node-runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 03s
+     Running tests/budget_parity.rs (target/debug/deps/budget_parity-ea2fc478cf48ca71)
+
+running 1 test
+test native_noise_budgets_match_at_cancellation_and_floor_boundaries ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+
+     Running tests/proposal_build.rs (target/debug/deps/proposal_build-083844ee461286d3)
+
+running 1 test
+test native_ordered_recovery_traces_and_rejection_bytes ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+

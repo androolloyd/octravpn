@@ -1,0 +1,118 @@
+{
+  "status": "ordered proposal recovery qualified; full node remains open",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "tests": {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-p",
+      "octra-node",
+      "-p",
+      "octra-node-runtime",
+      "--test",
+      "proposal_build",
+      "--test",
+      "services",
+      "--test",
+      "private_import",
+      "--test",
+      "epoch_partition"
+    ],
+    "exit_code": 0,
+    "suites": 4,
+    "passed": 11,
+    "failed": 0,
+    "ignored": 0,
+    "log": "/private/tmp/proposal-recovery-checkpoint-20261014.log",
+    "log_sha256": "dbbcf3692ead9071ed1344f4abfeae49d3248ef0d26259ee21dc10e84d55ee5c"
+  },
+  "final_tests": {
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-p",
+      "octra-hfhe",
+      "-p",
+      "octra-node-runtime",
+      "--test",
+      "budget_parity",
+      "--test",
+      "proposal_build"
+    ],
+    "exit_code": 0,
+    "suites": 2,
+    "passed": 2,
+    "failed": 0,
+    "ignored": 0,
+    "log": "/private/tmp/proposal-recovery-final-checkpoint-20261014.log",
+    "log_sha256": "395c6d8f1a8424e07a856b294db97e5ecd65340083aba3c8f53482e8d082fcdb"
+  },
+  "sources_unchanged": true,
+  "source_count": 2164,
+  "changed_since_base_checkpoint": [
+    "crates/octra-hfhe/src/encrypt.rs",
+    "crates/octra-node-runtime/tests/proposal_build.rs"
+  ],
+  "native_oracle": {
+    "cases": 661,
+    "sources": 1158,
+    "instrumentation": false,
+    "scope": "Unmodified native make_proposal with scripted local preparation outcomes; exact recovery traces, refusal receipts, evictions and holds. Admission, private slot selection and frozen rounds are outside this oracle."
+  },
+  "hfhe_linux": {
+    "cases": 326,
+    "architecture": "aarch64",
+    "compiler": "Debian GCC 12.2.0",
+    "mode": "release",
+    "before": "failed at cancellation case 2: Rust (0, 7), native (0, 10)",
+    "after": "passed all 326 vectors",
+    "image": "octravpn-builder:ci-20261014",
+    "scope": "Existing Linux build image, pinned native sources and exact encrypt.rs override; no full clean Linux node qualification"
+  },
+  "hfhe_linux_crypto": {
+    "suites": 3,
+    "passed": 4,
+    "failed": 0,
+    "vector_cases": 220,
+    "scope": "Seeded ciphertext bytes, randomized entropy-tape ciphertexts and native decryption acceptance/refusals on Linux ARM, using the existing recorded vectors."
+  },
+  "ci_source_sha256": {
+    ".github/actions/prepare-native-tests/action.yml": "73b6cc859460664c108a7f913501134b02437e53eb81afbe2daf6132c13667d2",
+    ".github/workflows/ci.yml": "77084681bec390e6ba8c225bd644b20fef22849f1475d2b9aaec3c80b344cf32",
+    ".github/workflows/coverage.yml": "3841ed956173209a1e42180c5154491c5134bfe077bbbdcb5c95006f535f52b1",
+    ".github/workflows/circle-vpn.yml": "f3eaf4f8b889f22110fc6f00fc6854e63daa80aaa7b74416a79ad86e3835666b"
+  },
+  "ci": "Shared preparation builds the registry WASM and generates native HFHE noise evidence on the runner before workspace test/coverage and Circle jobs. Existing OS checks are preserved.",
+  "clippy": "passed for octra-node, octra-node-runtime and octra-hfhe, all targets",
+  "full_node_end_to_end": false,
+  "funded_vpn_end_to_end": false,
+  "remaining": [
+    "native staging selection, private slots and Circle turn policy connected to the builder",
+    "queue mutation persistence, locally attributed resource-failure handling, round freezing and production driver/startup host",
+    "remaining private/VM/Circle operations, concrete HFHE callbacks and wallet/peer intake",
+    "whole OCaml/Rust node sync/recovery, funded VPN settlement and OS oct:// launching",
+    "headscale unsafe-libyaml replacement, Docker writable state and signed lifecycle migration, repository-wide CI and benchmark investigation"
+  ],
+  "limitations": [
+    "The Native adapter accepts a selected canonical batch; the reusable recovery host provides refill callbacks, while full queue selection remains open.",
+    "The live four-validator test uses development activation and synthetic VPN escrow; the recovered proposal is built, authenticated, executed and published locally.",
+    "Tests use the recorded local sibling working trees, not fresh remote clones.",
+    "After the base checkpoint, only Linux-specific HFHE rounding and fixture provenance assertions changed. Targeted HFHE and scheduler tests passed against the final source hashes; earlier source files are archived.",
+    "Floating-point parity remains compiler/OS/architecture scoped; these nonstandard boundary vectors do not establish a reachable public-chain consensus bug."
+  ],
+  "evidence_sha256": {
+    "proposal-recovery.json": "3ebdcb74616532478a347a43ed18c82ebcce399b3ae1253d8112d9c86a4ca9f9",
+    "proposal-recovery.log": "dbbcf3692ead9071ed1344f4abfeae49d3248ef0d26259ee21dc10e84d55ee5c",
+    "proposal-recovery-final.json": "6c61fc9ad62fe598141e937a31504b5e7d2960600b8017e005d92bdbbebc147f",
+    "proposal-recovery-final.log": "395c6d8f1a8424e07a856b294db97e5ecd65340083aba3c8f53482e8d082fcdb",
+    "proposal-recovery-clippy.log": "0c1a44e14eb1cd801b3ef644a74ca2bb2874e3385d8d5c5694769983d41c119f",
+    "hfhe-budget-linux.json": "b4d1c11b8b2f2571ccec3ec7818dfa235fb2d05ed0ad9eaa4ca05e9655f482bb",
+    "hfhe-budget-linux-before.log": "7713a90005702e8f9c72ff0e798afa6a5bbb0f526cdce330aefe9cf376a1e077",
+    "hfhe-budget-linux-after.log": "21f90baaf5630814591308efd0a317721f5a791bc92e1ebc5c7541e34f5a1402",
+    "hfhe-linux-crypto.log": "b1afbcbf22d8a15d250fa05a7ee3528eb925d9fe1ff9f6ee01ef9767f8dccec6"
+  }
+}

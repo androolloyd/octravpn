@@ -33,7 +33,10 @@ Current ports:
 - Noise planning: 326 floating-point boundary cases compare the current native
   target. The fixture contains ARM and translated x86 macOS outputs; 27 budgets
   differ between those native targets. Rust preserves each observed build's
-  contraction behavior. Other hosts generate their own native fixture in CI.
+  contraction behavior. Linux ARM/GCC 12.2 also passes all 326 cases using
+  separate multiply/add rounding; Apple Clang ARM uses fused rounding. CI
+  generates host-specific evidence before testing. This is compiler/target
+  qualification, not a universal ARM or cross-platform equality claim.
 
 Scalar, transcript, generator, inner-product and R1CS proof ports add 3,263
 inputs: complete proofs, identical entropy consumption, scalar helpers and
@@ -52,7 +55,7 @@ their own evidence from a pristine checkout of the adopted pin, using a fresh
 output path:
 
 ```sh
-python3 scripts/node-port/hfhe-budget-fixtures.py --mode native \
+python3 scripts/node-port/hfhe-budget-fixtures.py --mode native --compiler c++ \
   --upstream /path/to/lite_node --out out/hfhe-budget-host.json
 OCTRA_HFHE_BUDGET_FIXTURE="$PWD/out/hfhe-budget-host.json" \
   cargo test --locked -p octra-hfhe

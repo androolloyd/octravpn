@@ -68,6 +68,7 @@ struct LiveHost {
     prepared: Mutex<Option<octra_node::executor::Prepared>>,
     built: Mutex<Option<octra_node::executor::Built>>,
     inputs: Vec<octra_node_protocol::transaction::Transaction>,
+    refused: Arc<Mutex<Vec<Vec<u8>>>>,
     ready: Arc<AtomicBool>,
     warnings: Arc<Mutex<Vec<String>>>,
 }
@@ -126,6 +127,11 @@ impl Host for LiveHost {
         if !self.node.draft_current(built.draft()) {
             return Ok(None);
         }
+        self.refused
+            .lock()
+            .unwrap()
+            .extend(built.refused().iter().map(|tx| tx.hash().unwrap().to_vec()));
+        assert!(built.held().is_empty());
         self.peer.cached.lock().unwrap().insert(
             hash::proposal_id(&built.plan().header)?,
             built.bundle().clone(),
@@ -430,6 +436,32 @@ async fn live_quorum_publishes_circle_vpn_and_exex_atomically() {
             .unwrap()["result"]["result"],
         "4"
     );
+    // A failing transfer and its successor force native sender cutoffs before
+    // this leader can publish the independently expected Circle transition.
+    use base64::Engine as _;
+    use octra_node_protocol::transaction::{Nonce, OpType};
+    let call = super::circle_call(1, circle.as_bytes());
+    let mut rejected = call.clone();
+    rejected.op_type = OpType::Standard;
+    rejected.nonce = Nonce::new(2).unwrap();
+    rejected.amount = 1_000_000.into();
+    rejected.encrypted_data = None;
+    rejected.message = None;
+    let mut successor = rejected.clone();
+    successor.nonce = Nonce::new(3).unwrap();
+    successor.amount = 0.into();
+    for tx in [&mut rejected, &mut successor] {
+        tx.signature = base64::engine::general_purpose::STANDARD
+            .encode(
+                SigningKey::from_bytes(&[42; 32])
+                    .sign(&tx.signing_bytes().unwrap())
+                    .to_bytes(),
+            )
+            .into_bytes();
+    }
+    let refused_hash = rejected.hash().unwrap().to_vec();
+    let inputs = vec![call, rejected, successor];
+    let refused = Arc::new(Mutex::new(vec![]));
     let ready = Arc::new(AtomicBool::new(false));
     let warnings = Arc::new(Mutex::new(vec![]));
     let mut tasks = vec![];
@@ -458,7 +490,8 @@ async fn live_quorum_publishes_circle_vpn_and_exex_atomically() {
             executor: executor.native.clone(),
             prepared: Mutex::new(None),
             built: Mutex::new(None),
-            inputs: vec![super::circle_call(1, circle.as_bytes())],
+            inputs: inputs.clone(),
+            refused: refused.clone(),
             ready: ready.clone(),
             warnings: warnings.clone(),
         };
@@ -517,6 +550,12 @@ async fn live_quorum_publishes_circle_vpn_and_exex_atomically() {
         "5"
     );
     assert_eq!(records.lock().unwrap().len(), 1);
+    assert!(!refused.lock().unwrap().is_empty());
+    assert!(refused
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|hash| hash == &refused_hash));
     let committed_root = nodes[0].head().await.unwrap().cursor.state_root;
     assert_eq!(
         committed_root.0.as_slice(),

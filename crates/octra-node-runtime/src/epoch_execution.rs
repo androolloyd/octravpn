@@ -66,12 +66,13 @@ impl Effect {
         }
     }
 }
+#[derive(Clone)]
 pub struct Rejected {
     pub input_index: usize,
     pub refusal: Refusal,
     pub charged: bool,
 }
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Artifacts {
     /// Input index and canonical position (including rejected candidates).
     pub confirmed: Vec<(usize, usize)>,

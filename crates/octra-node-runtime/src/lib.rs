@@ -43,6 +43,7 @@ pub mod private_balance;
 pub mod private_crypto;
 pub mod private_epoch;
 pub mod private_outputs;
+pub mod proposal_build;
 pub mod proposal_relay;
 pub mod query_peers;
 pub mod staging;

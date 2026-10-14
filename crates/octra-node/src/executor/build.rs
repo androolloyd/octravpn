@@ -1,10 +1,10 @@
 //! Construct commitments from local execution of selected staging candidates.
-//! Queue selection/refill and round freezing belong to the driver host.
+//! Queue ownership and round freezing belong to the driver host.
 use super::{
     admission, proofs,
     proposal::{invalid, unavailable},
     run_worker,
-    stage::Stage,
+    stage::{Stage, Staged},
     Native, ProposalError,
 };
 use crate::proposal::Draft;
@@ -22,6 +22,7 @@ use octra_node_runtime::{
     consensus_driver::ProposalPlan,
     epoch_partition::Partition,
     finality::ExecutedEpoch,
+    proposal_build::{self, Failure, Host, Preview, Selection},
     state_batch::StateBatch,
 };
 use std::{collections::BTreeMap, sync::Arc};
@@ -33,6 +34,8 @@ pub struct Built {
     plan: ProposalPlan,
     bundle: RawBundle,
     execution: ExecutedEpoch,
+    refused: Vec<Transaction>,
+    held: Vec<Transaction>,
 }
 impl Built {
     pub fn draft(&self) -> &Draft {
@@ -47,6 +50,13 @@ impl Built {
     pub fn execution(&self) -> &ExecutedEpoch {
         &self.execution
     }
+    /// Queue changes are valid only while this draft is current.
+    pub fn refused(&self) -> &[Transaction] {
+        &self.refused
+    }
+    pub fn held(&self) -> &[Transaction] {
+        &self.held
+    }
     pub fn into_plan(self) -> ProposalPlan {
         self.plan
     }
@@ -54,8 +64,8 @@ impl Built {
 
 impl Native {
     /// Execute a selected staging batch and derive its native header, receipts
-    /// and outcome partition. Unavailable proofs or a partition that changes on
-    /// replay defer construction; no fallback root or fabricated receipt is used.
+    /// and outcome partition, using native bounded replay for changing outcomes.
+    /// Unavailable proofs defer construction; no fallback root is used.
     pub async fn build_proposal(
         &self,
         draft: Arc<Draft>,
@@ -153,54 +163,22 @@ impl Native {
                 roots,
             )
         };
-        let preview = capture(inputs).map_err(unavailable)?;
-        bundle.txs = preview
-            .artifacts
-            .confirmed
-            .iter()
-            .map(|(i, _)| inputs[*i].clone())
-            .collect();
-        bundle.rejections = transaction_outcome::build(
-            inputs,
-            &preview
-                .artifacts
-                .rejected
-                .iter()
-                .map(|r| {
-                    (
-                        inputs[r.input_index].clone(),
-                        r.refusal.error_type.clone(),
-                        r.refusal.reason.clone(),
-                    )
-                })
-                .collect::<Vec<_>>(),
-            &preview
-                .artifacts
-                .rejected
-                .iter()
-                .filter(|r| r.charged)
-                .map(|r| inputs[r.input_index].clone())
-                .collect::<Vec<_>>(),
-        )
-        .map_err(unavailable)?;
-        // Check complete candidate coverage/order using the same native gate as
-        // incoming proposals, then replay only confirmed and charged outcomes.
-        let candidates =
-            Partition::candidates(&bundle.txs, &bundle.rejections).map_err(unavailable)?;
-        if candidates.transactions() != inputs {
-            return Err(unavailable("preview_partition_mismatch"));
-        }
-        candidates
-            .verify(Ok(&preview.artifacts))
-            .map_err(unavailable)?;
-        let partition = Partition::finalized(&bundle.txs, &bundle.rejections, rules.envelope)
-            .map_err(unavailable)?;
-        let staged = if partition.transactions() == inputs {
-            preview
-        } else {
-            capture(partition.transactions()).map_err(unavailable)?
+        let mut recovery = Capture {
+            draft: &draft,
+            capture,
+            refused: vec![],
+            held: vec![],
         };
-        partition
+        let stable = proposal_build::build(&mut recovery, inputs).map_err(unavailable)?;
+        let refused = recovery.refused;
+        let held = recovery.held;
+        bundle.txs = stable.confirmed;
+        bundle.rejections = stable.rejections;
+        let staged = stable.value;
+        // The last preview contains only confirmed/charged effects. Verify its
+        // partition before allowing any locally built commitments to escape.
+        Partition::finalized(&bundle.txs, &bundle.rejections, rules.envelope)
+            .map_err(unavailable)?
             .verify(Ok(&staged.artifacts))
             .map_err(unavailable)?;
         let receipts = proofs::select(&staged.gate.receipts, &bundle.txs)
@@ -260,6 +238,46 @@ impl Native {
             plan,
             bundle: raw,
             execution,
+            refused,
+            held,
         })
+    }
+}
+
+struct Capture<'a, F> {
+    draft: &'a Draft,
+    capture: F,
+    refused: Vec<Transaction>,
+    held: Vec<Transaction>,
+}
+impl<F: FnMut(&[Transaction]) -> anyhow::Result<Staged>> Host for Capture<'_, F> {
+    type Value = Staged;
+    fn current(&self) -> bool {
+        self.draft.live()
+    }
+    fn select(
+        &mut self,
+        inputs: &[Transaction],
+    ) -> Result<Selection, octra_node_runtime::execution::Error> {
+        // This API receives an already admitted/selected batch. The staging
+        // host supplies queue shaping and refill for the general runtime API.
+        Ok(Selection {
+            inputs: inputs.to_vec(),
+            selected: inputs.to_vec(),
+        })
+    }
+    fn preview(&mut self, inputs: &[Transaction]) -> Result<Preview<Staged>, Failure> {
+        let staged = (self.capture)(inputs)
+            .map_err(|e| Failure::Failed(octra_node_runtime::execution::Error(e.to_string())))?;
+        Ok(Preview {
+            artifacts: staged.artifacts.clone(),
+            value: staged,
+        })
+    }
+    fn refuse(&mut self, tx: &Transaction) {
+        self.refused.push(tx.clone());
+    }
+    fn hold(&mut self, tx: &Transaction) {
+        self.held.push(tx.clone());
     }
 }

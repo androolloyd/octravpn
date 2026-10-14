@@ -2088,3 +2088,70 @@ required. The benchmark comparison remains unresolved.
 - [Final leader checkpoint](checkpoints/2026-10-14/proposal-build-leader.json)
 - [Final service log](checkpoints/2026-10-14/proposal-build-leader.log)
 - [Portable AML checks](checkpoints/2026-10-14/aml-portable.log)
+
+
+### Ordered proposal recovery and Linux qualification (2026-10-14)
+
+The selected proposal builder now follows the adopted native ordered recovery
+algorithm. Each preview starts at the same immutable parent. It checks exact
+candidate coverage, separates paid and unpaid outcomes, cuts off dependent sender
+nonces, defers unavailable work and carries ordinary refusal records into the
+final proposal. Four previews share one budget and at most one refill; after that,
+two reserved previews can retain unaffected senders. A revoked context cannot
+return a proposal. The final state comes only from a stable confirmed/charged
+preview, checked again against the finalized partition.
+
+The reusable `proposal_build::Host` separates queue selection, local execution and
+epoch-bound refusal/hold effects. **661 traces** match unmodified upstream
+`Consensus_proposal.make_proposal`, including exact preview requests, rejection
+bytes, evictions and holds. The oracle validates all 1,158 adopted source hashes
+and uses no source instrumentation. Its execution responses are scripted; actual
+Circle/private execution is covered by the separate node tests.
+
+The real `Native::build_proposal` adapter now recovers a failed Circle call followed
+by a nonce-dependent successor, and the resulting proposal passes incoming local
+verification. The four-validator test also builds from a valid Circle call, a
+failing transfer and its dependent successor. It reaches quorum and canonical
+publication with the independently expected state, then checks browser reads,
+VPN revocation/re-admission, ExEx delivery, duplicate publication and restart.
+All **11 tests across four suites** pass with unchanged source hashes. Activation
+and escrow are still development fixtures.
+
+The adapter still accepts a selected canonical batch. Full staging selection,
+private slots and Circle turn policy, persisted queue changes, typed per-transaction
+resource failures, frozen rounds and production startup/activation/precommit
+wiring remain open. General operational failures still defer the selected build.
+The reusable scheduler's refill callback does not establish that these queue
+boundaries are connected to the executable node.
+
+GitHub's workspace test job had failed because its Linux runner consumed the
+macOS-only noise budget fixture. A shared CI preparation action now builds the
+registry WASM and generates budget evidence from the adopted source pin on that
+runner. It is shared by workspace test/coverage and the Circle workflow; the
+platform assertion remains mandatory.
+
+Independent Linux ARM/GCC 12.2 reproduction then exposed an actual Rust rounding
+mismatch at cancellation boundaries: the native budget was `(0, 10)` while Rust
+returned `(0, 7)`. Rust had selected fused multiply/add for every ARM target. It
+now retains fused rounding for the qualified Apple Clang ARM build and separate
+rounding for Linux/GCC, matching all **326 native Linux budget cases**. The
+Linux encryption/decryption regressions also pass **220 recorded vectors** across
+four tests. Compiler,
+OS and architecture remain part of the qualification scope. Nonstandard budget
+vectors do not establish a reachable public-chain consensus bug.
+
+After the integration checkpoint, only that Linux-specific arithmetic choice
+and scheduler fixture-provenance assertions changed. Earlier sources are archived
+and checked against the checkpoint. Final targeted scheduler/macOS budget tests
+and strict Clippy cover the final sources. See the summary for exact commands,
+source hashes and remaining full-node gates.
+
+- [Scope and evidence hashes](checkpoints/2026-10-14/proposal-recovery-summary.json)
+- [Integration source checkpoint](checkpoints/2026-10-14/proposal-recovery.json)
+- [Integration test log](checkpoints/2026-10-14/proposal-recovery.log)
+- [Final source checkpoint](checkpoints/2026-10-14/proposal-recovery-final.json)
+- [Final test log](checkpoints/2026-10-14/proposal-recovery-final.log)
+- [Linux native budget evidence](checkpoints/2026-10-14/hfhe-budget-linux.json)
+- [Linux regression before](checkpoints/2026-10-14/hfhe-budget-linux-before.log)
+- [Linux regression after](checkpoints/2026-10-14/hfhe-budget-linux-after.log)
+- [Linux encryption/decryption regressions](checkpoints/2026-10-14/hfhe-linux-crypto.log)

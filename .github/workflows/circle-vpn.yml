@@ -29,22 +29,11 @@ jobs:
         with: { repository: androolloyd/octra-foundry, ref: 995e51af02155bc7178af629c00a74ab0f8f5816, path: octra-foundry }
       - uses: actions/checkout@v4
         with: { repository: androolloyd/headscale-rs, path: headscale-rs }
-      - uses: actions/checkout@v4
-        with:
-          repository: octra-labs/lite_node
-          ref: 7f9be4489870645cfcc95439638cde40f5da9f50
-          path: lite-node
       - uses: ./octra/.github/actions/setup-rust
-      - run: rustup target add wasm32-unknown-unknown
-      - name: Build registry artifact for runtime parity cases
-        working-directory: octra
-        run: cargo build --locked -p octravpn-circle-registry --release --target wasm32-unknown-unknown
+      - uses: ./octra/.github/actions/prepare-native-tests
       - name: Circle application and durable ExEx delivery
         working-directory: octra
-        env:
-          OCTRA_HFHE_BUDGET_FIXTURE: ${{ github.workspace }}/octra/out/hfhe-budget-native.json
         run: |
-          python3 scripts/node-port/hfhe-budget-fixtures.py --mode native --upstream ../lite-node --out out/hfhe-budget-native.json
           cargo test --locked -p octra-hfhe -p octra-node-runtime -p octra-pvac -p octra-node-protocol -p octra-exex -p octravpn-circle-registry --all-features
           cargo clippy --locked -p octra-hfhe -p octra-node-runtime -p octra-pvac -p octra-node-protocol -p octra-exex -p octravpn-circle-registry --all-targets --all-features -- -D warnings
           cargo clippy --locked -p octravpn-circle-registry --target wasm32-unknown-unknown --lib -- -D warnings

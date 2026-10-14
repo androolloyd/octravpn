@@ -19,11 +19,11 @@ use crate::{
 
 pub fn plan_noise(public: &PublicKey, depth: i32) -> Result<(usize, usize), Error> {
     let p = public.params;
-    // The adopted -O2 native build contracts this expression on ARM, but its
-    // x86 SSE build does not. Boundary vectors qualify the current target;
-    // cross-architecture/compiler equality remains a separate gate.
+    // The qualified Apple Clang ARM build contracts this expression. Native
+    // GCC on Linux ARM and the x86 SSE builds round the product separately.
+    // Boundary vectors qualify these compiler/target pairs, not every compiler.
     let depth = f64::from(depth.max(0));
-    let cap = if cfg!(target_arch = "aarch64") {
+    let cap = if cfg!(all(target_arch = "aarch64", target_os = "macos")) {
         p.depth_slope_bits.mul_add(depth, p.noise_entropy_bits)
     } else {
         p.noise_entropy_bits + p.depth_slope_bits * depth

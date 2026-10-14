@@ -4706,7 +4706,7 @@
         "Yojson",
         "Z"
       ],
-      "qualification": "The before-precommit host callback validates and synchronizes the bundle, then fsyncs pending recovery data under the validator journal owner. Its ordering and record bytes match 381 native cases. Full proposal construction and execution remain open."
+      "qualification": "Authenticated build/verification and bounded ordered recovery are implemented. Recovery matches 661 unmodified OCaml make_proposal traces and runs through real Circle/private execution. Full staging selection, private slots, Circle turns, queue persistence, resource attribution, round freezing and production host wiring remain open."
     },
     {
       "source": "node_runtime/consensus_proposal_preview_shell.ml",
@@ -8742,5 +8742,22 @@
     "final_leader_tests_passed": 7,
     "full_node_end_to_end": false,
     "funded_vpn_end_to_end": false
+  },
+  "ordered_proposal_recovery_qualification": {
+    "status": "ordered proposal recovery qualified; full node remains open",
+    "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+    "summary": "docs/rust-node/checkpoints/2026-10-14/proposal-recovery-summary.json",
+    "native_cases": 661,
+    "local_tests": 11,
+    "final_tests": 2,
+    "full_node_end_to_end": false,
+    "funded_vpn_end_to_end": false,
+    "remaining": [
+      "native staging selection, private slots and Circle turn policy connected to the builder",
+      "queue mutation persistence, locally attributed resource-failure handling, round freezing and production driver/startup host",
+      "remaining private/VM/Circle operations, concrete HFHE callbacks and wallet/peer intake",
+      "whole OCaml/Rust node sync/recovery, funded VPN settlement and OS oct:// launching",
+      "headscale unsafe-libyaml replacement, Docker writable state and signed lifecycle migration, repository-wide CI and benchmark investigation"
+    ]
   }
 }

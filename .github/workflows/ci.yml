@@ -69,6 +69,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { repository: androolloyd/headscale-rs, path: headscale-rs }
       - uses: ./octra/.github/actions/setup-rust
+      - uses: ./octra/.github/actions/prepare-native-tests
       - run: cargo test --locked --workspace --all-targets --all-features
       # Extra explicit run with the mesh test-helpers feature so a
       # change that builds under --all-features but breaks the
@@ -275,6 +276,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { repository: androolloyd/headscale-rs, path: headscale-rs }
       - uses: ./octra/.github/actions/setup-rust
+      - uses: ./octra/.github/actions/prepare-native-tests
       # cargo-tarpaulin's recent releases lock a dependency tree that
       # needs rustc 1.91 (cargo-platform 0.3.3), so `cargo install`
       # fails on the repo's pinned 1.88. Pull a prebuilt binary instead

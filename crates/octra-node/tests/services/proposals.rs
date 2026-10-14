@@ -250,7 +250,8 @@ async fn local_proposal_capture_checks_receipts_outcomes_and_commitment() {
     ));
     // A failed VM call advances the nonce in candidate preview. Its public
     // successor cannot survive finalized replay after that ordinary rejection
-    // is removed. Construction must defer instead of publishing preview state.
+    // is removed. Native recovery cuts off the successor and replays the failure
+    // alone before building the empty final state with its refusal record.
     let mut failed_call = tx.clone();
     failed_call.encrypted_data = Some(b"missing_method".to_vec());
     let mut successor = tx.clone();
@@ -267,12 +268,32 @@ async fn local_proposal_capture_checks_receipts_outcomes_and_commitment() {
             )
             .into_bytes();
     }
-    let error = executor
-        .build_proposal(draft.clone(), vec![failed_call, successor])
+    let recovered = executor
+        .build_proposal(draft.clone(), vec![failed_call.clone(), successor])
         .await
-        .err()
-        .expect("unstable partition was built");
-    assert!(matches!(error, ProposalError::Unavailable(_)), "{error}");
+        .unwrap();
+    assert!(recovered.bundle().txs_json.is_empty());
+    assert_eq!(recovered.refused(), &[failed_call]);
+    assert!(recovered.held().is_empty());
+    assert_eq!(
+        recovered.execution().state.root().unwrap(),
+        empty.execution().state.root().unwrap()
+    );
+    let mut recovered_proposal = proposal.clone();
+    recovered_proposal.header = recovered.plan().header.clone();
+    recovered_proposal.tx_hashes.clear();
+    sign(&mut recovered_proposal);
+    let verified = executor
+        .verify_proposal(
+            candidate(&node, &recovered_proposal).await,
+            recovered.bundle(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        verified.execution().state.root().unwrap(),
+        recovered.execution().state.root().unwrap()
+    );
     let mut wrong = rejections;
     wrong[0].reason = b"invented rejection".to_vec();
     outcomes.receipts_json = transaction_outcome::encode(&raw.receipts_json, &wrong).unwrap();
