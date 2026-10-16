@@ -1,0 +1,64 @@
+{
+  "date": "2026-10-16",
+  "status": "PASS_LOCAL_PUBLIC_RESTART_SUSPENDED",
+  "change": "Startup and recovery resume both authenticate every retained BFT finality record. The audit overlaps at most four independent record reads, matching the canonical SQLite pool limit. Consensus rules and accepted bytes are unchanged.",
+  "security_review": "An in-process suffix watermark was rejected because raw storage changes to an earlier record could evade resume. The candidate was stopped before service admission and was not committed or pushed.",
+  "tests": [
+    {
+      "scope": "finality publication, modified earlier certificate and receipt rejection",
+      "passed": 6,
+      "log": "out/node-port-final-20261015/full-parallel-audit-runtime.log",
+      "log_sha256": "1125b824c2e0012c5d62dd1f3f34d5a0aa42fcfa08fdff539cd42ddb5591b690"
+    },
+    {
+      "scope": "node recovery, gateway, VPN, ExEx and publication services",
+      "passed": 15,
+      "ignored": 1,
+      "log": "out/node-port-final-20261015/full-parallel-audit-services.log",
+      "log_sha256": "ed67906762af7f60c76bcc598b6740388c44949529771f441d54a192e31de259"
+    },
+    {
+      "scope": "executable multi-node devnet transfer, Circle browsing and restart",
+      "passed": 2,
+      "log": "out/node-port-final-20261015/full-parallel-audit-devnet.log",
+      "log_sha256": "681f7f997311c9629ee6103403ad11bc14605bd870f29e08f51d13af3ba3da9a"
+    }
+  ],
+  "strict_clippy": {
+    "result": "pass",
+    "packages": ["octra-node-runtime", "octra-node"],
+    "targets": "all",
+    "log": "out/node-port-final-20261015/full-parallel-audit-clippy.log",
+    "log_sha256": "9121e04dfd4973b6975f5ddec9c6a66611516bee2db3230cfecc19118f7cb05a"
+  },
+  "release_build": {
+    "result": "pass",
+    "binary_sha256": "bc7f57240840e3afce43d6ba6e875dff0450286dd50086edd6cac21e57b4d475",
+    "log": "out/node-port-final-20261015/full-parallel-audit-build.log",
+    "log_sha256": "29d042cac027adc7f5b615f48fc07fb0d2da962ce0baee1e00256136242123f5"
+  },
+  "public_restart": {
+    "network": "Octra public devnet",
+    "chain_id": "octra-devnet-9871-cluster",
+    "nonvoting": true,
+    "vpn": null,
+    "retained_identity_and_state": true,
+    "before_epoch": 1703477,
+    "config_sha256": "9eac462c782eda87e954792e7efbc0faf47d71bdb17d3be09ee0bded5fcd2005",
+    "process_pid": 5547,
+    "after_epoch": 1703479,
+    "operator_peers": 0,
+    "operator_serving": false,
+    "circle_https_status": 503,
+    "devnet_home_status": 200,
+    "devnet_rpc_status": 502,
+    "state_sync_primary_and_secondary": "both timed out after 8 seconds with zero bytes",
+    "probe_record": "out/node-port-final-20261015/public-devnet-final-candidate/full-prefix-public-probes.json",
+    "probe_record_sha256": "9af53da241a068a8bac0feaaf5a8b6048bef17dc87be6f1700c5b58e17cfed03",
+    "result": "retained state reauthenticated and head advanced two epochs; no authenticated peer currently connected, so service admission remains suspended"
+  },
+  "limitations": [
+    "The exact follow-up source has host regressions but has not repeated the frozen private paid Single/BFT qualification.",
+    "The public observer completed startup but has no authenticated peer at the sampled time. Both configured state-sync heads timed out and public devnet RPC returned 502 from this host. Catch-up and stable Circle HTTPS remain unqualified."
+  ]
+}

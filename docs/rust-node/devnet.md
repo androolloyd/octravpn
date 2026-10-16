@@ -130,10 +130,14 @@ observer's loopback gateway at `127.0.0.1:20805`. The
 [public Circle HTTPS canary](checkpoints/2026-10-16/public-circle-https.json)
 returned its rendered page over TLS after both public transactions appeared in
 the observer's canonical ExEx outbox. Later requests returned 503 during
-catch-up. The final gateway-guard binary has advanced past its pre-restart
+catch-up. The gateway-guard binary advanced past its pre-restart
 head, but its sampled HTTPS requests also returned 503 during authenticated
-catch-up (24 attempts over two minutes). Stable availability, final-binary
-HTTP 200, and external-device navigation have not passed.
+catch-up (24 attempts over two minutes). Stable availability, current-release
+ HTTP 200, and external-device navigation have not passed. A subsequent
+ [full-prefix-audit observer restart](checkpoints/2026-10-16/full-prefix-audit.json)
+ reauthenticated the retained state and advanced two epochs. Its sampled
+ operator status had no connected peers; both configured state-sync heads timed
+ out, public devnet RPC returned 502, and its Circle HTTPS request returned 503.
 The [zero-escrow public devnet RC](checkpoints/2026-10-16/devnet-canary.json)
 deployed the factory and VPN child, exercised private pause, replay rejection
 and unpause, and was observed again in our Rust node's canonical ExEx history.

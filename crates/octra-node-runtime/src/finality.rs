@@ -7,6 +7,7 @@
 pub mod history;
 pub mod proposal;
 mod vm_receipts;
+use futures::TryStreamExt;
 use num_bigint::BigInt;
 use std::sync::Arc;
 
@@ -296,10 +297,11 @@ impl<A: ValidatorHistory> Publisher<A> {
             return Err(invalid("local Single store cannot provide BFT finality"));
         }
         let end = self.store.head().await?;
-        for number in 1..=end.cursor.sequence.0 {
-            self.record(Sequence(number)).await?;
-        }
-        Ok(())
+        futures::stream::iter((1..=end.cursor.sequence.0).map(Ok::<_, Error>))
+            .try_for_each_concurrent(4, |number| async move {
+                self.record(Sequence(number)).await.map(|_| ())
+            })
+            .await
     }
 
     async fn authenticate(

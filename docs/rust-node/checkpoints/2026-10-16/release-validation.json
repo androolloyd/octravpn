@@ -1,7 +1,7 @@
 {
   "date": "2026-10-16",
   "status": "PASS_SEGMENTED_HOST_RELEASE_GATES",
-  "source_scope": "Current checkout including the publication-error gateway revocation guard",
+  "source_scope": "Committed node snapshot 6e72d5d, including the publication-error gateway revocation guard; later full-prefix audit follow-up is qualified separately",
   "release_suites": [
     {
       "scope": "VPN, support crates and headscale-rs library",

@@ -1,6 +1,6 @@
 {
   "date": "2026-10-16",
-  "status": "PUBLIC_CIRCLE_CONFIRMED_FINAL_BINARY_CATCHUP_NOT_SERVING",
+  "status": "PUBLIC_CIRCLE_CONFIRMED_CURRENT_RELEASE_SUSPENDED",
   "network": "Octra public devnet",
   "chain_id": "octra-devnet-9871-cluster",
   "circle_id": "oct5WASWApL9k2oUaoS8VfM2PAZhPJijPMCaNH6UFkSxtsr",
@@ -44,7 +44,7 @@
     "rendered_body_contains_published_text": true,
     "binary_sha256": "f5e738011908c7af632ce8382982b16e7087d0e179cbad7b1bf98a46eabf91c0"
   },
-  "final_binary_https_result": {
+  "gateway_guard_binary_https_result": {
     "checked_at_utc": "2026-10-16T12:25:55Z",
     "http_status": 503,
     "bounded_https_attempts": 24,
@@ -53,6 +53,16 @@
     "binary_sha256_at_launch": "a5603614993ac1dc4bf92f1e111ce6508d276c4281be024aaab183b5fa16be3d",
     "nonvoting": true,
     "source_status": "The primary exporter was behind retained canonical history; the secondary exporter supplied verified epochs, but the observer had not entered an admitted serving window at this check."
+  },
+  "current_binary_https_result": {
+    "checked_at_utc": "2026-10-16T13:19:49Z",
+    "http_status": 503,
+    "observed_node_epoch": 1703479,
+    "operator_peers": 0,
+    "operator_serving": false,
+    "binary_sha256": "bc7f57240840e3afce43d6ba6e875dff0450286dd50086edd6cac21e57b4d475",
+    "probe_record": "out/node-port-final-20261015/public-devnet-final-candidate/full-prefix-public-probes.json",
+    "probe_record_sha256": "9af53da241a068a8bac0feaaf5a8b6048bef17dc87be6f1700c5b58e17cfed03"
   },
   "evidence": {
     "committed_payload": "docs/rust-node/fixtures/devnet-circle/payload.json",
@@ -64,9 +74,9 @@
     "official_asset_readback": "out/node-port-final-20261015/public-circle-fixture-20261016/official-asset.stdout",
     "retained_observer_exex_report": "out/node-port-final-20261015/public-circle-fixture-20261016/observer-exex.json",
     "retained_observer_exex_report_sha256": "65d201f2d3761b19111f493c47b0fc073d5290686aa3c31879c9ced2802420b1",
-    "final_binary_restart_record": "out/node-port-final-20261015/public-devnet-final-candidate/retained-restart-gateway-final.json",
-    "final_binary_observer_log": "out/node-port-final-20261015/public-devnet-final-candidate/retained-observer-gateway-final.log",
-    "final_binary_https_headers": "out/node-port-final-20261015/public-circle-fixture-20261016/final-https-headers.txt"
+    "gateway_guard_restart_record": "out/node-port-final-20261015/public-devnet-final-candidate/retained-restart-gateway-final.json",
+    "gateway_guard_observer_log": "out/node-port-final-20261015/public-devnet-final-candidate/retained-observer-gateway-final.log",
+    "gateway_guard_https_headers": "out/node-port-final-20261015/public-circle-fixture-20261016/final-https-headers.txt"
   },
-  "scope": "Public static Circle gateway fixture only. An earlier binary returned the rendered asset over TLS during an admitted serving window. The final binary restarted on retained authenticated state and advanced past its previous head, but its sampled TLS requests returned 503 during catch-up. Stable availability, exact-final-binary HTTP 200, external-device navigation, funded VPN service, and Mainnet remain separate gates."
+  "scope": "Public static Circle gateway fixture only. An earlier binary returned the rendered asset over TLS during an admitted serving window. The current binary restarted on retained authenticated state and advanced two epochs, but the sampled operator status had zero connected peers and Circle HTTPS returned 503. Stable availability, HTTP 200 on the current release, external-device navigation, funded VPN service, and Mainnet remain separate gates."
 }

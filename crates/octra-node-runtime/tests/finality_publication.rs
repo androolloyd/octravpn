@@ -528,6 +528,7 @@ async fn restart_reauthenticates_history_and_detects_missing_or_modified_evidenc
         .execute(&db)
         .await
         .unwrap();
+    assert!(publisher.audit().await.is_err());
     assert!(Publisher::open(store.clone(), authority.clone())
         .await
         .is_err());

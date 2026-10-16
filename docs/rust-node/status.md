@@ -11,9 +11,17 @@ upstream behavioral parity and public-network deployment remain unqualified.
 
 - The [final host release gates](checkpoints/2026-10-16/release-validation.json)
   passed segmented VPN/Headscale, runtime, node/protocol/ExEx/browser and doc
-  suites on the current source, plus strict workspace lint and offline
+  suites on committed snapshot `6e72d5d`, plus strict workspace lint and offline
   dependency policy checks. The checkpoint records exact log hashes and the
   separate suite boundaries.
+- The [full-prefix audit follow-up](checkpoints/2026-10-16/full-prefix-audit.json)
+  checks every retained finality record on startup and recovery resume with four
+  concurrent reads. It rejects modified older certificates and receipts. Its
+  runtime, node service, executable devnet, strict lint and release build gates
+  pass. The public observer restarted on the same identity and advanced two
+  epochs, but had zero authenticated peers in the sampled status and remained
+  suspended. Both configured state-sync heads timed out from this host, public
+  devnet RPC returned 502, and the current Circle HTTPS request returned 503.
 - The [2026-10-16 combined checkpoint](checkpoints/2026-10-16/combined-native-vpn.json)
   records a pinned frozen-source image passing both the paid private Single run
   and a four-validator BFT run. Each completed 34 stateful steps with zero
@@ -106,11 +114,11 @@ now maps the host's tailnet HTTPS address to the loopback Circle gateway. The
 deployed a public static asset, matched its official RPC bytes, matched both
 transactions in the Rust observer's ExEx outbox, and returned its rendered page
 over Tailscale HTTPS during an admitted serving window. Later requests returned
-503 during catch-up. The final gateway-guard binary restarted with the same
+503 during catch-up. The gateway-guard binary restarted with the same
 retained identity and advanced beyond its prior head, but its sampled HTTPS
 requests, including 24 in a bounded two-minute check, returned 503 while it
 verified secondary-exporter history.
-Stable availability, an HTTP 200 on that final binary, and navigation from another tailnet
+Stable availability, an HTTP 200 on the current release, and navigation from another tailnet
 device or application remain integration gates. Circle HTTPS addresses
 translate automatically at that
 gateway; a VPN or DNS connection alone cannot teach arbitrary applications to
@@ -161,6 +169,9 @@ comparisons, crash/restart tests and strict linting. Its asynchronous proof
 workers and Single RPC/browser/VPN/ExEx service adapter passed the combined
 private Single qualification above. This does not establish complete upstream
 behavioral parity on the public network.
+The standard network launcher still rejects native standalone Single producer
+mode; the working Single executor currently has a separate private-genesis
+launcher. That host integration remains an upstream parity gap.
 A mapped source file or passing local fixture does not establish full
 native parity. Dated reports in [the adoption history](native-runtime.md) preserve
 their original snapshot and should not be read as current completeness counters.
