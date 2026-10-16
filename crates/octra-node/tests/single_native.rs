@@ -887,7 +887,8 @@ async fn sigkill_before_and_after_commit_recovers_exact_prefix_and_exex() {
             .kill_on_drop(true)
             .spawn()
             .unwrap();
-        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        // Cold CI runners may need more than ten seconds to start the helper.
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
             while !tmp.path().join("crash.ready").exists() {
                 assert!(
                     child.try_wait().unwrap().is_none(),

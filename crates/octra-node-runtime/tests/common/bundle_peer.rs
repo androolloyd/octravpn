@@ -38,6 +38,7 @@ pub(crate) struct Authority {
     pub(crate) address: Bytes,
     pub(crate) validators: ValidatorSet,
     pub(crate) activation: Arc<Mutex<Option<i64>>>,
+    pub(crate) range_plan_error: Arc<AtomicBool>,
     pub(crate) cached: Arc<Mutex<BTreeMap<[u8; 32], RawBundle>>>,
     pub(crate) requests: Arc<Mutex<Vec<[u8; 32]>>>,
     pub(crate) corrupt: Arc<AtomicBool>,
@@ -76,6 +77,9 @@ impl finality_queries::Host for Authority {
         Host::validators(self)
     }
     async fn range_plan(&self) -> Result<finality_queries::RangePlan, Error> {
+        if self.range_plan_error.load(Ordering::SeqCst) {
+            return Err("fixture range acquisition unavailable".into());
+        }
         Ok(finality_queries::RangePlan {
             stake: self.validators.clone(),
             scheduled: self
@@ -296,6 +300,7 @@ pub(crate) async fn node(
     .unwrap();
     let authority = Authority {
         activation: Arc::default(),
+        range_plan_error: Arc::default(),
         history: Arc::default(),
         withheld: Arc::default(),
         ranges: Arc::default(),

@@ -1531,7 +1531,15 @@ async fn consecutive_peer_recovery_resumes_after_missing_bundle_and_restart() {
         vec![reader.endpoint.clone()],
     )
     .await;
-    bundle_peer::wait_for(|| reader.swarm.peers().len() == 1).await;
+    let stale = bundle_peer::node(
+        chain.chain_id.as_bytes(),
+        b"validator-2".to_vec(),
+        SigningKey::from_bytes(&[3; 32]),
+        set.clone(),
+        vec![reader.endpoint.clone()],
+    )
+    .await;
+    bundle_peer::wait_for(|| reader.swarm.peers().len() == 2).await;
     let mut ids = vec![];
     for _ in 1..=3 {
         let view = source.snapshot().unwrap();
@@ -1578,6 +1586,40 @@ async fn consecutive_peer_recovery_resumes_after_missing_bundle_and_restart() {
         .await
         .unwrap()
         .unwrap();
+    let range = node
+        .catch_up_range(3, &reader.finality, &executor, 0.5)
+        .await
+        .unwrap();
+    assert!(!range.reached);
+    assert_eq!(range.head.cursor.epoch.0, 0);
+    assert!(stale
+        .authority
+        .range_requests
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|(epoch, _)| *epoch == 1));
+    assert!(server
+        .authority
+        .range_requests
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|(epoch, _)| *epoch == 1));
+    reader
+        .authority
+        .range_plan_error
+        .store(true, Ordering::SeqCst);
+    let unavailable = node
+        .catch_up_range(3, &reader.finality, &executor, 0.5)
+        .await
+        .unwrap();
+    assert!(!unavailable.reached);
+    assert_eq!(unavailable.head, range.head);
+    reader
+        .authority
+        .range_plan_error
+        .store(false, Ordering::SeqCst);
     let progress = node.catch_up(3, &peers, &executor, 1.).await.unwrap();
     assert!(!progress.reached);
     assert_eq!(progress.head.cursor.epoch.0, 1);
@@ -1637,7 +1679,10 @@ async fn consecutive_peer_recovery_resumes_after_missing_bundle_and_restart() {
     assert_eq!(node.head().await.unwrap(), progress.head);
     assert!(matches!(node.status(), Status::Suspended(_)));
     executor.corrupt.store(true, Ordering::SeqCst);
-    assert!(node.catch_up(3, &peers, &executor, 1.).await.is_err());
+    assert!(matches!(
+        node.catch_up(3, &peers, &executor, 1.).await,
+        Err(octra_node::sync::PeerCatchUpError::Invalid(_))
+    ));
     assert_eq!(node.head().await.unwrap(), progress.head);
     assert!(seen.lock().unwrap().is_empty());
     executor.corrupt.store(false, Ordering::SeqCst);

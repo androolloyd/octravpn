@@ -21,6 +21,21 @@ pub struct Progress {
     pub head: Head,
     pub reached: bool,
 }
+#[derive(Debug)]
+pub enum PeerCatchUpError {
+    /// No usable signed reply was acquired; another authenticated source may retry.
+    Unavailable(anyhow::Error),
+    /// Local history, finality verification, execution or publication failed.
+    Invalid(anyhow::Error),
+}
+impl std::fmt::Display for PeerCatchUpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unavailable(error) | Self::Invalid(error) => write!(f, "{error:#}"),
+        }
+    }
+}
+impl std::error::Error for PeerCatchUpError {}
 
 impl<A: Host> Node<A> {
     /// Recover using native weighted range agreement and shared prefixes. Each
@@ -88,8 +103,19 @@ impl<A: Host> Node<A> {
                     }
                     Ok(true)
                 })
-                .await
-                .context("acquire agreed catch-up range")?;
+                .await;
+            let response = match response {
+                Ok(response) => response,
+                Err(error) => {
+                    // No record has been imported from this query. Leave its
+                    // canonical base intact so proof or HTTP recovery can try.
+                    eprintln!("catch-up range unavailable from={from} error={error}");
+                    return Ok(Progress {
+                        head: self.head().await?,
+                        reached: false,
+                    });
+                }
+            };
             let Some(response) = response else {
                 return Ok(Progress {
                     head: self.head().await?,
@@ -126,13 +152,14 @@ impl<A: Host> Node<A> {
         peers: &Peers<'_, R, F, B>,
         executor: &impl Executor,
         network_seconds: f64,
-    ) -> Result<Progress> {
-        anyhow::ensure!(
-            target < (1_u64 << 62),
-            "catch-up target exceeds canonical epoch range"
-        );
+    ) -> std::result::Result<Progress, PeerCatchUpError> {
+        if target >= (1_u64 << 62) {
+            return Err(PeerCatchUpError::Invalid(anyhow::anyhow!(
+                "catch-up target exceeds canonical epoch range"
+            )));
+        }
         let _sync = self.syncing.lock().await;
-        let head = self.head().await?;
+        let head = self.head().await.map_err(PeerCatchUpError::Invalid)?;
         if head.cursor.epoch.0 >= target {
             return Ok(Progress {
                 head,
@@ -142,14 +169,15 @@ impl<A: Host> Node<A> {
         self.suspend("catching up canonical history");
         let budget = Duration::from_secs_f64(driver_policy::bounded_timeout(network_seconds));
         loop {
-            let head = self.head().await?;
+            let head = self.head().await.map_err(PeerCatchUpError::Invalid)?;
             if head.cursor.epoch.0 >= target {
                 return Ok(Progress {
                     head,
                     reached: true,
                 });
             }
-            let epoch = i64::try_from(head.cursor.epoch.0 + 1)?;
+            let epoch = i64::try_from(head.cursor.epoch.0 + 1)
+                .map_err(|error| PeerCatchUpError::Invalid(error.into()))?;
             let deadline = Instant::now() + budget;
             let roots = peers
                 .roots
@@ -160,7 +188,8 @@ impl<A: Host> Node<A> {
                     false,
                 )
                 .await
-                .context("discover finalized epoch sources")?;
+                .context("discover finalized epoch sources")
+                .map_err(PeerCatchUpError::Unavailable)?;
             let remaining = || {
                 deadline
                     .saturating_duration_since(Instant::now())
@@ -183,20 +212,29 @@ impl<A: Host> Node<A> {
                     }
                 })
                 .await
-                .context("acquire finalized epoch certificate")?
+                .context("acquire finalized epoch certificate")
+                .map_err(PeerCatchUpError::Unavailable)?
             else {
                 return Ok(Progress {
-                    head: self.head().await?,
+                    head: self.head().await.map_err(PeerCatchUpError::Invalid)?,
                     reached: false,
                 });
             };
             if self
-                .import_finalized(&certificate.encode()?, peers.bundles, executor, remaining())
-                .await?
+                .import_finalized(
+                    &certificate
+                        .encode()
+                        .map_err(|error| PeerCatchUpError::Invalid(error.into()))?,
+                    peers.bundles,
+                    executor,
+                    remaining(),
+                )
+                .await
+                .map_err(PeerCatchUpError::Invalid)?
                 .is_none()
             {
                 return Ok(Progress {
-                    head: self.head().await?,
+                    head: self.head().await.map_err(PeerCatchUpError::Invalid)?,
                     reached: false,
                 });
             }

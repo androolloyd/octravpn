@@ -1,0 +1,42 @@
+{
+  "date": "2026-10-16",
+  "status": "PASS_ISOLATED_SINGLE_AND_FOUR_VALIDATOR_BFT",
+  "source": {
+    "octra_commit": "b120007c7d1de948281e1e8c572cbdee6346a81c",
+    "octra_foundry_commit": "d5feaad7f14d6a381e2327dfd6738cae8df95b31",
+    "headscale_rs_commit": "7b6b71b245ceff25f27a400588d78dd28e6e340f",
+    "upstream_lite_node_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+    "source_manifest_sha256": "e8d7396bcb5e163c676fbc0dd7f7db0b961939fe76752e914b8738b1d1920370",
+    "cargo_lock_sha256": "8dc17a27354a1c89ff2bb56c39db37783ae2860095bb792ecd8ec61733d19414",
+    "image_id": "sha256:7e96bcf9ab5a95eedd1540f27ac5a1d1ad96cb43cfa4b9567a862a7d744c1e1d",
+    "image_source_sha256": "2a294379ca29ea82869fc25ff57dab5b9ca85baffcf012fdd5a457c5af7c5962"
+  },
+  "runs": {
+    "four_validator_bft": {
+      "qualified": true,
+      "steps": 34,
+      "qualification_sha256": "45a861bd16d5548dc719607ba4b268db23b98b65155ed112a05b9c88fb1063a1",
+      "journal_sha256": "eff6586cf568c6d50afd58bffd4666f4f0581ceb9f2b244d470de3ee17057a96",
+      "build_log_sha256": "e069922da269a8b4a4728944070c26177c5d0ff05c226acec5e070cc3e5f830a",
+      "run_log_sha256": "c09c94ad26531e70fa25793c551c62e5659cc3f146796a3c2f1c5f1f35b257c2",
+      "local_evidence_directory": "out/node-port-final-20261015/native-vpn-headscale-v0295-bft"
+    },
+    "private_single": {
+      "qualified": true,
+      "steps": 34,
+      "qualification_sha256": "36a5d95d73a7c1059f19d54ba21f2e3db0ac49a9ea6d0ae0f698687e10e42a27",
+      "journal_sha256": "a10cbd96f1442ffa0d3d04fdd43e90e20c0e5ef42243774a966fd8d3ff3f1ccf",
+      "build_log_sha256": "4a660b71bc2dfa521d84a40b4bc61673895a825c9394e2448608ba2170e3ce9c",
+      "run_log_sha256": "adcaf4e8aef36b21e41deb600732751e42370be9956801517f1a4175d80682ef",
+      "local_evidence_directory": "out/node-port-final-20261015/native-vpn-headscale-v0295-single"
+    }
+  },
+  "coverage": "Private administration handoff, rotation and replay rejection; paid WireGuard and OS TUN TCP/UDP/ICMP forwarding; exact settlement and refunds; canonical ExEx across four validators; Circle gateway reads; restart recovery.",
+  "host_tests": {
+    "vpn_headscale": "700 passed, 0 failed, 1 privileged kernel test ignored; that path ran in the Docker TUN gate",
+    "vpn_headscale_log_sha256": "df388fe6fcaf323624fff3f2e86eea2ed13683e1f103ddd1c02d0aa966574bae",
+    "clean_pinned_headscale_cli": "16 passed, 0 failed",
+    "clean_pinned_headscale_cli_log_sha256": "eb704f83dd7352bff78b194cbdff5a85d16f4904ae5c24ddebda3517a1c6c5bb"
+  },
+  "scope": "Exact pinned isolated activated-genesis qualification. No public-chain paid VPN, current-head Circle availability or Mainnet qualification. Later recovery and test-only changes are separate from this image."
+}

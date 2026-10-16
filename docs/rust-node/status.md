@@ -9,6 +9,12 @@ upstream behavioral parity and public-network deployment remain unqualified.
 
 ## Recorded local evidence
 
+- The [Headscale 0.29.5 pinned VPN checkpoint](checkpoints/2026-10-16/headscale-v0295-native-vpn.json)
+  records an exact-source image at `b120007` and Headscale `7b6b71b` passing
+  both 34-step paid private Single and four-validator BFT gates. The host
+  VPN/Headscale suite passed 700 tests, and a clean pinned Headscale checkout
+  passed all 16 CLI passthrough comparisons. Public paid service and later
+  recovery changes require separate qualification.
 - The [final host release gates](checkpoints/2026-10-16/release-validation.json)
   passed segmented VPN/Headscale, runtime, node/protocol/ExEx/browser and doc
   suites on committed snapshot `6e72d5d`, plus strict workspace lint and offline

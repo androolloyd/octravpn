@@ -7,6 +7,7 @@ use crate::{
     import::Executor,
     peers::Authority,
     rpc::Submission,
+    sync::{PeerCatchUpError, Peers},
     Host, Node,
 };
 use anyhow::{ensure, Context, Result};
@@ -14,6 +15,7 @@ use octra_node_protocol::{
     consensus::{
         catchup,
         engine::{Engine, TimeoutConfig},
+        ValidatorSet,
     },
     network::swarm::Swarm,
 };
@@ -28,6 +30,41 @@ use std::{sync::Arc, time::Duration};
 use tokio::{sync::watch, task::JoinHandle, time::Instant};
 
 pub(crate) type Live<A> = Driver<driver::Validator<A>, Canonical<A, Authority, Native>>;
+/// Responses come only from `EpochRoots::query`, whose handler verifies each
+/// validator signature. A lone higher head is a one-epoch availability hint;
+/// it never supplies canonical state or relaxes finality verification.
+fn target_from_verified_roots(
+    chain: &[u8],
+    epoch: i64,
+    local_root: &[u8],
+    stake: &ValidatorSet,
+    responses: &[epoch_roots::Response],
+) -> Result<Option<u64>> {
+    let matching = responses
+        .iter()
+        .filter(|r| r.state_root.as_deref() == Some(local_root))
+        .cloned()
+        .collect::<Vec<_>>();
+    if epoch_roots::reached(chain, epoch, stake, WaitFor::SourceAgreement, &matching)? {
+        let heads = matching
+            .iter()
+            .map(|r| catchup::PeerHead {
+                responder_addr: r.responder_addr.clone(),
+                responder_head_epoch: r.responder_head_epoch,
+            })
+            .collect::<Vec<_>>();
+        let advertised = catchup::pick_target_epoch(&heads, stake.f, epoch)?;
+        if advertised > epoch {
+            return Ok(Some(u64::try_from(advertised)?));
+        }
+    }
+    if matching.iter().any(|r| r.responder_head_epoch > epoch) {
+        return Ok(Some(u64::try_from(
+            epoch.checked_add(1).context("recovery epoch overflow")?,
+        )?));
+    }
+    Ok(None)
+}
 pub(crate) struct Service<A: Host> {
     pub node: Arc<Node<A>>,
     pub submission: Arc<Submission<A>>,
@@ -179,30 +216,14 @@ impl<A: Host> Service<A> {
                 .roots
                 .query(epoch, 2., WaitFor::SourceAgreement, false)
                 .await?;
-            let matching = responses
-                .into_iter()
-                .filter(|r| r.state_root.as_deref() == Some(head.cursor.state_root.0.as_slice()))
-                .collect::<Vec<_>>();
             let stake = self.membership.stake_set(&head, epoch + 1).await?;
-            if epoch_roots::reached(
+            target = target_from_verified_roots(
                 self.node.store.chain().chain_id.as_bytes(),
                 epoch,
+                &head.cursor.state_root.0,
                 &stake,
-                WaitFor::SourceAgreement,
-                &matching,
-            )? {
-                let heads = matching
-                    .into_iter()
-                    .map(|r| catchup::PeerHead {
-                        responder_addr: r.responder_addr,
-                        responder_head_epoch: r.responder_head_epoch,
-                    })
-                    .collect::<Vec<_>>();
-                let advertised = catchup::pick_target_epoch(&heads, stake.f, epoch)?;
-                if advertised > epoch {
-                    target = Some(advertised as u64);
-                }
-            }
+                &responses,
+            )?;
         }
         if Instant::now() < deadline {
             if let Some(http) = self
@@ -431,14 +452,57 @@ impl<A: Host> Service<A> {
                     if reached {
                         return Ok(true);
                     }
+                    let deadline = Instant::now() + self.budget;
+                    if connected {
+                        let remaining = deadline
+                            .saturating_duration_since(Instant::now())
+                            .as_secs_f64()
+                            .min(8.);
+                        if remaining > 0. {
+                            // One successor per attempt keeps a lone signed
+                            // high-head hint bounded. Full QC and execution
+                            // still decide whether that successor commits.
+                            let next = self
+                                .node
+                                .head()
+                                .await?
+                                .cursor
+                                .epoch
+                                .0
+                                .saturating_add(1)
+                                .min(target);
+                            match self
+                                .node
+                                .catch_up(
+                                    next,
+                                    &Peers {
+                                        roots: &self.roots,
+                                        finality: &self.finality,
+                                        bundles: &self.bundles,
+                                    },
+                                    &self.executor,
+                                    remaining,
+                                )
+                                .await
+                            {
+                                Ok(proof)
+                                    if proof.reached && proof.head.cursor.epoch.0 >= target =>
+                                {
+                                    return Ok(true);
+                                }
+                                Ok(_) => (),
+                                Err(PeerCatchUpError::Unavailable(error)) => {
+                                    eprintln!("live peer proof unavailable: {error:#}");
+                                }
+                                Err(PeerCatchUpError::Invalid(error)) => {
+                                    return Err(error.context("live peer finalized import failed"));
+                                }
+                            }
+                        }
+                    }
                     Ok::<_, anyhow::Error>(
                         self.join
-                            .catch_up(
-                                &self.node,
-                                target,
-                                &self.executor,
-                                Instant::now() + self.budget,
-                            )
+                            .catch_up(&self.node, target, &self.executor, deadline)
                             .await?
                             .reached,
                     )
@@ -474,7 +538,50 @@ impl<A: Host> Service<A> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use octra_node_protocol::consensus::Validator;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[test]
+    fn one_verified_ahead_head_probes_only_the_successor() {
+        let chain = b"node-recovery-fixture";
+        let root = [7_u8; 32];
+        let validators = ValidatorSet::unweighted(
+            (1..=5)
+                .map(|seed| Validator {
+                    address: format!("validator-{seed}").into_bytes(),
+                    pubkey: ed25519_dalek::SigningKey::from_bytes(&[seed; 32])
+                        .verifying_key()
+                        .to_bytes()
+                        .to_vec(),
+                })
+                .collect(),
+        );
+        let signed = epoch_roots::Response {
+            responder_addr: b"validator-1".to_vec(),
+            responder_head_epoch: 750,
+            state_root: Some(root.to_vec()),
+        };
+        assert_eq!(
+            target_from_verified_roots(chain, 10, &root, &validators, &[signed.clone()]).unwrap(),
+            Some(11)
+        );
+        let mut mismatched = signed.clone();
+        mismatched.state_root = Some(vec![0; 32]);
+        assert_eq!(
+            target_from_verified_roots(chain, 10, &root, &validators, &[mismatched]).unwrap(),
+            None
+        );
+        let mut responses = vec![signed];
+        responses.extend((2..=5).map(|seed| epoch_roots::Response {
+            responder_addr: format!("validator-{seed}").into_bytes(),
+            responder_head_epoch: 10,
+            state_root: Some(root.to_vec()),
+        }));
+        assert_eq!(
+            target_from_verified_roots(chain, 10, &root, &validators, &responses).unwrap(),
+            Some(11)
+        );
+    }
     struct Active(Arc<AtomicBool>);
     impl Drop for Active {
         fn drop(&mut self) {
