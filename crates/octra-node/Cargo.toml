@@ -41,6 +41,7 @@ rustix = { version = "1", features = ["fs"] }
 
 [dev-dependencies]
 boringtun.workspace = true
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
 
 [lints]
 workspace = true

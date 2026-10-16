@@ -516,6 +516,8 @@ async fn restart_reauthenticates_history_and_detects_missing_or_modified_evidenc
         .execute(&db)
         .await
         .unwrap();
+    // The head is unchanged, but an already-audited prefix is no longer safe.
+    assert_eq!(store.head().await.unwrap(), head);
     assert!(publisher.audit().await.is_err());
     sqlx::query("UPDATE node_epochs SET certificate=? WHERE sequence=1")
         .bind(original)
@@ -523,17 +525,12 @@ async fn restart_reauthenticates_history_and_detects_missing_or_modified_evidenc
         .await
         .unwrap();
     publisher.audit().await.unwrap();
-    assert_eq!(
-        publisher.audit_after(Sequence(3)).await.unwrap(),
-        Sequence(3)
-    );
-    assert!(publisher.audit_after(Sequence(4)).await.is_err());
     sqlx::query("UPDATE node_consensus_receipts SET receipts=? WHERE sequence=2")
         .bind(b"[]".as_slice())
         .execute(&db)
         .await
         .unwrap();
-    assert!(publisher.audit_after(Sequence(1)).await.is_err());
+    assert_eq!(store.head().await.unwrap(), head);
     assert!(publisher.audit().await.is_err());
     assert!(Publisher::open(store.clone(), authority.clone())
         .await

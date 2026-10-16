@@ -284,9 +284,10 @@ impl<A: ValidatorHistory> Publisher<A> {
         Ok(prepared)
     }
 
-    /// Audit a fixed published suffix after a prefix already checked by this
-    /// process. Restart still uses `audit` to recheck the entire retained chain.
-    pub async fn audit_after(&self, after: Sequence) -> Result<Sequence> {
+    /// Audit all retained epochs before startup publication, recovery resume,
+    /// or explicit operator verification. Recheck the prefix on every resume:
+    /// raw storage writes can change earlier evidence without moving the head.
+    pub async fn audit(&self) -> Result<()> {
         if self
             .store
             .chain()
@@ -297,24 +298,12 @@ impl<A: ValidatorHistory> Publisher<A> {
             return Err(invalid("local Single store cannot provide BFT finality"));
         }
         let end = self.store.head().await?;
-        if after.0 > end.cursor.sequence.0 {
-            return Err(invalid("audited prefix exceeds canonical head"));
-        }
-        if after == end.cursor.sequence {
-            return Ok(end.cursor.sequence);
-        }
-        futures::stream::iter(((after.0 + 1)..=end.cursor.sequence.0).map(Ok::<_, Error>))
+        futures::stream::iter((1..=end.cursor.sequence.0).map(Ok::<_, Error>))
             .try_for_each_concurrent(4, |number| async move {
                 self.record(Sequence(number)).await.map(|_| ())
             })
             .await?;
-        Ok(end.cursor.sequence)
-    }
-
-    /// Audit all retained epochs before startup publication or explicit
-    /// operator verification.
-    pub async fn audit(&self) -> Result<()> {
-        self.audit_after(Sequence(0)).await.map(|_| ())
+        Ok(())
     }
 
     async fn authenticate(

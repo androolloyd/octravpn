@@ -1395,6 +1395,74 @@ async fn peer_import_drives_browser_wireguard_exex_and_restart() {
 }
 
 #[tokio::test]
+async fn resume_reauthenticates_earlier_finality_after_raw_storage_change() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("chain.db");
+    let circle = format!("oct{}", "1".repeat(44));
+    let state = genesis(circle.as_bytes());
+    let chain = ChainIdentity::genesis(
+        "resume-full-audit-fixture",
+        StateRoot(finality_host::root(None, &state, &[])),
+    );
+    CanonicalStore::create(&path, chain.clone(), state.snapshot(), 0)
+        .await
+        .unwrap()
+        .close()
+        .await;
+    let checkpoints = Arc::new(
+        SqliteCheckpoints::open(&directory.path().join("checkpoints.db"))
+            .await
+            .unwrap(),
+    );
+    let authority = finality_host::Authority {
+        seed: 1,
+        chain: chain.clone(),
+    };
+    let node = open(&path, checkpoints, chain, Arc::default()).await;
+    assert!(node.resume().await.unwrap());
+    for _ in 0..2 {
+        let view = node.snapshot().unwrap();
+        let (certificate, executed) = execute(&view, circle.as_bytes(), &authority);
+        node.publish(view.head(), &certificate, executed)
+            .await
+            .unwrap();
+    }
+    // Prime an in-process audited prefix before changing an earlier row.
+    node.suspend("checking retained history");
+    assert!(node.resume().await.unwrap());
+    let head = node.head().await.unwrap();
+    assert_eq!(head.cursor.sequence.0, 2);
+
+    let db = sqlx::sqlite::SqlitePoolOptions::new()
+        .connect_with(sqlx::sqlite::SqliteConnectOptions::new().filename(&path))
+        .await
+        .unwrap();
+    let original: Vec<u8> =
+        sqlx::query_scalar("SELECT certificate FROM node_epochs WHERE sequence=1")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    sqlx::query("UPDATE node_epochs SET certificate=? WHERE sequence=1")
+        .bind([0_u8].as_slice())
+        .execute(&db)
+        .await
+        .unwrap();
+    assert_eq!(node.head().await.unwrap(), head);
+    node.suspend("checking retained history");
+    assert!(node.resume().await.is_err());
+    assert!(matches!(node.status(), Status::Suspended(_)));
+    assert!(node.snapshot().is_err());
+
+    sqlx::query("UPDATE node_epochs SET certificate=? WHERE sequence=1")
+        .bind(original)
+        .execute(&db)
+        .await
+        .unwrap();
+    assert!(node.resume().await.unwrap());
+    node.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn empty_finalized_import_needs_no_peer_and_rejects_wrong_parent() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("empty.db");
