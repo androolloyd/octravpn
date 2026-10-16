@@ -134,12 +134,13 @@ impl<A: Host> Submission<A> {
             let Ok(view) = self.node.snapshot() else {
                 continue;
             };
+            let Some(queued) = self.pending.ingress_transactions()? else {
+                continue;
+            };
             let ledger = account_store::ledger(&StateBatch::from_snapshot(view.state().clone()))?;
             let mut captured = Captured {
                 now: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64(),
-                pending: self
-                    .pending
-                    .transactions()?
+                pending: queued
                     .into_iter()
                     .map(|tx| Ok((hex::encode(tx.hash()?).into_bytes(), tx)))
                     .collect::<Result<_>>()?,

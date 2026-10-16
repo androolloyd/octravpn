@@ -389,7 +389,7 @@ async fn proof_status(client: &reqwest::Client, url: &str, tx: &Transaction) -> 
         client,
         url,
         "single_proof_status",
-        serde_json::json!({"hash":hex::encode(tx.hash().unwrap())}),
+        serde_json::json!([hex::encode(tx.hash().unwrap())]),
     )
     .await
     .unwrap();
@@ -505,7 +505,9 @@ async fn real_cli_async_range_timeout_death_rss_drop_restart_and_success() {
             &client,
             &url,
             "octra_submit",
-            serde_json::from_slice(&tx.to_json_bytes().unwrap()).unwrap(),
+            serde_json::json!([
+                serde_json::from_slice::<Value>(&tx.to_json_bytes().unwrap()).unwrap()
+            ]),
         )
         .await
         .unwrap();
@@ -553,7 +555,7 @@ async fn real_cli_async_range_timeout_death_rss_drop_restart_and_success() {
         &client,
         &url,
         "octra_submit",
-        serde_json::from_slice(&tx.to_json_bytes().unwrap()).unwrap(),
+        serde_json::json!([serde_json::from_slice::<Value>(&tx.to_json_bytes().unwrap()).unwrap()]),
     )
     .await
     .unwrap();
@@ -593,7 +595,7 @@ async fn real_cli_async_range_timeout_death_rss_drop_restart_and_success() {
         &client,
         &url,
         "octra_submit",
-        serde_json::from_slice(&tx.to_json_bytes().unwrap()).unwrap(),
+        serde_json::json!([serde_json::from_slice::<Value>(&tx.to_json_bytes().unwrap()).unwrap()]),
     )
     .await
     .unwrap();
@@ -644,7 +646,7 @@ async fn real_cli_async_range_timeout_death_rss_drop_restart_and_success() {
                 &client,
                 &url,
                 "octra_balance",
-                serde_json::json!({"address":String::from_utf8(tx.from.clone()).unwrap()}),
+                serde_json::json!([String::from_utf8(tx.from.clone()).unwrap()]),
             )
             .await
             .unwrap();

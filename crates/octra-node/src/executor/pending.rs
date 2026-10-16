@@ -114,6 +114,22 @@ impl Pending {
     pub fn transactions(&self) -> Result<Vec<Transaction>> {
         Ok(self.lock()?.pool.all().cloned().collect())
     }
+    /// P2P gossip may arrive before a lagging observer restores its durable
+    /// queue. Defer that frame while recovery or a short queue write owns the
+    /// lock, but keep a failed journal fatal to the ingress service.
+    pub(crate) fn ingress_transactions(&self) -> Result<Option<Vec<Transaction>>> {
+        let Ok(state) = self.state.try_lock() else {
+            return Ok(None);
+        };
+        anyhow::ensure!(
+            !state.failed,
+            Unavailable("durable staging unavailable".into())
+        );
+        Ok(state
+            .recovery
+            .is_none()
+            .then(|| state.pool.all().cloned().collect()))
+    }
     /// Durable entries are replayed against the current canonical head by
     /// `recover`; per-commit callbacks must wait until that replay completes.
     pub(crate) fn awaiting_recovery(&self) -> Result<bool> {
@@ -752,4 +768,35 @@ fn processed(record: &octra_node_protocol::consensus::CatchupEpochRecord) -> Res
         hashes.push(hex::encode(rejection.tx.hash()?).into_bytes());
     }
     Ok(hashes)
+}
+
+#[cfg(test)]
+mod ingress_tests {
+    use super::*;
+    use octra_exex::{EpochId, Sequence, StateRoot};
+
+    #[test]
+    fn gossip_waits_for_queue_recovery_but_fails_on_poisoned_persistence() {
+        let pending = Pending::new(Pool::default());
+        assert!(pending.ingress_transactions().unwrap().unwrap().is_empty());
+        let state = pending.state.lock().unwrap();
+        assert!(pending.ingress_transactions().unwrap().is_none());
+        drop(state);
+        let mut state = pending.state.lock().unwrap();
+        state.recovery = Some(Recovery {
+            cursor: Cursor {
+                sequence: Sequence(0),
+                epoch: EpochId(0),
+                state_root: StateRoot([0; 32]),
+            },
+            entries: BTreeMap::new(),
+            preview: Pool::default().preview_state(),
+        });
+        drop(state);
+        assert!(pending.ingress_transactions().unwrap().is_none());
+        let mut state = pending.state.lock().unwrap();
+        state.failed = true;
+        drop(state);
+        assert!(pending.ingress_transactions().is_err());
+    }
 }

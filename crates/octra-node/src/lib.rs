@@ -34,7 +34,10 @@ pub mod vpn;
 
 #[cfg(test)]
 use octra_browser::Provenance;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, Mutex,
+};
 
 use anyhow::{Context, Result};
 use octra_browser::{
@@ -43,6 +46,7 @@ use octra_browser::{
 };
 use octra_exex::{
     native_history::NativeTransaction, CheckpointStore, ExEx, ExExManager, ExtensionStatus,
+    Sequence,
 };
 use octra_node_runtime::{
     canonical::{CanonicalStore, Head, ReliefSource},
@@ -103,6 +107,7 @@ pub struct Node<A: Host> {
     shared: Arc<Shared>,
     legacy: Arc<Mutex<legacy::State>>,
     writer_lease: Arc<std::fs::File>,
+    audited_sequence: AtomicU64,
 }
 
 /// A legacy observation belongs to one attempted publication. Losing its
@@ -182,6 +187,7 @@ impl<A: Host> Node<A> {
             shared: Arc::new(Shared::new()),
             legacy: Arc::new(Mutex::new(legacy)),
             writer_lease: Arc::new(writer),
+            audited_sequence: AtomicU64::new(legacy_head.cursor.sequence.0),
         })
     }
 
@@ -288,7 +294,11 @@ impl<A: Host> Node<A> {
         let _operation = self.operations.lock().await;
         let (ticket, _) = self.shared.suspend("auditing canonical history");
         let result = async {
-            self.publisher.audit().await?;
+            let audited = self
+                .publisher
+                .audit_after(Sequence(self.audited_sequence.load(Ordering::Acquire)))
+                .await?;
+            self.audited_sequence.store(audited.0, Ordering::Release);
             self.serving().await
         }
         .await;
