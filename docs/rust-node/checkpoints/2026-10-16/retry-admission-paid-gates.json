@@ -1,6 +1,6 @@
 {
   "date": "2026-10-16",
-  "recorded_at_utc": "2026-10-16T20:44:49Z",
+  "recorded_at_utc": "2026-10-16T21:06:49Z",
   "status": "LOCAL_PAID_PASS_PUBLIC_OBSERVER_SUSPENDED",
   "source": {
     "base_commit": "2f8e8ddc4f86a6d6fb4b7d7f467c615c483475ce",
@@ -76,12 +76,25 @@
       "official_primary_state_root": "86b544cbe389158f75159e4165328f1ad8d127d88e9b0a8dd9af10e1930241a4"
     },
     "circle_https_after_restart": "TLS verified; HTTP 503 while observer serving lease is suspended",
-    "current_gate": "Authenticated public history advanced from 1705339 to at least 1705433; exact local root matched the official signed primary head at epoch 1705432. Source-agreement serving admission has not passed; VPN remains unconfigured."
+    "current_gate": "Authenticated public history advanced from 1705339 to at least 1705496; exact local root matched the official signed primary head at epoch 1705432. Source-agreement serving admission has not passed; VPN remains unconfigured.",
+    "admission_probe": {
+      "sampled_epochs": [1705494, 1705496],
+      "official_primary_head_epoch_at_end": 1705496,
+      "validator_count": 27,
+      "fault_tolerance": 8,
+      "necessary_matching_signers": 9,
+      "max_matching_signed_root_responses_in_twelve_seconds": 6,
+      "max_connected_peers_in_twelve_seconds": 8,
+      "interpretation": "The signed source-agreement count floor was not met in this bounded sample; weight and freshness checks may impose further conditions. No admission threshold was relaxed.",
+      "reachability": "This host advertises 127.0.0.1:20800, which cannot receive public inbound P2P connections. Qualify on a publicly reachable P2P endpoint, or establish enough verified outbound validator links, while retaining the existing source-agreement gate.",
+      "local_report": "out/node-port-final-20261015/public-devnet-final-candidate/retry-fix-admission-probe.json",
+      "local_report_sha256": "9ae977a4f8f48cd33449fc229f6929e1ff5107837f6739bd54590941de924bdd"
+    }
   },
   "github_prior_head_runs": {
     "proof": "38949534954 failed on 30-second private Single cold startup deadline",
     "coverage": "38949534880 failed on instrumentation-sensitive service deadlines and a long private-balance test",
-    "new_head_ci": "At fe80722, Headscale parity and kernel WireGuard smoke passed. Proof and Coverage were still running; CI test and test-helpers Clippy jobs failed to compile three Linux-only wait_single_head call sites after the helper gained a log argument. The follow-up patch supplies those arguments; local full-feature lint and Single integration passed. Linux CI rerun remains the acceptance gate."
+    "new_head_ci": "At fe80722, Headscale parity and kernel WireGuard smoke passed. CI test and test-helpers Clippy jobs failed to compile three Linux-only wait_single_head call sites after the helper gained a log argument. Commit a42f192 repaired those calls; local full-feature lint and Single integration passed. Its Linux Clippy, AML, Lean, Tamarin, Kani, TLC, format, audit, benchmark and Docker tailnet jobs passed; full workspace test, coverage and Proof were still running at this record time."
   },
   "scope": "No consensus changes. Local Single and BFT paid qualification is isolated. Public observer remains nonvoting and unfunded VPN activation, stable Circle HTTPS, external tailnet navigation, full upstream behavioral parity, and Mainnet remain open gates."
 }

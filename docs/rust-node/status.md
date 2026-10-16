@@ -16,10 +16,15 @@ upstream behavioral parity and public-network deployment remain unqualified.
   ExEx records, Circle gateway reads and restart recovery passed. The current
   release binary restarted the nonvoting public observer on its retained state.
   It advanced more than 90 authenticated epochs, and its epoch 1,705,432 root
-  exactly matched the official signed primary head. Serving admission remains
-  suspended, so the current Tailscale HTTPS Circle request returns 503. The
-  public VPN is still unconfigured; paid admission and stable Circle HTTPS
-  remain open.
+  exactly matched the official signed primary head. A bounded later check at
+  epochs 1,705,494–1,705,496 saw at most six matching signed root replies;
+  the active 27-validator set requires at least nine signers for source
+  agreement. Serving admission remains suspended, so the current Tailscale
+  HTTPS Circle request returns 503. The public VPN is still unconfigured;
+  paid admission and stable Circle HTTPS
+  remain open. This local observer advertises a loopback P2P address; the next
+  public qualification needs a reachable P2P endpoint or enough verified
+  outbound validator links to satisfy the existing source-agreement gate.
 - The [bounded public observer recovery checkpoint](checkpoints/2026-10-16/public-prefix-recovery.json)
   records commit `23466d5` passing the executable devnet, node library,
   service and strict lint gates. A nonvoting observer now binds diagnostics
