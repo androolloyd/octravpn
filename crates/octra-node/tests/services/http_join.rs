@@ -31,7 +31,7 @@ impl Executor for ExpiringExecutor {
 }
 
 struct JoinFixture {
-    _directory: tempfile::TempDir,
+    directory: tempfile::TempDir,
     source: Node<Authority>,
     target: Node<Authority>,
     authority: finality_host::Authority,
@@ -153,7 +153,7 @@ impl JoinFixture {
         })
         .unwrap();
         Self {
-            _directory: directory,
+            directory,
             source,
             target,
             authority,
@@ -271,7 +271,7 @@ async fn http_join_tries_secondary_after_primary_head_stalls() {
     })
     .unwrap();
     let membership_store = CanonicalStore::open(
-        &fixture._directory.path().join("target.db"),
+        &fixture.directory.path().join("target.db"),
         &fixture.authority.chain,
     )
     .await
@@ -298,7 +298,7 @@ async fn http_join_tries_secondary_after_primary_head_stalls() {
         .synchronize(
             &fixture.target,
             &executor,
-            fixture._directory.path(),
+            fixture.directory.path(),
             &SigningKey::from_bytes(&[99; 32]),
             false,
             Instant::now() + Duration::from_secs(10),
