@@ -9,6 +9,15 @@ upstream behavioral parity and public-network deployment remain unqualified.
 
 ## Recorded local evidence
 
+- The [bounded public observer recovery checkpoint](checkpoints/2026-10-16/public-prefix-recovery.json)
+  records commit `23466d5` passing the executable devnet, node library,
+  service and strict lint gates. A nonvoting observer now binds diagnostics
+  while suspended, recovers its durable queue only after authenticated
+  catch-up, and does not run a consensus driver. HTTP join chooses a bounded
+  consecutive range beside the retained head as an availability target;
+  certificate, execution and publication checks still decide every import.
+  The retained public-devnet observer is being requalified on this exact
+  binary; stable Circle HTTPS and paid VPN remain open gates.
 - The [Headscale 0.29.5 pinned VPN checkpoint](checkpoints/2026-10-16/headscale-v0295-native-vpn.json)
   records an exact-source image at `b120007` and Headscale `7b6b71b` passing
   both 34-step paid private Single and four-validator BFT gates. The host

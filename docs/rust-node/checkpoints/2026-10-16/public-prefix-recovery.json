@@ -1,0 +1,52 @@
+{
+  "date": "2026-10-16",
+  "status": "LOCAL_PASS_PUBLIC_CATCHUP_IN_PROGRESS",
+  "network": "Octra public devnet",
+  "chain_id": "octra-devnet-9871-cluster",
+  "source": {
+    "octra_commit": "23466d592dbf9becdf82b7fb292f067fa2d0a250",
+    "upstream_lite_node_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+    "headscale_rs_commit": "7b6b71b245ceff25f27a400588d78dd28e6e340f",
+    "binary_sha256": "92000deecc0ff59d6324e563b6156a17388e78a7e126bd824a29e635106f57c9",
+    "config_sha256": "9eac462c782eda87e954792e7efbc0faf47d71bdb17d3be09ee0bded5fcd2005"
+  },
+  "local_gates": {
+    "executable_devnet": "2 passed, 0 failed; four validators, nonmember observer, Circle, transaction refusal and restart",
+    "executable_devnet_log_sha256": "56328df10124cdf93eff30216b51fa43e97f9245f6afb7b8677983a72cde7ef1",
+    "node_library": "47 passed, 0 failed",
+    "node_library_log_sha256": "38ff3811807ee31325f3a1fb289d87284a29145902cae94cfb750395938c5b2d",
+    "node_services": "16 passed, 0 failed, 1 isolated Chromium test ignored",
+    "node_services_log_sha256": "167c82047d94bf384695f9aa0bb87bdbc21b3dc74d1659e86d31023589baf49b",
+    "strict_node_clippy": "passed",
+    "strict_node_clippy_log_sha256": "ce0807397859c405c7c9e22789636f81d78de7a96cbf5898005f1c742b585d23",
+    "release_build": "passed",
+    "release_build_log_sha256": "0ffe9e1dc81bdb7c24bbe111e0ee21d03cc51f27f0b871caa6587137827c38f6"
+  },
+  "public_observer": {
+    "voting": false,
+    "vpn": null,
+    "retained_pre_restart_epoch": 1704339,
+    "restart_record": "out/node-port-final-20261015/public-devnet-final-candidate/retained-restart-prefix-v3.json",
+    "run_log": "out/node-port-final-20261015/public-devnet-final-candidate/retained-observer-prefix-v3.log",
+    "rpc_opened_at_utc": "2026-10-16T18:38:23Z",
+    "post_restart_epoch_at_rpc_open": 1704356,
+    "official_head_epoch_at_rpc_open": 1704967,
+    "post_restart_epoch_at_2026_10_16T18_39_20Z": 1704371,
+    "matching_official_finalized_epoch": 1704371,
+    "matching_state_root": "247920cca6f0319d05aa7f46eb4e68ce99f10639ab2e75beab508989c37da54a",
+    "official_range_response_sha256": "5fa5b3bcfcc5d27511e6e0ce06fbbc0799326aaaab7b142438caf8434ea2cb56",
+    "post_restart_epoch_at_2026_10_16T18_40_01Z": 1704377,
+    "post_restart_epoch_at_2026_10_16T18_42_55Z": 1704418,
+    "official_head_epoch_at_2026_10_16T18_42_55Z": 1704983,
+    "measured_272_second_imported_epochs": 62,
+    "measured_272_second_gap_reduction_epochs": 46,
+    "minimum_authenticated_peers": 1,
+    "serving": false,
+    "circle_https_status": 503,
+    "circle_https_tls_verify_result": 0,
+    "external_tailnet_device_check": "not_run",
+    "cpu_sample": "out/node-port-final-20261015/public-prefix-target-cpu-sample.txt",
+    "cpu_sample_sha256": "744f4be2fed352e39baeb28202d466fb92de20d30f801896c517a2be81546598"
+  },
+  "scope": "No public consensus rules changed. HTTP range endpoints provide bounded availability targets; every imported epoch still requires native finality, canonical execution and durable publication. Public paid VPN, stable current-head Circle serving, independent tailnet-device navigation and Mainnet qualification remain separate gates."
+}
