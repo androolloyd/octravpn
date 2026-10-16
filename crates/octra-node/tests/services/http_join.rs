@@ -173,6 +173,151 @@ impl JoinFixture {
 }
 
 #[tokio::test]
+async fn http_join_tries_secondary_after_primary_head_stalls() {
+    let fixture = JoinFixture::new().await;
+    let source_head = fixture.source.head().await.unwrap();
+    let octra_node_runtime::finality_queries::Range::Found { records, .. } =
+        fixture.source.history().range(1, 2).await.unwrap()
+    else {
+        panic!("signed source history missing");
+    };
+    let response = http::head_response(
+        source_head.cursor.epoch.0 as i64 + 1,
+        Some(&http::Head {
+            epoch: source_head.cursor.epoch.0 as i64,
+            state_root: hex::encode(source_head.cursor.state_root.0).into_bytes(),
+            txid_hi: source_head.txid_hi,
+            irmin_commit: None,
+        }),
+        None,
+    );
+    let primary_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let primary = format!("http://{}", primary_listener.local_addr().unwrap());
+    let primary_server = tokio::spawn(async move {
+        axum::serve(
+            primary_listener,
+            axum::Router::new().route(
+                "/state-sync/head",
+                axum::routing::get(|| async {
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                    (axum::http::StatusCode::SERVICE_UNAVAILABLE, Vec::new())
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    });
+    let secondary_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let secondary = format!("http://{}", secondary_listener.local_addr().unwrap());
+    let head_seen = Arc::new(AtomicBool::new(false));
+    let range_seen = Arc::new(AtomicBool::new(false));
+    let secondary_server = tokio::spawn({
+        let head_seen = head_seen.clone();
+        let range_seen = range_seen.clone();
+        async move {
+            let router = axum::Router::new()
+                .route(
+                    "/state-sync/head",
+                    axum::routing::get(move || {
+                        let response = response.clone();
+                        let head_seen = head_seen.clone();
+                        async move {
+                            head_seen.store(true, Ordering::SeqCst);
+                            response
+                        }
+                    }),
+                )
+                .route(
+                    "/state-sync/range",
+                    axum::routing::get(
+                        move |axum::extract::Query(query): axum::extract::Query<
+                            std::collections::HashMap<String, String>,
+                        >| {
+                            let records = records.clone();
+                            let range_seen = range_seen.clone();
+                            async move {
+                                range_seen.store(true, Ordering::SeqCst);
+                                let from: i64 = query["from_epoch"].parse().unwrap();
+                                let max: i64 = query["max_epochs"].parse().unwrap();
+                                let request = http::RangeQuery {
+                                    from_epoch: from,
+                                    max_epochs: max,
+                                    part: None,
+                                    hash: None,
+                                };
+                                http::range_response(
+                                    None,
+                                    &request,
+                                    &http::RangeResult::Records {
+                                        records: records
+                                            .into_iter()
+                                            .filter(|record| record.epoch_id >= from)
+                                            .take(max as usize)
+                                            .collect(),
+                                        next_epoch: None,
+                                    },
+                                )
+                                .unwrap()
+                            }
+                        },
+                    ),
+                );
+            axum::serve(secondary_listener, router).await.unwrap();
+        }
+    });
+    let sources = format!("{primary},{secondary}");
+    let client = octra_node::consensus_join::Client::capture(|name| {
+        (name == "OCTRA_JOIN_RPC").then(|| sources.as_bytes().to_vec())
+    })
+    .unwrap();
+    let membership_store = CanonicalStore::open(
+        &fixture._directory.path().join("target.db"),
+        &fixture.authority.chain,
+    )
+    .await
+    .unwrap();
+    let membership = octra_node_runtime::validator_history::CanonicalValidators::new(
+        membership_store.reader(),
+        octra_node_runtime::validator_history::Environment::default(),
+    );
+    let executor = ImportExecutor::new(&fixture.authority, &fixture.target);
+    let proved = client
+        .proved_target(
+            &fixture.target,
+            &membership,
+            &executor,
+            Instant::now() + Duration::from_secs(10),
+        )
+        .await
+        .unwrap();
+    assert_eq!(proved, Some(1));
+    assert!(head_seen.swap(false, Ordering::SeqCst));
+    assert!(range_seen.swap(false, Ordering::SeqCst));
+    membership_store.close().await;
+    let report = client
+        .synchronize(
+            &fixture.target,
+            &executor,
+            fixture._directory.path(),
+            &SigningKey::from_bytes(&[99; 32]),
+            false,
+            Instant::now() + Duration::from_secs(10),
+        )
+        .await
+        .unwrap();
+    assert!(report.synced, "{:#?}", report.error);
+    assert_eq!(report.records_verified, 2);
+    let canonical_secondary = format!("{secondary}/");
+    assert_eq!(report.source.as_deref(), Some(canonical_secondary.as_str()));
+    assert!(head_seen.load(Ordering::SeqCst));
+    assert!(range_seen.load(Ordering::SeqCst));
+    assert_eq!(fixture.target.head().await.unwrap(), source_head);
+    primary_server.abort();
+    secondary_server.abort();
+    fixture.shutdown().await;
+}
+
+#[tokio::test]
 async fn http_join_deadline_preserves_committed_prefix_before_next_record() {
     let fixture = JoinFixture::new().await;
     let deadline = Instant::now() + Duration::from_secs(5);

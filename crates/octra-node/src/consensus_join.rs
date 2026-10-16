@@ -70,6 +70,16 @@ impl Client {
     pub fn configured(&self) -> bool {
         !self.sources.is_empty()
     }
+    /// Reserve a share of the caller's remaining time for later sources. The
+    /// last source retains the full deadline, including multipart transfers.
+    fn source_deadline(deadline: Instant, remaining_sources: usize) -> Instant {
+        if remaining_sources <= 1 {
+            return deadline;
+        }
+        let now = Instant::now();
+        now + (deadline.saturating_duration_since(now) / remaining_sources as u32)
+            .min(Duration::from_secs(20))
+    }
     fn route(source: &Url, path: &str) -> Result<Url> {
         Ok(Url::parse(&format!(
             "{}{path}",
@@ -211,16 +221,20 @@ impl Client {
     ) -> Result<Option<u64>> {
         let base = node.head().await?;
         let mut best = None;
-        for source in &self.sources {
+        for (index, source) in self.sources.iter().enumerate() {
             if Instant::now() >= deadline {
                 break;
             }
+            let source_deadline = Self::source_deadline(deadline, self.sources.len() - index);
             let candidate = async {
-                let advertised = self.advertised(source, deadline).await?;
+                let advertised = self.advertised(source, source_deadline).await?;
                 if advertised.epoch <= base.cursor.epoch.0 as i64 {
                     return Ok(None);
                 }
-                if let Ok(records) = self.range(source, advertised.epoch, 1, deadline).await {
+                if let Ok(records) = self
+                    .range(source, advertised.epoch, 1, source_deadline)
+                    .await
+                {
                     let record = &records[0];
                     if hex::encode(&record.state_root).as_bytes() == advertised.state_root
                         && self
@@ -239,7 +253,7 @@ impl Client {
                         source,
                         from,
                         (advertised.epoch - from + 1).min(catchup::RANGE_EPOCHS),
-                        deadline,
+                        source_deadline,
                     )
                     .await?;
                 // This includes historical relief and ready-config rules for
@@ -290,9 +304,10 @@ impl Client {
             let from = (head.cursor.epoch.0 + 1) as i64;
             let max = (target - head.cursor.epoch.0).min(catchup::RANGE_EPOCHS as u64) as i64;
             let mut selected = None;
-            for source in &self.sources {
+            for (index, source) in self.sources.iter().enumerate() {
+                let source_deadline = Self::source_deadline(deadline, self.sources.len() - index);
                 let candidate = async {
-                    let records = self.range(source, from, max, deadline).await?;
+                    let records = self.range(source, from, max, source_deadline).await?;
                     catchup::verify_chain_continuity(&records, from, &head.cursor.state_root.0)?;
                     node.publisher
                         .verify_record(&head, &records[0], &executor.graph())
@@ -370,11 +385,15 @@ impl Client {
         let _sync = node.syncing.lock().await;
         let mut verified = 0_i64;
         let mut last_error = None;
-        for source in &self.sources {
+        for (index, source) in self.sources.iter().enumerate() {
+            if Instant::now() >= deadline {
+                break;
+            }
+            let mut source_deadline = Self::source_deadline(deadline, self.sources.len() - index);
             let mut failures = 0;
-            while failures < 3 && Instant::now() < deadline {
+            while failures < 3 && Instant::now() < source_deadline {
                 let attempt = async {
-                    let advertised = self.advertised(source, deadline).await?;
+                    let advertised = self.advertised(source, source_deadline).await?;
                     let head = node.head().await?;
                     let local = i64::try_from(head.cursor.epoch.0)?;
                     if local > advertised.epoch {
@@ -393,7 +412,7 @@ impl Client {
                             source,
                             local + 1,
                             (advertised.epoch - local).min(catchup::RANGE_EPOCHS),
-                            deadline,
+                            source_deadline,
                         )
                         .await?;
                     catchup::verify_chain_continuity(
@@ -404,7 +423,7 @@ impl Client {
                     node.suspend("joining authenticated HTTP history");
                     for record in records {
                         ensure!(
-                            Instant::now() < deadline,
+                            Instant::now() < source_deadline,
                             "join deadline elapsed before next epoch"
                         );
                         node.import_record(&record, executor).await?;
@@ -428,14 +447,20 @@ impl Client {
                             error: None,
                         });
                     }
-                    Ok(false) => failures = 0,
+                    Ok(false) => {
+                        failures = 0;
+                        // Authenticated progress earns another bounded window
+                        // without consuming the later sources' reserve.
+                        source_deadline =
+                            Self::source_deadline(deadline, self.sources.len() - index);
+                    }
                     Err(error) => {
                         eprintln!("join source unavailable source={source} error={error:#}");
                         last_error = Some(format!("{error:#}"));
                         failures += 1;
                         if failures < 3 {
                             let wake = (Instant::now() + Duration::from_secs(1 << (failures - 1)))
-                                .min(deadline);
+                                .min(source_deadline);
                             tokio::time::sleep_until(wake).await;
                         }
                     }
