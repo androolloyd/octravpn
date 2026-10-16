@@ -10,7 +10,9 @@ OCTRA_BIN="${OCTRA_BIN:-../octra-foundry/target/debug/octra}"
 "$AMLC" check program/main-v5.aml
 "$AMLC" check program/private-admin-factory.aml
 "$OCTRA_BIN" forge test --contract program/main-v4.aml --root program/tests/v4 --amlc "$AMLC"
-"$OCTRA_BIN" forge test --contract program/main-v5.aml --root program/tests/v5 --amlc "$AMLC"
+# Timeout fixtures exercise the exact 1,000-epoch grace boundary. Epoch zero
+# cannot represent their earlier opening time in AML's unsigned arithmetic.
+"$OCTRA_BIN" forge test --contract program/main-v5.aml --root program/tests/v5 --amlc "$AMLC" --epoch 1000
 for fixture in false-result wrong-revert host-operation; do
   log=$(mktemp)
   if "$OCTRA_BIN" forge test --root "program/tests/negative/$fixture" --amlc "$AMLC" >"$log" 2>&1; then

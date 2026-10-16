@@ -1,0 +1,61 @@
+{
+  "at": "2026-10-16T01:10:16.757076+00:00",
+  "status": "PASS_ACTUAL_STANDALONE_VM_EXPIRY_BOUNDARIES",
+  "compiler_commit": "3a183bc8892b1795f2e1059848f1f331ce1a3a51",
+  "compiler_patch_sha256": "d19ff92e9c511109587f05048d26ed1e4be6244816cae75c485719d89c7112b3",
+  "native_compiler_binary_sha256": "14cf3624dcd750061cd2c822d356df673c4ec9b9dc793d9faadfb06990618502",
+  "runtime_image": "sha256:9c5db2275a4cb93c356dc331ad3250f4207d15d95f788a2c0fc1dabffede9c73",
+  "network": "none",
+  "private_directories_mounted": false,
+  "source_manifest_sha256": "595dd584786ce1862762358cbfc82f5bc7e86459310fb3d92abd42d74af4d6cf",
+  "source_drift": [],
+  "results": [
+    {
+      "label": "original-zero-epoch",
+      "exit_code": 1,
+      "elapsed_seconds": 1.112,
+      "AML_suite_results": [
+        {
+          "passed": 18,
+          "failed": 0
+        },
+        {
+          "passed": 35,
+          "failed": 1
+        }
+      ],
+      "log_sha256": "6e6d5986242ec88763a7f7df8edb124f810c3875077ef4fafda8e75320ae96bb"
+    },
+    {
+      "label": "corrected-expiry-boundaries",
+      "exit_code": 0,
+      "elapsed_seconds": 1.042,
+      "AML_suite_results": [
+        {
+          "passed": 18,
+          "failed": 0
+        },
+        {
+          "passed": 37,
+          "failed": 0
+        }
+      ],
+      "log_sha256": "9f4a8255d9553698e2eb5aa72b10704035b973b2178624a1ac6553a21f5d1dfb"
+    }
+  ],
+  "scope": "Exact CI standalone compiler and real Foundry AML runner: original failure reproduced, explicit epoch1000 passes at expiry and refuses one epoch before. Production contract/compiler/financial assertions unchanged.",
+  "schema": 1,
+  "date": "2026-10-15",
+  "qualification": {
+    "path": "out/node-port-final-20261015/standalone-ci-timeout-candidate/qualification.json",
+    "sha256": "bdb61a7a4c9d16f180cab44b209bd6fec11af8764e7575bdb6f5a28fbac52251"
+  },
+  "production_source_sha256": "586ba42e520f29729329f945556fece6dfcf26c489d9a8a8267db664b1fc3d1a",
+  "fixture_sha256": "d597c3643a9ef6f4d62bb0bd19188ec610e02e40664a29e9a7bf57c105d5b523",
+  "runner_sha256": "1c87887ee4ce99491a702c69201096c8a3b901b089fcde2fd480b8cdcebe696e",
+  "financial_or_consensus_change": false,
+  "limitations": [
+    "Standalone AML VM test qualification; public-chain stateful private-proof execution remains separate",
+    "Runtime/compiler-image hashes refer to this isolated local capture; final combined paid fixture retains its own source freeze"
+  ]
+}
