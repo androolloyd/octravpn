@@ -14,8 +14,12 @@ upstream behavioral parity and public-network deployment remain unqualified.
   frozen image passing both 34-step private Single and four-validator BFT paid
   gates. Real client/node OS TUN traffic, exact on-chain settlement, canonical
   ExEx records, Circle gateway reads and restart recovery passed. The current
-  release binary was built and the nonvoting public observer is restarting on
-  its retained state. Public paid admission and stable Circle HTTPS remain open.
+  release binary restarted the nonvoting public observer on its retained state.
+  It advanced more than 90 authenticated epochs, and its epoch 1,705,432 root
+  exactly matched the official signed primary head. Serving admission remains
+  suspended, so the current Tailscale HTTPS Circle request returns 503. The
+  public VPN is still unconfigured; paid admission and stable Circle HTTPS
+  remain open.
 - The [bounded public observer recovery checkpoint](checkpoints/2026-10-16/public-prefix-recovery.json)
   records commit `23466d5` passing the executable devnet, node library,
   service and strict lint gates. A nonvoting observer now binds diagnostics

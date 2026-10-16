@@ -499,7 +499,7 @@ async fn real_cli_async_range_timeout_death_rss_drop_restart_and_success() {
             timeout,
             rss,
         );
-        wait_single_head(&mut child, &client, &url, 0).await;
+        wait_single_head(&mut child, &client, &url, 0, &tmp.path().join("node.log")).await;
         let began = std::time::Instant::now();
         let response = single_rpc(
             &client,
@@ -548,7 +548,7 @@ async fn real_cli_async_range_timeout_death_rss_drop_restart_and_success() {
         "600",
         "9216",
     );
-    wait_single_head(&mut child, &client, &url, 0).await;
+    wait_single_head(&mut child, &client, &url, 0, &tmp.path().join("first.log")).await;
     let submit = single_rpc(
         &client,
         &url,
@@ -630,7 +630,14 @@ async fn real_cli_async_range_timeout_death_rss_drop_restart_and_success() {
         "600",
         "9216",
     );
-    wait_single_head(&mut resumed, &client, &url, recovered_epoch).await;
+    wait_single_head(
+        &mut resumed,
+        &client,
+        &url,
+        recovered_epoch,
+        &tmp.path().join("resumed.log"),
+    )
+    .await;
     tokio::time::timeout(Duration::from_secs(120), async {
         loop {
             let response = single_rpc(

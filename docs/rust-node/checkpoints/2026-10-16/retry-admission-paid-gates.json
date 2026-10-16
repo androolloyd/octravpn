@@ -1,7 +1,7 @@
 {
   "date": "2026-10-16",
-  "recorded_at_utc": "2026-10-16T20:21:20.085188+00:00",
-  "status": "LOCAL_PAID_PASS_PUBLIC_RESTART_PENDING",
+  "recorded_at_utc": "2026-10-16T20:44:49Z",
+  "status": "LOCAL_PAID_PASS_PUBLIC_OBSERVER_SUSPENDED",
   "source": {
     "base_commit": "2f8e8ddc4f86a6d6fb4b7d7f467c615c483475ce",
     "upstream_lite_node": "7f9be4489870645cfcc95439638cde40f5da9f50",
@@ -22,7 +22,9 @@
     "octra_node_executable_devnet": "2 passed",
     "octra_node_services_after_coverage_budget_fix": "16 passed, 1 isolated Chromium fixture ignored",
     "single_cli_ci_timeout_regression": "1 passed",
+    "single_native_test_helpers_followup": "17 passed, 2 controlled helpers ignored on macOS",
     "strict_clippy": "passed for octra-node and octravpn-node all targets",
+    "workspace_test_helpers_clippy_followup": "passed with -D warnings",
     "package_format": "passed",
     "vendored_source": "passed"
   },
@@ -59,13 +61,27 @@
     "release_binary_sha256": "c13273d1badd2c4b98b9bfc9302a828568d297f7cdff9efd08253950c7a2ceba",
     "config_sha256": "9eac462c782eda87e954792e7efbc0faf47d71bdb17d3be09ee0bded5fcd2005",
     "new_pid": 34469,
-    "first_status": null,
-    "circle_https_after_restart": "pending"
+    "first_status": {
+      "sampled_at_utc": "2026-10-16T20:28:44.611784Z",
+      "epoch": 1705355,
+      "peers": 0,
+      "serving": false
+    },
+    "later_sample": {
+      "epoch": 1705432,
+      "peers": 4,
+      "serving": false,
+      "state_root": "86b544cbe389158f75159e4165328f1ad8d127d88e9b0a8dd9af10e1930241a4",
+      "official_primary_head_epoch": 1705432,
+      "official_primary_state_root": "86b544cbe389158f75159e4165328f1ad8d127d88e9b0a8dd9af10e1930241a4"
+    },
+    "circle_https_after_restart": "TLS verified; HTTP 503 while observer serving lease is suspended",
+    "current_gate": "Authenticated public history advanced from 1705339 to at least 1705433; exact local root matched the official signed primary head at epoch 1705432. Source-agreement serving admission has not passed; VPN remains unconfigured."
   },
   "github_prior_head_runs": {
     "proof": "38949534954 failed on 30-second private Single cold startup deadline",
     "coverage": "38949534880 failed on instrumentation-sensitive service deadlines and a long private-balance test",
-    "new_head_ci": "pending push"
+    "new_head_ci": "At fe80722, Headscale parity and kernel WireGuard smoke passed. Proof and Coverage were still running; CI test and test-helpers Clippy jobs failed to compile three Linux-only wait_single_head call sites after the helper gained a log argument. The follow-up patch supplies those arguments; local full-feature lint and Single integration passed. Linux CI rerun remains the acceptance gate."
   },
   "scope": "No consensus changes. Local Single and BFT paid qualification is isolated. Public observer remains nonvoting and unfunded VPN activation, stable Circle HTTPS, external tailnet navigation, full upstream behavioral parity, and Mainnet remain open gates."
 }
