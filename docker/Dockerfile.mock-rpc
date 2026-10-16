@@ -6,9 +6,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /work/octra/target/release/octra-mock-rpc /usr/local/bin/octra-mock-rpc
 
+COPY --from=builder /work/octra/target/release/octra /usr/local/bin/octra
+
 RUN useradd -r -s /bin/false octravpn
 USER octravpn
 
 EXPOSE 18080/tcp
 ENTRYPOINT ["/usr/local/bin/octra-mock-rpc"]
-CMD ["--listen", "0.0.0.0:18080", "--program-addr", "octPROGmockaddress0000000000000000000000"]
+CMD ["--listen", "0.0.0.0:18080", "--program-addr", "octAiTHXCqX84s2ExQFzZBFsxKwsijVmsmfmZ84LrurdPLB"]

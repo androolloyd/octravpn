@@ -117,5 +117,17 @@
     "Runtime execution/nativeAML regression used1.96 and unchanged pinned nativefixture; no1.89 runtime-test claim.",
     "Isolated Single candidate is absent and requires later incremental actual1.89check after adoption.",
     "No public store, observer, Tailscale, deployment, source declarations or live code changed by this task."
-  ]
+  ],
+  "composed_single_core_followup": {
+    "qualification": {
+      "path": "out/node-port-final-20261015/minimum-rust-1.89/composed-single-core/qualification.json",
+      "sha256": "b18408c27f8b05f2b209543255d88119c0b261d1507d47dc4ec845c6511f48fb"
+    },
+    "source_files": 2775,
+    "source_manifest_sha256": "afdd6b3bb44b745e784493a08715988da2c9b83fe576cdea5ae887279c4bd2df",
+    "default_all_targets": "PASS",
+    "all_features_all_targets": "PASS",
+    "source_drift": 0,
+    "scope": "ActualRust1.89 after composed BFTfacade/Singlecore/registration. Sealed worker and complete Single service deltas remain separate later inputs."
+  }
 }

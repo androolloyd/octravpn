@@ -59,7 +59,8 @@ pub(super) async fn read(
                 return Err(unavailable("anchor root differs"));
             }
         } else {
-            let Some((row, bytes)) = reader
+            let Some((row, bytes)) = host
+                .node
                 .epoch_page_row(&head, anchor.epoch)
                 .await
                 .map_err(inconsistent)?
@@ -83,7 +84,8 @@ pub(super) async fn read(
                 break "more";
             }
             tokio::task::yield_now().await;
-            let Some((row, bytes)) = reader
+            let Some((row, bytes)) = host
+                .node
                 .epoch_page_row(&head, next)
                 .await
                 .map_err(inconsistent)?
@@ -110,7 +112,8 @@ pub(super) async fn read(
     }
     if method == b"epoch_get" {
         let epoch = rpc::require_int(doc, params, 0, "epoch_id")?;
-        let raw = reader
+        let raw = host
+            .node
             .epoch_summary(&head, epoch)
             .await
             .map_err(inconsistent)?
@@ -122,7 +125,8 @@ pub(super) async fn read(
     }
     let mut raw = vec![b'['];
     for epoch in epoch_journal::summary_ids(doc, params) {
-        if let Some(row) = reader
+        if let Some(row) = host
+            .node
             .epoch_summary(&head, epoch)
             .await
             .map_err(inconsistent)?

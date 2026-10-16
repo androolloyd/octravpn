@@ -70,10 +70,18 @@ fn float(value: f64) -> std::result::Result<Vec<u8>, Fault> {
 fn counter(value: i64) -> i64 {
     value.wrapping_shl(1) >> 1
 }
-fn load(view: &crate::Committed, address: &[u8]) -> std::result::Result<Account, Fault> {
-    account_store::load(&StateBatch::from_snapshot(view.state().clone()), address)
-        .map_err(unavailable)?
-        .ok_or_else(|| Fault::new(100, b"sender not found"))
+fn load(
+    node: &dyn crate::rpc::context::ReadNode,
+    view: &crate::Committed,
+    address: &[u8],
+) -> std::result::Result<Account, Fault> {
+    node.account_for_read(
+        address,
+        account_store::load(&StateBatch::from_snapshot(view.state().clone()), address)
+            .map_err(unavailable)?,
+    )
+    .map_err(unavailable)?
+    .ok_or_else(|| Fault::new(100, b"sender not found"))
 }
 
 pub(super) async fn read(
@@ -106,9 +114,10 @@ pub(super) async fn read(
             let view = host.node.snapshot().map_err(unavailable)?;
             let pending = host.pending.clone();
             let method = method.to_vec();
+            let node = host.node.clone();
             host.executor
                 .read(move || {
-                    let account = load(&view, &address)?;
+                    let account = load(node.as_ref(), &view, &address)?;
                     match method.as_slice() {
                         b"octra_balance" => {
                             let nonce = pending

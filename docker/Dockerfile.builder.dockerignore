@@ -1,25 +1,33 @@
-# Per-Dockerfile ignore for Dockerfile.builder (buildkit ≥0.10).
-# Context is the PARENT of this repo (octra/), which on CI contains
-# fresh checkouts of {octra, octra-foundry, headscale-rs} with no
-# target/ artefacts. On dev machines the same parent may carry huge
-# cargo target directories + git worktrees that balloon the build
-# context past 10GB and stall buildkit. Trim them aggressively.
-
-# Per-repo cargo build artefacts.
+# The context is the parent directory. Send only the required source checkouts.
+**
+!octra/
+!octra/Cargo.toml
+!octra/Cargo.lock
+!octra/rust-toolchain.toml
+!octra/crates/
+!octra/crates/**
+!octra/vendor/
+!octra/vendor/**
+!octra/tests/
+!octra/tests/**
+!octra/program/
+!octra/program/**
+!octra/pvac-sidecar/
+!octra/pvac-sidecar/**
+!octra-foundry/
+!octra-foundry/**
+!headscale-rs/
+!headscale-rs/**
 **/target/
-**/.cargo-cache/
-
-# Git internals + worktrees.
+**/out/
+**/node_modules/
 **/.git/
 **/.git-worktrees/
-
-# IDE / OS junk.
+**/.cargo-cache/
+**/.codex/
+**/.agents/
+**/.aws/
+**/.env
+**/.env.*
 **/.DS_Store
-**/.idea/
-**/.vscode/
-
-# Bare sibling worktrees that some devs leave in the parent dir
-# (matches the naming convention `<repo>-<branch>`).
-headscale-rs-*
-octra-*-fixes
-octra-*-pvac-*
+**/__pycache__/

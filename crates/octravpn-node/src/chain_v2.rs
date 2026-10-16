@@ -41,7 +41,6 @@ use octravpn_core::{
     },
     rpc::{next_nonce, RpcClient},
     sig::KeyPair,
-    tx as octra_tx,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -327,16 +326,16 @@ impl ChainCtxV2 {
     /// key. Same `sign_call` the v1.1 path uses — translates legacy
     /// `kind:contract_call` shape to the on-the-wire OctraTx envelope.
     pub(crate) fn sign_call(&self, mut call: Value) -> Result<Value> {
-        // v2 chain-id binding (P1-5b). Splice the configured chain id
-        // into the canonical envelope before signing so the signature
-        // commits to the chain. Empty string ⇒ skip (v1 compat).
+        // Forward this legacy option to the canonical signer, which refuses
+        // unsupported transaction chain bindings before producing a signature.
         if !self.chain_id.is_empty() {
             if let Some(obj) = call.as_object_mut() {
                 obj.entry("chain_id")
                     .or_insert_with(|| json!(self.chain_id.clone()));
             }
         }
-        octra_tx::sign_call(&self.wallet, call).map_err(|e| anyhow!("sign_call: {e}"))
+        octravpn_core::tx_signer::sign_live_call(&self.wallet, call)
+            .map_err(|e| anyhow!("sign_call: {e}"))
     }
 
     /// Sign a pre-shaped OctraTx envelope (e.g. the deploy_circle /
@@ -349,7 +348,8 @@ impl ChainCtxV2 {
                     .or_insert_with(|| json!(self.chain_id.clone()));
             }
         }
-        octra_tx::sign_call(&self.wallet, env).map_err(|e| anyhow!("sign_envelope: {e}"))
+        octravpn_core::tx_signer::sign_live_call(&self.wallet, env)
+            .map_err(|e| anyhow!("sign_envelope: {e}"))
     }
 
     pub(crate) async fn submit_signed_tx(&self, signed: &Value) -> Result<String> {

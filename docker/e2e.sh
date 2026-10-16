@@ -32,9 +32,9 @@ trap cleanup EXIT
 RPC_URL_HOST="${OCTRAVPN_E2E_RPC:-http://127.0.0.1:18080/rpc}"
 
 NODE_ADDRS=(
-  "octVNODE1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-  "octVNODE2AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-  "octVNODE3AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  "oct4XmjKEd9A96KhoMX94zWJmd28dcPisbWGYWtad1dQ9v5"
+  "oct89dkqqjMw9HTi1pqHbANSNwioHuMhmpTCXapTmfUr1EW"
+  "octDGAMCcQXJNKo6NdMuyAdAMWjLuy32cMTfexaRcq49SUx"
 )
 
 rpc_call() {
@@ -62,6 +62,7 @@ echo "[e2e] Building images..."
 # existent) `octravpn-builder` image from docker.io.
 docker compose build --quiet builder
 docker compose build --quiet
+docker compose build --quiet client
 
 echo "[e2e] Starting mock-rpc..."
 docker compose up -d mock-rpc
@@ -80,10 +81,19 @@ docker compose up -d node1 node2 node3
 
 echo "[e2e] Waiting for endpoint registry to reach 3..."
 for _ in $(seq 1 30); do
-  list=$(rpc_call contract_call "[\"octPROGmockaddress0000000000000000000000\",\"list_active_endpoints\",[0,50]]" \
-    | python3 -c 'import sys,json; r=json.load(sys.stdin).get("result",[]); print(len(r) if isinstance(r,list) else 0)' 2>/dev/null || echo 0)
+  list=$(rpc_call contract_call "[\"octAiTHXCqX84s2ExQFzZBFsxKwsijVmsmfmZ84LrurdPLB\",\"list_active_endpoints\",[0,50]]" \
+    | python3 -c 'import sys,json; r=json.load(sys.stdin)["result"]["result"]; print(len(r) if isinstance(r,list) else 0)' 2>/dev/null || echo 0)
   if [ "$list" -ge 3 ]; then
     echo "[e2e] OK — $list endpoints registered."
+    echo "[e2e] Checking the real client registry view..."
+    client_nodes=$(docker compose run --rm --no-deps client)
+    for addr in "${NODE_ADDRS[@]}"; do
+      if ! grep -Fq "$addr" <<<"$client_nodes"; then
+        echo "[e2e] FAIL: client did not list $addr" >&2
+        exit 1
+      fi
+    done
+    echo "[e2e] Real client listed all three registered endpoints."
     docker compose logs --tail=20 node1 node2 node3 | grep -E "register_endpoint|endpoint" || true
     exit 0
   fi

@@ -27,6 +27,9 @@ Early TCP demultiplexing is disabled in the main fixture so its explicit receive
 routes carry replies through both VPN TUNs before reaching the local socket.
 
 Run `bash docker/native-vpn/run.sh /absolute/path/to/new-evidence-directory`.
+Set `OCTRA_NATIVE_VPN_CONTEXT` to a staged directory containing `octra/`,
+`octra-foundry/`, and the pinned `headscale-rs/` when qualifying a specific
+sibling revision without replacing the developer's working checkout.
 The builder image must supply the pinned Rust toolchain and sibling source
 dependencies. Source and executable hashes are retained. Keys and proving
 material remain in disposable container tmpfs and are excluded from evidence.
@@ -37,3 +40,23 @@ epoch timing remain unchanged. Binary Contract deployments happen inside the
 native 64-epoch ProgramSource overlap. This is not a public-chain activation or
 Mainnet parity claim. The development trusted setup is not production ceremony
 evidence. HTTPS gateway backend checks do not qualify external Tailscale/TLS.
+
+
+The separate `single-run.sh` uses the same image, isolated kernel target and
+unchanged four-validator gate inputs. It runs `single_qualify.py` instead of
+`qualify.py`. Its controlled test initializer writes a new private Single
+ledger image containing funded accounts and the original application opt-in;
+all factories, programs, Circles, administrative changes and escrow operations
+are subsequently ordinary signed RPC transactions. The node uses the shared
+native RPC/application facade and authenticates local history with its retained
+Single journal key. It does not create a BFT certificate or serve BFT catch-up.
+
+This gate requires the actual `octra-single-fixture` test executable captured in
+the source/binary manifest. It retains the original initial UDP timeout/loss and
+usage criteria, the real two-kernel TUN/NAT/TCP/ICMP checks, private administrator
+handoff/rotation/replay controls, exact claim/refund checks and same-opening
+restart recovery. Its ExEx assertion covers one actual Single producer. The
+four-validator agreement/quorum assertions belong to `run.sh` independently.
+Both gates must be run and reported separately; source preparation alone is not
+qualification. External HTTPS/Tailscale and public-network deployment remain
+separate gates.

@@ -47,4 +47,4 @@ WORKDIR /work/octra
 # Foundry's own locked manifest. Share the output directory used by runtime images.
 RUN cargo build --locked --release -p octravpn-node -p octravpn-client && \
     CARGO_TARGET_DIR=/work/octra/target cargo build --locked --release \
-        --manifest-path /work/octra-foundry/Cargo.toml -p octra-mock-rpc
+        --manifest-path /work/octra-foundry/Cargo.toml -p octra-mock-rpc -p octra-cli

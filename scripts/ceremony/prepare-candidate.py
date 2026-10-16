@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import tomllib
+import local_compiler
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 from importlib.util import module_from_spec, spec_from_file_location
@@ -74,7 +75,12 @@ def compile_candidate(args):
         raise ValueError('constructor values must be positive u64 integers')
     if values[2] < 100_000_000 or values[4] < 1000:
         raise ValueError('stake/unbond grace violate contract floors')
-    compiler = args.amlc.resolve(strict=True)
+    local = args.compiler_rpc_url is not None
+    if local and (args.program_version != 5 or args.compiler_binding is None):
+        raise ValueError('local compiler mode requires v5 and an explicit compiler binding')
+    if not local and args.compiler_binding is not None:
+        raise ValueError('compiler binding requires local compiler RPC mode')
+    compiler = None if local else args.amlc.resolve(strict=True)
     if args.compiler_upstream_commit is not None and not re.fullmatch(r'[0-9a-f]{40}', args.compiler_upstream_commit):
         raise ValueError('compiler upstream commit must be a full lowercase Git commit')
     version = args.program_version
@@ -106,16 +112,32 @@ def compile_candidate(args):
     output.mkdir(parents=True)
     bundled = output / f'main-v{version}.aml'
     bundled.write_bytes(source.read_bytes())
-    report = command([str(compiler), 'compile', str(bundled), '--out', str(output / f'main-v{version}.octb')]).decode()
-    code = (output / f'main-v{version}.octb').read_bytes()
-    if not report.startswith('status = pass ') or not code.startswith(b'OCTB'):
-        raise ValueError('real compiler did not produce valid OCTB')
-    abi_raw = command([str(compiler), 'abi', str(bundled)])
-    abi = json.loads(abi_raw)
-    if not isinstance(abi, dict) or not isinstance(abi.get('functions'), list) or not abi['functions']:
-        raise ValueError('compiler ABI missing methods')
-    (output / f'main-v{version}.abi.json').write_text(json.dumps(abi, indent=2) + '\n')
-    (output / 'compiler-report.txt').write_text(report)
+    if local:
+        sources = {bundled.name: bundled.read_bytes(), 'private-admin-factory.aml': (ROOT/'program/private-admin-factory.aml').read_bytes()}
+        artifacts, compiler_record = local_compiler.compile_bundle(args.compiler_rpc_url, args.compiler_binding, selected_target, sources)
+        bound = local_compiler.binding(args.compiler_binding, args.compiler_rpc_url)
+        (output/'compiler-native-fixture.json').write_bytes(local_compiler.read(pathlib.Path(bound['declaration']['native_fixture']['path'])))
+        for name, item in artifacts.items():
+            (output/name).write_bytes(sources[name])
+            (output/(name.removesuffix('.aml')+'.octb')).write_bytes(item['code'])
+            abi = item['result']['abi']
+            (output/(name.removesuffix('.aml')+'.abi.json')).write_text(abi+'\n' if isinstance(abi,str) else json.dumps(abi)+'\n')
+            (output/(name+'.compile.json')).write_bytes(item['response'])
+    else:
+        report = command([str(compiler), 'compile', str(bundled), '--out', str(output / f'main-v{version}.octb')]).decode()
+        code = (output / f'main-v{version}.octb').read_bytes()
+        if not report.startswith('status = pass ') or not code.startswith(b'OCTB'):
+            raise ValueError('real compiler did not produce valid OCTB')
+        abi = json.loads(command([str(compiler), 'abi', str(bundled)]))
+        if not isinstance(abi, dict) or not isinstance(abi.get('functions'), list) or not abi['functions']:
+            raise ValueError('compiler ABI missing methods')
+        (output / f'main-v{version}.abi.json').write_text(json.dumps(abi, indent=2) + '\n')
+        (output / 'compiler-report.txt').write_text(report)
+        compiler_record = {'version': command([str(compiler), 'version']).decode().strip(),
+                          'binary_sha256': sha(compiler.read_bytes()),
+                          'patches': {path.name: sha(path.read_bytes()) for path in args.compiler_patch},
+                          'upstream_commit': args.compiler_upstream_commit,
+                          'source_provenance': 'Caller declaration only; this tool hashes the compiler binary but does not certify its source derivation.'}
     intent = {'kind': 'unsigned_deployment_intent', 'contract': f'OctraVPN v{version}',
               'target': selected_target, 'target_binding_sha256': targets.digest(selected_target),
               'constructor_args': values, 'nonce': None, 'signed': False,
@@ -130,17 +152,14 @@ def compile_candidate(args):
                                  'setup_certified': False}
         factory = output/'private-admin-factory.aml'
         factory.write_bytes((ROOT/'program/private-admin-factory.aml').read_bytes())
-        factory_report = command([str(compiler), 'compile', str(factory), '--out', str(output/'private-admin-factory.octb')]).decode()
-        if not factory_report.startswith('status = pass ') or not (output/'private-admin-factory.octb').read_bytes().startswith(b'OCTB'):
-            raise ValueError('factory compilation failed')
-        (output/'private-admin-factory.abi.json').write_bytes(command([str(compiler), 'abi', str(factory)]))
-        (output/'factory-compiler-report.txt').write_text(factory_report)
+        if not local:
+            factory_report = command([str(compiler), 'compile', str(factory), '--out', str(output/'private-admin-factory.octb')]).decode()
+            if not factory_report.startswith('status = pass ') or not (output/'private-admin-factory.octb').read_bytes().startswith(b'OCTB'):
+                raise ValueError('factory compilation failed')
+            (output/'private-admin-factory.abi.json').write_bytes(command([str(compiler), 'abi', str(factory)]))
+            (output/'factory-compiler-report.txt').write_text(factory_report)
     (output / 'intent.json').write_text(json.dumps(intent, indent=2) + '\n')
-    payload = {'schema': 2, 'program_version': version, 'compiler': {'version': command([str(compiler), 'version']).decode().strip(),
-               'binary_sha256': sha(compiler.read_bytes()),
-               'patches': {path.name: sha(path.read_bytes()) for path in args.compiler_patch},
-               'upstream_commit': args.compiler_upstream_commit,
-               'source_provenance': 'Caller declaration only; this tool hashes the compiler binary but does not certify its source derivation.'},
+    payload = {'schema': 2, 'program_version': version, 'compiler': compiler_record,
                'files': {p.name: sha(p.read_bytes()) for p in sorted(output.iterdir()) if p.is_file()},
                'repositories': {name: snapshot(ROOT if name == 'octra' else ROOT.parent / name)
                                 for name in ('octra', 'octra-foundry', 'headscale-rs')}}
@@ -178,7 +197,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='action', required=True)
     prepare = sub.add_parser('prepare')
-    prepare.add_argument('--amlc', type=pathlib.Path, required=True)
+    compiler_mode = prepare.add_mutually_exclusive_group(required=True)
+    compiler_mode.add_argument('--amlc', type=pathlib.Path)
+    compiler_mode.add_argument('--compiler-rpc-url', help='Verified local Rust node only; literal HTTP loopback /rpc')
+    prepare.add_argument('--compiler-binding', type=pathlib.Path, help='Reviewed public build/source/binary/launch declaration')
     prepare.add_argument('--params', type=pathlib.Path, default=ROOT/'ceremony/mainnet-candidate.toml.example')
     prepare.add_argument('--network', choices=('mainnet', 'devnet'), default='mainnet')
     prepare.add_argument('--network-env', type=pathlib.Path, help='Public adopted network.env; required for explicit devnet mode')

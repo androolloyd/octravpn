@@ -93,7 +93,7 @@ impl Services {
             signal: stop,
         };
         let mut browser_stop = stopped.clone();
-        let router = Router::new().fallback(dispatch).with_state(shared);
+        let router = browser_router(shared);
         let mut browser = Box::pin(std::future::IntoFuture::into_future(
             axum::serve(browser, router).with_graceful_shutdown(async move {
                 let _ = browser_stop.wait_for(|v| *v).await;
@@ -131,6 +131,10 @@ impl Services {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(6), drain).await;
         result
     }
+}
+
+pub(crate) fn browser_router(shared: Arc<Shared>) -> Router {
+    Router::new().fallback(dispatch).with_state(shared)
 }
 
 async fn dispatch(

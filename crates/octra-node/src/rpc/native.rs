@@ -50,6 +50,38 @@ async fn dispatch(
     request: &Request,
 ) -> std::result::Result<Vec<u8>, Fault> {
     let params = request.params(&doc).cloned().unwrap_or(Value::List(vec![]));
+    // These historical private-fixture probes do not add BFT authority or
+    // duplicate the native dispatcher used by normal Single clients.
+    if host.single.is_some() && request.method == b"octra_head" {
+        return serde_json::to_vec(
+            &host
+                .node
+                .head()
+                .await
+                .map_err(|_| Fault::new(110, b"service unavailable"))?,
+        )
+        .map_err(|_| Fault::new(110, b"service unavailable"));
+    }
+    #[cfg(feature = "test-helpers")]
+    if let Some(single) = &host.single {
+        if request.method == b"single_proof_status" {
+            let hash = rpc::require_string(&doc, &params, 0, "hash")?;
+            let hash =
+                std::str::from_utf8(hash).map_err(|_| Fault::invalid(b"hash must be UTF-8"))?;
+            let (status, pending) = single
+                .proof_status(hash)
+                .map_err(|_| Fault::new(110, b"service unavailable"))?;
+            let status = match status {
+                Some(octra_node_protocol::single::Preverify::Unavailable(reason)) => {
+                    format!("Some(Unavailable({}))", String::from_utf8_lossy(&reason))
+                }
+                other => format!("{other:?}"),
+            };
+            return serde_json::to_vec(&serde_json::json!({"status":status,"pending":pending}))
+                .map_err(|_| Fault::new(110, b"service unavailable"));
+        }
+    }
+
     if let Some(route) = octra_node_runtime::circle_rpc::assets::route(&request.method) {
         let plan = host
             .executor

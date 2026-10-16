@@ -6,13 +6,18 @@ records each submission before waiting, and qualifies real stateful private-admi
 proofs before the operator funds the contract. A failed/unknown submission stops;
 rerunning into the same output directory is refused to avoid duplicate actions.
 """
-import argparse,base64,hashlib,json,pathlib,subprocess,time,urllib.request
+import argparse,base64,hashlib,json,pathlib,subprocess,time,urllib.error,urllib.request
+import local_compiler
 ROOT=pathlib.Path(__file__).resolve().parents[2]
 from importlib.util import module_from_spec, spec_from_file_location
 _TARGET_SPEC = spec_from_file_location('octra_ceremony_target', pathlib.Path(__file__).with_name('target.py'))
 targets = module_from_spec(_TARGET_SPEC)
 _TARGET_SPEC.loader.exec_module(targets)
 RPC=targets.MAINNET_RPC
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self,request,fp,code,msg,headers,newurl):
+        return None
 
 def command(parts):
     result=subprocess.run([str(p) for p in parts],capture_output=True,text=True)
@@ -75,8 +80,19 @@ def load(candidate,preflight,network='mainnet',network_env=None):
     return intent,artifacts,selected
 
 def rpc(rpc_url,method,params):
-    req=urllib.request.Request(rpc_url,data=json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params}).encode(),headers={'Content-Type':'application/json'})
-    with urllib.request.urlopen(req,timeout=20) as response: raw=response.read(4*1024*1024+1)
+    req=urllib.request.Request(rpc_url,data=json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params}).encode(),headers={'Content-Type':'application/json','User-Agent':'octra-canary/1.0'})
+    # Keep every canary read on the selected endpoint. Environment proxies can
+    # return unrelated 403s; redirects must not move account or receipt reads.
+    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),_NoRedirect())
+    for attempt in range(6):
+        try:
+            with opener.open(req,timeout=20) as response: raw=response.read(4*1024*1024+1)
+            break
+        except urllib.error.HTTPError as error:
+            if error.code!=429 or attempt==5: raise
+            header=error.headers.get('Retry-After','0')
+            retry_after=int(header) if header.isdecimal() else 0
+            time.sleep(min(8,max(2**attempt,retry_after)))
     if len(raw)>4*1024*1024: raise ValueError('RPC response exceeds bound')
     result=json.loads(raw)
     if result.get('id')!=1 or 'error' in result or 'result' not in result: raise RuntimeError(f'{method}: {result}')
@@ -95,14 +111,24 @@ def main():
     p.add_argument('--octra',type=pathlib.Path,default=ROOT.parent/'octra-foundry/target/debug/octra')
     p.add_argument('--prover',type=pathlib.Path,default=ROOT/'target/release/octravpn-private-admin')
     p.add_argument('--fee-ou',type=int,default=1000)
+    p.add_argument('--deployment-ou',type=int,default=200_000,help='Factory deployment fee in OU; native minimum 200000')
     p.add_argument('--broadcast',action='store_true')
+    p.add_argument('--resume',action='store_true',help='continue an existing journal only after its replay is terminally rejected')
     args=p.parse_args()
+    if args.resume and not args.broadcast: raise ValueError('--resume requires --broadcast')
     intent,artifacts,selected=load(args.candidate,args.preflight,args.network,args.network_env)
     rpc_url=selected['rpc_url']
+    local_report=None
+    report_path=args.preflight/'report.json'
+    if report_path.exists() and json.loads(report_path.read_text()).get('compiler',{}).get('kind')=='verified_local_rust_node':
+        local_report=local_compiler.validate_saved(args.candidate,args.preflight,selected)
+    if args.broadcast and local_report is None:
+        raise ValueError('broadcast requires verified local compiler artifacts; external source compilation is disabled')
     def call(method,params): return rpc(rpc_url,method,params)
     if not 1<=args.fee_ou<=10_000: raise ValueError('fee must be within the bounded canary range')
+    if not 200_000<=args.deployment_ou<=1_000_000: raise ValueError('deployment fee must be between 200000 and 1000000 OU')
     plan={'network':args.network,'rpc_url':rpc_url,'target':selected,'target_binding_sha256':targets.digest(selected),'escrow_deposited':0,'contract_funding_cap_ou':200_000_000,
-          'declared_fee_budget_ou':5*args.fee_ou,'private_admin_domain':intent['constructor_args'][7],
+          'deployment_fee_ou':args.deployment_ou,'call_fee_ou':args.fee_ou,'declared_fee_budget_ou':args.deployment_ou+4*args.fee_ou,'private_admin_domain':intent['constructor_args'][7],
           'actions':['deploy factory','spawn VPN via factory','private pause','replay must revert','private unpause'],
           'scope':'RC qualification only; no operator stake, treasury deposit or VPN service activation',
           'independent_review':False,'multiparty_setup_certified':False,'broadcast':args.broadcast}
@@ -110,6 +136,14 @@ def main():
     if not args.broadcast:
         print(json.dumps(plan,indent=2)); return
     if not all([args.key,args.credential,args.setup,args.out]): raise ValueError('broadcast requires key, credential, setup and fresh output directory')
+    if args.network=='devnet':
+        expected=local_report['recheck']['before']['runtime']
+        live=call('octra_runtimeVersion',[])
+        if (not isinstance(live,dict) or live.get('chain_id')!=selected['chain_id'] or
+            live.get('runtime_profile_hash')!=expected['runtime_profile_hash'] or
+            live.get('consensus_standard_hash')!=expected['consensus_standard_hash']):
+            raise ValueError('public devnet runtime differs from the pinned local compiler profile')
+        plan['live_runtime_profile_hash']=live['runtime_profile_hash']
     # Bind all inputs before submitting anything. Prover enforces regular-file,
     # permission and size checks on the credential; no witness enters this journal.
     setup=json.loads((args.setup/'manifest.json').read_text())
@@ -120,9 +154,19 @@ def main():
     balance=call('octra_balance',[relayer])
     available=int(balance['balance_raw'])
     if available<plan['declared_fee_budget_ou']: raise ValueError('relayer is unfunded or below qualification fee budget')
-    if args.out.exists(): raise ValueError('use a fresh output directory; inspect previous submission journal before retrying')
-    args.out.mkdir(mode=0o700,parents=True)
-    journal={'plan':plan,'relayer':relayer,'initial_balance_raw':available,'submissions':[],'qualified':False}
+    if args.resume:
+        if not args.out.is_dir(): raise ValueError('resume requires an existing canary journal directory')
+        journal=json.loads((args.out/'journal.json').read_text())
+        if (journal.get('plan')!=plan or journal.get('relayer')!=relayer or journal.get('qualified') is not False or
+            journal.get('in_flight') or [entry.get('label') for entry in journal.get('submissions',[])]!=
+            ['deploy factory','spawn VPN','private pause','replay rejection'] or
+            any('receipt' not in entry for entry in journal['submissions'][:3]) or
+            not isinstance(journal.get('initial_balance_raw'),int)):
+            raise ValueError('journal does not match a resumable canary at the replay boundary')
+    else:
+        if args.out.exists(): raise ValueError('use a fresh output directory; inspect previous submission journal before retrying')
+        args.out.mkdir(mode=0o700,parents=True)
+        journal={'plan':plan,'relayer':relayer,'initial_balance_raw':available,'submissions':[],'qualified':False}
     def save(): (args.out/'journal.json').write_text(json.dumps(journal,indent=2)+'\n')
     def view(program,method):
         result=call('contract_call',[program,method,[]])
@@ -137,32 +181,68 @@ def main():
             raise ValueError('credential/proving key differs from reviewed candidate')
         return auth
     # Dry proof binds this credential and key before the first paid operation.
-    authorization('oct'+'1'*44,0,1,'input-check')
-    def wait_receipt(hash):
+    if not args.resume: authorization('oct'+'1'*44,0,1,'input-check')
+    def wait_receipt(hash,allow_rejected=False):
         until=time.monotonic()+90
         while time.monotonic()<until:
             tx=call('octra_transaction',[hash])
-            if tx.get('status') in ('rejected','dropped'): raise ValueError(f'transaction rejected: {hash}: {tx}')
-            if tx.get('status')=='confirmed': return call('contract_receipt',[hash])
+            status=tx.get('status')
+            if status=='dropped' or (status=='rejected' and not allow_rejected): raise ValueError(f'transaction rejected: {hash}: {tx}')
+            if status=='confirmed': return call('contract_receipt',[hash])
+            if status=='rejected' and allow_rejected:
+                try: return call('contract_receipt',[hash])
+                except RuntimeError:
+                    reason=tx.get('error',{}).get('reason')
+                    if reason!='execution reverted [admin nonce mismatch]': raise
+                    return {'success':False,'error':reason,'transaction':tx,'receipt_source':'rejected_transaction'}
             time.sleep(1)
         raise ValueError('confirmation timeout; inspect journal and never blindly resubmit')
-    def record(label,result):
+    def record(label,result,allow_rejected=False):
         journal.pop('in_flight',None)
         hash=result['tx_hash']
         journal['submissions'].append({'label':label,'tx_hash':hash}); save()
-        receipt=wait_receipt(hash)
+        receipt=wait_receipt(hash,allow_rejected)
         journal['submissions'][-1]['receipt']=receipt; save()
         return receipt
     def send(label,address,method,params,expected_success=True):
         # Every call has zero attached value and an explicit bounded fee.
         journal['in_flight']={'label':label,'possible_submission':True};save()
         result=json.loads(command([args.octra,'cast','send','--key',args.key,'--rpc-url',rpc_url,'--fee',args.fee_ou,'--value',0,address,method,*[json.dumps(x,separators=(',',':')) for x in params]]))
-        receipt=record(label,result)
+        receipt=record(label,result,allow_rejected=label=='replay rejection' and expected_success is False)
         if receipt.get('success') is not expected_success: raise ValueError(f'{label}: unexpected execution outcome; no escrow has been funded')
         return receipt
+    if args.resume:
+        factory=journal.get('factory');program=journal.get('program')
+        if not isinstance(factory,str) or not isinstance(program,str): raise ValueError('journal lacks confirmed factory/program')
+        for entry in journal['submissions'][:3]:
+            observed=call('octra_transaction',[entry['tx_hash']])
+            receipt=call('contract_receipt',[entry['tx_hash']])
+            if (observed.get('status')!='confirmed' or observed.get('tx_hash')!=entry['tx_hash'] or
+                receipt.get('success') is not True or receipt!=entry['receipt']):
+                raise ValueError('resumed confirmed submission differs from its journal')
+        if call('vm_contract',[factory]).get('code_hash')!=artifacts['private-admin-factory.aml'][1]: raise ValueError('resumed factory code mismatch')
+        metadata=call('vm_contract',[program])
+        if metadata.get('code_hash')!=artifacts['main-v5.aml'][1] or metadata.get('owner')!=factory: raise ValueError('resumed child binding mismatch')
+        replay=journal['submissions'][3]
+        tx=call('octra_transaction',[replay['tx_hash']])
+        if tx.get('status')!='rejected' or tx.get('tx_hash')!=replay['tx_hash'] or tx.get('error',{}).get('reason')!='execution reverted [admin nonce mismatch]':
+            raise ValueError('replay has not been terminally rejected for the expected reason')
+        if int(view(program,'get_admin_nonce'))!=1: raise ValueError('replay changed the admin nonce')
+        if 'receipt' not in replay:
+            replay['receipt']={'success':False,'error':tx['error']['reason'],'transaction':tx,'receipt_source':'rejected_transaction'}
+            save()
+        unpause=authorization(program,1,0,'unpause')
+        send('private unpause',program,unpause['method'],unpause['params'])
+        if int(view(program,'get_admin_nonce'))!=2: raise ValueError('private unpause failed')
+        final=int(call('octra_balance',[relayer])['balance_raw'])
+        if journal['initial_balance_raw']-final>plan['declared_fee_budget_ou']: raise ValueError('observed spend exceeds bounded fee plan')
+        journal.update(qualified=True,final_balance_raw=final,escrow_deposited=0,
+                       scope='stateful proof and replay qualified through selected execution RPC using reviewed local compiler artifacts; production network/finality certification still absent')
+        save();print(json.dumps({'program':program,'factory':factory,'qualified':True,'escrow_deposited':0,'journal':str(args.out/'journal.json')},indent=2))
+        return
     save()
     journal['in_flight']={'label':'deploy factory','possible_submission':True};save()
-    factory_result=json.loads(command([args.octra,'forge','create',args.candidate/'private-admin-factory.aml','--key',args.key,'--rpc-url',rpc_url,'--ou',args.fee_ou,'--no-wait']))
+    factory_result=json.loads(command([args.octra,'forge','create',args.candidate/'private-admin-factory.aml','--compiled-artifact',args.preflight/'private-admin-factory.aml.artifact.json','--artifact-sha256',local_report['checks']['private-admin-factory.aml']['deployment_artifact_sha256'],'--key',args.key,'--rpc-url',rpc_url,'--ou',args.deployment_ou,'--no-wait']))
     receipt=record('deploy factory',factory_result)
     if receipt.get('success') is not True: raise ValueError('factory deployment failed')
     factory=receipt.get('contract')
@@ -182,14 +262,16 @@ def main():
     if int(view(program,'get_admin_nonce'))!=1: raise ValueError('stateful proof did not advance nonce')
     receipt=send('replay rejection',program,pause['method'],pause['params'],False)
     reasons=[event.get('values') for event in receipt.get('events',[]) if event.get('event')=='Require']
-    if ['admin nonce mismatch'] not in reasons or int(view(program,'get_admin_nonce'))!=1: raise ValueError('replay control failed')
+    with_receipt=receipt.get('error')=='execution reverted' and ['admin nonce mismatch'] in reasons
+    with_transaction=receipt.get('receipt_source')=='rejected_transaction' and receipt.get('error')=='execution reverted [admin nonce mismatch]'
+    if not (with_receipt or with_transaction) or int(view(program,'get_admin_nonce'))!=1: raise ValueError('replay control failed')
     unpause=authorization(program,1,0,'unpause')
     send('private unpause',program,unpause['method'],unpause['params'])
     if int(view(program,'get_admin_nonce'))!=2: raise ValueError('private unpause failed')
     final=int(call('octra_balance',[relayer])['balance_raw'])
     if available-final>plan['declared_fee_budget_ou']: raise ValueError('observed spend exceeds bounded fee plan')
     journal.update(qualified=True,final_balance_raw=final,escrow_deposited=0,
-                   scope='stateful proof and replay qualified through official RPC; production network/finality certification still absent')
+                   scope='stateful proof and replay qualified through selected execution RPC using reviewed local compiler artifacts; production network/finality certification still absent')
     save();print(json.dumps({'program':program,'factory':factory,'qualified':True,'escrow_deposited':0,'journal':str(args.out/'journal.json')},indent=2))
 
 if __name__=='__main__':

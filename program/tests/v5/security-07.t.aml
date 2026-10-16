@@ -1,0 +1,30 @@
+// Isolated v5 security fragment; original production methods compile unchanged.
+// Kept separate to preserve the adopted native compiler method-label range.
+private fn test_seed_circle() {
+  self.min_circle_stake = 100000000
+  self.unbond_grace_epochs = 1000
+  self.circle_owner[caller] = caller
+  self.circle_active[caller] = 1
+  self.circle_state_version[caller] = 1
+  self.circle_bond[caller] = 100000000
+  self.circle_registration_approved[caller] = 1
+  self.circle_authorized_owner[caller] = caller
+}
+
+private fn test_seed_session(): uint {
+  test_seed_circle()
+  self.min_session_deposit = 1
+  self.session_grace_epochs = 100
+  self.sweep_grace_multiplier = 10
+  self.tailnet_count = 1
+  return write_session(0, caller, 100, 1)
+}
+
+// expect-revert test_claim_sweep_before_expiry_rejected "sweep grace not elapsed"
+fn test_claim_sweep_before_expiry_rejected(): bool {
+  require(epoch >= 1000, "timeout fixture requires epoch >= 1000")
+  let sid = test_seed_session()
+  require(settle_claim(sid, 100, 90), "claim failed")
+  self.session_opened_at[sid] = epoch - 999
+  return sweep_expired_session(sid)
+}

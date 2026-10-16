@@ -156,6 +156,13 @@ async fn canonical_gateway_keeps_old_subresources_across_publication_and_refuses
     assert!(html.contains(&format!("/snapshots/{old}/MiXeD/docs/style.css")));
     assert!(html.contains(&format!("/snapshots/{old}/MiXeD/mark.svg")));
     assert!(!html.contains("<script"));
+    fixture.node.suspend("publishing canonical epoch");
+    let during_publication = fixture.get("/circles/MiXeD/docs/").await;
+    assert_eq!(during_publication.status(), 200);
+    assert!(during_publication.text().await.unwrap().contains(&old));
+    fixture.node.suspend("gateway fixture catch-up");
+    assert_eq!(fixture.get("/circles/MiXeD/docs/").await.status(), 503);
+    fixture.node.resume().await.unwrap();
     fixture.advance().await;
     let new = fixture.node.snapshot().unwrap().provenance().id();
     assert_ne!(new, old);

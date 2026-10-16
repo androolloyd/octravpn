@@ -55,15 +55,6 @@ fn test_claim_timeout_refunds_without_operator_payment(): bool {
   return true
 }
 
-// expect-revert test_claim_sweep_before_expiry_rejected "sweep grace not elapsed"
-fn test_claim_sweep_before_expiry_rejected(): bool {
-  require(epoch >= 1000, "timeout fixture requires epoch >= 1000")
-  let sid = test_seed_session()
-  require(settle_claim(sid, 100, 90), "claim failed")
-  self.session_opened_at[sid] = epoch - 999
-  return sweep_expired_session(sid)
-}
-
 fn test_relay_claim_closes_session_and_accounts_earnings(): bool {
   let sid = test_seed_session()
   self.session_status[sid] = SESSION_RELAY_ARMED

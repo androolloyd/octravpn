@@ -130,13 +130,17 @@ pub(super) async fn read(
     }
 }
 async fn head_proposal_id(host: &Arc<Context>, head: &Head) -> std::result::Result<String, Fault> {
+    let finality = host
+        .finality
+        .as_ref()
+        .ok_or_else(|| unavailable("Single history has no BFT certificate"))?;
     let certificate = if head.cursor.sequence.0 == 0 {
-        host.finality
+        finality
             .checkpoint_parent()
             .ok_or_else(|| fault("committed head certificate is unavailable"))?
             .certificate
     } else {
-        host.finality
+        finality
             .record(head.cursor.sequence)
             .await
             .map_err(unavailable)?
@@ -178,13 +182,9 @@ async fn node_stats(host: &Arc<Context>) -> std::result::Result<Vec<u8>, Fault> 
                 return Err(unavailable("recent anchor transaction count unavailable"));
             }
         } else {
-            let record = host
-                .finality
-                .record(retained.cursor.sequence)
-                .await
-                .map_err(unavailable)?;
+            let record = host.node.epoch_data(&retained).await.map_err(unavailable)?;
             recent = recent
-                .checked_add(record.tx_hashes.len() as i64)
+                .checked_add(record.hashes.len() as i64)
                 .ok_or_else(|| unavailable("recent transaction count exhausted"))?;
         }
     }
@@ -264,12 +264,8 @@ async fn epoch_proof(
         .head_at(octra_exex::Sequence(previous))
         .await
         .map_err(unavailable)?;
-    let record = host
-        .finality
-        .record(head.cursor.sequence)
-        .await
-        .map_err(unavailable)?;
-    if record.tx_hashes.len() > octra_node_protocol::consensus::codec::MAX_TXS {
+    let record = host.node.epoch_data(&head).await.map_err(unavailable)?;
+    if record.hashes.len() > octra_node_protocol::consensus::codec::MAX_TXS {
         return Err(fault("invalid epoch tx count"));
     }
     let start = parent
@@ -280,12 +276,12 @@ async fn epoch_proof(
         chain_id: host.node.chain().chain_id.as_bytes().to_vec(),
         epoch_id: epoch,
         tx_hashes: record
-            .tx_hashes
+            .hashes
             .iter()
             .map(|v| v.to_ascii_lowercase())
             .collect(),
         start_txid: start,
-        tx_count: record.tx_hashes.len() as i64,
+        tx_count: record.hashes.len() as i64,
         prev_epoch_index_root: parent.index_root.into_bytes(),
         epoch_index_root: head.index_root.into_bytes(),
     };

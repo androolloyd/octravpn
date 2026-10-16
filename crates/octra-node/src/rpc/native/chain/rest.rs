@@ -245,7 +245,6 @@ async fn search(
         let head = host.node.head().await.map_err(unavailable)?;
         if host
             .node
-            .reader()
             .epoch_summary(&head, epoch)
             .await
             .map_err(unavailable)?

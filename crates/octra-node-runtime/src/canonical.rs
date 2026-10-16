@@ -328,6 +328,9 @@ impl CanonicalStore {
             .open(path)
             .map_err(error)?;
         file.sync_all().map_err(error)?;
+        // Closing another descriptor for the database after SQLite has locked it
+        // can release this process's POSIX locks. Finish creation before connect.
+        drop(file);
         // Persist the directory entry as well as subsequent SQLite contents.
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
             std::fs::File::open(parent)
@@ -794,3 +797,5 @@ fn decode_head(row: &sqlx::sqlite::SqliteRow) -> Result<Head> {
     }
     Ok(head)
 }
+
+pub mod single;

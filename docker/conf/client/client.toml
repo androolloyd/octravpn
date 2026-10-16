@@ -1,9 +1,9 @@
 [chain]
 rpc_url = "http://mock-rpc:18080/rpc"
-program_addr = "octPROGmockaddress0000000000000000000000"
+program_addr = "octAiTHXCqX84s2ExQFzZBFsxKwsijVmsmfmZ84LrurdPLB"
 
 [wallet]
-addr = "octCLIENT00000000000000000000000000000099"
+addr = "octGatHn158giyza6HjzdcMBwE6bm5SY322D3AmFnrpabbT"
 secret_path = "/etc/octravpn/wallet.key"
 
 [tunnel]

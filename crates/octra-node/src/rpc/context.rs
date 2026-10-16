@@ -1,6 +1,7 @@
 //! Service capabilities independent of a validator-history type. The BFT
 //! adapter delegates to the existing host; no RPC acquires a canonical writer.
 use super::{http, Native, Pending, Submission};
+mod single;
 use crate::{import::Executor as _, Committed, Host, LegacyStatus, Node, Status};
 use anyhow::Result;
 use async_trait::async_trait;
@@ -18,6 +19,7 @@ use octra_node_runtime::{
     finality,
     staging::{DropRecord, Pool},
 };
+pub(crate) use single::Options as SingleOptions;
 use std::{
     path::Path,
     sync::Arc,
@@ -36,11 +38,31 @@ pub(crate) trait ReadNode: Send + Sync {
     fn legacy_status_at(&self, head: &Head) -> Result<LegacyStatus>;
     fn native_metrics(&self) -> Result<Vec<u8>>;
     fn program_records(&self) -> ProgramRecords;
+    fn account_for_read(
+        &self,
+        address: &[u8],
+        committed: Option<octra_node_protocol::state::Account>,
+    ) -> Result<Option<octra_node_protocol::state::Account>> {
+        let _ = address;
+        Ok(committed)
+    }
+    async fn epoch_data(&self, head: &Head) -> Result<EpochData>;
+    async fn epoch_summary(&self, head: &Head, epoch: i64) -> Result<Option<Vec<u8>>>;
+    async fn epoch_page_row(
+        &self,
+        head: &Head,
+        epoch: i64,
+    ) -> Result<Option<(octra_node_protocol::epoch_page::Row, usize)>>;
     async fn vm_receipt(
         &self,
         head: &Head,
         hash: &[u8],
     ) -> std::result::Result<Option<Vec<u8>>, canonical::Error>;
+}
+
+pub(crate) struct EpochData {
+    pub(crate) hashes: Vec<Vec<u8>>,
+    pub(crate) outcomes: Vec<Vec<u8>>,
 }
 
 /// This capability is deliberately distinct from a committed tree. A local
@@ -88,25 +110,46 @@ pub(crate) trait Intake: Send + Sync {
 /// Read-only access to the real bounded staging pool. Mutation remains an
 /// authenticated owned intake operation, never a callback through this handle.
 #[derive(Clone)]
-pub(crate) struct Queue(Arc<Pending>);
+pub(crate) enum Queue {
+    Bft(Arc<Pending>),
+    Single(Arc<crate::single::Node>),
+}
 impl Queue {
     pub(crate) fn inspect<T>(&self, read: impl FnOnce(&Pool) -> T) -> Result<T> {
-        self.0.inspect(read)
+        match self {
+            Self::Bft(pending) => pending.inspect(read),
+            Self::Single(node) => node.inspect_pool(read),
+        }
     }
     pub(crate) fn transactions(&self) -> Result<Vec<Transaction>> {
-        self.0.transactions()
+        match self {
+            Self::Bft(pending) => pending.transactions(),
+            Self::Single(node) => node.inspect_pool(|pool| pool.all().cloned().collect()),
+        }
     }
     pub(crate) fn dropped(&self, hash: &[u8]) -> Result<Option<DropRecord>> {
-        self.0.dropped(hash)
+        match self {
+            Self::Bft(pending) => pending.dropped(hash),
+            Self::Single(node) => node.inspect_pool(|pool| pool.dropped(hash).cloned()),
+        }
     }
     pub(crate) fn drops(&self, address: &[u8]) -> Result<Vec<DropRecord>> {
-        self.0.drops(address)
+        match self {
+            Self::Bft(pending) => pending.drops(address),
+            Self::Single(node) => node.inspect_pool(|pool| {
+                pool.drops()
+                    .filter(|row| row.from == address || row.to == address)
+                    .cloned()
+                    .collect()
+            }),
+        }
     }
 }
 
 pub(crate) struct Context {
     pub(crate) node: Arc<dyn ReadNode>,
-    pub(crate) finality: Arc<dyn BftHistory>,
+    pub(crate) single: Option<Arc<crate::single::Node>>,
+    pub(crate) finality: Option<Arc<dyn BftHistory>>,
     intake: Arc<dyn Intake>,
     pub(crate) executor: Native,
     pub(crate) pending: Queue,
@@ -162,10 +205,11 @@ impl<A: Host> Submission<A> {
         let read = Arc::new(BftNode(self.node.clone()));
         Arc::new(Context {
             node: read.clone(),
-            finality: read,
+            single: None,
+            finality: Some(read),
             intake: self.clone(),
             executor: self.executor.clone(),
-            pending: Queue(self.pending.clone()),
+            pending: Queue::Bft(self.pending.clone()),
             address: self.address.clone(),
             compute: self.compute.clone(),
             vpn_program: self.vpn_program.clone(),
@@ -209,6 +253,28 @@ impl<A: Host> ReadNode for BftNode<A> {
     }
     fn program_records(&self) -> ProgramRecords {
         self.0.store.program_records()
+    }
+    async fn epoch_data(&self, head: &Head) -> Result<EpochData> {
+        let record = self.0.publisher.record(head.cursor.sequence).await?;
+        anyhow::ensure!(
+            record.epoch_id == head.cursor.epoch.0 as i64
+                && record.state_root == head.cursor.state_root.0,
+            "epoch record head differs"
+        );
+        Ok(EpochData {
+            hashes: record.tx_hashes,
+            outcomes: record.receipts_json,
+        })
+    }
+    async fn epoch_summary(&self, head: &Head, epoch: i64) -> Result<Option<Vec<u8>>> {
+        Ok(self.0.store.reader().epoch_summary(head, epoch).await?)
+    }
+    async fn epoch_page_row(
+        &self,
+        head: &Head,
+        epoch: i64,
+    ) -> Result<Option<(octra_node_protocol::epoch_page::Row, usize)>> {
+        Ok(self.0.store.reader().epoch_page_row(head, epoch).await?)
     }
     async fn vm_receipt(
         &self,

@@ -33,7 +33,7 @@ use std::{
 use tokio::sync::{mpsc, watch};
 mod compute;
 mod context;
-pub(crate) use context::Context;
+pub(crate) use context::{Context, SingleOptions};
 pub(crate) mod grpc;
 pub(crate) mod http;
 mod native;
@@ -106,19 +106,9 @@ impl<A: Host> Submission<A> {
         Ok(())
     }
     pub fn router(self: Arc<Self>) -> Router {
-        let router = Router::new()
-            .route("/operator/status", get(status))
-            .route("/account/:address", get(account))
-            .route("/transactions", post(submit))
-            .route(
-                "/rpc",
-                post(native::handle).layer(DefaultBodyLimit::max(5_000_000 + 65_536)),
-            )
-            .merge(http::router())
-            .layer(DefaultBodyLimit::max(5_000_000))
-            .with_state(self.context());
-        http::native_layer(router)
+        router(self.context())
     }
+
     pub async fn ingress(
         self: Arc<Self>,
         mut inbox: mpsc::Receiver<(Peer, Frame)>,
@@ -178,6 +168,23 @@ impl<A: Host> Submission<A> {
             }
         }
     }
+}
+pub(crate) fn router(host: Arc<Context>) -> Router {
+    router_with_limit(host, 5_000_000 + 65_536)
+}
+pub(crate) fn router_with_limit(host: Arc<Context>, maximum: usize) -> Router {
+    let router = Router::new()
+        .route("/operator/status", get(status))
+        .route("/account/:address", get(account))
+        .route("/transactions", post(submit))
+        .route(
+            "/rpc",
+            post(native::handle).layer(DefaultBodyLimit::max(maximum.min(5_000_000 + 65_536))),
+        )
+        .merge(http::router())
+        .layer(DefaultBodyLimit::max(maximum.min(5_000_000)))
+        .with_state(host);
+    http::native_layer(router)
 }
 struct Captured {
     now: f64,

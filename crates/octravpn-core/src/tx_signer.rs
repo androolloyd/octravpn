@@ -50,6 +50,22 @@ use sha2::{Digest, Sha256};
 
 use crate::sig::KeyPair;
 
+/// Sign a live daemon call, supplying the current time for older builders
+/// that omit it. Explicit timestamps remain part of the caller's payload.
+pub fn sign_live_call(kp: &KeyPair, mut call: Value) -> Result<Value, String> {
+    let fields = call
+        .as_object_mut()
+        .ok_or_else(|| "tx must be a JSON object".to_string())?;
+    if !fields.contains_key("timestamp") {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|error| error.to_string())?
+            .as_secs_f64();
+        fields.insert("timestamp".into(), serde_json::json!(now));
+    }
+    sign_call_canonical(kp, &call)
+}
+
 // Native op_type strings accepted by the node (`transaction.ml:199-239`,
 // `op_type_of_string`). An UNRECOGNIZED op_type is a hard error at parse;
 // a MISSING one silently falls back to `Standard` (`transaction.ml:295-296`)

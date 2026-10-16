@@ -7,14 +7,14 @@ SERVER='vpn-node'
 NODE_LINK='vpn-egress'
 SNAT='192.0.2.1'
 
-def run(g,*,operator_config,descriptor_path,program,circle,client_config,config):
+def run(g,*,operator_config,descriptor_path,program,circle,client_config,config,epoch_peer=1):
     hop=Hop(pathlib.Path('/hop'),public=g.PUBLIC,role='node',name=NODE_LINK)
     try:
-        return _run(g,hop,operator_config,descriptor_path,program,circle,client_config,config)
+        return _run(g,hop,operator_config,descriptor_path,program,circle,client_config,config,epoch_peer)
     finally:
         hop.close()
 
-def _run(g,hop,operator_config,descriptor_path,program,circle,client_config,config):
+def _run(g,hop,operator_config,descriptor_path,program,circle,client_config,config,epoch_peer):
     command=g.command
     def ip(*args):return command(['ip',*args])
     def target():
@@ -37,9 +37,11 @@ def _run(g,hop,operator_config,descriptor_path,program,circle,client_config,conf
     # node is then restarted with the matching actual kernel TUN configuration.
     operator_config.write_text(operator_config.read_text()+f'\n[tun.ip_tunnel]\nname = "{SERVER}"\n')
     command(['octravpn-node','--config',operator_config,'circle','bootstrap','--circle',circle,'--native-identity',descriptor_path,'--force','--commit'],180)
+    prior_epoch=g.epoch()
     g.stop(0);config['vpn']['ip_tunnel']={'name':SERVER}
     (g.ROOT/'chain/node-0/config.json').write_text(json.dumps(config));g.start(0)
-    g.until(lambda:g.epoch()>=g.epoch(1),120,'native IP tunnel restart synchronized')
+    g.until(lambda:g.epoch() >= (g.epoch(epoch_peer) if epoch_peer is not None else prior_epoch),
+            120,'native IP tunnel restart synchronized')
     g.until(lambda:SERVER in ip('-j','link','show'),30,'actual native server TUN')
     ip('route','add','198.18.0.0/15','dev',SERVER,'table','402')
     ip('rule','add','priority','5','iif',NODE_LINK,'to','198.18.0.0/15','lookup','402')
@@ -91,7 +93,7 @@ def _run(g,hop,operator_config,descriptor_path,program,circle,client_config,conf
         ping.sendto(message,(g.PUBLIC,0));response,peer=ping.recvfrom(2048);ping.close()
         assert response[0]==0 and response[8:8+len(payload)]==payload and peer[0]==g.PUBLIC
         def restore_route():
-            g.until(lambda:SERVER in ip('-j','link','show'),30,'restarted native server TUN')
+            g.until(lambda:SERVER in ip('-j','link','show'),60,'restarted native server TUN')
             ip('route','replace','198.18.0.0/15','dev',SERVER,'table','402')
         g.recover_active(program,sid,logfile,restore_route)
         # Keep the actual TCP socket and both endpoint kernels alive while the

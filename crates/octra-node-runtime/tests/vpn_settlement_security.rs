@@ -44,6 +44,9 @@ fn fragment(path: &str) -> &'static str {
         "program/tests/v5/security-06.t.aml" => {
             include_str!("../../../program/tests/v5/security-06.t.aml")
         }
+        "program/tests/v5/security-07.t.aml" => {
+            include_str!("../../../program/tests/v5/security-07.t.aml")
+        }
         _ => panic!("unknown security fragment"),
     }
 }
@@ -85,7 +88,7 @@ fn rust_compiled_settlement_security_matches_pinned_native_vm() {
         assert_eq!(report[name], hex::encode(Sha256::digest(bytes)), "{name}");
     }
     let fragments = report["fragments_sha256"].as_object().unwrap();
-    assert_eq!(fragments.len(), 6);
+    assert_eq!(fragments.len(), 7);
     for (path, expected) in fragments {
         assert_eq!(
             *expected,

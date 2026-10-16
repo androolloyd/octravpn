@@ -312,6 +312,33 @@ pub fn activation_mode(
         Some(p) => verify_anchor(root_at, p).map(|()| RuleMode::Active),
     }
 }
+/// Explicit private genesis metadata for the application-only fixture. These
+/// variants do not select consensus rules or confer public-network authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IsolatedApplicationProfile {
+    BftDevnet,
+    Single,
+}
+impl IsolatedApplicationProfile {
+    pub fn metadata_key(self) -> &'static [u8] {
+        match self {
+            Self::BftDevnet => b"local_devnet",
+            Self::Single => b"local_single",
+        }
+    }
+    pub fn name(self) -> &'static [u8] {
+        match self {
+            Self::BftDevnet => b"devnet_full_v1",
+            Self::Single => b"single_applications_v1",
+        }
+    }
+    fn chain_prefix(self) -> &'static [u8] {
+        match self {
+            Self::BftDevnet => b"octra-rust-local-",
+            Self::Single => b"octra-single-local-",
+        }
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Graph {
     chain_id: Vec<u8>,
@@ -319,7 +346,7 @@ pub struct Graph {
     /// Native cached slots in ALL order, ending at ProgramSource. The
     /// later profile rules are derived from chain identity, as in Rule_graph.
     plans: [Option<Activation>; 20],
-    isolated_applications: Option<Activation>,
+    isolated_applications: Option<(Activation, IsolatedApplicationProfile)>,
 }
 impl Graph {
     pub fn new(chain_id: Vec<u8>, ready_config_hash: Option<Vec<u8>>) -> Self {
@@ -340,7 +367,34 @@ impl Graph {
         ready_config_hash: Option<Vec<u8>>,
         genesis_root: [u8; 32],
     ) -> Result<Self, &'static str> {
-        let Some(identity) = chain_id.strip_prefix(b"octra-rust-local-") else {
+        Self::isolated_application_profile(
+            chain_id,
+            ready_config_hash,
+            genesis_root,
+            IsolatedApplicationProfile::BftDevnet,
+        )
+    }
+    /// Application-only private Single fixture. SetFold, membership, epoch
+    /// timing and quorum still follow the unchanged native graph.
+    pub fn isolated_single_applications(
+        chain_id: Vec<u8>,
+        ready_config_hash: Option<Vec<u8>>,
+        genesis_root: [u8; 32],
+    ) -> Result<Self, &'static str> {
+        Self::isolated_application_profile(
+            chain_id,
+            ready_config_hash,
+            genesis_root,
+            IsolatedApplicationProfile::Single,
+        )
+    }
+    fn isolated_application_profile(
+        chain_id: Vec<u8>,
+        ready_config_hash: Option<Vec<u8>>,
+        genesis_root: [u8; 32],
+        profile: IsolatedApplicationProfile,
+    ) -> Result<Self, &'static str> {
+        let Some(identity) = chain_id.strip_prefix(profile.chain_prefix()) else {
             return Err("application fixture requires an isolated local chain");
         };
         if identity.len() != 16
@@ -351,17 +405,47 @@ impl Graph {
             return Err("invalid isolated local chain identity");
         }
         let mut graph = Self::new(chain_id, ready_config_hash);
-        graph.isolated_applications = Some(Activation {
-            anchor_epoch: 0,
-            anchor_state_root: hex::encode(genesis_root).into_bytes(),
-            activation_epoch: 0,
-        });
+        graph.isolated_applications = Some((
+            Activation {
+                anchor_epoch: 0,
+                anchor_state_root: hex::encode(genesis_root).into_bytes(),
+                activation_epoch: 0,
+            },
+            profile,
+        ));
         Ok(graph)
     }
     pub fn isolated_application_anchor(&self) -> Option<&[u8]> {
         self.isolated_applications
             .as_ref()
-            .map(|plan| plan.anchor_state_root.as_slice())
+            .map(|(plan, _)| plan.anchor_state_root.as_slice())
+    }
+    pub fn application_fixture(&self) -> Option<IsolatedApplicationProfile> {
+        self.isolated_applications
+            .as_ref()
+            .map(|(_, profile)| *profile)
+    }
+    /// Validate metadata obtained from the already authenticated genesis tree.
+    /// This validates the explicit opt-in only; it is not an inclusion proof.
+    pub fn check_application_opt_in(&self, raw: &[u8]) -> Result<(), &'static str> {
+        use crate::native_json::{Document, Value};
+        let profile = self
+            .application_fixture()
+            .ok_or("application fixture is not configured")?;
+        if raw.len() > 64 * 1024 {
+            return Err("application fixture metadata exceeds limit");
+        }
+        let doc = Document::parse(raw).map_err(|_| "application fixture metadata malformed")?;
+        if matches!(
+            doc.field(doc.root(), b"activated_applications"),
+            Some(Value::Bool(true))
+        ) && matches!(doc.field(doc.root(),b"chain_id"),Some(Value::String(chain)) if chain.as_slice()==self.chain_id())
+            && matches!(doc.field(doc.root(),b"profile"),Some(Value::String(name)) if name.as_slice()==profile.name())
+        {
+            Ok(())
+        } else {
+            Err("application fixture genesis opt-in differs")
+        }
     }
     pub fn chain_id(&self) -> &[u8] {
         &self.chain_id
@@ -383,7 +467,7 @@ impl Graph {
                 | Rule::ProofExecution
                 | Rule::VmBytes
         ) {
-            if let Some(plan) = &self.isolated_applications {
+            if let Some((plan, _)) = &self.isolated_applications {
                 return Some(plan.clone());
             }
         }
@@ -489,6 +573,83 @@ mod isolated_tests {
         ] {
             assert!(Graph::isolated_applications(chain.to_vec(), None, [7; 32]).is_err());
         }
+    }
+
+    #[test]
+    fn single_application_fixture_is_private_anchored_and_never_changes_consensus() {
+        let chain = b"octra-single-local-0123456789abcdef".to_vec();
+        let graph = Graph::isolated_single_applications(chain.clone(), None, [7; 32]).unwrap();
+        let default = Graph::new(chain.clone(), None);
+        let read = |height| {
+            if height == 0 {
+                RootRead::Root(hex::encode([7; 32]).into_bytes())
+            } else {
+                RootRead::Missing
+            }
+        };
+        assert_eq!(
+            graph.application_fixture(),
+            Some(IsolatedApplicationProfile::Single)
+        );
+        assert_eq!(
+            graph.application_fixture().unwrap().metadata_key(),
+            b"local_single"
+        );
+        for rule in ALL {
+            if matches!(
+                rule,
+                Rule::Circle
+                    | Rule::OwnerMigration
+                    | Rule::ObjectCost
+                    | Rule::AccountPack
+                    | Rule::Standard
+                    | Rule::Math
+                    | Rule::ProgramSource
+                    | Rule::FheWork
+                    | Rule::ProofExecution
+                    | Rule::VmBytes
+            ) {
+                assert_eq!(graph.mode(rule, 1, &read).unwrap(), RuleMode::Active);
+                assert!(matches!(
+                    graph.mode(rule, 1, &|_| RootRead::Missing),
+                    Err(Fault::Missing(_))
+                ));
+                assert!(matches!(
+                    graph.mode(rule, 1, &|_| RootRead::Root(
+                        hex::encode([8; 32]).into_bytes()
+                    )),
+                    Err(Fault::Mismatch { .. })
+                ));
+            } else {
+                assert_eq!(graph.activation(rule), default.activation(rule));
+                assert_eq!(graph.mode(rule, 1, &read), default.mode(rule, 1, &read));
+            }
+        }
+        assert_eq!(
+            graph.mode(Rule::SetFold, 1, &read).unwrap(),
+            RuleMode::Prior
+        );
+        assert!(graph.program_overlap(63, &read).unwrap());
+        assert!(!graph.program_overlap(64, &read).unwrap());
+        for chain in [
+            policy::DEVNET,
+            b"mainnet",
+            b"octra-rust-local-0123456789abcdef",
+            b"octra-single-local-",
+            b"octra-single-local-native-oracle",
+            b"octra-single-local-0123456789abcdeF",
+        ] {
+            assert!(Graph::isolated_single_applications(chain.to_vec(), None, [7; 32]).is_err());
+        }
+        assert!(Graph::isolated_applications(chain, None, [7; 32]).is_err());
+        let valid=br#"{"chain_id":"octra-single-local-0123456789abcdef","profile":"single_applications_v1","activated_applications":true}"#;
+        assert!(graph.check_application_opt_in(valid).is_ok());
+        for invalid in [b"bad".as_slice(),b"{}",br#"{"chain_id":"octra-single-local-0123456789abcdef","profile":"devnet_full_v1","activated_applications":true}"#,br#"{"chain_id":"octra-single-local-0123456789abcdef","profile":"single_applications_v1","activated_applications":false}"#,br#"{"chain_id":"octra-rust-local-0123456789abcdef","profile":"single_applications_v1","activated_applications":true}"#] {
+            assert!(graph.check_application_opt_in(invalid).is_err());
+        }
+        assert!(graph.check_application_opt_in(&vec![b' '; 65537]).is_err());
+        assert!(default.application_fixture().is_none());
+        assert!(default.check_application_opt_in(valid).is_err());
     }
 
     #[test]

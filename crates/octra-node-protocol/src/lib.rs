@@ -63,3 +63,7 @@ pub mod circle_wasm;
 pub mod circles;
 pub mod irmin;
 pub mod legacy_tree;
+
+pub mod single;
+
+pub mod legacy_epoch;

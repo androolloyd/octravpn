@@ -78,7 +78,7 @@ pub enum QueueState {
     WaitNonce { expected: Nonce, expires_at: f64 },
     NonceUsed { confirmed: Nonce, expires_at: f64 },
 }
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct Pool {
     entries: BTreeMap<Vec<u8>, Arc<Entry>>,
     hashes: BTreeMap<Vec<u8>, Arc<Entry>>,

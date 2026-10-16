@@ -7,8 +7,23 @@ Circle browsing and a paid VPN service. The adopted reference is lite_node
 are substantially beyond the earlier implementation-pass records; complete
 upstream behavioral parity and public-network deployment remain unqualified.
 
-## Recorded local evidence — 2026-10-15
+## Recorded local evidence
 
+- The [final host release gates](checkpoints/2026-10-16/release-validation.json)
+  passed segmented VPN/Headscale, runtime, node/protocol/ExEx/browser and doc
+  suites on the current source, plus strict workspace lint and offline
+  dependency policy checks. The checkpoint records exact log hashes and the
+  separate suite boundaries.
+- The [2026-10-16 combined checkpoint](checkpoints/2026-10-16/combined-native-vpn.json)
+  records a pinned frozen-source image passing both the paid private Single run
+  and a four-validator BFT run. Each completed 34 stateful steps with zero
+  process failures, covering private handoff/rotation/replay, paid WireGuard,
+  exact settlement and refunds, real client/node OS TUN forwarding, canonical
+  ExEx, Circle gateway reads and restart recovery. Later lint, test-only, and
+  read-only gateway publication changes mean that image is not byte-identical
+  to the current checkout.
+  These are isolated activated genesis qualifications; public-chain paid
+  activation is separate.
 - [Native VPN checkpoint](checkpoints/2026-10-15/native-vpn.json): a fresh,
   isolated four-validator chain deployed the actual factory/main-v5 application,
   exercised private administration and paid escrow/settlement, and ran the real
@@ -68,11 +83,14 @@ Its bounded fixture allocated 32–52 KiB per individual account update. An actu
 364-second public window committed 51 verified epochs at 8.4 epochs per minute,
 with approximately 1 MiB of logical SQLite growth per epoch. This short window
 does not establish sustained throughput or a completion forecast. A second,
-fresh authenticated snapshot import is running in a separate directory to reduce
-catch-up time; it has not replaced the running observer or its retained history.
-The observer continues
-startup windows only while each durably advances. Complete catch-up, healthy
-serving and public restart qualification remain pending.
+fresh authenticated snapshot import completed in a separate directory at epoch
+1,700,640. It has not replaced the running observer or its retained history;
+final-binary restart and catch-up from that snapshot remain pending for that
+separate import. The [final retained-state restart](checkpoints/2026-10-16/public-restart.json)
+used the current release binary, stopped gracefully, and resumed the same
+nonvoting identity from epoch 1,702,159; its authenticated head advanced past
+1,702,211. The observer continues startup windows only while each durably
+advances. Complete catch-up and stable healthy serving remain pending.
 Voting requires the existing native membership, readiness and serving gates.
 
 The [retained public gateway](checkpoints/2026-10-15/gateway.json) passed 34
@@ -80,9 +98,21 @@ functional tests, nine exact native registry comparisons and eight actual Chrome
 checks, including canonical publication between HTML and its pinned stylesheets.
 Inline CSS, imports, images and fonts use the captured public resource scope.
 Pinned snapshots retain their captured visibility policy for at most 120 seconds
-or 32 entries; new navigation uses the current verified head. Actual Tailscale Serve/TLS
-and navigation from another tailnet device or application remain external
-integration gates. Circle HTTPS addresses translate automatically at that
+or 32 entries; new navigation uses the current verified head, or its last
+committed public asset view for at most 15 seconds while a successor publishes.
+Tailscale Serve
+now maps the host's tailnet HTTPS address to the loopback Circle gateway. The
+[public Circle HTTPS canary](checkpoints/2026-10-16/public-circle-https.json)
+deployed a public static asset, matched its official RPC bytes, matched both
+transactions in the Rust observer's ExEx outbox, and returned its rendered page
+over Tailscale HTTPS during an admitted serving window. Later requests returned
+503 during catch-up. The final gateway-guard binary restarted with the same
+retained identity and advanced beyond its prior head, but its sampled HTTPS
+requests, including 24 in a bounded two-minute check, returned 503 while it
+verified secondary-exporter history.
+Stable availability, an HTTP 200 on that final binary, and navigation from another tailnet
+device or application remain integration gates. Circle HTTPS addresses
+translate automatically at that
 gateway; a VPN or DNS connection alone cannot teach arbitrary applications to
 interpret a bare `oct://` scheme. The supported address preserves the Circle's
 case-sensitive identifier in the HTTPS path.
@@ -96,10 +126,23 @@ authority require their own qualification.
 
 The [devnet canary tooling](checkpoints/2026-10-15/devnet-canary-tooling.json)
 binds its selected RPC, independently pinned network configuration, checkpoint
-origin, source and compiler artifacts before wallet use. Its 54 offline controls
-passed. Public source compilation at the separate devnet endpoint awaits approval;
-the latest balance query still reports the relayer account absent. No public
-contract deployment or funded service is claimed.
+origin, source and compiler artifacts before wallet use. Its local compiler and
+artifact path and bounded fee/replay runner passed their recorded hermetic gates;
+the final runner passed 76 controls, including bounded read-only 429 retry and
+safe journal resume. Our running Rust node compiled both
+applications locally: its bytecode,
+ABI, verification, certificate and complete compiler response match the pinned
+native reference, as recorded in the [local compiler checkpoint](checkpoints/2026-10-15/local-compiler.json).
+The user selected local compilation, so no source was sent to the team's RPC.
+Canary broadcast consumes caller-hash-pinned artifacts and cannot fall back to
+a source compiler at the submission endpoint.
+The [public devnet RC checkpoint](checkpoints/2026-10-16/devnet-canary.json)
+records confirmed factory and VPN child deployment, private pause/unpause,
+on-chain replay rejection, independent RPC readback and 203,000 OU of relayer
+spend within a 204,000 OU cap. The nonvoting Rust observer independently
+matched all four confirmed canary transactions and receipts to its canonical
+SQLite ExEx outbox and archive. The canary deposited no escrow or operator stake.
+Funded VPN service and independent public-chain replay remain unqualified.
 
 There is no VPN protocol commission: operators receive the agreed traffic charge
 in OCT, with ordinary chain transaction fees separate. Settlement checks the
@@ -112,7 +155,12 @@ The [source inventory](network-consensus-inventory.json) distinguishes mapped
 implementation boundaries, finite native comparisons and optional activation
 surfaces. The adopted optional resource libraries cover 121 native APIs with
 1,070 exact oracle comparisons; production activation remains disabled exactly
-as in the reference. Native Single-mode execution is still being implemented
-and qualified in an isolated candidate. A mapped source file or passing local fixture does not establish full
+as in the reference. The [private Single execution core](checkpoints/2026-10-15/single-core.json)
+has been adopted after 31 complete native execution comparisons, 227 policy/cache
+comparisons, crash/restart tests and strict linting. Its asynchronous proof
+workers and Single RPC/browser/VPN/ExEx service adapter passed the combined
+private Single qualification above. This does not establish complete upstream
+behavioral parity on the public network.
+A mapped source file or passing local fixture does not establish full
 native parity. Dated reports in [the adoption history](native-runtime.md) preserve
 their original snapshot and should not be read as current completeness counters.

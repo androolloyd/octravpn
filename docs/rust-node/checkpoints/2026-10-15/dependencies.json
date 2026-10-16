@@ -3,20 +3,53 @@
   "rust_toolchain": "1.96.0",
   "headscale": {
     "repository": "https://github.com/androolloyd/headscale-rs",
-    "commit": "e1d719104fc77edb0001932e28c859f81ec7dc78",
-    "scope": "qualified YAML boundary, protobuf OUT_DIR generation and scoped lint fixes; existing golden-parity workflow retains its separately qualified older pin",
-    "yaml": "serde-saphyr =2.0.0; serialize + deserialize only",
-    "cli_tests": 392,
-    "cli_failed": 0,
-    "cli_ignored": 0,
-    "strict_cli_clippy": "passed",
-    "compatibility": "existing snapshots unchanged; quoted true/false also accepted as booleans; U+2028/U+2029 presentation escaped with identical decoded strings; no optional YAML file-inclusion/interpolation features"
+    "commit": "b896380835789e28d46043b8120fdd02125a5ae2",
+    "upstream_go_tag": "v0.29.5",
+    "upstream_go_commit": "0f7d1e536bed9f01dd7161f7637af19bb0908335",
+    "source": "exact signed Git revision used by all Octra Cargo dependencies and CI checkout pins",
+    "qualification": {
+      "path": "out/node-port-final-20261015/headscale-0295-candidate/qualification.json",
+      "sha256": "74be13b1337427586df8331c67c258f8816cea04348a80e68078be8a247d15b1"
+    },
+    "publication_manifest_sha256": "5b78fb44c4c2029fd0ac401954ffac0981968117d2c354cff7c3d6f0df363526",
+    "workspace_tests": 2061,
+    "wire_only_tests": 786,
+    "go_rust_differential_scenarios": 100,
+    "stock_client_rust_rows_passed": 3,
+    "stock_client_go_rows_passed": 2,
+    "stock_client_go_rows_failed": 1,
+    "complete_replacement_parity": false,
+    "open_backlog": [
+      "production PostgreSQL process mutations",
+      "policy-v2 compatibility fixtures",
+      "CLI output/error residuals",
+      "live DNS resolver behavior"
+    ],
+    "go_divergence": "Go v0.29.5 keeps a stale copied node.User after immediate rename; Rust updates its projection",
+    "prior_safe_yaml_qualification": {
+      "commit": "e1d719104fc77edb0001932e28c859f81ec7dc78",
+      "cli_tests": 392,
+      "scope": "qualified YAML boundary, protobuf OUT_DIR generation and scoped lint fixes; existing golden-parity workflow retains its separately qualified older pin"
+    }
   },
   "foundry": {
     "repository": "https://github.com/androolloyd/octra-foundry",
-    "commit": "07a11f6f5d1d0b1f46145bba19616570f85acc2c"
+    "commit": "d5feaad7f14d6a381e2327dfd6738cae8df95b31",
+    "signature": "Good RSA signature verified on host; exact current local/remote main confirmed",
+    "qualification": {
+      "path": "out/node-port-final-20261015/foundry-composed-qualification/qualification.json",
+      "sha256": "76611398d81c2bbb0de9219468e32e10785d8ce9cdfcc218baec4578bc0e1135"
+    },
+    "tests": 358,
+    "targets": 38,
+    "failed": 0,
+    "ignored": 0,
+    "strict_workspace_clippy": "PASS all-targets/all-features",
+    "rust_1_89": "PASS actual workspace/default/all-features/all-target checks; tests ran on1.96",
+    "cargo_lock_sha256": "10c94cf8fb4a8f88ce3933c891a039b8f65b2dc756ab1cf80867def05cd4613f",
+    "scope": "Reviewed local-artifact deployment without compiler RPC and explicit mock test-wallet genesis; no public deployment or chain parity claim"
   },
-  "cargo_lock_sha256": "73e39658a1f9e7281744b64b0f39753c5a61652919b5a5bccda0bb071db25bce",
+  "cargo_lock_sha256": "d898a389c92bd007e66f970aa52426144c11eaa649e15f7a66360c5e10f4fc7d",
   "root_lock_change": {
     "removed": [
       [
@@ -61,7 +94,8 @@
     "existing_versions_changed": 0,
     "existing_dependency_edges_changed": [
       "headscale-cli: serde_yaml replaced by serde-saphyr"
-    ]
+    ],
+    "scope": "Historical safe-YAML dependency delta from the prior Headscale pin; the current lock also pins the signed v0.29.5 Git source."
   },
   "security": {
     "strict_audit": "passed with existing reviewed exclusions unchanged",
@@ -92,5 +126,14 @@
     "all_targets_default_and_all_features": "PASS",
     "compiler": "Rust1.89.0/29483883eed69d5fb4db01964cdf2af4d86e9cb2",
     "scope": "Actual Linux aarch64 current captured source, compile-only; isolated Single/facade candidates excluded."
+  },
+  "security_final_headscale0295": {
+    "at": "2026-10-16",
+    "locked_packages_scanned": 684,
+    "cargo_audit_deny_warnings": "PASS",
+    "cargo_deny_check": "PASS",
+    "audit_log_sha256": "49d50fc10604e169636ffe08191e7480e42780df100f4d7981fc87501cddeb57",
+    "deny_log_sha256": "5028796d91742f87401c8baf0ada0882cf8660307d0f60290e283d8991efbfd1",
+    "lock_sha256": "d898a389c92bd007e66f970aa52426144c11eaa649e15f7a66360c5e10f4fc7d"
   }
 }

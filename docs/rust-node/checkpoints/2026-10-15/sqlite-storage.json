@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "status": "WAL_BACKPORT_ADOPTED_PENDING_COMBINED_RUST_GATE",
+  "crate": "libsqlite3-sys 0.30.1",
+  "original_archive_sha256": "2e99fb7a497b1e3339bc746195567ed8d3e24945ecd636e3619d20b9de9e9149",
+  "upstream_fossil_fixes": [
+    "053bd3930f827156fd67ea4546a36227cffbb6f8bada3b5d1a7cf5f1867ac624",
+    "decb69015457b4f70cf574aeef87d40f9de60b94965f4a915e8d0cd7559ef2ae"
+  ],
+  "amalgamation_changes": [
+    "vendor/libsqlite3-sys/sqlite3/sqlite3.c",
+    "vendor/libsqlite3-sys/sqlcipher/sqlite3.c"
+  ],
+  "implementation_manifest_sha256": "ea1a0f016333174178d5fcc6c78cc5e4ba0a88d63014aaa5f09ffd16467d1dea",
+  "qualification_sha256": "e46084553b63d217f6beb024a81ae6d9296dcb0ea3a6c17bdc2711f3140321a9",
+  "negative_control": "Original bundled SQLite 3.46.0: forced upstream WAL-reset race produced integrity_check failure, exit 3",
+  "positive_control": "Patched copy: same forced race, integrity_check and durable reopen pass, exit 0",
+  "test_hook": "Only temporary test amalgamations contain sqlite3FaultSim(660)",
+  "rust_lock_change": "Only libsqlite3-sys registry source and checksum removed for the exact local path patch; all other resolved packages unchanged",
+  "scope": "Local SQLite checkpoint durability. No consensus, application rule, transaction encoding, schema or public network behavior change.",
+  "limit": "This upstream race is distinct from the separately reproduced SQLite file-descriptor lifetime bug. Combined Rust recovery and public restart gates remain pending."
+}

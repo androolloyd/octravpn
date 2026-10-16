@@ -138,6 +138,48 @@ impl CanonicalAssets {
         })
     }
 
+    /// A captured execution graph can opt into the private application fixture
+    /// only if its exact epoch-zero commitment contains the original opt-in.
+    /// Looking at the current tree would permit a later flag to change history.
+    pub(crate) async fn check_view_graph(
+        &self,
+        graph: &octra_node_protocol::rules::Graph,
+    ) -> Result<(), Error> {
+        if graph.chain_id() != self.identity.chain_id.as_bytes() {
+            return Err(Error::Unavailable("Circle graph chain differs".into()));
+        }
+        let Some(expected) = graph.isolated_application_anchor() else {
+            return Ok(());
+        };
+        let octra_exex::ChainOrigin::Genesis { state_root } = self.identity.origin else {
+            return Err(Error::Unavailable(
+                "Circle fixture requires genesis origin".into(),
+            ));
+        };
+        if hex::encode(state_root.0).as_bytes() != expected {
+            return Err(Error::Unavailable(
+                "Circle fixture genesis anchor differs".into(),
+            ));
+        }
+        let genesis = self.reader.head_for_epoch(0).await.map_err(unavailable)?;
+        if genesis.cursor.sequence.0 != 0 || genesis.cursor.state_root != state_root {
+            return Err(Error::Unavailable(
+                "Circle fixture retained genesis differs".into(),
+            ));
+        }
+        let profile = graph
+            .application_fixture()
+            .ok_or_else(|| Error::Unavailable("Circle fixture profile missing".into()))?;
+        let raw = self
+            .reader
+            .read_at_bounded(&genesis, &[b"meta", profile.metadata_key()], 64 * 1024)
+            .await
+            .map_err(unavailable)?
+            .ok_or_else(|| Error::Unavailable("Circle fixture genesis opt-in missing".into()))?;
+        graph.check_application_opt_in(&raw).map_err(unavailable)?;
+        Ok(())
+    }
+
     fn read(&self, url: &OctUrl) -> Result<Asset, Error> {
         let circle = url.circle_id.as_bytes();
         let key = circles::path_key(url.path.as_bytes());

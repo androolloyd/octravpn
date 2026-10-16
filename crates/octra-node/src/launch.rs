@@ -13,6 +13,7 @@ use ed25519_dalek::SigningKey;
 use octra_browser::application::UnavailableHost;
 use octra_exex::{
     native_history::NativeTransaction, sqlite::SqliteCheckpoints, CommittedEpoch, ExEx,
+    ExtensionStatus,
 };
 use octra_node_protocol::{
     consensus::{
@@ -128,13 +129,41 @@ impl Drop for Stop {
         }
     }
 }
-fn service_stopped(
+pub(crate) fn service_stopped(
     task: Option<std::result::Result<Result<()>, tokio::task::JoinError>>,
 ) -> anyhow::Error {
     match task {
         Some(Ok(Err(error))) => error,
         Some(Err(error)) => error.into(),
         _ => anyhow::anyhow!("node service stopped unexpectedly"),
+    }
+}
+pub(crate) async fn supervise_archive(
+    mut status: watch::Receiver<ExtensionStatus>,
+    mut shutdown: watch::Receiver<bool>,
+) -> Result<()> {
+    loop {
+        if *shutdown.borrow_and_update() {
+            return Ok(());
+        }
+        match status.borrow_and_update().clone() {
+            ExtensionStatus::Running { .. } | ExtensionStatus::Processing { .. } => {}
+            ExtensionStatus::Failed { reason, .. } => {
+                anyhow::bail!("archive ExEx failed: {reason}")
+            }
+            ExtensionStatus::Stopped { .. } => {
+                anyhow::bail!("archive ExEx stopped unexpectedly")
+            }
+        }
+        tokio::select! {
+            biased;
+            change = shutdown.changed() => {
+                if change.is_err() { return Ok(()); }
+            }
+            change = status.changed() => {
+                if change.is_err() { anyhow::bail!("archive ExEx status closed"); }
+            }
+        }
     }
 }
 
@@ -248,8 +277,12 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
         ) => opened?,
         _ = shutdown.wait_for(|stopping| *stopping) => return Ok(()),
     };
-    let node = Arc::new(opened);
+    let node = Arc::new(opened.with_view_graph(execution.graph.clone())?);
     node.register(Archive(services.data.join("exex"))).await?;
+    let archive_status = node
+        .extension_status("devnet-archive")
+        .await
+        .context("archive ExEx status missing")?;
     let head = node.head().await?;
     // The imported certificate authenticates the history floor; never invent
     // genesis or erase retained signing records when opening a snapshot.
@@ -420,6 +453,8 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
         .take()
         .context("compute inbox missing")?;
     let mut tasks = JoinSet::new();
+    let mut archive_guard = tokio::spawn(supervise_archive(archive_status, stop.subscribe()));
+    let mut archive_done = false;
     tasks.spawn(crate::compute::ingress(
         compute.clone(),
         compute_inbox,
@@ -663,11 +698,22 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
         );
         Ok::<_, anyhow::Error>(())
     };
-    let started = tokio::select! {r=startup=>r,_=shutdown.wait_for(|v|*v)=>Ok(())};
+    let started = tokio::select! {
+        r = startup => r,
+        archive = &mut archive_guard => {
+            archive_done = true;
+            Err(service_stopped(Some(archive)))
+        },
+        _ = shutdown.wait_for(|v|*v) => Ok(()),
+    };
     let result = if started.is_err() {
         started
     } else {
         tokio::select! {
+            archive=&mut archive_guard=>{
+                archive_done = true;
+                Err(service_stopped(Some(archive)))
+            },
             result=tasks.join_next()=>Err(service_stopped(result)),
             _=shutdown.wait_for(|v|*v)=>Ok(()),
         }
@@ -675,6 +721,14 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
     stop.send_replace(true);
     swarm.stop();
     node.suspend("node shutting down");
+    if !archive_done
+        && tokio::time::timeout(Duration::from_secs(8), &mut archive_guard)
+            .await
+            .is_err()
+    {
+        archive_guard.abort();
+        let _ = archive_guard.await;
+    }
     let drain = async { while tasks.join_next().await.is_some() {} };
     if tokio::time::timeout(Duration::from_secs(8), drain)
         .await
@@ -690,4 +744,69 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
     node.shutdown().await?;
     computed?;
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use octra_exex::{Cursor, EpochId, Sequence, StateRoot};
+
+    fn cursor() -> Cursor {
+        Cursor {
+            sequence: Sequence(0),
+            epoch: EpochId(0),
+            state_root: StateRoot([0; 32]),
+        }
+    }
+
+    #[tokio::test]
+    async fn archive_failure_ends_service_supervision_even_when_status_precedes_watcher() {
+        for before_watch in [false, true] {
+            let (status, receiver) = watch::channel(ExtensionStatus::Running {
+                checkpoint: cursor(),
+            });
+            let (_stop, shutdown) = watch::channel(false);
+            if before_watch {
+                status.send_replace(ExtensionStatus::Failed {
+                    checkpoint: cursor(),
+                    reason: "archive disk full".into(),
+                });
+                let error = supervise_archive(receiver, shutdown).await.unwrap_err();
+                assert!(error.to_string().contains("archive disk full"));
+            } else {
+                let watcher = tokio::spawn(supervise_archive(receiver, shutdown));
+                status.send_replace(ExtensionStatus::Failed {
+                    checkpoint: cursor(),
+                    reason: "archive disk full".into(),
+                });
+                let error = watcher.await.unwrap().unwrap_err();
+                assert!(error.to_string().contains("archive disk full"));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn archive_monitor_rejects_unexpected_stop_but_honors_node_shutdown() {
+        let (status, receiver) = watch::channel(ExtensionStatus::Stopped {
+            checkpoint: cursor(),
+        });
+        let (_stop, shutdown) = watch::channel(false);
+        assert!(supervise_archive(receiver, shutdown).await.is_err());
+        drop(status);
+
+        let (status, receiver) = watch::channel(ExtensionStatus::Running {
+            checkpoint: cursor(),
+        });
+        let (_stop, shutdown) = watch::channel(false);
+        drop(status);
+        assert!(supervise_archive(receiver, shutdown).await.is_err());
+
+        let (status, receiver) = watch::channel(ExtensionStatus::Running {
+            checkpoint: cursor(),
+        });
+        let (stop, shutdown) = watch::channel(false);
+        stop.send_replace(true);
+        assert!(supervise_archive(receiver, shutdown).await.is_ok());
+        drop(status);
+    }
 }

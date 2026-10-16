@@ -158,6 +158,26 @@ this is omitted. A node reference pin does not establish compiler provenance;
 the compiler binary and supplied patch files are always hashed separately.
 
 
+Our Rust node implements `octra_compileAml` locally. For the current v5 canary,
+prepare the bundle with `--compiler-rpc-url http://127.0.0.1:20801/rpc` and
+`--compiler-binding /absolute/path/to/reviewed-binding.json` in place of `--amlc`.
+The binding identifies the exact binary, successful build, captured public
+sources, launch PID and pinned native compiler fixture. The tooling verifies
+process/listening-port ownership and requires literal loopback HTTP; proxies
+and redirects are disabled. Both contracts must match one complete native
+compiler profile, including the raw result bytes.
+
+Recheck the bundle using `scripts/ceremony/probe-mainnet.py --network devnet
+--network-env PATH --candidate BUNDLE --compiler-rpc-url
+http://127.0.0.1:20801/rpc --compiler-binding BINDING --out FRESH_DIRECTORY`.
+The independently pinned execution RPC remains the deployment target. This
+local compiler check does not establish its current finality or stateful
+execution. The canary runner passes `forge create --compiled-artifact FILE
+--artifact-sha256 SHA256`; that branch validates the reviewed artifact before
+wallet/nonce access and never calls a source compiler. Source and proving
+credentials are not uploaded to the team's compiler endpoint.
+
+
 ## Canary security changes
 
 V5 construction now has nine arguments: five economics, commitment, verification

@@ -25,8 +25,27 @@ services:
       dockerfile: octra/docker/Dockerfile.mock-rpc
     depends_on:
       - builder
+    # Explicit public test wallets only. Funding enables signed transaction,
+    # nonce and balance admission; no mock account is silently invented.
+    command:
+      - --listen
+      - 0.0.0.0:18080
+      - --program-addr
+      - octAiTHXCqX84s2ExQFzZBFsxKwsijVmsmfmZ84LrurdPLB
+      - --fund
+      - oct4XmjKEd9A96KhoMX94zWJmd28dcPisbWGYWtad1dQ9v5=1000000
+      - --fund
+      - oct89dkqqjMw9HTi1pqHbANSNwioHuMhmpTCXapTmfUr1EW=1000000
+      - --fund
+      - octDGAMCcQXJNKo6NdMuyAdAMWjLuy32cMTfexaRcq49SUx=1000000
+      - --fund
+      - octGatHn158giyza6HjzdcMBwE6bm5SY322D3AmFnrpabbT=1000000
+    environment:
+      OCTRA_MOCK_EPOCH_MS: "100"
+    volumes:
+      - ./docker/conf:/fixtures:ro
     ports:
-      - "18080:18080"
+      - "127.0.0.1:18080:18080"
     networks:
       - octravpn
     healthcheck:

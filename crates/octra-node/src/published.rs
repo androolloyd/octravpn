@@ -3,10 +3,20 @@
 use anyhow::Result;
 use axum::Router;
 use octra_browser::Provenance;
-use octra_node_runtime::{canonical::Head, circle_assets::CanonicalAssets, state_batch::Snapshot};
+use octra_node_runtime::{
+    canonical::Head,
+    circle_assets::{CanonicalAssets, RetainedAssets},
+    state_batch::Snapshot,
+};
 use octravpn_node::admission::Revocation;
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 use tokio::sync::watch;
+
+const PUBLICATION_READ_GRACE: Duration = Duration::from_secs(15);
+pub(crate) const PUBLICATION_REASON: &str = "publishing canonical epoch";
 
 /// One immutable, published tree. Application adapters must validate their code
 /// pin and all authorization/funding fields against this same tree.
@@ -42,6 +52,7 @@ pub enum Status {
 
 struct State {
     serving: Option<Arc<Serving>>,
+    publishing_assets: Option<(RetainedAssets, Instant)>,
     reason: String,
     // Identity, rather than a wrapping counter, prevents an old resume from
     // undoing a newer pause while it was awaiting disk or history validation.
@@ -53,6 +64,7 @@ impl Shared {
         Self(
             Mutex::new(State {
                 serving: None,
+                publishing_assets: None,
                 reason: "awaiting catch-up".into(),
                 ticket: Arc::new(()),
             }),
@@ -66,9 +78,48 @@ impl Shared {
             .clone()
             .ok_or_else(|| anyhow::anyhow!("{}", state.reason))
     }
+    /// Public assets belong to an immutable committed root. Keep that root
+    /// readable briefly while its successor is published; never reuse it for
+    /// catch-up, failures, wallets, execution, or VPN admission.
+    pub(crate) fn gateway_view(&self) -> Result<(RetainedAssets, Arc<()>)> {
+        let state = self.0.lock().expect("service state lock");
+        let assets = if let Some(serving) = &state.serving {
+            serving.committed.assets.retained()
+        } else if state.reason == PUBLICATION_REASON {
+            let (assets, captured) = state
+                .publishing_assets
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("{}", state.reason))?;
+            anyhow::ensure!(
+                captured.elapsed() <= PUBLICATION_READ_GRACE,
+                "publication read grace elapsed"
+            );
+            assets.clone()
+        } else {
+            anyhow::bail!("{}", state.reason);
+        };
+        Ok((assets, state.ticket.clone()))
+    }
+    pub(crate) fn gateway_view_still_valid(&self, ticket: &Arc<()>) -> bool {
+        let state = self.0.lock().expect("service state lock");
+        Arc::ptr_eq(ticket, &state.ticket)
+            && (state.serving.is_some()
+                || (state.reason == PUBLICATION_REASON
+                    && state
+                        .publishing_assets
+                        .as_ref()
+                        .is_some_and(|(_, captured)| captured.elapsed() <= PUBLICATION_READ_GRACE)))
+    }
     pub(crate) fn suspend(&self, reason: &str) -> (Arc<()>, bool) {
         let mut state = self.0.lock().expect("service state lock");
         let was_serving = state.serving.take();
+        state.publishing_assets = if reason == PUBLICATION_REASON {
+            was_serving
+                .as_ref()
+                .map(|previous| (previous.committed.assets.retained(), Instant::now()))
+        } else {
+            None
+        };
         if let Some(previous) = &was_serving {
             // Packet checks see revocation before a new snapshot is exposed.
             previous.revocation.revoke();
@@ -84,6 +135,7 @@ impl Shared {
             return false;
         }
         state.serving = Some(Arc::new(serving));
+        state.publishing_assets = None;
         self.1.send_replace(());
         true
     }
@@ -91,6 +143,7 @@ impl Shared {
         let mut state = self.0.lock().expect("service state lock");
         if Arc::ptr_eq(ticket, &state.ticket) {
             state.reason = reason;
+            state.publishing_assets = None;
         }
     }
     /// The lock remains held through the short queue transition. No await,

@@ -74,6 +74,51 @@ pub fn public_key_bft(doc: &Document, params: &Value) -> Vec<u8> {
     raw
 }
 
+/// An authenticated native Single registration request. This grants no storage
+/// authority: the host updates only an existing, temporary Ledger account.
+pub struct PublicKey {
+    address: Vec<u8>,
+    public_key: Vec<u8>,
+}
+impl PublicKey {
+    pub fn address(&self) -> &[u8] {
+        &self.address
+    }
+    pub fn public_key(&self) -> &[u8] {
+        &self.public_key
+    }
+    pub fn parse(doc: &Document, params: &Value) -> Result<Self, Fault> {
+        let address = rpc::require_address(doc, params, 0, "address")?;
+        let public_key = rpc::require_string(doc, params, 1, "public_key")?;
+        let signature = rpc::require_string(doc, params, 2, "signature")?;
+        // Native checks both decoded lengths before address correspondence or
+        // curve/signature validity; preserve that observable error ordering.
+        if !native_base64::decode(public_key).is_ok_and(|raw| raw.len() == 32)
+            || !native_base64::decode(signature).is_ok_and(|raw| raw.len() == 64)
+        {
+            return Err(Fault::new(-32000, b"invalid key or signature length"));
+        }
+        let message = [b"register_pubkey:".as_slice(), address].concat();
+        verify_address_signature(
+            address,
+            public_key,
+            signature,
+            &message,
+            b"public key does not match address",
+        )?;
+        Ok(Self {
+            address: address.to_vec(),
+            public_key: public_key.to_vec(),
+        })
+    }
+    pub fn response(&self) -> Vec<u8> {
+        let mut raw = b"{\"ok\":true,\"address\":".to_vec();
+        json_string(&mut raw, &self.address);
+        raw.push(b'}');
+        raw
+    }
+}
+
 pub struct Pvac {
     pub address: Vec<u8>,
     pub incoming: Vec<u8>,

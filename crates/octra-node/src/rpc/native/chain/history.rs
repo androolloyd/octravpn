@@ -217,18 +217,9 @@ async fn rejected_as(
                     let matched = if let Some(matched) = saved {
                         matched
                     } else {
-                        let record = host
-                            .finality
-                            .record(row.head.cursor.sequence)
-                            .await
-                            .map_err(unavailable)?;
-                        if record.epoch_id != row.head.cursor.epoch.0 as i64
-                            || record.state_root != row.head.cursor.state_root.0
-                        {
-                            return Err(unavailable("rejection finality head differs"));
-                        }
+                        let record = host.node.epoch_data(&row.head).await.map_err(unavailable)?;
                         let partition = octra_node_protocol::transaction_outcome::split(
-                            &record.receipts_json,
+                            &record.outcomes,
                             false,
                         )
                         .map_err(unavailable)?;
@@ -472,9 +463,10 @@ pub(super) async fn read(
     let head = captured.head().clone();
     if method == b"octra_account" {
         let account_address = address.clone().expect("account address");
+        let node = host.node.clone();
         let account = host
             .executor
-            .read(move || load(&captured, &account_address))
+            .read(move || load(node.as_ref(), &captured, &account_address))
             .await?;
         let limit = rpc::param_int(doc, params, 1).map_or(10, |limit| limit.clamp(0, 50) as usize);
         let query = HistoryQuery {

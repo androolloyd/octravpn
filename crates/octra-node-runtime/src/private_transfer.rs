@@ -233,6 +233,7 @@ enum Operation {
     },
 }
 pub struct Verified {
+    authorized: bool,
     transaction: [u8; 32],
     current: Vec<u8>,
     next: Vec<u8>,
@@ -272,6 +273,9 @@ impl Verified {
         tx: &Transaction,
         epoch: i64,
     ) -> Result<()> {
+        if !self.authorized {
+            return Err(operational("unverified private transfer preparation"));
+        }
         if tx.hash().map_err(operational)? != self.transaction
             || current(ledger, tx)? != self.current
         {
@@ -356,12 +360,24 @@ pub(crate) fn resolve<B: AsRef<[u8]>>(
     evidence: Evidence<'_>,
     key: impl FnOnce() -> Result<Option<B>>,
 ) -> Result<Verified> {
+    resolve_inner(ledger, state, tx, profile, evidence, key, false, None)
+}
+fn resolve_inner<B: AsRef<[u8]>>(
+    ledger: &Ledger,
+    state: &StateBatch,
+    tx: &Transaction,
+    profile: Profile,
+    evidence: Evidence<'_>,
+    key: impl FnOnce() -> Result<Option<B>>,
+    prepared: bool,
+    cached: Option<&crate::single_private::CacheBinding>,
+) -> Result<Verified> {
     if profile.strict && matches!(evidence, Evidence::Certified(_)) {
         return Err(operational(
             "active private rules require proof verification",
         ));
     }
-    let verify = matches!(evidence, Evidence::Proof);
+    let verify = matches!(evidence, Evidence::Proof) && !prepared;
     let (operation, source, next) = match tx.op_type {
         OpType::Stealth => {
             let send = Send::parse(tx, profile.fields)?;
@@ -402,8 +418,8 @@ pub(crate) fn resolve<B: AsRef<[u8]>>(
                 b"sender encrypted balance update: ",
                 None,
             )?;
-            if verify {
-                if !check(
+            if (verify || prepared)
+                && !check(
                     crypto::verify_commitment(
                         &public,
                         &send.delta,
@@ -413,13 +429,15 @@ pub(crate) fn resolve<B: AsRef<[u8]>>(
                     "bad_commitment",
                     b"",
                     None,
-                )? {
-                    return Err(failure(
-                        "bad_commitment",
-                        "delta cipher commitment verification failed",
-                        None,
-                    ));
-                }
+                )?
+            {
+                return Err(failure(
+                    "bad_commitment",
+                    "delta cipher commitment verification failed",
+                    None,
+                ));
+            }
+            if verify {
                 // Native evaluates both ranges before choosing the first false
                 // result; an unavailable second proof still aborts the attempt.
                 let range = |cipher: &[u8], proof: &[u8], prefix: &[u8]| {
@@ -433,8 +451,20 @@ pub(crate) fn resolve<B: AsRef<[u8]>>(
                         Some(prefix),
                     )
                 };
-                let delta_ok = range(&send.delta, &send.range_delta, b"stealth delta range: ")?;
-                let balance_ok = range(&next, &send.range_balance, b"stealth balance range: ")?;
+                let (delta_ok, balance_ok) = match cached.and_then(|binding| {
+                    binding.results(
+                        tx,
+                        profile,
+                        source,
+                        blob.as_ref().map(AsRef::as_ref).unwrap_or_default(),
+                    )
+                }) {
+                    Some(results) => results,
+                    None => (
+                        range(&send.delta, &send.range_delta, b"stealth delta range: ")?,
+                        range(&next, &send.range_balance, b"stealth balance range: ")?,
+                    ),
+                };
                 if !delta_ok {
                     return Err(failure(
                         "bad_range_proof_delta",
@@ -578,6 +608,7 @@ pub(crate) fn resolve<B: AsRef<[u8]>>(
         _ => return Err(operational("private transfer route mismatch")),
     };
     let plan = Verified {
+        authorized: !prepared,
         transaction: tx.hash().map_err(operational)?,
         current: source,
         next,
@@ -593,4 +624,143 @@ pub(crate) fn resolve<B: AsRef<[u8]>>(
         }
     }
     Ok(plan)
+}
+
+/// Parsed, key-bound stealth balance preparation. Its inner plan cannot apply
+/// until range/commitment/binding proofs are actually verified.
+pub(crate) struct PreparedStealth {
+    inner: Verified,
+}
+impl PreparedStealth {
+    pub(crate) fn current_cipher(&self) -> &[u8] {
+        self.inner.current_cipher()
+    }
+}
+pub(crate) fn prepare_stealth<B: AsRef<[u8]>>(
+    ledger: &Ledger,
+    state: &StateBatch,
+    tx: &Transaction,
+    profile: Profile,
+    key: impl FnOnce() -> Result<Option<B>>,
+) -> Result<PreparedStealth> {
+    if tx.op_type != OpType::Stealth {
+        return Err(operational("stealth preparation route mismatch"));
+    }
+    Ok(PreparedStealth {
+        inner: resolve_inner(ledger, state, tx, profile, Evidence::Proof, key, true, None)?,
+    })
+}
+/// Range-only speculative work, as Tx_view.preverify_stealth_ranges. This does
+/// not authorize execution: commitment and send binding are checked at apply.
+struct SingleRanges {
+    source: Vec<u8>,
+    public: PublicKey,
+    send: Send,
+    next: Vec<u8>,
+    profile: Profile,
+}
+impl SingleRanges {
+    fn prepare(ledger: &Ledger, tx: &Transaction, profile: Profile, blob: &[u8]) -> Result<Self> {
+        let send = Send::parse(tx, profile.fields)?;
+        if !wrapped(&send.delta, false)? {
+            return Err(failure(
+                "invalid_stealth_data",
+                "stealth delta cipher shape invalid",
+                None,
+            ));
+        }
+        let source = current(ledger, tx)?;
+        let public = load_public(Some(blob), false)?;
+        let delta = check(
+            crypto::decode_cipher(&send.delta, false, profile.strict),
+            "bad_delta_cipher",
+            b"",
+            None,
+        )?;
+        let next = check(
+            crypto::balance(
+                &public,
+                source,
+                &delta,
+                true,
+                profile.strict,
+                profile.result,
+            ),
+            "encrypted_balance_update_failed",
+            b"",
+            None,
+        )?;
+
+        Ok(Self {
+            source: source.to_vec(),
+            public,
+            send,
+            next,
+            profile,
+        })
+    }
+    fn check(&self, balance: bool) -> Result<bool> {
+        if self.public.supports_alias_rejection() {
+            let (cipher, proof) = if balance {
+                (&self.next, &self.send.range_balance)
+            } else {
+                (&self.send.delta, &self.send.range_delta)
+            };
+            check(
+                crypto::verify_range(
+                    &self.public,
+                    cipher,
+                    proof,
+                    self.profile.strict,
+                    self.profile.math,
+                ),
+                "bad_range_proof",
+                b"",
+                None,
+            )
+        } else {
+            Ok(false)
+        }
+    }
+}
+pub(crate) fn single_ranges(
+    ledger: &Ledger,
+    tx: &Transaction,
+    profile: Profile,
+    blob: &[u8],
+) -> Result<(Vec<u8>, bool, bool)> {
+    let ranges = SingleRanges::prepare(ledger, tx, profile, blob)?;
+    let delta = ranges.check(false)?;
+    let balance = ranges.check(true)?;
+    Ok((ranges.source, delta, balance))
+}
+/// A trusted helper's one native proof phase. No externally supplied verdict.
+pub(crate) fn single_range(
+    ledger: &Ledger,
+    tx: &Transaction,
+    profile: Profile,
+    blob: &[u8],
+    balance: bool,
+) -> Result<bool> {
+    SingleRanges::prepare(ledger, tx, profile, blob)?.check(balance)
+}
+
+pub(crate) fn verify_single<B: AsRef<[u8]>>(
+    ledger: &Ledger,
+    state: &StateBatch,
+    tx: &Transaction,
+    profile: Profile,
+    cached: Option<&crate::single_private::CacheBinding>,
+    key: impl FnOnce() -> Result<Option<B>>,
+) -> Result<Verified> {
+    resolve_inner(
+        ledger,
+        state,
+        tx,
+        profile,
+        Evidence::Proof,
+        key,
+        false,
+        cached,
+    )
 }

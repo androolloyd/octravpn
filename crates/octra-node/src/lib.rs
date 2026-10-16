@@ -95,6 +95,7 @@ pub struct Node<A: Host> {
     host: Arc<A>,
     publisher: Arc<Publisher<Authority<A>>>,
     runtime: CircleRuntime,
+    view_graph: octra_node_protocol::rules::Graph,
     wallet: Arc<dyn ApplicationHost>,
     operations: Arc<AsyncMutex<()>>,
     syncing: AsyncMutex<()>,
@@ -164,11 +165,16 @@ impl<A: Host> Node<A> {
         if let Some(digest) = retained_legacy {
             legacy.restore_parent(&legacy_head, &digest)?;
         }
+        let view_graph = octra_node_protocol::rules::Graph::new(
+            store.chain().chain_id.as_bytes().to_vec(),
+            None,
+        );
         Ok(Self {
             store,
             host,
             publisher,
             runtime,
+            view_graph,
             wallet,
             operations: Arc::new(AsyncMutex::new(())),
             syncing: AsyncMutex::new(()),
@@ -177,6 +183,19 @@ impl<A: Host> Node<A> {
             legacy: Arc::new(Mutex::new(legacy)),
             writer_lease: Arc::new(writer),
         })
+    }
+
+    /// Bind reads to the captured transaction-execution graph. Authentication
+    /// occurs when each immutable view is built, after catch-up can supply its
+    /// anchors. Changing configuration first revokes any prior service view.
+    pub fn with_view_graph(mut self, graph: octra_node_protocol::rules::Graph) -> Result<Self> {
+        anyhow::ensure!(
+            graph.chain_id() == self.store.chain().chain_id.as_bytes(),
+            "Circle graph chain differs"
+        );
+        self.shared.suspend("captured Circle profile changed");
+        self.view_graph = graph;
+        Ok(self)
     }
 
     pub(crate) fn published(&self) -> Published {
@@ -240,8 +259,12 @@ impl<A: Host> Node<A> {
             "canonical writer changed outside the node"
         );
         self.host.check_views(&head).map_err(anyhow::Error::msg)?;
-        let rules =
-            octra_node_runtime::circle_view::canonical(&assets, self.publisher.as_ref()).await?;
+        let rules = octra_node_runtime::circle_view::canonical_with_graph(
+            &assets,
+            &self.view_graph,
+            self.publisher.as_ref(),
+        )
+        .await?;
         let revocation = Revocation::default();
         let application = CanonicalApplications::new(assets.clone(), self.runtime.clone(), rules)
             .with_wallet(Arc::new(Wallet {
@@ -316,13 +339,17 @@ impl<A: Host> Node<A> {
             legacy: self.legacy.clone(),
             armed: true,
         };
-        let (ticket, was_serving) = self.shared.suspend("publishing canonical epoch");
-        prepared
+        let (ticket, was_serving) = self.shared.suspend(published::PUBLICATION_REASON);
+        if let Err(error) = prepared
             .retain_epoch_legacy_digest(legacy_digest.as_deref())
-            .await?;
+            .await
+        {
+            self.shared.fail(&ticket, error.to_string());
+            return Err(error.into());
+        }
         let writer = self.writer_lease.clone();
         let (completed, completion) = tokio::sync::oneshot::channel();
-        std::thread::Builder::new()
+        if let Err(error) = std::thread::Builder::new()
             .name("octra-canonical-commit".into())
             .spawn(move || {
                 // Tokio shutdown aborts ordinary owned async tasks. Retain the
@@ -340,11 +367,22 @@ impl<A: Host> Node<A> {
                     })
                 })();
                 let _ = completed.send(outcome);
-            })?;
-        let (head, _operation) = completion
+            })
+        {
+            self.shared.fail(&ticket, error.to_string());
+            return Err(error.into());
+        }
+        let outcome = completion
             .await
-            .context("canonical commit worker stopped; resume before serving")?
-            .context("canonical commit; resume before serving")?;
+            .context("canonical commit worker stopped; resume before serving")
+            .and_then(|completed| completed.context("canonical commit; resume before serving"));
+        let (head, _operation) = match outcome {
+            Ok(completed) => completed,
+            Err(error) => {
+                self.shared.fail(&ticket, error.to_string());
+                return Err(error);
+            }
+        };
         // The notification follows the durable state/history/outbox transaction.
         self.exex.lock().await.notify_commit();
         if was_serving {
@@ -495,3 +533,5 @@ mod tests {
         ));
     }
 }
+
+pub mod single;

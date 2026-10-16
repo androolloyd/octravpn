@@ -286,6 +286,15 @@ impl<A: ValidatorHistory> Publisher<A> {
     /// Audit a fixed published prefix while another process may append. The
     /// canonical store already checks state/history/outbox commitments on open.
     pub async fn audit(&self) -> Result<()> {
+        if self
+            .store
+            .chain()
+            .chain_id
+            .starts_with("octra-single-local-")
+            || self.store.is_single().await?
+        {
+            return Err(invalid("local Single store cannot provide BFT finality"));
+        }
         let end = self.store.head().await?;
         for number in 1..=end.cursor.sequence.0 {
             self.record(Sequence(number)).await?;

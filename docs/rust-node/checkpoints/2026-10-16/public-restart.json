@@ -1,0 +1,26 @@
+{
+  "date": "2026-10-16",
+  "status": "PASS_RETAINED_NONVOTING_RESTART_SERVING_PENDING",
+  "network": "Octra public devnet",
+  "chain_id": "octra-devnet-9871-cluster",
+  "before_epoch": 1702159,
+  "observed_after_epoch": 1702211,
+  "graceful_stop_seconds": 2.362,
+  "binary_sha256": "b12ee21291ff117345e86a182ef52a4e3f28ca890047c0a18eb77be0ab012757",
+  "config_sha256": "9eac462c782eda87e954792e7efbc0faf47d71bdb17d3be09ee0bded5fcd2005",
+  "mode": "retained authenticated state and identity; nonvoting",
+  "retained_canary_exex_archives_unchanged": 4,
+  "tailscale": {
+    "hostname": "andrews-macbook-pro.tailcd562a.ts.net",
+    "https_port": 443,
+    "backend": "http://127.0.0.1:20805",
+    "circle_path": "/circles/<case-sensitive-Circle-address>/index.html",
+    "direct_https_check": "HTTP/2 503 Node is synchronizing",
+    "external_tailnet_device_check": "not_run"
+  },
+  "evidence": {
+    "local_restart_record": "out/node-port-final-20261015/public-devnet-final-candidate/retained-restart-current.json",
+    "local_log": "out/node-port-final-20261015/public-devnet-final-candidate/retained-observer-current.log"
+  },
+  "limitation": "The official state-sync exporter was briefly behind retained canonical history. Peer recovery resumed and the final binary advanced past the pre-restart head, but public serving and HTTPS Circle content were not qualified. VPN remains unconfigured: the zero-escrow RC did not deposit the required operator stake."
+}

@@ -82,7 +82,7 @@ async fn dispatch(
     State(state): State<Arc<GatewayState>>,
     request: axum::extract::Request,
 ) -> axum::response::Response {
-    let Ok(serving) = state.shared.current() else {
+    let Ok((current, ticket)) = state.shared.gateway_view() else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             [("cache-control", "no-store")],
@@ -92,8 +92,6 @@ async fn dispatch(
     };
     // Retain only authenticated read capabilities, never historical whole trees
     // or wallet/execution hosts. A client-supplied scope cannot create authority.
-    let current = serving.committed.assets.retained();
-    drop(serving);
     let selected = {
         let Ok(mut retained) = state.retained.lock() else {
             return StatusCode::SERVICE_UNAVAILABLE.into_response();
@@ -122,7 +120,7 @@ async fn dispatch(
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     match gateway.router().oneshot(request).await {
-        Ok(response) if state.shared.current().is_ok() => response,
+        Ok(response) if state.shared.gateway_view_still_valid(&ticket) => response,
         Ok(_) => (
             StatusCode::SERVICE_UNAVAILABLE,
             [("cache-control", "no-store")],

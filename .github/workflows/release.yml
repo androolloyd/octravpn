@@ -77,13 +77,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: androolloyd/octra-foundry
-          ref: 07a11f6f5d1d0b1f46145bba19616570f85acc2c
+          ref: d5feaad7f14d6a381e2327dfd6738cae8df95b31
           path: octra-foundry
       - name: Checkout headscale-rs
         uses: actions/checkout@v4
         with:
           repository: androolloyd/headscale-rs
-          ref: e1d719104fc77edb0001932e28c859f81ec7dc78
+          ref: b896380835789e28d46043b8120fdd02125a5ae2
           path: headscale-rs
 
       - name: Install Rust toolchain

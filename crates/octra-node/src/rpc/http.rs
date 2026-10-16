@@ -424,8 +424,16 @@ async fn manifest_response(host: &Arc<Context>) -> Response {
     response
 }
 async fn readiness(host: &Arc<Context>) -> Response {
-    match host
-        .finality
+    let Some(finality) = &host.finality else {
+        return json_response(
+            StatusCode::OK,
+            json::object(&[
+                ("version", json::string(b"octra-observer-ready")),
+                ("status", json::string(b"not_ready")),
+            ]),
+        );
+    };
+    match finality
         .readiness(&host.http.data, &host.http.public_key)
         .await
     {
@@ -542,6 +550,11 @@ async fn read_range(
         }
     };
     check()?;
+    let Some(finality) = &host.finality else {
+        let raw = wire::range_response(Some(&head(&captured)), &query, &wire::RangeResult::Missing)
+            .map_err(|e| range::Error::Invalid(e.to_string()))?;
+        return Encoded::encode(raw).map_err(|e| range::Error::Invalid(e.to_string()));
+    };
     let mut records = vec![];
     let mut next = None;
     let mut bytes = 0usize;
@@ -564,8 +577,7 @@ async fn read_range(
                 break;
             }
         };
-        let record = host
-            .finality
+        let record = finality
             .record_bounded(
                 retained.cursor.sequence,
                 octra_node_protocol::state_sync::range_part::FULL_MAX,

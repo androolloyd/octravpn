@@ -1,0 +1,133 @@
+{
+  "at": "2026-10-16T01:03:48.869117+00:00",
+  "compiler_endpoint": "http://127.0.0.1:20801/rpc",
+  "implementation": "Rust octra-node actual HTTP/RPC compiler on public-devnet observer",
+  "binary_sha256": "6c83c21d8d342ae59786ae8804ea2a8c1417d705aaba20aabbb2adef8a8b5d89",
+  "upstream_pin": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "team_RPC_source_uploads": 0,
+  "source": "Verified unsigned candidate bundle",
+  "results": [
+    {
+      "source": "main-v5.aml",
+      "source_sha256": "586ba42e520f29729329f945556fece6dfcf26c489d9a8a8267db664b1fc3d1a",
+      "http_status": "200",
+      "transport_exit": 0,
+      "response_sha256": "defc3fe2c73ce5ff8683c155afaa18f484426a6dc7f3111255042e61774f1fc5",
+      "error": null,
+      "bytecode_sha256": "7334e6e8b25e901a50a57dd9166d2231402d9cf30c7b000e0d6333801855998e",
+      "matches_native_package_bytecode": false,
+      "full_native_rpc_matches": [
+        {
+          "syntax": "source",
+          "loops": true,
+          "native_rpc_sha256": "554bb835fb800224bc09536cb6d226fa4875ec3c78e71741e669d32b1d4d1584"
+        }
+      ],
+      "verification_errors": 0,
+      "certificate_source_bound": true,
+      "certificate_bytecode_bound": true,
+      "raw_native_result_bytes_exact_in_RPC_envelope": [
+        {
+          "syntax": "source",
+          "loops": true,
+          "native_rpc_sha256": "554bb835fb800224bc09536cb6d226fa4875ec3c78e71741e669d32b1d4d1584"
+        }
+      ]
+    },
+    {
+      "source": "private-admin-factory.aml",
+      "source_sha256": "acd48e25f2a0798c7eb4f3caa9ad73263faa99e15d3dd0aab92b7e0ae389545b",
+      "http_status": "200",
+      "transport_exit": 0,
+      "response_sha256": "fb6fc03ded8c9bffec63f3f55dfabb26a9bf38ec6ca3c5bf3633cae888f15ce5",
+      "error": null,
+      "bytecode_sha256": "15e30e37c7586475e9df603840d3a2be5ea303d8a1b5be4990dcdb8b50f5560a",
+      "matches_native_package_bytecode": true,
+      "full_native_rpc_matches": [
+        {
+          "syntax": "forms",
+          "loops": false,
+          "native_rpc_sha256": "2639a8d6e137078f4a8d8371a0707ac51d4c74fff599ec5892c0002d96087cbc"
+        },
+        {
+          "syntax": "forms",
+          "loops": true,
+          "native_rpc_sha256": "2639a8d6e137078f4a8d8371a0707ac51d4c74fff599ec5892c0002d96087cbc"
+        },
+        {
+          "syntax": "source",
+          "loops": false,
+          "native_rpc_sha256": "2639a8d6e137078f4a8d8371a0707ac51d4c74fff599ec5892c0002d96087cbc"
+        },
+        {
+          "syntax": "source",
+          "loops": true,
+          "native_rpc_sha256": "2639a8d6e137078f4a8d8371a0707ac51d4c74fff599ec5892c0002d96087cbc"
+        }
+      ],
+      "verification_errors": 0,
+      "certificate_source_bound": true,
+      "certificate_bytecode_bound": true,
+      "raw_native_result_bytes_exact_in_RPC_envelope": [
+        {
+          "syntax": "forms",
+          "loops": false,
+          "native_rpc_sha256": "2639a8d6e137078f4a8d8371a0707ac51d4c74fff599ec5892c0002d96087cbc"
+        },
+        {
+          "syntax": "forms",
+          "loops": true,
+          "native_rpc_sha256": "2639a8d6e137078f4a8d8371a0707ac51d4c74fff599ec5892c0002d96087cbc"
+        },
+        {
+          "syntax": "source",
+          "loops": false,
+          "native_rpc_sha256": "2639a8d6e137078f4a8d8371a0707ac51d4c74fff599ec5892c0002d96087cbc"
+        },
+        {
+          "syntax": "source",
+          "loops": true,
+          "native_rpc_sha256": "2639a8d6e137078f4a8d8371a0707ac51d4c74fff599ec5892c0002d96087cbc"
+        }
+      ]
+    }
+  ],
+  "scope": "Actual local Rust RPC compilation compared to native OCTB and complete reference compiler result. Does not qualify public transaction execution, current finality or launch readiness.",
+  "exact_result_bytes_compared": true,
+  "metadata_capture_at": "2026-10-16T01:03:48.869117+00:00",
+  "schema": 1,
+  "status": "PASS_ACTUAL_LOCAL_RUST_RPC_NATIVE_BYTE_PARITY",
+  "source_disclosed_to_team_RPC": false,
+  "limits": [
+    "Both actual local RPC compiled-result byte strings match pinned pristine native fixtures; no universal compiler theorem claimed",
+    "The original offline wrapper artifact above is preserved as a wrong-profile diagnostic. The current unsigned local Rust candidate uses Source+loops=true and matches both complete native results.",
+    "Compilation does not establish public stateful contract execution, full public sync or production proving setup"
+  ],
+  "qualification": {
+    "path": "out/node-port-final-20261015/local-rust-compiler-preflight-1/report-final.json",
+    "sha256": "fcec61bf9af5fdb9f79a8297665b5e11d32b8fa479b7e8e81ac08a856e42069c"
+  },
+  "current_local_tooling": {
+    "status": "PASS_ADOPTED_LOCAL_COMPILER_AND_REVIEWED_ARTIFACT_PATH",
+    "qualification": {
+      "path": "out/node-port-final-20261015/local-compiler-tooling-candidate/qualification.json",
+      "sha256": "729ae0414c6edf5cfc1f68748464d72f557da196c572f14a49d2dc3ad7b82c41"
+    },
+    "parent_adoption": {
+      "path": "out/node-port-final-20261015/local-compiler-tooling-candidate/parent-root-adoption.json",
+      "sha256": "84dc1c63821292722767a28dd9a7740d0fd6c860beda1fc57677bb8761153c6d"
+    },
+    "hermetic_controls": 117,
+    "foundry_cli_tests": 67,
+    "unsigned_candidate_id": "70a7bfda6d7a0621d4ede5e64140ce3adc972a273c3d4adb76211804906c393d",
+    "native_profiles": [
+      {
+        "syntax": "source",
+        "loops": true
+      }
+    ],
+    "source_uploads_to_team_RPC": 0,
+    "funds_spent": 0,
+    "public_execution_qualified": false
+  }
+}

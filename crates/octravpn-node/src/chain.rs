@@ -24,11 +24,8 @@ pub(crate) struct ChainCtx {
     pub program_addr: Address,
     pub validator_addr: Address,
     pub wallet: KeyPair,
-    /// v2 tx-envelope chain-id binding (P1-5b). The numeric chain id
-    /// from `cfg.chain.chain_id` is stringified into the envelope's
-    /// `chain_id` field at sign time, so a tx signed for one chain
-    /// cannot be replayed on another. Empty/None ⇒ v1 (wallet-compat)
-    /// signing.
+    /// Native Octra transactions have no chain-id signing field. A configured
+    /// binding is refused rather than implying unsupported replay protection.
     pub chain_id: String,
 }
 
@@ -267,7 +264,7 @@ impl ChainCtx {
     }
 
     /// Sign a constructed call payload with the wallet key.
-    pub(crate) fn sign_call(&self, mut call: Value) -> Result<Value> {
+    pub(crate) fn sign_call(&self, call: Value) -> Result<Value> {
         // Capture the method name BEFORE signing: `tx::sign_call`
         // translates the legacy `kind:contract_call,method:..` shape
         // into the OctraTx wire envelope, which uses `encrypted_data`
@@ -277,17 +274,81 @@ impl ChainCtx {
             .get("method")
             .and_then(serde_json::Value::as_str)
             .map(str::to_string);
-        // v2 chain-id binding (P1-5b). Attach `chain_id` to the
-        // canonical pre-sign object so the signature commits to the
-        // network identifier. Empty string ⇒ skip (v1 wallet-compat).
-        if !self.chain_id.is_empty() {
-            if let Some(obj) = call.as_object_mut() {
-                obj.entry("chain_id")
-                    .or_insert_with(|| json!(self.chain_id.clone()));
-            }
-        }
-        let signed = octravpn_core::tx::sign_call(&self.wallet, call)?;
+        anyhow::ensure!(
+            self.chain_id.is_empty(),
+            "native Octra signing does not support chain_id; unset the transaction binding"
+        );
+        let signed = octravpn_core::tx_signer::sign_live_call(&self.wallet, call)
+            .map_err(anyhow::Error::msg)?;
         info!(method = method.as_deref().unwrap_or("?"), "signed tx");
         Ok(signed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    fn verify_native(ctx: &ChainCtx, signed: &Value) {
+        let native = octravpn_core::tx_signer::canonical_tx_from_call(signed).unwrap();
+        let signature = STANDARD
+            .decode(signed["signature"].as_str().unwrap())
+            .unwrap();
+        octravpn_core::sig::verify(
+            &ctx.wallet.public,
+            native.signing_preimage().as_bytes(),
+            &octravpn_core::sig::Signature(signature.try_into().unwrap()),
+        )
+        .unwrap();
+    }
+
+    fn context() -> ChainCtx {
+        let wallet = KeyPair::from_secret_bytes(&[17; 32]);
+        let address = Address::from_pubkey(&wallet.public.0);
+        ChainCtx {
+            rpc: RpcClient::new("http://127.0.0.1:1/rpc"),
+            program_addr: address.clone(),
+            validator_addr: address,
+            wallet,
+            chain_id: String::new(),
+        }
+    }
+
+    #[test]
+    fn legacy_calls_sign_a_current_native_timestamp_and_preserve_explicit_time() {
+        let ctx = context();
+        let call = ctx.build_bond_call(100, 1000, 1);
+        let start = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        let signed = ctx.sign_call(call.clone()).unwrap();
+        let end = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        let timestamp = signed["timestamp"].as_f64().unwrap();
+        assert!(timestamp >= start && timestamp <= end);
+        // Check the signature over the canonical wire preimage, including the
+        // integral timestamp representation; Compose also submits it over HTTP.
+        verify_native(&ctx, &signed);
+        for timestamp in [1_755_446_400.0_f64, 1_755_446_400.5] {
+            let mut explicit = call.clone();
+            explicit["timestamp"] = json!(timestamp);
+            let signed = ctx.sign_call(explicit).unwrap();
+            assert_eq!(
+                signed["timestamp"].as_f64().unwrap().to_bits(),
+                timestamp.to_bits()
+            );
+            verify_native(&ctx, &signed);
+        }
+    }
+
+    #[test]
+    fn unsupported_transaction_chain_binding_is_refused() {
+        let mut ctx = context();
+        ctx.chain_id = "unsupported-binding".into();
+        assert!(ctx.sign_call(ctx.build_bond_call(100, 1000, 1)).is_err());
     }
 }

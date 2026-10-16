@@ -69,7 +69,7 @@ conflicting routes, then publish the gateway privately:
 ```sh
 python3 scripts/devnet/native.py stop
 python3 scripts/devnet/native.py start
-tailscale serve --bg --https=443 http://127.0.0.1:19875
+tailscale serve --bg --yes http://127.0.0.1:19875
 tailscale serve status
 ```
 
@@ -82,13 +82,15 @@ The gateway serves published public resources. Sealed resources and resources
 requiring local approval remain denied. JSON/binary bodies preserve their bytes;
 HTML uses the existing bounded, script-free renderer. Links resolve automatically,
 and subresource URLs carry the captured snapshot. Responses include
-`X-Octra-Chain`, `X-Octra-Epoch` and `X-Octra-State-Root`. During synchronization,
-requests return 503; stale snapshot resources fail rather than mix roots.
+`X-Octra-Chain`, `X-Octra-Epoch` and `X-Octra-State-Root`. During canonical
+publication, the gateway may serve the last verified public asset view for at
+most 15 seconds. Catch-up and errors return 503; stale snapshot resources fail
+rather than mix roots.
 
 An HTTPS gateway backed by this local launcher still serves the isolated local
-chain. Tailscale connectivity does not join Octra's public devnet. The new
-snapshot importer and public-network launcher described below have local tests;
-the official public snapshot import/join remains a separate unfinished gate.
+chain. Tailscale connectivity does not join Octra's public devnet. The
+public-network launcher below has a separate authenticated snapshot and observer
+state; its gateway must be configured and qualified independently.
 
 ## Public-network startup (public qualification pending)
 
@@ -116,11 +118,28 @@ membership, readiness and serving admission. Conflicting registered keys fail
 startup. The RPC, browser bridge and control service
 remain on loopback; the HTTPS gateway has its own bind and Host policy.
 
-These commands are not evidence of a successful public-devnet join. The official
-snapshot has authenticated against the pinned network authority, but download,
-import, live catch-up and public restart qualification have not completed. The
-isolated paid-node qualification is recorded separately in the
-[native VPN checkpoint](checkpoints/2026-10-15/native-vpn.json).
+The official public-devnet snapshot completed authenticated download and import
+against the pinned network authority. A separate observer has committed a
+bounded live window and restarted with retained history. It remains nonvoting
+and advances only authenticated canonical history. The
+[final retained-state restart](checkpoints/2026-10-16/public-restart.json)
+resumed the same nonvoting identity and advanced past its pre-restart head.
+Complete catch-up and stable gateway serving remain qualification gates. The
+host's Tailscale Serve now proxies private HTTPS port 443 to the public
+observer's loopback gateway at `127.0.0.1:20805`. The
+[public Circle HTTPS canary](checkpoints/2026-10-16/public-circle-https.json)
+returned its rendered page over TLS after both public transactions appeared in
+the observer's canonical ExEx outbox. Later requests returned 503 during
+catch-up. The final gateway-guard binary has advanced past its pre-restart
+head, but its sampled HTTPS requests also returned 503 during authenticated
+catch-up (24 attempts over two minutes). Stable availability, final-binary
+HTTP 200, and external-device navigation have not passed.
+The [zero-escrow public devnet RC](checkpoints/2026-10-16/devnet-canary.json)
+deployed the factory and VPN child, exercised private pause, replay rejection
+and unpause, and was observed again in our Rust node's canonical ExEx history.
+It deposited no operator stake or escrow, so it does not activate a paid VPN
+service. The isolated paid-node qualification is recorded separately in the
+[combined native VPN checkpoint](checkpoints/2026-10-16/combined-native-vpn.json).
 
 Stop and restart without deleting state:
 
@@ -172,7 +191,7 @@ publication until explicit recovery.
 ## Qualification boundary
 
 The running isolated devnet and each captured qualification image are different
-artifacts. The [2026-10-15 status](status.md) links the combined paid VPN/node
+artifacts. The [current status](status.md) links the combined paid VPN/node
 and formal checkpoints and records the remaining public and production gates.
 The final local node release run passed 40 tests; the broader runtime and final
 Chromium gates have independent results. Neither source inventories nor those

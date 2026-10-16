@@ -368,3 +368,5 @@ mod tests {
         run_worker(worker, || Ok(())).await.unwrap();
     }
 }
+
+pub mod single;

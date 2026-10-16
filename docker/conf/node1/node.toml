@@ -1,7 +1,7 @@
 [chain]
 rpc_url             = "http://mock-rpc:18080/rpc"
-program_addr        = "octPROGmockaddress0000000000000000000000"
-validator_addr      = "octVNODE1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+program_addr        = "octAiTHXCqX84s2ExQFzZBFsxKwsijVmsmfmZ84LrurdPLB"
+validator_addr      = "oct4XmjKEd9A96KhoMX94zWJmd28dcPisbWGYWtad1dQ9v5"
 wallet_secret_path  = "/etc/octravpn/wallet.key"
 
 [tunnel]

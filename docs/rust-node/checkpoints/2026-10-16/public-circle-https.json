@@ -1,0 +1,72 @@
+{
+  "date": "2026-10-16",
+  "status": "PUBLIC_CIRCLE_CONFIRMED_FINAL_BINARY_CATCHUP_NOT_SERVING",
+  "network": "Octra public devnet",
+  "chain_id": "octra-devnet-9871-cluster",
+  "circle_id": "oct5WASWApL9k2oUaoS8VfM2PAZhPJijPMCaNH6UFkSxtsr",
+  "asset_path": "/index.html",
+  "asset_content_type": "text/html",
+  "asset_sha256": "9f7bfa1125583d8c9b7ccb623b1493596b3be6571125146ccf5ad76cfcc5d3fa",
+  "payload_sha256": "ce34ac7763580092b7639e43eb0f1dc578cf9054e83a162275e9d3e448501a35",
+  "transactions": [
+    {
+      "action": "deploy public Circle",
+      "tx_hash": "e8e9f12aae989ef6f576cf6f2a716a85d500226fd55b013bb42273506abfe70f",
+      "status": "confirmed",
+      "epoch": 1702304,
+      "nonce": 508,
+      "fee_cap_ou": 200000
+    },
+    {
+      "action": "publish public HTML asset",
+      "tx_hash": "716e59715024690708a51576347f03b88efd9ac46548eae325f91bf802d1edf6",
+      "status": "confirmed",
+      "epoch": 1702306,
+      "nonce": 509,
+      "fee_cap_ou": 5000
+    }
+  ],
+  "economics": {
+    "total_fee_cap_ou": 205000,
+    "escrow_deposited_ou": 0,
+    "operator_stake_deposited_ou": 0
+  },
+  "official_asset_readback": {
+    "exact_bytes_equal": true,
+    "size_bytes": 252,
+    "content_type": "text/html"
+  },
+  "tailscale_url": "https://andrews-macbook-pro.tailcd562a.ts.net/circles/oct5WASWApL9k2oUaoS8VfM2PAZhPJijPMCaNH6UFkSxtsr/index.html",
+  "initial_https_observer_result": {
+    "http_status": 200,
+    "observed_node_epoch": 1703230,
+    "rendered_body_sha256": "b8f9e3dfbb502a697006d20fa4594bb61ed7553d7458a7d9e6ace5700bdc9727",
+    "rendered_body_contains_published_text": true,
+    "binary_sha256": "f5e738011908c7af632ce8382982b16e7087d0e179cbad7b1bf98a46eabf91c0"
+  },
+  "final_binary_https_result": {
+    "checked_at_utc": "2026-10-16T12:25:55Z",
+    "http_status": 503,
+    "bounded_https_attempts": 24,
+    "observed_node_epoch": 1703347,
+    "reason": "catching up authenticated HTTP history or publishing canonical epoch",
+    "binary_sha256_at_launch": "a5603614993ac1dc4bf92f1e111ce6508d276c4281be024aaab183b5fa16be3d",
+    "nonvoting": true,
+    "source_status": "The primary exporter was behind retained canonical history; the secondary exporter supplied verified epochs, but the observer had not entered an admitted serving window at this check."
+  },
+  "evidence": {
+    "committed_payload": "docs/rust-node/fixtures/devnet-circle/payload.json",
+    "committed_asset": "docs/rust-node/fixtures/devnet-circle/index.html",
+    "local_plan": "out/node-port-final-20261015/public-circle-fixture-20261016/plan.json",
+    "local_deploy_submission": "out/node-port-final-20261015/public-circle-fixture-20261016/deploy-cli-auto.json",
+    "local_asset_submission": "out/node-port-final-20261015/public-circle-fixture-20261016/put-cli.json",
+    "official_transaction_readback": "out/node-port-final-20261015/public-circle-fixture-20261016/official-transactions.json",
+    "official_asset_readback": "out/node-port-final-20261015/public-circle-fixture-20261016/official-asset.stdout",
+    "retained_observer_exex_report": "out/node-port-final-20261015/public-circle-fixture-20261016/observer-exex.json",
+    "retained_observer_exex_report_sha256": "65d201f2d3761b19111f493c47b0fc073d5290686aa3c31879c9ced2802420b1",
+    "final_binary_restart_record": "out/node-port-final-20261015/public-devnet-final-candidate/retained-restart-gateway-final.json",
+    "final_binary_observer_log": "out/node-port-final-20261015/public-devnet-final-candidate/retained-observer-gateway-final.log",
+    "final_binary_https_headers": "out/node-port-final-20261015/public-circle-fixture-20261016/final-https-headers.txt"
+  },
+  "scope": "Public static Circle gateway fixture only. An earlier binary returned the rendered asset over TLS during an admitted serving window. The final binary restarted on retained authenticated state and advanced past its previous head, but its sampled TLS requests returned 503 during catch-up. Stable availability, exact-final-binary HTTP 200, external-device navigation, funded VPN service, and Mainnet remain separate gates."
+}

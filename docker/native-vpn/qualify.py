@@ -298,6 +298,7 @@ state_dir = "{ROOT}/client-state"
     session=int(re.search(r'v3 session opened: id=(\d+)',client_log.read_text()).group(1))
     local=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);local.bind(('127.0.0.1',0));local.settimeout(.5)
     received=0
+    lost_datagrams=0
     for index in range(1500):
         if client.poll() is not None:raise RuntimeError('real client exited before forwarding: '+client_log.read_text()[-3000:])
         payload=index.to_bytes(4,'big')+b'paid-native-vpn'*80
@@ -306,7 +307,11 @@ state_dir = "{ROOT}/client-state"
             data,_=local.recvfrom(2048)
             if data==payload:received+=len(data)
         except socket.timeout:
-            if received:
+            # UDP can lose an isolated datagram even when the authenticated
+            # session remains healthy. Bound loss and still require the full
+            # paid-byte threshold before proceeding.
+            lost_datagrams+=1
+            if lost_datagrams>5:
                 udp_diagnostic(program,session,index,received,payload,reflector,echo_stats,udp_started,local)
                 raise
         if received>=1_200_000:break

@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 task_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+task_context=${OCTRA_NATIVE_VPN_CONTEXT:-$(dirname "$task_root")}
 task_image=${OCTRA_NATIVE_VPN_IMAGE:-octra-native-vpn-qualification:local}
 task_builder=${OCTRAVPN_BUILDER_IMAGE:-octravpn-builder:latest}
 task_output=${1:?provide a fresh evidence output directory}
+for task_source in octra octra-foundry headscale-rs; do test -d "$task_context/$task_source"; done
 test ! -e "$task_output"
 mkdir -m 700 "$task_output"
-docker build --build-arg "BUILDER_IMAGE=$task_builder" -f "$task_root/docker/native-vpn/Dockerfile" -t "$task_image" "$(dirname "$task_root")" 2>&1 | tee "$task_output/build.log"
+docker build --build-arg "BUILDER_IMAGE=$task_builder" -f "$task_root/docker/native-vpn/Dockerfile" -t "$task_image" "$task_context" 2>&1 | tee "$task_output/build.log"
 task_volume=$(docker volume create)
 task_hop_volume=''
 task_container=''

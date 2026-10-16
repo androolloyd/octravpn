@@ -11,6 +11,10 @@ use octra_node_runtime::{
 
 pub(crate) struct ViewLease(tokio::sync::OwnedSemaphorePermit);
 impl Native {
+    pub(crate) fn circle_runtime(&self) -> octra_node_runtime::circle::CircleRuntime {
+        self.runtime.clone()
+    }
+
     /// Read-only host work has independent capacity and retains its permit if
     /// the HTTP future disappears while a blocking decoder is still running.
     pub(crate) async fn read<T: Send + 'static>(
@@ -55,9 +59,13 @@ impl Native {
     ) -> Result<circle_view::Profile, Fault> {
         circle_view::epoch(snapshot.state().get(&[b"meta", b"last_epoch"]), kind)
             .map_err(|error| Fault::new(-32000, error.to_string().as_bytes()))?;
-        circle_view::canonical(&snapshot.assets, self.history.as_ref())
-            .await
-            .map_err(|error| Fault::new(-32005, error.to_string().as_bytes()))
+        circle_view::canonical_with_graph(
+            &snapshot.assets,
+            &self.config.graph,
+            self.history.as_ref(),
+        )
+        .await
+        .map_err(|error| Fault::new(-32005, error.to_string().as_bytes()))
     }
     pub(crate) fn begin_circle_view(&self) -> Result<ViewLease, Fault> {
         self.circle_views
@@ -120,9 +128,13 @@ impl Native {
             circle_view::ReadKind::Program,
         )
         .map_err(|_| Fault::new(-32005, b"program snapshot epoch invalid"))?;
-        let profile = circle_view::canonical(&snapshot.assets, self.history.as_ref())
-            .await
-            .map_err(|error| Fault::new(-32005, error.to_string().as_bytes()))?;
+        let profile = circle_view::canonical_with_graph(
+            &snapshot.assets,
+            &self.config.graph,
+            self.history.as_ref(),
+        )
+        .await
+        .map_err(|error| Fault::new(-32005, error.to_string().as_bytes()))?;
         let runtime = self.runtime.clone();
         let running = clock.clone();
         let result = tokio::task::spawn_blocking(move || {

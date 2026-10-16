@@ -3,7 +3,7 @@ name: headscale-go parity
 # Docker-free, differential headscale-go parity gate (P0.1).
 #
 # Proves that octravpn's vendored headscale-api / headscale-api-acl surface
-# stays behaviourally identical to upstream headscale-go v0.29.0-beta.2. The
+# is checked against upstream headscale-go v0.29.5. The
 # harness itself lives in the headscale-rs sibling (tools/parity/*); octravpn
 # compiles the very same crates (crates/octravpn-mesh/Cargo.toml), so a
 # regression caught here IS a regression in octravpn's control plane.
@@ -14,7 +14,7 @@ name: headscale-go parity
 # What runs (all hermetic w.r.t. upstream network state):
 #   1. check_parity_golden.py     — metadata + golden coverage (no build)
 #   2. check_headscale_go_refs.py — pin consistency, LOCAL only (see note)
-#   3. headscale_go_diff.sh       — build Rust + Go engines, diff 98 scenarios
+#   3. headscale_go_diff.sh       — build Rust + Go engines, diff 100 scenarios
 #                                   against each other and the checked-in golden
 
 on:
@@ -44,14 +44,14 @@ jobs:
       - uses: actions/checkout@v4
         with: { path: octra }
       - uses: actions/checkout@v4
-        with: { repository: androolloyd/octra-foundry, ref: 07a11f6f5d1d0b1f46145bba19616570f85acc2c, path: octra-foundry }
+        with: { repository: androolloyd/octra-foundry, ref: d5feaad7f14d6a381e2327dfd6738cae8df95b31, path: octra-foundry }
       - uses: actions/checkout@v4
         with:
           repository: androolloyd/headscale-rs
           path: headscale-rs
           # PINNED for a deterministic golden. The differential golden
-          # (tools/parity/golden/headscale-go-v0.29.0-beta.2.json) plus the
-          # 98 checked-in scenarios are only meaningful against a fixed
+          # (tools/parity/golden/headscale-go-v0.29.5.json) plus the
+          # 100 checked-in scenarios are only meaningful against a fixed
           # harness revision; a floating `main` would let the golden drift
           # out from under this gate.
           #
@@ -61,8 +61,7 @@ jobs:
           # confirm the golden still matches (refresh it deliberately with
           # PARITY_UPDATE_GOLDEN=1 ./scripts/headscale_go_diff.sh if the
           # bump intentionally changes observable output).
-          # Short SHA today: 41f817d.
-          ref: 41f817d6ff624b59fd18c8066a61f281810fb34e
+          ref: b896380835789e28d46043b8120fdd02125a5ae2
 
       # --- toolchains ---------------------------------------------------
       # setup-rust also installs protoc (headscale-api's tonic build script
@@ -102,7 +101,7 @@ jobs:
         # with the real-client baseline/current pins.
         run: python3 scripts/check_headscale_go_refs.py
 
-      - name: headscale-go differential parity (98 scenarios)
+      - name: headscale-go differential parity (100 scenarios)
         # Builds the Rust parity binary + the Go engine, runs every scenario
         # through both, asserts Rust == Go, then asserts Go == checked-in
         # golden. Any drift fails the job loudly.

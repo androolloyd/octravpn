@@ -44,3 +44,6 @@ boringtun.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+test-helpers = ["octra-node-runtime/test-helpers"]

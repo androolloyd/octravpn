@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-exclude = ["proofs/kani", "fuzz", "vendor/ark-relations", "vendor/octra-circle-wasm-host", "vendor/octra-lmdb"]
+exclude = ["proofs/kani", "fuzz", "vendor/ark-relations", "vendor/octra-circle-wasm-host", "vendor/octra-lmdb", "vendor/libsqlite3-sys"]
 members = [
     "crates/octravpn-analytics",
     "crates/octravpn-audit-chain",
@@ -126,6 +126,7 @@ futures         = "0.3"
 
 [patch.crates-io]
 ark-relations = { path = "vendor/ark-relations" }
+libsqlite3-sys = { path = "vendor/libsqlite3-sys" }
 
 [profile.test.package.octra-hfhe]
 # Native proof parity tests exercise real R1CS verification and ciphertext math.

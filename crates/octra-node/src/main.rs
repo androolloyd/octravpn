@@ -9,6 +9,11 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    #[command(hide = true)]
+    SingleRangeWorker {
+        #[arg(long)]
+        parent_pid: u32,
+    },
     /// Manage the signed local validator duty pause; no network transaction.
     ValidatorControl(octra_node::validator_cli::Options),
     /// Prepare, authorize and serve native finalized state-sync snapshots.
@@ -51,6 +56,11 @@ enum Command {
         #[arg(long)]
         activated_applications: bool,
     },
+    /// Run an explicitly private Single fixture, with no BFT voting or public join.
+    RunSingle {
+        #[arg(long)]
+        config: PathBuf,
+    },
     Run {
         #[arg(long)]
         config: PathBuf,
@@ -71,6 +81,10 @@ enum Command {
 #[tokio::main]
 async fn main() -> Result<()> {
     match Cli::parse().command {
+        Command::SingleRangeWorker { parent_pid } => {
+            octra_node_runtime::single_private::worker::helper(parent_pid)
+                .map_err(anyhow::Error::msg)?;
+        }
         Command::ValidatorControl(options) => options.run()?,
         Command::Snapshot { command } => command.run(shutdown()).await?,
         Command::InitIdentity { key } => {
@@ -125,6 +139,10 @@ async fn main() -> Result<()> {
             {
                 println!("{}", config.display());
             }
+        }
+        Command::RunSingle { config } => {
+            octra_node::single::launch::run(octra_node::single::launch::read(&config)?, shutdown())
+                .await?;
         }
         Command::Run {
             config,

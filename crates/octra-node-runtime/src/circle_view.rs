@@ -137,12 +137,27 @@ impl Profile {
 /// The node supplies its authenticated history. Anchor reads are bounded by
 /// the captured snapshot, even if publication advances while this awaits I/O.
 pub async fn canonical(assets: &CanonicalAssets, history: &dyn History) -> Result<Profile, Error> {
+    let graph = Graph::new(assets.identity().chain_id.as_bytes().to_vec(), None);
+    canonical_with_graph(assets, &graph, history).await
+}
+
+/// The host passes the same captured graph used by transaction execution.
+/// Private fixture activation is checked against authenticated genesis contents;
+/// every active native rule still revalidates its independent retained anchor.
+pub async fn canonical_with_graph(
+    assets: &CanonicalAssets,
+    graph: &Graph,
+    history: &dyn History,
+) -> Result<Profile, Error> {
     let epoch = epoch(
         assets.snapshot().get(&[b"meta", b"last_epoch"]),
         ReadKind::View,
     )?;
-    let graph = Graph::new(assets.identity().chain_id.as_bytes().to_vec(), None);
-    anchored(&graph, epoch, assets.identity().epoch, history).await
+    assets
+        .check_view_graph(graph)
+        .await
+        .map_err(|error| Error(error.to_string()))?;
+    anchored(graph, epoch, assets.identity().epoch, history).await
 }
 
 async fn anchored(

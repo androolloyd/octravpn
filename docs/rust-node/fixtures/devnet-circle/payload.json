@@ -1,0 +1,1 @@
+{"browser_mode":"gateway_allowed","code_b64":null,"export_policy":null,"limits":{"max_assets_bytes":"33554432","max_inline_value":"65536","max_stable_bytes":"33554432","max_wasm_bytes":"33554432"},"members_root":null,"policy_hash":null,"privacy_class":"public","resource_mode":"public_resources","runtime":"octb"}

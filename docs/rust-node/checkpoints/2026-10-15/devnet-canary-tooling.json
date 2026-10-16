@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "date": "2026-10-15",
-  "status": "PASS_ADOPTED_OFFLINE_DEVNET_TOOLING",
+  "status": "PASS_ADOPTED_OFFLINE_DEVNET_TOOLING_PENDING_STATEFUL_QUALIFICATION",
   "qualification": {
     "path": "out/node-port-final-20261015/canary-devnet-candidate/qualification.json",
     "sha256": "7f3e30da05ace199316a6a268bc90035422b407f2719e3b85fa2e4c449fc5adf"
@@ -10,17 +10,77 @@
     "path": "out/node-port-final-20261015/canary-devnet-candidate/parent-review.json",
     "sha256": "3849de774362b64f68a97eca775d87c8323deaca2dfd53b8e9b6574963906337"
   },
-  "hermetic_controls": 54,
+  "hermetic_controls": 140,
   "network": "octra-devnet-9871-cluster",
   "rpc_url": "https://devnet.octrascan.io/rpc",
   "origin_kind": "checkpoint",
   "network_calls": 0,
   "source_uploads": 0,
   "funds_spent": 0,
+  "fee_and_replay_followup": {
+    "qualification_sha256": "9a9db07f17005ec196e7bc72bb28d60a03c66b061f82872abe7922a87fe0e786",
+    "adoption_manifest_sha256": "11068bc25f3be4dbbcb4725051173ad030783cf9b5afce0ae0d397805ea3ab0c",
+    "deployment_fee_ou": 200000,
+    "call_fee_ou": 1000,
+    "declared_five_action_budget_ou": 204000,
+    "escrow_deposited_ou": 0,
+    "replay_requires": "Native rejected receipt with success=false, execution reverted, admin nonce mismatch Require event and unchanged admin nonce",
+    "controls": 135
+  },
+  "existing_funded_deployer": {
+    "address": "oct8Tdgu4RLbSGah1fVoVHW4T4cLFDmsoKhTyVD8gCndNFm",
+    "local_key_path": "docker/devnet/state/deployer.key",
+    "public_balance_last_observed_ou": 54610189057,
+    "broadcasts_so_far": 0
+  },
+  "strict_rpc_transport_followup": {
+    "read_only_probe_evidence_sha256": "21ed8e1d5911b925b892cf5af7ab4646de806d8375fb99faad01c7ec34619c47",
+    "source_sha256": "1fca9abf57f7d10f805c62fe74b6fa01375b628576d1831ae2410b121d9f7958",
+    "result": "Direct official devnet RPC returned the selected deployer balance and nonce after setting a stable User-Agent; environment proxy and redirects are disabled",
+    "new_hermetic_transport_control_pending": false,
+    "key_reads": 0,
+    "source_uploads": 0,
+    "submissions": 0
+  },
   "limits": [
-    "Hermetic controls verify refusal ordering and metadata binding; no real public compilation or deployment claimed",
-    "Separate devnet endpoint source compilation approval remains pending",
-    "Relayer sender-not-found last observed; no funding assumed",
+    "Hermetic controls verify refusal ordering and metadata binding; no stateful public deployment claimed",
+    "The original fresh relayer is unfunded; an existing funded local devnet deployer was selected under the user's instruction",
     "Development private administration setup remains uncertified"
-  ]
+  ],
+  "local_compiler_followup": {
+    "checkpoint": "local-compiler.json",
+    "scope": "Adopted verified local compilation, native result comparison and reviewed-artifact deployment. Candidate70a7bfda uses Source+loops=true; broadcast cannot fall back to a remote compiler.",
+    "team_RPC_source_uploads": 0,
+    "hermetic_controls": 117,
+    "public_execution_qualified": false
+  },
+  "live_identity_guard": {
+    "status": "PASS_HERMETIC_NEGATIVES_PENDING_FINAL_LIVE_RECHECK",
+    "before_wallet_read": true,
+    "fields": [
+      "chain_id",
+      "runtime_profile_hash",
+      "consensus_standard_hash"
+    ],
+    "expected_profile_source": "verified saved local Rust compiler recheck before runtime",
+    "observed_official_devnet_profile_hash": "4b40557ade107a3f6cb618319ea1ea005df7c3c6b03c527279bcb50c6b499d6f",
+    "source_sha256": "1fca9abf57f7d10f805c62fe74b6fa01375b628576d1831ae2410b121d9f7958",
+    "control_source_sha256": "128e87a22ca9b54a1171d16d63abc59e8d08a8885d474bfc080bbab40d481e29",
+    "new_negative_controls": [
+      "wrong_live_chain",
+      "wrong_live_profile",
+      "wrong_live_consensus",
+      "wrong_live_shape"
+    ]
+  },
+  "final_hermetic_followup": {
+    "at": "2026-10-16",
+    "canary_runner_controls": 71,
+    "local_compiler_controls": 69,
+    "total_controls": 140,
+    "result": "PASS",
+    "canary_runner_source_sha256": "128e87a22ca9b54a1171d16d63abc59e8d08a8885d474bfc080bbab40d481e29",
+    "local_compiler_control_source_sha256": "fe9f466b2248cdcf38e551d4db5b23e7a7d39b5c203dbee6b10e3dfc971a26d6",
+    "scope": "Direct local Python controls, mocked network and wallet; final live compiler and public stateful qualification remain pending"
+  }
 }

@@ -68,17 +68,20 @@ fn headscale_bin() -> &'static PathBuf {
             .manifest_path(&manifest)
             .bin("headscale")
             .current_release()
-            .target_dir(octra_target_dir())
+            // Cargo keeps the outer `cargo test` target locked until this test
+            // exits. Building into that same directory would deadlock here.
+            .target_dir(isolated_headscale_target_dir())
             .run()
             .expect("build standalone headscale binary");
         bin.path().to_path_buf()
     })
 }
 
-fn octra_target_dir() -> PathBuf {
+fn isolated_headscale_target_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join("target")
+        .join("headscale-cli-passthrough")
 }
 
 fn child_timeout() -> Duration {

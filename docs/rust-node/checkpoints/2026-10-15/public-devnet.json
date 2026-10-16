@@ -398,5 +398,62 @@
     "Same-call admission ledger handoff",
     "Bounded retained public-asset/CSS gateway",
     "Storage-authentication candidate after its remaining gates"
-  ]
+  ],
+  "fresh_snapshot_import_completed": {
+    "evidence_sha256": "0d4c7a894732d4a0ff9fe0ccb33f134de2ad425f1828c6655793e9ba8312350a",
+    "exit_code": 0,
+    "separate_destination": "out/node-port-final-20261015/public-devnet-fresh-state",
+    "epoch": 1700640,
+    "state_root": "d86d8a50d02eaf8c39f440fdab0a9742834509bfdbc04486d703bb093cdd57eb",
+    "manifest_hash": "602e49e22e85847e186e450be38dd3304d936fcf5547f1e839557454f1abfcbe",
+    "ledger_records": 3327656,
+    "downloaded_bytes": 37845412752,
+    "network_config_hash": "89c4deb7de2144dd2193f9abdc7fc87e2ed6889e4700def42d8c1d0ee756ccd9",
+    "retained_observer_untouched": true,
+    "scope": "The earlier qualified bootstrap binary authenticated and atomically published a later snapshot. Final combined binary restart, catch-up, ExEx and public gateway qualification remain pending."
+  },
+  "selected_existing_devnet_deployer": {
+    "address": "oct8Tdgu4RLbSGah1fVoVHW4T4cLFDmsoKhTyVD8gCndNFm",
+    "last_observed_balance_ou": 54610189057,
+    "zero_escrow_canary_declared_fee_budget_ou": 204000,
+    "broadcasts_so_far": 0
+  },
+  "gateway_storage_live_followup": {
+    "at": "2026-10-16T00:58:52Z",
+    "launch": {
+      "path": "out/node-port-final-20261015/public-observer-gateway-storage-launch.json",
+      "sha256": "ec986d5e23127875ec9209d4ed0bed26e2269d4e46a5eac2355931f659a64d4b"
+    },
+    "prior_supervised_exit": {
+      "path": "out/node-port-final-20261015/public-observer-inode-exit.json",
+      "sha256": "03a40f018f2dd57f0a311d2b923f23d2e84222a9383ac98a398c8f20a10c47a8"
+    },
+    "prior_stop": {
+      "path": "out/node-port-final-20261015/public-observer-inode-stop.json",
+      "sha256": "0def596d0c23e50720448af08c1b2908d82a9fb809555d56854b038f44889af8"
+    },
+    "binary_sha256": "6c83c21d8d342ae59786ae8804ea2a8c1417d705aaba20aabbb2adef8a8b5d89",
+    "audited_prefix": {
+      "path": "out/node-port-final-20261015/public-observer-gateway-storage-prefix-1.json",
+      "sha256": "2b095d83c0dcec94eff7d98785768e2b9d1b2749e12e2719d7dde758411954d4"
+    },
+    "canonical_and_exex_epochs": 722,
+    "last_audited_epoch": 1698482,
+    "full_sync": false,
+    "health": {
+      "path": "out/node-port-final-20261015/public-observer-gateway-storage-health-1.json",
+      "sha256": "3d5ab57dfa11bb17df21c3cf03c60c8ea72e06d4f15335cacd3875ce3df247fd"
+    },
+    "health_scope": "At this measurement initial HTTP startup catch-up had durably progressed to1698498; public service ports were still unopened. No healthy-serving claim.",
+    "fresh_snapshot_import": {
+      "path": "out/node-port-final-20261015/public-devnet-fresh-import-launch.json",
+      "sha256": "e16eb43ad1da992f8558844c80ab7cac4376d0094471955729f0c2ca3ccc2db2"
+    },
+    "fresh_snapshot_scope": "Separate destination, existing observer untouched; import ongoing, no source replacement or completed qualification.",
+    "latest_funding": {
+      "path": "out/node-port-final-20261015/public-gateway-storage-funding-1.json",
+      "sha256": "8c435d6267cb221cd35cf766f8d155667adab24d21a14a4bed070ad4a02d8c47"
+    },
+    "funding_result": "Official devnet RPC sender-not-found; no public transaction sent."
+  }
 }

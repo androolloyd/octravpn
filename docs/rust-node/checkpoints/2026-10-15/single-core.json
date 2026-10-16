@@ -1,0 +1,130 @@
+{
+  "schema": 1,
+  "date": "2026-10-15",
+  "status": "PASS_ADOPTED_PRIVATE_SINGLE_CORE",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "scope": "qualified isolated private Single core; not full service facade",
+  "qualification": {
+    "path": "out/node-port-final-20261015/single-mode-candidate/qualification.json",
+    "sha256": "9b637f620905c33a191ef081e52e79f8b864d3d7b47fe9f59ed13f01165fe2be"
+  },
+  "parent_review": {
+    "path": "out/node-port-final-20261015/single-mode-candidate/parent-source-review-final.json",
+    "sha256": "b177ad66c84243fea08cb3ed323c4becea06af8e8eae6d70960049b134536f47"
+  },
+  "adoption": {
+    "path": "out/node-port-final-20261015/single-mode-candidate/adoption.json",
+    "sha256": "e9d8f9275b24c303b222280e7470b4f91be56cb9c262e9f28a05ca4b3fa42745"
+  },
+  "native_cases": {
+    "single_execution": 31,
+    "policy_cache": 227,
+    "existing_private_balance": 66,
+    "existing_private_crypto": 259,
+    "existing_private_epoch": 48
+  },
+  "gates": [
+    {
+      "label": "single-native4",
+      "exit": 0,
+      "log_sha256": "4c376907535bbdc7c76b79bf385f4de11452d7514d23ce7b668c2434baa568fa",
+      "results": [
+        "test result: ok. 10 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 88.84s"
+      ]
+    },
+    {
+      "label": "single-policy2",
+      "exit": 0,
+      "log_sha256": "19c5d3e976cd94d610def5e53c1498cdac8bb60dec69719400a80f48d0424fbb",
+      "results": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"
+      ]
+    },
+    {
+      "label": "single-cache2",
+      "exit": 0,
+      "log_sha256": "d0be3b9c900b46ea71ef75c9fa4f082dbce8c7714f5e4e837a512690acb3e4bf",
+      "results": [
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 42 filtered out; finished in 38.10s"
+      ]
+    },
+    {
+      "label": "single-cache-doc2",
+      "exit": 0,
+      "log_sha256": "4a3fa3ce807c6b13ab9d720287fee618cde7365d560bd6aa6aea373cbd3ba659",
+      "results": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s"
+      ]
+    },
+    {
+      "label": "single-strict5",
+      "exit": 0,
+      "log_sha256": "66c6b27563b30de54f1408ff65a6b728d1c70d54d1ad4514b7c2ed6cd9f8e0b0",
+      "results": []
+    },
+    {
+      "label": "single-private-existing1",
+      "exit": 0,
+      "log_sha256": "e7cc96d58fef67ef6bc3482c31143bb57bc2e2ad2a365db52578929c5b9eb677",
+      "results": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 63.14s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 659.45s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 177.10s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 241.71s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    }
+  ],
+  "boundaries": [
+    "10 current Node tests, 1 actual crash helper ignored by generic harness but invoked twice by parent test; current policy1/cache2/doc1 tests PASS",
+    "Existing five shared-private targets PASS before narrow style-only freeze3 edits; not represented as freshly rerun after style changes",
+    "Private-prior fixture explicit startup exception; pristine CLI rejects arbitrary private IDs; public activated missing-parent refusal retained",
+    "Known pristine multi-sender sorting refusal retained; no sorting patch",
+    "Full214RPC/browser/gateway/VPN facade and native0x40 broadcast still require adapters",
+    "Bounded asynchronous native-style hard proof workers are next separate service candidate; core proof work currently synchronous",
+    "No BFT QC forgery, public profiles/defaults, consensus activation, public transactions or public store modifications"
+  ],
+  "current_host_composition_pending": true,
+  "full_service_integration": false,
+  "public_single_qualified": false,
+  "mainnet_ready": false,
+  "service_core_adoption": {
+    "status": "ADOPTED_SOURCE10_PENDING_FINAL_COMBINED_GATE",
+    "qualification": {
+      "path": "out/node-port-final-20261015/single-service-candidate/qualification.json",
+      "sha256": "3a744130e90ae8ff51252f88a238138910a98e25f6e4687d05c46baf87dc3fc1"
+    },
+    "manifest": {
+      "path": "out/node-port-final-20261015/single-service-candidate/adoption-files.json",
+      "sha256": "5bd6d12dbe5efcf56a83744912b2c578041de322ea2ef9959475f5b1e540f6f5"
+    },
+    "parent_adoption": {
+      "path": "out/node-port-final-20261015/single-service-candidate/parent-adoption10.json",
+      "sha256": "123bf1242729cbff1e83650e4cd3840145d45f7cec6315d2c4ba38d80ddd36df"
+    },
+    "negative_control": "Restored precommit Tree publication fails real SQLite prepare-error rollback test; corrected source10 passes affected5 and strict Node/Runtime/Protocol isolated gates.",
+    "limits": "Combined Root/SQLite/adapter and full public qualification pending.",
+    "unchanged_shared_private_replay": {
+      "status": "PASS",
+      "targets": 5,
+      "failed": 0,
+      "evidence_path": "out/node-port-final-20261015/single-service-candidate/shared-private9-result.json",
+      "sha256": "affccfa323257661a7c6be4d3c676690d9512817c6e8e3eeefc89b1304a6d9ea",
+      "scope": "Source9 Runtime/Protocol/crypto identical to adopted source10; final combined Root qualification remains pending."
+    }
+  },
+  "service_adapter_adoption": {
+    "status": "SOURCE_ADOPTED_PENDING_COMBINED_GATE",
+    "manifest": {
+      "path": "out/node-port-final-20261015/single-service-adapter-candidate/adapter-files-final.json",
+      "sha256": "49e0868097bccc3f0f64e5646b6ea951093906a1d772faae50a044bfb7e8498b"
+    },
+    "parent_adoption": {
+      "path": "out/node-port-final-20261015/single-service-adapter-candidate/parent-adoption-final.json",
+      "sha256": "6d98e4275d59f0e50f2133fc847d73848b63c226c303d0fb6cf1844fb5401a59"
+    },
+    "paths": 28,
+    "scope": "Single RPC, browser, gateway, VPN settlement, ExEx, authenticated loopback peer transport and separate paid native fixture",
+    "limits": "Source parsed and formatted in isolation; final Root with patched SQLite and qualified Headscale is not built or tested yet."
+  }
+}

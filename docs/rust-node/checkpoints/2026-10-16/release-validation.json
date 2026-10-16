@@ -1,0 +1,79 @@
+{
+  "date": "2026-10-16",
+  "status": "PASS_SEGMENTED_HOST_RELEASE_GATES",
+  "source_scope": "Current checkout including the publication-error gateway revocation guard",
+  "release_suites": [
+    {
+      "scope": "VPN, support crates and headscale-rs library",
+      "passed": 1714,
+      "ignored": 4,
+      "targets": 73,
+      "log": "out/node-port-final-20261015/root-release-vpn-final-headscale-bin.log",
+      "log_sha256": "542b88ab862292d95f6c9dcebe78ac227da1758bd2c6eaa1a8680c05c12013dc"
+    },
+    {
+      "scope": "Headscale CLI in isolated target directory",
+      "passed": 16,
+      "ignored": 0,
+      "targets": 1,
+      "log": "out/node-port-final-20261015/root-headscale-cli-isolated-target-final.log",
+      "log_sha256": "f4afd93622a0686ad586d27f853df680cb6a1283f885f6dff4b5f4f3412a097a"
+    },
+    {
+      "scope": "Rust node runtime",
+      "passed": 201,
+      "ignored": 2,
+      "targets": 60,
+      "log": "out/node-port-final-20261015/root-release-runtime-final-green.log",
+      "log_sha256": "63f4bdab503bc052245e6648f7c8b758952f45fed427acb02b7514a34c83edf9"
+    },
+    {
+      "scope": "Rust node, protocol, ExEx, browser and simulator, including the final gateway guard",
+      "passed": 253,
+      "ignored": 5,
+      "targets": 78,
+      "log": "out/node-port-final-20261015/root-release-node-protocol-guard-final.log",
+      "log_sha256": "629ebdc00e2f09d7fb778b24aa126c73ec248332b0e9ed78622190f5bde890e6"
+    },
+    {
+      "scope": "Runtime documentation",
+      "passed": 1,
+      "ignored": 0,
+      "targets": 1,
+      "log": "out/node-port-final-20261015/root-runtime-doc-final.log",
+      "log_sha256": "79a6d9c85462ce5787fb63a6aa608915d5d4827abc1c6426774812c712577c1e"
+    }
+  ],
+  "static_gates": [
+    {
+      "scope": "Changed nonvendor Rust files, rustfmt --edition 2021 --check",
+      "result": "pass"
+    },
+    {
+      "scope": "Full workspace strict Clippy including test helpers",
+      "result": "pass",
+      "log": "out/node-port-final-20261015/root-clippy-gateway-grace-final.log",
+      "log_sha256": "6ed8f8d94e245ced2eef0d4bcb8e62137782831fd4995aab00a5b61d61964fc4"
+    },
+    {
+      "scope": "Final node guard strict Clippy and offline check",
+      "result": "pass",
+      "clippy_log": "out/node-port-final-20261015/root-clippy-node-gateway-guard-final.log",
+      "clippy_log_sha256": "35db196793f66e488727fa1e65b204ba4ca14425aa6f627958d378b39910e202",
+      "check_log": "out/node-port-final-20261015/root-gateway-failure-guard-check.log",
+      "check_log_sha256": "cc2a2ae146155670b3623fac1a899f10e9e58508ddedbaf8a11e2d2afdb50741"
+    },
+    {
+      "scope": "Dependency policy without fetching",
+      "result": "pass",
+      "log": "out/node-port-final-20261015/root-cargo-deny-20261016-elevated.log",
+      "log_sha256": "5028796d91742f87401c8baf0ada0882cf8660307d0f60290e283d8991efbfd1"
+    }
+  ],
+  "limitations": [
+    "These are separately completed host suites, not one uninterrupted full-workspace command.",
+    "cargo fmt --all -- --check reports pre-existing formatting differences in the vendored octra-circle-wasm-host; the changed nonvendor Rust files pass rustfmt.",
+    "The frozen private paid Single/BFT image predates the final read-only gateway changes and has its own checkpoint.",
+    "Passing these gates does not establish complete upstream behavioral parity, stable public gateway availability, or paid public VPN activation."
+  ]
+}

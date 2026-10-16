@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Hermetic controls only: no network, compiler, wallet, signing or real proving keys."""
-import argparse,base64,contextlib,copy,hashlib,importlib.util,io,json,pathlib,sys,tempfile,tomllib
+import argparse,base64,contextlib,copy,hashlib,importlib.util,io,json,pathlib,sys,tempfile,tomllib,unittest.mock
 ROOT=pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0,str(ROOT/'scripts/ceremony'))
 
 def load(name,path):
     spec=importlib.util.spec_from_file_location(name,path)
@@ -9,9 +10,11 @@ def load(name,path):
     return module
 
 module=load('canary',ROOT/'scripts/ceremony/deploy-canary.py')
+transport_rpc=module.rpc
 FACTORY='oct'+'2'*44;PROGRAM='oct'+'3'*44;RELAYER='oct'+'4'*44
 commit='a'*64;domain='b'*64;vk=base64.b64encode(b'OG16V1'+b'\0\0\0\6'+bytes(896)).decode()
 code=b'OCTBfixture';code_hash=hashlib.sha256(code).hexdigest();key_hash='c'*64
+runtime_profile='e'*64;consensus_standard='f'*64
 checks=[]
 
 def sha(data):return hashlib.sha256(data).hexdigest()
@@ -45,19 +48,22 @@ cases=['valid','unfunded','wrong_child_code','ambiguous_child_event','replay_acc
        'devnet_valid','mainnet_offline_plan','devnet_offline_plan','mode_mismatch','devnet_requires_mode','devnet_mode_mainnet_candidate',
        'wrong_devnet_rpc','wrong_chain','wrong_config','wrong_checkpoint_kind','wrong_checkpoint_root','wrong_checkpoint_epoch',
        'checkpoint_as_genesis','wrong_env_sha','tampered_env','missing_env','wrong_binding','wrong_preflight_rpc','wrong_preflight_binding',
-       'wrong_preflight_target','missing_preflight_report','wrong_preflight_artifact_hash','wrong_preflight_source_hash','wrong_preflight_code_hash','wrong_preflight_runtime_chain','main_source_mismatch','factory_source_mismatch',
+       'wrong_preflight_target','missing_preflight_report','wrong_preflight_artifact_hash','wrong_preflight_source_hash','wrong_preflight_code_hash','wrong_preflight_runtime_chain','wrong_live_chain','wrong_live_profile','wrong_live_consensus','wrong_live_shape','main_source_mismatch','factory_source_mismatch',
        'swapped_compile_files','wrong_certificate_code','duplicate_jump','verifier_error','wrong_admin_binding','wrong_credential',
-       'wrong_setup_vk','unknown_submission','fee_out_of_range']
+       'wrong_setup_vk','unknown_submission','fee_out_of_range','deployment_too_low','deployment_negative','deployment_exceeds_ceiling','budget_exceeded','fee_budget_exact','custom_deployment','replay_rejected','devnet_replay_rejected','devnet_replay_native_no_receipt','devnet_resume_after_replay','devnet_resume_tampered_journal','replay_wrong_reason','replay_wrong_error','replay_successful_receipt','replay_missing_receipt','replay_dropped','unexpected_rejection_factory','unexpected_rejection_spawn','unexpected_rejection_pause','replay_nonce_changed','fee_depletion']
 for case in cases:
     with tempfile.TemporaryDirectory(prefix='octra-canary-controls-') as raw:
         temp=pathlib.Path(raw);candidate,preflight,setup,network_env,target,compile_files,authority_file=fixture(temp)
-        is_devnet=case.startswith('devnet') or case in ['mode_mismatch','wrong_devnet_rpc','wrong_chain','wrong_config','wrong_checkpoint_kind','wrong_checkpoint_root','wrong_checkpoint_epoch','checkpoint_as_genesis','wrong_env_sha','tampered_env','missing_env','wrong_binding','wrong_preflight_rpc','wrong_preflight_binding','wrong_preflight_target','missing_preflight_report','wrong_preflight_artifact_hash','wrong_preflight_source_hash','wrong_preflight_code_hash','wrong_preflight_runtime_chain','wrong_admin_binding']
+        is_devnet=case.startswith('devnet') or case in ['mode_mismatch','wrong_devnet_rpc','wrong_chain','wrong_config','wrong_checkpoint_kind','wrong_checkpoint_root','wrong_checkpoint_epoch','checkpoint_as_genesis','wrong_env_sha','tampered_env','missing_env','wrong_binding','wrong_preflight_rpc','wrong_preflight_binding','wrong_preflight_target','missing_preflight_report','wrong_preflight_artifact_hash','wrong_preflight_source_hash','wrong_preflight_code_hash','wrong_preflight_runtime_chain','wrong_live_chain','wrong_live_profile','wrong_live_consensus','wrong_live_shape','wrong_admin_binding']
         network='devnet' if is_devnet else 'mainnet'
+        deployment_ou=960_000 if case=='fee_budget_exact' else (300_000 if case=='custom_deployment' else 200_000)
+        call_fee=10_000 if case=='fee_budget_exact' else 1000
         values=[1_000_000,1_000_000,100_000_000,100,1000,commit,vk,domain,200_000_000]
         intent={'target':copy.deepcopy(target) if is_devnet else {'rpc_url':module.RPC},'constructor_args':values,'economics':{'vpn_protocol_fee_bps':0}}
         if is_devnet:
             intent.update(target_binding_sha256=module.targets.digest(target),private_admin={'commitment':commit,'domain':domain,'verification_key_b64_sha256':sha(vk.encode())})
-        report={'rpc_url':target['rpc_url'],'target':copy.deepcopy(target),'target_binding_sha256':module.targets.digest(target),'checks':copy.deepcopy(compile_files)}
+        report={'compiler':{'kind':'verified_local_rust_node'},'rpc_url':target['rpc_url'],'target':copy.deepcopy(target),'target_binding_sha256':module.targets.digest(target),'checks':copy.deepcopy(compile_files)}
+        if not is_devnet:report={'compiler':{'kind':'verified_local_rust_node'},'rpc_url':module.RPC}
         if case=='wrong_cap':values[-1]=0
         if case=='commission_enabled':intent['economics']['vpn_protocol_fee_bps']=50
         if case=='mode_mismatch':network='mainnet'
@@ -94,8 +100,8 @@ for case in cases:
         if case=='wrong_setup_vk':
             path=setup/'manifest.json';item=json.loads(path.read_text());item['verification_key_b64']='wrong';path.write_text(json.dumps(item))
         (candidate/'intent.json').write_text(json.dumps(intent))
-        if is_devnet and case!='missing_preflight_report':(preflight/'report.json').write_text(json.dumps(report))
-        nonce=0;paid=[];receipts={};wallet=[];proofs=[];calls=[]
+        if case!='missing_preflight_report':(preflight/'report.json').write_text(json.dumps(report))
+        nonce=0;paid=[];receipts={};wallet=[];proofs=[];calls=[];resume_mode=False
         expected_rpc=target['rpc_url'] if is_devnet else module.RPC
         def command(parts):
             global nonce
@@ -104,17 +110,20 @@ for case in cases:
             if parts[1:4]==['cast','wallet','addr']:wallet.append(parts);return RELAYER
             if parts[1]=='authorize':
                 proofs.append(parts);output=pathlib.Path(parts[parts.index('--out')+1]);n=int(parts[parts.index('--nonce')+1])
+                if output.exists():raise RuntimeError('authorization output already exists')
                 request=json.loads(pathlib.Path(parts[parts.index('--request')+1]).read_text())
                 output.write_text(json.dumps({'method':'set_paused','params':[request['params'][0],n,'tag','proof'],'commitment':'wrong' if case=='wrong_credential' else commit,'verification_key_sha256':key_hash}))
                 return 'Authorization fixture'
             assert parts[1:3] in [['forge','create'],['cast','send']],parts
             paid.append(parts);tx='tx'+str(len(paid));assert parts[parts.index('--rpc-url')+1]==expected_rpc
             if parts[1]=='forge':
-                assert '--no-wait' in parts and int(parts[parts.index('--ou')+1])==1000
+                assert '--compiled-artifact' in parts and '--artifact-sha256' in parts
+                assert parts[parts.index('--artifact-sha256')+1]=='a'*64
+                assert '--no-wait' in parts and int(parts[parts.index('--ou')+1])==deployment_ou
                 if case=='unknown_submission':raise RuntimeError('unknown fixture submission; no hash returned')
                 receipt={'success':True,'contract':FACTORY}
             else:
-                assert int(parts[parts.index('--value')+1])==0 and int(parts[parts.index('--fee')+1])==1000
+                assert int(parts[parts.index('--value')+1])==0 and int(parts[parts.index('--fee')+1])==call_fee
                 address=parts[parts.index('--value')+2];method=parts[parts.index('--value')+3]
                 if method=='deploy_vpn':
                     assert address==FACTORY;event={'event':'VPNDeployed','values':[PROGRAM]}
@@ -124,32 +133,59 @@ for case in cases:
                     params=[json.loads(x) for x in parts[parts.index('--value')+4:]]
                     if params[1]==nonce:nonce+=1;receipt={'success':True}
                     elif case=='replay_accepted':receipt={'success':True}
-                    else:receipt={'success':False,'events':[{'event':'Require','values':['admin nonce mismatch']}]}
+                    else:
+                        receipt={'success':False,'error':'execution reverted','events':[{'event':'Require','values':['admin nonce mismatch']}]}
+                        if case=='replay_wrong_reason':receipt['events'][0]['values']=['different failure']
+                        if case=='replay_wrong_error':receipt['error']='different error'
+                        if case=='replay_successful_receipt':receipt['success']=True
+                        if case=='replay_nonce_changed':nonce+=1
             receipts[tx]=receipt;return json.dumps({'tx_hash':tx,'address':'untrusted prediction'})
         def rpc(url,method,params):
             assert url==expected_rpc;calls.append(method)
+            if method=='octra_runtimeVersion':
+                if case=='wrong_live_shape':return []
+                return {'chain_id':'foreign' if case=='wrong_live_chain' else target['chain_id'],
+                        'runtime_profile_hash':'0'*64 if case=='wrong_live_profile' else runtime_profile,
+                        'consensus_standard_hash':'0'*64 if case=='wrong_live_consensus' else consensus_standard}
             if method=='octra_balance':
                 if case=='unfunded':raise RuntimeError('sender not found')
-                return {'balance_raw':str(20_000-1000*len(paid))}
-            if method=='octra_transaction':return {'status':'confirmed'}
-            if method=='contract_receipt':return receipts[params[0]]
+                charged=sum(int(parts[parts.index('--ou')+1]) if parts[1]=='forge' else int(parts[parts.index('--fee')+1]) for parts in paid)
+                return {'balance_raw':str(1_000_000-charged-(1 if case=='fee_depletion' and len(paid)==5 else 0))}
+            if method=='octra_transaction':
+                index=int(params[0].removeprefix('tx'))
+                if case=='unexpected_rejection_factory' and index==1 or case=='unexpected_rejection_spawn' and index==2 or case=='unexpected_rejection_pause' and index==3:return {'status':'rejected','tx_hash':params[0]}
+                if index==4 and case in ['devnet_resume_after_replay','devnet_resume_tampered_journal'] and not resume_mode:raise RuntimeError('public replay still pending')
+                if index==4 and case in ['replay_rejected','devnet_replay_rejected','devnet_replay_native_no_receipt','devnet_resume_after_replay','devnet_resume_tampered_journal','replay_wrong_reason','replay_wrong_error','replay_successful_receipt','replay_missing_receipt','replay_nonce_changed']:
+                    reason='execution reverted [unrelated]' if case=='replay_missing_receipt' else 'execution reverted [admin nonce mismatch]'
+                    return {'status':'rejected','tx_hash':params[0],'error':{'reason':reason}}
+                if index==4 and case=='replay_dropped':return {'status':'dropped','tx_hash':params[0]}
+                return {'status':'confirmed','tx_hash':params[0]}
+            if method=='contract_receipt':
+                if case in ['replay_missing_receipt','devnet_replay_native_no_receipt'] and params[0]=='tx4':raise RuntimeError('receipt unavailable')
+                return receipts[params[0]]
             if method=='vm_contract':return {'code_hash':'wrong' if case=='wrong_child_code' and params[0]==PROGRAM else code_hash,'owner':FACTORY}
             if method=='contract_call':return {'result':{'get_admin_commitment':commit,'get_admin_domain':domain,'get_max_locked_value':200_000_000,'get_admin_nonce':nonce}[params[1]]}
             raise AssertionError(method)
         module.command=command;module.rpc=rpc;out=temp/'run'
+        # The real offline artifact validator has dedicated native-fixture controls.
+        # This suite isolates the existing financial/journal/prover ordering.
+        module.local_compiler.validate_saved=lambda *args: {'checks':{'private-admin-factory.aml':{'deployment_artifact_sha256':'a'*64}},'recheck':{'before':{'runtime':{'runtime_profile_hash':runtime_profile,'consensus_standard_hash':consensus_standard}}}}
         offline=case.endswith('offline_plan');argv=['deploy-canary.py','--candidate',str(candidate),'--preflight',str(preflight)]
         if case!='devnet_requires_mode':argv+=['--network',network]
         if is_devnet and case!='missing_env':argv+=['--network-env',str(network_env)]
         if not offline:argv+=['--key','fixture.key','--credential','fixture.credential','--setup',str(setup),'--out',str(out),'--broadcast']
         if case=='fee_out_of_range':argv+=['--fee-ou','10001']
-        sys.argv=argv;success=case in ['valid','devnet_valid','mainnet_offline_plan','devnet_offline_plan']
+        if case=='fee_budget_exact':argv+=['--fee-ou',str(call_fee)]
+        requested_deployment={'deployment_too_low':199999,'deployment_negative':-1,'deployment_exceeds_ceiling':1000001,'budget_exceeded':1000000}.get(case,deployment_ou)
+        argv+=['--deployment-ou',str(requested_deployment)]
+        sys.argv=argv;success=case in ['valid','devnet_valid','mainnet_offline_plan','devnet_offline_plan','fee_budget_exact','custom_deployment','replay_rejected','devnet_replay_rejected','devnet_replay_native_no_receipt']
         try:
             with contextlib.redirect_stdout(io.StringIO()) as stream:module.main()
             assert success,case
             result=json.loads(stream.getvalue())
             if offline:
                 assert result['broadcast'] is False and result['escrow_deposited']==0 and not wallet and not proofs and not calls and not paid
-                assert result['declared_fee_budget_ou']<=1_000_000
+                assert result['declared_fee_budget_ou']==deployment_ou+4*call_fee<=1_000_000
                 if is_devnet:assert result['target']['origin']['kind']=='checkpoint' and 'genesis_root' not in result['target']
             else:assert result['qualified'] is True and nonce==2 and len(paid)==5
         except (ValueError,RuntimeError):
@@ -157,8 +193,22 @@ for case in cases:
             journal_path=out/'journal.json'
             journal=json.loads(journal_path.read_text()) if journal_path.is_file() else {}
             assert journal.get('qualified') is not True
-        early=cases.index(case)>=cases.index('mode_mismatch') and case not in ['wrong_credential','unknown_submission','wrong_setup_vk']
-        if early:assert not wallet and not proofs and not calls and not paid,case
+        if case in ['devnet_resume_after_replay','devnet_resume_tampered_journal']:
+            journal_path=out/'journal.json';journal=json.loads(journal_path.read_text())
+            assert [entry['label'] for entry in journal['submissions']]==['deploy factory','spawn VPN','private pause','replay rejection']
+            assert 'receipt' not in journal['submissions'][-1] and len(paid)==4
+            if case=='devnet_resume_tampered_journal':
+                journal['relayer']=PROGRAM;journal_path.write_text(json.dumps(journal))
+            resume_mode=True;sys.argv=argv+['--resume']
+            try:
+                with contextlib.redirect_stdout(io.StringIO()) as stream:module.main()
+                assert case=='devnet_resume_after_replay'
+                assert json.loads(stream.getvalue())['qualified'] is True and len(paid)==5 and nonce==2
+            except ValueError:
+                assert case=='devnet_resume_tampered_journal' and len(paid)==4
+        early=cases.index(case)>=cases.index('mode_mismatch') and case not in ['wrong_credential','unknown_submission','wrong_setup_vk','fee_budget_exact','custom_deployment','replay_rejected','devnet_replay_rejected','devnet_replay_native_no_receipt','devnet_resume_after_replay','devnet_resume_tampered_journal','replay_wrong_reason','replay_wrong_error','replay_successful_receipt','replay_missing_receipt','replay_dropped','unexpected_rejection_factory','unexpected_rejection_spawn','unexpected_rejection_pause','replay_nonce_changed','fee_depletion']
+        if early and case not in ['wrong_live_chain','wrong_live_profile','wrong_live_consensus','wrong_live_shape']:assert not wallet and not proofs and not calls and not paid,case
+        if case in ['wrong_live_chain','wrong_live_profile','wrong_live_consensus','wrong_live_shape']:assert calls==['octra_runtimeVersion'] and not wallet and not proofs and not paid,case
         if case in ['unfunded','wrong_cap','commission_enabled','wrong_setup_vk']:assert not paid,case
         if case=='wrong_credential':assert len(proofs)==1 and not paid,case
         if case=='unknown_submission':
@@ -166,49 +216,14 @@ for case in cases:
             try:module.main();raise AssertionError('existing journal must refuse resubmission')
             except ValueError:pass
             assert len(paid)==1
+        if case.startswith('replay_') and case not in ['replay_accepted','replay_rejected']:
+            assert len(paid)==4 and nonce in (1,2),case
+        if case.startswith('unexpected_rejection_'):
+            assert len(paid)=={'unexpected_rejection_factory':1,'unexpected_rejection_spawn':2,'unexpected_rejection_pause':3}[case],case
         assert len(paid)<=5;checks.append(case)
 
-# Target preflight is tested only with fake responses and subprocesses.
-probe=load('probe',ROOT/'scripts/ceremony/probe-mainnet.py')
-for case in ['devnet_bound_sources','mainnet_legacy_default','rpc_override_mismatch','runtime_chain_mismatch','changed_main_before_upload','changed_factory_before_upload']:
-    with tempfile.TemporaryDirectory(prefix='octra-canary-probe-controls-') as raw:
-        temp=pathlib.Path(raw);candidate,preflight,setup,network_env,target,compile_files,authority_file=fixture(temp);probe.targets.AUTHORITY_FILE=authority_file
-        intent={'target':target,'target_binding_sha256':probe.targets.digest(target)};(candidate/'intent.json').write_text(json.dumps(intent));out=temp/'probe'
-        requests=[]
-        def verify_fixture(*args,**kwargs):
-            if case.startswith('changed_'):
-                name='main-v5.aml' if case=='changed_main_before_upload' else 'private-admin-factory.aml'
-                (candidate/name).write_bytes((candidate/name).read_bytes()+b'changed')
-            return None
-        probe.subprocess.run=verify_fixture
-        def rpc_fixture(url,method,params):
-            assert url==(probe.targets.MAINNET_RPC if case=='mainnet_legacy_default' else probe.targets.DEVNET_RPC);requests.append((method,params))
-            if method=='octra_runtimeVersion':return {'result':{'chain_id':'foreign' if case=='runtime_chain_mismatch' else target['chain_id']}}
-            if method=='node_status':return {'result':{}}
-            assert method=='octra_compileAml'
-            name=next(name for name in ['main-v5.aml','private-admin-factory.aml'] if params[0]==(candidate/name).read_text())
-            return json.loads((preflight/(name+'.compile.json')).read_text())
-        probe.rpc=rpc_fixture
-        argv=['probe-mainnet.py','--out',str(out)]
-        if case=='mainnet_legacy_default':
-            probe.ROOT=temp;shutil_source=temp/'program';shutil_source.mkdir()
-            for name in ['main-v5.aml','private-admin-factory.aml']:(shutil_source/name).write_bytes((candidate/name).read_bytes())
-        else:argv+=['--network','devnet','--candidate',str(candidate),'--network-env',str(network_env)]
-        if case=='rpc_override_mismatch':argv+=['--rpc-url',probe.targets.MAINNET_RPC]
-        sys.argv=argv
-        try:
-            with contextlib.redirect_stdout(io.StringIO()):probe.main()
-            assert case in ['devnet_bound_sources','mainnet_legacy_default'],case
-            report=json.loads((out/'report.json').read_text());assert report['deploy_ready'] is False and report['broadcast'] is False
-            assert len([m for m,p in requests if m=='octra_compileAml'])==2
-            for name in ['main-v5.aml','private-admin-factory.aml']:
-                assert report['checks'][name]['artifact_sha256']==sha((out/(name+'.compile.json')).read_bytes())
-                assert report['checks'][name]['source_sha256']==sha((candidate/name).read_bytes())
-        except ValueError:
-            assert case not in ['devnet_bound_sources','mainnet_legacy_default'],case
-            assert not any(m=='octra_compileAml' for m,p in requests),case
-        checks.append('probe_'+case)
-
+# Local compiler/profile/source/artifact controls are exercised separately by
+# test-local-compiler.py against the full pinned native result fixture.
 # Real packager logic uses a fake local compiler and fake public repository
 # snapshots; this certifies metadata/integrity plumbing, never native compilation.
 prepare=load('prepare',ROOT/'scripts/ceremony/prepare-candidate.py')
@@ -229,7 +244,7 @@ for case in ['compiler_unknown','compiler_declared','compiler_invalid','mainnet_
             assert args[1]=='version';return b'fixture compiler\n'
         prepare.command=compile_fixture;prepare.snapshot=lambda repo:{'head':'fixture','tree_sha256':'0'*64,'dirty':True}
         declared=None if case=='compiler_unknown' else ('invalid' if case=='compiler_invalid' else '7f9be4489870645cfcc95439638cde40f5da9f50')
-        args=argparse.Namespace(out=temp/'compiled',params=params,amlc=compiler,program_version=5,network='mainnet' if mainnet else 'devnet',network_env=None if mainnet else network_env,compiler_patch=[],compiler_upstream_commit=declared)
+        args=argparse.Namespace(compiler_rpc_url=None,compiler_binding=None,out=temp/'compiled',params=params,amlc=compiler,program_version=5,network='mainnet' if mainnet else 'devnet',network_env=None if mainnet else network_env,compiler_patch=[],compiler_upstream_commit=declared)
         try:
             with contextlib.redirect_stdout(io.StringIO()):prepare.compile_candidate(args)
             assert case!='compiler_invalid'
@@ -249,4 +264,37 @@ for case in ['compiler_unknown','compiler_declared','compiler_invalid','mainnet_
             with contextlib.redirect_stdout(io.StringIO()):assert prepare.verify(argparse.Namespace(out=args.out,require_ready=False))==0
         except ValueError:assert case=='compiler_invalid'
         checks.append('packager_'+case)
+class DirectEndpoint:
+    def open(self,request,timeout):
+        assert request.full_url=='https://devnet.octrascan.io/rpc' and timeout==20
+        assert request.get_header('User-agent')=='octra-canary/1.0'
+        assert json.loads(request.data)['method']=='octra_balance'
+        return io.BytesIO(b'{"jsonrpc":"2.0","id":1,"result":{"balance_raw":"7"}}')
+def direct_only(*handlers):
+    assert len(handlers)==2
+    assert isinstance(handlers[0],module.urllib.request.ProxyHandler) and handlers[0].proxies=={}
+    assert isinstance(handlers[1],module._NoRedirect)
+    assert handlers[1].redirect_request(None,None,302,'Found',{},'https://elsewhere.invalid/') is None
+    return DirectEndpoint()
+with unittest.mock.patch.object(module.urllib.request,'build_opener',direct_only):
+    assert transport_rpc('https://devnet.octrascan.io/rpc','octra_balance',['oct'+'4'*44])=={'balance_raw':'7'}
+checks.append('strict_direct_rpc_transport')
+class RateLimitedEndpoint(DirectEndpoint):
+    def __init__(self,failures):self.failures=failures;self.calls=0
+    def open(self,request,timeout):
+        self.calls+=1
+        if self.calls<=self.failures:
+            raise module.urllib.error.HTTPError(request.full_url,429,'Too Many Requests',{'Retry-After':'1'},None)
+        return super().open(request,timeout)
+endpoint=RateLimitedEndpoint(2)
+with unittest.mock.patch.object(module.urllib.request,'build_opener',lambda *handlers:endpoint),unittest.mock.patch.object(module.time,'sleep') as sleep:
+    assert transport_rpc('https://devnet.octrascan.io/rpc','octra_balance',['oct'+'4'*44])=={'balance_raw':'7'}
+    assert endpoint.calls==3 and [call.args[0] for call in sleep.call_args_list]==[1,2]
+checks.append('bounded_read_only_rate_limit_retry')
+endpoint=RateLimitedEndpoint(6)
+with unittest.mock.patch.object(module.urllib.request,'build_opener',lambda *handlers:endpoint),unittest.mock.patch.object(module.time,'sleep') as sleep:
+    try:transport_rpc('https://devnet.octrascan.io/rpc','octra_balance',['oct'+'4'*44]);raise AssertionError('sixth rate limit must stop')
+    except module.urllib.error.HTTPError as error:assert error.code==429
+    assert endpoint.calls==6 and sleep.call_count==5
+checks.append('rate_limit_exhaustion_stops')
 print(json.dumps({'status':'PASS','controls':len(checks),'cases':checks,'scope':'Hermetic mocked controls only; no actual RPC/source upload/wallet/signing/compiler/proof execution or public deployment.'},indent=2))

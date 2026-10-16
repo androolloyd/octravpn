@@ -4,6 +4,8 @@
 !octra/Cargo.toml
 !octra/Cargo.lock
 !octra/rust-toolchain.toml
+!octra/.cargo/
+!octra/.cargo/config.toml
 !octra/crates/
 !octra/crates/**
 !octra/program/
@@ -17,14 +19,11 @@
 !octra/docs/
 !octra/docs/rust-node/
 !octra/docs/rust-node/source-map.json
+!octra/docs/rust-node/upstream.json
+!octra/docs/rust-node/network-authority.json
 !octra/scripts/
 !octra/scripts/node-port/
-!octra/scripts/node-port/octb-oracle.ml
-!octra/scripts/node-port/native-oracle.py
-!octra/scripts/node-port/octb-fixtures.py
-!octra/scripts/node-port/snapshot-service-oracle.ml
-!octra/scripts/node-port/snapshot-service-fixtures.py
-!octra/scripts/node-port/finality-query-oracle.ml
+!octra/scripts/node-port/**
 !octra/docker/
 !octra/docker/vpn-transport/
 !octra/docker/vpn-transport/**

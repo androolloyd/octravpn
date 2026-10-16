@@ -1,0 +1,90 @@
+{
+  "date": "2026-10-16",
+  "status": "PASS_ZERO_ESCROW_PUBLIC_DEVNET_RC",
+  "network": "Octra public devnet",
+  "chain_id": "octra-devnet-9871-cluster",
+  "rpc_url": "https://devnet.octrascan.io/rpc",
+  "candidate_id": "485a4611317254f6c339f73152ab80732ea07026651b82f0e34c4835d25899c4",
+  "compiler": {
+    "kind": "verified_local_rust_node",
+    "source_uploaded_to_public_rpc": false,
+    "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50"
+  },
+  "deployment": {
+    "factory": "oct8re71db9G5neZ9crqPTW6NB9maXWjRVCxaFiUgUC4Hxg",
+    "factory_code_hash": "15e30e37c7586475e9df603840d3a2be5ea303d8a1b5be4990dcdb8b50f5560a",
+    "program": "octBvz5NWCqDYkUDoLb1xLCmiHvr8HHbfYy7okbaPit8Aj6",
+    "program_code_hash": "7334e6e8b25e901a50a57dd9166d2231402d9cf30c7b000e0d6333801855998e",
+    "program_owner": "oct8re71db9G5neZ9crqPTW6NB9maXWjRVCxaFiUgUC4Hxg",
+    "transactions": [
+      {
+        "label": "deploy factory",
+        "tx_hash": "2b74406070bfccad82725d8e8117cbb48a990345fffc03d271a08b8478bd4abd",
+        "status": "confirmed",
+        "epoch": 1701972,
+        "error_reason": null
+      },
+      {
+        "label": "spawn VPN",
+        "tx_hash": "a25ec25240a7cbfefc1d8410045aa237bd5cea45c3ef8a6b70e38cf23c92dfff",
+        "status": "confirmed",
+        "epoch": 1701974,
+        "error_reason": null
+      },
+      {
+        "label": "private pause",
+        "tx_hash": "1b0c37028b42934bb38d3680763200386a10f75304f6ddfbc299fe9b62800426",
+        "status": "confirmed",
+        "epoch": 1701977,
+        "error_reason": null
+      },
+      {
+        "label": "replay rejection",
+        "tx_hash": "322f3a5f4aec7ac7406754890ccdf332937b968f3feca772b8d7d6df119ee0d7",
+        "status": "rejected",
+        "epoch": 1702006,
+        "error_reason": "execution reverted [admin nonce mismatch]"
+      },
+      {
+        "label": "private unpause",
+        "tx_hash": "625ccc9ecf20316387eed03ed333479dd166d955f40fb5efce6134401102b84f",
+        "status": "confirmed",
+        "epoch": 1702021,
+        "error_reason": null
+      }
+    ]
+  },
+  "private_admin": {
+    "stateful_pause_and_unpause_confirmed": true,
+    "replay_rejected_reason": "execution reverted [admin nonce mismatch]",
+    "final_nonce": "2"
+  },
+  "economics": {
+    "escrow_deposited_ou": 0,
+    "operator_stake_deposited_ou": 0,
+    "protocol_fee_bps": 0,
+    "observed_relayer_spend_ou": 203000,
+    "declared_fee_budget_ou": 204000,
+    "max_locked_value_ou": "200000000"
+  },
+  "evidence": {
+    "local_journal": "out/node-port-final-20261015/devnet-rc-final-public-broadcast-2/journal.json",
+    "local_journal_sha256": "3e447b2bce119c18df0877abc72b8b0c993278bee409df25a7da164b5cd6d5da",
+    "sanitized_readback": "out/node-port-final-20261015/devnet-rc-public-readback-20261016.json",
+    "sanitized_readback_sha256": "05cb0420e52b8ff0f431cb845b0f8a60818c58994e94a8677d4b283e2d64c270"
+  },
+  "scope": "Official execution RPC stateful RC qualification with local source compilation. No escrow, operator stake, funded VPN traffic, independent public-chain replay, Mainnet claim or public HTTPS serving qualification.",
+  "observer_exex": {
+    "confirmed_transaction_count": 4,
+    "canonical_outbox_and_archive_receipts_equal": true,
+    "epochs": [
+      1701972,
+      1701974,
+      1701977,
+      1702021
+    ],
+    "local_report": "out/node-port-final-20261015/devnet-rc-observer-exex-20261016.json",
+    "local_report_sha256": "daeeeb16bd78ce8e89d0e45348fb542e19fb7a58233c796bb96a5b9d3426e742",
+    "scope": "Read-only comparison of each successful canary transaction to retained canonical SQLite ExEx outbox, archive cursor/parent/root and exact receipt; not a public serving or fully caught-up claim"
+  }
+}

@@ -81,6 +81,7 @@ pub(super) async fn read(
     let view = host.node.snapshot().map_err(unavailable)?;
     let native = host.executor.clone();
     let method = method.to_vec();
+    let node = host.node.clone();
     host.executor
         .read(move || match method.as_slice() {
             b"octra_pvacPubkey" | b"octra_pvacStatus" => {
@@ -133,9 +134,16 @@ pub(super) async fn read(
                 }
             }
             b"octra_encryptedCipher" | b"octra_encryptedBalance" | b"octra_viewPubkey" => {
-                let account =
-                    account_store::load(&StateBatch::from_snapshot(view.state().clone()), &address)
-                        .map_err(unavailable)?;
+                let account = node
+                    .account_for_read(
+                        &address,
+                        account_store::load(
+                            &StateBatch::from_snapshot(view.state().clone()),
+                            &address,
+                        )
+                        .map_err(unavailable)?,
+                    )
+                    .map_err(unavailable)?;
                 if method == b"octra_viewPubkey" {
                     return wire::view_pubkey(
                         &address,

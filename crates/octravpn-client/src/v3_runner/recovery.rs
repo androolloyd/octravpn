@@ -176,7 +176,8 @@ pub(super) async fn heartbeat(
         let deadline = Instant::now() + Duration::from_secs(60);
         let mut restored = false;
         let mut last = String::new();
-        for attempt in 0..4 {
+        let mut attempt = 0u32;
+        while Instant::now() < deadline {
             let attempt_deadline = deadline.min(Instant::now() + Duration::from_secs(25));
             let result = timeout_at(attempt_deadline, async {
                 open(ctx, client, active, anchor, policy, tailnet).await?;
@@ -218,9 +219,10 @@ pub(super) async fn heartbeat(
                 break;
             }
             tokio::time::sleep_until(
-                (Instant::now() + Duration::from_secs(1 << attempt)).min(deadline),
+                (Instant::now() + Duration::from_secs(1u64 << attempt.min(3))).min(deadline),
             )
             .await;
+            attempt += 1;
         }
         if !restored {
             bail!("existing VPN session recovery exhausted; traffic stayed paused and escrow remains recoverable: {last}");
