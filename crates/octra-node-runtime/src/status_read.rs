@@ -130,7 +130,7 @@ impl Service {
                 .unwrap_or_default(),
             round_votes: snapshot.as_ref().map(|s| &s.votes),
             round_agreed: agreed,
-            peers: if snapshot.is_some() { &peers } else { &[] },
+            peers: &peers,
             diagnostics: diag.as_ref(),
         }
         .to_json(now)
