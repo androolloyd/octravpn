@@ -1,0 +1,71 @@
+{
+  "date": "2026-10-16",
+  "recorded_at_utc": "2026-10-16T20:21:20.085188+00:00",
+  "status": "LOCAL_PAID_PASS_PUBLIC_RESTART_PENDING",
+  "source": {
+    "base_commit": "2f8e8ddc4f86a6d6fb4b7d7f467c615c483475ce",
+    "upstream_lite_node": "7f9be4489870645cfcc95439638cde40f5da9f50",
+    "headscale_rs": "7b6b71b245ceff25f27a400588d78dd28e6e340f",
+    "octra_foundry": "d5feaad7f14d6a381e2327dfd6738cae8df95b31",
+    "production_delta": "receipt-only retry now requires an opener signature and authenticated canonical opening; a vaulted retry cannot install a packet permit",
+    "post_image_test_only_delta": [
+      "crates/octra-node/tests/single_native.rs",
+      "crates/octra-node/tests/services.rs",
+      "crates/octra-node-runtime/tests/common/bundle_peer.rs",
+      "scripts/coverage.sh"
+    ]
+  },
+  "local_gates": {
+    "octravpn_node_lib": "501 passed",
+    "octravpn_node_integration": "all supported host suites passed; privileged kernel fixture isolated in Docker",
+    "octra_node_lib": "47 passed",
+    "octra_node_executable_devnet": "2 passed",
+    "octra_node_services_after_coverage_budget_fix": "16 passed, 1 isolated Chromium fixture ignored",
+    "single_cli_ci_timeout_regression": "1 passed",
+    "strict_clippy": "passed for octra-node and octravpn-node all targets",
+    "package_format": "passed",
+    "vendored_source": "passed"
+  },
+  "paid_qualification": {
+    "single": {
+      "qualified": true,
+      "steps": 34,
+      "scope": "isolated explicitly activated private Single genesis; signed local history, no BFT QC/public-network qualification",
+      "source_sha256": "e303701cbc78d020f61a956dbb4d03968be1591f54a64ba76ad623ac9c33700b",
+      "image_id": "sha256:f653e559a810643b33a5d8f5fdb3f23f2873fc33b0695e820d8fe505533d93c4",
+      "evidence_directory": "out/node-port-final-20261015/native-vpn-20261016-retry-fix-single",
+      "build_log_sha256": "6affd58497004d80c6834c0548d1f607239ae2f2538dc878bdaa8d0e37749a28",
+      "run_log_sha256": "7a32f1226a241cbf65c1eb31e9a4fc67dad68dfa6c2f8a9a513de603696381a0",
+      "journal_sha256": "c54c58eb0175b7cea103c5325e84f6aeedbae5d4175ce5446c1ea23b377fe8ce",
+      "qualification_sha256": "36a5d95d73a7c1059f19d54ba21f2e3db0ac49a9ea6d0ae0f698687e10e42a27"
+    },
+    "bft": {
+      "qualified": true,
+      "steps": 34,
+      "scope": "isolated activated application genesis; no public-chain parity claim",
+      "source_sha256": "e303701cbc78d020f61a956dbb4d03968be1591f54a64ba76ad623ac9c33700b",
+      "image_id": "sha256:f653e559a810643b33a5d8f5fdb3f23f2873fc33b0695e820d8fe505533d93c4",
+      "evidence_directory": "out/node-port-final-20261015/native-vpn-20261016-retry-fix-bft",
+      "build_log_sha256": "4c0b53ae53a74147924962089eb51c505fd5e1b715031b0fb1e8be8d0ec52d5d",
+      "run_log_sha256": "c8cff29e829fedde1fa9487a75f0edee5be7875b8ded46e749d68231ca703833",
+      "journal_sha256": "4b4d7aad9616da01dbf784aa2c9e3f97fe42935180b59ef715bc0af6dc04c3d1",
+      "qualification_sha256": "45a861bd16d5548dc719607ba4b268db23b98b65155ed112a05b9c88fb1063a1"
+    }
+  },
+  "public_observer": {
+    "voting": false,
+    "vpn": null,
+    "pre_restart_epoch": 1705339,
+    "release_binary_sha256": "c13273d1badd2c4b98b9bfc9302a828568d297f7cdff9efd08253950c7a2ceba",
+    "config_sha256": "9eac462c782eda87e954792e7efbc0faf47d71bdb17d3be09ee0bded5fcd2005",
+    "new_pid": 34469,
+    "first_status": null,
+    "circle_https_after_restart": "pending"
+  },
+  "github_prior_head_runs": {
+    "proof": "38949534954 failed on 30-second private Single cold startup deadline",
+    "coverage": "38949534880 failed on instrumentation-sensitive service deadlines and a long private-balance test",
+    "new_head_ci": "pending push"
+  },
+  "scope": "No consensus changes. Local Single and BFT paid qualification is isolated. Public observer remains nonvoting and unfunded VPN activation, stable Circle HTTPS, external tailnet navigation, full upstream behavioral parity, and Mainnet remain open gates."
+}

@@ -1,0 +1,43 @@
+{
+  "scope": "Source ancestry and remaining Rust node parity gates; no consensus behavior changed",
+  "checked_at_utc": "2026-10-16T18:47:24Z",
+  "upstream": {
+    "repository": "https://github.com/octra-labs/lite_node",
+    "requested_baseline": "d3e834919bd586e81f947d0dae91becc6c43c756",
+    "adopted_and_current_main": "7f9be4489870645cfcc95439638cde40f5da9f50",
+    "ancestry": "requested baseline is an ancestor of adopted main; five commits ahead",
+    "changed_paths_since_requested_baseline": [
+      "MANIFEST.sha256",
+      "SOURCE_COMMIT",
+      "controls/install.sh",
+      "controls/lib/test_upgrade_profile.py",
+      "controls/lib/test_validator_tools.py",
+      "controls/lib/upgrade.py",
+      "controls/lib/validator_config.py"
+    ],
+    "runtime_or_consensus_source_delta": false,
+    "verification": "GitHub commits/main and compare APIs; local git merge-base and diff-tree at the adopted pin"
+  },
+  "local_source_evidence": {
+    "source_map": "docs/rust-node/source-map.json",
+    "source_map_sha256": "6440fdf5895e791ce99ff1904aea396fc88c7e12645846a32702286aa9c17efa",
+    "inventoried_native_files": 1158,
+    "vendored_source_check": "PASS: pinned PVAC sources and exactly reproduced Rust Circle API patch",
+    "private_single_launcher": "run-network dispatches an explicitly tagged private Single configuration to the Single producer; single_native.rs exercises signed transfer, RPC, ExEx archive and restart through that path"
+  },
+  "remaining_parity_gates": [
+    {
+      "gate": "Full native node behavior",
+      "evidence": "docs/rust-node/upstream.json records full_rust_node_complete=false; network-consensus-inventory.json maps 31 of 167 scoped sources as partial. A mapped source or finite oracle does not prove the integrated host path."
+    },
+    {
+      "gate": "Public validator and peer operation",
+      "evidence": "network-consensus-inventory.json records full_consensus_execution=false and public_peer_interoperability=false as qualification flags. Current observer/import evidence is narrower than sustained voting, sync, restart and recovery qualification."
+    },
+    {
+      "gate": "Public paid VPN and Circle availability",
+      "evidence": "docs/rust-node/status.md records zero-escrow public canary execution and separate paid private-network qualification; public funded VPN settlement, stable current-release Circle HTTPS and external tailnet application navigation remain unqualified."
+    }
+  ],
+  "conclusion": "The adopted pin already includes the requested baseline with identical runtime and consensus sources. No upstream consensus-port edit is justified by this delta; complete Rust parity requires the separate integration and qualification gates above."
+}

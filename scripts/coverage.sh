@@ -5,6 +5,9 @@ cd "$(dirname "$0")/.."
 
 threshold="${OCTRA_COVERAGE_FAIL_UNDER:-20}"
 output_dir="${OCTRA_COVERAGE_OUTPUT_DIR:-coverage}"
+# The 48-case private-epoch FHE fixture takes substantially longer under
+# Tarpaulin instrumentation than in the ordinary test job.
+test_timeout="${OCTRA_COVERAGE_TEST_TIMEOUT:-1800}"
 
 if ! cargo tarpaulin --version >/dev/null 2>&1; then
   # No `--locked`: tarpaulin's pinned lock pulls cargo-platform 0.3.3
@@ -18,7 +21,7 @@ fi
 cargo tarpaulin \
   --workspace \
   --all-targets \
-  --timeout 300 \
+  --timeout "$test_timeout" \
   --fail-under "$threshold" \
   --out Xml \
   --output-dir "$output_dir" \

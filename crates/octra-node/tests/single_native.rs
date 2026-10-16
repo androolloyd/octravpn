@@ -1064,7 +1064,10 @@ async fn wait_single_head(
     log: &std::path::Path,
 ) -> Value {
     let mut last_response = String::new();
-    let result = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+    // A cold CI workspace can spend longer initializing the private ledger
+    // while other test binaries share the runner. Keep the process and exact
+    // head checks, but give startup the same bounded window as the live gate.
+    let result = tokio::time::timeout(std::time::Duration::from_secs(120), async {
         loop {
             assert!(
                 child.try_wait().unwrap().is_none(),

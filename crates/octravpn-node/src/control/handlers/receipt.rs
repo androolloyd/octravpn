@@ -740,9 +740,24 @@ mod tests {
     struct DeferredSettlement {
         entered: tokio::sync::Notify,
         committed: tokio::sync::Notify,
+        opening: octravpn_core::control::AnnounceSessionRequest,
     }
     #[async_trait::async_trait]
     impl crate::embedded::ReceiptSettlement for DeferredSettlement {
+        async fn authorize_retry(
+            &self,
+            receipt: &SignedReceipt,
+            announcement: &octravpn_core::control::AnnounceSessionRequest,
+        ) -> anyhow::Result<()> {
+            anyhow::ensure!(
+                receipt.receipt.session_id == announcement.session_id
+                    && receipt.client_pubkey == announcement.client_pubkey
+                    && serde_json::to_vec(&self.opening)? == serde_json::to_vec(announcement)?,
+                "receipt retry opening differs"
+            );
+            Ok(())
+        }
+
         async fn confirm(
             &self,
             _: SignedReceipt,
@@ -762,16 +777,17 @@ mod tests {
         let client = KeyPair::generate();
         let router = Arc::new(OnionRouter::new());
         let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let id = SessionId::from_u64(7);
+        let wg = [45; 32];
+        let request = signed_announce(id.clone(), &client, wg);
         let publisher = Arc::new(DeferredSettlement {
             entered: tokio::sync::Notify::new(),
             committed: tokio::sync::Notify::new(),
+            opening: request.clone(),
         });
         let mut control = ControlState::new(node.clone(), router, allowlist.clone());
         control.receipt_settlement = Some(publisher.clone());
         let state = Arc::new(control);
-        let id = SessionId::from_u64(7);
-        let wg = [45; 32];
-        let request = signed_announce(id.clone(), &client, wg);
         assert_eq!(
             announce(State(state.clone()), Json(request.clone()))
                 .await

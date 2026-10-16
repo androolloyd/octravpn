@@ -61,7 +61,7 @@ jobs:
           # confirm the golden still matches (refresh it deliberately with
           # PARITY_UPDATE_GOLDEN=1 ./scripts/headscale_go_diff.sh if the
           # bump intentionally changes observable output).
-          ref: b896380835789e28d46043b8120fdd02125a5ae2
+          ref: 7b6b71b245ceff25f27a400588d78dd28e6e340f
 
       # --- toolchains ---------------------------------------------------
       # setup-rust also installs protoc (headscale-api's tonic build script

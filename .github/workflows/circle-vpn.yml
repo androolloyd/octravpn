@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { repository: androolloyd/octra-foundry, ref: d5feaad7f14d6a381e2327dfd6738cae8df95b31, path: octra-foundry }
       - uses: actions/checkout@v4
-        with: { repository: androolloyd/headscale-rs, ref: b896380835789e28d46043b8120fdd02125a5ae2, path: headscale-rs }
+        with: { repository: androolloyd/headscale-rs, ref: 7b6b71b245ceff25f27a400588d78dd28e6e340f, path: headscale-rs }
       - uses: ./octra/.github/actions/setup-rust
       - uses: ./octra/.github/actions/prepare-native-tests
       - name: Circle application and durable ExEx delivery

@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { repository: androolloyd/octra-foundry, ref: d5feaad7f14d6a381e2327dfd6738cae8df95b31, path: octra-foundry }
       - uses: actions/checkout@v4
-        with: { repository: androolloyd/headscale-rs, ref: b896380835789e28d46043b8120fdd02125a5ae2, path: headscale-rs }
+        with: { repository: androolloyd/headscale-rs, ref: 7b6b71b245ceff25f27a400588d78dd28e6e340f, path: headscale-rs }
       # Format every workspace member with the pinned toolchain. `--all`
       # also traverses sibling/path dependencies, including byte-pinned
       # native sources. Verify those against their provenance instead.
@@ -45,7 +45,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { repository: androolloyd/octra-foundry, ref: d5feaad7f14d6a381e2327dfd6738cae8df95b31, path: octra-foundry }
       - uses: actions/checkout@v4
-        with: { repository: androolloyd/headscale-rs, ref: b896380835789e28d46043b8120fdd02125a5ae2, path: headscale-rs }
+        with: { repository: androolloyd/headscale-rs, ref: 7b6b71b245ceff25f27a400588d78dd28e6e340f, path: headscale-rs }
       - uses: ./octra/.github/actions/setup-rust
         with:
           components: clippy
@@ -67,7 +67,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { repository: androolloyd/octra-foundry, ref: d5feaad7f14d6a381e2327dfd6738cae8df95b31, path: octra-foundry }
       - uses: actions/checkout@v4
-        with: { repository: androolloyd/headscale-rs, ref: b896380835789e28d46043b8120fdd02125a5ae2, path: headscale-rs }
+        with: { repository: androolloyd/headscale-rs, ref: 7b6b71b245ceff25f27a400588d78dd28e6e340f, path: headscale-rs }
       - uses: ./octra/.github/actions/setup-rust
       - uses: ./octra/.github/actions/prepare-native-tests
       - run: cargo test --locked --workspace --all-targets --all-features
@@ -98,7 +98,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { repository: androolloyd/octra-foundry, ref: d5feaad7f14d6a381e2327dfd6738cae8df95b31, path: octra-foundry }
       - uses: actions/checkout@v4
-        with: { repository: androolloyd/headscale-rs, ref: b896380835789e28d46043b8120fdd02125a5ae2, path: headscale-rs }
+        with: { repository: androolloyd/headscale-rs, ref: 7b6b71b245ceff25f27a400588d78dd28e6e340f, path: headscale-rs }
       - uses: ./octra/.github/actions/setup-rust
       - name: Install jq
         run: sudo apt-get update -y >/dev/null && sudo apt-get install -y jq >/dev/null
@@ -234,7 +234,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { repository: androolloyd/octra-foundry, ref: d5feaad7f14d6a381e2327dfd6738cae8df95b31, path: octra-foundry }
       - uses: actions/checkout@v4
-        with: { repository: androolloyd/headscale-rs, ref: b896380835789e28d46043b8120fdd02125a5ae2, path: headscale-rs }
+        with: { repository: androolloyd/headscale-rs, ref: 7b6b71b245ceff25f27a400588d78dd28e6e340f, path: headscale-rs }
       - uses: ./octra/.github/actions/setup-rust
       - name: Install Kani
         run: |
@@ -257,7 +257,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { repository: androolloyd/octra-foundry, ref: d5feaad7f14d6a381e2327dfd6738cae8df95b31, path: octra-foundry }
       - uses: actions/checkout@v4
-        with: { repository: androolloyd/headscale-rs, ref: b896380835789e28d46043b8120fdd02125a5ae2, path: headscale-rs }
+        with: { repository: androolloyd/headscale-rs, ref: 7b6b71b245ceff25f27a400588d78dd28e6e340f, path: headscale-rs }
       # NB: do NOT add docker/setup-buildx-action here. It switches to
       # the `docker-container` buildx driver, whose build store is
       # isolated from the host daemon — so the `octravpn-builder:latest`
@@ -282,7 +282,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { repository: androolloyd/octra-foundry, ref: d5feaad7f14d6a381e2327dfd6738cae8df95b31, path: octra-foundry }
       - uses: actions/checkout@v4
-        with: { repository: androolloyd/headscale-rs, ref: b896380835789e28d46043b8120fdd02125a5ae2, path: headscale-rs }
+        with: { repository: androolloyd/headscale-rs, ref: 7b6b71b245ceff25f27a400588d78dd28e6e340f, path: headscale-rs }
       - uses: ./octra/.github/actions/setup-rust
       - uses: ./octra/.github/actions/prepare-native-tests
       # cargo-tarpaulin's recent releases lock a dependency tree that
@@ -308,7 +308,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { repository: androolloyd/octra-foundry, ref: d5feaad7f14d6a381e2327dfd6738cae8df95b31, path: octra-foundry }
       - uses: actions/checkout@v4
-        with: { repository: androolloyd/headscale-rs, ref: b896380835789e28d46043b8120fdd02125a5ae2, path: headscale-rs }
+        with: { repository: androolloyd/headscale-rs, ref: 7b6b71b245ceff25f27a400588d78dd28e6e340f, path: headscale-rs }
       - uses: ./octra/.github/actions/setup-rust
       - name: Build benches
         run: cargo bench -p octravpn-core --no-run
@@ -325,7 +325,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { repository: androolloyd/octra-foundry, ref: d5feaad7f14d6a381e2327dfd6738cae8df95b31, path: octra-foundry }
       - uses: actions/checkout@v4
-        with: { repository: androolloyd/headscale-rs, ref: b896380835789e28d46043b8120fdd02125a5ae2, path: headscale-rs }
+        with: { repository: androolloyd/headscale-rs, ref: 7b6b71b245ceff25f27a400588d78dd28e6e340f, path: headscale-rs }
       - uses: ./octra/.github/actions/setup-rust
         with:
           cache: "false"
@@ -349,7 +349,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { repository: androolloyd/octra-foundry, ref: d5feaad7f14d6a381e2327dfd6738cae8df95b31, path: octra-foundry }
       - uses: actions/checkout@v4
-        with: { repository: androolloyd/headscale-rs, ref: b896380835789e28d46043b8120fdd02125a5ae2, path: headscale-rs }
+        with: { repository: androolloyd/headscale-rs, ref: 7b6b71b245ceff25f27a400588d78dd28e6e340f, path: headscale-rs }
       - uses: ./octra/.github/actions/setup-rust
         with:
           toolchain: nightly

@@ -25,7 +25,7 @@ use std::{
     time::Duration,
 };
 use tokio::{net::TcpListener, sync::watch, task::JoinHandle};
-const WAIT: Duration = Duration::from_secs(10);
+const WAIT: Duration = Duration::from_secs(30);
 #[derive(Clone)]
 pub(crate) struct Authority {
     pub(crate) history: Arc<Mutex<Option<Arc<dyn octra_node_runtime::finality::history::History>>>>,

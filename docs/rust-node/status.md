@@ -9,6 +9,13 @@ upstream behavioral parity and public-network deployment remain unqualified.
 
 ## Recorded local evidence
 
+- The [receipt retry and paid integration checkpoint](checkpoints/2026-10-16/retry-admission-paid-gates.json)
+  records a canonical-opening check for vaulted receipt retries and the same
+  frozen image passing both 34-step private Single and four-validator BFT paid
+  gates. Real client/node OS TUN traffic, exact on-chain settlement, canonical
+  ExEx records, Circle gateway reads and restart recovery passed. The current
+  release binary was built and the nonvoting public observer is restarting on
+  its retained state. Public paid admission and stable Circle HTTPS remain open.
 - The [bounded public observer recovery checkpoint](checkpoints/2026-10-16/public-prefix-recovery.json)
   records commit `23466d5` passing the executable devnet, node library,
   service and strict lint gates. A nonvoting observer now binds diagnostics
@@ -184,9 +191,10 @@ comparisons, crash/restart tests and strict linting. Its asynchronous proof
 workers and Single RPC/browser/VPN/ExEx service adapter passed the combined
 private Single qualification above. This does not establish complete upstream
 behavioral parity on the public network.
-The standard network launcher still rejects native standalone Single producer
-mode; the working Single executor currently has a separate private-genesis
-launcher. That host integration remains an upstream parity gap.
+The standard `run-network` command dispatches an explicitly tagged private
+Single configuration to its native producer and service launcher. It requires
+an isolated private genesis; the public network path remains BFT-only. This
+local integration does not establish upstream public-network parity.
 A mapped source file or passing local fixture does not establish full
 native parity. Dated reports in [the adoption history](native-runtime.md) preserve
 their original snapshot and should not be read as current completeness counters.

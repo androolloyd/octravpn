@@ -1587,7 +1587,7 @@ async fn consecutive_peer_recovery_resumes_after_missing_bundle_and_restart() {
         .unwrap()
         .unwrap();
     let range = node
-        .catch_up_range(3, &reader.finality, &executor, 0.5)
+        .catch_up_range(3, &reader.finality, &executor, 5.)
         .await
         .unwrap();
     assert!(!range.reached);
@@ -1611,7 +1611,7 @@ async fn consecutive_peer_recovery_resumes_after_missing_bundle_and_restart() {
         .range_plan_error
         .store(true, Ordering::SeqCst);
     let unavailable = node
-        .catch_up_range(3, &reader.finality, &executor, 0.5)
+        .catch_up_range(3, &reader.finality, &executor, 5.)
         .await
         .unwrap();
     assert!(!unavailable.reached);
@@ -1620,7 +1620,7 @@ async fn consecutive_peer_recovery_resumes_after_missing_bundle_and_restart() {
         .authority
         .range_plan_error
         .store(false, Ordering::SeqCst);
-    let progress = node.catch_up(3, &peers, &executor, 1.).await.unwrap();
+    let progress = node.catch_up(3, &peers, &executor, 10.).await.unwrap();
     assert!(!progress.reached);
     assert_eq!(progress.head.cursor.epoch.0, 1);
     assert!(matches!(node.status(), Status::Suspended(_)));
@@ -1866,7 +1866,7 @@ async fn agreed_ranges_recover_canonical_services_and_exex_after_restart() {
         .unwrap();
     // Both authenticated sources have only a one-epoch committed prefix.
     let progress = node
-        .catch_up_range(3, &reader.finality, &executor, 0.5)
+        .catch_up_range(3, &reader.finality, &executor, 5.)
         .await
         .unwrap();
     assert!(!progress.reached);

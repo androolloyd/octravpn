@@ -23,6 +23,18 @@ pub use crate::tunnel::ip::Config as IpTunnelConfig;
 /// canonical application state. Queue acceptance is insufficient.
 #[async_trait::async_trait]
 pub trait ReceiptSettlement: Send + Sync {
+    /// Authorize receipt handback when the original funded session no longer
+    /// admits traffic. Implementations must verify the opening against
+    /// authenticated canonical history, even if a claim record is already
+    /// saved. The default refuses this privileged retry path.
+    async fn authorize_retry(
+        &self,
+        _receipt: &octravpn_core::receipt::SignedReceipt,
+        _announcement: &octravpn_core::control::AnnounceSessionRequest,
+    ) -> Result<()> {
+        anyhow::bail!("receipt retry opening verification unavailable")
+    }
+
     async fn confirm(
         &self,
         receipt: octravpn_core::receipt::SignedReceipt,

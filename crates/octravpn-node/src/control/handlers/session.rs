@@ -10,7 +10,10 @@ use std::sync::Arc;
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use octravpn_core::{
-    control::{announce_signing_payload, AnnounceSessionRequest, AnnounceSessionResponse},
+    control::{
+        announce_opener_binding_payload, announce_signing_payload, AnnounceSessionRequest,
+        AnnounceSessionResponse,
+    },
     sig::verify,
 };
 use tracing::warn;
@@ -42,15 +45,53 @@ pub(crate) async fn announce(
         )
             .into_response();
     }
+    // A vaulted receipt permits claim retry after canonical admission closes,
+    // but it must not permit a client to replace the opener's announcement.
+    let opener_payload = announce_opener_binding_payload(
+        &req.session_id,
+        &req.client_pubkey,
+        &req.client_wg_pubkey,
+        &req.open_tx_hash,
+    );
+    if verify(&req.opener_pubkey, &opener_payload, &req.opener_sig).is_err() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ApiError::new("bad opener signature")),
+        )
+            .into_response();
+    }
     // A durable countersignature restores receipt handback after restart but
-    // never reopens packet delivery. The publisher retains the independently
-    // authenticated original opening and announcement for that claim.
-    let receipt_only = s.receipt_settlement.is_some()
-        && s.receipt_vault.get(&req.session_id).is_some_and(|receipt| {
+    // never reopens packet delivery. Bind this exceptional admission to the
+    // exact original opening before installing a cached announcement.
+    let retry_receipt = s
+        .receipt_settlement
+        .as_ref()
+        .and_then(|_| s.receipt_vault.get(&req.session_id))
+        .filter(|receipt| {
             receipt.client_pubkey == req.client_pubkey
                 && receipt.node_pubkey == s.node_kp.public
                 && receipt.receipt.context == *s.receipt_context
         });
+    let receipt_only =
+        if let (Some(publisher), Some(receipt)) = (&s.receipt_settlement, retry_receipt.as_ref()) {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                publisher.authorize_retry(receipt, &req),
+            )
+            .await
+            {
+                Ok(Ok(())) => true,
+                _ => {
+                    return (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        Json(ApiError::new("receipt retry opening unavailable")),
+                    )
+                        .into_response()
+                }
+            }
+        } else {
+            false
+        };
     let native_permit = if receipt_only {
         None
     } else if let Some(authority) = &s.native_authority {
@@ -185,7 +226,9 @@ pub(crate) async fn announce(
                 s.allowlist.remove(&key);
             }
         }
-        if s.receipt_settlement.is_none() || s.receipt_vault.get(&req.session_id).is_none() {
+        if !receipt_only
+            && (s.receipt_settlement.is_none() || s.receipt_vault.get(&req.session_id).is_none())
+        {
             s.allowlist.insert(
                 req.client_wg_pubkey,
                 crate::tunnel::AllowedClient::new(req.clone()).with_permit(native_permit),
@@ -240,10 +283,10 @@ pub(crate) mod tests {
         address::Address,
         bounded::BoundedMap,
         control::{announce_opener_binding_payload, announce_signing_payload},
-        receipt::Receipt,
+        receipt::{Receipt, SignedReceipt},
         rpc::RpcClient,
         session::SessionId,
-        sig::{verify, KeyPair},
+        sig::{verify, KeyPair, PublicKey, Signature},
     };
     use serde_json::{json, Value};
     use tokio::sync::oneshot;
@@ -328,6 +371,138 @@ pub(crate) mod tests {
         assert_eq!(state.allowlist.len(), 0);
         assert_eq!(state.metrics.announces_total.load(Ordering::Relaxed), 0);
         assert_eq!(state.metrics.session_opens_total.load(Ordering::Relaxed), 0);
+    }
+
+    struct DenyAuthority;
+
+    #[async_trait::async_trait]
+    impl crate::admission::SessionAuthority for DenyAuthority {
+        async fn authorize(
+            &self,
+            _: &AnnounceSessionRequest,
+            _: &octravpn_core::receipt::ReceiptContext,
+        ) -> anyhow::Result<Option<crate::admission::SessionPermit>> {
+            Ok(None)
+        }
+
+        async fn lifecycle(
+            &self,
+            _: &SessionId,
+            _: &octravpn_core::receipt::ReceiptContext,
+        ) -> anyhow::Result<crate::admission::RelayLifecycle> {
+            Ok(crate::admission::RelayLifecycle::Terminal(1))
+        }
+    }
+
+    struct RetrySettlement {
+        opener: PublicKey,
+        opening: String,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::embedded::ReceiptSettlement for RetrySettlement {
+        async fn authorize_retry(
+            &self,
+            receipt: &SignedReceipt,
+            announcement: &AnnounceSessionRequest,
+        ) -> anyhow::Result<()> {
+            anyhow::ensure!(
+                receipt.receipt.session_id == announcement.session_id
+                    && receipt.client_pubkey == announcement.client_pubkey
+                    && announcement.opener_pubkey == self.opener
+                    && announcement.open_tx_hash == self.opening,
+                "opening differs"
+            );
+            Ok(())
+        }
+
+        async fn confirm(&self, _: SignedReceipt, _: AnnounceSessionRequest) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn vaulted_receipt_retry_requires_the_openers_signature() {
+        let node = Arc::new(KeyPair::generate());
+        let client = KeyPair::generate();
+        let opener = KeyPair::generate();
+        let id = SessionId::from_u64(82);
+        let mut valid = signed_announce(id.clone(), &client, [9; 32]);
+        valid.opener_pubkey = opener.public;
+        valid.opener_sig = opener.sign(&announce_opener_binding_payload(
+            &id,
+            &valid.client_pubkey,
+            &valid.client_wg_pubkey,
+            &valid.open_tx_hash,
+        ));
+        let mut control = ControlState::new(
+            node.clone(),
+            Arc::new(OnionRouter::new()),
+            Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60))),
+        );
+        control.native_authority = Some(Arc::new(DenyAuthority));
+        control.receipt_settlement = Some(Arc::new(RetrySettlement {
+            opener: opener.public,
+            opening: valid.open_tx_hash.clone(),
+        }));
+        let state = Arc::new(control);
+        let receipt = SignedReceipt::build(
+            Receipt::new(
+                (*state.receipt_context).clone(),
+                id.clone(),
+                1,
+                4096,
+                octravpn_core::session::Blind::new([3; 32]),
+            ),
+            &client,
+            &node,
+        );
+        state.receipt_vault.put(&id, &receipt).unwrap();
+
+        let mut forged = valid.clone();
+        forged.opener_sig = Signature([0; 64]);
+        assert_eq!(
+            announce(State(state.clone()), Json(forged))
+                .await
+                .into_response()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert!(!state.sessions.contains_key(&id));
+        assert_eq!(state.allowlist.len(), 0);
+        assert_eq!(state.metrics.announces_total.load(Ordering::Relaxed), 0);
+
+        // Both signatures can be valid while the claimed opener is not the
+        // one from the original opening. The settlement capability rejects it.
+        let mut alternate = valid.clone();
+        alternate.opener_pubkey = client.public;
+        alternate.opener_sig = client.sign(&announce_opener_binding_payload(
+            &id,
+            &alternate.client_pubkey,
+            &alternate.client_wg_pubkey,
+            &alternate.open_tx_hash,
+        ));
+        assert_eq!(
+            announce(State(state.clone()), Json(alternate))
+                .await
+                .into_response()
+                .status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert!(!state.sessions.contains_key(&id));
+        assert_eq!(state.metrics.announces_total.load(Ordering::Relaxed), 0);
+
+        // A real opener-signed announcement can still restore the claim
+        // handback, while the already-vaulted receipt keeps data delivery off.
+        assert_eq!(
+            announce(State(state.clone()), Json(valid))
+                .await
+                .into_response()
+                .status(),
+            StatusCode::OK
+        );
+        assert!(state.sessions.contains_key(&id));
+        assert_eq!(state.allowlist.len(), 0);
     }
 
     #[tokio::test]

@@ -40,6 +40,8 @@ struct Request {
 }
 pub(crate) struct Publisher {
     sender: mpsc::Sender<Request>,
+    submission: Arc<Context>,
+    pinned: Arc<Pinned>,
     directory: PathBuf,
     domain: ReceiptContext,
     receipt_key: PublicKey,
@@ -169,6 +171,8 @@ impl Service {
         Ok((
             Arc::new(Publisher {
                 sender,
+                submission: submission.clone(),
+                pinned: pinned.clone(),
                 directory: directory.clone(),
                 domain: domain.clone(),
                 receipt_key,
@@ -447,6 +451,26 @@ impl Service {
 }
 #[async_trait::async_trait]
 impl octravpn_node::embedded::ReceiptSettlement for Publisher {
+    async fn authorize_retry(
+        &self,
+        receipt: &SignedReceipt,
+        announcement: &AnnounceSessionRequest,
+    ) -> Result<()> {
+        let candidate = Record {
+            receipt: receipt.clone(),
+            announcement: announcement.clone(),
+        };
+        valid(&candidate, &self.domain, self.receipt_key)?;
+        // A saved claim record is not an admission proof: older versions could
+        // persist one before the canonical claim check. Recheck the opening at
+        // the current root on every retry, even after a restart.
+        let view = self.submission.node.snapshot()?;
+        self.pinned
+            .quote(&view, announcement, receipt.receipt.bytes_used)
+            .await?;
+        Ok(())
+    }
+
     async fn confirm(
         &self,
         receipt: SignedReceipt,
