@@ -2,9 +2,9 @@
 #  - rustfmt + clippy lint sets stay identical in CI and locally, so the
 #    `fmt --check` / `clippy -D warnings` gates don't drift when a new
 #    Rust ships new lints/formatting (see .github/actions/setup-rust).
-#  - reproducible builds: the rustc commit hash is embedded in std panic
-#    strings, so an exact patch pin yields byte-identical binaries
-#    (audit R3, docs/audit/2026-05-20-reproducible-builds-audit.md).
+#  - reproducible builds record the exact compiler as one input. Target,
+#    linker, source paths and build environment must also match before
+#    byte-identical binaries can be claimed.
 # Bump deliberately — it's a lint-churn event — and keep this in sync with
 # the setup-rust action default. MSRV is separate (Cargo.toml rust-version).
 [toolchain]

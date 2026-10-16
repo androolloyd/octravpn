@@ -1,0 +1,137 @@
+{
+  "scope": "Final strict composed workspace feature lint gates; executable/chain behavior has separate gates",
+  "root_lock_sha256": "f28ad88c09fb9c0ed4ed33eb8866a191cc0fdfba2ad4c5435443942dbefc3b35",
+  "default_all_targets": {
+    "exit_code": 0,
+    "log": "clippy-default-final-3.log",
+    "log_sha256": "4e910a0ae5283ff8c2265181d95b2d68ae1b9674266a29f2e5c2606816d48d13"
+  },
+  "gates": [
+    {
+      "name": "all-features",
+      "command": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--all-features",
+        "--keep-going",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "duration_seconds": 162.429,
+      "log": "clippy-all-features-final.log",
+      "log_sha256": "ffb6d9dd342fc9d754f5fae814318e8ef5ed396772e43a512e624a659f181555"
+    },
+    {
+      "name": "test-helpers",
+      "command": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--tests",
+        "--features",
+        "test-helpers",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "duration_seconds": 0.782,
+      "log": "clippy-test-helpers-final.log",
+      "log_sha256": "d988cd1beda715fe73b826f4b3c6af4d8cb67bb31db10f6c8ee3d473312cf32d"
+    },
+    {
+      "name": "registry-wasm",
+      "command": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "-p",
+        "octravpn-circle-registry",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--lib",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "duration_seconds": 92.537,
+      "log": "clippy-registry-wasm-final.log",
+      "log_sha256": "f88bbdc408121148adf43734e26dc5a87a52c5fe25b5b3d776e0c1f96363b23f"
+    }
+  ],
+  "passed": true,
+  "date": "2026-10-15",
+  "status": "PASS_FROZEN_WORKSPACE_FEATURE_MATRIX",
+  "report": {
+    "path": "out/node-port-final-20261015/clippy-composed-final.json",
+    "sha256": "409603d65f6a4efef50f7c3fac646c6fc181498d8fa87070e404466c09b12883"
+  },
+  "snapshot_boundary": "Recorded before the subsequent five-file read-only asset retry change. Scoped strict requalification of later source changes is recorded separately. These lint gates do not prove executable or chain behavior.",
+  "later_scoped_gates": [
+    {
+      "gate": "current_node_runtime_all_targets_all_features",
+      "report": {
+        "command": [
+          "cargo",
+          "clippy",
+          "--offline",
+          "--locked",
+          "-p",
+          "octra-node",
+          "-p",
+          "octra-node-runtime",
+          "--all-targets",
+          "--all-features",
+          "--no-deps",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "exit_code": 0,
+        "duration_seconds": 688.425,
+        "log_sha256": "da04cf9c3fd9390179f27ec6348a70288ef801253194610ae5c6b9ea6b9e8c3d",
+        "source_manifest_sha256": "4f800d7a2b025d838df94e86410f6c542197c24d7c2c3ec6ee6c127c41eea307",
+        "source_drift": []
+      },
+      "boundary": "Includes authenticated historical reads, disabled resource gossip routing, startup cancellation and test-only devnet port reservation; precedes public-startup-window continuation."
+    },
+    {
+      "gate": "startup_windows_node_all_targets_all_features",
+      "report": {
+        "command": [
+          "cargo",
+          "clippy",
+          "--offline",
+          "--locked",
+          "-p",
+          "octra-node",
+          "--all-targets",
+          "--all-features",
+          "--no-deps",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "exit_code": 0,
+        "duration_seconds": 20.992,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0,
+        "log_sha256": "40498c059be71a83ccef4232fbefbc763e5b5fd51cf00c82186fc219a45f9f5d",
+        "source_manifest_sha256": "e3c3b4345575dbc9204a54df34a63a526104f62ac37f7e7f77f42c66b3bc37de",
+        "source_drift": []
+      },
+      "boundary": "Three-file Node/public-startup follow-up; Protocol and Runtime sources unchanged from prior688-second strict gate."
+    }
+  ]
+}

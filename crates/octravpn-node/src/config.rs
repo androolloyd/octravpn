@@ -122,10 +122,9 @@ pub(crate) struct NodeConfig {
     /// the audit log + receipt journal remain authoritative.
     #[serde(default)]
     pub analytics: AnalyticsCfg,
-    /// Optional UDP-transport-plugin selection. Defaults to a direct
-    /// pass-through (no obfuscation), preserving the today-behaviour of
-    /// every existing deployed node. Operators opt into obfs4 via
-    /// `[tun.transport]` — see `docs/operators/obfs4-bridge.md`.
+    /// Live datagram transport and raw-IP settings. Direct UDP is supported;
+    /// Obfs4 configuration is rejected before startup. Amnezia parameters live
+    /// in `[tunnel.amnezia]` and are committed in the operator policy.
     #[serde(default)]
     pub tun: TunCfg,
     /// `[pvac]` block — managed `octra-pvac-sidecar` subprocess for the
@@ -297,31 +296,17 @@ impl PvacCfg {
 #[derive(Debug, Deserialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TunCfg {
+    /// Optional dedicated raw IPv4 exit interface. Host routes/NAT are explicit.
+    #[serde(default)]
+    pub ip_tunnel: Option<crate::embedded::IpTunnelConfig>,
     /// `[tun.transport]` — see [`TransportCfg`].
     #[serde(default)]
     pub transport: TransportCfg,
 }
 
-/// `[tun.transport]` block. Pluggable-transport selector for the WG
-/// data plane. Default is `direct` (pass-through UDP) to preserve
-/// today-behaviour. `obfs4` wraps the WG datagram stream in
-/// obfs4-modelled handshakes + framed ciphertext (see
-/// `octravpn-obfs4`).
-///
-/// TOML example:
-///
-/// ```toml
-/// [tun.transport]
-/// kind = "obfs4"
-///
-/// [tun.transport.obfs4]
-/// bridge_node_id  = "0102030405060708090a0b0c0d0e0f1011121314"
-/// bridge_pubkey   = "abcd...ef"   # 64 hex chars
-/// iat_mode        = 1             # 0 off, 1 uniform, 2 Pareto
-/// ```
-///
-/// See `docs/operators/obfs4-bridge.md` for credential minting and
-/// the operational runbook.
+/// `[tun.transport]` selector. The live data plane supports `direct` UDP;
+/// `obfs4` remains a parsed historical value so startup can report explicitly
+/// that its library transport is not integrated. It is never silently ignored.
 #[derive(Debug, Deserialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TransportCfg {
@@ -334,14 +319,14 @@ pub(crate) struct TransportCfg {
 }
 
 /// Selector for the data-plane transport. `Direct` is the no-op
-/// pass-through; `Obfs4` activates the obfs4-modelled wrapper.
+/// pass-through; `Obfs4` is explicitly unsupported by the live daemon.
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum TransportKind {
     /// Pass-through UDP. The default; preserves today-behaviour.
     #[default]
     Direct,
-    /// obfs4-modelled wrapper. Activates `octravpn-obfs4`.
+    /// Historical Obfs4 selector; rejected by live startup validation.
     Obfs4,
 }
 
@@ -363,25 +348,14 @@ pub(crate) struct Obfs4Cfg {
     ///
     /// Audit-2 CFG-2 / Audit-3 H-6: wrapped in `secrecy::SecretString`
     /// so any accidental `tracing::debug!(?cfg)` prints `<redacted>`
-    /// rather than the 64-char hex secret. Access via
-    /// [`Obfs4Cfg::bridge_identity_secret_expose`].
+    /// rather than the 64-char hex secret. Startup currently refuses this
+    /// experimental transport.
     #[serde(default)]
     pub bridge_identity_secret: Option<SecretString>,
     /// IAT mode: 0 = off (default), 1 = uniform 0..25ms,
     /// 2 = Pareto-shaped 0..200ms. See `octravpn_obfs4::IatMode`.
     #[serde(default)]
     pub iat_mode: u8,
-}
-
-impl Obfs4Cfg {
-    /// Expose the bridge-identity secret for the obfs4 handshake.
-    /// Returns `None` on client-side configs (no secret set). The
-    /// caller MUST NOT log or otherwise persist the returned &str.
-    pub(crate) fn bridge_identity_secret_expose(&self) -> Option<&str> {
-        self.bridge_identity_secret
-            .as_ref()
-            .map(ExposeSecret::expose_secret)
-    }
 }
 
 impl fmt::Debug for Obfs4Cfg {
@@ -565,6 +539,8 @@ pub(crate) struct ChainCfg {
     /// deployed operators keep working unchanged.
     #[serde(default)]
     pub protocol_version: ProtocolVersion,
+    #[serde(default)]
+    pub application: octravpn_core::v3_calls::Application,
     /// Network identifier bound into every signed receipt (v1.2 P1-5
     /// hardening). Operators on devnet leave this at the default
     /// (`CHAIN_ID_DEVNET`); mainnet operators set it to
@@ -697,6 +673,7 @@ impl fmt::Debug for ChainCfg {
             .field("validator_addr", &self.validator_addr)
             .field("wallet_secret_path", &self.wallet_secret_path)
             .field("protocol_version", &self.protocol_version)
+            .field("application", &self.application)
             .field("chain_id", &self.chain_id);
         s.field("sealed_passphrase", &RedactedOpt(&self.sealed_passphrase))
             .field("circle_state_path", &self.circle_state_path)
@@ -851,6 +828,9 @@ impl PricingCfg {
 #[derive(Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ControlCfg {
+    /// Advertised HTTP(S) origin when a TLS/tailnet proxy fronts the listener.
+    #[serde(default)]
+    pub public_endpoint: Option<String>,
     /// HTTP listen for the receipt control plane.
     #[serde(default = "default_control_listen")]
     pub listen: String,
@@ -980,6 +960,7 @@ pub(crate) struct ControlCfg {
 impl Default for ControlCfg {
     fn default() -> Self {
         Self {
+            public_endpoint: None,
             listen: default_control_listen(),
             audit_dir: None,
             events_token: None,
@@ -1273,6 +1254,7 @@ impl ControlCfg {
 impl fmt::Debug for ControlCfg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ControlCfg")
+            .field("public_endpoint", &self.public_endpoint)
             .field("listen", &self.listen)
             .field("audit_dir", &self.audit_dir)
             .field("events_token", &RedactedOpt(&self.events_token))
@@ -1322,7 +1304,21 @@ impl NodeConfig {
         let raw = fs::read_to_string(&path)
             .with_context(|| format!("read config: {}", path.as_ref().display()))?;
         let cfg: Self = ::toml::from_str(&raw).context("parse node config TOML")?;
+        cfg.wire_transport()?;
         Ok(cfg)
+    }
+
+    /// Reject unsupported transports before key loads, stores, publication or
+    /// sockets. The selector must describe the actual live datagram path.
+    pub(crate) fn wire_transport(&self) -> Result<octravpn_tun::amnezia::WireTransport> {
+        anyhow::ensure!(self.tun.transport.kind==TransportKind::Direct && self.tun.transport.obfs4.is_none(),
+            "Obfs4 is not integrated into the live WireGuard data plane; remove [tun.transport.obfs4] and select direct, or use an explicitly configured external transport");
+        let transport =
+            octravpn_tun::amnezia::WireTransport::from_config(self.tunnel.amnezia.to_wire())
+                .map_err(|error| anyhow::anyhow!("invalid Amnezia transport: {error}"))?;
+        anyhow::ensure!(matches!(transport,octravpn_tun::amnezia::WireTransport::Wireguard)||self.chain.protocol_version==ProtocolVersion::V3,
+            "Amnezia transport requires v3 committed transport policy; legacy endpoint registration cannot publish its parameters");
+        Ok(transport)
     }
 }
 

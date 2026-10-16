@@ -1,0 +1,393 @@
+{
+  "date": "2026-10-15",
+  "status": "passed",
+  "evidence_id": "native-vpn-paid-18",
+  "scope": {
+    "network": "isolated four-validator Rust fixture",
+    "application_activation": "explicit fixed application VM profile committed in isolated genesis",
+    "public_consensus_defaults_changed": false,
+    "public_network_qualified": false,
+    "external_tailscale_tls_qualified": false,
+    "production_trusted_setup_qualified": false
+  },
+  "reproduce": {
+    "script": "docker/native-vpn/run.sh",
+    "command": "bash docker/native-vpn/run.sh <fresh-evidence-directory>",
+    "dockerfile": "docker/native-vpn/Dockerfile",
+    "harness": "docker/native-vpn/qualify.py",
+    "tun_harness": "docker/native-vpn/tun_gate.py",
+    "isolation": "Two network-disabled containers; ordinary kernel TCP/UDP/ICMP target via bounded private Unix packet hop; no host routes or public funds"
+  },
+  "identity": {
+    "image": "sha256:9c5db2275a4cb93c356dc331ad3250f4207d15d95f788a2c0fc1dabffede9c73",
+    "source_aggregate_sha256": "d3726b4632442462fa565b7d257267a87dc7a63ac325a07a8380ca91847bdfe2",
+    "binary_sha256": {
+      "octra-node": "a2b01ead82c21d33a3d6e26ccc10ad213d510c710405b09e1155086ac26ea988",
+      "octravpn-node": "3b317eca879ba6e01b4921ecfdcbb25c6a4e522089c0748da3dabdc30a0772a6",
+      "octravpn": "10bb1c017a678cfdce255b2f51e5db78a4b6a1f6437e0daf859c2acb74dfa5fd",
+      "octra": "a3ca6eb48f73f600031db75433bb85bc98bb882336b5612e7ec96e933461487a",
+      "octravpn-private-admin": "6653268682d451039f7274ace72e6ae26b106e6ce377d79d7cf6d69361fd5185"
+    },
+    "build_profiles": {
+      "octravpn-private-admin": "release",
+      "octra-node": "dev",
+      "octravpn": "dev",
+      "octravpn-node": "dev",
+      "octra": "dev"
+    },
+    "rustc": "1.96.0",
+    "target": "aarch64-unknown-linux-gnu",
+    "vpn_aml_sha256": "586ba42e520f29729329f945556fece6dfcf26c489d9a8a8267db664b1fc3d1a",
+    "deployed_vpn_code_hash": "7334e6e8b25e901a50a57dd9166d2231402d9cf30c7b000e0d6333801855998e",
+    "source_identity_scope": "Exact final18 production source captured. Later devnet integration-fixture and configured public-startup-window changes are separately qualified below and were not exercised by this private paid run.",
+    "source_records": 4237,
+    "harness_sha256": "11cbbb726ee26ccc886c585eed1375de6125edeb946dc0411232bda2f960d496",
+    "failure_diagnostics_captured_in_image": true,
+    "external_script_override": false,
+    "finality_query_oracle_in_source_inventory": true,
+    "root_lock_sha256": "f28ad88c09fb9c0ed4ed33eb8866a191cc0fdfba2ad4c5435443942dbefc3b35"
+  },
+  "process_exits": {
+    "main_exit": 0,
+    "target_exit": 0,
+    "run_exit": 0
+  },
+  "focused_tests": {
+    "passed": 51,
+    "failed": 0,
+    "ignored": 0,
+    "commands": 16,
+    "native_snapshot_service_comparisons": 39,
+    "groups": [
+      {
+        "crate": "octra-node-protocol",
+        "filter": "isolated_tests",
+        "passed": 2
+      },
+      {
+        "crate": "octra-node-runtime",
+        "filter": "canonical::storage_tests",
+        "passed": 3
+      },
+      {
+        "crate": "octravpn-core",
+        "filter": "identifier::tests",
+        "passed": 2
+      },
+      {
+        "crate": "octravpn-core",
+        "filter": "rpc::asset_tests",
+        "passed": 7
+      },
+      {
+        "crate": "octravpn-client",
+        "filter": "settlement_guards",
+        "passed": 4
+      },
+      {
+        "crate": "octravpn-client",
+        "filter": "receipt_context_tests",
+        "passed": 3
+      },
+      {
+        "crate": "octravpn-client",
+        "filter": "recovery::tests",
+        "passed": 4
+      },
+      {
+        "crate": "octravpn-client",
+        "filter": "reconnect_real_wireguard",
+        "passed": 1
+      },
+      {
+        "crate": "octravpn-node",
+        "filter": "native_receipt_freezes",
+        "passed": 1
+      },
+      {
+        "crate": "octravpn-node",
+        "filter": "v3_boot::publication::tests",
+        "passed": 5
+      },
+      {
+        "crate": "octra-node",
+        "filter": "vpn::settlement::tests",
+        "passed": 2
+      },
+      {
+        "crate": "octra-node",
+        "filter": "native_vpn_directories",
+        "passed": 7
+      },
+      {
+        "crate": "octra-node",
+        "filter": "snapshot_export",
+        "passed": 7
+      },
+      {
+        "crate": "octra-node",
+        "filter": "explicit_observer_preserves_native_role_order",
+        "passed": 1
+      },
+      {
+        "crate": "octra-node",
+        "filter": "snapshot_service_parity",
+        "passed": 1
+      },
+      {
+        "crate": "octra-node",
+        "filter": "http_join_deadline_preserves_committed_prefix_before_next_record",
+        "passed": 1
+      }
+    ],
+    "regressions": [
+      {
+        "source": "crates/octravpn-client/src/wireguard/recovery.rs",
+        "tests": [
+          "reconnect_fault_during_canonical_recheck_invalidates_authenticated_generation",
+          "reconnect_gate_requires_each_fresh_authenticated_generation"
+        ]
+      },
+      {
+        "source": "crates/octravpn-client/src/v3_runner/recovery.rs",
+        "tests": [
+          "recovery_rejects_replayed_or_rebound_signed_state",
+          "recovery_distinguishes_missing_process_state_from_terminal_admission"
+        ]
+      },
+      {
+        "source": "crates/octravpn-client/src/wireguard/integration_tests.rs",
+        "tests": [
+          "reconnect_real_wireguard_preserves_identity_and_traffic_floor"
+        ]
+      }
+    ]
+  },
+  "private_admin": {
+    "factory_deployed_by_signed_transaction": true,
+    "factory_child_code_and_owner_pin_verified": true,
+    "pause": true,
+    "authorization_replay_rejected": true,
+    "handoff_proposed_and_accepted": true,
+    "retired_credential_rejected": true,
+    "credential_rotation_proposed_and_accepted": true,
+    "unpause": true,
+    "native_operator_privately_approved": true,
+    "immutable_discovery_and_registered_receipt_key_verified": true
+  },
+  "live_recovery": [
+    {
+      "session": 0,
+      "original_opening_tx_hash": "cac5bdb65267ecd83825c9efc134cb6a3e3b3c464bf04c00e42a981254d8e6aa",
+      "session_count_before_and_after": 1,
+      "new_escrows": 0,
+      "signed_seq_before": 2,
+      "signed_seq_after": 4,
+      "signed_bytes_before": 2547335,
+      "signed_bytes_after": 2547335,
+      "fresh_wireguard_handshake_and_canonical_recheck": true
+    },
+    {
+      "session": 3,
+      "original_opening_tx_hash": "9f31d8b2c3d472f7672e012fd33ff776b2dcfbd5e994df16a68e23b8cc8a723b",
+      "session_count_before_and_after": 4,
+      "new_escrows": 0,
+      "signed_seq_before": 2,
+      "signed_seq_after": 4,
+      "signed_bytes_before": 2460755,
+      "signed_bytes_after": 2460755,
+      "fresh_wireguard_handshake_and_canonical_recheck": true
+    }
+  ],
+  "paid_udp": {
+    "session": 0,
+    "echo_payload_bytes": 1200426,
+    "receipt_bytes": 2547558,
+    "deposit_micro_oct": 1000000,
+    "net_micro_oct": 2000,
+    "refund_micro_oct": 998000,
+    "settled_epoch": 26,
+    "settlement_tx_hash": "8afe3a3ff765c5f854ac8cb2f5ed8db2725d576a48e6f6e594f3c35d07850c6f",
+    "original_tariff_retained_across_policy_rotation": true
+  },
+  "paid_os_tun": {
+    "session": 3,
+    "udp_payload_bytes": 1054560,
+    "tcp_payload_bytes": 67816,
+    "kernel_icmp_echo": true,
+    "original_tcp_socket_continued_after_operator_restart": true,
+    "real_client_and_operator_tun_packet_counters_positive": true,
+    "exact_snat": {
+      "reserved_fixture_address": "192.0.2.1",
+      "udp": true,
+      "tcp": true
+    },
+    "packet_hop_errors": 0,
+    "packet_hop_rejections": 0,
+    "receipt_bytes": 2468372,
+    "deposit_micro_oct": 1000000,
+    "net_micro_oct": 4000,
+    "refund_micro_oct": 996000,
+    "settled_epoch": 40,
+    "settlement_tx_hash": "6e89feea8e9b579350d3fb4481fb56a5e01cb4d07925a89dd08f0bfa24f497da"
+  },
+  "settlement_controls": {
+    "zero_net_confirmation_rejected_before_escrow_or_earnings_mutation": true,
+    "different_net_confirmation_rejected_before_escrow_or_earnings_mutation": true,
+    "matching_claim_amount_settled": true,
+    "real_zero_byte_session": {
+      "session": 2,
+      "net_micro_oct": 0,
+      "settled": true
+    },
+    "adversarial_payment_fairness_claimed": false
+  },
+  "canonical_exex": {
+    "matching_validators": 4,
+    "comparison": "decoded JSON event equality",
+    "settlements": [
+      {
+        "epoch": 26,
+        "tx_hash": "8afe3a3ff765c5f854ac8cb2f5ed8db2725d576a48e6f6e594f3c35d07850c6f"
+      },
+      {
+        "epoch": 40,
+        "tx_hash": "6e89feea8e9b579350d3fb4481fb56a5e01cb4d07925a89dd08f0bfa24f497da"
+      }
+    ]
+  },
+  "gateway_asset": {
+    "backend_transport": "HTTP",
+    "body_sha256": "c796fabb98a1566b507c9a8498d930a893f903c711014417d3234b88641000ac",
+    "canonical_chain_header_verified": true,
+    "served_epoch": 40,
+    "external_dns_tls_or_second_device_exercised": false
+  },
+  "final_restart": {
+    "passed": true,
+    "epoch": 42,
+    "settled_sessions_and_operator_earnings_preserved": true,
+    "identity_keys_retained": true
+  },
+  "recovery_limits": {
+    "client_process_must_retain_ephemeral_session_identity_for_live_reconnect": true,
+    "cross_application_flow_isolation_claimed": false,
+    "fresh_session_keys_used_by_supported_cli": true
+  },
+  "evidence_sha256": {
+    "qualification.json": "45a861bd16d5548dc719607ba4b268db23b98b65155ed112a05b9c88fb1063a1",
+    "source.json": "44d763b4a142b1b3c57adbd01ff879766202d3837781676d0ec559bdfa5a6d5d",
+    "journal.json": "f3d496e0ee8697c949a00a9fd9a89691bef16c8709d03710899f84afcd79b851",
+    "run.log": "6c82defe9fdb1f1999cadfc9b9ad16500b9d6df1164d8126d6a8bdfe91d11064",
+    "tun-network.json": "5c6cb61f48f27ffc9ad68316cc108a1ef1d7bfdab96d5e664fe17d86f01dd760",
+    "target.json": "95c5beeaf44d73944f984370d59f4d197067e8042dd166038b3c37274481f39f",
+    "settlement-exex.json": "751a210e08807e51e046af0b15f763f81dbd45c45d78029f57ee673a2aa416bb",
+    "tun-settlement-exex.json": "a6cdd50ca895619a8ef57f3cc12fce30a408e488e9d21c4e2461dff3f6cad776",
+    "focused-tests.json": "0838e6f13c3699ece34068dbf7a56c3ca8c549ae9746fc8013180b5e98f26e23",
+    "post-capture-delta.json": "ee07b4096bc79bcce49132f7869d216bd022f442bb2b268cbee2079c1078a990",
+    "build.log": "ce6c8494f0a902ff875bcb9a39c5c61c92046d8a5e3609e699ef2a3a3ef97ca5"
+  },
+  "pending": [
+    "This isolated run does not qualify public-network interoperability.",
+    "External Tailscale DNS/TLS and additional-device acceptance are outside this run.",
+    "Production private-admin setup ceremony remains outside this development fixture."
+  ],
+  "post_capture_test_delta": {
+    "captured_source_aggregate_sha256": "d3726b4632442462fa565b7d257267a87dc7a63ac325a07a8380ca91847bdfe2",
+    "modified_or_removed": {
+      "octra/crates/octra-node/tests/devnet.rs": {
+        "captured": "9751c008e9557c1b6371e4c641efd33bb0f892194ca3eb681fc8ba086bc55920",
+        "current": "e045554c416fa0f85a12750bae4417b163333c26c2aef7b6940eee655a8aea67"
+      }
+    },
+    "test_only_delta": "Node integration fixture reserves all4x6 TCP/UDP endpoints in24000..30000; prior full Node run had unrelated ephemeral port collision. Production unchanged. Separate target rerun owned by parent.",
+    "added_source_files": {},
+    "source_additions_checked_with_docker_context_exclusions": true,
+    "separate_test_qualification": {
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--release",
+        "-p",
+        "octra-node",
+        "--test",
+        "devnet"
+      ],
+      "exit_code": 0,
+      "duration_seconds": 89.435,
+      "targets": 1,
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "source_files": 1794,
+      "source_manifest_sha256": "4f800d7a2b025d838df94e86410f6c542197c24d7c2c3ec6ee6c127c41eea307",
+      "source_drift": [],
+      "changed_since_full_run": [
+        "crates/octra-node/tests/devnet.rs"
+      ],
+      "log_sha256": "a77b03bb1c4e254ab30ddc77d1178d4bd81d830add4c6088e96317ed42ce9944"
+    },
+    "separate_test_qualification_sha256": "90c13645ee3a266859cbde0698d95151cee3a04d5ea202cb5c326b22a77c63bb",
+    "measurement_scope": "Measured at paid18 completion before the subsequent public-startup-window follow-up.",
+    "production_source_delta_at_paid_completion": false
+  },
+  "preserved_prior_attempts": {
+    "paid16": "Failed immutable policy readback on RPC110; scoped typed read retry subsequently qualified.",
+    "paid17": "First initial paid UDP loop failed its0.5s receive timeout after some valid echo. Cause remains unresolved; publication pause is a hypothesis only.",
+    "paid17_same_image_diagnostic_rerun": "Full pass with unchanged criteria; failure did not reproduce.",
+    "paid18": "Fresh final production source image, full pass with the exact same0.5s/no-loss initial UDP criterion and1.2MB delivered threshold. No transport production fix or lossless UDP guarantee claimed."
+  },
+  "subsequent_public_startup_followup": {
+    "scope": "Configured HTTP startup catchup repeats bounded windows only while authenticated canonical epoch advances. No-progress/error and suspended-admission behavior remain unchanged. Private paid18 has no configured HTTP join source; this later source was not executed by paid18.",
+    "source_sha256": {
+      "crates/octra-node/src/consensus_join.rs": {
+        "paid18_captured": "2c0f1d22ea2733822b260b0006a6250731ff47cbab5b12c63c810f483e982cb5",
+        "followup_qualified": "c0d264c4112cdc361b2d6d6036b7029e04dd95b2055a4b7f4de186191f873973"
+      },
+      "crates/octra-node/src/launch.rs": {
+        "paid18_captured": "9e93c5acf9c63e945f57a672da932e4fd0eff6cc6bbc545a73155fc9f874415e",
+        "followup_qualified": "22b443047e0968bb711bf41c4bcc72acaf22dd7dffa6870a3dadf41d5a49cd37"
+      },
+      "crates/octra-node/tests/services/http_join.rs": {
+        "paid18_captured": "1ec5107d2d383e8b8006575009e00614b8bba72afb011b1c0138aac7020cdd08",
+        "followup_qualified": "e4aca00d345f73abcd82b13b289de3927c035fc5d56fd5509939994dd669def9"
+      }
+    },
+    "source_manifest_sha256": "e3c3b4345575dbc9204a54df34a63a526104f62ac37f7e7f77f42c66b3bc37de",
+    "source_drift": [],
+    "services_tests": {
+      "passed": 14,
+      "failed": 0,
+      "ignored": 0,
+      "seconds": 20.436,
+      "log_sha256": "858294a6e464098efb4b1e6b1cdd52854b2151832f7b009e529b9e0249cae474"
+    },
+    "strict_clippy": {
+      "scope": "Node all targets/all features --no-deps -D warnings",
+      "exit_code": 0,
+      "seconds": 20.992,
+      "log_sha256": "40498c059be71a83ccef4232fbefbc763e5b5fd51cf00c82186fc219a45f9f5d"
+    },
+    "release_binary_sha256": "6a708cf4cb6217d9796d3334d77630accd519319f397210fa79aacb6faad1f4c",
+    "release_build_log_sha256": "982bc5ea5bf68d4adb27681d5638e954090c2f0779ccd4d94461ebf5999c8307",
+    "initial_fixture_assertion_failures_preserved": true,
+    "claim": "Separate configured-startup follow-up qualification; no private paid-image rebuild or source equivalence assertion."
+  },
+  "post_capture_adoptions": {
+    "scope": "These later reviewed adoptions are independently qualified and are not executed by paid18 image9c5db227. Fresh combined paid19 remains pending final source freeze.",
+    "checkpoints": [
+      "docs/rust-node/checkpoints/2026-10-15/node.json",
+      "docs/rust-node/checkpoints/2026-10-15/native-inode.json",
+      "docs/rust-node/checkpoints/2026-10-15/optional-resource.json",
+      "docs/rust-node/checkpoints/2026-10-15/dependencies.json"
+    ],
+    "combined_qualification": {
+      "path": "out/node-port-final-20261015/inode-combined-qualification.json",
+      "sha256": "651af93171a3cbe50e6e72e137c1c032398f40ea2e9c60d1c8ac970f3c6be109"
+    },
+    "foundry_commit": "07a11f6f5d1d0b1f46145bba19616570f85acc2c",
+    "new_paid_fixture_pending": true
+  }
+}

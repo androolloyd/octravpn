@@ -122,7 +122,7 @@ pub(crate) fn json_optional(out: &mut Vec<u8>, value: Option<&[u8]>) {
 
 // Yojson uses C's %.16g, retries %.17g only if the first representation loses bits,
 // and appends .0 to integer-looking floats. Rust's shortest float format differs.
-fn general_float(value: f64, precision: usize) -> String {
+pub(crate) fn general_float(value: f64, precision: usize) -> String {
     let scientific = format!("{value:.digits$e}", digits = precision - 1);
     let (mantissa, exponent) = scientific.split_once('e').expect("scientific float");
     let exponent: i32 = exponent.parse().expect("scientific exponent");
@@ -138,11 +138,11 @@ fn general_float(value: f64, precision: usize) -> String {
     let mut out = String::from(sign);
     if position <= 0 {
         out.push_str("0.");
-        out.extend(std::iter::repeat('0').take((-position) as usize));
+        out.extend(std::iter::repeat_n('0', (-position) as usize));
         out.push_str(&digits);
     } else if position as usize >= digits.len() {
         out.push_str(&digits);
-        out.extend(std::iter::repeat('0').take(position as usize - digits.len()));
+        out.extend(std::iter::repeat_n('0', position as usize - digits.len()));
     } else {
         out.push_str(&digits[..position as usize]);
         out.push('.');

@@ -1,0 +1,121 @@
+{
+  "date": "2026-10-15",
+  "status": "QUALIFIED_ACTUAL_RUST_1_89_WORKSPACE_TYPECHECK",
+  "qualification": {
+    "path": "out/node-port-final-20261015/minimum-rust-1.89/current/qualification.json",
+    "sha256": "faed7b31bf4ebccc8f1d00ceb7c640a01e90f3fcb278fe2fe65bea412bd62c78"
+  },
+  "source": {
+    "files": 2751,
+    "manifest_sha256": "df608620736e7170518a6fcac410dc828b31536420fb7a60f15f563409d9c57c",
+    "root_lock_sha256": "73e39658a1f9e7281744b64b0f39753c5a61652919b5a5bccda0bb071db25bce",
+    "exact_current_live_inventory_equal": true,
+    "frozen_delta_from_initial": {
+      "octra/crates/octra-node-protocol/src/aml/core/poly/substitute.rs": {
+        "before": "93853790e8ce686ae9b4a176c8b779e2526bc16bfacf49eede0646d46afa772b",
+        "after": "8507fd8b55c937f098c104e6b446f0d3a5b70a5bd2dac2e9a6c4d53943a9db3a"
+      },
+      "octra/crates/octra-node/tests/devnet.rs": {
+        "before": "810c7f6de90deceac3ecf18219d55dc8a2d822161be8df4543da85ec2ad819fb",
+        "after": "970a5171434bfa0276b9a26105e35000226c086a8ae10a6bf805d41dc3161613"
+      }
+    },
+    "captured_roots": {
+      "octra": [
+        "Cargo.toml",
+        "Cargo.lock",
+        "rust-toolchain.toml",
+        ".cargo/config.toml",
+        "LICENSE",
+        "LICENSE-APACHE",
+        "LICENSE-MIT",
+        "crates",
+        "vendor",
+        "program",
+        "tests",
+        "pvac-sidecar",
+        "scripts/node-port",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "docs/rust-node/network-authority.json"
+      ],
+      "octra-foundry": [
+        "Cargo.toml",
+        "Cargo.lock",
+        "rust-toolchain.toml",
+        ".cargo/config.toml",
+        "crates"
+      ],
+      "headscale-rs": [
+        "Cargo.toml",
+        "Cargo.lock",
+        "rust-toolchain.toml",
+        ".cargo/config.toml",
+        "headscale-api",
+        "headscale-api-acl",
+        "headscale-core",
+        "headscale-db",
+        "headscale-cli",
+        "headscale-identity",
+        "headscale-payments",
+        "headscale-resources"
+      ]
+    },
+    "headscale_note": "Actual qualified WIP source bytes captured; physical HEAD eb9d57395dd78a2253eb46d9680493081d1acc5f is not falsely called published e1. Foundry HEAD07a11f6f5d1d0b1f46145bba19616570f85acc2c; manifests bind both siblings.",
+    "single_isolated_candidate_included": false
+  },
+  "actual_minimum_rust": {
+    "commands": [
+      "cargo +1.89.0 check --offline --locked --workspace --all-targets --all-features",
+      "cargo +1.89.0 check --offline --locked --workspace --all-targets"
+    ],
+    "exit_code": 0,
+    "source_unchanged": true,
+    "live_drift_files": 0,
+    "image_id": "sha256:da5c1f20957217307b213c46d4e7068ea3808a789e7f36d585259b648833f582",
+    "image_metadata_sha256": "956b2a4f68f5abe8a38f4ad0496bc9d920e51b8ad8e40b0a73ba8fca74673fc6",
+    "compiler": "rustc 1.89.0 (29483883e 2025-08-04)\nbinary: rustc\ncommit-hash: 29483883eed69d5fb4db01964cdf2af4d86e9cb2\ncommit-date: 2025-08-04\nhost: aarch64-unknown-linux-gnu\nrelease: 1.89.0\nLLVM version: 20.1.7\n",
+    "cargo": "cargo 1.89.0 (c24e10642 2025-06-23)\nrelease: 1.89.0\ncommit-hash: c24e1064277fe51ab72011e2612e556ac56addf7\ncommit-date: 2025-06-23\nhost: aarch64-unknown-linux-gnu\nlibgit2: 1.9.0 (sys:0.20.2 vendored)\nlibcurl: 8.12.1-DEV (sys:0.4.80+curl-8.12.1 vendored ssl:OpenSSL/3.5.0)\nssl: OpenSSL 3.5.0 8 Apr 2025\nos: Debian 12.0.0 [64-bit]\n",
+    "exclusive_target_volume": "octra-msrv189-target-20261015-001",
+    "source_and_registry_readonly": true,
+    "network": "none",
+    "final_run_metadata_sha256": "8811226497c5c768e1253047406444674bc87da1c31f12543b4c4839b4c7a24f",
+    "logs": {
+      "all-features.log": {
+        "sha256": "811915ba1f524993d3773bc0ac7ec7eb491c04187ae8738558cd1029b02c9b7b",
+        "finished_line": "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.60s",
+        "warning": "Existing vendor ReceiptLease::Release unused variant warning retained, not waived."
+      },
+      "default-features.log": {
+        "sha256": "466c6f263a21b7d8d86bdaa27d41f1f0013c1074d6f566eebec179e924fc8288",
+        "finished_line": "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.34s",
+        "warning": "Existing vendor ReceiptLease::Release unused variant warning retained, not waived."
+      }
+    },
+    "target_artifact_manifest_sha256": "6d0f349aac15c3120662009c08600b5f59ac4bd885b2d4c1e8378ed0aa43ad4c",
+    "prior_full_compiled_current_run_sha256": "ccc3abc28f3179ac59880ac9be062d208cc14aa41b7a6aa96fd2ce279c078535",
+    "initial_fixed_full_workspace_run_sha256": "e51f185ca16780b6670d124cb9c550fe9fd369b78cb51df8b8153fb78c1e0168",
+    "cache_note": "Fresh exclusive1.89target initially compiled complete graph. The unchanged onefile fix full allfeature check took1m52s; exact parent devnetdelta then allfeature and defaultfeature checks passed, including26.29s defaultgraph compile. Final per-command logged repeat uses those valid Cargo fingerprints; no shared cache or source edits."
+  },
+  "protocol_behavior_composition": {
+    "qualification_sha256": "3dcd880a709c6f2890596d895a4af20b2e08e3e6938103439538c5f0067dcc64",
+    "strict": "Protocol1.96 no-deps alltargets/allfeatures -Dwarnings PASS16.64s",
+    "native_aml_public_parity_passed": 2,
+    "source_scope": "All protocol files byte-identical between native/strict qualified overlay and currentRoot; only parent Node devnet test differs.",
+    "executable_manifest_sha256": "698d9e6e1bf7f44c3905166dd751900f8675a55a61ce06501dccadd959c72c44"
+  },
+  "preserved_initial_failure": {
+    "report_sha256": "3dec6f5a5cb58fe8b9876287ea28e9dbd5ce61b07454cf22327de2307f49da89",
+    "check_log_sha256": "c384fc80c8819617d09765a082d4720dc6d629ec541a7d703d3df232256bfcf2",
+    "exit_code": 101,
+    "real_E0382_errors": 4,
+    "fixed_path": "crates/octra-node-protocol/src/aml/core/poly/substitute.rs",
+    "fix_scope": "Four explicit enum reconstruction arms, one original clone, same task/error order; no declarations/dependencies/lock/native semantics altered."
+  },
+  "limits": [
+    "Linux aarch64 actualRust1.89 typecheck for all Cargo targets under defaultfeatures and allfeatures; not a crossplatform runtime claim.",
+    "Runtime execution/nativeAML regression used1.96 and unchanged pinned nativefixture; no1.89 runtime-test claim.",
+    "Isolated Single candidate is absent and requires later incremental actual1.89check after adoption.",
+    "No public store, observer, Tailscale, deployment, source declarations or live code changed by this task."
+  ]
+}

@@ -132,6 +132,19 @@ pub fn load(
     budget: Option<i64>,
     spent: &mut i64,
 ) -> Result<Bundle, Error> {
+    load_at(state, epoch, declarations, budget, spent, None)
+}
+
+/// Captured RPC reads bind to the folded root. Update execution without a
+/// captured RPC snapshot retains the native current-batch ledger-root binding.
+pub(crate) fn load_at(
+    state: &Snapshot,
+    epoch: i64,
+    declarations: &[Declaration],
+    budget: Option<i64>,
+    spent: &mut i64,
+    snapshot_root: Option<&[u8]>,
+) -> Result<Bundle, Error> {
     *spent = 0;
     if declarations.is_empty() {
         return Ok(Bundle {
@@ -152,12 +165,18 @@ pub fn load(
     if !charge(rules::BASE_EFFORT) {
         return Err(fail("wasm public read effort exceeds limit"));
     }
-    let root = hex::encode(
-        state
-            .root()
-            .map_err(|_| fail("wasm public read snapshot root is unavailable"))?,
-    );
-    let root = circles::domain_hash(b"circle_public_read_snapshot_v1", &[root.as_bytes()]);
+    let batch_root;
+    let root = if let Some(root) = snapshot_root {
+        root
+    } else {
+        batch_root = hex::encode(
+            state
+                .root()
+                .map_err(|_| fail("wasm public read snapshot root is unavailable"))?,
+        );
+        batch_root.as_bytes()
+    };
+    let root = circles::domain_hash(b"circle_public_read_snapshot_v1", &[root]);
     if declarations.len() > rules::MAX_READS
         || rules::unique_assets(declarations) > rules::MAX_ASSETS
     {

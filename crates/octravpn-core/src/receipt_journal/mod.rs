@@ -43,6 +43,19 @@ pub use fsync_policy::{
     DEFAULT_RECENTLY_EVICTED_CAP, DEFAULT_SESSION_IN_MEM_TTL, DEFAULT_TTL_SWEEP_INTERVAL,
 };
 
+/// Decode complete immutable journal bytes without opening or mutating a
+/// store. Unlike recovery-on-open, inspection refuses a partial final record.
+pub fn inspect(raw: &[u8]) -> JournalResult<std::collections::BTreeMap<SessionId, u64>> {
+    let path = std::path::Path::new("<journal snapshot>");
+    if raw.starts_with(MAGIC_V1) && !(raw.len() - MAGIC_V1.len()).is_multiple_of(RECORD_SIZE) {
+        return Err(JournalError::Truncated {
+            path: path.display().to_string(),
+            detail: "incomplete final record; migration requires complete evidence".to_owned(),
+        });
+    }
+    migration::replay_any(raw, path).map(|(entries, _)| entries)
+}
+
 /// Persistent floor for `(session_id → last_signed_seq)`.
 ///
 /// The state lives behind an `Arc<Mutex<Inner>>` so async compaction

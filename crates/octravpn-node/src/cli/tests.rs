@@ -49,6 +49,28 @@ fn write_hex_key(path: &std::path::Path, raw: [u8; 32]) {
 }
 
 #[test]
+fn settlement_claim_requires_an_explicit_micro_oct_amount() {
+    for current in [false, true] {
+        let mut args = vec!["octravpn-node"];
+        if current {
+            args.push("v3");
+        }
+        args.extend(["settle-claim", "--session-id", "7", "--bytes-used", "0"]);
+        assert!(Cli::try_parse_from(&args).is_err());
+        args.extend(["--net", "0"]);
+        let cli = Cli::try_parse_from(args).unwrap();
+        match cli.cmd {
+            Cmd::SettleClaim(args) => assert_eq!(args.net, 0),
+            Cmd::V3(args) => match args.cmd {
+                v3_cli::V3Cmd::SettleClaim(args) => assert_eq!(args.net, 0),
+                other => panic!("unexpected command: {other:?}"),
+            },
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn seal_keys_round_trip_via_run_seal_keys() {
     let dir = tempdir().unwrap();
     let wallet = dir.path().join("wallet.key");

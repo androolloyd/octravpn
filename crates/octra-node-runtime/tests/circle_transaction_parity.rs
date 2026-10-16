@@ -127,6 +127,7 @@ fn rules(input: &Value) -> Rules {
         inspect: input["inspect"].as_bool().unwrap(),
         storage_proof: input["storage_proof"].as_bool().unwrap(),
         fhe_work: input["fhe_work"] == true,
+        object_cost: input["object_cost"] == true,
     }
 }
 #[test]
@@ -318,7 +319,7 @@ fn native_circle_transactions_match_fees_nonces_value_rollback_and_vm_receipts()
     }
 }
 #[test]
-fn missing_operation_or_parameter_capability_rolls_back_the_entire_attempt() {
+fn unavailable_execution_host_rolls_back_the_entire_attempt() {
     let fixture: Value =
         serde_json::from_str(include_str!("fixtures/circle-transaction.json")).unwrap();
     let mut input = fixture["cases"]
@@ -336,7 +337,9 @@ fn missing_operation_or_parameter_capability_rolls_back_the_entire_attempt() {
     for account in input["accounts"].as_array_mut().unwrap() {
         account["balance"] = json!("1000000000000");
     }
-    for op in [OpType::CircleCall, OpType::ContractCall] {
+    // CircleCall JSON failures are charged transaction rejections. These two
+    // routes require another host and therefore abort this Circle-only attempt.
+    for op in [OpType::ContractCall, OpType::ComputeFund] {
         let (mut state, mut ledger, mut transactions) = setup(&input, &fixture);
         let before = state.root().unwrap();
         let accounts = ledger.accounts().clone();

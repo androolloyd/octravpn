@@ -5,26 +5,47 @@ use ed25519_dalek::Signer;
 use octra_node::{devnet, devnet::Config};
 use octra_node_protocol::transaction::{self, Nonce, OpType, Transaction};
 use std::{
+    net::{Ipv4Addr, TcpListener, UdpSocket},
     path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{sync::watch, task::JoinHandle};
 
 fn start(config: Config) -> (watch::Sender<bool>, JoinHandle<anyhow::Result<()>>) {
-    let (stop, shutdown) = watch::channel(false);
+    let (stop, mut shutdown) = watch::channel(false);
     (
         stop,
         tokio::spawn(async move {
-            let result = devnet::run(config, shutdown).await;
-            if let Err(error) = &result {
-                eprintln!("validator stopped: {error:#}");
-            }
-            result
+            let path = config.data.join("process-test.json");
+            std::fs::write(&path, serde_json::to_vec(&config)?)?;
+            let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_octra-node"))
+                .args(["run", "--config"])
+                .arg(path)
+                // Transport admission is distinct from validator authority.
+                .env("OCTRA_CONSENSUS_ALLOW_DYNAMIC_PEERS", "1")
+                .env_remove("OCTRA_JOIN_RPC")
+                .env_remove("OCTRA_STATE_SYNC_SOURCES")
+                .env_remove("OCTRA_OBSERVER_RELAY_SUBMITS")
+                .env_remove("OCTRA_OPERATOR_RPC_URL")
+                .kill_on_drop(true)
+                .spawn()?;
+            let status = tokio::select! {
+                status = child.wait() => status?,
+                _ = shutdown.changed() => {
+                    let pid = child.id().ok_or_else(|| anyhow::anyhow!("node already exited"))?;
+                    anyhow::ensure!(tokio::process::Command::new("kill")
+                        .args(["-TERM", &pid.to_string()]).status().await?.success(),
+                        "node termination signal failed");
+                    child.wait().await?
+                }
+            };
+            anyhow::ensure!(status.success(), "node exited with {status}");
+            Ok(())
         }),
     )
 }
 async fn epoch(http: &reqwest::Client, config: &Config) -> Option<u64> {
-    http.get(format!("http://{}/status", config.rpc))
+    http.get(format!("http://{}/operator/status", config.rpc))
         .send()
         .await
         .ok()?
@@ -56,17 +77,54 @@ fn archive(path: &Path, height: u64) -> serde_json::Value {
     )
     .unwrap()
 }
+
+struct Ports {
+    base: u16,
+    _tcp: Vec<TcpListener>,
+    _udp: Vec<UdpSocket>,
+}
+
+impl Ports {
+    fn reserve() -> Self {
+        // Stay below the ephemeral range used by outgoing peer connections.
+        // Reserve the four validators and a nonmember observer until configured.
+        let start = u16::try_from(std::process::id() % 120).unwrap();
+        for offset in 0..120 {
+            let base = 24_000 + ((start + offset) % 120) * 50;
+            let mut tcp = Vec::new();
+            let mut udp = Vec::new();
+            let reserved = (0..5).all(|node| {
+                let port = base + node * 10;
+                for endpoint in [0, 1, 2, 3, 5] {
+                    let Ok(listener) = TcpListener::bind((Ipv4Addr::LOCALHOST, port + endpoint))
+                    else {
+                        return false;
+                    };
+                    tcp.push(listener);
+                }
+                let Ok(socket) = UdpSocket::bind((Ipv4Addr::LOCALHOST, port + 4)) else {
+                    return false;
+                };
+                udp.push(socket);
+                true
+            });
+            if reserved {
+                return Self {
+                    base,
+                    _tcp: tcp,
+                    _udp: udp,
+                };
+            }
+        }
+        panic!("no free five-node port block in 24000..30000");
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn executable_devnet_transfers_browses_and_recovers() {
     let temp = tempfile::tempdir().unwrap();
-    // Ask the OS for a candidate base; init checks every endpoint when running.
-    let base = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-        .min(65000);
-    let paths = devnet::init(&temp.path().join("network"), base)
+    let ports = Ports::reserve();
+    let paths = devnet::init(&temp.path().join("network"), ports.base)
         .await
         .unwrap();
     let configs = paths
@@ -80,6 +138,29 @@ async fn executable_devnet_transfers_browses_and_recovers() {
             config
         })
         .collect::<Vec<_>>();
+    let mut observer = configs[0].clone();
+    observer.voting = false;
+    observer.data = temp.path().join("observer");
+    std::fs::create_dir(&observer.data).unwrap();
+    observer.key = observer.data.join("observer.key");
+    let identity = octra_node::identity::create(&observer.key).unwrap();
+    let observer_key = std::fs::read(&observer.key).unwrap();
+    let observer_address = identity["address"].as_str().unwrap();
+    let observer_prefix = format!("{observer_address}:");
+    assert!(observer
+        .genesis
+        .validators
+        .iter()
+        .all(|entry| !entry.starts_with(&observer_prefix)));
+    let socket = |offset| (Ipv4Addr::LOCALHOST, ports.base + 40 + offset).into();
+    observer.p2p = socket(0);
+    observer.rpc = socket(1);
+    observer.browser = socket(2);
+    observer.control = socket(3);
+    observer.tunnel = socket(4);
+    observer.gateway.as_mut().unwrap().listen = socket(5);
+    observer.peers = configs.iter().map(|config| config.p2p).collect();
+    drop(ports);
     let mut running = configs.iter().cloned().map(start).collect::<Vec<_>>();
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
@@ -208,6 +289,57 @@ async fn executable_devnet_transfers_browses_and_recovers() {
     reached(&http, &configs[3], before + 4).await;
     eprintln!("checkpoint: restarted validator caught up");
     gateway_read(&http, &configs[3]).await;
+    let (stop, task) = start(observer.clone());
+    reached(&http, &observer, before + 4).await;
+    gateway_read(&http, &observer).await;
+    let mut refused = tx.clone();
+    refused.timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64();
+    refused.signature = STANDARD
+        .encode(key.sign(&refused.signing_bytes().unwrap()).to_bytes())
+        .into_bytes();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let response = http
+                .post(format!("http://{}/rpc", observer.rpc))
+                .json(&serde_json::json!({
+                    "jsonrpc": "2.0", "id": 1, "method": "octra_submit",
+                    "params": [serde_json::from_slice::<serde_json::Value>(&refused.to_json_bytes().unwrap()).unwrap()]
+                }))
+                .send()
+                .await
+                .unwrap();
+            assert!(response.status().is_success());
+            let value = response.json::<serde_json::Value>().await.unwrap();
+            if value["error"]["code"] == 117 {
+                break;
+            }
+            let error = value.to_string();
+            assert!(
+                error.contains("stale")
+                    || error.contains("busy")
+                    || error.contains("publishing")
+                    || error.contains("advanced")
+                    || error.contains("revoked")
+                    || error.contains("transaction admission unavailable:"),
+                "observer submission: {error}"
+            );
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let observed = epoch(&http, &observer).await.unwrap();
+    stopped(stop, task).await;
+    reached(&http, &configs[0], observed + 2).await;
+    let (stop, task) = start(observer.clone());
+    reached(&http, &observer, observed + 2).await;
+    gateway_read(&http, &observer).await;
+    stopped(stop, task).await;
+    assert!(std::fs::read(&observer.key).unwrap() == observer_key);
+    eprintln!("checkpoint: nonmember observer served, refused RPC submissions and recovered");
     for (stop, task) in running {
         stopped(stop, task).await;
     }
@@ -249,8 +381,16 @@ async fn gateway_read(http: &reqwest::Client, config: &Config) {
                 ))
                 .header("host", "circles.example.ts.net")
                 .send()
-                .await
-                .unwrap();
+                .await;
+            let response = match response {
+                Ok(response) => response,
+                // RPC becomes reachable before the remaining service sockets.
+                Err(error) if error.is_connect() => {
+                    tokio::time::sleep(Duration::from_millis(30)).await;
+                    continue;
+                }
+                Err(error) => panic!("gateway request failed: {error}"),
+            };
             if response.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE {
                 tokio::time::sleep(Duration::from_millis(30)).await;
                 continue;

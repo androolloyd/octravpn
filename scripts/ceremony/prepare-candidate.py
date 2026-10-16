@@ -11,12 +11,22 @@ import sys
 import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+from importlib.util import module_from_spec, spec_from_file_location
+_TARGET_SPEC = spec_from_file_location('octra_ceremony_target', pathlib.Path(__file__).with_name('target.py'))
+targets = module_from_spec(_TARGET_SPEC)
+_TARGET_SPEC.loader.exec_module(targets)
 REQUIRED = (
     'target_network_and_genesis', 'target_execution_profile', 'owner_authorization_scheme',
     'reviewed_economic_parameters', 'native_money_path_tests', 'vpn_daemon_interop',
     'independent_security_review', 'deployment_and_recovery_rehearsal',
 )
 PRIVATE_REQUIRED = REQUIRED + ('private_admin_circuit_and_multiparty_setup',)
+
+def prerequisites(version, target):
+    required = PRIVATE_REQUIRED if version == 5 else REQUIRED
+    if target.get('network') == 'devnet':
+        return ('target_network_and_checkpoint_origin',) + required[1:]
+    return required
 
 def sha(data):
     return hashlib.sha256(data).hexdigest()
@@ -54,6 +64,9 @@ def compile_candidate(args):
     config = tomllib.loads(args.params.read_text())
     # No guessed RPC, owner, nonce, network or synthetic signature envelope.
     target = config.get('target', {})
+    if args.network == 'devnet' and args.program_version != 5:
+        raise ValueError('devnet canary requires v5 private administration')
+    selected_target = targets.intent_target(target, args.network, args.network_env, owner=args.program_version != 5)
     economic = config['constructor']
     values = [economic[k] for k in ('min_session_deposit', 'min_tailnet_deposit', 'min_circle_stake',
                                    'session_grace_epochs', 'unbond_grace_epochs')]
@@ -62,6 +75,8 @@ def compile_candidate(args):
     if values[2] < 100_000_000 or values[4] < 1000:
         raise ValueError('stake/unbond grace violate contract floors')
     compiler = args.amlc.resolve(strict=True)
+    if args.compiler_upstream_commit is not None and not re.fullmatch(r'[0-9a-f]{40}', args.compiler_upstream_commit):
+        raise ValueError('compiler upstream commit must be a full lowercase Git commit')
     version = args.program_version
     source = ROOT / f'program/main-v{version}.aml'
     text = source.read_text()
@@ -101,9 +116,8 @@ def compile_candidate(args):
         raise ValueError('compiler ABI missing methods')
     (output / f'main-v{version}.abi.json').write_text(json.dumps(abi, indent=2) + '\n')
     (output / 'compiler-report.txt').write_text(report)
-    target_fields = ('rpc_url', 'chain_id', 'genesis_root') if version == 5 else ('rpc_url', 'chain_id', 'genesis_root', 'owner')
     intent = {'kind': 'unsigned_deployment_intent', 'contract': f'OctraVPN v{version}',
-              'target': {k: target.get(k) or None for k in target_fields},
+              'target': selected_target, 'target_binding_sha256': targets.digest(selected_target),
               'constructor_args': values, 'nonce': None, 'signed': False,
               'economics': {'vpn_protocol_fee_bps': 0},
               'policy': 'governed onboarding; opaque permissionless slashing disabled',
@@ -125,13 +139,14 @@ def compile_candidate(args):
     payload = {'schema': 2, 'program_version': version, 'compiler': {'version': command([str(compiler), 'version']).decode().strip(),
                'binary_sha256': sha(compiler.read_bytes()),
                'patches': {path.name: sha(path.read_bytes()) for path in args.compiler_patch},
-               'upstream_commit': '3a183bc8892b1795f2e1059848f1f331ce1a3a51'},
+               'upstream_commit': args.compiler_upstream_commit,
+               'source_provenance': 'Caller declaration only; this tool hashes the compiler binary but does not certify its source derivation.'},
                'files': {p.name: sha(p.read_bytes()) for p in sorted(output.iterdir()) if p.is_file()},
                'repositories': {name: snapshot(ROOT if name == 'octra' else ROOT.parent / name)
                                 for name in ('octra', 'octra-foundry', 'headscale-rs')}}
     candidate_id = sha(encoded(payload))
     manifest = {'candidate_id': candidate_id, 'payload': payload,
-                'launch_ready': False, 'unmet_prerequisites': list(PRIVATE_REQUIRED if version == 5 else REQUIRED),
+                'launch_ready': False, 'unmet_prerequisites': list(prerequisites(version, selected_target)),
                 'scope': 'Compiled unsigned candidate; standalone VM checks do not certify a target chain profile.'}
     (output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'Unsigned candidate: {output}\nCandidate ID: {candidate_id}\nLaunch status: NOT_READY')
@@ -149,12 +164,13 @@ def verify(args):
         if sha((output / name).read_bytes()) != expected:
             raise ValueError(f'artifact changed: {name}')
     # Readiness fields are declarations, never trusted as approval evidence.
-    prerequisites = PRIVATE_REQUIRED if payload.get('program_version') == 5 else REQUIRED
-    if manifest.get('launch_ready') is not False or manifest.get('unmet_prerequisites') != list(prerequisites):
+    intent = json.loads((output/'intent.json').read_text())
+    required = prerequisites(payload.get('program_version'), intent.get('target', {}))
+    if manifest.get('launch_ready') is not False or manifest.get('unmet_prerequisites') != list(required):
         raise ValueError('readiness declaration changed; this tool cannot certify a launch')
     print('Candidate integrity: PASS\nLaunch status: NOT_READY')
     if args.require_ready:
-        print('Missing verified prerequisites: ' + ', '.join(prerequisites), file=sys.stderr)
+        print('Missing verified prerequisites: ' + ', '.join(required), file=sys.stderr)
         return 1
     return 0
 
@@ -164,8 +180,11 @@ def main():
     prepare = sub.add_parser('prepare')
     prepare.add_argument('--amlc', type=pathlib.Path, required=True)
     prepare.add_argument('--params', type=pathlib.Path, default=ROOT/'ceremony/mainnet-candidate.toml.example')
+    prepare.add_argument('--network', choices=('mainnet', 'devnet'), default='mainnet')
+    prepare.add_argument('--network-env', type=pathlib.Path, help='Public adopted network.env; required for explicit devnet mode')
     prepare.add_argument('--program-version', type=int, choices=(4, 5), default=5)
     prepare.add_argument('--compiler-patch', type=pathlib.Path, action='append', default=[])
+    prepare.add_argument('--compiler-upstream-commit', help='Full source commit from the compiler build record; omitted means unknown, never inferred from the node pin')
     prepare.add_argument('--out', type=pathlib.Path, required=True)
     check = sub.add_parser('verify')
     check.add_argument('--out', type=pathlib.Path, required=True)

@@ -1,0 +1,163 @@
+{
+  "schema": 1,
+  "date": "2026-10-15",
+  "completed_at": "2026-10-15T22:00:00.561532+00:00",
+  "status": "PASS_POST_BATCHING_STORAGE_FOLLOWUP",
+  "scope": "Only the bounded canonical writer change and its storage consumers. The earlier full runtime 164/58 gate remains a separate pre-batching snapshot; no current full-runtime or public catch-up speed claim.",
+  "root_lock_sha256": "f28ad88c09fb9c0ed4ed33eb8866a191cc0fdfba2ad4c5435443942dbefc3b35",
+  "runtime_crate_files": 331,
+  "runtime_crate_tree_sha256": "4641c741c6026bab08a7435b37c43691cade3c8fbbdc198030317f28d93b8296",
+  "tree_digest_encoding": "SHA256 of UTF-8 sorted relative-path\u2192file-SHA256 JSON with separators=(',', ':') plus LF.",
+  "source_sha256": {
+    "src/canonical.rs": "d602f97b430cd61eccc045ad46efd240ac887462054e029251819171c570a8b2",
+    "src/canonical/storage_tests.rs": "f64b2a7582d326587762325e99a78900da09cd842c515de77337c9908c1c9631"
+  },
+  "baseline": {
+    "canonical_before_sha256": "5507a95d45b5e72f2e13f9ac1fb0f95f95c9ce9293c256ad1deb8844de4024cb",
+    "qualified_runtime_checkpoint_sha256": "8c39d16697774e9d7391f7593e41712032f28088f1d0950fe86d9b9eb3d6adc2",
+    "root_lock_sha256": "f28ad88c09fb9c0ed4ed33eb8866a191cc0fdfba2ad4c5435443942dbefc3b35"
+  },
+  "production_patch": {
+    "path": "out/node-port-final-20261015/canonical-edge-batching/production.patch",
+    "sha256": "5ea6a345303aa86bcda1d6231e7576771fdbba3e8367957020302298f6e42687"
+  },
+  "source_final_manifest": {
+    "path": "out/node-port-final-20261015/canonical-edge-batching/evidence/source-final.json",
+    "sha256": "0105b111eb93f35305447edb09a443de046972e4c50e391f1679c129d062802b"
+  },
+  "source_unchanged_during_each_gate": true,
+  "implementation": {
+    "edge_rows_per_statement": 256,
+    "max_binds_per_edge_statement": 512,
+    "same_schema_object_bytes_hashes_and_transaction": true,
+    "child_before_parent_and_foreign_keys_retained": true,
+    "new_rows": "Skip redundant contents/data readback only after successful insertion.",
+    "existing_rows": "On conflict, preserve exact contents type and data bytes comparison.",
+    "directory_width_cap_added": false
+  },
+  "initial_release": {
+    "command": "cargo test -p octra-node-runtime --release --offline --locked --lib --test canonical_recovery --test canonical_authority --test circle_application --test finality_publication --test ledger_image_parity --no-fail-fast",
+    "targets": [
+      {
+        "target": "unittests src/lib.rs (/target/release/deps/octra_node_runtime-99181733f8eb9545)",
+        "status": "ok",
+        "passed": 23,
+        "failed": 0,
+        "ignored": 0,
+        "filtered": 0,
+        "seconds": 0.47
+      },
+      {
+        "target": "tests/canonical_authority.rs (/target/release/deps/canonical_authority-b39031dc9cc615c7)",
+        "status": "ok",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "filtered": 0,
+        "seconds": 0.51
+      },
+      {
+        "target": "tests/canonical_recovery.rs (/target/release/deps/canonical_recovery-44984ca9d22ceaf0)",
+        "status": "ok",
+        "passed": 7,
+        "failed": 0,
+        "ignored": 1,
+        "filtered": 0,
+        "seconds": 0.37
+      },
+      {
+        "target": "tests/circle_application.rs (/target/release/deps/circle_application-e37ade3e36115ebc)",
+        "status": "ok",
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "filtered": 0,
+        "seconds": 1.29
+      },
+      {
+        "target": "tests/finality_publication.rs (/target/release/deps/finality_publication-8737ac4630162916)",
+        "status": "ok",
+        "passed": 6,
+        "failed": 0,
+        "ignored": 0,
+        "filtered": 0,
+        "seconds": 0.33
+      },
+      {
+        "target": "tests/ledger_image_parity.rs (/target/release/deps/ledger_image_parity-7cba25dc0a606632)",
+        "status": "ok",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "filtered": 0,
+        "seconds": 0.0
+      }
+    ],
+    "passed": 42,
+    "failed": 0,
+    "ignored": 1,
+    "filtered": 0,
+    "scope": "Three storage regressions plus all runtime unit tests, canonical authority/recovery, signed Circle publication, finality and native ledger image parity.",
+    "log": {
+      "path": "out/node-port-final-20261015/canonical-edge-batching/evidence/tests.log",
+      "sha256": "758e7d77ba10ee01d90e28ed6ae2d3a4ae2c5686b19e944d59bea17a2c59e9b2"
+    },
+    "executables_manifest": {
+      "path": "out/node-port-final-20261015/canonical-edge-batching/evidence/tests-executables.sha256",
+      "sha256": "39197e5e6fe6dcba5f8950b4ef411c9acc7443106341771cde4eb691febf37ed"
+    }
+  },
+  "test_precision_delta": {
+    "change": "Strengthen only missing-child refusal assertion to require actual SQLite FOREIGN KEY constraint failed cause; production unchanged.",
+    "old_test_sha256": "45d13630e980f7553d3775d3ddbe10d2b8c801e0d7994228c70aba7da649665f",
+    "new_test_sha256": "f64b2a7582d326587762325e99a78900da09cd842c515de77337c9908c1c9631",
+    "canonical_production_sha256": "d602f97b430cd61eccc045ad46efd240ac887462054e029251819171c570a8b2"
+  },
+  "final_storage_rerun": {
+    "command": "cargo test -p octra-node-runtime --release --offline --locked --lib canonical::storage_tests",
+    "passed": 3,
+    "failed": 0,
+    "ignored": 0,
+    "filtered": 20,
+    "scope": "All three storage tests rerun after strengthening actual FOREIGN KEY refusal assertion; other 20 lib tests intentionally filtered. Replaces the original three results, not 45 unique passes.",
+    "log": {
+      "path": "out/node-port-final-20261015/canonical-edge-batching/evidence/final-tests.log",
+      "sha256": "e8862caa30db25db1ceb1c54d6ab42773a8ca9bae26b34d4ab31128686de5777"
+    },
+    "executables_manifest": {
+      "path": "out/node-port-final-20261015/canonical-edge-batching/evidence/final-tests-executables.sha256",
+      "sha256": "43a9d7f5b88cdf8298805600bd20b6d1cb35c5fe37f719705a48b078bbeab7e7"
+    }
+  },
+  "strict_clippy": {
+    "command": "cargo clippy -p octra-node-runtime --no-deps --offline --locked --all-targets --all-features --keep-going -- -D warnings",
+    "passed": true,
+    "log": {
+      "path": "out/node-port-final-20261015/canonical-edge-batching/evidence/final-clippy.log",
+      "sha256": "898bea7b8b730fcb2f62e52f00301abd61f41f0f20e6bea460ba3f691019bacf"
+    },
+    "scope": "All runtime targets and all features, --no-deps; existing vendor dead-code warning is outside scoped runtime diagnostics."
+  },
+  "independent_review": "Production comparison clean; original writer oracle body matched captured baseline byte-for-byte after function-name normalization. The only test precision finding was corrected and requalified.",
+  "isolation": {
+    "host_cargo": false,
+    "network": "none",
+    "source_and_registry": "read-only",
+    "image": "sha256:62d73a659a92699cf1230d84a89521d4266f2eeb7b7e22b41835103871c76cb1",
+    "rustc": "1.96.0 (ac68faa20 2026-05-25), aarch64-unknown-linux-gnu",
+    "profile": "release optimized",
+    "public_or_old_store_effects": false
+  },
+  "dependency_scope": "Isolated follow-up captures current adopted Runtime, Protocol, ExEx, Browser, HFHE and vendor source, including HFHE style and browser MSRV changes omitted by the older full runtime snapshot.",
+  "limits": [
+    "No schema, object encoding or native commitment change.",
+    "Batching does not eliminate full changed-directory JSON or edge persistence; public throughput and DB/WAL growth require separate measurement.",
+    "The one ignored crash_worker is exercised only through its passing enclosing process_crash_recovery test, not counted as a direct pass.",
+    "Node, native VPN, browser, public catch-up and formal qualification remain separately scoped."
+  ],
+  "local_qualification_report": {
+    "path": "out/node-port-final-20261015/canonical-edge-batching/qualification.json",
+    "sha256": "d77574b6d6b69ea92fd5be2cef433e1b4cf1a756fbd120aef32c446b488701f9"
+  },
+  "local_evidence_notice": "Raw ignored out/ artifacts need not be present in a fresh clone; this checkpoint preserves exact source and evidence hashes."
+}

@@ -191,8 +191,11 @@ impl Native {
         }
         let raw = bundle.to_raw().map_err(unavailable)?;
         let execution = ExecutedEpoch {
+            epoch_observation: Some(staged.epoch_observation),
+            metrics: staged.metrics,
             state: staged.state,
             transactions: staged.transactions,
+            vm_receipts: staged.vm_receipts,
             consensus_receipts: bundle.receipts_json,
             reward_source: reward_attribution::to_source(&reward).map_err(unavailable)?,
             date: header.epoch_id,

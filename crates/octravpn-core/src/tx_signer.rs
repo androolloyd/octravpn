@@ -620,80 +620,49 @@ mod tests {
         assert_eq!(yojson_float(f64::NEG_INFINITY), "-Infinity");
     }
 
-    /// Differential test against the platform C library's `%g` via
-    /// printf(1) — the same code path OCaml's `Printf.sprintf "%.16g"`
-    /// bottoms out in. Replays yojson's exact pipeline on the C output
-    /// and compares whole strings. Skips silently when printf(1) is
-    /// unavailable or non-conforming (the pinned goldens above still
-    /// gate correctness).
+    /// Actual binary64 outputs from the adopted native Yojson implementation.
+    /// The fixture includes subnormals and 5,000 random bit patterns. Unlike
+    /// printf(1), this oracle never reparses a shortest decimal as long double.
     #[test]
-    #[cfg(unix)]
-    fn yojson_float_matches_c_printf() {
-        let mut vals: Vec<f64> = vec![
-            0.0,
-            -0.0,
-            1.0,
-            0.1 + 0.2,
-            1e15,
-            1e16,
-            1e21,
-            5e-324,
-            2f64.powi(70),
-            1_755_446_400.0,
-        ];
-        // Deterministic pseudo-random doubles across the full bit space.
-        let mut seed = 0x243F_6A88_85A3_08D3_u64;
-        while vals.len() < 300 {
-            seed = seed
-                .wrapping_mul(6_364_136_223_846_793_005)
-                .wrapping_add(1_442_695_040_888_963_407);
-            let x = f64::from_bits(seed);
-            if x.is_finite() {
-                vals.push(x);
+    fn yojson_float_matches_pinned_native_vectors() {
+        const FIXTURE: &str =
+            include_str!("../../octra-node-protocol/tests/fixtures/transaction-state.json");
+        assert_eq!(
+            hex::encode(Sha256::digest(FIXTURE.as_bytes())),
+            "80cb851324613731d0b05f62386ee4587ece6db9a645c08604527a8e7e989849"
+        );
+        let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+        assert_eq!(
+            fixture["upstream_commit"],
+            "7f9be4489870645cfcc95439638cde40f5da9f50"
+        );
+        assert_eq!(
+            fixture["sources"]["lib/core/transaction.ml"],
+            "b7fed1a8d2442150b78aba6b0ebca7959d57f150230939d201a0623cb736533a"
+        );
+        let mut finite = 0;
+        let mut nonfinite = 0;
+        for case in fixture["cases"].as_array().unwrap() {
+            if case["input"]["operation"] != "float" {
+                continue;
+            }
+            let bits = u64::from_str_radix(case["input"]["bits"].as_str().unwrap(), 16).unwrap();
+            let value = f64::from_bits(bits);
+            if value.is_finite() {
+                assert_eq!(
+                    yojson_float(value),
+                    case["output"].as_str().unwrap(),
+                    "native float bits {bits:016x}"
+                );
+                finite += 1;
+            } else {
+                // Safe JSON rejects these; our raw rendering helper's special
+                // tokens have their own explicit nonfinite golden test.
+                assert!(case["output"]["error"].is_string());
+                nonfinite += 1;
             }
         }
-        let c_g = |p: u32| -> Option<Vec<String>> {
-            // `{:e}` with no precision is Rust's shortest round-trip
-            // form; strtod inside printf(1) recovers the exact double.
-            let args: Vec<String> = vals.iter().map(|v| format!("{v:e}")).collect();
-            let out = std::process::Command::new("printf")
-                .arg(format!("%.{p}g\n"))
-                .args(&args)
-                .output()
-                .ok()?;
-            // NOT gated on exit status: BSD printf(1) exits 1 with
-            // "Result too large" (strtod ERANGE) on subnormal operands
-            // while still printing the correctly-rounded value. The
-            // line-count check below is the real gate.
-            let lines: Vec<String> = String::from_utf8(out.stdout)
-                .ok()?
-                .lines()
-                .map(str::to_string)
-                .collect();
-            (lines.len() == vals.len()).then_some(lines)
-        };
-        let (Some(g16), Some(g17)) = (c_g(16), c_g(17)) else {
-            eprintln!("printf(1) unavailable; skipping differential");
-            return;
-        };
-        for (i, x) in vals.iter().enumerate() {
-            let s = if g16[i].parse::<f64>().map(f64::to_bits) == Ok(x.to_bits()) {
-                g16[i].clone()
-            } else {
-                g17[i].clone()
-            };
-            let expected = if s.bytes().all(|b| b.is_ascii_digit() || b == b'-') {
-                s + ".0"
-            } else {
-                s
-            };
-            assert_eq!(
-                yojson_float(*x),
-                expected,
-                "for {x:?} (bits {:#x})",
-                x.to_bits()
-            );
-        }
+        assert_eq!((finite, nonfinite), (5_014, 5));
     }
 
     /// Golden tx hash: sha256 over the 11-field hash JSON

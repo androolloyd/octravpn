@@ -2,6 +2,7 @@
 // Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
 //! Native Circle records read from one immutable state tree.
 use crate::state_batch::{Snapshot, StateBatch};
+mod public;
 use num_bigint::BigInt;
 use octra_node_protocol::{
     circle_storage::StorageTable,
@@ -11,6 +12,7 @@ use octra_node_protocol::{
     native_json::{Document, Value},
     transaction::json_string,
 };
+pub use public::{public_asset, public_program, storage_at, PublicAsset, PublicProgram};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Info {
@@ -176,6 +178,96 @@ pub fn storage(state: &Snapshot, circle: &[u8]) -> Result<Storage, Error> {
     Ok(load_storage(state, circle, None)?.values().clone())
 }
 
+pub struct StoragePage {
+    pub entries: Vec<(Vec<u8>, Vec<u8>)>,
+    pub total: usize,
+}
+pub fn record(
+    state: &Snapshot,
+    circle: &[u8],
+    kind: octra_node_protocol::circle_records::Kind,
+    subject: &[u8],
+) -> Result<octra_node_protocol::circle_records::Record, Error> {
+    let mut fields = vec![];
+    for name in kind.field_names() {
+        let key = [kind.prefix(), b":", subject, b":", name].concat();
+        fields.push((name, inline(state, circle, &key)?));
+    }
+    Ok(kind.from_stored(|name| {
+        fields
+            .iter()
+            .find(|(key, _)| *key == name)
+            .and_then(|(_, value)| value.clone())
+    }))
+}
+/// Count raw child names before filtering malformed entries, as native Irmin
+/// pages do. A subtree occupies a page position without becoming a value.
+pub fn storage_page(state: &Snapshot, circle: &[u8], limit: usize) -> Result<StoragePage, Error> {
+    let path = [b"circles".as_slice(), circle, b"stable", b"by_hash"];
+    let total = state.child_count(&path);
+    let mut entries = vec![];
+    for hash in state.child_names(&path).take(limit) {
+        let Some(raw) = state.get(&[b"circles", circle, b"stable", b"by_hash", hash]) else {
+            continue;
+        };
+        let entry = match StableEntry::parse(raw) {
+            Ok(entry) => entry,
+            Err(error)
+                if error.0 == b"circle stable entry integer refused"
+                    || error.0 == b"circle stable entry JSON refused" =>
+            {
+                return Err(error)
+            }
+            Err(_) => continue,
+        };
+        match entry.value {
+            StableValue::Inline(value) => entries.push((entry.key, value)),
+            StableValue::Blob { .. } => {
+                return Err(Error(
+                    b"circle stable storage contains non-inline values".to_vec(),
+                ))
+            }
+        }
+    }
+    Ok(StoragePage { entries, total })
+}
+
+/// Any materialized descriptor field selects native stored-value defaults;
+/// complete absence is retained separately for RPC materialization status.
+pub fn descriptor(
+    state: &Snapshot,
+    circle: &[u8],
+    key: &[u8],
+) -> Result<Option<octra_node_protocol::circle_state::Descriptor>, Error> {
+    let mut fields = vec![];
+    for name in [
+        b"state_class".as_slice(),
+        b"codec",
+        b"schema_hash",
+        b"subject_addr",
+        b"hfhe_profile",
+        b"mutable_state",
+    ] {
+        let raw = inline(
+            state,
+            circle,
+            &[b"state_descriptor:".as_slice(), key, b":", name].concat(),
+        )?;
+        fields.push((name, raw));
+    }
+    if fields.iter().all(|(_, value)| value.is_none()) {
+        return Ok(None);
+    }
+    Ok(Some(
+        octra_node_protocol::circle_state::Descriptor::from_stored(|name| {
+            fields
+                .iter()
+                .find(|(key, _)| *key == name)
+                .and_then(|(_, value)| value.clone())
+        }),
+    ))
+}
+
 /// Native execution loader. Charged reads reject malformed entry shapes, while
 /// historical uncharged reads skip them. Operational decode failures propagate.
 pub fn load_storage(
@@ -336,6 +428,62 @@ pub fn storage_effort(storage: &StorageTable) -> BigInt {
         .sum();
     (bytes + 15) / 16 + BigInt::from(count) * (16 + levels)
 }
+
+/// Shared native asset record mutation. Authorization and budgets are checked
+/// before this function; the caller owns the transaction savepoint.
+pub(crate) fn save_asset(
+    state: &mut StateBatch,
+    circle: &[u8],
+    meta: &circles::AssetMeta,
+    body: &[u8],
+    usage: i64,
+) -> Result<(), crate::execution::Error> {
+    let error = |e: crate::state_batch::Error| crate::execution::Error(e.to_string());
+    let key = meta.path_key.as_slice();
+    state
+        .set(
+            &[b"circles", circle, b"assets", b"by_hash", key, b"meta"],
+            meta.to_json_bytes(),
+        )
+        .map_err(error)?;
+    let field = if meta.body_mode == circles::ResourceMode::Public {
+        b"body_b64".as_slice()
+    } else {
+        b"ciphertext_b64"
+    };
+    state
+        .set(
+            &[b"circles", circle, b"assets", b"by_hash", key, field],
+            body.to_vec(),
+        )
+        .map_err(error)?;
+    state
+        .set(
+            &[
+                b"circles",
+                circle,
+                b"assets",
+                b"resource_keys",
+                &meta.resource_key,
+            ],
+            key.to_vec(),
+        )
+        .map_err(error)?;
+    state
+        .set(
+            &[b"circles", circle, b"assets", b"usage_bytes"],
+            usage.to_string().into_bytes(),
+        )
+        .map_err(error)?;
+    let root = state
+        .snapshot()
+        .hash_at(&[b"circles", circle, b"assets", b"by_hash"])
+        .map_err(|e| crate::execution::Error(e.to_string()))?
+        .map_or_else(|| "0".repeat(64), hex::encode);
+    state
+        .set(&[b"circles", circle, b"assets_root"], root.into_bytes())
+        .map_err(error)
+}
 pub fn write_effort(storage: &StorageTable) -> BigInt {
     let overhead = StableEntry {
         key: vec![],
@@ -383,4 +531,83 @@ pub fn inline(state: &Snapshot, circle: &[u8], key: &[u8]) -> Result<Option<Vec<
         StableValue::Inline(v) if entry.key == key => Some(v),
         _ => None,
     })
+}
+pub struct ResourcePolicy {
+    pub delivery_key: Option<Vec<u8>>,
+    pub visibility: circles::AssetPolicy,
+}
+pub fn resource_policy(
+    state: &Snapshot,
+    circle: &[u8],
+    key: &[u8],
+    mode: circles::LocatorMode,
+) -> Result<ResourcePolicy, Error> {
+    let private_state = mode == circles::LocatorMode::State;
+    let prefix = if private_state {
+        b"state_policy:".as_slice()
+    } else {
+        b"slot_policy:"
+    };
+    let read = |suffix: &[u8], fallback: bool| -> Result<Option<Vec<u8>>, Error> {
+        let value = inline(state, circle, &[prefix, key, b":", suffix].concat())?;
+        if value.is_none() && fallback && !private_state {
+            inline(
+                state,
+                circle,
+                &[b"mailbox:".as_slice(), key, b":", suffix].concat(),
+            )
+        } else {
+            Ok(value)
+        }
+    };
+    let delivery_key = read(b"delivery_key_id", false)?
+        .map(|raw| octra_node_protocol::network::endpoint::native_trim(&raw).to_vec());
+    let activate = read(b"activate_after_epoch", true)?;
+    let expire = read(b"expire_after_epoch", true)?;
+    let tombstone = read(b"tombstone", true)?;
+    let revoked = read(b"revoked", true)?;
+    Ok(ResourcePolicy {
+        delivery_key,
+        visibility: circles::AssetPolicy {
+            activate_after_epoch: activate.as_deref().and_then(circles::policy_integer),
+            expire_after_epoch: expire.as_deref().and_then(circles::policy_integer),
+            tombstone: tombstone.as_deref().is_some_and(circles::policy_bool),
+            revoked: revoked.as_deref().is_some_and(circles::policy_bool),
+        },
+    })
+}
+pub fn asset_meta(
+    state: &Snapshot,
+    circle: &[u8],
+    key: &[u8],
+) -> Result<Option<circles::AssetMeta>, Error> {
+    state
+        .get(&[b"circles", circle, b"assets", b"by_hash", key, b"meta"])
+        .map_or(Ok(None), circles::AssetMeta::from_stored)
+}
+pub(crate) fn hfhe_policy(
+    state: &Snapshot,
+    circle: &[u8],
+) -> Result<octra_node_protocol::circle_policy::hfhe::Policy, Error> {
+    use octra_node_protocol::circle_policy::hfhe;
+    let mut values = vec![];
+    for name in hfhe::MODE_NAMES.iter().map(|name| name.as_bytes()).chain([
+        b"proof_receipt_class".as_slice(),
+        b"pk_allowlist",
+        b"require_live_key_policy",
+        b"require_receipt_transport_binding",
+        b"encrypt_proof",
+        b"decrypt_proof",
+    ]) {
+        values.push((
+            name,
+            inline(state, circle, &[b"hfhe_policy:".as_slice(), name].concat())?,
+        ));
+    }
+    Ok(hfhe::Policy::from_stored(|name| {
+        values
+            .iter()
+            .find(|(key, _)| *key == name)
+            .and_then(|(_, raw)| raw.clone())
+    }))
 }

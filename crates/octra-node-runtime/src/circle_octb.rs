@@ -4,12 +4,14 @@
 use crate::octb::Value;
 use octra_node_protocol::{
     circle_wasm::{Error, Execution, Method},
-    native_integer::parse_integer,
-    native_json::{Document, Value as Json},
+    native_json::Document,
     octb::{Instruction as I, Value as Constant},
 };
-fn unavailable(reason: &str) -> Error {
-    Error::Unavailable(reason.as_bytes().to_vec())
+fn program_error(error: crate::program::Error) -> Error {
+    match error {
+        crate::program::Error::Rejected(reason) => Error::Rejected(reason),
+        crate::program::Error::Unavailable(reason) => Error::Unavailable(reason.into_bytes()),
+    }
 }
 
 pub(crate) fn methods(code: &[I]) -> Vec<Method> {
@@ -79,17 +81,47 @@ pub(crate) fn arity(code: &[I], method: &[u8]) -> Option<usize> {
     None
 }
 
-pub(crate) fn seed(
-    machine: &mut crate::octb::Machine,
-    method: &[u8],
-    params: &Document,
-) -> Result<(), Error> {
+pub(crate) fn seed_values(machine: &mut crate::octb::Machine, method: &[u8], values: Vec<Value>) {
     machine.memory.insert(999, Value::string(b"call".to_vec()));
     machine.memory.insert(1000, Value::string(method.to_vec()));
-    for (index, value) in parameters(params)?.into_iter().enumerate() {
+    for (index, value) in values.into_iter().enumerate() {
         machine.memory.insert(1001 + index as i64, value);
     }
-    Ok(())
+}
+
+/// Contract.extract_method_target over code whose jumps have been fixed.
+pub(crate) fn method_target(code: &[I], method: &[u8]) -> Option<usize> {
+    let entry = code.iter().position(|op| matches!(op, I::Jdest(100)))?;
+    for pc in entry + 1..code.len() {
+        match (&code[pc], code.get(pc + 1), code.get(pc + 2)) {
+            (I::Ldi(_, name), Some(I::Eq(..)), Some(I::Jif(_, target))) if matches!(name.as_ref(),Constant::Str(name) if name.as_ref()==method) => {
+                return Some(*target as usize)
+            }
+            (I::Revert() | I::Stop(), _, _) => return None,
+            _ => (),
+        }
+    }
+    None
+}
+pub(crate) fn runtime_parameters(
+    admitted: &octra_node_protocol::octb::admission::Admitted,
+    code: &[I],
+    method: &[u8],
+    params: &Document,
+) -> Result<Vec<Value>, Error> {
+    let target =
+        method_target(code, method).ok_or_else(|| Error::Rejected(b"method not found".to_vec()))?;
+    crate::program::input::parse(admitted, target, params).map_err(program_error)
+}
+pub(crate) fn storage_kinds(
+    admitted: &octra_node_protocol::octb::admission::Admitted,
+    calls: bool,
+) -> std::collections::BTreeMap<Vec<u8>, octra_node_protocol::octb::StorageKind> {
+    if calls {
+        crate::program::input::storage_kinds(admitted)
+    } else {
+        std::collections::BTreeMap::default()
+    }
 }
 
 pub(crate) fn dispatcher(code: &[I], method: &[u8]) -> Option<usize> {
@@ -108,24 +140,4 @@ pub(crate) fn dispatcher(code: &[I], method: &[u8]) -> Option<usize> {
         }
     }
     None
-}
-pub(crate) fn parameters(params: &Document) -> Result<Vec<Value>, Error> {
-    let Json::List(ids) = params.root() else {
-        return Ok(vec![]);
-    };
-    ids.iter()
-        .map(|id| {
-            Ok(match params.get(*id).expect("native arena child") {
-                Json::String(raw) => Value::string(raw.clone()),
-                Json::Bool(v) => Value::Bool(*v),
-                Json::Int(v) => Value::int(v.get()),
-                Json::IntLiteral(raw) => {
-                    Value::int(parse_integer(raw).ok_or_else(|| {
-                        unavailable("OCTB parameter integer conversion unavailable")
-                    })?)
-                }
-                _ => Value::string(vec![]),
-            })
-        })
-        .collect()
 }

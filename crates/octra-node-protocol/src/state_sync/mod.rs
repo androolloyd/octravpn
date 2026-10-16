@@ -2,8 +2,17 @@
 // Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
 //! Native snapshot commitments. Parsing or hashing alone grants no state-import
 //! authority: callers must authenticate finality, exporters and trusted network.
+pub mod anchor;
 pub mod checkpoint;
+pub mod cycle;
+pub mod head;
+pub mod http;
+pub mod lease;
 pub mod manifest;
+pub mod migration;
+pub mod range_part;
+pub mod readiness;
+pub mod roots;
 
 pub use crate::oce1::Error;
 use crate::{

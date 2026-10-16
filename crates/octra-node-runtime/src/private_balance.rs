@@ -10,44 +10,9 @@ use octra_node_protocol::{
     state::Ledger,
     transaction::{OpType, RuleMode, Transaction},
 };
-use sha2::{Digest, Sha256};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Failure {
-    pub tag: &'static str,
-    pub reason: Vec<u8>,
-    pub user_reason: Vec<u8>,
-}
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error("private balance rejected: {0:?}")]
-    Rejected(Failure),
-    #[error("private balance execution unavailable: {0}")]
-    Unavailable(String),
-}
-fn failure(tag: &'static str, reason: impl AsRef<[u8]>, user: Option<Vec<u8>>) -> Error {
-    let reason = reason.as_ref().to_vec();
-    Error::Rejected(Failure {
-        tag,
-        user_reason: user.unwrap_or_else(|| reason.clone()),
-        reason,
-    })
-}
-fn check<T>(
-    result: Result<T, crypto::Error>,
-    tag: &'static str,
-    prefix: &[u8],
-    user: Option<&[u8]>,
-) -> Result<T, Error> {
-    result.map_err(|error| match error {
-        crypto::Error::Rejected(reason) => failure(
-            tag,
-            [prefix, &reason].concat(),
-            user.map(|p| [p, &reason].concat()),
-        ),
-        crypto::Error::Unavailable(error) => Error::Unavailable(error.to_string()),
-    })
-}
+pub(crate) use crate::private_error::{check, failure};
+pub use crate::private_error::{Error, Failure};
 #[derive(Clone, Copy, Debug)]
 pub struct Profile {
     pub fields: RuleMode,
@@ -178,13 +143,11 @@ impl Verified {
         &self.next
     }
     pub fn transition_hash(&self) -> String {
-        let transcript = format!(
-            "octra:private_transition:{}\0{}\0{}",
-            self.operation.name(),
-            hex::encode(Sha256::digest(&self.current)),
-            hex::encode(Sha256::digest(&self.next))
-        );
-        hex::encode(Sha256::digest(transcript.as_bytes()))
+        let tag = match self.operation {
+            Operation::Encrypt => b"octra:private_transition:encrypt".as_slice(),
+            Operation::Decrypt => b"octra:private_transition:decrypt".as_slice(),
+        };
+        crypto::transition_hash(tag, &[&self.current, &self.next])
     }
     /// Recheck state before charging. Every rejected application restores nonce,
     /// spent-nonce set, public supply, dirty addresses and account ciphertext.

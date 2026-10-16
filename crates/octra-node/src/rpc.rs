@@ -31,6 +31,12 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::{mpsc, watch};
+mod compute;
+mod context;
+pub(crate) use context::Context;
+pub(crate) mod grpc;
+pub(crate) mod http;
+mod native;
 
 pub struct Submission<A: Host> {
     pub node: Arc<Node<A>>,
@@ -39,16 +45,52 @@ pub struct Submission<A: Host> {
     pub swarm: Swarm,
     pub policy: Policy,
     pub address: Vec<u8>,
+    pub compute: Option<octra_node_runtime::compute_service::Service>,
+    pub vpn_program: Option<String>,
+    pub status: Option<Arc<octra_node_runtime::status_read::Service>>,
+    pub tokens: Option<octra_node_runtime::token_rpc::Actor>,
+    pub staging_notify: Arc<dyn Fn() + Send + Sync>,
+    /// Immutable native history pagination setting captured at launch.
+    pub history_epoch_limit: i64,
+    pub fees: octra_node_protocol::submit_rpc::Fees,
+    pub(crate) http: Arc<http::Service>,
 }
 impl<A: Host> Submission<A> {
+    pub async fn submit_native(
+        &self,
+        tx: Transaction,
+    ) -> std::result::Result<Vec<u8>, octra_node_runtime::admission::Error> {
+        let capture = async {
+            let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64();
+            Ok::<_, anyhow::Error>(
+                self.node
+                    .admission_capture(&self.executor.graph(), self.policy, &self.address, now)
+                    .await?,
+            )
+        };
+        let draft = Arc::new(capture.await.map_err(|error| {
+            octra_node_runtime::admission::Error::Unavailable(error.to_string())
+        })?);
+        let hash = self
+            .executor
+            .submit_native(draft, &self.pending, tx)
+            .await?;
+        (self.staging_notify)();
+        Ok(hash)
+    }
     pub async fn submit(&self, tx: Transaction) -> Result<Vec<u8>> {
+        self.submit_native(tx).await.map_err(anyhow::Error::new)
+    }
+    async fn submit_peer(&self, tx: Transaction) -> Result<Vec<u8>> {
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64();
         let draft = Arc::new(
             self.node
                 .admission_capture(&self.executor.graph(), self.policy, &self.address, now)
                 .await?,
         );
-        self.executor.submit(draft, &self.pending, tx).await
+        let hash = self.executor.submit(draft, &self.pending, tx).await?;
+        (self.staging_notify)();
+        Ok(hash)
     }
     pub async fn announce(&self, hash: Vec<u8>, except: Option<&[u8]>) -> Result<()> {
         self.swarm
@@ -64,12 +106,18 @@ impl<A: Host> Submission<A> {
         Ok(())
     }
     pub fn router(self: Arc<Self>) -> Router {
-        Router::new()
-            .route("/status", get(status::<A>))
-            .route("/account/:address", get(account::<A>))
-            .route("/transactions", post(submit::<A>))
+        let router = Router::new()
+            .route("/operator/status", get(status))
+            .route("/account/:address", get(account))
+            .route("/transactions", post(submit))
+            .route(
+                "/rpc",
+                post(native::handle).layer(DefaultBodyLimit::max(5_000_000 + 65_536)),
+            )
+            .merge(http::router())
             .layer(DefaultBodyLimit::max(5_000_000))
-            .with_state(self)
+            .with_state(self.context());
+        http::native_layer(router)
     }
     pub async fn ingress(
         self: Arc<Self>,
@@ -124,7 +172,7 @@ impl<A: Host> Submission<A> {
                 p2p_transaction::deliver(&self.swarm, &peer, effect).await?;
             }
             for tx in captured.transactions {
-                if let Ok(hash) = self.submit(tx).await {
+                if let Ok(hash) = self.submit_peer(tx).await {
                     self.announce(hash, Some(&peer.hello().node_id)).await?;
                 }
             }
@@ -163,15 +211,15 @@ impl p2p_transaction::Host for Captured {
         self.effects.push(effect);
     }
 }
-async fn status<A: Host>(State(host): State<Arc<Submission<A>>>) -> impl IntoResponse {
+async fn status(State(host): State<Arc<Context>>) -> impl IntoResponse {
     let head = host.node.head().await;
     match head {
-        Ok(head)=>Json(serde_json::json!({"chain_id":host.node.store.chain().chain_id,"epoch":head.cursor.epoch.0,"state_root":hex::encode(head.cursor.state_root.0),"serving":matches!(host.node.status(),crate::Status::Serving(_)),"peers":host.swarm.peers().len(),"pending":host.pending.transactions().map(|t|t.len()).ok(),"vpn_settlement":"unconfigured"})).into_response(),
+        Ok(head)=>Json(serde_json::json!({"chain_id":host.node.chain().chain_id,"epoch":head.cursor.epoch.0,"state_root":hex::encode(head.cursor.state_root.0),"serving":matches!(host.node.status(),crate::Status::Serving(_)),"peers":host.peer_count(),"pending":host.pending.transactions().map(|t|t.len()).ok(),"vpn_settlement":if host.vpn_program.is_some(){"configured"}else{"unconfigured"},"vpn_program":host.vpn_program})).into_response(),
         Err(_)=>(StatusCode::SERVICE_UNAVAILABLE,"canonical state unavailable").into_response(),
     }
 }
-async fn account<A: Host>(
-    State(host): State<Arc<Submission<A>>>,
+async fn account(
+    State(host): State<Arc<Context>>,
     Path(address): Path<String>,
 ) -> impl IntoResponse {
     let result = (|| -> Result<serde_json::Value> {
@@ -189,7 +237,7 @@ async fn account<A: Host>(
         Err(_) => (StatusCode::NOT_FOUND, "account unavailable").into_response(),
     }
 }
-async fn submit<A: Host>(State(host): State<Arc<Submission<A>>>, body: Bytes) -> impl IntoResponse {
+async fn submit(State(host): State<Arc<Context>>, body: Bytes) -> impl IntoResponse {
     let result = async {
         let tx = Transaction::from_document(&Document::parse(&body)?)?;
         let hash = host.submit(tx).await?;

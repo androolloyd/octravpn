@@ -22,7 +22,7 @@ def owned(record):
 
 def status(config):
     try:
-        with urllib.request.urlopen("http://" + config["rpc"] + "/status", timeout=2) as response:
+        with urllib.request.urlopen("http://" + config["rpc"] + "/operator/status", timeout=2) as response:
             return json.load(response)
     except (OSError, ValueError) as error:
         return {"error": str(error)}

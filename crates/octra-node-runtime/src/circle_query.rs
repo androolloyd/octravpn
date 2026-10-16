@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
-//! OCTB views over one immutable tree, including native legacy-contract subviews.
+//! Circle views over one immutable tree, including native legacy-contract subviews.
 use crate::{
     circle_call::{Event, VmReceipt},
     circle_octb, circle_store,
@@ -13,12 +13,33 @@ use num_bigint::BigInt;
 use octra_node_protocol::{
     account_pack,
     circle_storage::StorageTable,
-    circle_wasm::Error,
+    circle_wasm::{Error, Execution},
     native_json::{Document, Value as Json},
     octb::{admission, work::Budget},
     transaction::{decode_base64, json_string, RuleMode},
 };
 use sha2::{Digest, Sha256};
+use std::cell::Cell;
+mod wasm;
+
+#[derive(Clone, Copy)]
+struct Capabilities<'a> {
+    circle: Option<&'a crate::circle_fhe::Policy>,
+    verifier: &'a Cell<bool>,
+}
+impl Capabilities<'_> {
+    fn allows(&self, cap: octb::FheCapability) -> bool {
+        if let Some(policy) = self.circle {
+            return policy.allows(cap);
+        }
+        match cap {
+            octb::FheCapability::VerifyZero
+            | octb::FheCapability::VerifyRange
+            | octb::FheCapability::VerifyBound => self.verifier.replace(false),
+            _ => true,
+        }
+    }
+}
 
 fn unavailable(reason: impl std::fmt::Display) -> Error {
     Error::Unavailable(reason.to_string().into_bytes())
@@ -35,27 +56,117 @@ fn failed(reason: Vec<u8>) -> VmReceipt {
         error: Some(reason),
     }
 }
-pub(crate) fn admit(raw: &[u8], point_ops: bool) -> Result<admission::Admitted, Error> {
-    if raw.starts_with(b"OCPG") {
-        return Err(unavailable(
-            "OCTB Program certificate admission host is not available",
-        ));
-    }
-    admission::decode(raw, point_ops).map_err(|e| rejected(format!("invalid circle bytecode: {e}")))
+pub(crate) fn admit(
+    raw: &[u8],
+    point_ops: bool,
+    keys: Option<&octra_node_protocol::program_trust::Keys>,
+) -> Result<admission::Admitted, Error> {
+    let admitted = match keys {
+        Some(keys) => octra_node_protocol::octb::program::decode_deploy(raw, point_ops, keys),
+        None if raw.starts_with(b"OCPG") => {
+            octra_node_protocol::octb::program::decode_source(raw, point_ops)
+        }
+        None => admission::decode(raw, point_ops),
+    };
+    admitted.map_err(|e| {
+        if e.is_operational() {
+            unavailable(e)
+        } else {
+            rejected(format!("invalid circle bytecode: {e}"))
+        }
+    })
 }
 
 pub struct Query<'a> {
     state: &'a Snapshot,
     profile: &'a Profile,
-    root: Vec<u8>,
+    root: Option<Vec<u8>>,
+    keys: octra_node_protocol::program_trust::Keys,
+    public_keys: Option<std::sync::Arc<dyn crate::pvac::Source>>,
+    scope: Option<crate::circle_scope::Scope>,
+    runtime: Option<crate::circle::CircleRuntime>,
+    clock: Option<crate::circle_view::Clock>,
 }
 impl<'a> Query<'a> {
     pub fn new(state: &'a Snapshot, profile: &'a Profile) -> Result<Self, Error> {
+        if !(0..(1i64 << 62)).contains(&profile.epoch) {
+            return Err(unavailable("view epoch exceeds platform range"));
+        }
         Ok(Self {
             state,
             profile,
-            root: hex::encode(state.root().map_err(unavailable)?).into_bytes(),
+            root: Some(hex::encode(state.root().map_err(unavailable)?).into_bytes()),
+            keys: octra_node_protocol::program_trust::Keys::default(),
+            public_keys: None,
+            scope: None,
+            runtime: None,
+            clock: None,
         })
+    }
+    /// Captures the folded root from sealed canonical provenance. A raw-tree
+    /// query instead uses its actual snapshot hash, as native make_view_ctx does.
+    pub fn committed(
+        assets: &'a crate::circle_assets::CanonicalAssets,
+        profile: &'a Profile,
+    ) -> Result<Self, Error> {
+        let epoch = crate::circle_view::epoch(
+            assets.snapshot().get(&[b"meta", b"last_epoch"]),
+            crate::circle_view::ReadKind::View,
+        )
+        .map_err(unavailable)?;
+        if profile.epoch != epoch {
+            return Err(unavailable(
+                "view profile does not match the captured epoch",
+            ));
+        }
+        let mut query = Self::new(assets.snapshot(), profile)?;
+        query.root = Some(assets.identity().state_root.as_bytes().to_vec());
+        Ok(query)
+    }
+    pub fn with_program_keys(mut self, keys: &octra_node_protocol::program_trust::Keys) -> Self {
+        self.keys = keys.clone();
+        self
+    }
+    pub fn with_runtime(mut self, runtime: &crate::circle::CircleRuntime) -> Self {
+        self.keys = runtime.program_keys().clone();
+        self.public_keys = runtime.public_keys().cloned();
+        self.runtime = Some(runtime.clone());
+        self
+    }
+    pub fn with_clock(mut self, clock: crate::circle_view::Clock) -> Self {
+        self.clock = Some(clock);
+        self
+    }
+    /// Trusted local callers may supply a scope; public gateway reads do not.
+    pub fn with_scope(mut self, scope: crate::circle_scope::Scope) -> Self {
+        self.scope = Some(scope);
+        self
+    }
+    /// Native legacy-program view with one verifier allowance shared by its
+    /// invocation tree. The committed admission marker selects reload rules.
+    pub fn program(
+        &self,
+        address: &[u8],
+        method: &[u8],
+        params: &Document,
+        caller: &[u8],
+        limit: i64,
+    ) -> Result<VmReceipt, Error> {
+        let verifier = Cell::new(true);
+        match self.legacy(
+            address,
+            method,
+            params,
+            caller,
+            0,
+            limit,
+            None,
+            &verifier,
+            &mut Budget::default(),
+        ) {
+            Err(Error::Rejected(reason)) => Ok(failed(reason)),
+            result => result,
+        }
     }
     /// No mutable store is accepted; view effects can never reach publication.
     pub fn circle(
@@ -66,28 +177,88 @@ impl<'a> Query<'a> {
         caller: &[u8],
         limit: i64,
     ) -> Result<VmReceipt, Error> {
+        self.execute(Execution::Standard, circle, method, params, caller, limit)
+    }
+    /// The native compute entry point is explicit; ordinary views never promote
+    /// a declared compute method into a larger execution allowance.
+    pub fn compute(
+        &self,
+        circle: &[u8],
+        method: &[u8],
+        params: &Document,
+        caller: &[u8],
+        limit: i64,
+    ) -> Result<VmReceipt, Error> {
+        self.execute(Execution::Compute, circle, method, params, caller, limit)
+    }
+    fn execute(
+        &self,
+        execution: Execution,
+        circle: &[u8],
+        method: &[u8],
+        params: &Document,
+        caller: &[u8],
+        limit: i64,
+    ) -> Result<VmReceipt, Error> {
         let result = (|| {
             let info = circle_store::info(self.state, circle)
                 .map_err(unavailable)?
                 .ok_or_else(|| rejected("circle not found"))?;
-            if info.runtime != b"octb" {
-                return Err(unavailable("query requires the WASM view host"));
-            }
             let encoded = self
                 .state
                 .get(&[b"circles", circle, b"program", b"code_b64"])
                 .ok_or_else(|| rejected("circle program not found"))?;
+            if encoded.len() > crate::circle::MAX_INPUT_BYTES {
+                return Err(unavailable("Circle program exceeds native input capacity"));
+            }
             let raw = decode_base64(encoded)
                 .map_err(|e| rejected(format!("invalid circle code: Invalid_argument(\"{e}\")")))?;
             if hex::encode(Sha256::digest(&raw)).as_bytes() != info.code_hash {
                 return Err(rejected("circle code hash mismatch"));
             }
-            let code = admit(&raw, self.profile.point_ops)?;
+            if info.runtime == b"wasm_v1" {
+                let runtime = self
+                    .runtime
+                    .as_ref()
+                    .ok_or_else(|| unavailable("query requires the WASM view host"))?;
+                return wasm::execute(
+                    execution,
+                    runtime,
+                    self.state,
+                    self.profile,
+                    &info,
+                    encoded,
+                    method,
+                    params,
+                    caller,
+                    limit,
+                    self.scope.as_ref(),
+                    self.root.as_deref(),
+                    0,
+                    &mut Budget::default(),
+                );
+            }
+            let code = admit(&raw, self.profile.point_ops, Some(&self.keys))?;
+            if execution == Execution::Compute {
+                return Err(rejected(
+                    "circle method is not declared for compute execution",
+                ));
+            }
             let storage =
                 circle_store::load_storage(self.state, circle, None).map_err(|e| rejected(e.0))?;
             let calls = self.profile.proof_exec == RuleMode::Active
                 && self.state.get(&[b"circles", circle, b"call_code"])
                     == Some(info.code_hash.as_slice());
+            let policy = crate::circle_fhe::Policy::scoped(
+                self.state,
+                circle,
+                &info.owner,
+                caller,
+                self.profile.epoch,
+                self.scope.as_ref(),
+            )
+            .map_err(unavailable)?;
+            let verifier = Cell::new(true);
             self.run(
                 &code,
                 storage,
@@ -99,6 +270,11 @@ impl<'a> Query<'a> {
                 limit,
                 calls,
                 false,
+                Capabilities {
+                    circle: Some(&policy),
+                    verifier: &verifier,
+                },
+                None,
                 &mut Budget::default(),
             )
         })();
@@ -120,6 +296,8 @@ impl<'a> Query<'a> {
         limit: i64,
         calls: bool,
         contract: bool,
+        capabilities: Capabilities<'_>,
+        fhe_memory: Option<octra_node_protocol::octb::fhe_work::Memory>,
         budget: &mut Budget,
     ) -> Result<VmReceipt, Error> {
         let fixed = octb::fix_jumps(code.code());
@@ -142,13 +320,14 @@ impl<'a> Query<'a> {
         }
         let entry =
             circle_octb::dispatcher(&fixed, method).ok_or_else(|| rejected("method not found"))?;
+        let values = circle_octb::runtime_parameters(code, &fixed, method, params)?;
         let mut machine = octb::Machine::new(
             octb::Context {
                 caller: caller.to_vec(),
                 origin: caller.to_vec(),
                 address: address.to_vec(),
                 epoch: self.profile.epoch,
-                tree_hash: self.root.clone(),
+                tree_hash: self.root.clone().unwrap_or_default(),
                 depth,
                 ..octb::Context::default()
             },
@@ -156,17 +335,21 @@ impl<'a> Query<'a> {
                 limit,
                 integer_work: self.profile.int_work,
                 fhe_work: self.profile.fhe_work == RuleMode::Active,
+                object_cost: self.profile.object_cost,
                 proof_exec: self.profile.proof_exec == RuleMode::Active,
                 math: self.profile.math,
                 point_ops: self.profile.point_ops,
                 is_view: true,
                 async_exec: true,
+                strict: code.facts().is_some(),
+                storage_kinds: circle_octb::storage_kinds(code, calls),
+                fhe_memory,
                 ..octb::Options::default()
             },
             storage,
         );
         machine.pc = entry;
-        circle_octb::seed(&mut machine, method, params)?;
+        circle_octb::seed_values(&mut machine, method, values);
         let success = machine
             .run(
                 &fixed,
@@ -174,6 +357,7 @@ impl<'a> Query<'a> {
                     query: self,
                     calls,
                     depth,
+                    capabilities,
                 },
                 Some(budget),
             )
@@ -195,59 +379,51 @@ impl<'a> Query<'a> {
             error: (!success).then(|| b"execution reverted".to_vec()),
         })
     }
-    fn contract(
+    #[allow(clippy::too_many_arguments)] // Native view context and shared capability/budget.
+    fn legacy(
         &self,
-        request: &octb::CallRequest<'_>,
+        address: &[u8],
+        method: &[u8],
+        params: &Document,
+        caller: &[u8],
         depth: i64,
+        limit: i64,
+        memory: Option<octra_node_protocol::octb::fhe_work::Memory>,
+        verifier: &Cell<bool>,
         budget: &mut Budget,
     ) -> Result<VmReceipt, Error> {
-        let encoded = self
-            .state
-            .get(&[b"contracts", request.target, b"bytecode"])
-            .ok_or_else(|| rejected("bytecode not found"))?;
-        if let Some(raw) = self.state.get(&[b"contracts", request.target, b"meta"]) {
-            if let Ok(doc) = Document::parse(raw) {
-                let valid = [b"address".as_slice(), b"code_hash", b"version", b"owner"]
-                    .iter()
-                    .all(|key| matches!(doc.field(doc.root(), key), Some(Json::String(_))));
-                if valid
-                    && matches!(doc.field(doc.root(), b"admission"), Some(Json::String(v)) if v == b"source")
-                {
-                    return Err(unavailable(
-                        "Program source admission host is not available",
-                    ));
-                }
-            }
-        }
-        let raw = decode_base64(encoded).map_err(|_| rejected("bytecode not found"))?;
-        let code = admit(&raw, self.profile.point_ops).map_err(|e| match e {
-            Error::Rejected(_) => rejected("bytecode not found"),
-            other @ Error::Unavailable(_) => other,
-        })?;
-        let mut storage = StorageTable::new(100);
-        for key in self
-            .state
-            .child_names(&[b"contracts", request.target, b"storage"])
-        {
-            if let Some(value) = self
-                .state
-                .get(&[b"contracts", request.target, b"storage", key])
-            {
-                storage.replace(key.to_vec(), value.to_vec());
-            }
-        }
-        let params = parameters(request.params, self.profile.proof_exec == RuleMode::Active)?;
+        // The admission marker comes from the authenticated tree, never from
+        // view parameters. Native reloads validate source envelopes and facts
+        // here; independent source compilation is a deployment requirement.
+        let artifact = crate::program::Artifact::load(
+            self.state,
+            &crate::program::Journal::default(),
+            address,
+            self.profile.point_ops,
+            &self.keys,
+        )
+        .map_err(|error| match error {
+            crate::program::Error::Unavailable(reason) => unavailable(reason),
+            crate::program::Error::Rejected(_) => rejected("bytecode not found"),
+        })?
+        .ok_or_else(|| rejected("bytecode not found"))?;
+        let storage = crate::program::store::storage(self.state, address);
         self.run(
-            &code,
+            artifact.admitted(),
             storage,
-            request.method,
-            &params,
-            request.caller,
-            request.target,
+            method,
+            params,
+            caller,
+            address,
             depth,
-            request.limit.min(10_000_000),
+            limit.clamp(0, 10_000_000),
             true,
             true,
+            Capabilities {
+                circle: None,
+                verifier,
+            },
+            memory,
             budget,
         )
     }
@@ -256,8 +432,33 @@ struct Host<'a, 'b> {
     query: &'a Query<'b>,
     calls: bool,
     depth: i64,
+    capabilities: Capabilities<'a>,
 }
 impl octb::Host for Host<'_, '_> {
+    fn running(&self) -> bool {
+        self.query
+            .clock
+            .as_ref()
+            .is_none_or(crate::circle_view::Clock::running)
+    }
+    fn cap_live(&mut self, _cap: &octb::Capability) -> Result<bool, octb::Unavailable> {
+        Ok(false)
+    }
+    fn fhe_capability(&self, cap: octb::FheCapability) -> Result<bool, octb::Unavailable> {
+        Ok(self.capabilities.allows(cap))
+    }
+    fn fhe_key(&mut self, address: &[u8]) -> Result<Option<octb::FheKeySource>, octb::Unavailable> {
+        if self
+            .capabilities
+            .circle
+            .is_some_and(|policy| !policy.key(address))
+        {
+            return Ok(None);
+        }
+        crate::pvac::bound(self.query.public_keys.as_ref(), self.query.state, address)
+            .map(|key| key.map(octb::FheKeySource::Bytes))
+            .map_err(|e| octb::Unavailable(e.to_string()))
+    }
     fn groth16(
         &mut self,
         key: &[u8],
@@ -286,7 +487,24 @@ impl octb::Host for Host<'_, '_> {
             return Ok(None);
         }
         let budget = budget.ok_or_else(|| octb::Unavailable("view byte budget missing".into()))?;
-        match self.query.contract(&request, self.depth + 1, budget) {
+        let result = parameters(
+            request.params,
+            self.query.profile.proof_exec == RuleMode::Active,
+        )
+        .and_then(|params| {
+            self.query.legacy(
+                request.target,
+                request.method,
+                &params,
+                request.caller,
+                self.depth + 1,
+                request.limit,
+                request.fhe_memory.clone(),
+                self.capabilities.verifier,
+                budget,
+            )
+        });
+        match result {
             Ok(receipt) if receipt.success => Ok(Some(octb::Subcall {
                 response: receipt.response.unwrap_or(Value::Bool(true)),
                 effort: receipt.effort,

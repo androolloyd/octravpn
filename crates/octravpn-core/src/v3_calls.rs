@@ -1,5 +1,5 @@
-//! Shared builder for v3 (`program/main-v3.aml`) `contract_call`
-//! JSON envelopes.
+//! Shared VPN call builder. The legacy module name is retained; settlement
+//! targets the amount-bound `program/main-v5.aml` ABI.
 //!
 //! Both the operator daemon (`octravpn-node::chain_v3`) and the client
 //! CLI (`octravpn-client::chain_v3`) emit the legacy
@@ -19,13 +19,74 @@
 //! entrypoint. Each method delegates to [`ContractCallBuilder::call`]
 //! after substituting the corresponding [`method`] constant — so the
 //! method name never appears as a stringly-typed literal at the call
-//! site. Cross-reference against
-//! `docker/devnet/{v3-smoke.sh, e2e-adversarial-v3.sh}` for the source-
-//! of-truth wire shapes; the unit tests at the bottom pin each
-//! method's exact JSON output.
+//! site. Current settlement follows `program/main-v5.aml`; older v3 smoke
+//! scripts describe their historical ABI. Tests below pin the current shape.
 
 use octra_core::address::Address;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+
+/// Explicit application deployment, independent of Circle identity advertised
+/// by the VPN operator. Existing constructors retain Program behavior.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Application {
+    #[default]
+    Program,
+    Circle,
+}
+
+impl Application {
+    pub const fn view_method(self) -> &'static str {
+        match self {
+            Self::Program => "contract_call",
+            Self::Circle => "circle_view",
+        }
+    }
+
+    pub const fn operation(self) -> &'static str {
+        match self {
+            Self::Program => "call",
+            Self::Circle => "circle_call",
+        }
+    }
+
+    /// Route a previously constructed legacy call through the configured app.
+    /// Already canonical calls must name the correct operation explicitly.
+    pub fn route_call(self, call: Value) -> Result<Value, String> {
+        let object = call
+            .as_object()
+            .ok_or_else(|| "application call must be an object".to_owned())?;
+        if !object.contains_key("kind") {
+            if object.get("op_type").and_then(Value::as_str) != Some(self.operation()) {
+                return Err(
+                    "transaction operation differs from the configured application".to_owned(),
+                );
+            }
+            return Ok(call);
+        }
+        if object.get("kind").and_then(Value::as_str) != Some("contract_call") {
+            return Err("unsupported application call kind".to_owned());
+        }
+        if self == Self::Program {
+            return Ok(call);
+        }
+        let mut tx = crate::tx_signer::canonical_tx_from_call(&call)?;
+        self.operation().clone_into(&mut tx.op_type);
+        if !tx.timestamp.is_finite()
+            || tx.from.is_empty()
+            || tx.to.is_empty()
+            || tx.encrypted_data.as_deref().is_none_or(str::is_empty)
+        {
+            return Err("application call fields are incomplete".to_owned());
+        }
+        Ok(json!({
+            "from":tx.from, "to_":tx.to, "amount":tx.amount.to_string(),
+            "nonce":tx.nonce, "ou":tx.ou.to_string(), "timestamp":tx.timestamp,
+            "op_type":tx.op_type, "encrypted_data":tx.encrypted_data, "message":tx.message,
+        }))
+    }
+}
 
 /// String constants for every v3 AML entrypoint covered by this
 /// builder. Centralising them here means each call site uses
@@ -72,7 +133,7 @@ pub mod method {
     pub const OPEN_RELAY_SESSION: &str = "open_relay_session";
     /// `open_relay_session_from_treasury(tailnet_id, circle, max_pay, settlement_hash, net, relay_expiry_epochs) -> int`.
     pub const OPEN_RELAY_SESSION_FROM_TREASURY: &str = "open_relay_session_from_treasury";
-    /// `settle_claim(session_id, bytes_used)`.
+    /// `settle_claim(session_id, bytes_used, net)`.
     pub const SETTLE_CLAIM: &str = "settle_claim";
     /// `nonreentrant settle_confirm(session_id, bytes_used, net, settle_blinding)`.
     pub const SETTLE_CONFIRM: &str = "settle_confirm";
@@ -130,11 +191,12 @@ pub struct ContractCallBuilder {
     program_addr: Address,
     wallet_addr: Address,
     timestamp: f64,
+    application: Application,
 }
 
 impl ContractCallBuilder {
-    /// Construct a builder for a given v3 program + caller wallet.
-    /// `program_addr` is the deployed `program/main-v3.aml` address;
+    /// Construct a builder for the current VPN program + caller wallet.
+    /// `program_addr` is the deployed VPN application address;
     /// `wallet_addr` is the `from` field of every emitted call.
     pub fn new(program_addr: Address, wallet_addr: Address) -> Self {
         Self::new_with_timestamp(program_addr, wallet_addr, current_timestamp_f64())
@@ -145,7 +207,13 @@ impl ContractCallBuilder {
             program_addr,
             wallet_addr,
             timestamp,
+            application: Application::Program,
         }
+    }
+
+    pub fn with_application(mut self, application: Application) -> Self {
+        self.application = application;
+        self
     }
 
     /// Borrow the program address this builder is bound to.
@@ -163,6 +231,19 @@ impl ContractCallBuilder {
     /// future AML entrypoint with no dedicated wrapper can still ride
     /// this builder rather than re-hand-rolling the JSON.
     pub fn call(&self, method: &str, params: &[Value], value: u64, fee: u64, nonce: u64) -> Value {
+        if self.application == Application::Circle {
+            return json!({
+                "from": self.wallet_addr.display(),
+                "to_": self.program_addr.display(),
+                "amount": value.to_string(),
+                "ou": fee.to_string(),
+                "nonce": nonce,
+                "timestamp": self.timestamp,
+                "op_type": self.application.operation(),
+                "encrypted_data": method,
+                "message": serde_json::Value::Array(params.to_vec()).to_string(),
+            });
+        }
         json!({
             "kind": "contract_call",
             "from": self.wallet_addr.display(),
@@ -470,21 +551,33 @@ impl ContractCallBuilder {
     }
 
     /// Build a `settle_claim` call.
-    /// `params` order: `[session_id, bytes_used]`.
-    pub fn settle_claim_call(&self, params: &[Value], value: u64, fee: u64, nonce: u64) -> Value {
-        self.call(method::SETTLE_CLAIM, params, value, fee, nonce)
+    /// Commit the operator's byte count and agreed microOCT credit together.
+    pub fn settle_claim_call(
+        &self,
+        session_id: u64,
+        bytes_used: u64,
+        net: u64,
+        value: u64,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call(
+            method::SETTLE_CLAIM,
+            &[json!(session_id), json!(bytes_used), json!(net)],
+            value,
+            fee,
+            nonce,
+        )
     }
 
-    /// HFHE-2 variant of [`Self::settle_claim_call`] that takes a
-    /// shadow ciphertext as the *trailing* positional argument.
-    /// Empty string when the PVAC sidecar is disabled; base64
-    /// ciphertext when enabled. The on-chain AML doesn't yet
-    /// consume the trailing position — pinning the shape here
-    /// makes the HFHE-3 swap-ready diff a single AML-side line.
+    /// Unqualified future shadow ABI: `[session, bytes, net, ciphertext]`.
+    /// Current main-v5 rejects the extra field; do not submit this shape.
+    #[allow(clippy::too_many_arguments)] // Future ABI includes an explicit encrypted shadow.
     pub fn settle_claim_with_shadow_call(
         &self,
         session_id: u64,
         bytes_used: u64,
+        net: u64,
         enc_bytes_used: &str,
         value: u64,
         fee: u64,
@@ -492,7 +585,12 @@ impl ContractCallBuilder {
     ) -> Value {
         self.call(
             method::SETTLE_CLAIM,
-            &[json!(session_id), json!(bytes_used), json!(enc_bytes_used)],
+            &[
+                json!(session_id),
+                json!(bytes_used),
+                json!(net),
+                json!(enc_bytes_used),
+            ],
             value,
             fee,
             nonce,
@@ -1048,13 +1146,13 @@ mod tests {
     #[test]
     fn settle_claim_shape() {
         let b = builder();
-        let got = b.settle_claim_call(&[json!(0u64), json!(1_048_576u64)], 0, 500, 20);
+        let got = b.settle_claim_call(0, 1_048_576, 1_000, 0, 500, 20);
         let want = json!({
             "kind": "contract_call",
             "from": WALLET,
             "to": PROG,
             "method": "settle_claim",
-            "params": [0u64, 1_048_576u64],
+            "params": [0u64, 1_048_576u64, 1_000u64],
             "value": 0u64,
             "fee": 500u64,
             "nonce": 20u64,
@@ -1344,13 +1442,13 @@ mod tests {
     #[test]
     fn settle_claim_with_shadow_shape_empty_blob() {
         let b = builder();
-        let got = b.settle_claim_with_shadow_call(0, 1_048_576, "", 0, 500, 20);
+        let got = b.settle_claim_with_shadow_call(0, 1_048_576, 1_000, "", 0, 500, 20);
         let want = json!({
             "kind": "contract_call",
             "from": WALLET,
             "to": PROG,
             "method": "settle_claim",
-            "params": [0u64, 1_048_576u64, ""],
+            "params": [0u64, 1_048_576u64, 1_000u64, ""],
             "value": 0u64,
             "fee": 500u64,
             "nonce": 20u64,
@@ -1362,10 +1460,11 @@ mod tests {
     #[test]
     fn settle_claim_with_shadow_shape_populated_blob() {
         let b = builder();
-        let got = b.settle_claim_with_shadow_call(7, 1_000, "hfhe_v1|AAAA", 0, 500, 42);
+        let got = b.settle_claim_with_shadow_call(7, 1_000, 19, "hfhe_v1|AAAA", 0, 500, 42);
         assert_eq!(got["params"][0], 7);
         assert_eq!(got["params"][1], 1_000);
-        assert_eq!(got["params"][2], "hfhe_v1|AAAA");
+        assert_eq!(got["params"][2], 19);
+        assert_eq!(got["params"][3], "hfhe_v1|AAAA");
         assert_eq!(got["method"], "settle_claim");
     }
 
@@ -1403,8 +1502,9 @@ mod tests {
     #[test]
     fn shadow_disabled_uses_empty_string_sentinel() {
         let b = builder();
-        let claim = b.settle_claim_with_shadow_call(0, 0, "", 0, 0, 0);
-        assert_eq!(claim["params"][2], "");
+        let claim = b.settle_claim_with_shadow_call(0, 0, 0, "", 0, 0, 0);
+        assert_eq!(claim["params"][2], 0);
+        assert_eq!(claim["params"][3], "");
         let confirm = b.settle_confirm_with_shadow_call(0, 0, 0, "", "", "", 0, 0, 0);
         assert_eq!(confirm["params"][4], "");
         assert_eq!(confirm["params"][5], "");

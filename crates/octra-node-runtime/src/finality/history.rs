@@ -51,28 +51,22 @@ impl<A: ValidatorHistory> History for Publisher<A> {
         Ok(self.store.head().await?)
     }
     async fn root(&self, epoch: i64) -> Result<Option<Vec<u8>>> {
-        let Ok(epoch) = u64::try_from(epoch) else {
+        let Ok(number) = u64::try_from(epoch) else {
             return Ok(None);
         };
-        if epoch > self.store.head().await?.cursor.epoch.0 {
-            return Ok(None);
+        let Some(sequence) = self.store.sequence_for_epoch(number).await? else {
+            return Ok(self.store.checkpoint_root(epoch));
+        };
+        if sequence == Sequence(0) {
+            return Ok(Some(self.store.anchor().cursor.state_root.0.to_vec()));
         }
-        if epoch == 0 {
-            return Ok(Some(
-                self.store
-                    .retained_head(Sequence(0))
-                    .await?
-                    .cursor
-                    .state_root
-                    .0
-                    .to_vec(),
-            ));
-        }
-        Ok(Some(self.record(Sequence(epoch)).await?.state_root))
+        Ok(Some(self.record(sequence).await?.state_root))
     }
+
     async fn range(&self, from_epoch: i64, max_epochs: i64) -> Result<Range> {
         let maximum = max_epochs.min(catchup::RANGE_EPOCHS);
-        if from_epoch < 1 || maximum <= 0 {
+        if from_epoch < 1 || maximum <= 0 || from_epoch as u64 <= self.store.anchor().cursor.epoch.0
+        {
             return Ok(Range::NotFound);
         }
         // A fixed committed prefix keeps concurrent publication out of this reply.
@@ -84,7 +78,12 @@ impl<A: ValidatorHistory> History for Publisher<A> {
             if next as u64 > head.cursor.epoch.0 {
                 break;
             }
-            let record = self.record(Sequence(next as u64)).await?;
+            let sequence = self
+                .store
+                .sequence_for_epoch(next as u64)
+                .await?
+                .ok_or_else(|| invalid("canonical epoch unavailable"))?;
+            let record = self.record(sequence).await?;
             let size = record_size(&record)?;
             let total = bytes
                 .checked_add(size)

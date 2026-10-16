@@ -5,3 +5,5 @@ crates/octra-node-runtime/tests/fixtures/** linguist-generated=true
 crates/octra-hfhe/tests/fixtures/** linguist-generated=true
 docs/rust-node/checkpoints/** linguist-generated=true
 vendor/** linguist-vendored=true
+# A unified diff represents an empty context line with a single space.
+scripts/node-port/circle-host-rust-api.patch whitespace=-blank-at-eol

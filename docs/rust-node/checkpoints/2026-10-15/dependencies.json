@@ -1,0 +1,96 @@
+{
+  "date": "2026-10-15",
+  "rust_toolchain": "1.96.0",
+  "headscale": {
+    "repository": "https://github.com/androolloyd/headscale-rs",
+    "commit": "e1d719104fc77edb0001932e28c859f81ec7dc78",
+    "scope": "qualified YAML boundary, protobuf OUT_DIR generation and scoped lint fixes; existing golden-parity workflow retains its separately qualified older pin",
+    "yaml": "serde-saphyr =2.0.0; serialize + deserialize only",
+    "cli_tests": 392,
+    "cli_failed": 0,
+    "cli_ignored": 0,
+    "strict_cli_clippy": "passed",
+    "compatibility": "existing snapshots unchanged; quoted true/false also accepted as booleans; U+2028/U+2029 presentation escaped with identical decoded strings; no optional YAML file-inclusion/interpolation features"
+  },
+  "foundry": {
+    "repository": "https://github.com/androolloyd/octra-foundry",
+    "commit": "07a11f6f5d1d0b1f46145bba19616570f85acc2c"
+  },
+  "cargo_lock_sha256": "73e39658a1f9e7281744b64b0f39753c5a61652919b5a5bccda0bb071db25bce",
+  "root_lock_change": {
+    "removed": [
+      [
+        "serde_yaml",
+        "0.9.34+deprecated"
+      ],
+      [
+        "unsafe-libyaml",
+        "0.2.11"
+      ]
+    ],
+    "added": [
+      [
+        "annotate-snippets",
+        "0.12.16"
+      ],
+      [
+        "arraydeque",
+        "0.5.1"
+      ],
+      [
+        "encoding_rs_io",
+        "0.1.8"
+      ],
+      [
+        "granit-parser",
+        "2.0.0"
+      ],
+      [
+        "nohash-hasher",
+        "0.2.0"
+      ],
+      [
+        "serde-saphyr",
+        "2.0.0"
+      ],
+      [
+        "unicode-width",
+        "0.2.2"
+      ]
+    ],
+    "existing_versions_changed": 0,
+    "existing_dependency_edges_changed": [
+      "headscale-cli: serde_yaml replaced by serde-saphyr"
+    ]
+  },
+  "security": {
+    "strict_audit": "passed with existing reviewed exclusions unchanged",
+    "vulnerabilities": 0,
+    "warnings": 0,
+    "advisory_database_commit": "edb58f5974b83eb8302332821cb6d389777aa351",
+    "audit_config_sha256": "3f7abd67a93a879fc5c24597c569b98a115e032bece302b2f26217c73a01edd8",
+    "audit_report_sha256": "f0e9a338f9e0477906941ebd6c35e7a9e731d6d06f35bb7ab8f8bc2a205775be",
+    "licenses_bans_sources_default": "passed",
+    "licenses_bans_sources_all_features": "passed",
+    "policy_sha256": "093c3f7217d04eb9a0fbafeed6bf87f1b566bdc0ec27dafe5c2df045043268eb",
+    "license_notice": "licenses/MPL-dependencies.md"
+  },
+  "scope": "Dependency/build qualification only; no Mainnet readiness or complete Headscale protocol parity claim",
+  "declared_workspace_rust_floor": "1.89",
+  "rust_floor_scope": "Actual1.89default/allfeature workspace/all-target typechecks passed for the captured adopted source. Later Single/facade source requires its own incremental qualification.",
+  "gateway_lock_followup": {
+    "prior_lock_sha256": "f28ad88c09fb9c0ed4ed33eb8866a191cc0fdfba2ad4c5435443942dbefc3b35",
+    "current_lock_sha256": "73e39658a1f9e7281744b64b0f39753c5a61652919b5a5bccda0bb071db25bce",
+    "delta": "Only the existing cssparser0.36.0 direct Browser dependency edge; all684 package versions/checksums unchanged",
+    "qualification": "gateway.json",
+    "qualification_sha256": "d93c7a4877ac0b6031aff6125da3f3cb3c6fc9efdc1e462318ca59db21060394",
+    "prior_security_scope": "Original exact-source audit/deny reports retain their original lock binding; no newly selected package/version/checksum in this follow-up."
+  },
+  "minimum_rust_qualification": {
+    "checkpoint": "minimum-rust.json",
+    "qualification_sha256": "faed7b31bf4ebccc8f1d00ceb7c640a01e90f3fcb278fe2fe65bea412bd62c78",
+    "all_targets_default_and_all_features": "PASS",
+    "compiler": "Rust1.89.0/29483883eed69d5fb4db01964cdf2af4d86e9cb2",
+    "scope": "Actual Linux aarch64 current captured source, compile-only; isolated Single/facade candidates excluded."
+  }
+}

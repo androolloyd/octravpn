@@ -1,0 +1,14 @@
+[package]
+name = "octra-lmdb"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "BSD-3-Clause"
+publish = false
+description = "Scoped LMDB ownership for adopted Octra compute history"
+
+[dependencies]
+heed = { version = "=0.22.1", default-features = false }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs", "process"] }

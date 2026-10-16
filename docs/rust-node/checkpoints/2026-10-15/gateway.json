@@ -1,0 +1,212 @@
+{
+  "date": "2026-10-15",
+  "status": "ADOPTED_QUALIFIED_RETAINED_PUBLIC_ASSETS_AND_CSS",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "qualification": {
+    "path": "out/node-port-final-20261015/gateway-candidate/qualification-final.json",
+    "sha256": "d93c7a4877ac0b6031aff6125da3f3cb3c6fc9efdc1e462318ca59db21060394"
+  },
+  "adoption": {
+    "path": "out/node-port-final-20261015/gateway-candidate/adoption.json",
+    "sha256": "6b9e00653532caedbfea33e92ca6b3f82dc574335fb1d9c3eec6e1fdfa33101a"
+  },
+  "source_inventory": {
+    "files": 3366,
+    "canonical_sha256": "d0d2c406a7fb3abb2bdd56da49e116727c80da06f75965d73149b2d5c5608094",
+    "algorithm": "SHA256 UTF8 JSON object sorted keys, compact separators comma/colon, no newline",
+    "drift": 0,
+    "manifest": "source-sealed-final-2.json",
+    "independent_inode_inputs": "inode-dependency-delta.json",
+    "not_composed_with_later_live_ledger": [
+      "crates/octra-node/src/executor.rs",
+      "crates/octra-node/src/executor/stage.rs"
+    ]
+  },
+  "functional_tests": {
+    "targets": 9,
+    "passed": 34,
+    "failed": 0,
+    "ignored": 0
+  },
+  "expected_artifact_refusals": [
+    {
+      "name": "missing-artifact",
+      "expected_exit_code": 101,
+      "actual_exit_code": 101,
+      "qualified_refusal": true,
+      "seconds": 0.13808037700073328
+    },
+    {
+      "name": "wrong-artifact",
+      "expected_exit_code": 101,
+      "actual_exit_code": 101,
+      "qualified_refusal": true,
+      "seconds": 0.13803404299687827
+    }
+  ],
+  "actual_chromium_checks": {
+    "browser": "Chrome/155.0.8059.84",
+    "actual_checks": [
+      "HTML then canonical publication then old pinned stylesheet renders",
+      "Inline style attribute and style block use old exact scope",
+      "Root-relative import and inline import render",
+      "Pinned public SVG image renders after head advances",
+      "Scripts remain absent and all renderer requests stay on controlled origin",
+      "Reload captures new snapshot and newly published stylesheet",
+      "Old exact pinned stylesheet retains old bytes",
+      "User activation follows cross-Circle rewritten HTTPS path"
+    ],
+    "actual_node_signed_publication_between_html_and_subresources": true,
+    "transport": "CDPcontrolledHTTPSorigin -> isolatedNode loopback; allotherbrowsing blackholed",
+    "external_tls_tailscale_qualification": false,
+    "fixture_teardown": "Deliberate dockerstop afterPASS; processsignalstatus retained separately"
+  },
+  "strict_all_targets_all_features": "PASS",
+  "native_registry": {
+    "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+    "native_cases": 9,
+    "full_inputs_outputs_unchanged": true,
+    "native_source_hashes_match_adopted_provenance": true,
+    "actual_current_wasm_sha256": "b5b301f30b16289b67e6c2cd9ed065881647667b1bc5c0c8172d463606e07773",
+    "prior_host_wasm_sha256": "ca5530c7fdc82adedb5290a9da4192cf7d2727d74193dee73f91a62020a7d42f",
+    "cross_host_byte_identity_claim": false,
+    "historical_tracked_fixture_unchanged": "fb73be50697e722683a4441198552a821cf6181c242d94b0f905cb0e05ae61f9",
+    "selection": "OCTRA_CIRCLE_REGISTRY_FIXTURE and OCTRA_CIRCLE_REGISTRY_WASM; default historicalincludedfixture/existingtarget preserved; exacthash/source/upstream/full9output assertions mandatory",
+    "host_target_modified": false
+  },
+  "cache_policy": {
+    "entries": 32,
+    "ttl_seconds": 120,
+    "fixed_no_hit_refresh": true,
+    "retains": "Reader+Head+fullSnapshotIdentity; no historicalwholeSnapshot/Committed/Host/wallet/private/readinessauthority",
+    "visibility": "Capturedheadpublicpolicy survives newerrevocations untilfixedexpiry/count eviction; newnavigation uses currentverifiedhead",
+    "unknown_scope_current_fallback": false,
+    "serving_required_before_after_read": true
+  },
+  "css_limits": {
+    "input_bytes": 8388608,
+    "shared_output_bytes": 8388608,
+    "tokens": 1000000,
+    "nesting": 64,
+    "shared_recursive_budget_early_stop_regression": true
+  },
+  "ci": {
+    "qualified": true,
+    "yaml_parser": "yaml 2.7.1",
+    "bash_syntax_steps": 3,
+    "fresh_generator_input_pair_exported": true,
+    "tracked_historical_fixture_not_written": true,
+    "action_sha256": "1179716103fde753e4434046082f839d1fb5fd1a2e8cff278f06b5cd8da03fd8",
+    "execution_scope": "Syntax/structure regression plus separate actual unchanged generator build/native9replay; no GitHub runner execution claim",
+    "initial_tooling_probe": "HostPython lackedPyYAML; existingNodeYAMLparser used, noinstall"
+  },
+  "changed_paths": [
+    {
+      "path": ".github/actions/prepare-native-tests/action.yml",
+      "before_sha256": "ff93d8f6f6de87ba964239866b520be29b991729e3d63e66a274cf9b0cafa84e",
+      "after_sha256": "1179716103fde753e4434046082f839d1fb5fd1a2e8cff278f06b5cd8da03fd8",
+      "mode": "0644"
+    },
+    {
+      "path": "Cargo.lock",
+      "before_sha256": "f28ad88c09fb9c0ed4ed33eb8866a191cc0fdfba2ad4c5435443942dbefc3b35",
+      "after_sha256": "73e39658a1f9e7281744b64b0f39753c5a61652919b5a5bccda0bb071db25bce",
+      "mode": "0644"
+    },
+    {
+      "path": "crates/octra-browser/Cargo.toml",
+      "before_sha256": "fc19c6638e36c570bea79bd439caef9b89520edc2215913ed7f75816425619c6",
+      "after_sha256": "2f46a73511ef41ee3f57e4857224dd7eee21ae5496cf2c80e3172b2743b8ea6d",
+      "mode": "0644"
+    },
+    {
+      "path": "crates/octra-browser/src/http.rs",
+      "before_sha256": "618d6d76ebd6e15420430aece0f81eae17c11bb036d5c51f8c881cecf5e742b1",
+      "after_sha256": "92d6bab29e89075c2f59cf0784daa99108465ed4fba8a55b72816d0c610f83d4",
+      "mode": "0644"
+    },
+    {
+      "path": "crates/octra-browser/src/render.rs",
+      "before_sha256": "a51dddd9bda14e1344fa0430240bedeb7ca0b487cb81828a9834a5efb9a90f27",
+      "after_sha256": "6807f53c8ed599df25886bc3b1c9290219a75d45dd182509e87f21a68920c53a",
+      "mode": "0644"
+    },
+    {
+      "path": "crates/octra-browser/src/render/css.rs",
+      "before_sha256": null,
+      "after_sha256": "ee98f76e39b8765da665e67f3c4b8c395c0611ff29b3319fee5fd58d14e3780f",
+      "mode": "0644"
+    },
+    {
+      "path": "crates/octra-node-runtime/src/canonical/reader.rs",
+      "before_sha256": "233e76f1a20c9820e5aceea7db275086bbc7e8e145446498561767f38b295681",
+      "after_sha256": "62dfa0965127e10dc13f3f320554d009ad3a67c9e68893d93c268f304a8aec2d",
+      "mode": "0644"
+    },
+    {
+      "path": "crates/octra-node-runtime/src/canonical/reader/paths.rs",
+      "before_sha256": "ca247232599a9978284472ebb6824d56688420ccd8ec95cc4856cfae006e891e",
+      "after_sha256": "258a8fa8da98efc54453fa313840ea08bf15506f12fc7944947754f0a80a0a3e",
+      "mode": "0644"
+    },
+    {
+      "path": "crates/octra-node-runtime/src/canonical/reader/paths/tests.rs",
+      "before_sha256": "7438056f17bee25507f4c2b5807c3bccea7a8cdf30faff72ffe4e461cab88937",
+      "after_sha256": "ea2702fee36c7797849149b9306b74dfe080ed30d22a2b4de831ab352037e264",
+      "mode": "0644"
+    },
+    {
+      "path": "crates/octra-node-runtime/src/circle_assets.rs",
+      "before_sha256": "b118577f2865532f1271ba6f68ab00cca1bb74b4916ddc1acc8af4da641dea61",
+      "after_sha256": "7e649b5922f798173b73b4e2c1e4261c1347e88ed0323580139fb973b7e45d78",
+      "mode": "0644"
+    },
+    {
+      "path": "crates/octra-node-runtime/tests/canonical_assets.rs",
+      "before_sha256": "63fc8067a84cc8d1e75dc463b97586265bad7e89ec9f737baf87956bd2d24ddc",
+      "after_sha256": "0be4fe8a0b3ed8a67ab2e4753609307c548acde40fd03dfb39722dea56847a69",
+      "mode": "0644"
+    },
+    {
+      "path": "crates/octra-node-runtime/tests/canonical_assets/retained.rs",
+      "before_sha256": null,
+      "after_sha256": "10d029d2676d46fa4ed04676042848c58e6e63bf2b46364b3519938411f406e7",
+      "mode": "0644"
+    },
+    {
+      "path": "crates/octra-node-runtime/tests/circle_parity.rs",
+      "before_sha256": "e316804139bcc84e4a1af11df5a4f2ab0a5d5e9db5d595253bfe4d4df14ba18b",
+      "after_sha256": "67c2109d441fa923ab42a4b629ef83c3da0a7ebcca6fe131b9934021b21f924b",
+      "mode": "0644"
+    },
+    {
+      "path": "crates/octra-node/src/gateway.rs",
+      "before_sha256": "083de727d66eb52b8cdccf70599217bf5e9776fca615b2dc6be5804cfa806a3b",
+      "after_sha256": "bb9778efe9ef9c465116633cadb59982257bde422c25f6dec0118d3336351d09",
+      "mode": "0644"
+    },
+    {
+      "path": "crates/octra-node/src/gateway/cache.rs",
+      "before_sha256": null,
+      "after_sha256": "c04ccc31d1a71a2da6940c42ecbee673571809f5d5c9eb04567fde741b2eef9a",
+      "mode": "0644"
+    },
+    {
+      "path": "crates/octra-node/tests/services.rs",
+      "before_sha256": "2fee095644c8e1ceb04be915ba81ed523f5577130c6b68725ddac43be6289b36",
+      "after_sha256": "31e790f8be4e17e8be3ca37f951488ec5adb219699f5ef636fc21a95e479ea2c",
+      "mode": "0644"
+    },
+    {
+      "path": "crates/octra-node/tests/services/gateway.rs",
+      "before_sha256": null,
+      "after_sha256": "6631349e1a9ec5299f5a5170c640f5bdf6361e837b83ba45908754d469b90172",
+      "mode": "0644"
+    }
+  ],
+  "limits": [
+    "Qualified isolated candidate is composed with inode source but predates the independently adopted same-call ledger handoff and storage-authentication follow-up. Final combined Root/paid-VPN/public restart gates remain pending.",
+    "Public gateway serves script-free public Circle assets only; no wallet, private content, transaction bridge or readiness authority is exposed.",
+    "Actual external Tailscale Serve/TLS and cross-device navigation are not established by controlled browser-origin interception."
+  ]
+}

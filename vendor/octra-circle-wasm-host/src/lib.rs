@@ -348,11 +348,47 @@ struct HfhePubkeyJson {
     pubkey_b64: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
+#[serde(try_from = "HfheActiveKeyWire")]
 struct HfheActiveKey {
-    key_id: String,
+    key_id: Vec<u8>,
     pubkey_b64: String,
     seckey_b64: String,
+}
+// Local host adaptation: OCaml key IDs are byte strings. Preserve native UTF-8
+// inputs and allow the Rust API to carry the remaining IDs in base64.
+#[derive(Deserialize)]
+struct HfheActiveKeyWire {
+    key_id: Option<String>,
+    key_id_b64: Option<JsonValue>,
+    pubkey_b64: String,
+    seckey_b64: String,
+}
+impl TryFrom<HfheActiveKeyWire> for HfheActiveKey {
+    type Error = String;
+    fn try_from(wire: HfheActiveKeyWire) -> Result<Self, Self::Error> {
+        let key_id = if let Some(id) = wire.key_id {
+            id.into_bytes()
+        } else if let Some(JsonValue::String(encoded)) = wire.key_id_b64 {
+            BASE64.decode(encoded).map_err(|_| "invalid HFHE active key ID base64".to_owned())?
+        } else {
+            return Err("missing field `key_id`".to_owned());
+        };
+        Ok(Self {
+            key_id,
+            pubkey_b64: wire.pubkey_b64,
+            seckey_b64: wire.seckey_b64,
+        })
+    }
+}
+impl std::fmt::Debug for HfheActiveKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HfheActiveKey")
+            .field("key_id", &self.key_id)
+            .field("pubkey_b64", &self.pubkey_b64)
+            .field("seckey_b64", &"<redacted>")
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

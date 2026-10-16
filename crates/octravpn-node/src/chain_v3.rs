@@ -1,9 +1,8 @@
-//! Chain integration for the node daemon (v3 / chain-minimal).
+//! Current VPN chain integration under the legacy v3 module name.
 //!
 //! Sibling to `chain.rs` (v1.1) and `chain_v2.rs` (v2 Circle-native).
-//! This module talks to `program/main-v3.aml`, the "chain-minimal,
-//! circle-resident" registry deployed on devnet at
-//! `oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3`.
+//! Settlement requires the amount-bound `program/main-v5.aml` ABI.
+//! Missing amount-binding views refuse submission before signing or fees.
 //!
 //! v3's chain surface is intentionally narrow:
 //!
@@ -39,7 +38,7 @@ use octravpn_core::{
     rpc::{next_nonce, RpcClient},
     sig::KeyPair,
     tx as octra_tx,
-    v3_calls::ContractCallBuilder,
+    v3_calls::{method, ContractCallBuilder},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -62,9 +61,8 @@ pub(crate) const SESSION_RELAY_ARMED: u64 = 3;
 pub(crate) const SESSION_RELAY_CLAIMED: u64 = 4;
 pub(crate) const SESSION_RELAY_REFUNDED: u64 = 5;
 
-/// All v3 chain interactions. Holds the same RPC + wallet primitives
-/// as `ChainCtx` / `ChainCtxV2`, but talks exclusively to the v3
-/// program. Keep this struct local to the v3 code path so legacy
+/// Current VPN application interactions under the legacy v3 module name.
+/// Settlement uses the amount-bound main-v5 ABI. Keep this struct local so legacy
 /// v1.1 and v2 flows stay unaffected.
 ///
 /// Most `build_*` methods are not yet called from the boot path
@@ -75,6 +73,7 @@ pub(crate) const SESSION_RELAY_REFUNDED: u64 = 5;
 /// wire shapes against `e2e-adversarial-v3.sh` without re-implementing
 /// the cast tool.
 pub(crate) struct ChainCtxV3 {
+    pub application: octravpn_core::v3_calls::Application,
     pub rpc: RpcClient,
     /// v3 main program address — `program/main-v3.aml` deployment.
     pub program_addr: Address,
@@ -125,6 +124,7 @@ impl ChainCtxV3 {
     ) -> Self {
         let wallet_addr = Address::from_pubkey(&wallet.public.0);
         Self {
+            application: octravpn_core::v3_calls::Application::Program,
             rpc,
             program_addr,
             wallet_addr,
@@ -141,6 +141,15 @@ impl ChainCtxV3 {
     /// here.
     fn call_builder(&self) -> ContractCallBuilder {
         ContractCallBuilder::new(self.program_addr.clone(), self.wallet_addr.clone())
+            .with_application(self.application)
+    }
+
+    pub(crate) fn with_application(
+        mut self,
+        application: octravpn_core::v3_calls::Application,
+    ) -> Self {
+        self.application = application;
+        self
     }
 
     pub(crate) async fn nonce(&self) -> Result<u64> {
@@ -184,7 +193,8 @@ impl ChainCtxV3 {
     pub(crate) async fn get_circle_active(&self, circle: &str) -> Result<bool> {
         let v = self
             .rpc
-            .contract_call(
+            .application_call(
+                self.application,
                 &self.program_addr,
                 "get_circle_active",
                 &[json!(circle)],
@@ -192,14 +202,33 @@ impl ChainCtxV3 {
             )
             .await
             .context("get_circle_active")?;
-        Ok(v.as_bool().unwrap_or(false))
+        v.as_bool()
+            .ok_or_else(|| anyhow!("invalid get_circle_active result"))
+    }
+
+    pub(crate) async fn get_circle_receipt_pubkey(&self, circle: &str) -> Result<String> {
+        let value = self
+            .rpc
+            .application_call(
+                self.application,
+                &self.program_addr,
+                "get_circle_receipt_pubkey",
+                &[json!(circle)],
+                Some(&self.wallet_addr),
+            )
+            .await?;
+        value
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| anyhow!("invalid circle receipt key result"))
     }
 
     /// `is_circle_slashed(circle) -> bool` view.
     pub(crate) async fn is_circle_slashed(&self, circle: &str) -> Result<bool> {
         let v = self
             .rpc
-            .contract_call(
+            .application_call(
+                self.application,
                 &self.program_addr,
                 "is_circle_slashed",
                 &[json!(circle)],
@@ -207,7 +236,8 @@ impl ChainCtxV3 {
             )
             .await
             .context("is_circle_slashed")?;
-        Ok(v.as_bool().unwrap_or(false))
+        v.as_bool()
+            .ok_or_else(|| anyhow!("invalid is_circle_slashed result"))
     }
 
     /// `get_circle_state_root(circle) -> bytes` (64-char hex). Returns
@@ -217,7 +247,8 @@ impl ChainCtxV3 {
     pub(crate) async fn get_circle_state_root(&self, circle: &str) -> Result<Option<String>> {
         let v = self
             .rpc
-            .contract_call(
+            .application_call(
+                self.application,
                 &self.program_addr,
                 "get_circle_state_root",
                 &[json!(circle)],
@@ -237,7 +268,8 @@ impl ChainCtxV3 {
     pub(crate) async fn get_circle_state_version(&self, circle: &str) -> Result<u64> {
         let v = self
             .rpc
-            .contract_call(
+            .application_call(
+                self.application,
                 &self.program_addr,
                 "get_circle_state_version",
                 &[json!(circle)],
@@ -253,7 +285,8 @@ impl ChainCtxV3 {
     pub(crate) async fn endpoint_stake_of(&self, circle: &str) -> Result<u64> {
         let v = self
             .rpc
-            .contract_call(
+            .application_call(
+                self.application,
                 &self.program_addr,
                 "endpoint_stake_of",
                 &[json!(circle)],
@@ -269,7 +302,8 @@ impl ChainCtxV3 {
     pub(crate) async fn get_session_status(&self, session_id: u64) -> Result<u64> {
         let v = self
             .rpc
-            .contract_call(
+            .application_call(
+                self.application,
                 &self.program_addr,
                 "get_session_status",
                 &[json!(session_id)],
@@ -290,7 +324,8 @@ impl ChainCtxV3 {
     pub(crate) async fn get_session_status_strict(&self, session_id: u64) -> Result<u64> {
         let v = self
             .rpc
-            .contract_call(
+            .application_call(
+                self.application,
                 &self.program_addr,
                 "get_session_status",
                 &[json!(session_id)],
@@ -302,11 +337,56 @@ impl ChainCtxV3 {
             .ok_or_else(|| anyhow!("non-numeric session_status body for session {session_id}"))
     }
 
+    async fn settlement_uint(&self, method: &str, params: &[Value]) -> Result<u64> {
+        let value = self
+            .rpc
+            .application_call(
+                self.application,
+                &self.program_addr,
+                method,
+                params,
+                Some(&self.wallet_addr),
+            )
+            .await
+            .with_context(|| format!("amount-bound settlement requires {method}"))?;
+        value
+            .as_u64()
+            .ok_or_else(|| anyhow!("non-numeric {method} body"))
+    }
+
+    pub(crate) async fn require_current_settlement(&self) -> Result<()> {
+        anyhow::ensure!(
+            self.settlement_uint("get_settlement_version", &[]).await? == 2,
+            "VPN application requires settlement version 2"
+        );
+        Ok(())
+    }
+
+    /// Missing or malformed capability views never become a legacy claim.
+    pub(crate) async fn get_claim_net_set(&self, session_id: u64) -> Result<bool> {
+        match self
+            .settlement_uint("get_claim_net_set", &[json!(session_id)])
+            .await?
+        {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(anyhow!(
+                "invalid claim amount flag for session {session_id}"
+            )),
+        }
+    }
+
+    pub(crate) async fn get_claim_net(&self, session_id: u64) -> Result<u64> {
+        self.settlement_uint("get_claim_net", &[json!(session_id)])
+            .await
+    }
+
     /// `get_relay_deadline(sid) -> int` view.
     pub(crate) async fn get_relay_deadline(&self, session_id: u64) -> Result<u64> {
         let v = self
             .rpc
-            .contract_call(
+            .application_call(
+                self.application,
                 &self.program_addr,
                 "get_relay_deadline",
                 &[json!(session_id)],
@@ -323,7 +403,8 @@ impl ChainCtxV3 {
     pub(crate) async fn get_session_count(&self) -> Result<u64> {
         let v = self
             .rpc
-            .contract_call(
+            .application_call(
+                self.application,
                 &self.program_addr,
                 "get_session_count",
                 &[],
@@ -342,7 +423,8 @@ impl ChainCtxV3 {
     pub(crate) async fn get_sweep_grace(&self) -> Result<u64> {
         let v = self
             .rpc
-            .contract_call(
+            .application_call(
+                self.application,
                 &self.program_addr,
                 "get_sweep_grace",
                 &[],
@@ -359,7 +441,8 @@ impl ChainCtxV3 {
     pub(crate) async fn get_relay_settlement_hash(&self, session_id: u64) -> Result<String> {
         let v = self
             .rpc
-            .contract_call(
+            .application_call(
+                self.application,
                 &self.program_addr,
                 "get_relay_settlement_hash",
                 &[json!(session_id)],
@@ -703,39 +786,31 @@ impl ChainCtxV3 {
         )
     }
 
-    /// `settle_claim(session_id, bytes_used)` — operator-side first
+    /// `settle_claim(session_id, bytes_used, net)` — operator-side first
     /// half of the two-tx settle. The AML enforces caller ==
     /// `circle_owner[session_exit[sid]]` and refunds the session on
-    /// equivocation (different `bytes_used` from a prior claim under
+    /// equivocation (different byte count or microOCT credit from a prior claim under
     /// the same sid).
     pub(crate) fn build_settle_claim_call(
         &self,
         session_id: u64,
         bytes_used: u64,
+        net: u64,
         fee: u64,
         nonce: u64,
     ) -> Value {
-        self.call_builder().settle_claim_call(
-            &[json!(session_id), json!(bytes_used)],
-            0,
-            fee,
-            nonce,
-        )
+        self.call_builder()
+            .settle_claim_call(session_id, bytes_used, net, 0, fee, nonce)
     }
 
-    /// HFHE-2 swap-ready settle-claim builder. Trailing positional
-    /// `bytes` arg carrying the encrypted `bytes_used` ciphertext
-    /// (or `""` when the PVAC sidecar is disabled). The on-chain
-    /// `program/main-v3.aml::settle_claim` does NOT yet consume
-    /// this third positional — call sites that submit tx today
-    /// MUST keep using [`Self::build_settle_claim_call`]. This
-    /// builder lives here so the shape lands in one place and
-    /// tests pin it.
+    /// Unqualified future shadow ABI: `[session, bytes, net, ciphertext]`.
+    /// Current main-v5 accepts three fields; use `build_settle_claim_call`.
     #[allow(dead_code)] // wired by HFHE-3 swap diff
     pub(crate) fn build_settle_claim_with_shadow_call(
         &self,
         session_id: u64,
         bytes_used: u64,
+        net: u64,
         enc_bytes_used: &str,
         fee: u64,
         nonce: u64,
@@ -743,6 +818,7 @@ impl ChainCtxV3 {
         self.call_builder().settle_claim_with_shadow_call(
             session_id,
             bytes_used,
+            net,
             enc_bytes_used,
             0,
             fee,
@@ -986,7 +1062,7 @@ impl ChainCtxV3 {
         octra_tx::sign_call(&self.wallet, call).map_err(|e| anyhow!("sign_call: {e}"))
     }
 
-    pub(crate) async fn submit_signed_tx(&self, signed: &Value) -> Result<String> {
+    async fn submit_signed_tx(&self, signed: &Value) -> Result<String> {
         let r = self.rpc.submit(signed).await?;
         debug!(hash = %r.hash, "submitted tx (v3)");
         Ok(r.hash)
@@ -995,6 +1071,9 @@ impl ChainCtxV3 {
     /// Submit an unsigned tx/call through the single nonce owner when
     /// present; otherwise preserve the legacy nonce -> sign -> submit path.
     pub(crate) async fn submit_call(&self, mut unsigned_call: Value) -> Result<String> {
+        if requires_current_settlement(&unsigned_call)? {
+            self.require_current_settlement().await?;
+        }
         if let Some(tx_queue) = &self.tx_queue {
             return tx_queue
                 .submit(unsigned_call)
@@ -1007,6 +1086,28 @@ impl ChainCtxV3 {
         let signed = self.sign_call(unsigned_call)?;
         self.submit_signed_tx(&signed).await
     }
+}
+
+/// Recovery stays usable on legacy deployments. New money and obligations
+/// require the amount-bound ABI before the nonce owner signs or submits them.
+fn requires_current_settlement(call: &Value) -> Result<bool> {
+    let tx = octravpn_core::tx_signer::canonical_tx_from_call(call).map_err(anyhow::Error::msg)?;
+    Ok(tx.amount > 0
+        || matches!(
+            tx.encrypted_data.as_deref(),
+            Some(
+                method::REGISTER_CIRCLE
+                    | method::CREATE_TAILNET
+                    | method::AUTHORIZE_TAILNET_SPENDER
+                    | method::OPEN_SESSION
+                    | method::OPEN_SESSION_FROM_TREASURY
+                    | method::OPEN_RELAY_SESSION
+                    | method::OPEN_RELAY_SESSION_FROM_TREASURY
+                    | method::ARM_RELAY
+                    | method::SETTLE_CLAIM
+                    | method::SETTLE_CONFIRM
+            )
+        ))
 }
 
 fn set_unsigned_nonce(call: &mut Value, nonce: u64) -> Result<()> {
@@ -1184,6 +1285,7 @@ mod tests {
         balance_calls: usize,
         submit_calls: u64,
         submitted: Vec<Value>,
+        settlement_version: Value,
     }
 
     type SharedSubmitMock = Arc<Mutex<SubmitMock>>;
@@ -1200,6 +1302,9 @@ mod tests {
         let params = req.get("params").cloned().unwrap_or(json!([]));
 
         let result = match method {
+            "contract_call" if params[1] == "get_settlement_version" => {
+                json!({"result":state.lock().settlement_version.clone()})
+            }
             "octra_balance" => {
                 let mut g = state.lock();
                 g.balance_calls += 1;
@@ -1243,6 +1348,7 @@ mod tests {
             balance_calls: 0,
             submit_calls: 0,
             submitted: Vec::new(),
+            settlement_version: json!(2),
         }));
         let app = Router::new()
             .route("/", post(submit_mock_handler))
@@ -1480,6 +1586,75 @@ mod tests {
 
         assert!(c.get_session_status_strict(1).await.is_err());
         assert_eq!(c.get_session_status(1).await.unwrap(), SESSION_OPEN);
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn amount_binding_views_reject_legacy_and_malformed_responses() {
+        let replies = Arc::new(Mutex::new(std::collections::VecDeque::from([
+            json!({"method":"get_settlement_version","value":1}),
+            json!({"method":"get_settlement_version","value":2}),
+            json!({"method":"get_claim_net_set","value":0}),
+            json!({"method":"get_claim_net_set","value":1}),
+            json!({"method":"get_claim_net_set","value":2}),
+            json!({"method":"get_claim_net_set","value":null}),
+            json!({"method":"get_claim_net_set","missing":true}),
+            json!({"method":"get_claim_net","value":"1000"}),
+        ])));
+        async fn handler(
+            AxumState(replies): AxumState<Arc<Mutex<std::collections::VecDeque<Value>>>>,
+            Json(request): Json<Value>,
+        ) -> Json<Value> {
+            let reply = replies.lock().pop_front().expect("expected view request");
+            assert_eq!(request["method"], "contract_call");
+            assert_eq!(request["params"][1], reply["method"]);
+            assert_eq!(
+                request["params"][2],
+                if reply["method"] == "get_settlement_version" {
+                    json!([])
+                } else {
+                    json!([7])
+                }
+            );
+            let id = request["id"].clone();
+            if reply["missing"] == true {
+                Json(
+                    json!({"jsonrpc":"2.0","id":id,"error":{"code":-32000,"message":"method not found"}}),
+                )
+            } else {
+                Json(json!({"jsonrpc":"2.0","id":id,"result":{"result":reply["value"]}}))
+            }
+        }
+        let app = Router::new()
+            .route("/", post(handler))
+            .with_state(replies.clone());
+        let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        tokio::spawn(async move {
+            axum::serve(listener, app.into_make_service())
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+                .unwrap();
+        });
+        let c = ChainCtxV3::new(
+            RpcClient::new(format!("http://{addr}/")),
+            Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3"),
+            KeyPair::from_secret_bytes(&[7u8; 32]),
+        );
+        assert!(c.require_current_settlement().await.is_err());
+        c.require_current_settlement().await.unwrap();
+        assert!(!c.get_claim_net_set(7).await.unwrap());
+        assert!(c.get_claim_net_set(7).await.unwrap());
+        for _ in 0..3 {
+            assert!(c.get_claim_net_set(7).await.is_err());
+        }
+        assert_eq!(c.get_claim_net(7).await.unwrap(), 1_000);
+        assert!(replies.lock().is_empty());
         let _ = shutdown_tx.send(());
     }
 
@@ -1795,13 +1970,78 @@ mod tests {
     #[test]
     fn settle_claim_call_shape() {
         let c = ctx();
-        let call = c.build_settle_claim_call(0, 1_048_576, 500, 20);
+        let call = c.build_settle_claim_call(0, 1_048_576, 1_000, 500, 20);
         assert_eq!(call["method"], "settle_claim");
         let params = call["params"].as_array().unwrap();
-        // [session_id, bytes_used] — matches v3-smoke.sh:80.
-        assert_eq!(params.len(), 2);
+        // [session_id, bytes_used, microOCT credit].
+        assert_eq!(params.len(), 3);
         assert_eq!(params[0], 0);
         assert_eq!(params[1], 1_048_576);
+        assert_eq!(params[2], 1_000);
+    }
+
+    #[test]
+    fn current_abi_guards_obligations_and_preserves_legacy_recovery() {
+        for application in [
+            octravpn_core::v3_calls::Application::Program,
+            octravpn_core::v3_calls::Application::Circle,
+        ] {
+            let c = ctx().with_application(application);
+            let builder = c.call_builder();
+            for method in [
+                method::REGISTER_CIRCLE,
+                method::CREATE_TAILNET,
+                method::AUTHORIZE_TAILNET_SPENDER,
+                method::OPEN_SESSION,
+                method::OPEN_SESSION_FROM_TREASURY,
+                method::OPEN_RELAY_SESSION,
+                method::OPEN_RELAY_SESSION_FROM_TREASURY,
+                method::ARM_RELAY,
+                method::SETTLE_CLAIM,
+                method::SETTLE_CONFIRM,
+            ] {
+                assert!(requires_current_settlement(&builder.call(method, &[], 0, 1, 0)).unwrap());
+            }
+            for method in [
+                method::UNBOND_ENDPOINT,
+                method::FINALIZE_UNBOND,
+                method::WITHDRAW_TAILNET_TREASURY,
+                method::CLAIM_NO_SHOW,
+                method::SWEEP_EXPIRED_SESSION,
+                method::RELAY_CLAIM,
+                method::RELAY_REFUND,
+                method::RELAY_SWEEP,
+                method::CLAIM_EARNINGS,
+            ] {
+                assert!(!requires_current_settlement(&builder.call(method, &[], 0, 1, 0)).unwrap());
+                assert!(requires_current_settlement(&builder.call(method, &[], 1, 1, 0)).unwrap());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn legacy_app_cannot_receive_new_money_but_can_return_existing_funds() {
+        let (url, state, _shutdown) = spawn_submit_mock(10).await;
+        state.lock().settlement_version = json!(1);
+        let c = ChainCtxV3::new(
+            RpcClient::new(url),
+            Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3"),
+            KeyPair::from_secret_bytes(&[7u8; 32]),
+        );
+        for call in [
+            c.build_bond_endpoint_call("octCircle", 1_000, 500, 0),
+            c.build_open_session_from_treasury_call(0, "octCircle", 1_000, 500, 0),
+            c.call_builder()
+                .arm_relay_call(7, &"a".repeat(64), 1_000, 10, 0, 500, 0),
+        ] {
+            assert!(c.submit_call(call).await.is_err());
+        }
+        assert_eq!(state.lock().balance_calls, 0);
+        assert!(state.lock().submitted.is_empty());
+        c.submit_call(c.build_unbond_endpoint_call("octCircle", 500, 0))
+            .await
+            .unwrap();
+        assert_eq!(state.lock().submitted.len(), 1);
     }
 
     #[test]
@@ -1994,22 +2234,24 @@ mod tests {
     #[test]
     fn settle_claim_with_shadow_call_shape_empty() {
         let c = ctx();
-        let call = c.build_settle_claim_with_shadow_call(0, 1_048_576, "", 500, 20);
+        let call = c.build_settle_claim_with_shadow_call(0, 1_048_576, 1_000, "", 500, 20);
         assert_eq!(call["method"], "settle_claim");
         let params = call["params"].as_array().unwrap();
-        assert_eq!(params.len(), 3);
+        assert_eq!(params.len(), 4);
         assert_eq!(params[0], 0);
         assert_eq!(params[1], 1_048_576);
-        assert_eq!(params[2], "");
+        assert_eq!(params[2], 1_000);
+        assert_eq!(params[3], "");
     }
 
     #[test]
     fn settle_claim_with_shadow_call_shape_populated() {
         let c = ctx();
-        let call = c.build_settle_claim_with_shadow_call(7, 1000, "hfhe_v1|CT", 500, 22);
+        let call = c.build_settle_claim_with_shadow_call(7, 1000, 19, "hfhe_v1|CT", 500, 22);
         let params = call["params"].as_array().unwrap();
-        assert_eq!(params.len(), 3);
-        assert_eq!(params[2], "hfhe_v1|CT");
+        assert_eq!(params.len(), 4);
+        assert_eq!(params[2], 19);
+        assert_eq!(params[3], "hfhe_v1|CT");
     }
 
     #[test]

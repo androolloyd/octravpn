@@ -2,9 +2,11 @@
 // Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
 //! Live engine ownership. Peer readers enqueue consensus input without waiting
 //! for execution, so a proposal's bundle can arrive on the same connection.
+mod diagnostics;
 mod inbound;
 mod outputs;
 mod work;
+pub use diagnostics::Diagnostics;
 
 use crate::consensus_votes::{Precommit, Readiness, VoteGuard};
 use crate::proposal_relay::{Broadcast, ProposalRelay};
@@ -79,8 +81,10 @@ pub struct Status {
     pub round: i64,
     pub step: RoundStep,
     pub voting: bool,
+    pub finalized: bool,
     pub issue: Option<String>,
 }
+pub type DutyHandler = Arc<dyn Fn(i64, Option<octra_node_protocol::duty::Proof>) + Send + Sync>;
 enum Input {
     Frame(Peer, Frame),
     Wake,
@@ -89,15 +93,25 @@ enum Input {
 pub struct Handle {
     input: mpsc::Sender<Input>,
     status: watch::Receiver<Status>,
+    diagnostics: watch::Receiver<Result<Option<Diagnostics>, Error>>,
 }
 impl Handle {
+    pub fn diagnostics(&self) -> Result<Option<Diagnostics>, Error> {
+        if self.diagnostics.has_changed().is_err() {
+            return Ok(None);
+        }
+        self.diagnostics.borrow().clone()
+    }
     pub fn status(&self) -> watch::Receiver<Status> {
         self.status.clone()
     }
     /// Queue without blocking a connection reader behind a bundle fetch. A
     /// full inbox is an operational backpressure error, never an accepted vote.
     pub fn enqueue(&self, peer: &Peer, frame: &Frame) -> Result<bool, Error> {
-        if !matches!(frame.message, 0x30 | 0x31 | 0x32 | 0x3d | 0x3e | 0x3f) {
+        if !matches!(
+            frame.message,
+            0x30 | 0x31 | 0x32 | 0x3c | 0x3d | 0x3e | 0x3f
+        ) {
             return Ok(false);
         }
         self.input
@@ -143,6 +157,8 @@ pub struct Driver<H: Host, C: Publication> {
     votes: VoteGuard,
     input: mpsc::Receiver<Input>,
     status: watch::Sender<Status>,
+    diagnostic_view: watch::Sender<Result<Option<Diagnostics>, Error>>,
+    round_peers: BTreeMap<Bytes, octra_node_protocol::status_rpc::consensus::RoundPeer>,
     work: JoinSet<Work>,
     pending_checks: BTreeMap<(i64, i64), work::Check>,
     active_work: Option<driver_policy::ProposalBuild>,
@@ -166,6 +182,7 @@ pub struct Driver<H: Host, C: Publication> {
     epoch_started: i64,
     pace: Option<Pace>,
     build_retry: Option<Instant>,
+    duty: Option<DutyHandler>,
 }
 impl<H: Host, C: Publication> Drop for Driver<H, C> {
     fn drop(&mut self) {
@@ -190,6 +207,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
         let mut votes = VoteGuard::new(chain.clone(), address.clone(), journal.clone());
         votes.prepare(false, &mut engine, recovery_votes)?;
         let (input, receiver) = mpsc::channel(64);
+        let (diagnostic_view, diagnostic_receiver) = watch::channel(Ok(None));
         let (status, view) = watch::channel(Status {
             started: false,
             locked_round: engine.state().locked_round,
@@ -197,6 +215,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
             round: engine.state().round,
             step: engine.state().step,
             voting: false,
+            finalized: engine.pending_finalized().is_some(),
             issue: None,
         });
         let host = Arc::new(host);
@@ -208,6 +227,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
             Handle {
                 input,
                 status: view,
+                diagnostics: diagnostic_receiver,
             },
             Self {
                 engine,
@@ -220,6 +240,8 @@ impl<H: Host, C: Publication> Driver<H, C> {
                 votes,
                 input: receiver,
                 status,
+                diagnostic_view,
+                round_peers: BTreeMap::new(),
                 work: JoinSet::new(),
                 pending_checks: BTreeMap::new(),
                 active_work: None,
@@ -246,16 +268,28 @@ impl<H: Host, C: Publication> Driver<H, C> {
                 epoch_started: 0,
                 pace: None,
                 build_retry: None,
+                duty: None,
             },
         ))
     }
     fn now(&self) -> i64 {
         i64::try_from(self.started.elapsed().as_nanos()).unwrap_or(i64::MAX)
     }
+    /// Observe a real finalization and a matching journalled omitted vote.
+    /// The observer cannot replace engine outputs or supply consensus evidence.
+    pub fn with_duty_handler(mut self, handler: DutyHandler) -> Self {
+        self.duty = Some(handler);
+        self
+    }
     fn refresh(&mut self) {
         let (ready, issue) = self.votes.state(&self.engine, self.host.readiness());
         self.engine.set_voting_ready(ready);
         self.engine.set_round_skip_ready(!self.work_grace());
+        // send_replace returns the previous diagnostic result; the newly
+        // captured result (including an operational error) remains observable.
+        let _previous = self
+            .diagnostic_view
+            .send_replace(self.diagnostics(ready, issue).map(Some));
         self.status.send_replace(Status {
             started: self.initialized,
             locked_round: self.engine.state().locked_round,
@@ -263,6 +297,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
             round: self.engine.state().round,
             step: self.engine.state().step,
             voting: ready,
+            finalized: self.engine.pending_finalized().is_some(),
             issue: issue.map(str::to_owned),
         });
     }

@@ -8,7 +8,42 @@ use octra_node_protocol::{
     rules::{Graph, RootRead, Rule},
     transaction::RuleMode,
 };
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
+
+/// A host-owned monotonic view deadline. Sharing it across nested calls never
+/// resets the deadline or grants mutation authority.
+#[derive(Clone)]
+pub struct Clock {
+    active: Arc<AtomicBool>,
+    deadline: Instant,
+}
+impl Clock {
+    pub fn new(seconds: Duration) -> Self {
+        Self {
+            active: Arc::new(AtomicBool::new(true)),
+            deadline: Instant::now() + seconds,
+        }
+    }
+    pub fn running(&self) -> bool {
+        self.active.load(Ordering::Acquire) && Instant::now() < self.deadline
+    }
+    pub fn expired(&self) -> bool {
+        Instant::now() >= self.deadline
+    }
+    pub fn deadline(&self) -> Instant {
+        self.deadline
+    }
+    pub fn stop(&self) {
+        self.active.store(false, Ordering::Release);
+    }
+}
 
 #[derive(Clone, Copy)]
 pub enum ReadKind {

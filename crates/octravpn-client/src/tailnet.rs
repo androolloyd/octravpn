@@ -180,6 +180,9 @@ fn load_bookmark(name: &str) -> Result<TailnetBookmark> {
 }
 
 pub(crate) async fn dispatch(client: &Client, cfg: &ClientConfig, cmd: TailnetCmd) -> Result<()> {
+    if cfg.is_v3() {
+        anyhow::bail!("tailnet commands use the historical public-membership ABI; configure tailnets and membership through the current Circle application, then use connect or connect-v3");
+    }
     match cmd {
         TailnetCmd::Create {
             treasury,

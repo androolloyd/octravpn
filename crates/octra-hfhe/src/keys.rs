@@ -76,7 +76,7 @@ impl Params {
         if self.lpn_n <= 0 || self.lpn_t <= 0 || self.lpn_tau_den <= 0 {
             return Err(Error("pvac: params lpn shape rejected"));
         }
-        if ((1_u128 << 127) - 2) % self.basis as u128 != 0 {
+        if !((1_u128 << 127) - 2).is_multiple_of(self.basis as u128) {
             return Err(Error("pvac: keygen_from_seed: prm.B does not divide pm1"));
         }
         Ok(())
@@ -194,7 +194,7 @@ fn make_matrix(params: Params, tag: u64) -> Result<(Vec<BitVec>, [u8; 32]), Erro
         for word in column.words.iter().take(bytes / 8) {
             hash.update(word.to_le_bytes());
         }
-        if bytes % 8 != 0 {
+        if !bytes.is_multiple_of(8) {
             hash.update(&column.words[bytes / 8].to_le_bytes()[..bytes % 8]);
         }
         columns.push(column);
@@ -302,6 +302,36 @@ fn push_i32(output: &mut Vec<u8>, value: i32) {
 }
 
 impl PublicKey {
+    pub fn bit_words(&self) -> Result<u64, Error> {
+        if self.params.m_bits <= 0 {
+            return Err(Error("pubkey bit size rejected"));
+        }
+        Ok((self.params.m_bits as u64).div_ceil(64))
+    }
+    /// Native retained-key image accounting; this is separate from compressed
+    /// wire length and from the allocator's implementation-specific footprint.
+    pub fn image_size(&self) -> Result<u64, Error> {
+        let mut size = 219u64;
+        let mut add = |count: usize, width: u64| -> Result<(), Error> {
+            size = size
+                .checked_add(
+                    (count as u64)
+                        .checked_mul(width)
+                        .ok_or(Error("pubkey image size overflow"))?,
+                )
+                .filter(|n| *n < 1u64 << 62)
+                .ok_or(Error("pubkey image size overflow"))?;
+            Ok(())
+        };
+        add(self.h.len(), 16)?;
+        for row in &self.h {
+            add(row.words.len(), 8)?;
+        }
+        add(self.permutation.len(), 4)?;
+        add(self.inverse.len(), 4)?;
+        add(self.powers.len(), 16)?;
+        Ok(size)
+    }
     pub fn set_circuit_profile(&mut self, secret: &SecretKey, profile: CircuitProfile) {
         self.circuit_profile = profile as u8;
         let (key, blind) = match profile {

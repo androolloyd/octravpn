@@ -23,12 +23,38 @@ impl<A: Host> Node<A> {
         vpn: Config,
         settlement: Arc<dyn Settlement>,
     ) -> Result<Services> {
+        self.bind_with_ip_tunnel(browser_listen, vpn, settlement, None)
+            .await
+    }
+
+    pub async fn bind_with_ip_tunnel(
+        &self,
+        browser_listen: SocketAddr,
+        vpn: Config,
+        settlement: Arc<dyn Settlement>,
+        ip_tunnel: Option<octravpn_node::embedded::IpTunnelConfig>,
+    ) -> Result<Services> {
+        self.published()
+            .bind_with_ip_tunnel(browser_listen, vpn, settlement, ip_tunnel)
+            .await
+    }
+}
+
+impl crate::published::Handle {
+    pub(crate) async fn bind_with_ip_tunnel(
+        &self,
+        browser_listen: SocketAddr,
+        vpn: Config,
+        settlement: Arc<dyn Settlement>,
+        ip_tunnel: Option<octravpn_node::embedded::IpTunnelConfig>,
+    ) -> Result<Services> {
         anyhow::ensure!(
             browser_listen.ip().is_loopback(),
             "browser must bind loopback"
         );
         let browser = TcpListener::bind(browser_listen).await?;
-        let vpn = EmbeddedVpn::bind(vpn, self.vpn_authority(settlement)).await?;
+        let vpn = EmbeddedVpn::bind_with_ip_tunnel(vpn, self.vpn_authority(settlement), ip_tunnel)
+            .await?;
         Ok(Services {
             browser,
             vpn,
@@ -38,6 +64,13 @@ impl<A: Host> Node<A> {
 }
 
 impl Services {
+    pub(crate) fn with_settlement(
+        mut self,
+        publisher: Arc<dyn octravpn_node::embedded::ReceiptSettlement>,
+    ) -> Self {
+        self.vpn = self.vpn.with_settlement(publisher);
+        self
+    }
     pub fn browser_addr(&self) -> Result<SocketAddr> {
         Ok(self.browser.local_addr()?)
     }

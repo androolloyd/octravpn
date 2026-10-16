@@ -43,12 +43,18 @@ jobs:
         with:
           path: octra
 
-      - name: Checkout sibling repos (octra-foundry, headscale-rs)
-        run: |
-          set -euo pipefail
-          git clone --depth 1 https://github.com/androolloyd/octra-foundry.git
-          git clone --depth 1 https://github.com/androolloyd/headscale-rs.git
-          ls -la
+      - name: Checkout octra-foundry
+        uses: actions/checkout@v4
+        with:
+          repository: androolloyd/octra-foundry
+          ref: 07a11f6f5d1d0b1f46145bba19616570f85acc2c
+          path: octra-foundry
+      - name: Checkout headscale-rs
+        uses: actions/checkout@v4
+        with:
+          repository: androolloyd/headscale-rs
+          ref: e1d719104fc77edb0001932e28c859f81ec7dc78
+          path: headscale-rs
 
       - name: Install vhs + ttyd + ffmpeg + espeak-ng
         run: |
@@ -405,12 +411,18 @@ jobs:
         with:
           path: octra
 
-      - name: Checkout sibling repos
-        run: |
-          set -euo pipefail
-          git clone --depth 1 https://github.com/androolloyd/octra-foundry.git
-          git clone --depth 1 https://github.com/androolloyd/headscale-rs.git
-          ls -la
+      - name: Checkout octra-foundry
+        uses: actions/checkout@v4
+        with:
+          repository: androolloyd/octra-foundry
+          ref: 07a11f6f5d1d0b1f46145bba19616570f85acc2c
+          path: octra-foundry
+      - name: Checkout headscale-rs
+        uses: actions/checkout@v4
+        with:
+          repository: androolloyd/headscale-rs
+          ref: e1d719104fc77edb0001932e28c859f81ec7dc78
+          path: headscale-rs
 
       - name: Install vhs + jq + openssl + espeak-ng
         run: |

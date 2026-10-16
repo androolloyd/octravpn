@@ -1,0 +1,46 @@
+{
+  "date": "2026-10-15",
+  "status": "ADOPTED_QUALIFIED_OPTIONAL_LIBRARIES_DEFAULTS_UNCHANGED",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "native_top_level_values": 121,
+  "native_cases": 1070,
+  "signed_positive_witnesses": 25,
+  "proof_families": 9,
+  "qualification": {
+    "path": "out/node-port-final-20261015/optional-resource-candidate/qualification.json",
+    "sha256": "2342ec40187fd3c209aac729a1a667ee6b30aafe9752e5593a263af5e4b09708"
+  },
+  "adoption": {
+    "path": "out/node-port-final-20261015/optional-resource-candidate/adoption.json",
+    "sha256": "7870a323c07b5425d20b2557f7d89070e13024df76c908c7c0553df54f6bb8ea"
+  },
+  "production_sha256": {
+    "crates/octra-node/src/lib.rs": "5b094039eaf78ad7f9beeeade829a76f7870d7130a18907f0d8ddc5acc03b6a3",
+    "crates/octra-node/src/resource_attestation.rs": "93f813a73c43c92e1b51b7f24e7953163f1f52e9998b11deaf49bc0f00f7d431",
+    "crates/octra-node-protocol/src/consensus/mod.rs": "c7d8da43dd02318e849378cd1d018191a8ae93a61dd99413193857288d4c4980",
+    "crates/octra-node-protocol/src/consensus/resource_attestation_admission.rs": "7828a30dc15261e8da86c1623fc0e2face5522412463a35a9478bd7ec50e8037",
+    "crates/octra-node-protocol/src/consensus/resource_attestation_flow.rs": "786035ca277715c249f85ac3639fed9926782b1646d28ee64e59099cd9f7bc58",
+    "crates/octra-node-protocol/src/consensus/resource_attestations/evidence.rs": "157a5f9e2e01ecc60fc07e63e86f01d1ad348eb4c0136840afdababdb6de8d54",
+    "crates/octra-node-protocol/src/consensus/resource_attestations/plugins.rs": "ca17ad17e65943e3b16e50924aedc1b94c555db523b97a7ef12f0c5aa5409fd1",
+    "crates/octra-node-protocol/src/consensus/resource_attestations.rs": "8f4c8d10857da1504bd2e082f139ac4c13bd1ec53a10e25521cf847e225c94e7"
+  },
+  "public_consensus_or_configuration_changed": false,
+  "activation_status": "No public/default committee activation; upstream production also wires resource_committee_config=None. Proof models do not execute FHE/PVAC backends.",
+  "combined_node_gate_pending": false,
+  "inode_combined_followup": {
+    "qualification": {
+      "path": "out/node-port-final-20261015/inode-combined-qualification.json",
+      "sha256": "651af93171a3cbe50e6e72e137c1c032398f40ea2e9c60d1c8ac970f3c6be109"
+    },
+    "source_manifest": {
+      "path": "out/node-port-final-20261015/inode-combined-source.json",
+      "sha256": "a9c14b1d9a9261d649ae0d5ed5990f176dc9348d5d66753d3fa5773cb2bdaf57"
+    },
+    "node_exex_pvac_passed": 80,
+    "protocol_passed": 107,
+    "runtime_unit_passed": 42,
+    "strict_all_targets_all_features": "PASS",
+    "qualified_binary_sha256": "e31fba75c0132ea0f845601173e723d7c57a8b17a985593a1174a18e84be44e5",
+    "source_drift": []
+  }
+}

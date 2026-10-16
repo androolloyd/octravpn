@@ -1,0 +1,646 @@
+{
+  "schema": 1,
+  "date": "2026-10-15",
+  "status": "PASS_WITH_REQUIRED_NEGATIVE_CONTROL",
+  "scope": "Abstract state/protocol models and five selected production primitive harnesses at exact byte hashes. These gates are separate from native differential tests and deployment qualification.",
+  "source_identity_scope": "Hashes identify the inputs to these recorded runs. Later dependency or unrelated source changes require separate qualification; this file makes no whole-checkout byte-identity claim.",
+  "does_not_establish": [
+    "Refinement between the abstract specifications and compiled main-v5 AML/OCTB or the Rust node",
+    "Cryptographic unforgeability or security of concrete cryptographic implementations",
+    "Whole-protocol liveness, OS durability or exactly-once delivery",
+    "Public-network compatibility or Mainnet deployment readiness"
+  ],
+  "lean": {
+    "status": "PASS",
+    "toolchain": "leanprover/lean4:v4.10.0",
+    "entrypoint": "cd proofs/lean && lake build",
+    "exit_code": 0,
+    "default_roots": [
+      "OctraVPN",
+      "OctraVPN_V2",
+      "OctraVPN_V3",
+      "OctraVPN_V4",
+      "OctraVPN_Rust",
+      "WireProtocol"
+    ],
+    "source_count": {
+      "lean_files_including_lakefile": 38,
+      "all_inventory_files": 40
+    },
+    "scope": "Abstract models and primitive proofs; explicit axioms and opaque definitions remain assumptions. A successful build is not compiled-code refinement.",
+    "source_sha256": {
+      "proofs/lean/OctraVPN/AmlLink.lean": "bb9014a779cce194f2984c5c07e045c0b85ce004761a0a462abfff52bf38ba80",
+      "proofs/lean/OctraVPN/Entrypoints.lean": "d2b0ef1e08dc873abf675343d68212c280f7dff2c01e22656176c1804662efb7",
+      "proofs/lean/OctraVPN/Lemmas.lean": "f2aef2cefd79199703557b563636f0c38c91e1e6198b0699fb01fffbc40eff1d",
+      "proofs/lean/OctraVPN/State.lean": "af38b45e6b72697f23a8406c7827ff35c82a2db2452c87a978adf09ed9638a5f",
+      "proofs/lean/OctraVPN.lean": "6cc4e50a56f44cde919e555c4b76fc44861373af6fbc00997c37d6cdfddea547",
+      "proofs/lean/OctraVPN_Rust/ACL.lean": "ee1d25415323a6ebece89eac8f9f32fbd1a64a4a05138914c2e063679b9aa456",
+      "proofs/lean/OctraVPN_Rust/AuditLog.lean": "d6b2d7b645b0bcbeb86b30571985be9283c5e4e365a5cd02e111f32e636a2d7b",
+      "proofs/lean/OctraVPN_Rust/EndToEnd.lean": "04b46076be6a17cae98107e59799ce7dacf5456fa81aebdb8da32fc83c4b4749",
+      "proofs/lean/OctraVPN_Rust/Lemmas.lean": "8c4d32e0035678d2ebca1a76df59e6576ccc8b5ce4e9ff742240c87561356f6f",
+      "proofs/lean/OctraVPN_Rust/MachineRegistry.lean": "8bfb845212e5f67112952845be26f27a79b64b0495688822f34c99a46c6a8d0e",
+      "proofs/lean/OctraVPN_Rust/ReceiptJournal.lean": "599fb5fbdb88af10906575bb38cd0abad86e1f72066807ff731b85099eb1b66e",
+      "proofs/lean/OctraVPN_Rust/ShadowBlob.lean": "70ebfc2d06bad2e99f65773506c082f49283697bb2c7b6838013d0af6e6fa45d",
+      "proofs/lean/OctraVPN_Rust/Spec.lean": "fb2fb6829ed50603a8c895fc33ef8e3085b90f5e48deb97299d2d428a101ab5d",
+      "proofs/lean/OctraVPN_Rust.lean": "2cdb3d2ec6cbb7d0137ae1bcff11aa5af3ad699dfce24deeac7245260396db54",
+      "proofs/lean/OctraVPN_V2/AmlLink.lean": "9b72f83412be16475672202f8778010dc60f46f834c30fb54f8cb75dbf649a55",
+      "proofs/lean/OctraVPN_V2/Entrypoints.lean": "6db7015005ccaf724f0ed2e83ad381148fdcbd218817407e25dad87982576048",
+      "proofs/lean/OctraVPN_V2/Lemmas.lean": "919cf1a44a42a958fff9050012d0bc3086a993402840dfdca8cae46362db5bfd",
+      "proofs/lean/OctraVPN_V2/State.lean": "554e441123cae868d5725a4335ca56a256e2f74764a846c4db5cbb93389d6ba3",
+      "proofs/lean/OctraVPN_V2.lean": "0172e047f195259ba5ce5dffba2121f9444a13b7c582041463c5581efc746167",
+      "proofs/lean/OctraVPN_V3/AmlLink.lean": "ae4fe598966ce8e25b6b66276d94a22f0d652617de8a24c7cc5b75740ccc4d82",
+      "proofs/lean/OctraVPN_V3/Invariants.lean": "ec92392d37c4e56e6cb74d02cefcb94b9ff3b1ddbcdd55d3d141ff6d35f08691",
+      "proofs/lean/OctraVPN_V3/State.lean": "ce2a431e7d4710eb7afb07b01ac4e69ad7e5107bcf7d343266c124b4cc624cbd",
+      "proofs/lean/OctraVPN_V3/Transitions.lean": "18e09257bdb66516764f5037b409afae4de207a5b40ad0ec48629b52db1e2304",
+      "proofs/lean/OctraVPN_V3.lean": "895516286dc3c327f64124d3f378668fc398e139cd990fe072ffd29c66d51a37",
+      "proofs/lean/OctraVPN_V4.lean": "68a50c85328bdca0c98072f514b088e4d284619936bdd16f5900e1573157b25b",
+      "proofs/lean/WireProtocol/BeNonce.lean": "2d5c7f0dffcb3962d91b6db324ee7830a0ffb83200c40ad2b04d4f0e4b347366",
+      "proofs/lean/WireProtocol/Controlbase.lean": "3c70049c8d49dc36db4de18de6590ee1efdf3b29e53375b2d65179d4d9aa35ae",
+      "proofs/lean/WireProtocol/HFHE.lean": "ac9ac647146715a8f4498e1501203db70bde5919b00ce0cbab3f4a6112cba2ee",
+      "proofs/lean/WireProtocol/HmacToken.lean": "4ec4a84ce9d11eba4c3b0d44b67d5801e5c622e3bd6a0ba6a674c767f07af1c6",
+      "proofs/lean/WireProtocol/PortalCache.lean": "17c71c2bdd46179638dd2201b1cf21bf67f7915e904fdf10c56fbefbe560cc3c",
+      "proofs/lean/WireProtocol/RpcEnvelope.lean": "a87a1323f6f175896e5bc7eeba82c946a0f30298a04d5f31ad6cf0cf7ac5499c",
+      "proofs/lean/WireProtocol/Shielding.lean": "dd3645c16db2181164eb4b141eefe4a5b82563b1d425506fead3358952445b5d",
+      "proofs/lean/WireProtocol/V3Canonical.lean": "77041ac5c855e09abbd6310e5df588b56bcdaf9f94a83fca2613b6ec78d0e0e5",
+      "proofs/lean/WireProtocol/V3Members.lean": "a8998bc3fbf854ec369021092f7bc6e42bb2251edcefcbcbf0a3e67c29599c49",
+      "proofs/lean/WireProtocol/V3Policy.lean": "9dcfa79671db26ac7655b02ccf6326ea3eaca055ab002e5888df597513858f25",
+      "proofs/lean/WireProtocol/Wire.lean": "f267fc14949601b1a66d4fb0d1e86662d0da9fe1037574969e3666e801e4ae4e",
+      "proofs/lean/WireProtocol.lean": "42fc854e3f9fdaf0d6b707f8ab0aa65b7d8d31bd59aae6513bb728a36e6d3a35",
+      "proofs/lean/lake-manifest.json": "c62ba9c5fe66337218740fd993e25b0c7eadca392a199b6eca54189e34423252",
+      "proofs/lean/lakefile.lean": "c90654e375150e90a0c3e3a1d21557d1d6533528f2c755b249620c90ee6faf16",
+      "proofs/lean/lean-toolchain": "f3ea78fdd417d39483583b721709727c225eeea0c0e9d29283de43f577411095"
+    },
+    "canonical_source_digest_sha256": "1ac1f411173d12134fcb1be9321e5e6f960f61d41d7fa1597d5be875e611255a",
+    "canonical_digest_algorithm": "SHA256 of UTF-8 compact JSON for source_sha256 with lexicographically sorted keys, separators comma/colon, followed by one LF byte.",
+    "inventory_file_sha256": "aa49af5ccf26009b8a1e5f8aed4e410445a0770a46ecf8ca50e0888ea9456012",
+    "inventory_unchanged_after_build": true,
+    "report_sha256": "24e14b310fff90966c7404b470299f1d372e532381431acbc58b4ae12f692572",
+    "log_sha256": "a30d6eefe7ccec7803482bd446c3d48f7cc46ed86ba99cb839fca134dd7a5a3d"
+  },
+  "tlc": {
+    "status": "PASS_WITH_REQUIRED_NEGATIVE_CONTROL",
+    "tool": {
+      "release": "TLA+ tools v1.7.4",
+      "reported_version": "TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)",
+      "jar_sha256": "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88",
+      "java": "OpenJDK 26.0.1 build 26.0.1"
+    },
+    "entrypoint": "cd proofs/tla && java -Xmx3g -XX:+UseParallelGC -cp \"$TLA2TOOLS_JAR\" tlc2.TLC -workers 4 -seed 1 -deadlock -metadir \"$TLC_STATE_DIR\" \"$TLC_MODEL\" -config \"$TLC_CONFIG\"",
+    "entrypoint_note": "Set TLC_MODEL and TLC_CONFIG to each model/config pair below; use a fresh TLC_STATE_DIR for every run. The -deadlock flag disables deadlock checking; no liveness or deadlock qualification is claimed.",
+    "scope": "Three completed bounded abstract safety explorations, plus a mandatory zero-margin counterexample. Signature/FHE/commitment correctness is abstracted; source constraints and action selection limit the state spaces.",
+    "results": [
+      {
+        "model": "OctraVPN",
+        "config": "OctraVPN.cfg",
+        "source_sha256": "55a82fa2a3f507e0a1f3e30a37828e38bc5ca9d6fed243c66373ea66270ddce0",
+        "config_sha256": "3b99d9c8296eb7ae7dc041634520d595cf1d9dba4e831cb101f27aca0a7e0921",
+        "bounds": {
+          "domains": "one endpoint, tailnet, client, token hash and device; two payloads",
+          "MaxSeq": 2,
+          "MinDeposit": 1,
+          "MinTailnetDeposit": 2,
+          "MinEndpointStake": 2,
+          "UnbondGrace": 1,
+          "SweepGrace": 1,
+          "constraint": "StateBound; canonical action amounts; at most one open and two total sessions; epoch<=2; pause action omitted from explored Next"
+        },
+        "outcome": "BOUNDED_SAFETY_PASS",
+        "exit_code": 0,
+        "states_generated": 2756874,
+        "distinct_states": 223118,
+        "states_remaining": 0,
+        "log_sha256": "5e51a13bec3efe0a21caeb186da941335406a02065b50c3af0ec4cdc9c4dc15a"
+      },
+      {
+        "model": "OctraVPN_V2",
+        "config": "OctraVPN_V2.cfg",
+        "source_sha256": "e486f0d6f5155f77f2f4a69acfaca0b5f60a1ec33dbda71300424574d9760e95",
+        "config_sha256": "6b80405300b9fc08f66aea70de6ace269891be34188d0580c27caf6965709bd1",
+        "bounds": {
+          "domains": "one circle, tailnet, client and token hash; two payloads",
+          "MaxSeq": 2,
+          "MinDeposit": 1,
+          "MinTailnetDeposit": 2,
+          "MinCircleStake": 1,
+          "Price": 1,
+          "UnbondGrace": 1,
+          "SweepGrace": 1,
+          "constraint": "StateBound and canonical action choices as committed by the exact model hash"
+        },
+        "outcome": "BOUNDED_SAFETY_PASS",
+        "exit_code": 0,
+        "states_generated": 52676571,
+        "distinct_states": 3805681,
+        "states_remaining": 0,
+        "log_sha256": "a7e24fd6dad27fee745db8d645c394e20d85f66bb33a59394cc633eb96115796"
+      },
+      {
+        "model": "RelaySettlement",
+        "config": "RelaySettlement.cfg",
+        "source_sha256": "f9a8889a27348c3e7aa9d319991401ece55d6739fdf7702710b436b8511ee437",
+        "config_sha256": "24d1b5450c54d49021e6539cd89cccc0f6c5c8ab358df76e09f97bd017abd7ba",
+        "bounds": {
+          "Deposit": 10,
+          "D": 3,
+          "SweepGrace": 2,
+          "Kc": 1,
+          "Kr": 1,
+          "Ks": 1,
+          "MaxEpoch": 8
+        },
+        "outcome": "BOUNDED_SAFETY_PASS",
+        "exit_code": 0,
+        "states_generated": 159,
+        "distinct_states": 71,
+        "states_remaining": 0,
+        "log_sha256": "720bb4fb5da4cb738f6b68ca12aa09fbe1a461b89a465a641c9d36d86cdc9ab2"
+      },
+      {
+        "model": "RelaySettlement",
+        "config": "RelaySettlement_NoMargin.cfg",
+        "source_sha256": "f9a8889a27348c3e7aa9d319991401ece55d6739fdf7702710b436b8511ee437",
+        "config_sha256": "927ad902329e7cfdff1a474a109b62268f256b7cc36774a66caa29e3c351d0b7",
+        "bounds": {
+          "Deposit": 10,
+          "D": 3,
+          "SweepGrace": 2,
+          "Kc": 0,
+          "Kr": 0,
+          "Ks": 0,
+          "MaxEpoch": 8
+        },
+        "outcome": "EXPECTED_QUIET_ZONE_COUNTEREXAMPLE",
+        "exit_code": 12,
+        "states_generated": 117,
+        "distinct_states": 63,
+        "states_remaining": 14,
+        "log_sha256": "69e4487597d59e09ecc232dec32b696e87fa4f0536fdc80adc821bc26a8f23f0"
+      }
+    ],
+    "negative_control_requirement": "RelaySettlement_NoMargin.cfg must terminate with exit 12 and report Invariant QuietZone is violated; this deliberate failure is required, not waived.",
+    "report_sha256": "4306070989732a9930712f566c913a6c38d944bf184b912416833f79af2e419a"
+  },
+  "tamarin": {
+    "status": "PASS",
+    "tools": {
+      "tamarin": "1.12.0",
+      "maude": "3.5.1",
+      "maude_version_check": "OK",
+      "image": "sha256:a6c7cd5bf39becd20e4efb068d6324eece53cd362ee19f58d0579089f6624398",
+      "architecture": "linux/amd64",
+      "tamarin_archive_sha256": "201be06f469e47cff554df6ca93db8366fc2c69d70c61fcbd1370a1074b469c6",
+      "maude_archive_sha256": "72ed1ca87e3b3d0dfc6ee1436baf154bf04c45ff97d521bec040c5e8dfc8f92c"
+    },
+    "entrypoint": "scripts/run-tamarin.sh",
+    "scope": "Symbolic dual-signature authentication with explicit compromise exceptions, and persistence-before-ACK/recovery under assumed durable storage. These results do not verify concrete Rust/AML code or OS fsync behavior.",
+    "exit_code": 0,
+    "lemma_count": 6,
+    "theories": [
+      {
+        "source": "proofs/tamarin/octravpn.spthy",
+        "lemmas": [
+          {
+            "name": "ClientAuthentication",
+            "quantifier": "all-traces",
+            "result": "verified (7 steps)"
+          },
+          {
+            "name": "NodeAuthentication",
+            "quantifier": "all-traces",
+            "result": "verified (13 steps)"
+          },
+          {
+            "name": "HonestReceiptReachable",
+            "quantifier": "exists-trace",
+            "result": "verified (7 steps)"
+          }
+        ],
+        "log_sha256": "de01499f686d8b0a9a71feb581a0a21e3446719fcdf53c28a53c580c31c27c62"
+      },
+      {
+        "source": "proofs/tamarin/relay_receipt_ack.spthy",
+        "lemmas": [
+          {
+            "name": "AckRequiresDurableReceipt",
+            "quantifier": "all-traces",
+            "result": "verified (7 steps)"
+          },
+          {
+            "name": "SendAlwaysAfterPersistence",
+            "quantifier": "all-traces",
+            "result": "verified (5 steps)"
+          },
+          {
+            "name": "RecoveryCanDeliverAck",
+            "quantifier": "exists-trace",
+            "result": "verified (8 steps)"
+          }
+        ],
+        "log_sha256": "8acaf97261c4889fa5479ba8c29653fe71f013740f4a72f14deaf616cdd96468"
+      }
+    ],
+    "source_sha256": {
+      "proofs/tamarin/octravpn.spthy": "c99f50c46b3e66a7e3bc15735ef0a55a140e0579e91508d997d802b3a353319f",
+      "proofs/tamarin/relay_receipt_ack.spthy": "9aee2af8b672347d53d8489d3b24a2e18b6b9edf240e585c07de6a377ce4522e",
+      "scripts/run-tamarin.sh": "a1c1b64a88d0dbfb3e7a4f3813692fbb7c93de4a3c97322a86ac915ff2e0aa4f"
+    },
+    "excluded_theory": "octravpn-legacy-target.spthy is archived research and is not a release gate.",
+    "unsupported_backend_negative_control": {
+      "passed": true,
+      "outcome": "The strengthened runner rejected the previous Maude 3.2 backend with an explicit unsupported-version failure before supported Maude 3.5.1 was installed. The earlier six verified Maude 3.2 results remain diagnostic only.",
+      "supported_image_recipe_sha256": "ffef8de2d0f4222c9591cee6a9608a458db6a247da847fb10b0d5d35967846ef",
+      "build_log_sha256": "d4cda2d6d8641be48d72c9eee783c4d6819b2b40a4cda72f3e2a61009c9d1b93"
+    },
+    "report_sha256": "ab69648d2187070f5e82eaed4a4f8adac9c1f2b5c6e80fb0f51dc34f864ecdbd",
+    "source_report_sha256": "f8372f8414d876ecd0ff209eaa321a982a90b765bc5a0f6643cab775db4b892f"
+  },
+  "kani": {
+    "status": "PASS",
+    "tools": {
+      "kani": "0.68.0",
+      "rustc": "rustc 1.100.0-nightly (8925ea358 2026-08-20)",
+      "cbmc": "6.11.0 (cbmc-6.11.0)",
+      "solver": "cadical",
+      "image": "sha256:c35cfb1f1d5c4b76f5456570714e568063042ed49467b8c57cef3b904473d1ee",
+      "architecture": "linux/amd64",
+      "base_image": "rust:1.96-bookworm@sha256:a339861ae23e9abb272cea45dfafde21760d2ce6577a70f8a926153677902663"
+    },
+    "entrypoint": "cargo kani --manifest-path proofs/kani/Cargo.toml --verbose -Z unstable-options --export-json kani-results-verbose.json",
+    "setup_entrypoint": "cargo install --locked kani-verifier --version 0.68.0 && cargo kani setup",
+    "scope": "Production SessionId codec round-trip/padding and checked relay claim/recovery deadline arithmetic over symbolic 64-bit inputs, including overflow; no receipt-signature or whole-node proof.",
+    "harnesses": [
+      {
+        "name": "claim_and_recovery_windows_disjoint",
+        "status": "Success",
+        "checks": 35,
+        "passed": 35,
+        "unreachable": 0,
+        "unwind": null
+      },
+      {
+        "name": "recovery_never_at_or_before_deadline",
+        "status": "Success",
+        "checks": 28,
+        "passed": 28,
+        "unreachable": 0,
+        "unwind": null
+      },
+      {
+        "name": "claim_never_at_or_after_deadline",
+        "status": "Success",
+        "checks": 21,
+        "passed": 21,
+        "unreachable": 0,
+        "unwind": null
+      },
+      {
+        "name": "session_nonzero_padding_rejected",
+        "status": "Success",
+        "checks": 109,
+        "passed": 105,
+        "unreachable": 4,
+        "unwind": 33
+      },
+      {
+        "name": "session_u64_round_trip",
+        "status": "Success",
+        "checks": 128,
+        "passed": 124,
+        "unreachable": 4,
+        "unwind": 33
+      }
+    ],
+    "total_harnesses": 5,
+    "total_checks": 321,
+    "passed_checks": 313,
+    "unreachable_checks": 8,
+    "failed_checks": 0,
+    "verbose_replay": "Same five harnesses completed successfully; two session-loop harnesses explicitly use unwind 33. Default unwinding assertions were enabled.",
+    "known_tool_warnings": "caller_location and a panic foreign call are reported unsupported; corresponding branches are proved unreachable, not stubbed or suppressed.",
+    "isolation": "Proof execution used a read-only source snapshot, Docker network none and CARGO_NET_OFFLINE=true; exact proof lock was prefetched with cargo fetch --locked, unchanged. No host Cargo proof run.",
+    "source_sha256": {
+      "Cargo.toml": "5e08f4e5a7d1882df7b10c80664d2c3725b64ba53f5a9b2f7f36dd9f495937ca",
+      "Cargo.lock": "f28ad88c09fb9c0ed4ed33eb8866a191cc0fdfba2ad4c5435443942dbefc3b35",
+      "proofs/kani/src/lib.rs": "80fcce33ad014ea75a5239f023e1f4933f471c998ae6ea68e0db5a9e1b290a63",
+      "proofs/kani/Cargo.toml": "c8c4257a5a48908937c1ebfc346ec9e0dd43bd5777e5ee3e368b2116be9d9ba9",
+      "proofs/kani/Cargo.lock": "7751cad10c51a04cc58bc76b82a42e7ba822c246fddafa6ae1b16ec7e8643e8c",
+      "crates/octravpn-core/Cargo.toml": "14109b3340224835041bebdd8dae358439146a811ba4c500986f9db3560d1e2e",
+      "crates/octravpn-core/src/session.rs": "2d0216a5551fc7ad7981e11b57efa48286dbb76826eb0961f8cf951b569b309b",
+      "crates/octravpn-core/src/relay_window.rs": "fe99cf25fa28e9cd91619033fff6af680a5e907abb4f6e8b3fca22e4f0cbc0eb",
+      "crates/octravpn-core/src/onion.rs": "b5e45289a158ec4da30780fa2cee43f6343535cbadb41a3035479799eefaad72",
+      "crates/octravpn-core/src/v3_calls.rs": "4a4cbcb5eb48ac70d048a228942d5afd3ed0d6c60db62d2d2f5866cde9a892df",
+      "crates/octravpn-core/src/tx_signer.rs": "de1efe8728d61e0d4627d951a8aafc6fbb32f2a990aba9ebdc72d1c09c24ae2b",
+      "crates/octravpn-core/src/receipt_journal/mod.rs": "442b784bc5c5f5da7472a925bef9f3944dbb6a1ccfa9fbd978e08e42cdb6a389",
+      "crates/octravpn-core/src/rpc.rs": "91db476b7218eced3bbb952030a66aad49656001861c56fc368569ac6ff1ed3e",
+      "crates/octravpn-core/src/rpc/asset_tests.rs": "596d72eb7958ba34bd77da23d670198e1675a0ccb30f2e4cc5982b946950959f"
+    },
+    "recorded_utc": "2026-10-15T21:50:21.534005+00:00",
+    "source_binding": {
+      "file_count": 72,
+      "complete_input_manifest_sha256": "0518dc3d23a0a537579750dff236121d5e4dda376fdf7c5a48de7b18a38c3e65",
+      "scope": "Current complete Core and Foundry Core crates, existing five harnesses, manifests and locks, including the RPC code 110 helper and its new rpc/asset_tests.rs. Uncompiled integration/test files bind crate source identity only. These harnesses prove only production SessionId/deadline functions, not RPC retry correctness.",
+      "workspace_msrv": "1.89",
+      "root_lock_sha256": "f28ad88c09fb9c0ed4ed33eb8866a191cc0fdfba2ad4c5435443942dbefc3b35",
+      "proof_lock_sha256": "7751cad10c51a04cc58bc76b82a42e7ba822c246fddafa6ae1b16ec7e8643e8c",
+      "dependency_graph": "Existing dedicated proofs/kani/Cargo.lock, unchanged. Root lock is retained as provenance, not substituted for the proof dependency graph.",
+      "archive": "No new complete-input archive is claimed; the current full source-input manifest binds all 72 files.",
+      "source_drift": [],
+      "copied_source_drift": []
+    },
+    "report_sha256": "4e29e7d03d208798c350d6ceac1ea7dbae86fa42b3f9450e824fee48dc81a3cc",
+    "solver_results_sha256": "792f5fe903657be927d06cacfc16cd5b55bbee0c3532e2a94501a4a889c134a6",
+    "proof_log_sha256": "ecc83b52e55b37d91e60f5f97365b5ba8138b8fd5b77bfbc90abeb313c5e7eee",
+    "command_script_sha256": "af228e323f3477b9efc036c3dee1515326e7feb3b79e3da1cda14c340dc55816",
+    "historical_runs": [
+      {
+        "recorded_utc": "2026-10-15T21:23:18.532146+00:00",
+        "description": "Previous successful current2 source-binding run, retained as historical after the scoped RPC code 110 asset-read fix. Its 71-file manifest/report/solver hashes bind that earlier exact source snapshot.",
+        "result": {
+          "status": "PASS",
+          "tools": {
+            "kani": "0.68.0",
+            "rustc": "rustc 1.100.0-nightly (8925ea358 2026-08-20)",
+            "cbmc": "6.11.0 (cbmc-6.11.0)",
+            "solver": "cadical",
+            "image": "sha256:c35cfb1f1d5c4b76f5456570714e568063042ed49467b8c57cef3b904473d1ee",
+            "architecture": "linux/amd64",
+            "base_image": "rust:1.96-bookworm@sha256:a339861ae23e9abb272cea45dfafde21760d2ce6577a70f8a926153677902663"
+          },
+          "entrypoint": "cargo kani --manifest-path proofs/kani/Cargo.toml --verbose -Z unstable-options --export-json kani-results-verbose.json",
+          "setup_entrypoint": "cargo install --locked kani-verifier --version 0.68.0 && cargo kani setup",
+          "scope": "Production SessionId codec round-trip/padding and checked relay claim/recovery deadline arithmetic over symbolic 64-bit inputs, including overflow; no receipt-signature or whole-node proof.",
+          "harnesses": [
+            {
+              "name": "claim_and_recovery_windows_disjoint",
+              "status": "Success",
+              "checks": 35,
+              "passed": 35,
+              "unreachable": 0,
+              "unwind": null
+            },
+            {
+              "name": "recovery_never_at_or_before_deadline",
+              "status": "Success",
+              "checks": 28,
+              "passed": 28,
+              "unreachable": 0,
+              "unwind": null
+            },
+            {
+              "name": "claim_never_at_or_after_deadline",
+              "status": "Success",
+              "checks": 21,
+              "passed": 21,
+              "unreachable": 0,
+              "unwind": null
+            },
+            {
+              "name": "session_nonzero_padding_rejected",
+              "status": "Success",
+              "checks": 109,
+              "passed": 105,
+              "unreachable": 4,
+              "unwind": 33
+            },
+            {
+              "name": "session_u64_round_trip",
+              "status": "Success",
+              "checks": 128,
+              "passed": 124,
+              "unreachable": 4,
+              "unwind": 33
+            }
+          ],
+          "total_harnesses": 5,
+          "total_checks": 321,
+          "passed_checks": 313,
+          "unreachable_checks": 8,
+          "failed_checks": 0,
+          "verbose_replay": "Same five harnesses completed successfully; two session-loop harnesses explicitly use unwind 33. Default unwinding assertions were enabled.",
+          "known_tool_warnings": "caller_location and a panic foreign call are reported unsupported; corresponding branches are proved unreachable, not stubbed or suppressed.",
+          "isolation": "Proof execution used a read-only source snapshot, Docker network none and CARGO_NET_OFFLINE=true; exact proof lock was prefetched with cargo fetch --locked, unchanged. No host Cargo proof run.",
+          "source_sha256": {
+            "Cargo.toml": "5e08f4e5a7d1882df7b10c80664d2c3725b64ba53f5a9b2f7f36dd9f495937ca",
+            "Cargo.lock": "f28ad88c09fb9c0ed4ed33eb8866a191cc0fdfba2ad4c5435443942dbefc3b35",
+            "proofs/kani/src/lib.rs": "80fcce33ad014ea75a5239f023e1f4933f471c998ae6ea68e0db5a9e1b290a63",
+            "proofs/kani/Cargo.toml": "c8c4257a5a48908937c1ebfc346ec9e0dd43bd5777e5ee3e368b2116be9d9ba9",
+            "proofs/kani/Cargo.lock": "7751cad10c51a04cc58bc76b82a42e7ba822c246fddafa6ae1b16ec7e8643e8c",
+            "crates/octravpn-core/Cargo.toml": "14109b3340224835041bebdd8dae358439146a811ba4c500986f9db3560d1e2e",
+            "crates/octravpn-core/src/session.rs": "2d0216a5551fc7ad7981e11b57efa48286dbb76826eb0961f8cf951b569b309b",
+            "crates/octravpn-core/src/relay_window.rs": "fe99cf25fa28e9cd91619033fff6af680a5e907abb4f6e8b3fca22e4f0cbc0eb",
+            "crates/octravpn-core/src/onion.rs": "b5e45289a158ec4da30780fa2cee43f6343535cbadb41a3035479799eefaad72",
+            "crates/octravpn-core/src/v3_calls.rs": "4a4cbcb5eb48ac70d048a228942d5afd3ed0d6c60db62d2d2f5866cde9a892df",
+            "crates/octravpn-core/src/tx_signer.rs": "de1efe8728d61e0d4627d951a8aafc6fbb32f2a990aba9ebdc72d1c09c24ae2b",
+            "crates/octravpn-core/src/receipt_journal/mod.rs": "442b784bc5c5f5da7472a925bef9f3944dbb6a1ccfa9fbd978e08e42cdb6a389"
+          },
+          "recorded_utc": "2026-10-15T21:23:18.532146+00:00",
+          "source_binding": {
+            "file_count": 71,
+            "complete_input_manifest_sha256": "24af57fa3a60b676e515669379fd110b4f0dba2b9e70502818c839efb509a37c",
+            "scope": "Current complete Core and Foundry Core crates, existing five harnesses, manifests and locks; includes uncompiled integration-test files for crate source identity. Proof claims remain limited to the five production library harnesses.",
+            "workspace_msrv": "1.89",
+            "root_lock_sha256": "f28ad88c09fb9c0ed4ed33eb8866a191cc0fdfba2ad4c5435443942dbefc3b35",
+            "proof_lock_sha256": "7751cad10c51a04cc58bc76b82a42e7ba822c246fddafa6ae1b16ec7e8643e8c",
+            "dependency_graph": "Existing dedicated proofs/kani/Cargo.lock, unchanged. Root lock is retained as provenance, not substituted for the proof dependency graph.",
+            "archive": "No new complete-input archive is claimed; the current full source-input manifest binds all 71 files.",
+            "source_drift": [],
+            "copied_source_drift": []
+          },
+          "report_sha256": "3262e77d86ff25d9f2200f493afc4ae1849faea06acf0d4b18c88152248ddec0",
+          "solver_results_sha256": "a5b8329d03c968a4b8411f3b326cde688e773da01656767dbc5a1018ed124d80",
+          "proof_log_sha256": "6b05a85faa4f911e08887ebcb7fc571ac4d2a0850668bc6c19192bd1a3bab885",
+          "command_script_sha256": "af228e323f3477b9efc036c3dee1515326e7feb3b79e3da1cda14c340dc55816"
+        }
+      },
+      {
+        "recorded_utc": "2026-10-15T20:58:43.399787+00:00",
+        "description": "Previous current-source successful run, preserved as historical after the subsequent test-only Core lint idiom; its 63-file manifest/report/solver hashes do not bind the present 71-file source identity.",
+        "result": {
+          "status": "PASS",
+          "tools": {
+            "kani": "0.68.0",
+            "rustc": "rustc 1.100.0-nightly (8925ea358 2026-08-20)",
+            "cbmc": "6.11.0 (cbmc-6.11.0)",
+            "solver": "cadical",
+            "image": "sha256:c35cfb1f1d5c4b76f5456570714e568063042ed49467b8c57cef3b904473d1ee",
+            "architecture": "linux/amd64",
+            "base_image": "rust:1.96-bookworm@sha256:a339861ae23e9abb272cea45dfafde21760d2ce6577a70f8a926153677902663"
+          },
+          "entrypoint": "cargo kani --manifest-path proofs/kani/Cargo.toml --verbose -Z unstable-options --export-json kani-results-verbose.json",
+          "setup_entrypoint": "cargo install --locked kani-verifier --version 0.68.0 && cargo kani setup",
+          "scope": "Production SessionId codec round-trip/padding and checked relay claim/recovery deadline arithmetic over symbolic 64-bit inputs, including overflow; no receipt-signature or whole-node proof.",
+          "harnesses": [
+            {
+              "name": "claim_and_recovery_windows_disjoint",
+              "status": "Success",
+              "checks": 35,
+              "passed": 35,
+              "unreachable": 0,
+              "unwind": null
+            },
+            {
+              "name": "recovery_never_at_or_before_deadline",
+              "status": "Success",
+              "checks": 28,
+              "passed": 28,
+              "unreachable": 0,
+              "unwind": null
+            },
+            {
+              "name": "claim_never_at_or_after_deadline",
+              "status": "Success",
+              "checks": 21,
+              "passed": 21,
+              "unreachable": 0,
+              "unwind": null
+            },
+            {
+              "name": "session_nonzero_padding_rejected",
+              "status": "Success",
+              "checks": 109,
+              "passed": 105,
+              "unreachable": 4,
+              "unwind": 33
+            },
+            {
+              "name": "session_u64_round_trip",
+              "status": "Success",
+              "checks": 128,
+              "passed": 124,
+              "unreachable": 4,
+              "unwind": 33
+            }
+          ],
+          "total_harnesses": 5,
+          "total_checks": 321,
+          "passed_checks": 313,
+          "unreachable_checks": 8,
+          "failed_checks": 0,
+          "verbose_replay": "Same five harnesses completed successfully; two session-loop harnesses explicitly use unwind 33. Default unwinding assertions were enabled.",
+          "known_tool_warnings": "caller_location and a panic foreign call are reported unsupported; corresponding branches are proved unreachable, not stubbed or suppressed.",
+          "isolation": "Proof execution used a read-only source snapshot, Docker network none and CARGO_NET_OFFLINE=true; exact proof lock was prefetched with cargo fetch --locked, unchanged. No host Cargo proof run.",
+          "source_sha256": {
+            "Cargo.toml": "5e08f4e5a7d1882df7b10c80664d2c3725b64ba53f5a9b2f7f36dd9f495937ca",
+            "Cargo.lock": "f28ad88c09fb9c0ed4ed33eb8866a191cc0fdfba2ad4c5435443942dbefc3b35",
+            "proofs/kani/src/lib.rs": "80fcce33ad014ea75a5239f023e1f4933f471c998ae6ea68e0db5a9e1b290a63",
+            "proofs/kani/Cargo.toml": "c8c4257a5a48908937c1ebfc346ec9e0dd43bd5777e5ee3e368b2116be9d9ba9",
+            "proofs/kani/Cargo.lock": "7751cad10c51a04cc58bc76b82a42e7ba822c246fddafa6ae1b16ec7e8643e8c",
+            "crates/octravpn-core/Cargo.toml": "14109b3340224835041bebdd8dae358439146a811ba4c500986f9db3560d1e2e",
+            "crates/octravpn-core/src/session.rs": "2d0216a5551fc7ad7981e11b57efa48286dbb76826eb0961f8cf951b569b309b",
+            "crates/octravpn-core/src/relay_window.rs": "fe99cf25fa28e9cd91619033fff6af680a5e907abb4f6e8b3fca22e4f0cbc0eb",
+            "crates/octravpn-core/src/onion.rs": "d99a43f32e458406f2b7dec78a6b0e7993dd4d53ac3ae57b9c293781c66bba84",
+            "crates/octravpn-core/src/v3_calls.rs": "4a4cbcb5eb48ac70d048a228942d5afd3ed0d6c60db62d2d2f5866cde9a892df",
+            "crates/octravpn-core/src/tx_signer.rs": "de1efe8728d61e0d4627d951a8aafc6fbb32f2a990aba9ebdc72d1c09c24ae2b",
+            "crates/octravpn-core/src/receipt_journal/mod.rs": "442b784bc5c5f5da7472a925bef9f3944dbb6a1ccfa9fbd978e08e42cdb6a389"
+          },
+          "recorded_utc": "2026-10-15T20:58:43.399787+00:00",
+          "source_binding": {
+            "file_count": 63,
+            "complete_input_manifest_sha256": "c03b85e77462788acb8c1d9aaa1be4b0b0710823e1f04e8305c1b39666810357",
+            "scope": "Complete current Core and Foundry Core sources plus existing harnesses, manifests and locks; read-only snapshot and live input hash checks passed.",
+            "workspace_msrv": "1.89",
+            "root_lock_sha256": "f28ad88c09fb9c0ed4ed33eb8866a191cc0fdfba2ad4c5435443942dbefc3b35",
+            "proof_lock_sha256": "7751cad10c51a04cc58bc76b82a42e7ba822c246fddafa6ae1b16ec7e8643e8c",
+            "dependency_graph": "Existing dedicated proofs/kani/Cargo.lock, unchanged. Root lock is retained as provenance, not substituted for the proof dependency graph.",
+            "archive": "No new complete-input archive is claimed; the current full-input manifest binds all 63 files.",
+            "source_drift": [],
+            "copied_source_drift": []
+          },
+          "report_sha256": "ecab677020fc4ac8b78200535ea9c9b6cd7a9c6de75426661f129d70cc3a5e14",
+          "solver_results_sha256": "e065d9f34444cd441876756bbe41222ed5c9bf3958c46d62f090460f283e3086",
+          "proof_log_sha256": "36624df307b398f060e68d9e13c9faa97eed4d4e90bd7b81e9df951e04167969",
+          "command_script_sha256": "af228e323f3477b9efc036c3dee1515326e7feb3b79e3da1cda14c340dc55816"
+        }
+      },
+      {
+        "description": "Earlier successful run, retained verbatim for historical provenance; these archive/report/solver hashes do not bind the current Core source or final root lock.",
+        "result": {
+          "status": "PASS",
+          "tools": {
+            "kani": "0.68.0",
+            "rustc": "rustc 1.100.0-nightly (8925ea358 2026-08-20)",
+            "cbmc": "6.11.0 (cbmc-6.11.0)",
+            "solver": "cadical",
+            "image": "sha256:c35cfb1f1d5c4b76f5456570714e568063042ed49467b8c57cef3b904473d1ee",
+            "architecture": "linux/amd64",
+            "base_image": "rust:1.96-bookworm@sha256:a339861ae23e9abb272cea45dfafde21760d2ce6577a70f8a926153677902663"
+          },
+          "entrypoint": "cargo kani --manifest-path proofs/kani/Cargo.toml -Z unstable-options --export-json kani-results.json",
+          "setup_entrypoint": "cargo install --locked kani-verifier --version 0.68.0 && cargo kani setup",
+          "scope": "Production SessionId codec round-trip/padding and checked relay claim/recovery deadline arithmetic over symbolic 64-bit inputs, including overflow; no receipt-signature or whole-node proof.",
+          "harnesses": [
+            {
+              "name": "claim_and_recovery_windows_disjoint",
+              "status": "Success",
+              "checks": 35,
+              "passed": 35,
+              "unreachable": 0,
+              "unwind": null
+            },
+            {
+              "name": "recovery_never_at_or_before_deadline",
+              "status": "Success",
+              "checks": 28,
+              "passed": 28,
+              "unreachable": 0,
+              "unwind": null
+            },
+            {
+              "name": "claim_never_at_or_after_deadline",
+              "status": "Success",
+              "checks": 21,
+              "passed": 21,
+              "unreachable": 0,
+              "unwind": null
+            },
+            {
+              "name": "session_nonzero_padding_rejected",
+              "status": "Success",
+              "checks": 109,
+              "passed": 105,
+              "unreachable": 4,
+              "unwind": 33
+            },
+            {
+              "name": "session_u64_round_trip",
+              "status": "Success",
+              "checks": 128,
+              "passed": 124,
+              "unreachable": 4,
+              "unwind": 33
+            }
+          ],
+          "total_harnesses": 5,
+          "total_checks": 321,
+          "passed_checks": 313,
+          "unreachable_checks": 8,
+          "failed_checks": 0,
+          "verbose_replay": "Same five harnesses completed successfully; two session-loop harnesses explicitly use unwind 33. Default unwinding assertions were enabled.",
+          "known_tool_warnings": "caller_location and a panic foreign call are reported unsupported; corresponding branches are proved unreachable, not stubbed or suppressed.",
+          "isolation": "Proof execution used a read-only source snapshot, Docker network none and CARGO_NET_OFFLINE=true; exact proof lock was prefetched with cargo fetch --locked, unchanged. No host Cargo proof run.",
+          "source_sha256": {
+            "proofs/kani/src/lib.rs": "80fcce33ad014ea75a5239f023e1f4933f471c998ae6ea68e0db5a9e1b290a63",
+            "proofs/kani/Cargo.toml": "c8c4257a5a48908937c1ebfc346ec9e0dd43bd5777e5ee3e368b2116be9d9ba9",
+            "proofs/kani/Cargo.lock": "7751cad10c51a04cc58bc76b82a42e7ba822c246fddafa6ae1b16ec7e8643e8c",
+            "crates/octravpn-core/src/session.rs": "2d0216a5551fc7ad7981e11b57efa48286dbb76826eb0961f8cf951b569b309b",
+            "crates/octravpn-core/src/relay_window.rs": "fe99cf25fa28e9cd91619033fff6af680a5e907abb4f6e8b3fca22e4f0cbc0eb"
+          },
+          "complete_input_archive_sha256": "6583d17dd072ba642feed67ba9ebc048d947aad223887397825a3764502d9b31",
+          "input_provenance_report_sha256": "84f89e7fec1be7acecefd88c334d2b31394562b48f5b783aec6654e6270f5801",
+          "report_sha256": "5345b6321ea1bdbfc024d808235279e57270bac461c65b77c87ddfe01401d74e",
+          "solver_results_sha256": "79c35702b9698eb86a8ba3dcff202aa2fdeed8a911d6051e5d3bd6f6498008ed",
+          "verbose_solver_results_sha256": "4a18df0fe01ecb7c2e7868799a7bd62403afc16cd69bdd6c52f67f6ccbc5033d"
+        }
+      }
+    ]
+  },
+  "summary": {
+    "lean_default_roots_built": 6,
+    "tlc_safety_models_completed": 3,
+    "tlc_required_negative_controls_observed": 1,
+    "tamarin_verified_lemmas": 6,
+    "tamarin_reachable_trace_lemmas": 2,
+    "kani_production_harnesses": 5,
+    "kani_checks": 321
+  }
+}

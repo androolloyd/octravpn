@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 pub const PENDING_KEY: &[u8] = b"bft.validator_set.pending";
 pub const ACTIVE_KEY: &[u8] = b"bft.validator_set.active";
 pub fn snapshot_slot(epoch: i64, pending: Option<&ValidatorUpdate>) -> bool {
-    pending.map_or(true, |p| p.activate_epoch <= epoch)
+    pending.is_none_or(|p| p.activate_epoch <= epoch)
 }
 pub fn ready_key(fingerprint: &[u8], address: &[u8]) -> Vec<u8> {
     [b"bft.validator_set.ready.", fingerprint, b".", address].concat()

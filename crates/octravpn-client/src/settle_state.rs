@@ -172,6 +172,14 @@ impl SettleStateStore {
         &self.paths
     }
 
+    pub(crate) fn migration_net(&self, session: &SessionId) -> Option<u64> {
+        self.arm_net(session)
+    }
+
+    pub(crate) fn migration_receipt(&self, session: &SessionId) -> Option<SignedReceipt> {
+        self.receipts.get(session)
+    }
+
     pub(crate) fn state(&self, session_id: &SessionId) -> Result<Option<SettlementState>> {
         SettlementState::from_code(self.state.floor(session_id))
     }
@@ -608,7 +616,7 @@ impl ArmChain for crate::runner::Client {
     async fn arm_fee(&self) -> Result<u64> {
         Ok(self
             .rpc()
-            .recommended_fee(Some("contract_call"))
+            .recommended_fee(Some(self.application().operation()))
             .await
             .ok()
             .map(|f| f.recommended)
@@ -621,8 +629,7 @@ impl ArmChain for crate::runner::Client {
     }
 
     async fn get_session_status(&self, session_id: u64) -> Result<u64> {
-        let ctx =
-            crate::chain_v3::ChainCtxV3::new(self.rpc(), self.program_addr(), self.wallet_kp());
+        let ctx = self.chain_context();
         ctx.get_session_status(session_id).await
     }
 }
@@ -632,7 +639,7 @@ impl RefundChain for crate::runner::Client {
     async fn refund_fee(&self) -> Result<u64> {
         Ok(self
             .rpc()
-            .recommended_fee(Some("contract_call"))
+            .recommended_fee(Some(self.application().operation()))
             .await
             .ok()
             .map(|f| f.recommended)
@@ -641,20 +648,17 @@ impl RefundChain for crate::runner::Client {
     }
 
     async fn get_session_status_strict(&self, session_id: u64) -> Result<u64> {
-        let ctx =
-            crate::chain_v3::ChainCtxV3::new(self.rpc(), self.program_addr(), self.wallet_kp());
+        let ctx = self.chain_context();
         ctx.get_session_status_strict(session_id).await
     }
 
     async fn get_relay_deadline(&self, session_id: u64) -> Result<u64> {
-        let ctx =
-            crate::chain_v3::ChainCtxV3::new(self.rpc(), self.program_addr(), self.wallet_kp());
+        let ctx = self.chain_context();
         ctx.get_relay_deadline(session_id).await
     }
 
     async fn current_epoch(&self) -> Result<u64> {
-        let ctx =
-            crate::chain_v3::ChainCtxV3::new(self.rpc(), self.program_addr(), self.wallet_kp());
+        let ctx = self.chain_context();
         ctx.current_epoch().await
     }
 

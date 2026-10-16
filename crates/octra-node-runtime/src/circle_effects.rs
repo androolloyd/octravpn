@@ -14,7 +14,7 @@ use octra_node_protocol::{
     },
     circles::{self, AssetMeta, LocatorMode, MetadataMode, ResourceMode},
     native_integer::parse_int64,
-    native_json::Document,
+    native_json::{Document, ReadError, ReadMode},
     transaction::decode_base64,
 };
 use sha2::{Digest, Sha256};
@@ -93,6 +93,7 @@ impl Prepared {
             update_policy: ctx.update_policy,
             storage_proof: ctx.storage_proof,
             fhe_work: ctx.fhe_work,
+            object_cost: ctx.object_cost,
         };
         let mut checked = Vec::new();
         // Native mapi_s completes admission of each child before selecting the
@@ -105,13 +106,18 @@ impl Prepared {
                 if source.payload_json.len() > 2_097_152 {
                     return Err(rejected("circle spawn payload exceeds max size"));
                 }
-                let document =
-                    Document::parse(&source.payload_json).map_err(|error| match error {
-                        octra_node_protocol::native_json::Error::Allocation => unavailable(error),
-                        octra_node_protocol::native_json::Error::Syntax(_) => {
-                            rejected("circle deploy payload is invalid")
-                        }
-                    })?;
+                let document = Document::parse_native(
+                    &source.payload_json,
+                    if ctx.profile.proof_exec {
+                        ReadMode::Plain
+                    } else {
+                        ReadMode::Safe
+                    },
+                )
+                .map_err(|error| match error {
+                    ReadError::Unavailable(error) => unavailable(error),
+                    ReadError::Json { .. } => rejected("circle deploy payload is invalid"),
+                })?;
                 let payload = Deploy::from_document(&document).map_err(|e| {
                     if e.tag == "malformed_transaction_exception" {
                         rejected("circle deploy payload is invalid")
@@ -214,51 +220,14 @@ impl Prepared {
             }
         }
         for asset in self.assets {
-            let id = asset.target.as_slice();
-            let key = asset.meta.path_key.as_slice();
-            state
-                .set(
-                    &[b"circles", id, b"assets", b"by_hash", key, b"meta"],
-                    asset.meta.to_json_bytes(),
-                )
-                .map_err(unavailable)?;
-            let field = if asset.meta.body_mode == ResourceMode::Public {
-                b"body_b64".as_slice()
-            } else {
-                b"ciphertext_b64".as_slice()
-            };
-            state
-                .set(
-                    &[b"circles", id, b"assets", b"by_hash", key, field],
-                    asset.body,
-                )
-                .map_err(unavailable)?;
-            state
-                .set(
-                    &[
-                        b"circles",
-                        id,
-                        b"assets",
-                        b"resource_keys",
-                        &asset.meta.resource_key,
-                    ],
-                    key.to_vec(),
-                )
-                .map_err(unavailable)?;
-            state
-                .set(
-                    &[b"circles", id, b"assets", b"usage_bytes"],
-                    asset.usage.to_string().into_bytes(),
-                )
-                .map_err(unavailable)?;
-            let root = state
-                .snapshot()
-                .hash_at(&[b"circles", id, b"assets", b"by_hash"])
-                .map_err(unavailable)?
-                .map_or_else(|| "0".repeat(64), hex::encode);
-            state
-                .set(&[b"circles", id, b"assets_root"], root.into_bytes())
-                .map_err(unavailable)?;
+            crate::circle_store::save_asset(
+                state,
+                &asset.target,
+                &asset.meta,
+                &asset.body,
+                asset.usage,
+            )
+            .map_err(unavailable)?;
         }
         Ok(())
     }
@@ -478,75 +447,18 @@ impl Assets<'_> {
 }
 type Locator = (Vec<u8>, Vec<u8>, Vec<u8>, LocatorMode, Option<Vec<u8>>);
 fn locator(asset: &EncryptedAsset) -> Result<Locator, Error> {
-    match (
+    let locator = octra_node_protocol::circle_resources::Locator::encrypted(
+        &asset.circle_id,
         asset.path.as_deref(),
         asset.slot_ref.as_deref(),
         asset.state_ref.as_deref(),
-    ) {
-        (None, None, None) => Err(rejected("path, slot_ref, or state_ref is required")),
-        (Some(path), None, None) => {
-            let path = circles::normalize_path(path)
-                .map_err(|e| rejected(e.0))?
-                .into_bytes();
-            Ok((
-                path.clone(),
-                circles::path_key(&path).into_bytes(),
-                circles::resource_key(&asset.circle_id, &path).into_bytes(),
-                LocatorMode::Path,
-                None,
-            ))
-        }
-        (None, Some(raw), None) | (None, None, Some(raw)) => {
-            let slot = asset.slot_ref.is_some();
-            let label = if slot { "slot_ref" } else { "state_ref" };
-            let space = |b: &u8| matches!(b, b' ' | b'\n' | b'\r' | b'\t' | 12);
-            let start = raw.iter().position(|b| !space(b)).unwrap_or(raw.len());
-            let end = raw.iter().rposition(|b| !space(b)).map_or(start, |i| i + 1);
-            let normalized = raw[start..end].to_ascii_lowercase();
-            if normalized.len() != 64 || !normalized.iter().all(u8::is_ascii_hexdigit) {
-                return Err(rejected(format!("{label} must be a 64-char hex string")));
-            }
-            let path = [
-                if slot {
-                    b"/_slots/".as_slice()
-                } else {
-                    b"/_state/".as_slice()
-                },
-                &normalized,
-            ]
-            .concat();
-            let key = circles::domain_hash(
-                if slot {
-                    b"octra:asset_path:v1"
-                } else {
-                    b"octra:asset_state_path:v1"
-                },
-                &[&path],
-            )
-            .into_bytes();
-            let resource = circles::domain_hash(
-                if slot {
-                    b"octra:circle_resource_key:slot:v1"
-                } else {
-                    b"octra:circle_resource_key:state:v1"
-                },
-                &[&asset.circle_id, if slot { &normalized } else { raw }],
-            )
-            .into_bytes();
-            Ok((
-                path,
-                key,
-                resource,
-                if slot {
-                    LocatorMode::Slot
-                } else {
-                    LocatorMode::State
-                },
-                slot.then_some(normalized),
-            ))
-        }
-        _ => Err(rejected(
-            "provide exactly one of path, slot_ref, or state_ref",
-        )),
-    }
+    )
+    .map_err(|error| rejected(error.reason))?;
+    Ok((
+        locator.path,
+        locator.key,
+        locator.resource,
+        locator.mode,
+        locator.slot,
+    ))
 }

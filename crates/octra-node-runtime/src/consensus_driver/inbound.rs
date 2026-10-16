@@ -10,6 +10,21 @@ use octra_node_protocol::{
 };
 impl<H: Host, C: Publication> Driver<H, C> {
     pub(super) async fn receive(&mut self, peer: &Peer, frame: Frame) -> Result<(), Error> {
+        if frame.message == 0x3c {
+            // Native production wiring disables resource committees, but still
+            // decodes gossip and charges well-formed rejected messages. A
+            // malformed resource gossip is logged without charging the peer.
+            match octra_node_protocol::consensus::resource_gossip::disabled_reason(
+                &self.chain,
+                &frame.payload,
+            ) {
+                Ok(reason) => self.swarm.report_peer(peer, reason),
+                Err(reason) => self
+                    .host
+                    .warning(&format!("bad_resource_attestation error = {reason}")),
+            }
+            return Ok(());
+        }
         // Decoding/authentication failures are peer input, not actor failures.
         if let Err(reason) = self.admit(peer, &frame).await {
             self.host.warning(&format!(
@@ -182,6 +197,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
                 if !hash::verify_round_sync(public, &sync)? {
                     return Err("invalid round sync signature".into());
                 }
+                self.remember_round_peer(&sync);
                 if !driver_policy::round_sync_allowed(round, &sync) {
                     return Ok(());
                 }

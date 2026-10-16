@@ -20,6 +20,11 @@ use sha2::{Digest, Sha256};
 /// The host supplies this capability; it is never deserialized from a peer.
 #[async_trait]
 pub trait SessionAuthority: Send + Sync {
+    /// A change is a refresh hint, never an authorization grant. Hosts still
+    /// revoke old permits synchronously before exposing another state tree.
+    fn updates(&self) -> Option<tokio::sync::watch::Receiver<()>> {
+        None
+    }
     /// Return no permit while syncing, behind the canonical head, unfunded,
     /// expired, closed, or unable to authenticate this request. A new snapshot
     /// must revoke obsolete permits before becoming available to admission.
@@ -163,7 +168,7 @@ impl SessionPermit {
             && self
                 .service_stop
                 .as_ref()
-                .map_or(true, |stop| !stop.is_revoked())
+                .is_none_or(|stop| !stop.is_revoked())
             && Instant::now() < self.expires_at
     }
 }

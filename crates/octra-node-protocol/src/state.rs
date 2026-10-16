@@ -67,9 +67,7 @@ pub enum TransferError {
     CreditRejected(&'static str),
 }
 pub fn valid_cipher(cipher: Option<&[u8]>) -> bool {
-    cipher.map_or(true, |value| {
-        value.is_empty() || value.starts_with(b"hfhe_v1")
-    })
+    cipher.is_none_or(|value| value.is_empty() || value.starts_with(b"hfhe_v1"))
 }
 impl Ledger {
     /// Load the complete native account view. Legacy string "0" ciphers are

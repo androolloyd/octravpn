@@ -330,10 +330,7 @@ async fn validator_restart(case: &Value) {
         hex::encode(index_root).as_bytes(),
     )
     .unwrap();
-    let chain = ChainIdentity {
-        chain_id: "validator-storage-fixture".into(),
-        genesis_root: StateRoot(root),
-    };
+    let chain = ChainIdentity::genesis("validator-storage-fixture", StateRoot(root));
     state.acknowledge_commit().unwrap();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("node.sqlite");

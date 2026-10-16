@@ -90,7 +90,7 @@ impl Handle {
     fn encode(&self) -> Result<Vec<u8>, Error> {
         let mut size = 0;
         // C++ owns this allocation; free with its allocator even if copying panics.
-        let pointer = unsafe { octra_pvac_encode(self.raw(), self.kind, &mut size) };
+        let pointer = unsafe { octra_pvac_encode(self.raw(), self.kind, &raw mut size) };
         let bytes = NativeBytes(NonNull::new(pointer).ok_or_else(failure)?);
         Ok(unsafe { std::slice::from_raw_parts(bytes.0.as_ptr(), size) }.to_vec())
     }
@@ -115,7 +115,8 @@ pub struct Cipher(Handle);
 
 pub fn keygen(seed: &[u8; 32]) -> Result<(PublicKey, SecretKey), Error> {
     let (mut public_key, mut secret_key) = (std::ptr::null_mut(), std::ptr::null_mut());
-    let status = unsafe { octra_pvac_keygen(seed.as_ptr(), &mut public_key, &mut secret_key) };
+    let status =
+        unsafe { octra_pvac_keygen(seed.as_ptr(), &raw mut public_key, &raw mut secret_key) };
     if status != 0 {
         return Err(failure());
     }
@@ -167,8 +168,14 @@ impl PublicKey {
     }
     pub fn decrypt(&self, secret: &SecretKey, cipher: &Cipher) -> Result<i64, Error> {
         let mut amount = 0;
-        if unsafe { octra_pvac_decrypt(self.0.raw(), secret.0.raw(), cipher.0.raw(), &mut amount) }
-            != 0
+        if unsafe {
+            octra_pvac_decrypt(
+                self.0.raw(),
+                secret.0.raw(),
+                cipher.0.raw(),
+                &raw mut amount,
+            )
+        } != 0
         {
             return Err(failure());
         }

@@ -63,7 +63,9 @@ impl Drop for BackendScope {
 pub fn run(input: &[u8], backend: Arc<dyn HfheBackend>) -> Result<Reply, Error> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _scope = BackendScope(BACKEND.with(|slot| slot.replace(Some(backend))));
-        super::run_reply_bytes(input).map(Reply).map_err(Error::from)
+        super::run_reply_bytes(input)
+            .map(Reply)
+            .map_err(Error::from)
     }))
     .unwrap_or_else(|_| Err(Error::Unavailable("octra_circle_wasm_host: panic".into())))
 }
@@ -82,17 +84,33 @@ pub enum CallStep {
 
 impl CallSession {
     pub fn new(backend: Arc<dyn HfheBackend>) -> Self {
-        Self { port: super::call_step::Port::new(), backend }
+        Self {
+            port: super::call_step::Port::new(),
+            backend,
+        }
     }
 
     /// The first input is an authenticated execution payload. Further inputs
     /// answer the preceding request using the native call-session JSON schema.
     pub fn step(&mut self, input: &[u8]) -> Result<CallStep, Error> {
-        if input.len() > 64 * 1024 * 1024 {
+        self.step_bounded(input, 64 * 1024 * 1024)
+    }
+
+    /// Local host transport for an already admitted native payload. The host
+    /// must measure the original byte-string key ID against the native limit
+    /// before using the adapter's base64 metadata representation. Replies use
+    /// the ordinary step method and retain their native transport limit.
+    pub fn step_byte_transport(&mut self, input: &[u8]) -> Result<CallStep, Error> {
+        self.step_bounded(input, ((64 * 1024 * 1024 + 2) / 3) * 4 + 16)
+    }
+
+    fn step_bounded(&mut self, input: &[u8], limit: usize) -> Result<CallStep, Error> {
+        if input.len() > limit {
             return Err(Error::Unavailable("circle session input invalid".into()));
         }
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _scope = BackendScope(BACKEND.with(|slot| slot.replace(Some(self.backend.clone()))));
+            let _scope =
+                BackendScope(BACKEND.with(|slot| slot.replace(Some(self.backend.clone()))));
             match self.port.step(input) {
                 Ok((0, body)) => Ok(CallStep::Complete(body.into_bytes())),
                 Ok((3, body)) => Ok(CallStep::Request(body.into_bytes())),
@@ -105,8 +123,136 @@ impl CallSession {
     }
 }
 
+/// Safe ownership of the adopted native compute cache builder. Closing or
+/// dropping this port retains upstream generation and retirement semantics.
+pub struct ComputeStorageBuilder {
+    port: super::ComputeBuild,
+}
+fn compute_local<T>(work: impl FnOnce() -> Result<T, String>) -> Result<T, Error> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(work))
+        .unwrap_or_else(|_| Err("compute storage execution failed".into()))
+        .map_err(Error::Unavailable)
+}
+impl ComputeStorageBuilder {
+    pub fn begin(key: &str) -> Result<Self, Error> {
+        compute_local(|| {
+            let port = super::ComputeBuild {
+                port: std::sync::Mutex::new(super::BuildPort {
+                    token: None,
+                    closed: false,
+                }),
+            };
+            super::build_begin(&port, key)?;
+            Ok(Self { port })
+        })
+    }
+    fn step(&self, input: &[u8]) -> Result<(), Error> {
+        compute_local(|| {
+            if input.len() > super::MAX_GUEST_READ_BYTES {
+                return Err("compute storage input refused".into());
+            }
+            let token = self.port.token()?;
+            let _memory = super::payload_memory(input)?;
+            let payload: super::Payload = serde_json::from_slice(input)
+                .map_err(|_| "compute storage input refused".to_owned())?;
+            match payload.action.as_deref() {
+                Some("compute_storage_put") => super::run_compute_storage_put(&token, &payload)?,
+                Some("compute_storage_seal") => super::run_compute_storage_seal(&token, &payload)?,
+                _ => return Err("compute storage action refused".into()),
+            };
+            Ok(())
+        })
+    }
+    pub fn put(&self, key: &str, value: &[u8]) -> Result<(), Error> {
+        use base64::Engine;
+        let input = serde_json::to_vec(&serde_json::json!({
+            "action":"compute_storage_put", "compute_storage_key":key,
+            "compute_storage_value_b64":base64::engine::general_purpose::STANDARD.encode(value),
+        }))
+        .map_err(|error| Error::Unavailable(error.to_string()))?;
+        self.step(&input)
+    }
+    pub fn seal(&self, root: &str, entries: usize, bytes: usize) -> Result<(), Error> {
+        let input = serde_json::to_vec(&serde_json::json!({
+            "action":"compute_storage_seal", "compute_storage_root":root,
+            "compute_storage_entries":entries, "compute_storage_bytes":bytes,
+        }))
+        .map_err(|error| Error::Unavailable(error.to_string()))?;
+        self.step(&input)
+    }
+    pub fn close(&self) {
+        self.port.close();
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ComputeStorageStatus {
+    Missing,
+    Ready {
+        root: String,
+        entries: usize,
+        bytes: usize,
+    },
+}
+pub fn compute_storage_status(key: &str) -> Result<ComputeStorageStatus, Error> {
+    compute_local(|| {
+        super::normalize_hex64(key, "compute storage cache key")?;
+        match super::compute_cache_call(super::CacheMessage::Read(
+            key.to_owned(),
+            super::now_secs(),
+        ))? {
+            super::CacheReply::Missing => Ok(ComputeStorageStatus::Missing),
+            super::CacheReply::Ready(entry) => Ok(ComputeStorageStatus::Ready {
+                root: entry.root,
+                entries: entry.storage.len(),
+                bytes: entry.weight,
+            }),
+            _ => Err("compute storage status reply differs".into()),
+        }
+    })
+}
+/// Native cache removal reports a live builder or lease as busy.
+pub fn compute_storage_drop(key: &str) -> Result<bool, Error> {
+    compute_local(|| {
+        let raw = serde_json::to_vec(&serde_json::json!({"compute_storage_cache_key":key}))
+            .map_err(|e| e.to_string())?;
+        let _memory = super::payload_memory(&raw)?;
+        let payload: super::Payload = serde_json::from_slice(&raw)
+            .map_err(|_| "compute storage drop input refused".to_owned())?;
+        let reply = super::run_compute_storage_drop(&payload)?;
+        match reply.get("status").and_then(Value::as_str) {
+            Some("missing") => Ok(true),
+            Some("busy") => Ok(false),
+            _ => Err("compute storage drop reply differs".into()),
+        }
+    })
+}
+/// A cache hold survives through the entire caller-owned replay operation.
+pub struct ComputeStorageLease {
+    _lease: super::ComputeLease,
+}
+impl ComputeStorageLease {
+    pub fn hold(key: &str, root: &str, entries: usize, bytes: usize) -> Result<Self, Error> {
+        compute_local(|| {
+            super::normalize_hex64(key, "compute storage cache key")?;
+            super::normalize_hex64(root, "compute storage root")?;
+            match super::compute_cache_call(super::CacheMessage::Hold {
+                key: key.to_owned(),
+                root: root.to_owned(),
+                entries,
+                bytes,
+            })? {
+                super::CacheReply::Held(id) => Ok(Self {
+                    _lease: super::ComputeLease { id: Some(id) },
+                }),
+                _ => Err("compute storage hold reply differs".into()),
+            }
+        })
+    }
+}
+
 pub(super) fn invoke_backend(request: &Value) -> Result<Value, HostFailure> {
-    let backend = BACKEND.with(|slot| slot.borrow().clone())
+    let backend = BACKEND
+        .with(|slot| slot.borrow().clone())
         .ok_or_else(|| HostFailure::Unavailable("Rust HFHE backend not installed".into()))?;
     backend.call(request).map_err(|error| match error {
         Error::Rejected(reason) => HostFailure::Rejected(reason),
@@ -125,8 +271,14 @@ mod tests {
     }
     #[test]
     fn safe_api_classifies_errors_and_releases_backend_scope() {
-        assert!(matches!(run(b"not-json", Arc::new(Backend)), Err(Error::Rejected(_))));
+        assert!(matches!(
+            run(b"not-json", Arc::new(Backend)),
+            Err(Error::Rejected(_))
+        ));
         assert!(BACKEND.with(|slot| slot.borrow().is_none()));
-        assert!(matches!(invoke_backend(&Value::Null), Err(HostFailure::Unavailable(_))));
+        assert!(matches!(
+            invoke_backend(&Value::Null),
+            Err(HostFailure::Unavailable(_))
+        ));
     }
 }

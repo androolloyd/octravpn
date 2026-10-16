@@ -1,0 +1,88 @@
+{
+  "date": "2026-10-15",
+  "status": "scoped_fix_and_paid18_qualified",
+  "scope": "Node plain-asset reader only. Client and view readers retain their existing behavior; consensus, dependencies, the lockfile and live configuration are unchanged. No public spends.",
+  "change": "Preserve RPC error codes and distinguish explicit null from an absent result. The circle_asset read retries temporary code 110 and transport failures within its budget. Only code 112 or explicit null yields None. Raw calls, submissions and public error types are unchanged; immutable readback remains strict.",
+  "budgets": {
+    "attempts": 4,
+    "attempt_seconds": 10,
+    "overall_seconds": 30,
+    "outer_publication_seconds_unchanged": 120
+  },
+  "source_sha256": {
+    "crates/octravpn-core/src/rpc.rs": "91db476b7218eced3bbb952030a66aad49656001861c56fc368569ac6ff1ed3e",
+    "crates/octravpn-core/src/rpc/asset_tests.rs": "596d72eb7958ba34bd77da23d670198e1675a0ccb30f2e4cc5982b946950959f",
+    "crates/octravpn-node/src/circle_update.rs": "f3d39aa95cc6ea3cc767ea63d283817df9af43ff72fdb777f876e175a1dbb009",
+    "crates/octravpn-node/src/v3_boot/publication.rs": "9f1284800e3519586f96f64e7b07222cba16db7600abcd752dec8476c694a60d",
+    "crates/octravpn-node/src/v3_boot/publication/tests.rs": "f1fb9eebc4e6c3586625eb979e82035875fca18d35150f32a6b099ae8d421ac9",
+    "Cargo.lock": "f28ad88c09fb9c0ed4ed33eb8866a191cc0fdfba2ad4c5435443942dbefc3b35",
+    "docker/native-vpn/Dockerfile": "eb0ae7ea208ce0ff52c2b40708680d646c3336bd62edfe7a4997bae686dc031f",
+    "docker/native-vpn/Dockerfile.dockerignore": "fcaaff1cdc1caee37e49a5f78c4168513f6690136e846091d6565c78d5e7132c"
+  },
+  "tests": {
+    "core_passed": 7,
+    "publication_passed": 5,
+    "failed": 0,
+    "ignored": 0,
+    "covers": [
+      "Code110 retries preserve the exact method, Circle and path.",
+      "Exhausted code 110 stays an error even with missing-data words and result:null.",
+      "Only code 112 or explicit null means missing; absent result and schema errors are terminal.",
+      "Other native codes and raw or submission code 110 do not gain retries.",
+      "The absolute read deadline clips backoff and an inflight request.",
+      "Committed readback recovers exact bytes after code 110 with exactly one signed write.",
+      "Wrong bytes, malformed body and missing method fail without retrying or writing."
+    ]
+  },
+  "strict_clippy": {
+    "default": "passed alltargets --no-deps",
+    "all_features": "passed alltargets --no-deps"
+  },
+  "reproduce": {
+    "core_tests": "cargo test --offline --locked -p octravpn-core --lib rpc::asset_tests -- --test-threads=1",
+    "publication_tests": "cargo test --offline --locked -p octravpn-node --lib v3_boot::publication::tests -- --test-threads=1",
+    "strict_default": "cargo clippy --offline --locked -p octravpn-core -p octravpn-node --all-targets --no-deps -- -D warnings",
+    "strict_all_features": "cargo clippy --offline --locked -p octravpn-core -p octravpn-node --all-targets --all-features --no-deps -- -D warnings"
+  },
+  "provenance": {
+    "qualification_report_sha256": "989b78a6508bbd1abbdfbe38ff90f0642257a291c237a330e76acb6f90a20602",
+    "log_sha256": {
+      "core_tests": "025c55219533f0c69aa25d1505b3c470872677d2d9c4ec32ec8db430a4bfb495",
+      "publication_tests": "79c8c7a2743c6ecad4f6e64ff512837845ae5435ce364941f071e19963985b6c",
+      "strict_default": "a6484422edf815ca6a35ac3f538d0addc3bf537474bc92fa73d37aa1748b9e03",
+      "strict_all_features": "72b17ec04ffea0d313cfcc0fd8fa62d318944db63dddf33239354936195226d8"
+    },
+    "test_executable_sha256": {
+      "octravpn_core-3839d1ae4a24cb62": "6d39479a73090b8dc48502e0ffb2b31f0ae2b480c51c62f243ac32d892eeacc0",
+      "octravpn_node-d5929032a00d7e8d": "af8a1fe6f389324d60827f9add94264e5e2ba5501a54f89f80ccca58431b59a4"
+    },
+    "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+    "native_rpc_source_sha256": "8802001921dd452bbfa9e7ca5f0ff538210a39a6d7b218da38305f694a4d0f97"
+  },
+  "preserved_failed_run": {
+    "image": "sha256:2b7158b56c3c4a750277d258deda091937eee573cae049009a8f9daa341ac5de",
+    "source_aggregate": "9fcd973b116fd44f2b908cdb2c89728997e8a0c49051c1945e8b01dd8ba089c5",
+    "phase": "immutable policy asset publication during active-session tariff rotation after operator restart",
+    "rpc_code": 110,
+    "focused_passed": 35,
+    "qualified": false,
+    "journal_sha256": "6b7c99ca9a1a747b1efda09ee515a9577211e3d26290666a37974469031319c1",
+    "qualification_sha256": "f0538d7f6015142b4255973f5b81bf17bac42cc3be91f6c30b52dc2ae5051f83"
+  },
+  "limits": [
+    "Fresh isolated paid18 combined qualification passed against the final captured production sources; original failed16 and failed17 evidence remain preserved.",
+    "Read retries do not resubmit a write or relax immutable bytes/hash/anchor checks.",
+    "No public network, full node parity or Mainnet qualification claim."
+  ],
+  "source_sha256_scope": "Exact scoped retry qualification snapshot; the two Docker packaging hashes are historical. Final combined source identity is separately bound below.",
+  "combined_paid18": {
+    "checkpoint": "docs/rust-node/checkpoints/2026-10-15/native-vpn.json",
+    "checkpoint_sha256": "cd07cd26c920ca96cde5f9061f196c2378aaedc515f87e6f2e858e3c3df7525f",
+    "image": "sha256:9c5db2275a4cb93c356dc331ad3250f4207d15d95f788a2c0fc1dabffede9c73",
+    "source_aggregate_sha256": "d3726b4632442462fa565b7d257267a87dc7a63ac325a07a8380ca91847bdfe2",
+    "qualified": true,
+    "focused_passed": 51,
+    "policy_rotation_readback_and_settlement_passed": true,
+    "external_network_or_mainnet_qualified": false
+  }
+}

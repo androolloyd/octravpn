@@ -425,7 +425,7 @@ async fn cold_open_session_then_settle_confirm() {
     let program_addr = Address::from_display("oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3");
     let circle_id = "oct8taXQ4CvohcgzCJFYyaKrrAbcZs5mxkBCJQQYWb2Pcun".to_string();
     let tailnet_id: u64 = 0;
-    let max_pay: u64 = 1_500;
+    let max_pay: u64 = 5_000;
 
     // Pre-seed sealed policy + state-root + on-chain anchor. The
     // helper picks `price_per_mb_shared = 1_000` so the net assertion

@@ -128,6 +128,7 @@ pub(crate) struct ControlState {
     /// to the program's `get_session_status` view.
     pub session_verifier: Option<SessionAdmissionVerifier>,
     pub native_authority: Option<Arc<dyn crate::admission::SessionAuthority>>,
+    pub receipt_settlement: Option<Arc<dyn crate::embedded::ReceiptSettlement>>,
     /// Optional read-only relay lifecycle probe for
     /// `POST /session/:id/receipt`. Hub-built states set this so every
     /// countersigned receipt post checks whether the chain has already
@@ -417,7 +418,7 @@ fn transaction_is_confirmed_call_to_program(
     let open_session = tx
         .get("encrypted_data")
         .and_then(|v| v.as_str())
-        .map_or(true, |method| {
+        .is_none_or(|method| {
             matches!(
                 method,
                 "open_session"
@@ -503,6 +504,7 @@ pub(crate) struct ShadowSigner {
 
 #[derive(Clone)]
 pub(crate) struct ControlSession {
+    pub announcement: Option<octravpn_core::control::AnnounceSessionRequest>,
     pub byte_offset: u64,
     pub last_seq: u64,
     pub last_blind: octravpn_core::session::Blind,
@@ -590,6 +592,7 @@ impl ControlState {
             rate_limit_cfg: crate::rate_limit::RateLimitCfg::default(),
             session_verifier: None,
             native_authority: None,
+            receipt_settlement: None,
             relay_lifecycle_verifier: None,
             shadow_signer: None,
             shadow_price_per_byte: 0,

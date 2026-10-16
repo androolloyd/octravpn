@@ -64,7 +64,13 @@ impl<A: Host, B: BundleHost, E: Executor> Canonical<A, B, E> {
             let parent = self
                 .node
                 .store
-                .retained_head(Sequence(head.cursor.epoch.0 - 1))
+                .retained_head(Sequence(
+                    head.cursor
+                        .sequence
+                        .0
+                        .checked_sub(1)
+                        .ok_or_else(|| anyhow::anyhow!("cannot republish snapshot floor"))?,
+                ))
                 .await?;
             let verified = self
                 .node
@@ -90,12 +96,16 @@ impl<A: Host, B: BundleHost, E: Executor> Canonical<A, B, E> {
             );
         }
         if let Some(pending) = &self.pending {
-            let record = self
+            let sequence = self
                 .node
-                .publisher
-                .record(Sequence(u64::try_from(finalized.epoch_id)?))
-                .await?;
-            pending.committed(&record)?;
+                .store
+                .sequence_for_epoch(u64::try_from(finalized.epoch_id)?)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("committed epoch unavailable"))?;
+            let record = self.node.publisher.record(sequence).await?;
+            let cursor = self.node.store.retained_head(sequence).await?.cursor;
+            let pending = pending.clone();
+            tokio::task::spawn_blocking(move || pending.committed(&record, cursor)).await??;
         }
         self.head.store(finalized.epoch_id, Ordering::Release);
         Ok(())

@@ -5,43 +5,21 @@ use crate::{
     circle::{CircleRuntime, WasmProfile, MAX_INPUT_BYTES},
     circle_store,
     circle_transaction::Rules,
-    execution::{Completion, Error, Rejection},
+    execution::{Completion, Error},
     state_batch::StateBatch,
 };
 use octra_node_protocol::{
-    circle_program::{self, Deploy, Refusal, LIMIT_NAMES},
+    circle_program::{self, Deploy, LIMIT_NAMES},
     circle_wasm::{public_read, Error as WasmError},
     native_json::Document,
-    octb::admission,
     state::Ledger,
     transaction::{decode_base64, OpType, Transaction},
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
-pub(crate) enum Failure {
-    Refused(Refusal),
-    Unavailable(Error),
-}
-impl Failure {
-    pub(crate) fn effect(self) -> WasmError {
-        match self {
-            Self::Refused(e) => WasmError::Rejected(e.reason),
-            Self::Unavailable(e) => WasmError::Unavailable(e.0.into_bytes()),
-        }
-    }
-}
-impl From<Refusal> for Failure {
-    fn from(error: Refusal) -> Self {
-        Self::Refused(error)
-    }
-}
-fn unavailable(reason: impl std::fmt::Display) -> Failure {
-    Failure::Unavailable(Error(reason.to_string()))
-}
-fn refused(tag: &'static str, reason: impl Into<Vec<u8>>) -> Failure {
-    Refusal::new(tag, reason).into()
-}
+pub(crate) use crate::circle_error::Failure;
+use crate::circle_error::{completion, refused, unavailable};
 fn set(state: &mut StateBatch, circle: &[u8], path: &[&[u8]], value: &[u8]) -> Result<(), Failure> {
     let mut key = vec![b"circles".as_slice(), circle];
     key.extend_from_slice(path);
@@ -59,32 +37,31 @@ fn debit(tx: &Transaction, ledger: &mut Ledger) -> Result<(), Failure> {
         .debit(&tx.from, &tx.ou, tx.nonce, None)
         .map_err(|e| refused("insufficient_balance", e.0.into_bytes()))
 }
-fn admit_octb(code: &[u8], rules: Rules) -> Result<(), Failure> {
+fn admit_octb(runtime: &CircleRuntime, code: &[u8], rules: Rules) -> Result<(), Failure> {
     let invalid = |reason: String| refused("circle_program_invalid", reason.into_bytes());
     let raw =
         decode_base64(code).map_err(|error| invalid(format!("Invalid_argument(\"{error}\")")))?;
-    if raw.starts_with(b"OCPG") {
-        return Err(unavailable(
-            "OCTB Program certificate admission host is not available",
-        ));
-    }
-    admission::decode(&raw, rules.storage_proof)
+    runtime
+        .admit_program(&raw, rules.storage_proof)
         .map(|_| ())
-        .map_err(|error| invalid(error.to_string()))
+        .map_err(|error| {
+            if error.is_operational() {
+                unavailable(error)
+            } else {
+                invalid(error.to_string())
+            }
+        })
 }
-fn document(tx: &Transaction) -> Result<Document, Failure> {
-    let missing = if tx.op_type == OpType::CircleDeploy {
-        b"deploy_circle requires message payload".as_slice()
-    } else {
-        b"circle_program_update requires message payload"
-    };
-    let raw = tx
-        .message
-        .as_deref()
-        .ok_or_else(|| refused("malformed_transaction", missing))?;
-    // The native JSON syntax exception text requires its own qualification.
-    // Resource/parser failures must not become an invented consensus refusal.
-    Document::parse(raw).map_err(unavailable)
+fn document(tx: &Transaction, rules: Rules) -> Result<Document, Failure> {
+    use octra_node_protocol::native_json::ReadMode;
+    crate::circle_operation::document_with_mode(
+        tx,
+        if rules.inspect {
+            ReadMode::Plain
+        } else {
+            ReadMode::Tree
+        },
+    )
 }
 fn validate(
     runtime: &CircleRuntime,
@@ -133,12 +110,12 @@ fn deploy(
     ledger: &mut Ledger,
     state: &mut StateBatch,
 ) -> Result<(), Failure> {
-    let payload = Deploy::from_document(&document(tx)?)?;
+    let payload = Deploy::from_document(&document(tx, rules)?)?;
     // Consensus_circle_code_admission runs OCTB verification before deriving
     // the address. Never install unchecked bytecode into canonical state.
     if payload.runtime == b"octb" {
         if let Some(code) = &payload.code {
-            admit_octb(code, rules)?;
+            admit_octb(runtime, code, rules)?;
         }
     }
     let circle = payload.id(&tx.from, tx.nonce);
@@ -279,12 +256,12 @@ fn update(
     ledger: &mut Ledger,
     state: &mut StateBatch,
 ) -> Result<(), Failure> {
-    let code = circle_program::update_code(&document(tx)?)?;
+    let code = circle_program::update_code(&document(tx, rules)?)?;
     let info = circle_store::info(&state.snapshot(), &tx.to)
         .map_err(unavailable)?
         .ok_or_else(|| refused("circle_not_found", b"circle does not exist"))?;
     if info.runtime == b"octb" {
-        admit_octb(&code, rules)?;
+        admit_octb(runtime, &code, rules)?;
     }
     if info.owner != tx.from {
         return Err(refused(
@@ -335,17 +312,5 @@ pub fn execute(
         OpType::CircleProgramUpdate => update(runtime, rules, tx, ledger, state),
         _ => Err(unavailable("operation is not a Circle code transition")),
     };
-    match result {
-        Ok(()) => Ok(Completion::Confirmed {
-            created_account: None,
-        }),
-        Err(Failure::Unavailable(error)) => Err(error),
-        Err(Failure::Refused(error)) => Ok(Completion::Rejected(Rejection {
-            tag: error.tag.into(),
-            reason: error.reason,
-            notify_reason: None,
-            consume_nonce: false,
-            persist_state: false,
-        })),
-    }
+    completion(result)
 }

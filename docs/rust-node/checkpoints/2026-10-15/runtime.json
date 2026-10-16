@@ -1,0 +1,318 @@
+{
+  "schema": 2,
+  "date": "2026-10-15",
+  "status": "PASS_FULL_RUNTIME_NATIVE_INODE_RELEASE_WITH_COMPOSED_FOLLOWUP",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "scope": "All58Runtime library/integration targets in isolated Linux release; strengthened42unit follow-up uses identical production bytes. Subsequent current macOS42unit and Node54/sharedstrict gates cover the independently adopted observer-admission body. Gateway and Single candidate source remain unadopted.",
+  "result": {
+    "targets": 58,
+    "passed": 187,
+    "failed": 0,
+    "declared_ignored": 2,
+    "composition": "Full immutable release plus replacing its unit result with42strengthened unit tests; no repeated-test summation."
+  },
+  "qualification": {
+    "path": "out/node-port-final-20261015/native-inode-candidate/qualification.json",
+    "sha256": "e8f78095e8c765e05db7ef91c5cda7b94b9caa63a647b49a1983ba623d6dfd09"
+  },
+  "current_combined_qualification": {
+    "path": "out/node-port-final-20261015/inode-combined-qualification.json",
+    "sha256": "651af93171a3cbe50e6e72e137c1c032398f40ea2e9c60d1c8ac970f3c6be109"
+  },
+  "historical_pre_inode": {
+    "schema": 1,
+    "date": "2026-10-15",
+    "completed_at": "2026-10-15T21:36:28.594945+00:00",
+    "status": "PASS_COMPOSED_FULL_RUNTIME_RELEASE",
+    "scope": "Pre-batching octra-node-runtime library and all integration targets from the reviewed candidate. Finite local qualification; no complete upstream parity, public-chain execution or deployment claim.",
+    "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+    "result": {
+      "targets": 58,
+      "passed": 164,
+      "failed": 0,
+      "declared_ignored": 2,
+      "filtered": 0,
+      "composition": "The frozen full run covered all 58 targets; successful focused reruns replace the two affected target results, without double-counting."
+    },
+    "source": {
+      "runtime_crate_files": 330,
+      "runtime_crate_tree_sha256": "ee4876a7909105e623361594352d5f248b9f4893d906b1ed77a19e277ed23803",
+      "tree_digest_encoding": "SHA256 of UTF-8 json.dumps({relative_path: SHA256(file_bytes)}, sort_keys=True, separators=(',', ':')) plus one LF; all regular files below crates/octra-node-runtime.",
+      "qualified_source_manifest": {
+        "path": "out/node-port-final-20261015/runtime-candidate-release/release-qualified-source.json",
+        "sha256": "7deb1222bc20f79f96fc0be26575d9db198c2297bf4cd9b2afa32537b40d69f3"
+      },
+      "qualified_source_files": 2209,
+      "original_candidate_files": 2185,
+      "extra_public_read_only_inputs": 24,
+      "original_stage_and_qualified_tree_unchanged": true,
+      "runtime_rust_live_drift": [],
+      "root_lock_sha256": "f28ad88c09fb9c0ed4ed33eb8866a191cc0fdfba2ad4c5435443942dbefc3b35",
+      "root_manifest_sha256": "5e08f4e5a7d1882df7b10c80664d2c3725b64ba53f5a9b2f7f36dd9f495937ca",
+      "rust_toolchain_manifest_sha256": "2e566b33dfaaf876ca55fd110256c7838c935ec35a6f949544e0f028db7383f5",
+      "runtime_manifest_sha256": "0504fc3f34ce96f5a005dd04c4ad475f306b379f9105eb5c8d0184dbf41927b2",
+      "selected_source_sha256": {
+        "src/compute_service/actor.rs": "6667c6719fa823ac79a65ceec9f953e002f4bb11a05145d74b5ad33aa28bc0f0",
+        "src/compute_service/actor/jobs.rs": "be6ed8037d22320926ba63b975ed9ae6d1a05e62a2e90ffe6ced5cb67c28b0e8",
+        "src/compute_service/actor/tests.rs": "bae29ec6940b60a273cb474e90ffd4a33f383a6fc5097d9959037743c76c750f",
+        "tests/circle_parity.rs": "e316804139bcc84e4a1af11df5a4f2ab0a5d5e9db5d595253bfe4d4df14ba18b",
+        "tests/circle_query.rs": "cdd804b3dff3a4dcb4024ecfe1a1a21bf849bfcf25cbdae279b4c8df48ec6a9a",
+        "tests/fixtures/circle-engine.json": "fb73be50697e722683a4441198552a821cf6181c242d94b0f905cb0e05ae61f9"
+      },
+      "reviewed_candidate": {
+        "source_files_changed": 100,
+        "patch_sha256": "182c49f477087cb62c514cd281d35ff49c6062cc936a80c6f3ca1c7ff84dc238",
+        "review_sha256": "a6c3fbc93b5511574b6b7cdc2a06c36e1d0d976fdf9669137c00a4faf765fce8",
+        "source_manifest_sha256": "babbcc8ac3bb05f41c2ad5b042a0276a641d21697c3b2a34a793b74fd7f305cb",
+        "adoption_report": {
+          "path": "out/node-port-final-20261015/runtime-clippy-adoption.json",
+          "sha256": "2f8c4fcb9e9ca53eb02f65e5bbea5d927054a829bbb85f9f4055cd3da376968d"
+        },
+        "scope": "Mechanical lint cleanup plus bounding the owned compute actor future allocation; native arithmetic, admission and ownership semantics retained."
+      },
+      "runtime_tree_composition": "The final 330-file runtime tree equals the frozen capture except the independently refreshed circle-engine fixture. The qualified-source manifest preserves first-full-run fixture bytes; the final selected fixture hash and follow-up inputs are recorded separately."
+    },
+    "tools": {
+      "image": "sha256:62d73a659a92699cf1230d84a89521d4266f2eeb7b7e22b41835103871c76cb1",
+      "rustc": "1.96.0 (ac68faa20 2026-05-25)",
+      "rustc_commit": "ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96",
+      "cargo": "1.96.0 (30a34c682 2026-05-25)",
+      "host": "aarch64-unknown-linux-gnu",
+      "llvm": "22.1.2",
+      "profile": "release optimized",
+      "rustc_report": {
+        "path": "out/node-port-final-20261015/runtime-candidate-release/release-rustc.txt",
+        "sha256": "f77b0143371b8a220549f762eacd32249d05c8c34f767890aef5fff616c3a07a"
+      }
+    },
+    "isolation": {
+      "network": "none",
+      "source_and_registry": "read-only",
+      "host_cargo": false,
+      "live_implementation_edits": false,
+      "public_or_old_store_effects": false
+    },
+    "full_run": {
+      "command": "cargo test -p octra-node-runtime --release --offline --locked --lib --tests --no-fail-fast",
+      "exit_code": 101,
+      "passed": 162,
+      "failed": 2,
+      "declared_ignored": 2,
+      "targets": 58,
+      "log": {
+        "path": "out/node-port-final-20261015/runtime-candidate-release/release-full.log",
+        "sha256": "95c3959a0ab0cc7ddb4398d7570bc42bf420d9d2425a30dc7f15db9b64cce6ae"
+      },
+      "result_report": {
+        "path": "out/node-port-final-20261015/runtime-candidate-release/release-full-results.json",
+        "sha256": "cace2be38c3f20ebb8e5facf8add6da52bf630dd4ba9801f1e8befc31fd63611"
+      },
+      "run_provenance": {
+        "path": "out/node-port-final-20261015/runtime-candidate-release/release-run.json",
+        "sha256": "c9e76e3793ffa52dae0f3eae96e275676a6912fe21e121a77c986459c46df0a2"
+      },
+      "failures": [
+        {
+          "target": "circle_parity",
+          "test": "rust_host_matches_pristine_engine_storage_events_metering_and_refusals",
+          "cause": "Fixture app_source_sha256.Cargo.lock still recorded the pre-YAML 714eec lock while the actual locked source used f28ad88.",
+          "resolution": "Fresh locked registry build and pinned native WASM engine replay passed all 9 complete cases; only the fixture lock provenance hash changed.",
+          "fixture_checkpoint": "circle-engine.json",
+          "fixture_sha256": "fb73be50697e722683a4441198552a821cf6181c242d94b0f905cb0e05ae61f9",
+          "all_9_inputs_outputs_and_wasm_unchanged": true
+        },
+        {
+          "target": "circle_query",
+          "test": "native_rpc_context_matches_octb_view_receipts_and_immutable_roots",
+          "cause": "The isolated copy omitted two dynamically named public generator provenance inputs, causing NotFound before execution.",
+          "resolution": "Supplied the exact existing fixture-declared hashes as read-only inputs; test assertions and expected VM receipts unchanged.",
+          "inputs": [
+            {
+              "fixture": "circle-octb-view.json",
+              "field": "generator_dependencies",
+              "path": "scripts/node-port/circle-state-fixtures.py",
+              "sha256": "5c2469fad8e3f27a9b82658760fcee5055e68d05959a2b06ca2432dd57f9de34"
+            },
+            {
+              "fixture": "circle-octb-view.json",
+              "field": "generator_dependencies",
+              "path": "scripts/node-port/circle-assets-fixtures.py",
+              "sha256": "207c35eb635c05842ee936e53dcfb7275ab3c051eafbccabae4813b7a49236eb"
+            }
+          ]
+        }
+      ]
+    },
+    "followups": {
+      "command": "cargo test -p octra-node-runtime --release --offline --locked --test circle_parity --test circle_query --no-fail-fast",
+      "initial_cache_retry": {
+        "exit_code": 101,
+        "passed": 4,
+        "failed": 1,
+        "cause": "Cargo reused the old include_str fixture executable because the qualified fixture timestamp predated full compilation.",
+        "correction": "Advanced only the external qualified fixture copy mtime; bytes unchanged and original source untouched. The affected target rebuilt.",
+        "log": {
+          "path": "out/node-port-final-20261015/runtime-candidate-release/release-followup-stale-cache.log",
+          "sha256": "1de02044578113d84a06778039801f0578d150436ec9b9431f9f02d656b1c0c6"
+        },
+        "run_provenance": {
+          "path": "out/node-port-final-20261015/runtime-candidate-release/release-followup-stale-cache-run.json",
+          "sha256": "4c42f70603050c93de96bcfa7cdecb3217f011677dee122f2911ca842f5d2974"
+        }
+      },
+      "final": {
+        "exit_code": 0,
+        "targets": 2,
+        "passed": 5,
+        "failed": 0,
+        "ignored": 0,
+        "filtered": 0,
+        "log": {
+          "path": "out/node-port-final-20261015/runtime-candidate-release/release-followup.log",
+          "sha256": "661d985276ebecc83d01e9e3a5c6b53f9824a29aeb5772370b094b247fc822ca"
+        },
+        "run_provenance": {
+          "path": "out/node-port-final-20261015/runtime-candidate-release/release-followup-run.json",
+          "sha256": "d2838fe43f1894e6db02e66538d0769e00b6306edc316fd08dcc60deaea08822"
+        }
+      },
+      "no_production_assertion_weakening": true,
+      "expected_native_inputs_outputs_and_wasm_unchanged": true
+    },
+    "executables": {
+      "full_manifest": {
+        "path": "out/node-port-final-20261015/runtime-candidate-release/release-executables.sha256",
+        "sha256": "9912222bfd6bbfb78e263970ded2e67c4535c008280952326e7ee8afc6a1163b"
+      },
+      "final_followup_manifest": {
+        "path": "out/node-port-final-20261015/runtime-candidate-release/release-followup-executables.sha256",
+        "sha256": "f7a92ac5dd8ac9bff73e7d4dbb09d603fa59d76ed27d9fc242aa15b6889120d6"
+      },
+      "unit_test_sha256": "03c1144aa0ba56f559dab6c8c189df99370aa6c70285050bb892043b6dc3dcc9",
+      "circle_parity_first_sha256": "5b4fefec6164028c72264df34f2c17dedd885f237b32719b771965cc5e1271c3",
+      "circle_parity_final_sha256": "6a5eecb11036c2f56734a473d0012ed25696bc01902a677152ed9ff6a1c8ed1b",
+      "circle_query_unchanged_sha256": "991e241b31d2ed777719e5795628d8701367d333ac2fcbb6798d814b917d99c5"
+    },
+    "new_actor_tests": {
+      "passed": 4,
+      "included_in_lib_passes": 20,
+      "cases": [
+        "command_panic_preserves_unavailable_reply_and_guard_cleanup",
+        "pending_response_cancellation_drops_guard_and_reply_once",
+        "receiver_close_does_not_abandon_owned_command",
+        "unpolled_response_owns_guard_without_starting_work"
+      ],
+      "scope": "Receiver closure, pending cancellation, panic and unpolled ownership retain the owned guard/reply behavior; no detached work introduced."
+    },
+    "ignored_helpers": [
+      {
+        "name": "browser_fixture",
+        "reason": "Launched only by the external Chromium qualification runner; no standalone pass counted here."
+      },
+      {
+        "name": "crash_worker",
+        "reason": "Controlled child of the passing process_crash_recovery test; no standalone pass counted."
+      }
+    ],
+    "strict_clippy": {
+      "passed": true,
+      "command": "cargo clippy -p octra-node-runtime --no-deps --offline --locked --keep-going --all-targets --message-format=json -- -D warnings",
+      "log": {
+        "path": "out/node-port-final-20261015/runtime-clippy-candidate/evidence/clippy-all.log",
+        "sha256": "08438d39556b1c34694d379e3af61c382bb16b74c9cf2b2089677311f156351e"
+      },
+      "scope": "Scoped runtime diagnostics only; dependency and whole-workspace lint gates retain their separate evidence."
+    },
+    "dependency_deltas": {
+      "qualifier": "The complete runtime gate uses frozen dependency bytes. The following exact source/metadata differences from adopted current dependencies are separately qualified; this is not a byte-identical full rerun of those changed dependencies.",
+      "files": [
+        {
+          "path": "crates/octra-browser/Cargo.toml",
+          "stage_sha256": "760ae1dbce4b09d8ec892b71ddc241a831ed240f52cbc676beacdb10d92212d6",
+          "live_sha256": "fc19c6638e36c570bea79bd439caef9b89520edc2215913ed7f75816425619c6"
+        },
+        {
+          "path": "crates/octra-hfhe/src/keys.rs",
+          "stage_sha256": "221087aa71fb4c712884029d758729baf194f9f89472ad9572e0c9e4b13e32f3",
+          "live_sha256": "67efb4552fbc12690344d89188379023b4f6eb648a968f00bb5bc98bce621d9c"
+        },
+        {
+          "path": "crates/octra-hfhe/src/proof/zero.rs",
+          "stage_sha256": "229371c0abd5f0a5cb0bea9acd402e5b94f37d7232ad44f91bcef1f908808a00",
+          "live_sha256": "d3f7406e2e8eed766b40736e69484d9aae4c970a0f13ecb753a7f01e91f93815"
+        }
+      ],
+      "browser": "Only the declared MSRV changes from 1.85 to workspace 1.89; browser Rust sources and actual 1.96 compiler are unchanged.",
+      "hfhe": "Two positive-basis/constant 8 remainder checks use is_multiple_of; Option::map_or(true, ...) uses is_none_or. Existing guards, values and short-circuit behavior are retained.",
+      "current_hfhe_qualification": {
+        "passed": 13,
+        "failed": 0,
+        "ignored": 0,
+        "targets": 7,
+        "scope": "Native key, wire and actual zero/bound/range proof regressions after equivalent integer/Option style changes; earlier full49-test evidence retained separately",
+        "report": {
+          "path": "out/node-port-final-20261015/hfhe-style-final-qualification.json",
+          "sha256": "6766390966cf7cba2231573f8a134aa7a9d4692b063d369f078de03a8f2a0bc7"
+        },
+        "source_manifest": {
+          "path": "out/node-port-final-20261015/hfhe-style-final-source.json",
+          "sha256": "c0389d8c9a5e7bb853a70307af8c8a07389444927824f939c43d3330cd961f18"
+        },
+        "strict_clippy_passed": true,
+        "strict_clippy_log": {
+          "path": "out/node-port-final-20261015/hfhe-clippy-final-2.log",
+          "sha256": "c154f0f008c72760f478c3bd693fdff8f4348e4328accc1877f4b0ab4c1f7c60"
+        }
+      },
+      "earlier_full_hfhe": "The earlier 49-test native crypto qualification remains separate. No repeated full native-crypto run is claimed solely for the three equivalent style changes."
+    },
+    "evidence": {
+      "qualification_report": {
+        "path": "out/node-port-final-20261015/runtime-candidate-release/qualification.json",
+        "sha256": "1ca09d8fb2d69cd4e500cd4085f20ae9b6b93647b56ce6b8bf478703c379ad86"
+      },
+      "raw_artifacts": "out/ is local evidence; this tracked checkpoint preserves hashes without assuming those ignored files exist in a fresh clone."
+    },
+    "limits": [
+      "A passing finite suite does not prove arbitrary transaction/state/consensus equivalence.",
+      "The two browser/crash helpers are not counted as direct passes.",
+      "Node HTTP/gRPC, native paid VPN, browser, formal and public-devnet gates retain their own checkpoints."
+    ],
+    "post_batching_followup": {
+      "checkpoint": "canonical-storage.json",
+      "sha256": "6bb5388ccf100833fb51dac71f1108c455e25a122d7d3155dd5844ee51955c5f",
+      "scope": "Later canonical writer batching and its consumers are qualified separately; the 330-file tree and 164-pass full run above remain the original pre-batching snapshot."
+    },
+    "native_inode_followup": {
+      "checkpoint": "docs/rust-node/checkpoints/2026-10-15/native-inode.json",
+      "qualification": "out/node-port-final-20261015/native-inode-candidate/qualification.json",
+      "qualification_sha256": "e8f78095e8c765e05db7ef91c5cda7b94b9caa63a647b49a1983ba623d6dfd09",
+      "full_runtime_release": {
+        "passed": 187,
+        "targets": 58,
+        "failed": 0,
+        "declared_ignored": 2
+      },
+      "composition": "A fresh complete runtime release run includes the9native inode production paths;42test-only precision unit results replace its unchanged unit result. The original pre-inode164test record remains historical. Rootobserver-only admission fix retains its independent full54Node and strict gates; finalcombinedgates pending.",
+      "adopted": true,
+      "public_performance_qualified": false
+    }
+  },
+  "gateway_storage_combined_followup": {
+    "qualification": {
+      "path": "out/node-port-final-20261015/gateway-storage-final-combined-qualification.json",
+      "sha256": "f60bce038a144b62f7bd087e82297a6463bbc1ae2e3769cf4ae57795aa1beff7"
+    },
+    "selected_targets": 15,
+    "passed": 90,
+    "failed": 0,
+    "ignored_helpers": 2,
+    "fresh_host_native_registry_cases": 9,
+    "native_registry_report": {
+      "path": "out/node-port-final-20261015/gateway-host-native/report.json",
+      "sha256": "f8622d6d63fb7018a1446f64e3af60ad9b7520b6db423aba6253a6d07e62f771"
+    },
+    "scope": "Current host unit/state/storage/canonical/validator/native engine consumers on one source capture. Earlier complete187-target-count evidence remains historical; no fresh whole crypto run claimed.",
+    "source_drift": []
+  }
+}

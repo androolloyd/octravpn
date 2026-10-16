@@ -223,7 +223,7 @@
     "Complete verification acceptance and refusal, full backend key/profile policy and resource limits",
     "All retained and active execution/proof profiles through the backend adapter",
     "Side-channel and secret lifetime review, including SHA-256/SHAKE state and compiler copies",
-    "Isolated verifier worker, Circle backend and native node integration",
+    "Sustained native node/Circle/private proof-worker resource, cancellation and all-profile qualification beyond the recorded local fixtures",
     "Cross-architecture differential qualification and performance"
   ],
   "total_native_fixture_cases": 19076,
@@ -232,5 +232,24 @@
     "Aggregated legacy range verification returns false in pinned native source",
     "Ordinary legacy 64-bit range construction reaches a linear-combination ciphertext beyond the native zero-proof base-layer limit; embedded bound range remains a separate supported path",
     "ru_cipher/nat_cipher reject materialized source ciphers; abstract hidden-carrier recryption paths remain active and require porting"
-  ]
+  ],
+  "switch_scope": "Full-backend substitution and every retained/active profile remain separate qualification gates. The node already uses the Rust Circle/private HFHE host; switch_completed=false is not a missing-node-adapter claim.",
+  "current_host_integration": {
+    "date": "2026-10-15",
+    "node_circle_backend": "crates/octra-node-runtime/src/circle_hfhe.rs",
+    "node_private_crypto": "crates/octra-node-runtime/src/private_crypto.rs",
+    "launchers": [
+      "crates/octra-node/src/network.rs",
+      "crates/octra-node/src/devnet.rs"
+    ],
+    "bounded_workers": "Native executor execution/proof leases plus the shared nonblocking Circle verifier lane",
+    "rust_hfhe_release_tests": 49,
+    "status": "PASS",
+    "command": "cargo test --release --locked --offline -p octra-hfhe --all-targets --no-fail-fast",
+    "profile": "release",
+    "report_sha256": "454ccd3192c7aa3e4f07831cdefc2806c8f77d7b1e5de9d66ce4771c835a9d2e",
+    "log_sha256": "a0d46cf920bac6633020e3e884b2a0943a0e18985e21e067dc693b47ff6349ed",
+    "scope": "Finite native fixture and implementation regression evidence; no whole-backend, side-channel, all-architecture or public deployment certification.",
+    "current_status": "docs/rust-node/status.md"
+  }
 }

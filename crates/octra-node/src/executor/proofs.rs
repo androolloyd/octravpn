@@ -108,7 +108,8 @@ impl Native {
                 &ledger,
                 state,
                 parent.ledger_root.as_bytes(),
-                self.private_profile(bound, epoch),
+                epoch,
+                self.private_policy(bound, epoch),
                 &rules.stealth_minimum,
             ))
         })
@@ -121,19 +122,34 @@ impl Native {
         ledger: &Ledger,
         state: &Snapshot,
         root: &[u8],
-        profile: private_balance::Profile,
+        epoch: i64,
+        policy: octra_node_runtime::private_key::Policy,
         minimum: &BigInt,
     ) -> Checked {
         if !preverify_commit::managed(tx) {
             return Checked::Ready(None);
         }
-        if !matches!(tx.op_type, OpType::Encrypt | OpType::Decrypt) {
+        match tx.op_type {
+            OpType::Private => return skip(Kind::Invalid, b"private_disabled".to_vec()),
+            OpType::Recrypt => return skip(Kind::Invalid, b"recrypt_disabled".to_vec()),
+            _ => (),
+        }
+        if matches!(
+            tx.op_type,
+            OpType::CircleBalanceCellPut | OpType::CircleRegisterCellPut
+        ) {
+            return self.prove_cell(tx, ledger, state, root, epoch, policy.balance, minimum);
+        }
+        if !matches!(
+            tx.op_type,
+            OpType::Encrypt | OpType::Decrypt | OpType::Stealth | OpType::Claim | OpType::KeySwitch
+        ) {
             return skip(Kind::Unavailable, b"private_preverify_pending".to_vec());
         }
         let hash = state
             .get(&[b"pvac_hashes", &tx.from])
             .filter(|h| *h != b"none");
-        let plan = private_balance::verify_with_key(ledger, tx, profile, || {
+        let key = || {
             let Some(hash) = hash else {
                 return Ok(None);
             };
@@ -149,24 +165,107 @@ impl Native {
                 ));
             }
             Ok(Some(blob))
-        });
-        let plan = match plan {
+        };
+        let profile = policy.balance;
+        let verified = if tx.op_type == OpType::KeySwitch {
+            octra_node_runtime::private_key::verify(
+                ledger,
+                tx,
+                policy,
+                epoch,
+                self.config.migration.as_deref(),
+                key,
+            )
+            .map(|plan| (plan.current_cipher().to_vec(), plan.transition_hash()))
+        } else if matches!(tx.op_type, OpType::Stealth | OpType::Claim) {
+            octra_node_runtime::private_transfer::verify(
+                ledger,
+                &octra_node_runtime::state_batch::StateBatch::from_snapshot(state.clone()),
+                tx,
+                profile,
+                key,
+            )
+            .map(|plan| (plan.current_cipher().to_vec(), plan.transition_hash()))
+        } else {
+            private_balance::verify_with_key(ledger, tx, profile, key)
+                .map(|plan| (plan.current_cipher().to_vec(), plan.transition_hash()))
+        };
+        let (current, transition_hash) = match verified {
             Ok(plan) => plan,
             Err(private_balance::Error::Rejected(failure)) => {
-                return skip(Kind::Invalid, failure.reason)
+                return skip(
+                    Kind::Invalid,
+                    failure.preverify_reason.unwrap_or(failure.reason),
+                )
             }
             Err(private_balance::Error::Unavailable(_)) => {
                 return skip(Kind::Unavailable, b"private_preverify_pending".to_vec());
             }
         };
-        let Some(hash) = hash else {
-            return skip(Kind::Invalid, b"pvac_key_not_consensus_bound".to_vec());
+        let hash = match hash {
+            Some(hash) => hash,
+            None if tx.op_type == OpType::KeySwitch => &[b'0'; 64],
+            None => return skip(Kind::Invalid, b"pvac_key_not_consensus_bound".to_vec()),
         };
         let binding = Binding::Private(State {
             pre_state_hash: preverify_receipt::state_hash(root),
-            source_cipher_hash: hex::encode(Sha256::digest(plan.current_cipher())).into_bytes(),
+            source_cipher_hash: hex::encode(Sha256::digest(current)).into_bytes(),
             pvac_key_hash: hash.to_vec(),
-            transition_hash: Some(plan.transition_hash().into_bytes()),
+            transition_hash: Some(transition_hash.into_bytes()),
+        });
+        match receipt(tx, binding, minimum) {
+            Ok(receipt) => Checked::Ready(Some(Box::new(receipt))),
+            Err(error) => skip(Kind::Invalid, error.to_string().into_bytes()),
+        }
+    }
+    fn prove_cell(
+        &self,
+        tx: &Transaction,
+        ledger: &Ledger,
+        state: &Snapshot,
+        root: &[u8],
+        epoch: i64,
+        profile: private_balance::Profile,
+        minimum: &BigInt,
+    ) -> Checked {
+        use octra_node_runtime::circle_cell::{self, Error};
+        // Source binding precedes the cell callback in the adopted worker.
+        let Some(encoded) = tx.encrypted_data.as_deref() else {
+            return skip(
+                Kind::Invalid,
+                b"circle cell ciphertext is required".to_vec(),
+            );
+        };
+        let cipher = match octra_node_protocol::transaction::decode_base64(encoded) {
+            Ok(raw) if !raw.is_empty() => raw,
+            _ => return skip(Kind::Invalid, b"circle cell ciphertext is invalid".to_vec()),
+        };
+        let Some(hash) = state
+            .get(&[b"pvac_hashes", &tx.from])
+            .filter(|hash| *hash != b"none")
+        else {
+            return skip(Kind::Invalid, b"pvac_key_not_consensus_bound".to_vec());
+        };
+        let plan = match circle_cell::preverify(
+            &self.runtime,
+            tx,
+            ledger,
+            state,
+            epoch,
+            profile.strict,
+            profile.math,
+        ) {
+            Ok(plan) => plan,
+            Err(Error::Rejected(reason)) => return skip(Kind::Invalid, reason),
+            Err(Error::Unavailable(_)) => {
+                return skip(Kind::Unavailable, b"circle_cell_preverify_pending".to_vec())
+            }
+        };
+        let binding = Binding::Private(State {
+            pre_state_hash: preverify_receipt::state_hash(root),
+            source_cipher_hash: hex::encode(Sha256::digest(cipher)).into_bytes(),
+            pvac_key_hash: hash.to_vec(),
+            transition_hash: Some(plan.transition_hash().as_bytes().to_vec()),
         });
         match receipt(tx, binding, minimum) {
             Ok(receipt) => Checked::Ready(Some(Box::new(receipt))),

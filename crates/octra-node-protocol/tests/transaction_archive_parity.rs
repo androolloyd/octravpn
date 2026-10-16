@@ -94,9 +94,9 @@ fn raw_transaction_payload_and_legacy_archive_match_native() {
 fn unknown_nested_fields_do_not_exhaust_call_stack() {
     let depth = 50_000;
     let mut raw = Vec::from(b"{\"ignored\":".as_slice());
-    raw.extend(std::iter::repeat(b'[').take(depth));
+    raw.extend(std::iter::repeat_n(b'[', depth));
     raw.extend_from_slice(b"null");
-    raw.extend(std::iter::repeat(b']').take(depth));
+    raw.extend(std::iter::repeat_n(b']', depth));
     raw.extend_from_slice(b"}");
     let document = Document::parse(&raw).unwrap();
     assert_eq!(

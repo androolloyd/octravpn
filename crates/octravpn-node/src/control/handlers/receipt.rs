@@ -75,6 +75,23 @@ pub(crate) async fn get_state(
         let Some(entry) = s.sessions.get(&id) else {
             return (StatusCode::NOT_FOUND, Json(ApiError::new("not announced"))).into_response();
         };
+        if s.receipt_settlement.is_some() {
+            if let Some(fixed) = s.receipt_vault.get(&id) {
+                return Json(SessionStateResponse {
+                    bytes_served: fixed.receipt.bytes_used,
+                    last_seq: fixed.receipt.seq,
+                    proposed: Some(ProposedReceipt {
+                        receipt: fixed.receipt,
+                        node_pubkey: fixed.node_pubkey,
+                        node_sig: fixed.node_sig,
+                        enc_bytes_used: fixed.enc_bytes_used,
+                        enc_net: fixed.enc_net,
+                        pvac_zero_proof: fixed.pvac_zero_proof,
+                    }),
+                })
+                .into_response();
+            }
+        }
         let current = s.router.bytes(&id).unwrap_or((0, 0));
         let Some(bytes) = current
             .0
@@ -325,8 +342,10 @@ pub(crate) async fn post_receipt(
             .into_response();
     }
 
+    let durable_retry =
+        s.receipt_settlement.is_some() && s.receipt_vault.get(&id).as_ref() == Some(&sr);
     let vault_floor = s.receipt_vault.current_seq(&id).unwrap_or(0);
-    if sr.receipt.seq < vault_floor {
+    if sr.receipt.seq < vault_floor && !durable_retry {
         return (
             StatusCode::CONFLICT,
             Json(ApiError::new("receipt seq below vault floor")),
@@ -344,7 +363,7 @@ pub(crate) async fn post_receipt(
                 .into_response();
         }
     };
-    if sr.receipt.seq < journal_floor {
+    if sr.receipt.seq < journal_floor && !durable_retry {
         return (
             StatusCode::CONFLICT,
             Json(ApiError::new("receipt seq below journal floor")),
@@ -441,10 +460,42 @@ pub(crate) async fn post_receipt(
     }
 
     let settlement_hash = sr.settlement_hash();
-    if let Err(e) = s.receipt_vault.put(&id, &sr) {
-        tracing::warn!(error = %e, session = %id_hex, "receipt vault write failed");
-        let status = receipt_vault_error_status(&e);
-        return (status, Json(ApiError::new("receipt vault write failed"))).into_response();
+    {
+        let _binding = s.admission_lock.lock();
+        if let Err(e) = s.receipt_vault.put(&id, &sr) {
+            tracing::warn!(error = %e, session = %id_hex, "receipt vault write failed");
+            let status = receipt_vault_error_status(&e);
+            return (status, Json(ApiError::new("receipt vault write failed"))).into_response();
+        }
+        if s.receipt_settlement.is_some() {
+            for (key, grant) in s.allowlist.snapshot() {
+                if grant.request.session_id == id {
+                    s.allowlist.remove(&key);
+                }
+            }
+        }
+    }
+
+    if let Some(publisher) = &s.receipt_settlement {
+        let Some(announcement) = entry.announcement.clone() else {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ApiError::new("receipt announcement unavailable")),
+            )
+                .into_response();
+        };
+        // This countersignature closes data delivery before fixing the claim.
+        // The durable publisher refuses any later conflicting byte total.
+        if let Err(error) = publisher.confirm(sr.clone(), announcement).await {
+            tracing::warn!(%error, session = %id_hex, "operator claim pending or unavailable");
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ApiError::new(
+                    "operator claim is not confirmed; retry the same receipt",
+                )),
+            )
+                .into_response();
+        }
     }
 
     if s.events.receiver_count() > 0 {
@@ -540,6 +591,7 @@ mod tests {
             state.0.sessions.insert(
                 id,
                 crate::control::state::ControlSession {
+                    announcement: None,
                     byte_offset: 0,
                     last_seq: 0,
                     last_blind: octravpn_core::session::Blind::new([0; 32]),
@@ -683,6 +735,116 @@ mod tests {
         assert_eq!(body.settlement_hash, want_hash);
         assert_eq!(body.settlement_hash.len(), 64);
         assert_eq!(state.receipt_vault.get(&id), Some(signed));
+    }
+
+    struct DeferredSettlement {
+        entered: tokio::sync::Notify,
+        committed: tokio::sync::Notify,
+    }
+    #[async_trait::async_trait]
+    impl crate::embedded::ReceiptSettlement for DeferredSettlement {
+        async fn confirm(
+            &self,
+            _: SignedReceipt,
+            _: octravpn_core::control::AnnounceSessionRequest,
+        ) -> anyhow::Result<()> {
+            self.entered.notify_one();
+            self.committed.notified().await;
+            Ok(())
+        }
+    }
+
+    /// This is a control callback fixture; the separate native-process gate
+    /// establishes real escrow and canonical claim inclusion.
+    #[tokio::test]
+    async fn native_receipt_freezes_data_and_waits_for_confirmed_claim_callback() {
+        let node = Arc::new(KeyPair::generate());
+        let client = KeyPair::generate();
+        let router = Arc::new(OnionRouter::new());
+        let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
+        let publisher = Arc::new(DeferredSettlement {
+            entered: tokio::sync::Notify::new(),
+            committed: tokio::sync::Notify::new(),
+        });
+        let mut control = ControlState::new(node.clone(), router, allowlist.clone());
+        control.receipt_settlement = Some(publisher.clone());
+        let state = Arc::new(control);
+        let id = SessionId::from_u64(7);
+        let wg = [45; 32];
+        let request = signed_announce(id.clone(), &client, wg);
+        assert_eq!(
+            announce(State(state.clone()), Json(request.clone()))
+                .await
+                .into_response()
+                .status(),
+            StatusCode::OK
+        );
+        assert!(allowlist.contains_key(&wg));
+        let signed = SignedReceipt::build(
+            Receipt::new(
+                (*state.receipt_context).clone(),
+                id.clone(),
+                1,
+                4096,
+                octravpn_core::session::Blind::new([46; 32]),
+            ),
+            &client,
+            &node,
+        );
+        let handler_state = state.clone();
+        let handler_signed = signed.clone();
+        let handler_id = id.to_hex();
+        let post = tokio::spawn(async move {
+            post_receipt(State(handler_state), Path(handler_id), Json(handler_signed))
+                .await
+                .into_response()
+        });
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            publisher.entered.notified(),
+        )
+        .await
+        .unwrap();
+        assert!(
+            !post.is_finished(),
+            "queueing a claim must not acknowledge canonical inclusion"
+        );
+        assert!(!allowlist.contains_key(&wg));
+        let frozen = parse_state(
+            get_state(State(state.clone()), Path(id.to_hex()))
+                .await
+                .into_response(),
+        )
+        .await;
+        assert_eq!(frozen.bytes_served, 4096);
+        assert_eq!(frozen.last_seq, 1);
+        assert_eq!(frozen.proposed.unwrap().receipt, signed.receipt);
+        assert_eq!(
+            announce(State(state.clone()), Json(request.clone()))
+                .await
+                .into_response()
+                .status(),
+            StatusCode::OK
+        );
+        assert!(
+            !allowlist.contains_key(&wg),
+            "receipt retry must not reopen a paid data grant"
+        );
+        publisher.committed.notify_one();
+        assert!(parse_post_receipt(post.await.unwrap()).await.accepted);
+        state.sessions.remove(&id);
+        assert_eq!(
+            announce(State(state.clone()), Json(request))
+                .await
+                .into_response()
+                .status(),
+            StatusCode::OK
+        );
+        assert!(
+            !allowlist.contains_key(&wg),
+            "receipt-only restart recovery must not reopen delivery"
+        );
+        assert!(state.sessions.contains_key(&id));
     }
 
     #[tokio::test]

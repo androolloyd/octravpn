@@ -43,6 +43,7 @@ pub struct RpcClient {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(bound(deserialize = "T: Deserialize<'de>"))]
 struct RpcResponse<T> {
     #[allow(dead_code)]
     #[serde(default)]
@@ -50,8 +51,51 @@ struct RpcResponse<T> {
     #[allow(dead_code)]
     #[serde(default)]
     id: u64,
-    result: Option<T>,
+    #[serde(default)]
+    result: ResponseResult<T>,
     error: Option<RpcError>,
+}
+
+// Explicit null is a legacy missing-asset response; an omitted result is a
+// malformed envelope. Neither is native unavailable code110.
+#[derive(Debug, Default)]
+enum ResponseResult<T> {
+    #[default]
+    Missing,
+    Present(Option<T>),
+}
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for ResponseResult<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Option::<T>::deserialize(deserializer).map(Self::Present)
+    }
+}
+
+// Preserve the response code until the caller selects a retry policy. Public
+// errors retain their existing text and type, including for raw calls/writes.
+#[derive(Debug)]
+struct RequestFailure {
+    error: CoreError,
+    rpc_code: Option<i64>,
+    null_result: bool,
+    transport_retryable: bool,
+}
+impl From<CoreError> for RequestFailure {
+    fn from(error: CoreError) -> Self {
+        Self {
+            error,
+            rpc_code: None,
+            null_result: false,
+            transport_retryable: false,
+        }
+    }
+}
+impl RequestFailure {
+    fn transport(error: CoreError) -> Self {
+        Self {
+            transport_retryable: true,
+            ..error.into()
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -221,9 +265,9 @@ impl RpcClient {
         for attempt in 0..4 {
             match self.call_once::<T>(method, &params).await {
                 Ok(v) => return Ok(v),
-                Err(e) if !is_retryable(&e) => return Err(e),
+                Err(e) if !is_retryable(&e.error) => return Err(e.error),
                 Err(e) => {
-                    last_err = Some(e);
+                    last_err = Some(e.error);
                     if attempt == 3 {
                         break;
                     }
@@ -236,27 +280,58 @@ impl RpcClient {
         Err(last_err.unwrap_or_else(|| CoreError::Rpc(format!("rpc {method}: retries exhausted"))))
     }
 
-    async fn call_once<T: DeserializeOwned>(&self, method: &str, params: &Value) -> CoreResult<T> {
+    async fn call_once<T: DeserializeOwned>(
+        &self,
+        method: &str,
+        params: &Value,
+    ) -> Result<T, RequestFailure> {
         let req = RpcRequest {
             jsonrpc: "2.0",
             id: 1,
             method,
             params: params.clone(),
         };
-        let resp = self
+        let mut resp = self
             .http
             .post(&self.endpoint)
             .json(&req)
             .send()
             .await
-            .map_err(|e| CoreError::Rpc(format!("send {method}: {e}")))?;
+            .map_err(|e| {
+                RequestFailure::transport(CoreError::Rpc(format!("send {method}: {e}")))
+            })?;
         let status = resp.status();
         if status.is_server_error() {
-            return Err(CoreError::Rpc(format!("rpc {method} HTTP {status}")));
+            return Err(RequestFailure::transport(CoreError::Rpc(format!(
+                "rpc {method} HTTP {status}"
+            ))));
         }
-        let resp: RpcResponse<T> = resp
-            .json()
+        // Bound both declared and streamed bodies, including chunked replies.
+        // This exceeds the native per-response budget and permits base64 assets
+        // without trusting a remote endpoint's Content-Length header.
+        const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
+        if resp
+            .content_length()
+            .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
+        {
+            return Err(
+                CoreError::Rpc(format!("rpc {method}: response exceeds byte limit")).into(),
+            );
+        }
+        let mut body = Vec::new();
+        while let Some(chunk) = resp
+            .chunk()
             .await
+            .map_err(|e| RequestFailure::transport(CoreError::Rpc(format!("read {method}: {e}"))))?
+        {
+            if chunk.len() > MAX_RESPONSE_BYTES.saturating_sub(body.len()) {
+                return Err(
+                    CoreError::Rpc(format!("rpc {method}: response exceeds byte limit")).into(),
+                );
+            }
+            body.extend_from_slice(&chunk);
+        }
+        let resp: RpcResponse<T> = serde_json::from_slice(&body)
             .map_err(|e| CoreError::Rpc(format!("decode {method}: {e}")))?;
         if let Some(err) = resp.error {
             let detail = match &err.data {
@@ -264,13 +339,25 @@ impl RpcClient {
                 Some(Value::Null) | None => String::new(),
                 Some(other) => format!(" ({other})"),
             };
-            return Err(CoreError::Rpc(format!(
-                "rpc {method} error {}: {}{detail}",
-                err.code, err.message
-            )));
+            return Err(RequestFailure {
+                error: CoreError::Rpc(format!(
+                    "rpc {method} error {}: {}{detail}",
+                    err.code, err.message
+                )),
+                rpc_code: Some(err.code),
+                null_result: false,
+                transport_retryable: false,
+            });
         }
-        resp.result
-            .ok_or_else(|| CoreError::Rpc(format!("rpc {method}: empty result")))
+        match resp.result {
+            ResponseResult::Present(Some(value)) => Ok(value),
+            result => Err(RequestFailure {
+                error: CoreError::Rpc(format!("rpc {method}: empty result")),
+                rpc_code: None,
+                null_result: matches!(result, ResponseResult::Present(None)),
+                transport_retryable: false,
+            }),
+        }
     }
 
     pub async fn node_status(&self) -> CoreResult<NodeStatus> {
@@ -296,8 +383,26 @@ impl RpcClient {
         params: &[Value],
         caller: Option<&Address>,
     ) -> CoreResult<Value> {
+        self.application_call(
+            crate::v3_calls::Application::Program,
+            program_addr,
+            method,
+            params,
+            caller,
+        )
+        .await
+    }
+
+    pub async fn application_call(
+        &self,
+        application: crate::v3_calls::Application,
+        program_addr: &Address,
+        method: &str,
+        params: &[Value],
+        caller: Option<&Address>,
+    ) -> CoreResult<Value> {
         let raw = self
-            .contract_call_raw(program_addr, method, params, caller)
+            .application_call_raw(application, program_addr, method, params, caller)
             .await?;
         // Real Octra wraps the return as `{ "result": <value>, "storage": {...} }`.
         // Mock returns bare. Strip + normalise stringified u64 so callers
@@ -324,11 +429,29 @@ impl RpcClient {
         params: &[Value],
         caller: Option<&Address>,
     ) -> CoreResult<Value> {
+        self.application_call_raw(
+            crate::v3_calls::Application::Program,
+            program_addr,
+            method,
+            params,
+            caller,
+        )
+        .await
+    }
+
+    pub async fn application_call_raw(
+        &self,
+        application: crate::v3_calls::Application,
+        program_addr: &Address,
+        method: &str,
+        params: &[Value],
+        caller: Option<&Address>,
+    ) -> CoreResult<Value> {
         let mut p = vec![json!(program_addr.display()), json!(method), json!(params)];
         if let Some(c) = caller {
             p.push(json!(c.display()));
         }
-        self.call("contract_call", json!(p)).await
+        self.call(application.view_method(), json!(p)).await
     }
 
     pub async fn submit(&self, signed_tx: &Value) -> CoreResult<SubmitResult> {
@@ -365,6 +488,59 @@ impl RpcClient {
         self.call(method, params).await
     }
 
+    /// Read an asset through temporary canonical-publication/worker pauses.
+    /// Only this read API retries native unavailable code 110. Missing assets,
+    /// invalid responses and other native error codes retain their meaning.
+    /// `None` requires native not-found code112 or an explicit legacy null.
+    pub async fn circle_asset(&self, circle: &str, path: &str) -> CoreResult<Option<Value>> {
+        self.circle_asset_until(
+            circle,
+            path,
+            tokio::time::Instant::now() + Duration::from_secs(30),
+        )
+        .await
+    }
+
+    async fn circle_asset_until(
+        &self,
+        circle: &str,
+        path: &str,
+        deadline: tokio::time::Instant,
+    ) -> CoreResult<Option<Value>> {
+        let params = json!([circle, path]);
+        let timeout = || CoreError::Rpc("rpc circle_asset: read deadline exceeded".into());
+        for attempt in 0..4 {
+            let now = tokio::time::Instant::now();
+            if now >= deadline {
+                return Err(timeout());
+            }
+            let attempt_deadline = deadline.min(now + Duration::from_secs(10));
+            let failure = match tokio::time::timeout_at(
+                attempt_deadline,
+                self.call_once("circle_asset", &params),
+            )
+            .await
+            {
+                Ok(Ok(value)) => return Ok(Some(value)),
+                Ok(Err(failure)) if failure.rpc_code == Some(112) || failure.null_result => {
+                    return Ok(None);
+                }
+                Ok(Err(failure)) => failure,
+                Err(_) => return Err(timeout()),
+            };
+            let retryable = match failure.rpc_code {
+                Some(code) => code == 110,
+                None => failure.transport_retryable,
+            };
+            if !retryable || attempt == 3 {
+                return Err(failure.error);
+            }
+            let next = tokio::time::Instant::now() + Duration::from_millis(100 << attempt);
+            tokio::time::sleep_until(deadline.min(next)).await;
+        }
+        unreachable!("fourth attempt returns its result")
+    }
+
     /// `octra_isValidator(addr)` — true iff `addr` is a current Octra
     /// protocol validator. Used by `register_endpoint` callers as a
     /// pre-check (the program-side gate is the authoritative one).
@@ -373,6 +549,10 @@ impl RpcClient {
             .await
     }
 }
+
+#[cfg(test)]
+#[path = "rpc/asset_tests.rs"]
+mod asset_tests;
 
 #[derive(Debug, Deserialize)]
 pub struct NodeStatus {

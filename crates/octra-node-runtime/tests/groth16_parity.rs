@@ -20,6 +20,14 @@ fn bytes(value: &Value) -> Vec<u8> {
 fn flag(v: &Value, k: &str) -> bool {
     v[k].as_bool().unwrap_or(false)
 }
+fn rust_vpn_bytecode(report: &Value) -> Vec<u8> {
+    use octra_node_protocol::aml::source::{self, Syntax};
+    let raw = include_bytes!("../../../program/main-v5.aml");
+    assert_eq!(report["aml_sha256"], hex::encode(Sha256::digest(raw)));
+    let compiled = source::compile(raw, Syntax::Source, true).unwrap();
+    assert_eq!(compiled.octb, bytes(&report["cases"]["bytecode"]));
+    compiled.octb
+}
 struct ProofHost {
     unavailable: bool,
 }
@@ -146,7 +154,7 @@ fn native_groth16_bytes_gates_effort_and_worker_outages() {
 }
 
 #[test]
-fn existing_vpn_aml_private_administration_matches_native_state_and_effort() {
+fn rust_compiled_vpn_admin_handoff_rotation_and_replay_match_native_state_and_effort() {
     use octra_node_protocol::octb::admission;
     use octra_node_runtime::octb::fix_jumps;
     let report: Value = serde_json::from_str(include_str!("fixtures/vpn-admin.json")).unwrap();
@@ -179,7 +187,7 @@ fn existing_vpn_aml_private_administration_matches_native_state_and_effort() {
     ] {
         assert_eq!(report[key], hex::encode(Sha256::digest(raw)), "{key}");
     }
-    let code = admission::decode(&bytes(&report["cases"]["bytecode"]), true).unwrap();
+    let code = admission::decode(&rust_vpn_bytecode(&report), true).unwrap();
     let code = fix_jumps(code.code());
     let mut committed = StorageTable::new(0);
     let mut host = ProofHost { unavailable: false };
@@ -246,7 +254,7 @@ fn existing_vpn_aml_private_administration_matches_native_state_and_effort() {
 }
 
 #[test]
-fn circle_host_executes_private_admin_proof_and_rejects_replay() {
+fn circle_host_executes_private_admin_handoff_rotation_and_rejects_replay() {
     use octra_node_protocol::{native_json::Document, transaction::RuleMode};
     use octra_node_runtime::{
         circle::{WasmProfile, WasmRules},
@@ -260,7 +268,7 @@ fn circle_host_executes_private_admin_proof_and_rejects_replay() {
     let public: Value =
         serde_json::from_str(include_str!("fixtures/vpn-admin-public.json")).unwrap();
     let circle = public["program"].as_str().unwrap().as_bytes();
-    let code = bytes(&report["cases"]["bytecode"]);
+    let code = rust_vpn_bytecode(&report);
     let hash = hex::encode(Sha256::digest(&code)).into_bytes();
     let mut state = StateBatch::default();
     state.begin().unwrap();
@@ -318,8 +326,10 @@ fn circle_host_executes_private_admin_proof_and_rejects_replay() {
             inspect: true,
             update_policy: true,
             hfhe_strict: true,
+            hfhe_scope: None,
             storage_proof: true,
             fhe_work: true,
+            object_cost: true,
         };
         let attempted = circle_call::execute(
             &runtime,
@@ -370,5 +380,5 @@ fn circle_host_executes_private_admin_proof_and_rejects_replay() {
         )
         .unwrap();
     assert!(view.success);
-    assert_eq!(view.response.unwrap().text().as_ref(), b"1");
+    assert_eq!(view.response.unwrap().text().as_ref(), b"10");
 }

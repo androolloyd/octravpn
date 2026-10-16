@@ -1,0 +1,14 @@
+{
+  "repository": "https://github.com/octra-labs/lite_node",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "path": "config/network.env",
+  "sha256": "db87b3323080e7d7090e01aa2d7636985f49ba4c639ec26c78673a1c43a15c07",
+  "chain_id": "octra-devnet-9871-cluster",
+  "config_hash": "89c4deb7de2144dd2193f9abdc7fc87e2ed6889e4700def42d8c1d0ee756ccd9",
+  "checkpoint": {
+    "epoch": 1278039,
+    "state_root": "ab602f2a1956a9df087106a686ea36e654c819e62321ae6b4ed3cf61107676ee",
+    "txid_hi": 660497
+  },
+  "scope": "Adopted native network authority and checkpoint. This does not attest an original genesis root or a successful public-network join."
+}

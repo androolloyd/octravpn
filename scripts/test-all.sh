@@ -28,10 +28,17 @@ cd "$(dirname "$0")/.."
 say() { printf '\n=== %s ===\n' "$*"; }
 
 say "cargo workspace"
-cargo build --workspace --all-targets
-cargo test --workspace
-cargo test -p octravpn-mesh --features test-helpers
-cargo clippy --workspace --tests --features test-helpers -- -D warnings
+cargo build --locked --workspace --all-targets
+if [[ -z "${HEADSCALE_BIN:-}" ]]; then
+  # Keep passthrough tests on the root lockfile instead of resolving the
+  # sibling's untracked standalone lockfile in a nested Cargo invocation.
+  cargo build --locked -p headscale-cli --bin headscale
+  HEADSCALE_BIN="$(python3 -c 'import os,pathlib; print((pathlib.Path(os.environ.get("CARGO_TARGET_DIR", "target")) / "debug/headscale").resolve())')"
+  export HEADSCALE_BIN
+fi
+cargo test --locked --workspace
+cargo test --locked -p octravpn-mesh --features test-helpers
+cargo clippy --locked --workspace --tests --features test-helpers -- -D warnings
 
 say "bench snapshots"
 ./scripts/bench-regression.sh

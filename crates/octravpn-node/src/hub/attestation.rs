@@ -418,11 +418,11 @@ impl Hub {
         Ok(())
     }
 
-    /// `settle_claim(session_id, bytes_used)` — operator-side half
+    /// `settle_claim(session_id, bytes_used, net)` — operator-side half
     /// of the two-tx settle. Submit once per session at session
     /// close (or when the receipt rate crosses a threshold worth
-    /// settling). Equivocation slashes us in-AML, so callers must
-    /// commit to a single bytes_used per session.
+    /// settling). Current settlement binds both bytes and microOCT credit;
+    /// equivocation refunds the escrow for governance adjudication.
     ///
     /// Dispatches to the v1.1 or v2 chain client based on
     /// `cfg.chain.protocol_version`. v2's `settle_claim` is identical
@@ -432,6 +432,7 @@ impl Hub {
         self: &Arc<Self>,
         session_id: u64,
         bytes_used: u64,
+        net: u64,
     ) -> Result<()> {
         match self.cfg.chain.protocol_version {
             ProtocolVersion::V1_1 => {
@@ -463,12 +464,13 @@ impl Hub {
                 Ok(())
             }
             ProtocolVersion::V3 => {
+                self.chain_v3.get_claim_net_set(session_id).await?;
                 let fee = self.chain_v3.fee_or_fallback("contract_call").await;
                 let call = self
                     .chain_v3
-                    .build_settle_claim_call(session_id, bytes_used, fee, 0);
+                    .build_settle_claim_call(session_id, bytes_used, net, fee, 0);
                 let hash = self.chain_v3.submit_call(call).await?;
-                info!(%hash, session_id, bytes_used, "settle_claim (v3) submitted");
+                info!(%hash, session_id, bytes_used, net, "settle_claim (v3) submitted");
                 Ok(())
             }
         }

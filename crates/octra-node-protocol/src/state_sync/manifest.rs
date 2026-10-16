@@ -3,6 +3,7 @@
 //! Native snapshot layout, byte commitments and certificate decoding. A decoded
 //! certificate remains untrusted until its finality authority is verified.
 use super::{
+    anchor::{self, VerifiedAnchor},
     checkpoint::{self, Signature},
     field, fields, int64, integer, list, lower_hex, optional, require, text, Result,
 };
@@ -64,6 +65,65 @@ pub struct Certificate {
     pub draft: Draft,
     pub authority: Authority,
     pub exporters: Vec<Signature>,
+}
+
+/// A certificate with authenticated authority and exporter signatures. Raw
+/// parsing and draft-hash checks cannot construct this type.
+#[derive(Clone, Debug)]
+pub struct VerifiedCertificate {
+    certificate: Certificate,
+    anchor: Option<VerifiedAnchor>,
+}
+impl VerifiedCertificate {
+    pub fn certificate(&self) -> &Certificate {
+        &self.certificate
+    }
+    pub fn draft(&self) -> &Draft {
+        &self.certificate.draft
+    }
+    pub fn anchor(&self) -> Option<&VerifiedAnchor> {
+        self.anchor.as_ref()
+    }
+}
+
+/// Explicit network trust comes from adopted configuration, never from the
+/// downloaded snapshot or an unauthenticated RPC observation.
+pub struct Trust<'a> {
+    pub validators: &'a ValidatorSet,
+    pub exporters: &'a ValidatorSet,
+    pub chain_id: &'a [u8],
+    pub config_hash: &'a [u8],
+    pub minimum_epoch: i64,
+}
+impl Trust<'_> {
+    pub fn verify(&self, raw: &[u8], now: i64) -> Result<VerifiedCertificate> {
+        let verified = self.verify_persisted(raw)?;
+        require(
+            verified.certificate.fresh(now),
+            "manifest certificate is outside its validity window",
+        )?;
+        Ok(verified)
+    }
+    /// Recovery authenticates the retained authority and network binding again.
+    /// Expiry limits acquisition, not the lifetime of an already committed root.
+    pub fn verify_persisted(&self, raw: &[u8]) -> Result<VerifiedCertificate> {
+        let certificate = Certificate::parse(raw)?;
+        let verified = certificate.verify_reference(self.validators, self.exporters)?;
+        let checkpoint = &verified.draft().checkpoint;
+        require(
+            checkpoint.chain_id == self.chain_id,
+            "manifest chain id mismatch",
+        )?;
+        require(
+            checkpoint.config_hash == self.config_hash,
+            "manifest config hash mismatch",
+        )?;
+        require(
+            checkpoint.epoch >= self.minimum_epoch,
+            "manifest snapshot epoch below minimum",
+        )?;
+        Ok(verified)
+    }
 }
 
 pub fn valid_path(value: &[u8]) -> bool {
@@ -239,7 +299,7 @@ impl Body {
         require(
             self.irmin_commit
                 .as_ref()
-                .map_or(true, |v| !v.is_empty() && v.len() <= 256),
+                .is_none_or(|v| !v.is_empty() && v.len() <= 256),
             "invalid irmin commit",
         )?;
         require(
@@ -384,6 +444,48 @@ fn signatures(doc: &Document, value: &Value) -> Result<Vec<Signature>> {
         .collect()
 }
 impl Certificate {
+    pub fn verify(
+        self,
+        validators: &ValidatorSet,
+        exporters: &ValidatorSet,
+    ) -> Result<VerifiedCertificate> {
+        validate_signers(validators)?;
+        validate_signers(exporters)?;
+        self.draft.verify()?;
+        let message = self.draft.manifest.hash()?;
+        let anchor = match &self.authority {
+            Authority::CheckpointQuorum(signatures) => {
+                require(
+                    self.draft.checkpoint.validator_set_hash == set_hash(validators)?,
+                    "checkpoint validator set hash mismatch",
+                )?;
+                self.draft
+                    .checkpoint
+                    .verify_quorum(validators, signatures)?;
+                None
+            }
+            Authority::Finalized(encoded) => {
+                self.draft.manifest.validate_reference()?;
+                Some(anchor::verify(validators, &self.draft.checkpoint, encoded)?)
+            }
+        };
+        verify_exporters(exporters, 1, &message, &self.exporters)?;
+        Ok(VerifiedCertificate {
+            certificate: self,
+            anchor,
+        })
+    }
+    pub fn verify_reference(
+        self,
+        validators: &ValidatorSet,
+        exporters: &ValidatorSet,
+    ) -> Result<VerifiedCertificate> {
+        require(
+            matches!(&self.authority, Authority::Finalized(_)),
+            "reference checkpoint finality is required",
+        )?;
+        self.verify(validators, exporters)
+    }
     pub fn parse(raw: &[u8]) -> Result<Self> {
         require(raw.len() <= MANIFEST_LIMIT, "manifest exceeds size limit")?;
         let doc = Document::parse(raw).map_err(|e| super::Error::from(e.to_string()))?;

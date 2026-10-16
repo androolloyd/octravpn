@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
 //! Authenticated native P2P transport primitives; consensus messages stay opaque.
+pub mod accept;
 pub mod budget;
 pub mod endpoint;
 pub mod frame;
 pub mod gossip_guard;
 pub mod guard;
 pub mod handshake;
+pub mod peer_diag;
 pub mod peer_record;
 pub mod session;
 pub mod swarm;

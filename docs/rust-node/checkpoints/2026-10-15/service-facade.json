@@ -1,0 +1,109 @@
+{
+  "schema": 1,
+  "date": "2026-10-15",
+  "status": "PASS_ADOPTED_BFT_SERVICE_EXTRACTION",
+  "scope": "BFT-only shared committed-view, real queue/intake, finality capability and revocable publication handle extraction; no Single implementation or public network qualification",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "qualification": {
+    "path": "out/node-port-final-20261015/single-facade-candidate/qualification-bft-final.json",
+    "sha256": "6ebf87c7bfb2fc92423a3c52d0500e2b5ae59bc41613fe5d7e1f93bc5799ca53"
+  },
+  "source": {
+    "manifest": "source-bft-final-1.json",
+    "files": 3369,
+    "canonical_aggregate_sha256": "259c6197697052483208ecb0bb2e8c721eef5a85b94aef4b2c976e9f1ff39b0b",
+    "canonical_aggregate_algorithm": "SHA256 of UTF-8 json.dumps(path_to_sha256,sort_keys=True,separators=(comma,colon)) without trailing newline",
+    "drift": [],
+    "owned_adoption_paths": 25,
+    "separate_parent_inputs": "parent-qualified-deltas.json",
+    "dependencies_lock_or_runtime_changed_by_this_candidate": false
+  },
+  "checks": {
+    "all_targets_all_features_check": {
+      "passed": true,
+      "evidence": "runs/check-2/result.json"
+    },
+    "full_node": {
+      "passed": 56,
+      "failed": 0,
+      "ignored": 1,
+      "targets": [
+        {
+          "target": "Running unittests src/lib.rs (target/release/deps/octra_node-c4b4c0fb4b898de0)",
+          "passed": 37,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 1.39
+        },
+        {
+          "target": "Running unittests src/main.rs (target/release/deps/octra_node-da718d7728b2aba1)",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0.0
+        },
+        {
+          "target": "Running tests/devnet.rs (target/release/deps/devnet-a0ea52fdc2563e8a)",
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 109.97
+        },
+        {
+          "target": "Running tests/private_import.rs (target/release/deps/private_import-7726c0df771b6bf3)",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 129.06
+        },
+        {
+          "target": "Running tests/services.rs (target/release/deps/services-2363d44e394c6443)",
+          "passed": 15,
+          "failed": 0,
+          "ignored": 1,
+          "seconds": 7.95
+        },
+        {
+          "target": "Running tests/snapshot_service_parity.rs (target/release/deps/snapshot_service_parity-36406336e6e47bb5)",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "seconds": 0.0
+        }
+      ],
+      "command_result": "runs/bft-final-1/result.json",
+      "wall_seconds": 389.18874147099996,
+      "ignored_scope": "gateway::canonical_gateway_chromium_fixture is an externally driven long-lived fixture, subsequently driven by actual Chromium"
+    },
+    "strict_clippy": {
+      "passed": true,
+      "command": "cargo clippy --offline --locked -p octra-node --all-targets --all-features --no-deps -- -D warnings",
+      "wall_seconds": 9.914084215000912,
+      "evidence": "runs/bft-final-1/clippy.log"
+    },
+    "chromium": {
+      "passed": true,
+      "checks": 8,
+      "browser": "Chrome/155.0.8059.84",
+      "evidence": "runs/chromium-bft-1/result.json",
+      "transport_scope": "real signed-publication Node gateway behind controlled CDP HTTPS-origin transport; no actual TLS or external Tailscale claim",
+      "fixture_shutdown": {
+        "intent": "deliberate stop after renderer PASS",
+        "exit_code": 137,
+        "oom_killed": false
+      }
+    },
+    "snapshot_service_oracle": {
+      "passed": true,
+      "vectors": 39,
+      "evidence": "full Node snapshot_service_parity target"
+    }
+  },
+  "parent_review": {
+    "path": "out/node-port-final-20261015/single-facade-candidate/parent-source-review-final.json",
+    "sha256": "d18a43dd65a595b2ee2476f8af932d092adff25e8cac2eab7a573e6ca05e660a"
+  },
+  "single_implemented_by_this_gate": false,
+  "public_sync": false,
+  "mainnet_ready": false
+}

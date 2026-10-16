@@ -17,7 +17,8 @@ pub enum Message {
         hash: Vec<u8>,
     },
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct State {
     pub(super) head: i64,
     hashes: BTreeSet<Vec<u8>>,
@@ -33,6 +34,15 @@ impl Default for State {
     }
 }
 impl State {
+    pub(super) fn valid(&self, limit: usize) -> bool {
+        self.head >= -1
+            && self.hashes.len() <= limit
+            && self.hashes.iter().all(|h| {
+                h.len() == 64
+                    && h.iter()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
+            })
+    }
     fn advance(&mut self, head: Option<i64>) {
         if let Some(head) = head.filter(|head| *head > self.head) {
             *self = Self {

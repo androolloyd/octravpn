@@ -2,12 +2,33 @@
 use octravpn_core::{sig::KeyPair, util};
 use x25519_dalek::{PublicKey, StaticSecret};
 
+mod forward;
+#[cfg(test)]
+mod integration_tests;
+mod io;
+mod ip;
+pub(crate) mod recovery;
+mod tunnel;
+
+pub(crate) use forward::Forward;
+pub(crate) use io::Mode;
+pub(crate) use tunnel::{Traffic, Tunnel};
+
+pub(crate) fn validate_peer_key(key: [u8; 32]) -> anyhow::Result<()> {
+    tunnel::validate_peer_key(key)
+}
+
+pub(crate) fn validate_endpoint(endpoint: &str) -> anyhow::Result<()> {
+    tunnel::validate_endpoint(endpoint).map(|_| ())
+}
+
+fn secret(keypair: &KeyPair) -> StaticSecret {
+    let bytes = keypair.secret_bytes();
+    StaticSecret::from(util::derive_subkey(&bytes, util::DOMAIN_NOISE))
+}
+
 pub(crate) fn public_key(keypair: &KeyPair) -> [u8; 32] {
-    let secret = StaticSecret::from(util::derive_subkey(
-        &keypair.secret_bytes(),
-        util::DOMAIN_NOISE,
-    ));
-    PublicKey::from(&secret).to_bytes()
+    PublicKey::from(&secret(keypair)).to_bytes()
 }
 
 #[cfg(test)]

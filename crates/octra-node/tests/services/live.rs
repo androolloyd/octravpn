@@ -301,10 +301,10 @@ async fn live_quorum_publishes_circle_vpn_and_exex_atomically() {
     let dir = tempfile::tempdir().unwrap();
     let circle = format!("oct{}", "1".repeat(44));
     let state = genesis(circle.as_bytes());
-    let chain = ChainIdentity {
-        chain_id: "live-node-services-fixture".into(),
-        genesis_root: StateRoot(finality_host::root(None, &state, &[])),
-    };
+    let chain = ChainIdentity::genesis(
+        "live-node-services-fixture",
+        StateRoot(finality_host::root(None, &state, &[])),
+    );
     let authority = finality_host::Authority {
         seed: 1,
         chain: chain.clone(),

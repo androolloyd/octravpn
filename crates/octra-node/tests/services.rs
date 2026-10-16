@@ -101,8 +101,9 @@ impl Host for Authority {
 struct FixtureSettlement {
     session: FundedSession,
 }
+#[async_trait::async_trait]
 impl Settlement for FixtureSettlement {
-    fn session(
+    async fn session(
         &self,
         view: &Committed,
         _: &AnnounceSessionRequest,
@@ -119,7 +120,7 @@ impl Settlement for FixtureSettlement {
             std::str::from_utf8(view.state().get(&[b"fixture", b"escrow"]).unwrap())?.parse()?;
         Ok(Some(session))
     }
-    fn lifecycle(
+    async fn lifecycle(
         &self,
         view: &Committed,
         session: &SessionId,
@@ -499,6 +500,9 @@ fn execute_received(
         })
         .collect();
     Ok(ExecutedEpoch {
+        epoch_observation: None,
+        metrics: octra_node_protocol::metrics::Epoch::default(),
+        vm_receipts: std::collections::BTreeMap::default(),
         reward_source: finality_host::reward_source(authority.seed),
         state: state.snapshot(),
         transactions,
@@ -547,6 +551,7 @@ fn add_rejected_call(view: &Committed, executed: &mut ExecutedEpoch) {
             inspect: true,
             storage_proof: true,
             fhe_work: false,
+            object_cost: false,
         },
         view.head().cursor.epoch.0 as i64 + 1,
         1.,
@@ -619,6 +624,9 @@ impl ImportExecutor {
             sender_key_activation: Some(0),
             private_result_activation: 0,
             max_fhe: 32,
+            max_stealth: 32,
+            max_multi_exec_calls: 8,
+            migration: None,
             ready_max_lag: 10,
             pvac_dir: std::path::PathBuf::from("unused-public-fixture-pvac"),
         };
@@ -815,10 +823,10 @@ async fn newer_pause_cannot_be_undone_and_cancellation_releases_services() {
     let path = directory.path().join("chain.db");
     let circle = format!("oct{}", "1".repeat(44));
     let state = genesis(circle.as_bytes());
-    let chain = ChainIdentity {
-        chain_id: "node-cancellation-fixture".into(),
-        genesis_root: StateRoot(finality_host::root(None, &state, &[])),
-    };
+    let chain = ChainIdentity::genesis(
+        "node-cancellation-fixture",
+        StateRoot(finality_host::root(None, &state, &[])),
+    );
     let store = CanonicalStore::create(&path, chain.clone(), state.snapshot(), 0)
         .await
         .unwrap();
@@ -993,9 +1001,12 @@ async fn handshake(endpoint: std::net::SocketAddr) -> (Tunn, UdpSocket) {
         .await
         .unwrap()
         .unwrap();
-    if let TunnResult::WriteToNetwork(packet) = tunnel.decapsulate(None, &bytes[..n], &mut work) {
-        socket.send(packet).await.unwrap();
-    }
+    let TunnResult::WriteToNetwork(packet) = tunnel.decapsulate(None, &bytes[..n], &mut work)
+    else {
+        panic!("server response did not authenticate the WireGuard handshake");
+    };
+    assert_eq!(&packet[..4], &[4, 0, 0, 0]);
+    socket.send(packet).await.unwrap();
     (tunnel, socket)
 }
 async fn send(tunnel: &mut Tunn, socket: &UdpSocket, frame: &[u8]) {
@@ -1003,6 +1014,11 @@ async fn send(tunnel: &mut Tunn, socket: &UdpSocket, frame: &[u8]) {
     let TunnResult::WriteToNetwork(packet) = tunnel.encapsulate(frame, &mut bytes) else {
         panic!("encrypt");
     };
+    assert_eq!(
+        &packet[..4],
+        &[4, 0, 0, 0],
+        "expected authenticated transport"
+    );
     socket.send(packet).await.unwrap();
 }
 async fn metered(
@@ -1027,10 +1043,10 @@ async fn peer_import_drives_browser_wireguard_exex_and_restart() {
     let path = directory.path().join("chain.db");
     let circle = format!("oct{}", "1".repeat(44));
     let state = genesis(circle.as_bytes());
-    let chain = ChainIdentity {
-        chain_id: "node-integration-fixture".into(),
-        genesis_root: StateRoot(finality_host::root(None, &state, &[])),
-    };
+    let chain = ChainIdentity::genesis(
+        "node-integration-fixture",
+        StateRoot(finality_host::root(None, &state, &[])),
+    );
     CanonicalStore::create(&path, chain.clone(), state.snapshot(), 0)
         .await
         .unwrap()
@@ -1120,8 +1136,8 @@ async fn peer_import_drives_browser_wireguard_exex_and_restart() {
         .unwrap();
     assert!(permit.live());
     let (mut tunnel, socket) = handshake(endpoint).await;
-    // Only authenticate/decrypt/peel/meter. Local egress is intentionally denied;
-    // this assertion does not qualify Internet forwarding or return traffic.
+    // Exercise authenticated WireGuard/onion input while refusing local egress.
+    // Rejected traffic must not increase a billable receipt.
     let onion = build_onion(
         &[HopBuildInput {
             static_pubkey: PublicKey::from(&StaticSecret::from([41; 32])).to_bytes(),
@@ -1132,17 +1148,20 @@ async fn peer_import_drives_browser_wireguard_exex_and_restart() {
     .unwrap();
     let frame = tunnel_frame::encode(&request.session_id, &onion).unwrap();
     send(&mut tunnel, &socket, &frame).await;
-    let before = tokio::time::timeout(Duration::from_secs(3), async {
+    let before = metered(&http, &control, &request).await;
+    assert_eq!(before.bytes_served, 0);
+    assert!(tokio::time::timeout(Duration::from_secs(3), async {
         loop {
             let r = metered(&http, &control, &request).await;
-            if r.bytes_served > 0 {
-                break r;
-            }
+            assert_eq!(
+                r.bytes_served, before.bytes_served,
+                "denied local egress was billed"
+            );
             tokio::task::yield_now().await;
         }
     })
     .await
-    .unwrap();
+    .is_err());
     let (_, mut executed) = execute(&old, circle.as_bytes(), &authority);
     add_rejected_call(&old, &mut executed);
     let certificate = finality_host::certificate(old.head(), &executed, &authority)
@@ -1380,10 +1399,10 @@ async fn empty_finalized_import_needs_no_peer_and_rejects_wrong_parent() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("empty.db");
     let state = genesis(format!("oct{}", "1".repeat(44)).as_bytes());
-    let chain = ChainIdentity {
-        chain_id: "empty-import-fixture".into(),
-        genesis_root: StateRoot(finality_host::root(None, &state, &[])),
-    };
+    let chain = ChainIdentity::genesis(
+        "empty-import-fixture",
+        StateRoot(finality_host::root(None, &state, &[])),
+    );
     CanonicalStore::create(&path, chain.clone(), state.snapshot(), 0)
         .await
         .unwrap()
@@ -1460,10 +1479,10 @@ async fn consecutive_peer_recovery_resumes_after_missing_bundle_and_restart() {
     let path = directory.path().join("recover.db");
     let circle = format!("oct{}", "1".repeat(44));
     let state = genesis(circle.as_bytes());
-    let chain = ChainIdentity {
-        chain_id: "node-recovery-fixture".into(),
-        genesis_root: StateRoot(finality_host::root(None, &state, &[])),
-    };
+    let chain = ChainIdentity::genesis(
+        "node-recovery-fixture",
+        StateRoot(finality_host::root(None, &state, &[])),
+    );
     for path in [&source_path, &path] {
         CanonicalStore::create(path, chain.clone(), state.snapshot(), 0)
             .await
@@ -1688,10 +1707,10 @@ async fn agreed_ranges_recover_canonical_services_and_exex_after_restart() {
     let path = directory.path().join("range-target.db");
     let circle = format!("oct{}", "1".repeat(44));
     let state = genesis(circle.as_bytes());
-    let chain = ChainIdentity {
-        chain_id: "node-range-fixture".into(),
-        genesis_root: StateRoot(finality_host::root(None, &state, &[])),
-    };
+    let chain = ChainIdentity::genesis(
+        "node-range-fixture",
+        StateRoot(finality_host::root(None, &state, &[])),
+    );
     for path in [&source_path, &path] {
         CanonicalStore::create(path, chain.clone(), state.snapshot(), 0)
             .await
@@ -1948,6 +1967,12 @@ async fn agreed_ranges_recover_canonical_services_and_exex_after_restart() {
     node.shutdown().await.unwrap();
 }
 
+#[path = "services/cancellation.rs"]
+mod cancellation;
+#[path = "services/gateway.rs"]
+mod gateway;
+#[path = "services/http_join.rs"]
+mod http_join;
 #[path = "services/live.rs"]
 mod live;
 #[path = "services/pending.rs"]

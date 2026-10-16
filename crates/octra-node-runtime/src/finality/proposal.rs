@@ -126,6 +126,14 @@ impl<A: ValidatorHistory> Publisher<A> {
         base: &Head,
         policy: Policy,
     ) -> Result<Option<ParentCommit>> {
+        if base.cursor.sequence.0 == 0 {
+            if base != self.store.anchor() {
+                return Err(invalid("proposal anchor differs"));
+            }
+            if let Some(parent) = self.store.checkpoint_parent() {
+                return Ok(Some(parent));
+            }
+        }
         if base.cursor.epoch.0 == 0 {
             let epoch = i64::try_from(base.cursor.epoch.0 + 1).map_err(invalid)?;
             if epoch >= policy.protocol.activation_epoch() {

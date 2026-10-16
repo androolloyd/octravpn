@@ -15,5 +15,325 @@
     "challenge": "af33a0fb7b4403e12b76004def04ec2faddc80d74570012945e6d6a0655828d9",
     "circuit": "sha256-credential-action-bn254-v1",
     "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+  },
+  "authorizations": {
+    "1": {
+      "method": "set_paused",
+      "params": [
+        1,
+        0,
+        "bb97206f481d2d25a0e61d23acc6585aad6275beff1fe3fb4930460df23df90d",
+        "T0cxNlAxCP4DGAPYxa5vomvw7OFxyRL/PvvWWk47T/Z0HoQHGCcoxMXLRbs+8n1sezLRNHb09SZcUWn9axlfCt0jLnbIDA493ms3+XYARKPi2vhpEGOXpYdueNCSVZvn8P+IXmrAD6Z4Eal23e37y6LgcEdCssIkd4hPJfD7dMDoMKQAPGsAwqtcmtmdnE/CsaQVBKFaNvmK4HAUmmLrY8ovxbQLaSXhvSguIRxzRVVsZtFB1fXGFRFiwF1sbWgrpKdvcdxUHzipKuUpbSD1VCuH3BUR7ooF1QIjqN2dF3xbUbbPk98HPoPx5wlb5DhqYT+h4xr0tAs4swvJULz5cVn29IkYdA=="
+      ],
+      "commitment": "748fe3b5c405c47edab26df16b14e4a0747cd7d58c9ba01f1e54bf6acdac4ba5",
+      "challenge": "af33a0fb7b4403e12b76004def04ec2faddc80d74570012945e6d6a0655828d9",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    },
+    "2": {
+      "method": "set_paused",
+      "params": [
+        1,
+        0,
+        "b303255e498c7414d96ad6431452dc97f4e1bba59a903ada966e8e40502d573a",
+        "T0cxNlAxHoBNxsDUVx17azPbeDWTJM12aeT4bSgKoUEd1zvnqQ8LapB9j6wlH81sZJw0FYhqL+YzvzlkvlQNgQqmFRw01CW4vp/qmpazelOusE7fz4dOaJUuFzI6BT+ZC/KNw527IjZwqLdarT/CATwDaPJKxPCPVb8Y5Qxk98zQ1C4QbWkXWRyE42sM/+gUK5wYdl0yWSQIvtGzo1Bw/x38e6RVnxtXAevVR+lh8tz3aW6X+3KcbODyf/wP5QDy8wfPhjc7ESkdXSjMa49RmnBAjUvqFZlxq2T36Qe8UDPaEkoKWnkYgYBetailgQo2S6gidDyA1OoclSvUlGjQH0XRWclqiw=="
+      ],
+      "commitment": "748fe3b5c405c47edab26df16b14e4a0747cd7d58c9ba01f1e54bf6acdac4ba5",
+      "challenge": "eac4a8e16477cc30ec59c95154ab54b7a5f8232b9418091f0a3343031d6114d8",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    },
+    "3": {
+      "method": "set_paused",
+      "params": [
+        1,
+        0,
+        "685bf64b4fd7f549d7e7ff98ec7af3c6bbd4051834b8b2a160c774419b1ceb70",
+        "T0cxNlAxEqxzAsgjgG6LqgwH0CI5L3la3Y11pWJj2WDUiJxEXVQFuY0o/yYW3kAwzDsRMmf/azJaP4RGGFwCVsutXMyxpQrZCciG6qR2e09U0/prWSvojiwMXWOy1mVQLFM3o9K5KgML+FcmO+k+s7zGqdovWRaAqFZnCyDxRJ18Z7p2AAEOzGJP50+UezxR8j79p8JW1Fvo5NFBjREwxMvuvFcP2yaETwlpp8eJka+wabryeSLgO8sWnUr3c0VlmoCu9oS3IJa2KQSc+d7Us5yGgYga/DnwZg/U/JAPDigj8Zns6vciOl7f1xPKxNKHonKGHILwjlF3VfB6fgUwvP6GD0xzwA=="
+      ],
+      "commitment": "882a955a415c5d634f1dbeb5058a428673314ca1d1fd2f90d93f6a0cdb88141e",
+      "challenge": "af33a0fb7b4403e12b76004def04ec2faddc80d74570012945e6d6a0655828d9",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    },
+    "4": {
+      "method": "set_paused",
+      "params": [
+        1,
+        0,
+        "bb97206f481d2d25a0e61d23acc6585aad6275beff1fe3fb4930460df23df90d",
+        "T0cxNlAxLOiPLGtHVP7HtOd7iIrYlKPCk+O9L4MH54oUdwwo3CowQmx4Q2tcJdKxbUN/IMqlcPVzp+LZYov/HBL/LKFvWQum/rr4buKLAiwrLbLkYFZnNT6NLJik39KJNM0ftbxjHLQLu26ftrdyiLnW+ojKivWLByTdwPNsiwBy9rl2Qfop+auF1FL4gJmD0Ser4wV3WXF88r1JlZ6Cle9vf2kgagxPyVHzOlfT2mgvezTmwTu+wb3CgFNrLjXfACRmWqRELeUVg4kp92LfdzSadpEKl9eRuC9rVZ7RmhxPcb0Nd+cHFsKbKMRAC0uK7/gcsdHI//P1xcYWns1nufLAK46R2w=="
+      ],
+      "commitment": "748fe3b5c405c47edab26df16b14e4a0747cd7d58c9ba01f1e54bf6acdac4ba5",
+      "challenge": "af33a0fb7b4403e12b76004def04ec2faddc80d74570012945e6d6a0655828d9",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    },
+    "5": {
+      "method": "set_paused",
+      "params": [
+        0,
+        1,
+        "3a4a889816212d1185654513ff645848c411a2567a82c24cd1cf8619923278cb",
+        "T0cxNlAxK53dakHPsWTKo2Gwd0GduLVvpQUdpXfqI/BotkCBXHkqtokZoGlihSY50ZEsCpCer46oUdr52VqSOlk6Z72rwyQKyT6ovovaEpC7mYqzDuQPTNhicmuG3iFfUA793q6XKQ9n83EiJG0Ap8mOtK6yS/mhB4Rno+nQOvuUeTHOJYMmpwFtNKrS5Enmrqv1OG2bZZ9U9VavU+7Mlj7ntXU3/ysQ5d+fH0E83PAeH4DWcPZxmio5NFoY8BB5OxOrAUCADAqq4nabz8vQK/+hHPslXsAIIdaTWeclY89+rS6n9Wgrk4mGRFRdXnf31Dm4ec4zIRNn3nWEYkuJSi02cZ12cQ=="
+      ],
+      "commitment": "748fe3b5c405c47edab26df16b14e4a0747cd7d58c9ba01f1e54bf6acdac4ba5",
+      "challenge": "940e2f0c8766709510a15b807cad36fb13e57023fe5cccaee2d6ac1500d9b4f8",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    },
+    "6": {
+      "method": "propose_admin",
+      "params": [
+        "d80addb7c70d435b06971f904ac36707b5792f8e97abdeda73a31b02ccc47627",
+        0,
+        2,
+        "492c4566e4e37ea56ba0bf54d7875a09a2b9f8d727b2b585969fb1ae84a90a1c",
+        "T0cxNlAxIETKznUIgcLjovgVGOJXT7BffxFhHnTmzz0bbirWD8oq+xmoJUgHG/VnWA0noHF92fGU0l5VHSo76Vzx9p3IThQX34ZC1CrsUREaVEV1is9VPGiL69lfoBsViKjPp/6+D0I+9ApjRT3pu4G/7Vi3Y11INlYAMo1MIihwRjT0zJ8BHKwfl1Gy/l/zMhZGwzrz/cf2JPf4A4hbl/J3LDNeQwQDE+WpUkzfi1J/N8P+pmSw28a7lOt3qqITHW7Zh4PnKRawUcuwFyd38p5iQz3xzzGASamHk715A567cy2RDtIm2kejg03hiKtKjBqyOzVuefHRb4qfXY+OoC90F3N8nw=="
+      ],
+      "commitment": "748fe3b5c405c47edab26df16b14e4a0747cd7d58c9ba01f1e54bf6acdac4ba5",
+      "challenge": "a033c7239951fa5814a056ce4e4cd536bf44ed33d9ed329dcad30c41de6acbc2",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    },
+    "7": {
+      "method": "accept_admin",
+      "params": [
+        "d80addb7c70d435b06971f904ac36707b5792f8e97abdeda73a31b02ccc47627",
+        "e77f128a85893660bec394b442624c7eb9fa9a76704e25889dee5d329eab288f",
+        3,
+        "646316455b2eadfcf758b1dd4ef14e678d0aa04019b45d1fdee4ebdceec25e4d",
+        "T0cxNlAxHg/wjMDg5IANPQNOckRlIWYEr749eM3YgILd2XIPryoSZ8icJkWeqSiWP6bgJvamZ8t1247uiKzeuHS67Zg3WRrgfzn5MUjfBISSbRGl7zHa6c2p+3WRdzDMDiTUyc7AI7TLzS2uOO6m6pRFJbo1JEnKh6ze7iwKTZdZzqedHWYDL2dkWE2VVxfPzSIG/T3QOMQyONJa5XhUDkjRff7hdiJvJmeBmTV/gxWg89ePG8v9Kqm29SVBx5bGjl0FR5ijB8GtTS0w38TLMZrUKlLqFB54hZ1Hw+rvZZ2TRfJLg8wfqq0BokSeWQ2HzC2GnozXRyZbjBsrxKwxYm/+lOEDdA=="
+      ],
+      "commitment": "d80addb7c70d435b06971f904ac36707b5792f8e97abdeda73a31b02ccc47627",
+      "challenge": "4b4d97e3f9e6bfe8f9b36323efb0d6e2517545a19271ec2ad7ebc7f54f0b1004",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    },
+    "8": {
+      "method": "set_paused",
+      "params": [
+        1,
+        3,
+        "0e619db9e4d88265de8b79e8be1c71f06822e8e3268890ddec2f5ee0154a95d4",
+        "T0cxNlAxKACckxW70ZPP0IV+Ai5ohjqbTub+KlF3zUQw9Cr3NL4Wm4M8B2nVbK/xTn1wnj//O5H7fONHVvnWjxOafZJZTx6Jyn+2xBiqnhA53ZDhc3hsZLvqOnIQ+rn8oP8saBkmAJFNVncDAIW4YkmHTqDgI7KsZsbYeStjGzqfVqfVrO0qG/JO98WSTMMbW8cHI1OCX8gbgIAM2/VETYrtkM2pIw+oNDTaUviuvJk4oINWnpMnpNdQ0AxOqxyHjpwney4SILm/955Bdh8Mu/VqCu6po/zd5FGHiIw9YpjqYBnP58cGGWajo0kqu7FdaRN2FXVGjykp3GBA9PTr+ea8WcOhLg=="
+      ],
+      "commitment": "748fe3b5c405c47edab26df16b14e4a0747cd7d58c9ba01f1e54bf6acdac4ba5",
+      "challenge": "da2f3c22ade60f199e8d44ca6ce892db3da20f857c23203f4041d5f8892b382d",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    },
+    "9": {
+      "method": "accept_admin",
+      "params": [
+        "d80addb7c70d435b06971f904ac36707b5792f8e97abdeda73a31b02ccc47627",
+        "e77f128a85893660bec394b442624c7eb9fa9a76704e25889dee5d329eab288f",
+        3,
+        "c3cb124df042bd75a092ab6a8c066f5b18f04156936dd83cf62b66efb923bad7",
+        "T0cxNlAxFN8TCv7z0QNjVY1UqgFBZvaeBWd/eZN/Dg6D0jdEv9wgsmBg6KSS1vvvs8CSHFaCzQJe6YBZB003cPsh1DuyNysiSf0w3pFAUVdhKIu2IzD3YrLLkBSvKfYkmieTdkptBwWb5QLnyseNL5PxhRMBQvhRiLhETdHVPn2GY0NSvaovMzlSKDOFNguIZYtZFZbZCrM4UASb/SIb4e2sb9l/IA1nk2hbH25VqiXvlXOutTusC15v+IA48NeKzzByZgQ7JS5KDmOSLmOt21dmClXL7YyItg7j69yzYkxfPdnhoScBWYKls1OkDyT21z4kFSuKJ63FU+xK/j8QBijD5CYS2Q=="
+      ],
+      "commitment": "69a81649a56062b37070ce89cbceed057d5936d8b091c95f1ce15b3a199174e9",
+      "challenge": "4b4d97e3f9e6bfe8f9b36323efb0d6e2517545a19271ec2ad7ebc7f54f0b1004",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    },
+    "10": {
+      "method": "accept_admin",
+      "params": [
+        "d80addb7c70d435b06971f904ac36707b5792f8e97abdeda73a31b02ccc47627",
+        "e77f128a85893660bec394b442624c7eb9fa9a76704e25889dee5d329eab288f",
+        3,
+        "20283499e95eab214e15423d86104e32a99fd401699cf25f8dc63ad5d537cbe3",
+        "T0cxNlAxK0iQMU/++jFjPbxOLDEsyehDcfHqll1e7AKfiLc452QtvAx1K4CgtLIUGPJA1SdbJmzcRFzt2FHr1CWwh6rWEBiiX1BAQShLoCNINRiT02VgzDiuE63iZnsvy1rnRDREFjmk/voFwYtUrBqxZnfupIJ/Ga62orfyotcdc2kvK1ALt5xOj99gedgs+QtuoemtiFf+w6SVSA3c7y/DQgEfnBbzdaUdU5BBanBaevVBtNErtBdzi529gMHnv28HHdQwCO0jOWyVVsOtThSJ53J8/8VD1JMYEAfxfJOb5Gz0ilUgk0CysXAxPKfyMDHRlvFzgxseugmj65qLHUsh2Ud4FA=="
+      ],
+      "commitment": "748fe3b5c405c47edab26df16b14e4a0747cd7d58c9ba01f1e54bf6acdac4ba5",
+      "challenge": "4b4d97e3f9e6bfe8f9b36323efb0d6e2517545a19271ec2ad7ebc7f54f0b1004",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    },
+    "11": {
+      "method": "cancel_admin",
+      "params": [
+        "e77f128a85893660bec394b442624c7eb9fa9a76704e25889dee5d329eab288f",
+        3,
+        "d9f6052a15855bb85f27ae94d463e4a4ee58c175d649c519769b2640f085f3cd",
+        "T0cxNlAxEm5TJfxtCWRdcmB01dAAwPPBhLdEByccMNN8bPltQWEt/bb8GDGF+Ij+9R7wFOO7R5fZSN/QWW7A5kJpSvQngQk1nenbnMR5ESQWEsacBPNyv/SgDBaFk8xomdQ/yBL9FNqdToK08dROidVdagHvh2wcG8kefAWwKyCosSQIbV8U/gTAbf70eQPfckSQGGNzJbg4Bb0pMtwLYh2EmMSzjByjaMeKiz1mk9/Swg8UVNt1+mcviS5YrOr2+Mlj1PbpKxdliNi7jUokxVFmky5bPR+fk8XZNP000h29kUZh8c4m7XMFEhr04EGAZ4fX69JZZ91np3goRAfWFWB4mE5n3w=="
+      ],
+      "commitment": "882a955a415c5d634f1dbeb5058a428673314ca1d1fd2f90d93f6a0cdb88141e",
+      "challenge": "fea463f844f324512dd282cfaadcf8027838386e0a3757e3879beca543b72f03",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    },
+    "12": {
+      "method": "cancel_admin",
+      "params": [
+        "e77f128a85893660bec394b442624c7eb9fa9a76704e25889dee5d329eab288f",
+        3,
+        "2eb10f1c200edc195fa47c0a5ed4fc1e02717385c2c3c312da3e612d6eec4356",
+        "T0cxNlAxKrw4GBITbafa7ma5haOctpd7yz3AxuFOOP1gEts2a+YlTDowAY2tH7l3n+BvDQgGJwRhyhoSxoImWq2hfdtJSytZGjom5IAOUGgrXA6TR92qAUJVznIFj6GBpPndW8SFFL/k63rRw2Lwo+T5WOoq9b21fWn2zmX4C6EiTzCsUjQWrDZ9B2gVFIjvGTucuOcS9YG4jwiVXUU+55LGlaEDrSaglgKq23Gw4kkVt3IOuj46YRHr0Mx8/RSWcAQZVKlTFpLBVWQHvI1V9HpPWz9ezeXkyoH05Rbob8TshogSabsLrzyqc3hPIzGxfMwAyvtxsW45DcQhHkSHxcRRpWOrgA=="
+      ],
+      "commitment": "748fe3b5c405c47edab26df16b14e4a0747cd7d58c9ba01f1e54bf6acdac4ba5",
+      "challenge": "fea463f844f324512dd282cfaadcf8027838386e0a3757e3879beca543b72f03",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    },
+    "13": {
+      "method": "propose_admin",
+      "params": [
+        "d80addb7c70d435b06971f904ac36707b5792f8e97abdeda73a31b02ccc47627",
+        0,
+        4,
+        "ac251068e5dfe816f4854547a1c06b3cccd397f97286adf5142e63eecfb4589b",
+        "T0cxNlAxFqnhSsi3jCRZL39Red7OE2hy0kbjuQwj6SmHhK51MZcFA0LsDbZwh7Q+FfAXBDMhOFQlD1VDtsqAFCOGo0wu2RObT5kjBMRNM/DnIhHZlWUn87srwxriaQxywXFey8eNL/nuzSO/7agrNbE7jbHHCo0od5Thpk8KlYsLR46BEaYauis75KdJFBxQwWx0xphtHl/2kNcVcGencW4damj0ewvnTC83rmISQu8dtkYW/4CPF8Ha9suyEhixVMAiHCu4EEuX2UAd1bF3keXCBcZy49kC4ijmigqEtth9Gc32t60WterxbNIpHInbQaxT3NWOIMCf6lXTbCwnaaRutu/vTA=="
+      ],
+      "commitment": "748fe3b5c405c47edab26df16b14e4a0747cd7d58c9ba01f1e54bf6acdac4ba5",
+      "challenge": "b953f632aa5291666729be623709c7ba0ced3740447e9c8f9abb0fba942466e6",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    },
+    "14": {
+      "method": "accept_admin",
+      "params": [
+        "d80addb7c70d435b06971f904ac36707b5792f8e97abdeda73a31b02ccc47627",
+        "e77f128a85893660bec394b442624c7eb9fa9a76704e25889dee5d329eab288f",
+        5,
+        "676e6009be81c21ca9a63fe143b5796eca94f3d67f9e05c093e34ccb53f205ac",
+        "T0cxNlAxLDwHJjKviC7LJIPzRm5bYCLjwQ87u0RwPERsWqJF4noBXXvuZfBDIqv7tMNzbobNT41Dwd/srC0KwTLqCalVGyO+pA4ud+vul1uexLYEEM//DhTesrLUrkwRAgIeLEFMJ0y3RS0uF+LbAhJcbc7i9Y/nq2HgBNqW5295Ka6c+NcMw5OERVNScfGN5MmeLexZKoPxYVm4I82l410h5G4/Ci+ynxJ4Rcu1kxDtq6VMJRLW/ILkyZymG/fKoWsoKU/XBrTnmyjOMuEUeSJAkBDlWgkemsfd/tv3Dp5Ol36kYyoTlgR5hmzx9DbRreOGixcbDeGPnZEn7uu0z37orY+N+A=="
+      ],
+      "commitment": "d80addb7c70d435b06971f904ac36707b5792f8e97abdeda73a31b02ccc47627",
+      "challenge": "f1380a5776a04244342be756697b05ca7f4e1ecd21863104146c3c54c7b4e569",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    },
+    "15": {
+      "method": "accept_admin",
+      "params": [
+        "d80addb7c70d435b06971f904ac36707b5792f8e97abdeda73a31b02ccc47627",
+        "7d94423d122581662068c30a5f1ec520ca675305c4952f9695ab0a96a92af347",
+        5,
+        "7fc346fbd54a592ef0b99e52889099937f9dd488aa27944890bab294d93159b9",
+        "T0cxNlAxDEDaVnGiHBvrCbClnetD2wsmxVHfP7n5np7KlujWnxAMGwtDVckvmxFQ+vBEZhVijEaxhy1k1fLn9gXxwzV9QC5pD41l/Zucq8FJw8qFtdryetOa07hPzpsy4enUk43OFC0ofiGQXF2C5q8ktpS69X1nD2QKjU3QhNEYJWcb3kUbY78ZqFEhwDAQOjqhbSjQCL1jHHqWZO+iTH2gblVvqC+hKJIwZ4caQ/sq2qxy8x/MXe+VsFllJ9dd6fWQOX3HFr+JvuUHoFCmhZo/fq4/ehLyHP/UsSNnIhn5NN3ks5Ijz0ViSX/K5D0gom1BUGdz86npDj0YUYosVIunyO0jkQ=="
+      ],
+      "commitment": "d80addb7c70d435b06971f904ac36707b5792f8e97abdeda73a31b02ccc47627",
+      "challenge": "9c7758067693feba59af0e056cde5fbd0fa0f8234090408de1fcd2c939492359",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    },
+    "16": {
+      "method": "set_paused",
+      "params": [
+        1,
+        6,
+        "8b6dab06a528f83c911859bf5007ab97e15c4485fa57f009411e29c711beaa3d",
+        "T0cxNlAxLMxA37070SDMNVVJSRZqPvJ3wirEVPXEuRhCtaNtX4EiU0fFMYJH6qHsvEZVUc1LNkbxqYE73oCSwRw4NiTPrwXzRBEu9Fkjw1S9CqHWrSmP8AyVe4BVzWtqAwKayxiPFCTFOw+1fuGg9j5Jx/3SbpjHN/CascvOKtlnH1S/GVIRnSpzzhdN2z3Ldq1EXwPVVy9Dzc6eFeSQd6YE9M+eOh1OEWZs6E1NhRQMT9kKz6BHVU4J5T/PMCI9SMN4EUY8CLYHwBxVhN0HWnyxqqs4f3VzaojEUIpLBUbKgu9bRTADy3HnY9lGXgAqHF7dRhuj6wFnDwFBv0077O/jUOgmeA=="
+      ],
+      "commitment": "748fe3b5c405c47edab26df16b14e4a0747cd7d58c9ba01f1e54bf6acdac4ba5",
+      "challenge": "eb69fa4bba9071821b78ce6dfd490e835f9e75ecd300dc13bdc2957568ed3da3",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    },
+    "17": {
+      "method": "set_paused",
+      "params": [
+        1,
+        6,
+        "1ee55db05c5ccfb91eebad5bc53dd3a0aef0ccface0abdc2ecdeac7f64d3f12a",
+        "T0cxNlAxJLAdroeSf8HXmwwPPELcug1hhMOsTheEoe7wFzKXKI8u62PxghSLS62NaxUpyxsRTtwsMlWK3yKHRPv6TjzxjRnPI/igKvAQWYt8N2V9rqEnfGGGbKdabbaq/yIUcZcqGQpvRjP1PyH7S6XeWGY44lhaqdPQ/tF1txQBnDnsgqsW90bPy74Wjap6JPKLSL8AowZODkZEF1I8Xc+JrDbidS1i0QbqpXikqwrdRBz4jktHhNlx0qFoLXKkT1g5syuVJSSPhfABCtPsB56pqBCI062AgDsWib3n4cdXA+1u45YoW2fmEeLS5GEC02El52zaradqBJ4XLVV9AcL+dghJjA=="
+      ],
+      "commitment": "d80addb7c70d435b06971f904ac36707b5792f8e97abdeda73a31b02ccc47627",
+      "challenge": "eb69fa4bba9071821b78ce6dfd490e835f9e75ecd300dc13bdc2957568ed3da3",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    },
+    "18": {
+      "method": "propose_admin",
+      "params": [
+        "69a81649a56062b37070ce89cbceed057d5936d8b091c95f1ce15b3a199174e9",
+        1,
+        7,
+        "b80bc88444e8d7ddbc8f674e7978123c6c56e5c0a0d1fce1e464617e789e02c3",
+        "T0cxNlAxL1XdascT+RetcbMyzkpBSGiikjdfdjvw9jXiCDuwAY8U6YWz4yJD6v4VUvbmBTnZm2xVRKQfGZ2BlL0TElSAEgQ0ZVKMKlOu/suIHR4VzolbkecHAkd4j/5yFlpYGa9kKS24obUzu+FiEzYuUzBuur07mpW8RwMSPbJ3wbdAoysnDoMMVIz+Xx7MYhYL91ouwrVr9uLEaUm6/ZAvpQ1YBBV3uJFhm2ys/ZulHEkWfYW7p3xbExFLI7xrtvTqDWGtIzOG50zl6fX+ebICUvpli7JSvx6TI2O6i7coGH2qEAMQ7x6RLTO1d62bc2soW6Mx7eAxrH3hWhGBv87Ow8JXxg=="
+      ],
+      "commitment": "d80addb7c70d435b06971f904ac36707b5792f8e97abdeda73a31b02ccc47627",
+      "challenge": "c04e756a3d1c3b6896aa14b661190d92673f675817c119fec736a901b617c845",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    },
+    "19": {
+      "method": "accept_admin",
+      "params": [
+        "69a81649a56062b37070ce89cbceed057d5936d8b091c95f1ce15b3a199174e9",
+        "7c3bda6f2ca5bb75ec94a3edca0bb96dbe39c4fe3ee0eea8ac82256e3ab61c77",
+        8,
+        "f68be559cf50c6be2df36d5d1568d21a35731298ad55ec1e4a9709fed4dc543f",
+        "T0cxNlAxD3+HK0ZyxqG7g7PHMr/GDAZ93zqP8sUwjVbrcTFXGhwC72cpRuMM5J/FzM4os1o16s2xvZS41QRcqdhv6MxHXwCyTbIXsIkT3VwwyWpkNzPkE77Km5oS5hxVaDbJMJmGChluDRmnHdp0HN5zdPk4xuZtvUWNKON1KVhtNGPE0y4WT1w6xIR1cfuwNknokVuwwyk4vQcPoJvIZlPdanaNyRhmcUv+N58GgdKk3XOeldmiB2F+MsiP1saq0lh7wCo1BREIRuWmu9OQBj5Qh4bXW49NGjc13wyq7wsmTpxDag0eB6p7JLNFTpQTgqe2g2a91f3xkBraE/L7ozPUvpTUzA=="
+      ],
+      "commitment": "69a81649a56062b37070ce89cbceed057d5936d8b091c95f1ce15b3a199174e9",
+      "challenge": "b3f0714445634729ef1f98b4bdd131915e91e490fbfc8a646dd44580a8aea709",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    },
+    "20": {
+      "method": "set_paused",
+      "params": [
+        0,
+        9,
+        "d2f84cb2969e9834ee15eaaf04e660ab8f907287d8fe72de2e1d58c594fe67b0",
+        "T0cxNlAxLEsponFigKtFTvkzxPmJKRBfgz0S+3L0qRb8SyYt8ukTIMu/xqFteMem7Vk9sIMBhucfczb2MWnfAoObH2QV9xxydh5Eva8RYCTrDoCevj7ezViUhGPjvnLoxZuCuRnaKIUiHHOCRdcR7cNy+1mADyC0fTExKAYBCTrck8BU0KUCQ1UjCMf5GZ6zZ5qSomodYHnsJOU2U+71c2udGmmfwg5NryX9WcgFBm0gmGwDx446a+tMaPrDBsiZr0A2+4SkFqUmFQfRGpgJDSfTIqv/s/WiuawJerktYtauDFJdpKcDT9h6lCZDF3siX6ca0tIdf7JkPrwzu9PKwEffbjKmdg=="
+      ],
+      "commitment": "d80addb7c70d435b06971f904ac36707b5792f8e97abdeda73a31b02ccc47627",
+      "challenge": "fba7cb2ff3eb7b5ac2e84945be50217d244968585958dd75b0d8461a964edbf9",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    },
+    "21": {
+      "method": "set_paused",
+      "params": [
+        0,
+        9,
+        "23bde162cca05e1a35d08c5ece95694070b58866b5d9585a819a418f20d436c1",
+        "T0cxNlAxDt7mg8x/RnMzrYFx2gRFJw8WupQjGwd4VgxS66uJ28oYNQ4ymABrXjOWEZNdq7wq8FAC0Hx3Jhd2N4l5KGRerBb6RYCy3xbEat4uSkS0GVQsgFkfQTEkqJiiozqc5vKiCjH8l83/4/89jwoUqasELKd/coQHD8k1yqTgILQHIYgS8RNkkzxyLoW/8gkL8Lp/Si5mu0NMnS2MunDMGEpJeB+qWiAICdv6lQc18MP8myB2oFPT24L7oQE0GN/oFMEmJIKr2HAqvhe/ReF0ZKBtgxmMvcVFRbn0LjFkgBucJXkXfL4n+XV5YMgT3yT9Zbcu4tjHIHa2priovnDnsss/rA=="
+      ],
+      "commitment": "69a81649a56062b37070ce89cbceed057d5936d8b091c95f1ce15b3a199174e9",
+      "challenge": "fba7cb2ff3eb7b5ac2e84945be50217d244968585958dd75b0d8461a964edbf9",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    },
+    "22": {
+      "method": "propose_admin",
+      "params": [
+        "69a81649a56062b37070ce89cbceed057d5936d8b091c95f1ce15b3a199174e9",
+        1,
+        10,
+        "d142e5a8a645c597fbed04a9c2f3a6f0d8d17c529c3b5633aa1bed0926bea69a",
+        "T0cxNlAxFmDSEpJCgfGv2P6qGPvyu5rhobfHULzr1bW/Sfpxa34WPgNyuajkPgrcI3gxsJkJ0m897p80jLerHNzKkaL6LxZmxMKdv7trXTVBHBVzwnJ+hAiu3xcZdFB+0qjqYu4WJkBMxEcHk6deBCSdYukjAPhlaWATrRhnB0nT23K/KesJj6/kNcAYoIHq4Q+wVgcNn5m1WnkMJZ1Wuy2E3zIBki+74YMIqwbhduXw6fxxJISHERVG30Or9akjG6xS25erIkGrea7OxOCvhGO417O+0QnG5JI83h+i0UsxJBQt0+IYBYvlF8W6vn7kEQFv3xElIACpHaGV5wspUns2fLaj4A=="
+      ],
+      "commitment": "69a81649a56062b37070ce89cbceed057d5936d8b091c95f1ce15b3a199174e9",
+      "challenge": "fdda8934b07d21c04be306a8d741099d7aca21292afdc1bcc2e87474fe293524",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    },
+    "23": {
+      "method": "set_params",
+      "params": [
+        1,
+        1,
+        10,
+        10,
+        100,
+        100000000,
+        1000,
+        9000,
+        1000,
+        50,
+        10,
+        "7e17315d10a7c234eef5d58ef68537356ad97e0d20c14be8dd775b7d0767a78f",
+        "T0cxNlAxEmm4+BeGEMHtFRlnJ6+I+V1XPqjaX6qczoOiAlyMjggVM0QfefXND8DAHVNjjFN7NSG8luwMAYBVvrXnUEmTPybaB2Jy56jmP0+7K/roAOHOTQLZfC16gdbC/4vnV0vIJU5xRQM3JbMewKpgzs6QlmiFo22846nbJAI4vqlXtWggc9vdgnhXBUxRjz2pG/NIfB94NbUgJ56tttpI3vbQMAgJ+byaQ7B/vwVrbMdSYpt2L5pPdZWnqiBmhUSn6XYyLQKFxHM9Ru9BhYxl+oI/7w8l7HvCnhq5THY0wk2LfGMCYYmYnFK1QGha82NSbGwBbrJNiiERYfhixqbm7A31LQ=="
+      ],
+      "commitment": "69a81649a56062b37070ce89cbceed057d5936d8b091c95f1ce15b3a199174e9",
+      "challenge": "50a1555a1d1b993af3bba68b2ac6e9af418940d71150678a433ca53bd012a23f",
+      "circuit": "sha256-credential-action-bn254-v1",
+      "verification_key_sha256": "2916e3d5e8bfa2cf82a3a24a2564c3a1c976532494fe66b0fec18221c1830e94"
+    }
   }
 }

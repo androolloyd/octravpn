@@ -5,25 +5,33 @@
 [![HFHE bridge status](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fandroolloyd%2Foctravpn%2Fmain%2Fdocs%2Faudit%2Ffhe-load-pk-status.json)](docs/audit/fhe-load-pk-status.json)
 
 A decentralized VPN — Tailscale-style mesh with on-chain coordination —
-that runs on Octra. Operators stake OU to run exit/relay endpoints,
-tailnet owners group members under shared treasuries, sessions escrow
-their cost in OU, traffic flows over WireGuard, and settlement is
-**two-tx** (operator claims bytes_used → client confirms → AML
-settles or records a public dispute). Misbehavior is slashed in-AML.
+that runs on Octra. Operators stake OCT, sessions escrow their traffic cost in
+OCT, and traffic flows over WireGuard. Settlement is **two-tx**: the operator
+claims bytes and the agreed charge, then the client confirms that exact amount.
+The current application uses private admin credentials; historical owner,
+tailnet and slashing variants below retain their own separate deployment scope.
 
 **Current economics:** operators receive the full traffic payment in OCT.
 There is no VPN protocol commission; ordinary Octra transaction fees are
 separate. The [canary candidate](docs/audit/2026-10-11-canary-security.md)
 remains unqualified for launch. [First-party integration](docs/octra-vpn-inclusion.md)
-tracks Circle applications, ExEx and the incomplete Rust node port.
+tracks Circle applications, ExEx and the Rust node's qualification boundaries.
 
-**Rust node development (2026-10-14):** the `octra-node` executable connects the
+**Rust node qualification (2026-10-15):** the `octra-node` executable connects the
 native validator driver, authenticated peers, transaction intake, canonical
 commits, ExEx and Circle browsing. The [local devnet guide](docs/rust-node/devnet.md)
 runs four persistent validator processes, each with embedded VPN sockets.
-VPN session admission remains closed until a real settlement Circle is configured.
-Remaining VM/HFHE operations, funded VPN integration and public-network qualification
-remain open. See the [implementation evidence](docs/rust-node/native-runtime.md).
+VPN session admission remains closed until a real settlement application is configured.
+The [paid local checkpoint](docs/rust-node/checkpoints/2026-10-15/native-vpn.json)
+passed actual application deployment, private handoff/rotation, paid UDP and OS
+TUN TCP/UDP/ICMP, same-session restart recovery, matching ExEx and canonical
+gateway delivery on an isolated four-validator chain. Public synchronization,
+external Tailscale/TLS, production setup and full native parity remain separate
+gates. See [current status](docs/rust-node/status.md) and the
+[bounded formal checkpoint](docs/rust-node/checkpoints/2026-10-15/formal.json).
+
+The dated deployment notes below are historical records, not qualification of
+the current application or a present Mainnet readiness claim.
 
 > **Status (2026-05-20).** Three AML deployments are live on devnet
 > and run in parallel, gated by the node/client `protocol_version` config:
@@ -31,7 +39,7 @@ remain open. See the [implementation evidence](docs/rust-node/native-runtime.md)
 > - **v1.1** — `program/main.aml`, deployed at
 >   `oct2YehVLezCi2RCcSkURc3nyyYtzxmspwGHHALm6pjkUvJ`. Public-registry
 >   operators, two-tx settle, cryptographic `slash_double_sign`. The
->   v1.1 49-case adversarial drill landed clean. Production-ready.
+>   v1.1 49-case adversarial drill landed clean in that historical deployment.
 > - **v2** — `program/main-v2.aml`, deployed at
 >   `oct3fxjrzfqh65ATo31eau8xRFBPiXh2Uzwue56EYkfVSj7`. Slim registry
 >   + per-operator **Octra Circle** holding sealed `/policy.json`,

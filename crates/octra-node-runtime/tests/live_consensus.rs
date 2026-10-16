@@ -575,3 +575,102 @@ async fn failed_precommit_durability_never_reaches_peers() {
         }
     }
 }
+
+fn resource_gossip(chain: &[u8], kind: u8) -> Vec<u8> {
+    use octra_node_protocol::oce1::Writer;
+    let mut attestation = Writer::new();
+    attestation.put_bytes(b"inner-chain").unwrap();
+    attestation.put_u64(0).unwrap();
+    attestation.put_bytes(b"resource-node").unwrap();
+    attestation.put_u8(kind).unwrap();
+    attestation.put_bytes(b"commitment").unwrap();
+    attestation.put_hash32(&[0; 32]).unwrap();
+    attestation.put_u64(1).unwrap();
+    attestation.put_hash32(&[0; 32]).unwrap();
+    attestation.put_sig64(&[0; 64]).unwrap();
+    let mut gossip = Writer::new();
+    gossip.put_bytes(chain).unwrap();
+    gossip.put_u64(0).unwrap();
+    gossip.put_bytes(&attestation.into_bytes()).unwrap();
+    gossip.into_bytes()
+}
+
+fn peer_score(node: &Node, id: &[u8]) -> Option<octra_node_protocol::network::guard::Score> {
+    let key = octra_node_protocol::network::guard::identity_key(id);
+    node.swarm
+        .scores()
+        .into_iter()
+        .find_map(|(identity, score)| (identity == key).then_some(score))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn resource_gossip_reaches_actor_without_enabling_optional_committees() {
+    let receiver = node(1, 2, vec![], None).await;
+    let sender = node(2, 2, vec![receiver.endpoint.clone()], None).await;
+    wait(|| {
+        receiver.swarm.peers().len() == 1
+            && sender.swarm.peers().len() == 1
+            && receiver.handle.status().borrow().started
+    })
+    .await;
+    let id = sender.swarm.node_id();
+    // Both malformed payloads cross the authenticated peer/Handle boundary.
+    // Nested decoding must still precede a mismatching outer chain check.
+    for payload in [vec![], resource_gossip(b"wrong-chain", 9)] {
+        let warnings = receiver.authority.warnings.lock().unwrap().len();
+        assert!(
+            sender
+                .swarm
+                .send_to(
+                    receiver.swarm.node_id(),
+                    Frame {
+                        message: 0x3c,
+                        payload
+                    }
+                )
+                .await
+        );
+        wait(|| {
+            receiver.authority.warnings.lock().unwrap()[warnings..]
+                .iter()
+                .any(|warning| warning.starts_with("bad_resource_attestation error = "))
+        })
+        .await;
+        assert_eq!(peer_score(&receiver, id).map_or(0, |s| s.bad_count), 0);
+        assert!(receiver.swarm.peers()[0].is_connected());
+    }
+    let warnings = receiver.authority.warnings.lock().unwrap().clone();
+    for (chain, reason, count) in [
+        (CHAIN, b"invalid_resource_attestation".as_slice(), 1),
+        (
+            b"wrong-chain".as_slice(),
+            b"resource_attestation_chain_mismatch".as_slice(),
+            2,
+        ),
+    ] {
+        assert!(
+            sender
+                .swarm
+                .send_to(
+                    receiver.swarm.node_id(),
+                    Frame {
+                        message: 0x3c,
+                        payload: resource_gossip(chain, 1)
+                    },
+                )
+                .await
+        );
+        wait(|| peer_score(&receiver, id).is_some_and(|s| s.bad_count == count)).await;
+        assert_eq!(peer_score(&receiver, id).unwrap().last_reason, reason);
+    }
+    assert_eq!(*receiver.authority.warnings.lock().unwrap(), warnings);
+    assert_eq!(receiver.authority.head_epoch(), 0);
+    assert_eq!(receiver.handle.status().borrow().height, 1);
+    assert!(!receiver.handle.status().borrow().voting);
+    assert!(receiver.authority.commits.lock().unwrap().is_empty());
+    assert!(receiver.swarm.peers()[0].is_connected());
+    for node in [&receiver, &sender] {
+        node.stop.send_replace(true);
+    }
+    wait(|| receiver.driver.is_finished() && sender.driver.is_finished()).await;
+}

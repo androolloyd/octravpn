@@ -58,7 +58,7 @@
 use std::net::SocketAddr;
 
 use rand::{rngs::OsRng, Rng, RngCore};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Stock WireGuard msg-type bytes. We use these as both the
 /// "untouched" outbound source (the boringtun layer always emits one
@@ -69,10 +69,10 @@ const WG_MSG_RESPONSE: u32 = 2;
 const WG_MSG_COOKIE: u32 = 3;
 const WG_MSG_TRANSPORT: u32 = 4;
 
-/// Canonical WireGuard packet sizes — used to disambiguate
-/// handshake-init / handshake-response on the inbound path (so we
-/// know how many junk-prefix bytes to strip).
+/// Canonical handshake lengths used by round-trip fixtures.
+#[cfg(test)]
 const WG_INIT_LEN: usize = 148;
+#[cfg(test)]
 const WG_RESPONSE_LEN: usize = 92;
 
 /// Maximum allowed S1 / S2 prefix length. Mirrors AmneziaWG's
@@ -108,7 +108,8 @@ const MAX_JC: u8 = 128;
 /// `Default` returns the **identity** mapping (h1..h4 = 1..4, all
 /// other knobs zero). This is the off-the-wire shape so an
 /// unconfigured `AmneziaShield` is a pass-through.
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AmneziaConfig {
     #[serde(default)]
     pub jc: u8,
@@ -128,6 +129,41 @@ pub struct AmneziaConfig {
     pub h3: u32,
     #[serde(default = "default_h4")]
     pub h4: u32,
+}
+
+/// Committed policy transport. Unknown kinds and parameters fail decoding;
+/// clients never infer a plaintext fallback after an obfuscated handshake fails.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum WireTransport {
+    #[default]
+    Wireguard,
+    AmneziaV1 {
+        parameters: AmneziaConfig,
+    },
+}
+impl WireTransport {
+    pub fn from_config(parameters: AmneziaConfig) -> Result<Self, &'static str> {
+        parameters.validate()?;
+        Ok(if parameters.is_identity() {
+            Self::Wireguard
+        } else {
+            Self::AmneziaV1 { parameters }
+        })
+    }
+    pub fn config(self) -> Result<AmneziaConfig, &'static str> {
+        let config = match self {
+            Self::Wireguard => AmneziaConfig::default(),
+            Self::AmneziaV1 { parameters } => {
+                if parameters.is_identity() {
+                    return Err("identity parameters must advertise wireguard transport");
+                }
+                parameters
+            }
+        };
+        config.validate()?;
+        Ok(config)
+    }
 }
 
 const fn default_h1() -> u32 {
@@ -221,8 +257,9 @@ impl AmneziaConfig {
 
 /// Stateful obfuscation wrapper. One instance per UDP socket / peer
 /// session. Tracks whether the pre-handshake junk burst has been
-/// emitted for a given destination (we only emit it once per process
-/// run, per destination, to avoid re-burst storms on every keepalive).
+/// emitted for a given destination. At most 4096 initiated destinations are
+/// retained; additional destinations still receive header/prefix shielding
+/// without junk bursts. Responses to inbound probes never trigger junk.
 pub struct AmneziaShield {
     cfg: AmneziaConfig,
     /// Set once the junk burst has been emitted. Keyed by destination
@@ -264,8 +301,14 @@ impl AmneziaShield {
             return;
         }
 
-        // Emit pre-handshake junk burst once per (process, dst).
-        if self.cfg.jc > 0 && !self.junk_emitted.contains(&dst) {
+        // Junk precedes an initiation only. Sending it in response to an
+        // unauthenticated cookie/handshake probe would amplify spoofed UDP.
+        let initiating = buf.get(..4) == Some(WG_MSG_INIT.to_le_bytes().as_slice());
+        if initiating
+            && self.cfg.jc > 0
+            && self.junk_emitted.len() < 4096
+            && !self.junk_emitted.contains(&dst)
+        {
             self.junk_emitted.insert(dst);
             let mut rng = OsRng;
             for _ in 0..self.cfg.jc {
@@ -343,6 +386,9 @@ impl AmneziaShield {
         F: FnMut(&mut [u8]) -> Option<usize>,
     {
         let n = recv(buf)?;
+        if n > buf.len() {
+            return None;
+        }
         if self.cfg.is_identity() {
             return Some(n);
         }
@@ -350,20 +396,8 @@ impl AmneziaShield {
             return None;
         }
 
-        // We may need to peek through up to `max(s1, s2)` candidate
-        // offsets to find the substituted header. AmneziaWG places
-        // the substituted header at offset == s1 (for init) or s2
-        // (for response); for cookie/transport there is no prefix
-        // (s1/s2 only apply to handshake packets). So the inbound
-        // strategy is:
-        //
-        //   - Check buf[0..4] LE u32 against h3 / h4 first
-        //     (cookie / transport — no prefix). If match, restore and
-        //     return Some(n).
-        //   - Else check buf[s1..s1+4] against h1; if match, strip
-        //     first s1 bytes, restore header to WG_MSG_INIT, return.
-        //   - Else check buf[s2..s2+4] against h2; same for response.
-        //   - Else: junk, return None.
+        // Decode handshake headers at their configured prefix offsets.
+        // Boringtun remains responsible for complete logical packet validation.
         let read_hdr = |b: &[u8], off: usize| -> Option<u32> {
             if b.len() < off + 4 {
                 return None;
@@ -376,31 +410,8 @@ impl AmneziaShield {
             ]))
         };
 
-        // Cookie / transport: no prefix, header at offset 0.
-        if let Some(hdr0) = read_hdr(&buf[..n], 0) {
-            if hdr0 == self.cfg.h3 {
-                buf[0..4].copy_from_slice(&WG_MSG_COOKIE.to_le_bytes());
-                return Some(n);
-            }
-            if hdr0 == self.cfg.h4 {
-                buf[0..4].copy_from_slice(&WG_MSG_TRANSPORT.to_le_bytes());
-                return Some(n);
-            }
-            // ALSO accept stock-WG msg-type at offset 0 — this is what
-            // lets a `disabled` peer interoperate with us if our
-            // config has the stock h-values (the identity case). When
-            // h1..h4 are non-canonical, a stock-WG packet's leading
-            // byte 0x01..0x04 will not match any of h1..h4 and will
-            // be (correctly) dropped as junk.
-            //
-            // The identity case is already handled above by
-            // `is_identity()`. Here, the h-values are non-canonical,
-            // so a packet matching the stock values is treated as
-            // junk (no recognition).
-        }
-
         // Init: header at offset s1.
-        if self.cfg.s1 > 0 || self.cfg.h1 != WG_MSG_INIT {
+        {
             let off = self.cfg.s1 as usize;
             if let Some(hdr) = read_hdr(&buf[..n], off) {
                 if hdr == self.cfg.h1 {
@@ -408,27 +419,34 @@ impl AmneziaShield {
                     let new_len = n - off;
                     buf.copy_within(off..n, 0);
                     buf[0..4].copy_from_slice(&WG_MSG_INIT.to_le_bytes());
-                    // Sanity: a real WG init is exactly 148 bytes.
-                    // Don't enforce here — boringtun will reject if
-                    // wrong.
-                    let _ = WG_INIT_LEN;
                     return Some(new_len);
                 }
             }
         }
 
         // Response: header at offset s2.
-        if self.cfg.s2 > 0 || self.cfg.h2 != WG_MSG_RESPONSE {
+        {
             let off = self.cfg.s2 as usize;
             if let Some(hdr) = read_hdr(&buf[..n], off) {
                 if hdr == self.cfg.h2 {
                     let new_len = n - off;
                     buf.copy_within(off..n, 0);
                     buf[0..4].copy_from_slice(&WG_MSG_RESPONSE.to_le_bytes());
-                    let _ = WG_RESPONSE_LEN;
                     return Some(new_len);
                 }
             }
+        }
+
+        if let Some(header) = read_hdr(&buf[..n], 0) {
+            let canonical = if header == self.cfg.h3 {
+                WG_MSG_COOKIE
+            } else if header == self.cfg.h4 {
+                WG_MSG_TRANSPORT
+            } else {
+                return None;
+            };
+            buf[..4].copy_from_slice(&canonical.to_le_bytes());
+            return Some(n);
         }
 
         // No magic match: junk packet, drop silently.
@@ -440,6 +458,56 @@ impl AmneziaShield {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    #[test]
+    fn junk_only_and_partial_headers_preserve_handshake_roundtrip() {
+        let destination = "127.0.0.1:51820".parse().unwrap();
+        for config in [
+            AmneziaConfig {
+                jc: 2,
+                jmin: 32,
+                jmax: 32,
+                ..Default::default()
+            },
+            AmneziaConfig {
+                h4: 5,
+                ..Default::default()
+            },
+        ] {
+            let mut send = AmneziaShield::new(config).unwrap();
+            let mut receive = AmneziaShield::new(config).unwrap();
+            for (kind, length) in [
+                (WG_MSG_INIT, WG_INIT_LEN),
+                (WG_MSG_RESPONSE, WG_RESPONSE_LEN),
+            ] {
+                let mut logical = vec![0; length];
+                logical[..4].copy_from_slice(&kind.to_le_bytes());
+                let mut packets = Vec::new();
+                send.wrap_send(destination, &logical, |bytes| packets.push(bytes.to_vec()));
+                let expected = if kind == WG_MSG_INIT {
+                    usize::from(config.jc) + 1
+                } else {
+                    1
+                };
+                assert_eq!(packets.len(), expected, "junk must precede initiation only");
+                let mut wire = packets.pop().unwrap();
+                let size = wire.len();
+                let decoded = receive.wrap_recv(&mut wire, |_| Some(size)).unwrap();
+                assert_eq!(&wire[..decoded], logical);
+            }
+        }
+    }
+
+    #[test]
+    fn false_receive_length_and_mislabelled_identity_are_rejected() {
+        let mut shield = AmneziaShield::new(AmneziaConfig::default()).unwrap();
+        assert!(shield.wrap_recv(&mut [0; 32], |_| Some(33)).is_none());
+        assert!(WireTransport::AmneziaV1 {
+            parameters: AmneziaConfig::default()
+        }
+        .config()
+        .is_err());
+    }
 
     fn nonid_cfg() -> AmneziaConfig {
         AmneziaConfig {
@@ -518,29 +586,26 @@ mod tests {
         let mut sh = AmneziaShield::new(cfg).unwrap();
         let dst: SocketAddr = "127.0.0.1:9".parse().unwrap();
 
-        // burn the junk burst — emit a transport packet (no prefix)
-        // first to set junk_emitted for this dst.
+        // Transport traffic never triggers a junk burst.
         let mut emitted: Vec<Vec<u8>> = Vec::new();
         let mut transport = vec![0u8; 32];
         transport[..4].copy_from_slice(&WG_MSG_TRANSPORT.to_le_bytes());
         sh.wrap_send(dst, &transport, |b| emitted.push(b.to_vec()));
-        // emitted = [3 junk pkts, transport-substituted]
-        assert_eq!(emitted.len(), 4);
-        let last = &emitted[3];
+        assert_eq!(emitted.len(), 1);
+        let last = &emitted[0];
         assert_eq!(
             u32::from_le_bytes([last[0], last[1], last[2], last[3]]),
             cfg.h4
         );
         assert_eq!(last.len(), 32); // no prefix on transport
 
-        // Now init: should NOT re-emit junk (already burned), should
-        // have s1 prefix + h1 header.
+        // The first initiation emits junk and receives its configured prefix.
         emitted.clear();
         let mut init = vec![0u8; WG_INIT_LEN];
         init[..4].copy_from_slice(&WG_MSG_INIT.to_le_bytes());
         sh.wrap_send(dst, &init, |b| emitted.push(b.to_vec()));
-        assert_eq!(emitted.len(), 1);
-        let one = &emitted[0];
+        assert_eq!(emitted.len(), usize::from(cfg.jc) + 1);
+        let one = emitted.last().unwrap();
         assert_eq!(one.len(), WG_INIT_LEN + cfg.s1 as usize);
         // The substituted header lives at offset s1.
         let hdr = u32::from_le_bytes([
@@ -589,25 +654,12 @@ mod tests {
         let mut rx = AmneziaShield::new(cfg).unwrap();
         let dst: SocketAddr = "127.0.0.1:9".parse().unwrap();
 
-        // burn junk
+        // A transport packet creates no junk burst.
         let mut emitted: Vec<Vec<u8>> = Vec::new();
         let warmup = vec![WG_MSG_TRANSPORT as u8, 0, 0, 0, 0x77, 0x88];
         tx.wrap_send(dst, &warmup, |b| emitted.push(b.to_vec()));
-        // skip junk via rx.wrap_recv -> None for the first jc packets
-        for (j, junk_pkt) in emitted.iter().enumerate().take(cfg.jc as usize) {
-            let mut rxbuf = vec![0u8; junk_pkt.len()];
-            rxbuf.copy_from_slice(junk_pkt);
-            let mut once = Some(junk_pkt);
-            let got = rx.wrap_recv(&mut rxbuf, |out| {
-                let src = once.take()?;
-                out[..src.len()].copy_from_slice(src);
-                Some(src.len())
-            });
-            assert_eq!(got, None, "junk packet #{j} should be dropped");
-        }
-        // the real warmup packet is at index jc
-        let real_idx = cfg.jc as usize;
-        let raw = emitted[real_idx].clone();
+        assert_eq!(emitted.len(), 1);
+        let raw = emitted[0].clone();
         let mut rxbuf = vec![0u8; raw.len()];
         let mut once = Some(raw.clone());
         let got = rx.wrap_recv(&mut rxbuf, |out| {
@@ -628,9 +680,9 @@ mod tests {
         init[..4].copy_from_slice(&WG_MSG_INIT.to_le_bytes());
         init[10] = 0x42; // sentinel
         tx.wrap_send(dst, &init, |b| emitted.push(b.to_vec()));
-        assert_eq!(emitted.len(), 1);
-        let mut rxbuf = vec![0u8; emitted[0].len()];
-        let raw = emitted[0].clone();
+        assert_eq!(emitted.len(), usize::from(cfg.jc) + 1);
+        let raw = emitted.pop().unwrap();
+        let mut rxbuf = vec![0u8; raw.len()];
         let mut once = Some(raw);
         let got = rx.wrap_recv(&mut rxbuf, |out| {
             let src = once.take()?;
@@ -1019,8 +1071,8 @@ mod tests {
         c.jmax = 33;
         let mut sh = AmneziaShield::new(c).unwrap();
         let dst: SocketAddr = "127.0.0.1:9".parse().unwrap();
-        let mut pkt = vec![0u8; 32];
-        pkt[..4].copy_from_slice(&WG_MSG_TRANSPORT.to_le_bytes());
+        let mut pkt = vec![0u8; WG_INIT_LEN];
+        pkt[..4].copy_from_slice(&WG_MSG_INIT.to_le_bytes());
         let out = collect_send(&mut sh, dst, &pkt);
         // jc=5 junk pkts + 1 real = 6 datagrams.
         assert_eq!(out.len(), 6, "must be jc + 1");
@@ -1028,11 +1080,11 @@ mod tests {
         for j in &out[..5] {
             assert_eq!(j.len(), 33);
         }
-        // The 6th must NOT be junk-shaped: it's the substituted transport
-        // packet, length 32.
-        assert_eq!(out[5].len(), 32);
-        let hdr = u32::from_le_bytes([out[5][0], out[5][1], out[5][2], out[5][3]]);
-        assert_eq!(hdr, c.h4);
+        // The final datagram is the prefixed initiation.
+        assert_eq!(out[5].len(), WG_INIT_LEN + usize::from(c.s1));
+        let offset = usize::from(c.s1);
+        let hdr = u32::from_le_bytes(out[5][offset..offset + 4].try_into().unwrap());
+        assert_eq!(hdr, c.h1);
     }
 
     #[test]
@@ -1044,8 +1096,8 @@ mod tests {
         let mut sh = AmneziaShield::new(c).unwrap();
         let dst_a: SocketAddr = "127.0.0.1:11".parse().unwrap();
         let dst_b: SocketAddr = "127.0.0.1:12".parse().unwrap();
-        let mut pkt = vec![0u8; 16];
-        pkt[..4].copy_from_slice(&WG_MSG_TRANSPORT.to_le_bytes());
+        let mut pkt = vec![0u8; WG_INIT_LEN];
+        pkt[..4].copy_from_slice(&WG_MSG_INIT.to_le_bytes());
 
         // First send to A: burst + real = 4
         let out_a1 = collect_send(&mut sh, dst_a, &pkt);
@@ -1377,24 +1429,23 @@ mod tests {
     }
 
     // -------------------------------------------------------------------
-    // Bypass: outbound msg-type 0 (unknown) is passed unchanged through
-    // junk burst (junk still happens) and the restored msg-type rules.
+    // Unknown outbound types pass unchanged without emitting junk.
     // -------------------------------------------------------------------
 
     #[test]
-    fn outbound_unknown_msg_type_skips_substitution_but_burns_junk() {
-        // Unknown msg-type passes through, but the *first* call to a
-        // new dst still emits the junk burst (because the burst gate
-        // fires before msg-type inspection).
+    fn outbound_unknown_msg_type_never_triggers_or_consumes_junk() {
         let cfg = nonid_cfg();
-        let mut sh = AmneziaShield::new(cfg).unwrap();
-        let dst: SocketAddr = "127.0.0.1:9".parse().unwrap();
-        let mut pkt = vec![0u8; 32];
-        pkt[..4].copy_from_slice(&0xDEADu32.to_le_bytes());
-        let out = collect_send(&mut sh, dst, &pkt);
-        // jc junk + 1 unchanged real
-        assert_eq!(out.len(), cfg.jc as usize + 1);
-        assert_eq!(out.last().unwrap(), &pkt);
+        let mut shield = AmneziaShield::new(cfg).unwrap();
+        let dst = "127.0.0.1:9".parse().unwrap();
+        let mut unknown = vec![0; 32];
+        unknown[..4].copy_from_slice(&0xDEADu32.to_le_bytes());
+        assert_eq!(collect_send(&mut shield, dst, &unknown), vec![unknown]);
+        let mut init = vec![0; WG_INIT_LEN];
+        init[..4].copy_from_slice(&WG_MSG_INIT.to_le_bytes());
+        assert_eq!(
+            collect_send(&mut shield, dst, &init).len(),
+            usize::from(cfg.jc) + 1
+        );
     }
 
     // -------------------------------------------------------------------

@@ -15,14 +15,14 @@ pub fn preferred_direction(local: &[u8], peer: &[u8]) -> Direction {
     }
 }
 pub fn role(validators: Option<&[Vec<u8>]>, peer: &[u8]) -> PeerClass {
-    if validators.map_or(true, |keys| keys.iter().any(|key| node_id(key) == peer)) {
+    if validators.is_none_or(|keys| keys.iter().any(|key| node_id(key) == peer)) {
         PeerClass::Validator
     } else {
         PeerClass::Observer
     }
 }
 pub fn local_is_validator(validators: Option<&[Vec<u8>]>, public: &[u8]) -> bool {
-    validators.map_or(true, |keys| keys.iter().any(|k| k == public))
+    validators.is_none_or(|keys| keys.iter().any(|k| k == public))
 }
 pub fn accepts_observers(validators: Option<&[Vec<u8>]>, public: &[u8]) -> bool {
     validators.is_some() && local_is_validator(validators, public)

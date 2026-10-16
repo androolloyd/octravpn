@@ -4,10 +4,17 @@
 //! transaction savepoint. A VM refusal retains local diagnostic state; unavailable
 //! execution must abort and restore the enclosing attempt, never become a verdict.
 mod data;
+mod fhe;
 mod meter;
+mod object;
 mod proof;
 mod spawn;
 mod value;
+mod vector;
+pub use fhe::{
+    Capability as FheCapability, KeySource as FheKeySource, Proof as FheProof,
+    ProofKind as FheProofKind,
+};
 use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive, Zero};
 use octra_node_protocol::{
@@ -74,10 +81,13 @@ pub struct Options {
     pub typed_bytes: bool,
     pub integer_work: bool,
     pub fhe_work: bool,
+    pub object_cost: bool,
+    pub object_quorum: octra_node_protocol::circle_object::Quorum,
     pub proof_exec: bool,
     pub math: bool,
     pub point_ops: bool,
     pub is_view: bool,
+    pub fhe_memory: Option<octra_node_protocol::octb::fhe_work::Memory>,
     /// Native suspended-host completion semantics (used by Circle execution).
     pub async_exec: bool,
     pub storage_kinds: BTreeMap<Vec<u8>, StorageKind>,
@@ -90,10 +100,13 @@ impl Default for Options {
             typed_bytes: false,
             integer_work: false,
             fhe_work: false,
+            object_cost: false,
+            object_quorum: octra_node_protocol::circle_object::Quorum::Machine,
             proof_exec: false,
             math: false,
             point_ops: false,
             is_view: false,
+            fhe_memory: None,
             async_exec: false,
             storage_kinds: BTreeMap::new(),
         }
@@ -101,12 +114,22 @@ impl Default for Options {
 }
 /// The host supplies authenticated state. Missing state is an operational error.
 pub trait Host {
+    fn fhe_capability(&self, _capability: FheCapability) -> Result<bool, Unavailable> {
+        Ok(true)
+    }
+    fn fhe_key(&mut self, _address: &[u8]) -> Result<Option<FheKeySource>, Unavailable> {
+        Ok(None)
+    }
+    fn fhe_verify(&mut self, proof: FheProof<'_>) -> Result<bool, Unavailable> {
+        fhe::verify(proof)
+    }
     fn groth16(&mut self, _key: &[u8], _proof: &[u8], _inputs: &[u8]) -> Result<bool, Unavailable> {
         Err(Unavailable("OCTB proof host is unavailable".into()))
     }
     fn spawn(
         &mut self,
         _request: SpawnRequest<'_>,
+        _storage: &mut StorageTable,
         _budget: Option<&mut Budget>,
     ) -> Result<Option<Spawned>, Unavailable> {
         Err(Unavailable("OCTB deployment host is unavailable".into()))
@@ -143,6 +166,7 @@ pub struct CallRequest<'a> {
     pub method: &'a [u8],
     pub params: &'a [Value],
     pub limit: i64,
+    pub fhe_memory: Option<octra_node_protocol::octb::fhe_work::Memory>,
 }
 pub struct Subcall {
     pub response: Value,
@@ -155,6 +179,7 @@ pub struct SpawnRequest<'a> {
     pub nonce: i64,
     pub params: &'a [Value],
     pub limit: i64,
+    pub fhe_memory: Option<octra_node_protocol::octb::fhe_work::Memory>,
 }
 pub struct Spawned {
     pub address: Vec<u8>,
@@ -196,9 +221,20 @@ pub struct Machine {
     options: Options,
     undo: Vec<Undo>,
     returns: Vec<(usize, u8, [Value; 64])>,
+    fhe: fhe::State,
 }
 impl Machine {
+    pub fn storage_writes(&self) -> usize {
+        self.undo
+            .iter()
+            .filter(|entry| matches!(entry, Undo::Write(..)))
+            .count()
+    }
     pub fn new(context: Context, options: Options, storage: StorageTable) -> Self {
+        let memory = options
+            .fhe_memory
+            .clone()
+            .or_else(|| (options.is_view || options.fhe_work).then(Default::default));
         Self {
             regs: std::array::from_fn(|_| Value::default()),
             memory: BTreeMap::new(),
@@ -215,6 +251,7 @@ impl Machine {
             options,
             undo: vec![],
             returns: vec![],
+            fhe: fhe::State::new(memory),
         }
     }
     pub fn run(
@@ -390,17 +427,13 @@ impl Machine {
             return Ok(());
         }
         if let Some(b) = budget {
-            let left = b.event_left() - 16;
-            let value = self.regs[0].clone();
-            let used = Self::value_work(&value, b, self.effort, self.options.limit)?;
-            let text = value.text();
-            let mut size = work::text_size(left, &text).ok_or(Trap::Refused)?;
-            if matches!(value, Value::Bytes(_) | Value::Bytes32(_)) {
-                size = size.max(work::encoded_size(text.len() as i64).ok_or(Trap::Refused)? + 2);
-            }
-            self.effort = b
-                .output(used, self.options.limit, size + 16)
-                .ok_or(Trap::Refused)?;
+            self.effort = crate::circle_receipt::output_value(
+                b,
+                &self.regs[0],
+                self.effort,
+                self.options.limit,
+            )
+            .ok_or(Trap::Refused)?;
         }
         self.output_ready = true;
         Ok(())
@@ -424,7 +457,7 @@ impl Machine {
     ) -> Exec<bool> {
         // Missing execution families must remain operational errors even when
         // an incomplete meter could otherwise appear to refuse the instruction.
-        if !matches!(op.opcode(), 0x00..=0x2f | 0x3f..=0x55 | 0x7a | 0x7b | 0x89 | 0x8a) {
+        if !matches!(op.opcode(), 0x00..=0x61 | 0x65 | 0x68..=0x6a | 0x6c..=0x6e | 0x7a..=0x8a) {
             return Err(Unavailable(format!(
                 "OCTB opcode 0x{:02x} execution is not available",
                 op.opcode()
@@ -432,8 +465,60 @@ impl Machine {
             .into());
         }
         self.prepare(op, budget)?;
+        self.prepare_fhe(op)?;
         use Instruction as I;
         match op {
+            I::Matmul(..)
+            | I::Vecdot(..)
+            | I::ReluInplace(..)
+            | I::ElemwiseMulInplace(..)
+            | I::LoadInt8BytesToMem(..)
+            | I::ResidualAdd(..)
+            | I::LoadInt8B64ToMem(..)
+            | I::MatmulQ16(..)
+            | I::ShiftRoundInplace(..)
+            | I::ExpQ16(..)
+            | I::SoftmaxQ16Inplace(..)
+            | I::LayernormQ16Inplace(..)
+            | I::RmsnormQ16Inplace(..)
+            | I::SiluQ16Inplace(..)
+            | I::RopeApplyQ16(..)
+            | I::AttentionKvQ16(..)
+            | I::VecdotQ16(..)
+            | I::ElemwiseMulQ16(..)
+            | I::ResidualAddQ16(..)
+            | I::LoadInt8Q16(..)
+            | I::AppendVecQ16(..)
+            | I::ArgmaxQ16(..) => self.execute_vector(op, budget)?,
+            I::ObjectTransitionApply(..)
+            | I::ObjectMemberCount(..)
+            | I::ObjectHasMember(..)
+            | I::ObjectMemberRefAt(..) => self.execute_object(op, budget)?,
+            I::FheLoadPk(..)
+            | I::FheAdd(..)
+            | I::FheSub(..)
+            | I::FheMul(..)
+            | I::FheScale(..)
+            | I::FheDivConst(..)
+            | I::FheAddConst(..)
+            | I::FheSubConst(..)
+            | I::FheVerifyZero(..)
+            | I::FheVerifyRange(..)
+            | I::FheVerifyBound(..)
+            | I::FheCommit(..)
+            | I::FhePedersen(..)
+            | I::FhePedersenAdd(..)
+            | I::FhePedersenSub(..)
+            | I::FhePedersenIdentity(..)
+            | I::FheSer(..)
+            | I::FheDeser(..)
+            | I::FheSerPk(..)
+            | I::FheDeserPk(..) => self.execute_fhe(op, host, budget)?,
+            I::StatePathKey(dest, source) => {
+                let key = octra_node_protocol::circles::state_path_key(&self.text(*source)?)
+                    .map_err(|_| Trap::Refused)?;
+                self.set(*dest, Value::string(key.into_bytes()))?;
+            }
             I::Groth16VerifyBn254(dest, key, proof, inputs) => {
                 self.verify_groth16(*dest, *key, *proof, *inputs, host, budget)?;
             }
@@ -669,6 +754,7 @@ impl Machine {
                         method: &method,
                         params: &params,
                         limit,
+                        fhe_memory: self.fhe.memory.clone(),
                     },
                     &mut self.storage,
                     budget.as_deref_mut(),

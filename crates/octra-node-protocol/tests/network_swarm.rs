@@ -115,6 +115,65 @@ async fn client(
     .await
 }
 #[tokio::test]
+async fn handshake_keys_do_not_select_scheduled_or_unknown_validators() {
+    // Cover native dynamic admission and a scheduled key already allowed by a
+    // closed handshake filter. Both remain observers until actual selection.
+    for (peer_key, handshake_keys) in [
+        (3, vec![]),
+        // Native bound active/scheduled admission lists can repeat keys. Only
+        // the separately installed selected validator set requires uniqueness.
+        (2, vec![public(1), public(2), public(1)]),
+    ] {
+        let al = listener().await;
+        let bl = listener().await;
+        let original = vec![public(1)];
+        let a = Swarm::new(
+            config(
+                al.local_addr().unwrap().port(),
+                handshake_keys.clone(),
+                vec![endpoint(bl.local_addr().unwrap().port())],
+                false,
+            ),
+            key(1),
+        )
+        .unwrap();
+        let b = Swarm::new(
+            config(
+                bl.local_addr().unwrap().port(),
+                handshake_keys,
+                vec![],
+                false,
+            ),
+            key(peer_key),
+        )
+        .unwrap();
+        // The native startup installs independently authenticated membership after
+        // choosing its open handshake policy. A connection cannot add a voter.
+        a.set_validators(original.clone()).unwrap();
+        b.set_validators(original.clone()).unwrap();
+        let (bt, _) = start(&b, bl);
+        let (at, _) = start(&a, al);
+        until(|| a.peers().len() == 1 && b.peers().len() == 1).await;
+        assert_eq!(
+            a.direction(b.node_id()),
+            Some(swarm_policy::Direction::Outbound)
+        );
+        assert_eq!(a.peers()[0].peer_class(), PeerClass::Observer);
+        assert_eq!(b.peers()[0].peer_class(), PeerClass::Validator);
+        let selected = vec![public(1), public(peer_key)];
+        a.set_validators(selected.clone()).unwrap();
+        b.set_validators(selected).unwrap();
+        assert_eq!(a.peers()[0].peer_class(), PeerClass::Validator);
+        a.set_validators(original).unwrap();
+        assert_eq!(a.peers()[0].peer_class(), PeerClass::Observer);
+        a.stop();
+        b.stop();
+        at.await.unwrap();
+        bt.await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn signed_discovery_builds_mesh_and_delivers_native_frames() {
     let al = listener().await;
     let bl = listener().await;

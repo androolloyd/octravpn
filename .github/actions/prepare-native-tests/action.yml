@@ -1,8 +1,15 @@
 name: Prepare native parity tests
-description: Build the Circle fixture and generate HFHE budget evidence for the CI host.
+description: Build root-locked test tools, the Circle fixture, and native HFHE budget evidence.
 runs:
   using: composite
   steps:
+    - shell: bash
+      working-directory: octra
+      run: |
+        # The sibling intentionally has no committed standalone lockfile.
+        # Passthrough tests must use the graph qualified by Octra's lockfile.
+        cargo build --locked -p headscale-cli --bin headscale
+        echo "HEADSCALE_BIN=$PWD/target/debug/headscale" >> "$GITHUB_ENV"
     - id: upstream
       shell: bash
       working-directory: octra
@@ -21,5 +28,11 @@ runs:
       run: |
         rustup target add wasm32-unknown-unknown
         cargo build --locked -p octravpn-circle-registry --release --target wasm32-unknown-unknown
+        # Literal artifact bytes can differ across build environments. Replay
+        # this actual build in the pristine pinned host and keep both explicit
+        # inputs separate from the historical tracked golden fixture.
+        python3 scripts/circle-apps/test-registry-native.py --upstream ../lite-node --out out/registry-native-current.json --runtime-fixture out/circle-engine-current.json
+        echo "OCTRA_CIRCLE_REGISTRY_WASM=$PWD/target/wasm32-unknown-unknown/release/octravpn_circle_registry.wasm" >> "$GITHUB_ENV"
+        echo "OCTRA_CIRCLE_REGISTRY_FIXTURE=$PWD/out/circle-engine-current.json" >> "$GITHUB_ENV"
         python3 scripts/node-port/hfhe-budget-fixtures.py --mode native --compiler c++ --upstream ../lite-node --out out/hfhe-budget-native.json
         echo "OCTRA_HFHE_BUDGET_FIXTURE=$PWD/out/hfhe-budget-native.json" >> "$GITHUB_ENV"

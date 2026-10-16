@@ -21,7 +21,7 @@
 //!      `register_circle(circle, anchor, receipt_pk)` exactly once and
 //!      persist the resulting state file.
 //!   2. **Settle.** After cold boot, the test calls the v3 chain ctx
-//!      directly to submit `settle_claim(sid=0, bytes=1MiB)` and
+//!      directly to submit `settle_claim(sid=0, bytes=1MiB, net=1000)` and
 //!      verifies the submitted envelope carries the right method +
 //!      params.
 //!
@@ -281,6 +281,7 @@ fn build_settle_claim_call(
     program_addr: &str,
     session_id: u64,
     bytes_used: u64,
+    net: u64,
     fee: u64,
     nonce: u64,
 ) -> Value {
@@ -289,7 +290,7 @@ fn build_settle_claim_call(
         "from": from,
         "to": program_addr,
         "method": "settle_claim",
-        "params": [session_id, bytes_used],
+        "params": [session_id, bytes_used, net],
         "value": 0,
         "fee": fee,
         "nonce": nonce,
@@ -499,14 +500,14 @@ async fn cold_boot_registers_and_settle_claim() {
 
     // ---- settle_claim path --------------------------------------
     // After register, the operator submits `settle_claim(sid=0,
-    // bytes=1MiB)` for a closed session. The mock doesn't track
+    // bytes=1MiB, net=1000)` for a closed session. The mock doesn't track
     // session state per se, but we verify the call shape made it
     // through sign + submit.
     let balance2 = rpc.balance(&wallet_addr).await.expect("balance");
     let nonce2 = next_nonce(&balance2);
     let prog2 = program_addr.display();
     #[allow(clippy::needless_borrow)]
-    let settle_call = build_settle_claim_call(&from, &prog2, 0, 1_048_576, fee, nonce2);
+    let settle_call = build_settle_claim_call(&from, &prog2, 0, 1_048_576, 1_000, fee, nonce2);
     let signed_settle = octravpn_core::tx::sign_call(&wallet, settle_call).expect("sign settle");
     let r2 = rpc.submit(&signed_settle).await.expect("submit settle");
     assert!(!r2.hash.is_empty());
@@ -521,6 +522,8 @@ async fn cold_boot_registers_and_settle_claim() {
         let params = params.as_array().unwrap();
         assert_eq!(params[0], 0);
         assert_eq!(params[1], 1_048_576);
+        assert_eq!(params[2], 1_000);
+        assert_eq!(params.len(), 3);
     }
 }
 

@@ -1,0 +1,73 @@
+{
+  "date": "2026-10-15",
+  "status": "ADOPTED_QUALIFIED_STORAGE_AUTHENTICATION_AND_VERIFIED_DIRECTORY_REUSE",
+  "qualification": {
+    "path": "out/node-port-final-20261015/storage-authentication-candidate/qualification.json",
+    "sha256": "3c0525931d448576558c58d184916657d1b87ebfd38bd69b784469ed4dc04168"
+  },
+  "adoption": {
+    "path": "out/node-port-final-20261015/storage-authentication-candidate/adoption.json",
+    "sha256": "207833eff522007df5617f9ab9de76f1695d2edb853f2cdd8db244b7f72fe753"
+  },
+  "source": {
+    "files": 3015,
+    "manifest_sha256": "a9afb6e56561a57f49720b240e9af650a8bd109ae7046de9a78ab376cb87407d",
+    "baseline_manifest_sha256": "e996c25def0477022da5f6b6688404ae6e8da8c0cd7a6782b95b94a2ddaacd09",
+    "root_lock_sha256": "f28ad88c09fb9c0ed4ed33eb8866a191cc0fdfba2ad4c5435443942dbefc3b35",
+    "adoption_paths": {
+      "crates/octra-node-runtime/src/state_batch/storage/restore.rs": {
+        "baseline_sha256": "a36807c9cbe114d36b194273cbaf7a229292e71b7911c3acd9888b91f1b50876",
+        "candidate_sha256": "60fe4e7c4cd8d1b37fb70a4e383bfafff0bb46745853605151a3473bea62afdd"
+      },
+      "crates/octra-node-runtime/src/state_batch/storage/tests.rs": {
+        "baseline_sha256": "0e643fbdb082468779b583c640a46fc0cbf738e0f895db159824eff536e3cb39",
+        "candidate_sha256": "2ea5a12123821c3211b37de31b693f8bdb292235b8bb1bce6d6b38bf632d4aae"
+      },
+      "crates/octra-node-runtime/src/state_batch/storage.rs": {
+        "baseline_sha256": "dfe617c00981396e9ff086e52b5fe6820705bd7a08d37f623d0d1438eb94cf00",
+        "candidate_sha256": "472f23cda1229a75dbb581b4e396a55a1c09fbae0bfb1670da4227d155ffa7bb"
+      },
+      "crates/octra-node-runtime/src/state_batch.rs": {
+        "baseline_sha256": "41d51a88344b2a1533770129c07f4b5aab9eaca16063b6567bfcdff57fd95b2b",
+        "candidate_sha256": "b1f461e93fbebed76fb7640335e9e8d4bc416f178d82623f861b5ef63ccdbbe5"
+      }
+    },
+    "adoption_manifest_sha256": "4c1b4b4dc3e8332dcd0f9ff2dbc9eb621fef543785d75ae6f17c3bb055f411cc",
+    "patch_sha256": "8845d7cf1ee0fbab1b3c6d63373ad547ef017a7d5b150a867332e103dda0bb3a",
+    "scope": "Only three Runtime production files and their existing unit test file; qualified ledger-handoff source is the unchanged dependency baseline. No live, codec, schema, authority, config, consensus, dependency or lock changes."
+  },
+  "release_tests": {
+    "passed": 149,
+    "targets": 23,
+    "runtime_passed": 86,
+    "node_passed": 54,
+    "protocol_codec_parity_passed": 8,
+    "independent_public_certificate_passed": 1,
+    "existing_helper_exclusions": 2
+  },
+  "strict": {
+    "status": "PASS",
+    "command": "cargo clippy -p octra-node-runtime -p octra-node --no-deps --offline --locked --all-targets --all-features --keep-going -- -D warnings"
+  },
+  "controlled_negative": {
+    "status": "EXPECTED_TEST_FAILURE_PROVES_OLD_PRIVATE_RESTORE_ACCEPTANCE_BUG",
+    "source_manifest_sha256": "8daae7038bd803deec054122fe07c02af05688da49fdc172560517bcba7622ec",
+    "exit_code": 101,
+    "source_unchanged": true,
+    "metadata_sha256": "31a878e2ef3392471ec94b25c9537ded28e81fbaba8454bd2c3370e71d466861",
+    "log_sha256": "4103388777f1e9e7843c46ae364d13399a842de2198b713781b44ff0c9aa94ac",
+    "statement": "Baseline production plus the new child-alias regression accepted different valid contents under the expected map key and cached commitment. The same unchanged regression passes with explicit requested/object hash binding."
+  },
+  "semantics": [
+    "Requested map key equals StoredObject.hash before logical or physical page resolution; actual SQL Reader already constructs those identities from the same row hash, so this is not claimed as a current SQL exploit.",
+    "Flat decoder, native full inode flatten/context checks and contents hash/empty-edge checks are byte-identical to baseline.",
+    "VerifiedDirectory fields and sole value constructor are private to restore.rs, after existing complete directory commitment and page-edge authentication. Snapshot Finish consumes the token and retains logical child existence/kind/duplicate checks.",
+    "Legacy flat directories perform their native node hash once rather than three times. Inode logical native-root recomputation remains, and contents commitment validation remains before cache population."
+  ],
+  "limits": [
+    "No public observer restart, throughput, RSS or cold-start performance claim is included; parent must adopt exact files and measure retained public state.",
+    "Full state restoration and every physical page/content/edge authentication remain; logical directory scans and necessary hashing remain O(width).",
+    "Native proof verification and unchanged Rust producer roundtrips are distinct from a dedicated independent native-producer wire differential; no new broad proof-producer parity claim is made.",
+    "Independent gateway/Single candidates are outside this snapshot and require separate integration gates."
+  ]
+}

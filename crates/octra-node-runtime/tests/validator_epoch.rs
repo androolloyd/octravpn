@@ -182,18 +182,21 @@ fn round(
                 let root = octra_node_runtime::compute_roots::load(state, epoch)
                     .unwrap()
                     .unwrap();
+                assert!(octra_node_runtime::compute_roots::recent(
+                    state,
+                    root.epoch(),
+                    root.state()
+                )
+                .is_ok());
                 assert!(
-                    octra_node_runtime::compute_roots::recent(state, root.epoch, &root.state)
-                        .is_ok()
+                    octra_node_runtime::compute_roots::recent(state, root.epoch(), b"wrong")
+                        .is_err()
                 );
-                assert!(
-                    octra_node_runtime::compute_roots::recent(state, root.epoch, b"wrong").is_err()
-                );
-                assert!(!root.tree.contains_tree(&[b"accounts"]));
-                assert!(!root.tree.contains_tree(&[b"circles", b"speculative"]));
-                if root.epoch != epoch {
+                assert!(!root.tree().contains_tree(&[b"accounts"]));
+                assert!(!root.tree().contains_tree(&[b"circles", b"speculative"]));
+                if root.epoch() != epoch {
                     assert!(
-                        octra_node_runtime::compute_roots::recent(state, epoch, &root.state)
+                        octra_node_runtime::compute_roots::recent(state, epoch, root.state())
                             .is_err()
                     );
                 }
@@ -309,10 +312,10 @@ async fn scheduled_membership_and_circle_roots_survive_canonical_restart() {
         hex::encode(index).as_bytes(),
     )
     .unwrap();
-    let chain = ChainIdentity {
-        chain_id: String::from_utf8(chain_id.clone()).unwrap(),
-        genesis_root: StateRoot(root),
-    };
+    let chain = ChainIdentity::genesis(
+        String::from_utf8(chain_id.clone()).unwrap(),
+        StateRoot(root),
+    );
     state.acknowledge_commit().unwrap();
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("validator-activation.sqlite");
@@ -402,7 +405,7 @@ async fn scheduled_membership_and_circle_roots_survive_canonical_restart() {
             octra_node_runtime::compute_roots::recent(&next, epoch - 1, &head.cursor.state_root.0)
                 .unwrap();
         assert_eq!(
-            retained.tree.get(&[b"circles", b"app", b"value"]),
+            retained.tree().get(&[b"circles", b"app", b"value"]),
             Some((epoch - 1).to_string().as_bytes())
         );
         next.set(&[b"meta", b"last_epoch"], epoch.to_string().into_bytes())
@@ -501,10 +504,12 @@ async fn scheduled_membership_and_circle_roots_survive_canonical_restart() {
                 .to_string()
                 .contains("historical head differs"));
             if epoch == 66 {
-                assert!(
-                    octra_node_runtime::compute_roots::recent(&tree, 0, &chain.genesis_root.0)
-                        .is_err()
-                );
+                assert!(octra_node_runtime::compute_roots::recent(
+                    &tree,
+                    0,
+                    &chain.genesis_root().unwrap().0
+                )
+                .is_err());
             }
         }
     }

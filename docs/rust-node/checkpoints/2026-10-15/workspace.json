@@ -1,0 +1,206 @@
+{
+  "schema": 1,
+  "date": "2026-10-15",
+  "status": "PASS",
+  "scope": "Current-source fourteen-package release all-targets/all-features qualification, after adopted mechanical lint edits. Seven native-node, ExEx, browser and crypto packages are excluded from selected target execution and require their separate evidence; current transitive dependency bytes are bound by this source manifest. No public-chain deployment or mainnet readiness claim.",
+  "packages": [
+    "octravpn-analytics",
+    "octravpn-audit-chain",
+    "octravpn-core",
+    "octravpn-node",
+    "octravpn-client",
+    "octravpn-tun",
+    "octravpn-obfs4",
+    "octravpn-mesh",
+    "octravpn-admin-ui",
+    "octra-circle-sim",
+    "octravpn-circle-registry",
+    "octravpn-private-admin",
+    "pvac-sidecar-ipc-tests",
+    "octravpn-e2e"
+  ],
+  "excluded_packages": [
+    "octra-node",
+    "octra-node-runtime",
+    "octra-node-protocol",
+    "octra-exex",
+    "octra-browser",
+    "octra-hfhe",
+    "octra-pvac"
+  ],
+  "root_lock_sha256": "f28ad88c09fb9c0ed4ed33eb8866a191cc0fdfba2ad4c5435443942dbefc3b35",
+  "workspace_msrv": "1.89",
+  "tools": {
+    "image": "sha256:53723ed5b34fcdc21e85717982af001c0c8213cdbc2ed69f4596a9e5f4f6a0b5",
+    "architecture": "linux/arm64",
+    "rustc": "1.96.0 (ac68faa20 2026-05-25)",
+    "cargo": "1.96.0 (30a34c682)",
+    "protoc": "3.21.12",
+    "tool_binary_hashes_report_sha256": "8bf18e66b9de14eb4ad6120e4396683381f313300e5d9be92fa889c92ee19eea"
+  },
+  "test_command": "cargo test --release --locked --offline <each listed -p package> --all-targets --all-features --no-fail-fast --message-format=json-render-diagnostics -- --nocapture",
+  "isolation": {
+    "source_and_registry": "read-only",
+    "network": "none",
+    "ordinary_capabilities": "all dropped",
+    "host_cargo": false
+  },
+  "ordinary_tests": {
+    "passed": 1721,
+    "failed": 0,
+    "declared_ignored": 6,
+    "libtest_targets": 61,
+    "cargo_exit_code": 0
+  },
+  "benchmarks": {
+    "successful_smoke_cases": 52,
+    "targets": 6,
+    "scope": "Criterion test-mode smoke execution, not performance measurements."
+  },
+  "executables": {
+    "count": 73,
+    "manifest_sha256": "e14d71d73f77fc265b78a220cc9683d064833f6596742fe0bf4a5ad9b647397e"
+  },
+  "runtime_helpers": {
+    "pvac_sidecar_sha256": "bc1bc5cc8d98b540c4a14d925ef7d979e42d7adbc9ae9fe33d741cc245d560d5",
+    "headscale_cli_sha256": "227232c67a19113e709a862cce56067a5504318d9630405df2884588bca37042",
+    "headscale_build": "Root-lock cargo build --release --locked --offline -p headscale-cli --bin headscale; HEADSCALE_BIN supplied to prevent nested online Cargo.",
+    "headscale_prebuild_report_sha256": "b1b31d9dd195b8c1f0e6fe66faed06bb693b8091a450388902adc64baf8f7bd4"
+  },
+  "declared_ignore_coverage": {
+    "failed": 0,
+    "client": {
+      "passed": 2,
+      "basis": "Fresh execution of final changed binary with NET_ADMIN and /dev/net/tun in network-none namespace; fixed loopback alias, no external routes.",
+      "binary_sha256": "401e3489e5e1e8a3850ac220b3d2fb6e99e49143e5d0ab4cebe1ac0e4893c3ae",
+      "report_sha256": "d19cd6dc0d5d54176aeb42a69b97a2afcc9e8c2180294896b16da9e7cbaa1d29"
+    },
+    "kernel": {
+      "passed": 1,
+      "basis": "Earlier actual external wg/ip lifecycle PASS; current final test binary is directly byte-identical, so no new kernel execution is claimed.",
+      "binary_sha256": "209428f6db19392987c6f45e2c90d48ba62382e1eafb091380232e0333c8ecf0",
+      "scope": "External create/key/peer/query/delete lifecycle, not direct private Rust backend integration.",
+      "scope_report_sha256": "50785b9dc563c270f5e301ad6b93ef5b6f50056856e1c579648bae9f48fb26b7",
+      "current_read_only_preflight_report_sha256": "c0a6017d7fecf68c7cbff68d06adb92c8bc11a88d4a99a5e7d86a3454cae7d18",
+      "historical_observed_side_effect": "The earlier probe auto-loaded the existing WireGuard module globally in the Docker VM; module state is not namespace-local. No unload or reconfiguration followed. The current read-only preflight found it already loaded, and no fresh kernel probe was necessary."
+    },
+    "ipc": {
+      "passed": 3,
+      "basis": "Earlier actual stress PASS; direct byte comparison proves both current test binary and freshly built PVAC sidecar identical.",
+      "binary_sha256": "0d14a1dd2e08f30d675265ba2280c518e14c69489034a8ff68021031417b8d63",
+      "sidecar_sha256": "bc1bc5cc8d98b540c4a14d925ef7d979e42d7adbc9ae9fe33d741cc245d560d5",
+      "workloads": {
+        "alternating_ping_keygen_ping_cycles": 200,
+        "zero_proof_generations": 50,
+        "encrypt_parse_iterations": 1000,
+        "outer_timeout_seconds": 1800
+      }
+    },
+    "equivalence_report_sha256": "f96e226b2f28dec3240d802039a9b95d0e4eac7b2fe64a1c79936fe39cdda4ed",
+    "executed_capabilities_report_sha256": "1e66c75b3b4bd33cff0fa70deef549393d95b023cc88b4775235ab0ea3418eaa",
+    "covered_total": 6,
+    "fresh_current_executions": 2,
+    "prior_executions_with_identical_current_artifacts": 4
+  },
+  "evidence_sha256": {
+    "source_manifest": "c6d7008d0e8eddda18a548ab7c8b78b15d4ee5a5adbc3a5fc41b86280cfd8b1b",
+    "command": "c37f33218fa3f807ee6a31cdce1312d37fa2f09a7a70a65d58b266da7f04b8e0",
+    "test_summary": "64681f8e1bbe72a178ea9ef552285795f4c1bdef68c7a9125919375c3bbd7082",
+    "test_log": "748d7663d13f41f11595407e9c32e28f1281c83f394cb8d8bd141cd8b5db230b",
+    "final_report": "547f34a612803881ecf25ec9ad551b8e532ce0acf3fc38af169638e6ec482861"
+  },
+  "preserved_prior_failures": [
+    {
+      "run": "first selected-package pass",
+      "passed": 1697,
+      "failed": 23,
+      "ignored": 6,
+      "cargo_exit_code": null,
+      "note": "A post-test collector exception prevented exact Cargo exit capture; complete test output and failures are retained.",
+      "report_sha256": "a6a3d7d56d2bf72ce9169ebcdee2fb63c934fc0297e0200ee55acca48da554b5"
+    },
+    {
+      "run": "first corrected pass",
+      "passed": 1720,
+      "failed": 1,
+      "ignored": 6,
+      "cargo_exit_code": 101,
+      "note": "One test-only use of legacy onion API tripped the conservative source guard; replaced by the actual production fresh API before the final complete replay.",
+      "summary_sha256": "8ef73b277aa6ac966a1e0a779ff329b9926d31a6c27a859f64cc2538049ed884"
+    }
+  ],
+  "source_binding": {
+    "source_files": 2135,
+    "source_manifest_sha256": "c6d7008d0e8eddda18a548ab7c8b78b15d4ee5a5adbc3a5fc41b86280cfd8b1b",
+    "current_captured_file_drift": [],
+    "source_drift_report_sha256": "514cdd202d2a3e7a2ee924045a9c3cba60dc68af3cb8161a9f777dbabab5cdd0",
+    "scope": "Every captured Octra/build-relevant sibling file matches the live source after execution; newly added files after capture are outside this existing-file audit."
+  },
+  "adopted_mechanical_patch": {
+    "sha256": "a079a72ffeb9795962812d649998552a103cdff82922e3e585e5fbf328e84e48",
+    "files": 21,
+    "behavior_qualification": "This fresh complete current-source test run includes the adopted patch; no source followup remains outside this snapshot.",
+    "selected_source_identity_to_qualified_clippy_report_sha256": "5f8b53ec844ac9b64e2de1a0045d24f15b9cb967eb0bf487a15dad638b20ce71"
+  },
+  "current_kani": {
+    "harnesses": 5,
+    "checks": 321,
+    "source_files": 71,
+    "report_sha256": "3262e77d86ff25d9f2200f493afc4ae1849faea06acf0d4b18c88152248ddec0",
+    "source_manifest_sha256": "24af57fa3a60b676e515669379fd110b4f0dba2b9e70502818c839efb509a37c",
+    "scope": "See formal.json; only production SessionId and checked relay deadline harnesses."
+  },
+  "historical_successful_snapshot": {
+    "ordinary_passed": 1721,
+    "ordinary_failed": 0,
+    "declared_ignored": 6,
+    "benchmark_smoke_cases": 52,
+    "checkpoint_sha256": "6951e3ed980cd8c8a57893f4fdb56a578c3cc71abe1c3c3b865a9e1034117cd3",
+    "source_manifest_sha256": "abe214b7c06fa9a937af63924dd5fed460353c9a2d471b25828a0e4deb86da28",
+    "final_report_sha256": "afc77c86dc678fbd2c392e12a8f3ad9574865417425ba2b3c76001c9b88f061a",
+    "scope": "Previous successful final2 snapshot. Its five metadata-only manifest drifts and separately qualified Core journal idiom are now included in the fresh current snapshot. The complete previous checkpoint remains preserved as historical evidence.",
+    "metadata_only_msrv_inheritance": [
+      {
+        "path": "crates/octra-browser/Cargo.toml",
+        "qualified_sha256": "760ae1dbce4b09d8ec892b71ddc241a831ed240f52cbc676beacdb10d92212d6",
+        "current_sha256": "fc19c6638e36c570bea79bd439caef9b89520edc2215913ed7f75816425619c6",
+        "previous_msrv": "1.85",
+        "effective_msrv": "1.89",
+        "all_other_toml_fields_identical": true
+      },
+      {
+        "path": "crates/octra-node-runtime/Cargo.toml",
+        "qualified_sha256": "2f91af4cb0d1f628ec7875c59fcbb2d984cddd7a2f2b59f0cec6c95a7418ade3",
+        "current_sha256": "0504fc3f34ce96f5a005dd04c4ad475f306b379f9105eb5c8d0184dbf41927b2",
+        "previous_msrv": "1.85",
+        "effective_msrv": "1.89",
+        "all_other_toml_fields_identical": true
+      },
+      {
+        "path": "crates/octra-node/Cargo.toml",
+        "qualified_sha256": "01de3ece6d853ee56e47a4894c82a81f92205cc2a2fec1ceaebca1fed0f622f3",
+        "current_sha256": "72809e266a2f6cc4a9d099e6c127ae65b9a9f2a17374bb53ad7893892c6f4253",
+        "previous_msrv": "1.85",
+        "effective_msrv": "1.89",
+        "all_other_toml_fields_identical": true
+      },
+      {
+        "path": "crates/octravpn-client/Cargo.toml",
+        "qualified_sha256": "f7c9c5aedac9f72b940a19ac2cbed00720e86cf46fa5a1507d45a8f469d7b013",
+        "current_sha256": "ee4e7949751e758398e6ad5b9fe96c3a432b963b6660ff941cf5a7278dd2e98c",
+        "previous_msrv": "1.85",
+        "effective_msrv": "1.89",
+        "all_other_toml_fields_identical": true
+      },
+      {
+        "path": "crates/octravpn-private-admin/Cargo.toml",
+        "qualified_sha256": "86898ec3cb62ed29f43a1e768a3b0d0d49fa09c5339d56b19e310d89650ae3ce",
+        "current_sha256": "0dc9bba84f8402ac50cb6d97b2f4185e1341e9c2ba74e84596c7f2f3e584e932",
+        "previous_msrv": "1.89",
+        "effective_msrv": "1.89",
+        "all_other_toml_fields_identical": true
+      }
+    ],
+    "core_journal_followup_report_sha256": "20c8b16a884af5cad91ecaf17dd7a1479d436166f7ae472f8ef6bd845344a96a"
+  }
+}

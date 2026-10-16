@@ -76,7 +76,9 @@ impl Machine {
                 nonce,
                 params: &params,
                 limit,
+                fhe_memory: self.fhe.memory.clone(),
             },
+            &mut self.storage,
             budget.as_deref_mut(),
         )?;
         let Some(result) = result else {

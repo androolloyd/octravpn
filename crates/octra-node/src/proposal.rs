@@ -49,19 +49,7 @@ impl Draft {
             .shared
             .upgrade()
             .ok_or_else(|| anyhow::anyhow!("node stopped"))?;
-        let state = shared
-            .0
-            .try_lock()
-            .map_err(|_| anyhow::anyhow!("canonical view busy"))?;
-        anyhow::ensure!(
-            self.live()
-                && state
-                    .serving
-                    .as_ref()
-                    .is_some_and(|s| s.committed.head() == self.context.parent()),
-            "proposal snapshot was revoked"
-        );
-        action()
+        shared.with_current(self.context.parent(), &self.revocation, action)
     }
     pub(crate) fn live(&self) -> bool {
         !self.revocation.is_revoked()

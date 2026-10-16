@@ -219,7 +219,7 @@ pub(crate) async fn run(hub: Arc<Hub>) -> Result<()> {
             &mut inflight,
             tick,
             quiesce,
-            tick % COMPACT_EVERY == 0,
+            tick.is_multiple_of(COMPACT_EVERY),
         )
         .await;
     }

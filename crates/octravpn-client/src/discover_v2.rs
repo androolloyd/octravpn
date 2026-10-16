@@ -24,14 +24,8 @@
 //!   * config field `[v2].sealed_passphrase`
 //!   * CLI `--secret <…>` (the caller pre-resolves and passes it in)
 
-use std::time::Duration;
-
-use anyhow::{anyhow, bail, Context, Result};
-use octravpn_core::{
-    address::Address,
-    circle::{decrypt_sealed_bytes, resource_key},
-    rpc::next_nonce,
-};
+use anyhow::{bail, Context, Result};
+use octravpn_core::circle::{decrypt_sealed_bytes, resource_key};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -93,41 +87,6 @@ impl CircleListing {
             | Self::Opaque { circle_id, .. }
             | Self::Unpublished { circle_id }
             | Self::Error { circle_id, .. } => circle_id,
-        }
-    }
-}
-
-/// Class of session a v2 client can open. Mirrors the AML constants
-/// `CLASS_SHARED = 0` and `CLASS_INTERNAL = 1`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SessionClass {
-    Shared,
-    Internal,
-}
-
-impl SessionClass {
-    pub(crate) fn as_int(self) -> u64 {
-        match self {
-            Self::Shared => 0,
-            Self::Internal => 1,
-        }
-    }
-
-    /// Parse one of `shared`, `internal`, `s`, `i`, `0`, `1`.
-    pub(crate) fn parse(s: &str) -> Result<Self> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "shared" | "s" | "0" => Ok(Self::Shared),
-            "internal" | "i" | "1" => Ok(Self::Internal),
-            other => Err(anyhow!(
-                "unknown session class '{other}' (expected shared|internal)"
-            )),
-        }
-    }
-
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::Shared => "shared",
-            Self::Internal => "internal",
         }
     }
 }
@@ -364,67 +323,6 @@ pub(crate) async fn fetch_one(
     }
 }
 
-/// Submit `open_session(tid, circle, class, max_pay)` against the v2
-/// program. Returns the on-chain session id once it's observed in the
-/// transaction events.
-pub(crate) async fn open_session_v2(
-    client: &Client,
-    tailnet_id: u64,
-    circle_id: &str,
-    class: SessionClass,
-    max_pay: u64,
-) -> Result<u64> {
-    let kp = client.wallet_kp();
-    let from = Address::from_pubkey(&kp.public.0);
-    let bal = client.rpc().balance(&from).await?;
-    let nonce = next_nonce(&bal);
-    let fee = client
-        .rpc()
-        .recommended_fee(Some("contract_call"))
-        .await?
-        .recommended;
-
-    let call = json!({
-        "kind": "contract_call",
-        "from": from.display(),
-        "to": client.program_addr().display(),
-        "method": "open_session",
-        "params": [
-            tailnet_id,
-            circle_id,
-            class.as_int(),
-            max_pay,
-        ],
-        "value": 0u64,
-        "fee": fee,
-        "nonce": nonce,
-    });
-    let signed = octravpn_core::tx::sign_call(kp, call)?;
-    let submit = client.rpc().submit(&signed).await?;
-    poll_session_id_v2(client, &submit.hash).await
-}
-
-/// Poll the transaction receipt until the `SessionOpened` event surfaces
-/// the session id. Caps out at ~30s wall clock.
-async fn poll_session_id_v2(client: &Client, tx_hash: &str) -> Result<u64> {
-    let mut delay_ms: u64 = 100;
-    for _ in 0..20 {
-        let v = client.rpc().transaction(tx_hash).await?;
-        if let Some(events) = v.get("events").and_then(|x| x.as_array()) {
-            for e in events {
-                if e.get("name").and_then(Value::as_str) == Some("SessionOpened") {
-                    if let Some(sid) = e.get("session_id").and_then(Value::as_u64) {
-                        return Ok(sid);
-                    }
-                }
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-        delay_ms = (delay_ms * 2).min(2_000);
-    }
-    Err(anyhow!("session id not observed before timeout"))
-}
-
 /// Pretty-print one row of the operator menu, suitable for stdout.
 pub(crate) fn render_row(listing: &CircleListing) -> String {
     match listing {
@@ -457,27 +355,6 @@ pub(crate) fn render_row(listing: &CircleListing) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
-
-    #[test]
-    fn session_class_parses_aliases() {
-        assert_eq!(SessionClass::parse("shared").unwrap(), SessionClass::Shared);
-        assert_eq!(SessionClass::parse("s").unwrap(), SessionClass::Shared);
-        assert_eq!(SessionClass::parse("0").unwrap(), SessionClass::Shared);
-        assert_eq!(
-            SessionClass::parse("internal").unwrap(),
-            SessionClass::Internal
-        );
-        assert_eq!(SessionClass::parse("I").unwrap(), SessionClass::Internal);
-        assert_eq!(SessionClass::parse("1").unwrap(), SessionClass::Internal);
-        assert!(SessionClass::parse("nonsense").is_err());
-    }
-
-    #[test]
-    fn session_class_as_int_matches_aml() {
-        // AML constants: CLASS_SHARED = 0, CLASS_INTERNAL = 1.
-        assert_eq!(SessionClass::Shared.as_int(), 0);
-        assert_eq!(SessionClass::Internal.as_int(), 1);
-    }
 
     #[test]
     fn passphrase_precedence_env_beats_cli_beats_config() {

@@ -30,15 +30,45 @@ def main():
     malformed = copy.deepcopy(authorized); malformed['params'][-1] = 'A'*352
     calls = [constructor, wrong_action, wrong_program, malformed, authorized, authorized,
              dict(method='get_admin_nonce', params=[], program=address)]
+    success_flags = [True, False, False, False, True, False, True]
+    if 'authorizations' in material:
+        auths = material['authorizations']
+        def authorization(number):
+            row = auths[str(number)]
+            return dict(method=row['method'], params=row['params'], program=address)
+        # All proof packages are public development fixtures. Replay the original
+        # nonce order against the CURRENT native compiler and VM, including the
+        # cancelled handoff and later rotation to a third private credential.
+        sequence = [(4, False), (5, True), (6, True), (8, False),
+                    (9, False), (10, False), (11, False), (12, True),
+                    (7, False), (13, True), (14, False), (15, True),
+                    (15, False), (16, False), (17, True), (18, True)]
+        calls = calls[:6]
+        success_flags = success_flags[:6]
+        for number, succeeds in sequence:
+            calls.append(authorization(number)); success_flags.append(succeeds)
+        calls.append(dict(method='get_admin_handoff_kind', params=[], program=address))
+        success_flags.append(True)
+        # A valid proof at the current nonce must still roll back when the
+        # signed governance request attempts to enable protocol commission.
+        for number, succeeds in [(19, True), (20, False), (21, True), (22, False), (23, False)]:
+            calls.append(authorization(number)); success_flags.append(succeeds)
+        for retired in [auths['1']['commitment'], auths['15']['commitment']]:
+            reuse = copy.deepcopy(authorization(22)); reuse['params'][0] = retired
+            calls.append(reuse); success_flags.append(False)
+        for method in ['get_admin_nonce', 'get_admin_commitment', 'get_pending_admin_commitment']:
+            calls.append(dict(method=method, params=[], program=address)); success_flags.append(True)
     spec = importlib.util.spec_from_file_location('native', ROOT/'scripts/node-port/native-oracle.py')
     native = importlib.util.module_from_spec(spec); spec.loader.exec_module(native)
     report = native.run(a.upstream, a.builder_image, ROOT/'scripts/node-port/vpn-admin-oracle.ml',
                         dict(source=source, calls=calls), 'octra_vm octra_core yojson lwt.unix')
-    assert [c['expected']['ok'] for c in report['cases']['cases']] == [True, False, False, False, True, False, True]
+    assert [c['expected']['ok'] for c in report['cases']['cases']] == success_flags
     report['generator_sha256'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     report['aml_sha256'] = hashlib.sha256(source.encode()).hexdigest()
     report['public_fixture_sha256'] = hashlib.sha256(a.public_fixture.read_bytes()).hexdigest()
-    report['scope'] = 'Current VPN AML constructor and private-admin authorization/replay through real VM execution. Development public proof only. No Circle deployment, account funding, consensus or tunnel qualification.'
+    report['scope'] = ('Current VPN AML constructor, private-admin authorization, cancellation/reproposal, handoff, '
+                       'rotation, retired credential and replay refusal through real VM execution. Development '
+                       'public proofs only. No Circle deployment, account funding, consensus or tunnel qualification.')
     a.out.write_text(json.dumps(report, indent=2)+'\n')
     print('PASS native compiled VPN administration',len(calls),'calls')
 

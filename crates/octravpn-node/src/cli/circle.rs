@@ -57,6 +57,9 @@ pub(crate) struct CircleBootstrapArgs {
     /// Circle id (`oct…`), deployed beforehand (`octra cast circle deploy`).
     #[arg(long)]
     pub(crate) circle: String,
+    /// Public JSON from `octra-node vpn-identity --key PATH`.
+    #[arg(long)]
+    pub(crate) native_identity: Option<std::path::PathBuf>,
     /// Sealed-asset passphrase. Falls back to `$OCTRAVPN_SEALED_PASSPHRASE`.
     #[arg(long)]
     pub(crate) passphrase: Option<String>,
@@ -261,134 +264,320 @@ pub(crate) async fn run_circle_cmd(cfg_path: &std::path::Path, cmd: CircleCmd) -
     }
 }
 
-/// `circle bootstrap` — the state-root a fresh circle starts from, built
-/// exactly the way `v3_boot` builds it at daemon boot (same policy, same
-/// key derivation), sealed into the circle, then anchored on chain.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NativeIdentityFile {
+    operator: String,
+    receipt_pubkey_b64: String,
+    wg_pubkey_b64: String,
+    transport: NativeTransport,
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NativeTransport {
+    kind: String,
+}
+struct BootstrapIdentity {
+    operator: octravpn_core::Address,
+    receipt: octravpn_core::sig::PublicKey,
+    wireguard: [u8; 32],
+}
+fn native_identity(path: &std::path::Path) -> Result<BootstrapIdentity> {
+    use curve25519_dalek::edwards::CompressedEdwardsY;
+    use std::io::Read;
+    use x25519_dalek::{PublicKey, StaticSecret};
+    let file = std::fs::File::open(path).context("open native public identity")?;
+    let mut raw = Vec::new();
+    file.take(4097).read_to_end(&mut raw)?;
+    anyhow::ensure!(raw.len() <= 4096, "native identity exceeds byte limit");
+    let descriptor: NativeIdentityFile =
+        serde_json::from_slice(&raw).context("decode native public identity")?;
+    anyhow::ensure!(
+        descriptor.transport.kind == "wireguard",
+        "native operator requires plain WireGuard transport"
+    );
+    let operator = octravpn_core::Address::try_from_display(&descriptor.operator)
+        .context("invalid native operator address")?;
+    anyhow::ensure!(
+        operator.display() == descriptor.operator && operator.as_bytes().iter().any(|b| *b != 0),
+        "noncanonical native operator address"
+    );
+    let decode = |encoded: &str, name: &str| -> Result<[u8; 32]> {
+        let bytes = octravpn_core::b64::decode(encoded.as_bytes())
+            .with_context(|| format!("invalid native {name}"))?;
+        anyhow::ensure!(
+            bytes.len() == 32 && octravpn_core::b64::encode(&bytes) == encoded,
+            "native {name} must be a canonical 32-byte public key"
+        );
+        let key: [u8; 32] = bytes.as_slice().try_into()?;
+        anyhow::ensure!(key.iter().any(|b| *b != 0), "native {name} is zero");
+        Ok(key)
+    };
+    let receipt = decode(&descriptor.receipt_pubkey_b64, "receipt key")?;
+    let point = CompressedEdwardsY(receipt)
+        .decompress()
+        .ok_or_else(|| anyhow::anyhow!("invalid native Ed25519 receipt key"))?;
+    anyhow::ensure!(
+        point.compress().0 == receipt && point.is_torsion_free() && !point.is_small_order(),
+        "unsafe native Ed25519 receipt key"
+    );
+    ed25519_dalek::VerifyingKey::from_bytes(&receipt).context("invalid native receipt key")?;
+    let wireguard = decode(&descriptor.wg_pubkey_b64, "WG key")?;
+    let mut prime = [255; 32];
+    prime[0] = 237;
+    prime[31] = 127;
+    anyhow::ensure!(
+        wireguard.iter().rev().cmp(prime.iter().rev()).is_lt(),
+        "noncanonical native X25519 public key"
+    );
+    anyhow::ensure!(
+        StaticSecret::from([165; 32])
+            .diffie_hellman(&PublicKey::from(wireguard))
+            .was_contributory(),
+        "unsafe native X25519 public key"
+    );
+    Ok(BootstrapIdentity {
+        operator,
+        receipt: octravpn_core::sig::PublicKey(receipt),
+        wireguard,
+    })
+}
+
+/// Publish both discovery resources before committing their application anchor.
 async fn run_bootstrap(
     cfg: &NodeConfig,
     ctx: &crate::chain_v3::ChainCtxV3,
     args: CircleBootstrapArgs,
 ) -> Result<()> {
     use crate::chain_v3::{RegisterCircleParams, MIN_CIRCLE_STAKE_DEFAULT};
-    use octravpn_core::v3_state_root::StateRoot;
-    use x25519_dalek::{PublicKey as X25519Pub, StaticSecret};
-
-    let creds = resolve_sealed_passphrase(args.passphrase.as_deref())?;
-    let circle = args.circle.as_str();
-    let dry_run = args.dry_run && !args.commit;
-
-    // Same derivation the Hub boots with (hub/boot.rs), so the anchored
-    // wg_pubkey_hash is the one the daemon will attest later.
-    let master = if cfg.chain.require_sealed_keys {
-        *octravpn_core::util::read_secret_32_or_sealed(&cfg.tunnel.wg_secret_path, None)
-            .with_context(|| {
-                format!("strict-load wg master secret {}", cfg.tunnel.wg_secret_path)
-            })?
-    } else {
-        octravpn_core::util::read_secret_32(&cfg.tunnel.wg_secret_path)
-            .with_context(|| format!("load wg master secret {}", cfg.tunnel.wg_secret_path))?
+    use crate::v3_boot::publication;
+    use octravpn_core::{
+        circle::PaddingClass, v3_policy::OperatorPolicy, v3_state_root::StateRoot,
     };
-    let noise_sk = octravpn_core::util::derive_subkey(&master, octravpn_core::util::DOMAIN_NOISE);
-    let receipt_sk =
-        octravpn_core::util::derive_subkey(&master, octravpn_core::util::DOMAIN_RECEIPT_SIGN);
-    let wg_pub = X25519Pub::from(&StaticSecret::from(noise_sk)).to_bytes();
-    let receipt_kp = octravpn_core::sig::KeyPair::from_secret_bytes(&receipt_sk);
-    let receipt_pubkey_b64 = octravpn_core::b64::encode(receipt_kp.public.0);
-
-    let epoch = ctx.current_epoch().await.unwrap_or(0);
-    let timestamp_secs = octravpn_core::util::now_unix_secs();
-    let policy = crate::v3_boot::build_operator_policy_for_v3(
-        cfg,
-        &octravpn_core::b64::encode(wg_pub),
-        epoch,
-        timestamp_secs,
+    use x25519_dalek::{PublicKey as X25519Pub, StaticSecret};
+    let circle = args.circle.as_str();
+    octravpn_core::parse_native_address(circle).context("invalid operator Circle address")?;
+    octravpn_core::parse_native_address(&cfg.chain.program_addr)
+        .context("invalid settlement application address")?;
+    let dry_run = args.dry_run && !args.commit;
+    let native = args.native_identity.is_some();
+    let identity = if let Some(path) = &args.native_identity {
+        native_identity(path)?
+    } else {
+        let master = zeroize::Zeroizing::new(if cfg.chain.require_sealed_keys {
+            *octravpn_core::util::read_secret_32_or_sealed(&cfg.tunnel.wg_secret_path, None)
+                .context("strict-load operator WG master secret")?
+        } else {
+            octravpn_core::util::read_secret_32(&cfg.tunnel.wg_secret_path)
+                .context("load operator WG master secret")?
+        });
+        let noise = zeroize::Zeroizing::new(octravpn_core::util::derive_subkey(
+            &master,
+            octravpn_core::util::DOMAIN_NOISE,
+        ));
+        let receipt = zeroize::Zeroizing::new(octravpn_core::util::derive_subkey(
+            &master,
+            octravpn_core::util::DOMAIN_RECEIPT_SIGN,
+        ));
+        BootstrapIdentity {
+            operator: ctx.wallet_addr.clone(),
+            wireguard: X25519Pub::from(&StaticSecret::from(*noise)).to_bytes(),
+            receipt: octravpn_core::sig::KeyPair::from_secret_bytes(&receipt).public,
+        }
+    };
+    anyhow::ensure!(
+        ctx.wallet_addr == identity.operator,
+        "funding wallet differs from native operator identity"
     );
-    policy
-        .validate()
-        .map_err(|e| anyhow::anyhow!("operator-policy validation: {e}"))?;
-    let policy_hash = policy
-        .hash_hex()
-        .map_err(|e| anyhow::anyhow!("operator-policy hash: {e}"))?;
-    let state_root = StateRoot::new_v1(
+    let info = ctx
+        .rpc
+        .raw_call("circle_info", serde_json::json!([circle]))
+        .await?;
+    let public = match info
+        .get("resource_mode")
+        .and_then(serde_json::Value::as_str)
+    {
+        Some("public_resources" | "public_read") => true,
+        Some("sealed_read") => false,
+        _ => anyhow::bail!("operator Circle resource mode is unavailable"),
+    };
+    anyhow::ensure!(
+        !native || public,
+        "native discovery requires a public-resource operator Circle"
+    );
+    let creds = if public {
+        None
+    } else {
+        Some(resolve_sealed_passphrase(args.passphrase.as_deref())?)
+    };
+    let epoch = ctx
+        .current_epoch()
+        .await
+        .context("read committed chain epoch for bootstrap")?;
+    let timestamp = octravpn_core::util::now_unix_secs();
+    let wg_b64 = octravpn_core::b64::encode(identity.wireguard);
+    let mut policy = if native {
+        crate::v3_boot::transport_policy_with(
+            cfg,
+            &wg_b64,
+            &identity.receipt,
+            epoch,
+            timestamp,
+            octravpn_tun::amnezia::WireTransport::Wireguard,
+        )?
+    } else {
+        crate::v3_boot::transport_policy(cfg, &wg_b64, &identity.receipt, epoch, timestamp)?
+    };
+    policy.unknown.insert(
+        "operator".into(),
+        serde_json::json!(identity.operator.display()),
+    );
+    policy.unknown.insert("receipt_domain".into(), serde_json::json!({"program_addr": cfg.chain.program_addr, "chain_id": cfg.chain.chain_id, "circle_id": circle}));
+    policy.validate().context("operator policy validation")?;
+    let mut state_root = StateRoot::new_v1(
         circle,
-        policy_hash,
-        crate::v3_boot::sha256_hex(&wg_pub),
+        policy.hash_hex()?,
+        crate::v3_boot::sha256_hex(&identity.wireguard),
         None,
         cfg.pricing.region.clone(),
         0,
         epoch,
-        timestamp_secs,
+        timestamp,
     );
-    state_root
-        .validate()
-        .map_err(|e| anyhow::anyhow!("state-root validation: {e}"))?;
-    let anchor_hex = state_root
-        .anchor_hex()
-        .map_err(|e| anyhow::anyhow!("state-root anchor: {e}"))?;
-
+    state_root.validate().context("state-root validation")?;
+    let mut anchor = state_root.anchor_hex()?;
+    let receipt_b64 = octravpn_core::b64::encode(identity.receipt.0);
+    anyhow::ensure!(
+        !ctx.is_circle_slashed(circle).await?,
+        "operator Circle is permanently slashed"
+    );
     let active = ctx.get_circle_active(circle).await?;
     let on_chain = ctx.get_circle_state_root(circle).await?;
-    // Readable = the sealed blob exists AND verifies against the anchor.
-    // An error here (no blob, wrong passphrase) is exactly the state
-    // bootstrap repairs, so it is reported, not propagated.
-    let current = match on_chain {
-        Some(_) => circle_update::fetch_current_state_root(ctx, circle, &creds)
-            .await
-            .ok()
-            .flatten(),
-        None => None,
+    if active || on_chain.is_some() {
+        anyhow::ensure!(
+            ctx.get_circle_receipt_pubkey(circle).await? == receipt_b64,
+            "registered receipt key differs; rotate it before bootstrap"
+        );
+    }
+    let current = if let Some(prior) = on_chain.as_deref() {
+        let (prior_policy, root) = if public {
+            publication::load(ctx, circle, prior).await?
+        } else {
+            let creds = creds.as_ref().context("sealed credentials unavailable")?;
+            let root = circle_update::fetch_current_state_root(ctx, circle, creds)
+                .await?
+                .context("anchored state-root is unavailable; restore its immutable snapshot")?;
+            let circle_update::SealedRead::Valid(policy_bytes) = circle_update::read_sealed_asset(
+                ctx,
+                circle,
+                "/policy.json",
+                "default",
+                creds,
+                &root.policy_hash,
+            )
+            .await?
+            else {
+                anyhow::bail!("anchored operator policy is unavailable or invalid; restore its immutable snapshot");
+            };
+            let prior_policy = OperatorPolicy::decode_lenient(&policy_bytes)?;
+            anyhow::ensure!(
+                prior_policy.hash_hex()? == root.policy_hash,
+                "anchored operator policy hash differs"
+            );
+            (prior_policy, root)
+        };
+        anyhow::ensure!(
+            root.circle_id == circle && root.anchor_hex()? == prior,
+            "anchored state-root identity differs"
+        );
+        Some((prior_policy, root))
+    } else {
+        None
     };
+    if let Some((prior_policy, prior_root)) = &current {
+        if !args.force {
+            let mut expected = policy.clone();
+            expected.effective_epoch = prior_policy.effective_epoch;
+            expected.timestamp_secs = prior_policy.timestamp_secs;
+            for (key, value) in &prior_policy.unknown {
+                expected
+                    .unknown
+                    .entry(key.clone())
+                    .or_insert_with(|| value.clone());
+            }
+            anyhow::ensure!(&expected==prior_policy && prior_root.wg_pubkey_hash==crate::v3_boot::sha256_hex(&identity.wireguard),"existing operator discovery differs from requested configuration; use circle update or explicit --force");
+            policy = prior_policy.clone();
+            state_root = prior_root.clone();
+            anchor = state_root.anchor_hex()?;
+        }
+    }
     println!("circle bootstrap for {circle}");
-    println!("  registered:          {active}");
+    println!("  operator: {}", identity.operator.display());
+    println!("  registered: {active}");
     println!(
-        "  on-chain anchor:     {}",
+        "  on-chain anchor: {}",
         on_chain.as_deref().unwrap_or("<none>")
     );
-    println!("  state-root readable: {}", current.is_some());
-    println!("  new anchor:          {anchor_hex}");
-    if current.is_some() && !args.force {
-        println!(
-            "circle already bootstrapped — use `circle update` to rotate, or --force to reset \
-             the anchor (drops the anchored member/allow hashes)"
-        );
+    println!("  new anchor: {anchor}");
+    if current.is_some() && active && !args.force {
+        println!("verified existing policy and state-root; use circle update to rotate, or --force to reset membership hashes");
         return Ok(());
     }
     if dry_run {
-        println!("(dry-run; pass --commit to broadcast)");
+        println!("dry-run; pass --commit to publish and anchor");
         return Ok(());
     }
-    let put_tx = circle_update::put_state_root(ctx, circle, &state_root, &creds)
-        .await
-        .context("put /state-root.json")?;
-    println!("  state-root put:      tx {put_tx}");
+    if public {
+        publication::publish(ctx, circle, &policy, &state_root)
+            .await
+            .context("publish immutable discovery resources")?;
+    } else {
+        let creds = creds.as_ref().context("sealed credentials unavailable")?;
+        for (path, bytes) in [
+            ("/policy.json", policy.canonical_bytes()?),
+            ("/state-root.json", state_root.canonical_bytes()?),
+        ] {
+            let blob = circle_update::BlobUpdate {
+                asset_path: path.into(),
+                plaintext: zeroize::Zeroizing::new(bytes),
+                key_id: "default".into(),
+                padding_class: PaddingClass::None,
+            };
+            circle_update::submit_sealed_put(ctx, circle, &blob, creds)
+                .await
+                .with_context(|| format!("publish immutable {path}"))?;
+        }
+    }
     if !active {
         let stake = args
             .stake
             .or(cfg.chain.v3_initial_stake)
             .unwrap_or(MIN_CIRCLE_STAKE_DEFAULT);
-        let fee = ctx.fee_or_fallback("contract_call").await;
         let params = RegisterCircleParams {
             circle_id: circle,
-            state_root_hex: &anchor_hex,
-            receipt_pubkey_b64: &receipt_pubkey_b64,
+            state_root_hex: &anchor,
+            receipt_pubkey_b64: &receipt_b64,
             stake_amount: stake,
-            fee,
+            fee: ctx.fee_or_fallback("contract_call").await,
             nonce: 0,
         };
-        let tx = ctx
+        let hash = ctx
             .submit_call(ctx.build_register_circle_call(&params))
             .await
             .context("register_circle")?;
-        println!("  register_circle:     tx {tx} (stake {stake})");
-    } else if on_chain.as_deref() != Some(anchor_hex.as_str()) {
-        let tx = circle_update::retry_anchor(ctx, circle, &anchor_hex)
+        println!("  register_circle: tx {hash} (stake {stake})");
+    } else if on_chain.as_deref() != Some(anchor.as_str()) {
+        let hash = circle_update::retry_anchor(ctx, circle, &anchor)
             .await
             .context("update_circle_state")?;
-        println!("  update_circle_state: tx {tx}");
-    } else {
-        println!("  anchor already current; only the state-root blob was (re)written");
+        println!("  update_circle_state: tx {hash}");
     }
-    println!("submitted; the chain applies it at the next epoch (~10s)");
+    publication::await_anchor(ctx, circle, &anchor).await?;
+    anyhow::ensure!(
+        ctx.get_circle_receipt_pubkey(circle).await? == receipt_b64,
+        "confirmed receipt key differs"
+    );
+    println!("confirmed policy, state-root and active registry anchor: {anchor}");
     Ok(())
 }
 

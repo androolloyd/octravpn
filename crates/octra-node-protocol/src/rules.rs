@@ -319,6 +319,7 @@ pub struct Graph {
     /// Native cached slots in ALL order, ending at ProgramSource. The
     /// later profile rules are derived from chain identity, as in Rule_graph.
     plans: [Option<Activation>; 20],
+    isolated_applications: Option<Activation>,
 }
 impl Graph {
     pub fn new(chain_id: Vec<u8>, ready_config_hash: Option<Vec<u8>>) -> Self {
@@ -327,7 +328,40 @@ impl Graph {
             chain_id,
             ready_config_hash,
             plans,
+            isolated_applications: None,
         }
+    }
+    /// Explicit application-only qualification profile for a new isolated
+    /// genesis. Public network selection and native consensus rules are never
+    /// overridden. The caller must commit this opt-in in its genesis state;
+    /// every active lookup independently checks the retained epoch-zero root.
+    pub fn isolated_applications(
+        chain_id: Vec<u8>,
+        ready_config_hash: Option<Vec<u8>>,
+        genesis_root: [u8; 32],
+    ) -> Result<Self, &'static str> {
+        let Some(identity) = chain_id.strip_prefix(b"octra-rust-local-") else {
+            return Err("application fixture requires an isolated local chain");
+        };
+        if identity.len() != 16
+            || !identity
+                .iter()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
+        {
+            return Err("invalid isolated local chain identity");
+        }
+        let mut graph = Self::new(chain_id, ready_config_hash);
+        graph.isolated_applications = Some(Activation {
+            anchor_epoch: 0,
+            anchor_state_root: hex::encode(genesis_root).into_bytes(),
+            activation_epoch: 0,
+        });
+        Ok(graph)
+    }
+    pub fn isolated_application_anchor(&self) -> Option<&[u8]> {
+        self.isolated_applications
+            .as_ref()
+            .map(|plan| plan.anchor_state_root.as_slice())
     }
     pub fn chain_id(&self) -> &[u8] {
         &self.chain_id
@@ -336,6 +370,23 @@ impl Graph {
         self.ready_config_hash.as_deref()
     }
     pub fn activation(&self, rule: Rule) -> Option<Activation> {
+        if matches!(
+            rule,
+            Rule::Circle
+                | Rule::OwnerMigration
+                | Rule::ObjectCost
+                | Rule::AccountPack
+                | Rule::Standard
+                | Rule::Math
+                | Rule::ProgramSource
+                | Rule::FheWork
+                | Rule::ProofExecution
+                | Rule::VmBytes
+        ) {
+            if let Some(plan) = &self.isolated_applications {
+                return Some(plan.clone());
+            }
+        }
         self.plans
             .get(rule as usize)
             .cloned()
@@ -375,5 +426,79 @@ impl Graph {
             && self.activation(Rule::ProgramSource).is_some_and(|p| {
                 ((epoch.wrapping_sub(p.activation_epoch) << 1) >> 1) < PROGRAM_OVERLAP
             }))
+    }
+}
+
+#[cfg(test)]
+mod isolated_tests {
+    use super::*;
+
+    #[test]
+    fn isolated_applications_require_identity_and_matching_retained_genesis() {
+        let chain = b"octra-rust-local-0123456789abcdef".to_vec();
+        let graph = Graph::isolated_applications(chain.clone(), None, [7; 32]).unwrap();
+        let read = |height| {
+            if height == 0 {
+                RootRead::Root(hex::encode([7; 32]).into_bytes())
+            } else {
+                RootRead::Missing
+            }
+        };
+        for rule in [
+            Rule::Standard,
+            Rule::Math,
+            Rule::ProgramSource,
+            Rule::FheWork,
+            Rule::ProofExecution,
+            Rule::VmBytes,
+            Rule::ObjectCost,
+        ] {
+            assert_eq!(graph.mode(rule, 1, &read).unwrap(), RuleMode::Active);
+            assert!(matches!(
+                graph.mode(rule, 1, &|_| RootRead::Root(
+                    hex::encode([8; 32]).into_bytes()
+                )),
+                Err(Fault::Mismatch { epoch: 0, .. })
+            ));
+        }
+        assert!(graph.program_overlap(63, &read).unwrap());
+        assert!(!graph.program_overlap(64, &read).unwrap());
+        for rule in [
+            Rule::ValidatorQuorum,
+            Rule::EpochTime,
+            Rule::ValidatorReady,
+            Rule::ReadyReference,
+            Rule::LiveSet,
+            Rule::SeatCap,
+            Rule::OpenSet,
+        ] {
+            assert_eq!(
+                graph.mode(rule, 1, &read),
+                Graph::new(chain.clone(), None).mode(rule, 1, &read)
+            );
+            assert_eq!(
+                graph.activation(rule),
+                Graph::new(chain.clone(), None).activation(rule)
+            );
+        }
+        for chain in [
+            policy::DEVNET,
+            b"mainnet",
+            b"octra-rust-local-",
+            b"octra-rust-local-arbitrary",
+        ] {
+            assert!(Graph::isolated_applications(chain.to_vec(), None, [7; 32]).is_err());
+        }
+    }
+
+    #[test]
+    fn public_and_default_local_graphs_have_no_fixture_rules() {
+        for chain in [policy::DEVNET, b"octra-rust-local-0123456789abcdef"] {
+            let graph = Graph::new(chain.to_vec(), None);
+            assert!(graph.isolated_application_anchor().is_none());
+            for rule in ALL {
+                assert_eq!(graph.activation(rule), activation(chain, rule));
+            }
+        }
     }
 }

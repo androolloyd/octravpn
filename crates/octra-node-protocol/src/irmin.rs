@@ -6,6 +6,9 @@
 use blake2::{Blake2b512, Digest};
 use std::collections::BTreeMap;
 
+pub mod page;
+pub mod proof;
+
 pub type Hash = [u8; 64];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

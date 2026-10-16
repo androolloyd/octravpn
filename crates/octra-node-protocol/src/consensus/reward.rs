@@ -13,7 +13,7 @@ fn valid_address(value: &[u8]) -> bool {
     value.len() > 3 && value.len() <= 128
 }
 fn valid_key(value: Option<&Bytes>) -> bool {
-    value.map_or(true, |key| key.len() == 32)
+    value.is_none_or(|key| key.len() == 32)
 }
 pub fn validate(source: &RewardSource) -> Result<RewardSource, Error> {
     let mut source = source.clone();

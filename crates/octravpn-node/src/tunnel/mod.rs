@@ -37,7 +37,6 @@ use anyhow::Result;
 use boringtun::noise::{
     handshake::parse_handshake_anon, rate_limiter::RateLimiter, Packet, Tunn, TunnResult,
 };
-use octravpn_core::onion::SessionKeyStore;
 use octravpn_tun::amnezia::{AmneziaConfig, AmneziaShield};
 use parking_lot::Mutex;
 use tokio::net::UdpSocket;
@@ -52,6 +51,8 @@ use crate::onion::{Direction, OnionRouter};
 // whole tree until those consumers land.
 #[allow(dead_code)]
 pub(crate) mod backend;
+mod egress;
+pub(crate) mod ip;
 
 /// Perf-Data-Plane #2: per-peer shard count. boringtun `Tunn` is
 /// single-threaded; sharding a peer's flow across N `Tunn` instances
@@ -142,9 +143,9 @@ pub(crate) const ADMISSION_LEASE: std::time::Duration = std::time::Duration::fro
 #[derive(Clone)]
 pub(crate) struct AllowedClient {
     pub request: Arc<octravpn_core::control::AnnounceSessionRequest>,
-    pub admitted_at: std::time::Instant,
     pub expires_at: std::time::Instant,
     pub permit: Option<crate::admission::SessionPermit>,
+    pub paused: bool,
 }
 
 impl AllowedClient {
@@ -152,9 +153,9 @@ impl AllowedClient {
         let now = std::time::Instant::now();
         Self {
             request: Arc::new(request),
-            admitted_at: now,
             expires_at: now + ADMISSION_LEASE,
             permit: None,
+            paused: false,
         }
     }
 
@@ -164,11 +165,17 @@ impl AllowedClient {
     }
 
     fn live(&self) -> bool {
-        std::time::Instant::now() < self.expires_at
+        !self.paused
+            && self.retain_peer()
             && self
                 .permit
                 .as_ref()
-                .map_or(true, crate::admission::SessionPermit::live)
+                .is_none_or(crate::admission::SessionPermit::live)
+    }
+    /// Keeping bounded handshake state does not grant packet admission. A
+    /// publication pause can resume the same tunnel after explicit rechecking.
+    fn retain_peer(&self) -> bool {
+        std::time::Instant::now() < self.expires_at
     }
 }
 
@@ -187,12 +194,7 @@ pub(crate) struct Server {
     static_secret: StaticSecret,
     handshake_limiter: Arc<RateLimiter>,
     router: Arc<OnionRouter>,
-    /// Perf-Data-Plane #9 — session-pinned onion keys. The data plane
-    /// drops the per-packet X25519+HKDF and runs AEAD-only against the
-    /// pinned key from session-open. Backward-compatible: a missing
-    /// pin falls back to the full peel.
-    session_keys: Arc<SessionKeyStore>,
-    peers: octravpn_core::bounded::BoundedMap<SocketAddr, Arc<Peer>>,
+    peers: Arc<octravpn_core::bounded::BoundedMap<SocketAddr, Arc<Peer>>>,
     /// Per-peer shard count to use for fresh admits. Picked at server
     /// construction; defaults to `default_shard_count()`. See
     /// Perf-Data-Plane #2 in the module docstring.
@@ -213,7 +215,9 @@ pub(crate) struct Server {
     /// (one UDP recv loop, one send call per packet, both held
     /// briefly). Operators who actually enable obfuscation pay
     /// O(buf.len()) extra work per packet.
-    shield: Mutex<AmneziaShield>,
+    shield: Arc<Mutex<AmneziaShield>>,
+    egress: egress::Flows,
+    ip_tunnel: Option<Arc<ip::Tunnel>>,
 }
 
 impl Server {
@@ -261,12 +265,16 @@ impl Server {
             handshake_limiter: Arc::new(RateLimiter::new(&X25519Pub::from(&static_secret), 100)),
             static_secret,
             router,
-            session_keys: Arc::new(SessionKeyStore::new()),
-            peers: octravpn_core::bounded::BoundedMap::new(PEERS_CAP, PEER_IDLE_TTL),
+            peers: Arc::new(octravpn_core::bounded::BoundedMap::new(
+                PEERS_CAP,
+                PEER_IDLE_TTL,
+            )),
             shard_count: default_shard_count(),
             allowlist,
             metrics: None,
-            shield: Mutex::new(shield),
+            shield: Arc::new(Mutex::new(shield)),
+            egress: egress::Flows::default(),
+            ip_tunnel: None,
         })
     }
 
@@ -299,10 +307,20 @@ impl Server {
                 me.run_queue(idx, sock).await;
             });
         }
+        let maintenance = self.clone();
+        joinset.spawn(async move { maintenance.run_maintenance().await });
+        if let Some(tunnel) = self.ip_tunnel.clone() {
+            joinset.spawn(async move { tunnel.run().await });
+        }
         // If any queue task exits, we exit too. In practice the recv
         // loop never returns; this is just hygiene.
-        joinset.join_next().await;
-        Ok(())
+        let stopped = joinset.join_next().await;
+        joinset.abort_all();
+        while joinset.join_next().await.is_some() {}
+        match stopped {
+            Some(Err(error)) => Err(error.into()),
+            _ => anyhow::bail!("VPN transport worker stopped unexpectedly"),
+        }
     }
 
     /// One SO_REUSEPORT queue's recv loop. Each task owns its own
@@ -350,22 +368,7 @@ impl Server {
     }
 
     async fn shielded_send_to(&self, bytes: &[u8], dst: SocketAddr) -> std::io::Result<usize> {
-        // Fast-path: when the shield is identity, skip the Vec
-        // allocation entirely.
-        if self.shield.lock().config().is_identity() {
-            return self.outbound_sock().send_to(bytes, dst).await;
-        }
-        // Collect outbound datagrams via the sync wrap_send closure,
-        // then flush them through the async UDP socket.
-        let mut out: Vec<Vec<u8>> = Vec::new();
-        self.shield
-            .lock()
-            .wrap_send(dst, bytes, |b| out.push(b.to_vec()));
-        let mut last = 0usize;
-        for pkt in &out {
-            last = self.outbound_sock().send_to(pkt, dst).await?;
-        }
-        Ok(last)
+        egress::send(self.outbound_sock(), &self.shield, bytes, dst).await
     }
 
     async fn handle_packet(&self, packet: &[u8], src: SocketAddr, work: &mut [u8]) {
@@ -375,15 +378,14 @@ impl Server {
             return;
         };
 
-        if !self
-            .allowlist
-            .get(&peer.client_pubkey)
-            .is_some_and(|binding| binding.live())
-        {
-            if let Some(binding) = self.allowlist.get(&peer.client_pubkey) {
-                self.session_keys.evict(&binding.request.session_id);
+        let binding = self.allowlist.get(&peer.client_pubkey);
+        if !binding.as_ref().is_some_and(AllowedClient::live) {
+            if binding
+                .as_ref()
+                .is_none_or(|binding| !binding.retain_peer())
+            {
+                self.peers.remove(&src);
             }
-            self.peers.remove(&src);
             return;
         }
 
@@ -392,10 +394,27 @@ impl Server {
         // `peer.tuns[shard]` is monotone across the flow.
         let shard = peer.shard_for(src, self.local_addr);
         // boringtun decapsulation. The Tunn handles handshake + transport.
-        let res = peer.tuns[shard]
-            .lock()
-            .decapsulate(Some(src.ip()), packet, work);
-        self.handle_tunn_result(res, src).await;
+        let mut input = packet;
+        // A handshake response may release buffered return datagrams. The
+        // boringtun contract requires empty-input drains after network output.
+        for _ in 0..=256 {
+            if !self
+                .allowlist
+                .get(&peer.client_pubkey)
+                .is_some_and(|b| b.live())
+            {
+                return;
+            }
+            let res = peer.tuns[shard]
+                .lock()
+                .decapsulate(Some(src.ip()), input, work);
+            let drain = matches!(&res, TunnResult::WriteToNetwork(_));
+            self.handle_tunn_result(res, src).await;
+            if !drain {
+                break;
+            }
+            input = &[];
+        }
     }
 
     async fn handle_tunn_result(&self, res: TunnResult<'_>, src: SocketAddr) {
@@ -552,16 +571,9 @@ impl Server {
     /// Treat the inner bytes as an onion layer; peel and act per the
     /// resulting `HopAction`.
     ///
-    /// Perf-Data-Plane combined path:
-    ///   - #9: when `session_keys` has a pinned entry for the session,
-    ///     we run AEAD-only via `peel_layer_pinned_or_fallback` instead
-    ///     of the full X25519+HKDF+AEAD.
-    ///   - #3: when the per-session `onion_peel_required` flag is
-    ///     `false` (mesh has marked the session as Direct), we
-    ///     short-circuit the peel entirely and treat the inner blob
-    ///     as the Egress payload. A debug-only assertion guards
-    ///     against the privacy regression of skipping on a relay
-    ///     session.
+    /// Frames bind the session before payload processing. The fresh-ephemeral
+    /// sender always supplies an onion; only an explicitly selected legacy
+    /// direct policy may bypass peeling.
     async fn dispatch_frame(&self, packet: &[u8], src: SocketAddr) {
         if let Ok(layer) = octravpn_core::tunnel_frame::decode(packet) {
             self.dispatch_inner(layer, src).await;
@@ -614,21 +626,14 @@ impl Server {
                 "onion-skip MUST only fire on explicitly-marked Direct sessions; \
                  see Perf-Data-Plane #3 privacy invariant in conn.rs::is_direct()"
             );
-            self.router
-                .record_bytes(&session_id, Direction::In, layer.len() as u64);
-            self.egress(onion).await;
+            self.egress(&session_id, src, &binding, onion, layer.len() as u64)
+                .await;
             return;
         }
 
-        // Perf-Data-Plane #9 — pinned-key fast path. The first packet
-        // of a session falls through to `peel_layer` (X25519+HKDF+AEAD);
-        // every subsequent packet hits the AEAD-only fast path.
-        let peeled_result = octravpn_core::onion::peel_layer_pinned_or_fallback(
-            &self.static_secret,
-            &self.session_keys,
-            &session_id,
-            onion,
-        );
+        // Every production packet has a fresh ephemeral. Retaining its first
+        // receive key adds no fast path and must not imply a stable sender key.
+        let peeled_result = octravpn_core::onion::peel_layer(&self.static_secret, onion);
         match peeled_result {
             Ok(peeled) => {
                 if !self
@@ -636,23 +641,6 @@ impl Server {
                     .install(session_id.clone(), peeled.action.clone())
                 {
                     return;
-                }
-                self.router
-                    .record_bytes(&session_id, Direction::In, layer.len() as u64);
-
-                // First-packet pinning: if we don't have a pinned key
-                // yet, derive one now from the eph_pk in the packet
-                // prefix and stash it for next time. Subsequent peels
-                // are AEAD-only (~5 µs vs 31.7 µs).
-                if self.session_keys.get(&session_id).is_none() && onion.len() >= 32 {
-                    let mut eph_pk = [0u8; 32];
-                    eph_pk.copy_from_slice(&onion[..32]);
-                    if let Ok(keys) = octravpn_core::onion::OnionSessionKeys::from_ephemeral_pubkeys(
-                        &self.static_secret,
-                        &[eph_pk],
-                    ) {
-                        self.session_keys.pin(session_id.clone(), keys);
-                    }
                 }
 
                 match peeled.action {
@@ -663,7 +651,14 @@ impl Server {
                         self.forward_to(&endpoint, &session_id, &peeled.inner).await;
                     }
                     octravpn_core::onion::HopAction::Egress => {
-                        self.egress(&peeled.inner).await;
+                        self.egress(
+                            &session_id,
+                            src,
+                            &binding,
+                            &peeled.inner,
+                            layer.len() as u64,
+                        )
+                        .await;
                     }
                 }
             }
@@ -683,23 +678,6 @@ impl Server {
             endpoint,
             "multi-hop forwarding unavailable; dropping packet"
         );
-    }
-
-    async fn egress(&self, payload: &[u8]) {
-        // Egress format: first 6 bytes = (4 IPv4 + 2 port BE), rest = data.
-        if payload.len() < 6 {
-            return;
-        }
-        let ip = std::net::Ipv4Addr::new(payload[0], payload[1], payload[2], payload[3]);
-        let port = u16::from_be_bytes([payload[4], payload[5]]);
-        if port == 0 || !public_egress_ip(ip) {
-            debug!(%ip, port, "refusing non-public egress target");
-            return;
-        }
-        let target = SocketAddr::new(std::net::IpAddr::V4(ip), port);
-        if let Err(e) = self.outbound_sock().send_to(&payload[6..], target).await {
-            warn!(?target, error = %e, "egress send_to failed");
-        }
     }
 }
 
@@ -891,23 +869,37 @@ mod tests {
         let mut work = [0; 4096];
         server.handle_packet(&packet, src, &mut work).await;
         assert!(server.peers.contains_key(&src), "real WG identity admitted");
-        // Exercise the exact post-decapsulation dispatch boundary separately:
-        // the current client has no session framing driver (documented RC limit).
+        // Exercise authenticated dispatch with a genuinely encrypted onion.
+        // A malformed/private egress target must never add billable bytes.
+        let onion = octravpn_core::onion::build_fresh_onion(
+            &[octravpn_core::onion::HopBuildInput {
+                static_pubkey: X25519Pub::from(&node_secret).to_bytes(),
+                endpoint: String::new(),
+            }],
+            &[0; 64],
+        )
+        .unwrap();
         let mut payload = SessionId::from_u64(43).as_bytes().to_vec();
-        payload.extend_from_slice(&[0; 64]);
+        payload.extend_from_slice(&onion);
         server.dispatch_inner(&payload, src).await;
         assert!(router.bytes(&SessionId::from_u64(43)).is_none());
-        router.install(id.clone(), octravpn_core::onion::HopAction::Egress);
-        router.set_onion_peel_required(&id, false);
+        assert!(router.bytes(&id).is_none());
         payload[..32].copy_from_slice(id.as_bytes());
         server.dispatch_inner(&payload, src).await;
-        let served = router.bytes(&id).unwrap().0;
-        assert_eq!(served, payload.len() as u64);
+        assert_eq!(
+            router.bytes(&id),
+            Some((0, 0)),
+            "the live session authenticates and peels, but invalid egress is unbilled"
+        );
+        router.remove(&id);
         let mut expired = binding.clone();
         expired.expires_at = std::time::Instant::now();
         allowlist.insert(client_pk, expired);
         server.dispatch_inner(&payload, src).await;
-        assert_eq!(router.bytes(&id).unwrap().0, served);
+        assert!(
+            router.bytes(&id).is_none(),
+            "expired grant cannot install a route"
+        );
         allowlist.insert(client_pk, binding);
         allowlist.remove(&client_pk);
         server.handle_packet(&packet, src, &mut work).await;
@@ -916,7 +908,11 @@ mod tests {
             "revoked established peer removed"
         );
         server.dispatch_inner(&payload, src).await;
-        assert_eq!(router.bytes(&id).unwrap().0, served);
+        assert!(
+            router.bytes(&id).is_none(),
+            "revoked peer cannot install a route"
+        );
+        assert_eq!(router.total_bytes(), 0);
     }
 
     #[tokio::test]

@@ -104,8 +104,10 @@ fn check_updates(source: &str, capture: bool) {
             inspect: v["inspect"].as_bool().unwrap(),
             update_policy: v["update_policy"].as_bool().unwrap(),
             hfhe_strict: true,
+            hfhe_scope: None,
             storage_proof: v["storage_proof"].as_bool().unwrap(),
             fhe_work: false,
+            object_cost: v["object_cost"] == true,
         };
         let before = state.snapshot();
         let params = Document::parse(&serde_json::to_vec(&v["params"]).unwrap()).unwrap();
@@ -179,7 +181,7 @@ fn check_updates(source: &str, capture: bool) {
 }
 
 #[test]
-fn updates_bind_snapshot_and_refuse_unimplemented_capabilities_without_mutation() {
+fn updates_bind_snapshot_and_refuse_view_only_methods_without_mutation() {
     let mut state = StateBatch::default();
     state.begin().unwrap();
     host::install_counter(&mut state, b"counter", b"4");
@@ -201,8 +203,10 @@ fn updates_bind_snapshot_and_refuse_unimplemented_capabilities_without_mutation(
         inspect: true,
         update_policy: true,
         hfhe_strict: true,
+        hfhe_scope: None,
         storage_proof: true,
         fhe_work: false,
+        object_cost: false,
     };
     let params = Document::parse(b"[]").unwrap();
     let runtime = host::runtime();
@@ -223,18 +227,25 @@ fn updates_bind_snapshot_and_refuse_unimplemented_capabilities_without_mutation(
     let committed = state.root().unwrap();
     assert!(matches!(call.apply(&mut state), Err(Error::Unavailable(_))));
     assert_eq!(state.root().unwrap(), committed);
-    assert!(matches!(
-        circle_call::execute(
-            &runtime,
-            &state.snapshot(),
-            b"counter",
-            b"fhe_encrypt_of",
-            &params,
-            &ctx,
-            None
-        ),
-        Err(Error::Unavailable(_))
-    ));
+    let invalid = circle_call::execute(
+        &runtime,
+        &state.snapshot(),
+        b"counter",
+        b"fhe_encrypt_of",
+        &params,
+        &ctx,
+        None,
+    )
+    .unwrap();
+    assert!(!invalid.receipt().success);
+    assert_eq!(
+        invalid.receipt().error.as_deref(),
+        Some(b"wasm export returned 62".as_slice())
+    );
+    assert!(
+        matches!(invalid.apply(&mut state), Err(Error::Rejected(ref error)) if error == b"circle call failed")
+    );
+    assert_eq!(state.root().unwrap(), committed);
     let code = state
         .get(&[b"circles", b"counter", b"code_hash"])
         .unwrap()

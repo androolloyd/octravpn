@@ -1,15 +1,19 @@
 # obfs4 bridge runbook
 
-This runbook covers the obfs4-modelled UDP transport plug-in (layer 2
-of the OctraVPN 4-layer shielding pack). It sits between the WG
-data plane and the public internet, wrapping every WG datagram in an
-NTOR-handshaked ChaCha20-Poly1305 frame with length-randomised
-padding. The wrapper is opt-in and defaults to off — stock validator
-nodes are unaffected.
+The live node currently rejects `[tun.transport].kind = "obfs4"` and any
+`[tun.transport.obfs4]` block before loading keys, opening stores, publishing
+policy, or binding sockets. The experimental library wrapper has no live node
+or client transport driver; enabling its configuration cannot silently select
+plain WireGuard.
 
-Layer 1 (AmneziaWG-style WG handshake obfuscation, see
-`docs/security/validator-hardening.md` § "Layer 1") sits *inside* the
-WG datagram and is independent of obfs4: the two layers compose.
+Live sessions support committed `transport = { "kind": "wireguard" }` or
+`transport = { "kind": "amnezia_v1", "parameters": { ... } }` policy metadata.
+Both peers apply the same Amnezia parameters to handshake, timer, and data
+packets. Missing or unsupported transport metadata prevents a live client
+from opening escrow.
+
+The remaining sections describe the experimental Obfs4 library and historical
+operator tooling. They do not establish a deployable integrated Obfs4 path.
 
 ## What the wrapper provides (and doesn't)
 

@@ -2,62 +2,13 @@
 // Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
 use super::{work, Budget, Exec, Instruction as I, IntegerOp, Machine, Request, Trap, Value};
 use num_traits::{ToPrimitive, Zero};
-fn fixed(op: &I) -> i64 {
-    match op.opcode() {
-        0x0b | 0x0c | 0x14 | 0x16..=0x18 | 0x2a | 0x2b | 0x2d => 1,
-        0x07..=0x0a | 0x19..=0x1d | 0x7b => 2,
-        0x00..=0x02
-        | 0x12
-        | 0x13
-        | 0x28
-        | 0x2c
-        | 0x2e
-        | 0x2f
-        | 0x41
-        | 0x47..=0x4b
-        | 0x52
-        | 0x56 => 3,
-        0x03..=0x06
-        | 0x15
-        | 0x1f
-        | 0x20
-        | 0x29
-        | 0x42
-        | 0x43
-        | 0x62
-        | 0x65
-        | 0x68
-        | 0x6a
-        | 0x6e
-        | 0x77
-        | 0x79
-        | 0x7a
-        | 0x84
-        | 0x85
-        | 0x87
-        | 0x88 => 5,
-        0x7c => 8,
-        0x26 | 0x40 | 0x44 | 0x61 | 0x67 | 0x69 | 0x72 | 0x73 | 0x80 | 0x83 => 10,
-        0x0d | 0x10 | 0x1e | 0x45 | 0x46 | 0x63 | 0x71 | 0x76 | 0x89 => 20,
-        0x66 | 0x7d | 0x7f => 25,
-        0x27 | 0x59 | 0x64 | 0x6c | 0x75 | 0x7e | 0x86 => 30,
-        0x0f | 0x23 | 0x3d | 0x3e | 0x4c | 0x4d | 0x51 | 0x54 | 0x58 | 0x5a | 0x6b | 0x70
-        | 0x81 | 0x8a => 50,
-        0x0e | 0x11 | 0x21 | 0x24 | 0x30 | 0x3b | 0x3c | 0x4e..=0x50 | 0x60 | 0x6d | 0x74 => 100,
-        0x25 | 0x39 | 0x3a | 0x5d..=0x5f | 0x6f | 0x78 | 0x82 => 200,
-        0x57 => 300,
-        0x31 | 0x32 | 0x34 | 0x35 => 500,
-        0x33 | 0x5c => 1000,
-        0x55 => 2000,
-        0x22 | 0x53 => 5000,
-        0x5b => 10000,
-        0x3f => 50000,
-        0x36..=0x38 => 5_000_000,
-        _ => unreachable!("all OCTB opcodes are enumerated"),
-    }
+pub(super) fn fixed(op: &I) -> i64 {
+    op.effort_cost()
 }
 
 impl Machine {
+    // Positional operand names match the native instruction layout.
+    #[allow(clippy::many_single_char_names)]
     fn strict(&self, op: &I) -> Exec<bool> {
         Ok(match op {
             I::Add(_, a, b) => self.get(*a)?.add_operand(self.get(*b)?),
@@ -100,10 +51,59 @@ impl Machine {
             I::ParseInts(_, text, base) | I::Skeys(_, text, base) => {
                 self.get(*text)?.is_text() && self.get(*base)?.numeric()
             }
+            I::ObjectMemberCount(_, object) => self.get(*object)?.is_text(),
+            I::ObjectHasMember(_, object, member) => {
+                self.get(*object)?.is_text() && self.get(*member)?.is_text()
+            }
+            I::ObjectMemberRefAt(_, object, index) => {
+                self.get(*object)?.is_text() && self.get(*index)?.numeric()
+            }
+            I::ObjectTransitionApply(_, a, b, c, d, e, f, g, h, i, j) => {
+                [a, b, c, d, e, f, g, h, i, j]
+                    .into_iter()
+                    .map(|reg| self.get(*reg).map(Value::is_text))
+                    .collect::<Exec<Vec<_>>>()?
+                    .into_iter()
+                    .all(|v| v)
+            }
             I::SkeysPage(_, _, prefix, after, base) => {
                 self.get(*prefix)?.is_text()
                     && self.get(*after)?.is_text()
                     && self.get(*base)?.numeric()
+            }
+            I::ExpQ16(_, source) => self.get(*source)?.numeric(),
+            I::SoftmaxQ16Inplace(base, count) | I::SiluQ16Inplace(base, count) => {
+                self.get(*base)?.numeric() && self.get(*count)?.numeric()
+            }
+            I::LayernormQ16Inplace(a, b, c, d)
+            | I::RopeApplyQ16(a, b, c, d)
+            | I::AppendVecQ16(a, b, c, d) => [a, b, c, d]
+                .into_iter()
+                .map(|r| self.get(*r).map(Value::numeric))
+                .collect::<Exec<Vec<_>>>()?
+                .into_iter()
+                .all(|v| v),
+            I::RmsnormQ16Inplace(a, b, c)
+            | I::ElemwiseMulQ16(a, b, c)
+            | I::ResidualAddQ16(a, b, c)
+            | I::ArgmaxQ16(a, b, c)
+            | I::VecdotQ16(_, a, b, c) => {
+                self.get(*a)?.numeric() && self.get(*b)?.numeric() && self.get(*c)?.numeric()
+            }
+            I::AttentionKvQ16(a, b, c, d, e, f, g, h) => [a, b, c, d, e, f, g, h]
+                .into_iter()
+                .map(|r| self.get(*r).map(Value::numeric))
+                .collect::<Exec<Vec<_>>>()?
+                .into_iter()
+                .all(|v| v),
+            I::LoadInt8BytesToMem(dest, source, off, count, scale)
+            | I::LoadInt8B64ToMem(dest, source, off, count, scale)
+            | I::LoadInt8Q16(dest, source, off, count, scale) => {
+                self.get(*dest)?.numeric()
+                    && self.get(*source)?.is_text()
+                    && self.get(*off)?.numeric()
+                    && self.get(*count)?.numeric()
+                    && self.get(*scale)?.numeric()
             }
             I::Sloadn(key, value, count) | I::Sstoren(key, value, count) => {
                 self.get(*key)?.numeric()
@@ -116,6 +116,42 @@ impl Machine {
                     && self.get(*message)?.is_text()
                     && self.get(*signature)?.is_text()
             }
+            I::FheLoadPk(_, source) => self.get(*source)?.is_address(),
+            I::FheAdd(_, p, a, b) | I::FheSub(_, p, a, b) | I::FheMul(_, p, a, b) => {
+                matches!(self.get(*p)?, Value::PublicKey(_))
+                    && matches!(self.get(*a)?, Value::Cipher(_))
+                    && matches!(self.get(*b)?, Value::Cipher(_))
+            }
+            I::FheScale(_, p, c, s)
+            | I::FheDivConst(_, p, c, s)
+            | I::FheAddConst(_, p, c, s)
+            | I::FheSubConst(_, p, c, s) => {
+                matches!(self.get(*p)?, Value::PublicKey(_))
+                    && matches!(self.get(*c)?, Value::Cipher(_))
+                    && self.get(*s)?.numeric()
+            }
+            I::FheVerifyZero(_, p, c, proof) | I::FheVerifyRange(_, p, c, proof) => {
+                matches!(self.get(*p)?, Value::PublicKey(_))
+                    && matches!(self.get(*c)?, Value::Cipher(_))
+                    && self.get(*proof)?.is_text()
+            }
+            I::FheVerifyBound(_, p, c, proof, commit) => {
+                matches!(self.get(*p)?, Value::PublicKey(_))
+                    && matches!(self.get(*c)?, Value::Cipher(_))
+                    && self.get(*proof)?.is_text()
+                    && self.get(*commit)?.is_text()
+            }
+            I::FheCommit(_, p, c) => {
+                matches!(self.get(*p)?, Value::PublicKey(_))
+                    && matches!(self.get(*c)?, Value::Cipher(_))
+            }
+            I::FhePedersen(_, a, b) => self.get(*a)?.numeric() && self.get(*b)?.is_text(),
+            I::FhePedersenAdd(_, a, b) | I::FhePedersenSub(_, a, b) => {
+                self.get(*a)?.is_text() && self.get(*b)?.is_text()
+            }
+            I::FheSer(_, c) => matches!(self.get(*c)?, Value::Cipher(_)),
+            I::FheDeser(_, r) | I::FheDeserPk(_, r) => self.get(*r)?.is_text(),
+            I::FheSerPk(_, p) => matches!(self.get(*p)?, Value::PublicKey(_)),
             I::Substr(_, s, a, b) => {
                 self.get(*s)?.is_text() && self.get(*a)?.numeric() && self.get(*b)?.numeric()
             }
@@ -160,6 +196,8 @@ impl Machine {
             _ => true,
         })
     }
+    // Positional operand names match the native instruction layout.
+    #[allow(clippy::many_single_char_names)]
     fn inputs(&self, op: &I) -> Vec<(u8, i64, bool)> {
         let numeric =
             |registers: &[u8], passes: i64| registers.iter().map(|r| (*r, passes, false)).collect();
@@ -183,10 +221,57 @@ impl Machine {
             I::Mloadr(_, a)
             | I::Mstorer(a, _)
             | I::ParseInts(_, _, a)
+            | I::ObjectMemberRefAt(_, _, a)
             | I::Skeys(_, _, a)
             | I::SkeysPage(_, _, _, _, a) => indices(&[*a], 1),
-            I::Sloadn(a, b, c) => indices(&[*a, *b, *c], 1),
+            I::Sloadn(a, b, c)
+            | I::Vecdot(_, a, b, c)
+            | I::VecdotQ16(_, a, b, c)
+            | I::RmsnormQ16Inplace(a, b, c)
+            | I::ElemwiseMulInplace(a, b, c)
+            | I::ElemwiseMulQ16(a, b, c)
+            | I::ResidualAdd(a, b, c)
+            | I::ResidualAddQ16(a, b, c)
+            | I::ShiftRoundInplace(a, b, c) => indices(&[*a, *b, *c], 1),
             I::Sstoren(a, b, c) => indices(&[*a, *b, *c], 2),
+            I::Matmul(a, b, c, d, e, f) | I::MatmulQ16(a, b, c, d, e, f) => {
+                indices(&[*a, *b, *c, *d, *e, *f], 1)
+            }
+            I::SoftmaxQ16Inplace(a, b)
+            | I::ReluInplace(a, b)
+            | I::SiluQ16Inplace(a, b)
+            | I::ArgmaxQ16(_, a, b) => indices(&[*a, *b], 1),
+            I::LayernormQ16Inplace(a, b, c, d) | I::AppendVecQ16(a, b, c, d) => {
+                indices(&[*a, *b, *c, *d], 1)
+            }
+            I::RopeApplyQ16(a, b, c, d) => {
+                let mut values = indices(&[*a, *b, *c], 1);
+                values.extend(numeric(&[*d], 1));
+                values
+            }
+            I::LoadInt8BytesToMem(a, _, b, c, d)
+            | I::LoadInt8B64ToMem(a, _, b, c, d)
+            | I::LoadInt8Q16(a, _, b, c, d) => {
+                let mut values = indices(
+                    &[*a, *b, *c],
+                    if matches!(op, I::LoadInt8BytesToMem(..)) {
+                        1
+                    } else {
+                        2
+                    },
+                );
+                values.extend(numeric(&[*d], 1));
+                values
+            }
+            I::AttentionKvQ16(a, b, c, d, e, f, g, h) => {
+                indices(&[*a, *b, *c, *d, *e, *f, *g, *h], 1)
+            }
+            I::ExpQ16(_, source)
+            | I::FheScale(_, _, _, source)
+            | I::FheDivConst(_, _, _, source)
+            | I::FheAddConst(_, _, _, source)
+            | I::FheSubConst(_, _, _, source)
+            | I::FhePedersen(_, source, _) => numeric(&[*source], 1),
             I::Substr(_, _, a, b) => indices(&[*a, *b], 2),
             I::Transfer(_, _, a) => numeric(&[*a], 1),
             _ => vec![],
@@ -272,6 +357,15 @@ impl Machine {
             | I::ParseInts(_, a, _)
             | I::Skeys(_, a, _) => vec![*a],
             I::SkeysPage(_, _, a, c, _) => vec![*a, *c],
+            I::LoadInt8BytesToMem(dest, source, offset, count, _)
+            | I::LoadInt8B64ToMem(dest, source, offset, count, _)
+            | I::LoadInt8Q16(dest, source, offset, count, _) => {
+                self.reserve_text(*source, b)?;
+                for reg in [dest, offset, count] {
+                    self.index(*reg).map_err(|_| Trap::Refused)?;
+                }
+                vec![]
+            }
             I::Sstoren(keys, values, count) => {
                 let count = self.index(*count)?;
                 let keys = self.index(*keys)?;

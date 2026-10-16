@@ -11,10 +11,7 @@ use octra_exex::{
 use tokio::sync::{watch, Mutex, Notify};
 
 fn chain() -> ChainIdentity {
-    ChainIdentity {
-        chain_id: "fixture-chain".into(),
-        genesis_root: StateRoot([0; 32]),
-    }
+    ChainIdentity::genesis("fixture-chain", StateRoot([0; 32]))
 }
 
 fn root(sequence: u64) -> StateRoot {
@@ -86,7 +83,7 @@ struct Checkpoints {
 }
 
 fn key(chain: &ChainIdentity, extension: &str) -> String {
-    format!("{}:{:?}:{extension}", chain.chain_id, chain.genesis_root)
+    format!("{}:{:?}:{extension}", chain.chain_id, chain.namespace_key())
 }
 
 #[async_trait]
@@ -291,7 +288,11 @@ async fn wrong_chain_parent_sequence_and_epoch_are_rejected() {
             let mut records = source.records.lock().await;
             let epoch = Arc::make_mut(records.get_mut(&1).unwrap());
             match mutation {
-                0 => epoch.chain.genesis_root = root(999),
+                0 => {
+                    epoch.chain.origin = octra_exex::ChainOrigin::Genesis {
+                        state_root: root(999),
+                    }
+                }
                 1 => epoch.parent_root = root(999),
                 2 => epoch.cursor.sequence = Sequence(2),
                 _ => epoch.cursor.epoch = EpochId(100),

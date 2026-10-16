@@ -619,10 +619,7 @@ impl Engine {
         if self.validators.is_validator(validator)
             && round > self.state.round
             && round <= int63_add(self.state.round, limit)
-            && self
-                .higher_rounds
-                .get(validator)
-                .map_or(true, |v| *v < round)
+            && self.higher_rounds.get(validator).is_none_or(|v| *v < round)
         {
             self.higher_rounds.insert(validator.to_vec(), round);
         }

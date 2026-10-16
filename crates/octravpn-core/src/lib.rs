@@ -20,6 +20,8 @@ pub mod commit;
 pub mod control;
 pub mod earnings;
 pub mod enroll;
+pub mod identifier;
+pub mod ip_tunnel;
 pub mod onion;
 pub mod receipt;
 pub mod receipt_journal;
@@ -45,6 +47,7 @@ pub use address::{Address, ADDRESS_LEN};
 pub use chain_tx_queue::ChainTxQueueHandle;
 pub use earnings::{LedgerPoint, POINT_LEN};
 pub use enroll::{EnrollChallenge, EnrollPeer, EnrollRequest, EnrollResponse};
+pub use identifier::parse_native_address;
 pub use receipt::{Receipt, ReceiptError, SignedReceipt};
 pub use receipt_vault::{ReceiptVault, ReceiptVaultError};
 pub use session::{

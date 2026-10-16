@@ -1,0 +1,72 @@
+{
+  "date": "2026-10-15",
+  "status": "ADOPTED_QUALIFIED_NATIVE_INODE_STORAGE",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "qualification": {
+    "path": "out/node-port-final-20261015/native-inode-candidate/qualification.json",
+    "sha256": "e8f78095e8c765e05db7ef91c5cda7b94b9caa63a647b49a1983ba623d6dfd09"
+  },
+  "adoption": {
+    "path": "out/node-port-final-20261015/native-inode-candidate/adoption.json",
+    "sha256": "7f02fc5e37fdabbaf4d572f533e382a3b642f01eded3d43464ee4bb019dc56ba"
+  },
+  "results": {
+    "protocol_passed": 103,
+    "protocol_targets": 47,
+    "runtime_passed": 187,
+    "runtime_targets": 58,
+    "test_only_precision_runtime_unit_passed": 42,
+    "failed": 0
+  },
+  "growth_fixture": {
+    "accounts": 32768,
+    "individual_updates": 8,
+    "sqlite_page_allocation_bytes_per_update_min": 32768,
+    "sqlite_page_allocation_bytes_per_update_max": 53248,
+    "data_blob_bytes_per_update_min": 6532,
+    "data_blob_bytes_per_update_max": 7584,
+    "objects_per_update_min": 7,
+    "objects_per_update_max": 8,
+    "edges_per_update_min": 89,
+    "edges_per_update_max": 95,
+    "old_full_directory_blob_bytes": 13069419
+  },
+  "production_sha256": {
+    "crates/octra-node-protocol/src/irmin/page.rs": "68cea67fbe3953d417bc56050c20ddfac74a1db95edba1214cf0af9a8f48a8de",
+    "crates/octra-node-protocol/src/irmin.rs": "1f11af00cc5908521220332ee2dd65d8baa2627032c507175ec24c8fe410d4fa",
+    "crates/octra-node-runtime/src/canonical/inodes.rs": "88839236bdfae35728b558a0af9846971106c4f3a18b9191113dc697321bcb74",
+    "crates/octra-node-runtime/src/canonical/reader/paths.rs": "ca247232599a9978284472ebb6824d56688420ccd8ec95cc4856cfae006e891e",
+    "crates/octra-node-runtime/src/canonical/reader.rs": "233e76f1a20c9820e5aceea7db275086bbc7e8e145446498561767f38b295681",
+    "crates/octra-node-runtime/src/canonical/storage_tests.rs": "a68dfe21c0b4e2504c4ec3c69aedee4855ff025ef7e5d82f218f70bf28b6fbe4",
+    "crates/octra-node-runtime/src/canonical.rs": "4e953ea5a06ade1b9841f770e6b88c6692f1b442243771252aa9e17ba2847e98",
+    "crates/octra-node-runtime/src/state_batch/storage/restore.rs": "a36807c9cbe114d36b194273cbaf7a229292e71b7911c3acd9888b91f1b50876",
+    "crates/octra-node-runtime/src/state_batch/storage/test_support.rs": "a4f7c9562519e1723c167ba54dcd6c705718ac3767d2c77b1a8f50e4a9b0086a",
+    "crates/octra-node-runtime/src/state_batch/storage.rs": "dfe617c00981396e9ff086e52b5fe6820705bd7a08d37f623d0d1438eb94cf00",
+    "crates/octra-node-runtime/src/state_batch.rs": "41d51a88344b2a1533770129c07f4b5aab9eaca16063b6567bfcdff57fd95b2b"
+  },
+  "claims": {
+    "same_native_commitments": true,
+    "schema_migration": false,
+    "public_consensus_change": false,
+    "changed_inode_path_durable_writes": true,
+    "logical_directory_cpu_constant_time": false,
+    "public_performance_qualified": false,
+    "combined_node_qualified": true
+  },
+  "inode_combined_followup": {
+    "qualification": {
+      "path": "out/node-port-final-20261015/inode-combined-qualification.json",
+      "sha256": "651af93171a3cbe50e6e72e137c1c032398f40ea2e9c60d1c8ac970f3c6be109"
+    },
+    "source_manifest": {
+      "path": "out/node-port-final-20261015/inode-combined-source.json",
+      "sha256": "a9c14b1d9a9261d649ae0d5ed5990f176dc9348d5d66753d3fa5773cb2bdaf57"
+    },
+    "node_exex_pvac_passed": 80,
+    "protocol_passed": 107,
+    "runtime_unit_passed": 42,
+    "strict_all_targets_all_features": "PASS",
+    "qualified_binary_sha256": "e31fba75c0132ea0f845601173e723d7c57a8b17a985593a1174a18e84be44e5",
+    "source_drift": []
+  }
+}

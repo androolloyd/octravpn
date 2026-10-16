@@ -83,6 +83,7 @@ struct Cache {
     frozen: BTreeMap<(i64, i64), Arc<Built>>,
     executions: BTreeMap<[u8; 32], Arc<Evidence>>,
 }
+#[derive(Clone)]
 pub struct Config {
     pub key: SigningKey,
     pub address: Bytes,
@@ -111,6 +112,25 @@ impl<A: Host> Validator<A> {
         network: &peers::Network,
         config: Config,
     ) -> Result<Self, Error> {
+        Self::with_peers(
+            node,
+            executor,
+            pending,
+            network.authority.clone(),
+            network.bundles.clone(),
+            network.swarm.clone(),
+            config,
+        )
+    }
+    pub(crate) fn with_peers(
+        node: Arc<Node<A>>,
+        executor: Native,
+        pending: Arc<Pending>,
+        peers: peers::Authority,
+        bundles: Bundles<peers::Authority>,
+        swarm: Swarm,
+        config: Config,
+    ) -> Result<Self, Error> {
         if config.stealth_slots > 128 || config.epoch_capacity <= 0.into() {
             return Err("invalid staging limits".into());
         }
@@ -118,9 +138,9 @@ impl<A: Host> Validator<A> {
             node,
             executor,
             pending,
-            peers: network.authority.clone(),
-            bundles: network.bundles.clone(),
-            swarm: network.swarm.clone(),
+            peers,
+            bundles,
+            swarm,
             config,
             cache: Mutex::default(),
             enabled: AtomicBool::new(false),
@@ -269,7 +289,9 @@ impl<A: Host> DriverHost for Validator<A> {
                 e.rules.validators.public_key(&self.config.address)
                     == Some(self.config.key.verifying_key().as_bytes())
             }),
-            can_vote: self.enabled.load(Ordering::Acquire) && epoch.is_some(),
+            can_vote: self.enabled.load(Ordering::Acquire)
+                && epoch.is_some()
+                && matches!(self.node.status(), crate::Status::Serving(_)),
             finality_proof_needed: false,
         }
     }
@@ -428,9 +450,15 @@ impl<A: Host> DriverHost for Validator<A> {
             .proposal_parent(&head, self.config.policy)
             .await
             .map_err(error)?;
-        let config = self.peers.config(&head).await?;
-        self.swarm.set_validators(config.allowed_pubkeys)?;
+        self.swarm.advance_profile(number)?;
         let validators = rules.validators.clone();
+        self.swarm.set_validators(
+            validators
+                .validators
+                .iter()
+                .map(|member| member.pubkey.clone())
+                .collect(),
+        )?;
         self.peers.set_validators(validators.clone())?;
         self.peers.prune(number - 1)?;
         let mut cache = self.cache.lock().map_err(error)?;

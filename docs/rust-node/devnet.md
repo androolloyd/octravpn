@@ -86,8 +86,41 @@ and subresource URLs carry the captured snapshot. Responses include
 requests return 503; stale snapshot resources fail rather than mix roots.
 
 An HTTPS gateway backed by this local launcher still serves the isolated local
-chain. Tailscale connectivity does not join Octra's public devnet. Public joining
-needs the authenticated snapshot import and public-chain startup implementation.
+chain. Tailscale connectivity does not join Octra's public devnet. The new
+snapshot importer and public-network launcher described below have local tests;
+the official public snapshot import/join remains a separate unfinished gate.
+
+## Public-network startup (public qualification pending)
+
+`octra-node init-identity --key /private/path/node.key` creates a private node
+key without replacing an existing key and prints only the public identity.
+
+`octra-node bootstrap --config bootstrap.json --directory /new/data/path`
+downloads into a private staging directory. It verifies configured network trust,
+finality and validator transitions, exporter signatures, chunk/file hashes,
+ledger roots, the source HEAD, recent finalized roots and migration admission
+before atomically publishing a new directory. It never replaces an existing
+directory or derives the chain's configured origin from the downloaded snapshot.
+The operator configuration must supply the independent chain identity, trusted
+validators/exporters, configuration hash and minimum checkpoint epoch.
+
+`octra-node run-network --config network.json` reauthenticates that import and
+uses the captured native `network.env` settings for execution, peer compatibility,
+validator readiness and profile transitions. Paths in `network.json` resolve
+relative to that file. Trust comes from this operator configuration, not the
+`network.json` retained beside the downloaded snapshot. Public startup shares
+the canonical node, ExEx, browser, VPN admission and shutdown lifecycle with the
+local launcher. Voting defaults to false. Lifecycle-enabled permissionless startup can admit a
+nonactive operator, while actual proposal and vote duties still require native
+membership, readiness and serving admission. Conflicting registered keys fail
+startup. The RPC, browser bridge and control service
+remain on loopback; the HTTPS gateway has its own bind and Host policy.
+
+These commands are not evidence of a successful public-devnet join. The official
+snapshot has authenticated against the pinned network authority, but download,
+import, live catch-up and public restart qualification have not completed. The
+isolated paid-node qualification is recorded separately in the
+[native VPN checkpoint](checkpoints/2026-10-15/native-vpn.json).
 
 Stop and restart without deleting state:
 
@@ -103,41 +136,84 @@ revokes service admission. Startup reauthenticates retained history, catches up
 from peers with certificate and execution verification, and restores a pending
 precommit lock only after local replay. Unresolved legacy locks stop startup.
 
-## Development RPC
+## RPC and retained history
 
-- `GET /status`: chain, committed epoch/root, serving state, peers and queue size.
+The implementation candidate mounts native JSON-RPC at `POST /rpc`, native
+HTTP status at `GET /status`, and native state-sync head, range, readiness and
+snapshot routes under `/state-sync/`. Optional loopback gRPC uses the captured
+upstream `OCTRA_GRPC_*` settings and shares the JSON-RPC handlers. These new
+routes have implementation and local test coverage; public interoperability and
+the broader runtime's final result remain separate qualification gates.
+
+Local operator tools use these separate endpoints:
+
+- `GET /operator/status`: chain, committed epoch/root, serving state, peers and
+  queue size.
 - `GET /account/<address>`: committed balance and nonce, with the captured epoch.
 - `POST /transactions`: native signed transaction JSON. A `202` response means
-  queue acceptance. Inclusion must be checked in canonical history/ExEx.
+  durable queue acceptance; inclusion must be checked in canonical history/ExEx.
 
-Transactions undergo signature, payload, fee, nonce, proof and active-rule
-admission. Peer gossip uses the same queue admission. Queue state is currently
-volatile; clients must retain signed pending transactions for resubmission after
-restart. RPC is a small local operator API, not the complete upstream REST API.
-The faucet key signs transactions client-side; no endpoint exposes or signs with
-that key.
+Transactions undergo native signature, payload, fee, nonce, proof and active-rule
+admission. Peer gossip and pending recovery share the transaction checks without
+inheriting the observer RPC submission restriction. Accepted queue changes are
+journaled before acknowledgment. Recovery binds the journal to canonical history,
+removes finalized transactions and recorded refusals, revalidates candidates and
+preserves their original age. Checksum, chain and cursor conflicts stop recovery;
+persistence failure stops admission. Clients should retain signed transactions
+until canonical inclusion. No endpoint exposes or signs with a faucet key.
 
 `node-N/exex/<sequence>.json` contains immutable canonical execution events. The
 archive extension uses atomic durable writes and durable checkpoints. Replayed
-writes must match existing bytes.
+writes must match existing bytes. Canonical publication retains its writer lease
+and serialization guard through SQL commit and head-cache publication even when
+the caller is canceled. Applications remain suspended after interrupted
+publication until explicit recovery.
 
 ## Qualification boundary
 
-The launcher uses the adopted native protocol and execution components. Its
-local genesis explicitly starts the current proposal format at epoch two,
-turns on preverification receipts from genesis, uses `devnet_full_v1`, static
-genesis validators and no issuance. These are isolated-chain startup settings;
-this is not a public-devnet or mainnet joining configuration.
+The running isolated devnet and each captured qualification image are different
+artifacts. The [2026-10-15 status](status.md) links the combined paid VPN/node
+and formal checkpoints and records the remaining public and production gates.
+The final local node release run passed 40 tests; the broader runtime and final
+Chromium gates have independent results. Neither source inventories nor those
+bounded local results establish full native parity or deployment readiness.
 
-VPN sockets run with canonical admission, but the launcher has no configured
-settlement Circle: every funded session request is denied. It never fabricates
-escrow. Circle HFHE host calls report unavailable. Managed private operations
-without an implemented verifier also remain unavailable. Complete VM/HFHE parity,
-funded VPN settlement, public network qualification and OS protocol registration
-remain separate work. Groth16 private-admin proofs now execute in the Rust VM and
-Circle host. The existing VPN AML constructor still needs an authenticated Circle
-initialization path before the launcher can enable paid sessions. See the
-[proof and restart evidence](checkpoints/2026-10-14/groth16-summary.json).
+The candidate now contains native AML compilation/admission and OCTB execution,
+Circle resource/state/policy and sealed-cell operations, HFHE and private proof
+hosts, key lifecycle/migration, compute services, validator enrollment/duties,
+transaction/history APIs and authenticated snapshot/bootstrap paths. These source
+paths have received compiler reproduction, native differential, stateful and
+bounded cancellation/restart checks at their recorded snapshots. The final
+whole-runtime gate is still being reconciled; coverage is not an assertion that
+every native input or operational failure has been proved equivalent.
+Missing retained journal observations remain explicit history gaps; local footer
+checksums do not create new signed fee authority.
+
+The default isolated launcher starts the current proposal format at epoch two, enables
+preverification receipts from genesis, uses `devnet_full_v1`, static genesis
+validators and no issuance. These settings do not describe Octra's public devnet.
+Public startup requires independently supplied chain/origin identity, validator
+and exporter trust, configuration hash and checkpoint floor, together with usable
+snapshot or authenticated prefix access. A downloaded configuration cannot grant
+itself trust. A completed import still needs combined P2P/HTTP catch-up, replay,
+disconnect/rejoin, restart, vote-lock and ExEx recovery qualification.
+
+Native VPN admission and the paid client now share Circle/Program application
+configuration, code and receipt-domain pins, committed escrow and signed opening
+receipts. The default isolated launcher has no settlement application and denies
+funded admission. The separate paid qualification fixture passed actual funding,
+publication, receipt, rotation/replay, UDP and client/node kernel TUN/NAT tests
+with the application profile bound to its private genesis. Only one
+funded exit is implemented; multi-hop selection is refused before escrow.
+See [native VPN integration](native-vpn.md) and
+[validator duty integration](validator-duty.md) for source behavior and limits.
+
+The combined paid fixture exercises node/VPN/ExEx and the canonical gateway
+backend together, including operator termination/restart and active traffic
+recovery. It does not qualify external HTTPS/Tailscale deployment, public source
+failover or every durable publication boundary. Broader runtime cancellation and
+recovery tests retain their own results. Historical passing reports apply only
+to their pinned artifacts; the paid image does not establish public deployment.
 
 The end-to-end regression is:
 

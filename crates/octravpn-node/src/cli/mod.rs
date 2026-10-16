@@ -100,10 +100,9 @@ pub(crate) enum Cmd {
     /// zero-proof and transfers plaintext OU; the operator's wallet
     /// then wraps it in a native stealth tx for unlinkable payout.
     ClaimEarnings(bond::ClaimEarningsArgs),
-    /// Submit `settle_claim(session_id, bytes_used)` for a closed
-    /// session. The operator MUST submit the same bytes_used per
-    /// session for life — equivocation slashes the operator bond
-    /// in-AML.
+    /// Submit `settle_claim(session_id, bytes_used, net)` for a closed
+    /// session. Current settlement commits both bytes and microOCT credit;
+    /// conflicting claims refund the session for governance adjudication.
     SettleClaim(bond::SettleClaimArgs),
     /// Print derived addresses / pubkeys without changing on-chain state.
     Identity(identity::IdentityArgs),
@@ -144,7 +143,7 @@ pub(crate) enum Cmd {
     /// elsewhere. Passphrase resolution mirrors `seal-keys`.
     UnsealKeys(seal::UnsealKeysArgs),
     /// v3 chain-minimal entrypoints. Every non-boot v3 method exposed
-    /// by `program/main-v3.aml` is reachable here as a subcommand:
+    /// by the current VPN AML is reachable here as a subcommand:
     /// bond / unbond / finalize / slash / rotate / retire-circle,
     /// tailnet create / update / retire / deposit / withdraw, session
     /// open / settle-claim / settle-confirm / claim-no-show / sweep,

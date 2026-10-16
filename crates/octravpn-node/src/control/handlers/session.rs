@@ -42,7 +42,18 @@ pub(crate) async fn announce(
         )
             .into_response();
     }
-    let native_permit = if let Some(authority) = &s.native_authority {
+    // A durable countersignature restores receipt handback after restart but
+    // never reopens packet delivery. The publisher retains the independently
+    // authenticated original opening and announcement for that claim.
+    let receipt_only = s.receipt_settlement.is_some()
+        && s.receipt_vault.get(&req.session_id).is_some_and(|receipt| {
+            receipt.client_pubkey == req.client_pubkey
+                && receipt.node_pubkey == s.node_kp.public
+                && receipt.receipt.context == *s.receipt_context
+        });
+    let native_permit = if receipt_only {
+        None
+    } else if let Some(authority) = &s.native_authority {
         match tokio::time::timeout(
             std::time::Duration::from_secs(10),
             authority.authorize(&req, &s.receipt_context),
@@ -157,6 +168,7 @@ pub(crate) async fn announce(
             s.sessions.insert(
                 req.session_id.clone(),
                 ControlSession {
+                    announcement: Some(req.clone()),
                     byte_offset: byte_floor.saturating_sub(
                         s.router
                             .bytes(&req.session_id)
@@ -173,10 +185,12 @@ pub(crate) async fn announce(
                 s.allowlist.remove(&key);
             }
         }
-        s.allowlist.insert(
-            req.client_wg_pubkey,
-            crate::tunnel::AllowedClient::new(req.clone()).with_permit(native_permit),
-        );
+        if s.receipt_settlement.is_none() || s.receipt_vault.get(&req.session_id).is_none() {
+            s.allowlist.insert(
+                req.client_wg_pubkey,
+                crate::tunnel::AllowedClient::new(req.clone()).with_permit(native_permit),
+            );
+        }
     }
     s.metrics.announces_total.fetch_add(1, Ordering::Relaxed);
     // `session_opens_total` mirrors `announces_total` today (every

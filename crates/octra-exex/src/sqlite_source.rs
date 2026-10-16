@@ -5,6 +5,9 @@
 //! This is a storage adapter, not a consensus or finality implementation. A
 //! separate database would leave a crash window between chain state and this
 //! outbox, so callers must pass their canonical transaction to `append`.
+//! The legacy SQL column `genesis` contains the immutable host namespace key.
+//! Genesis origins preserve their original key; checkpoint origins use a
+//! domain-separated digest and retain the typed origin in chain metadata.
 
 use std::{marker::PhantomData, sync::Arc};
 
@@ -29,15 +32,20 @@ impl<E> SqliteEpochSource<E> {
     /// is immutable once installed and identifies the cursor just before the
     /// first retained epoch.
     pub async fn open(pool: SqlitePool, chain: ChainIdentity, anchor: Cursor) -> Result<Self> {
-        if chain.chain_id.is_empty() {
+        if chain.validate().is_err() {
             return Err(Error::InvalidChain);
         }
+        crate::identity::bind_cursor(&chain, anchor)?;
+        crate::identity::initialize(&pool).await?;
+        let mut identity = pool.begin().await.map_err(store)?;
+        crate::identity::save(&mut identity, &chain).await?;
+        identity.commit().await.map_err(store)?;
         sqlx::query("CREATE TABLE IF NOT EXISTS exex_epoch_anchor (chain_id TEXT NOT NULL, genesis BLOB NOT NULL CHECK(length(genesis)=32), sequence TEXT NOT NULL, epoch TEXT NOT NULL, root BLOB NOT NULL CHECK(length(root)=32), PRIMARY KEY(chain_id, genesis))")
             .execute(&pool).await.map_err(store)?;
         sqlx::query("CREATE TABLE IF NOT EXISTS exex_committed_epoch (chain_id TEXT NOT NULL, genesis BLOB NOT NULL CHECK(length(genesis)=32), sequence TEXT NOT NULL CHECK(length(sequence)=16), epoch TEXT NOT NULL CHECK(length(epoch)=16), parent_root BLOB NOT NULL CHECK(length(parent_root)=32), root BLOB NOT NULL CHECK(length(root)=32), events BLOB NOT NULL, PRIMARY KEY(chain_id, genesis, sequence))")
             .execute(&pool).await.map_err(store)?;
         sqlx::query("INSERT INTO exex_epoch_anchor(chain_id,genesis,sequence,epoch,root) VALUES(?,?,?,?,?) ON CONFLICT DO NOTHING")
-            .bind(&chain.chain_id).bind(chain.genesis_root.0.as_slice())
+            .bind(&chain.chain_id).bind(chain.namespace_key().as_slice())
             .bind(hex_u64(anchor.sequence.0)).bind(hex_u64(anchor.epoch.0))
             .bind(anchor.state_root.0.as_slice())
             .execute(&pool).await.map_err(store)?;
@@ -51,14 +59,16 @@ impl<E> SqliteEpochSource<E> {
         chain: ChainIdentity,
         anchor: Cursor,
     ) -> Result<Self> {
-        if chain.chain_id.is_empty() {
+        if chain.validate().is_err() {
             return Err(Error::InvalidChain);
         }
+        crate::identity::bind_cursor(&chain, anchor)?;
+        crate::identity::verify(&pool, &chain).await?;
         let row = sqlx::query(
             "SELECT sequence,epoch,root FROM exex_epoch_anchor WHERE chain_id=? AND genesis=?",
         )
         .bind(&chain.chain_id)
-        .bind(chain.genesis_root.0.as_slice())
+        .bind(chain.namespace_key().as_slice())
         .fetch_one(&pool)
         .await
         .map_err(store)?;
@@ -88,14 +98,16 @@ impl<E: Serialize> SqliteEpochSource<E> {
         if epoch.chain != self.chain {
             return Err(Error::InvalidEvent(epoch.cursor.sequence));
         }
+        crate::identity::bind_cursor(&self.chain, epoch.cursor)?;
         let row = sqlx::query("SELECT sequence,epoch,root FROM exex_committed_epoch WHERE chain_id=? AND genesis=? ORDER BY sequence DESC LIMIT 1")
-            .bind(&self.chain.chain_id).bind(self.chain.genesis_root.0.as_slice())
+            .bind(&self.chain.chain_id).bind(self.chain.namespace_key().as_slice())
             .fetch_optional(&mut **tx).await.map_err(store)?;
         let head = row
             .as_ref()
             .map(cursor_from_row)
             .transpose()?
             .unwrap_or(self.anchor);
+        crate::identity::bind_cursor(&self.chain, head)?;
         if head.sequence.0.checked_add(1) != Some(epoch.cursor.sequence.0)
             || epoch.cursor.epoch <= head.epoch
             || epoch.parent_root != head.state_root
@@ -104,7 +116,7 @@ impl<E: Serialize> SqliteEpochSource<E> {
         }
         let events = serde_json::to_vec(&epoch.events).map_err(store)?;
         sqlx::query("INSERT INTO exex_committed_epoch(chain_id,genesis,sequence,epoch,parent_root,root,events) VALUES(?,?,?,?,?,?,?)")
-            .bind(&self.chain.chain_id).bind(self.chain.genesis_root.0.as_slice())
+            .bind(&self.chain.chain_id).bind(self.chain.namespace_key().as_slice())
             .bind(hex_u64(epoch.cursor.sequence.0)).bind(hex_u64(epoch.cursor.epoch.0))
             .bind(epoch.parent_root.0.as_slice()).bind(epoch.cursor.state_root.0.as_slice())
             .bind(events)
@@ -125,21 +137,25 @@ impl<E: DeserializeOwned + Send + Sync + 'static> CommittedEpochSource<E> for Sq
 
     async fn head(&self) -> Result<Cursor> {
         let row = sqlx::query("SELECT sequence,epoch,root FROM exex_committed_epoch WHERE chain_id=? AND genesis=? ORDER BY sequence DESC LIMIT 1")
-            .bind(&self.chain.chain_id).bind(self.chain.genesis_root.0.as_slice())
+            .bind(&self.chain.chain_id).bind(self.chain.namespace_key().as_slice())
             .fetch_optional(&self.pool).await.map_err(store)?;
-        row.as_ref()
+        let head = row
+            .as_ref()
             .map(cursor_from_row)
             .transpose()
-            .map(|c| c.unwrap_or(self.anchor))
+            .map(|c| c.unwrap_or(self.anchor))?;
+        crate::identity::bind_cursor(&self.chain, head)?;
+        Ok(head)
     }
 
     async fn load(&self, sequence: Sequence) -> Result<Option<Arc<CommittedEpoch<E>>>> {
         let row = sqlx::query("SELECT sequence,epoch,parent_root,root,events FROM exex_committed_epoch WHERE chain_id=? AND genesis=? AND sequence=?")
-            .bind(&self.chain.chain_id).bind(self.chain.genesis_root.0.as_slice())
+            .bind(&self.chain.chain_id).bind(self.chain.namespace_key().as_slice())
             .bind(hex_u64(sequence.0))
             .fetch_optional(&self.pool).await.map_err(store)?;
         row.map(|row| {
             let cursor = cursor_from_row(&row)?;
+            crate::identity::bind_cursor(&self.chain, cursor)?;
             let parent_root = root_from_row(&row, "parent_root")?;
             let events: Vec<u8> = row.try_get("events").map_err(store)?;
             let events = serde_json::from_slice(&events).map_err(store)?;

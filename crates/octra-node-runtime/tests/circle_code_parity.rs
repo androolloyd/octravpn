@@ -146,6 +146,7 @@ fn rules(input: &Value) -> Rules {
         inspect: input["inspect"].as_bool().unwrap(),
         storage_proof: input["storage_proof"].as_bool().unwrap(),
         fhe_work: input["fhe_work"] == true,
+        object_cost: input["object_cost"] == true,
     }
 }
 #[test]
@@ -194,33 +195,20 @@ fn native_nested_circle_journals_match_value_reentry_events_and_rollback() {
 }
 
 #[test]
-fn unavailable_code_admission_restores_earlier_deployment_and_fee() {
+fn unavailable_operation_restores_earlier_deployment_and_fee() {
     let fixture: Value = serde_json::from_str(include_str!("fixtures/circle-code.json")).unwrap();
     let input = &fixture["cases"][0]["input"];
-    for unavailable in [b"{".as_slice(), b"octb"] {
+    // The Circle-only host now implements real admission. Exercise genuinely
+    // missing execution hosts after a successful deploy rather than treating
+    // invalid JSON or an untrusted Program certificate as operational outages.
+    for op in [OpType::ContractCall, OpType::ComputeFund] {
         let (mut state, mut ledger, mut transactions) = setup(input, &fixture);
         let before = state.root().unwrap();
         let accounts = ledger.accounts().clone();
         let supply = ledger.total_supply().clone();
         let mut second = transactions[0].clone();
         second.nonce = second.nonce.successor();
-        if unavailable == b"octb" {
-            let mut payload: Value =
-                serde_json::from_slice(second.message.as_ref().unwrap()).unwrap();
-            payload["runtime"] = json!("octb");
-            payload["code_b64"] = json!(STANDARD.encode(
-                octra_node_protocol::program_wire::Envelope {
-                    code: b"OCTB\x01\x00\x00\x00\x01\x00\x00\x00\x17".to_vec(),
-                    cert: b"{}".to_vec(),
-                }
-                .encode()
-                .unwrap()
-            ));
-            second.message = Some(serde_json::to_vec(&payload).unwrap());
-            second.to = derived(&second).unwrap();
-        } else {
-            second.message = Some(unavailable.to_vec());
-        }
+        second.op_type = op;
         transactions.push(second);
         let error = circle_transaction::execute(
             &host::runtime(),
@@ -232,13 +220,8 @@ fn unavailable_code_admission_restores_earlier_deployment_and_fee() {
             &mut state,
         )
         .err()
-        .expect("missing admission capability must abort the attempt");
-        if unavailable == b"octb" {
-            assert_eq!(
-                error.0,
-                "OCTB Program certificate admission host is not available"
-            );
-        }
+        .expect("missing execution host must abort the attempt");
+        assert_eq!(error.0, "operation requires an unavailable execution host");
         assert_eq!(state.root().unwrap(), before);
         assert_eq!(*ledger.accounts(), accounts);
         assert_eq!(*ledger.total_supply(), supply);
@@ -335,10 +318,7 @@ async fn signed_spawn_publishes_oct_page_and_exex_record_through_restart() {
     let store = Arc::new(
         CanonicalStore::create(
             &path,
-            ChainIdentity {
-                chain_id: "circle-effects-development".into(),
-                genesis_root: StateRoot(root),
-            },
+            ChainIdentity::genesis("circle-effects-development", StateRoot(root)),
             state.snapshot(),
             0,
         )
@@ -443,6 +423,9 @@ async fn signed_spawn_publishes_oct_page_and_exex_record_through_restart() {
     };
     item.validate().unwrap();
     let executed = ExecutedEpoch {
+        epoch_observation: None,
+        metrics: octra_node_protocol::metrics::Epoch::default(),
+        vm_receipts: std::collections::BTreeMap::default(),
         state: next.snapshot(),
         transactions: vec![item.clone()],
         consensus_receipts: vec![],
@@ -521,18 +504,44 @@ fn unavailable_nested_execution_restores_earlier_child_effects_and_fees() {
         .expect("successful native nested transfer")["input"];
     let (mut state, mut ledger, mut transactions) = setup(input, &fixture);
     let unavailable = format!("oct{}", "8".repeat(44));
+    use octra_node_protocol::octb::{self, Instruction as I, Metadata, Value as Constant};
+    use std::sync::Arc;
+    let key_address = format!("oct{}", "9".repeat(44));
+    let code = octb::encode(
+        &[
+            I::Jdest(100),
+            I::Mload(1, 1000),
+            I::Ldi(2, Arc::new(Constant::Str(Arc::from(b"return".as_slice())))),
+            I::Eq(3, 1, 2),
+            I::Jif(3, 200),
+            I::Revert(),
+            I::Jdest(200),
+            I::Ldi(
+                4,
+                Arc::new(Constant::Str(Arc::from(key_address.as_bytes()))),
+            ),
+            I::FheLoadPk(0, 4),
+            I::Stop(),
+        ],
+        &Metadata::default(),
+        false,
+    )
+    .unwrap();
     state
         .set(
             &[b"contracts", unavailable.as_bytes(), b"bytecode"],
-            b"unsupported OCTB fixture".to_vec(),
+            STANDARD.encode(code).into_bytes(),
         )
+        .unwrap();
+    state
+        .set(&[b"pvac_hashes", key_address.as_bytes()], vec![b'a'; 64])
         .unwrap();
     let before = state.root().unwrap();
     let accounts = ledger.accounts().clone();
     let supply = ledger.total_supply().clone();
     let mut second = transactions[0].clone();
     second.nonce = second.nonce.successor();
-    second.message = Some(serde_json::to_vec(&json!([unavailable, "return", true])).unwrap());
+    second.message = Some(serde_json::to_vec(&json!([unavailable, "return"])).unwrap());
     transactions.push(second);
     let error = circle_transaction::execute(
         &host::runtime(),
@@ -544,13 +553,13 @@ fn unavailable_nested_execution_restores_earlier_child_effects_and_fees() {
         &mut state,
     )
     .err()
-    .expect("unsupported nested execution must abort the attempt");
+    .expect("unavailable registered key must abort the attempt");
     assert_eq!(
         error.0,
         format!(
             "Circle execution unavailable: {:?}",
             octra_node_protocol::circle_wasm::Error::Unavailable(
-                b"OCTB execution host is not available".to_vec()
+                b"PVAC public key source is unavailable".to_vec()
             )
         )
     );
@@ -680,6 +689,7 @@ fn unavailable_octb_child_restores_the_entire_speculative_attempt() {
             )
             .unwrap();
     }
+    let key_address = format!("oct{}", "9".repeat(44));
     let code = octb::encode(
         &[
             I::Jdest(100),
@@ -689,7 +699,11 @@ fn unavailable_octb_child_restores_the_entire_speculative_attempt() {
             I::Jif(3, 200),
             I::Revert(),
             I::Jdest(200),
-            I::FheMul(0, 1, 2, 3),
+            I::Ldi(
+                4,
+                Arc::new(Constant::Str(Arc::from(key_address.as_bytes()))),
+            ),
+            I::FheLoadPk(0, 4),
             I::Stop(),
         ],
         &Metadata::default(),
@@ -714,6 +728,39 @@ fn unavailable_octb_child_restores_the_entire_speculative_attempt() {
         path.extend(suffix);
         state.set(&path, value).unwrap();
     }
+    state
+        .set(&[b"pvac_hashes", key_address.as_bytes()], vec![b'a'; 64])
+        .unwrap();
+    for (key, value) in [
+        (
+            b"hfhe_policy:require_live_key_policy".as_slice(),
+            b"false".as_slice(),
+        ),
+        (
+            b"hfhe_policy:load_pk_mode".as_slice(),
+            b"any_registered".as_slice(),
+        ),
+    ] {
+        let hash = octra_node_protocol::circles::stable_key(key);
+        let entry = octra_node_runtime::circle_store::StableEntry {
+            key: key.to_vec(),
+            hash: hash.as_bytes().to_vec(),
+            value: octra_node_runtime::circle_store::StableValue::Inline(value.to_vec()),
+        }
+        .encode();
+        state
+            .set(
+                &[
+                    b"circles",
+                    child.as_bytes(),
+                    b"stable",
+                    b"by_hash",
+                    hash.as_bytes(),
+                ],
+                entry,
+            )
+            .unwrap();
+    }
     let before = state.root().unwrap();
     let accounts = ledger.accounts().clone();
     let supply = ledger.total_supply().clone();
@@ -731,8 +778,16 @@ fn unavailable_octb_child_restores_the_entire_speculative_attempt() {
         &mut state,
     )
     .err()
-    .expect("missing private execution must abort the complete attempt");
-    assert!(error.0.contains("Unavailable"), "{error:?}");
+    .expect("unavailable registered key must abort the complete attempt");
+    assert_eq!(
+        error.0,
+        format!(
+            "Circle execution unavailable: {:?}",
+            octra_node_protocol::circle_wasm::Error::Unavailable(
+                b"PVAC public key source is unavailable".to_vec()
+            )
+        )
+    );
     assert_eq!(state.root().unwrap(), before);
     assert_eq!(*ledger.accounts(), accounts);
     assert_eq!(*ledger.total_supply(), supply);

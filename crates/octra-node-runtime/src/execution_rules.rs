@@ -85,6 +85,7 @@ impl Bound {
                 inspect: ctx.vm_bytes == RuleMode::Active,
                 storage_proof: ctx.standard_mode == RuleMode::Active,
                 fhe_work: ctx.fhe_work == RuleMode::Active,
+                object_cost,
             },
             object_cost,
             owner_migration,

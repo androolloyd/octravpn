@@ -108,7 +108,7 @@ impl Body {
             (&self.epoch_index_hash, "invalid checkpoint index hash"),
             (&self.epoch_index_root, "invalid checkpoint index root"),
         ] {
-            require(value.as_ref().map_or(true, |v| lower_hex(v, 64)), reason)?;
+            require(value.as_ref().is_none_or(|v| lower_hex(v, 64)), reason)?;
         }
         require(
             self.epoch_index_hash.is_some() && self.epoch_index_root.is_some(),

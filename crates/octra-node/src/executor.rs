@@ -2,15 +2,22 @@
 //! owns finality, canonical commits and ExEx; this host owns no canonical writer.
 mod admission;
 mod build;
+mod compiler;
 mod pending;
+mod pending_store;
+mod private_account;
 mod proofs;
 mod proposal;
+mod registration;
 mod stage;
+mod verification;
+mod views;
 use crate::import::{Execution, Executor};
 pub use admission::Limits;
 use anyhow::{ensure, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
 pub use build::Built;
+pub use compiler::Compiler;
 use octra_node_protocol::{
     consensus::{policy::Protocol, reward_attribution, EpochHeader},
     control_payload::{BondedReady, LegacyReady},
@@ -34,6 +41,8 @@ pub use pending::Pending;
 pub use proposal::{Prepared, ProposalError};
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use tokio::sync::Semaphore;
+pub(crate) use verification::VerificationLease;
+pub(crate) use views::ViewLease;
 
 /// Capture these native startup settings once. Peer data cannot select policy.
 pub struct Config {
@@ -47,30 +56,73 @@ pub struct Config {
     pub sender_key_activation: Option<i64>,
     pub private_result_activation: i64,
     pub max_fhe: usize,
+    pub max_stealth: usize,
+    pub max_multi_exec_calls: usize,
     pub ready_max_lag: i64,
     /// Native PVAC directory, containing content-addressed `blobs/<hash>.pk`.
     pub pvac_dir: PathBuf,
+    pub migration: Option<Arc<octra_node_protocol::state_sync::migration::Admission>>,
 }
 
 #[derive(Clone)]
 pub struct Native {
     config: Arc<Config>,
+    observer_submissions: bool,
+    pending_nonce_window: octra_node_protocol::transaction::Nonce,
     runtime: CircleRuntime,
     history: Arc<dyn History>,
     worker: Arc<Semaphore>,
+    compiler: Arc<Semaphore>,
+    verification: Arc<Semaphore>,
+    views: Arc<Semaphore>,
+    circle_views: Arc<Semaphore>,
+    reads: Arc<Semaphore>,
+    operator_wallet: Arc<tokio::sync::Mutex<()>>,
+    migration_status: octra_node_runtime::pvac_status_actor::Service,
 }
 impl Native {
+    pub(crate) fn with_submission_policy(
+        mut self,
+        observer: bool,
+        window: octra_node_protocol::transaction::Nonce,
+    ) -> Self {
+        self.observer_submissions = observer;
+        self.pending_nonce_window = window;
+        self
+    }
+    pub(crate) fn emission_policy(&self) -> &epoch_footer::Policy {
+        &self.config.emission
+    }
     pub fn new(config: Config, runtime: CircleRuntime, history: Arc<dyn History>) -> Result<Self> {
+        ensure!(
+            (1..=64).contains(&config.max_multi_exec_calls),
+            "invalid multi-exec call limit"
+        );
         ensure!(
             (0..1_i64 << 62).contains(&config.private_result_activation),
             "invalid private result activation epoch"
         );
         Ok(Self {
             config: Arc::new(config),
+            observer_submissions: false,
+            pending_nonce_window: octra_node_protocol::transaction::Nonce::new(32)
+                .expect("native default nonce window"),
             runtime,
             history,
             worker: Arc::new(Semaphore::new(1)),
+            compiler: Arc::new(Semaphore::new(1)),
+            verification: Arc::new(Semaphore::new(1)),
+            views: Arc::new(Semaphore::new(1)),
+            circle_views: Arc::new(Semaphore::new(2)),
+            reads: Arc::new(Semaphore::new(4)),
+            operator_wallet: Arc::new(tokio::sync::Mutex::new(())),
+            migration_status: octra_node_runtime::pvac_status_actor::Service::default(),
         })
+    }
+
+    /// Serialize native first-party wallet nonce capture through durable intake.
+    pub(crate) async fn operator_wallet(&self) -> tokio::sync::OwnedMutexGuard<()> {
+        self.operator_wallet.clone().lock_owned().await
     }
 
     async fn ready_roots(
@@ -152,7 +204,7 @@ impl Native {
         let reward = reward_attribution::bind_finality(&authority.validators, finalized, &reward)?;
         let receipts = transaction_outcome::split(&bundle.bundle().receipts_json, true)?;
         let gate = Gate::parse(&receipts.preverify).map_err(anyhow::Error::msg)?;
-        let staged = self.stage(
+        let staged = self.stage_with_ledger(
             stage::Stage {
                 parent,
                 state,
@@ -166,11 +218,15 @@ impl Native {
                 capture: false,
             },
             roots,
+            move |_| Ok(ledger),
         )?;
         bundle.partition().verify(Ok(&staged.artifacts))?;
         Ok(ExecutedEpoch {
+            epoch_observation: Some(staged.epoch_observation),
+            metrics: staged.metrics,
             state: staged.state,
             transactions: staged.transactions,
+            vm_receipts: staged.vm_receipts,
             consensus_receipts: bundle.bundle().receipts_json.clone(),
             reward_source: reward_attribution::to_source(&reward)?,
             date: epoch,
@@ -209,22 +265,13 @@ impl Native {
         })
     }
     fn key_blob(&self, hash: &[u8]) -> Result<Option<Vec<u8>>, Error> {
-        if hash.len() != 64
-            || !hash
-                .iter()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
-        {
-            return Err(Error("invalid pvac blob hash".into()));
-        }
-        let name = format!(
-            "{}.pk",
-            std::str::from_utf8(hash).expect("checked hexadecimal hash")
-        );
-        match std::fs::read(self.config.pvac_dir.join("blobs").join(name)) {
-            Ok(bytes) => Ok(Some(bytes)),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(Error(format!("pvac blob unavailable: {error}"))),
-        }
+        octra_node_runtime::pvac::Source::get(
+            &octra_node_runtime::pvac::Files(self.config.pvac_dir.clone()),
+            hash,
+        )
+    }
+    fn persist_key(&self, key: &[u8]) -> Result<(), Error> {
+        octra_node_runtime::pvac::Files(self.config.pvac_dir.clone()).persist(key)
     }
 }
 

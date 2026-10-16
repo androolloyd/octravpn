@@ -42,7 +42,7 @@ fn standalone_connect_args(mut connect: headscale_cli::ConnectArgs) -> headscale
     if connect
         .address
         .as_deref()
-        .map_or(true, |address| address.trim().is_empty())
+        .is_none_or(|address| address.trim().is_empty())
     {
         connect.warn_no_config_default = true;
         connect.wrap_grpc_connect_error = true;

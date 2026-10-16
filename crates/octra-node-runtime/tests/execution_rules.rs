@@ -277,10 +277,10 @@ async fn execution_and_catchup_keep_the_authority_that_verified_the_certificate(
     }
     let dir = tempfile::tempdir().unwrap();
     let state = StateBatch::default();
-    let chain = ChainIdentity {
-        chain_id: "execution-authority-fixture".into(),
-        genesis_root: StateRoot(finality_host::root(None, &state, &[])),
-    };
+    let chain = ChainIdentity::genesis(
+        "execution-authority-fixture",
+        StateRoot(finality_host::root(None, &state, &[])),
+    );
     let store = Arc::new(
         CanonicalStore::create(
             &dir.path().join("node.db"),
@@ -304,6 +304,9 @@ async fn execution_and_catchup_keep_the_authority_that_verified_the_certificate(
     .unwrap();
     let parent = store.head().await.unwrap();
     let executed = ExecutedEpoch {
+        epoch_observation: None,
+        metrics: octra_node_protocol::metrics::Epoch::default(),
+        vm_receipts: std::collections::BTreeMap::default(),
         state: state.snapshot(),
         transactions: vec![],
         consensus_receipts: vec![],

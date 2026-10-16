@@ -47,10 +47,7 @@ async fn create(path: &std::path::Path, state: &StateBatch) -> CanonicalStore {
     .unwrap();
     CanonicalStore::create(
         path,
-        ChainIdentity {
-            chain_id: "circle-view-test".into(),
-            genesis_root: StateRoot(root),
-        },
+        ChainIdentity::genesis("circle-view-test", StateRoot(root)),
         state.snapshot(),
         0,
     )
@@ -257,11 +254,15 @@ async fn signed_counter(octb: bool) {
         Err(Error::Invalid(_))
     ));
     if !octb {
-        assert!(matches!(
-            old.read(request(&old, &circle, "fhe_encrypt_of", json!([])))
-                .await,
-            Err(Error::Unavailable(_))
-        ));
+        // The native guest rejects the absent integer argument before invoking
+        // HFHE. The panic-on-use test backend also guards that ordering.
+        assert_eq!(
+            result(
+                old.read(request(&old, &circle, "fhe_encrypt_of", json!([])))
+                    .await
+            ),
+            json!({"error":"wasm export returned 21"})
+        );
     }
     let mut info = request(&old, &circle, "unused", json!([]));
     info.method = ReadMethod::ProgramInfo;
@@ -341,6 +342,7 @@ async fn signed_counter(octb: bool) {
             inspect: true,
             storage_proof: true,
             fhe_work: false,
+            object_cost: false,
         },
         1,
         123.5,
@@ -404,6 +406,9 @@ async fn signed_counter(octb: bool) {
         .collect::<Vec<_>>();
     next.set(&[b"meta", b"last_epoch"], b"1".to_vec()).unwrap();
     let executed = ExecutedEpoch {
+        epoch_observation: None,
+        metrics: octra_node_protocol::metrics::Epoch::default(),
+        vm_receipts: std::collections::BTreeMap::default(),
         reward_source: finality_host::reward_source(authority.seed),
         state: next.snapshot(),
         transactions: archive.clone(),

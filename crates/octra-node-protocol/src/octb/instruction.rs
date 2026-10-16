@@ -22,6 +22,24 @@ macro_rules! instructions {
             Jdest(u32), CallInt(u8, u32), Emit(Arc<[u8]>, Vec<u8>),
         }
         impl Instruction {
+            pub(super) fn fixed_arity(tag: u8) -> Option<usize> {
+                match tag {
+                    $($tag => { let args: &[&str] = &[$(stringify!($reg)),*]; Some(args.len()) },)*
+                    _ => None,
+                }
+            }
+            pub(super) fn from_fixed(tag: u8, values: &[u8]) -> Option<Self> {
+                match (tag, values) {
+                    $(($tag, [$($reg),*]) => Some(Self::$name($(*$reg),*)),)*
+                    _ => None,
+                }
+            }
+            pub(super) fn fixed_bytes(&self) -> Option<Vec<u8>> {
+                match self {
+                    $(Self::$name($($reg),*) => Some(vec![$(*$reg),*]),)*
+                    _ => None,
+                }
+            }
             pub(super) fn first_invalid_byte(&self) -> Option<u8> {
                 match self {
                     $(Self::$name($($reg),*) => { $(if *$reg > 63 { return Some(*$reg); })* None },)*

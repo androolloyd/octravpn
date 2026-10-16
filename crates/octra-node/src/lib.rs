@@ -4,28 +4,42 @@
 //! execution and authenticated activation history remain explicit host inputs.
 //! A host must exclusively own the canonical writer and explicitly resume
 //! serving after catch-up. Restart starts suspended, even with valid history.
+pub mod bootstrap;
+mod compute;
 pub mod consensus;
+pub mod consensus_join;
 pub mod devnet;
 pub mod driver;
+mod duty;
 pub mod executor;
 pub mod gateway;
+pub mod identity;
 pub mod import;
+mod launch;
+mod legacy;
+pub mod network;
+pub mod network_profile;
 pub mod peers;
 pub mod proposal;
+mod published;
+mod recovery;
+pub mod resource_attestation;
 pub mod rpc;
 mod services;
+pub mod snapshot_export;
 mod storage;
 pub mod sync;
+pub mod validator_cli;
 pub mod vpn;
 
+#[cfg(test)]
+use octra_browser::Provenance;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
-use axum::Router;
 use octra_browser::{
     application::{ApplicationHost, ReadRequest, ReviewedAction},
     http::Browser,
-    Provenance,
 };
 use octra_exex::{
     native_history::NativeTransaction, CheckpointStore, ExEx, ExExManager, ExtensionStatus,
@@ -36,11 +50,13 @@ use octra_node_runtime::{
     circle_application::CanonicalApplications,
     circle_assets::CanonicalAssets,
     finality::{EpochRules, ExecutedEpoch, Publisher, ValidatorHistory},
-    state_batch::Snapshot,
 };
 use octravpn_node::admission::Revocation;
 use tokio::sync::{watch, Mutex as AsyncMutex};
 
+pub use legacy::Status as LegacyStatus;
+pub use published::{Committed, Status};
+use published::{Handle as Published, Serving, Shared};
 pub use services::Services;
 
 /// Canonical finality authority with an optional local availability check.
@@ -66,95 +82,6 @@ impl<A: Host> ValidatorHistory for Authority<A> {
     }
 }
 
-/// One immutable, published tree. Application adapters must validate their code
-/// pin and all authorization/funding fields against this same tree.
-#[derive(Clone)]
-pub struct Committed {
-    head: Head,
-    assets: CanonicalAssets,
-}
-impl Committed {
-    pub fn head(&self) -> &Head {
-        &self.head
-    }
-    pub fn state(&self) -> &Snapshot {
-        self.assets.snapshot()
-    }
-    pub fn provenance(&self) -> Provenance {
-        use octra_browser::AssetResolver;
-        self.assets.provenance()
-    }
-}
-
-struct Serving {
-    committed: Committed,
-    router: Router,
-    revocation: Revocation,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Status {
-    Suspended(String),
-    Serving(Box<Head>),
-}
-
-struct State {
-    serving: Option<Arc<Serving>>,
-    reason: String,
-    // Identity, rather than a wrapping counter, prevents an old resume from
-    // undoing a newer pause while it was awaiting disk or history validation.
-    ticket: Arc<()>,
-}
-struct Shared(Mutex<State>);
-impl Shared {
-    fn new() -> Self {
-        Self(Mutex::new(State {
-            serving: None,
-            reason: "awaiting catch-up".into(),
-            ticket: Arc::new(()),
-        }))
-    }
-    fn current(&self) -> Result<Arc<Serving>> {
-        let state = self.0.lock().expect("service state lock");
-        state
-            .serving
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("{}", state.reason))
-    }
-    fn suspend(&self, reason: &str) -> (Arc<()>, bool) {
-        let mut state = self.0.lock().expect("service state lock");
-        let was_serving = state.serving.take();
-        if let Some(previous) = &was_serving {
-            // Packet checks see revocation before a new snapshot is exposed.
-            previous.revocation.revoke();
-        }
-        state.reason = reason.into();
-        state.ticket = Arc::new(());
-        (state.ticket.clone(), was_serving.is_some())
-    }
-    fn install(&self, ticket: &Arc<()>, serving: Serving) -> bool {
-        let mut state = self.0.lock().expect("service state lock");
-        if !Arc::ptr_eq(ticket, &state.ticket) {
-            return false;
-        }
-        state.serving = Some(Arc::new(serving));
-        true
-    }
-    fn fail(&self, ticket: &Arc<()>, reason: String) {
-        let mut state = self.0.lock().expect("service state lock");
-        if Arc::ptr_eq(ticket, &state.ticket) {
-            state.reason = reason;
-        }
-    }
-    fn status(&self) -> Status {
-        let state = self.0.lock().expect("service state lock");
-        state.serving.as_ref().map_or_else(
-            || Status::Suspended(state.reason.clone()),
-            |s| Status::Serving(Box::new(s.committed.head.clone())),
-        )
-    }
-}
-
 /// A successful publication stays successful if refreshing a local service
 /// fails afterwards. Consumers can retry resume; they must not resubmit the
 /// already committed epoch because of a browser/application configuration error.
@@ -169,11 +96,38 @@ pub struct Node<A: Host> {
     publisher: Arc<Publisher<Authority<A>>>,
     runtime: CircleRuntime,
     wallet: Arc<dyn ApplicationHost>,
-    operations: AsyncMutex<()>,
+    operations: Arc<AsyncMutex<()>>,
     syncing: AsyncMutex<()>,
     exex: AsyncMutex<ExExManager<NativeTransaction>>,
     shared: Arc<Shared>,
-    _writer: std::fs::File,
+    legacy: Arc<Mutex<legacy::State>>,
+    writer_lease: Arc<std::fs::File>,
+}
+
+/// A legacy observation belongs to one attempted publication. Losing its
+/// caller before commit must not reuse the partially finalized Tree on retry.
+struct CommitObservation {
+    legacy: Arc<Mutex<legacy::State>>,
+    armed: bool,
+}
+impl CommitObservation {
+    fn committed(&mut self, head: &Head) {
+        self.legacy
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .committed(head);
+        self.armed = false;
+    }
+}
+impl Drop for CommitObservation {
+    fn drop(&mut self) {
+        if self.armed {
+            self.legacy
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .failed("legacy publication interrupted; restart before legacy observation".into());
+        }
+    }
 }
 
 impl<A: Host> Node<A> {
@@ -191,18 +145,42 @@ impl<A: Host> Node<A> {
         let host = Arc::new(host);
         let publisher = Arc::new(Publisher::open(store.clone(), Authority(host.clone())).await?);
         let exex = ExExManager::new(store.source(), checkpoints)?;
+        let (legacy_head, legacy_state) = store.snapshot().await?;
+        let genesis_parent = legacy_head.cursor.epoch.0 == 0
+            && legacy_head.cursor.sequence.0 == 0
+            && store.chain().genesis_root() == Some(legacy_head.cursor.state_root)
+            && legacy_head.txid_hi == -1
+            && legacy_head.parent_commit.is_none()
+            && store.checkpoint_parent().is_none();
+        let retained_legacy = store
+            .reader()
+            .epoch_legacy_digest(&legacy_head, legacy_head.cursor.epoch.0 as i64)
+            .await?;
+        let mut legacy = legacy::State::boot(
+            legacy_head.clone(),
+            &legacy_state.snapshot(),
+            genesis_parent,
+        )?;
+        if let Some(digest) = retained_legacy {
+            legacy.restore_parent(&legacy_head, &digest)?;
+        }
         Ok(Self {
             store,
             host,
             publisher,
             runtime,
             wallet,
-            operations: AsyncMutex::new(()),
+            operations: Arc::new(AsyncMutex::new(())),
             syncing: AsyncMutex::new(()),
             exex: AsyncMutex::new(exex),
             shared: Arc::new(Shared::new()),
-            _writer: writer,
+            legacy: Arc::new(Mutex::new(legacy)),
+            writer_lease: Arc::new(writer),
         })
+    }
+
+    pub(crate) fn published(&self) -> Published {
+        Published::new(self.shared.clone())
     }
 
     pub fn status(&self) -> Status {
@@ -211,12 +189,42 @@ impl<A: Host> Node<A> {
     pub async fn head(&self) -> Result<Head> {
         Ok(self.store.head().await?)
     }
+    /// Wait for any already-dispatched owned commit, including a cancelled
+    /// driver's SQLite/cache publication, before choosing a recovery parent.
+    pub(crate) async fn quiesce(&self) -> Result<Head> {
+        let _operation = self.operations.lock().await;
+        self.head().await
+    }
     /// Read-only, revalidated committed history for peer query services.
     pub fn history(&self) -> Arc<dyn octra_node_runtime::finality::history::History> {
         self.publisher.clone()
     }
     pub fn snapshot(&self) -> Result<Committed> {
         Ok(self.shared.current()?.committed.clone())
+    }
+    /// The actual live legacy Tree epoch/root count, independent of its optional
+    /// unavailable parent digest and of the BFT root-history window.
+    pub fn legacy_status(&self) -> Result<LegacyStatus> {
+        let head = self
+            .store
+            .cached_head()
+            .context("canonical head unavailable")?;
+        self.legacy
+            .lock()
+            .map_err(|_| anyhow::anyhow!("legacy observation unavailable"))?
+            .status(&head)
+    }
+    pub fn native_metrics(&self) -> Result<Vec<u8>> {
+        self.legacy
+            .lock()
+            .map_err(|_| anyhow::anyhow!("native metrics observation unavailable"))?
+            .metrics()
+    }
+    pub fn legacy_status_at(&self, head: &Head) -> Result<LegacyStatus> {
+        self.legacy
+            .lock()
+            .map_err(|_| anyhow::anyhow!("legacy observation unavailable"))?
+            .status(head)
     }
     /// Synchronous revocation also invalidates any in-flight resume operation.
     pub fn suspend(&self, reason: &str) {
@@ -281,12 +289,61 @@ impl<A: Host> Node<A> {
         certificate: &[u8],
         executed: ExecutedEpoch,
     ) -> Result<Publication> {
-        let _operation = self.operations.lock().await;
-        let prepared = self.publisher.prepare(base, certificate, executed).await?;
+        let operation = self.operations.clone().lock_owned().await;
+        let observed_metrics = executed.metrics.clone();
+        let material = executed
+            .transactions
+            .iter()
+            .map(|record| record.transaction.clone())
+            .collect::<Vec<_>>();
+        let mut prepared = self.publisher.prepare(base, certificate, executed).await?;
+        let candidate = prepared.candidate().clone();
+        let legacy_digest = {
+            let mut legacy = self
+                .legacy
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let observed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                legacy.prepare(base, candidate.clone(), certificate, &material);
+                legacy.observe_metrics(&observed_metrics);
+            }));
+            if observed.is_err() {
+                legacy.failed("legacy observation failed".into());
+            }
+            legacy.pending_digest(&candidate)
+        };
+        let mut observation = CommitObservation {
+            legacy: self.legacy.clone(),
+            armed: true,
+        };
         let (ticket, was_serving) = self.shared.suspend("publishing canonical epoch");
-        let head = prepared
-            .commit()
+        prepared
+            .retain_epoch_legacy_digest(legacy_digest.as_deref())
+            .await?;
+        let writer = self.writer_lease.clone();
+        let (completed, completion) = tokio::sync::oneshot::channel();
+        std::thread::Builder::new()
+            .name("octra-canonical-commit".into())
+            .spawn(move || {
+                // Tokio shutdown aborts ordinary owned async tasks. Retain the
+                // serialization and file leases on a thread whose runtime can
+                // finish SQLite COMMIT even when the calling runtime is gone.
+                let outcome = (|| -> Result<_> {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()?;
+                    runtime.block_on(async move {
+                        let _writer_lease = writer;
+                        let head = prepared.commit().await?;
+                        observation.committed(&head);
+                        Ok::<_, anyhow::Error>((head, operation))
+                    })
+                })();
+                let _ = completed.send(outcome);
+            })?;
+        let (head, _operation) = completion
             .await
+            .context("canonical commit worker stopped; resume before serving")?
             .context("canonical commit; resume before serving")?;
         // The notification follows the durable state/history/outbox transaction.
         self.exex.lock().await.notify_commit();

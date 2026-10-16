@@ -19,7 +19,7 @@ pub(crate) struct Authority {
 impl Authority {
     pub(crate) fn validators(&self, parent: &Head, epoch: u64) -> Result<ValidatorSet, String> {
         if epoch != parent.cursor.epoch.0 + 1
-            || (epoch == 1 && parent.cursor.state_root != self.chain.genesis_root)
+            || (epoch == 1 && self.chain.genesis_root() != Some(parent.cursor.state_root))
         {
             return Err("history binding differs".into());
         }

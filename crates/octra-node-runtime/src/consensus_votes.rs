@@ -61,6 +61,9 @@ impl VoteGuard {
     pub fn issue(&self) -> Option<&Error> {
         self.issue.as_ref()
     }
+    pub(crate) fn hold_journal(&mut self, reason: Error) {
+        self.issue = Some(reason);
+    }
     pub fn fault(&self) -> Option<&Fault> {
         self.fault.as_ref()
     }

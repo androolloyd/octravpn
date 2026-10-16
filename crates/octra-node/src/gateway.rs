@@ -3,10 +3,16 @@ use crate::{Host, Node, Shared};
 use anyhow::{ensure, Result};
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Router};
 use octra_browser::http::Gateway;
+use octra_node_runtime::circle_assets::RetainedAssets;
 use serde::{Deserialize, Serialize};
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 use tokio::{net::TcpListener, sync::watch};
 use tower::ServiceExt;
+mod cache;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -17,11 +23,23 @@ pub struct Config {
 
 pub struct Service {
     listener: TcpListener,
-    state: (Arc<Shared>, String),
+    state: Arc<GatewayState>,
+}
+
+struct GatewayState {
+    shared: Arc<Shared>,
+    origin: String,
+    retained: Mutex<cache::Cache<RetainedAssets>>,
 }
 
 impl<A: Host> Node<A> {
     pub async fn bind_gateway(&self, config: Config) -> Result<Service> {
+        self.published().bind_gateway(config).await
+    }
+}
+
+impl crate::published::Handle {
+    pub(crate) async fn bind_gateway(&self, config: Config) -> Result<Service> {
         ensure!(
             config.listen.ip().is_loopback(),
             "gateway backend must bind loopback"
@@ -29,7 +47,11 @@ impl<A: Host> Node<A> {
         Gateway::validate_origin(&config.origin)?;
         Ok(Service {
             listener: TcpListener::bind(config.listen).await?,
-            state: (self.shared.clone(), config.origin),
+            state: Arc::new(GatewayState {
+                shared: self.shared.clone(),
+                origin: config.origin,
+                retained: Mutex::new(cache::Cache::default()),
+            }),
         })
     }
 }
@@ -57,10 +79,10 @@ impl Service {
 }
 
 async fn dispatch(
-    State((shared, origin)): State<(Arc<Shared>, String)>,
+    State(state): State<Arc<GatewayState>>,
     request: axum::extract::Request,
 ) -> axum::response::Response {
-    let Ok(serving) = shared.current() else {
+    let Ok(serving) = state.shared.current() else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             [("cache-control", "no-store")],
@@ -68,13 +90,45 @@ async fn dispatch(
         )
             .into_response();
     };
-    // Capture one already audited root for the whole request. No RPC fallback,
-    // wallet, decryption capability or transaction bridge crosses this boundary.
-    let Ok(gateway) = Gateway::new(Arc::new(serving.committed.assets.clone()), &origin) else {
+    // Retain only authenticated read capabilities, never historical whole trees
+    // or wallet/execution hosts. A client-supplied scope cannot create authority.
+    let current = serving.committed.assets.retained();
+    drop(serving);
+    let selected = {
+        let Ok(mut retained) = state.retained.lock() else {
+            return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        };
+        let now = Instant::now();
+        if retained
+            .remember(current.identity().clone(), current.clone(), now)
+            .is_err()
+        {
+            return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        }
+        if let Some(path) = request.uri().path().strip_prefix("/snapshots/") {
+            let scope = path.split('/').next().unwrap_or_default();
+            let Some((identity, capability)) = retained.get(scope, now) else {
+                return StatusCode::BAD_REQUEST.into_response();
+            };
+            if capability.identity() != &identity {
+                return StatusCode::SERVICE_UNAVAILABLE.into_response();
+            }
+            capability
+        } else {
+            current
+        }
+    };
+    let Ok(gateway) = Gateway::new(Arc::new(selected), &state.origin) else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     match gateway.router().oneshot(request).await {
-        Ok(response) => response,
+        Ok(response) if state.shared.current().is_ok() => response,
+        Ok(_) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [("cache-control", "no-store")],
+            "Node is synchronizing",
+        )
+            .into_response(),
         Err(never) => match never {},
     }
 }

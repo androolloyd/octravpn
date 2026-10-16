@@ -5,6 +5,7 @@ use octra_node_runtime::{
     staging::{intake, DropRecord, Pool},
     state_batch::Snapshot,
 };
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Actual signature/payload/nonce/fee intake. These fixtures contain only public
 /// operations, which require no cryptographic preverification worker.
@@ -89,10 +90,10 @@ async fn pending_fee_order_recovery_and_stale_queue_isolation() {
     state
         .set(&[b"meta", b"total_supply"], b"20000".to_vec())
         .unwrap();
-    let chain = ChainIdentity {
-        chain_id: "pending-build-fixture".into(),
-        genesis_root: StateRoot(finality_host::root(None, &state, &[])),
-    };
+    let chain = ChainIdentity::genesis(
+        "pending-build-fixture",
+        StateRoot(finality_host::root(None, &state, &[])),
+    );
     let authority = finality_host::Authority {
         seed: 1,
         chain: chain.clone(),
@@ -116,6 +117,15 @@ async fn pending_fee_order_recovery_and_stale_queue_isolation() {
         protocol,
         genesis_time: Some(0.),
     };
+    let observer_admission = Arc::new(
+        node.admission_capture(&graph, policy, b"observer", 10.)
+            .await
+            .unwrap(),
+    );
+    let Err(error) = node.proposal_draft(&graph, policy, b"observer", 10.).await else {
+        panic!("nonvalidator observer received a proposal draft");
+    };
+    assert!(error.to_string().contains("not an active validator"));
     let draft = Arc::new(
         node.proposal_draft(&graph, policy, b"validator-0", 10.)
             .await
@@ -135,6 +145,22 @@ async fn pending_fee_order_recovery_and_stale_queue_isolation() {
         43
     };
     txs[1] = signed(txs[1].clone(), signer);
+    let observer_pending = Pending::new(Pool::default());
+    let mut observed = circle_call(1, circle.as_bytes());
+    observed.op_type = OpType::Standard;
+    observed.message = None;
+    observed.timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64();
+    let observed = signed(observed, 42);
+    executor
+        .submit(observer_admission, &observer_pending, observed.clone())
+        .await
+        .unwrap();
+    let queued = observer_pending.transactions().unwrap();
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].hash().unwrap(), observed.hash().unwrap());
     let pending = admitted(draft.state(), &txs);
     let capped = executor
         .build_pending(draft.clone(), pending.clone(), 1000.into(), 4)

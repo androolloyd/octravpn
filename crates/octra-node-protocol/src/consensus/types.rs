@@ -192,7 +192,7 @@ impl EngineState {
     }
 }
 pub fn valid_round_is_well_formed(round: i64, valid_round: Option<i64>) -> bool {
-    valid_round.map_or(true, |valid| valid >= 0 && valid < round)
+    valid_round.is_none_or(|valid| valid >= 0 && valid < round)
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RoundSync {

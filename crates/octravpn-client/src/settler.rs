@@ -1,20 +1,9 @@
-//! Client-side settlement handler.
-//!
-//! Two-tx flow (v1 AML):
-//!   1. GET /session/{id} on the exit's control plane to learn the
-//!      exit's claimed `bytes_used` (informational; the AML does not
-//!      look at the receipt signatures).
-//!   2. Verify the exit's sig over its proposed receipt — that's
-//!      our local sanity check, not a chain-side enforcement.
-//!   3. Submit `settle_confirm(session_id, bytes_used)` on chain.
-//!      If our local count matches the exit's, settlement applies.
-//!      If we want to dispute, we submit a different value: the AML
-//!      records `SettleDispute` and leaves the session open.
-//!
-//! Equivocation: the exit is responsible for submitting its own
-//! `settle_claim`. If the exit ever submits two different claims
-//! for the same session, the AML slashes the operator's bond
-//! automatically. The client never has to do anything about it.
+//! Verify operator receipts against the pinned domain and local traffic ceiling,
+//! persist the countersignature, and hand it back for durable operator delivery.
+//! The current application requires both settlement legs to agree on bytes and
+//! the independently quoted microOCT amount. Receipt signatures are checked by
+//! the clients and operator; the AML checks its explicit claim/confirm fields.
+//! Acknowledgement alone never marks a receipt as canonically settled.
 
 use std::{path::Path, sync::Arc};
 
@@ -23,11 +12,11 @@ use octravpn_core::{
     address::Address,
     control::{
         announce_opener_binding_payload, announce_signing_payload, AnnounceSessionRequest,
-        PostReceiptResponse, ProposedReceipt, SessionStateResponse,
+        AnnounceSessionResponse, PostReceiptResponse, ProposedReceipt, SessionStateResponse,
     },
     receipt::SignedReceipt,
     session::SessionId,
-    sig::verify,
+    sig::{verify, KeyPair},
     v3_calls::ContractCallBuilder,
 };
 use serde_json::{json, Value};
@@ -47,10 +36,83 @@ pub(crate) async fn settle_active(client: &Arc<Client>, active: ActiveSession) -
             .record_proposed(&active.session_id)?;
     }
 
-    let exit = active.route.last().ok_or_else(|| anyhow!("empty route"))?;
-    let proposed = fetch_proposed_receipt(client, &exit.validator.endpoint, &active.session_id)
+    let signed = receipt_for_active(client, &active).await?;
+
+    // Open the durable store and compute net before the operator ACK. The
+    // only step between ACK and Countersigned is the local durable write.
+    let relay_prep = if client.relay_config().enabled {
+        let net = relay_net(&active, signed.receipt.bytes_used);
+        Some((client.open_settle_state()?, net))
+    } else {
+        None
+    };
+
+    let receipt_posted = match post_countersigned_receipt(
+        client,
+        &control_base(&active)?,
+        &active.session_id,
+        &signed,
+    )
+    .await
+    {
+        Ok(()) => {
+            info!(settlement_hash = %signed.settlement_hash(), "countersigned receipt posted to exit");
+            true
+        }
+        Err(error) => {
+            warn!(%error, "countersigned receipt handback failed");
+            false
+        }
+    };
+
+    if let Some((store, net)) = relay_prep {
+        if !receipt_posted {
+            return Err(anyhow!(
+                "relay receipt handback failed for session {}; not arming and not \
+                 falling back to settle_confirm (wrong mechanism for the relay lane)",
+                active.session_id.to_hex()
+            ));
+        }
+        if net == 0 {
+            info!(session = %active.session_id.to_hex(), bytes_used = signed.receipt.bytes_used,
+                "relay net is 0; nothing to settle on chain, not arming");
+            return Ok(());
+        }
+        store.record_countersigned(&active.session_id, &signed, net)?;
+        let env = client.arm_environment();
+        store
+            .arm_if_countersigned(client.as_ref(), &env, &active.session_id)
+            .await?;
+        return Ok(());
+    }
+
+    submit_settle_confirm(client, &active, signed.receipt.bytes_used).await
+}
+
+async fn receipt_for_active(client: &Client, active: &ActiveSession) -> Result<SignedReceipt> {
+    let exit = &active.exit;
+    let proposed = fetch_proposed_receipt(client, &control_base(active)?, &active.session_id)
         .await
         .context("fetch proposed receipt from exit")?;
+
+    if proposed.receipt.session_id != active.session_id {
+        return Err(anyhow!(
+            "operator proposed a receipt for a different session"
+        ));
+    }
+    if exit.receipt_pubkey.0 == [0; 32] || proposed.node_pubkey != exit.receipt_pubkey {
+        return Err(anyhow!(
+            "operator receipt key does not match its authenticated advertisement"
+        ));
+    }
+    if active
+        .metered_bytes
+        .is_some_and(|bytes| proposed.receipt.bytes_used > bytes)
+    {
+        return Err(anyhow!(
+            "operator receipt exceeds locally observed session traffic"
+        ));
+    }
 
     // v1.2 P1-5 guard: the receipt the exit sent us must bind the
     // same `(program_addr, chain_id, circle_id)` we configured locally.
@@ -104,83 +166,23 @@ pub(crate) async fn settle_active(client: &Arc<Client>, active: ActiveSession) -
     };
     signed.verify().context("dual-sig self-verify")?;
 
-    // AUDIT #4 (I1): open the durable store + compute net BEFORE the POST, so the
-    // ONLY step between the operator's ACK (POST -> Ok, receipt fsynced in their
-    // vault) and our durable Countersigned record is a single local write. This
-    // shrinks the crash window where the operator holds the receipt but we're
-    // stuck at Proposed and would never arm.
-    let relay_prep = if client.relay_config().enabled {
-        let net = relay_net(&active, signed.receipt.bytes_used);
-        Some((client.open_settle_state()?, net))
-    } else {
-        None
-    };
+    Ok(signed)
+}
 
-    let receipt_posted = match post_countersigned_receipt(
-        client,
-        &exit.validator.endpoint,
+/// The four-argument v3 confirmation caller owns the chain transaction. This
+/// function performs the same pinned local receipt checks and handback first.
+pub(crate) async fn countersign_active(
+    client: &Client,
+    active: &ActiveSession,
+) -> Result<SignedReceipt> {
+    let signed = receipt_for_active(client, active).await?;
+    client.open_settle_state()?.record_countersigned(
         &active.session_id,
         &signed,
-    )
-    .await
-    {
-        Ok(()) => {
-            info!(
-                settlement_hash = %signed.settlement_hash(),
-                "countersigned receipt posted to exit"
-            );
-            true
-        }
-        Err(e) => {
-            // The relay lane surfaces this as an error below (arm-XOR-confirm, no
-            // settle_confirm fallback); only the non-relay v1.1 lane falls back.
-            warn!(
-                error = %e,
-                "countersigned receipt handback failed"
-            );
-            false
-        }
-    };
-
-    if let Some((store, net)) = relay_prep {
-        // Relay lane (v3/v4): the operator settles UNILATERALLY via relay_claim
-        // AFTER we arm, so the countersigned receipt MUST reach the operator. A
-        // failed handback means arming is pointless (the operator can't compute
-        // the preimage without the receipt), and the v3 two-tx settle_confirm is
-        // the wrong mechanism here anyway (main-v4's settle_confirm needs a prior
-        // operator settle_claim and takes 4 params, not 2). Surface the failure
-        // for retry instead of burning a fee on a guaranteed revert.
-        if !receipt_posted {
-            return Err(anyhow!(
-                "relay receipt handback failed for session {}; not arming and not \
-                 falling back to settle_confirm (wrong mechanism for the relay lane)",
-                active.session_id.to_hex()
-            ));
-        }
-        if net == 0 {
-            // Nothing is owed on chain (sub-MiB usage or zero price): arm_relay
-            // requires net>0 and would revert, so there is nothing to record or
-            // arm. The countersigned receipt is already posted to the operator
-            // (and stashed in its vault) for any dispute.
-            info!(
-                session = %active.session_id.to_hex(),
-                bytes_used = signed.receipt.bytes_used,
-                "relay net is 0; nothing to settle on chain, not arming"
-            );
-            return Ok(());
-        }
-        // Only step after the ACK: the local durable write, then arm.
-        store.record_countersigned(&active.session_id, &signed, net)?;
-        let env = client.arm_environment();
-        store
-            .arm_if_countersigned(client.as_ref(), &env, &active.session_id)
-            .await?;
-        return Ok(());
-    }
-
-    // Non-relay (v1.1) legacy lane: the operator does not pre-claim, so the
-    // client submits the confirm directly against the configured program.
-    submit_settle_confirm(client, &active, signed.receipt.bytes_used).await
+        relay_net(active, signed.receipt.bytes_used),
+    )?;
+    post_countersigned_receipt(client, &control_base(active)?, &active.session_id, &signed).await?;
+    Ok(signed)
 }
 
 pub(crate) async fn arm_recorded_session(
@@ -337,26 +339,19 @@ fn print_arm_submission(submitted: &ArmSubmission) {
     );
 }
 
-pub(crate) async fn reclaim(client: &Arc<Client>, session_id_hex: &str) -> Result<()> {
-    let id = SessionId::from_hex(session_id_hex).ok_or_else(|| anyhow!("bad session id hex"))?;
+pub(crate) async fn reclaim(client: &Arc<Client>, raw_session_id: &str) -> Result<()> {
+    let id = session_id_from_cli(raw_session_id)?
+        .as_u64()
+        .ok_or_else(|| anyhow!("v3 session id must fit uint64"))?;
     let fee = client
         .rpc()
-        .recommended_fee(Some("contract_call"))
+        .recommended_fee(Some(client.application().operation()))
         .await?
         .recommended;
-    let call = json!({
-        "kind": "contract_call",
-        "from": client.wallet_addr().display(),
-        "to": client.program_addr().display(),
-        "method": "claim_no_show",
-        "params": [hex::encode(id.as_bytes())],
-        "value": 0,
-        "fee": fee,
-        "nonce": 0,
-    });
-    let hash = client
-        .chain_tx_queue()
-        .submit(call)
+    let context = client.chain_context();
+    let call = context.build_claim_no_show_call(id, fee, 0);
+    let hash = context
+        .submit_call(call)
         .await
         .map_err(|e| anyhow!("chain tx queue claim_no_show submit: {e}"))?;
     info!(hash = %hash, "claim_no_show submitted");
@@ -370,7 +365,7 @@ async fn submit_settle_confirm(
 ) -> Result<()> {
     let fee = client
         .rpc()
-        .recommended_fee(Some("contract_call"))
+        .recommended_fee(Some(client.application().operation()))
         .await?
         .recommended;
     let sid_u64 = active
@@ -388,8 +383,7 @@ async fn submit_settle_confirm(
         "nonce": 0,
     });
     let hash = client
-        .chain_tx_queue()
-        .submit(call)
+        .submit_application(call)
         .await
         .map_err(|e| anyhow!("chain tx queue settle_confirm submit: {e}"))?;
     info!(hash = %hash, session = sid_u64, bytes_used, "settle_confirm submitted");
@@ -418,8 +412,7 @@ pub(crate) fn build_arm_params(
 
 pub(crate) async fn submit_arm(client: &Client, call: Value) -> Result<String> {
     client
-        .chain_tx_queue()
-        .submit(call)
+        .submit_application(call)
         .await
         .map_err(|e| anyhow!("chain tx queue arm_relay submit: {e}"))
 }
@@ -443,17 +436,13 @@ pub(crate) fn build_relay_refund_params(
 
 pub(crate) async fn submit_refund(client: &Client, call: Value) -> Result<String> {
     client
-        .chain_tx_queue()
-        .submit(call)
+        .submit_application(call)
         .await
         .map_err(|e| anyhow!("chain tx queue relay_refund submit: {e}"))
 }
 
 fn relay_net(active: &ActiveSession, bytes_used: u64) -> u64 {
-    let price_per_mb = active
-        .route
-        .last()
-        .map_or(0, |hop| hop.validator.price_per_mb);
+    let price_per_mb = active.exit.price_per_mb;
     compute_relay_net(bytes_used, price_per_mb, active.deposit)
 }
 
@@ -462,13 +451,13 @@ fn compute_relay_net(bytes_used: u64, price_per_mb: u64, deposit: u64) -> u64 {
     raw.min(deposit)
 }
 
-pub(crate) async fn announce_session_to_exit(
-    client: &Arc<Client>,
+pub(crate) async fn announce_session_with_opener(
+    client: &Client,
     active: &ActiveSession,
+    opener: &KeyPair,
 ) -> Result<()> {
-    let exit = active.route.last().ok_or_else(|| anyhow!("empty route"))?;
-    let ctrl_endpoint =
-        octravpn_core::control::base_url_for(&normalize_control_endpoint(&exit.validator.endpoint));
+    let exit = &active.exit;
+    let ctrl_endpoint = control_base(active)?;
     let client_wg_pubkey = crate::wireguard::public_key(&active.session_kp);
     let client_sig_payload = announce_signing_payload(
         &active.session_id,
@@ -488,8 +477,8 @@ pub(crate) async fn announce_session_to_exit(
         client_wg_pubkey,
         open_tx_hash: active.open_tx_hash.clone(),
         client_sig: active.session_kp.sign(&client_sig_payload),
-        opener_pubkey: client.wallet_kp().public,
-        opener_sig: client.wallet_kp().sign(&opener_sig_payload),
+        opener_pubkey: opener.public,
+        opener_sig: opener.sign(&opener_sig_payload),
     };
     let resp = client
         .http()
@@ -499,9 +488,44 @@ pub(crate) async fn announce_session_to_exit(
         .await
         .context("announce session HTTP")?;
     if !resp.status().is_success() {
-        return Err(anyhow!("exit announce: status {}", resp.status()));
+        return Err(ControlStatus(resp.status()).into());
+    }
+    let body: AnnounceSessionResponse = control_json(resp)
+        .await
+        .context("decode session announcement")?;
+    if !body.accepted || body.node_pubkey != exit.receipt_pubkey {
+        return Err(anyhow!(
+            "operator rejected session or returned an unadvertised receipt key"
+        ));
     }
     Ok(())
+}
+
+pub(crate) fn control_base(active: &ActiveSession) -> Result<String> {
+    if let Some(endpoint) = &active.control_endpoint {
+        return validate_control_endpoint(endpoint);
+    }
+    let exit = &active.exit;
+    Ok(octravpn_core::control::base_url_for(
+        &normalize_control_endpoint(&exit.endpoint),
+    ))
+}
+
+pub(crate) fn validate_control_endpoint(endpoint: &str) -> Result<String> {
+    let url = reqwest::Url::parse(endpoint).context("parse operator control endpoint")?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || !matches!(url.path(), "" | "/")
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(anyhow!(
+            "operator control endpoint must be an HTTP(S) origin"
+        ));
+    }
+    Ok(url.as_str().trim_end_matches('/').to_owned())
 }
 
 pub(crate) fn session_id_from_cli(raw: &str) -> Result<SessionId> {
@@ -520,13 +544,20 @@ pub(crate) fn normalize_control_endpoint(endpoint: &str) -> String {
         .to_string()
 }
 
-async fn fetch_proposed_receipt(
-    client: &Arc<Client>,
-    wg_endpoint: &str,
+#[derive(Debug, thiserror::Error)]
+#[error("operator control status {0}")]
+pub(crate) struct ControlStatus(pub reqwest::StatusCode);
+
+pub(crate) async fn fetch_proposed_receipt(
+    client: &Client,
+    control_endpoint: &str,
     session_id: &SessionId,
 ) -> Result<ProposedReceipt> {
-    let endpoint = normalize_control_endpoint(wg_endpoint);
-    let url = octravpn_core::control::session_state_url(&endpoint, session_id);
+    let url = format!(
+        "{}{}",
+        control_endpoint,
+        octravpn_core::control::path_state(session_id)
+    );
     let resp = client
         .http()
         .get(&url)
@@ -534,32 +565,50 @@ async fn fetch_proposed_receipt(
         .await
         .context("control-plane GET")?;
     if !resp.status().is_success() {
-        return Err(anyhow!("control GET status {}", resp.status()));
+        return Err(ControlStatus(resp.status()).into());
     }
-    let body: SessionStateResponse = resp.json().await.context("decode session state")?;
+    let body: SessionStateResponse = control_json(resp).await.context("decode session state")?;
     body.proposed.ok_or_else(|| anyhow!("no proposed receipt"))
 }
 
 async fn post_countersigned_receipt(
-    client: &Arc<Client>,
-    wg_endpoint: &str,
+    client: &Client,
+    control_endpoint: &str,
     session_id: &SessionId,
     signed: &SignedReceipt,
 ) -> Result<()> {
-    let endpoint = normalize_control_endpoint(wg_endpoint);
-    let url = octravpn_core::control::receipt_url(&endpoint, session_id);
+    let url = format!(
+        "{}{}",
+        control_endpoint,
+        octravpn_core::control::path_receipt(session_id)
+    );
     let local_hash = signed.settlement_hash();
-    let resp = client
-        .http()
-        .post(&url)
-        .json(signed)
-        .send()
-        .await
-        .context("control-plane POST receipt")?;
+    // Native operators acknowledge after canonical inclusion. HTTP timeout or
+    // 503 preserves this exact durable countersignature for idempotent retry.
+    let mut attempts = 0;
+    let resp = loop {
+        let response = client
+            .http()
+            .post(&url)
+            .json(signed)
+            .timeout(std::time::Duration::from_secs(20))
+            .send()
+            .await;
+        attempts += 1;
+        match response {
+            Ok(response) if response.status().is_server_error() && attempts < 4 => (),
+            Ok(response) => break response,
+            Err(_) if attempts < 4 => (),
+            Err(error) => return Err(error).context("control-plane POST receipt"),
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    };
     if !resp.status().is_success() {
         return Err(anyhow!("control POST receipt status {}", resp.status()));
     }
-    let body: PostReceiptResponse = resp.json().await.context("decode receipt POST response")?;
+    let body: PostReceiptResponse = control_json(resp)
+        .await
+        .context("decode receipt POST response")?;
     if !body.accepted {
         return Err(anyhow!("operator rejected countersigned receipt"));
     }
@@ -571,6 +620,30 @@ async fn post_countersigned_receipt(
         ));
     }
     Ok(())
+}
+
+async fn control_json<T: serde::de::DeserializeOwned>(
+    mut response: reqwest::Response,
+) -> Result<T> {
+    const LIMIT: usize = 1_048_576;
+    if response
+        .content_length()
+        .is_some_and(|bytes| bytes > LIMIT as u64)
+    {
+        return Err(anyhow!("operator control response exceeds the byte limit"));
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .context("read operator control response")?
+    {
+        if chunk.len() > LIMIT.saturating_sub(bytes.len()) {
+            return Err(anyhow!("operator control response exceeds the byte limit"));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&bytes).context("decode operator control response JSON")
 }
 
 #[cfg(test)]

@@ -1,6 +1,5 @@
-// Method fragments appended by `octra forge test --contract program/main-v5.aml`.
-// Original production bodies are compiled unchanged. Each test has isolated VM state.
-// Fixtures seed storage; transfers/native circle ownership need the native-host gate.
+// Isolated v5 security fragment; original production methods compile unchanged.
+// Kept below the adopted native compiler method-label range.
 private fn test_seed_circle() {
   self.min_circle_stake = 100000000
   self.unbond_grace_epochs = 1000
@@ -10,6 +9,26 @@ private fn test_seed_circle() {
   self.circle_bond[caller] = 100000000
   self.circle_registration_approved[caller] = 1
   self.circle_authorized_owner[caller] = caller
+}
+
+private fn test_seed_session(): uint {
+  test_seed_circle()
+  self.min_session_deposit = 1
+  self.session_grace_epochs = 100
+  self.sweep_grace_multiplier = 10
+  self.tailnet_count = 1
+  // Internal treasury refunds keep isolated VM tests independent of host transfers.
+  return write_session(0, caller, 100, 1)
+}
+
+private fn test_seed_admin() {
+  self.admin_nonce = 0
+  self.pending_admin_commitment = ""
+}
+
+fn test_settlement_version_is_explicit(): bool {
+  require(get_settlement_version() == 2, "unsafe settlement ABI")
+  return true
 }
 
 // expect-revert test_retired_circle_cannot_be_reclaimed "circle already registered"
@@ -32,7 +51,6 @@ fn test_wrong_approved_owner_rejected(): bool {
   return register_circle(caller, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "fixture-key")
 }
 
-
 // expect-revert test_stake_required_at_registration "initial stake below minimum"
 fn test_stake_required_at_registration(): bool {
   test_seed_circle()
@@ -46,170 +64,4 @@ fn test_stake_required_at_registration(): bool {
 fn test_active_circle_cannot_unbond(): bool {
   test_seed_circle()
   return unbond_endpoint(caller)
-}
-
-fn test_retired_circle_stake_moves_to_slashable_unbond(): bool {
-  test_seed_circle()
-  require(retire_circle(caller), "retire failed")
-  require(unbond_endpoint(caller), "unbond failed")
-  require(self.circle_bond[caller] == 0, "live bond remains")
-  require(self.circle_unbonding[caller] == 100000000, "stake disappeared")
-  require(self.circle_unbond_unlock_epoch[caller] == epoch + 1000, "wrong unlock")
-  require(!circle_is_active(caller), "unbonding operator active")
-  return true
-}
-
-// expect-revert test_unbond_waits_for_funded_sessions "funded sessions still open"
-fn test_unbond_waits_for_funded_sessions(): bool {
-  test_seed_circle()
-  self.circle_active[caller] = 0
-  self.circle_open_sessions[caller] = 1
-  self.circle_unbonding[caller] = 100000000
-  self.circle_unbond_unlock_epoch[caller] = epoch
-  return finalize_unbond(caller)
-}
-
-fn test_active_requires_minimum_stake(): bool {
-  test_seed_circle()
-  self.circle_bond[caller] = 99999999
-  require(!circle_is_active(caller), "underfunded operator active")
-  return true
-}
-
-fn test_active_rejects_unbonding(): bool {
-  test_seed_circle()
-  self.circle_unbonding[caller] = 1
-  require(!circle_is_active(caller), "unbonding operator active")
-  return true
-}
-
-// expect-revert test_opaque_signed_messages_cannot_slash "opaque slashing disabled; submit evidence to governance"
-fn test_opaque_signed_messages_cannot_slash(): bool {
-  test_seed_circle()
-  return slash_double_sign(caller, "message-a", "signature-a", "message-b", "signature-b")
-}
-
-private fn test_seed_session(): uint {
-  test_seed_circle()
-  self.min_session_deposit = 1
-  self.session_grace_epochs = 100
-  self.sweep_grace_multiplier = 10
-  self.tailnet_count = 1
-  return write_session(0, caller, 100, 0)
-}
-
-fn test_open_tracks_outstanding_session(): bool {
-  let sid = test_seed_session()
-  require(self.circle_open_sessions[caller] == 1, "missing outstanding session")
-  require(get_session_exit(sid) == caller, "operator binding wrong")
-  require(get_session_opener(sid) == caller, "opener binding wrong")
-  return true
-}
-
-fn test_confirm_closes_session_once_and_accounts_earnings(): bool {
-  let sid = test_seed_session()
-  self.operator_claim_set[sid] = 1
-  self.operator_claim_bytes[sid] = 100
-  self.protocol_fee_bps = 50
-  self.session_deposit[sid] = 20000
-  require(settle_confirm(sid, 100, 20000, "fixture"), "confirm failed")
-  require(self.circle_open_sessions[caller] == 0, "outstanding session remains")
-  require(self.session_status[sid] == SESSION_SETTLED, "session not settled")
-  require(self.circle_earnings_total[caller] == 20000, "traffic payment was reduced")
-  require(self.treasury == 0, "protocol commission collected")
-  return true
-}
-
-// expect-revert test_terminal_session_cannot_close_twice "session not open"
-fn test_terminal_session_cannot_close_twice(): bool {
-  let sid = test_seed_session()
-  self.operator_claim_set[sid] = 1
-  self.operator_claim_bytes[sid] = 100
-  require(settle_confirm(sid, 100, 100, "fixture"), "confirm failed")
-  return settle_confirm(sid, 100, 100, "fixture")
-}
-
-fn test_dispute_preserves_session_and_stake_lock(): bool {
-  let sid = test_seed_session()
-  self.operator_claim_set[sid] = 1
-  self.operator_claim_bytes[sid] = 100
-  require(!settle_confirm(sid, 99, 100, "fixture"), "dispute accepted")
-  require(self.session_status[sid] == SESSION_OPEN, "dispute prematurely terminal")
-  require(self.circle_open_sessions[caller] == 1, "stake lock lost")
-  return true
-}
-
-fn test_relay_claim_closes_session_and_accounts_earnings(): bool {
-  let sid = test_seed_session()
-  self.session_status[sid] = SESSION_RELAY_ARMED
-  self.session_settlement_hash[sid] = sha256("receipt-preimage")
-  self.session_relay_net[sid] = 100
-  self.session_relay_deadline[sid] = epoch + 10
-  require(relay_claim(sid, "receipt-preimage"), "claim failed")
-  require(self.session_status[sid] == SESSION_RELAY_CLAIMED, "relay not terminal")
-  require(self.circle_open_sessions[caller] == 0, "relay stake lock remains")
-  require(self.circle_earnings_total[caller] == 100, "relay earnings wrong")
-  return true
-}
-
-// expect-revert test_relay_claim_at_deadline_rejected "relay window elapsed; client may refund"
-fn test_relay_claim_at_deadline_rejected(): bool {
-  let sid = test_seed_session()
-  self.session_status[sid] = SESSION_RELAY_ARMED
-  self.session_relay_deadline[sid] = epoch
-  return relay_claim(sid, "receipt-preimage")
-}
-
-// expect-revert test_session_exit_rejects_missing_session "session not found"
-fn test_session_exit_rejects_missing_session(): bool {
-  let unused = get_session_exit(0)
-  return true
-}
-
-private fn test_seed_admin() {
-  self.admin_nonce = 0
-  self.pending_admin_commitment = ""
-}
-
-// expect-revert test_admin_nonce_mismatch "admin nonce mismatch"
-fn test_admin_nonce_mismatch(): bool {
-  test_seed_admin()
-  return set_paused(1, 1, "", "")
-}
-
-// expect-revert test_admin_missing_private_proof "invalid admin digest"
-fn test_admin_missing_private_proof(): bool {
-  test_seed_admin()
-  return set_paused(1, 0, "", "")
-}
-
-// expect-revert test_admin_nonce_exhaustion "admin nonce exhausted"
-fn test_admin_nonce_exhaustion(): bool {
-  test_seed_admin()
-  self.admin_nonce = 18446744073709551615
-  return set_paused(1, 18446744073709551615, "", "")
-}
-
-// expect-revert test_admin_pending_freezes_governance "admin handoff pending"
-fn test_admin_pending_freezes_governance(): bool {
-  test_seed_admin()
-  self.pending_admin_commitment = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-  return set_paused(1, 0, "", "")
-}
-
-// expect-revert test_admin_reused_credential_rejected "admin credential already used"
-fn test_admin_reused_credential_rejected(): bool {
-  let old = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-  self.admin_commitment = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-  self.admin_used_commitments[old] = 1
-  return propose_admin(old, 1, 0, "", "")
-}
-
-fn test_paused_exit_remains_recoverable(): bool {
-  test_seed_circle()
-  self.paused = 1
-  require(retire_circle(caller), "retire failed")
-  require(unbond_endpoint(caller), "unbond failed")
-  require(self.circle_unbonding[caller] == 100000000, "paused exit lost stake")
-  return true
 }

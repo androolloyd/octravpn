@@ -1,0 +1,77 @@
+// Isolated v5 security fragment; original production methods compile unchanged.
+// Kept below the adopted native compiler method-label range.
+private fn test_seed_circle() {
+  self.min_circle_stake = 100000000
+  self.unbond_grace_epochs = 1000
+  self.circle_owner[caller] = caller
+  self.circle_active[caller] = 1
+  self.circle_state_version[caller] = 1
+  self.circle_bond[caller] = 100000000
+  self.circle_registration_approved[caller] = 1
+  self.circle_authorized_owner[caller] = caller
+}
+
+private fn test_seed_session(): uint {
+  test_seed_circle()
+  self.min_session_deposit = 1
+  self.session_grace_epochs = 100
+  self.sweep_grace_multiplier = 10
+  self.tailnet_count = 1
+  // Internal treasury refunds keep isolated VM tests independent of host transfers.
+  return write_session(0, caller, 100, 1)
+}
+
+private fn test_seed_admin() {
+  self.admin_nonce = 0
+  self.pending_admin_commitment = ""
+}
+
+fn test_confirm_closes_session_once_and_accounts_earnings(): bool {
+  let sid = test_seed_session()
+  self.protocol_fee_bps = 50
+  self.session_deposit[sid] = 20000
+  require(settle_claim(sid, 100, 20000), "claim failed")
+  require(settle_confirm(sid, 100, 20000, "fixture"), "confirm failed")
+  require(self.circle_open_sessions[caller] == 0, "outstanding session remains")
+  require(self.session_status[sid] == SESSION_SETTLED, "session not settled")
+  require(self.circle_earnings_total[caller] == 20000, "traffic payment was reduced")
+  require(self.treasury == 0, "protocol commission collected")
+  return true
+}
+
+// expect-revert test_terminal_session_cannot_close_twice "session not open"
+fn test_terminal_session_cannot_close_twice(): bool {
+  let sid = test_seed_session()
+  require(settle_claim(sid, 100, 100), "claim failed")
+  require(settle_confirm(sid, 100, 100, "fixture"), "confirm failed")
+  return settle_confirm(sid, 100, 100, "fixture")
+}
+
+fn test_dispute_preserves_session_and_stake_lock(): bool {
+  let sid = test_seed_session()
+  require(settle_claim(sid, 100, 100), "claim failed")
+  require(!settle_confirm(sid, 99, 100, "fixture"), "dispute accepted")
+  require(self.session_status[sid] == SESSION_OPEN, "dispute prematurely terminal")
+  require(self.circle_open_sessions[caller] == 1, "stake lock lost")
+  return true
+}
+
+// expect-revert test_opener_cannot_zero_operator_payment "settlement amount differs from operator claim"
+fn test_opener_cannot_zero_operator_payment(): bool {
+  let sid = test_seed_session()
+  require(settle_claim(sid, 100, 100), "claim failed")
+  return settle_confirm(sid, 100, 0, "fixture")
+}
+
+// expect-revert test_opener_cannot_increase_operator_payment "settlement amount differs from operator claim"
+fn test_opener_cannot_increase_operator_payment(): bool {
+  let sid = test_seed_session()
+  require(settle_claim(sid, 100, 90), "claim failed")
+  return settle_confirm(sid, 100, 100, "fixture")
+}
+
+// expect-revert test_operator_cannot_claim_more_than_deposit "claim exceeds deposit"
+fn test_operator_cannot_claim_more_than_deposit(): bool {
+  let sid = test_seed_session()
+  return settle_claim(sid, 100, 101)
+}

@@ -22,6 +22,7 @@ use octra_node_protocol::{
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+mod program;
 
 fn unavailable(e: impl std::fmt::Display) -> Error {
     Error::Unavailable(e.to_string().into_bytes())
@@ -74,7 +75,8 @@ pub(crate) struct Journal<'a> {
     ledger: &'a Ledger,
     pub(crate) state: &'a mut StateBatch,
     pub(crate) values: Values,
-    circles: BTreeMap<Vec<u8>, StorageTable>,
+    pub(crate) programs: crate::program::Journal,
+    pub(crate) fhe_memory: Option<octra_node_protocol::octb::fhe_work::Memory>,
 }
 pub(crate) struct Reply {
     pub(crate) bytes: Vec<u8>,
@@ -91,7 +93,8 @@ impl<'a> Journal<'a> {
             ledger,
             state,
             values: Values::default(),
-            circles: BTreeMap::new(),
+            programs: crate::program::Journal::default(),
+            fhe_memory: None,
         }
     }
     pub(crate) fn balance(&self, address: &[u8]) -> BigInt {
@@ -104,17 +107,13 @@ impl<'a> Journal<'a> {
         self.state.snapshot()
     }
     pub(crate) fn storage(&self, address: &[u8]) -> Option<StorageTable> {
-        self.circles.get(address).cloned()
+        self.programs.circle(address).cloned()
     }
     pub(crate) fn stage(&mut self, address: &[u8], storage: StorageTable) {
-        self.circles.insert(address.to_vec(), storage);
+        self.programs.set_circle(address, storage);
     }
     fn program_effort(&self) -> BigInt {
-        self.circles
-            .values()
-            .map(|s| BigInt::from(s.values().len()) + 1)
-            .sum::<BigInt>()
-            * 32
+        self.programs.snapshot_effort()
     }
     pub(crate) fn execute(
         &mut self,
@@ -149,29 +148,32 @@ impl<'a> Journal<'a> {
         fuel: i64,
         budget: Option<&mut ReceiptBudget>,
     ) -> Result<(VmValue, i64, Vec<Event>), Error> {
-        let work: BigInt = self.program_effort() + BigInt::from(self.values.deltas.len()) * 32;
+        let work: BigInt = if ctx.profile.proof_exec {
+            self.program_effort() + BigInt::from(self.values.deltas.len()) * 32
+        } else {
+            BigInt::zero()
+        };
         let spent = work
             .to_i64()
             .filter(|cost| *cost <= fuel)
             .ok_or_else(|| rejected("call journal effort exceeds limit"))?;
         let saved = self.state.save().map_err(unavailable)?;
         let values = self.values.clone();
-        let circles = self.circles.clone();
+        let programs = self.programs.snapshot();
         let result = (|| {
-            let Some(info) = circle_store::info(&self.snapshot(), target).map_err(unavailable)?
-            else {
-                // Contract.call_with charges another program snapshot before loading.
-                if self.program_effort() > BigInt::from(fuel - spent) {
-                    return Err(rejected("call journal effort exceeds limit"));
-                }
-                if self
-                    .state
-                    .get(&[b"contracts", target, b"bytecode"])
-                    .is_none()
-                {
-                    return Err(rejected("bytecode not found"));
-                }
-                return Err(unavailable("OCTB execution host is not available"));
+            let info = if ctx.profile.proof_exec {
+                circle_store::info(&self.snapshot(), target).map_err(unavailable)?
+            } else {
+                None
+            };
+            let Some(info) = info else {
+                let (response, effort, events) =
+                    self.program_call(caller, target, method, params, ctx, fuel - spent, budget)?;
+                let effort = spent
+                    .checked_add(effort)
+                    .filter(|effort| !ctx.profile.proof_exec || *effort <= fuel)
+                    .ok_or_else(|| rejected("call effort exceeds limit"))?;
+                return Ok((response, effort, events));
             };
             if self.state.get(&[b"circles", target, b"call_code"])
                 != Some(info.code_hash.as_slice())
@@ -223,7 +225,7 @@ impl<'a> Journal<'a> {
         })();
         if result.is_err() {
             self.values = values;
-            self.circles = circles;
+            self.programs.restore(programs);
             self.state.restore(saved).map_err(unavailable)?;
         }
         result

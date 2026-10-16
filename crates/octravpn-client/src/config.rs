@@ -109,8 +109,11 @@ pub(crate) struct WalletCfg {
 /// operator's circle as a sealed asset. The client only needs to
 /// know which `(tailnet_id, circle_id)` to bind to — everything else
 /// is fetched + validated from chain at session-open time.
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Clone)]
 pub(crate) struct V3Cfg {
+    /// The VPN settlement AML may be deployed as a Program or Circle app.
+    #[serde(default)]
+    pub application: octravpn_core::v3_calls::Application,
     /// `oct…` address of the desired operator circle. The circle's
     /// `state-root.json` anchor must already be registered on chain
     /// via `register_circle`. Empty / unset → `connect-v3` aborts
@@ -138,6 +141,19 @@ pub(crate) struct V3Cfg {
     /// client explicitly opts in.
     #[serde(default)]
     pub relay: V3RelayCfg,
+}
+
+impl Default for V3Cfg {
+    fn default() -> Self {
+        Self {
+            application: octravpn_core::v3_calls::Application::default(),
+            circle_id: String::new(),
+            tailnet_id: 0,
+            wallet_key_path: None,
+            max_pay: default_v3_max_pay(),
+            relay: V3RelayCfg::default(),
+        }
+    }
 }
 
 fn default_v3_max_pay() -> u64 {

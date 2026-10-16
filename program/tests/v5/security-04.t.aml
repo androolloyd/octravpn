@@ -1,0 +1,85 @@
+// Isolated v5 security fragment; original production methods compile unchanged.
+// Kept below the adopted native compiler method-label range.
+private fn test_seed_circle() {
+  self.min_circle_stake = 100000000
+  self.unbond_grace_epochs = 1000
+  self.circle_owner[caller] = caller
+  self.circle_active[caller] = 1
+  self.circle_state_version[caller] = 1
+  self.circle_bond[caller] = 100000000
+  self.circle_registration_approved[caller] = 1
+  self.circle_authorized_owner[caller] = caller
+}
+
+private fn test_seed_session(): uint {
+  test_seed_circle()
+  self.min_session_deposit = 1
+  self.session_grace_epochs = 100
+  self.sweep_grace_multiplier = 10
+  self.tailnet_count = 1
+  // Internal treasury refunds keep isolated VM tests independent of host transfers.
+  return write_session(0, caller, 100, 1)
+}
+
+private fn test_seed_admin() {
+  self.admin_nonce = 0
+  self.pending_admin_commitment = ""
+}
+
+// expect-revert test_zero_bytes_cannot_claim_payment "zero bytes require zero net"
+fn test_zero_bytes_cannot_claim_payment(): bool {
+  let sid = test_seed_session()
+  return settle_claim(sid, 0, 1)
+}
+
+fn test_zero_traffic_closes_with_zero_credit(): bool {
+  let sid = test_seed_session()
+  require(settle_claim(sid, 0, 0), "zero claim failed")
+  require(get_claim_net_set(sid) == 1, "zero amount not explicitly bound")
+  require(get_claim_net(sid) == 0, "zero amount changed")
+  require(settle_confirm(sid, 0, 0, "fixture"), "zero close failed")
+  require(self.circle_earnings_total[caller] == 0, "zero traffic credited")
+  require(self.session_status[sid] == SESSION_SETTLED, "zero session remains open")
+  require(self.circle_open_sessions[caller] == 0, "zero session stake lock remains")
+  return true
+}
+
+fn test_same_claim_is_idempotent_in_bytes_and_amount(): bool {
+  let sid = test_seed_session()
+  require(settle_claim(sid, 100, 90), "claim failed")
+  require(settle_claim(sid, 100, 90), "identical claim failed")
+  require(get_claim_net(sid) == 90, "amount changed")
+  require(self.session_status[sid] == SESSION_OPEN, "identical claim closed session")
+  require(self.circle_open_sessions[caller] == 1, "identical claim unlocked stake")
+  return true
+}
+
+fn test_amount_equivocation_refunds_without_operator_credit(): bool {
+  let sid = test_seed_session()
+  require(settle_claim(sid, 100, 90), "claim failed")
+  require(!settle_claim(sid, 100, 80), "different amount accepted")
+  require(self.session_status[sid] == SESSION_REFUNDED, "equivocation not terminal")
+  require(self.circle_open_sessions[caller] == 0, "equivocation stake lock remains")
+  require(self.circle_earnings_total[caller] == 0, "equivocation credited earnings")
+  require(get_claim_net(sid) == 90, "original claim evidence changed")
+  return true
+}
+
+// expect-revert test_legacy_claim_needs_operator_amount "operator claim amount missing"
+fn test_legacy_claim_needs_operator_amount(): bool {
+  let sid = test_seed_session()
+  self.operator_claim_set[sid] = 1
+  self.operator_claim_bytes[sid] = 100
+  return settle_confirm(sid, 100, 0, "fixture")
+}
+
+fn test_operator_rebinds_legacy_claim_amount(): bool {
+  let sid = test_seed_session()
+  self.operator_claim_set[sid] = 1
+  self.operator_claim_bytes[sid] = 100
+  require(settle_claim(sid, 100, 90), "legacy rebind failed")
+  require(get_claim_net(sid) == 90, "legacy amount not bound")
+  require(settle_confirm(sid, 100, 90, "fixture"), "legacy confirm failed")
+  require(self.circle_earnings_total[caller] == 90, "legacy credit wrong")
+  return true
+}

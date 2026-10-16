@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive, Zero};
 use octra_node_protocol::{
-    native_json::{Document, Value},
+    native_json::{Document, ReadMode, Value},
     state::Ledger,
     transaction::{json_string, native_float, OpType, Transaction},
 };
@@ -28,6 +28,7 @@ pub struct Rules {
     pub inspect: bool,
     pub storage_proof: bool,
     pub fhe_work: bool,
+    pub object_cost: bool,
 }
 
 pub struct Batch {
@@ -113,6 +114,7 @@ pub struct Calls<'a> {
     charged_fees: BigInt,
     bindings: BTreeMap<String, circle_call::Binding>,
     verification: Verification<'a>,
+    cell_gate: Option<&'a octra_node_protocol::preverify_commit::Gate>,
 }
 fn operational(error: impl std::fmt::Display) -> Error {
     Error(error.to_string())
@@ -157,6 +159,7 @@ impl<'a> Calls<'a> {
             receipt_time,
             parent_root: parent_root.to_vec(),
             verification,
+            cell_gate: None,
             receipts: BTreeMap::new(),
             charged_fees: BigInt::zero(),
             bindings: BTreeMap::new(),
@@ -164,6 +167,15 @@ impl<'a> Calls<'a> {
     }
     pub fn receipts(&self) -> &BTreeMap<String, Vec<u8>> {
         &self.receipts
+    }
+    /// Producer previews use locally checked cell receipts while CircleCall
+    /// bindings are captured by execution. Import already supplies its Gate.
+    pub fn with_preverify_gate(
+        mut self,
+        gate: &'a octra_node_protocol::preverify_commit::Gate,
+    ) -> Self {
+        self.cell_gate = Some(gate);
+        self
     }
     pub fn bindings(&self) -> &BTreeMap<String, circle_call::Binding> {
         &self.bindings
@@ -200,6 +212,96 @@ impl OperationHost for Calls<'_> {
         {
             return crate::circle_code::execute(self.runtime, self.rules, tx, ledger, state);
         }
+        if route == Route::CircleOperation
+            && matches!(
+                tx.op_type,
+                OpType::CircleAssetPut
+                    | OpType::CircleAssetPutEncrypted
+                    | OpType::CircleSealedSlotPut
+                    | OpType::CircleSlotPolicyPut
+                    | OpType::CircleStateDescriptorPut
+            )
+        {
+            return crate::circle_resource_ops::execute(tx, ledger, state);
+        }
+        if route == Route::CircleOperation
+            && matches!(
+                tx.op_type,
+                OpType::CircleTransportPolicyPut
+                    | OpType::CircleHfhePolicyPut
+                    | OpType::CircleKeyPolicyPut
+                    | OpType::CircleKeyGrant
+                    | OpType::CircleKeyExtend
+                    | OpType::CircleKeyRevoke
+                    | OpType::CircleKeyErase
+            )
+        {
+            return crate::circle_policy_ops::execute(tx, ledger, state, self.epoch);
+        }
+        if route == Route::CircleOperation
+            && matches!(
+                tx.op_type,
+                OpType::CircleOutboxOpen
+                    | OpType::CircleRelayClaim
+                    | OpType::CircleRelayCancel
+                    | OpType::CircleIngressCommit
+            )
+        {
+            return crate::circle_transport_ops::execute(tx, ledger, state, self.epoch);
+        }
+        if route == Route::CircleOperation
+            && matches!(
+                tx.op_type,
+                OpType::CircleBalanceCellPut | OpType::CircleRegisterCellPut
+            )
+        {
+            let gate = match self.verification {
+                Verification::Consume { gate, .. } => Some(gate),
+                Verification::Capture => self.cell_gate,
+                Verification::Direct => None,
+            };
+            let binding_error = |reason: &[u8]| {
+                rejection("circle_cell_preverify_receipt", reason, None, false, false)
+            };
+            let expected = if let Some(gate) = gate {
+                let receipt = match gate.receipt(tx) {
+                    Ok(receipt) => receipt,
+                    Err(octra_node_protocol::preverify_commit::Error::Invalid(reason)) => {
+                        return Ok(binding_error(&reason))
+                    }
+                    Err(octra_node_protocol::preverify_commit::Error::Unavailable(reason)) => {
+                        return Err(Error(reason))
+                    }
+                };
+                let octra_node_protocol::preverify_receipt::Binding::Private(binding) =
+                    &receipt.binding
+                else {
+                    return Ok(binding_error(b"circle_cell_transition_binding_missing"));
+                };
+                let Some(hash) = binding.transition_hash.as_deref() else {
+                    return Ok(binding_error(b"circle_cell_transition_binding_missing"));
+                };
+                Some(hash)
+            } else if matches!(self.verification, Verification::Direct) {
+                None
+            } else {
+                return Ok(binding_error(b"circle_cell_preverify_receipt_required"));
+            };
+            return crate::circle_cell::execute(
+                self.runtime,
+                tx,
+                ledger,
+                state,
+                self.epoch,
+                expected,
+                self.rules.storage_proof,
+                if self.rules.wasm.math {
+                    octra_hfhe::scalar::ScalarRule::Wide
+                } else {
+                    octra_hfhe::scalar::ScalarRule::Prior
+                },
+            );
+        }
         if route != Route::VirtualMachine || tx.op_type != OpType::CircleCall {
             return Err(operational(
                 "operation requires an unavailable execution host",
@@ -226,10 +328,15 @@ impl OperationHost for Calls<'_> {
                 false,
             ));
         };
-        // Native JSON exception text is not yet qualified. Abort operationally
-        // rather than charging an invented circle_call_exception outcome.
-        let parsed = Document::parse(params)
-            .map_err(|e| operational(format!("Circle parameter parsing unavailable: {e}")))?;
+        let parsed = match Document::parse_native(params, ReadMode::Tree) {
+            Ok(parsed) => parsed,
+            Err(error) => match error.exception() {
+                Some(exception) => {
+                    return Ok(self.charged(tx, "circle_call_exception", &exception))
+                }
+                None => return Err(operational(error.legacy())),
+            },
+        };
         let params = if matches!(parsed.root(), Value::List(_)) {
             parsed
         } else {
@@ -266,8 +373,10 @@ impl OperationHost for Calls<'_> {
             inspect: self.rules.inspect,
             update_policy: self.rules.update_policy,
             hfhe_strict: self.rules.storage_proof,
+            hfhe_scope: None,
             storage_proof: self.rules.storage_proof,
             fhe_work: self.rules.fhe_work,
+            object_cost: self.rules.object_cost,
         };
         let expected = match self.verification {
             Verification::Consume { root, gate } => {
@@ -313,6 +422,7 @@ impl OperationHost for Calls<'_> {
             )
             .map_err(|e| operational(format!("Circle execution unavailable: {e:?}")))?;
         let values = journal.values;
+        let programs = journal.programs;
         if let Some((root, expected)) = expected {
             if call
                 .binding()
@@ -364,6 +474,7 @@ impl OperationHost for Calls<'_> {
                 )))
             }
         }
+        programs.stage(state).map_err(operational)?;
         values.commit(ledger)?;
         Ok(Completion::Confirmed {
             created_account: None,

@@ -9,13 +9,10 @@ use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 use serde_json::json;
-use tracing::info;
 
 use crate::{
     config::ClientConfig,
-    discover_v2::{
-        self, render_row, resolve_passphrase, CircleListing, CirclePolicy, SessionClass,
-    },
+    discover_v2::{self, render_row, resolve_passphrase, CircleListing},
     runner::Client,
     v2_cache::{resolve_cache_dir, PolicyCache},
     DiscoverOp,
@@ -136,111 +133,21 @@ async fn run_discover_v2(
     Ok(())
 }
 
-/// Body of `connect-v2`. Resolves the circle, opens the session, and
-/// prints the WG handoff. We deliberately stop short of bringing the
-/// data plane up — same shape as the v1.1 `connect` which prints a WG
-/// config block for the user (the boringtun side lives in
-/// `octravpn-node`).
+/// The historical v2 opening ABI includes a session-class argument. It is
+/// incompatible with the current Circle settlement program and has no
+/// authenticated client data plane. Refuse before lookup or escrow submission.
 pub(crate) async fn connect_v2(
-    client: &Arc<Client>,
+    _client: &Arc<Client>,
     cfg: &Arc<ClientConfig>,
-    tailnet_id: u64,
-    circle_id_arg: Option<&str>,
-    class_str: &str,
-    deposit: u64,
-    cli_secret: Option<&str>,
-    refresh: bool,
+    _tailnet_id: u64,
+    _circle_id_arg: Option<&str>,
+    _class_str: &str,
+    _deposit: u64,
+    _cli_secret: Option<&str>,
+    _refresh: bool,
 ) -> Result<()> {
     require_v2(cfg)?;
-    let class = SessionClass::parse(class_str)?;
-    let cache_dir = resolve_cache_dir(&cfg.v2.cache_dir);
-    let mut cache = PolicyCache::open(&cache_dir)
-        .with_context(|| format!("open policy cache {}", cache_dir.display()))?;
-    if refresh {
-        cache.clear().ok();
-    }
-
-    let passphrase = resolve_passphrase(&cfg.v2, cli_secret).ok_or_else(|| {
-        anyhow::anyhow!(
-            "no sealed-policy passphrase available — set OCTRAVPN_SEALED_PASSPHRASE, \
-             pass --secret, or fill `[v2].sealed_passphrase`",
-        )
-    })?;
-
-    // 1. Pick the circle. If the caller gave one explicitly, decrypt
-    // just that one; otherwise fetch the full list and use the first
-    // decryptable entry.
-    let (chosen_id, policy) = if let Some(id) = circle_id_arg {
-        let listing =
-            discover_v2::fetch_one(client, id, &cfg.v2, Some(passphrase.as_str()), &mut cache)
-                .await;
-        match listing {
-            CircleListing::Open {
-                circle_id, policy, ..
-            } => (circle_id, policy),
-            CircleListing::Opaque { reason, .. } => {
-                bail!("can't decrypt policy for {id}: {reason}")
-            }
-            CircleListing::Unpublished { .. } => bail!("circle {id} has no published policy yet"),
-            CircleListing::Error { error, .. } => bail!("circle {id} fetch error: {error}"),
-        }
-    } else {
-        pick_first_open(client, cfg, tailnet_id, passphrase.as_str(), &mut cache).await?
-    };
-
-    info!(
-        tailnet_id,
-        circle = chosen_id.as_str(),
-        class = class.label(),
-        deposit,
-        policy_version = policy.policy_version,
-        "opening v2 session"
-    );
-    let session_id =
-        discover_v2::open_session_v2(client, tailnet_id, &chosen_id, class, deposit).await?;
-    println!("session opened: id={session_id}");
-    println!("  tailnet_id    = {tailnet_id}");
-    println!("  circle        = {chosen_id}");
-    println!("  class         = {} ({})", class.label(), class.as_int());
-    println!("  policy ver    = {}", policy.policy_version);
-    print_wg_handoff(&policy);
-    Ok(())
-}
-
-async fn pick_first_open(
-    client: &Client,
-    cfg: &ClientConfig,
-    tailnet_id: u64,
-    passphrase: &str,
-    cache: &mut PolicyCache,
-) -> Result<(String, CirclePolicy)> {
-    let listings = discover_v2::list(client, tailnet_id, &cfg.v2, Some(passphrase), cache).await?;
-    for l in listings {
-        if let CircleListing::Open {
-            circle_id, policy, ..
-        } = l
-        {
-            return Ok((circle_id, policy));
-        }
-    }
-    bail!(
-        "no decryptable authorized circles for tailnet {tailnet_id} \
-         (no member access, or operators haven't published policy)",
-    )
-}
-
-fn print_wg_handoff(policy: &CirclePolicy) {
-    // audit-13: text labels instead of ASCII separators so screen
-    // readers (NVDA / VoiceOver) don't recite a run of dashes.
-    println!("[wireguard-handoff-begin v2-sealed-policy]");
-    println!("[Peer]");
-    println!("PublicKey  = {}", policy.wg_pubkey_b64);
-    println!("Endpoint   = {}", policy.endpoint);
-    println!("AllowedIPs = 0.0.0.0/0, ::/0");
-    println!("# region        = {}", policy.region);
-    println!("# tariff shared = {} OU/MB", policy.price_per_mb_shared);
-    println!("# tariff intra  = {} OU/MB", policy.price_per_mb_internal);
-    println!("[wireguard-handoff-end]");
+    bail!("connect-v2 uses a historical session ABI; configure protocol_version = \"v3\" and use connect-v3 --udp-target for the current authenticated flow")
 }
 
 fn require_v2(cfg: &ClientConfig) -> Result<()> {

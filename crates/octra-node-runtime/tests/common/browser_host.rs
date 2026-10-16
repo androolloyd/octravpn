@@ -194,6 +194,7 @@ impl Node for Host {
                 inspect: true,
                 storage_proof: true,
                 fhe_work: false,
+                object_cost: false,
             },
             epoch,
             123.5,
@@ -257,6 +258,9 @@ impl Node for Host {
             receipt: Some(calls.receipts()[&hash].clone()),
         };
         let executed = ExecutedEpoch {
+            epoch_observation: None,
+            metrics: octra_node_protocol::metrics::Epoch::default(),
+            vm_receipts: std::collections::BTreeMap::default(),
             reward_source: finality_host::reward_source(self.authority.seed),
             state: state.snapshot(),
             transactions: vec![record],
@@ -290,7 +294,7 @@ impl Node for Host {
             return Err(Error::SnapshotChanged);
         };
         if identity.chain_id != self.store.chain().chain_id
-            || identity.genesis_root != hex::encode(self.store.chain().genesis_root.0)
+            || identity.origin != self.store.chain().origin
         {
             return Err(Error::SnapshotChanged);
         }

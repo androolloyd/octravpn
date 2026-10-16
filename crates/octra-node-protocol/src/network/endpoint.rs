@@ -9,7 +9,7 @@ pub struct Endpoint {
     pub port: u16,
 }
 // OCaml String.trim excludes vertical tab (Rust trim_ascii includes it).
-pub(crate) fn native_trim(mut bytes: &[u8]) -> &[u8] {
+pub fn native_trim(mut bytes: &[u8]) -> &[u8] {
     fn whitespace(b: u8) -> bool {
         matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 12)
     }

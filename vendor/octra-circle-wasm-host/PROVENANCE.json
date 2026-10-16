@@ -3,7 +3,7 @@
   "commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
   "source_directory": "lib/core/circle_wasm_native",
   "license": "BSD-3-Clause",
-  "adaptation": "rlib and explicit Rust HFHE backend; execution and effect rules retained",
+  "adaptation": "rlib and explicit Rust HFHE backend; measured native-byte payloads with local active-key ID transport; safe native compute cache builder, status, drop and lease ownership; execution and effect rules retained",
   "upstream_sha256": {
     "Cargo.toml": "9743e4fd5aa87c02d4c6f22ae698f178d97f787bf94450e618b086ef0f17b40a",
     "Cargo.lock": "c3c6e2e05bad621856ed5efc5924acbc9e6549da7d6886df39c5f0a0d4bbc762",
@@ -25,11 +25,11 @@
     "src/deterministic_tensor.rs": "730f71348353955c610a1950f732de4de3c445131028990a82dddc4fb53f3d5b",
     "src/float_cases.rs": "4b29ced3759f51399a31cae0c6f1e4897f8d91da769c0c19cf5919b3408f865f",
     "src/float_ops.rs": "5380b06120667c0d1c6ae0e44d9b4fdd76efa8e0fb0a395e87b17203d9b00730",
-    "src/lib.rs": "deaba354386499adb712d1a0dad2fcb9516c010c768f5e5974fdd4972df83484",
+    "src/lib.rs": "bc377662e81e41457678e4c99907de411f3ee2c8ce529f34c9a18ab4194ddf3d",
     "src/native_bytes.rs": "7499907438644814672af2d6d478aabab33b94550ce230edb4be5bdbd8bdfbc7",
     "src/parse_memory.rs": "5b543060c24f2879a90adae6a1efc0e13051f62e4aa91a2f0616ba1d52b9a621",
     "src/reply.rs": "1d945b71b5ac0c6a5f8e03ea9536bc85ba858727bfcd213b73f77ca1b969d2f2",
-    "src/rust_api.rs": "b53d11948b2165bb250bde8c121cec32f78e0a4aa646696dcbe672f62463ac49"
+    "src/rust_api.rs": "b6de106c89310de1ce6defd91e57003c01eba57c3a0f1dd5c42aa2af770141a1"
   },
-  "patch_sha256": "ef7612f31bec82b874ff141800475ae751b2c88a450056da1de5a5c4e1c6a3af"
+  "patch_sha256": "b499d3a66bbcaeb80d763c2b85da7f0a4792fc30bd74312fc9717d7925cba684"
 }

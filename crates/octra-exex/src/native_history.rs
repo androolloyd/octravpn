@@ -271,7 +271,7 @@ impl NativeEpochSource {
             "SELECT count(*) FROM exex_committed_epoch WHERE chain_id=? AND genesis=?",
         )
         .bind(&chain.chain_id)
-        .bind(chain.genesis_root.0.as_slice())
+        .bind(chain.namespace_key().as_slice())
         .fetch_one(&mut *tx)
         .await
         .map_err(invalid)?;
@@ -279,7 +279,7 @@ impl NativeEpochSource {
             "SELECT anchor FROM exex_native_binding WHERE chain_id=? AND genesis=?",
         )
         .bind(&chain.chain_id)
-        .bind(chain.genesis_root.0.as_slice())
+        .bind(chain.namespace_key().as_slice())
         .fetch_optional(&mut *tx)
         .await
         .map_err(invalid)?;
@@ -292,7 +292,7 @@ impl NativeEpochSource {
                     "INSERT INTO exex_native_binding(chain_id,genesis,anchor,head) VALUES(?,?,?,?)",
                 )
                 .bind(&chain.chain_id)
-                .bind(chain.genesis_root.0.as_slice())
+                .bind(chain.namespace_key().as_slice())
                 .bind(&encoded)
                 .bind(&encoded)
                 .execute(&mut *tx)
@@ -310,7 +310,7 @@ impl NativeEpochSource {
             "SELECT head,anchor FROM exex_native_binding WHERE chain_id=? AND genesis=?",
         )
         .bind(&chain.chain_id)
-        .bind(chain.genesis_root.0.as_slice())
+        .bind(chain.namespace_key().as_slice())
         .fetch_one(&self.pool)
         .await
         .map_err(invalid)?;
@@ -330,14 +330,14 @@ impl NativeEpochSource {
             "SELECT head,anchor FROM exex_native_binding WHERE chain_id=? AND genesis=?",
         )
         .bind(&chain.chain_id)
-        .bind(chain.genesis_root.0.as_slice())
+        .bind(chain.namespace_key().as_slice())
         .fetch_one(&mut *tx)
         .await
         .map_err(invalid)?;
         let encoded: String = binding.try_get("head").map_err(invalid)?;
         let previous: NativeBoundary = serde_json::from_str(&encoded).map_err(invalid)?;
         let row = sqlx::query("SELECT sequence,epoch,root FROM exex_committed_epoch WHERE chain_id=? AND genesis=? ORDER BY sequence DESC LIMIT 1")
-            .bind(&chain.chain_id).bind(chain.genesis_root.0.as_slice())
+            .bind(&chain.chain_id).bind(chain.namespace_key().as_slice())
             .fetch_optional(&mut *tx).await.map_err(invalid)?;
         let mut sequence = Sequence(0);
         if let Some(row) = row {
@@ -377,7 +377,7 @@ impl NativeEpochSource {
         )
         .bind(serde_json::to_string(latest).map_err(invalid)?)
         .bind(&chain.chain_id)
-        .bind(chain.genesis_root.0.as_slice())
+        .bind(chain.namespace_key().as_slice())
         .bind(encoded)
         .execute(&mut *tx)
         .await

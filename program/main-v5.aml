@@ -59,6 +59,7 @@ contract OctraVPN_V5 {
   event SettleClaimed(session_id: uint, circle: address, bytes_used: uint)
   event SettleConfirmed(session_id: uint, opener: address, bytes_used: uint)
   event SettleDispute(session_id: uint, operator_bytes: uint, client_bytes: uint)
+  event SettleAmountDispute(session_id: uint, operator_net: uint, other_net: uint)
   event SessionSettled(session_id: uint, circle: address, net: uint, refund: uint)
   event SessionRefunded(session_id: uint, reason: string)
   event SessionSwept(session_id: uint)
@@ -165,6 +166,12 @@ contract OctraVPN_V5 {
     slash_burn_bps: uint
     slash_bounty_bps: uint
     protocol_fee_bps: uint
+
+    // Append-only layout: old claims have no amount flag and cannot confirm
+    // until the authenticated operator binds an amount to the same byte count.
+    operator_claim_net: map[uint]uint
+    operator_claim_net_set: map[uint]uint
+    session_policy_root: map[uint]bytes
   }
 
   // ============================================================
@@ -309,6 +316,7 @@ contract OctraVPN_V5 {
     self.session_count = sid + 1
     self.session_tailnet[sid] = tailnet_id
     self.session_exit[sid] = circle
+    self.session_policy_root[sid] = self.circle_state_root[circle]
     self.circle_open_sessions[circle] = self.circle_open_sessions[circle] + 1
     self.session_opener[sid] = caller
     self.session_deposit[sid] = deposit
@@ -830,8 +838,8 @@ contract OctraVPN_V5 {
     let dep = self.session_deposit[session_id]
     let net = self.session_relay_net[session_id]
 
-    // Same value movement as settle_confirm: fee to protocol, net-after-fee
-    // to the earnings ledger, surplus escrow back to the session funder.
+    // Credit the full traffic payment to pending operator earnings and refund
+    // the remaining escrow to the funder. There is no protocol commission.
     let total_paid = net
     if total_paid > dep {
       total_paid = dep
@@ -895,44 +903,60 @@ contract OctraVPN_V5 {
     return true
   }
 
-  // Operator records bytes_used. Re-claiming a different value =
+  // Operator binds both bytes_used and the agreed raw OCT credit. A different
+  // byte count or amount on a later claim is
   // equivocation: refund the session; bond is burned by a follow-up
   // governance adjudication.
-  nonreentrant fn settle_claim(session_id: uint, bytes_used: uint): bool {
+  nonreentrant fn settle_claim(session_id: uint, bytes_used: uint, net: uint): bool {
     // Existing obligations remain recoverable while admission is paused.
     require(session_id < self.session_count, "session not found")
     require(self.session_status[session_id] == SESSION_OPEN, "session not open")
-    require(bytes_used > 0, "bytes > 0")
     let circle = self.session_exit[session_id]
     require(self.circle_owner[circle] == caller, "not circle owner")
     require(circle_is_active(circle), "operator inactive")
+    require(bytes_used > 0 || net == 0, "zero bytes require zero net")
+    let dep = self.session_deposit[session_id]
+    require(net <= dep, "claim exceeds deposit")
 
     let prev_set = self.operator_claim_set[session_id]
     if prev_set == 1 {
       let prev_bytes = self.operator_claim_bytes[session_id]
       if prev_bytes == bytes_used {
-        return true
+        if self.operator_claim_net_set[session_id] == 0 {
+          // Explicit migration: only this operator can bind an old bytes-only
+          // claim. A missing amount must never mean a free settlement.
+          self.operator_claim_net[session_id] = net
+          self.operator_claim_net_set[session_id] = 1
+          emit SettleClaimed(session_id, circle, bytes_used)
+          return true
+        }
+        if self.operator_claim_net[session_id] == net {
+          return true
+        }
       }
       // Equivocation: refund deposit, mark refunded. Slash itself
       // is adjudicated by governance using the signed receipts.
-      let dep = self.session_deposit[session_id]
       self.session_status[session_id] = SESSION_REFUNDED
-    let funded_circle = self.session_exit[session_id]
-    self.circle_open_sessions[funded_circle] = self.circle_open_sessions[funded_circle] - 1
+      self.circle_open_sessions[circle] = self.circle_open_sessions[circle] - 1
       refund_session_escrow(session_id, dep)
       emit SettleDispute(session_id, prev_bytes, bytes_used)
+      if self.operator_claim_net_set[session_id] == 1 {
+        emit SettleAmountDispute(session_id, self.operator_claim_net[session_id], net)
+      }
       emit SessionRefunded(session_id, "operator equivocation")
       return false
     }
 
     self.operator_claim_set[session_id] = 1
     self.operator_claim_bytes[session_id] = bytes_used
+    self.operator_claim_net[session_id] = net
+    self.operator_claim_net_set[session_id] = 1
     emit SettleClaimed(session_id, circle, bytes_used)
     return true
   }
 
-  // Opener confirms. `net` is the operator's plaintext credit pre-
-  // agreed off-chain (price * bytes after class rules). `settle_blinding`
+  // Opener confirms the exact bytes and net already bound by the operator.
+  // `settle_blinding`
   // is a per-session secret that feeds the earnings hash-chain so
   // off-chain auditors can detect tampering with the settle stream.
   nonreentrant fn settle_confirm(session_id: uint, bytes_used: uint, net: uint, settle_blinding: string): bool {
@@ -941,6 +965,9 @@ contract OctraVPN_V5 {
     require(self.session_status[session_id] == SESSION_OPEN, "session not open")
     require(self.session_opener[session_id] == caller, "only opener can confirm")
     require(self.operator_claim_set[session_id] == 1, "no operator claim yet")
+    require(self.operator_claim_net_set[session_id] == 1, "operator claim amount missing")
+    require(net == self.operator_claim_net[session_id], "settlement amount differs from operator claim")
+    require(net <= self.session_deposit[session_id], "claim exceeds deposit")
     require(len(settle_blinding) > 0, "blinding required")
 
     let op_bytes = self.operator_claim_bytes[session_id]
@@ -960,13 +987,9 @@ contract OctraVPN_V5 {
     // Inactive operators receive no new credit. Previously accrued earnings
     // remain claimable. Refund this escrow even when an operator claim blocks
     // the no-show path.
-    // Cap net against deposit; surplus is refunded to the session funder.
     let total_paid = 0
     if circle_is_active(circle) {
       total_paid = net
-      if total_paid > dep {
-        total_paid = dep
-      }
     }
     let net_after_fee = total_paid
     let refund = dep - total_paid
@@ -1053,6 +1076,7 @@ contract OctraVPN_V5 {
   // ============================================================
 
   view fn get_max_locked_value(): uint { return self.max_locked_value }
+  view fn get_settlement_version(): uint { return 2 }
   view fn get_admin_commitment(): string { return self.admin_commitment }
   view fn get_admin_nonce(): uint { return self.admin_nonce }
   view fn get_admin_domain(): string { return self.admin_domain }
@@ -1083,6 +1107,10 @@ contract OctraVPN_V5 {
     return self.circle_owner[circle]
   }
 
+  view fn get_circle_receipt_pubkey(circle: address): string {
+    return self.circle_receipt_pk[circle]
+  }
+
   view fn endpoint_stake_of(circle: address): uint {
     return self.circle_bond[circle]
   }
@@ -1109,6 +1137,23 @@ contract OctraVPN_V5 {
 
   view fn get_session_status(session_id: uint): uint {
     return self.session_status[session_id]
+  }
+
+  view fn get_claim_net(session_id: uint): uint {
+    require(session_id < self.session_count, "session not found")
+    require(self.operator_claim_net_set[session_id] == 1, "operator claim amount missing")
+    return self.operator_claim_net[session_id]
+  }
+
+  view fn get_claim_net_set(session_id: uint): uint {
+    require(session_id < self.session_count, "session not found")
+    return self.operator_claim_net_set[session_id]
+  }
+
+  view fn get_session_policy_root(session_id: uint): bytes {
+    require(session_id < self.session_count, "session not found")
+    require(len(self.session_policy_root[session_id]) == 64, "session policy anchor missing")
+    return self.session_policy_root[session_id]
   }
 
   view fn get_relay_settlement_hash(session_id: uint): bytes {

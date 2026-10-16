@@ -47,7 +47,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Args, Subcommand};
-use octravpn_core::{address::Address, sig::KeyPair};
+use octravpn_core::sig::KeyPair;
 use serde_json::Value;
 use tracing::{info, warn};
 
@@ -100,7 +100,7 @@ pub(crate) enum V3Cmd {
     /// `session_id` is best-effort fetched from `octra_transaction(hash)`
     /// and logged.
     OpenSession(OpenSessionArgs),
-    /// `settle_claim(session_id, bytes_used)` — operator-side first
+    /// `settle_claim(session_id, bytes_used, net)` — operator-side first
     /// half of the two-tx settle. Equivocation on `bytes_used` per sid
     /// triggers an AML-side slash.
     SettleClaim(SettleClaimArgs),
@@ -244,6 +244,9 @@ pub(crate) struct SettleClaimArgs {
     pub session_id: u64,
     #[arg(long)]
     pub bytes_used: u64,
+    /// Operator-agreed credit in microOCT, committed with the byte count.
+    #[arg(long)]
+    pub net: u64,
 }
 
 #[derive(Args, Debug)]
@@ -329,7 +332,8 @@ pub(crate) fn build_chain_ctx_for_circle(cfg: &NodeConfig) -> Result<ChainCtxV3>
 /// `PlaintextKeyOnDisk` error pointing at `seal-keys`.
 fn build_chain_ctx(cfg: &NodeConfig) -> Result<ChainCtxV3> {
     let rpc = cfg.chain.build_rpc_client()?;
-    let program_addr = Address::from_display(&cfg.chain.program_addr);
+    let program_addr = octravpn_core::parse_native_address(&cfg.chain.program_addr)
+        .context("invalid program application address")?;
     let wallet_secret = if cfg.chain.require_sealed_keys {
         *octravpn_core::util::read_secret_32_or_sealed(&cfg.chain.wallet_secret_path, None)
             .with_context(|| {
@@ -340,7 +344,7 @@ fn build_chain_ctx(cfg: &NodeConfig) -> Result<ChainCtxV3> {
             .with_context(|| format!("load wallet secret {}", cfg.chain.wallet_secret_path))?
     };
     let wallet = KeyPair::from_secret_bytes(&wallet_secret);
-    Ok(ChainCtxV3::new(rpc, program_addr, wallet))
+    Ok(ChainCtxV3::new(rpc, program_addr, wallet).with_application(cfg.chain.application))
 }
 
 // ============================================================
@@ -439,12 +443,17 @@ async fn run_open_session(ctx: &ChainCtxV3, a: &OpenSessionArgs) -> Result<()> {
 }
 
 async fn run_settle_claim(ctx: &ChainCtxV3, a: &SettleClaimArgs) -> Result<()> {
+    ctx.get_claim_net_set(a.session_id).await?;
     let fee = call_fee(ctx).await?;
-    let call = ctx.build_settle_claim_call(a.session_id, a.bytes_used, fee, 0);
+    let call = ctx.build_settle_claim_call(a.session_id, a.bytes_used, a.net, fee, 0);
     submit_and_log(ctx, "settle_claim", call, Some(ReturnLog::AcceptedBool)).await
 }
 
 async fn run_settle_confirm(ctx: &ChainCtxV3, a: &SettleConfirmArgs) -> Result<()> {
+    anyhow::ensure!(
+        ctx.get_claim_net(a.session_id).await? == a.net,
+        "confirmation differs from the operator's committed microOCT credit"
+    );
     let fee = call_fee(ctx).await?;
     let params = SettleConfirmParams {
         session_id: a.session_id,
@@ -768,10 +777,11 @@ mod tests {
     #[test]
     fn settle_claim_args_build_expected_call() {
         let c = ctx();
-        let call = c.build_settle_claim_call(7, 1_048_576, 500, 13);
+        let call = c.build_settle_claim_call(7, 1_048_576, 1_000, 500, 13);
         assert_eq!(call["method"], "settle_claim");
         assert_eq!(call["params"][0], 7);
         assert_eq!(call["params"][1], 1_048_576);
+        assert_eq!(call["params"][2], 1_000);
     }
 
     #[test]
@@ -1035,7 +1045,7 @@ listen = "0.0.0.0:51821"
         assert_eq!(c.build_finalize_unbond_call(CID, 100, 1)["value"], 0);
         assert_eq!(c.build_retire_circle_call(CID, 100, 1)["value"], 0);
         assert_eq!(c.build_retire_tailnet_call(2, 100, 1)["value"], 0);
-        assert_eq!(c.build_settle_claim_call(1, 1, 100, 1)["value"], 0);
+        assert_eq!(c.build_settle_claim_call(1, 1, 0, 100, 1)["value"], 0);
         assert_eq!(c.build_claim_no_show_call(1, 100, 1)["value"], 0);
         assert_eq!(c.build_sweep_expired_session_call(1, 100, 1)["value"], 0);
         assert_eq!(c.build_claim_earnings_call(CID, 1, 100, 1)["value"], 0);

@@ -6,26 +6,20 @@
 //!
 //! ## Atomicity contract
 //!
-//! Updating a sealed circle asset is a two-step dance:
-//!
-//! 1. **Write all new blobs first** via `circle_asset_put_encrypted`.
-//!    These writes are content-addressed: the chain stores them under
-//!    `(circle_id, path)`, but the OLD anchor still points at the OLD
-//!    asset bytes (verifiers recompute `sha256(asset_bytes)` against
-//!    the bound `policy_hash` / `members_hash` / etc. — different
-//!    bytes ⇒ different hash ⇒ the new blob is *invisible* to old
-//!    verifiers because the on-chain anchor doesn't bind it yet).
+//! 1. Write new blobs to immutable `snapshot_path(plaintext_hash, logical_path)`
+//!    locations and verify committed readback. Existing fixed paths are never
+//!    overwritten. Write and verify the new immutable StateRoot metadata too.
 //!
 //! 2. **Submit one `update_circle_state` tx** that flips the on-chain
 //!    anchor to a [`StateRoot`] whose field-by-field hashes match the
-//!    new blobs. After this tx confirms, verifiers see the new bytes
-//!    as the canonical state of the circle.
+//!    new blobs. Wait for the committed anchor before reporting success.
 //!
 //! If step 2 fails (RPC error, nonce race, op out of funds, etc.) the
 //! blobs are *orphans*: they exist in the chain's asset store, but no
 //! anchor field binds their hash. Old verifiers still see the old
 //! anchor pointing at the old blobs, so user-visible state is fully
-//! consistent. The operator can retry the anchor flip via
+//! consistent for snapshot-aware readers. Legacy fixed paths are migration
+//! fallbacks; they do not receive new revisions. Operators can retry the flip via
 //! [`retry_anchor`] without re-uploading any blob bytes.
 //!
 //! The reverse order — anchor first, blobs second — is forbidden,
@@ -60,7 +54,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use octravpn_core::{
     circle::{decrypt_sealed_bytes, encrypt_sealed_bytes, PaddingClass},
-    v3_state_root::StateRoot,
+    v3_state_root::{snapshot_path, StateRoot},
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -323,7 +317,13 @@ fn validate_bundle(bundle: &UpdateBundle) -> Result<(), UpdateError> {
                 .into(),
         ));
     }
+    let mut paths = std::collections::BTreeSet::new();
     for (i, b) in bundle.blobs.iter().enumerate() {
+        if !paths.insert(&b.asset_path) {
+            return Err(UpdateError::BundleInvalid(format!(
+                "blob[{i}]: duplicate asset path"
+            )));
+        }
         if b.asset_path.is_empty() || !b.asset_path.starts_with('/') {
             return Err(UpdateError::BundleInvalid(format!(
                 "blob[{i}]: asset_path must start with '/', got {:?}",
@@ -333,6 +333,11 @@ fn validate_bundle(bundle: &UpdateBundle) -> Result<(), UpdateError> {
         if b.key_id.is_empty() {
             return Err(UpdateError::BundleInvalid(format!(
                 "blob[{i}]: key_id is empty"
+            )));
+        }
+        if b.bound_field().is_none() {
+            return Err(UpdateError::BundleInvalid(format!(
+                "blob[{i}]: atomic updates require a StateRoot-bound asset path"
             )));
         }
     }
@@ -385,6 +390,23 @@ pub(crate) fn compute_target_state_root(
     if let Some(mc) = bundle.anchor_overrides.member_count {
         let clamped = u32::try_from(mc).unwrap_or(u32::MAX);
         next.member_count = clamped;
+    }
+
+    for blob in &bundle.blobs {
+        let expected = match blob.bound_field() {
+            Some(AnchoredField::Policy) => Some(next.policy_hash.as_str()),
+            Some(AnchoredField::WgPubkey) => Some(next.wg_pubkey_hash.as_str()),
+            Some(AnchoredField::Attestation) => next.attestation_hash.as_deref(),
+            Some(AnchoredField::AuthMembers) => next.auth_members_hash.as_deref(),
+            Some(AnchoredField::AuthAllowed) => next.auth_allowed_hash.as_deref(),
+            _ => None,
+        };
+        if expected != Some(blob.plaintext_hash_hex().as_str()) {
+            return Err(UpdateError::BundleInvalid(format!(
+                "anchor override conflicts with blob {}",
+                blob.asset_path
+            )));
+        }
     }
 
     next.validate().map_err(|e| {
@@ -444,23 +466,10 @@ pub(crate) async fn fetch_circle_asset_plain(
     circle_id: &str,
     path: &str,
 ) -> Result<Option<Vec<u8>>> {
-    let v = match ctx
-        .rpc
-        .raw_call("circle_asset", json!([circle_id, path]))
-        .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            let msg = e.to_string();
-            // Missing-asset shapes: explicit "not found" / "no such" /
-            // empty `result: null` (the RPC client surfaces this as
-            // "empty result").
-            if msg.contains("not found") || msg.contains("no such") || msg.contains("empty result")
-            {
-                return Ok(None);
-            }
-            return Err(anyhow!("circle_asset({circle_id}, {path}): {e}"));
-        }
+    let v = match ctx.rpc.circle_asset(circle_id, path).await {
+        Ok(Some(v)) => v,
+        Ok(None) => return Ok(None),
+        Err(e) => return Err(anyhow!("circle_asset({circle_id}, {path}): {e}")),
     };
     if v.is_null() {
         return Ok(None);
@@ -474,7 +483,11 @@ pub(crate) async fn fetch_circle_asset_plain(
                 return Ok(Some(s.as_bytes().to_vec()));
             }
         }
-        if let Some(s) = obj.get("bytes").and_then(Value::as_str) {
+        if let Some(s) = obj
+            .get("body_b64")
+            .or_else(|| obj.get("bytes"))
+            .and_then(Value::as_str)
+        {
             let decoded = octravpn_core::b64::decode(s.as_bytes())
                 .map_err(|e| anyhow!("circle_asset bytes b64: {e}"))?;
             return Ok(Some(decoded));
@@ -569,6 +582,23 @@ pub(crate) async fn read_sealed_asset(
     creds: &SealedAssetCreds,
     expected_hash: &str,
 ) -> Result<SealedRead> {
+    let immutable = snapshot_path(expected_hash, path)?;
+    match read_sealed_at(ctx, circle_id, &immutable, key_id, creds, expected_hash).await? {
+        SealedRead::Absent => {
+            read_sealed_at(ctx, circle_id, path, key_id, creds, expected_hash).await
+        }
+        result => Ok(result),
+    }
+}
+
+async fn read_sealed_at(
+    ctx: &ChainCtxV3,
+    circle_id: &str,
+    path: &str,
+    key_id: &str,
+    creds: &SealedAssetCreds,
+    expected_hash: &str,
+) -> Result<SealedRead> {
     // Sequence-12 path first: the chain hands back the envelope itself.
     // A miss falls through to the plain read for legacy / `public_read`
     // circles, where the envelope string is the asset body.
@@ -598,6 +628,11 @@ pub(crate) async fn read_sealed_asset(
             let Some(bytes) = fetch_circle_asset_plain(ctx, circle_id, path).await? else {
                 return Ok(SealedRead::Absent);
             };
+            // Public metadata may coexist with sealed membership resources.
+            // Its anchored content hash authenticates it without a read key.
+            if hex::encode(Sha256::digest(&bytes)) == expected_hash {
+                return Ok(SealedRead::Valid(bytes));
+            }
             let Ok(sealed) = String::from_utf8(bytes) else {
                 return Ok(SealedRead::Corrupt);
             };
@@ -634,7 +669,7 @@ fn build_blob_put_tx(
     )
     .with_context(|| format!("seal asset {} for circle {circle_id}", blob.asset_path))?;
     let mut payload = json!({
-        "path": &blob.asset_path,
+        "path": snapshot_path(&plaintext_hash, &blob.asset_path)?,
         "content_type": "application/octet-stream",
         "key_id": &blob.key_id,
         "plaintext_hash": &plaintext_hash,
@@ -740,7 +775,19 @@ pub(crate) async fn apply(
         blob_tx_hashes.push(hash);
     }
 
-    // Step 3: flip the anchor.
+    // The immutable meta-blob must also be readable before the anchor changes.
+    let meta_hash = put_state_root(ctx, &bundle.circle_id, &target, creds)
+        .await
+        .map_err(|e| UpdateError::BlobPutFailed {
+            asset_path: STATE_ROOT_PATH.into(),
+            index: bundle.blobs.len(),
+            committed_so_far: blob_tx_hashes.clone(),
+            source: e,
+        })?;
+    if let Some(meta_hash) = meta_hash {
+        blob_tx_hashes.push(meta_hash);
+    }
+
     let anchor_hash = submit_anchor_update(ctx, &bundle.circle_id, &target_anchor_hex)
         .await
         .map_err(|e| UpdateError::AnchorUpdateFailed {
@@ -749,19 +796,6 @@ pub(crate) async fn apply(
             source: e,
         })?;
 
-    // Step 4: emit the meta-blob (state-root.json itself) AFTER the
-    // anchor flip. See module-level docs for the rationale (until the
-    // HFHE-3 swap collapses this to one tx, the anchor briefly points
-    // at not-yet-served meta bytes; same-block ordering covers it).
-    let meta_hash = put_state_root(ctx, &bundle.circle_id, &target, creds)
-        .await
-        .map_err(|e| UpdateError::AnchorUpdateFailed {
-            target_anchor_hex: target_anchor_hex.clone(),
-            blob_tx_hashes: blob_tx_hashes.clone(),
-            source: e,
-        })?;
-    blob_tx_hashes.push(meta_hash);
-
     Ok(UpdateResult {
         new_anchor_hex: target_anchor_hex,
         blob_tx_hashes,
@@ -769,17 +803,30 @@ pub(crate) async fn apply(
     })
 }
 
-/// Seal + put `/state-root.json` for `sr`. `apply` writes it after the
-/// anchor flip; `circle bootstrap` writes a fresh circle's first one.
+/// Seal + put the immutable metadata for `sr`, before publishing its anchor.
 pub(crate) async fn put_state_root(
     ctx: &ChainCtxV3,
     circle_id: &str,
     sr: &StateRoot,
     creds: &SealedAssetCreds,
-) -> Result<String> {
+) -> Result<Option<String>> {
     let state_root_bytes = sr
         .canonical_bytes()
         .map_err(|e| anyhow!("canonical_bytes: {e}"))?;
+    let info = ctx.rpc.raw_call("circle_info", json!([circle_id])).await?;
+    match info.get("resource_mode").and_then(Value::as_str) {
+        Some("public_resources" | "public_read") => {
+            return crate::v3_boot::publication::put(
+                ctx,
+                circle_id,
+                &snapshot_path(&sr.anchor_hex()?, STATE_ROOT_PATH)?,
+                &state_root_bytes,
+            )
+            .await;
+        }
+        Some("sealed_read") => (),
+        _ => bail!("operator Circle resource mode is unavailable"),
+    }
     let meta_blob = BlobUpdate {
         asset_path: STATE_ROOT_PATH.to_string(),
         plaintext: zeroize::Zeroizing::new(state_root_bytes),
@@ -788,6 +835,7 @@ pub(crate) async fn put_state_root(
     };
     submit_sealed_put(ctx, circle_id, &meta_blob, creds)
         .await
+        .map(Some)
         .with_context(|| format!("submit {STATE_ROOT_PATH} put for {circle_id}"))
 }
 
@@ -821,7 +869,7 @@ pub(crate) fn parse_fee_floor(err: &str) -> Option<u64> {
 /// Seal, size the fee, submit — and if the chain still says the fee is
 /// under its floor, resubmit once at exactly the floor it reported.
 /// Returns the tx hash.
-async fn submit_sealed_put(
+pub(crate) async fn submit_sealed_put(
     ctx: &ChainCtxV3,
     circle_id: &str,
     blob: &BlobUpdate,
@@ -848,8 +896,8 @@ async fn submit_sealed_put(
         fee,
         "circle-update: submitting sealed put"
     );
-    match ctx.submit_call(tx.clone()).await {
-        Ok(hash) => Ok(hash),
+    let hash = match ctx.submit_call(tx.clone()).await {
+        Ok(hash) => hash,
         Err(e) => match parse_fee_floor(&e.to_string()) {
             Some(floor) if floor > fee => {
                 info!(
@@ -859,11 +907,38 @@ async fn submit_sealed_put(
                     "circle-update: chain floor is above the sized fee; resubmitting at the floor"
                 );
                 tx["ou"] = json!(floor.to_string());
-                ctx.submit_call(tx).await
+                ctx.submit_call(tx).await?
             }
-            _ => Err(e),
+            _ => return Err(e),
         },
-    }
+    };
+    let immutable = snapshot_path(&plaintext_hash, &blob.asset_path)?;
+    tokio::time::timeout(std::time::Duration::from_secs(120), async {
+        loop {
+            match read_sealed_at(
+                ctx,
+                circle_id,
+                &immutable,
+                &blob.key_id,
+                creds,
+                &plaintext_hash,
+            )
+            .await?
+            {
+                SealedRead::Valid(bytes) => {
+                    if bytes != blob.plaintext.as_slice() {
+                        bail!("sealed snapshot readback differs");
+                    }
+                    return Ok::<_, anyhow::Error>(());
+                }
+                SealedRead::Corrupt => bail!("sealed snapshot readback is invalid"),
+                SealedRead::Absent => tokio::time::sleep(std::time::Duration::from_secs(1)).await,
+            }
+        }
+    })
+    .await
+    .map_err(|_| anyhow!("sealed snapshot confirmation timeout: {hash}"))??;
+    Ok(hash)
 }
 
 async fn submit_anchor_update(
@@ -882,6 +957,16 @@ async fn submit_anchor_update(
         .submit_call(call)
         .await
         .with_context(|| format!("submit update_circle_state for {circle_id}"))?;
+    tokio::time::timeout(std::time::Duration::from_secs(120), async {
+        loop {
+            if ctx.get_circle_state_root(circle_id).await?.as_deref() == Some(target_anchor_hex) {
+                return Ok::<_, anyhow::Error>(());
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    })
+    .await
+    .map_err(|_| anyhow!("anchor confirmation timeout: {hash}"))??;
     info!(circle_id, new_anchor = target_anchor_hex, %hash, "circle-update: anchor committed");
     Ok(hash)
 }
@@ -1276,10 +1361,10 @@ mod tests {
     }
 
     #[test]
-    fn explicit_override_wins_over_blob_hash() {
+    fn explicit_override_must_match_blob_hash() {
         let current = sample_current_state_root();
         let forced_hash = h(0x55);
-        let bundle = UpdateBundle {
+        let mut bundle = UpdateBundle {
             circle_id: TEST_CIRCLE.into(),
             blobs: vec![BlobUpdate {
                 asset_path: "/policy.json".into(),
@@ -1288,12 +1373,19 @@ mod tests {
                 padding_class: PaddingClass::None,
             }],
             anchor_overrides: AnchorOverrides {
-                policy_hash: Some(forced_hash.clone()),
+                policy_hash: Some(forced_hash),
                 ..AnchorOverrides::default()
             },
         };
+        assert!(matches!(
+            compute_target_state_root(&current, &bundle),
+            Err(UpdateError::BundleInvalid(reason))
+                if reason == "anchor override conflicts with blob /policy.json"
+        ));
+        let actual = bundle.blobs[0].plaintext_hash_hex();
+        bundle.anchor_overrides.policy_hash = Some(actual.clone());
         let next = compute_target_state_root(&current, &bundle).unwrap();
-        assert_eq!(next.policy_hash, forced_hash);
+        assert_eq!(next.policy_hash, actual);
     }
 
     #[test]
@@ -1467,6 +1559,8 @@ mod tests {
         /// synchronously with `113 fee too low (min: N)`.
         blob_min_fee: Option<u64>,
         fee_rejections: u32,
+        sealed_readbacks: Vec<String>,
+        anchor_readbacks: Vec<Vec<String>>,
     }
 
     type SharedMock = Arc<Mutex<MockChain>>;
@@ -1484,6 +1578,7 @@ mod tests {
 
         let result = match method {
             "node_status" => json!({ "epoch": 1234 }),
+            "circle_info" => json!({ "resource_mode": "sealed_read" }),
             "octra_balance" => {
                 let g = state.lock();
                 let last_used_nonce = g.next_nonce.saturating_sub(1);
@@ -1531,14 +1626,17 @@ mod tests {
                     .unwrap_or("")
                     .to_string();
                 let path = arr.get(1).and_then(Value::as_str).unwrap_or("").to_string();
-                let g = state.lock();
-                match g.sealed.get(&(circle, path)) {
-                    Some((ciphertext_b64, plaintext_hash, key_id)) => json!({
-                        "ciphertext_b64": ciphertext_b64,
-                        "plaintext_hash": plaintext_hash,
-                        "key_id": key_id,
-                        "resource_mode": "sealed_read",
-                    }),
+                let mut g = state.lock();
+                match g.sealed.get(&(circle, path.clone())).cloned() {
+                    Some((ciphertext_b64, plaintext_hash, key_id)) => {
+                        g.sealed_readbacks.push(path);
+                        json!({
+                            "ciphertext_b64": ciphertext_b64,
+                            "plaintext_hash": plaintext_hash,
+                            "key_id": key_id,
+                            "resource_mode": "sealed_read",
+                        })
+                    }
                     None => {
                         return Ok(Json(json!({
                             "jsonrpc": "2.0",
@@ -1642,6 +1740,8 @@ mod tests {
                         ),
                     );
                 } else if method == "update_circle_state" {
+                    let readbacks = g.sealed_readbacks.clone();
+                    g.anchor_readbacks.push(readbacks);
                     if g.anchor_revert_remaining > 0 {
                         g.anchor_revert_remaining -= 1;
                         return Ok(Json(json!({
@@ -1782,9 +1882,19 @@ mod tests {
                 }
             })
             .collect();
-        assert_eq!(methods[0], "put:/policy.json");
-        assert_eq!(methods[1], "update_circle_state");
-        assert_eq!(methods[2], "put:/state-root.json");
+        let policy_path =
+            snapshot_path(&hex::encode(Sha256::digest(new_policy)), "/policy.json").unwrap();
+        let metadata_path = snapshot_path(&result.new_anchor_hex, STATE_ROOT_PATH).unwrap();
+        assert_eq!(methods[0], format!("put:{policy_path}"));
+        assert_eq!(methods[1], format!("put:{metadata_path}"));
+        assert_eq!(methods[2], "update_circle_state");
+        assert!(g.anchor_readbacks[0].contains(&policy_path));
+        assert!(g.anchor_readbacks[0].contains(&metadata_path));
+        assert_eq!(
+            g.sealed[&(TEST_CIRCLE.to_string(), STATE_ROOT_PATH.into())].1,
+            initial.anchor_hex().unwrap(),
+            "the previous metadata stays available at its legacy path"
+        );
     }
 
     /// Anchor-tx revert: blobs commit, anchor flip rejected,
@@ -1814,7 +1924,16 @@ mod tests {
                 blob_tx_hashes,
                 ..
             }) => {
-                assert_eq!(blob_tx_hashes.len(), 1, "policy blob committed");
+                assert_eq!(blob_tx_hashes.len(), 2, "policy and metadata committed");
+                let expected_policy =
+                    snapshot_path(&hex::encode(Sha256::digest(b"v3")), "/policy.json").unwrap();
+                let expected_metadata = snapshot_path(&target_anchor_hex, STATE_ROOT_PATH).unwrap();
+                {
+                    let g = state.lock();
+                    assert!(g.anchor_readbacks[0].contains(&expected_policy));
+                    assert!(g.anchor_readbacks[0].contains(&expected_metadata));
+                    assert_eq!(g.anchors[TEST_CIRCLE], initial.anchor_hex().unwrap());
+                }
                 let hash = retry_anchor(&ctx, TEST_CIRCLE, &target_anchor_hex)
                     .await
                     .expect("retry succeeds");
@@ -1840,7 +1959,8 @@ mod tests {
         let creds = SealedAssetCreds::new(TEST_PASS);
         let initial = sample_current_state_root();
         seed_circle(&state, TEST_CIRCLE, &initial);
-        state.lock().blob_reject_path = Some("/wg.pub".to_string());
+        state.lock().blob_reject_path =
+            Some(snapshot_path(&hex::encode(Sha256::digest(b"new-wg")), "/wg.pub").unwrap());
 
         let bundle = UpdateBundle {
             circle_id: TEST_CIRCLE.into(),

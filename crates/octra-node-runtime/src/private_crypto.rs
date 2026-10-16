@@ -236,6 +236,167 @@ fn verified(result: Result<bool, octra_hfhe::Error>) -> Result<bool, Error> {
         Err(_) => Ok(false),
     }
 }
+pub fn verify_commitment(
+    public: &PublicKey,
+    encoded: &[u8],
+    expected: &[u8],
+    cap: bool,
+) -> Result<bool, Error> {
+    let cipher = match decode_cipher(encoded, false, cap) {
+        Ok(cipher) => cipher,
+        Err(Error::Rejected(_)) => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    Ok(STANDARD.encode(cipher.commitment(public)).as_bytes() == expected)
+}
+/// Native claim/send amount binding. Its commitment is a Pedersen amount
+/// commitment, distinct from the ciphertext commitment checked above.
+pub fn verify_claim(
+    public: &PublicKey,
+    encoded: &[u8],
+    proof: &[u8],
+    commitment: &[u8],
+    strict: bool,
+    math: ScalarRule,
+) -> Result<(), Error> {
+    verify_claim_profile(
+        public,
+        encoded,
+        proof,
+        commitment,
+        strict,
+        math,
+        BoundProfile::Standard,
+    )
+}
+pub(crate) fn verify_claim_profile(
+    public: &PublicKey,
+    encoded: &[u8],
+    proof: &[u8],
+    commitment: &[u8],
+    strict: bool,
+    math: ScalarRule,
+    profile: BoundProfile,
+) -> Result<(), Error> {
+    if profile == BoundProfile::HistoricalMigration && public.supports_alias_rejection() {
+        return Err(Error::rejected(
+            "historical migration requires a historical proof profile",
+        ));
+    }
+    if profile != BoundProfile::HistoricalMigration && !public.supports_alias_rejection() {
+        return Err(Error::rejected(
+            "pvac pubkey proof circuit lacks alias rejection",
+        ));
+    }
+    let historical = profile == BoundProfile::HistoricalMigration;
+    let cipher = decode_cipher(encoded, strict, strict).map_err(|e| {
+        if historical {
+            e
+        } else {
+            e.prefix(b"bad claim cipher: ")
+        }
+    })?;
+    let proof = decode_zero_proof(proof).map_err(|e| {
+        if historical {
+            e
+        } else {
+            e.prefix(b"bad zero proof: ")
+        }
+    })?;
+    if historical {
+        let commitment = base64(commitment).map_err(|_| Error::rejected("invalid commitment"))?;
+        let commitment: [u8; 32] = commitment
+            .try_into()
+            .map_err(|_| Error::rejected("commitment must be 32 bytes"))?;
+        return if verified(zero::verify_bound(
+            public,
+            &cipher,
+            &proof,
+            &commitment,
+            profile,
+            strict,
+            math,
+        ))? {
+            Ok(())
+        } else {
+            Err(Error::rejected(
+                "historical migration proof verification failed",
+            ))
+        };
+    }
+    let commitment = bytes32(commitment, "amount_commitment must be 32 bytes").map_err(
+        |error| match &error {
+            Error::Rejected(reason) if reason.starts_with(b"Invalid_argument(") => {
+                error.prefix(b"bad amount_commitment: ")
+            }
+            _ => error,
+        },
+    )?;
+    if !verified(zero::verify_bound(
+        public,
+        &cipher,
+        &proof,
+        &commitment,
+        profile,
+        strict,
+        math,
+    ))? {
+        return Err(Error::rejected("bound zero proof verification failed"));
+    }
+    Ok(())
+}
+pub(crate) fn verify_range_bound(
+    public: &PublicKey,
+    encoded: &[u8],
+    proof: &[u8],
+    commitment: &[u8],
+    strict: bool,
+    math: ScalarRule,
+) -> Result<(), Error> {
+    if !public.supports_alias_rejection() {
+        return Err(Error::rejected(
+            "pvac pubkey proof circuit lacks alias rejection",
+        ));
+    }
+    let cipher = decode_cipher(encoded, strict, strict)?;
+    let raw = proof
+        .strip_prefix(b"rp_v1|")
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| Error::rejected("invalid range proof"))?;
+    let raw = base64(raw).map_err(|_| Error::rejected("invalid bound range proof"))?;
+    let commitment =
+        base64(commitment).map_err(|_| Error::rejected("invalid bound range proof"))?;
+    let commitment: [u8; 32] = commitment
+        .try_into()
+        .map_err(|_| Error::rejected("amount commitment must be 32 bytes"))?;
+    let proof = match ZeroProof::from_bound_range_bytes(&raw) {
+        Ok(proof) => proof,
+        Err(error) if error.is_operational() => return Err(Error::Unavailable(error)),
+        Err(_) => return Err(Error::rejected("bound range proof verification failed")),
+    };
+    if !verified(zero::verify_bound(
+        public,
+        &cipher,
+        &proof,
+        &commitment,
+        BoundProfile::Range,
+        strict,
+        math,
+    ))? {
+        return Err(Error::rejected("bound range proof verification failed"));
+    }
+    Ok(())
+}
+pub(crate) fn transition_hash(tag: &[u8], fields: &[&[u8]]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(tag);
+    for field in fields {
+        hash.update([0]);
+        hash.update(hex::encode(Sha256::digest(field)).as_bytes());
+    }
+    hex::encode(hash.finalize())
+}
 pub fn verify_range(
     public: &PublicKey,
     cipher: &[u8],

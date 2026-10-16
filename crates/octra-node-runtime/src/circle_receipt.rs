@@ -6,6 +6,31 @@ use octra_node_protocol::{
     native_integer::parse_integer,
     octb::work::{self, Budget, Request},
 };
+/// Native ContractVM.output_work on the caller's existing byte budget.
+pub(crate) fn output_value(
+    budget: &mut Budget,
+    value: &crate::octb::Value,
+    mut used: i64,
+    limit: i64,
+) -> Option<i64> {
+    let left = budget.event_left() - 16;
+    if value.numeric() {
+        let size = i64::try_from(value.number().bits() / 3 + 2).ok()?;
+        if size > budget.event_left() {
+            return None;
+        }
+        used = budget.charge(used, limit, 0, &[Request::Allocate(size)])?;
+    }
+    let text = value.text();
+    let mut size = work::text_size(left, &text)?;
+    if matches!(
+        value,
+        crate::octb::Value::Bytes(_) | crate::octb::Value::Bytes32(_)
+    ) {
+        size = size.max(work::encoded_size(text.len() as i64)? + 2);
+    }
+    budget.output(used, limit, size + 16)
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct ReceiptBudget {

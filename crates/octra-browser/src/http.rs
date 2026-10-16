@@ -337,6 +337,17 @@ async fn resolved_asset(
             Ok(bytes) => bytes,
             Err(error) => return failure(&error),
         }
+    } else if content_type == "text/css" {
+        match render::rewrite_stylesheet(
+            &asset.bytes,
+            &url,
+            &browser.prefix,
+            &browser.scope,
+            gateway,
+        ) {
+            Ok(bytes) => bytes,
+            Err(error) => return failure(&error),
+        }
     } else {
         asset.bytes.to_vec()
     };

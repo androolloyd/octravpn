@@ -26,10 +26,7 @@ impl ExEx<String> for Recorder {
 }
 
 fn chain() -> ChainIdentity {
-    ChainIdentity {
-        chain_id: "octra-test".into(),
-        genesis_root: StateRoot([1; 32]),
-    }
+    ChainIdentity::genesis("octra-test", StateRoot([1; 32]))
 }
 
 fn cursor(sequence: u64, epoch: u64, root: u8) -> Cursor {
@@ -141,7 +138,9 @@ async fn rejects_noncanonical_history_and_anchor_changes() {
         assert!(source.append(&mut tx, &invalid).await.is_err());
     }
     let mut other_chain = epoch(u64::MAX, 100, 3, 4);
-    other_chain.chain.genesis_root = StateRoot([8; 32]);
+    other_chain.chain.origin = octra_exex::ChainOrigin::Genesis {
+        state_root: StateRoot([8; 32]),
+    };
     assert!(source.append(&mut tx, &other_chain).await.is_err());
     source
         .append(&mut tx, &epoch(u64::MAX, 100, 3, 4))
@@ -196,4 +195,50 @@ async fn committed_sqlite_epoch_reaches_extension_and_checkpoints() {
         checkpoints.load(&chain(), "vpn").await.unwrap(),
         Some(cursor(1, 1, 2))
     );
+}
+
+#[tokio::test]
+async fn checkpoint_source_requires_the_configured_floor_before_writing_identity() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = pool(&temp.path().join("checkpoint.sqlite")).await;
+    let identity = ChainIdentity::checkpoint("public", 7, StateRoot([9; 32]));
+    for anchor in [cursor(0, 6, 9), cursor(0, 7, 8)] {
+        assert!(
+            SqliteEpochSource::<String>::open(db.clone(), identity.clone(), anchor)
+                .await
+                .is_err()
+        );
+    }
+    let exists: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM sqlite_master WHERE name='exex_origin'")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    assert_eq!(
+        exists, 0,
+        "invalid floor metadata cannot initialize a durable namespace"
+    );
+    let anchor = cursor(0, 7, 9);
+    let source = SqliteEpochSource::<String>::open(db.clone(), identity.clone(), anchor)
+        .await
+        .unwrap();
+    assert_eq!(source.head().await.unwrap(), anchor);
+    assert!(SqliteEpochSource::<String>::open_existing(
+        db.clone(),
+        identity.clone(),
+        cursor(0, 7, 8)
+    )
+    .await
+    .is_err());
+    let later = CommittedEpoch {
+        chain: identity.clone(),
+        cursor: cursor(1, 8, 10),
+        parent_root: anchor.state_root,
+        events: vec!["later".to_owned()],
+    };
+    let mut tx = db.begin().await.unwrap();
+    source.append(&mut tx, &later).await.unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(source.head().await.unwrap(), later.cursor);
+    assert_eq!(*source.load(Sequence(1)).await.unwrap().unwrap(), later);
 }

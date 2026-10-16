@@ -1,8 +1,11 @@
 # First-party Octra VPN
 
 Baseline: lite_node `7f9be4489870645cfcc95439638cde40f5da9f50` (2026-10-13).
-The Rust node port remains incomplete. [Source pin](rust-node/upstream.json)
-and [source map](rust-node/source-map.json) retain the entire runtime scope.
+The Rust node integrates VPN, ExEx and canonical Circle browsing, with a passing
+[paid local checkpoint](rust-node/checkpoints/2026-10-15/native-vpn.json).
+Full native parity and public deployment remain unqualified; [current status](rust-node/status.md)
+separates those gates. [Source pin](rust-node/upstream.json) and
+[source map](rust-node/source-map.json) retain the adopted runtime scope.
 
 Keep deterministic protocol logic in Circle apps. Embed the VPN service in
 the node and expose it through the wallet. Users who only need the VPN do
@@ -29,10 +32,11 @@ admission binds the wallet's session key and WG key to current eligibility.
 Traffic stops when authorization expires; settlement and refunds remain
 available after pause or retirement.
 
-The fork may add a missing general Circle capability after specifying its
-activation and replay behavior. No VPN-specific consensus operation is
-implemented in this step. Public network activation requires the team's
-release process; the local experimental branch does not activate anything.
+General Circle capabilities follow the adopted activation and replay rules.
+The VPN adds no consensus operation. Public network activation requires the
+team's release process. The paid qualification fixture has an explicit
+application activation profile committed to a dedicated private genesis;
+that fixture profile is refused for the public identity.
 
 The initial registry app is in `crates/octravpn-circle-registry`. It uses the
 existing OCWR1/OCWS1 ABI, authenticated host caller, stable KV storage and
@@ -47,8 +51,10 @@ code binding, batch rollback and replay checks. The Rust canonical store now
 publishes Irmin-compatible objects, epoch history and the ExEx outbox in one
 SQLite transaction. The live Rust validator actor now calls that boundary through
 `octra-node::consensus::Canonical`; four-validator local tests compose public
-Circle execution, browser state, VPN admission and ExEx. Production execution,
-activation and the complete native driver still require qualification.
+Circle execution, browser state, VPN admission and ExEx. The later paid fixture
+adds actual escrow, signed metering, settlement and active traffic recovery.
+Production activation and public-network interoperability require separate
+qualification; neither fixture is a full native-parity claim.
 
 `octra-node-protocol` ports the epoch-index commitment and folded consensus
 root. Its 134 differential cases use outputs from the real pinned OCaml
@@ -57,14 +63,18 @@ implementation. This validates that primitive, not the remaining runtime.
 `octra-node-runtime` reuses the native Rust WASM engine through a safe API
 with an explicit HFHE backend. Nine golden cases compare its complete
 registry results with the unmodified engine. `octra-pvac` directly links
-the latest native PVAC crypto; its owned handles avoid ordinary-operation
-IPC. The full backend adapter and isolated verifier worker remain to be wired.
+the adopted native PVAC crypto as a separate bridge/oracle. The native Rust
+launcher now wires `circle_hfhe::Backend`, using the Rust implementation through
+bounded execution/proof workers. Every retained/active profile and operational
+resource boundary still has its own qualification scope.
 
 The requested backend target is now pure Rust after exact compatibility passes.
 `octra-hfhe` ports the field, seeded RNG, keys, active/retained PRFs, ciphertext
 formats, seeded encryption, arithmetic, commitments and decryption with native
-oracle tests. Complete proofs, recryption and backend qualification remain;
-[HFHE gates](rust-node/hfhe-parity.json) keep the remaining crypto scope explicit.
+oracle tests. The final Rust HFHE release suite passed 49 tests, including the
+existing complete-proof and public-recryption fixtures. This is finite
+compatibility evidence; [HFHE gates](rust-node/hfhe-parity.json) preserve the
+remaining full-surface, side-channel and cross-architecture scope.
 
 Build and qualify the app:
 
@@ -78,9 +88,12 @@ python3 scripts/circle-apps/prepare-registry.py \
 
 The embedded VPN library uses a mandatory local session-authority capability.
 Real WireGuard admission, revocation, receipt replay floors, service cancellation
-and restart have integration tests. Those tests use supplied funding fixtures;
-the authority still needs the finalized settlement application's real state
-adapter. They do not establish a production funded session.
+and restart have integration tests. The pinned Circle/Program adapter now binds
+the actual finalized application's code, receipt domain/key, opening and escrow.
+The paid checkpoint deployed the unchanged main-v5 application and exercised
+real signed funding, receipts, settlement/refunds and operator restart through
+that adapter. It establishes isolated local funded operation, not production
+funding or public-chain readiness.
 
 Native browsing uses the same committed read snapshot for a page and its
 resources. The HTTP bridge opens `oct://` URLs, isolates Circle views, and routes
@@ -88,7 +101,11 @@ application calls through scoped host capabilities. Local live-consensus tests
 check view updates after a canonical commit and refusal while services are
 suspended. System client launch and public-network qualification remain open.
 
-Remaining work: complete the Rust runtime and consensus driver, bind the VPN
-consumer to finalized app state, port the money protocol to Circle execution,
-finish native browsing and authenticated client/relay transport, then qualify
-combined node sync, restart, recovery and funded tunnel operation.
+Remaining release gates include final broader runtime/Chromium results, actual
+public snapshot import and P2P/HTTP catch-up/restart, external Tailscale/TLS and
+additional-device navigation, production private-admin setup/upgrade authority,
+and any unmapped native behavior in the source inventory. The protocol has no
+commission and pays agreed traffic in OCT. Its two-step settlement still assumes
+timely cooperation; local adversarial amount checks do not prove fair payment
+when an operator or client refuses to complete settlement. Multi-hop selection
+remains unsupported and is refused before funding.

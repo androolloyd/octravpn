@@ -50,10 +50,8 @@ impl Fixture {
     async fn new(chain: &str) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let state = StateBatch::default();
-        let chain = ChainIdentity {
-            chain_id: chain.into(),
-            genesis_root: StateRoot(finality_host::root(None, &state, &[])),
-        };
+        let chain =
+            ChainIdentity::genesis(chain, StateRoot(finality_host::root(None, &state, &[])));
         let store = Arc::new(
             CanonicalStore::create(
                 &dir.path().join("node.db"),
@@ -93,6 +91,9 @@ impl Fixture {
     }
     fn executed() -> ExecutedEpoch {
         ExecutedEpoch {
+            epoch_observation: None,
+            metrics: octra_node_protocol::metrics::Epoch::default(),
+            vm_receipts: std::collections::BTreeMap::default(),
             state: StateBatch::default().snapshot(),
             transactions: vec![],
             consensus_receipts: vec![],

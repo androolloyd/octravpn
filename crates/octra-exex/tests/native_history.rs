@@ -35,10 +35,14 @@ fn parse(value: &Value) -> NativeHistory {
 }
 
 fn chain() -> ChainIdentity {
-    ChainIdentity {
-        chain_id: "native-storage-fixture".into(),
-        genesis_root: StateRoot([71; 32]),
-    }
+    // The source starts at native epoch zero, so its explicit Genesis origin
+    // must name the fixture's actual folded root rather than an unrelated key.
+    let cases = fixture();
+    let root = hex::decode(cases["full"]["anchor"]["state_root"].as_str().unwrap()).unwrap();
+    ChainIdentity::genesis(
+        "native-storage-fixture",
+        StateRoot(root.try_into().unwrap()),
+    )
 }
 
 async fn pool(path: &Path) -> SqlitePool {

@@ -18,6 +18,16 @@ pub struct CtrRng {
     has_buffered: bool,
 }
 
+/// Native PVAC backend identity used by consensus profiles and key records.
+pub fn aes_kat() -> [u8; 16] {
+    let key: [u8; 32] = Sha256::digest(b"pvac.aes.kat.key").into();
+    let mut rng = CtrRng::seeded(&key);
+    let mut output = [0; 16];
+    output[..8].copy_from_slice(&rng.next_u64().to_le_bytes());
+    output[8..].copy_from_slice(&rng.next_u64().to_le_bytes());
+    output
+}
+
 impl Drop for CtrRng {
     fn drop(&mut self) {
         self.counter.zeroize();

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-exclude = ["proofs/kani", "fuzz", "vendor/ark-relations", "vendor/octra-circle-wasm-host"]
+exclude = ["proofs/kani", "fuzz", "vendor/ark-relations", "vendor/octra-circle-wasm-host", "vendor/octra-lmdb"]
 members = [
     "crates/octravpn-analytics",
     "crates/octravpn-audit-chain",
@@ -77,10 +77,9 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 authors = ["OctraVPN contributors"]
-# Real floor: the code uses the generic `std::num::NonZero` API (stable
-# 1.79). The pinned toolchain (rust-toolchain.toml) is newer; this only
-# declares the minimum the source actually compiles on.
-rust-version = "1.79"
+# The selected YAML, proof and CLI dependencies require Rust 1.89.
+# CI and release qualification use the separately pinned toolchain.
+rust-version = "1.89"
 
 [workspace.dependencies]
 anyhow      = "1"

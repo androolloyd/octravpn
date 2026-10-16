@@ -119,14 +119,23 @@ fn execute(
         })
     };
     let mut host = Epoch::new(
-        Profile {
-            fields: RuleMode::Active,
-            strict: true,
-            math: ScalarRule::Wide,
-            result: ResultPolicy::Recoverable,
+        octra_node_runtime::private_key::Policy {
+            balance: Profile {
+                fields: RuleMode::Active,
+                strict: true,
+                math: ScalarRule::Wide,
+                result: ResultPolicy::Recoverable,
+            },
+            owner: RuleMode::Prior,
+            cipher: RuleMode::Prior,
         },
-        1,
+        octra_node_runtime::private_epoch::Limits {
+            max_fhe: 1,
+            max_stealth: 1,
+        },
+        request.validators.epoch,
         Some(gate),
+        None,
     );
     let executed = epoch_execution::execute(
         &request,
@@ -134,7 +143,19 @@ fn execute(
         std::slice::from_ref(tx),
         &mut ledger,
         state,
-        |tx, ledger, state| host.process(tx, ledger, state, |_| Ok(public.map(<[u8]>::to_vec))),
+        |tx, ledger, state| {
+            host.process(
+                tx,
+                ledger,
+                state,
+                |_| Ok(public.map(<[u8]>::to_vec)),
+                |_| {
+                    Err(octra_node_runtime::execution::Error(
+                        "unexpected key persistence".into(),
+                    ))
+                },
+            )
+        },
     );
     match executed {
         Ok(executed) => {
@@ -198,10 +219,10 @@ async fn signed_private_epochs_publish_exex_and_recover_with_bound_receipts() {
         .set(&[b"meta", b"emission_remaining"], b"0".to_vec())
         .unwrap();
     initial.acknowledge_commit().unwrap();
-    let chain = ChainIdentity {
-        chain_id: "private-application".into(),
-        genesis_root: StateRoot(common::root(None, &initial, &[])),
-    };
+    let chain = ChainIdentity::genesis(
+        "private-application",
+        StateRoot(common::root(None, &initial, &[])),
+    );
     let authority = Authority(common::Authority {
         seed: 1,
         chain: chain.clone(),
@@ -362,6 +383,9 @@ async fn signed_private_epochs_publish_exex_and_recover_with_bound_receipts() {
             .is_none());
         let identity = tx.identity_bytes().unwrap();
         let executed = ExecutedEpoch {
+            epoch_observation: None,
+            metrics: octra_node_protocol::metrics::Epoch::default(),
+            vm_receipts: std::collections::BTreeMap::default(),
             state: candidate.snapshot(),
             transactions: vec![NativeTransaction {
                 txid: parent.txid_hi + 1,

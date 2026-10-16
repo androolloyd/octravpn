@@ -90,13 +90,16 @@ impl Subcommand for ClaimEarningsArgs {
     }
 }
 
-/// `octravpn-node settle-claim --session-id <id> --bytes-used <n>`
+/// `octravpn-node settle-claim --session-id <id> --bytes-used <n> --net <microOCT>`
 #[derive(clap::Args, Debug)]
 pub(crate) struct SettleClaimArgs {
     #[arg(long)]
     pub(crate) session_id: u64,
     #[arg(long)]
     pub(crate) bytes_used: u64,
+    /// Operator-agreed credit in microOCT; required for current settlement.
+    #[arg(long)]
+    pub(crate) net: u64,
 }
 
 #[async_trait]
@@ -106,7 +109,7 @@ impl Subcommand for SettleClaimArgs {
     }
     async fn dispatch(self, ctx: CliContext<'_>) -> Result<i32> {
         ctx.hub()
-            .settle_claim(self.session_id, self.bytes_used)
+            .settle_claim(self.session_id, self.bytes_used, self.net)
             .await?;
         Ok(0)
     }

@@ -7,6 +7,7 @@ use octra_hfhe::scalar::ScalarRule;
 use octra_node_protocol::{
     consensus::EpochHeader,
     preverify_commit::Gate,
+    state::Ledger,
     transaction::{OpType, RuleMode},
     transaction_policy,
 };
@@ -16,14 +17,14 @@ use octra_node_protocol::{
 use octra_node_runtime::{
     account_store,
     canonical::Head,
-    circle_transaction,
+    circle_transaction, compute_transaction,
     consensus_bundle::Rules,
     epoch_execution::{self, Effect},
     execution::{Error, OperationHost, Route},
     execution_rules::Bound,
     private_balance,
     private_crypto::ResultPolicy,
-    private_epoch, validator_epoch, validator_transaction,
+    private_epoch, program_transaction, validator_epoch, validator_transaction,
 };
 use octra_node_runtime::{
     preverify_state,
@@ -44,8 +45,11 @@ pub(super) struct Stage<'a> {
     pub capture: bool,
 }
 pub(super) struct Staged {
+    pub epoch_observation: octra_node_protocol::epoch_journal::Observation,
+    pub metrics: octra_node_protocol::metrics::Epoch,
     pub state: Snapshot,
     pub transactions: Vec<NativeTransaction>,
+    pub vm_receipts: octra_node_runtime::canonical::VmReceipts,
     pub artifacts: epoch_execution::Artifacts,
     pub gate: Gate,
 }
@@ -55,6 +59,18 @@ impl Native {
         request: Stage<'_>,
         roots: &BTreeMap<i64, Option<Vec<u8>>>,
     ) -> Result<Staged> {
+        self.stage_with_ledger(request, roots, account_store::ledger)
+    }
+
+    /// Finalized admission can transfer its unchanged ledger. Other callers
+    /// still load only after the canonical-parent check below.
+    pub(super) fn stage_with_ledger(
+        &self,
+        request: Stage<'_>,
+        roots: &BTreeMap<i64, Option<Vec<u8>>>,
+        load_ledger: impl FnOnce(&StateBatch) -> Result<Ledger, octra_node_protocol::transaction::Error>,
+    ) -> Result<Staged> {
+        let execution_started = std::time::Instant::now();
         let Stage {
             parent,
             mut state,
@@ -73,7 +89,7 @@ impl Native {
             hex::encode(state.published_root()?) == parent.ledger_root,
             "execution snapshot differs from canonical parent"
         );
-        let mut ledger = account_store::ledger(&state)?;
+        let mut ledger = load_ledger(&state)?;
         let keys = validators
             .validators
             .iter()
@@ -115,11 +131,26 @@ impl Native {
                     gate,
                 }
             },
-        );
+        )
+        .with_preverify_gate(gate);
+        let mut programs = program_transaction::Calls::new(
+            &self.runtime,
+            context.circle,
+            octra_node_runtime::program::artifact::SourceRules::captured(context.fold.context()),
+            epoch,
+            header.ts,
+            previous.as_bytes(),
+            config.max_multi_exec_calls,
+        )?;
         let mut private = private_epoch::Epoch::new(
-            self.private_profile(context, epoch),
-            config.max_fhe,
+            self.private_policy(context, epoch),
+            private_epoch::Limits {
+                max_fhe: config.max_fhe,
+                max_stealth: config.max_stealth,
+            },
+            epoch,
             Some(gate),
+            config.migration.as_deref(),
         );
         let root_at = |head| roots.get(&head).cloned().flatten();
         let mut validators = validator_transaction::Host {
@@ -134,6 +165,17 @@ impl Native {
             },
         };
         let committed = state.snapshot();
+        let replay = octra_node_runtime::compute_replay::NativeReplay::new(&self.runtime);
+        let mut settlement = octra_node_runtime::compute_settle::Service::new(replay);
+        let mut compute = compute_transaction::Host {
+            chain: &header.chain_id,
+            epoch,
+            fold: &context.fold,
+            settle: rules.envelope.settle,
+            previous_root: previous.as_bytes(),
+            committed_head: Some(&committed),
+            verifier: Some(&mut settlement),
+        };
         state.begin()?;
         let request = epoch_execution::Request {
             validators: validator_epoch::Request {
@@ -176,10 +218,28 @@ impl Native {
                     | OpType::Decrypt
                     | OpType::Stealth
                     | OpType::Claim
-                    | OpType::KeySwitch => {
-                        private.process(tx, ledger, state, |hash| self.key_blob(hash))
+                    | OpType::KeySwitch
+                    | OpType::Private
+                    | OpType::Recrypt => private.process(
+                        tx,
+                        ledger,
+                        state,
+                        |hash| self.key_blob(hash),
+                        |key| self.persist_key(key),
+                    ),
+                    OpType::CircleCall => calls.process(tx, ledger, state),
+                    OpType::ComputeFund | OpType::ComputeReturn | OpType::ComputeSettle => {
+                        compute.process(tx, ledger, state)
                     }
-                    OpType::CircleCall | OpType::CircleDeploy | OpType::CircleProgramUpdate => {
+                    OpType::ContractDeploy
+                    | OpType::ProgramDeploy
+                    | OpType::ContractCall
+                    | OpType::ProgramExec
+                    | OpType::MultiExec
+                    | OpType::ContractUpgrade => programs.process(tx, ledger, state),
+                    _ if octra_node_runtime::execution::route(tx)
+                        == octra_node_runtime::execution::Route::CircleOperation =>
+                    {
                         calls.process(tx, ledger, state)
                     }
                     _ => Err(Error(format!(
@@ -211,7 +271,11 @@ impl Native {
                     identity: identity.clone(),
                     transaction: identity,
                     proof: ArchiveProof::Exact,
-                    receipt: calls.receipts().get(&hash).cloned(),
+                    receipt: calls
+                        .receipts()
+                        .get(&hash)
+                        .or_else(|| programs.receipts().get(&hash))
+                        .cloned(),
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -254,9 +318,38 @@ impl Native {
                 .collect::<Vec<_>>();
             gate.check(&checked, rules.crypto_active, &rules.stealth_minimum)?;
         }
+        let mut vm_receipts = calls.receipts().clone();
+        for (hash, receipt) in programs.receipts() {
+            ensure!(
+                vm_receipts.insert(hash.clone(), receipt.clone()).is_none(),
+                "duplicate auxiliary VM receipt"
+            );
+        }
         Ok(Staged {
+            epoch_observation: octra_node_protocol::epoch_journal::Observation::from_rewards(
+                header.ts,
+                &executed.artifacts.confirmed_fees,
+                &executed.footer.plan,
+                &executed.footer.credits,
+            )
+            .map_err(anyhow::Error::msg)?,
+            metrics: octra_node_protocol::metrics::Epoch {
+                transactions: executed
+                    .artifacts
+                    .confirmed
+                    .iter()
+                    .map(|(input, _)| {
+                        octra_node_protocol::metrics::Record::of_transaction(
+                            &transactions[*input],
+                            &rules.stealth_minimum,
+                        )
+                    })
+                    .collect(),
+                duration: execution_started.elapsed().as_secs_f64(),
+            },
             state: state.snapshot(),
             transactions: archived,
+            vm_receipts,
             artifacts: executed.artifacts,
             gate,
         })
@@ -276,6 +369,17 @@ impl Native {
             } else {
                 ResultPolicy::Legacy
             },
+        }
+    }
+    pub(super) fn private_policy(
+        &self,
+        context: &Bound,
+        epoch: i64,
+    ) -> octra_node_runtime::private_key::Policy {
+        octra_node_runtime::private_key::Policy {
+            balance: self.private_profile(context, epoch),
+            owner: context.owner_migration,
+            cipher: context.cipher_migration,
         }
     }
 }

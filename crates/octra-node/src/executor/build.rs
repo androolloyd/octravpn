@@ -100,9 +100,13 @@ impl Native {
                 &context.authority().receipts,
             )
             .map_err(unavailable)?;
-        let (inputs, ordinary) = queue
-            .capture(&draft, &rules, &capacity)
-            .map_err(unavailable)?;
+        let captured = draft.clone();
+        let selected = queue.clone();
+        let (inputs, ordinary) = run_worker(self.worker.clone(), move || {
+            selected.capture(&captured, &rules, &capacity)
+        })
+        .await
+        .map_err(unavailable)?;
         let previous = self.previous_circle(&draft).await.map_err(unavailable)?;
         self.start_build(
             draft,
@@ -266,8 +270,11 @@ impl Native {
             parent_commit: context.parent_commit().cloned(),
         };
         let execution = ExecutedEpoch {
+            epoch_observation: Some(staged.epoch_observation),
+            metrics: staged.metrics,
             state: staged.state,
             transactions: staged.transactions,
+            vm_receipts: staged.vm_receipts,
             consensus_receipts: raw.receipts_json.clone(),
             reward_source: reward_attribution::to_source(&reward).map_err(unavailable)?,
             date: plan.header.epoch_id,

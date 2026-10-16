@@ -1,6 +1,8 @@
 //! HTML is rewritten by a bounded HTML5 parser and served in an opaque sandbox.
 use crate::{url::encode_path, Error, OctUrl, MAX_ASSET_BYTES};
-use lol_html::{element, HtmlRewriter, MemorySettings, Settings};
+use lol_html::{element, html_content::ContentType, text, HtmlRewriter, MemorySettings, Settings};
+use std::cell::RefCell;
+mod css;
 
 pub fn escape(input: &str) -> String {
     input
@@ -57,6 +59,23 @@ pub(crate) fn rewrite_gateway(input: &[u8], base: &OctUrl, scope: &str) -> Resul
     })
 }
 
+pub(crate) fn rewrite_stylesheet(
+    input: &[u8],
+    base: &OctUrl,
+    prefix: &str,
+    scope: &str,
+    gateway: bool,
+) -> Result<Vec<u8>, Error> {
+    let route = |url: &OctUrl| {
+        if gateway {
+            gateway_route(Some(scope), url)
+        } else {
+            route(prefix, scope, "asset", url)
+        }
+    };
+    css::rewrite(input, base, &route)
+}
+
 fn rewrite(
     input: &[u8],
     base: &OctUrl,
@@ -75,12 +94,17 @@ fn rewrite(
         output.extend_from_slice(b"</script>");
     }
     let mut overflow = false;
+    let style_buffer = RefCell::new(String::new());
     let settings = Settings::new()
         .with_memory_settings(
             MemorySettings::default().with_max_allowed_memory_usage(MAX_ASSET_BYTES),
         )
         .append_element_content_handler(element!("*", |el| {
             let tag = el.tag_name();
+            if let Some(style) = el.get_attribute("style") {
+                let rewritten = css::rewrite(style.as_bytes(), base, &|url| route("asset", url))?;
+                el.set_attribute("style", std::str::from_utf8(&rewritten)?)?;
+            }
             if matches!(
                 tag.as_str(),
                 "base" | "iframe" | "frame" | "frameset" | "object" | "embed" | "portal"
@@ -155,6 +179,20 @@ fn rewrite(
                     .is_some_and(|r| r.eq_ignore_ascii_case("stylesheet"))
             {
                 el.remove();
+            }
+            Ok(())
+        }))
+        .append_element_content_handler(text!("style", |chunk| {
+            let mut buffer = style_buffer.borrow_mut();
+            if chunk.as_str().len() > MAX_ASSET_BYTES.saturating_sub(buffer.len()) {
+                return Err(Error::TooLarge.into());
+            }
+            buffer.push_str(chunk.as_str());
+            chunk.remove();
+            if chunk.last_in_text_node() {
+                let rewritten = css::rewrite(buffer.as_bytes(), base, &|url| route("asset", url))?;
+                chunk.after(std::str::from_utf8(&rewritten)?, ContentType::Html);
+                buffer.clear();
             }
             Ok(())
         }));

@@ -4,6 +4,7 @@
 pub mod admission;
 pub mod config;
 pub mod evidence;
+pub mod intent;
 pub mod policy;
 pub mod ready;
 pub mod registry;

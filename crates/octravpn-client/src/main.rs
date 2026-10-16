@@ -11,6 +11,7 @@ mod commands;
 mod config;
 mod discover;
 mod discover_v2;
+mod migration;
 mod portal;
 mod runner;
 mod settle_state;
@@ -45,14 +46,27 @@ enum Cmd {
         #[arg(long, default_value_t = 50)]
         limit: u64,
     },
-    /// Open a 1..3 hop session and run the tunnel until ctrl-c.
+    /// Run an authenticated single-exit session until ctrl-c.
     Connect {
-        #[arg(long, default_value_t = 3)]
+        #[arg(long, default_value_t = 1)]
         hops: u8,
         #[arg(long)]
         region: Option<String>,
         #[arg(long)]
         deposit: u64,
+        /// Public IPv4 UDP destination reached through the selected Circle.
+        #[arg(
+            long,
+            required_unless_present = "tun_name",
+            conflicts_with = "tun_name"
+        )]
+        udp_target: Option<std::net::SocketAddrV4>,
+        #[arg(long, requires = "udp_target")]
+        udp_bind: Option<std::net::SocketAddrV4>,
+        /// Raw IPv4 through a TUN at its session-derived /32. Routes must be
+        /// provisioned explicitly on the host; this command changes no routes.
+        #[arg(long, conflicts_with_all = ["udp_target", "udp_bind"])]
+        tun_name: Option<String>,
     },
     /// Durable settlement recovery operations.
     Settle {
@@ -118,9 +132,8 @@ enum Cmd {
         #[command(subcommand)]
         op: DiscoverOp,
     },
-    /// v3 substrate: open a session against the configured operator
-    /// circle (`[v3].circle_id`) on the v3 chain-minimal program
-    /// (`program/main-v3.aml`). Reads `[v3]` config + falls back to
+    /// Open a session against the configured operator Circle on the current
+    /// receipt-key-pinned settlement app. Reads `[v3]` config + falls back to
     /// `[wallet].secret_path` when `[v3].wallet_key_path` is unset.
     /// Gated on `[chain].protocol_version = "v3"`.
     ConnectV3 {
@@ -138,15 +151,22 @@ enum Cmd {
         /// when the operator deliberately stalls.
         #[arg(long, default_value_t = false)]
         no_show: bool,
-        /// Plumb a deterministic `bytes_used` figure into the settle
-        /// path. Only useful for tests; production clients leave this
-        /// unset and read the value from session counters (deferred —
-        /// real bring-up is the WG follow-up).
+        /// Run an explicit settlement fixture with this byte count. Cannot
+        /// be combined with live UDP forwarding.
         #[arg(long)]
         bytes_used: Option<u64>,
+        /// Forward one local UDP source through the authenticated operator.
+        /// The target is a public IPv4 socket address, for example 1.1.1.1:53.
+        #[arg(long)]
+        udp_target: Option<std::net::SocketAddrV4>,
+        /// Loopback listener for --udp-target. Port 0 selects an unused port.
+        #[arg(long, requires = "udp_target")]
+        udp_bind: Option<std::net::SocketAddrV4>,
+        /// Raw IPv4 TUN; requires the operator's ip_tunnel_v1 capability.
+        #[arg(long, conflicts_with_all = ["udp_target", "udp_bind", "bytes_used", "no_show"])]
+        tun_name: Option<String>,
     },
-    /// v2 substrate: open a session against an authorized circle and
-    /// print the WG handoff. The v1.1 `connect` path is preserved.
+    /// Historical v2 connection ABI; rejected before funds are submitted.
     ConnectV2 {
         /// Tailnet id (decimal). Looked up against the v2 program.
         #[arg(long)]
@@ -279,6 +299,12 @@ async fn main() -> Result<()> {
         Cmd::BugReport { out } => {
             return commands::bugreport(&cli.config, out.as_deref());
         }
+        Cmd::Settle {
+            op: commands::SettleCmd::Migrate(args),
+        } => {
+            let cfg = ClientConfig::load(&cli.config)?;
+            return migration::run(&cfg, args);
+        }
         Cmd::Serve { cmd } => {
             return commands::serve(cmd.clone().into_inner());
         }
@@ -318,7 +344,27 @@ async fn main() -> Result<()> {
         _ => {}
     }
 
-    let cfg = Arc::new(ClientConfig::load(&cli.config)?);
+    let mut effective = ClientConfig::load(&cli.config)?;
+    if let Cmd::ConnectV3 {
+        tailnet_id,
+        circle_id,
+        max_pay,
+        ..
+    } = &cli.cmd
+    {
+        if let Some(value) = tailnet_id {
+            effective.v3.tailnet_id = *value;
+        }
+        if let Some(value) = circle_id {
+            effective.v3.circle_id = value.clone();
+        }
+        if let Some(value) = max_pay {
+            effective.v3.max_pay = *value;
+        }
+    }
+    // Receipt context and durable recovery bind the command-line Circle
+    // before the client and transaction queue are opened.
+    let cfg = Arc::new(effective);
     let client = Arc::new(runner::Client::new(cfg.clone()).await?);
 
     match cli.cmd {
@@ -344,9 +390,14 @@ async fn main() -> Result<()> {
             hops,
             region,
             deposit,
+            udp_target,
+            udp_bind,
+            tun_name,
         } => {
             info!(hops, ?region, deposit, "connecting");
-            client.connect(hops, region.as_deref(), deposit).await
+            let mode = forwarding_mode(udp_target, udp_bind, tun_name)
+                .ok_or_else(|| anyhow::anyhow!("connect requires --udp-target or --tun-name"))?;
+            Box::pin(client.connect(&cfg, hops, region.as_deref(), deposit, mode)).await
         }
         Cmd::Settle { op } => commands::run_settle(&client, op).await,
         Cmd::Reclaim { session_id } => settler::reclaim(&client, &session_id).await,
@@ -374,29 +425,25 @@ async fn main() -> Result<()> {
             .await
         }
         Cmd::ConnectV3 {
-            tailnet_id,
-            circle_id,
-            max_pay,
+            tailnet_id: _,
+            circle_id: _,
+            max_pay: _,
             no_show,
             bytes_used,
+            udp_target,
+            udp_bind,
+            tun_name,
         } => {
             // Per-protocol dispatch — v3 is the only variant routed
             // through `protocol_version()` for now; v1.1 and v2 keep
             // their own connect subcommands untouched.
             match cfg.protocol_version()? {
                 ProtocolVersion::V3 => {
-                    let mut effective_cfg = (*cfg).clone();
-                    if let Some(t) = tailnet_id {
-                        effective_cfg.v3.tailnet_id = t;
-                    }
-                    if let Some(c) = circle_id {
-                        effective_cfg.v3.circle_id = c;
-                    }
-                    if let Some(m) = max_pay {
-                        effective_cfg.v3.max_pay = m;
-                    }
-                    let cfg_arc = Arc::new(effective_cfg);
-                    v3_runner::connect_v3(&client, &cfg_arc, bytes_used, no_show).await
+                    let mode = forwarding_mode(udp_target, udp_bind, tun_name);
+                    Box::pin(v3_runner::connect_v3(
+                        &client, &cfg, bytes_used, no_show, mode,
+                    ))
+                    .await
                 }
                 ProtocolVersion::V1_1 | ProtocolVersion::V2 => {
                     anyhow::bail!(
@@ -417,4 +464,21 @@ async fn main() -> Result<()> {
         | Cmd::Fetch(_)
         | Cmd::Portal { .. } => unreachable!(),
     }
+}
+
+fn forwarding_mode(
+    target: Option<std::net::SocketAddrV4>,
+    bind: Option<std::net::SocketAddrV4>,
+    name: Option<String>,
+) -> Option<wireguard::Mode> {
+    if let Some(name) = name {
+        return Some(wireguard::Mode::Ip { name });
+    }
+    target.map(|target| {
+        wireguard::Mode::Udp(wireguard::Forward {
+            bind: bind
+                .unwrap_or_else(|| std::net::SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0)),
+            target,
+        })
+    })
 }

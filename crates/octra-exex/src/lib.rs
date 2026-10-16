@@ -18,6 +18,7 @@
 //! no mutable execution-state or validator-signing capability. Extensions that
 //! submit transactions obtain an explicit submission capability from the host.
 
+mod identity;
 pub mod native_history;
 pub mod sqlite;
 pub mod sqlite_source;
@@ -29,16 +30,7 @@ use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 use tokio::{sync::watch, task::JoinHandle};
 
-/// Identifies a chain independently of an operator-selected label.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ChainIdentity {
-    pub chain_id: String,
-    pub genesis_root: StateRoot,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-/// The 32-byte folded consensus root, not the raw Irmin ledger-root string.
-pub struct StateRoot(pub [u8; 32]);
+pub use octra_node_protocol::chain_identity::{ChainIdentity, ChainOrigin, StateRoot};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct EpochId(pub u64);

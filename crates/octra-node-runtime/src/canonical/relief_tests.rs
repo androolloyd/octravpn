@@ -62,16 +62,16 @@ async fn relief_archive_survives_pruning_and_reauthenticates_every_witness() {
     let (_, index) =
         epoch_index::next_root(hex::encode(epoch_index::genesis_root()).as_bytes(), 0, &[])
             .unwrap();
-    let chain = ChainIdentity {
-        chain_id: String::from_utf8(DEVNET.to_vec()).unwrap(),
-        genesis_root: StateRoot(
+    let chain = ChainIdentity::genesis(
+        String::from_utf8(DEVNET.to_vec()).unwrap(),
+        StateRoot(
             epoch_index::folded_state_root(
                 hex::encode(state.root().unwrap()).as_bytes(),
                 hex::encode(index).as_bytes(),
             )
             .unwrap(),
         ),
-    };
+    );
     let path = directory.path().join("history.db");
     let store = CanonicalStore::create(&path, chain.clone(), state.clone(), 0)
         .await

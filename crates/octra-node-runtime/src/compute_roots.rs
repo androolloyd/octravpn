@@ -11,12 +11,30 @@ use octra_node_protocol::{
     oce1::{Reader, Writer},
 };
 pub const WINDOW: i64 = 65;
+#[derive(Clone, Debug)]
 pub struct Root {
-    pub chain_id: Vec<u8>,
-    pub epoch: i64,
-    pub state: Vec<u8>,
-    pub validators: ValidatorSet,
-    pub tree: Snapshot,
+    pub(crate) chain_id: Vec<u8>,
+    pub(crate) epoch: i64,
+    pub(crate) state: Vec<u8>,
+    pub(crate) validators: ValidatorSet,
+    pub(crate) tree: Snapshot,
+}
+impl Root {
+    pub fn chain_id(&self) -> &[u8] {
+        &self.chain_id
+    }
+    pub fn epoch(&self) -> i64 {
+        self.epoch
+    }
+    pub fn state(&self) -> &[u8] {
+        &self.state
+    }
+    pub fn validators(&self) -> &ValidatorSet {
+        &self.validators
+    }
+    pub fn tree(&self) -> &Snapshot {
+        &self.tree
+    }
 }
 fn error(e: impl std::fmt::Display) -> Error {
     Error(e.to_string())
@@ -58,29 +76,46 @@ pub fn remember(
         projected.graft(&[b"circles"], &circles).map_err(error)?;
     }
     let tree = projected.snapshot();
-    let mut writer = Writer::new();
-    writer.put_bytes(&cert.chain_id).map_err(error)?;
-    writer.put_u64(cert.epoch_id as u64).map_err(error)?;
-    writer.put_hash32(&previous).map_err(error)?;
-    writer
-        .put_bytes(&parent.validator_set.encode().map_err(error)?)
-        .map_err(error)?;
-    writer
-        .put_bytes(hex::encode(tree.root().map_err(error)?).as_bytes())
-        .map_err(error)?;
     let slot = slot(cert.epoch_id);
-    state
-        .set(&[b"compute", b"roots", &slot, b"meta"], writer.into_bytes())
-        .map_err(error)?;
-    state
-        .graft(&[b"compute", b"roots", &slot, b"data"], &tree)
-        .map_err(error)
+    save_at(
+        state,
+        &[b"compute", b"roots", &slot],
+        &Root {
+            chain_id: cert.chain_id.clone(),
+            epoch: cert.epoch_id,
+            state: previous,
+            validators: parent.validator_set.clone(),
+            tree,
+        },
+    )
 }
 pub fn load(state: &StateBatch, epoch: i64) -> Result<Option<Root>, Error> {
     let slot = slot(epoch);
-    let snapshot = state.snapshot();
-    let raw = state.get(&[b"compute", b"roots", &slot, b"meta"]);
-    let tree = snapshot.subtree(&[b"compute", b"roots", &slot, b"data"]);
+    load_at(&state.snapshot(), &[b"compute", b"roots", &slot])
+}
+pub(crate) fn save_at(state: &mut StateBatch, path: &[&[u8]], root: &Root) -> Result<(), Error> {
+    let mut writer = Writer::new();
+    writer.put_bytes(&root.chain_id).map_err(error)?;
+    writer.put_u64(root.epoch as u64).map_err(error)?;
+    writer.put_hash32(&root.state).map_err(error)?;
+    writer
+        .put_bytes(&root.validators.encode().map_err(error)?)
+        .map_err(error)?;
+    writer
+        .put_bytes(hex::encode(root.tree.root().map_err(error)?).as_bytes())
+        .map_err(error)?;
+    let mut field = path.to_vec();
+    field.push(b"meta");
+    state.set(&field, writer.into_bytes()).map_err(error)?;
+    *field.last_mut().expect("root field") = b"data";
+    state.graft(&field, &root.tree).map_err(error)
+}
+pub(crate) fn load_at(snapshot: &Snapshot, path: &[&[u8]]) -> Result<Option<Root>, Error> {
+    let mut field = path.to_vec();
+    field.push(b"meta");
+    let raw = snapshot.get(&field);
+    *field.last_mut().expect("root field") = b"data";
+    let tree = snapshot.subtree(&field);
     let raw = match (raw, tree.as_ref()) {
         (None, None) => return Ok(None),
         (Some(raw), _) => raw,

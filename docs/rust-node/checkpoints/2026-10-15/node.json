@@ -1,0 +1,315 @@
+{
+  "schema": 2,
+  "date": "2026-10-15",
+  "status": "PASS_FROZEN_HOST_NODE_EXEX_PVAC",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "scope": "Fresh combined host release qualification through retained gateway, storage authentication, admission ledger handoff and MSRV compatibility. Later shared BFT facade and Single have separate gates.",
+  "results": {
+    "passed": 82,
+    "failed": 0,
+    "ignored": 1,
+    "targets": 13,
+    "node_passed": 56,
+    "exex_passed": 25,
+    "native_pvac_passed": 1
+  },
+  "current_node": {
+    "full_run": {
+      "path": "out/node-port-final-20261015/gateway-storage-final-combined-node-result.json",
+      "sha256": "3c1aaaa0881ab09bce614f28e4c7f7cdafeae1330e969d060b33be4c872f1e8c"
+    },
+    "full_log": {
+      "path": "out/node-port-final-20261015/gateway-storage-final-combined-node.log",
+      "sha256": "2f25da8ea27bf1bc960902086a9daff9c098aa2a54d9a56cae0e85c482b7e9d7"
+    },
+    "source_manifest": {
+      "path": "out/node-port-final-20261015/gateway-storage-final-combined-source.json",
+      "sha256": "c41d8c6a9fbe19fc69b18b4d8ff6dd67d44e3510b4e687913554b9fa8105fe7c"
+    },
+    "qualified_binary_sha256": "6c83c21d8d342ae59786ae8804ea2a8c1417d705aaba20aabbb2adef8a8b5d89",
+    "composition": "Fresh full13targets;82unique passes, one externally driven Chromium fixture excluded from ordinary count. ActualChrome8 separate gateway gate."
+  },
+  "retained_exex_pvac": {
+    "source_inputs_compared": 22,
+    "source_drift": [],
+    "qualification_report": {
+      "path": "out/node-port-final-20261015/node-exex-pvac-final-qualification.json",
+      "sha256": "fe157c49ffb725a8921659a1c7e7942201a3b3f573b039c040d65e85cf4b675f"
+    },
+    "log": {
+      "path": "out/node-port-final-20261015/node-exex-pvac-release-final.log",
+      "sha256": "f826e3ddde0a955bcab31f9bf3258aa071dab8086a30576dd794767516036b3e"
+    },
+    "source_manifest": {
+      "path": "out/node-port-final-20261015/node-exex-pvac-final-source.json",
+      "sha256": "bcb678277d838eaadd768b85a24eaad72ee9e8bb728360137974334ae439d9a6"
+    },
+    "scope": "ExEx25/PVAC1 from seven targets; none of their source, protocol, workspace manifest or lock inputs changed."
+  },
+  "historical_composed_run": {
+    "schema": 1,
+    "date": "2026-10-15",
+    "status": "PASS_LOCAL_COMPOSED_NODE_EXEX_PVAC",
+    "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+    "scope": "Final composed local Node/ExEx/native C ABI behavior; public sync, TLS and paid fixture have separate gates",
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "--release",
+      "-p",
+      "octra-node",
+      "-p",
+      "octra-exex",
+      "-p",
+      "octra-pvac",
+      "--lib",
+      "--tests",
+      "--no-fail-fast"
+    ],
+    "results": {
+      "passed": 75,
+      "failed": 0,
+      "ignored": 0,
+      "targets": 13,
+      "exit_code": 0,
+      "duration_seconds": 290.458,
+      "source_drift": []
+    },
+    "source_manifest": {
+      "path": "out/node-port-final-20261015/node-exex-pvac-final-source.json",
+      "sha256": "bcb678277d838eaadd768b85a24eaad72ee9e8bb728360137974334ae439d9a6"
+    },
+    "qualification_report": {
+      "path": "out/node-port-final-20261015/node-exex-pvac-final-qualification.json",
+      "sha256": "fe157c49ffb725a8921659a1c7e7942201a3b3f573b039c040d65e85cf4b675f"
+    },
+    "log": {
+      "path": "out/node-port-final-20261015/node-exex-pvac-release-final.log",
+      "sha256": "f826e3ddde0a955bcab31f9bf3258aa071dab8086a30576dd794767516036b3e"
+    },
+    "executables": {
+      "target/release/deps/delivery-926404fb04a09665": "90f79ee7360d9692992c8f938eff771bc9c07126eb82b7e211e6c4857d308fa5",
+      "target/release/deps/devnet-cf5406e62b59d02a": "d29666d95bda53e87e8b6b71a55c7cc8f0dc95b5898d33c8c86ade99dab20b29",
+      "target/release/deps/native-65160a6437862588": "989f57a28ae97e565c8e5c388e8a4d11b3e303aadd0b77f4995c3f4f684c1812",
+      "target/release/deps/native_history-b5ae768523f0ba72": "88a5bf41c6b878a30a98550dd9eb8eac24828facdf741c396a0467f5c1502149",
+      "target/release/deps/octra_exex-8c6b1d9fdb7fcf16": "991dbd1eb0b52445d370e4944a02de30ca4fdf798bd8f4430565afc006743878",
+      "target/release/deps/octra_node-4c34d735889fcf37": "5911d4650bf5e486a5df06f410e67b9433f17453a47fa67c53c21e9125babec5",
+      "target/release/deps/octra_node-88a637fb485769b7": "85c44a8873983b1333ae98ed2667985126d317f974459cc44aa8281ba2432df0",
+      "target/release/deps/octra_pvac-1cbc268ec594ba70": "f11d64b361a303819f8211462da13f1e6ab76c7dd073053f09bb922e8e820eb7",
+      "target/release/deps/persistence-92965b906b9dd972": "0dc10f976d0846f5fcb03a1b1359f7275ebed22292a5db52bef10b63a6dcbc56",
+      "target/release/deps/private_import-4a172a301e3be1b5": "ebb712ccf53b129e982ea5356d250aa85f86c9e991a09279bf17772d9d6a4b22",
+      "target/release/deps/services-9f8177307a3c1e9b": "bd903eb9c78e6cbbe5dac9ab262aefd0daf47d595bf381be181f8d7d3e876f1c",
+      "target/release/deps/snapshot_service_parity-9d856bcae6f0f5aa": "1a7f78d47601c57622fbd89b19e9b61e5351a0e044addfdb224ef31f0ab5398c",
+      "target/release/deps/sqlite_source-fe20f0b73a50a7e6": "62e8cec0eab3d4f139abb83dfc8bd46169424098e6d127bcafae8847ae708019"
+    },
+    "qualified_server_binary": {
+      "sha256": "faa82beefe27ff169f45ec368d43f17e9778491725add3f08ed11abe5454c40d"
+    },
+    "snapshot_boundary": "Frozen composed release before subsequent read-only asset-client retry fix; public sync, current dependency deltas, browser/TLS and paid transport retain separate qualification.",
+    "production_coverage": [
+      "Canonical finality publication, ExEx transactional history and restart",
+      "Native private import, preservation and recovery",
+      "Development chain transfers and Circle browsing recovery",
+      "Snapshot archive publication, transition QCs, repair, descriptor ownership and garbage collection",
+      "39 pinned native snapshot/lease/resource-refusal comparisons",
+      "Native PVAC C ABI regression"
+    ],
+    "release_claims": {
+      "complete_upstream_behavioral_parity": false,
+      "public_sync": false,
+      "mainnet_ready": false
+    }
+  },
+  "release_claims": {
+    "complete_upstream_behavioral_parity": false,
+    "public_sync": false,
+    "mainnet_ready": false
+  },
+  "startup_windows_followup": {
+    "gates": {
+      "startup-windows-services": {
+        "command": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--release",
+          "-p",
+          "octra-node",
+          "--test",
+          "services"
+        ],
+        "exit_code": 0,
+        "duration_seconds": 20.436,
+        "passed": 14,
+        "failed": 0,
+        "ignored": 0,
+        "log_sha256": "858294a6e464098efb4b1e6b1cdd52854b2151832f7b009e529b9e0249cae474",
+        "source_manifest_sha256": "e3c3b4345575dbc9204a54df34a63a526104f62ac37f7e7f77f42c66b3bc37de",
+        "source_drift": []
+      },
+      "startup-windows-strict": {
+        "command": [
+          "cargo",
+          "clippy",
+          "--offline",
+          "--locked",
+          "-p",
+          "octra-node",
+          "--all-targets",
+          "--all-features",
+          "--no-deps",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "exit_code": 0,
+        "duration_seconds": 20.992,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0,
+        "log_sha256": "40498c059be71a83ccef4232fbefbc763e5b5fd51cf00c82186fc219a45f9f5d",
+        "source_manifest_sha256": "e3c3b4345575dbc9204a54df34a63a526104f62ac37f7e7f77f42c66b3bc37de",
+        "source_drift": []
+      },
+      "startup-windows-binary": {
+        "command": [
+          "cargo",
+          "build",
+          "--offline",
+          "--locked",
+          "--release",
+          "-p",
+          "octra-node",
+          "--bin",
+          "octra-node"
+        ],
+        "exit_code": 0,
+        "duration_seconds": 0.398,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0,
+        "log_sha256": "982bc5ea5bf68d4adb27681d5638e954090c2f0779ccd4d94461ebf5999c8307",
+        "source_manifest_sha256": "e3c3b4345575dbc9204a54df34a63a526104f62ac37f7e7f77f42c66b3bc37de",
+        "source_drift": [],
+        "binary_sha256": "6a708cf4cb6217d9796d3334d77630accd519319f397210fa79aacb6faad1f4c"
+      }
+    },
+    "composition": "Replace the prior10-test services target with14passing tests; other five Node targets and all ExEx/PVAC targets retain their source-bound results. This is80unique selected tests, not a sum of repeated runs.",
+    "behavior": "Continue bounded public-startup HTTP windows only while each durably advances; no-progress/errors stop startup and serving remains suspended until completion.",
+    "coverage": [
+      "Existing absolute deadline preserves an atomic committed prefix",
+      "Two signed epochs cross an expired window and produce exactly matching complete heads",
+      "Unavailable source stops without a busy retry loop or publication",
+      "Failed execution propagates without retry or publication",
+      "Cancellation during executed-but-unpublished work can recover and complete exact history"
+    ],
+    "preserved_initial_failure": {
+      "report_sha256": "7aeaccc7a062984a2b52cb91a293f3f30b3f327058951af8c446a0eef5a275cc",
+      "passed": 12,
+      "failed": 2,
+      "cause": "Test source published local integration commit messages while native import publishes finalized epoch. State/ledger roots already matched; fixture metadata was aligned and full Head equality retained. Production code unchanged between runs."
+    }
+  },
+  "qualified_server_binary": {
+    "sha256": "6c83c21d8d342ae59786ae8804ea2a8c1417d705aaba20aabbb2adef8a8b5d89",
+    "scope": "Live public observer gateway/storage/ledger build; later BFT facade extraction is source-qualified separately."
+  },
+  "snapshot_boundary": "Target composition through startup-window continuation; paid18 and actual Chromium retain their own frozen sources and explicit later deltas.",
+  "observer_admission_followup": {
+    "qualification": {
+      "path": "out/node-port-final-20261015/observer-admission-qualification.json",
+      "sha256": "0ea0ab602f441230fda399950fd7cb319919db365ed5c10d7a329774d1c34b68"
+    },
+    "full_node_result": {
+      "targets": 6,
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--release",
+        "-p",
+        "octra-node",
+        "--lib",
+        "--tests",
+        "--no-fail-fast"
+      ],
+      "exit_code": 0,
+      "duration_seconds": 257.169,
+      "passed": 54,
+      "failed": 0,
+      "ignored": 0,
+      "log_sha256": "7d6b45be6f5456fc493f869c33b40fd952caea8b5cc79d21a8ab84a02a99632f",
+      "source_manifest_sha256": "b5472b724ad80ae74bf4300ba2db30e9fccfccc47115c6f3244a1dc63f8235f3",
+      "source_drift": []
+    },
+    "qualified_binary_sha256": "6930ff5f043c55f79876a593dea5ec9ee6a78e956273748c0b4f9f11189a68c9",
+    "composition": "Fresh current full six Node targets:54passed. Unchanged seven ExEx/PVAC targets retain26passed.80unique selected tests. Earlier target-composed histories preserved."
+  },
+  "inode_combined_followup": {
+    "qualification": {
+      "path": "out/node-port-final-20261015/inode-combined-qualification.json",
+      "sha256": "651af93171a3cbe50e6e72e137c1c032398f40ea2e9c60d1c8ac970f3c6be109"
+    },
+    "source_manifest": {
+      "path": "out/node-port-final-20261015/inode-combined-source.json",
+      "sha256": "a9c14b1d9a9261d649ae0d5ed5990f176dc9348d5d66753d3fa5773cb2bdaf57"
+    },
+    "node_exex_pvac_passed": 80,
+    "protocol_passed": 107,
+    "runtime_unit_passed": 42,
+    "strict_all_targets_all_features": "PASS",
+    "qualified_binary_sha256": "e31fba75c0132ea0f845601173e723d7c57a8b17a985593a1174a18e84be44e5",
+    "source_drift": []
+  },
+  "historical_before_observer_node": {
+    "full_run": {
+      "path": "out/node-port-final-20261015/node-authenticated-path-qualification.json",
+      "sha256": "b764435d90f6eb7024885e86e145b14589de8a5499c0284be2b31346896b9fae"
+    },
+    "full_log": {
+      "path": "out/node-port-final-20261015/node-authenticated-path-release.log",
+      "sha256": "35c37e1b54273314f30c262d7091666212378dc19735ce6ba66a73e8dec2ea48"
+    },
+    "devnet_replacement": {
+      "path": "out/node-port-final-20261015/node-devnet-port-qualification.json",
+      "sha256": "90c13645ee3a266859cbde0698d95151cee3a04d5ea202cb5c326b22a77c63bb"
+    },
+    "replacement_log": {
+      "path": "out/node-port-final-20261015/node-devnet-port-release.log",
+      "sha256": "a77b03bb1c4e254ab30ddc77d1178d4bd81d830add4c6088e96317ed42ce9944"
+    },
+    "source_manifest": {
+      "path": "out/node-port-final-20261015/node-devnet-port-source.json",
+      "sha256": "4f800d7a2b025d838df94e86410f6c542197c24d7c2c3ec6ee6c127c41eea307"
+    },
+    "composition": "Use 48 passing tests from five unaffected targets in the full run, replace the devnet target (1 passed,1 failed) with its 2 passing tests after the test-only port reservation fix. Initial bind failure is preserved; no assertions or timeouts relaxed.",
+    "changed_source": "crates/octra-node/tests/devnet.rs",
+    "devnet_executable_sha256": "035de2924f8664c6a1a5dccb4def9458e03ef4a03e933e51ca84273d240f444b"
+  },
+  "gateway_storage_combined_followup": {
+    "qualification": {
+      "path": "out/node-port-final-20261015/gateway-storage-final-combined-qualification.json",
+      "sha256": "f60bce038a144b62f7bd087e82297a6463bbc1ae2e3769cf4ae57795aa1beff7"
+    },
+    "node_exex_pvac_passed": 82,
+    "runtime_selected_passed": 90,
+    "browser_passed": 18,
+    "strict": "PASS",
+    "source_drift": [],
+    "later_shared_bft_facade": {
+      "qualification": {
+        "path": "out/node-port-final-20261015/single-facade-candidate/qualification-bft-final.json",
+        "sha256": "6ebf87c7bfb2fc92423a3c52d0500e2b5ae59bc41613fe5d7e1f93bc5799ca53"
+      },
+      "adopted": true,
+      "node_passed": 56,
+      "chromium_checks": 8,
+      "strict": "PASS",
+      "combined_single_composition_pending": true
+    }
+  }
+}

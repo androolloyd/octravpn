@@ -98,6 +98,7 @@ impl Host for FixtureHost {
     fn spawn(
         &mut self,
         request: octb::SpawnRequest<'_>,
+        _storage: &mut octra_node_protocol::circle_storage::StorageTable,
         _budget: Option<&mut Budget>,
     ) -> Result<Option<octb::Spawned>, Unavailable> {
         self.calls.push(json!([
@@ -182,9 +183,15 @@ fn run(v: &Value, stepped: bool) -> Value {
         depth: integer(v, "depth", 0),
     };
     let options = Options {
-        proof_exec: false,
-        math: false,
+        proof_exec: flag(v, "proof_exec"),
+        math: flag(v, "math"),
         fhe_work: flag(v, "fhe_work"),
+        object_cost: flag(v, "object_cost"),
+        object_quorum: if v["object_quorum"] == "exact" {
+            octra_node_protocol::circle_object::Quorum::Exact
+        } else {
+            octra_node_protocol::circle_object::Quorum::Machine
+        },
         async_exec: flag(v, "async"),
         limit: integer(v, "limit", 1_000_000),
         strict: flag(v, "strict"),
@@ -196,6 +203,7 @@ fn run(v: &Value, stepped: bool) -> Value {
             .iter()
             .map(|r| (bytes(&r[0]), kind(&r[1])))
             .collect::<BTreeMap<_, _>>(),
+        ..Options::default()
     };
     let mut machine = Machine::new(context, options, storage);
     for row in rows(v, "regs") {
@@ -333,8 +341,16 @@ fn compare(cases: &[Value]) {
 #[test]
 fn unavailable_execution_is_never_a_consensus_refusal() {
     use octra_node_protocol::octb::Instruction;
-    struct MissingHost;
-    impl Host for MissingHost {}
+    #[derive(Default)]
+    struct MissingHost {
+        key_calls: usize,
+    }
+    impl Host for MissingHost {
+        fn fhe_key(&mut self, _: &[u8]) -> Result<Option<octb::FheKeySource>, Unavailable> {
+            self.key_calls += 1;
+            Err(Unavailable("public-key source is unavailable".into()))
+        }
+    }
     for limit in [0, 1_000_000] {
         let mut machine = Machine::new(
             Context::default(),
@@ -345,23 +361,31 @@ fn unavailable_execution_is_never_a_consensus_refusal() {
             StorageTable::new(0),
         );
         let mut budget = Budget::default();
-        let before = budget.clone();
-        let error = machine
-            .run(
-                &[Instruction::FheMul(0, 1, 2, 3)],
-                &mut MissingHost,
-                Some(&mut budget),
-            )
-            .unwrap_err();
-        assert!(error.0.contains("not available"));
-        assert!(!machine.reverted);
-        assert_eq!(machine.effort, 0);
-        assert_eq!(budget, before);
+        machine.regs[1] = Cell::Address(Arc::from(format!("oct{}", "9".repeat(44)).as_bytes()));
+        let mut host = MissingHost::default();
+        let result = machine.run(
+            &[Instruction::FheLoadPk(0, 1)],
+            &mut host,
+            Some(&mut budget),
+        );
+        if limit == 0 {
+            assert!(!result.unwrap());
+            assert_eq!(host.key_calls, 0, "fuel refusal precedes the host read");
+        } else {
+            assert_eq!(result.unwrap_err().0, "public-key source is unavailable");
+            assert_eq!(host.key_calls, 1);
+            assert!(!machine.reverted);
+            assert!(!machine.output_ready);
+        }
     }
     let mut machine = Machine::new(Context::default(), Options::default(), StorageTable::new(0));
     machine.regs[1] = Cell::Address(Arc::from(b"address".as_slice()));
     let error = machine
-        .run(&[Instruction::Balance(0, 1)], &mut MissingHost, None)
+        .run(
+            &[Instruction::Balance(0, 1)],
+            &mut MissingHost::default(),
+            None,
+        )
         .unwrap_err();
     assert!(error.0.contains("balance host"));
     assert!(!machine.reverted);

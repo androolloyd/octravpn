@@ -25,9 +25,11 @@ use crate::{
 /// Layered boot sequence. Each step has a comment block explaining
 /// why it is ordered where it is.
 pub(super) async fn build_hub(cfg: NodeConfig) -> Result<Hub> {
+    cfg.wire_transport()?;
     let rpc = cfg.chain.build_rpc_client()?;
     let validator_addr = Address::from_display(&cfg.chain.validator_addr);
-    let program_addr = Address::from_display(&cfg.chain.program_addr);
+    let program_addr = octravpn_core::parse_native_address(&cfg.chain.program_addr)
+        .context("invalid program application address")?;
 
     let wallet_secret = if cfg.chain.require_sealed_keys {
         *read_secret_32_strict(&cfg.chain.wallet_secret_path)
@@ -81,7 +83,8 @@ pub(super) async fn build_hub(cfg: NodeConfig) -> Result<Hub> {
         wallet_v3,
         chain_id_str,
         Some(chain_v3_queue),
-    );
+    )
+    .with_application(cfg.chain.application);
 
     // The on-disk file holds a single 32-byte master secret. Two
     // independent subkeys are derived via HKDF-Expand with distinct

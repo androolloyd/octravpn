@@ -9,9 +9,21 @@ use crate::control::state::{ControlState, CONTROL_SWEEP_PERIOD};
 
 /// Periodic sweeper: evicts sessions idle past TTL.
 pub(crate) async fn run_sweeper(state: Arc<ControlState>) {
+    let mut period = tokio::time::interval(CONTROL_SWEEP_PERIOD);
+    period.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    period.tick().await;
+    let mut updates = state
+        .native_authority
+        .as_ref()
+        .and_then(|authority| authority.updates());
     loop {
-        tokio::time::sleep(CONTROL_SWEEP_PERIOD).await;
-        let n = state.sessions.sweep();
+        let sweep = tokio::select! {
+            _=period.tick()=>true,
+            changed=async {
+                match &mut updates {Some(updates)=>updates.changed().await.is_ok(),None=>std::future::pending().await}
+            }=>{if !changed {updates=None;continue;} false},
+        };
+        let n = if sweep { state.sessions.sweep() } else { 0 };
         refresh_admissions(&state).await;
         if n > 0 {
             // Each evicted entry is a "session close" from the
@@ -35,7 +47,7 @@ pub(crate) async fn refresh_admissions(state: &Arc<ControlState>) {
     let entries = state.allowlist.snapshot();
     stream::iter(entries)
         .map(|(key, binding)| async move {
-            let permit = if let Some(authority) = &state.native_authority {
+            let (permit, unavailable) = if let Some(authority) = &state.native_authority {
                 match tokio::time::timeout(
                     std::time::Duration::from_secs(10),
                     authority.authorize(&binding.request, &state.receipt_context),
@@ -45,12 +57,16 @@ pub(crate) async fn refresh_admissions(state: &Arc<ControlState>) {
                     Ok(Ok(Some(permit)))
                         if permit.matches(&binding.request, &state.receipt_context) =>
                     {
-                        Some(permit.with_service_stop(state.native_stop.clone()))
+                        (
+                            Some(permit.with_service_stop(state.native_stop.clone())),
+                            false,
+                        )
                     }
-                    _ => None,
+                    Ok(Ok(None)) => (None, false),
+                    _ => (None, true),
                 }
             } else {
-                None
+                (None, false)
             };
             let live = if !state.sessions.contains_key(&binding.request.session_id) {
                 false
@@ -71,11 +87,18 @@ pub(crate) async fn refresh_admissions(state: &Arc<ControlState>) {
             };
             let _guard = state.admission_lock.lock();
             state.allowlist.modify(&key, |current| {
-                if current.admitted_at == binding.admitted_at {
-                    current.permit = permit;
+                if Arc::ptr_eq(&current.request, &binding.request) {
                     if !state.sessions.contains_key(&current.request.session_id) {
                         state.router.remove(&current.request.session_id);
+                    } else if unavailable {
+                        // Close packet admission without extending the last
+                        // verified lease. The next published head may recheck
+                        // this binding and resume its retained handshake state.
+                        current.paused = true;
+                        return;
                     }
+                    current.permit = permit;
+                    current.paused = !live;
                     current.expires_at = std::time::Instant::now()
                         + if live {
                             crate::tunnel::ADMISSION_LEASE

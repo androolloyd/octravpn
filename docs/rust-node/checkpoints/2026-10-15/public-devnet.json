@@ -1,0 +1,402 @@
+{
+  "date": "2026-10-15",
+  "status": "catching_up_authenticated_public_history_with_native_inode_storage",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "chain_id": "octra-devnet-9871-cluster",
+  "identity_origin": {
+    "kind": "checkpoint",
+    "epoch": 1278039,
+    "state_root": "ab602f2a1956a9df087106a686ea36e654c819e62321ae6b4ed3cf61107676ee"
+  },
+  "import": {
+    "chain_id": "octra-devnet-9871-cluster",
+    "epoch": 1697760,
+    "state_root": "cc2cb2f63dca1672f1ba3a724e6a2a76c8146281187e6e36adc3603540306694",
+    "manifest_hash": "ccd56002c30659d8fcc8eec519c7166a30dabcc08170c54071473880be1df883",
+    "ledger_records": 3326792,
+    "downloaded_bytes": 37830616510,
+    "reused_bytes": 0
+  },
+  "import_exit": 0,
+  "bootstrap_binary_sha256": "fa3d2b8580fda747301e7c309025b37688afc9c4527d696d38e8a2396585e8ea",
+  "bootstrap_binary_scope": "Frozen bootstrap-only executable; latest qualified release must reauthenticate the persisted checkpoint before serving",
+  "public_peer_sync_qualified": false,
+  "observer_restart_qualified": false,
+  "public_vpn_deployed": false,
+  "tailscale_tls_qualified": false,
+  "funds_spent": 0,
+  "voting": false,
+  "scope": "Certificate, finality, manifest, chunks, ledger and restored root verified; live-network qualification remains pending",
+  "observer_first_start": {
+    "observed_at": "2026-10-15T21:46:49.947248+00:00",
+    "process_running": true,
+    "import_epoch": 1697760,
+    "retained_sequence": 6,
+    "epoch": 1697766,
+    "state_root": "902679201841972b2c8c7744ee910ae9bf6b2fecc2801af9430e0d6a2cfb5c31",
+    "txid_hi": 2669477,
+    "operator_status": {
+      "available": false,
+      "error": "URLError"
+    },
+    "voting": false,
+    "funds_spent": 0,
+    "sync_complete": false,
+    "gateway_exposed": false,
+    "scope": "Read-only observation of the actual public observer. Canonical epochs advanced from the authenticated snapshot; startup serving and live sync remain unqualified.",
+    "binary_sha256": "faa82beefe27ff169f45ec368d43f17e9778491725add3f08ed11abe5454c40d",
+    "evidence": {
+      "path": "out/node-port-final-20261015/public-observer-progress-1.json",
+      "sha256": "d38421cafe4b55acd639d02220b772afd2c498e32d106004f074b0d864e7e279"
+    }
+  },
+  "tailscale_existing_tls_observation": {
+    "certificate_verified": true,
+    "http_status": 502,
+    "backend_healthy": false,
+    "serve_configuration_changed": false,
+    "cross_device_navigation_qualified": false,
+    "evidence_sha256": "d7b4100ebe46346ab7ce8823d2a3271ebec08a8bc1bfd751acda904aa0425529"
+  },
+  "observer_currently_running": true,
+  "first_stop": {
+    "at": "2026-10-15T21:51:27.126143+00:00",
+    "process_running": false,
+    "epoch": 1697768,
+    "retained_sequence": 8,
+    "state_root": "5b94dc0ec8db483a3587b1cae23ddd76a690d8bc30b1f00652c3a6b07299d280",
+    "state_reset": false,
+    "evidence": {
+      "path": "out/node-port-final-20261015/public-observer-first-stop-complete.json",
+      "sha256": "f25223085899178ff8b654e370e54a525494c226a5a0b00641b99bf4e3ae7a35"
+    }
+  },
+  "public_exex_prefix": {
+    "at": "2026-10-15T21:52:40.381797+00:00",
+    "scope": "Actual public observer first-run prefix only, before storage batching; no full-sync or restart claim",
+    "canonical_epochs": 8,
+    "archived_epochs": 8,
+    "mismatches": [],
+    "complete_prefix": true,
+    "files": [
+      {
+        "sequence": 1,
+        "epoch": 1697761,
+        "events": 8,
+        "sha256": "48e61a292df079680398aa302e16de6cc545bcfd5d9e3642ee1f816d63c51339"
+      },
+      {
+        "sequence": 2,
+        "epoch": 1697762,
+        "events": 8,
+        "sha256": "410c0d9a5b68f48cba647b72463f300ac56da1bee8d5a793df823cceaf8900c0"
+      },
+      {
+        "sequence": 3,
+        "epoch": 1697763,
+        "events": 8,
+        "sha256": "d535feb68e5ad76c673affc7e12bd01bbb3d76d59523e6a029c0b7ce8ff89ce9"
+      },
+      {
+        "sequence": 4,
+        "epoch": 1697764,
+        "events": 8,
+        "sha256": "3b4bcfd055aab11546a43469ce9dd402266fbcdf29a8031405c6ee801f61d8ef"
+      },
+      {
+        "sequence": 5,
+        "epoch": 1697765,
+        "events": 8,
+        "sha256": "dbe59ef31ece641e880e5a3da17df1a9ec8b3da46e2ea7dbf3574de206d40b54"
+      },
+      {
+        "sequence": 6,
+        "epoch": 1697766,
+        "events": 8,
+        "sha256": "baca0d8cd4af69bba8e83ed18676b04d20bcb182c582b1b6f7a498a0e9b54340"
+      },
+      {
+        "sequence": 7,
+        "epoch": 1697767,
+        "events": 7,
+        "sha256": "6ae835689ff55e0d75ce2bd5d9a886da0ab90835e3c84f9fd7e878a02f915864"
+      },
+      {
+        "sequence": 8,
+        "epoch": 1697768,
+        "events": 10,
+        "sha256": "f5faa0f77892ea63088ac57bd765def45a97f79e05e8222dfbd30806de2bce56"
+      }
+    ],
+    "evidence": {
+      "path": "out/node-port-final-20261015/public-observer-first-exex.json",
+      "sha256": "26b46879c747121a5faa3aee77b2145678cc2925ce26adc3d9d112d2c0109525"
+    }
+  },
+  "latest_observed_prefix": {
+    "initial_epoch": 1697768,
+    "last_epoch": 1697789,
+    "canonical_sequence": 29,
+    "binary_sha256": "afd872bc2b1170550114f8c2160a60058d5dadf87022910596fc09f7b99f7750",
+    "measurement_sha256": "adb31f5a6158cbec8ed400ab355d616abcc696c6d30cc62c4c593fcc60af432e",
+    "measurement": {
+      "completed_at": "2026-10-15T22:27:07.713074+00:00",
+      "observation_count": 7,
+      "first_durable_advancement": {
+        "previous_unchanged_observation": "2026-10-15T22:23:01.888472+00:00",
+        "first_advanced_observation": "2026-10-15T22:23:45.129912+00:00",
+        "seconds_after_launch_lower_exclusive": 129.888472,
+        "seconds_after_launch_upper_inclusive": 173.129912,
+        "first_observed_epoch": 1697771
+      },
+      "steady_window": {
+        "from": "2026-10-15T22:23:45.129912+00:00",
+        "to": "2026-10-15T22:26:31.505816+00:00",
+        "seconds": 166.375904,
+        "local_epochs": 18,
+        "local_epochs_per_minute": 6.491324609121283,
+        "official_epochs": 11,
+        "official_epochs_per_minute": 3.966920594463006,
+        "initial_advisory_lag": 2451,
+        "final_advisory_lag": 2444,
+        "lag_reduction": 7,
+        "logical_file_growth_bytes": {
+          "canonical.sqlite": 1447727104,
+          "canonical.sqlite-wal": 0,
+          "canonical.sqlite-shm": 0
+        },
+        "database_bytes_per_committed_epoch": 80429283.55555555
+      },
+      "since_initial_observation": {
+        "epochs": 21,
+        "logical_file_growth_bytes": {
+          "canonical.sqlite": 1688936448,
+          "canonical.sqlite-wal": 81596600,
+          "canonical.sqlite-shm": 163840
+        }
+      },
+      "listener": {
+        "local_http_observed_available": false,
+        "still_connection_refused_at": "2026-10-15T22:26:31.505816+00:00",
+        "seconds_after_launch": 339.505816
+      },
+      "short_process_sample_taken": false,
+      "short_sample_reason": "Canonical progress continued, and the measured local head rate exceeded official head telemetry; no stall condition triggered.",
+      "state_changes_by_measurement": false,
+      "source_build_restart_tailscale_changes": false,
+      "limits": [
+        "Canonical head comes from a read-only SQLite query of the authorized observer; official unsigned HTTP head is advisory comparison telemetry, not finality evidence.",
+        "RPC still refused connections throughout the measured window; first durable advancement is not service readiness.",
+        "Logical file lengths are measured, not allocated disk usage, write amplification or WAL bytes actually live.",
+        "The 166-second head-rate window cannot establish sustained throughput or a completion-time forecast.",
+        "The first official response did not record head_epoch because the old helper projected epoch; all steady-window responses record native head_epoch correctly."
+      ]
+    },
+    "scope": "Short read-only observation window; durable canonical progress is not complete sync or serving qualification."
+  },
+  "startup_cancellation": {
+    "report_sha256": "48e950cb93710b8833dd353462ec7844edf3546529573a7ada78414745dd6fa6",
+    "scope": "Real early-start SIGTERM exits cleanly with retained public head and identity unchanged; this is not serving/restart qualification.",
+    "passed": true,
+    "shutdown_seconds": 0.098,
+    "exit_code": 0,
+    "forced": false,
+    "canonical_head_unchanged": true,
+    "identity_unchanged": true,
+    "binary_sha256": "afd872bc2b1170550114f8c2160a60058d5dadf87022910596fc09f7b99f7750"
+  },
+  "latest_stop": {
+    "at": "2026-10-15T23:04:48.823292+00:00",
+    "process_observed_running": false,
+    "exit_code": null,
+    "retained_epoch": 1697857,
+    "retained_sequence": 97,
+    "observed_error": "finality: proposal creator is not an active validator",
+    "diagnosis": "Local observer pending-queue recovery requests an admission context with its nonvalidator transport identity; the proposal-only membership check is incorrectly shared with queue admission. No rejected public epoch is claimed.",
+    "state_reset": false,
+    "funds_spent": 0
+  },
+  "retained_public_exex": {
+    "at": "2026-10-15T22:45:28.513589+00:00",
+    "scope": "Retained public canonical prefix after bounded startup catch-up exited; independent read-only comparison of every archive against configured chain identity, canonical cursor/parent/root and durable ExEx event outbox. No full sync or serving/restart claim.",
+    "canonical_epochs": 89,
+    "archived_epochs": 89,
+    "outbox_records": 89,
+    "complete_prefix": true,
+    "mismatches": [],
+    "report_sha256": "4d947b2d489e25c6484a38ac1490de4403e3b80dedc40221bcc7264942971cfd"
+  },
+  "latest_launch": {
+    "started_at": "2026-10-15T22:50:44.998634+00:00",
+    "binary_sha256": "6a708cf4cb6217d9796d3334d77630accd519319f397210fa79aacb6faad1f4c",
+    "retained_epoch_before_start": 1697849,
+    "retained_sequence_before_start": 89,
+    "status": "reopening_retained_public_state_with_progress_windows",
+    "state_reset": false,
+    "identity_reset": false,
+    "voting": false,
+    "funds_spent": 0,
+    "tailscale_serve_changed": false,
+    "scope": "Actual observer bootstrap; no full-sync, service readiness, restart or public VPN deployment claim."
+  },
+  "observer_admission_launch": {
+    "started_at": "2026-10-15T23:18:59.117305+00:00",
+    "pid": 56336,
+    "binary_sha256": "6930ff5f043c55f79876a593dea5ec9ee6a78e956273748c0b4f9f11189a68c9",
+    "retained_epoch_before_start": 1697857,
+    "retained_sequence_before_start": 97,
+    "status": "reopening_retained_public_state_with_observer_admission_fix",
+    "state_reset": false,
+    "identity_reset": false,
+    "voting": false,
+    "funds_spent": 0,
+    "tailscale_serve_changed": false,
+    "launch_report_repaired": "Initial report used head.epoch instead of head.cursor.epoch after the process had already started; existing PID verified, no duplicate launch.",
+    "scope": "Actual public observer bootstrap; service health and complete public synchronization require separate observation.",
+    "evidence": {
+      "path": "out/node-port-final-20261015/public-observer-admission-launch.json",
+      "sha256": "bcc471f9e2db458281497173df4e09cf3a349b164c808b1f99e7338e697d99a5"
+    }
+  },
+  "observer_admission_exex_prefix": {
+    "at": "2026-10-15T23:22:12.725795+00:00",
+    "scope": "Read-only independently audited retained public canonical prefix; no complete public sync claim. Compare configured chain origin, canonical cursor/parent/root, archive and durable transactional ExEx outbox.",
+    "canonical_epochs": 100,
+    "archived_epochs": 100,
+    "outbox_records": 100,
+    "last_epoch": 1697860,
+    "complete_prefix": true,
+    "mismatches": [],
+    "initial_audit_correction": "Bootstrap sequence0 is authenticated against import root and has no epoch archive; initial audit incorrectly treated it as a live epoch. Initial script and report preserved.",
+    "evidence": {
+      "path": "out/node-port-final-20261015/public-observer-admission-exex.json",
+      "sha256": "7f4e4958ff5dfc40b598078f48c35f606550ab74d59aff83b315d052ffabaaf6"
+    }
+  },
+  "latest_funding_probe": {
+    "at": "2026-10-16T00:06:53.823742+00:00",
+    "rpc": "https://devnet.octrascan.io/rpc",
+    "address": "oct8qxdTZc4Tk8ZDkLHXm1HjNXmytRnCMzhxEBnCVtJJ69Q",
+    "method": "octra_balance",
+    "scope": "Read-only official positional RPC probe; no keys/signature/transaction; network authority comes from independently pinned configuration",
+    "exit_code": 0,
+    "http_status": "200",
+    "response_sha256": "cf22b0466661d559f8b15ea659e9ac26f47e5e0bff630eeca0129aa2637165fd",
+    "response": {
+      "jsonrpc": "2.0",
+      "error": {
+        "code": 100,
+        "message": "sender not found"
+      },
+      "id": 1
+    },
+    "evidence": {
+      "path": "out/node-port-final-20261015/public-relayer-funding-5.json",
+      "sha256": "672cb8d119ec5374dee78b5dff1334e829c9b2f6756a9510d6e244debf096e1a"
+    },
+    "network": "official public devnet",
+    "funding_verified": false,
+    "funds_spent": 0,
+    "interpretation": "Official positional balance RPC returned sender not found; no funded account was observed."
+  },
+  "observer_inode_launch": {
+    "started_at": "2026-10-15T23:46:49.154865+00:00",
+    "pid": 63742,
+    "supervisor_pid": 63741,
+    "binary_sha256": "e31fba75c0132ea0f845601173e723d7c57a8b17a985593a1174a18e84be44e5",
+    "retained_epoch_before_start": 1698048,
+    "retained_sequence_before_start": 288,
+    "status": "reopening_authenticated_public_state_with_native_inode_storage",
+    "state_reset": false,
+    "identity_unchanged": true,
+    "voting": false,
+    "funds_spent": 0,
+    "tailscale_serve_changed": false,
+    "scope": "Actual public observer with qualified native inode storage; full sync, service health and public inode performance require observation.",
+    "evidence": {
+      "path": "out/node-port-final-20261015/public-observer-inode-launch.json",
+      "sha256": "cc763c1312755a1fe66a7a9b57a56ce3c0af74517326d8065da6a7e9c3f5a134"
+    }
+  },
+  "observer_admission_stop": {
+    "at": "2026-10-15T23:46:49.023005+00:00",
+    "previous_pid": 56336,
+    "process_running": false,
+    "graceful_signal": "SIGTERM",
+    "observed_stop_seconds": 3.715,
+    "forced": false,
+    "exit_code": null,
+    "exit_code_scope": "Previous detached process exit status was not supervised; no exact exit code claimed.",
+    "sequence_before": 288,
+    "epoch_before": 1698048,
+    "sequence_after": 288,
+    "epoch_after": 1698048,
+    "identity_unchanged": true,
+    "state_reset": false,
+    "evidence": {
+      "path": "out/node-port-final-20261015/public-observer-admission-stop.json",
+      "sha256": "d8eb4139a345be371bbb56c1f8139436618a8d647815fcf2a9594d01ca7bbf6c"
+    }
+  },
+  "retained_public_exex_latest": {
+    "at": "2026-10-16T00:10:23.309689+00:00",
+    "scope": "Read-only independently audited retained public canonical prefix; no complete public sync claim. Compare configured chain origin, canonical cursor/parent/root, archive and durable transactional ExEx outbox.",
+    "canonical_epochs": 411,
+    "archived_epochs": 411,
+    "outbox_records": 411,
+    "last_epoch": 1698171,
+    "complete_prefix": true,
+    "mismatches": [],
+    "initial_audit_correction": "Bootstrap sequence0 is authenticated against import root and has no epoch archive; initial audit incorrectly treated it as a live epoch. Initial script and report preserved.",
+    "evidence": {
+      "path": "out/node-port-final-20261015/public-observer-inode-prefix-2.json",
+      "sha256": "6c7ed9cb017de3991dc202669305572957554f6334b933cc6e83200779a9d9d1"
+    }
+  },
+  "observer_inode_steady_window": {
+    "at": "2026-10-16T00:04:42.178466+00:00",
+    "sequence": 361,
+    "epoch": 1698121,
+    "logical_database_bytes": 62551662592,
+    "database_file_bytes": 62551662592,
+    "elapsed_seconds": 364.192222,
+    "new_commits": 51,
+    "logical_database_growth_bytes": 52916224,
+    "logical_growth_bytes_per_commit": 1037573.0196078431,
+    "verified_commits_per_minute": 8.402156375541704,
+    "evidence": {
+      "path": "out/node-port-final-20261015/public-observer-inode-performance-2.json",
+      "sha256": "73a3024d23919cdce30515b8651ba41c9381a95e44de4e6f56304c845efbd6d2"
+    }
+  },
+  "observer_latest_operator_observation": {
+    "at": "2026-10-16T00:06:00.435945+00:00",
+    "operator": {
+      "status": 200,
+      "bytes": 226,
+      "sha256": "5c0bfa6dfeba5e698cdde573566c368c9727c0d0913da8f1b0dbf65e44fc4bdd",
+      "result": {
+        "chain_id": "octra-devnet-9871-cluster",
+        "epoch": 1698132,
+        "peers": 13,
+        "pending": 0,
+        "serving": false,
+        "state_root": "8fd77a870eaf05c78ab4a3f028d31222bd861abd0b50c8522cb6c98c61c28bd3",
+        "vpn_program": null,
+        "vpn_settlement": "unconfigured"
+      }
+    },
+    "gateway": {
+      "error": "HTTP Error 503: Service Unavailable"
+    },
+    "evidence": {
+      "path": "out/node-port-final-20261015/public-observer-inode-health-2.json",
+      "sha256": "0a171b00fc307a269ede7e33b0b68e87a5fdc6b9003a128f3bb501250507efb7"
+    }
+  },
+  "observer_pending_adoptions": [
+    "Same-call admission ledger handoff",
+    "Bounded retained public-asset/CSS gateway",
+    "Storage-authentication candidate after its remaining gates"
+  ]
+}

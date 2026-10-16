@@ -244,6 +244,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
                     .await?;
                 }
                 Output::Finalized { epoch_id, finalize } => {
+                    let duty = self.duty_event(&finalize);
                     // Leave the engine's certificate pending on failure. It will
                     // emit this output again; no journal floor or next-height
                     // state may advance before durable publication succeeds.
@@ -261,6 +262,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
                     }
                     let next = epoch_id.checked_add(1).ok_or("consensus epoch overflow")?;
                     if self.engine.state().height >= next {
+                        self.notify_duty(next, duty);
                         continue;
                     }
                     let pruned = self.journal.prune_finalized(epoch_id)?;
@@ -272,12 +274,14 @@ impl<H: Host, C: Publication> Driver<H, C> {
                     }
                     let validators = self.host.activate(next).await?;
                     self.engine.replace_validator_set(validators);
+                    self.notify_duty(next, duty);
                     self.engine.start_height(next);
                     self.work.abort_all();
                     self.active_work = None;
                     self.build_retry = None;
                     self.replies.clear();
                     self.round_replies.clear();
+                    self.round_peers.clear();
                     let now = self.now();
                     self.pace = Pace::new(
                         next,
@@ -331,5 +335,49 @@ impl<H: Host, C: Publication> Driver<H, C> {
             self.round_sync(round, RoundStep::Prevote, true).await?;
         }
         Ok(())
+    }
+    fn duty_event(
+        &mut self,
+        finalized: &octra_node_protocol::consensus::Finalize,
+    ) -> Option<octra_node_protocol::duty::Proof> {
+        let commit = finalized.parent_commit.as_ref()?;
+        let certificate = &commit.certificate;
+        if certificate
+            .precommits
+            .iter()
+            .any(|vote| vote.validator == self.address)
+        {
+            return None;
+        }
+        let expected = Vote {
+            chain_id: self.chain.clone(),
+            epoch_id: certificate.epoch_id,
+            round: certificate.commit_round,
+            vote_type: VoteType::Precommit,
+            proposal_id: certificate.proposal_id.clone(),
+            validator: self.address.clone(),
+            signature: vec![],
+        };
+        match self.journal.find_vote(&expected) {
+            Ok(vote) => vote.map(|vote| octra_node_protocol::duty::Proof {
+                vote,
+                commit: commit.clone(),
+            }),
+            Err(reason) => {
+                self.host
+                    .warning(&format!("finalized parent vote lookup failed: {reason}"));
+                self.votes.hold_journal(reason);
+                None
+            }
+        }
+    }
+    fn notify_duty(&self, next: i64, proof: Option<octra_node_protocol::duty::Proof>) {
+        if let Some(handler) = &self.duty {
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(next, proof)))
+                .is_err()
+            {
+                self.host.warning("validator duty observer panicked");
+            }
+        }
     }
 }

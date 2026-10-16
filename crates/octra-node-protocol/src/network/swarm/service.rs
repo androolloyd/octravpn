@@ -61,11 +61,13 @@ async fn launch(
     generation: u64,
     direction: Direction,
     connection: Connection<TcpStream>,
+    remote_host: Vec<u8>,
     handler: Arc<dyn Handler>,
     spawn: Spawner,
 ) -> bool {
     let peer_id = connection.peer().node_id.clone();
-    let Ok(Some((peer, driver))) = swarm.install(generation, direction, connection) else {
+    let Ok(Some((peer, driver))) = swarm.install(generation, direction, connection, remote_host)
+    else {
         return swarm
             .state()
             .peers
@@ -146,6 +148,7 @@ async fn dial(
         generation,
         Direction::Outbound,
         connection,
+        endpoint.host.clone(),
         handler,
         spawn,
     )
@@ -269,31 +272,7 @@ fn records(
         });
     }
 }
-fn accept_delay(attempt: u32, error: &std::io::Error) -> Option<Duration> {
-    use rustix::io::Errno as E;
-    let code = error.raw_os_error()?;
-    let retry = [
-        E::INTR,
-        E::AGAIN,
-        E::CONNABORTED,
-        E::NETDOWN,
-        E::NETUNREACH,
-        E::HOSTDOWN,
-        E::HOSTUNREACH,
-        E::NOPROTOOPT,
-        E::OPNOTSUPP,
-        E::MFILE,
-        E::NFILE,
-        E::NOBUFS,
-        E::NOMEM,
-        E::PROTO,
-    ]
-    .iter()
-    .any(|e| e.raw_os_error() == code);
-    #[cfg(target_os = "linux")]
-    let retry = retry || code == E::NONET.raw_os_error();
-    retry.then(|| Duration::from_secs_f64((0.01 * f64::from(1_u32 << attempt.min(7))).min(1.0)))
-}
+use crate::network::accept::delay as accept_delay;
 pub(super) async fn run(
     swarm: Swarm,
     listener: TcpListener,
@@ -373,7 +352,7 @@ pub(super) async fn run(
                             let Ok(local)=owner.hello(port)else{return;};
                             let result=super::super::session::accept(stream,&local,&owner.0.key,&allowed,&mut OsRng,owner.0.config.timeouts).await;
                             drop(permit);
-                            match result{Ok(connection)=>{launch(owner,generation,Direction::Inbound,connection,handler,spawn).await;},Err(e)=>{
+                            match result{Ok(connection)=>{launch(owner,generation,Direction::Inbound,connection,key.clone(),handler,spawn).await;},Err(e)=>{
                                 if let Some(reason)=guard::handshake_penalty(e.as_bytes()){owner.state().guard.report(guard::Config::default(),now(),&key,reason.as_bytes());}
                             }}
                         });

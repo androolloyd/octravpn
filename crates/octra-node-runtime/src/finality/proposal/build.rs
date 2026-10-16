@@ -48,6 +48,9 @@ impl<A: ValidatorHistory> Publisher<A> {
         let context = self
             .admission_context(base, graph, policy, creator, now)
             .await?;
+        if context.authority.validators.public_key(creator).is_none() {
+            return Err(invalid("proposal creator is not an active validator"));
+        }
         let previous = context
             .parent_commit
             .as_ref()
@@ -94,9 +97,6 @@ impl<A: ValidatorHistory> Publisher<A> {
             return Err(invalid("execution graph differs from canonical chain"));
         }
         let authority = self.rules(base, epoch).await?;
-        if authority.validators.public_key(creator).is_none() {
-            return Err(invalid("proposal creator is not an active validator"));
-        }
         let parent_commit = self.proposal_parent(base, policy).await?;
         let version = policy.protocol.version_at(epoch as i64);
         if version == LEGACY_VERSION && parent_commit.is_some() {

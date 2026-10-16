@@ -19,10 +19,24 @@ use sqlx::{
 };
 
 use crate::state_batch::{Snapshot, StateBatch, StoredObject};
+mod epochs;
+mod inodes;
 mod reader;
-pub use reader::{Reader, ReliefSource};
+mod records;
+mod snapshots;
+mod transactions;
+pub use transactions::{
+    HistoryPage, HistoryQuery, HistoryReadError, RejectionPage, RejectionRecord,
+};
+mod vm_receipts;
+pub use reader::{Reader, RecordLengths, ReliefSource};
+pub use records::{ProgramRecords, RecordError};
+pub use vm_receipts::VmReceipts;
+mod bootstrap;
 #[cfg(test)]
 mod relief_tests;
+#[cfg(test)]
+mod storage_tests;
 
 #[derive(Debug, thiserror::Error)]
 #[error("canonical store: {0}")]
@@ -112,7 +126,34 @@ pub struct CanonicalStore {
     pool: SqlitePool,
     chain: ChainIdentity,
     anchor: Head,
+    bootstrap: Option<bootstrap::Bootstrap>,
     source: Arc<SqliteEpochSource<NativeTransaction>>,
+    head_cache: Arc<HeadCache>,
+    snapshots: Arc<snapshots::Cache>,
+}
+
+struct HeadCache(std::sync::RwLock<Head>);
+impl HeadCache {
+    fn new(head: Head) -> Self {
+        Self(std::sync::RwLock::new(head))
+    }
+    fn remember(&self, head: &Head) -> Result<()> {
+        let mut saved = self
+            .0
+            .write()
+            .map_err(|_| error("canonical head cache poisoned"))?;
+        if saved.cursor.sequence > head.cursor.sequence {
+            return Ok(());
+        }
+        if saved.cursor.sequence == head.cursor.sequence && *saved != *head {
+            return Err(error("canonical head cache commitment differs"));
+        }
+        *saved = head.clone();
+        Ok(())
+    }
+    fn get(&self) -> Option<Head> {
+        self.0.read().ok().map(|head| head.clone())
+    }
 }
 
 /// Dropping this value rolls back state, history and outbox together. No ExEx
@@ -120,6 +161,9 @@ pub struct CanonicalStore {
 pub struct PreparedCommit {
     transaction: Transaction<'static, Sqlite>,
     head: Head,
+    head_cache: Arc<HeadCache>,
+    snapshots: Arc<snapshots::Cache>,
+    state: Snapshot,
 }
 
 impl PreparedCommit {
@@ -174,6 +218,7 @@ impl PreparedCommit {
             .execute(&mut *self.transaction)
             .await
             .map_err(error)?;
+        transactions::retain_outcomes(&mut self.transaction, &self.head, receipts).await?;
         Ok(())
     }
 
@@ -181,8 +226,17 @@ impl PreparedCommit {
         &self.head
     }
     pub async fn commit(self) -> Result<Head> {
-        self.transaction.commit().await.map_err(error)?;
-        Ok(self.head)
+        // The SQLite commit and publication-cache update have one owned
+        // lifetime. An abandoned caller cannot leave a live process observing
+        // its previous head after the transaction finishes committing.
+        tokio::spawn(async move {
+            self.transaction.commit().await.map_err(error)?;
+            self.snapshots.remember(&self.head, self.state)?;
+            self.head_cache.remember(&self.head)?;
+            Ok(self.head)
+        })
+        .await
+        .map_err(error)?
     }
 }
 
@@ -219,9 +273,7 @@ impl CanonicalStore {
         state: Snapshot,
         date: i64,
     ) -> Result<Self> {
-        if chain.chain_id.is_empty() {
-            return Err(error("empty chain identity"));
-        }
+        chain.validate().map_err(error)?;
         let ledger_root = hex::encode(state.root().map_err(error)?);
         let (index_hash, index_root) =
             epoch_index::next_root(hex::encode(epoch_index::genesis_root()).as_bytes(), 0, &[])
@@ -231,7 +283,7 @@ impl CanonicalStore {
             epoch_index::folded_state_root(ledger_root.as_bytes(), index_root.as_bytes())
                 .map_err(error)?,
         );
-        if chain.genesis_root != root {
+        if chain.genesis_root() != Some(root) {
             return Err(error("genesis snapshot differs from chain identity"));
         }
         let cursor = Cursor {
@@ -257,6 +309,19 @@ impl CanonicalStore {
             date,
             message,
         };
+        Self::initialize(path, chain, state, anchor, None).await
+    }
+
+    async fn initialize(
+        path: &Path,
+        chain: ChainIdentity,
+        state: Snapshot,
+        anchor: Head,
+        bootstrap: Option<bootstrap::Bootstrap>,
+    ) -> Result<Self> {
+        let state = state.with_persisted_counter().map_err(error)?;
+        anchor.validate()?;
+        let cursor = anchor.cursor;
         let file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -288,15 +353,34 @@ impl CanonicalStore {
             .execute(&mut *tx)
             .await
             .map_err(error)?;
-        write_snapshot(&mut tx, &state).await?;
+        write_snapshot(&mut tx, &state, None).await?;
         write_head(&mut tx, &anchor, &[]).await?;
+        if let Some(evidence) = &bootstrap {
+            sqlx::query("CREATE TABLE node_bootstrap(id INTEGER PRIMARY KEY CHECK(id=0), certificate BLOB NOT NULL, roots BLOB NOT NULL)")
+                .execute(&mut *tx).await.map_err(error)?;
+            sqlx::query("INSERT INTO node_bootstrap VALUES(0,?,?)")
+                .bind(&evidence.raw)
+                .bind(&evidence.window)
+                .execute(&mut *tx)
+                .await
+                .map_err(error)?;
+        }
         tx.commit().await.map_err(error)?;
-        Ok(Self {
+        let head_cache = Arc::new(HeadCache::new(anchor.clone()));
+        let snapshots = Arc::new(snapshots::Cache::default());
+        snapshots.remember(&anchor, state)?;
+        let store = Self {
             pool,
             chain,
             anchor,
+            bootstrap,
             source,
-        })
+            head_cache,
+            snapshots,
+        };
+        store.index_vm_receipts().await?;
+        store.index_transactions().await?;
+        Ok(store)
     }
 
     /// Reopen without repairing missing history. Corruption or mismatched chain
@@ -316,7 +400,7 @@ impl CanonicalStore {
         if &chain != expected_chain
             || anchor.cursor.sequence != Sequence(0)
             || anchor.cursor.epoch != EpochId(0)
-            || anchor.cursor.state_root != chain.genesis_root
+            || chain.genesis_root() != Some(anchor.cursor.state_root)
         {
             return Err(error("canonical chain identity differs"));
         }
@@ -326,15 +410,42 @@ impl CanonicalStore {
                 .await
                 .map_err(error)?,
         );
+        let head_cache = Arc::new(HeadCache::new(anchor.clone()));
         let store = Self {
             pool,
             chain,
             anchor,
+            bootstrap: None,
             source,
+            head_cache,
+            snapshots: Arc::default(),
         };
         store.verify_history().await?;
         store.snapshot().await?;
+        store.index_vm_receipts().await?;
+        store.index_transactions().await?;
         Ok(store)
+    }
+
+    pub fn anchor(&self) -> &Head {
+        &self.anchor
+    }
+
+    /// Authenticated native finality bytes preceding the retained history floor.
+    /// Callers must still verify the complete window against their export anchor.
+    pub fn checkpoint_window(&self) -> Option<&[u8]> {
+        self.bootstrap.as_ref().map(|value| value.window.as_slice())
+    }
+
+    /// Sequence numbers count retained commits; they are not chain epochs.
+    pub async fn sequence_for_epoch(&self, epoch: u64) -> Result<Option<Sequence>> {
+        let Some(offset) = epoch.checked_sub(self.anchor.cursor.epoch.0) else {
+            return Ok(None);
+        };
+        if epoch > self.head().await?.cursor.epoch.0 {
+            return Ok(None);
+        }
+        Ok(Some(Sequence(offset)))
     }
 
     pub fn source(&self) -> Arc<SqliteEpochSource<NativeTransaction>> {
@@ -347,7 +458,12 @@ impl CanonicalStore {
     /// Read-only access for historical rules and membership. The canonical
     /// writer remains exclusively owned by the node.
     pub fn reader(&self) -> Reader {
-        Reader::new(self.pool.clone(), self.chain.clone())
+        Reader::new(
+            self.pool.clone(),
+            self.chain.clone(),
+            self.anchor.cursor,
+            self.snapshots.clone(),
+        )
     }
 
     pub async fn head(&self) -> Result<Head> {
@@ -357,12 +473,19 @@ impl CanonicalStore {
         .fetch_one(&self.pool)
         .await
         .map_err(error)?;
-        decode_head(&row)
+        let head = decode_head(&row)?;
+        self.head_cache.remember(&head)?;
+        Ok(head)
+    }
+    /// Last locally published canonical head, independent of browser/VPN
+    /// serving leases. Historical reads still authenticate their stored rows.
+    pub fn cached_head(&self) -> Option<Head> {
+        self.head_cache.get()
     }
 
     pub async fn snapshot(&self) -> Result<(Head, StateBatch)> {
         let head = self.head().await?;
-        let snapshot = reader::restore(&self.pool, &head).await?;
+        let snapshot = self.snapshots.load(&self.pool, &head).await?;
         Ok((head, StateBatch::from_snapshot(snapshot)))
     }
 
@@ -429,8 +552,10 @@ impl CanonicalStore {
 
     /// Trusted local storage boundary. Normal node publication must go through
     /// `finality::Publisher`, which binds signatures and consensus receipts.
-    pub async fn prepare(&self, base: &Head, applied: AppliedEpoch) -> Result<PreparedCommit> {
+    pub async fn prepare(&self, base: &Head, mut applied: AppliedEpoch) -> Result<PreparedCommit> {
         base.validate()?;
+        applied.state = applied.state.with_persisted_counter().map_err(error)?;
+        let vm_receipts = vm_receipts::confirmed(&applied.transactions)?;
         if base.cursor.epoch.0.checked_add(1) != Some(applied.epoch)
             || applied.epoch > (1u64 << 62) - 1
         {
@@ -475,6 +600,9 @@ impl CanonicalStore {
             date: applied.date,
             message: applied.message,
         };
+        // Authenticate the persisted base before taking the writer connection.
+        // It is the only reusable object prefix accepted by incremental writes.
+        let persisted = self.reader().snapshot_at(base).await?;
         let mut tx = self.pool.begin().await.map_err(error)?;
         // Acquire the writer lock before reading HEAD. Competing processes may
         // prepare concurrently, but only one can publish against this base.
@@ -491,8 +619,10 @@ impl CanonicalStore {
         if decode_head(&row)? != *base {
             return Err(error("canonical HEAD moved"));
         }
-        write_snapshot(&mut tx, &applied.state).await?;
+        write_snapshot(&mut tx, &applied.state, Some(&persisted)).await?;
         write_head(&mut tx, &head, &applied.certificate).await?;
+        transactions::retain(&mut tx, head.cursor.sequence, &applied.transactions).await?;
+        transactions::advance(&mut tx, base.cursor.sequence, head.cursor.sequence).await?;
         self.source
             .append(
                 &mut tx,
@@ -505,10 +635,16 @@ impl CanonicalStore {
             )
             .await
             .map_err(error)?;
-        Ok(PreparedCommit {
+        let mut prepared = PreparedCommit {
             transaction: tx,
             head,
-        })
+            head_cache: self.head_cache.clone(),
+            snapshots: self.snapshots.clone(),
+            state: applied.state,
+        };
+        prepared.retain_vm_receipts(&vm_receipts).await?;
+        prepared.advance_vm_receipts(base.cursor.sequence).await?;
+        Ok(prepared)
     }
 
     async fn verify_history(&self) -> Result<()> {
@@ -519,7 +655,7 @@ impl CanonicalStore {
         let mut after = -1i64;
         loop {
             let rows = sqlx::query("SELECT n.sequence,n.head,n.root,e.sequence AS event_sequence,e.epoch AS event_epoch,e.parent_root AS event_parent,e.root AS event_root,e.events FROM node_epochs n LEFT JOIN exex_committed_epoch e ON e.chain_id=? AND e.genesis=? AND e.sequence=printf('%016x',n.sequence) WHERE n.sequence>? ORDER BY n.sequence LIMIT 16")
-                .bind(&self.chain.chain_id).bind(self.chain.genesis_root.0.as_slice()).bind(after)
+                .bind(&self.chain.chain_id).bind(self.chain.namespace_key().as_slice()).bind(after)
                 .fetch_all(&mut *read).await.map_err(error)?;
             if rows.is_empty() {
                 break;
@@ -564,7 +700,7 @@ impl CanonicalStore {
         }
         let head = previous.ok_or_else(|| error("missing canonical history"))?;
         let event_head: Option<String> = sqlx::query_scalar("SELECT sequence FROM exex_committed_epoch WHERE chain_id=? AND genesis=? ORDER BY sequence DESC LIMIT 1")
-            .bind(&self.chain.chain_id).bind(self.chain.genesis_root.0.as_slice()).fetch_optional(&mut *read).await.map_err(error)?;
+            .bind(&self.chain.chain_id).bind(self.chain.namespace_key().as_slice()).fetch_optional(&mut *read).await.map_err(error)?;
         let expected = (head.cursor.sequence != self.anchor.cursor.sequence)
             .then(|| format!("{:016x}", head.cursor.sequence.0));
         if event_head != expected {
@@ -622,40 +758,12 @@ pub fn execution_root(
     ))
 }
 
-async fn write_snapshot(tx: &mut Transaction<'_, Sqlite>, snapshot: &Snapshot) -> Result<()> {
-    let objects = snapshot.objects().map_err(error)?;
-    for object in objects.values() {
-        sqlx::query(
-            "INSERT INTO node_objects(hash,contents,data) VALUES(?,?,?) ON CONFLICT DO NOTHING",
-        )
-        .bind(object.hash.as_slice())
-        .bind(object.contents)
-        .bind(&object.data)
-        .execute(&mut **tx)
-        .await
-        .map_err(error)?;
-        let row = sqlx::query("SELECT contents,data FROM node_objects WHERE hash=?")
-            .bind(object.hash.as_slice())
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(error)?;
-        if row.try_get::<bool, _>("contents").map_err(error)? != object.contents
-            || row.try_get::<Vec<u8>, _>("data").map_err(error)? != object.data
-        {
-            return Err(error("conflicting persisted state object"));
-        }
-    }
-    for object in objects.values() {
-        for child in &object.children {
-            sqlx::query("INSERT INTO node_edges(parent,child) VALUES(?,?) ON CONFLICT DO NOTHING")
-                .bind(object.hash.as_slice())
-                .bind(child.as_slice())
-                .execute(&mut **tx)
-                .await
-                .map_err(error)?;
-        }
-    }
-    Ok(())
+async fn write_snapshot(
+    tx: &mut Transaction<'_, Sqlite>,
+    snapshot: &Snapshot,
+    base: Option<&Snapshot>,
+) -> Result<()> {
+    inodes::write(tx, snapshot, base).await
 }
 
 async fn write_head(

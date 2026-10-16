@@ -154,7 +154,7 @@ pub fn parse(raw: &[u8], admit: bool) -> Result<Item> {
     Ok(Item::Rejection(Box::new(value)))
 }
 fn strictly_ordered(values: &[Rejection]) -> bool {
-    values.first().map_or(true, |r| r.position > -1)
+    values.first().is_none_or(|r| r.position > -1)
         && values.windows(2).all(|v| v[0].position < v[1].position)
 }
 fn distinct<'a>(transactions: impl Iterator<Item = &'a Transaction>) -> Result<bool> {

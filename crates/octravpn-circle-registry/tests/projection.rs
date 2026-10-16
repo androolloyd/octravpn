@@ -21,7 +21,9 @@ fn registry_circle() -> String {
 fn chain() -> ChainIdentity {
     ChainIdentity {
         chain_id: "private-vpn-fork".into(),
-        genesis_root: StateRoot([1; 32]),
+        origin: octra_exex::ChainOrigin::Genesis {
+            state_root: StateRoot([1; 32]),
+        },
     }
 }
 fn anchor() -> Cursor {

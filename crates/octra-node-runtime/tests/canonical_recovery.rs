@@ -37,10 +37,7 @@ fn genesis() -> (ChainIdentity, StateBatch) {
     )
     .unwrap();
     (
-        ChainIdentity {
-            chain_id: "canonical-recovery-fixture".into(),
-            genesis_root: StateRoot(root),
-        },
+        ChainIdentity::genesis("canonical-recovery-fixture", StateRoot(root)),
         state,
     )
 }
@@ -154,7 +151,9 @@ async fn state_and_outbox_publish_together_or_rollback_and_survive_restart() {
         transactions()
     );
     let mut wrong = chain;
-    wrong.genesis_root.0[0] ^= 1;
+    wrong.origin = octra_exex::ChainOrigin::Genesis {
+        state_root: StateRoot([255; 32]),
+    };
     assert!(CanonicalStore::open(&path, &wrong).await.is_err());
 }
 
@@ -164,6 +163,38 @@ async fn raw_pool(path: &Path) -> sqlx::SqlitePool {
         .connect_with(SqliteConnectOptions::new().filename(path))
         .await
         .unwrap()
+}
+
+#[tokio::test]
+async fn immutable_prefix_is_reused_without_reencoding_or_rewriting_after_rollback() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("chain.db");
+    let store = fixture(&path).await;
+    let pool = raw_pool(&path).await;
+    sqlx::query("CREATE TRIGGER refuse_rewrite BEFORE INSERT ON node_objects WHEN EXISTS(SELECT 1 FROM node_objects WHERE hash=NEW.hash) BEGIN SELECT RAISE(FAIL,'immutable prefix rewritten'); END")
+        .execute(&pool).await.unwrap();
+    let (base, state) = store.snapshot().await.unwrap();
+    let request = applied(&base, state, transactions());
+    let pending = store.prepare(&base, request.clone()).await.unwrap();
+    assert_eq!(store.snapshot().await.unwrap().0, base);
+    drop(pending);
+    let head = store
+        .prepare(&base, request)
+        .await
+        .unwrap()
+        .commit()
+        .await
+        .unwrap();
+    let committed = store.reader().snapshot_at(&head).await.unwrap();
+    assert_eq!(
+        committed.get(&[b"accounts", b"\xff\0", b"data"]),
+        Some(b"genesis".as_slice())
+    );
+    pool.close().await;
+    let chain = store.chain().clone();
+    store.close().await;
+    let reopened = CanonicalStore::open(&path, &chain).await.unwrap();
+    assert_eq!(reopened.snapshot().await.unwrap().0, head);
 }
 
 #[tokio::test]

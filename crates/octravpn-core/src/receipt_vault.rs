@@ -719,6 +719,59 @@ pub fn decode_record(raw: &[u8]) -> ReceiptVaultResult<Option<DecodedRecord>> {
     decode_record_at(raw, Path::new("<buffer>"), 0)
 }
 
+/// Inspect every immutable record without migration, truncation or file IO.
+/// Replay validates checksums and lifecycle consistency before any records
+/// are returned; historical receipts remain available to domain inspection.
+pub fn inspect(raw: &[u8]) -> ReceiptVaultResult<Vec<VaultRecord>> {
+    let path = Path::new("<receipt vault snapshot>");
+    let (_, good_len, _) = replay_any(raw, path)?;
+    if good_len != raw.len() as u64 {
+        return Err(ReceiptVaultError::Truncated {
+            path: path.display().to_string(),
+            detail: format!(
+                "incomplete record after byte {good_len}; migration requires complete evidence"
+            ),
+        });
+    }
+    if raw.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut records = Vec::new();
+    let mut cursor = MAGIC_V1.len();
+    while cursor < raw.len() {
+        if raw.starts_with(MAGIC_V2) {
+            let decoded =
+                decode_record_at(&raw[cursor..], path, cursor as u64)?.ok_or_else(|| {
+                    ReceiptVaultError::Truncated {
+                        path: path.display().to_string(),
+                        detail: format!("missing record at byte {cursor}"),
+                    }
+                })?;
+            cursor += decoded.bytes_consumed;
+            records.push(decoded.record);
+        } else {
+            // replay_any already checked every v1 length and CRC against the
+            // same immutable slice. Retain all receipts, not only the winner.
+            let mut id = [0; 32];
+            id.copy_from_slice(&raw[cursor..cursor + 32]);
+            let length = u32::from_be_bytes([
+                raw[cursor + 32],
+                raw[cursor + 33],
+                raw[cursor + 34],
+                raw[cursor + 35],
+            ]) as usize;
+            let start = cursor + 36;
+            let end = start + length;
+            records.push(VaultRecord::Receipt {
+                session_id: SessionId::new(id),
+                receipt: serde_json::from_slice(&raw[start..end])?,
+            });
+            cursor = end + CRC_LEN;
+        }
+    }
+    Ok(records)
+}
+
 fn decode_record_at(
     raw: &[u8],
     path: &Path,

@@ -1,0 +1,2054 @@
+{
+  "baseline": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "source_equivalent_baseline": "d3e834919bd586e81f947d0dae91becc6c43c756",
+  "scope": "Standalone lib/vm/aml c_*.mli public value inventory mapped to Rust source relative to aml/core. This is source inventory, not compiled coverage or parity evidence.",
+  "validation": "UNBUILT_UNTESTED; source API mapping proves neither successful compilation nor consumer coverage, behavioral equivalence or native differential qualification.",
+  "interfaces": [
+    {
+      "native": "analysis/c_braid.mli",
+      "public_values": [
+        "build",
+        "make",
+        "lower",
+        "check",
+        "text"
+      ],
+      "rust_sources": [
+        "braid.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "build": "braid::build",
+        "make": "braid::make",
+        "lower": "braid::lower",
+        "check": "braid::check",
+        "text": "braid::Error::text"
+      }
+    },
+    {
+      "native": "analysis/c_check.mli",
+      "public_values": [
+        "max_depth",
+        "max_nodes",
+        "max_inputs",
+        "check",
+        "check_in",
+        "check_in_located",
+        "check_at",
+        "check_in_at",
+        "locations",
+        "sites",
+        "text",
+        "text_named",
+        "rule_text"
+      ],
+      "rust_sources": [
+        "check/mod.rs",
+        "check/env.rs",
+        "check/infer.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "max_depth": "check::MAX_DEPTH",
+        "max_nodes": "check::MAX_NODES",
+        "max_inputs": "check::MAX_INPUTS",
+        "check": "check::check",
+        "check_in": "check::check_in",
+        "check_in_located": "check::check_in_located",
+        "check_at": "check::check_at",
+        "check_in_at": "check::check_in_at",
+        "locations": "Checked::locations",
+        "sites": "Checked::sites",
+        "text": "check::Error::text",
+        "text_named": "check::Error::text_named",
+        "rule_text": "check::RuleError::text"
+      }
+    },
+    {
+      "native": "analysis/c_eff.mli",
+      "public_values": [
+        "valid",
+        "compare",
+        "empty",
+        "one",
+        "add",
+        "union",
+        "of_list",
+        "to_list",
+        "equal",
+        "subset",
+        "atom_text",
+        "text"
+      ],
+      "rust_sources": [
+        "mod.rs",
+        "../ast.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "notes": "Effects use BTreeSet<Atom>; atom ordering and set operations are Rust trait/container APIs.",
+      "public_api": {
+        "valid": "Atom's validated Natural fields",
+        "compare": "Atom::Ord",
+        "empty": "Effects::new",
+        "one": "Effects::from([atom])",
+        "add": "Effects::insert",
+        "union": "Effects::union",
+        "of_list": "Effects::from_iter",
+        "to_list": "Effects::iter",
+        "equal": "Effects::PartialEq",
+        "subset": "Effects::is_subset",
+        "atom_text": "atom_text",
+        "text": "effects_text"
+      }
+    },
+    {
+      "native": "analysis/c_ent.mli",
+      "public_values": [
+        "prod",
+        "valid",
+        "plan",
+        "mode",
+        "bind",
+        "bind_at",
+        "text"
+      ],
+      "rust_sources": [
+        "entropy.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "prod": "entropy::production",
+        "valid": "entropy::valid",
+        "plan": "entropy::plan",
+        "mode": "entropy::mode",
+        "bind": "entropy::bind",
+        "bind_at": "entropy::bind_at",
+        "text": "entropy::Error::text"
+      }
+    },
+    {
+      "native": "analysis/c_fin.mli",
+      "public_values": [
+        "stat",
+        "fit",
+        "clear",
+        "clearn",
+        "pick",
+        "pickn"
+      ],
+      "rust_sources": [
+        "finite.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "stat": "finite::stat",
+        "fit": "finite::fit",
+        "clear": "finite::clear",
+        "clearn": "finite::clear_all",
+        "pick": "finite::pick",
+        "pickn": "finite::pick_many"
+      }
+    },
+    {
+      "native": "analysis/c_graph.mli",
+      "public_values": [
+        "cfg",
+        "base",
+        "prod",
+        "edge",
+        "graph",
+        "valid",
+        "mul_depth",
+        "norm",
+        "text"
+      ],
+      "rust_sources": [
+        "graph.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "cfg": "graph::Config::new",
+        "base": "graph::base",
+        "prod": "graph::prod",
+        "edge": "graph::edge",
+        "graph": "graph::graph",
+        "valid": "graph::valid",
+        "mul_depth": "graph::mul_depth",
+        "norm": "graph::norm",
+        "text": "graph::Error::text"
+      }
+    },
+    {
+      "native": "analysis/c_loom.mli",
+      "public_values": [
+        "make",
+        "lower",
+        "check",
+        "text"
+      ],
+      "rust_sources": [
+        "loom.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "make": "loom::make",
+        "lower": "loom::lower",
+        "check": "loom::check",
+        "text": "loom::Error::text"
+      }
+    },
+    {
+      "native": "analysis/c_orbit.mli",
+      "public_values": [
+        "make",
+        "upto",
+        "lower",
+        "check",
+        "text"
+      ],
+      "rust_sources": [
+        "orbit.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "make": "orbit::make",
+        "upto": "orbit::upto",
+        "lower": "orbit::lower",
+        "check": "orbit::check",
+        "text": "orbit::Error::text"
+      }
+    },
+    {
+      "native": "analysis/c_perm.mli",
+      "public_values": [
+        "le",
+        "meet",
+        "empty",
+        "add",
+        "set",
+        "vals",
+        "cut",
+        "check_info",
+        "check",
+        "prog",
+        "text"
+      ],
+      "rust_sources": [
+        "perm.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "le": "perm::le",
+        "meet": "perm::meet",
+        "empty": "perm::Set::default",
+        "add": "Set::add",
+        "set": "Set::from_values",
+        "vals": "Set::vals",
+        "cut": "Set::cut",
+        "check_info": "Set::check_info",
+        "check": "Set::check",
+        "prog": "Set::prog",
+        "text": "perm::Error::text"
+      }
+    },
+    {
+      "native": "analysis/c_quant.mli",
+      "public_values": [
+        "expand",
+        "make",
+        "lower",
+        "check",
+        "text"
+      ],
+      "rust_sources": [
+        "quant.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "expand": "quant::expand",
+        "make": "quant::make",
+        "lower": "quant::lower",
+        "check": "quant::check",
+        "text": "quant::Error::text"
+      }
+    },
+    {
+      "native": "analysis/c_rift.mli",
+      "public_values": [
+        "step",
+        "path",
+        "build",
+        "make",
+        "lower",
+        "check",
+        "text"
+      ],
+      "rust_sources": [
+        "rift.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "step": "rift::Step::new",
+        "path": "rift::Path::new",
+        "build": "rift::build",
+        "make": "rift::make",
+        "lower": "rift::lower",
+        "check": "rift::check",
+        "text": "rift::Error::text"
+      }
+    },
+    {
+      "native": "analysis/c_wake.mli",
+      "public_values": [
+        "build",
+        "make",
+        "lower",
+        "check",
+        "text"
+      ],
+      "rust_sources": [
+        "wake.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "build": "wake::build",
+        "make": "wake::make",
+        "lower": "wake::lower",
+        "check": "wake::check",
+        "text": "wake::Error::text"
+      }
+    },
+    {
+      "native": "analysis/c_weave.mli",
+      "public_values": [
+        "build",
+        "make",
+        "lower",
+        "check",
+        "text"
+      ],
+      "rust_sources": [
+        "weave.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "build": "weave::build",
+        "make": "weave::make",
+        "lower": "weave::lower",
+        "check": "weave::check",
+        "text": "weave::Error::text"
+      }
+    },
+    {
+      "native": "artifact/codec/c_bin.mli",
+      "public_values": [
+        "num",
+        "get_num",
+        "ty_code",
+        "ty_get",
+        "atom_code",
+        "atom_get",
+        "list_code",
+        "list_get",
+        "value_code",
+        "value_get",
+        "res_code",
+        "res_get",
+        "enc_ty",
+        "dec_ty",
+        "enc_value",
+        "dec_value",
+        "enc_row",
+        "dec_row",
+        "enc_res",
+        "dec_res",
+        "enc_snap",
+        "dec_snap",
+        "enc_code",
+        "dec_code",
+        "pack",
+        "unpack",
+        "transcript"
+      ],
+      "rust_sources": [
+        "bin/mod.rs",
+        "bin/typed.rs",
+        "bin/value.rs",
+        "bin/wire.rs",
+        "bin/snapshot.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "num": "Codes::num with validated Natural",
+        "get_num": "Codes::natural_get",
+        "ty_code": "Codes::type_code",
+        "ty_get": "Codes::type_get",
+        "atom_code": "Codes::atom_code",
+        "atom_get": "Codes::atom_get",
+        "list_code": "Codes::list after element projection",
+        "list_get": "Codes::list_get then element projection",
+        "value_code": "Codes::value_code",
+        "value_get": "Codes::value_get",
+        "res_code": "Codes::resources_code",
+        "res_get": "Codes::resources_get",
+        "enc_ty": "bin::encode_type",
+        "dec_ty": "bin::decode_type",
+        "enc_value": "bin::encode_value",
+        "dec_value": "bin::decode_value",
+        "enc_row": "bin::encode_row",
+        "dec_row": "bin::decode_row",
+        "enc_res": "bin::encode_resources",
+        "dec_res": "bin::decode_resources",
+        "enc_snap": "bin::encode_snapshot",
+        "dec_snap": "bin::decode_snapshot",
+        "enc_code": "bin::encode",
+        "dec_code": "bin::decode",
+        "pack": "bin::pack",
+        "unpack": "bin::unpack",
+        "transcript": "bin::transcript"
+      }
+    },
+    {
+      "native": "artifact/codec/c_pbin.mli",
+      "public_values": [
+        "valid",
+        "code",
+        "get",
+        "enc",
+        "dec"
+      ],
+      "rust_sources": [
+        "program_codec/mod.rs",
+        "program_codec/encode.rs",
+        "program_codec/decode.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "valid": "program_codec::valid",
+        "code": "program_codec::code",
+        "get": "program_codec::get",
+        "enc": "program_codec::encode",
+        "dec": "program_codec::decode"
+      }
+    },
+    {
+      "native": "artifact/codec/c_sbin.mli",
+      "public_values": [
+        "enc_scope",
+        "dec_scope",
+        "enc_tok",
+        "dec_tok",
+        "enc_state",
+        "dec_state"
+      ],
+      "rust_sources": [
+        "source_binary.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "enc_scope": "source_binary::encode_scope",
+        "dec_scope": "source_binary::decode_scope",
+        "enc_tok": "source_binary::encode_token",
+        "dec_tok": "source_binary::decode_token",
+        "enc_state": "source_binary::encode_state",
+        "dec_state": "source_binary::decode_state"
+      }
+    },
+    {
+      "native": "artifact/project/c_feed.mli",
+      "public_values": [
+        "spec",
+        "specs",
+        "make",
+        "values",
+        "typed",
+        "shaped",
+        "encode",
+        "decode",
+        "parse_value",
+        "parse",
+        "attach",
+        "term_of",
+        "close",
+        "text"
+      ],
+      "rust_sources": [
+        "feed/mod.rs",
+        "feed/parse.rs",
+        "feed/projection.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "spec": "feed::Spec::new",
+        "specs": "feed::specs",
+        "make": "Feed::make",
+        "values": "Feed::values",
+        "typed": "feed::typed",
+        "shaped": "feed::shaped",
+        "encode": "Feed::encode",
+        "decode": "Feed::decode",
+        "parse_value": "feed::parse_value",
+        "parse": "feed::parse",
+        "attach": "Feed::attach",
+        "term_of": "feed::term_of",
+        "close": "Feed::close",
+        "text": "feed::Error::text"
+      }
+    },
+    {
+      "native": "artifact/project/c_folio.mli",
+      "public_values": [
+        "epoch_max",
+        "epoch_valid",
+        "part",
+        "form",
+        "make",
+        "origins",
+        "enc",
+        "dec",
+        "file",
+        "of_file",
+        "verify",
+        "text"
+      ],
+      "rust_sources": [
+        "folio.rs",
+        "folio/wire.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "notes": "Origin retains its Values arena alongside feed ValueIds. No filesystem reads or store opening.",
+      "public_api": {
+        "epoch_max": "folio::epoch_max",
+        "epoch_valid": "folio::epoch_valid",
+        "part": "folio::part",
+        "form": "folio::form",
+        "make": "folio::make",
+        "origins": "folio::origins",
+        "enc": "folio::encode",
+        "dec": "folio::decode",
+        "file": "folio::file",
+        "of_file": "folio::of_file",
+        "verify": "folio::verify",
+        "text": "folio::Error::text"
+      }
+    },
+    {
+      "native": "artifact/project/c_pfile.mli",
+      "public_values": [
+        "parse",
+        "paths",
+        "make",
+        "text"
+      ],
+      "rust_sources": [
+        "project_file.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "parse": "project_file::parse",
+        "paths": "ProjectFile::paths",
+        "make": "project_file::make",
+        "text": "project_file::Error::text"
+      }
+    },
+    {
+      "native": "artifact/project/c_pimg.mli",
+      "public_values": [
+        "valid",
+        "code",
+        "get",
+        "enc",
+        "dec"
+      ],
+      "rust_sources": [
+        "project_image.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "valid": "project_image::valid",
+        "code": "project_image::code",
+        "get": "project_image::get",
+        "enc": "project_image::encode",
+        "dec": "project_image::decode"
+      }
+    },
+    {
+      "native": "artifact/project/c_proj.mli",
+      "public_values": [
+        "source",
+        "root",
+        "root_feed",
+        "path_ok",
+        "name_ok",
+        "make",
+        "srcs",
+        "roots",
+        "rule",
+        "target",
+        "out",
+        "outs",
+        "text"
+      ],
+      "rust_sources": [
+        "project.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "source": "project::source",
+        "root": "project::root",
+        "root_feed": "project::root_feed",
+        "path_ok": "project::path_ok",
+        "name_ok": "project::name_ok",
+        "make": "project::make",
+        "srcs": "Project::sources",
+        "roots": "Project::roots",
+        "rule": "Project::rule",
+        "target": "Project::target",
+        "out": "project::out",
+        "outs": "Project::outs",
+        "text": "project::Error::text"
+      }
+    },
+    {
+      "native": "artifact/project/c_rval.mli",
+      "public_values": [
+        "make",
+        "typ",
+        "value",
+        "encode",
+        "decode",
+        "equal",
+        "text"
+      ],
+      "rust_sources": [
+        "result.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "make": "Record::make",
+        "typ": "Record::typ",
+        "value": "Record::value",
+        "encode": "Record::encode",
+        "decode": "Record::decode",
+        "equal": "Record::equal",
+        "text": "result::Error::text"
+      }
+    },
+    {
+      "native": "artifact/proof/c_cert.mli",
+      "public_values": [
+        "issue",
+        "verify",
+        "text"
+      ],
+      "rust_sources": [
+        "certificate.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "issue": "certificate::issue",
+        "verify": "certificate::verify",
+        "text": "certificate::Error::text"
+      }
+    },
+    {
+      "native": "artifact/proof/c_root.mli",
+      "public_values": [
+        "image",
+        "root"
+      ],
+      "rust_sources": [
+        "root.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "image": "root::image",
+        "root": "root::root"
+      }
+    },
+    {
+      "native": "artifact/proof/c_scert.mli",
+      "public_values": [
+        "issue",
+        "verify",
+        "text"
+      ],
+      "rust_sources": [
+        "source_certificate.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "issue": "source_certificate::issue",
+        "verify": "source_certificate::verify",
+        "text": "source_certificate::Error::text"
+      }
+    },
+    {
+      "native": "artifact/proof/c_seal.mli",
+      "public_values": [
+        "make",
+        "decode",
+        "accept",
+        "text"
+      ],
+      "rust_sources": [
+        "seal.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "make": "seal::make",
+        "decode": "seal::decode",
+        "accept": "seal::accept",
+        "text": "seal::Error::text"
+      }
+    },
+    {
+      "native": "artifact/proof/c_sha.mli",
+      "public_values": [
+        "hash"
+      ],
+      "rust_sources": [
+        "sha.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "hash": "sha::hash"
+      }
+    },
+    {
+      "native": "artifact/trace/c_dbg.mli",
+      "public_values": [
+        "make",
+        "cap",
+        "points",
+        "expect",
+        "decide",
+        "check",
+        "lit",
+        "lit_text",
+        "session",
+        "source",
+        "code",
+        "config",
+        "seen",
+        "trace",
+        "encode",
+        "decode",
+        "text"
+      ],
+      "rust_sources": [
+        "debug.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "make": "debug::make",
+        "cap": "Config::cap",
+        "points": "Config::points",
+        "expect": "Config::expect",
+        "decide": "debug::decide",
+        "check": "debug::check",
+        "lit": "debug::lit",
+        "lit_text": "debug::lit_text",
+        "session": "debug::session",
+        "source": "Session::source",
+        "code": "Session::code",
+        "config": "Session::config",
+        "seen": "Session::seen",
+        "trace": "Session::trace",
+        "encode": "debug::encode",
+        "decode": "debug::decode",
+        "text": "debug::Error::text"
+      }
+    },
+    {
+      "native": "artifact/trace/c_live.mli",
+      "public_values": [
+        "slot",
+        "make",
+        "rows",
+        "length",
+        "get",
+        "equal",
+        "enc",
+        "dec",
+        "text"
+      ],
+      "rust_sources": [
+        "maps/live.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "slot": "maps::Slot public fields",
+        "make": "LiveMap::make",
+        "rows": "LiveMap::rows",
+        "length": "LiveMap::rows().len()",
+        "get": "LiveMap::rows()[index]",
+        "equal": "LiveMap::equal",
+        "enc": "LiveMap::encode",
+        "dec": "LiveMap::decode",
+        "text": "maps::live::Error::Display"
+      }
+    },
+    {
+      "native": "artifact/trace/c_path.mli",
+      "public_values": [
+        "make",
+        "make_feed",
+        "make_in",
+        "replay",
+        "text"
+      ],
+      "rust_sources": [
+        "path.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "make": "path::make",
+        "make_feed": "path::make_feed",
+        "make_in": "path::make_in",
+        "replay": "path::replay",
+        "text": "path::Error::text"
+      }
+    },
+    {
+      "native": "artifact/trace/c_sess.mli",
+      "public_values": [
+        "scope",
+        "scope_equal",
+        "token",
+        "cell",
+        "empty",
+        "scope_of",
+        "view",
+        "of_cells",
+        "issue",
+        "current",
+        "take",
+        "run",
+        "token_text",
+        "text"
+      ],
+      "rust_sources": [
+        "session.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "scope": "session::scope",
+        "scope_equal": "session::scope_equal",
+        "token": "session::token",
+        "cell": "session::cell",
+        "empty": "session::empty",
+        "scope_of": "session::scope_of",
+        "view": "session::view",
+        "of_cells": "session::of_cells",
+        "issue": "session::issue",
+        "current": "session::current",
+        "take": "session::take",
+        "run": "session::run",
+        "token_text": "session::token_text",
+        "text": "session::Error::text"
+      }
+    },
+    {
+      "native": "artifact/trace/c_smap.mli",
+      "public_values": [
+        "max",
+        "make",
+        "spans",
+        "length",
+        "get",
+        "equal",
+        "enc",
+        "dec",
+        "text"
+      ],
+      "rust_sources": [
+        "maps/source.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "max": "maps::MAX_ROWS",
+        "make": "SourceMap::make",
+        "spans": "SourceMap::spans",
+        "length": "SourceMap::spans().len()",
+        "get": "SourceMap::spans()[index]",
+        "equal": "SourceMap::equal",
+        "enc": "SourceMap::encode",
+        "dec": "SourceMap::decode",
+        "text": "maps::source::Error::Display"
+      }
+    },
+    {
+      "native": "artifact/trace/c_trace.mli",
+      "public_values": [
+        "make",
+        "replay",
+        "text"
+      ],
+      "rust_sources": [
+        "trace.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "make": "trace::make",
+        "replay": "trace::replay",
+        "text": "trace::Error::text"
+      }
+    },
+    {
+      "native": "artifact/trace/c_turn.mli",
+      "public_values": [
+        "verify",
+        "run",
+        "text"
+      ],
+      "rust_sources": [
+        "turn.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "verify": "turn::verify",
+        "run": "turn::run",
+        "text": "turn::Error::text"
+      }
+    },
+    {
+      "native": "core/c_fp.mli",
+      "public_values": [
+        "p",
+        "valid",
+        "make",
+        "of_z",
+        "to_z",
+        "equal",
+        "add",
+        "mul",
+        "text"
+      ],
+      "rust_sources": [
+        "field.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "p": "field::modulus",
+        "valid": "field::valid",
+        "make": "Field::new",
+        "of_z": "Field::reduce",
+        "to_z": "Field::value",
+        "equal": "Field::PartialEq",
+        "add": "Field::add",
+        "mul": "Field::multiply",
+        "text": "Field::text"
+      }
+    },
+    {
+      "native": "core/c_limit.mli",
+      "public_values": [
+        "at",
+        "valid",
+        "text",
+        "zero",
+        "one",
+        "make",
+        "make3",
+        "level",
+        "effort",
+        "used",
+        "add",
+        "succ",
+        "max",
+        "scale",
+        "le",
+        "equal"
+      ],
+      "rust_sources": [
+        "limit.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "at": "Limit::at",
+        "valid": "Limit::valid",
+        "text": "Limit::Display",
+        "zero": "Limit::default",
+        "one": "Limit::one",
+        "make": "Limit::make",
+        "make3": "Limit public fields",
+        "level": "Limit::level",
+        "effort": "Limit::effort",
+        "used": "Limit::used",
+        "add": "Limit::add",
+        "succ": "Limit::successor",
+        "max": "Limit::maximum",
+        "scale": "Limit::scale",
+        "le": "Limit::le",
+        "equal": "Limit::PartialEq"
+      }
+    },
+    {
+      "native": "core/c_nat.mli",
+      "public_values": [
+        "max",
+        "str_max",
+        "zero",
+        "one",
+        "make",
+        "byte",
+        "of_int",
+        "valid",
+        "to_z",
+        "to_int",
+        "text",
+        "equal",
+        "compare",
+        "lt",
+        "le",
+        "add",
+        "sub"
+      ],
+      "rust_sources": [
+        "mod.rs",
+        "../ast.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "notes": "Natural is re-exported from aml::ast; validated construction, ordering, getters and checked arithmetic replace native value helpers.",
+      "public_api": {
+        "max": "Natural::MAX",
+        "str_max": "Natural::STR_MAX",
+        "zero": "Natural::zero",
+        "one": "Natural::one",
+        "make": "Natural::new",
+        "byte": "Natural::byte",
+        "of_int": "Natural::new / from_u32",
+        "valid": "Natural private-constructor invariant",
+        "to_z": "Natural::to_bigint",
+        "to_int": "Natural::get",
+        "text": "Natural::text",
+        "equal": "Natural::PartialEq",
+        "compare": "Natural::Ord",
+        "lt": "Natural::PartialOrd",
+        "le": "Natural::PartialOrd",
+        "add": "Natural::checked_add",
+        "sub": "Natural::checked_sub"
+      }
+    },
+    {
+      "native": "core/c_res.mli",
+      "public_values": [
+        "typ",
+        "ok",
+        "err",
+        "fold"
+      ],
+      "rust_sources": [
+        "res.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "notes": "Checked typed-sum facade, distinct from AR1 result artifacts in result.rs.",
+      "public_api": {
+        "typ": "res::typ",
+        "ok": "res::ok",
+        "err": "res::err",
+        "fold": "res::fold"
+      }
+    },
+    {
+      "native": "core/c_rule.mli",
+      "public_values": [
+        "limits",
+        "local",
+        "rule",
+        "schedule",
+        "at",
+        "select",
+        "id",
+        "version",
+        "id_limits",
+        "activate",
+        "rule_limits",
+        "same_id",
+        "same_limits",
+        "supported",
+        "id_values",
+        "id_text",
+        "text"
+      ],
+      "rust_sources": [
+        "rule.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "limits": "Limits::new",
+        "local": "rule::LOCAL",
+        "rule": "Rule::new",
+        "schedule": "Schedule::new",
+        "at": "Schedule::at",
+        "select": "Schedule::select",
+        "id": "Rule::id",
+        "version": "Id::version",
+        "id_limits": "Id::limits",
+        "activate": "Rule::activate",
+        "rule_limits": "Rule::limits",
+        "same_id": "Id::PartialEq",
+        "same_limits": "Limits::PartialEq",
+        "supported": "Rule::supported",
+        "id_values": "Id::values",
+        "id_text": "Id::text",
+        "text": "rule::Error::Display"
+      }
+    },
+    {
+      "native": "core/c_term.mli",
+      "public_values": [
+        "bind",
+        "fold"
+      ],
+      "rust_sources": [
+        "term.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "notes": "Bind/Fold public fields and Terms::insert provide public construction with child/type reference checks.",
+      "public_api": {
+        "bind": "term::Bind public fields",
+        "fold": "term::Fold public fields"
+      }
+    },
+    {
+      "native": "core/c_text.mli",
+      "public_values": [
+        "max",
+        "make",
+        "add",
+        "full",
+        "get",
+        "clip"
+      ],
+      "rust_sources": [
+        "text.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "max": "text::MAX",
+        "make": "Text::default",
+        "add": "Text::add",
+        "full": "Text::full",
+        "get": "Text::finish",
+        "clip": "text::clip"
+      }
+    },
+    {
+      "native": "core/c_type.mli",
+      "public_values": [
+        "max_depth",
+        "max_nodes",
+        "max_bits",
+        "equal",
+        "eq_work",
+        "mul_text",
+        "text",
+        "nodes",
+        "valid",
+        "repr",
+        "add_len",
+        "kind",
+        "plain",
+        "equatable",
+        "range",
+        "admits"
+      ],
+      "rust_sources": [
+        "types.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "notes": "Types::insert checks local references before mutation. TypeId equality uses canonical interning within one arena; semantic validity remains a later check.",
+      "public_api": {
+        "max_depth": "types::MAX_DEPTH",
+        "max_nodes": "types::MAX_NODES",
+        "max_bits": "types::MAX_BITS",
+        "equal": "TypeId::PartialEq in canonical Types arena",
+        "eq_work": "Types::equality_work",
+        "mul_text": "Multiplicity::text",
+        "text": "Types::text",
+        "nodes": "Types::nodes",
+        "valid": "Types::valid",
+        "repr": "Types::repr",
+        "add_len": "Natural::checked_add",
+        "kind": "Types::kind",
+        "plain": "Types::plain",
+        "equatable": "Types::equatable",
+        "range": "types::range",
+        "admits": "Types::admits"
+      }
+    },
+    {
+      "native": "crypto/c_crypt.mli",
+      "public_values": [
+        "input",
+        "make",
+        "equal",
+        "view",
+        "core",
+        "env",
+        "plain",
+        "eval",
+        "exec",
+        "text"
+      ],
+      "rust_sources": [
+        "crypt.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "notes": "Field simulation only, matching C_crypt. Does not provide HFHE ciphertext execution or cryptographic evidence.",
+      "public_api": {
+        "input": "crypt::Input::new",
+        "make": "Cipher::make",
+        "equal": "Cipher::PartialEq",
+        "view": "Cipher::view",
+        "core": "Cipher::core",
+        "env": "crypt::Environment::new",
+        "plain": "crypt::plain",
+        "eval": "crypt::eval",
+        "exec": "crypt::exec",
+        "text": "crypt::Error::text"
+      }
+    },
+    {
+      "native": "crypto/c_fhe.mli",
+      "public_values": [
+        "cfg",
+        "profile",
+        "full",
+        "param",
+        "catalog",
+        "select",
+        "params",
+        "input",
+        "env",
+        "var",
+        "trim",
+        "add",
+        "mul",
+        "recrypt",
+        "node",
+        "host",
+        "host_type",
+        "host_term",
+        "host_check",
+        "emit",
+        "emit_check",
+        "check",
+        "enc_text",
+        "param_text",
+        "op_text",
+        "text"
+      ],
+      "rust_sources": [
+        "fhe.rs",
+        "fhe/host.rs",
+        "fhe/run.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "cfg": "fhe::Config::new",
+        "profile": "fhe::Profile::new",
+        "full": "Profile::full",
+        "param": "fhe::Parameter::new",
+        "catalog": "fhe::Catalog::new",
+        "select": "Catalog::select",
+        "params": "Catalog::params",
+        "input": "fhe::Input::new",
+        "env": "fhe::Environment::new",
+        "var": "Terms::insert(Term::Var)",
+        "trim": "Terms::insert(Term::Trim)",
+        "add": "Terms::insert(Term::Add)",
+        "mul": "Terms::insert(Term::Mul)",
+        "recrypt": "Terms::insert(Term::Recrypt)",
+        "node": "Terms::get",
+        "host": "fhe::host",
+        "host_type": "Host::typ",
+        "host_term": "Host::term",
+        "host_check": "Host::check",
+        "emit": "Host::emit",
+        "emit_check": "Host::emit_check",
+        "check": "fhe::check",
+        "enc_text": "Enc::text",
+        "param_text": "Parameter::text",
+        "op_text": "fhe::Operation::text",
+        "text": "fhe::Error::text"
+      }
+    },
+    {
+      "native": "crypto/c_hfhe.mli",
+      "public_values": [
+        "prod",
+        "prod_cert",
+        "input",
+        "env",
+        "adm_ok",
+        "cert_ok",
+        "check",
+        "shape_text",
+        "text"
+      ],
+      "rust_sources": [
+        "hfhe.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "prod": "hfhe::production",
+        "prod_cert": "hfhe::production_certificate",
+        "input": "hfhe::Input::new",
+        "env": "hfhe::Environment::new",
+        "adm_ok": "Admission::valid",
+        "cert_ok": "Certificate::valid",
+        "check": "hfhe::check",
+        "shape_text": "Shape::text",
+        "text": "hfhe::Error::text"
+      }
+    },
+    {
+      "native": "crypto/c_hpar.mli",
+      "public_values": [
+        "prod",
+        "prod_cat",
+        "valid",
+        "seal",
+        "caps",
+        "catalog",
+        "select",
+        "check",
+        "check_cat",
+        "text"
+      ],
+      "rust_sources": [
+        "hpar.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "prod": "hpar::production",
+        "prod_cat": "hpar::production_catalog",
+        "valid": "ParameterSet::valid",
+        "seal": "ParameterSet::seal",
+        "caps": "ParameterSet::capacities",
+        "catalog": "Catalog::new",
+        "select": "Catalog::select",
+        "check": "hpar::check",
+        "check_cat": "hpar::check_catalog",
+        "text": "hpar::Error::text"
+      }
+    },
+    {
+      "native": "machine/c_emit.mli",
+      "public_values": [
+        "compile",
+        "text"
+      ],
+      "rust_sources": [
+        "emit.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "compile": "emit::compile_source",
+        "text": "emit::SourceFailure::text"
+      }
+    },
+    {
+      "native": "machine/c_eval.mli",
+      "public_values": [
+        "max_cost",
+        "equal",
+        "zero",
+        "typed",
+        "atoms",
+        "direct",
+        "held",
+        "int_text",
+        "value_text",
+        "run",
+        "run_in",
+        "run_at",
+        "run_in_at",
+        "text",
+        "rule_text"
+      ],
+      "rust_sources": [
+        "eval/mod.rs",
+        "eval/value.rs",
+        "eval/machine.rs",
+        "eval/operations.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "max_cost": "eval::max_cost",
+        "equal": "Values::equal",
+        "zero": "Values::zero",
+        "typed": "Values::typed",
+        "atoms": "eval::atoms",
+        "direct": "eval::Action::direct",
+        "held": "eval::Action::held",
+        "int_text": "eval::int_text",
+        "value_text": "Values::text",
+        "run": "eval::run",
+        "run_in": "eval::run_in",
+        "run_at": "eval::run_at",
+        "run_in_at": "eval::run_in_at",
+        "text": "eval::Error::text",
+        "rule_text": "eval::RuleError::text"
+      }
+    },
+    {
+      "native": "machine/c_low.mli",
+      "public_values": [
+        "term",
+        "typ",
+        "prog",
+        "names",
+        "text"
+      ],
+      "rust_sources": [
+        "lower/mod.rs",
+        "lower/types.rs",
+        "lower/terms.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "term": "lower::term",
+        "typ": "lower::typ",
+        "prog": "lower::program",
+        "names": "lower::names",
+        "text": "lower::Error::text"
+      }
+    },
+    {
+      "native": "machine/c_mach.mli",
+      "public_values": [
+        "compile",
+        "compile_feed",
+        "lower",
+        "lower_in",
+        "locate",
+        "replay_actions",
+        "replay_plan",
+        "replay",
+        "replay_actions_in",
+        "replay_plan_in",
+        "replay_in",
+        "replay_value_in",
+        "effects",
+        "equal",
+        "literal",
+        "atoms",
+        "value",
+        "shape_of",
+        "shape_width",
+        "shape_cells",
+        "same_shape",
+        "emission_text",
+        "text"
+      ],
+      "rust_sources": [
+        "machine/mod.rs",
+        "machine/image.rs",
+        "machine/lower.rs",
+        "machine/location.rs",
+        "machine/replay.rs",
+        "machine/projection.rs",
+        "machine/shape.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "compile": "machine::compile_source",
+        "compile_feed": "machine::compile_source_feed",
+        "lower": "Codes::lower with empty inputs",
+        "lower_in": "Codes::lower",
+        "locate": "Locations::locate",
+        "replay_actions": "Codes::replay_actions",
+        "replay_plan": "Codes::replay_plan",
+        "replay": "Codes::replay",
+        "replay_actions_in": "Codes::replay_actions_in",
+        "replay_plan_in": "Codes::replay_plan_in",
+        "replay_in": "Codes::replay_in",
+        "replay_value_in": "Codes::replay_value_in",
+        "effects": "Codes::effects",
+        "equal": "Literal::equal",
+        "literal": "machine::literal",
+        "atoms": "machine::atoms",
+        "value": "machine::value",
+        "shape_of": "Shapes::from_type",
+        "shape_width": "Shapes::width",
+        "shape_cells": "Shapes::cells",
+        "same_shape": "Shapes::same",
+        "emission_text": "Emission::text",
+        "text": "machine::SourceFailure::text"
+      },
+      "notes": "Public continuation/shape construction uses checked Codes::insert and Shapes::insert. Replay methods retain separate closed and input-bound terminal checks."
+    },
+    {
+      "native": "machine/c_octb.mli",
+      "public_values": [
+        "input_limit",
+        "registers",
+        "result_regs",
+        "label_limit",
+        "dispatch_label",
+        "check_label",
+        "data_label",
+        "guard_label",
+        "body_label",
+        "label_count",
+        "body_target",
+        "compile",
+        "compile_feed",
+        "effect_layouts",
+        "emit_effects",
+        "encode",
+        "decode",
+        "image_emission",
+        "veil_text",
+        "image_veil",
+        "image_veils",
+        "image_veil_depth",
+        "claims_aml",
+        "claims_open",
+        "op_text",
+        "decode_text",
+        "text"
+      ],
+      "rust_sources": [
+        "octb/mod.rs",
+        "octb/public.rs",
+        "octb/image.rs",
+        "octb/encode.rs",
+        "octb/decode/mod.rs",
+        "octb/layout.rs",
+        "octb/effects.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "notes": "Added public register/label and image/operation diagnostics; op_text additionally takes the Types arena for Data literal diagnostics.",
+      "public_api": {
+        "input_limit": "octb::INPUT_LIMIT",
+        "registers": "octb::registers",
+        "result_regs": "octb::result_regs",
+        "label_limit": "octb::LABEL_LIMIT",
+        "dispatch_label": "octb::dispatch_label",
+        "check_label": "octb::check_label",
+        "data_label": "octb::data_label",
+        "guard_label": "octb::guard_label",
+        "body_label": "octb::body_label",
+        "label_count": "octb::label_count",
+        "body_target": "octb::body_target",
+        "compile": "octb::compile",
+        "compile_feed": "octb::compile_feed",
+        "effect_layouts": "octb::effect_layouts",
+        "emit_effects": "octb::emit_effects",
+        "encode": "octb::encode",
+        "decode": "octb::decode",
+        "image_emission": "octb::image_emission",
+        "veil_text": "octb::veil_text",
+        "image_veil": "octb::image_veil",
+        "image_veils": "octb::image_veils",
+        "image_veil_depth": "octb::image_veil_depth",
+        "claims_aml": "octb::claims_aml",
+        "claims_open": "octb::claims_open",
+        "op_text": "octb::op_text",
+        "decode_text": "octb::DecodeError::Display",
+        "text": "octb::SourceFailure::text"
+      }
+    },
+    {
+      "native": "machine/c_print.mli",
+      "public_values": [
+        "term"
+      ],
+      "rust_sources": [
+        "print.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "term": "print::term"
+      }
+    },
+    {
+      "native": "machine/c_vm.mli",
+      "public_values": [
+        "make",
+        "make_in",
+        "pc",
+        "steps",
+        "work",
+        "halted",
+        "value",
+        "step",
+        "run",
+        "result",
+        "closes",
+        "text"
+      ],
+      "rust_sources": [
+        "vm.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "notes": "Standalone AML machine over core::octb::Operation; separate from runtime Circle contract VM. Register and jump operand Rust widths follow the existing Operation model.",
+      "public_api": {
+        "make": "Vm::new(Options)",
+        "make_in": "Vm::make_in",
+        "pc": "Vm::pc",
+        "steps": "Vm::steps",
+        "work": "Vm::work",
+        "halted": "Vm::halted",
+        "value": "Vm::value",
+        "step": "Vm::step",
+        "run": "Vm::run",
+        "result": "Vm::result",
+        "closes": "Vm::closes",
+        "text": "vm::Error::text"
+      }
+    },
+    {
+      "native": "syntax/c_comments.mli",
+      "public_values": [
+        "erase",
+        "text"
+      ],
+      "rust_sources": [
+        "comments.rs",
+        "lexer.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "erase": "comments::erase",
+        "text": "comments::Error::text"
+      }
+    },
+    {
+      "native": "syntax/c_data.mli",
+      "public_values": [
+        "ctor",
+        "tag_len",
+        "decl",
+        "name",
+        "bits",
+        "ctors",
+        "arm",
+        "typ",
+        "make",
+        "case",
+        "lower",
+        "check",
+        "text"
+      ],
+      "rust_sources": [
+        "data.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "ctor": "data::Constructor::new",
+        "tag_len": "data::TAG_LEN",
+        "decl": "data::Decl::new",
+        "name": "Decl::name",
+        "bits": "Decl::bits",
+        "ctors": "Decl::ctors",
+        "arm": "data::Arm::new",
+        "typ": "Decl::typ",
+        "make": "Decl::make",
+        "case": "Decl::case",
+        "lower": "Decl::lower",
+        "check": "Decl::check",
+        "text": "data::Error::text"
+      }
+    },
+    {
+      "native": "syntax/c_decl.mli",
+      "public_values": [
+        "input",
+        "typ",
+        "typ_in",
+        "binds",
+        "binds_in",
+        "prog",
+        "prog_in",
+        "text"
+      ],
+      "rust_sources": [
+        "declaration.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "input": "declaration::Input::new",
+        "typ": "Declarations::typ",
+        "typ_in": "Declarations::typ_in",
+        "binds": "Declarations::binds",
+        "binds_in": "Declarations::binds_in",
+        "prog": "Declarations::prog",
+        "prog_in": "Declarations::prog_in",
+        "text": "decl::Error::text"
+      }
+    },
+    {
+      "native": "syntax/c_fun.mli",
+      "public_values": [
+        "arr",
+        "marks",
+        "under",
+        "fn",
+        "def",
+        "defs",
+        "direct",
+        "apply",
+        "names",
+        "lower",
+        "check",
+        "text"
+      ],
+      "rust_sources": [
+        "functions/mod.rs",
+        "functions/rename.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "arr": "functions::Arrow::new",
+        "marks": "Arrow::marks",
+        "under": "Arrow::under",
+        "fn": "functions::Function public fields",
+        "def": "functions::valid",
+        "defs": "functions::definitions",
+        "direct": "functions::direct",
+        "apply": "functions::apply",
+        "names": "functions::names",
+        "lower": "functions::lower",
+        "check": "functions::check",
+        "text": "functions::Error::text"
+      }
+    },
+    {
+      "native": "syntax/c_idx.mli",
+      "public_values": [
+        "lit",
+        "exact",
+        "var",
+        "add",
+        "mul",
+        "max",
+        "sub",
+        "view",
+        "empty",
+        "env",
+        "put",
+        "eval",
+        "eq",
+        "le",
+        "hold",
+        "text"
+      ],
+      "rust_sources": [
+        "index.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "lit": "Indices::lit",
+        "exact": "Indices::exact",
+        "var": "Indices::var",
+        "add": "Indices::add or checked insert",
+        "mul": "Indices::mul or checked insert",
+        "max": "Indices::max or checked insert",
+        "sub": "Indices::sub or checked insert",
+        "view": "Indices::get",
+        "empty": "index::Env::default",
+        "env": "index::Env::from_values",
+        "put": "Env::put",
+        "eval": "Indices::eval",
+        "eq": "Indices::eq",
+        "le": "Indices::le",
+        "hold": "Indices::hold",
+        "text": "index::Error::text"
+      }
+    },
+    {
+      "native": "syntax/c_law.mli",
+      "public_values": [
+        "make",
+        "view",
+        "empty",
+        "set",
+        "items",
+        "hold",
+        "text"
+      ],
+      "rust_sources": [
+        "spec.rs",
+        "parse/ast.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "notes": "parse::ast::Law public fields and spec::Laws::new/items/hold provide the native law surface.",
+      "public_api": {
+        "make": "parse::ast::Law public fields",
+        "view": "Law public fields",
+        "empty": "spec::Laws::default",
+        "set": "Laws::new",
+        "items": "Laws::items",
+        "hold": "Laws::hold",
+        "text": "spec::LawError::text"
+      }
+    },
+    {
+      "native": "syntax/c_lex.mli",
+      "public_values": [
+        "scan",
+        "form",
+        "hold_text",
+        "form_text",
+        "text"
+      ],
+      "rust_sources": [
+        "lexer.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "scan": "lex::scan",
+        "form": "Token::form",
+        "hold_text": "lexer::Hold::text",
+        "form_text": "lexer::Form::text",
+        "text": "lex::Error::text"
+      }
+    },
+    {
+      "native": "syntax/c_parse.mli",
+      "public_values": [
+        "parse",
+        "name",
+        "binds",
+        "perms",
+        "dtypes",
+        "rtypes",
+        "decls",
+        "forms",
+        "body",
+        "body_marks",
+        "body_span",
+        "veils",
+        "veil_name",
+        "veil_info",
+        "veil_param",
+        "veil_host",
+        "veil_stage",
+        "veil_link",
+        "veil_count",
+        "veil_depth",
+        "res",
+        "lower",
+        "compile",
+        "check",
+        "source",
+        "text"
+      ],
+      "rust_sources": [
+        "parse.rs",
+        "parse/native.rs",
+        "parse/ast.rs",
+        "parse/elaborate.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "parse": "parse::parse",
+        "name": "Program::name",
+        "binds": "Program::binds",
+        "perms": "Program::perms",
+        "dtypes": "Program::dtypes",
+        "rtypes": "Program::rtypes",
+        "decls": "Program::declarations",
+        "forms": "Program::forms",
+        "body": "Program::body",
+        "body_marks": "Program::body_marks",
+        "body_span": "Program::body_span",
+        "veils": "Program::veils",
+        "veil_name": "CheckedVeil::name field",
+        "veil_info": "CheckedVeil::info field",
+        "veil_param": "CheckedVeil::parameter field",
+        "veil_host": "CheckedVeil::host field",
+        "veil_stage": "CheckedVeil::stage field",
+        "veil_link": "CheckedVeil::link field",
+        "veil_count": "Program::veil_count",
+        "veil_depth": "Program::veil_depth",
+        "res": "Program::res",
+        "lower": "Program::lower",
+        "compile": "Program::compile",
+        "check": "Program::check",
+        "source": "parse::source",
+        "text": "parse::Error::text"
+      },
+      "notes": "Declarations expose raw Form metadata and the Parsed arena; instantiated forms use Program::forms. CheckedVeil public fields cover native veil accessors."
+    },
+    {
+      "native": "syntax/c_poly.mli",
+      "public_values": [
+        "par",
+        "fn",
+        "name",
+        "pars",
+        "pname",
+        "pkind",
+        "base",
+        "actuals",
+        "compare_actuals",
+        "mono",
+        "inst",
+        "text"
+      ],
+      "rust_sources": [
+        "poly.rs",
+        "poly/order.rs",
+        "poly/substitute.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "par": "poly::Parameter::new",
+        "fn": "poly::Function::new",
+        "name": "Function::name",
+        "pars": "Function::parameters",
+        "pname": "Parameter::name",
+        "pkind": "Parameter::kind",
+        "base": "Function::base",
+        "actuals": "poly::actuals",
+        "compare_actuals": "poly::compare_actuals",
+        "mono": "poly::mono",
+        "inst": "poly::inst",
+        "text": "poly::Error::text"
+      }
+    },
+    {
+      "native": "syntax/c_raw.mli",
+      "public_values": [
+        "bind",
+        "fold",
+        "arm",
+        "item",
+        "pick",
+        "arm_view",
+        "item_view",
+        "pick_view",
+        "of_syn",
+        "elab_trace",
+        "elab",
+        "text"
+      ],
+      "rust_sources": [
+        "parse/ast.rs",
+        "parse/elaborate.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "bind": "parse::ast::Bind public fields",
+        "fold": "Expr::Fold via Ast::insert_expression",
+        "arm": "DataCase tuple (Name, Bind, ExprId)",
+        "item": "RecordMake tuple (Name, ExprId)",
+        "pick": "RecordSplit tuple (Name, Bind)",
+        "arm_view": "DataCase tuple fields",
+        "item_view": "RecordMake tuple fields",
+        "pick_view": "RecordSplit tuple fields",
+        "of_syn": "Expr::Syn via Ast::insert_expression",
+        "elab_trace": "elaborate::Context::expand",
+        "elab": "Context::expand(...).term",
+        "text": "elaborate::Failure::message field"
+      }
+    },
+    {
+      "native": "syntax/c_rec.mli",
+      "public_values": [
+        "field",
+        "item",
+        "pick",
+        "decl",
+        "name",
+        "bits",
+        "fields",
+        "typ",
+        "make",
+        "split",
+        "lower",
+        "check",
+        "text"
+      ],
+      "rust_sources": [
+        "record.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "field": "record::Field::new",
+        "item": "record::Item::new",
+        "pick": "record::Pick::new",
+        "decl": "record::Decl::new",
+        "name": "Decl::name",
+        "bits": "Decl::bits",
+        "fields": "Decl::fields",
+        "typ": "Decl::typ",
+        "make": "Decl::make",
+        "split": "Decl::split",
+        "lower": "Decl::lower",
+        "check": "Decl::check",
+        "text": "record::Error::text"
+      }
+    },
+    {
+      "native": "syntax/c_spec.mli",
+      "public_values": [
+        "bind",
+        "arr",
+        "marks",
+        "under",
+        "fn",
+        "require",
+        "args",
+        "mono",
+        "inst",
+        "text"
+      ],
+      "rust_sources": [
+        "spec.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "public_api": {
+        "bind": "parse::ast::Bind public fields",
+        "arr": "spec::Arrow::new",
+        "marks": "Arrow::marks",
+        "under": "Arrow::under",
+        "fn": "spec::Function::new",
+        "require": "Function::require",
+        "args": "spec::args",
+        "mono": "spec::mono",
+        "inst": "spec::inst",
+        "text": "spec::Error::text"
+      },
+      "notes": "Specialization requires an elaboration callback, then validates the resulting C_fun definition. Raw syntax construction is public through checked Ast insertion."
+    },
+    {
+      "native": "syntax/c_syn.mli",
+      "public_values": [
+        "name",
+        "slot",
+        "dslot",
+        "name_text",
+        "name_equal",
+        "bind",
+        "fold",
+        "cmp",
+        "has"
+      ],
+      "rust_sources": [
+        "syntax.rs"
+      ],
+      "source_api_review": "public value surface mapped; semantic qualification pending",
+      "notes": "Syntax::insert_type/insert_term check local references. Raw numbers retain native lowering behavior.",
+      "public_api": {
+        "name": "syntax::Name::new",
+        "slot": "Name::slot",
+        "dslot": "Name::dslot",
+        "name_text": "Name::text",
+        "name_equal": "Name::PartialEq",
+        "bind": "syntax::Bind public fields",
+        "fold": "syntax::Fold public fields",
+        "cmp": "Term::Cmp via Syntax::insert_term",
+        "has": "Syntax::has"
+      }
+    }
+  ],
+  "arena_adapter": "IDs are request-local indices, reusable only in their creating arena or unchanged clones. Checked insertion rejects absent references before mutation. Native recursive constructors have no dangling-reference case; native semantic errors stay at lowering/checking boundaries."
+}

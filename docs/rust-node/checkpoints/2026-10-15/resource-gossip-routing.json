@@ -1,0 +1,118 @@
+{
+  "schema": 1,
+  "status": "PASS_DISABLED_RESOURCE_GOSSIP_ACTOR_ROUTING",
+  "date": "2026-10-15",
+  "completed_at": "2026-10-15T22:22:34.720844+00:00",
+  "scope": "Only restore existing pinned-native disabled 0x3c behavior through the authenticated peer Handle/actor. Optional committee/model ports remain separate and production committees remain disabled. No consensus defaults, acceptance rules, public transactions or deployment changed.",
+  "root_lock_sha256": "f28ad88c09fb9c0ed4ed33eb8866a191cc0fdfba2ad4c5435443942dbefc3b35",
+  "source_files": 2415,
+  "source_manifest_sha256": "e4335c673b780c07e349dbc7f255b76840689a7f9c64df270cb7a23884f702af",
+  "source_sha256": {
+    "crates/octra-node-runtime/src/consensus_driver/mod.rs": "a6703996295b97f12d13bbf57f9b3d34b226e4c52e0d5c92276080c2cb9390ee",
+    "crates/octra-node-runtime/tests/live_consensus.rs": "d1ac237fabfa578ec8a614670f9fce7efc01c6ae0785797e631c1269e0e84aec"
+  },
+  "patch_sha256": "09fd34500c71387ee06d18b6ac597914ab83cd61538543cab0b4c5682bd81b07",
+  "production_delta": "Add 0x3c to Handle::enqueue message filter; remaining production diff is rustfmt line wrapping.",
+  "tests_delta": "Existing live_consensus source is unchanged prefix, plus payload/peer-score helpers and authenticated loopback regression.",
+  "tests": {
+    "command": "cargo clean --release -p octra-node-runtime && cargo test -p octra-node-runtime --release --offline --locked --test live_consensus --message-format=json-render-diagnostics -- --nocapture",
+    "exit_code": 0,
+    "passed": 5,
+    "failed": 0,
+    "ignored": 0,
+    "elapsed_seconds": 159.85561120799684,
+    "test_execution_seconds": 11.24,
+    "log_sha256": "357d103d3df80dfdc46b69dba6191bc575ffe54a4654d4e6d254ef44f8138b3f",
+    "executable_sha256": "261d825edad44b7b80eec4c9dc289cf8a611595eed741cf6605e18cc93a8a863",
+    "runtime_library_and_test_freshly_built": true,
+    "coverage": [
+      "Actual authenticated loopback Swarm->Handler->Handle->actor path.",
+      "Empty gossip and unknown nested kind under wrong outer chain warn; no peer penalty/connection closure.",
+      "Well-encoded same-chain gossip charges invalid_resource_attestation while committee is disabled.",
+      "Well-encoded wrong-chain gossip charges resource_attestation_chain_mismatch.",
+      "Nonvoting role, unchanged epoch/committed state and controlled shutdown.",
+      "Four existing live consensus quorum/retry/durability/cancellation/lock regressions also pass."
+    ]
+  },
+  "strict_lint": {
+    "command": "cargo clippy --release -p octra-node-runtime --no-deps --offline --locked --all-targets --all-features --keep-going -- -D warnings",
+    "exit_code": 0,
+    "elapsed_seconds": 28.077757333005138,
+    "log_sha256": "6ce83d8afc438d01fa298869ca2bd29428f86e2a57f83fead046d9b0d0bb5bb9",
+    "scope": "Release profile, runtime all targets/all features, --no-deps, -D warnings; unchanged existing vendor dead-code warning is outside this package scope."
+  },
+  "negative_control": {
+    "status": "EXPECTED_FAILURE_WITH_EXACT_OLD_FILTER",
+    "command": "cargo clean --release -p octra-node-runtime && cargo test -p octra-node-runtime --release --offline --locked --test live_consensus resource_gossip_reaches_actor_without_enabling_optional_committees --message-format=json-render-diagnostics -- --exact --nocapture",
+    "exit_code": 101,
+    "passed": 0,
+    "failed": 1,
+    "filtered": 4,
+    "log_sha256": "5bd89c68749ab8a56c81429284a7e9b72df00c20d4b07575dac4037ff22b5b9b",
+    "production_override": {
+      "path": "octra/crates/octra-node-runtime/src/consensus_driver/mod.rs",
+      "sha256": "6933e117056813b347e3b411b5e0aa420a4362edf82f3b084e3803de9df827e7",
+      "purpose": "Exact pre-fix Handle filter, all other current source/test bytes identical."
+    },
+    "runtime_library_and_test_freshly_built": true,
+    "observed_failure": "Malformed warning not reached; routing regression timed out after peers/actor started.",
+    "executable_sha256": null,
+    "binary_limit": "Negative compiler-artifact paths and fresh:false are preserved; its temporary shared-cache binary was subsequently superseded, so no negative executable hash is claimed."
+  },
+  "isolation": {
+    "image_id": "sha256:62d73a659a92699cf1230d84a89521d4266f2eeb7b7e22b41835103871c76cb1",
+    "image_metadata_sha256": "dbc26d24d0ae6ce76db909dd44fbc17115bf40bae42bb461e0591cf021e17d2e",
+    "rust": "1.96.0",
+    "network": "none",
+    "capabilities": "ALL dropped",
+    "source_and_registry": "read-only",
+    "final_target_volume": "octra-remaining-target-20261015 (exclusive)",
+    "final_runtime_package_cleaned": true,
+    "host_cargo_used": false,
+    "final_source_unchanged": true,
+    "live_source_drift_from_final_capture": []
+  },
+  "current_followup_source_binding": {
+    "read_at": "Final replay includes reviewed frozen read_at production files and test-only empty-slice coercion 7438056f\u2026; separate owner qualifies its seven storage tests.",
+    "startup": "Node network/launch startup-cancellation source captured; this runtime target does not execute Node startup."
+  },
+  "preserved_history": [
+    {
+      "name": "First complete fixed-source live_consensus PASS",
+      "run": "tests-first-run.json",
+      "passed": 5,
+      "exit_code": 0,
+      "executable_binding": "tests-first-executable.json",
+      "scope": "Before later independent read_at/startup delta."
+    },
+    {
+      "name": "Missing existing compile-time oracle inputs",
+      "runs": [
+        "clippy-missing-inputs-run.json",
+        "clippy-missing-upstream-run.json"
+      ],
+      "exit_codes": [
+        101,
+        101
+      ],
+      "scope": "Disposable staging setup failures; fixed by copying existing inputs only, no source/test/assertion change."
+    },
+    {
+      "name": "Invalid first negative control reused fixed binary",
+      "run": "negative-stale-cache-run.json",
+      "exit_code": 0,
+      "scope": "Not accepted as a negative result: Cargo artifact fresh:true due old mounted-file timestamp. Corrected by explicit runtime package cache invalidation; actual control then fails."
+    },
+    {
+      "name": "Partially refreshed stage stopped before tests",
+      "run": "tests-partial-stage-interrupted-run.json",
+      "exit_code": 137,
+      "scope": "Capture caught newer owner test-only hash after partial disposable file copy. No test result used; final replay validates all inputs before execution and uses exclusive cache."
+    }
+  ],
+  "limits": [
+    "Finite regression, not optional-model or whole-node parity.",
+    "No original pinned-native code changed.",
+    "Earlier paid17 container snapshot is preserved; this is a later narrow runtime delta."
+  ]
+}

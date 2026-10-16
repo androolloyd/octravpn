@@ -127,10 +127,10 @@ async fn finalized_mixed_import_uses_bound_key_files_and_survives_restart() {
         .set(&[b"meta", b"emission_remaining"], b"0".to_vec())
         .unwrap();
     initial.acknowledge_commit().unwrap();
-    let chain = ChainIdentity {
-        chain_id: "private-import".into(),
-        genesis_root: StateRoot(common::root(None, &initial, &[])),
-    };
+    let chain = ChainIdentity::genesis(
+        "private-import",
+        StateRoot(common::root(None, &initial, &[])),
+    );
     let authority = Authority(common::Authority {
         seed: 1,
         chain: chain.clone(),
@@ -165,6 +165,9 @@ async fn finalized_mixed_import_uses_bound_key_files_and_survives_restart() {
         sender_key_activation: Some(0),
         private_result_activation: 0,
         max_fhe: 4,
+        max_stealth: 4,
+        max_multi_exec_calls: 8,
+        migration: None,
         ready_max_lag: 10,
         pvac_dir: pvac,
     };
@@ -262,6 +265,9 @@ async fn finalized_mixed_import_uses_bound_key_files_and_survives_restart() {
     .unwrap();
     account_store::flush_dirty(&mut ledger, &mut expected, RuleMode::Prior).unwrap();
     let planned = ExecutedEpoch {
+        epoch_observation: None,
+        metrics: octra_node_protocol::metrics::Epoch::default(),
+        vm_receipts: std::collections::BTreeMap::default(),
         state: expected.snapshot(),
         transactions: [&tx, &transfer]
             .into_iter()

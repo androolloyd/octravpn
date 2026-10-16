@@ -52,7 +52,7 @@ impl RoundPool {
         if self
             .by_address
             .get(&sync.validator)
-            .map_or(true, |prior| later(&sync, prior))
+            .is_none_or(|prior| later(&sync, prior))
         {
             self.by_address.insert(sync.validator.clone(), sync.clone());
         }
@@ -60,7 +60,7 @@ impl RoundPool {
             && self
                 .replies
                 .get(&sync.validator)
-                .map_or(true, |(prior, _)| !later(prior, &sync))
+                .is_none_or(|(prior, _)| !later(prior, &sync))
         {
             // Equal replies refresh their wall-clock timestamp, unlike history.
             self.replies
@@ -73,7 +73,7 @@ impl RoundPool {
             if self
                 .by_round
                 .get(&key)
-                .map_or(true, |prior| later(&sync, prior))
+                .is_none_or(|prior| later(&sync, prior))
             {
                 self.by_round.insert(key, sync);
             }
@@ -96,7 +96,7 @@ impl RoundPool {
             && self
                 .sent
                 .get(&sync.round)
-                .map_or(true, |prior| later(&sync, prior))
+                .is_none_or(|prior| later(&sync, prior))
         {
             self.sent.insert(sync.round, sync);
         }

@@ -5,14 +5,15 @@
 use crate::{
     epoch_execution::{Effect, Refusal},
     execution::Error,
-    private_balance::{self as balance, Evidence, Profile},
+    private_balance::{self as balance, Evidence},
+    private_key, private_transfer,
     state_batch::StateBatch,
 };
 use octra_node_protocol::{
     preverify_commit::{self, Gate},
     preverify_receipt::Binding,
     state::Ledger,
-    transaction::{OpType, Transaction},
+    transaction::{OpType, RuleMode, Transaction},
 };
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -31,19 +32,64 @@ fn failed(error: balance::Error) -> Result<Effect, Error> {
 }
 /// Construct a fresh host for each speculative epoch; discard it if that
 /// attempt aborts. Counters advance only after a successful ledger application.
+#[derive(Clone, Copy)]
+pub struct Limits {
+    pub max_fhe: usize,
+    pub max_stealth: usize,
+}
+enum Plan {
+    Balance(balance::Verified),
+    Transfer(private_transfer::Verified),
+    Key(private_key::Verified),
+}
+impl Plan {
+    fn transition_hash(&self) -> String {
+        match self {
+            Self::Balance(plan) => plan.transition_hash(),
+            Self::Transfer(plan) => plan.transition_hash(),
+            Self::Key(plan) => plan.transition_hash(),
+        }
+    }
+    fn apply(
+        &self,
+        ledger: &mut Ledger,
+        state: &mut StateBatch,
+        tx: &Transaction,
+        epoch: i64,
+        persist: impl FnOnce(&[u8]) -> Result<(), Error>,
+    ) -> Result<(), balance::Error> {
+        match self {
+            Self::Balance(plan) => plan.apply(ledger, tx),
+            Self::Transfer(plan) => plan.apply(ledger, state, tx, epoch),
+            Self::Key(plan) => plan.apply(ledger, state, tx, persist),
+        }
+    }
+}
 pub struct Epoch<'a> {
-    profile: Profile,
-    maximum: usize,
+    policy: private_key::Policy,
+    admission: Option<&'a octra_node_protocol::state_sync::migration::Admission>,
+    limits: Limits,
+    epoch: i64,
     used: usize,
+    stealth: usize,
     debits: BTreeSet<Vec<u8>>,
     gate: Option<&'a Gate>,
 }
 impl<'a> Epoch<'a> {
-    pub fn new(profile: Profile, maximum: usize, gate: Option<&'a Gate>) -> Self {
+    pub fn new(
+        policy: private_key::Policy,
+        limits: Limits,
+        epoch: i64,
+        gate: Option<&'a Gate>,
+        admission: Option<&'a octra_node_protocol::state_sync::migration::Admission>,
+    ) -> Self {
         Self {
-            profile,
-            maximum,
+            policy,
+            admission,
+            limits,
+            epoch,
             used: 0,
+            stealth: 0,
             debits: BTreeSet::new(),
             gate,
         }
@@ -54,8 +100,9 @@ impl<'a> Epoch<'a> {
         &mut self,
         tx: &Transaction,
         ledger: &mut Ledger,
-        state: &StateBatch,
+        state: &mut StateBatch,
         key_source: impl FnOnce(&[u8]) -> Result<Option<Vec<u8>>, Error>,
+        persist: impl FnOnce(&[u8]) -> Result<(), Error>,
     ) -> Result<Effect, Error> {
         match tx.op_type {
             OpType::Private => {
@@ -72,33 +119,68 @@ impl<'a> Epoch<'a> {
             }
             _ => (),
         }
-        if !matches!(tx.op_type, OpType::Encrypt | OpType::Decrypt) {
+        let profile = self.policy.balance;
+        if tx.op_type == OpType::KeySwitch
+            && self.policy.owner != RuleMode::Active
+            && private_key::owner_requested(tx, profile.fields)
+        {
+            return Ok(refusal(
+                "pvac_migration_inactive",
+                "historical owner migration is not active at this epoch",
+            ));
+        }
+        if !matches!(
+            tx.op_type,
+            OpType::Encrypt | OpType::Decrypt | OpType::Stealth | OpType::Claim | OpType::KeySwitch
+        ) {
             return Err(Error("private epoch operation unavailable".into()));
         }
-        if tx.from != tx.to {
+        if tx.op_type != OpType::Stealth && tx.from != tx.to {
             return Ok(refusal(
                 "private_target_rejected",
                 "private balance operation must be self-targeted",
             ));
         }
-        if self.used >= self.maximum {
+        if self.used >= self.limits.max_fhe {
             return Ok(refusal("fhe_epoch_cap", "private operation cap reached"));
         }
-        if tx.op_type == OpType::Decrypt && self.debits.contains(&tx.from) {
+        if tx.op_type == OpType::Stealth && self.stealth >= self.limits.max_stealth {
+            return Ok(refusal(
+                "stealth_epoch_cap",
+                "private operation cap reached",
+            ));
+        }
+        if matches!(tx.op_type, OpType::Decrypt | OpType::Stealth) && self.debits.contains(&tx.from)
+        {
             return Ok(refusal(
                 "encrypted_op_limit",
                 "only one encrypted debit operation per sender per epoch",
             ));
         }
-        let Some(hash) = state
+        if tx.op_type == OpType::Stealth && tx.to != b"stealth" {
+            return Ok(refusal(
+                "invalid_stealth_target",
+                "stealth transfer must target stealth",
+            ));
+        }
+        if tx.op_type == OpType::KeySwitch
+            && private_key::cipher_requested(tx, profile.fields)
+            && (self.policy.cipher != RuleMode::Active || !profile.strict)
+        {
+            return Ok(refusal(
+                "key_switch_rejected",
+                "unknown key_switch migration_mode = cipher_proof",
+            ));
+        }
+        let hash = state
             .get(&[b"pvac_hashes", &tx.from])
-            .filter(|hash| *hash != b"none")
-        else {
+            .filter(|hash| *hash != b"none");
+        if hash.is_none() && tx.op_type != OpType::KeySwitch {
             return Ok(refusal(
                 "pvac_key_unbound",
                 "pvac public key is not bound to consensus state",
             ));
-        };
+        }
         let expected = if let Some(gate) = self.gate {
             let receipt = match gate.receipt(tx) {
                 Ok(receipt) => receipt,
@@ -117,13 +199,16 @@ impl<'a> Epoch<'a> {
         } else {
             None
         };
-        let evidence = match (self.profile.strict, expected) {
+        let evidence = match (profile.strict, expected) {
             (false, Some(hash)) => Evidence::Certified(hash),
             _ => Evidence::Proof,
         };
         // Native payload parsing precedes blob retrieval. Keep the callback
         // lazy so local key availability cannot mask a malformed payload.
         let key = || {
+            let Some(hash) = hash else {
+                return Ok(None);
+            };
             let blob = key_source(hash)
                 .map_err(|error| balance::Error::Unavailable(error.0))?
                 .ok_or_else(|| balance::Error::Unavailable("pvac blob unavailable".into()))?;
@@ -134,23 +219,39 @@ impl<'a> Epoch<'a> {
             }
             Ok(Some(blob))
         };
-        let plan = match balance::resolve(ledger, tx, self.profile, evidence, key) {
+        let plan = match if matches!(tx.op_type, OpType::Stealth | OpType::Claim) {
+            private_transfer::resolve(ledger, state, tx, profile, evidence, key).map(Plan::Transfer)
+        } else if tx.op_type == OpType::KeySwitch {
+            private_key::resolve(
+                ledger,
+                tx,
+                self.policy,
+                self.epoch,
+                self.admission,
+                evidence,
+                key,
+            )
+            .map(Plan::Key)
+        } else {
+            balance::resolve(ledger, tx, profile, evidence, key).map(Plan::Balance)
+        } {
             Ok(plan) => plan,
             Err(error) => return failed(error),
         };
-        if self.profile.strict
-            && expected.is_some_and(|hash| hash != plan.transition_hash().as_bytes())
-        {
+        if expected.is_some_and(|hash| hash != plan.transition_hash().as_bytes()) {
             return Ok(refusal(
                 "preverify_transition_mismatch",
                 "private transition does not match the certified receipt",
             ));
         }
-        if let Err(error) = plan.apply(ledger, tx) {
+        if let Err(error) = plan.apply(ledger, state, tx, self.epoch, persist) {
             return failed(error);
         }
         self.used += 1;
-        if tx.op_type == OpType::Decrypt {
+        if tx.op_type == OpType::Stealth {
+            self.stealth += 1;
+        }
+        if matches!(tx.op_type, OpType::Decrypt | OpType::Stealth) {
             self.debits.insert(tx.from.clone());
         }
         Ok(Effect::Confirmed(tx.ou.clone()))

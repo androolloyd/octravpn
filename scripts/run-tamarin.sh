@@ -14,6 +14,8 @@ expected={
  'relay_receipt_ack': {'AckRequiresDurableReceipt','SendAlwaysAfterPersistence','RecoveryCanDeliverAck'},
 }
 s=pathlib.Path(sys.argv[1]).read_text()
+if 'returned unsupported version' in s:
+ print(s); sys.exit('Tamarin used an unsupported Maude version')
 rows=re.findall(r'^\s+([A-Za-z0-9_]+) \((?:all-traces|exists-trace)\): ([^\n]+)$',s,re.M)
 if {n for n,_ in rows} != expected[sys.argv[2]] or any(not v.startswith('verified (') for _,v in rows):
  print(s); sys.exit('Tamarin did not verify the exact required lemma set')

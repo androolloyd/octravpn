@@ -54,6 +54,38 @@ impl Default for Cipher {
 }
 
 impl Cipher {
+    /// Native migration classifier: every base layer must retain its per-slot
+    /// public commitments. This is a format check, not proof verification.
+    pub fn has_key_bound_material(&self) -> bool {
+        self.validate_structure().is_ok()
+            && !self.layers.is_empty()
+            && self.layers.iter().any(|layer| layer.rule == 0)
+            && self
+                .layers
+                .iter()
+                .filter(|layer| layer.rule == 0)
+                .all(|layer| layer.r_pc.len() == self.slots && layer.pc.len() == self.slots)
+    }
+    /// Native Fhe_image cipher metadata counts stored bit-vector words.
+    pub fn bit_words(&self) -> Result<u64, Error> {
+        self.edges.iter().try_fold(0u64, |total, edge| {
+            total
+                .checked_add(edge.sigma.words.len() as u64)
+                .filter(|n| *n < 1u64 << 62)
+                .ok_or(Error("cipher bit words overflow"))
+        })
+    }
+    /// Structural counts for host resource policy, independent of proof validity.
+    pub fn shape(&self) -> Result<Shape, Error> {
+        self.validate_structure()?;
+        Ok(Shape {
+            slots: self.slots,
+            constants: self.c0.len(),
+            layers: self.layers.len(),
+            base_layers: self.layers.iter().filter(|l| l.rule == 0).count(),
+            edges: self.edges.len(),
+        })
+    }
     /// Hash the native commitment transcript, which is distinct from wire bytes.
     pub fn commitment(&self, public: &PublicKey) -> [u8; 32] {
         let mut hash = Sha256::new();
@@ -198,6 +230,15 @@ impl Cipher {
         }
         Ok(())
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Shape {
+    pub slots: usize,
+    pub constants: usize,
+    pub layers: usize,
+    pub base_layers: usize,
+    pub edges: usize,
 }
 
 impl Cipher {

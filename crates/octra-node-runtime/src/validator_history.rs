@@ -47,7 +47,16 @@ impl CanonicalValidators {
         head: &Head,
         f: impl FnOnce(Source<'_>) -> Result<T, Vec<u8>>,
     ) -> Result<T, Error> {
-        let tree = self.reader.snapshot_at(head).await.map_err(error)?;
+        let active = self
+            .reader
+            .read_at(head, &[b"meta", update::ACTIVE_KEY])
+            .await
+            .map_err(error)?;
+        let pending = self
+            .reader
+            .read_at(head, &[b"meta", update::PENDING_KEY])
+            .await
+            .map_err(error)?;
         f(Source {
             chain: self.reader.chain().chain_id.as_bytes(),
             height: i64::try_from(head.cursor.epoch.0).map_err(error)?,
@@ -55,8 +64,8 @@ impl CanonicalValidators {
             next: self.environment.next.as_deref(),
             activate: self.environment.activate.as_deref(),
             fallback_activate: self.environment.fallback_activate.as_deref(),
-            active: tree.get(&[b"meta", update::ACTIVE_KEY]),
-            pending: tree.get(&[b"meta", update::PENDING_KEY]),
+            active: active.as_deref(),
+            pending: pending.as_deref(),
         })
         .map_err(diagnostic)
     }

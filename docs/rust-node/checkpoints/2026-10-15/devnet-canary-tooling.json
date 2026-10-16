@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "date": "2026-10-15",
+  "status": "PASS_ADOPTED_OFFLINE_DEVNET_TOOLING",
+  "qualification": {
+    "path": "out/node-port-final-20261015/canary-devnet-candidate/qualification.json",
+    "sha256": "7f3e30da05ace199316a6a268bc90035422b407f2719e3b85fa2e4c449fc5adf"
+  },
+  "parent_review": {
+    "path": "out/node-port-final-20261015/canary-devnet-candidate/parent-review.json",
+    "sha256": "3849de774362b64f68a97eca775d87c8323deaca2dfd53b8e9b6574963906337"
+  },
+  "hermetic_controls": 54,
+  "network": "octra-devnet-9871-cluster",
+  "rpc_url": "https://devnet.octrascan.io/rpc",
+  "origin_kind": "checkpoint",
+  "network_calls": 0,
+  "source_uploads": 0,
+  "funds_spent": 0,
+  "limits": [
+    "Hermetic controls verify refusal ordering and metadata binding; no real public compilation or deployment claimed",
+    "Separate devnet endpoint source compilation approval remains pending",
+    "Relayer sender-not-found last observed; no funding assumed",
+    "Development private administration setup remains uncertified"
+  ]
+}

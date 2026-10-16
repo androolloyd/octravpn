@@ -328,7 +328,7 @@ pub(crate) fn check_tmpfs(path: &Path) -> Result<()> {
         let fs_type = cols.get(sep + 1).copied().unwrap_or("");
         if canon.starts_with(mount_point) {
             let l = mount_point.len();
-            if best.as_ref().map_or(true, |b| l > b.0) {
+            if best.as_ref().is_none_or(|b| l > b.0) {
                 best = Some((l, fs_type.to_string()));
             }
         }

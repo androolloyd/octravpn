@@ -57,7 +57,9 @@ fn setup(available: i64, invalid_key: bool) -> (Wallet, Arc<Key>, Arc<Host>, Int
         circle_id: format!("oct{}", "1".repeat(44)),
         provenance: Provenance::Canonical(SnapshotIdentity {
             chain_id: "wallet-test".into(),
-            genesis_root: hex::encode([1; 32]),
+            origin: octra_exex::ChainOrigin::Genesis {
+                state_root: StateRoot([1; 32]),
+            },
             epoch: 1,
             state_root: hex::encode([2; 32]),
             ledger_root: "3".repeat(128),
@@ -75,10 +77,7 @@ fn setup(available: i64, invalid_key: bool) -> (Wallet, Arc<Key>, Arc<Host>, Int
         invalid: invalid_key,
     });
     let policy = Policy {
-        chain: ChainIdentity {
-            chain_id: "wallet-test".into(),
-            genesis_root: StateRoot([1; 32]),
-        },
+        chain: ChainIdentity::genesis("wallet-test", StateRoot([1; 32])),
         max_amount: 10.into(),
         max_ou: 1000.into(),
     };
@@ -107,7 +106,9 @@ async fn spending_chain_and_native_parameter_guards_precede_signing() {
             0 => intent.context.provenance = Provenance::UnpinnedRpc,
             1 => {
                 if let Provenance::Canonical(p) = &mut intent.context.provenance {
-                    p.genesis_root = "0".repeat(64);
+                    p.origin = octra_exex::ChainOrigin::Genesis {
+                        state_root: StateRoot([0; 32]),
+                    };
                 }
             }
             2 => intent.context.circle_id = "counter".into(),

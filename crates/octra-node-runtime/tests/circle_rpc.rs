@@ -182,10 +182,7 @@ async fn native_rpc_public_reads_and_browser_assets_share_next_epoch_visibility(
         .unwrap();
         let store = CanonicalStore::create(
             &temp.path().join(format!("{index}.db")),
-            ChainIdentity {
-                chain_id: "local".into(),
-                genesis_root: StateRoot(root),
-            },
+            ChainIdentity::genesis("local", StateRoot(root)),
             state.snapshot(),
             0,
         )

@@ -1,44 +1,12 @@
-//! v3 operator boot flow.
+//! Operator publication for the current private-admin VPN application
+//! (`program/main-v5.aml`), using the retained v3 registry ABI.
 //!
-//! Mirrors `Hub::register_endpoint_v2` shape but talks to the
-//! chain-minimal `program/main-v3.aml` registry. The sequence is:
-//!
-//!   1. Build a canonical `octravpn_core::v3_state_root::StateRoot` from
-//!      live operator state (policy hash, WG pubkey hash, region,
-//!      member count, current epoch, wall-clock).
-//!   2. Compute `anchor_hex()` — the 64-char hex sha256 the chain
-//!      stores in `circle_state_root[circle]`.
-//!   3. Decide which on-chain call to make:
-//!        * Circle not yet registered → `register_circle(circle,
-//!          anchor, receipt_pubkey)` with `value = initial stake`.
-//!        * Circle registered but anchor differs → `update_circle_state(
-//!          circle, new_anchor)`.
-//!        * Anchor matches → log + continue (idempotent restart).
-//!   4. Persist the (circle_id, anchor, tx_hash) triple into
-//!      `state/circle-v3.toml` so subsequent restarts can short-circuit.
-//!
-//! ## Judgement calls flagged for review
-//!
-//!   * **`circle_id` source**: v3's `register_circle` requires a
-//!     pre-existing circle address. The v2 path derives it via
-//!     `deploy_circle` at boot, but v3 does not bundle deploy + register
-//!     atomically (the smoke + adversarial scripts both use a hand-
-//!     specified `OPCIRCLE` constant). We therefore REQUIRE
-//!     `cfg.chain.circle_id` to be set when `protocol_version = "v3"`
-//!     and fail-fast with a clear error if it's absent. Operators
-//!     deploy the circle once out-of-band (via the wallet CLI or by
-//!     reusing a v2 circle they own) and configure the id here.
-//!   * **`policy_hash`**: derived from the canonical v3
-//!     `OperatorPolicy` (PR #191 schema, see
-//!     `octravpn_core::v3_policy::OperatorPolicy`). The boot fn builds
-//!     the policy struct from operator config + WG state + best-effort
-//!     epoch + wall-clock timestamp, then commits
-//!     `OperatorPolicy::hash_hex()` into the state-root.
-//!   * **`epoch`**: best-effort fetch via `octra_node_status`. Falls
-//!     back to 0 if the chain RPC is unreachable. The state-root
-//!     schema treats `epoch` as monotonic *per anchor*, so a 0 → real
-//!     transition on the second boot is fine — verifiers don't reject
-//!     a forward jump.
+//! The configured operator Circle must already exist. Boot requires a successful
+//! current-epoch read, builds a canonical policy with exact transport, keys and
+//! receipt domain, and publishes immutable public discovery assets. Committed
+//! readback precedes register/update of the on-chain anchor. Registration carries
+//! the operator stake; updates wait for the committed anchor before caching it.
+//! A restart reuses an unchanged policy revision and matching anchor.
 
 use std::sync::Arc;
 
@@ -53,6 +21,7 @@ use crate::{
     chain_v3::{ChainCtxV3, CircleV3State, RegisterCircleParams, MIN_CIRCLE_STAKE_DEFAULT},
     config::NodeConfig,
 };
+pub(crate) mod publication;
 
 /// Default cached-state path. Sits next to v2's `circle.toml` so an
 /// operator running both versions side-by-side (different binaries,
@@ -80,6 +49,7 @@ pub(crate) struct V3BootInputs<'a> {
 /// one and short-circuits without sending a tx. Returns the
 /// (anchor_hex, on_chain_action) pair for observability.
 pub(crate) async fn run_v3_boot(inputs: &V3BootInputs<'_>) -> Result<V3BootOutcome> {
+    inputs.cfg.wire_transport()?;
     let circle_id = required_circle_id(inputs.cfg)?;
     let state_path = v3_state_path(inputs.cfg);
 
@@ -88,16 +58,20 @@ pub(crate) async fn run_v3_boot(inputs: &V3BootInputs<'_>) -> Result<V3BootOutco
     let wg_pubkey_hash = sha256_hex(&wg_pub);
     let wg_pubkey_b64 = octravpn_core::b64::encode(wg_pub);
 
-    // Epoch is best-effort. The state-root schema documents that it's
-    // informational; a verifier doesn't reject a 0 → real jump.
-    let epoch = inputs.chain_v3.current_epoch().await.unwrap_or(0);
+    let epoch = inputs.chain_v3.current_epoch().await?;
     let timestamp_secs = octravpn_core::util::now_unix_secs();
 
     // Build the canonical `OperatorPolicy` (PR #191 schema). Its
     // `hash_hex()` is what flows into `state-root.policy_hash` — the
     // chain anchors `sha256_hex(canonical_bytes(state-root.json))`,
     // and state-root.json embeds this hash.
-    let policy = build_operator_policy_for_v3(inputs.cfg, &wg_pubkey_b64, epoch, timestamp_secs);
+    let mut policy = transport_policy(
+        inputs.cfg,
+        &wg_pubkey_b64,
+        &inputs.receipt_kp.public,
+        epoch,
+        timestamp_secs,
+    )?;
     policy
         .validate()
         .map_err(|e| anyhow!("v3 operator-policy validation: {e}"))?;
@@ -105,7 +79,7 @@ pub(crate) async fn run_v3_boot(inputs: &V3BootInputs<'_>) -> Result<V3BootOutco
         .hash_hex()
         .map_err(|e| anyhow!("v3 operator-policy hash: {e}"))?;
 
-    let state_root = StateRoot::new_v1(
+    let mut state_root = StateRoot::new_v1(
         circle_id,
         policy_hash,
         wg_pubkey_hash,
@@ -121,15 +95,6 @@ pub(crate) async fn run_v3_boot(inputs: &V3BootInputs<'_>) -> Result<V3BootOutco
     state_root
         .validate()
         .map_err(|e| anyhow!("v3 state-root validation: {e}"))?;
-    let anchor_hex = state_root
-        .anchor_hex()
-        .map_err(|e| anyhow!("v3 state-root anchor: {e}"))?;
-    info!(
-        circle_id,
-        anchor = %anchor_hex,
-        epoch,
-        "v3 state-root computed"
-    );
 
     // --- Step 2: load cached state + slash guard --------------------
     let mut cached = CircleV3State::load(&state_path)?.unwrap_or_default();
@@ -145,12 +110,7 @@ pub(crate) async fn run_v3_boot(inputs: &V3BootInputs<'_>) -> Result<V3BootOutco
         ));
     }
 
-    if inputs
-        .chain_v3
-        .is_circle_slashed(circle_id)
-        .await
-        .unwrap_or(false)
-    {
+    if inputs.chain_v3.is_circle_slashed(circle_id).await? {
         return Err(anyhow!(
             "v3 circle {} is permanently slashed; redeploy under a fresh \
              circle (update circle_id in node.toml and delete {})",
@@ -160,18 +120,26 @@ pub(crate) async fn run_v3_boot(inputs: &V3BootInputs<'_>) -> Result<V3BootOutco
     }
 
     // --- Step 3: decide register vs update vs no-op -----------------
-    let on_chain_anchor = inputs
-        .chain_v3
-        .get_circle_state_root(circle_id)
-        .await
-        .unwrap_or(None);
-    let is_registered = inputs
-        .chain_v3
-        .get_circle_active(circle_id)
-        .await
-        .unwrap_or(false);
+    let on_chain_anchor = inputs.chain_v3.get_circle_state_root(circle_id).await?;
+    let is_registered = inputs.chain_v3.get_circle_active(circle_id).await?;
 
     let receipt_pubkey_b64 = octravpn_core::b64::encode(inputs.receipt_kp.public.0);
+    if let Some(anchor) = on_chain_anchor.as_deref() {
+        anyhow::ensure!(
+            inputs.chain_v3.get_circle_receipt_pubkey(circle_id).await? == receipt_pubkey_b64,
+            "registered receipt key differs; rotate it before changing the serving key"
+        );
+        publication::inherit(
+            inputs.chain_v3,
+            circle_id,
+            anchor,
+            &mut policy,
+            &mut state_root,
+        )
+        .await?;
+    }
+    let anchor_hex = state_root.anchor_hex()?;
+    publication::publish(inputs.chain_v3, circle_id, &policy, &state_root).await?;
 
     let outcome = if !is_registered {
         // Brand-new circle: atomic register + bond.
@@ -191,6 +159,7 @@ pub(crate) async fn run_v3_boot(inputs: &V3BootInputs<'_>) -> Result<V3BootOutco
         };
         let call = inputs.chain_v3.build_register_circle_call(&params);
         let hash = inputs.chain_v3.submit_call(call).await?;
+        publication::await_anchor(inputs.chain_v3, circle_id, &anchor_hex).await?;
         info!(
             %hash,
             circle_id,
@@ -206,16 +175,10 @@ pub(crate) async fn run_v3_boot(inputs: &V3BootInputs<'_>) -> Result<V3BootOutco
             anchor_hex,
         }
     } else if on_chain_anchor.as_deref() != Some(anchor_hex.as_str()) {
-        // Registered but anchor drifted — submit `update_circle_state`.
-        // This is the SIMPLE-PATH version (anchor-only, no blob
-        // changes). The atomic multi-blob version lives in
-        // `crate::circle_update::apply`; we don't route through that
-        // here because the boot path's drift detection only ever
-        // changes the anchor (the policy bytes are sealed elsewhere
-        // by the operator, e.g. via the `octravpn-node circle update`
-        // CLI).
+        // Immutable resources have already passed committed readback.
         let hash =
             crate::circle_update::retry_anchor(inputs.chain_v3, circle_id, &anchor_hex).await?;
+        publication::await_anchor(inputs.chain_v3, circle_id, &anchor_hex).await?;
         info!(
             %hash,
             circle_id,
@@ -340,6 +303,80 @@ pub(crate) fn build_operator_policy_for_v3(
     )
 }
 
+pub(crate) fn transport_policy(
+    cfg: &NodeConfig,
+    wg_pubkey_b64: &str,
+    receipt: &octravpn_core::sig::PublicKey,
+    epoch: u64,
+    timestamp: u64,
+) -> Result<OperatorPolicy> {
+    let transport = cfg.wire_transport()?;
+    transport_policy_with(cfg, wg_pubkey_b64, receipt, epoch, timestamp, transport)
+}
+pub(crate) fn transport_policy_with(
+    cfg: &NodeConfig,
+    wg_pubkey_b64: &str,
+    receipt: &octravpn_core::sig::PublicKey,
+    epoch: u64,
+    timestamp: u64,
+    transport: octravpn_tun::amnezia::WireTransport,
+) -> Result<OperatorPolicy> {
+    let mut policy = build_operator_policy_for_v3(cfg, wg_pubkey_b64, epoch, timestamp);
+    let raw = cfg
+        .tunnel
+        .public_endpoint
+        .strip_prefix("wg://")
+        .unwrap_or(&cfg.tunnel.public_endpoint);
+    let mut endpoint = if let Some(endpoint) = &cfg.control.public_endpoint {
+        reqwest::Url::parse(endpoint)?
+    } else if raw.contains("://") {
+        reqwest::Url::parse(raw)?
+    } else {
+        reqwest::Url::parse(&format!("http://{raw}"))?
+    };
+    anyhow::ensure!(
+        matches!(endpoint.scheme(), "http" | "https")
+            && endpoint.host_str().is_some()
+            && endpoint.username().is_empty()
+            && endpoint.password().is_none()
+            && endpoint.query().is_none()
+            && endpoint.fragment().is_none()
+            && endpoint.path() == "/",
+        "invalid operator control origin"
+    );
+    let listen: std::net::SocketAddr = cfg.control.listen.parse()?;
+    anyhow::ensure!(listen.port() != 0, "operator control port must be explicit");
+    if cfg.control.public_endpoint.is_none() {
+        endpoint
+            .set_port(Some(listen.port()))
+            .map_err(|()| anyhow!("operator control origin cannot contain a port"))?;
+    }
+    if let Some(config) = &cfg.tun.ip_tunnel {
+        config.validate()?;
+    }
+    policy.unknown.insert(
+        "receipt_pubkey_b64".into(),
+        serde_json::json!(octravpn_core::b64::encode(receipt.0)),
+    );
+    policy.unknown.insert(
+        "control_endpoint".into(),
+        serde_json::json!(endpoint.as_str().trim_end_matches('/')),
+    );
+    policy.unknown.insert(
+        "ip_tunnel_v1".into(),
+        serde_json::json!(cfg.tun.ip_tunnel.is_some()),
+    );
+    policy.unknown.insert(
+        "application".into(),
+        serde_json::to_value(cfg.chain.application)?,
+    );
+    policy.unknown.insert(
+        "receipt_chain_id".into(),
+        serde_json::json!(cfg.chain.chain_id),
+    );
+    crate::embedded::advertise_transport(policy, transport)
+}
+
 /// Canonical bytes of the v3 `OperatorPolicy` for this operator —
 /// `sha256_hex` of this output is the value flowing into
 /// `state-root.policy_hash`. Thin wrapper over
@@ -370,6 +407,7 @@ mod tests {
     fn min_cfg(circle_id: Option<&str>) -> NodeConfig {
         NodeConfig {
             chain: ChainCfg {
+                application: octravpn_core::v3_calls::Application::default(),
                 rpc_url: "http://127.0.0.1:0/unused".into(),
                 program_addr: "oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3".into(),
                 validator_addr: "oct8taXQ4CvohcgzCJFYyaKrrAbcZs5mxkBCJQQYWb2Pcun".into(),

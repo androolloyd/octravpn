@@ -1,6 +1,8 @@
 //! Persistent, chain-scoped compare-and-swap checkpoints for execution extensions.
 //! This stores consumer progress. The host still owns canonical committed history.
 use crate::{ChainIdentity, CheckpointStore, Cursor, EpochId, Error, Result, Sequence, StateRoot};
+// `genesis` is the legacy SQL name for ChainIdentity::namespace_key(). Existing
+// Genesis keys are never rekeyed, which preserves already applied sink effects.
 use async_trait::async_trait;
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
@@ -28,6 +30,7 @@ impl SqliteCheckpoints {
             .map_err(|e| Error::Store(e.to_string()))?;
         sqlx::query("CREATE TABLE IF NOT EXISTS exex_checkpoint (chain_id TEXT NOT NULL, genesis BLOB NOT NULL CHECK(length(genesis)=32), extension TEXT NOT NULL, sequence TEXT NOT NULL, epoch TEXT NOT NULL, root BLOB NOT NULL CHECK(length(root)=32), PRIMARY KEY(chain_id, genesis, extension))")
             .execute(&pool).await.map_err(|e| Error::Store(e.to_string()))?;
+        crate::identity::initialize(&pool).await?;
         Ok(Self { pool })
     }
     pub async fn close(self) {
@@ -38,9 +41,13 @@ impl SqliteCheckpoints {
 #[async_trait]
 impl CheckpointStore for SqliteCheckpoints {
     async fn load(&self, chain: &ChainIdentity, extension: &str) -> Result<Option<Cursor>> {
+        chain.validate().map_err(|e| Error::Store(e.to_string()))?;
         let row = sqlx::query("SELECT sequence, epoch, root FROM exex_checkpoint WHERE chain_id=? AND genesis=? AND extension=?")
-            .bind(&chain.chain_id).bind(chain.genesis_root.0.as_slice()).bind(extension)
+            .bind(&chain.chain_id).bind(chain.namespace_key().as_slice()).bind(extension)
             .fetch_optional(&self.pool).await.map_err(|e| Error::Store(e.to_string()))?;
+        if row.is_some() {
+            crate::identity::verify(&self.pool, chain).await?;
+        }
         row.map(|r| {
             let sequence: String = r
                 .try_get("sequence")
@@ -58,14 +65,16 @@ impl CheckpointStore for SqliteCheckpoints {
                 }
                 Ok(n)
             };
-            Ok(Cursor {
+            let cursor = Cursor {
                 sequence: Sequence(parse(&sequence)?),
                 epoch: EpochId(parse(&epoch)?),
                 state_root: StateRoot(
                     root.try_into()
                         .map_err(|_| Error::Store("invalid persisted root".into()))?,
                 ),
-            })
+            };
+            crate::identity::bind_cursor(chain, cursor)?;
+            Ok(cursor)
         })
         .transpose()
     }
@@ -76,21 +85,32 @@ impl CheckpointStore for SqliteCheckpoints {
         expected: Option<Cursor>,
         next: Cursor,
     ) -> Result<()> {
+        crate::identity::bind_cursor(chain, next)?;
+        if let Some(expected) = expected {
+            crate::identity::bind_cursor(chain, expected)?;
+        }
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| Error::Store(e.to_string()))?;
+        crate::identity::save(&mut tx, chain).await?;
         let changed = if let Some(expected) = expected {
             sqlx::query("UPDATE exex_checkpoint SET sequence=?, epoch=?, root=? WHERE chain_id=? AND genesis=? AND extension=? AND sequence=? AND epoch=? AND root=?")
                 .bind(next.sequence.0.to_string()).bind(next.epoch.0.to_string()).bind(next.state_root.0.as_slice())
-                .bind(&chain.chain_id).bind(chain.genesis_root.0.as_slice()).bind(extension)
+                .bind(&chain.chain_id).bind(chain.namespace_key().as_slice()).bind(extension)
                 .bind(expected.sequence.0.to_string()).bind(expected.epoch.0.to_string()).bind(expected.state_root.0.as_slice())
-                .execute(&self.pool).await
+                .execute(&mut *tx).await
         } else {
             sqlx::query("INSERT INTO exex_checkpoint(chain_id,genesis,extension,sequence,epoch,root) VALUES(?,?,?,?,?,?) ON CONFLICT DO NOTHING")
-                .bind(&chain.chain_id).bind(chain.genesis_root.0.as_slice()).bind(extension)
+                .bind(&chain.chain_id).bind(chain.namespace_key().as_slice()).bind(extension)
                 .bind(next.sequence.0.to_string()).bind(next.epoch.0.to_string()).bind(next.state_root.0.as_slice())
-                .execute(&self.pool).await
+                .execute(&mut *tx).await
         }.map_err(|e| Error::Store(e.to_string()))?;
         if changed.rows_affected() != 1 {
             return Err(Error::Store("checkpoint compare-and-swap conflict".into()));
         }
+        tx.commit().await.map_err(|e| Error::Store(e.to_string()))?;
         Ok(())
     }
 }

@@ -1,0 +1,76 @@
+// Isolated v5 security fragment; original production methods compile unchanged.
+// Kept below the adopted native compiler method-label range.
+private fn test_seed_circle() {
+  self.min_circle_stake = 100000000
+  self.unbond_grace_epochs = 1000
+  self.circle_owner[caller] = caller
+  self.circle_active[caller] = 1
+  self.circle_state_version[caller] = 1
+  self.circle_bond[caller] = 100000000
+  self.circle_registration_approved[caller] = 1
+  self.circle_authorized_owner[caller] = caller
+}
+
+private fn test_seed_session(): uint {
+  test_seed_circle()
+  self.min_session_deposit = 1
+  self.session_grace_epochs = 100
+  self.sweep_grace_multiplier = 10
+  self.tailnet_count = 1
+  // Internal treasury refunds keep isolated VM tests independent of host transfers.
+  return write_session(0, caller, 100, 1)
+}
+
+private fn test_seed_admin() {
+  self.admin_nonce = 0
+  self.pending_admin_commitment = ""
+}
+
+fn test_retired_circle_stake_moves_to_slashable_unbond(): bool {
+  test_seed_circle()
+  require(retire_circle(caller), "retire failed")
+  require(unbond_endpoint(caller), "unbond failed")
+  require(self.circle_bond[caller] == 0, "live bond remains")
+  require(self.circle_unbonding[caller] == 100000000, "stake disappeared")
+  require(self.circle_unbond_unlock_epoch[caller] == epoch + 1000, "wrong unlock")
+  require(!circle_is_active(caller), "unbonding operator active")
+  return true
+}
+
+// expect-revert test_unbond_waits_for_funded_sessions "funded sessions still open"
+fn test_unbond_waits_for_funded_sessions(): bool {
+  test_seed_circle()
+  self.circle_active[caller] = 0
+  self.circle_open_sessions[caller] = 1
+  self.circle_unbonding[caller] = 100000000
+  self.circle_unbond_unlock_epoch[caller] = epoch
+  return finalize_unbond(caller)
+}
+
+fn test_active_requires_minimum_stake(): bool {
+  test_seed_circle()
+  self.circle_bond[caller] = 99999999
+  require(!circle_is_active(caller), "underfunded operator active")
+  return true
+}
+
+fn test_active_rejects_unbonding(): bool {
+  test_seed_circle()
+  self.circle_unbonding[caller] = 1
+  require(!circle_is_active(caller), "unbonding operator active")
+  return true
+}
+
+// expect-revert test_opaque_signed_messages_cannot_slash "opaque slashing disabled; submit evidence to governance"
+fn test_opaque_signed_messages_cannot_slash(): bool {
+  test_seed_circle()
+  return slash_double_sign(caller, "message-a", "signature-a", "message-b", "signature-b")
+}
+
+fn test_open_tracks_outstanding_session(): bool {
+  let sid = test_seed_session()
+  require(self.circle_open_sessions[caller] == 1, "missing outstanding session")
+  require(get_session_exit(sid) == caller, "operator binding wrong")
+  require(get_session_opener(sid) == caller, "opener binding wrong")
+  return true
+}

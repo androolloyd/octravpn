@@ -756,7 +756,7 @@ pub(crate) fn run_audit_tail(args: &AuditTailArgs) -> Result<i32> {
             let lossy = name.to_string_lossy();
             if lossy.starts_with("audit-") && lossy.ends_with(".jsonl") {
                 let p = entry.path();
-                if best.as_ref().map_or(true, |b| p > *b) {
+                if best.as_ref().is_none_or(|b| p > *b) {
                     best = Some(p);
                 }
             }

@@ -7,5 +7,9 @@
   "full_rust_node_complete": false,
   "source_equivalent_commits": [
     "d3e834919bd586e81f947d0dae91becc6c43c756"
-  ]
+  ],
+  "current_status": "docs/rust-node/status.md",
+  "qualification_scope": "Integrated Rust node with isolated paid VPN/ExEx/gateway qualification; full native behavioral parity, final broader runtime gates and public import/sync/restart remain unqualified.",
+  "local_paid_checkpoint": "docs/rust-node/checkpoints/2026-10-15/native-vpn.json",
+  "formal_checkpoint": "docs/rust-node/checkpoints/2026-10-15/formal.json"
 }

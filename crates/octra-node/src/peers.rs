@@ -1,7 +1,6 @@
 //! Native peer services backed by authenticated canonical history. Connection
 //! readers enqueue consensus work and stay available for its bundle replies.
 use ed25519_dalek::{Signer, SigningKey};
-use octra_exex::Sequence;
 use octra_node_protocol::{
     consensus::{codec::Wire, journal::JournalOwner, Bytes, Error, Finalize, ValidatorSet},
     network::{
@@ -44,12 +43,68 @@ struct Shared {
     active: RwLock<ValidatorSet>,
     bundles: Mutex<BTreeMap<[u8; 32], (i64, RawBundle)>>,
     driver: Mutex<Option<Handle>>,
+    peer_states: Mutex<BTreeMap<Bytes, octra_node_protocol::status_rpc::consensus::Peer>>,
     missing: mpsc::Sender<Missing>,
     transactions: mpsc::Sender<(Peer, Frame)>,
+    compute: mpsc::Sender<(Peer, Frame)>,
 }
 #[derive(Clone)]
 pub struct Authority(Arc<Shared>);
+impl octra_node_runtime::status_read::Consensus for Authority {
+    fn snapshot(
+        &self,
+    ) -> Result<
+        (
+            Option<octra_node_runtime::consensus_driver::Diagnostics>,
+            Vec<octra_node_protocol::status_rpc::consensus::Peer>,
+        ),
+        Error,
+    > {
+        let driver = self
+            .driver()?
+            .map(|driver| driver.diagnostics())
+            .transpose()?
+            .flatten();
+        let peers = self
+            .0
+            .peer_states
+            .lock()
+            .map_err(error)?
+            .values()
+            .cloned()
+            .collect();
+        Ok((driver, peers))
+    }
+}
 impl Authority {
+    fn remember_peer(&self, source: &[u8], checked_epoch: i64, response: &epoch_roots::Response) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|v| v.as_secs_f64())
+            .unwrap_or_default();
+        self.0
+            .peer_states
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(
+                response.responder_addr.clone(),
+                octra_node_protocol::status_rpc::consensus::Peer {
+                    responder_addr: response.responder_addr.clone(),
+                    head_epoch: response.responder_head_epoch,
+                    checked_epoch,
+                    state_root: response.state_root.clone(),
+                    last_seen: now,
+                    source: source.to_vec(),
+                },
+            );
+    }
+    pub(crate) fn compute_validators(&self) -> ValidatorSet {
+        self.0
+            .active
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
     pub fn attach(&self, driver: Handle) -> Result<(), Error> {
         let mut current = self.0.driver.lock().map_err(error)?;
         if current.is_some() {
@@ -98,7 +153,7 @@ impl Authority {
         let head = if epoch as u64 <= current.cursor.epoch.0 {
             self.0
                 .reader
-                .head_at(Sequence((epoch - 1) as u64))
+                .head_for_epoch((epoch - 1) as u64)
                 .await
                 .map_err(error)?
         } else {
@@ -170,7 +225,9 @@ impl finality_queries::Host for Authority {
     fn sign(&self, bytes: &[u8]) -> Result<Bytes, Error> {
         bundle_queries::Host::sign(self, bytes)
     }
-    fn remember(&self, _: i64, _: epoch_roots::Response) {}
+    fn remember(&self, epoch: i64, response: epoch_roots::Response) {
+        self.remember_peer(b"catchup_range", epoch, &response);
+    }
     fn finalized(&self, peer: &Peer, finalized: Finalize) -> Result<(), Error> {
         let driver = self.driver()?.ok_or("consensus driver unavailable")?;
         driver.enqueue(
@@ -207,7 +264,9 @@ impl epoch_roots::Host for Authority {
     fn sign(&self, bytes: &[u8]) -> Result<Bytes, Error> {
         bundle_queries::Host::sign(self, bytes)
     }
-    fn remember(&self, _: i64, _: &epoch_roots::Response) {}
+    fn remember(&self, epoch: i64, response: &epoch_roots::Response) {
+        self.remember_peer(b"epoch_root", epoch, response);
+    }
     async fn request_missing_finalize(
         &self,
         epoch: i64,
@@ -242,6 +301,12 @@ impl Handler for Dispatch {
                         .map_err(error)?;
                     return Ok(());
                 }
+                if frame.message == crate::compute::MESSAGE {
+                    // Compute's bounded worker lane owns the payload after this
+                    // point; peer readers remain available for consensus replies.
+                    let _ = authority.0.compute.try_send((peer, frame));
+                    return Ok(());
+                }
                 if let Some(driver) = authority.driver()? {
                     driver.enqueue(&peer, &frame)?;
                 }
@@ -262,6 +327,7 @@ pub struct Network {
     pub roots: EpochRoots<Authority>,
     pub finality: Finality<Authority>,
     pub inbox: Option<mpsc::Receiver<(Peer, Frame)>>,
+    pub compute_inbox: Option<mpsc::Receiver<(Peer, Frame)>>,
     listener: TcpListener,
     missing: mpsc::Receiver<Missing>,
 }
@@ -281,6 +347,8 @@ impl Network {
         let swarm = Swarm::new(config, key.clone())?;
         let (send, missing) = mpsc::channel(16);
         let (transactions, inbox) = mpsc::channel(16);
+        let (compute, compute_inbox) =
+            mpsc::channel(octra_node_runtime::compute_service::DATA_CHANNEL_LIMIT);
         let authority = Authority(Arc::new(Shared {
             history,
             reader,
@@ -290,8 +358,10 @@ impl Network {
             active: RwLock::new(validators),
             bundles: Mutex::default(),
             driver: Mutex::default(),
+            peer_states: Mutex::default(),
             missing: send,
             transactions,
+            compute,
         }));
         let started = Instant::now();
         let finality = Finality::new(
@@ -317,6 +387,7 @@ impl Network {
             listener,
             missing,
             inbox: Some(inbox),
+            compute_inbox: Some(compute_inbox),
         })
     }
     pub async fn run(mut self, mut shutdown: watch::Receiver<bool>) -> Result<(), Error> {

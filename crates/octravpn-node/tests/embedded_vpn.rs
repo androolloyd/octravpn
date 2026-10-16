@@ -204,8 +204,8 @@ async fn authenticated_wireguard_revocation_and_receipts_survive_embedded_restar
     {
         socket.send(packet).await.unwrap();
     }
-    // The non-public destination is intentionally refused by egress. Successful
-    // metering still proves the real WG decrypt, session binding and onion peel.
+    // Refused destinations must never become billable, even when the real
+    // WireGuard decrypt and onion peel succeed.
     let onion = build_onion(
         &[HopBuildInput {
             static_pubkey: node_public.to_bytes(),
@@ -216,18 +216,9 @@ async fn authenticated_wireguard_revocation_and_receipts_survive_embedded_restar
     .unwrap();
     let frame = tunnel_frame::encode(&request.session_id, &onion).unwrap();
     let encrypted = send_frame(&mut tunnel, &socket, &frame).await;
-    let before = tokio::time::timeout(Duration::from_secs(3), async {
-        loop {
-            let value = receipt(&http, &base, &request).await;
-            if value.bytes_served > 0 {
-                break value;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    assert_eq!(before.bytes_served, 32 + onion.len() as u64);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let before = receipt(&http, &base, &request).await;
+    assert_eq!(before.bytes_served, 0);
     socket.send(&encrypted).await.unwrap(); // WG replay window rejects identical ciphertext.
     let wrong = tunnel_frame::encode(&SessionId::from_u64(74), &onion).unwrap();
     send_frame(&mut tunnel, &socket, &wrong).await;

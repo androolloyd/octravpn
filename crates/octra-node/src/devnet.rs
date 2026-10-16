@@ -1,30 +1,15 @@
 //! Isolated development deployment using the real canonical store, native
 //! executor, authenticated peer transport and validator driver.
-use crate::{
-    consensus::Canonical,
-    driver,
-    executor::{self, Native, Pending},
-    peers::Network,
-    rpc::Submission,
-    Node,
-};
+use crate::executor;
 use anyhow::{ensure, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use ed25519_dalek::SigningKey;
-use octra_browser::application::UnavailableHost;
-use octra_exex::{
-    native_history::NativeTransaction, sqlite::SqliteCheckpoints, ChainIdentity, CommittedEpoch,
-    ExEx, StateRoot,
-};
+use octra_exex::{ChainIdentity, StateRoot};
 use octra_node_protocol::{
     circles::{self, AssetMeta, LocatorMode, MetadataMode, ResourceMode},
-    consensus::{
-        engine::{Engine, TimeoutConfig},
-        journal::JournalOwner,
-        policy::Protocol,
-    },
+    consensus::{engine::TimeoutConfig, journal::JournalOwner, policy::Protocol},
     epoch_index,
-    network::{endpoint::Endpoint, session::Timeouts, swarm},
+    network::endpoint::Endpoint,
     rules::Graph,
     state::Account,
     transaction::{self, RuleMode},
@@ -33,12 +18,10 @@ use octra_node_protocol::{
 use octra_node_runtime::{
     account_store,
     canonical::CanonicalStore,
-    circle::{CircleRuntime, HfheBackend},
-    consensus_driver::{Driver, Host as _},
+    circle::CircleRuntime,
     epoch_footer,
-    finality::proposal::Policy,
     state_batch::StateBatch,
-    validator_history::{Authority, CanonicalValidators, Environment, ReceiptPolicy},
+    validator_history::{Environment, ReceiptPolicy},
 };
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -49,7 +32,7 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tokio::{net::TcpListener, sync::watch, task::JoinSet};
+use tokio::sync::watch;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -59,6 +42,9 @@ pub struct Genesis {
     pub validators: Vec<String>,
     pub funded_public: String,
     pub circle: String,
+    /// Local qualification only; included in the genesis commitment.
+    #[serde(default)]
+    pub activated_applications: bool,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -74,7 +60,17 @@ pub struct Config {
     pub tunnel: SocketAddr,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gateway: Option<crate::gateway::Config>,
+    #[serde(default)]
+    pub compute_provider: bool,
+    /// Local transport identities may observe without joining the validator set.
+    #[serde(default = "default_voting")]
+    pub voting: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vpn: Option<crate::vpn::Config>,
     pub peers: Vec<SocketAddr>,
+}
+fn default_voting() -> bool {
+    true
 }
 fn key() -> SigningKey {
     let mut bytes = [0; 32];
@@ -92,13 +88,17 @@ fn state(genesis: &Genesis) -> Result<StateBatch> {
     state.begin()?;
     // Bind trusted startup parameters to the genesis commitment. Editing a
     // validator list or activation setting must create a different local chain.
+    let mut commitment = serde_json::json!({
+        "chain_id":genesis.chain.chain_id,"time":genesis.time,"validators":genesis.validators,
+        "profile":"devnet_full_v1","proposal_activation":2,"receipts_activation":0,
+        "upstream":"7f9be4489870645cfcc95439638cde40f5da9f50"
+    });
+    if genesis.activated_applications {
+        commitment["activated_applications"] = serde_json::json!(true);
+    }
     state.set(
         &[b"meta", b"local_devnet"],
-        serde_json::to_vec(&serde_json::json!({
-            "chain_id":genesis.chain.chain_id,"time":genesis.time,"validators":genesis.validators,
-            "profile":"devnet_full_v1","proposal_activation":2,"receipts_activation":0,
-            "upstream":"7f9be4489870645cfcc95439638cde40f5da9f50"
-        }))?,
+        serde_json::to_vec(&commitment)?,
     )?;
     for (name, value) in [
         (b"last_epoch".as_slice(), b"0".as_slice()),
@@ -180,6 +180,13 @@ fn root(state: &StateBatch) -> Result<StateRoot> {
 }
 /// New directory only: never replace validator keys or erase an existing chain.
 pub async fn init(directory: &Path, base: u16) -> Result<Vec<PathBuf>> {
+    init_with_applications(directory, base, false).await
+}
+pub async fn init_with_applications(
+    directory: &Path,
+    base: u16,
+    activated_applications: bool,
+) -> Result<Vec<PathBuf>> {
     ensure!((1024..=65500).contains(&base), "invalid base port");
     std::fs::create_dir(directory).context("devnet directory must be new")?;
     #[cfg(unix)]
@@ -192,13 +199,13 @@ pub async fn init(directory: &Path, base: u16) -> Result<Vec<PathBuf>> {
     let faucet = key();
     let circle = String::from_utf8(address(&key()))?;
     let mut genesis = Genesis {
-        chain: ChainIdentity {
-            chain_id: format!(
+        chain: ChainIdentity::genesis(
+            format!(
                 "octra-rust-local-{}",
                 hex::encode(&Sha256::digest(faucet.verifying_key().as_bytes())[..8])
             ),
-            genesis_root: StateRoot([0; 32]),
-        },
+            StateRoot([0; 32]),
+        ),
         time: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64(),
         validators: keys
             .iter()
@@ -206,8 +213,11 @@ pub async fn init(directory: &Path, base: u16) -> Result<Vec<PathBuf>> {
             .collect(),
         funded_public: public(&faucet),
         circle,
+        activated_applications,
     };
-    genesis.chain.genesis_root = root(&state(&genesis)?)?;
+    genesis.chain.origin = octra_exex::ChainOrigin::Genesis {
+        state_root: root(&state(&genesis)?)?,
+    };
     let faucet_path = directory.join("faucet.key");
     crate::storage::publish(&faucet_path, &faucet.to_bytes())?;
     let peers = (0..4)
@@ -232,6 +242,9 @@ pub async fn init(directory: &Path, base: u16) -> Result<Vec<PathBuf>> {
             control: socket(3),
             tunnel: socket(4),
             gateway: None,
+            compute_provider: false,
+            voting: true,
+            vpn: None,
             peers: peers.iter().copied().filter(|p| p != &peers[i]).collect(),
         };
         let file = data.join("config.json");
@@ -247,87 +260,9 @@ pub async fn init(directory: &Path, base: u16) -> Result<Vec<PathBuf>> {
 pub fn read(path: &Path) -> Result<Config> {
     Ok(serde_json::from_slice(&std::fs::read(path)?)?)
 }
-pub fn read_key(path: &Path) -> Result<SigningKey> {
-    #[cfg(unix)]
-    {
-        use std::io::Read;
-        use std::os::unix::fs::PermissionsExt;
-        let mut file: std::fs::File = rustix::fs::open(
-            path,
-            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC,
-            rustix::fs::Mode::empty(),
-        )?
-        .into();
-        let meta = file.metadata()?;
-        ensure!(
-            meta.is_file() && meta.len() == 32 && meta.permissions().mode().trailing_zeros() >= 6,
-            "validator key must be a private 32-byte regular file"
-        );
-        let mut bytes = [0; 32];
-        file.read_exact(&mut bytes)?;
-        Ok(SigningKey::from_bytes(&bytes))
-    }
-    #[cfg(not(unix))]
-    anyhow::bail!("devnet keys require Unix file permissions")
-}
-struct HfheUnavailable;
-impl HfheBackend for HfheUnavailable {
-    fn call(
-        &self,
-        _: &serde_json::Value,
-    ) -> Result<serde_json::Value, octra_node_runtime::circle::Error> {
-        Err(octra_node_runtime::circle::Error::Unavailable(
-            "Circle HFHE backend is not configured".into(),
-        ))
-    }
-}
-struct Unfunded;
-impl crate::vpn::Settlement for Unfunded {
-    fn session(
-        &self,
-        _: &crate::Committed,
-        _: &octravpn_core::control::AnnounceSessionRequest,
-        _: &octravpn_core::receipt::ReceiptContext,
-    ) -> Result<Option<octravpn_node::admission::FundedSession>> {
-        Ok(None)
-    }
-    fn lifecycle(
-        &self,
-        _: &crate::Committed,
-        _: &octravpn_core::session::SessionId,
-        _: &octravpn_core::receipt::ReceiptContext,
-    ) -> Result<octravpn_node::admission::RelayLifecycle> {
-        anyhow::bail!("VPN settlement Circle is not configured")
-    }
-}
-struct Archive(PathBuf);
-impl ExEx<NativeTransaction> for Archive {
-    fn name(&self) -> &'static str {
-        "devnet-archive"
-    }
-    async fn on_epoch(&mut self, event: &CommittedEpoch<NativeTransaction>) -> Result<(), String> {
-        let path = self
-            .0
-            .join(format!("{:016x}.json", event.cursor.sequence.0));
-        let bytes = serde_json::to_vec(event).map_err(|e| e.to_string())?;
-        tokio::task::spawn_blocking(move || crate::storage::publish(&path, &bytes))
-            .await
-            .map_err(|e| e.to_string())?
-            .map_err(|e| e.to_string())
-    }
-}
-struct Stop {
-    signal: watch::Sender<bool>,
-    swarm: swarm::Swarm,
-}
-impl Drop for Stop {
-    fn drop(&mut self) {
-        self.signal.send_replace(true);
-        self.swarm.stop();
-    }
-}
+pub use crate::identity::read as read_key;
 
-pub async fn run(config: Config, mut shutdown: watch::Receiver<bool>) -> Result<()> {
+pub async fn run(config: Config, shutdown: watch::Receiver<bool>) -> Result<()> {
     ensure!(
         config
             .genesis
@@ -353,11 +288,15 @@ pub async fn run(config: Config, mut shutdown: watch::Receiver<bool>) -> Result<
     }
     let initial = state(&config.genesis)?;
     ensure!(
-        root(&initial)? == config.genesis.chain.genesis_root,
+        root(&initial)?
+            == config
+                .genesis
+                .chain
+                .genesis_root()
+                .context("local devnet requires genesis origin")?,
         "genesis commitment differs"
     );
     let key = read_key(&config.key)?;
-    let address = address(&key);
     let journal = JournalOwner::open(&config.data)?;
     let database = config.data.join("canonical.db");
     let store = if database.exists() {
@@ -371,262 +310,96 @@ pub async fn run(config: Config, mut shutdown: watch::Receiver<bool>) -> Result<
         )
         .await?
     };
-    let reader = store.reader();
+    let profile = Profile::from_values(Some(b"devnet_full_v1"), None, None);
+    let protocol = Protocol::new(2)?;
     let environment = Environment {
         current: Some(config.genesis.validators.join(",").into_bytes()),
         ..Environment::default()
     };
-    let profile = Profile::from_values(Some(b"devnet_full_v1"), None, None);
-    let receipts = ReceiptPolicy::new(Some(b"0"), &profile, None);
-    let runtime = CircleRuntime::new(Arc::new(HfheUnavailable));
-    let checkpoints = Arc::new(SqliteCheckpoints::open(&config.data.join("exex.db")).await?);
-    let membership = CanonicalValidators::new(reader.clone(), environment.clone());
-    let node = Arc::new(
-        Node::open(
-            store,
-            Authority::new(reader.clone(), environment, receipts, journal.clone()),
-            runtime.clone(),
-            Arc::new(UnavailableHost),
-            checkpoints,
-        )
-        .await?,
-    );
-    node.register(Archive(config.data.join("exex"))).await?;
-    let head = node.head().await?;
-    // Establish the native genesis floor before a first-start catch-up. A
-    // retained non-genesis store without a floor still requires explicit repair.
-    if head.cursor.epoch.0 == 0 && journal.floor()?.is_none() {
-        journal.set_floor(0)?;
-    }
-    let validators = membership
-        .expected_set(&head, head.cursor.epoch.0 as i64 + 1, None, &|_| {
-            journal
-                .latest_relief(head.cursor.epoch.0 as i64 + 1)
-                .map_err(|e| e.as_bytes().to_vec())
-        })
-        .await?;
-    ensure!(
-        validators.public_key(&address) == Some(key.verifying_key().as_bytes()),
-        "local key is not in the genesis validator set"
-    );
-    let native_config = membership.config(&head).await?;
-    let protocol = Protocol::new(2)?;
-    let policy = Policy {
-        protocol,
-        genesis_time: Some(config.genesis.time),
-    };
-    let executor = Native::new(
-        executor::Config {
-            graph: Graph::new(config.genesis.chain.chain_id.as_bytes().to_vec(), None),
-            protocol,
-            profile,
-            payload: octra_node_protocol::transaction_payload::Limits::default(),
-            bundle: executor::Limits::new(100_000, 50_000_000, 10_000_000_000_u64.into()),
-            validators: octra_node_protocol::validator::policy::Policy::Inactive,
-            emission: epoch_footer::Policy {
-                emission_guard: true,
-                schedule: octra_node_protocol::emission::Schedule::Inactive,
-                legacy_total: None,
-            },
-            sender_key_activation: Some(0),
-            private_result_activation: 0,
-            max_fhe: 32,
-            ready_max_lag: 10,
-            pvac_dir: config.data.join("pvac"),
-        },
-        runtime,
-        node.history(),
-    )?;
-    let view = node.clone();
-    let fallback = head.clone();
     let endpoint = |socket: SocketAddr| Endpoint {
         host: socket.ip().to_string().into_bytes(),
         port: socket.port(),
     };
-    let mut network = Network::new(
-        TcpListener::bind(config.p2p).await?,
-        swarm::Config {
-            chain_id: config.genesis.chain.chain_id.as_bytes().to_vec(),
-            node_address: address.clone(),
-            config_hash: native_config.hash.to_vec(),
-            binary_hash: Sha256::digest(b"octra-rust-local-devnet-v1").to_vec(),
-            require_binary_hash: false,
-            upgrade: None,
-            profiles: vec![],
-            allowed_public_keys: native_config.allowed_pubkeys,
-            bootstrap: config.peers.iter().copied().map(endpoint).collect(),
-            maximum_validators: 16,
-            advertised: endpoint(config.p2p),
-            timeouts: Timeouts::default(),
-            head: Arc::new(move || {
-                let head = view
-                    .snapshot()
-                    .map_or_else(|_| fallback.clone(), |v| v.head().clone());
-                (head.cursor.epoch.0 as i64, head.cursor.state_root.0)
-            }),
-        },
-        key.clone(),
-        node.history(),
-        reader,
-        membership,
-        validators.clone(),
-        journal.clone(),
-    )?;
-    let pending = Arc::new(Pending::new(octra_node_runtime::staging::Pool::default()));
-    let submission = Arc::new(Submission {
-        node: node.clone(),
-        executor: executor.clone(),
-        pending: pending.clone(),
-        swarm: network.swarm.clone(),
-        policy,
-        address: address.clone(),
-    });
-    let (stop, stopped) = watch::channel(false);
-    let _stop = Stop {
-        signal: stop.clone(),
-        swarm: network.swarm.clone(),
-    };
-    let authority = network.authority.clone();
-    let swarm = network.swarm.clone();
-    let finality = network.finality.clone();
-    let bundles = network.bundles.clone();
-    let validator = driver::Validator::new(
-        node.clone(),
-        executor.clone(),
-        pending.clone(),
-        &network,
-        driver::Config {
-            key: key.clone(),
-            address: address.clone(),
-            policy,
-            journal: journal.clone(),
+    Box::pin(crate::launch::run(
+        crate::launch::Plan {
+            status_release: None,
+            state_sync: None,
+            services: crate::launch::Services {
+                data: config.data.clone(),
+                rpc: config.rpc,
+                browser: config.browser,
+                control: config.control,
+                tunnel: config.tunnel,
+                gateway: config.gateway,
+            },
+            transport: crate::launch::Transport {
+                listen: config.p2p,
+                advertised: endpoint(config.p2p),
+                peers: config.peers.into_iter().map(endpoint).collect(),
+                maximum_peers: 16,
+                config_hash: None,
+                binary_hash: Sha256::digest(b"octra-rust-local-devnet-v1").to_vec(),
+                require_binary_hash: false,
+                profiles: vec![],
+            },
+            store,
+            key,
+            journal,
+            environment,
+            receipts: ReceiptPolicy::new(Some(b"0"), &profile, None),
+            policy: octra_node_runtime::finality::proposal::Policy {
+                protocol,
+                genesis_time: Some(config.genesis.time),
+            },
+            execution: executor::Config {
+                graph: if config.genesis.activated_applications {
+                    Graph::isolated_applications(
+                        config.genesis.chain.chain_id.as_bytes().to_vec(),
+                        None,
+                        config
+                            .genesis
+                            .chain
+                            .genesis_root()
+                            .context("local devnet requires genesis origin")?
+                            .0,
+                    )
+                    .map_err(anyhow::Error::msg)?
+                } else {
+                    Graph::new(config.genesis.chain.chain_id.as_bytes().to_vec(), None)
+                },
+                protocol,
+                profile,
+                payload: octra_node_protocol::transaction_payload::Limits::default(),
+                bundle: executor::Limits::new(100_000, 50_000_000, 10_000_000_000_u64.into()),
+                validators: octra_node_protocol::validator::policy::Policy::Inactive,
+                emission: epoch_footer::Policy {
+                    emission_guard: true,
+                    schedule: octra_node_protocol::emission::Schedule::Inactive,
+                    legacy_total: None,
+                },
+                sender_key_activation: Some(0),
+                private_result_activation: 0,
+                max_fhe: 32,
+                max_stealth: 32,
+                max_multi_exec_calls: 8,
+                ready_max_lag: 10,
+                pvac_dir: config.data.join("pvac"),
+                migration: None,
+            },
+            runtime: CircleRuntime::new(Arc::new(octra_node_runtime::circle_hfhe::Backend)),
+            compute: octra_node_protocol::resource_compute::provider::Config::from_inputs(
+                config.compute_provider,
+                |name| std::env::var_os(name).map(|value| value.as_encoded_bytes().to_vec()),
+            )?,
+            vpn: config.vpn,
+            voting: config.voting,
+            minimum_peers: 2,
+            startup_timeout: Duration::from_secs(60),
+            timeouts: TimeoutConfig::default(),
             epoch_capacity: 10_000_000_000_u64.into(),
             stealth_slots: 4,
-            evidence_dir: config.data.join("evidence"),
         },
-    )?;
-    let inbox = network.inbox.take().context("transaction inbox missing")?;
-    let mut tasks = JoinSet::new();
-    tasks.spawn(async move { network.run(stopped).await.map_err(anyhow::Error::from) });
-    let startup = async {
-        // Peer announcements select a target only. Historical QCs and local
-        // execution authenticate every imported epoch before voting starts.
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
-        while swarm.peers().len() < 2 {
-            ensure!(
-                tokio::time::Instant::now() < deadline,
-                "waiting for devnet quorum timed out"
-            );
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        let target = swarm
-            .peers()
-            .iter()
-            .map(|p| p.hello().best_epoch)
-            .max()
-            .unwrap_or(0)
-            .max(0) as u64;
-        if target > node.head().await?.cursor.epoch.0 {
-            ensure!(
-                node.catch_up_range(target, &finality, &executor, 10.)
-                    .await?
-                    .reached,
-                "startup catch-up incomplete"
-            );
-        }
-        ensure!(node.resume().await?, "startup serving lease revoked");
-        let height = node.head().await?.cursor.epoch.0 as i64 + 1;
-        let set = validator.activate(height).await?;
-        let mut engine = Engine::new(
-            config.genesis.chain.chain_id.as_bytes().to_vec(),
-            address,
-            set,
-            height,
-            protocol,
-            TimeoutConfig::default(),
-        );
-        validator.recover(&mut engine).await?;
-        validator.set_enabled(true);
-        let publication = Canonical::new(node.clone(), bundles, executor, 10.)
-            .await?
-            .with_pending(pending);
-        let (handle, driver) = Driver::new(
-            engine,
-            journal,
-            swarm.clone(),
-            validator,
-            publication,
-            Ok(vec![]),
-        )?;
-        authority.attach(handle)?;
-        let signal = stop.subscribe();
-        tasks.spawn(async move { driver.run(signal).await.map_err(anyhow::Error::from) });
-        let signal = stop.subscribe();
-        tasks.spawn(submission.clone().ingress(inbox, signal));
-        let listener = TcpListener::bind(config.rpc).await?;
-        let mut signal = stop.subscribe();
-        tasks.spawn(async move {
-            axum::serve(listener, submission.router())
-                .with_graceful_shutdown(async move {
-                    let _ = signal.wait_for(|v| *v).await;
-                })
-                .await
-                .map_err(anyhow::Error::from)
-        });
-        let vpn_key = Sha256::digest([b"devnet-vpn-receipts".as_slice(), &key.to_bytes()].concat());
-        let wg_key = Sha256::digest([b"devnet-vpn-wireguard".as_slice(), &key.to_bytes()].concat());
-        let operator = octravpn_core::address::Address::from_pubkey(key.verifying_key().as_bytes());
-        let services = node
-            .bind(
-                config.browser,
-                octravpn_node::embedded::Config {
-                    control_listen: config.control,
-                    tunnel_listen: config.tunnel,
-                    data_dir: config.data.join("vpn"),
-                    receipt_key: Arc::new(octravpn_core::sig::KeyPair::from_secret_bytes(
-                        &vpn_key.into(),
-                    )),
-                    wireguard_secret: x25519_dalek::StaticSecret::from(<[u8; 32]>::from(wg_key)),
-                    receipt_context: octravpn_core::receipt::ReceiptContext::v2(
-                        operator.clone(),
-                        9871,
-                        operator,
-                    ),
-                },
-                Arc::new(Unfunded),
-            )
-            .await?;
-        tasks.spawn(services.run(stop.subscribe()));
-        if let Some(config) = config.gateway.clone() {
-            let gateway = node.bind_gateway(config).await?;
-            tasks.spawn(gateway.run(stop.subscribe()));
-        }
-        eprintln!(
-            "devnet serving: RPC http://{} browser http://{}/open?u=oct://{}/index.html",
-            config.rpc, config.browser, config.genesis.circle
-        );
-        Ok::<_, anyhow::Error>(())
-    };
-    let started = tokio::select! {r=startup=>r,_=shutdown.wait_for(|v|*v)=>Ok(())};
-    let result = if started.is_err() {
-        started
-    } else {
-        tokio::select! {
-            result=tasks.join_next()=>match result {Some(Ok(Err(e)))=>Err(e),Some(Err(e))=>Err(e.into()),_=>Err(anyhow::anyhow!("node service stopped unexpectedly"))},
-            _=shutdown.wait_for(|v|*v)=>Ok(()),
-        }
-    };
-    stop.send_replace(true);
-    swarm.stop();
-    node.suspend("devnet shutting down");
-    let drain = async { while tasks.join_next().await.is_some() {} };
-    if tokio::time::timeout(Duration::from_secs(8), drain)
-        .await
-        .is_err()
-    {
-        tasks.abort_all();
-    }
-    node.shutdown().await?;
-    result
+        shutdown,
+    ))
+    .await
 }

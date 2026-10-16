@@ -820,7 +820,7 @@ fn commitments_match(
             }
         }
     }
-    amount.map_or(true, |amount| proof.proof.commitments[expected] == *amount)
+    amount.is_none_or(|amount| proof.proof.commitments[expected] == *amount)
 }
 
 pub fn verify_zero(

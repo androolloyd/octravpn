@@ -1,0 +1,236 @@
+{
+  "schema": 1,
+  "date": "2026-10-15",
+  "completed_at": "2026-10-15T22:19:00.735135+00:00",
+  "status": "PASS_AUTHENTICATED_HISTORICAL_PATH_READ_FOLLOWUP",
+  "scope": "Selected canonical historical metadata reads and their storage/finality/validator consumers. This is a focused follow-up; earlier full Runtime164/58 and storage42 gates remain historical snapshots.",
+  "root_lock_sha256": "f28ad88c09fb9c0ed4ed33eb8866a191cc0fdfba2ad4c5435443942dbefc3b35",
+  "native_pin": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "runtime_crate_files": 333,
+  "runtime_crate_tree_sha256": "57f4818ec540ccf1f5a6ed82d14c6b59ba07a6f11d37e4a964505eed37ca583b",
+  "tree_digest_encoding": "SHA256 of UTF-8 sorted relative-path to file-SHA256 JSON with separators=(comma,colon) plus LF.",
+  "source_sha256": {
+    "crates/octra-node-runtime/src/canonical/reader.rs": "032c80925459efc5fef0d8ee41f08bf794399b3e39281177e687cad522b28590",
+    "crates/octra-node-runtime/src/validator_history.rs": "49238940758bd89aada4d6e752fce4ff14513049d32931952b36b811af475566",
+    "crates/octra-node-runtime/src/canonical/reader/paths.rs": "ad3778cb264faabb1ad0f85dbab956301894daf5b301cde30b22b057dc647cc6",
+    "crates/octra-node-runtime/src/canonical/reader/paths/tests.rs": "7438056f17bee25507f4c2b5807c3bccea7a8cdf30faff72ffe4e461cab88937"
+  },
+  "source_manifest": {
+    "path": "out/node-port-final-20261015/authenticated-read-at/evidence/source-final.json",
+    "sha256": "c37e8cea2a8dfc29960c7d125bdb1aff0a877a47b3e1f26547e24f910fde8e30"
+  },
+  "runtime_delta_from_storage_followup": {
+    "src/canonical/reader/paths/tests.rs": {
+      "before": null,
+      "after": "7438056f17bee25507f4c2b5807c3bccea7a8cdf30faff72ffe4e461cab88937"
+    },
+    "src/canonical/reader/paths.rs": {
+      "before": null,
+      "after": "ad3778cb264faabb1ad0f85dbab956301894daf5b301cde30b22b057dc647cc6"
+    },
+    "src/canonical/reader.rs": {
+      "before": "481030492ba06f90d24a40e6bce4e65ef1a3bcd0b1aa49fdcf404a07f68be737",
+      "after": "032c80925459efc5fef0d8ee41f08bf794399b3e39281177e687cad522b28590"
+    },
+    "src/consensus_driver/mod.rs": {
+      "before": "6933e117056813b347e3b411b5e0aa420a4362edf82f3b084e3803de9df827e7",
+      "after": "a6703996295b97f12d13bbf57f9b3d34b226e4c52e0d5c92276080c2cb9390ee"
+    },
+    "src/validator_history.rs": {
+      "before": "8a4307ce27e8e124b0a81f5628b911650bbd70df07ba7c0f8f504c0a2b6d8d3d",
+      "after": "49238940758bd89aada4d6e752fce4ff14513049d32931952b36b811af475566"
+    },
+    "tests/live_consensus.rs": {
+      "before": "e6d20bb40862e0c836e7fe4122c6fb473f0bc0c249615d3aa37d97ab90a296e5",
+      "after": "d1ac237fabfa578ec8a614670f9fce7efc01c6ae0785797e631c1269e0e84aec"
+    }
+  },
+  "production_patch": {
+    "path": "out/node-port-final-20261015/authenticated-read-at/production.patch",
+    "sha256": "c52222a80f1e13f8d470ad663b4292099e3fa890ad4a7f7c3afadaa20128a8aa"
+  },
+  "implementation": [
+    "Validate exact retained Head equality before selecting ledger root.",
+    "Recompute native Irmin hash for every traversed directory; reject duplicate names, wrong child-hash sizes and mismatched selected child kind.",
+    "Select child only from authenticated directory names/hashes; require matching retained parent/child edge before loading the child.",
+    "Verify contents hash before returning a value or treating contents as having no deeper path.",
+    "Return committed absence only after authenticating its complete containing directory; missing/corrupt selected objects or selected edges remain errors.",
+    "Replace only CanonicalValidators active/pending reads; preserve full checkpoint/latest-tree restore and all Publisher QC, receipt and history audits."
+  ],
+  "release": {
+    "command": "cargo clean -p octra-node-runtime --profile release && cargo test -p octra-node-runtime --release --offline --locked --lib --test canonical_recovery --test canonical_authority --test finality_publication --test validator_epoch --test validator_transactions --test ledger_image_parity --no-fail-fast",
+    "target_count": 7,
+    "passed": 52,
+    "failed": 0,
+    "ignored": 1,
+    "filtered": 0,
+    "targets": [
+      {
+        "target": "unittests src/lib.rs (/target/release/deps/octra_node_runtime-99181733f8eb9545)",
+        "status": "ok",
+        "passed": 30,
+        "failed": 0,
+        "ignored": 0,
+        "filtered": 0,
+        "seconds": 3.88
+      },
+      {
+        "target": "tests/canonical_authority.rs (/target/release/deps/canonical_authority-b39031dc9cc615c7)",
+        "status": "ok",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "filtered": 0,
+        "seconds": 0.52
+      },
+      {
+        "target": "tests/canonical_recovery.rs (/target/release/deps/canonical_recovery-44984ca9d22ceaf0)",
+        "status": "ok",
+        "passed": 7,
+        "failed": 0,
+        "ignored": 1,
+        "filtered": 0,
+        "seconds": 0.3
+      },
+      {
+        "target": "tests/finality_publication.rs (/target/release/deps/finality_publication-8737ac4630162916)",
+        "status": "ok",
+        "passed": 6,
+        "failed": 0,
+        "ignored": 0,
+        "filtered": 0,
+        "seconds": 0.24
+      },
+      {
+        "target": "tests/ledger_image_parity.rs (/target/release/deps/ledger_image_parity-7cba25dc0a606632)",
+        "status": "ok",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "filtered": 0,
+        "seconds": 0.0
+      },
+      {
+        "target": "tests/validator_epoch.rs (/target/release/deps/validator_epoch-b94056fb258258c2)",
+        "status": "ok",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "filtered": 0,
+        "seconds": 1.06
+      },
+      {
+        "target": "tests/validator_transactions.rs (/target/release/deps/validator_transactions-3e265585e5d9ea97)",
+        "status": "ok",
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0,
+        "filtered": 0,
+        "seconds": 0.17
+      }
+    ],
+    "new_regressions": [
+      "retained_values_and_authenticated_absence_match_snapshot_reads",
+      "selected_metadata_does_not_restore_unrelated_historical_payload",
+      "forged_head_cannot_select_a_path_even_when_the_path_is_absent",
+      "altered_directory_leaf_and_selected_kind_are_rejected",
+      "duplicate_names_and_short_child_hashes_cannot_prove_absence",
+      "missing_selected_edge_is_unavailable_even_when_object_exists",
+      "missing_selected_object_is_an_error_instead_of_authenticated_absence"
+    ],
+    "log": {
+      "path": "out/node-port-final-20261015/authenticated-read-at/evidence/exclusive-tests.log",
+      "sha256": "e71bd9f04d5233f44acbd8979c4be31ad9d9da240a6b8ddc29fb0ee375265ec2"
+    },
+    "run": {
+      "path": "out/node-port-final-20261015/authenticated-read-at/evidence/exclusive-tests-run.json",
+      "sha256": "61fd0e7a9739db6204eb341d09b361540e5b7f5fc6998c7b6b5fe73afde352cb"
+    },
+    "executables": {
+      "/target/release/deps/octra_node_runtime-99181733f8eb9545": "7558f35bf191a4aa84c989ea2cbec0c9ff23d256283cc05c1783c9eb3824fe0e",
+      "/target/release/deps/canonical_authority-b39031dc9cc615c7": "fccadd8a12bb686a074e6fc2102e6e74ec695402a631e42ee902bcf2bdee0df2",
+      "/target/release/deps/canonical_recovery-44984ca9d22ceaf0": "da833a5f8c6fa95433a92d9dfdf42a754a01d8fc15eaeac594e899b88a21ad21",
+      "/target/release/deps/finality_publication-8737ac4630162916": "6ed24f3c5886c42816c133a9058aa811446bf0a4ba1b44b44b77a8086e06d369",
+      "/target/release/deps/ledger_image_parity-7cba25dc0a606632": "0b6589d798a6e25450059710ddc1b89ce1bd94fe21dd0694ac328998ede8f529",
+      "/target/release/deps/validator_epoch-b94056fb258258c2": "cf8836158312fa1f7a28335b11caddcbda2e923631e3081eb1a89e4c5a09dc12",
+      "/target/release/deps/validator_transactions-3e265585e5d9ea97": "b5f879ed6712d8da6b93e874c686e466f8f02c447ed1bd528546e0bd8aa79e7c"
+    },
+    "executables_manifest": {
+      "path": "out/node-port-final-20261015/authenticated-read-at/evidence/exclusive-tests-executables.sha256",
+      "sha256": "da72c333cda8bc7ff817086475bb1d7a2580c9f23f6e0e7640cb70a86267a3f4"
+    }
+  },
+  "strict_clippy": {
+    "command": "cargo clean -p octra-node-runtime --profile dev && cargo clippy -p octra-node-runtime --no-deps --offline --locked --all-targets --all-features --keep-going -- -D warnings",
+    "passed": true,
+    "log": {
+      "path": "out/node-port-final-20261015/authenticated-read-at/evidence/exclusive-clippy.log",
+      "sha256": "831eea86fad64ef463968b1f7afc2edd55fa3aa6ffcb3f4ac7d04b50c1287a10"
+    },
+    "run": {
+      "path": "out/node-port-final-20261015/authenticated-read-at/evidence/exclusive-clippy-run.json",
+      "sha256": "a3402e980f1f95fb60ea1dc693515a77b77c9aa7e40512e29e1ea98ddfcdbce2"
+    },
+    "scope": "All Runtime targets and features, --no-deps. Existing vendor ReceiptLease::Release dead-code warning is outside scoped Runtime diagnostics."
+  },
+  "test_only_delta": {
+    "reason": "Replace trivial empty-slice cast with coercion; assertions and production code unchanged",
+    "files": {
+      "octra/crates/octra-node-runtime/src/canonical/reader/paths/tests.rs": {
+        "before": "4ce873b8651e4bf5d500796c356bdadbbb749317208b1c0160b5a659a9c53081",
+        "after": "7438056f17bee25507f4c2b5807c3bccea7a8cdf30faff72ffe4e461cab88937"
+      }
+    }
+  },
+  "cache_provenance": {
+    "initial_attempts": "Shared-cache first lint was stale and is not qualification; first shared-cache52-pass release and fresh shared-cache lint are preserved as diagnostics only.",
+    "final_target_volume": "octra-read-at-target-20261015",
+    "exclusive_during_final_gates": true,
+    "initial_contents": "Copied the idle historical Runtime cache, then invalidated only Runtime dev and release package artifacts before their respective final gates.",
+    "fresh_compiler_invocation_observed": true,
+    "source_unchanged_during_each_final_gate": true
+  },
+  "independent_review": "All four frozen files reviewed clean. No actionable findings; only test empty-slice cast changed to coercion afterward, with assertions and production unchanged.",
+  "isolation": {
+    "host_cargo": false,
+    "network": "none",
+    "source_and_registry": "read-only",
+    "image": "sha256:62d73a659a92699cf1230d84a89521d4266f2eeb7b7e22b41835103871c76cb1",
+    "toolchain": {
+      "path": "out/node-port-final-20261015/authenticated-read-at/evidence/toolchain.txt",
+      "sha256": "3aceafcd8b5f26da2bae13d3eba00938e315a9c8f4d1e14a308fd8379c5f14d9"
+    },
+    "profile": "release optimized",
+    "public_or_old_store_effects": false
+  },
+  "limits": [
+    "This avoids whole unrelated historical-subtree restores for validator metadata only; full checkpoint/latest-state authentication remains.",
+    "Public startup/catch-up improvement is not inferred from finite tests; parent owns measured restart.",
+    "No schema, stored-object encoding, native commitment, consensus authority or configuration default changes.",
+    "The ignored crash_worker is executed only through its passing controlled parent process_crash_recovery test and is not counted as a standalone pass.",
+    "The captured independent 0x3c runtime routing delta is typechecked by all-target lint; its live_consensus behavior is qualified separately by its owning agent.",
+    "Node, VPN, browser, public-chain deployment and formal qualification remain independently scoped."
+  ],
+  "evidence_sha256": {
+    "capture.json": "64addef5586a9cb4ba33692c26e6c4eaf91400d3eac43a1f7e1e2c4dba9c166c",
+    "clippy-executables.sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "clippy-run.json": "aa8898165a266957fe4176e4e904f04f3f3790c7269cf60d1b483cbc9a9212bc",
+    "clippy.log": "c37785a68f51b18b0759326ba364ce818b1912f12cf3613273f5da2ae44ab277",
+    "exclusive-clippy-executables.sha256": "fa81b53411dd032f3b2af71c7f0bc31eff27e1a9c28c0d2a6eeab1040f0029e8",
+    "exclusive-clippy-run.json": "a3402e980f1f95fb60ea1dc693515a77b77c9aa7e40512e29e1ea98ddfcdbce2",
+    "exclusive-clippy.log": "831eea86fad64ef463968b1f7afc2edd55fa3aa6ffcb3f4ac7d04b50c1287a10",
+    "exclusive-tests-executables.sha256": "da72c333cda8bc7ff817086475bb1d7a2580c9f23f6e0e7640cb70a86267a3f4",
+    "exclusive-tests-run.json": "61fd0e7a9739db6204eb341d09b361540e5b7f5fc6998c7b6b5fe73afde352cb",
+    "exclusive-tests.log": "e71bd9f04d5233f44acbd8979c4be31ad9d9da240a6b8ddc29fb0ee375265ec2",
+    "final-clippy-executables.sha256": "fa81b53411dd032f3b2af71c7f0bc31eff27e1a9c28c0d2a6eeab1040f0029e8",
+    "final-clippy-run.json": "e885c042e508888b86f2a3348662d010d83efa0ec29c6d915b1d4c613aa231ca",
+    "final-clippy.log": "faa5f733f53f57c6acc2e03cd54f4b8c689656f9a7f28fc521f2768dc646a092",
+    "source-before.json": "27a239e1055f297f4f681d677cbc78b261a982ce6ab491d756239547d20f26b2",
+    "source-final.json": "c37e8cea2a8dfc29960c7d125bdb1aff0a877a47b3e1f26547e24f910fde8e30",
+    "test-only-delta.json": "b5e1c5fc05d16092f0c08535cd33448ed9a101166688addb7ed0d9d14320f7d7",
+    "tests-executables.sha256": "fa81b53411dd032f3b2af71c7f0bc31eff27e1a9c28c0d2a6eeab1040f0029e8",
+    "tests-run.json": "910f54addedd3cb51ac4b4ce0ee17ee6d2f14ed2b2216d59a914447391536b5e",
+    "tests.log": "502deb32e462f38c86264f40a268f21c58361a98bb21a521c6cfe6fcbf0c5ad0",
+    "toolchain.txt": "3aceafcd8b5f26da2bae13d3eba00938e315a9c8f4d1e14a308fd8379c5f14d9"
+  }
+}

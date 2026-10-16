@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-rust-version = "1.85"
+rust-version.workspace = true
 description = "OctraVPN client CLI: pick a route, open session, run tunnel, settle."
 
 [[bin]]
@@ -56,6 +56,7 @@ hmac        = "0.12"
 rpassword   = "7"
 
 [dev-dependencies]
+octravpn-node = { path = "../octravpn-node" }
 assert_cmd  = "2"
 predicates  = "3"
 tempfile    = { workspace = true }
@@ -76,6 +77,9 @@ reqwest     = { workspace = true }
 
 [lints]
 workspace = true
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs"] }
 
 [[bench]]
 name = "cold_connect"

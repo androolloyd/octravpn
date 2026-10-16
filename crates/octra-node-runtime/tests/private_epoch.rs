@@ -100,9 +100,18 @@ fn native_epoch_admission_receipts_and_key_availability() {
             .collect::<Vec<_>>();
         let gate = (input["gate"] != "none").then(|| Gate::parse(&raws).unwrap());
         let mut host = Epoch::new(
-            profile,
-            input["max_fhe"].as_u64().unwrap() as usize,
+            octra_node_runtime::private_key::Policy {
+                balance: profile,
+                owner: RuleMode::Prior,
+                cipher: RuleMode::Prior,
+            },
+            octra_node_runtime::private_epoch::Limits {
+                max_fhe: input["max_fhe"].as_u64().unwrap() as usize,
+                max_stealth: 4,
+            },
+            0,
             gate.as_ref(),
+            None,
         );
         if warmup != "none" {
             let mut first = tx.clone();
@@ -114,8 +123,16 @@ fn native_epoch_admission_receipts_and_key_availability() {
                 OpType::Encrypt
             };
             assert!(matches!(
-                host.process(&first, &mut ledger, &store, |_| Ok(Some(public.clone())))
-                    .unwrap(),
+                host.process(
+                    &first,
+                    &mut ledger,
+                    &mut store,
+                    |_| Ok(Some(public.clone())),
+                    |_| Err(octra_node_runtime::execution::Error(
+                        "unexpected key persistence".into()
+                    ))
+                )
+                .unwrap(),
                 Effect::Confirmed(_)
             ));
         }
@@ -123,15 +140,25 @@ fn native_epoch_admission_receipts_and_key_availability() {
         let before_supply = ledger.total_supply().clone();
         let before_spent = ledger.spent_nonces().clone();
         let mut key_reads = 0;
-        let result = host.process(&tx, &mut ledger, &store, |requested| {
-            key_reads += 1;
-            assert_eq!(requested, hash.as_bytes());
-            Ok(match input["key_fault"].as_str() {
-                Some("missing") => None,
-                Some("corrupt") => Some(b"corrupt".to_vec()),
-                _ => Some(public.clone()),
-            })
-        });
+        let result = host.process(
+            &tx,
+            &mut ledger,
+            &mut store,
+            |requested| {
+                key_reads += 1;
+                assert_eq!(requested, hash.as_bytes());
+                Ok(match input["key_fault"].as_str() {
+                    Some("missing") => None,
+                    Some("corrupt") => Some(b"corrupt".to_vec()),
+                    _ => Some(public.clone()),
+                })
+            },
+            |_| {
+                Err(octra_node_runtime::execution::Error(
+                    "unexpected key persistence".into(),
+                ))
+            },
+        );
         let outcome = match result {
             Ok(Effect::Confirmed(fee)) => {
                 confirmed += 1;

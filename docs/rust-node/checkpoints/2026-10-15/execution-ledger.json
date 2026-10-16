@@ -1,0 +1,26 @@
+{
+  "date": "2026-10-15",
+  "status": "ADOPTED_QUALIFIED_SAME_CALL_LEDGER_HANDOFF",
+  "qualification": {
+    "path": "out/node-port-final-20261015/execution-ledger-candidate/qualification.json",
+    "sha256": "36e2e4abc4e3c9523ef254418056155200772c33fdce1768d9db76a540f33e2b"
+  },
+  "adoption": {
+    "path": "out/node-port-final-20261015/execution-ledger-candidate/adoption.json",
+    "sha256": "856460a0f40935aba5fadc408168dc2ac3a5bba1df46ca3fba75bfcee1080bd5"
+  },
+  "node_release_passed": 54,
+  "node_targets": 6,
+  "strict_all_targets_all_features": "PASS",
+  "scope": "The same unmodified ledger used for finalized admission moves into staging once; other stage callers retain normal ledger loading after the original parent-root check. No cross-call cache, state/proof/authority change or measured public speed claim.",
+  "production": {
+    "crates/octra-node/src/executor/stage.rs": {
+      "baseline_sha256": "53fcefac5c79eb1bdbae3b672e2f4071bde96c2ef7f2decb955e4792454b9170",
+      "candidate_sha256": "8d77ca09d302d0b096a1a2e7f295b2bbaf39564b0f4284fbbcbec2e79fe78b76"
+    },
+    "crates/octra-node/src/executor.rs": {
+      "baseline_sha256": "40f288906966be8c866cf8c61bc253ddf4df8229300d360961f0cc1fee7bda13",
+      "candidate_sha256": "3889985cb95d5664ad5ba38c84d45f09a33dbf39d4a2c49ff20b45d1850c744b"
+    }
+  }
+}

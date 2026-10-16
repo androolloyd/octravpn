@@ -92,6 +92,13 @@ pub struct Pool {
     held: BTreeMap<Vec<u8>, i64>,
     drops: BTreeMap<Vec<u8>, DropRecord>,
 }
+/// Local refusal/hold metadata. Restoring it never admits a transaction.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewState {
+    preview: preview::State,
+    held: Vec<(Vec<u8>, i64)>,
+}
 pub fn public_cost(tx: &Transaction) -> BigInt {
     match tx.op_type {
         OpType::Decrypt | OpType::Claim | OpType::Stealth | OpType::Private => tx.ou.clone(),
@@ -104,6 +111,36 @@ fn key(tx: &Transaction) -> Vec<u8> {
     key
 }
 impl Pool {
+    pub fn preview_state(&self) -> PreviewState {
+        PreviewState {
+            preview: self.preview.clone(),
+            held: self.held.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+        }
+    }
+    pub fn restore_preview(&mut self, state: PreviewState, head: i64) -> Result<(), &'static str> {
+        if !state.preview.valid(MAX_TRANSACTIONS)
+            || state.held.len() > MAX_TRANSACTIONS
+            || state.held.iter().any(|(hash, epoch)| {
+                *epoch < 0
+                    || *epoch > state.preview.head
+                    || hash.len() != 64
+                    || !hash
+                        .iter()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
+            })
+        {
+            return Err("invalid saved preview state");
+        }
+        if state.preview.head == head {
+            self.preview = state.preview;
+            self.held = state
+                .held
+                .into_iter()
+                .filter(|(h, e)| *e == head && self.hashes.contains_key(h))
+                .collect();
+        }
+        Ok(())
+    }
     pub fn len(&self) -> usize {
         self.entries.len()
     }

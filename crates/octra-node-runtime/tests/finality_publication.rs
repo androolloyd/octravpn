@@ -51,10 +51,10 @@ async fn fixture(path: &std::path::Path) -> (Arc<CanonicalStore>, Authority) {
     state.begin().unwrap();
     state.set(&[b"fixture"], b"genesis".to_vec()).unwrap();
     state.acknowledge_commit().unwrap();
-    let chain = ChainIdentity {
-        chain_id: "finality-publication-fixture".into(),
-        genesis_root: StateRoot(root(None, &state, &[])),
-    };
+    let chain = ChainIdentity::genesis(
+        "finality-publication-fixture",
+        StateRoot(root(None, &state, &[])),
+    );
     let authority = Authority {
         seed: 1,
         chain: chain.clone(),
@@ -97,6 +97,9 @@ fn execution(
         })
         .collect();
     ExecutedEpoch {
+        epoch_observation: None,
+        metrics: octra_node_protocol::metrics::Epoch::default(),
+        vm_receipts: std::collections::BTreeMap::default(),
         reward_source: common::reward_source(1),
         state: state.snapshot(),
         transactions,
@@ -114,6 +117,150 @@ async fn unchanged(store: &CanonicalStore, base: &Head) {
         .await
         .unwrap()
         .is_none());
+}
+
+#[tokio::test]
+async fn bounded_ranges_and_projected_history_reauthenticate_the_same_committed_epoch() {
+    use octra_node_runtime::canonical::{HistoryQuery, HistoryReadError};
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("bounded.db");
+    let (store, authority) = fixture(&path).await;
+    let publisher = Arc::new(
+        Publisher::open(store.clone(), authority.clone())
+            .await
+            .unwrap(),
+    );
+    let (base, state) = store.snapshot().await.unwrap();
+    let executed = execution(&base, state, transaction_fixture());
+    let finalized = certificate(&base, &executed, &authority).encode().unwrap();
+    let head = publisher
+        .prepare(&base, &finalized, executed.clone())
+        .await
+        .unwrap()
+        .commit()
+        .await
+        .unwrap();
+    let reader = store.reader();
+    let lengths = reader.record_lengths(&head).await.unwrap();
+    assert!(
+        lengths.events > 0
+            && lengths.receipts > 0
+            && lengths.reward > 0
+            && lengths.certificate == finalized.len()
+    );
+    let mut forged = head.clone();
+    forged.cursor.state_root = StateRoot([99; 32]);
+    assert!(reader.record_lengths(&forged).await.is_err());
+    let record = publisher
+        .record_bounded(head.cursor.sequence, 32 * 1024 * 1024)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        record,
+        publisher.record(head.cursor.sequence).await.unwrap()
+    );
+    let raw_tx_bytes = record
+        .txs_json
+        .iter()
+        .map(|raw| raw.len() + 64)
+        .sum::<usize>();
+    assert!(publisher
+        .record_bounded(head.cursor.sequence, raw_tx_bytes - 1)
+        .await
+        .unwrap()
+        .is_none());
+    let query = HistoryQuery::default();
+    // A large configured limit with a small matching result must remain valid.
+    let page = reader
+        .transactions_projected(
+            &head,
+            &query,
+            100_001,
+            0,
+            8 * 1024 * 1024,
+            |epoch, tx| async move {
+                assert_eq!(epoch.cursor.epoch.0, 1);
+                Ok::<_, octra_node_runtime::canonical::Error>((tx.hash, 64))
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.total, executed.transactions.len() as u64);
+    assert_eq!(page.rows.len(), executed.transactions.len());
+    let refusal = reader
+        .transactions_projected(
+            &head,
+            &query,
+            100_001,
+            0,
+            page.rows.len() * 64 - 1,
+            |_, tx| async move { Ok::<_, octra_node_runtime::canonical::Error>((tx.hash, 64)) },
+        )
+        .await;
+    assert!(matches!(refusal, Err(HistoryReadError::ResponseLimit)));
+    let rejections = reader
+        .rejections_projected(&head, &query, 100_001, 0, 8 * 1024 * 1024, |row| {
+            let publisher = publisher.clone();
+            async move {
+                let authenticated = publisher.record(row.head.cursor.sequence).await?;
+                let raw =
+                    octra_node_protocol::transaction_outcome::encode_rejection(&row.rejection)
+                        .unwrap();
+                assert!(authenticated.receipts_json.contains(&raw));
+                Ok::<_, Error>((row.rejection.position, 8))
+            }
+        })
+        .await
+        .unwrap();
+    assert_eq!((rejections.total, rejections.rows.len()), (2, 2));
+    // Scalar length guards must refuse oversized auxiliary bytes before a JSON
+    // decoder loads them. The refusal is operational, never a missing epoch.
+    let db = sqlx::sqlite::SqlitePoolOptions::new()
+        .connect_with(sqlx::sqlite::SqliteConnectOptions::new().filename(&path))
+        .await
+        .unwrap();
+    let original: Vec<u8> = sqlx::query_scalar(
+        "SELECT events FROM exex_committed_epoch WHERE sequence='0000000000000001'",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE exex_committed_epoch SET events=zeroblob(?) WHERE sequence='0000000000000001'",
+    )
+    .bind(4 * 1024 * 1024 + 8 * 64 + 1)
+    .execute(&db)
+    .await
+    .unwrap();
+    assert!(
+        matches!(publisher.record_bounded(head.cursor.sequence,64).await,Err(Error::Unavailable(reason)) if reason=="canonical archive exceeds bounded read budget")
+    );
+    sqlx::query("UPDATE exex_committed_epoch SET events=? WHERE sequence='0000000000000001'")
+        .bind(original)
+        .execute(&db)
+        .await
+        .unwrap();
+    let mut corrupted = finalized.clone();
+    corrupted[0] ^= 1;
+    sqlx::query("UPDATE node_epochs SET certificate=? WHERE sequence=1")
+        .bind(corrupted)
+        .execute(&db)
+        .await
+        .unwrap();
+    assert!(
+        publisher
+            .record_bounded(head.cursor.sequence, 32 * 1024 * 1024)
+            .await
+            .is_err(),
+        "length hints must not bypass QC authentication"
+    );
+    sqlx::query("UPDATE node_epochs SET certificate=? WHERE sequence=1")
+        .bind(finalized)
+        .execute(&db)
+        .await
+        .unwrap();
+    publisher.audit().await.unwrap();
 }
 
 struct MissingHistory;
@@ -589,7 +736,7 @@ async fn committed_history_serves_bundles_ranges_and_rejects_reward_corruption()
     assert!(publisher.bundle(&[0; 32]).await.unwrap().is_none());
     assert_eq!(
         publisher.root(0).await.unwrap().unwrap(),
-        authority.chain.genesis_root.0
+        authority.chain.genesis_root().unwrap().0
     );
     let db = sqlx::sqlite::SqlitePoolOptions::new()
         .connect_with(sqlx::sqlite::SqliteConnectOptions::new().filename(&path))

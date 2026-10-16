@@ -93,6 +93,9 @@ fn certificate(
         .map(|v| (v.address.clone(), STANDARD.encode(&v.pubkey).into_bytes()))
         .collect::<Vec<_>>();
     let executed = ExecutedEpoch {
+        epoch_observation: None,
+        metrics: octra_node_protocol::metrics::Epoch::default(),
+        vm_receipts: std::collections::BTreeMap::default(),
         state: state.snapshot(),
         transactions: vec![],
         consensus_receipts: vec![],
@@ -174,10 +177,8 @@ async fn canonical_authority_activates_and_reaudits_signed_history_after_restart
         .set(&[b"meta", update::PENDING_KEY], pending.clone())
         .unwrap();
     state.acknowledge_commit().unwrap();
-    let chain = ChainIdentity {
-        chain_id: "canonical-authority-fixture".into(),
-        genesis_root: StateRoot(root(None, &state)),
-    };
+    let chain =
+        ChainIdentity::genesis("canonical-authority-fixture", StateRoot(root(None, &state)));
     let mut store = Arc::new(
         CanonicalStore::create(&path, chain.clone(), state.snapshot(), 0)
             .await

@@ -1,0 +1,32 @@
+# Offline unsigned public-devnet RC parameters. This is not launch approval.
+# Use explicit --network devnet --network-env /path/to/the/adopted/network.env.
+# RPC route comes from pinned controls/lib/validator_config.py; network authority
+# comes separately from docs/rust-node/network-authority.json and network.env.
+[target]
+network = "devnet"
+rpc_url = "https://devnet.octrascan.io/rpc"
+chain_id = "octra-devnet-9871-cluster"
+config_hash = "89c4deb7de2144dd2193f9abdc7fc87e2ed6889e4700def42d8c1d0ee756ccd9"
+network_env_sha256 = "db87b3323080e7d7090e01aa2d7636985f49ba4c639ec26c78673a1c43a15c07"
+
+[target.origin]
+kind = "checkpoint"
+epoch = 1278039
+state_root = "ab602f2a1956a9df087106a686ea36e654c819e62321ae6b4ed3cf61107676ee"
+txid_hi = 660497
+
+[private_admin]
+# Fill only public setup/commitment/domain fields; never the credential witness.
+# A devnet deployment needs its reviewed domain bound to the intended network.
+commitment = ""
+verification_key_b64 = ""
+domain = ""
+
+# SIX-decimal OU. These do not deposit escrow or stake during qualification.
+[constructor]
+min_session_deposit = 1000000
+min_tailnet_deposit = 1000000
+min_circle_stake = 100000000
+session_grace_epochs = 100
+unbond_grace_epochs = 1000
+max_locked_value = 200000000

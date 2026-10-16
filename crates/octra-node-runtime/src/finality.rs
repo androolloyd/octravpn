@@ -6,6 +6,7 @@
 //! admission remain the driver's responsibility.
 pub mod history;
 pub mod proposal;
+mod vm_receipts;
 use num_bigint::BigInt;
 use std::sync::Arc;
 
@@ -69,8 +70,16 @@ pub struct ReceiptRules {
 
 #[derive(Clone)]
 pub struct ExecutedEpoch {
+    /// Actual footer observations for native local epochlog queries. Missing
+    /// historical material remains absent; it is never reconstructed as zero.
+    pub epoch_observation: Option<octra_node_protocol::epoch_journal::Observation>,
+    /// Observed execution work for local metrics; excluded from all commitments.
+    pub metrics: octra_node_protocol::metrics::Epoch,
     pub state: Snapshot,
     pub transactions: Vec<NativeTransaction>,
+    /// Auxiliary VM output for confirmed and rejected calls from this replay.
+    /// It is retained locally and is not an additional consensus commitment.
+    pub vm_receipts: crate::canonical::VmReceipts,
     /// Exact consensus outcome/preverification bytes produced or validated by
     /// execution. These are distinct from each transaction's VM receipt.
     pub consensus_receipts: Vec<Vec<u8>>,
@@ -230,7 +239,7 @@ impl<A: ValidatorHistory> Publisher<A> {
         let finalized = decode(certificate)?;
         let epoch = next_epoch(base, &finalized)?;
         let root = canonical::execution_root(base, epoch, &executed.state, &executed.transactions)?;
-        let (_, relief) = self
+        let (_, relief, validators) = self
             .authenticate(
                 base,
                 &finalized,
@@ -240,6 +249,7 @@ impl<A: ValidatorHistory> Publisher<A> {
                 &executed.reward_source,
             )
             .await?;
+        vm_receipts::validate(&executed)?;
         let mut prepared = self
             .store
             .prepare(
@@ -260,10 +270,16 @@ impl<A: ValidatorHistory> Publisher<A> {
         prepared
             .retain_consensus_receipts(&executed.consensus_receipts)
             .await?;
+        prepared.retain_vm_receipts(&executed.vm_receipts).await?;
         prepared
             .retain_reward_source(&finalized.proposal_id, &executed.reward_source)
             .await?;
         prepared.retain_relief(relief.as_ref()).await?;
+        if let Some(observation) = &executed.epoch_observation {
+            prepared
+                .retain_epoch_observation(&finalized, &validators, observation)
+                .await?;
+        }
         Ok(prepared)
     }
 
@@ -285,7 +301,7 @@ impl<A: ValidatorHistory> Publisher<A> {
         transactions: &[NativeTransaction],
         receipts: &[Vec<u8>],
         reward: &RewardSource,
-    ) -> Result<(CatchupEpochRecord, Option<Mark>)> {
+    ) -> Result<(CatchupEpochRecord, Option<Mark>, ValidatorSet)> {
         let epoch = next_epoch(base, finalized)?;
         let rules = self.rules(base, epoch).await?;
         let set = rules.validators;
@@ -341,7 +357,7 @@ impl<A: ValidatorHistory> Publisher<A> {
             ),
             finality: Some(CatchupFinality {
                 finalize: finalized.clone(),
-                validator_set: set,
+                validator_set: set.clone(),
             }),
         };
         let parsed_hashes = parsed
@@ -380,7 +396,7 @@ impl<A: ValidatorHistory> Publisher<A> {
             &record,
         )
         .map_err(invalid)?;
-        Ok((record, rules.relief))
+        Ok((record, rules.relief, set))
     }
 
     /// Export a retained epoch only after rechecking its QC, execution
@@ -420,7 +436,50 @@ impl<A: ValidatorHistory> Publisher<A> {
             &reward,
         )
         .await
-        .map(|(record, _)| record)
+        .map(|(record, _, _)| record)
+    }
+
+    /// A read-only allocation boundary for the native HTTP range service. The
+    /// conservative database representation guards account for base64 archive
+    /// identities and serde's integer-array receipt encoding. They do not alter
+    /// accepted blocks or replace `record` authentication. Oversized auxiliary
+    /// archive representations are operationally unavailable, not absent.
+    pub async fn record_bounded(
+        &self,
+        sequence: Sequence,
+        maximum: usize,
+    ) -> Result<Option<CatchupEpochRecord>> {
+        let retained = self.store.retained_head(sequence).await?;
+        let lengths = self.store.reader().record_lengths(&retained).await?;
+        let events = maximum
+            .checked_mul(8)
+            .and_then(|n| n.checked_add(4 * 1024 * 1024))
+            .ok_or_else(|| Error::Unavailable("canonical archive read budget overflow".into()))?;
+        let receipts = maximum
+            .checked_mul(4)
+            .and_then(|n| n.checked_add(4 * 1024 * 1024))
+            .ok_or_else(|| Error::Unavailable("canonical receipt read budget overflow".into()))?;
+        if lengths.events > events
+            || lengths.receipts > receipts
+            || lengths.certificate > 32 * 1024 * 1024
+            || lengths.reward > 4 * 1024 * 1024
+        {
+            return Err(Error::Unavailable(
+                "canonical archive exceeds bounded read budget".into(),
+            ));
+        }
+        let record = self.record(sequence).await?;
+        let mut size = 0usize;
+        for raw in &record.txs_json {
+            size = size
+                .checked_add(64)
+                .and_then(|n| n.checked_add(raw.len()))
+                .ok_or_else(|| invalid("range response exceeds full limit"))?;
+            if size > maximum {
+                return Ok(None);
+            }
+        }
+        Ok(Some(record))
     }
 }
 

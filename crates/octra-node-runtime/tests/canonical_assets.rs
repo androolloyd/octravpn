@@ -18,6 +18,8 @@ mod browser_host;
 mod circle_host;
 #[path = "common/finality_host.rs"]
 mod finality_host;
+#[path = "canonical_assets/retained.rs"]
+mod retained;
 
 fn asset(state: &mut StateBatch, circle: &str, path: &str, body: &[u8]) -> AssetMeta {
     let circle = circle.as_bytes();
@@ -105,10 +107,7 @@ async fn create(path: &std::path::Path, state: &StateBatch) -> CanonicalStore {
     .unwrap();
     CanonicalStore::create(
         path,
-        ChainIdentity {
-            chain_id: "native-circle-browser-fixture".into(),
-            genesis_root: StateRoot(root),
-        },
+        ChainIdentity::genesis("native-circle-browser-fixture", StateRoot(root)),
         state.snapshot(),
         0,
     )
@@ -464,6 +463,9 @@ async fn browser_fixture() {
     style.content_type = b"text/css".to_vec();
     write_meta(&mut state, b"one", &style);
     let executed = ExecutedEpoch {
+        epoch_observation: None,
+        metrics: octra_node_protocol::metrics::Epoch::default(),
+        vm_receipts: std::collections::BTreeMap::default(),
         reward_source: finality_host::reward_source(authority.seed),
         state: state.snapshot(),
         transactions: vec![],

@@ -55,10 +55,10 @@ async fn local_proposal_capture_checks_receipts_outcomes_and_commitment() {
     let dir = tempfile::tempdir().unwrap();
     let circle = format!("oct{}", "1".repeat(44));
     let state = genesis(circle.as_bytes());
-    let chain = ChainIdentity {
-        chain_id: "proposal-capture-fixture".into(),
-        genesis_root: StateRoot(finality_host::root(None, &state, &[])),
-    };
+    let chain = ChainIdentity::genesis(
+        "proposal-capture-fixture",
+        StateRoot(finality_host::root(None, &state, &[])),
+    );
     let authority = finality_host::Authority {
         seed: 1,
         chain: chain.clone(),

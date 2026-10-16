@@ -1,5 +1,24 @@
 # Native execution adoption
 
+Current release status is summarized in [status.md](status.md). The
+[2026-10-15 paid-node checkpoint](checkpoints/2026-10-15/native-vpn.json)
+records actual application deployment, private administration, funded UDP/TUN
+traffic, TCP continuation across operator restart, matching ExEx and canonical
+gateway delivery on an isolated four-validator chain. The
+[formal checkpoint](checkpoints/2026-10-15/formal.json) records its exact bounded
+proof/model scope. The final local node and HFHE release runs passed 40 and 49
+tests respectively; the broader runtime and final Chromium gates retain their
+own results. Public snapshot import/join/restart and external Tailscale/TLS
+qualification remain open.
+
+## Historical adoption and implementation records
+
+The dated entries below preserve the evidence and limitations of each earlier
+snapshot. Their "unbuilt", "untested", "missing" and "remaining" statements
+describe that implementation pass, not the current release status. Later source
+integration does not retroactively extend an older oracle's qualified input
+scope. Use the current status and exact checkpoint hashes for release claims.
+
 The node port adopts lite_node `7f9be4489870645cfcc95439638cde40f5da9f50`.
 Full node parity remains incomplete. This revision changes installer/upgrade
 tooling only; all 1,158 inventoried runtime sources match the previous adopted
@@ -104,6 +123,12 @@ message limits and connection lifecycle tests. These are tested components;
 complete transaction admission, state storage, consensus and sync are still
 being implemented.
 
+Startup separates handshake admission from validator membership, matching native
+`p2p_config`. Validator lifecycle mode or the exact
+`OCTRA_CONSENSUS_ALLOW_DYNAMIC_PEERS=1` setting opens handshake key admission;
+authenticated membership independently classifies peers and authorizes votes.
+Connecting a new key does not select a validator.
+
 ExEx now has a native retained-history recovery adapter. Real Irmin/chaindata
 fixtures prove export after durable HEAD but before journal completion, atomic
 Rust import and consumer restart. Concurrent native writers, unrecovered
@@ -118,6 +143,16 @@ paths. Evidence records all 1,158 node source hashes and 293 dependency source
 hashes (Irmin/Irmin-pack 3.11.0 and Repr 0.7.0).
 
 Applied state and ExEx events publish in one FULL-synchronous WAL transaction.
+The current qualification candidate shares ordered directory pages across
+transaction savepoints using pinned `imbl` 7.0.2. Immutable nodes memoize their
+native Irmin commitments; edits invalidate only their ancestor path. Authenticated
+read proofs reuse these commitments for blinded subtrees. Canonical readers share
+one authenticated snapshot, installed after the SQL commit. Subsequent commits
+stream changed objects against that persisted parent; initial writes visit
+children first and restoration consumes object payloads as it builds the tree.
+Native byte-key ordering, hash preimages and stored object encodings are retained.
+Public-size bootstrap and final recovery qualification remain required.
+
 Recovery tests kill a child process before and after commit, reject competing
 stale writers and corrupt objects/outbox bindings, and resume an extension
 without a commit notification. These establish storage atomicity and recovery.
@@ -136,7 +171,7 @@ remains open. Public recryption's full-proof
 oracle and Rust test now pass all eight complete native cases.
 
 `CanonicalAssets::capture` now supplies the HTTP browser directly from a verified
-published Rust store snapshot. It binds the chain identity, genesis root, epoch,
+published Rust store snapshot. It binds the chain identity and typed origin, epoch,
 folded root, Irmin ledger root and commit, and refuses a mismatched stored epoch.
 Existing readers retain their original snapshot through speculative preparation,
 commit and store restart. Public serving checks native publication/visibility
@@ -236,7 +271,7 @@ state, commits their exact archives/receipts through an authenticated local QC, 
 checks ExEx delivery and checkpoint recovery after restart.
 
 `browser_wallet::Wallet` replaces the synthetic browser signing path with explicit
-node and signer capabilities. Local policy binds the chain/genesis/Circle and caps
+node and signer capabilities. Local policy binds the chain/origin/Circle and caps
 value/OU; preparation checks spendable balance and native parameter/fee constraints.
 It serializes signing, verifies the native signature and requires the node to recheck
 admission and the reviewed snapshot atomically. Keys never enter the app frame.
@@ -2274,3 +2309,1214 @@ Evidence: [qualification summary](checkpoints/2026-10-14/state-sync-summary.json
 [source checkpoint](checkpoints/2026-10-14/state-sync.json),
 [Rust comparison](checkpoints/2026-10-14/state-sync.log), and
 [strict Clippy](checkpoints/2026-10-14/state-sync-clippy.log).
+
+### Program admission implementation in progress (2026-10-14)
+
+The current worktree adds the native OCPG compiler-attestation domain, ordered
+certificate parsing, bytecode/provenance/facts commitments, effect-graph
+summaries, internal-call cycle/depth limits and bounded fixed-point type flow.
+The JSON writer preserves byte strings, integer literals and duplicate fields;
+attestation payloads sort object keys with the native stable byte ordering.
+Allocation failures remain operational failures at the runtime boundary.
+
+Admitted profiles now travel through Circle deployment/update checks, calls and
+read-only views. Program calls decode parameter kinds from the selected entry's
+facts and run with strict values; opted-in Circle calls use declared storage
+kinds. Public-network runtime construction captures the configured program
+release keys. Descriptor reads use source-style certificate validation, as the
+adopted native descriptor path does. Opaque deployments still require a trusted
+compiler attestation. This does not enable source-package compilation: independent
+AML recompilation remains an unfinished integration boundary.
+
+The worktree also adds native `STATE_PATH_KEY` execution with state-reference
+normalization and its separate hash domain. These changes are unbuilt and
+untested. They do not extend the qualified opcode count or the evidence recorded
+above. Native differential comparison, negative certificate/type-flow cases,
+combined node recovery and final end-to-end qualification remain pending until
+the requested implementation phase is complete.
+
+### HFHE VM and Circle host implementation in progress (2026-10-14)
+
+The worktree now implements the OCTB HFHE key/cipher serialization, arithmetic,
+seeded multiplication, commitments, Pedersen point operations and zero/range/
+bound verification families over the Rust PVAC library. Native resource planning
+covers projected cells/layers/words, sampling effort, key I/O and gross retained
+volume. Nested VM calls share the retained-volume capability; journal rollback
+does not refund consumed volume. Proof input/shape caps, prior/active decoding,
+capability checks and operational verifier failures remain explicit.
+
+Circle OCTB updates and views load HFHE permissions from the committed inline
+policy records. Ordinary calls carry no scoped active key or relay. The public
+key capability resolves an address through canonical `pvac_hashes`, then reads
+and hashes a bounded regular blob; missing/corrupt bound data is unavailable.
+The launcher shares that content-addressed reader with private preverification.
+
+WASM `fhe_` methods now receive the direct-call policy capabilities and public
+keys rather than an unconditional unavailable result. Native key loading costs
+reduce the available fuel, and the signed execution binding includes the sorted
+capabilities and public-key inputs. Non-HFHE methods retain their empty context.
+Scoped key-pair/relay/receipt contexts still require the remaining private Circle
+integration; these direct-call paths do not imply that those contexts exist.
+
+This is unbuilt and untested implementation work. It does not extend the
+qualified VM/HFHE counts above. Full native differential, resource-exhaustion,
+stateful Circle and combined sync/restart/tunnel gates remain for the final test
+phase after implementation is complete. The running pinned devnet and gateway
+have not been replaced by this worktree.
+
+### Object and integer/Q16 execution implementation in progress (2026-10-14)
+
+Object membership queries and atomic transition planning now have Rust paths.
+The planner normalizes references, parses member deltas, checks bundle hashes,
+policy windows, transition permissions, proof/receipt shape, quorum and previous
+state, then produces ordered writes. The VM charges the complete plan and checks
+value sizes before writing through its undo journal. Circle updates and views
+carry the historical object-scan rule. The default quorum conversion retains the
+adopted native machine-integer behavior; exact comparison is an explicit VM
+option, not a change to the public-network profile.
+
+Integer matrix/dot/elementwise operations, byte loaders, ReLU and shift rounding
+now have VM paths. Activated integer work captures operands before charging;
+the prior path reads live memory, preserving its behavior when spans overlap.
+The Q16 layer implements the native integer exponential series, rounded matrix
+products, normalization, SiLU, rotary positions, grouped attention, byte loading,
+vector append and argmax. Allocation, numeric parsing and retained-vector charges
+follow the native execution paths. These operations use no host floating point.
+Native admission still rejects the separate host-float instruction families.
+
+All of this remains unbuilt and untested. Existing differential runners can now
+select the object and math modes, but no new oracle fixtures or qualification
+results have been generated. Source compilation, scoped private Circle contexts,
+managed private execution, funded VPN settlement and combined final qualification
+remain unfinished. The qualified counts and live pinned services are unchanged.
+
+### Stealth send/claim implementation in progress (2026-10-14)
+
+The worktree adds native V5 private-transfer plans. A send checks its ciphertext
+commitment, both range proofs and the amount-binding proof before debiting the
+encrypted balance and creating a key-bound stealth output. A claim checks the
+recipient-bound secret, output status/marker, ciphertext commitment and proof
+against the output's stored amount commitment before crediting the claimant's
+encrypted balance and marking the output consumed. Public value moves only for
+the declared fee. The output records retain native field ordering and claim
+serialization through the existing storage adapter.
+
+Plans are bound to the transaction and current encrypted balance; claims also
+retain their source output for rechecking. Ledger fees, nonce changes, encrypted
+balances and output writes share a rollback boundary. Epoch execution now carries
+both FHE and stealth caps and the shared encrypted-debit limit. Proposal
+preverification emits native transition hashes for sends/claims, while active
+epoch execution repeats the proof checks and compares the certified transition.
+Historical receipt replay remains limited to its exact prepared hash. Local
+resource failures remain unavailable rather than invalid transactions.
+
+These paths are unbuilt and untested. No new native fixtures, stateful results or
+qualification claims have been published. Independent source compilation,
+remaining Circle/private contexts, funded VPN
+settlement and combined final testing are still required. The live devnet still
+uses its previously qualified pinned executable.
+
+### Key-switch and migration implementation in progress (2026-10-14)
+
+The worktree adds the native key registry envelope/canonicalization rules,
+migration selector and compatibility-field parsing, ciphertext/key classifiers,
+and sealed key-switch plans. Empty-balance registration, equality-proof refresh,
+public-history and commitment-history migration, verified zero reset, historical
+owner proof and historical-cipher/current-range proof paths are implemented in
+source. Their source hashes, refresh limits, proof profiles, short key hashes and
+prepared-transition commitments follow the adopted native paths. Epoch admission
+retains owner/cipher activation checks, self-targeting and the FHE operation cap.
+
+Historical authorization comes from the independently configured entitlement
+artifact. Public startup verifies its commitment and history floor, and compares
+its snapshot root against retained canonical history when that epoch is present.
+The execution host receives the sealed parsed artifact, captured modes and actual
+epoch. Missing, inactive or mismatched entitlements cannot provide authorization.
+
+The file adapter writes immutable public-key blobs and backend metadata through
+temporary files, exclusive publication and file/directory fsync. The canonical
+tree receives the full public-key hash only after persistence succeeds. Fees,
+nonce, ciphertext and key binding share rollback; old blobs remain available for
+retained history. Backend metadata is addressed by the blob hash so speculative
+execution does not overwrite another key's address metadata. The stored-blob
+transport bound is separate from the unchanged 5MB incoming registry envelope.
+
+Proposal proof preparation now emits state-bound key-switch receipts, including
+the native zero hash for an absent old key. Active execution verifies proofs
+again and compares its prepared transition; historical certified replay can
+apply only the exact prepared hash. Shared private failure handling distinguishes
+canonical, user and preverification messages from operational unavailability.
+
+These changes are unbuilt and untested. They have not extended the qualified
+private-operation counts or replaced the running pinned devnet. Stateful key
+rotation/migration, failed persistence, recovery and adversarial native comparison
+remain for the final test phase. Source compilation, remaining Circle operation
+hosts, scoped private HFHE contexts, paid VPN settlement and full sync/browser/
+ExEx/tunnel qualification remain incomplete.
+
+### Circle operation implementation in progress (2026-10-14)
+
+The source now routes adopted direct Circle operations through resource, policy,
+key lifecycle, signed transport and private-cell hosts. Resources share locator
+derivation and asset writes with VM effects while retaining their distinct native
+validation rules. Policy snapshots retain native defaults, field ordering and
+clear/remove behavior. Terminal delivery-key changes materialize outbox and live
+claim resolutions in the same speculative transaction.
+
+Outbox open, relay claim, relay cancellation and ingress commit include registered
+relay signature checks, claim windows, replacement/capacity rules, count/weighted
+quorum, ingress selection and delivery-key checks. Their records preserve native
+JSON field order and string-encoded Int64 values. No traffic commission is added.
+
+Balance/register cells now have payload normalization, descriptor/policy/cell
+snapshots, HFHE proof-receipt authentication, prepared transition hashes and PVAC
+worker resource/proof checks. Proposal preparation checks the complete fee and
+storage transition in an isolated preview and creates state-bound receipts;
+execution reconstructs their hashes and repeats cryptography under the active
+standard rule. Fees, stable storage, resource metadata, ciphertext and indexes
+remain inside the existing epoch savepoint. Stored HFHE policy interpretation is
+shared with ordinary VM capability checks.
+
+This is **unbuilt and untested WIP** against the adopted `7f9be448` source. It adds
+no qualified coverage or public-network result and has not replaced the pinned
+devnet executable. Exact JSON lexer conformance and exception rendering remain
+incomplete; affected inputs fail operationally rather than receiving invented
+consensus outcomes. Independent AML/OCPS source compilation, scoped VM HFHE
+contexts, authenticated VPN application initialization/settlement, remaining RPC
+compatibility, bootstrap recovery/export and combined native differential,
+security, sync, restart, browser, tunnel and ExEx testing remain open.
+
+The adopted lockfile and installed parser source both identify Yojson 3.0.0.
+Its Safe value type has no tuple or variant constructors; adding such containers
+is not part of this parser port. Its supported extensions include byte strings,
+non-finite floats, comments and unquoted identifier keys.
+
+### JSON lexer and exception implementation in progress (2026-10-14)
+
+The parser now has classified modes for `Json_tree.read`, `read_plain`, and
+`Yojson.Safe.from_string`. The source follows the pinned Yojson 3.0.0 lexer for
+incomplete numeric tokens, comments, byte/line positions, error snippets,
+malformed escapes and surrogate pairs. OCaml 4.14 string-argument rendering uses
+decimal byte escapes. The wrapped JSON exception constructor was identified in
+the installed 3.0.0 bytecode/native library as `Yojson__Common.Json_error`.
+
+Direct Circle operations and code admission use the classified parser. Circle
+parameter syntax failures follow the native charged exception path; private-cell
+syntax failures retain their native fixed rejection message. Spawn parsing
+selects the adopted plain/safe mode. Unclassified and allocation failures remain
+operational. Legacy parser callers keep their existing error API.
+
+This is an implementation change, not parser parity evidence: no oracle, build,
+test or deployment was run. Full valid/invalid-input comparison, arbitrary-byte
+diagnostics, deep nesting, resource failure and transaction savepoint/fee checks
+remain in the deferred final test phase.
+
+### Scoped HFHE implementation in progress (2026-10-14)
+
+Local execution can now carry a typed, host-owned scope with the native optional
+key, intent and relay identifiers and an optional keypair capability. It is not
+deserializable from transaction or RPC parameters. Public transaction contexts
+and gateway reads continue to supply no scope.
+
+The runtime resolves live-key policy and active/selected relay status from the
+captured state. OCTB updates and typed OCTB views share these checks. WASM update
+calls can receive an authorized active keypair for encrypt/decrypt; key image and
+secret serialization costs are included in native key effort. HFHE context
+bindings include the active key ID and public key, excluding secret material.
+Receipt-linked permission follows capture/consume mode, and historical OCTB
+receipt execution suppresses verifier capabilities as upstream does.
+
+The WASM host adaptation retains ordinary UTF-8 key-ID inputs and adds base64 ID
+transport for local byte-string scopes. Keypair debug output redacts secret
+material. The adaptation patch and provenance hashes describe source changes;
+they do not represent a successful reproduction or qualification run.
+
+These paths remain unbuilt and untested. Transport-bound key-size edge cases,
+private client authorization, and final permission, serialization,
+context-binding, nested-call and negative-proof comparisons remain open. Public
+deployment and the running devnet have not changed.
+
+### Shared native views and payload admission in progress (2026-10-14)
+
+The query host now has source paths for both OCTB and WASM over one immutable
+snapshot. Public application reads use that host without an HFHE scope; trusted
+local callers can supply the explicit typed scope. Compute reads have a separate
+entry point and retain the native declaration checks and two-billion fuel cap.
+Ordinary WASM views keep their twenty-million cap. Return-value byte accounting
+is shared with the VM, and view effects never reach canonical publication.
+
+Update and query payloads share native full-input measurement, receipt-entry
+reservation, and the sixteen/sixty-four MiB direct/session limits. Measurement
+counts native byte strings, including the raw scoped key ID when the local
+adapter carries it as base64. Temporary payload JSON and serialized input wipe
+their own secret-key copies when released; this does not guarantee wiping all
+copies inside the adopted engine. A private admitted-input type authorizes the
+base64 metadata expansion at the local engine handoff; protocol admission still
+measures the original key bytes. Session replies keep their native limit. Missing
+cache capacity remains operationally unavailable.
+
+These are unbuilt and untested source changes. Compute execution, scoped policy,
+input boundaries, failure effort, native output accounting, engine-copy handling
+and the public bridge all remain in the final qualification phase.
+
+### Resumable snapshot staging in progress (2026-10-14)
+
+Bootstrap now retains a private, destination-bound download workspace and its
+last authenticated certificate. Every invocation rechecks that certificate
+against current independent trust and combines it with current source manifests.
+Verified final files and contiguous partial-file chunks can be reused only after
+their size and hashes are rechecked. Torn tails are truncated at the last valid
+chunk, and new chunks are synced before they count as resumable work.
+
+An exclusive workspace lease follows blocking file tasks through cancellation.
+Each canonical import still uses a fresh temporary directory; only the complete
+verified import is published with no replacement of an existing destination.
+Reports separate accepted download bytes from reused bytes. The cache is local
+recovery material, not finality authority or a published state-sync service.
+The active and immediately preceding manifest directories are retained; older
+download caches are removed under the exclusive lease during source rotation.
+
+This recovery path is unbuilt and untested. Cancellation, crash/torn-write,
+changed trust, corrupt cache, source rotation, concurrent import, disk exhaustion,
+reopen and publication fault checks remain deferred. Complete signed snapshot
+packaging and serving still require implementation before combined qualification.
+
+### Native ledger export in progress (2026-10-14)
+
+The ledger writer emits the adopted default flat `octra-ledger-image-3` format,
+including empty directories, ordered byte-string paths, full-width lengths,
+bounded output and the sorted set of external PVAC blob hashes. Tree traversal
+is iterative and keeps traversal state proportional to depth.
+
+The `export-ledger` CLI reauthenticates the retained public-network store, captures
+one committed head/tree, and writes a private temporary file. Root and byte-count
+checks precede fsync and publication to a new output path. Existing files are
+never replaced. The report identifies the captured epoch, folded state root,
+ledger root and local Irmin commit. It does not produce checkpoint or exporter
+signatures, a full reference bundle or a serving endpoint.
+
+This source is unbuilt and untested. Exact native bytes, round-trip roots,
+arbitrary-byte paths, empty trees, PVAC references, output limits, cancellation,
+concurrent head advance and publication faults remain final-phase checks.
+
+### Legacy view context corrections in progress (2026-10-14)
+
+Committed legacy programs with native `admission="source"` metadata now reload
+through source-envelope/fact validation, as upstream does. This marker is read
+only from the captured tree; new source deployments still require independent
+compilation. Binary deployments retain compiler-attestation checks. Legacy views
+have an explicit query entry point and share the native single-verifier allowance
+through nested RPC subviews, independently of the calling Circle's HFHE policy.
+
+Canonical application queries now obtain the folded state root from their
+sealed captured provenance. OCTB `TREEHASH` and WASM public-read commitments use
+that root. Unanchored raw-tree queries retain an empty `TREEHASH` context; update
+public reads retain native batch-ledger-root binding. These source changes remain
+unbuilt and untested, including boundary, nested permission and root comparisons.
+
+### AML frontend implementation in progress (2026-10-14)
+
+The protocol crate now contains a byte-string lexer and lazy token stream for
+the adopted source language, plus native source-versus-prior/forms selection.
+The source covers the keyword table, nested comments, newline behavior, decimal
+integers with underscores, raw string bytes, the limited escape set, punctuation,
+nesting bound, and native line/column error data. Source ownership selection
+preserves its lookahead and returns false on lexical failure.
+
+The syntax model now covers the adopted declarations, imperative statements,
+expressions and direct forms. Expressions, statements and interned types use flat
+arenas, so long operator chains do not recursively clone or destroy syntax.
+The parser preserves product association, optional/refined parameters, storage
+update desugaring, function modifier ordering, declaration duplicate checks,
+locations, imports and trailing-source diagnostics. Lexical and parse errors
+retain separate classifications.
+
+Imported syntax is relocated into the destination arena and prepended in native
+import order. Scope resolution retains local/constant shadowing, callable-name
+handling for `balance`, direct-form opacity and the separate pure-loop index
+check. Iterative block/expression traversal handles long statement and else-if
+chains. The source shape and diagnostic helpers retain native distinctions.
+
+The `Oct_types` and `Oct_check` ports add directional compatibility, return-flow
+checks, storage/map/list paths, inferred constants and cycle checks, expression
+and statement validation, optional values and native built-in return classes.
+Explicit inference frames preserve validation order; direct AML effects and
+uses still require their own elaborator. These checks do not substitute for
+that elaborator, bytecode generation, verification or source recompile admission.
+
+The bytecode generator now has its own native type-inference rules, separate
+from `Oct_check`, and source implementations of register/label allocation,
+storage encodings, option and netstring operations, arithmetic and control flow,
+internal/external calls, cryptography/vector builtins and Circle metadata
+operations. Iterative emission handles expression, constant and statement
+chains. Constructor/function dispatch, parameter/refinement guards, payable and
+reentrancy templates retain upstream instruction order and compatibility modes.
+The imperative emission entry point requires contracts containing forms to use
+the separate linker. Linked emission now accepts the direct-entry set and sealed
+host-effect evidence, emits canonical call wrappers and returns their seals
+separately from the instruction stream. Whole-image artifact binding remains a
+separate required step.
+
+The ABI projection retains native public-function/event ordering, fixed effort,
+view/pure flags and fallback argument classes. Program static-storage metadata
+preserves field order and declared-enum handling. Runtime scalar input parsing
+preserves canonical decimal, tagged/detached encodings, byte strings, unsigned
+bounds and public-method/arity errors. The structured core bridge now projects
+typed feed values into machine literals and flattened VM arguments, retaining
+the native distinction between invalid values and unavailable machine types.
+
+The sealed-form foundation now includes native AML rule identities/schedules,
+bounded diagnostic bytes, flat named/core type and term arenas, type validity,
+resource-kind and equality-work calculations, unbounded resource arithmetic and
+flat effect flows. Flow location order retains both fork branches and zero-count
+loop sites. Named lowering preserves binder numbering, validation order, scope,
+generated-name avoidance and structural limits.
+
+The independent core checker now implements native linear use, erased bindings,
+branch agreement, fold capture restrictions, scalar/aggregate/capability rules,
+resource bounds and located/named diagnostics. Its traversal uses explicit
+continuations rather than the host stack. Static host-effect sealing runs that
+checker, validates declared state/event/fault bindings, records per-origin quotas
+and derives host instruction blocks with native register-alias checks. Compiler
+blocks and runtime metering share the fixed instruction-cost table.
+
+The core evaluator now has source implementations of flat runtime values,
+canonical field values, typed input validation, global capability uniqueness,
+sequence padding and iterative evaluation. Static resources, runtime steps/work
+and integer-work reservations retain separate native limits and diagnostics.
+Erased initializers remain unevaluated; action traces retain upstream ordering.
+Host planning combines origin and payload checks, per-site quotas, trace matching,
+storage work, failure ordering and unsupported-close diagnostics. Planning
+describes host operations; it does not execute them or grant deployment authority.
+
+The artifact codec now includes the generic code tree, canonical natural/signed
+integer bits, bit packing, padding checks and transcript framing. Type, ordered
+effect-row, resource, value and snapshot records have their native raw/canonical
+projections. Resource records retain large derived bounds rather than clamping
+to natural limits. AF1 feed transport includes the core lexer, typed value
+grammar, attachment and capture-aware substitution. AR1 plain-data results and
+the minimal closed-literal OCTB encoder are also present as source implementations.
+
+The machine path now includes shapes, distinct width/cell measurements,
+continuation lowering, stack flow, effect indexing and size accounting. Its
+independent replay preserves linear slots, native fuel behavior, action ordering
+and active sequence folds. Source-mark trees, feed substitution mark transfer,
+instruction locations and code-map agreement feed a checked machine-image
+constructor for open and closed core programs. Replay and register-layout
+vectors share flat immutable lists, keeping cons and unhead constant time
+without recursively owned data or repeated shared-tail copying.
+
+The C_octb path now has continuation-to-register lowering, branch joins,
+unrolled vector folds and conditional sequence folds. Allocation, free-list
+order, erased input registers, linear slots and temporary effect scratch
+selection retain their native distinctions. Marked assembly preserves source
+spans, live-slot rows and effect layouts. Raw, scalar-open and aggregate-open
+encoders include native argument/result guards and sequence padding checks.
+An independent machine-profile decoder reconstructs canonical constants,
+schemas, open wrappers, result headers and body jumps; image construction checks
+open output against that reconstruction. Source and liveness map codecs retain
+native coordinate, multiplicity, duplicate-ID and canonical-image checks.
+Host-effect layout expansion also checks static site counts and exact block
+attachment before resolving expanded labels. Checked program artifacts now have
+native term/binder encoding, raw reconstruction and canonical decoding, including
+the distinct vector-spine fuel and fold-length reconstruction rules. Static
+certificates bind the selected epoch rule to a rechecked program, output type,
+ordered effects and resource bounds. These paths still require their final
+differential and boundary qualification. Whole-source artifact packaging,
+proof-bound map checking, stateful artifacts and source admission integration
+remain incomplete.
+
+### AML call evidence and direct-form linking in progress (2026-10-15)
+
+Host-effect evidence now has a canonical full-record codec. Decoding restores
+the registry, rechecks and seals the program, regenerates layouts, host blocks
+and cost metadata, and compares the complete record. Definition conflicts,
+duplicate atoms, binding kinds and event width preserve separate validation
+steps. Restored fault codes retain signed OCaml 63-bit values; cost metadata
+uses integers rather than the more restrictive natural profile.
+
+The call-evidence layer scopes labels, builds scalar input/output guards,
+regenerates call segments and binds the proof collection to the enclosing image
+hash. Verification checks bytecode structure, unique entries, exact segments,
+non-overlap and the final image stamp. Label identity remains 63-bit until
+verification, preserving the distinction from OCTB's 32-bit wire operands.
+
+The C_fun port adds definition validation, capture modes, declared effect and
+resource bounds, lexical renaming and explicit function expansion. C_orbit adds
+fixed-count and bounded dynamic-count expansion, with type and structural checks
+before copying loop bodies. Named syntax uses flat term arenas and iterative
+traversal for deep expressions and continuations.
+
+The Oct_form source path now elaborates forms and eligible pure functions,
+checks direct calls and explicit uses, and lowers supported bindings, pairs,
+branches and bounded orbits. The linker checks callable uniqueness, call-depth
+and recursion, source expression use and transitive effect reachability. Pure
+functions reject reachable marked forms; view functions reject reachable writes
+and closes. Constants and invariants reject reachable marked forms. Strict
+expression checks use their own build cache, preserving the linker's direct
+entry set. Form lowering and host-effect evidence construction feed the linked
+instruction emitter; a failed link leaves the input AST intact.
+
+The Aml_source composition now connects parsing, shape and loop checks, form
+linking, generation, bytecode verification and state metadata. It encodes call
+proofs against the image without a proof field, encodes the final bytecode, and
+verifies the proof binding before returning a raw compiled artifact. Single
+sources and interface imports use their distinct native paths. Bundle loading
+caches source bytes, imports only selected interfaces and preserves source-path
+diagnostics. The verifier exposes typed failures for source diagnostics while
+the existing admission wrapper retains its previous failure messages and order.
+
+The Oct_compile fact projection now records constructor memory, scalar storage,
+entry points, instruction ownership and typed internal calls. External-call ABI
+attachment retains the count and capacity checks. These facts still require
+policy completion and type-flow verification before they can support admission.
+
+These are source implementations against the adopted upstream, not executed
+parity evidence. The prior-core parser/packaging path, proof-bound artifacts and
+stateful execution still need their remaining integration. No build, test,
+oracle, commit, push or deployment has been run for these changes. Validation
+remains deferred until implementation is complete, as requested.
+
+### Source and Preview Program packaging in progress (2026-10-15)
+
+The compiler now has source paths for the native existing and structured Source
+ABI formats, including their distinct string quoting and constructor/parameter
+metadata. The advisory Aml_verify report includes ordered findings, write/call
+summaries, signed-value and unsigned-arithmetic heuristics, transfer warnings and
+derived/declared supply invariants. Report serialization retains its native rule
+trace and field order because the exact bytes feed the verification hash. The
+report's `verified` field is the upstream AST classification; it does not show
+that Coq ran or establish a theorem about this implementation.
+
+Program policy completion now shares graph computation with policy verification
+and derives each entry's transitive effects. Facts retain separate compiler JSON
+and canonical hash projections. The compiler combines bytecode, report and source
+hashes into native certificates, checks typed bytecode facts, and packages the
+certificate and code in an OCPG envelope. Optional Ed25519 attestation accepts a
+typed signing key and replaces existing attestation fields without serializing
+the secret key. No signing operation has been executed for this work.
+
+Source and Preview OCPS paths normalize bundles, reject unused sources,
+independently rebuild their envelopes, compare the full bytes, and then perform
+source admission. Preview retains the native fallback to Source when rebuilding
+the supplied envelope. Operational unavailability remains separate from a
+deterministic rejection. Protocol/prior compiler mode has not been aliased to
+Source. The historical Protocol and frozen Prior paths are described below.
+
+These paths are still unbuilt and untested. Source admission is now wired in the
+speculative Program deployment source described below; no live deployment or
+admission policy has been enabled. Compiler qualification, the standalone core
+surface grammar, remaining artifact/RPC integration and final native byte
+comparisons remain open.
+
+### Historical Protocol compiler in progress (2026-10-15)
+
+The emitter now has an explicit historical backend, separate from Forms/Source
+surface syntax. It preserves Protocol map separators, path/list suffixes, option
+presence keys and the reentrancy lock namespace. Protocol inference retains
+its weaker scalar/container classification, operand visit order, context-name
+shadowing rules and direct-form rejection. The backend shares unchanged emission
+primitives with Source rather than translating historical programs through the
+Source compiler.
+
+Protocol call emission retains missing-argument zero filling and ignored extra
+arguments. Historical list deletion, unchecked list pop, tuple unpacking, option
+key reevaluation and range-register allocation have their own source paths.
+The loop compatibility flag retains the adopted historical scope behavior.
+Source-only type/arity checks and source guard templates are not silently added
+to those paths. Native generator failures and source diagnostics keep their
+different projections.
+
+The Protocol compiler composes these paths with optional checked-source
+validation, native ABI/report generation, certificates and Program envelopes.
+Its strict and first-interface loaders retain separate selection, duplicate,
+ambiguity, missing-source and provenance rules. Package mode selection now
+includes Protocol when point operations are active, along with Source, Preview
+fallback and source-to-Protocol transition admission. Each implemented package
+path rebuilds and compares the envelope before returning source admission.
+
+The pre-activation frozen Prior path now has explicit lexer, parser and emitter
+modes. It retains its older type grammar, context expressions, unlocated
+statements, compound-update desugaring, duplicate-declaration behavior and lack
+of scope resolution or trailing-source checking. It excludes newer Pedersen
+helper builtins and uses pre-activation opcode admission. The compiler preserves
+the frozen single/multi-source exception boundaries, including its facts-first
+Program result projection. Reports share unchanged rules over the frozen AST
+domain. OCPS pre-activation compilation now selects this path.
+
+All new compiler paths remain unbuilt and untested; native diagnostics,
+bytecode, report/hash, package, boundary and historical-rule comparisons remain
+required. No qualified parity count, published release or running deployment
+has changed.
+
+### Program execution integration in progress (2026-10-15)
+
+Native contract identity, upgrade payloads, metadata, ABI records and immediate
+storage entries now have Rust source paths. A Program journal carries deploys,
+guarded upgrades, storage overlays, Circle overlays and native snapshot effort.
+Opaque binaries require normal admission and attestation. Source artifacts can
+enter execution only after rule-selected package rebuilding and full envelope
+comparison; persisted source markers are read from authenticated host state.
+
+Constructor and dispatcher execution retain typed entry parameters, storage
+kinds, epoch opcode checks, duplicate-deploy behavior, arity diagnostics,
+constructor limits and active/legacy rollback boundaries. Program calls and
+SPAWN use the Circle/value journal for nested execution. The SPAWN host now
+receives the caller's live storage and reloads it after a successful child;
+constructors remain outside the staged storage map until successful deployment.
+Failed child effects restore value, Program and tree snapshots while retaining
+consumed execution budgets.
+
+The speculative epoch source now dispatches deploy, Program deploy, contract
+call, Program exec, multi-exec and upgrade operations to this host. It retains
+fee/refusal ordering, source-address checks, guarded owner/hash upgrades, native
+receipt projections and shared multi-call budgets. Startup captures the native
+multi-exec call limit. Successful Program effects stage before value commits,
+and confirmed transaction archives receive their auxiliary receipts.
+
+This is **unbuilt and untested WIP**. Remaining source surfaces include standalone
+core parsing, view/receipt RPCs, compute transitions, complete signed
+snapshot serving, VPN settlement qualification and public-network startup.
+Final compilation, lint, native differential, adversarial transaction, nested
+reentrancy, persistence/restart, sync/recovery, ExEx, VPN and cross-device HTTPS
+qualification has not begun. The pinned running devnet and qualified evidence
+remain unchanged.
+
+### Compiler tooling RPC source in progress (2026-10-15)
+
+The compiler RPC projection now covers single-source and multi-file AML,
+automatic Program package selection, source/path/file limits, positional
+parameter diagnostics and deterministic contract-address derivation. Program
+requests return the envelope and deploy package; ordinary contracts use the
+native Forms/Source selection. Verification and certificate JSON remain separate
+response fields. A native assembler text emitter supplies disassembly, including
+raw quoted bytes and numeric argument counts. Its opcode names come from the
+adopted Bytecode.op_tag table.
+
+Native HTTP/JSON-RPC source now exposes compilation and address derivation on
+the operator listener. Request framing retains batch order, native parameter
+depth/string and admission-count limits, positional parameters and byte-preserving
+IDs. Response limits measure IDs before serialization and retain the native
+bounded-ID refusal. An exclusive compiler worker holds its permit through
+blocking completion, including when the requesting HTTP future is cancelled.
+Compiler rule selection comes from the captured canonical epoch; assembly
+compilation retains its native pre-activation admission policy.
+
+Assembly input preserves signed machine operands until verification and policy
+checks, retaining duplicate-label and register diagnostic priority before wire
+truncation. Its accepted instruction surface is taken from the adopted parser,
+separately from the broader disassembly table. Zarith invalid-digit diagnostics
+come from the locked 1.14 source. Immutable Program reads now project metadata,
+native list pagination, explicit storage keys and bytecode. Public storage dumps
+retain their native disabled response.
+
+These source paths remain **unbuilt and untested**. Source-record and ABI/source
+integration are described below. View/receipt source additions follow; the remaining
+read/write RPC methods still require implementation. No compiler RPC has been enabled on the
+running node. Request/response limits, worker cancellation/concurrency, assembly
+diagnostics and wire bytes, captured modes and storage/metadata comparisons all
+remain final-phase qualification work; this adds no qualified compiler evidence
+or deployment authority.
+
+### Program source records in progress (2026-10-15)
+
+Source verification now has native string/project input shapes, main-path
+reservation, bundle limits and historical compiler search. Source-admitted
+Programs try all seven upstream compiler/loop configurations in their native
+evaluation and selection orders. Binary deployments try the Source/Forms and
+historical Protocol paths. Matching uses the complete deployed artifact hash;
+candidate selection retains existing compiler buffers rather than duplicating
+their bytecode for the search. Noncanonical stored base64 is rejected.
+
+A private verification result binds the requested address, source bytes, ABI,
+AST report, certificate and deployed-code hash. Binary matches return metadata
+with `published=false`. Source-admitted matches recheck the current code hash and
+admission marker before publishing. Verification jobs retain their own exclusive
+lease through compilation and publication, including HTTP cancellation. This
+`verified` response means the supplied source reproduces a deployed artifact; it
+does not establish that Coq ran or prove the program secure.
+
+Auxiliary records use the native versioned JSON and address/hash keys, including
+the legacy-key read fallback. A SQLite write transaction acquires its lock before
+checking either key, refuses conflicting content and confirms the saved record
+before committing. These records do not enter the ledger tree, consensus
+certificates, canonical epoch history or ExEx. ABI/source reads recheck current
+metadata after record lookup, and derived ABI methods remain the fallback when
+no usable published ABI exists.
+
+This is **unbuilt and untested source**. No record has been compiled, published or
+qualified through these paths. Compiler fallback, conflict/race/cancellation,
+malformed-record, byte/hash/JSON, storage-failure and restart cases remain part of
+the final test phase. View/receipt source additions follow. Remaining RPCs,
+standalone core parsing, compute, signed snapshot serving, VPN/public-network
+integration and combined qualification remain unfinished. The running pinned
+devnet and all qualified counts remain unchanged.
+
+### Program views and receipt publication in progress (2026-10-15)
+
+Program calls now use one captured committed tree and its next-epoch anchored
+rule profile. Nested legacy calls share the native byte/FHE budgets and single
+verifier allowance. JSON argument subtrees share an immutable arena without
+serializing or copying their payloads. Source admission reloads use the same
+artifact loader as transactions. Optional storage comes from the captured tree,
+with the native 64-name page and 4096-byte value limit.
+
+The view slot is separate from consensus and compiler workers. A shared
+monotonic ten-second deadline stops VM instructions on timeout or cancellation;
+the blocking worker keeps its lease until it exits. Views accept no canonical
+writer. Program-call aliases project native result values and error categories.
+
+VM receipts now travel from the final replay through publication, including
+calls rejected after charging a fee. Auxiliary hash/epoch records publish in the
+same SQLite transaction as state, finality history and ExEx. Each must belong to
+a confirmed or rejected transaction in the authenticated epoch; overlapping
+confirmed archive receipts must agree. Lookup is bounded by the caller's
+published snapshot and checks the retained bytes' checksum. Reopening an older
+store indexes confirmed receipts already retained in its outbox in bounded
+pages; absent historical failed-call receipts cannot be reconstructed. Receipt
+RPC aliases retain native Safe JSON and legacy raw-string projections.
+
+All of these changes are **unbuilt and untested source**. No new deployment or
+parity evidence is claimed. Cancellation, concurrency, anchored profiles,
+snapshot consistency, receipt rollback/restart/rejection handling and native
+RPC comparisons remain for the final qualification phase. The live isolated
+devnet and Tailscale gateway still use the previously qualified binary.
+
+### Circle RPC read integration in progress (2026-10-15)
+
+Circle info, raw program, descriptor and view routes now have public and
+authenticated aliases. Their gates follow upstream privacy classes: sealed
+metadata can be public, private program/view reads require the owner, and a
+storage snapshot always requires the owner's signature. Public view calls use
+the native zero caller. Authenticated subjects retain Safe JSON parameter
+hashes, v2 length framing, safe public-key checks and the guarded legacy signature
+fallback. These signatures authorize reads and do not replace transaction nonce
+or private-admin replay checks.
+
+Browser and RPC descriptors share one snapshot-bound implementation for code
+hash validation, OCTB method extraction and WASM manifest descriptions. RPC
+Circle views use the captured next-epoch profile, native parameter limits and
+two execution slots. The deadline includes authorization work. A cancelled
+blocking worker retains its slot; OCTB instructions consult the shared stop
+clock, while synchronous WASM execution remains bounded by its native fuel
+allowance and retains capacity until it returns. Metadata, address derivation,
+ABI fallback and receipt decoders share a separate bounded read worker pool.
+
+This remains **unbuilt and untested source**. No live RPC or browser service was
+replaced. Native privacy/signature/error/JSON comparisons, concurrency and
+cancellation, browser regression, and recovery qualification are deferred to
+the final phase. Additional owner-authorized reads follow below. Private-cell
+and asset routes, compute RPC and transitions, general node RPCs, standalone core parsing, snapshot serving,
+VPN/public-network integration and combined qualification remain unfinished.
+
+### Circle policy, transport and record reads in progress (2026-10-15)
+
+Owner-authorized RPC source now covers transport/HFHE/key policy, stable keys and
+bounded storage pages, slot/state policy, state descriptors, outbox claims,
+intents and status, ingress packets, and balance/register bindings and workflows.
+Each has the upstream public refusal and authenticated aliases. Public refusals
+validate required string parameters before touching the store. Authenticated
+reads resolve the owner, subject and returned data against one immutable tree.
+Epoch-dependent key/lease results use that tree's next epoch. Workflow and
+binding references normalize before authentication where upstream does; locator
+signatures retain the submitted reference bytes.
+
+Policy encoders preserve native field order, byte strings and the distinction
+between integer counters and epoch strings. Storage pages count raw child names
+before filtering malformed entries, retain native hash-key traversal order and
+refuse blob-backed values. Descriptor materialization follows stored-field
+presence. Binding/workflow materialization follows successfully normalized
+fields, with absent/default values projected explicitly.
+
+Outbox status computes effective expiry, claim exhaustion and terminal delivery
+key resolution without persisting a transition. Relay ranking, eligibility,
+quorum/weight summaries and stored resolution precedence follow the adopted
+source. Existing transaction status defaults remain separate from optional RPC
+reads, so missing status records do not become invented open intents.
+
+These are **unbuilt and untested source changes**. They add no parity, security,
+deployment or finality qualification. Final-phase coverage still needs native
+signature/normalization/JSON comparisons, privacy negative cases, malformed
+storage, page boundaries, key/lease expiry, relay ranking/quorum cases and
+snapshot/restart checks. No live service, database or key material was changed.
+
+### Circle object queries in progress (2026-10-15)
+
+Object RPC source now includes reference discovery, filtered summary lists,
+individual summaries, member summaries, object detail and individual member
+detail, with public refusals and owner-authenticated aliases. Single-member
+authentication validates all required strings before normalizing the object and
+member references, then signs their upstream combined subject. Reads load one
+captured Circle storage table and receive no writer.
+
+The reusable query layer preserves the upstream distinctions between discovered
+keys, indexed member references and materialized member records. RPC member
+references sort the extracted names; the VM's existing key-index traversal is
+unchanged. Summary counts can therefore include an indexed reference whose
+stored record is invalid, while member summaries omit unmaterialized records.
+Discovery normalizes object references and summary lists filter unmaterialized
+objects. Object details retain absent/default binding, policy and transition
+projections; a descriptor equal to the native default remains unmaterialized
+in object detail even when its fields were stored explicitly.
+
+Binding/workflow record schemas now also cover object bindings, members,
+policies and transitions. Optional false values retain materialization and
+encode as JSON booleans; epoch/version/quorum fields retain native string
+encoding. Summary-only member reads do not load unrelated descriptor fields.
+
+These additions are **unbuilt and untested source**. Native RPC/signature/JSON
+comparisons, malformed fields, prefix-related member ordering, empty and default
+records, object discovery filtering and privacy negative cases remain part of
+final qualification. No running node or database was replaced. Asset/private-cell
+source additions follow. Compute, remaining node RPCs, standalone core parsing, snapshot
+serving, VPN/public-network integration and combined qualification remain open.
+
+### Asset and private-cell RPCs in progress (2026-10-15)
+
+Native asset RPC source now includes public plaintext reads and ciphertext reads
+by path, resource key, slot reference and state reference, with the upstream
+owner-authenticated ciphertext variants. Input plans retain their native JSON
+arena and validate/normalize locators before snapshot capture. Signatures bind
+canonical paths or the upstream original locator/resource subjects. Resource
+indexes and returned metadata remain tied to one immutable snapshot.
+
+Ciphertext visibility follows the stored locator policy, metadata fallback
+epochs, tombstones/revocation and effective delivery-key state. Slot policies
+retain the legacy mailbox fallback; state policies do not. Key reads still run
+when another flag hides the asset, preserving operational failures rather than
+turning a corrupt read into absence. Shared policy rendering also backs the
+existing locator-policy RPCs.
+
+Public ciphertext routes use the upstream redaction policy. Opaque metadata
+omits address fields; authenticated responses add sensitive metadata, effective
+delivery-key status and state descriptors in native field order. RPC reads
+return stored encoded bodies without invoking decryption or the browser's
+separate bounded serving policy. Metadata schema refusals produce absence;
+JSON, integer and allocation failures remain operational failures.
+
+Balance/register cell reads now authenticate the owner against the submitted
+state reference, apply ciphertext visibility, and return descriptor, policy and
+typed commitment/proof metadata with native materialization flags. Stored
+cell-record schemas normalize commitments and proof fields without inventing a
+cell from invalid values. Their source paths have no canonical writer.
+
+All of this is **unbuilt and untested source**. Final-phase native comparisons
+must cover locator/signature normalization, public/authenticated and
+opaque/revealed metadata, missing/corrupt records and indexes, key/epoch
+visibility, policy fallback, cell materialization, byte strings and browser
+regression. No live service or database changed. Compute, remaining node RPCs,
+standalone core parsing, snapshot serving, VPN/public-network integration and
+combined qualification remain unfinished.
+
+### Resource-compute evidence source in progress (2026-10-15)
+
+The adopted compute request model now carries native fee, memory, guest and
+fuel limits, chain/model/state/program/executor roots, caller/session/sequence
+and input/output bounds. Request IDs apply the upstream base, fuel, guest,
+memory and fee domains in order. Compute headers retain a distinct caller
+intent, coordinator signing digest and caller-signed intent ID. Method/parameter
+hashing binds the original parameter JSON bytes rather than normalizing them.
+
+Header source includes the bounded native OCE1 codec, optional-field order,
+signed counter interpretation and unsigned memory-size decoding. Header
+construction is sealed behind shape checks. It does not authenticate coordinator
+membership, authorize a payer, prove funding, or certify execution by itself.
+
+Certificate agreement source validates the captured request and selected signer
+set, filters signatures and execution budgets, deduplicates identical votes and
+excludes equivocating nodes. Distinct complete-result groups retain independent
+count/weight thresholds; multiple qualified groups remain conflicting. Signers
+sort by native byte-string node ID for certificate roots. Callback refusal,
+nonpositive weights, duplicate votes and the upstream weight-callback evaluation
+order retain their separate handling.
+
+These are **unbuilt and untested source additions**. Compute fund/return/settle
+transactions remain unwired pending funding permissions, deposits, bills,
+anchored inputs and staged ledger integration. Selection/capability/network and
+compute RPC/service integration also remain unfinished. Final-phase work still
+includes native wire/hash/signature/decision comparisons, equivocation and
+conflict cases, optional-limit boundaries and malformed/trailing-byte cases.
+No live node, ledger, deployment or qualified count changed.
+
+### Compute funding and billing source in progress (2026-10-15)
+
+Signed funding source now binds payer/public key, chain, target, nonce, fee cap,
+coordinator-signed call hash and payment deadline. Header-derived terms preserve
+the upstream resource, identity and signature check order. Permissions remain
+sealed behind signature verification; deposit records retain native reserve,
+strictly-after-expiry return and paid closure states. Their bounded codecs and
+request/deposit ID checks preserve ordinary refusal versus operational failure.
+
+Measured work and bills also have sealed constructors. Measurement binds exact
+output bytes, trace root, steps, operations and canonical stop outputs. Bill
+verification checks the supplied validator-set root, caller and coordinator
+signatures, certificate agreement and measured-result equality. Charges use
+exact integers, unused funds return to the payer, and certified payees receive
+equal shares with the remainder assigned in native sorted-address order. The
+host must still anchor the supplied validator set and execution inputs.
+
+Payment-message framing, native fee calculation and the pinned compute-bill
+consensus identity now have source implementations. Shared OCE1 framing checks
+trailing bytes even after an ordinary decoder refusal, while operational
+exceptions remain operational. Nested funding-request decoding retains header
+and permission evaluation/error priority. The runtime deposit adapter binds
+records to `compute/funds/<request-id>` inside the caller's speculative tree;
+it owns no publication or ledger transaction.
+
+All additions remain **unbuilt and untested source**. Anchored input capture,
+compute records/replay, transaction fund/return/settle effects, selection and
+capability messages, service/RPC wiring and combined qualification remain open.
+Final-phase gates include native signing/hash/codec comparisons, nonce/scope and
+expiry boundaries, malformed nested/trailing data, payee rounding, stored-record
+corruption, duplicate payment, atomic rollback and restart/recovery. No actual
+funds moved and the running qualified devnet remains unchanged.
+
+### Anchored compute inputs and execution source in progress (2026-10-15)
+
+The next source batch implements the native public tensor graph parser, stable
+JSON graph/layout/model roots, shard manifests and deterministic model cache
+plans. Input preparation verifies the retained call origin, validator root and
+coordinator signature, then captures public program records and the model graph,
+shard manifests and segment assets. Native byte, entry and pin-fee limits apply
+to every copied leaf, including repeated copies. Content hashes, stored metadata
+and model layout must agree before a plan can be retained. Session model pins
+and ordered request uses retain the native 64-use capacity and replay checks;
+expired-fund returns release those references. Root records share one checked
+codec across the rolling origin ring, per-job inputs and session model storage.
+
+The speculative executor now routes compute fund/return/settle operations to a
+dedicated host. Fund and return effects couple nonce/debit, escrow movement,
+deposit records and input retention under the epoch savepoint. Active-mode soft
+refusals restore attempted effects before charging the declared fee. Operational
+failures abort the attempt. Settlement effects handle repeated request IDs,
+same-root paid records, aggregate escrow debit, refunds and payee credits, but
+require an injected record/session verifier and deterministic replay service.
+
+Protocol source now covers provider capabilities, commit/reveal selection,
+offers, cancellation delivery and acknowledgements, fetch/answer messages and
+all native message tags, preserving historical limit extensions. Retained job,
+read-context and scope codecs bind optional validator extensions to the request;
+they do not establish origin finality. Runtime selection admission checks the
+anchored origin, signatures, capacity, commitments, reveals, duplicate evidence
+and committee root. Session admission checks ownership/model identity, sequence,
+epoch order and aggregate work/input budgets. Its bill projection verifies
+measurements and rejects a stopped call preceding later session steps.
+
+The settlement admission service loads pinned inputs, checks every deposit,
+requires at least one unpaid request, resolves prior origins, seals the session
+and requires replay measurements before deriving bills. **The native executor
+still has no concrete provider replay implementation connected**: settlement
+therefore fails operationally, and this source must not be used for funded public
+operation. Provider execution/model loading, compute history and service/RPC
+integration remain open, alongside the compiler, snapshot, network, VPN and
+cross-device qualification backlog described above.
+
+All changes in this batch are **unbuilt and untested**. Only explicitly scoped
+source formatting was run. No tests, builds, native oracles, commits, pushes or
+deployments were run; the user's final-phase testing instruction remains in
+effect. Required final evidence includes native graph/cache/message/record
+comparisons, malformed and conflicting evidence, session replay and expiry,
+escrow conservation, charged-refusal and operational rollback, interrupted
+capture/release, restart/recovery and real provider replay before settlement is
+enabled. The qualified Git HEAD and live isolated devnet are unchanged.
+
+### Native compute replay wiring source in progress (2026-10-15)
+
+The executor now supplies the settlement service with a concrete native CPU
+replay implementation. It checks the public program at the model origin and
+every call origin, verifies program continuity and code digests, checks the
+native executor self-test identity, and loads the retained model. The loader
+verifies graph and model roots, exact shard manifests, content types and asset
+modes, segment/chunk/shard hashes and cache identity. It streams segments into
+bounded chunks and retains a native cache lease through replay. A warm cache
+still causes the supplied shard data to be checked, as in the adopted node.
+
+The host adapter adds safe Rust ownership wrappers around upstream cache build,
+status and hold operations. Builder close/drop retains the upstream generation
+and retirement logic. No interpreter, compute trace, tensor operation, consensus
+hash or effect rule was changed. The reviewable adapter patch and provenance
+hashes were regenerated as source artifacts; independent patch reproduction has
+not been run in this implementation phase.
+
+Replay encodes native OCWR1 requests and the adopted compute replay payload,
+retaining the 8,000,000-byte aggregate payload budget and session scope. The
+upstream interpreter executes the shared session. Native receipt decoding and
+observation rules produce completed, stopped or fuel-exhausted measurements;
+the session verifier derives bills from those measurements and signed votes.
+Local replay timeout or unavailable cache resources remain operational failures.
+The fund/return/settle executor routes are now connected in source, superseding
+the missing concrete replay connection recorded in the preceding source batch.
+
+Native provider prepare/execute/self-test/prepared/executed JSON codecs and
+environment configuration now also have source implementations. They retain
+exact field sets, integer-versus-string numeric rules, ordered storage entries,
+duplicate/key/value/aggregate storage checks, address/hash admission, resource
+limits and native encoding field order. Replay consumes the shared self-test
+decoder. This does not yet implement the external provider service, its model
+owner/channel lifecycle, durable compute history, node compute RPCs or network
+offer/commit/reveal/result routing.
+
+Everything above remains **unbuilt and untested source**. Only explicit-file
+formatting and source adapter/provenance generation were performed. No final
+qualification, native oracle, build, test, commit, push or deployment occurred.
+Required final evidence includes cache build/drop/lease races and cancellation,
+stream boundaries and corrupt model data, executor identity, native replay
+receipts and stop/fuel behavior, measurement/bill equality, fee/refund/payee
+conservation, atomic failures, restart/recovery and combined node/VPN/ExEx/HTTPS
+execution. The broader implementation backlog and public-devnet prerequisites
+remain open. The qualified HEAD and running isolated devnet remain unchanged.
+
+### Provider lifecycle and canonical dependencies source in progress (2026-10-15)
+
+The provider owner state machine now has source implementations for native
+model preparation, a two-key cache working set, LRU touches and victim selection,
+shared cache bindings, generation-bound operation tokens, merged snapshot
+aliases, execution leases, recent spent-job IDs, stale-model removal and closure.
+The service wraps those transitions with bounded data/control queues, control
+priority, request deadlines and native cache holds. Model registration commits
+the owner transition only after its native cache hold succeeds. Missing or
+changed native cache entries invalidate owner metadata before another reserve.
+
+Preparation and execution run as owned operations. Caller cancellation or expiry
+signals the work without discarding its finish/release path. Execution keeps its
+cache lease until the worker has actually completed, including after a timed-out
+caller has received an error. Stopped providers refuse new work, cancel reads and
+model loading, wait for preparation and execution leases to drain and then remove
+their model keys. The recent-job list preserves the native bounded in-memory
+semantics; durable compute history remains a separate unimplemented boundary.
+
+Concrete provider dependencies now capture immutable canonical historical heads
+and compare requested epoch/state roots before using their snapshots. Missing
+retained heads are distinguished from database or contradictory-history errors.
+Program and storage lookups use bounded read workers; native execution and model
+loading use owned bounded workers. The bounded committed-storage reader preserves
+raw row order, strict row admission, duplicate raw keys, row-count/byte limits
+and encoded-entry size limits. Input-retention and canonical-provider model
+loading share the same checked asset/chunk pipeline, with provider cancellation
+checked during copying. The native cache drop wrapper retains upstream busy
+behavior and guard ownership.
+
+The native provider executes only its captured program/model and stored snapshot
+data; caller-supplied program/storage fields are cleared before execution. Single
+compute calls share receipt observation rules with replay and use the native
+module cache, falling back to full-code transport on cache miss. Provider output
+checks retain native fuel, counter, trace and output-limit ordering. GPU settings
+remain unavailable with the adopted native CPU engine. This source service is
+not yet constructed by node startup or connected to compute network messages or
+node submit/status/cancel RPCs.
+
+All changes remain **unbuilt and untested**. Only source inspection, explicit
+formatting and adapter/provenance regeneration were performed. The independent
+adapter reproduction check is deferred with builds and tests. Required final
+gates include owner transition comparisons, queue saturation and canceled replies,
+in-flight timeout/shutdown, stale cache identities and eviction races, canonical
+root mismatch and historical absence, bounded malformed storage, model-load
+cancellation, single-call/cache transport parity, actual provider execution and
+combined restart/recovery. No commit, push, deployment or live-devnet update was
+performed; the broader compiler, history, service/RPC/network and integration
+qualification work remains open.
+
+### Durable compute history source in progress (2026-10-15)
+
+Native compute history key/row codecs now cover integer framing, current and
+archived scopes, session readiness/reservation/completion/cancellation, padded
+reply allocations, planned/funding/issued/stored job rows, cancellation notices
+and relay records. The page-size map-limit policy retains the native 64 MiB
+work budget and cancellation/acknowledgement space calculation. Decoders preserve
+record-tag priority, bounded lengths, padding checks and corruption refusals.
+
+The new local `octra-lmdb` adapter pins `heed = 0.22.1` for native LMDB storage.
+It owns a private user-only directory and the native directory-flock boundary,
+uses the same four named byte maps and transactions without TLS, and exposes
+scoped reads/writes with actual LMDB page statistics. Only open and initial
+resize cross its documented unsafe boundary; runtime resizing, raw environment
+clones and mapped byte references are not exposed. This preserves a path to
+native page-allocation comparisons rather than replacing them with logical byte
+counts from a different database. The adapter is original local source and is
+not itself a qualified third-party or upstream artifact.
+
+History startup now binds chain/node identity transactionally. Session creation,
+monotonic scope archives, reply reservation, idempotent completion, saved reply
+lookup and atomic reserved-space checks have source implementations over the
+adapter. Completion compares actual live pages before and after the transaction
+and aborts if storage grew beyond the reservation. Closed history blocks new
+operations; in-progress transactions retain ownership until they finish. Scope
+search uses ordered cursor traversal without imposing an extra archive limit.
+
+Cancellation state/deadline transitions and durable minute-window send, forward,
+relay and transit quotas now have source implementations. Queued cancellation
+delivery, fair round selection, acknowledgement retention and deduplicated relay
+records are transactional and retain the native expiry and capacity rules.
+
+Durable jobs now have source paths for planning, reference-index migration,
+funding waits, issuance, padded result storage, fetch counters and idempotent
+reads. Reserved transitions compare actual LMDB live pages; shrinking stored
+results preserves the native page floor. Incremental pruning uses durable seek
+cursors and batches of 32, retaining issued work, stored results and referenced
+or paid cancellation records. Orphaned ready sessions and scope archives are
+removed only when their final job reference is removed.
+
+Funding observations are sealed values minted from authenticated canonical
+history. Observation checks the epoch, chain, ledger root or folded index
+commitment, snapshot epoch metadata and native escrow permission. The history
+funding transition additionally binds the observation epoch/root, header ID and
+stored session scope. Decoding a deposit or presenting a signed header cannot
+construct this evidence. Compute service/RPC/network integration remains open.
+
+All changes are **unbuilt and untested source**. The new dependency and its
+transitive lockfile expansion have not been resolved. No build, test, native
+oracle, adapter reproduction check, store opening, commit, push or deployment was
+performed. Final gates must compare native LMDB versions and page behavior,
+record bytes and malformed records, identity/permission/ownership failures,
+capacity and reserved completion, cancellation deadlines/quotas, concurrent
+transactions, job migration/pruning/reservations, funding observation tampering,
+interruption, crash/reopen and recovery. Broader node/VPN/ExEx/HTTPS
+implementation and qualification gates remain open; the live devnet is unchanged.
+
+### Compute coordination source in progress (2026-10-15)
+
+The compute service now has source components for a captured host view, offer
+and capability authentication, bounded offer evidence, delayed reveal promotion,
+native committee selection, resource admission and signed call verification.
+Distinct signed records remain keyed by their record IDs so selector-level
+equivocation exclusion is preserved. Pending reveals retain native total and
+per-node limits; offer lookup selects by ordered offer ID. The captured view is
+host input and does not establish finality itself.
+
+Client request shape checks and unsigned offer/call construction retain native
+caller terms, model commitments, expiry clipping, JSON-list parameters and input
+hashing. Request admission requires a sealed funding observation whose header,
+current epoch and folded state root match the host view. Provider result checks
+bind selected signer, request, output bytes/hash, fuel budget and signature.
+Coordinator result admission first updates its durable issued-job record; a
+failed history transition cannot add the vote. Provider reservation and retained
+reply decoding use the existing durable session history boundary.
+
+Certificate collection uses the native signer/weight floors and complete result
+evidence tuple. Retained job restoration rechecks the saved validator extension,
+historical request/model roots, coordinator and caller signatures, capability
+evidence, commit/reveal selection, resource support and unique result signers.
+Decoding a retained job alone does not authorize restored execution or payment.
+
+Provider-flow source now maps offers/calls into captured provider preparation and
+execution requests, signs capacity/commitment/reveal/result messages, waits for
+the reveal epoch and delegates publication/result admission back to the host.
+Execution results are published only after the durable save callback accepts.
+Provider completion saves the signed reply and read context against the matching
+request, local signer, session and sequence. Coordinator completion projects the
+agreed certificate's exact votes and requires the durable issued record to match
+before storing a completed job. Saved-plan verification and the planned-to-funding
+transition bind the original signed client intent and reserve final record space.
+
+Committee lease source now binds caller/public key/session, model/program/executor
+identity, validator commitment and the retained request head. It selects provider
+capacity records by signed record ID, derives minimum capacity/expiry across the
+committee and rejects reuse when roots, limits or identity differ. Lease storage
+prunes expired entries and evicts by earliest expiry with session-key tie breaking;
+reused calls retain the original request head and selection with clipped expiry.
+The session key uses the native OCE1 domain-separated cancellation-key framing.
+
+Job-registry source now owns active caller leases, result observers, completed
+job retention order and abortable computations with actor-mediated completion.
+Successful computations must pass the durable completion callback before their
+result is exposed. Abort handling runs completion outside the aborted computation;
+lease release is idempotent across normal completion, cancellation and shutdown.
+Cancellation capacity includes both remembered sessions and active job leases.
+Expired cancellation reservations are pruned independently of completed jobs.
+
+Cancellation authorization source verifies caller identity/signature, round origin
+and acknowledgement key/address bindings. It can recover matching caller/session
+scope from live request evidence or durable current/archived scopes, with pinned
+validator checks and current-validator fallback. Retained acknowledgement reads
+recheck the notice, complete cancellation message, origin, expiry, round and unique
+signers. Committee membership remains a separate receipt-projection check.
+
+The owned history worker now has a bounded queue and one blocking transaction
+lane. Queue admission and transactions survive abandoned callers; shutdown is
+also owned, drains preceding work and closes history only after active blocking
+work finishes. Startup/identity failures are retained as explicit failures rather
+than replaced by empty ephemeral history. These lifecycle properties remain
+unqualified until cancellation, queue saturation, panic and close/reopen testing.
+
+These are **unbuilt and untested source components**. The service actor,
+full job admission/resumption and cancellation/fetch orchestration,
+transport delivery, submit/status/cancel RPCs and startup wiring remain open.
+Source formatting does not prove type correctness or runtime parity. Final gates
+must compare native offer/call rejection order, malformed/equivocating records,
+reordered reveals, capacity, funding freshness, history write failure, certificate
+conflicts, retained validator changes and full restart/recovery. No tests, builds,
+lockfile dependency resolution, commit, push, deployment or live-devnet changes
+were performed in this source pass.
+Job gates additionally include abandoned observers, cancellation during history
+work and finalization, duplicate completion, queue retention, caller/session
+capacity, panic/cancellation error mapping and shutdown races. Cancellation gates
+include rotated validator sets, corrupt scope archives, forged key/address pairs,
+expired/repeated acknowledgements and cached notice replay.
+
+### Compute actor and node wiring source (2026-10-15)
+
+The service actor now owns bounded control/data queues, offer/request/job tables,
+funding-read reservations, cancellation routes, committee leases and reveal
+delivery. Admission, funding, completion, retained status recovery and signed
+result fetches have staged history-worker transitions. A funding timeout leaves
+the owned observation running until its reservation is released. Direct compute
+waiters cancel their shared job on abandonment; submitted job observers retain
+their work. Cancellation, shutdown and replay behavior still require qualification.
+
+Node startup now has source wiring for this service and its native provider
+configuration. The host obtains historical roots and sealed funding observations
+from authenticated canonical history, takes the active validator snapshot from
+the existing peer authority and checks cancellation-round activation against the
+anchored rule graph. Message `0x41` has a separate bounded ingress lane; RPC routes
+submit/status/cancel through the signed runtime gateway. Shutdown stops compute
+and closes its durable history before the canonical node closes. These local
+service changes do not alter consensus rules.
+
+Provider opt-in is available through `--compute-provider` on `run` and
+`run-network`, the optional `compute_provider` configuration field, and the native
+`OCTRA_COMPUTE_PROVIDER`/resource limit settings. Coordination remains present
+when provider execution is disabled; unavailable history prevents provider work.
+
+The canonical store also retains a monotonic cache of its verified published
+head. Compute and peer announcements use that head independently of temporary
+browser/VPN serving suspension during publication. SQLite commit and cache update
+run under one owned task, so abandoning the publication caller cannot leave its
+previous head cached after the commit completes. This lifecycle change remains
+unqualified until final cancellation and recovery testing.
+
+This supersedes the earlier open actor/RPC/startup source items above. It is
+**unbuilt and untested WIP**, with source review still in progress. Parsing and
+formatting are the only checks performed; dependency resolution, type checking,
+native comparisons, restart/recovery, saturation, full node/VPN/ExEx/browser
+qualification, commits, pushes and deployment remain deferred. The existing live
+devnet still runs its previously qualified binary.
+
+### Native VPN and read RPC source (2026-10-15)
+
+The source pass adds a canonical transaction/rejection lookup index, native
+account/history RPC adapters, and durable local queue-drop retention. Lookups
+authenticate returned transactions against their containing committed epoch;
+rejects are checked against the retained finality/receipt record. Checkpoint-only
+history and unavailable observation timestamps remain explicit failures. Status
+and proof families still require their genuine native host capabilities.
+
+VPN settlement is now an asynchronous pinned Circle/Program adapter. It checks
+current code, receipt domain/key, zero protocol commission, eligibility and escrow
+against one immutable tree, with exactly authenticated opening transactions.
+Canonical publication notifies lease refreshes; transient failures pause packets
+without extending authorization. The client and node now have source for actual
+WireGuard session framing, connected UDP return flows and opt-in validated IPv4
+TUN transport. Operator discovery uses immutable resources read back before the
+anchor changes. See [native VPN source integration](native-vpn.md) for boundaries.
+
+Standalone AML source now includes checked source parsing/lowering and the
+session, root, seal, certificate, replay, project and folio artifacts. Public API
+coverage is being tracked against the adopted native interface inventory in
+`crates/octra-node-protocol/src/aml/core/upstream-api.json`; inventory or source
+review is not differential parity evidence.
+
+These additions are **unbuilt and untested WIP**. Only explicit source formatting
+and inspection have run. The full implementation pass, dependency resolution,
+type checking, native comparison, combined sync/restart/recovery and deployment
+qualification remain unfinished. No commits, pushes or live service changes were
+performed in this source pass.

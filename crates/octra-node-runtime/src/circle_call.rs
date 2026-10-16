@@ -40,8 +40,11 @@ pub struct Context {
     pub inspect: bool,
     pub update_policy: bool,
     pub hfhe_strict: bool,
+    /// Explicit local execution capability; ordinary transaction calls use None.
+    pub hfhe_scope: Option<crate::circle_scope::Scope>,
     pub storage_proof: bool,
     pub fhe_work: bool,
+    pub object_cost: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Event {
@@ -318,7 +321,8 @@ pub(crate) fn execute_journalled(
     }
     if info.runtime == b"octb" {
         return octb::execute(
-            runtime, state, circle, method, params, ctx, &info, &decoded, value, budget, journal,
+            runtime, state, circle, method, params, ctx, &info, &decoded, value, mode, budget,
+            journal,
         );
     }
     let code = text(code)?;
@@ -362,17 +366,34 @@ pub(crate) fn execute_journalled(
         StorageLoad::Ready(storage, spent) => (storage, spent),
         StorageLoad::Failed(reason, effort) => return Ok(fail(reason, effort)),
     };
-    if method.starts_with(b"fhe_") {
-        return Err(unavailable(
-            "authenticated Circle HFHE context is not available",
-        ));
-    }
+    let hfhe = match crate::circle_fhe::Wasm::prepare(
+        runtime,
+        state,
+        circle,
+        &info.owner,
+        ctx.caller.as_bytes(),
+        method,
+        limit - spent,
+        false,
+        priced,
+        crate::circle_fhe::Context {
+            epoch: ctx.epoch,
+            scope: ctx.hfhe_scope.as_ref(),
+            receipt_linked: !matches!(mode, ReceiptMode::Direct),
+        },
+        journal.as_deref().and_then(|j| j.fhe_memory.as_ref()),
+    ) {
+        Ok(v) => v,
+        Err(Error::Rejected(reason)) => return Ok(fail(reason, 0)),
+        Err(e) => return Err(e),
+    };
+    spent += hfhe.effort;
     let calls =
         priced && state.get(&[b"circles", circle, b"call_code"]) == Some(info.code_hash.as_slice());
     let request =
         match codec::request_params(params).and_then(|p| codec::encode_request(method, &p)) {
             Ok(v) => v,
-            Err(Error::Rejected(e)) => return Ok(fail(e, 0)),
+            Err(Error::Rejected(e)) => return Ok(fail(e, hfhe.effort)),
             Err(e) => return Err(e),
         };
     let declarations = declarations
@@ -404,6 +425,8 @@ pub(crate) fn execute_journalled(
         .map(|(k, v)| json!({"key_b64":STANDARD.encode(k),"value_b64":STANDARD.encode(v)}))
         .collect::<Vec<_>>();
     let mut input = json!({"action":"execute","code_b64":code,"code_cache_key":hex::encode(Sha256::digest(code.as_bytes())),"execution_profile":"standard","export_name":"octra_update","request_b64":STANDARD.encode(request),"storage_pairs":storage_pairs,"storage_cache_key":null,"caller":ctx.caller,"address":text(circle)?,"tx_hash":ctx.tx_hash,"current_epoch":ctx.epoch,"hfhe_caps":[],"hfhe_pubkeys":[],"hfhe_active_key":null,"hfhe_strict":ctx.hfhe_strict,"hfhe_receipt_mode":"direct","hfhe_receipt_entries":[],"math":ctx.profile.math,"float_mode":ctx.profile.wasm_float,"inspect_policy":ctx.inspect,"fuel_limit":fuel.clamp(0,20_000_000),"is_view":false,"update_policy":ctx.update_policy,"public_reads":circle_reads::engine_reads(&reads).map_err(|e|unavailable(e.0))?,"compute_storage_cache_key":null,"compute_session_scope":null});
+    input["hfhe_caps"] = json!(hfhe.caps);
+    input["hfhe_pubkeys"] = hfhe.public_json()?;
     match mode {
         ReceiptMode::Direct => (),
         ReceiptMode::Capture => input["hfhe_receipt_mode"] = json!("capture"),
@@ -420,21 +443,15 @@ pub(crate) fn execute_journalled(
     if calls {
         input["update_policy"] = json!(true);
     }
-    // Oversize requests need the native cache/session transport; do not turn a
-    // locally missing transport into a consensus-level execution failure.
-    if serde_json::to_vec(&input)
-        .map_err(|e| unavailable(e.to_string()))?
-        .len()
-        > MAX_INPUT_BYTES - 4096
-    {
-        return Err(unavailable(
-            "Circle input requires native session transport",
-        ));
-    }
-    let input = serde_json::to_vec(&input).map_err(|e| unavailable(e.to_string()))?;
+    input["hfhe_active_key"] = hfhe.active_json()?;
+    let input = match crate::circle_input::encode(input, priced, calls, hfhe.active_key_id()) {
+        Ok(input) => input,
+        Err(Error::Rejected(reason)) => return Ok(fail(reason, if priced { limit } else { 0 })),
+        Err(error) => return Err(error),
+    };
     let mut nested = Vec::new();
     let execution = if calls {
-        runtime.execute_call_effects(&input, &before, |request| {
+        runtime.execute_prepared_call(&input, &before, |request| {
             let host = journal
                 .as_deref_mut()
                 .ok_or_else(|| unavailable("nested Circle execution host is not available"))?;
@@ -445,7 +462,7 @@ pub(crate) fn execute_journalled(
             Ok(reply.bytes)
         })
     } else {
-        runtime.execute_effects(&input, &before)
+        runtime.execute_prepared(&input, &before)
     };
     let effects = match execution {
         Ok(v) => v,
@@ -540,7 +557,7 @@ pub(crate) fn execute_journalled(
         reads_json.extend_from_slice(&read.native_json());
     }
     reads_json.push(b']');
-    let binding = binding(&info, ctx, &reads_json, effects.transcript.clone());
+    let binding = binding_with_context(&info, ctx, &reads_json, effects.transcript.clone(), &hfhe);
     Ok(Call {
         runtime: runtime.clone(),
         context: ctx.clone(),
@@ -569,7 +586,22 @@ fn binding(
     reads_json: &[u8],
     transcript: Vec<transcript::Entry>,
 ) -> Binding {
-    let mut context_json = b"{\"caps\":[],\"pubkeys\":[],\"active_key\":null".to_vec();
+    binding_with_context(
+        info,
+        ctx,
+        reads_json,
+        transcript,
+        &crate::circle_fhe::Wasm::default(),
+    )
+}
+fn binding_with_context(
+    info: &circle_store::Info,
+    ctx: &Context,
+    reads_json: &[u8],
+    transcript: Vec<transcript::Entry>,
+    hfhe: &crate::circle_fhe::Wasm,
+) -> Binding {
+    let mut context_json = hfhe.context_prefix();
     if ctx.profile.math {
         context_json.extend_from_slice(b",\"math\":true");
     }

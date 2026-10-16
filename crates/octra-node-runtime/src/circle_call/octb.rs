@@ -2,10 +2,10 @@
 // Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
 //! Native OCTB dispatcher and execution within the shared Circle journal.
 use super::{
-    binding, charge, load_call_storage, rejected, unavailable, Call, Context, Event, StorageLoad,
-    VmReceipt,
+    binding, charge, load_call_storage, rejected, unavailable, Call, Context, Event, ReceiptMode,
+    StorageLoad, VmReceipt,
 };
-use crate::circle_octb::{dispatcher, seed};
+use crate::circle_octb::{self, dispatcher};
 use crate::{
     circle::CircleRuntime, circle_receipt::ReceiptBudget, circle_store, state_batch::Snapshot,
 };
@@ -19,7 +19,6 @@ use octra_node_protocol::{
         Error,
     },
     native_json::Document,
-    octb::admission,
 };
 use vm::Value;
 
@@ -30,8 +29,23 @@ struct Host<'a, 'b, 'c> {
     before: &'c StorageTable,
     circle: &'c [u8],
     spawns: Vec<Spawn>,
+    runtime: &'c CircleRuntime,
+    snapshot: &'c Snapshot,
+    fhe_policy: crate::circle_fhe::Policy,
 }
 impl vm::Host for Host<'_, '_, '_> {
+    fn fhe_capability(&self, cap: vm::FheCapability) -> Result<bool, vm::Unavailable> {
+        Ok(self.fhe_policy.allows(cap))
+    }
+    fn fhe_key(&mut self, address: &[u8]) -> Result<Option<vm::FheKeySource>, vm::Unavailable> {
+        if !self.fhe_policy.key(address) {
+            return Ok(None);
+        }
+        self.runtime
+            .public_key(self.snapshot, address)
+            .map(|key| key.map(vm::FheKeySource::Bytes))
+            .map_err(|e| vm::Unavailable(e.to_string()))
+    }
     fn groth16(
         &mut self,
         key: &[u8],
@@ -43,6 +57,7 @@ impl vm::Host for Host<'_, '_, '_> {
     fn spawn(
         &mut self,
         request: vm::SpawnRequest<'_>,
+        _storage: &mut StorageTable,
         _budget: Option<&mut octra_node_protocol::octb::work::Budget>,
     ) -> Result<Option<vm::Spawned>, vm::Unavailable> {
         if request.parent != self.circle
@@ -123,7 +138,8 @@ impl vm::Host for Host<'_, '_, '_> {
             })?;
             journal.stage(request.caller, storage.clone());
             let params = nested_parameters(request.params)?;
-            let (response, effort, events) = ReceiptBudget::with_work(budget, |budget| {
+            let memory = std::mem::replace(&mut journal.fhe_memory, request.fhe_memory.clone());
+            let result = ReceiptBudget::with_work(budget, |budget| {
                 journal.nested(
                     request.caller,
                     request.target,
@@ -133,7 +149,9 @@ impl vm::Host for Host<'_, '_, '_> {
                     request.limit - spent,
                     budget,
                 )
-            })?;
+            });
+            journal.fhe_memory = memory;
+            let (response, effort, events) = result?;
             *storage = journal
                 .storage(request.caller)
                 .ok_or_else(|| unavailable("OCTB caller storage missing after subcall"))?;
@@ -218,17 +236,14 @@ pub(super) fn execute(
     info: &circle_store::Info,
     decoded: &[u8],
     value: &BigInt,
+    mode: ReceiptMode<'_>,
     mut budget: Option<&mut ReceiptBudget>,
     mut journal: Option<&mut Journal<'_>>,
 ) -> Result<Call, Error> {
     let fail = |error, effort| Call::failed(runtime, state, circle, ctx, error, effort);
-    if decoded.starts_with(b"OCPG") {
-        return Err(unavailable(
-            "OCTB Program certificate admission host is not available",
-        ));
-    }
-    let admitted = match admission::decode(decoded, ctx.storage_proof) {
+    let admitted = match runtime.admit_program(decoded, ctx.storage_proof) {
         Ok(code) => code,
+        Err(error) if error.is_operational() => return Err(unavailable(error.to_string())),
         Err(error) => {
             return Ok(fail(
                 format!("invalid circle bytecode: {error}").into_bytes(),
@@ -247,7 +262,13 @@ pub(super) fn execute(
     let Some(entry) = dispatcher(&fixed, method) else {
         return Ok(fail(b"method not found".to_vec(), 0));
     };
-    // Legacy admission has neither typed parameters nor declared storage kinds.
+    let calls =
+        priced && state.get(&[b"circles", circle, b"call_code"]) == Some(info.code_hash.as_slice());
+    let values = match circle_octb::runtime_parameters(&admitted, &fixed, method, params) {
+        Ok(values) => values,
+        Err(Error::Rejected(reason)) => return Ok(fail(reason, 0)),
+        Err(e) => return Err(e),
+    };
     let mut machine = vm::Machine::new(
         vm::Context {
             caller: ctx.caller.as_bytes().to_vec(),
@@ -265,19 +286,33 @@ pub(super) fn execute(
             limit: limit - spent,
             integer_work: ctx.storage_proof,
             fhe_work: ctx.fhe_work,
+            object_cost: ctx.object_cost,
             proof_exec: ctx.profile.proof_exec,
             math: ctx.profile.math,
             point_ops: ctx.storage_proof,
             async_exec: true,
+            strict: admitted.facts().is_some(),
+            storage_kinds: circle_octb::storage_kinds(&admitted, calls),
+            fhe_memory: journal.as_deref().and_then(|j| j.fhe_memory.clone()),
             ..vm::Options::default()
         },
         before.clone(),
     );
     machine.pc = entry;
-    seed(&mut machine, method, params)?;
+    circle_octb::seed_values(&mut machine, method, values);
     // Parameter slots do not enlarge native memory.size.
-    let calls =
-        priced && state.get(&[b"circles", circle, b"call_code"]) == Some(info.code_hash.as_slice());
+    let mut fhe_policy = crate::circle_fhe::Policy::scoped(
+        state,
+        circle,
+        &info.owner,
+        ctx.caller.as_bytes(),
+        ctx.epoch,
+        ctx.hfhe_scope.as_ref(),
+    )
+    .map_err(|error| unavailable(error.to_string()))?;
+    if !priced && !matches!(mode, ReceiptMode::Direct) {
+        fhe_policy = fhe_policy.without_verifiers();
+    }
     let mut host = Host {
         journal: journal.as_deref_mut(),
         calls,
@@ -285,6 +320,9 @@ pub(super) fn execute(
         before: &before,
         circle,
         spawns: vec![],
+        runtime,
+        snapshot: state,
+        fhe_policy,
     };
     let success = machine
         .run(&fixed, &mut host, budget.as_mut().map(|b| &mut b.work))

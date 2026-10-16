@@ -98,7 +98,7 @@ pub fn handshake_hash(
     }
 }
 pub fn binary_required(epoch: i64, require_binary: bool, plan: Option<&Plan>) -> bool {
-    require_binary && plan.map_or(true, |p| p.active(epoch))
+    require_binary && plan.is_none_or(|p| p.active(epoch))
 }
 pub fn expected_binary<'a>(epoch: i64, binary: &'a [u8], plan: Option<&'a Plan>) -> &'a [u8] {
     match plan {

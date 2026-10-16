@@ -1,0 +1,74 @@
+{
+  "date": "2026-10-15",
+  "status": "native_replay_passed_provenance_refreshed",
+  "scope": "Actual pinned upstream Rust WASM engine replay. No OCaml Circle commit or chain finality claim.",
+  "upstream": {
+    "repository": "https://github.com/octra-labs/lite_node",
+    "commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+    "engine_source_sha256": {
+      "lib/core/circle_wasm_native/Cargo.toml": "9743e4fd5aa87c02d4c6f22ae698f178d97f787bf94450e618b086ef0f17b40a",
+      "lib/core/circle_wasm_native/Cargo.lock": "c3c6e2e05bad621856ed5efc5924acbc9e6549da7d6886df39c5f0a0d4bbc762",
+      "lib/core/circle_wasm_native/src/call_step.rs": "6b065ff7d1faca146d35912a24e589cd41efb588e02518209d080217178c94d2",
+      "lib/core/circle_wasm_native/src/compute_replay.rs": "d607211ba60e27ac65fab1d1f3acbd4521add78ee45c7520a53fb06a35e292bb",
+      "lib/core/circle_wasm_native/src/deterministic_tensor.rs": "730f71348353955c610a1950f732de4de3c445131028990a82dddc4fb53f3d5b",
+      "lib/core/circle_wasm_native/src/float_cases.rs": "4b29ced3759f51399a31cae0c6f1e4897f8d91da769c0c19cf5919b3408f865f",
+      "lib/core/circle_wasm_native/src/float_ops.rs": "5380b06120667c0d1c6ae0e44d9b4fdd76efa8e0fb0a395e87b17203d9b00730",
+      "lib/core/circle_wasm_native/src/lib.rs": "247d00dd7043e5ed8bedfc1eec8a15c23220c19a5b2072d19e1e3fbedc8c7e1a",
+      "lib/core/circle_wasm_native/src/native_bytes.rs": "7499907438644814672af2d6d478aabab33b94550ce230edb4be5bdbd8bdfbc7",
+      "lib/core/circle_wasm_native/src/parse_memory.rs": "5b543060c24f2879a90adae6a1efc0e13051f62e4aa91a2f0616ba1d52b9a621",
+      "lib/core/circle_wasm_native/src/reply.rs": "1d945b71b5ac0c6a5f8e03ea9536bc85ba858727bfcd213b73f77ca1b969d2f2"
+    }
+  },
+  "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+  "fixture": {
+    "path": "crates/octra-node-runtime/tests/fixtures/circle-engine.json",
+    "sha256": "fb73be50697e722683a4441198552a821cf6181c242d94b0f905cb0e05ae61f9",
+    "previous_sha256": "bbbb7409f8edf506417ac74337e8c5911e72201b531206150613e267692496bd",
+    "complete_native_input_output_cases": 9,
+    "all_cases_unchanged": true,
+    "wasm_sha256": "ca5530c7fdc82adedb5290a9da4192cf7d2727d74193dee73f91a62020a7d42f",
+    "wasm_unchanged": true,
+    "only_refresh_delta": {
+      "path": "app_source_sha256.Cargo.lock",
+      "before": "714eec404ec11e442053e63b94916b5f84a40b0dcc1f8c72cf26c3699829440c",
+      "after": "f28ad88c09fb9c0ed4ed33eb8866a191cc0fdfba2ad4c5435443942dbefc3b35"
+    }
+  },
+  "reproduce": {
+    "generator": "scripts/circle-apps/test-registry-native.py",
+    "command": "CARGO_NET_OFFLINE=true python3 scripts/circle-apps/test-registry-native.py --upstream <pristine-7f9be448-checkout> --out <fresh-report> --runtime-fixture <fresh-fixture>",
+    "native_test": "vpn_compatibility::vpn_registry_circle_abi",
+    "passed": 1,
+    "failed": 0,
+    "ignored": 0,
+    "production_and_test_sources_unchanged": true
+  },
+  "provenance": {
+    "app_source_sha256": {
+      "crates/octravpn-circle-registry/Cargo.toml": "b6c0703cfbbd8092a69303d0a4e56d143ec7afcc102ba09d771c248ebaee7ef5",
+      "Cargo.lock": "f28ad88c09fb9c0ed4ed33eb8866a191cc0fdfba2ad4c5435443942dbefc3b35",
+      "crates/octravpn-circle-registry/src/codec.rs": "f27f591c478d08afc6b2dfff5f8e197fa6a9dd2c6677d865976564246c74f6d1",
+      "crates/octravpn-circle-registry/src/guest.rs": "0b79437db796592d2cbf519153466bb9dc971312d4ebe7aad65cfcfb2cdf539a",
+      "crates/octravpn-circle-registry/src/lib.rs": "b24b82f806fdba2c0c6b85ac7f3821be89826ce7f9aa04bbb798e6fa11473053",
+      "crates/octravpn-circle-registry/src/projection.rs": "7feb422fb67fb8170a470255af5fbf6ce2344597a1bdd5d403bd66778de65648"
+    },
+    "build_context_sha256": {
+      "Cargo.toml": "5e08f4e5a7d1882df7b10c80664d2c3725b64ba53f5a9b2f7f36dd9f495937ca",
+      "rust-toolchain.toml": "2e566b33dfaaf876ca55fd110256c7838c935ec35a6f949544e0f028db7383f5",
+      "scripts/circle-apps/test-registry-native.py": "873b1cc51417c401aa04cee4c57e4a957438264180ad6f0d23d53c2d4db83ab1",
+      "scripts/circle-apps/registry_native_tests.rs": "73f9002651cfe10fa6b3c132d6d42d0c00d580d30e1113bba58a5045e04f71b2",
+      "crates/octra-node-runtime/tests/circle_parity.rs": "e316804139bcc84e4a1af11df5a4f2ab0a5d5e9db5d595253bfe4d4df14ba18b"
+    },
+    "qualification_report_sha256": "7cf5001f0eda3b334eb7ea9c951dccf0ab9cf6eb18c98544308d89710c87f83e",
+    "native_report_sha256": "423776ac96915f758ed27a859d3fbb4050cd5dc86b42abdc09dbee0629a94bb7",
+    "run_log_sha256": "9341e87689b6f3c819fa1b0a8dcbdc76990e629a19da04c552a908d0e801978d",
+    "native_test_executable_sha256": "ab864a86ea4122e003fd353120261778bf51a724345b28b7a16f94ce2195ae3d"
+  },
+  "limits": [
+    "The native engine is copied from the pristine pin and only the external registry test module is appended; engine behavior is unchanged.",
+    "Nine full ABI cases cover manifest, publish/query, replay/ownership rejection, retire/republication, view mutation refusal and malformed framing.",
+    "HFHE is unused by this registry fixture.",
+    "Rust runtime parity test remains strict and unchanged; its fresh full-suite rerun is a separate qualification gate.",
+    "No OCaml Circle commit, full node, public chain or Mainnet qualification claim."
+  ]
+}

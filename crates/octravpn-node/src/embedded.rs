@@ -17,6 +17,34 @@ use crate::{
     tunnel::{Server, ADMISSION_LEASE},
 };
 
+pub use crate::tunnel::ip::Config as IpTunnelConfig;
+
+/// Successful completion means the ordinary operator claim is included in
+/// canonical application state. Queue acceptance is insufficient.
+#[async_trait::async_trait]
+pub trait ReceiptSettlement: Send + Sync {
+    async fn confirm(
+        &self,
+        receipt: octravpn_core::receipt::SignedReceipt,
+        announcement: octravpn_core::control::AnnounceSessionRequest,
+    ) -> Result<()>;
+}
+
+/// Add the exact supported wire transport to the canonical policy before
+/// publication. Native embedded service currently uses `Wireguard`.
+pub fn advertise_transport(
+    mut policy: octravpn_core::v3_policy::OperatorPolicy,
+    transport: octravpn_tun::amnezia::WireTransport,
+) -> Result<octravpn_core::v3_policy::OperatorPolicy> {
+    transport
+        .config()
+        .map_err(|error| anyhow::anyhow!("invalid advertised transport: {error}"))?;
+    policy
+        .unknown
+        .insert("transport".into(), serde_json::to_value(transport)?);
+    Ok(policy)
+}
+
 pub struct Config {
     pub control_listen: SocketAddr,
     pub tunnel_listen: SocketAddr,
@@ -35,9 +63,22 @@ pub struct EmbeddedVpn {
 }
 
 impl EmbeddedVpn {
+    pub fn with_settlement(mut self, publisher: Arc<dyn ReceiptSettlement>) -> Self {
+        Arc::make_mut(&mut self.state).receipt_settlement = Some(publisher);
+        self
+    }
     /// Bind both services before returning. Admission starts empty on every
     /// restart; the authority must finish canonical replay before granting it.
     pub async fn bind(config: Config, authority: Arc<dyn SessionAuthority>) -> Result<Self> {
+        Self::bind_with_ip_tunnel(config, authority, None).await
+    }
+
+    pub async fn bind_with_ip_tunnel(
+        config: Config,
+        authority: Arc<dyn SessionAuthority>,
+        ip_tunnel: Option<IpTunnelConfig>,
+    ) -> Result<Self> {
+        let ip_tunnel = ip_tunnel.map(|tunnel| tunnel.with_directory(&config.data_dir));
         let directory = config.data_dir.clone();
         let identity = Identity {
             version: 1,
@@ -104,6 +145,8 @@ impl EmbeddedVpn {
                 router,
                 allowlist,
             )
+            .await?
+            .with_ip_tunnel(ip_tunnel)
             .await?
             .with_metrics(metrics),
         );

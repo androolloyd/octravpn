@@ -5,7 +5,7 @@
 //! ECDH against the hop's static key, and derives a per-hop AEAD key
 //! via HKDF-SHA256.
 //!
-//! Wire format (sent client→entry as the first packet of the session):
+//! Wire format (sent client→entry for every packet):
 //!
 //! ```text
 //! onion_packet = layer_N
@@ -23,9 +23,9 @@
 //!   5. Parses the header (next-hop endpoint or "egress") and forwards
 //!      the inner ciphertext blob (which is layer_{i-1}).
 //!
-//! Subsequent data packets reuse the same per-session AEAD key, with
-//! a counter-derived nonce, so the ECDH and HKDF only run once at
-//! session establishment.
+//! Production senders generate a fresh ephemeral key for every layer of every
+//! packet. The zero nonce is never reused with a retained sending key. Cached
+//! receive keys apply only to the exact ephemeral public key that produced them.
 
 use std::{
     io::{Cursor, Read},
@@ -103,6 +103,12 @@ struct HopHeader {
 /// fresh ephemeral per packet. The `build_onion_has_no_production_callers` test
 /// guards this invariant.
 pub fn build_onion(hops: &[HopBuildInput], inner: &[u8]) -> Result<Vec<u8>, OnionError> {
+    build_fresh_onion(hops, inner)
+}
+
+/// Seal a production datagram with fresh per-packet, per-layer ephemeral keys.
+/// No caller-supplied secret or cached sending key can reuse the zero nonce.
+pub fn build_fresh_onion(hops: &[HopBuildInput], inner: &[u8]) -> Result<Vec<u8>, OnionError> {
     if hops.is_empty() {
         return Err(OnionError::EmptyRoute);
     }
@@ -144,6 +150,9 @@ fn wrap_layer(static_pk: &[u8; 32], header: &[u8], inner: &[u8]) -> Result<Vec<u
     let eph_secret = EphemeralSecret::random_from_rng(OsRng);
     let eph_pub = X25519Pub::from(&eph_secret);
     let shared = eph_secret.diffie_hellman(&X25519Pub::from(*static_pk));
+    if shared.as_bytes().iter().all(|byte| *byte == 0) {
+        return Err(OnionError::Malformed);
+    }
 
     let key = derive_aead_key(shared.as_bytes());
     // Per-layer nonce stays at zero because the key itself is unique
@@ -193,6 +202,9 @@ pub fn peel_layer(static_secret: &StaticSecret, packet: &[u8]) -> Result<PeeledL
     let mut eph_pk = [0u8; 32];
     eph_pk.copy_from_slice(&packet[..32]);
     let shared = static_secret.diffie_hellman(&X25519Pub::from(eph_pk));
+    if shared.as_bytes().iter().all(|byte| *byte == 0) {
+        return Err(OnionError::Malformed);
+    }
     let key = derive_aead_key(shared.as_bytes());
     let nonce = [0u8; AEAD_NONCE_LEN];
     // Perf-5: hardware-accelerated AEAD open. See wrap_layer for the
@@ -205,13 +217,10 @@ pub fn peel_layer(static_secret: &StaticSecret, packet: &[u8]) -> Result<PeeledL
 // -----------------------------------------------------------------------------
 // Perf #9: session-pinned onion keys.
 //
-// Backstory: every relay-hop packet today calls `peel_layer`, which runs
-// X25519 ECDH (~27 µs) + HKDF + AEAD open. The X25519 step is the dominant
-// cost (~85 % of the 31.7 µs `onion_peel_layer` time committed in
-// `bench-snapshots/core.json`). Across a session, the ephemeral pubkey in
-// the onion wrapper never changes — wire-format keeps the per-hop ECDH
-// stable for the session lifetime. So we move that ECDH from per-packet to
-// per-session-open.
+// Receive-only compatibility cache for an exact ephemeral public key. The
+// production sender generates fresh keys per packet and the node peels each
+// packet independently. A stable sending key requires a different wire nonce;
+// retaining a receive key never authorizes zero-nonce sending-key reuse.
 //
 // `OnionSessionKeys` stores the derived AEAD key (32 bytes; the ChaCha20
 // `Key`). Construction takes a static secret + the eph-pubkey from the
@@ -241,6 +250,7 @@ pub struct OnionSessionKeys {
     /// Up to `MAX_HOPS` entries; entries past the actual hop count are zero
     /// and unused.
     key_bytes: [[u8; 32]; MAX_HOPS],
+    ephemeral_pubkeys: [[u8; 32]; MAX_HOPS],
     /// How many hops are actually pinned (1..=MAX_HOPS).
     hop_count: usize,
 }
@@ -251,7 +261,7 @@ impl std::fmt::Debug for OnionSessionKeys {
         f.debug_struct("OnionSessionKeys")
             .field("hop_count", &self.hop_count)
             .field("key_bytes", &"<redacted>")
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -261,6 +271,7 @@ impl Drop for OnionSessionKeys {
             k.zeroize();
         }
         self.hop_count.zeroize();
+        self.ephemeral_pubkeys.zeroize();
     }
 }
 
@@ -283,13 +294,20 @@ impl OnionSessionKeys {
             return Err(OnionError::TooManyHops);
         }
         let mut key_bytes = [[0u8; 32]; MAX_HOPS];
+        let mut ephemeral_pubkeys = [[0u8; 32]; MAX_HOPS];
         for (i, pk) in eph_pubkeys.iter().enumerate() {
             let shared = static_secret.diffie_hellman(&X25519Pub::from(*pk));
+            if shared.as_bytes().iter().all(|byte| *byte == 0) {
+                key_bytes.zeroize();
+                return Err(OnionError::Malformed);
+            }
             let key = derive_aead_key(shared.as_bytes());
             key_bytes[i].copy_from_slice(key.as_slice());
+            ephemeral_pubkeys[i] = *pk;
         }
         Ok(Self {
             key_bytes,
+            ephemeral_pubkeys,
             hop_count: eph_pubkeys.len(),
         })
     }
@@ -305,6 +323,10 @@ impl OnionSessionKeys {
             return None;
         }
         Some(&self.key_bytes[hop])
+    }
+
+    fn matches(&self, hop: usize, packet: &[u8]) -> bool {
+        hop < self.hop_count && packet.get(..32) == Some(self.ephemeral_pubkeys[hop].as_slice())
     }
 }
 
@@ -372,7 +394,7 @@ pub fn peel_with_pinned_key(
     hop_idx: usize,
     packet: &[u8],
 ) -> Result<PeeledLayer, OnionError> {
-    if packet.len() < 32 + 16 {
+    if packet.len() < 32 + 16 || !keys.matches(hop_idx, packet) {
         return Err(OnionError::Malformed);
     }
     let key_bytes = keys.key_for(hop_idx).ok_or(OnionError::Malformed)?;
@@ -388,7 +410,7 @@ pub fn peel_with_pinned_key(
 
 /// Peel a layer, preferring the session-pinned key when present. Falls
 /// back to a full `peel_layer` (X25519 + HKDF + AEAD) when no pinned
-/// keys exist for the session yet.
+/// key matches this packet's ephemeral public key.
 ///
 /// This is the entry point the datapath should call: it lets the very
 /// first packet (which carries the eph_pubkey used to derive the pinned
@@ -401,7 +423,9 @@ pub fn peel_layer_pinned_or_fallback(
     packet: &[u8],
 ) -> Result<PeeledLayer, OnionError> {
     if let Some(keys) = store.get(sid) {
-        return peel_with_pinned_key(&keys, 0, packet);
+        if keys.matches(0, packet) {
+            return peel_with_pinned_key(&keys, 0, packet);
+        }
     }
     peel_layer(static_secret, packet)
 }
@@ -600,11 +624,32 @@ mod tests {
     #[test]
     fn minimum_length_packet_passes_length_check() {
         let (_pk, sk) = fresh_static();
-        let just_enough = vec![0u8; 48];
+        let (ephemeral, _) = fresh_static();
+        let mut just_enough = vec![0u8; 48];
+        just_enough[..32].copy_from_slice(&ephemeral);
         match peel_layer(&sk, &just_enough) {
             Err(OnionError::Aead(_)) => {}
             other => panic!("expected Aead error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn non_contributory_x25519_keys_are_rejected_before_aead() {
+        let (_, secret) = fresh_static();
+        assert!(matches!(
+            peel_layer(&secret, &[0; 48]),
+            Err(OnionError::Malformed)
+        ));
+        assert!(matches!(
+            build_onion(
+                &[HopBuildInput {
+                    static_pubkey: [0; 32],
+                    endpoint: String::new(),
+                }],
+                b"payload",
+            ),
+            Err(OnionError::Malformed)
+        ));
     }
 
     /// 47-byte packets (one below the floor) reject as Malformed.
@@ -889,7 +934,7 @@ mod tests {
                 while !stop.load(Ordering::Relaxed) {
                     let sid_byte = ((iter as u8).wrapping_add(t as u8)) & 0x0F;
                     let sid = crate::session::SessionId::new([sid_byte; 32]);
-                    if iter % 2 == 0 {
+                    if iter.is_multiple_of(2) {
                         let keys = OnionSessionKeys::from_ephemeral_pubkeys(&sk, &[eph]).unwrap();
                         store.pin(sid, keys);
                     } else {

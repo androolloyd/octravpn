@@ -83,6 +83,31 @@ pub enum StateRootError {
     EmptyRegion,
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
+    #[error("invalid snapshot asset path")]
+    BadSnapshotPath,
+}
+
+/// Immutable operator snapshot location. Hashes select content; an anchor is
+/// published only after its referenced resources can be read at these paths.
+pub fn snapshot_path(hash: &str, logical: &str) -> Result<String, StateRootError> {
+    check_hash("snapshot_hash", hash)?;
+    let logical = logical
+        .strip_prefix('/')
+        .ok_or(StateRootError::BadSnapshotPath)?;
+    if logical.is_empty()
+        || logical.len() > 256
+        || logical.split('/').any(|part| {
+            part.is_empty()
+                || part == "."
+                || part == ".."
+                || !part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
+        })
+    {
+        return Err(StateRootError::BadSnapshotPath);
+    }
+    Ok(format!("/octravpn/snapshots/{hash}/{logical}"))
 }
 
 /// Canonical operator-circle state commitment.

@@ -74,7 +74,7 @@ impl Wallet {
         signer: Arc<dyn Signer>,
         policy: Policy,
     ) -> Result<Self, Error> {
-        if policy.chain.chain_id.is_empty()
+        if policy.chain.validate().is_err()
             || policy.max_amount.is_negative()
             || !policy.max_ou.is_positive()
         {
@@ -96,7 +96,7 @@ impl Wallet {
             return Err(invalid("wallet requires an authenticated chain snapshot"));
         };
         if snapshot.chain_id != self.policy.chain.chain_id
-            || snapshot.genesis_root != hex::encode(self.policy.chain.genesis_root.0)
+            || snapshot.origin != self.policy.chain.origin
             || !is_valid_address(context.circle_id.as_bytes())
         {
             return Err(invalid("wallet chain or Circle binding differs"));

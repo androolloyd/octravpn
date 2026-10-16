@@ -7,6 +7,7 @@ pub mod render;
 pub mod url;
 
 use async_trait::async_trait;
+pub use octra_node_protocol::chain_identity::{ChainOrigin, StateRoot};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 pub use url::OctUrl;
@@ -17,7 +18,7 @@ pub const MAX_ASSET_BYTES: usize = 8 * 1024 * 1024;
 #[serde(deny_unknown_fields)]
 pub struct SnapshotIdentity {
     pub chain_id: String,
-    pub genesis_root: String,
+    pub origin: ChainOrigin,
     pub epoch: u64,
     pub state_root: String,
     pub ledger_root: String,

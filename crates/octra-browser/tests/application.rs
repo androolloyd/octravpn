@@ -21,7 +21,9 @@ struct Resolver;
 fn provenance() -> Provenance {
     Provenance::Canonical(SnapshotIdentity {
         chain_id: "test-chain".into(),
-        genesis_root: "00".repeat(32),
+        origin: octra_browser::ChainOrigin::Genesis {
+            state_root: octra_browser::StateRoot([0; 32]),
+        },
         epoch: 4,
         state_root: "11".repeat(32),
         ledger_root: "22".repeat(64),

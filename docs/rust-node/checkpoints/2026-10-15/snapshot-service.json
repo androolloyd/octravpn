@@ -1,0 +1,122 @@
+{
+  "date": "2026-10-15",
+  "status": "passed_scoped_host_qualification",
+  "scope": "Automatic retained-evidence snapshot exporter, bounded lease-aware owned retention and disabled resource-gossip decoding. Private retained-state/filesystem fixtures on Darwin; actual pinned OCaml oracle in network-none Linux container.",
+  "tools": {
+    "rustc": "1.96.0 (ac68faa20 2026-05-25)",
+    "clippy": "0.1.96 (ac68faa20c 2026-05-25)",
+    "declared_rust_floor": "1.89",
+    "cargo_lock_sha256": "f28ad88c09fb9c0ed4ed33eb8866a191cc0fdfba2ad4c5435443942dbefc3b35"
+  },
+  "native": {
+    "repository": "https://github.com/octra-labs/lite_node",
+    "commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+    "builder_image": "sha256:65dee9f250107983aaadbf8d4aa762848bebaa3d531ad1e8e362e01cfff4fd0d",
+    "instrumentation": {},
+    "vectors": 39,
+    "vector_groups": {
+      "policy": 5,
+      "cycle": 9,
+      "override": 8,
+      "retention": 3,
+      "lease": 8,
+      "leases": 1,
+      "disabled_gossip": 5
+    },
+    "used_module_sha256": {
+      "lib/bootstrap/sync_cycle.ml": "189663224300d114865a8613904e608ef2420dd0c017fec44c8c7dba171811ac",
+      "node_runtime/sync_publish.ml": "e4034692d804329401d90d4dd71873d6f2885eeb208b21a5ac18da23eb2da6e9",
+      "node_runtime/sync_lease.ml": "926f7548896008c2805f0021ecba08bac6471427ae4cf433f5d56d5bffa9d85c",
+      "lib/consensus/resource_attestation_flow.ml": "adc430270c25a3674deb17e8a8cc0cf7a2aaaceececd3a8fb8540e7e6698580f"
+    },
+    "oracle": "scripts/node-port/snapshot-service-oracle.ml",
+    "oracle_sha256": "3d864b392fcbf6aab91f552ab902d98205a155d0e7067b3f1e62494880c03409",
+    "generator": "scripts/node-port/snapshot-service-fixtures.py",
+    "generator_sha256": "480ec267fe679606fdb7569beb8c06fadf288436cb06acf76f406eb83f7b790c",
+    "runner_sha256": "b9b3362a4223a7a6a29318e2d0198bafaf6938fc4a32ec96de66a1d724832796",
+    "report_sha256": "e6e2bc459bf5d9888e811219ec3fdc954072fccfbf411c53e8a18c3c5937b449"
+  },
+  "tests": {
+    "exporter_lifecycle": {
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0,
+      "covers": [
+        "authenticated publication and restart",
+        "failed partial capture preserves pointer and retries after restart",
+        "same-head corrupt/missing package repaired by atomic exchange",
+        "actual pending-to-active validator transition anchor",
+        "foreign authority/pointer and linked-owner refusal",
+        "bounded leases preserve owned snapshots and unknown paths",
+        "interrupted deletion recovers only exact owned inode"
+      ]
+    },
+    "explicit_observer_role": {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "test": "network::role_tests::explicit_observer_preserves_native_role_order_without_inventing_single_finality"
+    },
+    "native_comparison": {
+      "passed": 1,
+      "vectors": 39,
+      "failed": 0,
+      "ignored": 0,
+      "test": "native_cycle_lease_and_disabled_resource_gossip_match_pinned_oracle"
+    },
+    "strict_node_clippy": {
+      "all_targets": true,
+      "no_deps": true,
+      "passed": true
+    }
+  },
+  "reproduce": {
+    "native_vectors": "python3 scripts/node-port/snapshot-service-fixtures.py --upstream <pristine-pinned-checkout> --builder-image sha256:65dee9f250107983aaadbf8d4aa762848bebaa3d531ad1e8e362e01cfff4fd0d --out <fresh-report.json>",
+    "commands": [
+      "cargo clippy --offline --locked -p octra-node --all-targets --no-deps -- -D warnings",
+      "cargo test --release --offline --locked -p octra-node --lib snapshot_export -- --test-threads=1",
+      "cargo test --release --offline --locked -p octra-node --lib explicit_observer_preserves_native_role_order -- --test-threads=1",
+      "cargo test --release --offline --locked -p octra-node --test snapshot_service_parity -- --test-threads=1"
+    ]
+  },
+  "provenance": {
+    "node_inventory_files": 85,
+    "node_inventory_aggregate_sha256": "3e6c4e90386b3f5584ba02496f38035414792d66eb1417b556143ff3662f6f27",
+    "aggregate_algorithm": "sha256 of UTF-8 repository-relative path + NUL + lowercase file SHA256 + LF, sorted by path",
+    "selected_source_sha256": {
+      "crates/octra-node/src/snapshot_export.rs": "5a04fc192d548b83538b7c6091593b33af21a518da323541ccdb00bbebb893ef",
+      "crates/octra-node/src/snapshot_export/archive.rs": "43a70dca96e1240974c26894435d5e96e5c29ac721486ae123a2e403f58eeceb",
+      "crates/octra-node/src/snapshot_export/chain.rs": "ebff644aa60ffc7e38b48c6e6b6265de63cfd4a42f974a4247070d480349c8b8",
+      "crates/octra-node/src/snapshot_export/tests.rs": "6499b3c38608a5c8ae414a9026343e02e613cc04599274e3f3d2c89d4da326f4",
+      "crates/octra-node/src/bootstrap/export/package.rs": "97c3bdacdabfb77a7bbe17b7d6f07a63022395e1695df34514e12dcd89f61f62",
+      "crates/octra-node/src/network.rs": "1634aa6465b6b0397a456ff08dc2e95e44e319e94ca1550c3efdad840c9326d9",
+      "crates/octra-node/src/launch.rs": "d92c859b41d3db21e68c84a4a70ae37ef7bc5bc5fe7c52941036c204a2e068db",
+      "crates/octra-node/tests/snapshot_service_parity.rs": "d6a8025febb42e018fea88cbf43953b90ebb1699f2e56bccf3b894d52432ea46",
+      "crates/octra-node/tests/fixtures/snapshot-service.json": "e6e2bc459bf5d9888e811219ec3fdc954072fccfbf411c53e8a18c3c5937b449",
+      "crates/octra-node-protocol/src/state_sync/cycle.rs": "30e9b1bb95f306d6773f7700dd62463c8f157d7f7255d943eee3cabb781e7fa7",
+      "crates/octra-node-protocol/src/state_sync/lease.rs": "f68001a24d641bb06575ae2a4f955a9a0a045ed6cb8896514d8a587be2a61223",
+      "crates/octra-node-protocol/src/consensus/resource_gossip.rs": "0c59219e07d4464fa1d8462677c072499b98d5a645ce3695279553d317ed7bfa",
+      "crates/octra-node-runtime/src/consensus_driver/inbound.rs": "0bf0223047b2c83275a49f88f8bb07957c27acf918e0bb78367c620042d878d3"
+    },
+    "qualification_report_sha256": "3c91f596830c14ce493db06b12beda07b5a571be7dd509a2f3626e75d4e63554",
+    "log_sha256": {
+      "clippy": "2ea8d683b6a44193280f7a42174d6d20f2ce38aa1a641dc5029449606f0f52cb",
+      "exporter": "75e1949da7c0f3ee05943dc59ad7cffac696c13f62adf079adfb163110b93503",
+      "role": "242621605488009d7e98c482fdb149f1badd9408ef7c0f5532ecb2f5e2682a98",
+      "native_parity": "42cfb37266f26791f6a22316a477f5bf4286fa285adaf45671174e4e85003832"
+    },
+    "release_executable_sha256": {
+      "octra_node-88a637fb485769b7": "651083f90357628a2a42e1290d1ac0e646bde49eab4e25f04e6935e6124ebc8a",
+      "snapshot_service_parity-9d856bcae6f0f5aa": "1a7f78d47601c57622fbd89b19e9b61e5351a0e044addfdb224ef31f0ab5398c"
+    },
+    "capture_scope": "These are the exact captured scoped-gate hashes. Later workspace style qualification may supersede them; no claim that every subsequent source file is identical."
+  },
+  "limits": [
+    "Scoped Node lint excludes dependency diagnostics; full workspace strict qualification is separate.",
+    "Full Node integration and combined paid Linux qualification must be rerun after final workspace style changes.",
+    "No public exporter publication or complete native behavioral parity claim.",
+    "Optional resource-attestation committee/model remains disabled and unported; only its active disabled wire boundary is compared.",
+    "Native Single producer remains unsupported; explicit observer and BFT roles do not manufacture quorum certificates.",
+    "No Mainnet, liveness, failure-exhaustiveness or cross-architecture qualification claim."
+  ]
+}

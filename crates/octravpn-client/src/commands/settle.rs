@@ -6,6 +6,9 @@ use crate::{runner::Client, settler};
 
 #[derive(clap::Parser, Debug, Clone)]
 pub(crate) enum SettleCmd {
+    /// Inspect or migrate a legacy wallet-only journal using stored signed
+    /// opening and announcement evidence. Does not contact the chain.
+    Migrate(crate::migration::Args),
     /// Arm a countersigned relay settlement from the durable client journal.
     Arm {
         session_id: String,
@@ -28,6 +31,7 @@ pub(crate) enum SettleCmd {
 
 pub(crate) async fn run(client: &Arc<Client>, cmd: SettleCmd) -> Result<()> {
     match cmd {
+        SettleCmd::Migrate(_) => Err(anyhow!("migration must run before client recovery startup")),
         SettleCmd::Arm {
             session_id,
             from_receipt,

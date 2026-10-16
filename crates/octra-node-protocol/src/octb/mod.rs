@@ -3,8 +3,13 @@
 //! OCTB instruction images. This wire decoder preserves the prior/active rules;
 //! accepting an image is separate from admission, proof checking and execution.
 pub mod admission;
+pub mod assembler;
+mod cost;
+pub mod fhe_work;
 mod instruction;
 mod metadata;
+pub mod program;
+pub mod q16;
 #[cfg(test)]
 mod tests;
 pub mod work;
@@ -21,12 +26,17 @@ pub const MAX_BYTES: usize = 67_108_864;
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
+    #[error("Program admission allocation unavailable")]
+    Allocation,
     #[error("{0}")]
     Message(String),
     #[error("Invalid_argument(\"{0}\")")]
     InvalidArgument(&'static str),
 }
 impl Error {
+    pub fn is_operational(&self) -> bool {
+        matches!(self, Self::Allocation)
+    }
     fn message(text: impl Into<String>) -> Self {
         Self::Message(text.into())
     }

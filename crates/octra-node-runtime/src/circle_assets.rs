@@ -1,6 +1,10 @@
 //! Circle reads from an immutable committed tree. Native storage decoding is
 //! separate from the browser's bounded, public-resource serving policy.
-use crate::{canonical::CanonicalStore, circle_view, state_batch::Snapshot};
+use crate::{
+    canonical::{CanonicalStore, Head, Reader},
+    circle_view,
+    state_batch::{Snapshot, StateBatch},
+};
 use async_trait::async_trait;
 use octra_browser::{
     Asset, AssetResolver, Error, OctUrl, Provenance, SnapshotIdentity, MAX_ASSET_BYTES,
@@ -77,6 +81,18 @@ pub fn public_asset<'a>(
 pub struct CanonicalAssets {
     state: Snapshot,
     identity: SnapshotIdentity,
+    reader: Reader,
+    head: Head,
+}
+
+/// An immutable public-asset capability without a retained historical tree.
+/// Only a captured canonical source can construct this object; requests cannot
+/// supply a root or forge a different read identity.
+#[derive(Clone)]
+pub struct RetainedAssets {
+    reader: Reader,
+    head: Head,
+    identity: SnapshotIdentity,
 }
 impl CanonicalAssets {
     /// Immutable state captured with this published browser identity.
@@ -86,6 +102,14 @@ impl CanonicalAssets {
 
     pub fn identity(&self) -> &SnapshotIdentity {
         &self.identity
+    }
+
+    pub fn retained(&self) -> RetainedAssets {
+        RetainedAssets {
+            reader: self.reader.clone(),
+            head: self.head.clone(),
+            identity: self.identity.clone(),
+        }
     }
 
     /// Capture only the published head. Speculative snapshots cannot acquire
@@ -103,12 +127,14 @@ impl CanonicalAssets {
             state: state.snapshot(),
             identity: SnapshotIdentity {
                 chain_id: store.chain().chain_id.clone(),
-                genesis_root: hex::encode(store.chain().genesis_root.0),
+                origin: store.chain().origin,
                 epoch: head.cursor.epoch.0,
                 state_root: hex::encode(head.cursor.state_root.0),
-                ledger_root: head.ledger_root,
-                irmin_commit: head.irmin_commit,
+                ledger_root: head.ledger_root.clone(),
+                irmin_commit: head.irmin_commit.clone(),
             },
+            reader: store.reader(),
+            head,
         })
     }
 
@@ -253,6 +279,104 @@ impl CanonicalAssets {
             }
         }
         Ok(None)
+    }
+}
+
+impl RetainedAssets {
+    pub fn identity(&self) -> &SnapshotIdentity {
+        &self.identity
+    }
+
+    async fn read(&self, url: &OctUrl) -> Result<Asset, Error> {
+        let circle = url.circle_id.as_bytes();
+        let key = circles::path_key(url.path.as_bytes());
+        let root = [
+            b"circles".as_slice(),
+            circle,
+            b"assets",
+            b"by_hash",
+            key.as_bytes(),
+        ];
+        let mut meta_path = root.to_vec();
+        meta_path.push(b"meta");
+        let meta = self
+            .reader
+            .read_at_bounded(&self.head, &meta_path, 64 * 1024)
+            .await
+            .map_err(unavailable)?
+            .ok_or(Error::NotFound)?;
+        let parsed = AssetMeta::parse(&meta).map_err(unavailable)?;
+        let size = usize::try_from(parsed.size_bytes).map_err(|_| Error::TooLarge)?;
+        if size > MAX_ASSET_BYTES {
+            return Err(Error::TooLarge);
+        }
+        let mut projection = StateBatch::default();
+        projection.begin().map_err(unavailable)?;
+        projection.set(&meta_path, meta).map_err(unavailable)?;
+        let mut paths: Vec<(Vec<&[u8]>, usize)> = vec![
+            (vec![b"meta", b"last_epoch"], 32),
+            (vec![b"circles", circle, b"browser", b"mode"], 64),
+            (vec![b"circles", circle, b"resources", b"mode"], 64),
+        ];
+        let body_limit = size.div_ceil(3) * 4;
+        let mut body_path = root.to_vec();
+        body_path.push(b"body_b64");
+        paths.push((body_path, body_limit));
+        for (path, cap) in paths {
+            if let Some(value) = self
+                .reader
+                .read_at_bounded(&self.head, &path, cap)
+                .await
+                .map_err(unavailable)?
+            {
+                projection.set(&path, value).map_err(unavailable)?;
+            }
+        }
+        for suffix in [
+            "activate_after_epoch",
+            "expire_after_epoch",
+            "tombstone",
+            "revoked",
+        ] {
+            for prefix in ["slot_policy", "mailbox"] {
+                let hash = circles::stable_key(format!("{prefix}:{key}:{suffix}").as_bytes());
+                let path = [
+                    b"circles".as_slice(),
+                    circle,
+                    b"stable",
+                    b"by_hash",
+                    hash.as_bytes(),
+                ];
+                if let Some(value) = self
+                    .reader
+                    .read_at_bounded(&self.head, &path, 64 * 1024)
+                    .await
+                    .map_err(unavailable)?
+                {
+                    projection.set(&path, value).map_err(unavailable)?;
+                }
+            }
+        }
+        // This small projection is not a new canonical tree. Each selected
+        // value was proved against the retained authenticated Head above; reuse
+        // the exact public-mode, visibility, size and body-binding checks.
+        CanonicalAssets {
+            state: projection.snapshot(),
+            identity: self.identity.clone(),
+            reader: self.reader.clone(),
+            head: self.head.clone(),
+        }
+        .read(url)
+    }
+}
+
+#[async_trait]
+impl AssetResolver for RetainedAssets {
+    fn provenance(&self) -> Provenance {
+        Provenance::Canonical(self.identity.clone())
+    }
+    async fn resolve(&self, url: &OctUrl) -> Result<Asset, Error> {
+        self.read(url).await
     }
 }
 fn unavailable(error: impl std::fmt::Display) -> Error {

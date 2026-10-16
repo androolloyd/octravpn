@@ -1,0 +1,70 @@
+// Isolated v5 security fragment; original production methods compile unchanged.
+// Kept below the adopted native compiler method-label range.
+private fn test_seed_circle() {
+  self.min_circle_stake = 100000000
+  self.unbond_grace_epochs = 1000
+  self.circle_owner[caller] = caller
+  self.circle_active[caller] = 1
+  self.circle_state_version[caller] = 1
+  self.circle_bond[caller] = 100000000
+  self.circle_registration_approved[caller] = 1
+  self.circle_authorized_owner[caller] = caller
+}
+
+private fn test_seed_session(): uint {
+  test_seed_circle()
+  self.min_session_deposit = 1
+  self.session_grace_epochs = 100
+  self.sweep_grace_multiplier = 10
+  self.tailnet_count = 1
+  // Internal treasury refunds keep isolated VM tests independent of host transfers.
+  return write_session(0, caller, 100, 1)
+}
+
+private fn test_seed_admin() {
+  self.admin_nonce = 0
+  self.pending_admin_commitment = ""
+}
+
+// expect-revert test_admin_nonce_mismatch "admin nonce mismatch"
+fn test_admin_nonce_mismatch(): bool {
+  test_seed_admin()
+  return set_paused(1, 1, "", "")
+}
+
+// expect-revert test_admin_missing_private_proof "invalid admin digest"
+fn test_admin_missing_private_proof(): bool {
+  test_seed_admin()
+  return set_paused(1, 0, "", "")
+}
+
+// expect-revert test_admin_nonce_exhaustion "admin nonce exhausted"
+fn test_admin_nonce_exhaustion(): bool {
+  test_seed_admin()
+  self.admin_nonce = 18446744073709551615
+  return set_paused(1, 18446744073709551615, "", "")
+}
+
+// expect-revert test_admin_pending_freezes_governance "admin handoff pending"
+fn test_admin_pending_freezes_governance(): bool {
+  test_seed_admin()
+  self.pending_admin_commitment = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  return set_paused(1, 0, "", "")
+}
+
+// expect-revert test_admin_reused_credential_rejected "admin credential already used"
+fn test_admin_reused_credential_rejected(): bool {
+  let old = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  self.admin_commitment = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  self.admin_used_commitments[old] = 1
+  return propose_admin(old, 1, 0, "", "")
+}
+
+fn test_paused_exit_remains_recoverable(): bool {
+  test_seed_circle()
+  self.paused = 1
+  require(retire_circle(caller), "retire failed")
+  require(unbond_endpoint(caller), "unbond failed")
+  require(self.circle_unbonding[caller] == 100000000, "paused exit lost stake")
+  return true
+}

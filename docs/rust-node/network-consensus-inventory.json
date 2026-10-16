@@ -1,12 +1,13 @@
 {
   "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
-  "scope": "All net/*.ml and lib/consensus/*.ml; node_runtime networking, consensus, sync, validator and network boot modules; core P2P/auth/consensus admission and Ed25519 guard. This is a source dependency inventory, not a full-node completeness claim.",
+  "scope": "All net/*.ml and lib/consensus/*.ml; selected node_runtime networking, consensus, sync, validator and boot modules; core P2P/auth/consensus admission and Ed25519 guard. Current source mappings distinguish integration/storage adaptation from finite native parity; no whole-node or Mainnet completeness claim.",
   "full_consensus_execution": false,
   "public_peer_interoperability": false,
   "counts": {
-    "missing": 104,
-    "partial": 28,
-    "ported-boundary": 35
+    "partial": 31,
+    "ported-boundary": 39,
+    "source-integrated": 90,
+    "storage-adapted": 7
   },
   "sources": [
     {
@@ -243,7 +244,8 @@
         "Unix",
         "Z"
       ],
-      "qualification": "Native admission, scheduling, vote durability, pending recovery, root/bundle/finality queries and bulk catch-up source agreement are ported. Range full/prefix selection, hash-table tie order, historical weights/count floor, rejection memoization, activation cap and waves match 384 unmodified native query cases. Separate owned range windows cover duplicate, legacy-relay, cancellation and timeout handling. Complete validator driver and production activation adapters remain open. A live Rust actor now integrates engine outputs, authenticated peers, proposal workers, journals, round sync and canonical Node publication. Local four-validator tests compose public Circle execution, browser URLs, VPN admission and ExEx. Whole-driver native parity, production boot/activation and autonomous recovery remain open."
+      "historical_qualification": "Native admission, scheduling, vote durability, pending recovery, root/bundle/finality queries and bulk catch-up source agreement are ported. Range full/prefix selection, hash-table tie order, historical weights/count floor, rejection memoization, activation cap and waves match 384 unmodified native query cases. Separate owned range windows cover duplicate, legacy-relay, cancellation and timeout handling. Complete validator driver and production activation adapters remain open. A live Rust actor now integrates engine outputs, authenticated peers, proposal workers, journals, round sync and canonical Node publication. Local four-validator tests compose public Circle execution, browser URLs, VPN admission and ExEx. Whole-driver native parity, production boot/activation and autonomous recovery remain open.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "lib/consensus/c_engine.ml",
@@ -340,7 +342,8 @@
       "external_or_nested_modules": [
         "Int64"
       ],
-      "qualification": "Native complete/legacy routing and retry scheduling qualified in consensus-recovery fixtures; live catchup driver remains open."
+      "historical_qualification": "Native complete/legacy routing and retry scheduling qualified in consensus-recovery fixtures; live catchup driver remains open.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "lib/consensus/c_hash.ml",
@@ -382,8 +385,8 @@
     {
       "source": "lib/consensus/c_light_account.ml",
       "source_sha256": "c2195b32b588faa4ab8c2fdee7e5c4f513fe7418f25d8e85e75afc24630a147b",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/light_rpc.rs",
       "native_module_dependencies": {
         "Hash_domain": [
           "net/hash_domain.ml"
@@ -396,13 +399,19 @@
         "Int64",
         "Octra_net",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Signed root, epoch, account and multi-record light-client codecs, verification and quorum projection; source mapping does not establish every proof-RPC or native-client outcome.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/light_rpc/json.rs",
+        "crates/octra-node/src/rpc/native/chain.rs"
       ]
     },
     {
       "source": "lib/consensus/c_light_client.ml",
       "source_sha256": "4ec36226ddee23f8f6bfe5b487a5edd8f6fb608de174f675dcd165c896cbf786",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/light_rpc.rs",
       "native_module_dependencies": {
         "C_light_epoch": [
           "lib/consensus/c_light_epoch.ml"
@@ -422,13 +431,19 @@
         "List",
         "Printf",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Signed root, epoch, account and multi-record light-client codecs, verification and quorum projection; source mapping does not establish every proof-RPC or native-client outcome.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/light_rpc/json.rs",
+        "crates/octra-node/src/rpc/native/chain.rs"
       ]
     },
     {
       "source": "lib/consensus/c_light_epoch.ml",
       "source_sha256": "ba545de7439edc40b85805338fe5a55e5c95871bbb2db71fe5a6e6b0c898fd4c",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/light_rpc.rs",
       "native_module_dependencies": {
         "Epoch_index_commitment": [
           "net/epoch_index_commitment.ml",
@@ -440,13 +455,19 @@
         "List",
         "Octra_net",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Signed root, epoch, account and multi-record light-client codecs, verification and quorum projection; source mapping does not establish every proof-RPC or native-client outcome.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/light_rpc/json.rs",
+        "crates/octra-node/src/rpc/native/chain.rs"
       ]
     },
     {
       "source": "lib/consensus/c_light_json.ml",
       "source_sha256": "51447d2dfa564c15cc1dc7b064be761c4bdfe93d15cdfd5fa756cf014ff1539a",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/light_rpc.rs",
       "native_module_dependencies": {
         "C_light_account": [
           "lib/consensus/c_light_account.ml"
@@ -470,13 +491,19 @@
         "String",
         "Yojson",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Signed root, epoch, account and multi-record light-client codecs, verification and quorum projection; source mapping does not establish every proof-RPC or native-client outcome.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/light_rpc/json.rs",
+        "crates/octra-node/src/rpc/native/chain.rs"
       ]
     },
     {
       "source": "lib/consensus/c_light_multi.ml",
       "source_sha256": "1f9fa95357d46e4e4e4d5b0e389eb5b1884e79f1da08e642232720e7791f14e1",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/light_rpc.rs",
       "native_module_dependencies": {
         "C_light_client": [
           "lib/consensus/c_light_client.ml"
@@ -494,13 +521,19 @@
       "external_or_nested_modules": [
         "List",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Signed root, epoch, account and multi-record light-client codecs, verification and quorum projection; source mapping does not establish every proof-RPC or native-client outcome.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/light_rpc/json.rs",
+        "crates/octra-node/src/rpc/native/chain.rs"
       ]
     },
     {
       "source": "lib/consensus/c_light_root.ml",
       "source_sha256": "2c2f0ae7d1b7b16cac9dc9f2cea8445d5c78aabe4b18b9a682ad2d24ef29ba25",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/light_rpc.rs",
       "native_module_dependencies": {
         "C_hash": [
           "lib/consensus/c_hash.ml"
@@ -519,13 +552,19 @@
         "Int64",
         "Octra_net",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Signed root, epoch, account and multi-record light-client codecs, verification and quorum projection; source mapping does not establish every proof-RPC or native-client outcome.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/light_rpc/json.rs",
+        "crates/octra-node/src/rpc/native/chain.rs"
       ]
     },
     {
       "source": "lib/consensus/c_light_validator_set.ml",
       "source_sha256": "e46554db4fb557e0af8b8963b8a7253673d19393b424d543b659714b6279c6cf",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/light_rpc.rs",
       "native_module_dependencies": {
         "C_config": [
           "lib/consensus/c_config.ml"
@@ -539,17 +578,26 @@
         "Option",
         "String",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Signed root, epoch, account and multi-record light-client codecs, verification and quorum projection; source mapping does not establish every proof-RPC or native-client outcome.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/light_rpc/json.rs",
+        "crates/octra-node/src/rpc/native/chain.rs"
       ]
     },
     {
       "source": "lib/consensus/c_loop.ml",
       "source_sha256": "3b6ef8c25670a3cbd5a4f30f60cf0f696c361a2fd4e1b25319bf6a577c361bd0",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-runtime/src/consensus_driver/mod.rs",
       "native_module_dependencies": {},
       "external_or_nested_modules": [
         "Lwt"
-      ]
+      ],
+      "historical_status": "missing",
+      "qualification": "The native loop is composed into the owned Rust driver/event loop; no separate C_loop file is needed.",
+      "rust_related": []
     },
     {
       "source": "lib/consensus/c_output_actor.ml",
@@ -564,7 +612,8 @@
       "external_or_nested_modules": [
         "Lwt"
       ],
-      "qualification": "Native pure actor traces and asynchronous OutputPump coalescing, cooperative yielding, error, panic and cancellation tests."
+      "historical_qualification": "Native pure actor traces and asynchronous OutputPump coalescing, cooperative yielding, error, panic and cancellation tests.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "lib/consensus/c_pace.ml",
@@ -615,7 +664,8 @@
         "Lwt",
         "Lwt_mutex"
       ],
-      "qualification": "82 native asynchronous traces qualify serialized work, relevance checks and queued/running cancellation."
+      "historical_qualification": "82 native asynchronous traces qualify serialized work, relevance checks and queued/running cancellation.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "lib/consensus/c_protocol.ml",
@@ -679,7 +729,8 @@
         "Option",
         "Printexc"
       ],
-      "qualification": "Native pure relay traces plus 98 asynchronous traces qualify bounded queue, deadlines, deduplication, failures and cancellation. Three authenticated local TCP peers qualify swarm delivery, byte preservation, exclusion and generation boundaries. Full driver remains open."
+      "historical_qualification": "Native pure relay traces plus 98 asynchronous traces qualify bounded queue, deadlines, deduplication, failures and cancellation. Three authenticated local TCP peers qualify swarm delivery, byte preservation, exclusion and generation boundaries. Full driver remains open.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "lib/consensus/c_relief.ml",
@@ -707,7 +758,8 @@
         "String",
         "Z"
       ],
-      "qualification": "Native authenticated relief decisions, intersection thresholds and proofs qualified in consensus-recovery fixtures; durable relief journal and authenticated restart have separate qualification."
+      "historical_qualification": "Native authenticated relief decisions, intersection thresholds and proofs qualified in consensus-recovery fixtures; durable relief journal and authenticated restart have separate qualification.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "lib/consensus/c_relief_log.ml",
@@ -741,7 +793,8 @@
         "Unix",
         "Yojson"
       ],
-      "qualification": "198 unmodified native memory/disk traces, 4101 operations: exact records, conflicts, corrupt records, staging, restart and pruning. Integrated with exclusive JournalOwner; restored plans reauthenticate witnesses before use. Native OS/JSON parser diagnostic text is normalized, admission is not."
+      "historical_qualification": "198 unmodified native memory/disk traces, 4101 operations: exact records, conflicts, corrupt records, staging, restart and pruning. Integrated with exclusive JournalOwner; restored plans reauthenticate witnesses before use. Native OS/JSON parser diagnostic text is normalized, admission is not.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "lib/consensus/c_reward_source.ml",
@@ -768,11 +821,16 @@
     {
       "source": "lib/consensus/c_role.ml",
       "source_sha256": "044e74b68d5f99bc394f5ed18f8afed5ed900987fceeb77c084857a9d5cd211c",
-      "status": "missing",
-      "rust": null,
+      "status": "partial",
+      "rust": "crates/octra-node/src/launch.rs",
       "native_module_dependencies": {},
       "external_or_nested_modules": [
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Observer/voting startup and membership/serving gates are captured by the launcher. Native standalone Single-role behavior is a separate unmapped scope; this mapping does not establish it.",
+      "rust_related": [
+        "crates/octra-node/src/network.rs"
       ]
     },
     {
@@ -788,7 +846,8 @@
         "Readers",
         "Set"
       ],
-      "qualification": "Native request admission, generation, timing and vote-weight guards qualified in consensus-recovery fixtures."
+      "historical_qualification": "Native request admission, generation, timing and vote-weight guards qualified in consensus-recovery fixtures.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "lib/consensus/c_round_pool.ml",
@@ -817,7 +876,8 @@
         "Unix",
         "Z"
       ],
-      "qualification": "Native round history and weighted witness selection qualified by driver-work fixtures; input signatures must be authenticated by the caller."
+      "historical_qualification": "Native round history and weighted witness selection qualified by driver-work fixtures; input signatures must be authenticated by the caller.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "lib/consensus/c_seen.ml",
@@ -864,7 +924,8 @@
         "Sys",
         "Unix"
       ],
-      "qualification": "Native authenticated round-sync retention, persistence, pruning and recovery qualified in consensus-journal fixtures."
+      "historical_qualification": "Native authenticated round-sync retention, persistence, pruning and recovery qualified in consensus-journal fixtures.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "lib/consensus/c_types.ml",
@@ -923,7 +984,8 @@
         "Sys",
         "Unix"
       ],
-      "qualification": "Native bytes, conflicts, floors, recovery and pruning qualified in consensus-journal fixtures; JournalOwner retains exclusive ownership across worker cancellation."
+      "historical_qualification": "Native bytes, conflicts, floors, recovery and pruning qualified in consensus-journal fixtures; JournalOwner retains exclusive ownership across worker cancellation.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "lib/consensus/c_work_slot.ml",
@@ -932,7 +994,8 @@
       "rust": "crates/octra-node-protocol/src/consensus/driver_work.rs",
       "native_module_dependencies": {},
       "external_or_nested_modules": [],
-      "qualification": "Native proposal worker slot and stale completion handling qualified by driver-work fixtures."
+      "historical_qualification": "Native proposal worker slot and stale completion handling qualified by driver-work fixtures.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "lib/consensus/epoch_time.ml",
@@ -949,8 +1012,8 @@
     {
       "source": "lib/consensus/finality_log.ml",
       "source_sha256": "47132817b14c4ca058e2ee1d2c64b447dea5866860450ceff04f78630254202f",
-      "status": "missing",
-      "rust": null,
+      "status": "storage-adapted",
+      "rust": "crates/octra-node-runtime/src/canonical.rs",
       "native_module_dependencies": {
         "C_codec": [
           "lib/consensus/c_codec.ml"
@@ -983,13 +1046,19 @@
         "Sys",
         "Unix",
         "Yojson"
+      ],
+      "historical_status": "missing",
+      "qualification": "The Rust host uses one audited SQLite canonical transaction/outbox instead of native flat finality-log files. Restart and replay use retained finality; byte-compatible legacy log migration is not claimed.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/finality.rs",
+        "crates/octra-node/src/recovery.rs"
       ]
     },
     {
       "source": "lib/consensus/finality_recovery.ml",
       "source_sha256": "6ba93ba5406b1fda8df4478122b6ee985c64731e82394ff376eb8990211c0590",
-      "status": "missing",
-      "rust": null,
+      "status": "storage-adapted",
+      "rust": "crates/octra-node-runtime/src/canonical.rs",
       "native_module_dependencies": {
         "Finality_log": [
           "lib/consensus/finality_log.ml"
@@ -997,13 +1066,19 @@
       },
       "external_or_nested_modules": [
         "Printf"
+      ],
+      "historical_status": "missing",
+      "qualification": "The Rust host uses one audited SQLite canonical transaction/outbox instead of native flat finality-log files. Restart and replay use retained finality; byte-compatible legacy log migration is not claimed.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/finality.rs",
+        "crates/octra-node/src/recovery.rs"
       ]
     },
     {
       "source": "lib/consensus/resource_attestation_admission.ml",
       "source_sha256": "273710b797181db0f2b50345c6b646d0ba0f16ea76cf0cb3a3a30cbefe3a9cdc",
-      "status": "missing",
-      "rust": null,
+      "status": "ported-boundary",
+      "rust": "crates/octra-node-protocol/src/consensus/resource_attestation_admission.rs",
       "native_module_dependencies": {
         "Hash_domain": [
           "net/hash_domain.ml"
@@ -1020,13 +1095,18 @@
         "Int64",
         "Octra_net",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "All121top-level native APIs implemented and exercised by1070exact native oracle cases, including25signed positive proof witnesses and ordered bounded pool behavior. Strict actual Node and Protocol library gates passed; reviewed13path adoption. See optional-resource checkpoint. Optional committee activation remains None exactly as upstream production; proof receipt/commitment models do not execute FHE/PVAC backends.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/consensus/resource_gossip.rs"
       ]
     },
     {
       "source": "lib/consensus/resource_attestation_flow.ml",
       "source_sha256": "adc430270c25a3674deb17e8a8cc0cf7a2aaaceececd3a8fb8540e7e6698580f",
-      "status": "missing",
-      "rust": null,
+      "status": "ported-boundary",
+      "rust": "crates/octra-node-protocol/src/consensus/resource_attestation_flow.rs",
       "native_module_dependencies": {
         "C_types": [
           "lib/consensus/c_types.ml"
@@ -1046,13 +1126,18 @@
         "List",
         "Octra_net",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "All121top-level native APIs implemented and exercised by1070exact native oracle cases, including25signed positive proof witnesses and ordered bounded pool behavior. Strict actual Node and Protocol library gates passed; reviewed13path adoption. See optional-resource checkpoint. Optional committee activation remains None exactly as upstream production; proof receipt/commitment models do not execute FHE/PVAC backends.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/consensus/resource_gossip.rs"
       ]
     },
     {
       "source": "lib/consensus/resource_attestations.ml",
       "source_sha256": "48f95724087aa16355d898ade32b6eacc72261cfeb48a8d3715fdf5b2b4b7d2b",
-      "status": "missing",
-      "rust": null,
+      "status": "ported-boundary",
+      "rust": "crates/octra-node-protocol/src/consensus/resource_attestations.rs",
       "native_module_dependencies": {
         "C_hash": [
           "lib/consensus/c_hash.ml"
@@ -1073,13 +1158,18 @@
         "Octra_net",
         "String",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "All121top-level native APIs implemented and exercised by1070exact native oracle cases, including25signed positive proof witnesses and ordered bounded pool behavior. Strict actual Node and Protocol library gates passed; reviewed13path adoption. See optional-resource checkpoint. Optional committee activation remains None exactly as upstream production; proof receipt/commitment models do not execute FHE/PVAC backends.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/consensus/resource_gossip.rs"
       ]
     },
     {
       "source": "lib/consensus/resource_compute_capability.ml",
       "source_sha256": "99cbaad3b93b0494edb3380ecf80c7450658f45ac8bb34225fcc7d1e2dfaa880",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/resource_compute/capability.rs",
       "native_module_dependencies": {
         "Hash_domain": [
           "net/hash_domain.ml"
@@ -1092,13 +1182,16 @@
         "Int64",
         "Octra_net",
         "String"
-      ]
+      ],
+      "historical_status": "missing",
+      "qualification": "Compute capability codec and authorization boundary; distinct from the optional resource-attestation committee model.",
+      "rust_related": []
     },
     {
       "source": "lib/consensus/resource_compute_certificate.ml",
       "source_sha256": "0e5783ebb3380eac0f6d4d884968dc27ed89d10156f24fd02eb17c0c0160abd2",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/resource_compute/certificate.rs",
       "native_module_dependencies": {
         "Hash_domain": [
           "net/hash_domain.ml"
@@ -1117,13 +1210,16 @@
         "ResultMap",
         "String",
         "Z"
-      ]
+      ],
+      "historical_status": "missing",
+      "qualification": "Compute certificate parsing, signature/committee and projection boundary; complete public operation is separately qualified.",
+      "rust_related": []
     },
     {
       "source": "lib/consensus/resource_compute_protocol.ml",
       "source_sha256": "32ecdae53fa09b24c1e4d36341c71e641408efbc8b0f8e9509d503bd66905082",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/resource_compute/wire.rs",
       "native_module_dependencies": {
         "Hash_domain": [
           "net/hash_domain.ml"
@@ -1143,13 +1239,19 @@
         "Option",
         "Selection",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Resource-compute wire messages and bounded runtime ingress are implemented.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/compute_service/service/network.rs",
+        "crates/octra-node/src/compute.rs"
       ]
     },
     {
       "source": "lib/consensus/resource_compute_selection.ml",
       "source_sha256": "57431c80e416b42a636d8917657748d2c2d98f093576c5d145762cbcf5382db2",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/resource_compute/selection.rs",
       "native_module_dependencies": {
         "Hash_domain": [
           "net/hash_domain.ml"
@@ -1165,13 +1267,18 @@
         "NodeMap",
         "Octra_net",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Compute committee/selection rules and provider snapshots are implemented.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/compute_service/committee.rs"
       ]
     },
     {
       "source": "lib/core/bft_control_admission.ml",
       "source_sha256": "c1ad2f13289c89e730c32780705ecff709558f3de3d3ab1a1905abadcbb7a9e3",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/control_payload.rs",
       "native_module_dependencies": {
         "Transaction": [
           "lib/core/transaction.ml"
@@ -1186,25 +1293,36 @@
           "lib/core/validator_set_update.ml"
         ]
       },
-      "external_or_nested_modules": []
+      "external_or_nested_modules": [],
+      "historical_status": "missing",
+      "qualification": "Native control-payload parsing and validator transaction admission are integrated.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/validator_transaction.rs"
+      ]
     },
     {
       "source": "lib/core/consensus.ml",
       "source_sha256": "4e619440e4370af8cd74f8d1ae28f0b51dcf7fbe454ed533124f55f987d79c14",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/consensus/mod.rs",
       "native_module_dependencies": {},
       "external_or_nested_modules": [
         "List",
         "String",
         "Validator"
+      ],
+      "historical_status": "missing",
+      "qualification": "Native consensus codecs/engine/policy are composed by the runtime driver and node authority.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/consensus_driver/mod.rs",
+        "crates/octra-node/src/consensus.rs"
       ]
     },
     {
       "source": "lib/core/p2p.ml",
       "source_sha256": "27cf075d596a9599b8b8266a3c9327eddcd9a46602b6c9e119b54a941ca31e39",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/network/mod.rs",
       "native_module_dependencies": {
         "Node": [
           "lib/core/node.ml"
@@ -1218,13 +1336,18 @@
         "String",
         "Unix",
         "Yojson"
+      ],
+      "historical_status": "missing",
+      "qualification": "Native P2P framing/authentication/swarm composition is implemented; public peer synchronization is a separate gate.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/network/swarm.rs"
       ]
     },
     {
       "source": "lib/core/peer_auth.ml",
       "source_sha256": "1871452c1a081400b92201478ecf282cb1e8522ba2183369cd080984da4a2f9e",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/network/handshake.rs",
       "native_module_dependencies": {
         "Octra_ed25519": [
           "crypto_guard/octra_ed25519.ml"
@@ -1234,6 +1357,11 @@
         "Base64",
         "Ed25519",
         "Mirage_crypto_ec"
+      ],
+      "historical_status": "missing",
+      "qualification": "Native HELLO/ACK/FINISH authentication is implemented and has finite local native-peer interoperability evidence.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/network/session.rs"
       ]
     },
     {
@@ -1319,7 +1447,8 @@
         "String",
         "Unix"
       ],
-      "qualification": "Authenticated full-duplex driver, bounded mailbox, cancellation and shutdown tested; native metrics/logging and all platform accept errors need broader qualification."
+      "historical_qualification": "Authenticated full-duplex driver, bounded mailbox, cancellation and shutdown tested; native metrics/logging and all platform accept errors need broader qualification.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "net/p2p_endpoint.ml",
@@ -1334,7 +1463,8 @@
         "String",
         "Sys"
       ],
-      "qualification": "Native parse, CSV and bootstrap ordering qualified; advertised environment adapter is explicit configuration and not a process environment loader."
+      "historical_qualification": "Native parse, CSV and bootstrap ordering qualified; advertised environment adapter is explicit configuration and not a process environment loader.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "net/p2p_frame.ml",
@@ -1372,8 +1502,8 @@
     {
       "source": "net/p2p_gossip.ml",
       "source_sha256": "5f1bc009028e31c4f3691a8475b75b2553e8ba96688bf8088661e87ca3a67d05",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/network/swarm/service.rs",
       "native_module_dependencies": {
         "Hash_domain": [
           "net/hash_domain.ml"
@@ -1392,6 +1522,11 @@
         "Lwt_list",
         "Printf",
         "Unix"
+      ],
+      "historical_status": "missing",
+      "qualification": "Gossip queues, peer routing and delivery are integrated into the owned swarm service.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/proposal_relay.rs"
       ]
     },
     {
@@ -1428,8 +1563,8 @@
     {
       "source": "net/p2p_peer_diag.ml",
       "source_sha256": "657718409abe73ebf84f4b907911a7174820aea5d763808daf63ba7c5b4e27ac",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/network/peer_diag.rs",
       "native_module_dependencies": {
         "P2p_peer_guard": [
           "net/p2p_peer_guard.ml"
@@ -1443,7 +1578,10 @@
         "List",
         "Option",
         "String"
-      ]
+      ],
+      "historical_status": "missing",
+      "qualification": "Peer diagnostics are implemented; finite native-peer fixture evidence has its own captured source hashes.",
+      "rust_related": []
     },
     {
       "source": "net/p2p_peer_guard.ml",
@@ -1457,7 +1595,8 @@
         "String",
         "Unix"
       ],
-      "qualification": "761 combined native peer-policy cases include abuse windows, bans, counters and deterministic eviction."
+      "historical_qualification": "761 combined native peer-policy cases include abuse windows, bans, counters and deterministic eviction.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "net/p2p_peer_record.ml",
@@ -1480,7 +1619,8 @@
         "Printf",
         "String"
       ],
-      "qualification": "Native signed records, wire bounds, hashes and eclipse buckets; live OCaml peer validates transport interoperability."
+      "historical_qualification": "Native signed records, wire bounds, hashes and eclipse buckets; live OCaml peer validates transport interoperability.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "net/p2p_peer_registry.ml",
@@ -1498,7 +1638,8 @@
         "List",
         "String"
       ],
-      "qualification": "Native expiry, future skew, refresh ordering and eclipse bucket enforcement."
+      "historical_qualification": "Native expiry, future skew, refresh ordering and eclipse bucket enforcement.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "net/p2p_swarm.ml",
@@ -1555,7 +1696,8 @@
         "String",
         "Unix"
       ],
-      "qualification": "Live authenticated swarm with discovery, reconnect, role/capacity checks, profiles and shutdown. Rust mesh plus native OCaml inbound interoperability pass. Diagnostics, full-node dispatch and wider failure qualification remain."
+      "historical_qualification": "Live authenticated swarm with discovery, reconnect, role/capacity checks, profiles and shutdown. Rust mesh plus native OCaml inbound interoperability pass. Diagnostics, full-node dispatch and wider failure qualification remain.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "net/p2p_tx_gossip.ml",
@@ -1571,7 +1713,8 @@
         "List",
         "String"
       ],
-      "qualification": "1238 native wire/planning cases; live native inventory/request interoperability."
+      "historical_qualification": "1238 native wire/planning cases; live native inventory/request interoperability.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "net/p2p_tx_gossip_guard.ml",
@@ -1591,7 +1734,8 @@
         "List",
         "String"
       ],
-      "qualification": "158 native traces covering quotas, bounded retry cache, nonfinite/rollback clocks and eviction. Timestamps compared as exact IEEE-754 bits."
+      "historical_qualification": "158 native traces covering quotas, bounded retry cache, nonfinite/rollback clocks and eviction. Timestamps compared as exact IEEE-754 bits.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "net/p2p_tx_seen.ml",
@@ -1607,7 +1751,8 @@
         "String",
         "Times"
       ],
-      "qualification": "158 native traces covering quotas, bounded retry cache, nonfinite/rollback clocks and eviction. Timestamps compared as exact IEEE-754 bits."
+      "historical_qualification": "158 native traces covering quotas, bounded retry cache, nonfinite/rollback clocks and eviction. Timestamps compared as exact IEEE-754 bits.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "net/p2p_upgrade_plan.ml",
@@ -1631,7 +1776,8 @@
         "String",
         "Sys"
       ],
-      "qualification": "832 combined native cases cover upgrade/rollback hashes, readiness and swarm policy; native environment variable loading is not implemented."
+      "historical_qualification": "832 combined native cases cover upgrade/rollback hashes, readiness and swarm policy; native environment variable loading is not implemented.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "node_runtime/consensus_bundle_cache.ml",
@@ -1698,7 +1844,8 @@
         "Weak",
         "Yojson"
       ],
-      "qualification": "Native cached-bundle decoding is ported and exercised through the precommit host oracle. Cache ownership, waiters and live proposal acquisition remain driver integration work."
+      "historical_qualification": "Native cached-bundle decoding is ported and exercised through the precommit host oracle. Cache ownership, waiters and live proposal acquisition remain driver integration work.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "node_runtime/consensus_bundle_fetch.ml",
@@ -1727,7 +1874,8 @@
         "Octra_core",
         "String"
       ],
-      "qualification": "Signed network fetch carries validated decoded bundles into the node import path; empty finalized bundles bypass fetching. Native cache/local-preverification fast paths, bundle notifications and complete proposal orchestration remain open."
+      "historical_qualification": "Signed network fetch carries validated decoded bundles into the node import path; empty finalized bundles bypass fetching. Native cache/local-preverification fast paths, bundle notifications and complete proposal orchestration remain open.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "node_runtime/consensus_bundle_validation.ml",
@@ -1777,16 +1925,22 @@
         "String",
         "Yojson"
       ],
-      "qualification": "Native finalized and proposal admission, validation order and normalized cache representation match 381 recovery cases plus 549 proposal cases. Transaction JSON diagnostic text is normalized separately; execution is an independent gate."
+      "historical_qualification": "Native finalized and proposal admission, validation order and normalized cache representation match 381 recovery cases plus 549 proposal cases. Transaction JSON diagnostic text is normalized separately; execution is an independent gate.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "node_runtime/consensus_catchup_queue.ml",
       "source_sha256": "bd5514eea4ff995fb37a899395935f4f1f4a2e5a65fcddfaa73b22cd99af34ef",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/sync.rs",
       "native_module_dependencies": {},
       "external_or_nested_modules": [
         "Int64"
+      ],
+      "historical_status": "missing",
+      "qualification": "Bounded peer catch-up and owned import are composed by the node supervisor.",
+      "rust_related": [
+        "crates/octra-node/src/recovery.rs"
       ]
     },
     {
@@ -1853,7 +2007,8 @@
         "String",
         "Yojson"
       ],
-      "qualification": "Canonical history exports revalidated roots, signed-finality records, reward attribution, transaction bundles and bounded ranges. Reopened source database drives signed peer recovery, local browser/VPN admission and ExEx restart. Native malformed epoch-log fallback and complete bulk catch-up remain unqualified."
+      "historical_qualification": "Canonical history exports revalidated roots, signed-finality records, reward attribution, transaction bundles and bounded ranges. Reopened source database drives signed peer recovery, local browser/VPN admission and ExEx restart. Native malformed epoch-log fallback and complete bulk catch-up remain unqualified.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "node_runtime/consensus_catchup_shell.ml",
@@ -1938,13 +2093,14 @@
         "Sys",
         "Yojson"
       ],
-      "qualification": "Native peer range payload/continuity admission and consecutive execution over authenticated range agreement are integrated with atomic publication, browser/VPN suspension and ExEx recovery. Full shell target selection, HTTP fallback, snapshot, fork repair and production driver integration remain open."
+      "historical_qualification": "Native peer range payload/continuity admission and consecutive execution over authenticated range agreement are integrated with atomic publication, browser/VPN suspension and ExEx recovery. Full shell target selection, HTTP fallback, snapshot, fork repair and production driver integration remain open.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "node_runtime/consensus_circle_cell_preverify.ml",
       "source_sha256": "9bd54349c408ae1f8549e96d2302ebc6f19ee88fdb2dcbd7b9ec57984b2eda79",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-runtime/src/circle_cell.rs",
       "native_module_dependencies": {
         "Epoch_exec": [
           "lib/core/epoch_exec.ml"
@@ -1974,6 +2130,12 @@
         "Result",
         "String",
         "Transition"
+      ],
+      "historical_status": "missing",
+      "qualification": "Private-cell payload/policy, proof and prepared-receipt boundaries are implemented.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/circle_cell_crypto.rs",
+        "crates/octra-node-runtime/src/preverify_state.rs"
       ]
     },
     {
@@ -2005,7 +2167,8 @@
         "Octra_vm",
         "Store"
       ],
-      "qualification": "Legacy OCTB Circle deployment/update admission matches 248 production epochs. Bytecode, verifier and opcode policy match 6910 native cases. OCPG certificates and Program type-flow admission remain unavailable."
+      "historical_qualification": "Legacy OCTB Circle deployment/update admission matches 248 production epochs. Bytecode, verifier and opcode policy match 6910 native cases. OCPG certificates and Program type-flow admission remain unavailable.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "node_runtime/consensus_circle_preverify.ml",
@@ -2055,13 +2218,14 @@
         "Result",
         "String"
       ],
-      "qualification": "Public WASM capture/consume execution binds snapshot, code, stable storage, public reads, context and transcript. 104 unmodified native Circle host cases qualify bindings and effects. Full preview/rule fold, private capability contexts and shared-worker integration remain open."
+      "historical_qualification": "Public WASM capture/consume execution binds snapshot, code, stable storage, public reads, context and transcript. 104 unmodified native Circle host cases qualify bindings and effects. Full preview/rule fold, private capability contexts and shared-worker integration remain open.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "node_runtime/consensus_driver_boot_shell.ml",
       "source_sha256": "7ff8b345be26c8e10fc419975a2fcae9816ac8b80c1520b038b5032f30164cfa",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/launch.rs",
       "native_module_dependencies": {
         "C_codec": [
           "lib/consensus/c_codec.ml"
@@ -2216,13 +2380,19 @@
         "Printf",
         "Result",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Shared native launcher wires captured execution/authority, authenticated swarm, driver, owned queues, duty, browser/VPN/ExEx and shutdown.",
+      "rust_related": [
+        "crates/octra-node/src/network.rs",
+        "crates/octra-node/src/driver.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_driver_launch_shell.ml",
       "source_sha256": "def3b485e17d436e969df1c8410a4ad5ffe4ae1033559071497bd65ba7864c4c",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/launch.rs",
       "native_module_dependencies": {
         "C_driver": [
           "lib/consensus/c_driver.ml"
@@ -2269,13 +2439,19 @@
         "Printexc",
         "Result",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Shared native launcher wires captured execution/authority, authenticated swarm, driver, owned queues, duty, browser/VPN/ExEx and shutdown.",
+      "rust_related": [
+        "crates/octra-node/src/network.rs",
+        "crates/octra-node/src/driver.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_driver_read.ml",
       "source_sha256": "18b3b50c3409277c9d9c52854725bdbdde6df6ba76f072a614d27d4675f55761",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/driver.rs",
       "native_module_dependencies": {
         "C_codec": [
           "lib/consensus/c_codec.ml"
@@ -2327,13 +2503,19 @@
         "Octra_consensus",
         "Octra_core",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Driver reads bind the canonical authority and actual retained state.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/consensus_driver/diagnostics.rs",
+        "crates/octra-node/src/rpc/native/status.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_driver_wiring.ml",
       "source_sha256": "9e7bc78d8127a898d68c3d9a71790f6296b157560de84c1672eb868d7559eb91",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/launch.rs",
       "native_module_dependencies": {
         "C_driver": [
           "lib/consensus/c_driver.ml"
@@ -2467,13 +2649,19 @@
         "Staging",
         "Stdlib",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Shared native launcher wires captured execution/authority, authenticated swarm, driver, owned queues, duty, browser/VPN/ExEx and shutdown.",
+      "rust_related": [
+        "crates/octra-node/src/network.rs",
+        "crates/octra-node/src/driver.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_apply_admission.ml",
       "source_sha256": "b2879f2552b51374115193810ed4f958ef171969392f43a9b858ccbe491c24e9",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/executor.rs",
       "native_module_dependencies": {
         "Finality_log": [
           "lib/consensus/finality_log.ml"
@@ -2483,13 +2671,20 @@
         "Int64",
         "Octra_consensus",
         "Printf"
+      ],
+      "historical_status": "missing",
+      "qualification": "Native epoch admission, captured rule context, isolated execution and operational/refusal handling are composed by the staged executor.",
+      "rust_related": [
+        "crates/octra-node/src/executor/admission.rs",
+        "crates/octra-node-runtime/src/epoch_execution.rs",
+        "crates/octra-node-runtime/src/epoch_partition.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_apply_broadcast.ml",
       "source_sha256": "77849e78139276066599f5a85e55160826aff5da16d816f99890e908eaa49cb4",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/consensus.rs",
       "native_module_dependencies": {
         "Oce1": [
           "net/oce1.ml"
@@ -2504,13 +2699,19 @@
         "List",
         "Octra_net",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Canonical publication and post-commit/broadcast callbacks share the node authority and owned publication path.",
+      "rust_related": [
+        "crates/octra-node/src/lib.rs",
+        "crates/octra-node-runtime/src/consensus_driver/outputs.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_apply_checked.ml",
       "source_sha256": "0dfb448e4e830a552b12299d63338c7a9714c4143376115b53e3a0e6b18d4419",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/executor.rs",
       "native_module_dependencies": {
         "Admission": [
           "lib/vm/runtime/admission.ml"
@@ -2522,13 +2723,20 @@
       "external_or_nested_modules": [
         "Catchup",
         "Lwt"
+      ],
+      "historical_status": "missing",
+      "qualification": "Native epoch admission, captured rule context, isolated execution and operational/refusal handling are composed by the staged executor.",
+      "rust_related": [
+        "crates/octra-node/src/executor/admission.rs",
+        "crates/octra-node-runtime/src/epoch_execution.rs",
+        "crates/octra-node-runtime/src/epoch_partition.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_apply_commit.ml",
       "source_sha256": "70ac990f6c865aaf1b9b53731142dff907fc19c837967cce35a1abb79d0192a7",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-runtime/src/finality.rs",
       "native_module_dependencies": {
         "C_types": [
           "lib/consensus/c_types.ml"
@@ -2586,13 +2794,19 @@
         "Octra_core",
         "Option",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Authenticated execution, canonical objects/head, transaction/receipt index and ExEx outbox publish atomically; caller cancellation retains writer ownership.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/canonical.rs",
+        "crates/octra-node/src/lib.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_apply_env.ml",
       "source_sha256": "c34699e7581a954b18d0a715e7ed8acef8a3c70e00b974d40b3b6729b4b3d644",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/executor.rs",
       "native_module_dependencies": {
         "C_driver": [
           "lib/consensus/c_driver.ml"
@@ -2616,13 +2830,20 @@
         "Lwt",
         "Octra_consensus",
         "Octra_core"
+      ],
+      "historical_status": "missing",
+      "qualification": "Native epoch admission, captured rule context, isolated execution and operational/refusal handling are composed by the staged executor.",
+      "rust_related": [
+        "crates/octra-node/src/executor/admission.rs",
+        "crates/octra-node-runtime/src/epoch_execution.rs",
+        "crates/octra-node-runtime/src/epoch_partition.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_apply_finalize.ml",
       "source_sha256": "3cd5f5358aed891637a46f077413335890937658d5c52a1d03343caec0407d75",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-runtime/src/finality.rs",
       "native_module_dependencies": {
         "Consensus_reward_attribution": [
           "node_runtime/consensus_reward_attribution.ml"
@@ -2671,13 +2892,19 @@
         "Sys",
         "Unix",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Authenticated execution, canonical objects/head, transaction/receipt index and ExEx outbox publish atomically; caller cancellation retains writer ownership.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/canonical.rs",
+        "crates/octra-node/src/lib.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_apply_finish_shell.ml",
       "source_sha256": "73d4bdfb1670a2710e4c2038370b38828251a447811cf87750408ee7acee8b36",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-runtime/src/finality.rs",
       "native_module_dependencies": {
         "C_types": [
           "lib/consensus/c_types.ml"
@@ -2741,13 +2968,19 @@
         "Proposer",
         "Reward",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Authenticated execution, canonical objects/head, transaction/receipt index and ExEx outbox publish atomically; caller cancellation retains writer ownership.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/canonical.rs",
+        "crates/octra-node/src/lib.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_apply_footer.ml",
       "source_sha256": "11ab4471a4ebc50922f9129f314c1cf16c4e93f134f65b26c84ec6a11a6580e7",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-runtime/src/epoch_footer.rs",
       "native_module_dependencies": {
         "Consensus_reward_attribution": [
           "node_runtime/consensus_reward_attribution.ml"
@@ -2778,13 +3011,19 @@
         "Rewards",
         "String",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Actual fee/reward/emission footer observations and balances are generated by epoch execution.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/epoch_execution.rs",
+        "crates/octra-node-runtime/src/canonical/epochs.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_apply_guard.ml",
       "source_sha256": "4590a9861ff1df05f0337bde0b3b99b3fb2a63d9840feeee762e9b5a438be029",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/executor.rs",
       "native_module_dependencies": {
         "Epoch_commit_marker": [
           "lib/core/epoch_commit_marker.ml"
@@ -2811,13 +3050,20 @@
         "Printf",
         "String",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Native epoch admission, captured rule context, isolated execution and operational/refusal handling are composed by the staged executor.",
+      "rust_related": [
+        "crates/octra-node/src/executor/admission.rs",
+        "crates/octra-node-runtime/src/epoch_execution.rs",
+        "crates/octra-node-runtime/src/epoch_partition.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_apply_post.ml",
       "source_sha256": "f1ae426c0f58286cea530335d9f056e65fe2d1059d111bcfd807f7e1e9673360",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/consensus.rs",
       "native_module_dependencies": {
         "C_types": [
           "lib/consensus/c_types.ml"
@@ -2872,13 +3118,19 @@
         "Octra_net",
         "Option",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Canonical publication and post-commit/broadcast callbacks share the node authority and owned publication path.",
+      "rust_related": [
+        "crates/octra-node/src/lib.rs",
+        "crates/octra-node-runtime/src/consensus_driver/outputs.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_apply_preflight.ml",
       "source_sha256": "afa0ac648f4c54c6413eb522cbb870c5308d711d71530591360ec1330a1e4552",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/executor.rs",
       "native_module_dependencies": {
         "Env": [
           "node_runtime/env.ml"
@@ -2897,13 +3149,20 @@
         "Octra_core",
         "Printf",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Native epoch admission, captured rule context, isolated execution and operational/refusal handling are composed by the staged executor.",
+      "rust_related": [
+        "crates/octra-node/src/executor/admission.rs",
+        "crates/octra-node-runtime/src/epoch_execution.rs",
+        "crates/octra-node-runtime/src/epoch_partition.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_apply_private_gate.ml",
       "source_sha256": "7c7e951df5fd3d261a01f7a91033de253c55856e8a7b73312bec9b747e61d738",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/executor.rs",
       "native_module_dependencies": {
         "Private_ledger": [
           "lib/core/private_ledger.ml"
@@ -2915,13 +3174,20 @@
         "Octra_core",
         "Printf",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Native epoch admission, captured rule context, isolated execution and operational/refusal handling are composed by the staged executor.",
+      "rust_related": [
+        "crates/octra-node/src/executor/admission.rs",
+        "crates/octra-node-runtime/src/epoch_execution.rs",
+        "crates/octra-node-runtime/src/epoch_partition.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_apply_proposer.ml",
       "source_sha256": "e2c99422e70e6375b9a30b11827c441713cd315eea0edb74234714d1809db7e3",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/consensus/reward_attribution.rs",
       "native_module_dependencies": {
         "C_types": [
           "lib/consensus/c_types.ml"
@@ -2940,13 +3206,18 @@
         "Option",
         "Printf",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Historical proposer/reward attribution is captured from authenticated native epoch authority.",
+      "rust_related": [
+        "crates/octra-node/src/executor/proposal.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_apply_rewards.ml",
       "source_sha256": "627f4e5495df2a478b6a878cdab2f9d4787a77b16f8ff15a45cb4cd4d2fa9c35",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-runtime/src/epoch_footer.rs",
       "native_module_dependencies": {
         "Epoch_exec": [
           "lib/core/epoch_exec.ml"
@@ -2959,13 +3230,19 @@
         "List",
         "Octra_core",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Actual fee/reward/emission footer observations and balances are generated by epoch execution.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/epoch_execution.rs",
+        "crates/octra-node-runtime/src/canonical/epochs.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_apply_sender.ml",
       "source_sha256": "df2654f1a59df5ab5e192be12e9c824eded63d583e5a8b8021e00c9654dc52c4",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-runtime/src/account_store.rs",
       "native_module_dependencies": {
         "Ledger_apply": [
           "lib/core/ledger_apply.ml"
@@ -3003,13 +3280,19 @@
         "Unix",
         "Yojson",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Account/sender and native key/nonce policy execute inside the epoch savepoint.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/admission.rs",
+        "crates/octra-node/src/executor/admission.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_apply_sender_live.ml",
       "source_sha256": "926b8905fca1ca99edc8d5ca05f2ae43909bd87cac13608795a6eaf84544187b",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-runtime/src/account_store.rs",
       "native_module_dependencies": {
         "Chaos": [
           "lib/core/chaos.ml"
@@ -3091,13 +3374,19 @@
         "Sender",
         "String",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Account/sender and native key/nonce policy execute inside the epoch savepoint.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/admission.rs",
+        "crates/octra-node/src/executor/admission.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_apply_shared.ml",
       "source_sha256": "1c077ad53a5c00293b9f44a91cf9d73c733fe1b4cba09948a1652d62dec30360",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/executor.rs",
       "native_module_dependencies": {
         "Consensus_vm_transition": [
           "node_runtime/consensus_vm_transition.ml"
@@ -3160,13 +3449,20 @@
         "Sender",
         "Sender_live",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Native epoch admission, captured rule context, isolated execution and operational/refusal handling are composed by the staged executor.",
+      "rust_related": [
+        "crates/octra-node/src/executor/admission.rs",
+        "crates/octra-node-runtime/src/epoch_execution.rs",
+        "crates/octra-node-runtime/src/epoch_partition.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_apply_source.ml",
       "source_sha256": "913a996031ca950a28e38a53ffcc3c162aecf18aad358fa9cf7e213b184fd454",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/consensus/reward_attribution.rs",
       "native_module_dependencies": {
         "C_hash": [
           "lib/consensus/c_hash.ml"
@@ -3197,13 +3493,18 @@
         "Result",
         "SHA256",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Historical proposer/reward attribution is captured from authenticated native epoch authority.",
+      "rust_related": [
+        "crates/octra-node/src/executor/proposal.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_apply_start_shell.ml",
       "source_sha256": "36e23ed5d0075fe56fd3ddbb5cad3ee712a223e7ad367fb6cf7f87923c3ee409",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/executor.rs",
       "native_module_dependencies": {
         "Env": [
           "node_runtime/env.ml"
@@ -3222,13 +3523,20 @@
         "Preflight",
         "Source",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Native epoch admission, captured rule context, isolated execution and operational/refusal handling are composed by the staged executor.",
+      "rust_related": [
+        "crates/octra-node/src/executor/admission.rs",
+        "crates/octra-node-runtime/src/epoch_execution.rs",
+        "crates/octra-node-runtime/src/epoch_partition.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_apply_tree.ml",
       "source_sha256": "5511a4e891c08b3c8f660465f0528f128c4ede6ff98bb4da44658f2216b06e92",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/legacy.rs",
       "native_module_dependencies": {
         "Node": [
           "lib/core/node.ml"
@@ -3249,13 +3557,19 @@
         "SHA256",
         "Safe",
         "Yojson"
+      ],
+      "historical_status": "missing",
+      "qualification": "Observational legacy Tree digest lifecycle and canonical commitment publication are separate; unknown legacy ancestry remains an explicit metadata gap.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/legacy_tree.rs",
+        "crates/octra-node-runtime/src/canonical/epochs.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_claim_shell.ml",
       "source_sha256": "f639c72b1c3410b619d7425a38121b856109185e0b14caa09d96d2ec4ef4e9b1",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-runtime/src/private_outputs.rs",
       "native_module_dependencies": {
         "Ledger": [
           "lib/core/ledger.ml"
@@ -3278,13 +3592,18 @@
         "Octra_core",
         "Printf",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Native claim transitions and proof/epoch ownership are integrated with epoch execution.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/private_epoch.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_cleanup.ml",
       "source_sha256": "f33e02d95cb84fd305202c62f1f53983e65f0128a6159b0b34d1d650288add71",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/executor/pending.rs",
       "native_module_dependencies": {
         "Log": [
           "node_runtime/log.ml"
@@ -3312,13 +3631,19 @@
         "Octra_core",
         "Octra_net",
         "Staging"
+      ],
+      "historical_status": "missing",
+      "qualification": "Committed outcomes retire durable queue entries and preserve appropriate pending/vote floors.",
+      "rust_related": [
+        "crates/octra-node/src/recovery.rs",
+        "crates/octra-node-runtime/src/consensus_driver/outputs.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_commit.ml",
       "source_sha256": "29f6aea78682d199449b8e7a51a1b084c7e8a9db197dc9fe3c4b8bc98c196daf",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-runtime/src/finality.rs",
       "native_module_dependencies": {
         "Aux_delta": [
           "lib/core/aux_delta.ml"
@@ -3384,13 +3709,19 @@
         "String",
         "Unix",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Authenticated execution, canonical objects/head, transaction/receipt index and ExEx outbox publish atomically; caller cancellation retains writer ownership.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/canonical.rs",
+        "crates/octra-node/src/lib.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_key_switch_shell.ml",
       "source_sha256": "deada5fde5736b9a58cf409446b374a4f75d3c15b90c511313610a1735ea594e",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-runtime/src/private_key/mod.rs",
       "native_module_dependencies": {
         "Ledger": [
           "lib/core/ledger.ml"
@@ -3416,13 +3747,19 @@
         "Octra_core",
         "Private_gate",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Native key-switch/policy and ciphertext-owner migration transitions are integrated.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/private_key/migration.rs",
+        "crates/octra-node-runtime/src/private_epoch.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_lifecycle.ml",
       "source_sha256": "1cd9f7bb7d099407eecd610703439476b6b09d0e7167bc205ad7147218e88670",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-runtime/src/epoch_execution.rs",
       "native_module_dependencies": {
         "Log": [
           "node_runtime/log.ml"
@@ -3435,13 +3772,18 @@
         "Lwt",
         "Octra_core",
         "Option"
+      ],
+      "historical_status": "missing",
+      "qualification": "Epoch savepoints, receipts, outcomes and footer completion are integrated with canonical finality.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/finality.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_private_balance_shell.ml",
       "source_sha256": "95ea38fe933e51c3b152cf0d63431ec5216b8cc19d6631cdee04c16b13baff9d",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-runtime/src/private_balance.rs",
       "native_module_dependencies": {
         "Ledger": [
           "lib/core/ledger.ml"
@@ -3462,13 +3804,18 @@
         "Printf",
         "Private_gate",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Native private-balance admission/arithmetic and rollback are integrated.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/private_epoch.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_epoch_stealth_shell.ml",
       "source_sha256": "00249a95409281ead42c5774884d1ea839df49b4936d63696f2427e0dda5053d",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-runtime/src/private_transfer.rs",
       "native_module_dependencies": {
         "Consensus_epoch_apply_sender": [
           "node_runtime/consensus_epoch_apply_sender.ml"
@@ -3505,6 +3852,11 @@
         "Private_gate",
         "String",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Native stealth/private send and claim paths are integrated.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/private_outputs.rs"
       ]
     },
     {
@@ -3618,13 +3970,14 @@
         "Yojson",
         "Z"
       ],
-      "qualification": "Shared WASM Circle value/storage journals, nested and reentrant execution, event ordering, receipt budget, effort and rollback matched against 682 native epochs. Spawn and public/encrypted asset commits now match 992 native epochs. OCTB execution and Program admission, authenticated HFHE and compute operation hosts remain incomplete. Separately qualified 71-instruction OCTB core and shared work budget; OCTB Circle transaction integration remains unavailable."
+      "historical_qualification": "Shared WASM Circle value/storage journals, nested and reentrant execution, event ordering, receipt budget, effort and rollback matched against 682 native epochs. Spawn and public/encrypted asset commits now match 992 native epochs. OCTB execution and Program admission, authenticated HFHE and compute operation hosts remain incomplete. Separately qualified 71-instruction OCTB core and shared work budget; OCTB Circle transaction integration remains unavailable.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "node_runtime/consensus_finality_backlog.ml",
       "source_sha256": "8f3a1193a691b036543188c73b26f8ade46f0aac639a0194dbf935fa1a003ded",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/consensus.rs",
       "native_module_dependencies": {
         "C_types": [
           "lib/consensus/c_types.ml"
@@ -3644,13 +3997,19 @@
         "Octra_consensus",
         "Octra_core",
         "Printexc"
+      ],
+      "historical_status": "missing",
+      "qualification": "Finality work/state, authenticated import and serving suspension are composed by the node and supervised driver.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/finality.rs",
+        "crates/octra-node/src/recovery.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_finality_journal.ml",
       "source_sha256": "0d20cce136db2b14bb0ceffb7fc33d6c89caa979524f31d4b8519791438c5ef3",
-      "status": "missing",
-      "rust": null,
+      "status": "storage-adapted",
+      "rust": "crates/octra-node-runtime/src/canonical.rs",
       "native_module_dependencies": {
         "C_codec": [
           "lib/consensus/c_codec.ml"
@@ -3712,13 +4071,19 @@
         "Unix",
         "Util",
         "Yojson"
+      ],
+      "historical_status": "missing",
+      "qualification": "The Rust host uses one audited SQLite canonical transaction/outbox instead of native flat finality-log files. Restart and replay use retained finality; byte-compatible legacy log migration is not claimed.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/finality.rs",
+        "crates/octra-node/src/recovery.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_finality_journal_recovery.ml",
       "source_sha256": "a216ac8a338c5d68557308f275c7bba50ea22ef3a3aa3fd4df0fd50aeb323e2a",
-      "status": "missing",
-      "rust": null,
+      "status": "storage-adapted",
+      "rust": "crates/octra-node-runtime/src/canonical.rs",
       "native_module_dependencies": {
         "C_types": [
           "lib/consensus/c_types.ml"
@@ -3745,13 +4110,19 @@
         "Printexc",
         "Printf",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "The Rust host uses one audited SQLite canonical transaction/outbox instead of native flat finality-log files. Restart and replay use retained finality; byte-compatible legacy log migration is not claimed.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/finality.rs",
+        "crates/octra-node/src/recovery.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_finality_runtime.ml",
       "source_sha256": "bdababc480680da81c559a9608f408696049e5dfb20b424dbf31265dc268b439",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/consensus.rs",
       "native_module_dependencies": {
         "C_config": [
           "lib/consensus/c_config.ml"
@@ -3820,13 +4191,19 @@
         "Option",
         "Printexc",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Finality work/state, authenticated import and serving suspension are composed by the node and supervised driver.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/finality.rs",
+        "crates/octra-node/src/recovery.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_finality_state.ml",
       "source_sha256": "e8016cf3e4169c2637598251c423d5d110df54ebc9c84a126c88c783444bbe8f",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/consensus.rs",
       "native_module_dependencies": {
         "C_types": [
           "lib/consensus/c_types.ml"
@@ -3842,6 +4219,12 @@
         "Hashtbl",
         "Octra_consensus",
         "Octra_core"
+      ],
+      "historical_status": "missing",
+      "qualification": "Finality work/state, authenticated import and serving suspension are composed by the node and supervised driver.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/finality.rs",
+        "crates/octra-node/src/recovery.rs"
       ]
     },
     {
@@ -3876,13 +4259,14 @@
         "Octra_consensus",
         "Octra_core"
       ],
-      "qualification": "The node authenticates consecutive certificates, fetches signed bundles, calls a staged execution host and verifies canonical effects before atomic publication. Local TCP/WASM/browser/VPN admission/ExEx/restart integration passes; complete native finality scheduling, catch-up and the finality journal remain open."
+      "historical_qualification": "The node authenticates consecutive certificates, fetches signed bundles, calls a staged execution host and verifies canonical effects before atomic publication. Local TCP/WASM/browser/VPN admission/ExEx/restart integration passes; complete native finality scheduling, catch-up and the finality journal remain open.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "node_runtime/consensus_finalized_flow.ml",
       "source_sha256": "19f930ae78b73000414787100591c3e678c70145561fb16894c2705fff463e9b",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/consensus.rs",
       "native_module_dependencies": {
         "Finality_log": [
           "lib/consensus/finality_log.ml"
@@ -3892,13 +4276,19 @@
         "Octra_consensus",
         "Printf",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Finality work/state, authenticated import and serving suspension are composed by the node and supervised driver.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/finality.rs",
+        "crates/octra-node/src/recovery.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_finalized_replay.ml",
       "source_sha256": "80c47e3f0df8fa351c320c808b60e1b79d237ea1ce33d9ec6b50c7a2fc40c305",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/import.rs",
       "native_module_dependencies": {
         "C_types": [
           "lib/consensus/c_types.ml"
@@ -3917,13 +4307,19 @@
         "Octra_consensus",
         "Printf",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Authenticated finalized replay executes against the retained parent and publishes through the canonical finality boundary.",
+      "rust_related": [
+        "crates/octra-node/src/executor.rs",
+        "crates/octra-node/src/sync.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_finalized_shell.ml",
       "source_sha256": "9bbb65e9f65391d5394d32a90e2bcb91e2efb65930b050b7d42b9cb030d2fac5",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/consensus.rs",
       "native_module_dependencies": {
         "C_types": [
           "lib/consensus/c_types.ml"
@@ -3937,13 +4333,19 @@
         "Int64",
         "Lwt",
         "Octra_consensus"
+      ],
+      "historical_status": "missing",
+      "qualification": "Finality work/state, authenticated import and serving suspension are composed by the node and supervised driver.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/finality.rs",
+        "crates/octra-node/src/recovery.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_health_probe.ml",
       "source_sha256": "6570b61846cf3d37f387956288f4f9f0e51dec8f1824c524804f9ec1c047344a",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/recovery.rs",
       "native_module_dependencies": {
         "C_driver": [
           "lib/consensus/c_driver.ml"
@@ -3953,13 +4355,19 @@
         "Hashtbl",
         "List",
         "Octra_consensus"
+      ],
+      "historical_status": "missing",
+      "qualification": "Live progress/peer checks, driver quiescence, authenticated target/catch-up and bounded recovery scheduling are implemented; public fault qualification remains open.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/consensus_driver/diagnostics.rs",
+        "crates/octra-node/src/launch.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_health_shell.ml",
       "source_sha256": "2a8247c0f3db3e6ee12da638cca06493260ff2d89791b01adcde8a97b16be0bc",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/recovery.rs",
       "native_module_dependencies": {
         "C_catchup": [
           "lib/consensus/c_catchup.ml"
@@ -3990,13 +4398,19 @@
         "Octra_core",
         "Printf",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Live progress/peer checks, driver quiescence, authenticated target/catch-up and bounded recovery scheduling are implemented; public fault qualification remains open.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/consensus_driver/diagnostics.rs",
+        "crates/octra-node/src/launch.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_health_wiring.ml",
       "source_sha256": "bd7801d7aefe7fee3a7a62cf3626190dae294d6636258342de0ffe97675f8628",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/recovery.rs",
       "native_module_dependencies": {
         "C_config": [
           "lib/consensus/c_config.ml"
@@ -4077,13 +4491,19 @@
         "Printexc",
         "Printf",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Live progress/peer checks, driver quiescence, authenticated target/catch-up and bounded recovery scheduling are implemented; public fault qualification remains open.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/consensus_driver/diagnostics.rs",
+        "crates/octra-node/src/launch.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_join_rpc.ml",
       "source_sha256": "eff248c0a770dcf1f2a354e0fd423acd418c90318aec242c7b474e9fbdddf04c",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/consensus_join.rs",
       "native_module_dependencies": {
         "C_catchup": [
           "lib/consensus/c_catchup.ml"
@@ -4206,13 +4626,18 @@
         "Unix",
         "Uri",
         "Yojson"
+      ],
+      "historical_status": "missing",
+      "qualification": "Captured HTTP sources, verified native multipart ranges and signed retained ready marker are implemented; public import/join is not yet qualified.",
+      "rust_related": [
+        "crates/octra-node/src/consensus_join/ready.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_key_switch_preverify.ml",
       "source_sha256": "b5c93aea19cda160ac12ba942146a6033d921dc767aa853e9f7bca6b632de16a",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-runtime/src/private_key/mod.rs",
       "native_module_dependencies": {
         "Private_ledger": [
           "lib/core/private_ledger.ml"
@@ -4236,13 +4661,19 @@
         "Octra_core",
         "Option",
         "Pool"
+      ],
+      "historical_status": "missing",
+      "qualification": "Native key-switch preverification and bound proof workers are implemented.",
+      "rust_related": [
+        "crates/octra-node/src/executor/proofs.rs",
+        "crates/octra-node-runtime/src/preverify_state.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_liveness.ml",
       "source_sha256": "85b5d6c1bbd7e0fd705afa151f656d7a1b04e20d16a593e611b61a1b94831d2a",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/recovery.rs",
       "native_module_dependencies": {
         "C_driver": [
           "lib/consensus/c_driver.ml"
@@ -4259,13 +4690,19 @@
         "Octra_consensus",
         "Option",
         "Printf"
+      ],
+      "historical_status": "missing",
+      "qualification": "Live progress/peer checks, driver quiescence, authenticated target/catch-up and bounded recovery scheduling are implemented; public fault qualification remains open.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/consensus_driver/diagnostics.rs",
+        "crates/octra-node/src/launch.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_mode.ml",
       "source_sha256": "a2ff607e31105928ede1fe133f0cefbb95a575ea12e3d9dc0b39fd88854f04df",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/consensus/profile.rs",
       "native_module_dependencies": {
         "C_role": [
           "lib/consensus/c_role.ml"
@@ -4273,13 +4710,19 @@
       },
       "external_or_nested_modules": [
         "Octra_consensus"
+      ],
+      "historical_status": "missing",
+      "qualification": "Native environment/profile capture and startup compatibility settings are implemented.",
+      "rust_related": [
+        "crates/octra-node/src/network_profile.rs",
+        "crates/octra-node/src/network.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_parent_commit.ml",
       "source_sha256": "a56a648072a64fb88c7efc4533e1534b5900caa174a020797d3cc665893a8086",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/consensus/parent.rs",
       "native_module_dependencies": {
         "C_config": [
           "lib/consensus/c_config.ml"
@@ -4306,6 +4749,11 @@
         "Parent",
         "Protocol",
         "Result"
+      ],
+      "historical_status": "missing",
+      "qualification": "Parent-commit validation is composed with retained authority, proposal rules and authenticated publication.",
+      "rust_related": [
+        "crates/octra-node/src/consensus.rs"
       ]
     },
     {
@@ -4359,13 +4807,14 @@
         "Result",
         "String"
       ],
-      "qualification": "Authenticated record recovery matches 381 native cases; startup hold/restore/legacy reconciliation ordering matches 438 native traces. The host restores an engine lock and durable vote in restart tests. Live driver query/catch-up callbacks and historical-set selection remain integration work."
+      "historical_qualification": "Authenticated record recovery matches 381 native cases; startup hold/restore/legacy reconciliation ordering matches 438 native traces. The host restores an engine lock and durable vote in restart tests. Live driver query/catch-up callbacks and historical-set selection remain integration work.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "node_runtime/consensus_post_finalize.ml",
       "source_sha256": "887c2b3b810bc625995f162ceba81985a1a21f0a8b07dc6426f63da30e2fc54d",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/executor/pending.rs",
       "native_module_dependencies": {
         "Log": [
           "node_runtime/log.ml"
@@ -4378,6 +4827,12 @@
         "Lwt",
         "Printf",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Committed outcomes retire durable queue entries and preserve appropriate pending/vote floors.",
+      "rust_related": [
+        "crates/octra-node/src/recovery.rs",
+        "crates/octra-node-runtime/src/consensus_driver/outputs.rs"
       ]
     },
     {
@@ -4410,13 +4865,14 @@
         "Scheduler",
         "String"
       ],
-      "qualification": "202 native controlled-worker traces; proof backend adapters and full consensus integration remain open."
+      "historical_qualification": "202 native controlled-worker traces; proof backend adapters and full consensus integration remain open.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "node_runtime/consensus_preverify_role.ml",
       "source_sha256": "5c9ca6c7a3535a3e9708d5599e6a69e8c9567aeddd25cd17af96a0906ad66d38",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-runtime/src/preverify.rs",
       "native_module_dependencies": {
         "Preverify_worker": [
           "lib/core/preverify_worker.ml"
@@ -4428,13 +4884,19 @@
       "external_or_nested_modules": [
         "Lwt",
         "Octra_core"
+      ],
+      "historical_status": "missing",
+      "qualification": "Preverification role/pool/worker boundaries are composed with captured authority and local voting policy.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/preverify_batch.rs",
+        "crates/octra-node/src/driver.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_private_preverify.ml",
       "source_sha256": "04e7444e286fbb094643d19ae77e07d45ae8b30d62a6f08ab3b615e1d687506a",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-runtime/src/private_epoch.rs",
       "native_module_dependencies": {
         "Private_ledger": [
           "lib/core/private_ledger.ml"
@@ -4455,13 +4917,19 @@
         "Octra_core",
         "Option",
         "Pool"
+      ],
+      "historical_status": "missing",
+      "qualification": "Private transaction preverification, artifact reuse and committed execution are integrated.",
+      "rust_related": [
+        "crates/octra-node/src/executor/proofs.rs",
+        "crates/octra-node-runtime/src/preverify_state.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_profile.ml",
       "source_sha256": "a925b128ea1a291006570121edc98d1f42b497b447e7e610e1f721bb3a90e6ed",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/consensus/profile.rs",
       "native_module_dependencies": {
         "Byte_work": [
           "lib/vm/runtime/byte_work.ml"
@@ -4575,6 +5043,12 @@
         "String",
         "VM",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Native environment/profile capture and startup compatibility settings are implemented.",
+      "rust_related": [
+        "crates/octra-node/src/network_profile.rs",
+        "crates/octra-node/src/network.rs"
       ]
     },
     {
@@ -4706,7 +5180,8 @@
         "Yojson",
         "Z"
       ],
-      "qualification": "Authenticated build/verification and bounded ordered recovery are implemented. Recovery matches 661 unmodified OCaml make_proposal traces and runs through real Circle/private execution. Full staging selection, private slots, Circle turns, queue persistence, resource attribution, round freezing and production host wiring remain open."
+      "historical_qualification": "Authenticated build/verification and bounded ordered recovery are implemented. Recovery matches 661 unmodified OCaml make_proposal traces and runs through real Circle/private execution. Full staging selection, private slots, Circle turns, queue persistence, resource attribution, round freezing and production host wiring remain open.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "node_runtime/consensus_proposal_preview_shell.ml",
@@ -4791,13 +5266,14 @@
         "Result",
         "Tx"
       ],
-      "qualification": "Native historical rule selection and fault priority only; production preview operation assembly remains incomplete."
+      "historical_qualification": "Native historical rule selection and fault priority only; production preview operation assembly remains incomplete.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "node_runtime/consensus_proposal_state.ml",
       "source_sha256": "6d02cbe1444caa86488c2f7ee46274573cc6bf1b24b5a4ad4b2dcbd479907efe",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/executor/proposal.rs",
       "native_module_dependencies": {
         "Transaction": [
           "lib/core/transaction.ml"
@@ -4805,13 +5281,19 @@
       },
       "external_or_nested_modules": [
         "Octra_core"
+      ],
+      "historical_status": "missing",
+      "qualification": "Proposal capture/verification and pending state are owned by the staged executor and driver.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/staging/mod.rs",
+        "crates/octra-node-runtime/src/consensus_driver/work.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_replay.ml",
       "source_sha256": "5b783ffa149b5494021b05c420512fc068a90d2da004eaed8cd4e5179a0a9137",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/import.rs",
       "native_module_dependencies": {
         "C_driver": [
           "lib/consensus/c_driver.ml"
@@ -4865,13 +5347,19 @@
         "U",
         "Util",
         "Yojson"
+      ],
+      "historical_status": "missing",
+      "qualification": "Authenticated finalized replay executes against the retained parent and publishes through the canonical finality boundary.",
+      "rust_related": [
+        "crates/octra-node/src/executor.rs",
+        "crates/octra-node/src/sync.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_resource_attestation.ml",
       "source_sha256": "ea0aacc0a0fb188120a1be75d829f6c6f3f5d36d04cf4a960dc0ca70c40fb58d",
-      "status": "missing",
-      "rust": null,
+      "status": "ported-boundary",
+      "rust": "crates/octra-node/src/resource_attestation.rs",
       "native_module_dependencies": {
         "Log": [
           "node_runtime/log.ml"
@@ -4885,6 +5373,11 @@
         "Lwt",
         "Octra_consensus",
         "Resource"
+      ],
+      "historical_status": "missing",
+      "qualification": "All121top-level native APIs implemented and exercised by1070exact native oracle cases, including25signed positive proof witnesses and ordered bounded pool behavior. Strict actual Node and Protocol library gates passed; reviewed13path adoption. See optional-resource checkpoint. Optional committee activation remains None exactly as upstream production; proof receipt/commitment models do not execute FHE/PVAC backends.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/consensus/resource_gossip.rs"
       ]
     },
     {
@@ -4922,13 +5415,14 @@
         "String",
         "Z"
       ],
-      "qualification": "Native full-set and parent-participant attribution, source conversions, standard activation and finality binding match 720 unmodified native cases. Historical epoch-log reward fallback remains open."
+      "historical_qualification": "Native full-set and parent-participant attribution, source conversions, standard activation and finality binding match 720 unmodified native cases. Historical epoch-log reward fallback remains open.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "node_runtime/consensus_runtime_boot_shell.ml",
       "source_sha256": "83766f1b66e63aeabf8ba23f421c36ba0998396e3a118b1a4c77ac762782fd12",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/launch.rs",
       "native_module_dependencies": {
         "C_driver": [
           "lib/consensus/c_driver.ml"
@@ -4992,24 +5486,36 @@
         "Octra_core",
         "Octra_net",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Shared native launcher wires captured execution/authority, authenticated swarm, driver, owned queues, duty, browser/VPN/ExEx and shutdown.",
+      "rust_related": [
+        "crates/octra-node/src/network.rs",
+        "crates/octra-node/src/driver.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_runtime_state.ml",
       "source_sha256": "78fdb3c56ae1890011084588130fcd52bfc53a4fc87ad1779938819ff0177a04",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/driver.rs",
       "native_module_dependencies": {},
       "external_or_nested_modules": [
         "List",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Driver reads bind the canonical authority and actual retained state.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/consensus_driver/diagnostics.rs",
+        "crates/octra-node/src/rpc/native/status.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_startup_finality.ml",
       "source_sha256": "327ab5afd76dbf9a4cbb500efa49b302777fe18485750fc9dd828253a4196f5c",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/launch.rs",
       "native_module_dependencies": {
         "Consensus_driver_wiring": [
           "node_runtime/consensus_driver_wiring.ml"
@@ -5026,13 +5532,19 @@
       },
       "external_or_nested_modules": [
         "Octra_consensus"
+      ],
+      "historical_status": "missing",
+      "qualification": "Startup audits retained canonical history, restores journal floors/pending locks and performs authenticated HTTP/P2P catch-up before serving/voting.",
+      "rust_related": [
+        "crates/octra-node/src/recovery.rs",
+        "crates/octra-node/src/sync.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_startup_sync.ml",
       "source_sha256": "2160be79defa9e4cc9cf11481f07549b548b8546687870c97bc6a2e4121b3fcc",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/launch.rs",
       "native_module_dependencies": {
         "C_types": [
           "lib/consensus/c_types.ml"
@@ -5078,13 +5590,19 @@
         "Safe",
         "String",
         "Yojson"
+      ],
+      "historical_status": "missing",
+      "qualification": "Startup audits retained canonical history, restores journal floors/pending locks and performs authenticated HTTP/P2P catch-up before serving/voting.",
+      "rust_related": [
+        "crates/octra-node/src/recovery.rs",
+        "crates/octra-node/src/sync.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_tick_loop.ml",
       "source_sha256": "f0743ebe9390c0567080271984139d1d092fb4cbee9fd7b7c31376a3e9eb2c15",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/recovery.rs",
       "native_module_dependencies": {
         "C_types": [
           "lib/consensus/c_types.ml"
@@ -5105,13 +5623,19 @@
         "Option",
         "Plan",
         "Printf"
+      ],
+      "historical_status": "missing",
+      "qualification": "Live progress/peer checks, driver quiescence, authenticated target/catch-up and bounded recovery scheduling are implemented; public fault qualification remains open.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/consensus_driver/diagnostics.rs",
+        "crates/octra-node/src/launch.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_tick_plan.ml",
       "source_sha256": "4609cd515ee9a83b0335737df8e8f600fa399a6d88c123a233ed155e87b089e7",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/recovery.rs",
       "native_module_dependencies": {
         "C_hash": [
           "lib/consensus/c_hash.ml"
@@ -5123,13 +5647,19 @@
       "external_or_nested_modules": [
         "Octra_consensus",
         "Printf"
+      ],
+      "historical_status": "missing",
+      "qualification": "Live progress/peer checks, driver quiescence, authenticated target/catch-up and bounded recovery scheduling are implemented; public fault qualification remains open.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/consensus_driver/diagnostics.rs",
+        "crates/octra-node/src/launch.rs"
       ]
     },
     {
       "source": "node_runtime/consensus_validator_anchor.ml",
       "source_sha256": "ada29954913b38ebc5a87397446067e6d0de8e0eda3bfa6d4fec66def08d255f",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/validator/config/mod.rs",
       "native_module_dependencies": {
         "C_relief": [
           "lib/consensus/c_relief.ml"
@@ -5148,6 +5678,13 @@
         "Option",
         "Result",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Native validator configuration, independent anchor and retained membership binding are implemented.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/validator/config/anchor.rs",
+        "crates/octra-node-runtime/src/validator_history/authority.rs",
+        "crates/octra-node/src/network.rs"
       ]
     },
     {
@@ -5224,13 +5761,14 @@
         "Transcript",
         "Vm"
       ],
-      "qualification": "Public WASM Circle deployment, replacement and calls; capture/consume, fees, value/nested-call journals and rule activation. AML/Spawn and public/encrypted asset commits now match 992 native epochs. OCTB execution and Program admission, authenticated HFHE and compute operation hosts remain incomplete. Separately qualified 71-instruction OCTB core and shared work budget; OCTB Circle transaction integration remains unavailable."
+      "historical_qualification": "Public WASM Circle deployment, replacement and calls; capture/consume, fees, value/nested-call journals and rule activation. AML/Spawn and public/encrypted asset commits now match 992 native epochs. OCTB execution and Program admission, authenticated HFHE and compute operation hosts remain incomplete. Separately qualified 71-instruction OCTB core and shared work budget; OCTB Circle transaction integration remains unavailable.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "node_runtime/p2p_config.ml",
       "source_sha256": "6b85440c785171360b57c1a025fc7e8a1db12118c1bd801989bb0cafe0ceb5e5",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/network.rs",
       "native_module_dependencies": {
         "C_config": [
           "lib/consensus/c_config.ml"
@@ -5283,13 +5821,19 @@
         "Option",
         "Printf",
         "String"
+      ],
+      "historical_status": "missing",
+      "qualification": "Native P2P compatibility/settings capture and known-active key policy are wired before swarm startup.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/network/swarm.rs",
+        "crates/octra-node/src/launch.rs"
       ]
     },
     {
       "source": "node_runtime/p2p_epoch_broadcast.ml",
       "source_sha256": "105b5d3ac2a7cce0c2f31f01bf860a845db906629c2ab92668d9236967103c0b",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/peers.rs",
       "native_module_dependencies": {
         "Oce1": [
           "net/oce1.ml"
@@ -5312,13 +5856,19 @@
         "Safe",
         "String",
         "Yojson"
+      ],
+      "historical_status": "missing",
+      "qualification": "Node dispatch routes authenticated epoch/finality/bundle/transaction work and owned swarm lifecycle.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/network/swarm/service.rs",
+        "crates/octra-node/src/launch.rs"
       ]
     },
     {
       "source": "node_runtime/p2p_message.ml",
       "source_sha256": "89bd340a2a0d0274f3b7b8e1fe7e9e59891fef4e054e8df2187f46c9c0622bcf",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/peers.rs",
       "native_module_dependencies": {
         "P2p_frame": [
           "net/p2p_frame.ml"
@@ -5327,13 +5877,19 @@
       "external_or_nested_modules": [
         "List",
         "Octra_net"
+      ],
+      "historical_status": "missing",
+      "qualification": "Node dispatch routes authenticated epoch/finality/bundle/transaction work and owned swarm lifecycle.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/network/swarm/service.rs",
+        "crates/octra-node/src/launch.rs"
       ]
     },
     {
       "source": "node_runtime/p2p_swarm_dispatch.ml",
       "source_sha256": "4dc905ab3eb49a42489d069c88d59861b43b842acc2a44c967cbf19513a2d28e",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/peers.rs",
       "native_module_dependencies": {
         "Log": [
           "node_runtime/log.ml"
@@ -5363,13 +5919,19 @@
       "external_or_nested_modules": [
         "Octra_core",
         "Octra_net"
+      ],
+      "historical_status": "missing",
+      "qualification": "Node dispatch routes authenticated epoch/finality/bundle/transaction work and owned swarm lifecycle.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/network/swarm/service.rs",
+        "crates/octra-node/src/launch.rs"
       ]
     },
     {
       "source": "node_runtime/p2p_swarm_lifecycle.ml",
       "source_sha256": "e1f3f65c960e9bc2ede31c22b9f95dda8890df2a2593e555b5900189e89317b2",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/peers.rs",
       "native_module_dependencies": {
         "C_driver": [
           "lib/consensus/c_driver.ml"
@@ -5408,6 +5970,12 @@
         "Octra_core",
         "Octra_net",
         "Option"
+      ],
+      "historical_status": "missing",
+      "qualification": "Node dispatch routes authenticated epoch/finality/bundle/transaction work and owned swarm lifecycle.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/network/swarm/service.rs",
+        "crates/octra-node/src/launch.rs"
       ]
     },
     {
@@ -5432,7 +6000,8 @@
         "Octra_core",
         "String"
       ],
-      "qualification": "219 native signed receiver traces validate normalization, signature/payload admission, retry timing and ordered queue effects. Complete production staging backend and swarm dispatch integration are unfinished."
+      "historical_qualification": "219 native signed receiver traces validate normalization, signature/payload admission, retry timing and ordered queue effects. Complete production staging backend and swarm dispatch integration are unfinished.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "node_runtime/p2p_tx_handler.ml",
@@ -5480,7 +6049,8 @@
         "String",
         "Yojson"
       ],
-      "qualification": "219 native signed receiver traces validate normalization, signature/payload admission, retry timing and ordered queue effects. Complete production staging backend and swarm dispatch integration are unfinished."
+      "historical_qualification": "219 native signed receiver traces validate normalization, signature/payload admission, retry timing and ordered queue effects. Complete production staging backend and swarm dispatch integration are unfinished.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "node_runtime/p2p_tx_plan.ml",
@@ -5507,13 +6077,14 @@
         "Safe",
         "Yojson"
       ],
-      "qualification": "Inventory/request planning and legacy fallback qualified; complete receiver and transaction admission integration remain under qualification."
+      "historical_qualification": "Inventory/request planning and legacy fallback qualified; complete receiver and transaction admission integration remain under qualification.",
+      "qualification": "Existing bounded native mapping retained; its original oracle input scope and limitations are recorded in historical_qualification. Current integrated release scope is recorded in current_qualification."
     },
     {
       "source": "node_runtime/startup_network_boot_shell.ml",
       "source_sha256": "1bc8f71dbcfa39359ca694a39df82ea03c4a919b11a4598be31febf4876f5b71",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/network.rs",
       "native_module_dependencies": {
         "C_config": [
           "lib/consensus/c_config.ml"
@@ -5567,13 +6138,19 @@
         "Result",
         "String",
         "Unix"
+      ],
+      "historical_status": "missing",
+      "qualification": "Independent configured checkpoint origin/trust and captured native network startup are integrated.",
+      "rust_related": [
+        "crates/octra-node/src/bootstrap.rs",
+        "crates/octra-node/src/launch.rs"
       ]
     },
     {
       "source": "node_runtime/sync_cert.ml",
       "source_sha256": "b2c9d5bed068327c81ba089cd293a008ebee11a05f7598579d2b94e690e720c6",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/rpc/http/certificate.rs",
       "native_module_dependencies": {
         "C_types": [
           "lib/consensus/c_types.ml"
@@ -5598,13 +6175,18 @@
         "Safe",
         "Sys",
         "Yojson"
+      ],
+      "historical_status": "missing",
+      "qualification": "Bounded captured-trust certificate verification/cache for native HTTP source is implemented.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/state_sync/manifest.rs"
       ]
     },
     {
       "source": "node_runtime/sync_chain.ml",
       "source_sha256": "1cd7d547ce15e68f2e91a6fd2917314488d6c94444bad7895a26cf173da1f57b",
-      "status": "missing",
-      "rust": null,
+      "status": "storage-adapted",
+      "rust": "crates/octra-node/src/bootstrap.rs",
       "native_module_dependencies": {
         "C_config": [
           "lib/consensus/c_config.ml"
@@ -5639,13 +6221,19 @@
         "Set",
         "Store",
         "Update"
+      ],
+      "historical_status": "missing",
+      "qualification": "Authenticated checkpoint/image/root-window import and canonical retained range verification replace the native physical archive adapter.",
+      "rust_related": [
+        "crates/octra-node/src/bootstrap/export/package.rs",
+        "crates/octra-node/src/sync.rs"
       ]
     },
     {
       "source": "node_runtime/sync_finality.ml",
       "source_sha256": "5c4d8a987b9e57ff6d75fb21b131d11dcdb971b102c16e9b03196d96a73601c8",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/rpc/http/range.rs",
       "native_module_dependencies": {
         "C_config": [
           "lib/consensus/c_config.ml"
@@ -5676,13 +6264,19 @@
         "Option",
         "Printexc",
         "Unix"
+      ],
+      "historical_status": "missing",
+      "qualification": "Retained authenticated finality/range reads and bounded multipart serving are implemented.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/finality/history.rs",
+        "crates/octra-node/src/consensus_join.rs"
       ]
     },
     {
       "source": "node_runtime/sync_lease.ml",
       "source_sha256": "926f7548896008c2805f0021ecba08bac6471427ae4cf433f5d56d5bffa9d85c",
-      "status": "missing",
-      "rust": null,
+      "status": "partial",
+      "rust": "crates/octra-node/src/rpc/http.rs",
       "native_module_dependencies": {},
       "external_or_nested_modules": [
         "Filename",
@@ -5692,13 +6286,20 @@
         "String",
         "Sys",
         "Unix"
+      ],
+      "historical_status": "missing",
+      "qualification": "Descriptor-safe renewal, bounded owned retention and inode-bound interrupted-removal recovery are implemented. Native lease/retention comparisons and private filesystem restart/foreign-path/corrupt-package tests passed in the snapshot-service checkpoint; public producer and final Linux combined qualification remain separate.",
+      "rust_related": [
+        "crates/octra-node/src/bootstrap/export/serve.rs",
+        "crates/octra-node/src/snapshot_export/archive.rs",
+        "crates/octra-node-protocol/src/state_sync/lease.rs"
       ]
     },
     {
       "source": "node_runtime/sync_mark.ml",
       "source_sha256": "2008cc61cd9450e0f20790327c5af2282b1986a08a6e1bf50acb9fd48e14bc62",
-      "status": "missing",
-      "rust": null,
+      "status": "storage-adapted",
+      "rust": "crates/octra-node/src/recovery.rs",
       "native_module_dependencies": {
         "Sync_need": [
           "node_runtime/sync_need.ml"
@@ -5717,24 +6318,36 @@
         "Sys",
         "Unix",
         "Yojson"
+      ],
+      "historical_status": "missing",
+      "qualification": "Rust-owned recovery uses audited SQLite atomic head/outbox, serving quarantine and stopped-driver reconciliation instead of OCaml local sync_need marker files. Native marker-file migration is not implied.",
+      "rust_related": [
+        "crates/octra-node/src/launch.rs",
+        "crates/octra-node-runtime/src/canonical.rs"
       ]
     },
     {
       "source": "node_runtime/sync_need.ml",
       "source_sha256": "27eeb52a1ea1f5f12963552e21cbb0a15a26378ab1a01729d18e25c32a07b1c5",
-      "status": "missing",
-      "rust": null,
+      "status": "storage-adapted",
+      "rust": "crates/octra-node/src/recovery.rs",
       "native_module_dependencies": {},
       "external_or_nested_modules": [
         "Int64",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Rust-owned recovery uses audited SQLite atomic head/outbox, serving quarantine and stopped-driver reconciliation instead of OCaml local sync_need marker files. Native marker-file migration is not implied.",
+      "rust_related": [
+        "crates/octra-node/src/launch.rs",
+        "crates/octra-node-runtime/src/canonical.rs"
       ]
     },
     {
       "source": "node_runtime/sync_publish.ml",
       "source_sha256": "e4034692d804329401d90d4dd71873d6f2885eeb208b21a5ac18da23eb2da6e9",
-      "status": "missing",
-      "rust": null,
+      "status": "partial",
+      "rust": "crates/octra-node/src/bootstrap/export.rs",
       "native_module_dependencies": {
         "C_config": [
           "lib/consensus/c_config.ml"
@@ -5800,13 +6413,22 @@
         "Sys",
         "Unix",
         "Wallet"
+      ],
+      "historical_status": "missing",
+      "qualification": "Automatic native cycle/role/force/retry, retained validator-transition anchor, loaded-identity signing and native certificate placement are implemented. Seven retained-state/filesystem lifecycle tests plus one explicit-role test and39 actual pinned native comparisons passed; checkpoint docs/rust-node/checkpoints/2026-10-15/snapshot-service.json. Public producer and final Linux combined qualification remain separate.",
+      "rust_related": [
+        "crates/octra-node/src/bootstrap/export/package.rs",
+        "crates/octra-node/src/bootstrap/export/serve.rs",
+        "crates/octra-node/src/snapshot_export.rs",
+        "crates/octra-node/src/snapshot_export/chain.rs",
+        "crates/octra-node-protocol/src/state_sync/cycle.rs"
       ]
     },
     {
       "source": "node_runtime/sync_range.ml",
       "source_sha256": "42f96260ebfd41a56ea4890d18b8b85c13ea66b806e3be70c7893bc652cc7f43",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/rpc/http/range.rs",
       "native_module_dependencies": {
         "Head_manifest": [
           "lib/core/head_manifest.ml"
@@ -5825,13 +6447,19 @@
         "Option",
         "Parts",
         "Result"
+      ],
+      "historical_status": "missing",
+      "qualification": "Retained authenticated finality/range reads and bounded multipart serving are implemented.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/finality/history.rs",
+        "crates/octra-node/src/consensus_join.rs"
       ]
     },
     {
       "source": "node_runtime/sync_range_read.ml",
       "source_sha256": "6506e08500a491b9b5f3e349387f1a3a641ebfafa85071604dbc4963b4271986",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node/src/rpc/http/range.rs",
       "native_module_dependencies": {
         "C_codec": [
           "lib/consensus/c_codec.ml"
@@ -5876,13 +6504,19 @@
         "Store",
         "String",
         "Sync"
+      ],
+      "historical_status": "missing",
+      "qualification": "Retained authenticated finality/range reads and bounded multipart serving are implemented.",
+      "rust_related": [
+        "crates/octra-node-runtime/src/finality/history.rs",
+        "crates/octra-node/src/consensus_join.rs"
       ]
     },
     {
       "source": "node_runtime/validator_config.ml",
       "source_sha256": "9727a4b3fdcf7f3276c49c39e7bea097c10f4214b0cfd406fcfd098a515b4bce",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/validator/config/mod.rs",
       "native_module_dependencies": {
         "C_config": [
           "lib/consensus/c_config.ml"
@@ -5918,13 +6552,20 @@
         "Result",
         "String",
         "Z"
+      ],
+      "historical_status": "missing",
+      "qualification": "Native validator configuration, independent anchor and retained membership binding are implemented.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/validator/config/anchor.rs",
+        "crates/octra-node-runtime/src/validator_history/authority.rs",
+        "crates/octra-node/src/network.rs"
       ]
     },
     {
       "source": "node_runtime/validators.ml",
       "source_sha256": "2df1003d41ea51e5361b0876d99ed6ebb77552f529056d48b43b6ab4fc0aee90",
-      "status": "missing",
-      "rust": null,
+      "status": "source-integrated",
+      "rust": "crates/octra-node-protocol/src/validator/config/mod.rs",
       "native_module_dependencies": {},
       "external_or_nested_modules": [
         "Base64",
@@ -5933,6 +6574,13 @@
         "Option",
         "String",
         "Sys"
+      ],
+      "historical_status": "missing",
+      "qualification": "Native validator configuration, independent anchor and retained membership binding are implemented.",
+      "rust_related": [
+        "crates/octra-node-protocol/src/validator/config/anchor.rs",
+        "crates/octra-node-runtime/src/validator_history/authority.rs",
+        "crates/octra-node/src/network.rs"
       ]
     }
   ],
@@ -8793,5 +9441,91 @@
     "full_node_end_to_end": false,
     "funded_vpn_end_to_end": false,
     "summary": "docs/rust-node/checkpoints/2026-10-14/groth16-summary.json"
-  }
+  },
+  "classification_date": "2026-10-15",
+  "classification_semantics": {
+    "ported-boundary": "Existing finite native differential boundary; not a complete-module or whole-node proof.",
+    "partial": "Mapped implementation with an explicitly remaining operational/parity boundary.",
+    "source-integrated": "Reviewed Rust source mapping and node integration; does not by itself assert behavioral parity for the native module.",
+    "storage-adapted": "Native local-storage/lifecycle intent is served through Rust atomic SQLite/recovery architecture; native private file-layout compatibility is not claimed.",
+    "unported-optional": "Native optional library/model not implemented; enabled production behavior is considered separately."
+  },
+  "historical_qualification_scope": "Dated local_* qualification records below preserve their original snapshots, commands, hashes and remaining-work lists. They are historical evidence, not current source-completeness counters; current_qualification supersedes their release status.",
+  "current_qualification": {
+    "date": "2026-10-15",
+    "status": "local_release_and_paid18_qualified_public_observer_and_storage_followups_active",
+    "guide": "docs/rust-node/status.md",
+    "checkpoints": [
+      "docs/rust-node/checkpoints/2026-10-15/native-vpn.json",
+      "docs/rust-node/checkpoints/2026-10-15/formal.json",
+      "docs/rust-node/checkpoints/2026-10-15/browser.json",
+      "docs/rust-node/checkpoints/2026-10-15/snapshot-service.json",
+      "docs/rust-node/checkpoints/2026-10-15/node.json",
+      "docs/rust-node/checkpoints/2026-10-15/runtime.json",
+      "docs/rust-node/checkpoints/2026-10-15/optional-resource.json",
+      "docs/rust-node/checkpoints/2026-10-15/canonical-read.json",
+      "docs/rust-node/checkpoints/2026-10-15/canonical-storage.json",
+      "docs/rust-node/checkpoints/2026-10-15/public-devnet.json"
+    ],
+    "isolated_paid_application": "Actual factory/main-v5 signed deployment, private administration, canonical escrow/claim/confirm/refunds, real WG UDP and client/node OS TUN TCP/UDP/ICMP, operator restart with same opening and original TCP continuation, matching4validator ExEx and gateway asset. Explicit private-genesis application profile only.",
+    "node_release_tests": 54,
+    "hfhe_release_tests": 49,
+    "paid_fixture_focused_tests": 51,
+    "remaining": [
+      "Public observer catch-up, healthy canonical services and retained-state restart qualification",
+      "External Tailscale HTTPS and additional-device navigation",
+      "Native inode storage full qualification and combined Node/browser/paid-image adoption gates",
+      "Distinct native Single-mode implementation and source-bound qualification",
+      "Production private-admin setup/upgrade custody and funded identity",
+      "Full native behavioral parity and cross-architecture/failure-boundary qualification"
+    ],
+    "economic_scope": "Zero VPN commission; exact opening tariff/claim net binding. Cooperative operator-claim/client-confirm protocol is not adversarial payment-fairness proof.",
+    "node_release_evidence": {
+      "checkpoint": "docs/rust-node/checkpoints/2026-10-15/node.json",
+      "qualification": "out/node-port-final-20261015/inode-combined-qualification.json",
+      "passed": 54,
+      "exex_passed": 25,
+      "native_pvac_passed": 1,
+      "targets": 13,
+      "log_sha256": "a1e9913f3aba0cb814dcacd988466931e7ebd3087fed1a7fc11fa4af26e9e289",
+      "scope": "Fresh full Node/ExEx/PVAC release on adopted inode,observer-admission,optional libraries and published Foundry source. Public replay/serving are separate gates."
+    },
+    "snapshot_exporter_evidence": {
+      "checkpoint": "docs/rust-node/checkpoints/2026-10-15/snapshot-service.json",
+      "host_lifecycle_and_role_tests": 8,
+      "native_vectors": 39,
+      "strict_node_clippy": "all-targets --no-deps passed",
+      "public_producer_qualified": false
+    },
+    "composed_node_exex_pvac_tests": 80,
+    "paid_fixture_native_comparisons": 39,
+    "runtime_release_tests": 187,
+    "optional_resource_native_cases": 1070,
+    "protocol_release_tests": 107
+  },
+  "operational_partials": [
+    {
+      "native": "node_runtime/sync_publish.ml",
+      "implemented": "Manual explicit-signature CLI plus automatic retained-evidence exporter cycle, configured role/force/retry, in-memory signer and native placement are integrated in source.",
+      "remaining": "Public producer qualification and final Linux combined rerun; private host publication/restart/capture-failure tests and39 actual native comparisons passed.",
+      "native_call_sites": [
+        "bin/octra_node.ml:2014",
+        "node_runtime/sync_publish.ml:875",
+        "node_runtime/sync_publish.ml:915"
+      ],
+      "scope": "Operator/exporter service; not a new consensus rule. The production native loop is dormant for an unselected wallet unless forced."
+    },
+    {
+      "native": "node_runtime/sync_lease.ml",
+      "implemented": "Descriptor-safe chunk lease renewal plus automatic bounded lease-aware owned retention, staged cleanup and durable inode-bound removal recovery are integrated in source.",
+      "remaining": "Public producer qualification and final Linux combined rerun; private host lease/pruning/foreign-path/interrupted-removal tests passed.",
+      "native_call_sites": [
+        "node_runtime/sync_publish.ml:279",
+        "node_runtime/sync_publish.ml:288"
+      ],
+      "scope": "Local snapshot disk lifecycle; not vote/import authority."
+    }
+  ],
+  "storage_adaptation_scope": "Native sync_need/sync_mark and flat-finality logs coordinate local OCaml store repair/restart, not peer wire or consensus. Rust canonical state/head/receipt/index/outbox commit atomically and startup/recovery audit retained history, quiesce serving, reconcile pending/vote floors, then recreate the driver. The mapping is architectural intent, not byte-compatible native private-file migration or proof of every repair case.",
+  "full_consensus_execution_scope": "False means complete native behavioral equivalence has not been established. It does not mean the Rust driver/executor is absent: the isolated four-validator paid checkpoint executes real native transactions and canonical finality."
 }

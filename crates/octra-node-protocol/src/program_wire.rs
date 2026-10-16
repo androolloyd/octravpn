@@ -142,6 +142,27 @@ impl<'a> Reader<'a> {
     }
 }
 impl Package {
+    /// Native framing encoder. Call `normalize` before building a source bundle;
+    /// structural decoding and source admission remain separate operations.
+    pub fn encode(&self) -> Result<Vec<u8>, Error> {
+        if self.envelope.len() > 2_097_152 {
+            return Err(err("Program envelope too large"));
+        }
+        let mut raw = b"OCPS\x01\x00".to_vec();
+        raw.extend(self.compiler_profile.to_le_bytes());
+        raw.extend((self.main.len() as u16).to_le_bytes());
+        raw.extend(&self.main);
+        raw.extend((self.sources.len() as u16).to_le_bytes());
+        for source in &self.sources {
+            raw.extend((source.path.len() as u16).to_le_bytes());
+            raw.extend(&source.path);
+            raw.extend((source.body.len() as u32).to_le_bytes());
+            raw.extend(&source.body);
+        }
+        raw.extend((self.envelope.len() as u32).to_le_bytes());
+        raw.extend(&self.envelope);
+        Ok(raw)
+    }
     pub fn decode_base64(encoded: &[u8]) -> Result<Self, Error> {
         let raw = decode_base64(encoded).map_err(|_| err("invalid Program package encoding"))?;
         if STANDARD.encode(&raw).as_bytes() != encoded {

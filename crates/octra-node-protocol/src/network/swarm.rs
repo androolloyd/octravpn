@@ -59,6 +59,7 @@ struct Slot {
     peer: Peer,
     direction: Direction,
     offered: BTreeMap<i64, Vec<u8>>,
+    remote_host: Vec<u8>,
 }
 struct State {
     started: bool,
@@ -72,6 +73,7 @@ struct State {
     dialing: BTreeSet<Vec<u8>>,
     record_dialing: BTreeSet<Vec<u8>>,
     due: BTreeMap<Vec<u8>, f64>,
+    relayed: super::peer_diag::Relayed,
 }
 struct Inner {
     config: Config,
@@ -97,11 +99,10 @@ impl Swarm {
         if config.config_hash.len() != 32 || config.binary_hash.len() != 32 {
             return Err("swarm configuration hashes must contain 32 bytes".into());
         }
+        // Native admission lists can overlap active and scheduled keys. The
+        // independently installed active set is validated by set_validators.
         let validators =
             (!config.allowed_public_keys.is_empty()).then(|| config.allowed_public_keys.clone());
-        if let Some(keys) = &validators {
-            policy::validate_validators(keys)?;
-        }
         let (stop, _) = watch::channel(false);
         let state = State {
             started: false,
@@ -115,6 +116,7 @@ impl Swarm {
             dialing: BTreeSet::new(),
             record_dialing: BTreeSet::new(),
             due: BTreeMap::new(),
+            relayed: super::peer_diag::Relayed::default(),
         };
         Ok(Self(Arc::new(Inner {
             node_id: handshake::node_id(&key.verifying_key().to_bytes()),
@@ -217,6 +219,22 @@ impl Swarm {
             .map(|(k, v)| (k.to_vec(), v.clone()))
             .collect()
     }
+    pub fn diagnostics(&self) -> super::peer_diag::Diagnostics {
+        let mut s = self.state();
+        s.peers.retain(|_, slot| slot.peer.is_connected());
+        let connected = s
+            .peers
+            .values()
+            .map(|slot| slot.remote_host.clone())
+            .collect::<Vec<_>>();
+        let records = s.registry.values(now()).cloned().collect::<Vec<_>>();
+        let scores = s
+            .guard
+            .snapshot()
+            .map(|(key, score)| (key.to_vec(), score.clone()))
+            .collect();
+        super::peer_diag::Diagnostics::make(&connected, &records, scores, s.relayed.clone(), 2)
+    }
     pub fn set_validators(&self, keys: Vec<Vec<u8>>) -> Result<(), Error> {
         policy::validate_validators(&keys)?;
         let mut s = self.state();
@@ -231,6 +249,18 @@ impl Swarm {
         s.registry.clear();
         s.due.clear();
         Ok(())
+    }
+    /// Apply the latest locally configured activation reached during startup,
+    /// catch-up or live consensus. A peer's offered profile is never authority.
+    pub fn advance_profile(&self, epoch: i64) -> Result<Option<Vec<u8>>, Error> {
+        let activation = self
+            .0
+            .config
+            .profiles
+            .iter()
+            .filter(|p| p.epoch <= epoch)
+            .max_by_key(|p| p.epoch);
+        activation.map(|p| self.switch_profile(p.epoch)).transpose()
     }
     pub fn switch_profile(&self, epoch: i64) -> Result<Vec<u8>, Error> {
         let profile = self
@@ -333,6 +363,7 @@ impl Swarm {
         generation: u64,
         direction: Direction,
         connection: Connection<TcpStream>,
+        remote_host: Vec<u8>,
     ) -> Result<Option<(Peer, Driver<TcpStream>)>, Error> {
         let mut s = self.state();
         let hello = connection.peer();
@@ -370,6 +401,7 @@ impl Swarm {
                 peer: peer.clone(),
                 direction,
                 offered: BTreeMap::new(),
+                remote_host,
             },
         );
         Ok(Some((peer, driver)))
@@ -450,17 +482,23 @@ impl Swarm {
                     upgrade::expected_binary(epoch, &config.binary_hash, config.upgrade.as_ref())
                 });
         for record in records {
-            if record
-                .validate(
-                    &config.chain_id,
-                    &s.active_hash,
-                    binary,
-                    &config.allowed_public_keys,
-                )
-                .is_ok()
-                && record.node_id != self.node_id()
-            {
-                let _ = s.registry.add(now(), record);
+            match record.validate(
+                &config.chain_id,
+                &s.active_hash,
+                binary,
+                &config.allowed_public_keys,
+            ) {
+                Err(reason) => s.relayed.reject(reason.as_bytes()),
+                Ok(()) => {
+                    if record.node_id == self.node_id() {
+                        s.relayed.accept(false);
+                    } else {
+                        match s.registry.add(now(), record) {
+                            Ok(added) => s.relayed.accept(added == peer_record::Added::New),
+                            Err(reason) => s.relayed.reject(reason.as_bytes()),
+                        }
+                    }
+                }
             }
         }
         self.0.wake.notify_one();

@@ -1,0 +1,82 @@
+// Isolated v5 security fragment; original production methods compile unchanged.
+// Kept below the adopted native compiler method-label range.
+private fn test_seed_circle() {
+  self.min_circle_stake = 100000000
+  self.unbond_grace_epochs = 1000
+  self.circle_owner[caller] = caller
+  self.circle_active[caller] = 1
+  self.circle_state_version[caller] = 1
+  self.circle_bond[caller] = 100000000
+  self.circle_registration_approved[caller] = 1
+  self.circle_authorized_owner[caller] = caller
+}
+
+private fn test_seed_session(): uint {
+  test_seed_circle()
+  self.min_session_deposit = 1
+  self.session_grace_epochs = 100
+  self.sweep_grace_multiplier = 10
+  self.tailnet_count = 1
+  // Internal treasury refunds keep isolated VM tests independent of host transfers.
+  return write_session(0, caller, 100, 1)
+}
+
+private fn test_seed_admin() {
+  self.admin_nonce = 0
+  self.pending_admin_commitment = ""
+}
+
+fn test_session_preserves_policy_anchor_at_open(): bool {
+  test_seed_circle()
+  self.circle_state_root[caller] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  let sid = write_session(0, caller, 100, 0)
+  self.circle_state_root[caller] = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  require(get_session_policy_root(sid) == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "opening policy anchor changed")
+  return true
+}
+
+// expect-revert test_legacy_session_policy_is_unavailable "session policy anchor missing"
+fn test_legacy_session_policy_is_unavailable(): bool {
+  let sid = test_seed_session()
+  let root = get_session_policy_root(sid)
+  return true
+}
+
+fn test_claim_timeout_refunds_without_operator_payment(): bool {
+  let sid = test_seed_session()
+  require(settle_claim(sid, 100, 90), "claim failed")
+  self.session_opened_at[sid] = epoch - 1000
+  self.sweep_bounty_bps = 0
+  require(sweep_expired_session(sid), "sweep failed")
+  require(self.session_status[sid] == SESSION_REFUNDED, "sweep not terminal")
+  require(self.circle_earnings_total[caller] == 0, "sweep credited unconfirmed traffic")
+  require(self.circle_open_sessions[caller] == 0, "sweep did not release liability")
+  return true
+}
+
+fn test_relay_claim_closes_session_and_accounts_earnings(): bool {
+  let sid = test_seed_session()
+  self.session_status[sid] = SESSION_RELAY_ARMED
+  self.session_settlement_hash[sid] = sha256("receipt-preimage")
+  self.session_relay_net[sid] = 100
+  self.session_relay_deadline[sid] = epoch + 10
+  require(relay_claim(sid, "receipt-preimage"), "claim failed")
+  require(self.session_status[sid] == SESSION_RELAY_CLAIMED, "relay not terminal")
+  require(self.circle_open_sessions[caller] == 0, "relay stake lock remains")
+  require(self.circle_earnings_total[caller] == 100, "relay earnings wrong")
+  return true
+}
+
+// expect-revert test_relay_claim_at_deadline_rejected "relay window elapsed; client may refund"
+fn test_relay_claim_at_deadline_rejected(): bool {
+  let sid = test_seed_session()
+  self.session_status[sid] = SESSION_RELAY_ARMED
+  self.session_relay_deadline[sid] = epoch
+  return relay_claim(sid, "receipt-preimage")
+}
+
+// expect-revert test_session_exit_rejects_missing_session "session not found"
+fn test_session_exit_rejects_missing_session(): bool {
+  let unused = get_session_exit(0)
+  return true
+}

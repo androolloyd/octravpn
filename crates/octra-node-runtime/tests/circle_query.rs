@@ -49,6 +49,8 @@ fn setup(input: &Value) -> (StateBatch, Profile) {
     let profile = Profile {
         point_ops: input["point"].as_bool().unwrap(),
         int_work: input["integer_work"].as_bool().unwrap(),
+        object_cost: input["object_cost"] == true,
+        math: input["math"] == true,
         proof_exec: mode("proof"),
         fhe_work: mode("fhe_work"),
         ..Profile::prior(input["epoch"].as_i64().unwrap())
@@ -140,10 +142,7 @@ async fn capture(
     .unwrap();
     let store = CanonicalStore::create(
         path,
-        ChainIdentity {
-            chain_id: "octb-views".into(),
-            genesis_root: StateRoot(root),
-        },
+        ChainIdentity::genesis("octb-views", StateRoot(root)),
         state.snapshot(),
         0,
     )

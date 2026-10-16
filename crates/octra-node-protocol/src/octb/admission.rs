@@ -34,7 +34,7 @@ impl Effect {
             Self::Journal => "journal",
         }
     }
-    fn of(instruction: &Instruction) -> Option<Self> {
+    pub(super) fn of(instruction: &Instruction) -> Option<Self> {
         Some(match instruction.opcode() {
             0x12 | 0x2e => Self::MemoryRead,
             0x13 | 0x2f => Self::MemoryWrite,
@@ -54,6 +54,8 @@ impl Effect {
 pub struct Admitted {
     code: Vec<Instruction>,
     effects: Vec<Effect>,
+    pub(super) facts: Option<std::sync::Arc<super::program::Facts>>,
+    pub(super) compiler_version: Option<Vec<u8>>,
 }
 impl Admitted {
     pub fn code(&self) -> &[Instruction] {
@@ -62,21 +64,55 @@ impl Admitted {
     pub fn effects(&self) -> &[Effect] {
         &self.effects
     }
+    pub fn facts(&self) -> Option<&super::program::Facts> {
+        self.facts.as_deref()
+    }
+    pub fn compiler_version(&self) -> Option<&[u8]> {
+        self.compiler_version.as_deref()
+    }
+    /// Recheck an already admitted artifact against the execution epoch. This
+    /// does not confer source authority or replace binary/certificate admission.
+    pub fn check_standard(&self, point_ops: bool) -> Result<(), Error> {
+        check_standard(&self.code, point_ops)
+    }
 }
-fn register(pc: usize, reg: u8) -> Result<(), Error> {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum VerificationError {
+    Register(usize, u8),
+    Span(usize, u8, u8),
+    Jump(u32),
+    Duplicate(u32),
+    Count(usize),
+    Empty,
+    Reserved(usize),
+    CapabilityKind(usize, BigInt),
+}
+impl VerificationError {
+    pub fn text(&self) -> String {
+        match self {
+            Self::Register(pc, reg) => format!("invalid register r{reg} at pc {pc}"),
+            Self::Span(pc, base, count) => {
+                format!("invalid register span r{base}+{count} at pc {pc}")
+            }
+            Self::Jump(dest) => format!("invalid jump destination {dest}"),
+            Self::Duplicate(dest) => format!("duplicate JDEST {dest}"),
+            Self::Count(count) => format!("code too large: {count} instructions"),
+            Self::Empty => "empty code".to_owned(),
+            Self::Reserved(pc) => format!("write to reserved key at pc {pc}"),
+            Self::CapabilityKind(pc, kind) => format!("capability kind {kind} at pc {pc}"),
+        }
+    }
+}
+fn register(pc: usize, reg: u8) -> Result<(), VerificationError> {
     if reg > 63 {
-        Err(Error::message(format!(
-            "invalid register r{reg} at pc {pc}"
-        )))
+        Err(VerificationError::Register(pc, reg))
     } else {
         Ok(())
     }
 }
-fn span(pc: usize, base: u8, count: u8) -> Result<(), Error> {
+fn span(pc: usize, base: u8, count: u8) -> Result<(), VerificationError> {
     if base > 63 || u16::from(count) > 64 - u16::from(base) {
-        Err(Error::message(format!(
-            "invalid register span r{base}+{count} at pc {pc}"
-        )))
+        Err(VerificationError::Span(pc, base, count))
     } else {
         Ok(())
     }
@@ -84,18 +120,20 @@ fn span(pc: usize, base: u8, count: u8) -> Result<(), Error> {
 /// Validate native register, span, label, reserved-key and capability constraints.
 /// Duplicate labels are checked before the instruction walk; the last wins.
 pub fn verify(code: &[Instruction]) -> Result<(), Error> {
+    verify_detailed(code).map_err(|error| Error::message(error.text()))
+}
+/// Preserve structured verifier failures for callers with a distinct native
+/// diagnostic projection. The verification order is shared with `verify`.
+pub fn verify_detailed(code: &[Instruction]) -> Result<(), VerificationError> {
     use Instruction::{
         CallInt, CapCheck, CapClose, Emit, Jdest, Jif, Jmp, Ldi, Mload, Mstore, Sdel, Sload,
         Spawn2, Sstore, Xcall,
     };
     if code.is_empty() {
-        return Err(Error::message("empty code"));
+        return Err(VerificationError::Empty);
     }
     if code.len() > 1_048_576 {
-        return Err(Error::message(format!(
-            "code too large: {} instructions",
-            code.len()
-        )));
+        return Err(VerificationError::Count(code.len()));
     }
     let mut destinations = HashSet::new();
     let mut duplicate = None;
@@ -107,19 +145,19 @@ pub fn verify(code: &[Instruction]) -> Result<(), Error> {
         }
     }
     if let Some(dest) = duplicate {
-        return Err(Error::message(format!("duplicate JDEST {dest}")));
+        return Err(VerificationError::Duplicate(*dest));
     }
     for (pc, instruction) in code.iter().enumerate() {
         let jump = |dest: &u32| {
             if destinations.contains(dest) {
                 Ok(())
             } else {
-                Err(Error::message(format!("invalid jump destination {dest}")))
+                Err(VerificationError::Jump(*dest))
             }
         };
         let reserved = |key: &[u8]| {
             if key.first() == Some(&0) {
-                Err(Error::message(format!("write to reserved key at pc {pc}")))
+                Err(VerificationError::Reserved(pc))
             } else {
                 Ok(())
             }
@@ -127,7 +165,7 @@ pub fn verify(code: &[Instruction]) -> Result<(), Error> {
         match instruction {
             CapCheck(kind, reg) | CapClose(kind, reg) => {
                 if kind.as_ref() < &BigInt::from(0) || kind.as_ref() > &BigInt::from(1_000_000) {
-                    return Err(Error::message(format!("capability kind {kind} at pc {pc}")));
+                    return Err(VerificationError::CapabilityKind(pc, kind.as_ref().clone()));
                 }
                 register(pc, *reg)?;
             }
@@ -227,15 +265,15 @@ fn first(
         .find_map(|(pc, instruction)| policy(instruction.opcode()).map(|name| (pc, name)))
 }
 pub fn of_code(code: Vec<Instruction>, point_ops: bool) -> Result<Admitted, Error> {
+    admit(code, point_ops, false)
+}
+pub(super) fn program_code(code: Vec<Instruction>, point_ops: bool) -> Result<Admitted, Error> {
+    admit(code, point_ops, true)
+}
+fn admit(code: Vec<Instruction>, point_ops: bool, program: bool) -> Result<Admitted, Error> {
     verify(&code)?;
-    if !point_ops {
-        if let Some((pc, name)) = first(&code, standard) {
-            return Err(Error::message(format!(
-                "standard opcode {name} is not active at pc {pc}"
-            )));
-        }
-    }
-    if let Some((pc, name)) = first(&code, program_only) {
+    check_standard(&code, point_ops)?;
+    if let Some((pc, name)) = (!program).then(|| first(&code, program_only)).flatten() {
         return Err(Error::message(format!(
             "Program-only opcode {name} at pc {pc}"
         )));
@@ -253,7 +291,22 @@ pub fn of_code(code: Vec<Instruction>, point_ops: bool) -> Result<Admitted, Erro
             }
         }
     }
-    Ok(Admitted { code, effects })
+    Ok(Admitted {
+        code,
+        effects,
+        facts: None,
+        compiler_version: None,
+    })
+}
+fn check_standard(code: &[Instruction], point_ops: bool) -> Result<(), Error> {
+    if !point_ops {
+        if let Some((pc, name)) = first(code, standard) {
+            return Err(Error::message(format!(
+                "standard opcode {name} is not active at pc {pc}"
+            )));
+        }
+    }
+    Ok(())
 }
 pub fn decode(raw: &[u8], point_ops: bool) -> Result<Admitted, Error> {
     of_code(Image::decode(raw, point_ops)?.code, point_ops)

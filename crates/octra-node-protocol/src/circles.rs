@@ -71,11 +71,58 @@ pub fn resource_key(circle: &[u8], path: &[u8]) -> String {
 pub fn stable_key(key: &[u8]) -> String {
     domain_hash(b"octra:stable_key:v1", &[key])
 }
+/// Native state references are byte strings with ASCII trimming/case folding.
+pub fn normalize_state_ref(raw: &[u8]) -> Result<Vec<u8>, Error> {
+    let normalized = crate::network::endpoint::native_trim(raw).to_ascii_lowercase();
+    if normalized.len() != 64 || !normalized.iter().all(u8::is_ascii_hexdigit) {
+        return Err(Error(b"state_ref must be a 64-char hex string".to_vec()));
+    }
+    Ok(normalized)
+}
+/// Native Circles.path_key_of_state_ref, including ASCII trimming/case folding.
+pub fn state_path_key(raw: &[u8]) -> Result<String, Error> {
+    Ok(state_locator(raw)?.path_key)
+}
+
+#[derive(Clone, Debug)]
+pub struct Locator {
+    pub canonical_path: Vec<u8>,
+    pub path_key: String,
+}
+pub fn slot_locator(raw: &[u8]) -> Result<Locator, Error> {
+    let normalized = crate::network::endpoint::native_trim(raw).to_ascii_lowercase();
+    if normalized.len() != 64 || !normalized.iter().all(u8::is_ascii_hexdigit) {
+        return Err(Error(b"slot_ref must be a 64-char hex string".to_vec()));
+    }
+    let canonical_path = [b"/_slots/".as_slice(), &normalized].concat();
+    let path_key = path_key(&canonical_path);
+    Ok(Locator {
+        canonical_path,
+        path_key,
+    })
+}
+pub fn state_locator(raw: &[u8]) -> Result<Locator, Error> {
+    let normalized = normalize_state_ref(raw)?;
+    let canonical_path = [b"/_state/".as_slice(), &normalized].concat();
+    let path_key = domain_hash(b"octra:asset_state_path:v1", &[&canonical_path]);
+    Ok(Locator {
+        canonical_path,
+        path_key,
+    })
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResourceMode {
     Public,
     Sealed,
+}
+impl ResourceMode {
+    pub const fn as_bytes(self) -> &'static [u8] {
+        match self {
+            Self::Public => b"public_resources",
+            Self::Sealed => b"sealed_read",
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LocatorMode {
@@ -83,10 +130,30 @@ pub enum LocatorMode {
     Slot,
     State,
 }
+impl LocatorMode {
+    pub const fn as_bytes(self) -> &'static [u8] {
+        match self {
+            Self::Path => b"path",
+            Self::Slot => b"opaque_slot",
+            Self::State => b"private_state",
+        }
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MetadataMode {
     Reveal,
     Opaque,
+}
+impl MetadataMode {
+    pub const fn as_bytes(self) -> &'static [u8] {
+        match self {
+            Self::Reveal => b"reveal",
+            Self::Opaque => b"opaque",
+        }
+    }
+}
+pub fn state_ref_from_path(path: &[u8]) -> Option<Vec<u8>> {
+    normalize_state_ref(path.strip_prefix(b"/_state/")?).ok()
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AssetMeta {
@@ -132,11 +199,11 @@ impl AssetPolicy {
     pub fn visible_at(&self, epoch: i64, meta: &AssetMeta) -> bool {
         self.activate_after_epoch
             .or(meta.activate_after_epoch)
-            .map_or(true, |n| epoch >= n)
+            .is_none_or(|n| epoch >= n)
             && self
                 .expire_after_epoch
                 .or(meta.expire_after_epoch)
-                .map_or(true, |n| epoch < n)
+                .is_none_or(|n| epoch < n)
             && !self.tombstone
             && !self.revoked
     }
@@ -166,6 +233,21 @@ fn integer(raw: &[u8]) -> Result<i64, Error> {
     parse_int64(raw).ok_or_else(|| Error("circle asset metadata integer refused".into()))
 }
 impl AssetMeta {
+    /// Native Store_irmin metadata loading skips schema refusals. JSON,
+    /// integer and allocation failures remain operational exceptions.
+    pub fn from_stored(raw: &[u8]) -> Result<Option<Self>, Error> {
+        match Self::parse(raw) {
+            Ok(meta) => Ok(Some(meta)),
+            Err(error)
+                if error.0 == b"circle asset metadata JSON refused"
+                    || error.0 == b"circle asset metadata integer refused"
+                    || error.0 == crate::native_json::Error::Allocation.to_string().as_bytes() =>
+            {
+                Err(error)
+            }
+            Err(_) => Ok(None),
+        }
+    }
     pub fn to_json_bytes(&self) -> Vec<u8> {
         use crate::transaction::{json_optional, json_string};
         let size = self.size_bytes.to_string();

@@ -1,31 +1,14 @@
-//! Client-side chain integration for the v3 (chain-minimal,
-//! circle-resident) program (`program/main-v3.aml`, devnet
-//! `oct7MofanKjxSBwCQXGgx5Aah2D2aUj1uNCjCTruhHUusf3`).
-//!
-//! Sibling to `discover_v2.rs` (v2 sealed-policy flow). This module is
-//! deliberately a thin subset of `octravpn-node::chain_v3` — only the
-//! client-facing entrypoints (open_session / settle_confirm /
-//! claim_no_show / sweep_expired_session) plus the view wrappers a
-//! client needs to render its session state. We do NOT depend on the
-//! node crate; the shared schema lives in `octravpn-core::v3_state_root`.
-//!
-//! Each `build_*` method returns the legacy `{"kind":"contract_call",
-//! ...}` shape that `octravpn_core::tx::sign_call` translates into the
-//! on-wire OctraTx envelope — the same path the v2 runner uses for
-//! `open_session_v2`. The JSON envelope construction itself lives in
-//! [`octravpn_core::v3_calls`] so the node crate emits identical bytes;
-//! each `build_*_call` wrapper below just forwards its inputs to the
-//! shared builder. Method names and param ordering mirror
-//! `docker/devnet/v3-smoke.sh`; unit tests at the bottom pin both.
+//! Current VPN application chain calls and immutable Circle discovery.
+//! Program/Circle routing is explicit; shared builders define the transaction
+//! envelope and ABI. Production code uses core schemas without the node crate.
 
 use anyhow::{anyhow, Context, Result};
 use octravpn_core::{
     address::Address,
     chain_tx_queue::ChainTxQueueHandle,
     rpc::{next_nonce, RpcClient},
-    sig::KeyPair,
-    tx as octra_tx,
-    v3_calls::ContractCallBuilder,
+    sig::{KeyPair, PublicKey},
+    v3_calls::{Application, ContractCallBuilder},
 };
 use serde_json::{json, Value};
 
@@ -42,9 +25,11 @@ pub(crate) struct ChainCtxV3<'a> {
     wallet_addr: Address,
     wallet: &'a KeyPair,
     tx_queue: Option<ChainTxQueueHandle>,
+    application: Application,
 }
 
 impl<'a> ChainCtxV3<'a> {
+    #[cfg(test)]
     pub(crate) fn new(rpc: &'a RpcClient, program_addr: &'a Address, wallet: &'a KeyPair) -> Self {
         Self::new_with_tx_queue(rpc, program_addr, wallet, None)
     }
@@ -62,7 +47,63 @@ impl<'a> ChainCtxV3<'a> {
             wallet_addr,
             wallet,
             tx_queue,
+            application: Application::Program,
         }
+    }
+
+    pub(crate) fn with_application(mut self, application: Application) -> Self {
+        self.application = application;
+        self
+    }
+    pub(crate) async fn require_priced_settlement(&self) -> Result<()> {
+        let version = self.view("get_settlement_version", &[]).await.context(
+            "settlement app does not expose the priced settlement ABI; no escrow was opened",
+        )?;
+        anyhow::ensure!(
+            version.as_u64() == Some(2),
+            "unsupported settlement ABI; no escrow was opened"
+        );
+        Ok(())
+    }
+    pub(crate) async fn session_policy_root(&self, session: u64) -> Result<String> {
+        let root = self
+            .view("get_session_policy_root", &[json!(session)])
+            .await?;
+        let root = root
+            .as_str()
+            .context("session policy anchor must be a string")?;
+        anyhow::ensure!(
+            root.len() == 64
+                && root
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+            "session policy anchor is unavailable or invalid"
+        );
+        Ok(root.to_owned())
+    }
+    pub(crate) async fn claim_net(&self, session: u64) -> Result<u64> {
+        let set = self.view("get_claim_net_set", &[json!(session)]).await?;
+        anyhow::ensure!(
+            set.as_u64() == Some(1),
+            "operator has not committed a settlement amount"
+        );
+        self.view("get_claim_net", &[json!(session)])
+            .await?
+            .as_u64()
+            .ok_or_else(|| anyhow!("operator claim amount is not an unsigned integer"))
+    }
+
+    pub(crate) async fn view(&self, method: &str, params: &[Value]) -> Result<Value> {
+        self.rpc
+            .application_call(
+                self.application,
+                self.program_addr,
+                method,
+                params,
+                Some(&self.wallet_addr),
+            )
+            .await
+            .map_err(Into::into)
     }
 
     #[allow(dead_code)] // referenced by integration tests + future status display.
@@ -76,6 +117,7 @@ impl<'a> ChainCtxV3<'a> {
     /// `octravpn_core::v3_calls`.
     fn call_builder(&self) -> ContractCallBuilder {
         ContractCallBuilder::new(self.program_addr.clone(), self.wallet_addr.clone())
+            .with_application(self.application)
     }
 
     pub(crate) async fn nonce(&self) -> Result<u64> {
@@ -86,6 +128,11 @@ impl<'a> ChainCtxV3<'a> {
     /// Fee with fallback to [`CALL_FEE_FALLBACK`] if the chain returns
     /// 0 or errors. Mirrors `chain_v3::fee_or_fallback` on the node.
     pub(crate) async fn fee_or_fallback(&self, op: &str) -> u64 {
+        let op = if op == "contract_call" {
+            self.application.operation()
+        } else {
+            op
+        };
         self.rpc
             .recommended_fee(Some(op))
             .await
@@ -104,13 +151,7 @@ impl<'a> ChainCtxV3<'a> {
     /// `bytes` default is the literal `"0"`, not the empty string).
     pub(crate) async fn get_circle_state_root(&self, circle: &str) -> Result<Option<String>> {
         let v = self
-            .rpc
-            .contract_call(
-                self.program_addr,
-                "get_circle_state_root",
-                &[json!(circle)],
-                Some(&self.wallet_addr),
-            )
+            .view("get_circle_state_root", &[json!(circle)])
             .await
             .context("get_circle_state_root")?;
         let s = v.as_str().unwrap_or("").to_string();
@@ -120,17 +161,37 @@ impl<'a> ChainCtxV3<'a> {
         Ok(Some(s))
     }
 
+    /// Independent on-chain receipt identity, rather than a key learned from
+    /// the operator's unauthenticated HTTP response or policy alone.
+    pub(crate) async fn get_circle_receipt_pubkey(&self, circle: &str) -> Result<PublicKey> {
+        let value = self
+            .view("get_circle_receipt_pubkey", &[json!(circle)])
+            .await
+            .context("get_circle_receipt_pubkey")?;
+        let encoded = value
+            .as_str()
+            .ok_or_else(|| anyhow!("circle receipt key must be a base64 string"))?;
+        let decoded = octravpn_core::b64::decode(encoded)
+            .map_err(|error| anyhow!("circle receipt key base64: {error}"))?;
+        let bytes: [u8; 32] = decoded
+            .try_into()
+            .map_err(|_| anyhow!("circle receipt key must contain 32 bytes"))?;
+        if octravpn_core::b64::encode(bytes) != encoded {
+            return Err(anyhow!("circle receipt key base64 is not canonical"));
+        }
+        let verifier = ed25519_dalek::VerifyingKey::from_bytes(&bytes)
+            .context("circle receipt key is invalid")?;
+        if verifier.is_weak() {
+            return Err(anyhow!("circle receipt key is weak"));
+        }
+        Ok(PublicKey(bytes))
+    }
+
     /// `get_tailnet_members_root(tid) -> bytes` (64-char hex). `None`
     /// when no `members_root` has been committed yet (AML default).
     pub(crate) async fn get_tailnet_members_root(&self, tailnet_id: u64) -> Result<Option<String>> {
         let v = self
-            .rpc
-            .contract_call(
-                self.program_addr,
-                "get_tailnet_members_root",
-                &[json!(tailnet_id)],
-                Some(&self.wallet_addr),
-            )
+            .view("get_tailnet_members_root", &[json!(tailnet_id)])
             .await
             .context("get_tailnet_members_root")?;
         let s = v.as_str().unwrap_or("").to_string();
@@ -141,18 +202,12 @@ impl<'a> ChainCtxV3<'a> {
     }
 
     /// `get_session_status(sid) -> int` view. The AML uses the
-    /// constants `SESSION_OPEN = 1`, `SESSION_SETTLED = 2`,
-    /// `SESSION_REFUNDED = 3`; values below 1 indicate "not found".
+    /// constants `SESSION_OPEN = 0`, `SESSION_SETTLED = 1`,
+    /// `SESSION_REFUNDED = 2`. Existence is checked independently at opening.
     #[allow(dead_code)] // surfaced for status displays + integration tests.
     pub(crate) async fn get_session_status(&self, session_id: u64) -> Result<u64> {
         let v = self
-            .rpc
-            .contract_call(
-                self.program_addr,
-                "get_session_status",
-                &[json!(session_id)],
-                Some(&self.wallet_addr),
-            )
+            .view("get_session_status", &[json!(session_id)])
             .await
             .context("get_session_status")?;
         Ok(v.as_u64().unwrap_or(0))
@@ -165,13 +220,7 @@ impl<'a> ChainCtxV3<'a> {
     /// phantom-drain a live session. Mirrors the node reader.
     pub(crate) async fn get_session_status_strict(&self, session_id: u64) -> Result<u64> {
         let v = self
-            .rpc
-            .contract_call(
-                self.program_addr,
-                "get_session_status",
-                &[json!(session_id)],
-                Some(&self.wallet_addr),
-            )
+            .view("get_session_status", &[json!(session_id)])
             .await
             .context("get_session_status_strict")?;
         v.as_u64()
@@ -185,13 +234,7 @@ impl<'a> ChainCtxV3<'a> {
     /// therefore skip (Err), not proceed.
     pub(crate) async fn get_relay_deadline(&self, session_id: u64) -> Result<u64> {
         let v = self
-            .rpc
-            .contract_call(
-                self.program_addr,
-                "get_relay_deadline",
-                &[json!(session_id)],
-                Some(&self.wallet_addr),
-            )
+            .view("get_relay_deadline", &[json!(session_id)])
             .await
             .context("get_relay_deadline")?;
         v.as_u64()
@@ -209,13 +252,7 @@ impl<'a> ChainCtxV3<'a> {
     #[allow(dead_code)]
     pub(crate) async fn get_earnings_total(&self, circle: &str) -> Result<u64> {
         let v = self
-            .rpc
-            .contract_call(
-                self.program_addr,
-                "get_earnings_total",
-                &[json!(circle)],
-                Some(&self.wallet_addr),
-            )
+            .view("get_earnings_total", &[json!(circle)])
             .await
             .context("get_earnings_total")?;
         Ok(v.as_u64().unwrap_or(0))
@@ -269,6 +306,20 @@ impl<'a> ChainCtxV3<'a> {
             return Ok(Some(s.as_bytes().to_vec()));
         }
         if let Some(obj) = v.as_object() {
+            if let Some(value) = obj.get("body_b64") {
+                let encoded = value
+                    .as_str()
+                    .ok_or_else(|| anyhow!("circle_asset body_b64 must be a string"))?;
+                if encoded.len() > 349_528 {
+                    return Err(anyhow!("operator metadata exceeds the byte limit"));
+                }
+                let decoded = octravpn_core::b64::decode(encoded)
+                    .map_err(|error| anyhow!("circle_asset body_b64: {error}"))?;
+                if decoded.len() > 262_144 {
+                    return Err(anyhow!("operator metadata exceeds the byte limit"));
+                }
+                return Ok(Some(decoded));
+            }
             // Direct UTF-8 / plaintext shapes first — v3 canonical bytes
             // are plain UTF-8 JSON, so this is the expected fast path
             // once the chain settles on a field name.
@@ -534,7 +585,12 @@ impl<'a> ChainCtxV3<'a> {
     /// Sign + envelope-translate whatever `Value` we just built. Same
     /// pipeline as the v1.1 / v2 paths.
     pub(crate) fn sign_call(&self, call: Value) -> Result<Value> {
-        octra_tx::sign_call(self.wallet, call).map_err(|e| anyhow!("sign_call: {e}"))
+        let call = self
+            .application
+            .route_call(call)
+            .map_err(|error| anyhow!(error))?;
+        octravpn_core::tx_signer::sign_call_canonical(self.wallet, &call)
+            .map_err(|error| anyhow!("sign_call: {error}"))
     }
 
     pub(crate) async fn submit_signed(&self, signed: &Value) -> Result<String> {
@@ -545,6 +601,10 @@ impl<'a> ChainCtxV3<'a> {
     /// Submit an unsigned call through the single nonce owner when
     /// present; otherwise preserve the legacy nonce -> sign -> submit path.
     pub(crate) async fn submit_call(&self, mut unsigned_call: Value) -> Result<String> {
+        unsigned_call = self
+            .application
+            .route_call(unsigned_call)
+            .map_err(|error| anyhow!(error))?;
         if let Some(tx_queue) = &self.tx_queue {
             return tx_queue
                 .submit(unsigned_call)

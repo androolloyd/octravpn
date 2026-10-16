@@ -16,17 +16,40 @@ impl HfheBackend for NoHfhe {
 
 #[test]
 fn rust_host_matches_pristine_engine_storage_events_metering_and_refusals() {
-    let fixture: Value = serde_json::from_str(include_str!("fixtures/circle-engine.json")).unwrap();
+    let fixture: Value = match std::env::var_os("OCTRA_CIRCLE_REGISTRY_FIXTURE") {
+        Some(path) => serde_json::from_slice(
+            &std::fs::read(path).expect("read explicitly selected native registry fixture"),
+        )
+        .unwrap(),
+        None => serde_json::from_str(include_str!("fixtures/circle-engine.json")).unwrap(),
+    };
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let wasm = std::fs::read(
-        root.join("target/wasm32-unknown-unknown/release/octravpn_circle_registry.wasm"),
-    )
-    .expect("build the registry WASM before runtime parity tests");
+    // The strict native fixture binds one exact portable artifact. Isolated
+    // qualification can supply that artifact without mutating Cargo's target.
+    let wasm_path = std::env::var_os("OCTRA_CIRCLE_REGISTRY_WASM").map_or_else(
+        || root.join("target/wasm32-unknown-unknown/release/octravpn_circle_registry.wasm"),
+        std::path::PathBuf::from,
+    );
+    let wasm = std::fs::read(wasm_path)
+        .expect("build or explicitly select the registry WASM before runtime parity tests");
     assert_eq!(hex::encode(Sha256::digest(&wasm)), fixture["wasm_sha256"]);
     let pin: Value =
         serde_json::from_slice(&std::fs::read(root.join("docs/rust-node/upstream.json")).unwrap())
             .unwrap();
     assert_eq!(fixture["upstream_commit"], pin["commit"]);
+    let adopted: Value = serde_json::from_slice(
+        &std::fs::read(root.join("vendor/octra-circle-wasm-host/PROVENANCE.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(adopted["commit"], pin["commit"]);
+    let source = adopted["source_directory"].as_str().unwrap();
+    let expected_sources: serde_json::Map<String, Value> = adopted["upstream_sha256"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(path, hash)| (format!("{source}/{path}"), hash.clone()))
+        .collect();
+    assert_eq!(fixture["source_sha256"], Value::Object(expected_sources));
     for (name, hash) in fixture["app_source_sha256"].as_object().unwrap() {
         assert_eq!(
             hex::encode(Sha256::digest(std::fs::read(root.join(name)).unwrap())),

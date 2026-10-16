@@ -1,10 +1,13 @@
 # Private administration for OctraVPN v5
 
-`program/main-v5.aml` preserves v4 settlement and replaces the program owner's
+`program/main-v5.aml` retains the v4 escrow paths and replaces the program owner's
 public address with a SHA256 commitment to a random 32-byte administration
 credential. The credential is a private prover witness. Neither its secret nor
 an administrator wallet address is submitted to the program. v1-v4 remain
 historical compatibility artifacts; they do not acquire these protections.
+The current v5 settlement capability also binds the operator's byte count and
+payment and captures the opening policy anchor; see [settlement-v5.md](settlement-v5.md)
+for migration requirements and the remaining cooperative-payment assumption.
 
 This implementation is a review candidate. Deployment still requires an
 activated target proof profile, independent circuit/security review, a verified
@@ -148,6 +151,11 @@ prepare --program-version 5 --params ceremony/private-admin-candidate.toml.examp
 --amlc PATH --out FRESH_DIRECTORY`. Unselected admin fields remain explicit nulls
 in the intent, never a fabricated deployable transaction. All readiness gates
 remain unsatisfied until independently certified.
+
+Pass `--compiler-upstream-commit FULL_COMMIT` only when the compiler's build
+record identifies that source. The bundle records an unknown source commit when
+this is omitted. A node reference pin does not establish compiler provenance;
+the compiler binary and supplied patch files are always hashed separately.
 
 
 ## Canary security changes
