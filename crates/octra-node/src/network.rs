@@ -3,7 +3,7 @@
 use crate::{bootstrap, executor, launch, network_profile::Profile};
 use anyhow::{ensure, Context, Result};
 use octra_node_protocol::{
-    consensus::{engine::TimeoutConfig, journal::JournalOwner},
+    consensus::{engine::TimeoutConfig, journal::JournalOwner, profile::Settings},
     native_integer,
     network::{
         endpoint::{self, Endpoint},
@@ -160,6 +160,18 @@ fn equal_entries(raw: Option<&[u8]>, expected: &[String]) -> bool {
     expected.sort();
     actual == expected
 }
+fn bootstrap_peers(configured: &[String], settings: &Settings) -> Vec<Endpoint> {
+    endpoint::bootstrap(
+        &configured
+            .iter()
+            .map(|s| s.as_bytes().to_vec())
+            .collect::<Vec<_>>(),
+        settings.get("OCTRA_BOOTSTRAP_PEERS").unwrap_or_default(),
+        settings
+            .get("OCTRA_BOOTSTRAP_PEERS_EXTRA")
+            .unwrap_or_default(),
+    )
+}
 pub async fn run(config: Config, mut shutdown: watch::Receiver<bool>) -> Result<()> {
     ensure!(
         (1..=3600).contains(&config.startup_seconds),
@@ -237,15 +249,7 @@ pub async fn run(config: Config, mut shutdown: watch::Receiver<bool>) -> Result<
             .get("OCTRA_VALIDATORS_NEXT_EPOCH")
             .map(<[u8]>::to_vec),
     };
-    let peers = endpoint::bootstrap(
-        &config
-            .peers
-            .iter()
-            .map(|s| s.as_bytes().to_vec())
-            .collect::<Vec<_>>(),
-        settings.get("OCTRA_BOOTSTRAP_PEERS").unwrap_or_default(),
-        settings.get("OCTRA_PEERS").unwrap_or_default(),
-    );
+    let peers = bootstrap_peers(&config.peers, settings);
     ensure!(!peers.is_empty(), "network has no bootstrap peers");
     let binary_hash = settings
         .get("OCTRA_BINARY_HASH")
@@ -372,6 +376,37 @@ fn network_voting(voting: bool, publisher: bool, mode: Option<&[u8]>) -> Result<
 mod role_tests {
     use super::*;
     use octra_exex::{ChainIdentity, StateRoot};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn public_bootstrap_merges_configured_base_and_upstream_extra_once() {
+        let settings = Settings::from_values(BTreeMap::from([
+            (
+                "OCTRA_BOOTSTRAP_PEERS".into(),
+                b"base.example:19000,shared.example:19000".to_vec(),
+            ),
+            (
+                "OCTRA_BOOTSTRAP_PEERS_EXTRA".into(),
+                b"shared.example:19000,extra.example:19000".to_vec(),
+            ),
+            ("OCTRA_PEERS".into(), b"legacy.example:19000".to_vec()),
+        ]))
+        .unwrap();
+        let configured = vec!["chosen.example:19000".into(), "base.example:19000".into()];
+        let actual = bootstrap_peers(&configured, &settings)
+            .iter()
+            .map(Endpoint::encode)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual,
+            [
+                b"chosen.example:19000".to_vec(),
+                b"base.example:19000".to_vec(),
+                b"shared.example:19000".to_vec(),
+                b"extra.example:19000".to_vec(),
+            ]
+        );
+    }
 
     fn private_single() -> crate::single::launch::Config {
         crate::single::launch::Config {
