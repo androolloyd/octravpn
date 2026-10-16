@@ -156,12 +156,20 @@ async fn main() -> Result<()> {
             config,
             compute_provider,
             publisher,
-        } => {
-            let mut config = octra_node::network::read(&config)?;
-            config.compute_provider |= compute_provider;
-            config.publisher |= publisher;
-            octra_node::network::run(config, shutdown()).await?;
-        }
+        } => match octra_node::network::read_role(&config)? {
+            octra_node::network::RoleConfig::Public(mut config) => {
+                config.compute_provider |= compute_provider;
+                config.publisher |= publisher;
+                octra_node::network::run(*config, shutdown()).await?;
+            }
+            octra_node::network::RoleConfig::Single(config) => {
+                anyhow::ensure!(
+                    !compute_provider && !publisher,
+                    "public-network flags cannot select private Single services"
+                );
+                octra_node::single::launch::run(*config, shutdown()).await?;
+            }
+        },
     }
     Ok(())
 }

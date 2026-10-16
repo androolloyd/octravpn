@@ -117,20 +117,7 @@ fn seed(config: &Config) -> Result<StateBatch> {
     Ok(StateBatch::from_snapshot(restored.state))
 }
 pub async fn open(config: &Config) -> Result<Arc<Node>> {
-    config.settings.validate()?;
-    ensure!(
-        config.chain.chain_id.starts_with("octra-single-local-")
-            && config.chain.genesis_root().is_some(),
-        "Single requires an explicit private genesis origin"
-    );
-    ensure!(
-        config.rpc.ip().is_loopback(),
-        "private Single fixture RPC must bind loopback"
-    );
-    ensure!(
-        (1024..=128 * 1024 * 1024).contains(&config.maximum_http_body),
-        "Single HTTP body budget invalid"
-    );
+    validate(config)?;
     let key = crate::identity::read(&config.key)?;
     let public = STANDARD.encode(key.verifying_key().as_bytes()).into_bytes();
     ensure!(
@@ -227,6 +214,26 @@ pub async fn open(config: &Config) -> Result<Arc<Node>> {
     node.register(Archive(config.data.join("single-archive")))
         .await?;
     Ok(node)
+}
+
+/// Validate the private role boundary before the standard network launcher
+/// opens a key, store, or listener.
+pub fn validate(config: &Config) -> Result<()> {
+    config.settings.validate()?;
+    ensure!(
+        config.chain.chain_id.starts_with("octra-single-local-")
+            && config.chain.genesis_root().is_some(),
+        "Single requires an explicit private genesis origin"
+    );
+    ensure!(
+        config.rpc.ip().is_loopback(),
+        "private Single fixture RPC must bind loopback"
+    );
+    ensure!(
+        (1024..=128 * 1024 * 1024).contains(&config.maximum_http_body),
+        "Single HTTP body budget invalid"
+    );
+    Ok(())
 }
 struct Archive(PathBuf);
 impl ExEx<NativeTransaction> for Archive {

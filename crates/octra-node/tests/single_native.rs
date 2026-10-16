@@ -1027,9 +1027,13 @@ async fn activated_public_single_preserves_native_missing_parent_refusal() {
     }
 }
 
-fn start_single_fixture(path: &std::path::Path, log: &std::path::Path) -> tokio::process::Child {
+fn start_single_fixture(
+    command: &str,
+    path: &std::path::Path,
+    log: &std::path::Path,
+) -> tokio::process::Child {
     tokio::process::Command::new(env!("CARGO_BIN_EXE_octra-node"))
-        .args(["run-single", "--config"])
+        .args([command, "--config"])
         .arg(path)
         .stderr(std::fs::File::create(log).unwrap())
         .stdout(std::process::Stdio::null())
@@ -1056,24 +1060,39 @@ async fn wait_single_head(
     client: &reqwest::Client,
     url: &str,
     epoch: u64,
+    log: &std::path::Path,
 ) -> Value {
-    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+    let mut last_response = String::new();
+    let result = tokio::time::timeout(std::time::Duration::from_secs(30), async {
         loop {
             assert!(
                 child.try_wait().unwrap().is_none(),
-                "private Single CLI stopped early"
+                "private Single CLI stopped early: {}",
+                std::fs::read_to_string(log).unwrap_or_default()
             );
             if let Ok(response) = single_rpc(client, url, "octra_head", Value::Null).await {
                 if response["result"]["cursor"]["epoch"].as_u64() == Some(epoch) {
                     return response["result"].clone();
                 }
-                assert!(response.get("error").is_none(), "{response}");
+                // A concurrent local commit temporarily suspends publication.
+                // The exact head must still become available before the deadline.
+                assert!(
+                    response.get("error").is_none()
+                        || response["error"]["code"].as_i64() == Some(110),
+                    "{response}"
+                );
+                last_response = response.to_string();
             }
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         }
     })
-    .await
-    .unwrap()
+    .await;
+    result.unwrap_or_else(|_| {
+        panic!(
+            "private Single head {epoch} unavailable; last response: {last_response}; log: {}",
+            std::fs::read_to_string(log).unwrap_or_default()
+        )
+    })
 }
 async fn stop_single_fixture(child: &mut tokio::process::Child) {
     assert!(tokio::process::Command::new("kill")
@@ -1155,14 +1174,21 @@ async fn real_private_single_cli_seed_clock_rpc_sigterm_and_restart() {
     };
     let config_path = tmp.path().join("single.json");
     std::fs::write(&config_path, serde_json::to_vec(&config).unwrap()).unwrap();
+    let network_path = tmp.path().join("single-network.json");
+    std::fs::write(
+        &network_path,
+        serde_json::to_vec(&serde_json::json!({"role":"single","single":&config})).unwrap(),
+    )
+    .unwrap();
     let url = format!("http://{rpc}/rpc");
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
         .build()
         .unwrap();
     let started = std::time::Instant::now();
-    let mut child = start_single_fixture(&config_path, &tmp.path().join("first.log"));
-    let genesis = wait_single_head(&mut child, &client, &url, 0).await;
+    let mut child = start_single_fixture("run-single", &config_path, &tmp.path().join("first.log"));
+    let genesis =
+        wait_single_head(&mut child, &client, &url, 0, &tmp.path().join("first.log")).await;
     assert_eq!(genesis["ledger_root"], config.seed.ledger_root);
     let mut tx = signed_transfer();
     tx.timestamp = std::time::SystemTime::now()
@@ -1189,7 +1215,7 @@ async fn real_private_single_cli_seed_clock_rpc_sigterm_and_restart() {
         hex::encode(tx.hash().unwrap()),
         "{response}"
     );
-    let first = wait_single_head(&mut child, &client, &url, 1).await;
+    let first = wait_single_head(&mut child, &client, &url, 1, &tmp.path().join("first.log")).await;
     assert!(
         started.elapsed() >= std::time::Duration::from_secs(9),
         "native ten-second timer fired early"
@@ -1218,9 +1244,17 @@ async fn real_private_single_cli_seed_clock_rpc_sigterm_and_restart() {
             .unwrap();
     assert_eq!(archive["cursor"]["sequence"], 1);
     stop_single_fixture(&mut child).await;
-    let mut resumed = start_single_fixture(&config_path, &tmp.path().join("second.log"));
+    let mut resumed =
+        start_single_fixture("run-network", &network_path, &tmp.path().join("second.log"));
     assert_eq!(
-        wait_single_head(&mut resumed, &client, &url, 1).await,
+        wait_single_head(
+            &mut resumed,
+            &client,
+            &url,
+            1,
+            &tmp.path().join("second.log")
+        )
+        .await,
         first
     );
     assert_eq!(

@@ -106,7 +106,16 @@ impl<A: Host> Submission<A> {
         Ok(())
     }
     pub fn router(self: Arc<Self>) -> Router {
-        router(self.context())
+        let swarm = self.swarm.clone();
+        http::native_layer(
+            router_base_with_limit(self.context(), 5_000_000 + 65_536).route(
+                "/operator/peers",
+                get(move || {
+                    let swarm = swarm.clone();
+                    async move { peer_diagnostics(&swarm) }
+                }),
+            ),
+        )
     }
 
     pub async fn ingress(
@@ -173,7 +182,27 @@ pub(crate) fn router(host: Arc<Context>) -> Router {
     router_with_limit(host, 5_000_000 + 65_536)
 }
 pub(crate) fn router_with_limit(host: Arc<Context>, maximum: usize) -> Router {
-    let router = Router::new()
+    http::native_layer(router_base_with_limit(host, maximum))
+}
+fn peer_diagnostics(swarm: &Swarm) -> Json<serde_json::Value> {
+    let diagnostics = swarm.diagnostics();
+    let mut score_reasons = BTreeMap::<String, usize>::new();
+    for (_, score) in &diagnostics.scores {
+        if !score.last_reason.is_empty() {
+            let reason = String::from_utf8_lossy(&score.last_reason).into_owned();
+            *score_reasons.entry(reason).or_default() += 1;
+        }
+    }
+    Json(serde_json::json!({
+        "connected": diagnostics.connected,
+        "known": diagnostics.known,
+        "public_sources": diagnostics.public_sources,
+        "risks": diagnostics.risks.iter().map(|risk| String::from_utf8_lossy(risk).into_owned()).collect::<Vec<_>>(),
+        "score_reasons": score_reasons,
+    }))
+}
+fn router_base_with_limit(host: Arc<Context>, maximum: usize) -> Router {
+    Router::new()
         .route("/operator/status", get(status))
         .route("/account/:address", get(account))
         .route("/transactions", post(submit))
@@ -183,8 +212,7 @@ pub(crate) fn router_with_limit(host: Arc<Context>, maximum: usize) -> Router {
         )
         .merge(http::router())
         .layer(DefaultBodyLimit::max(maximum.min(5_000_000)))
-        .with_state(host);
-    http::native_layer(router)
+        .with_state(host)
 }
 struct Captured {
     now: f64,

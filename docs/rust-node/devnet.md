@@ -117,6 +117,18 @@ nonactive operator, while actual proposal and vote duties still require native
 membership, readiness and serving admission. Conflicting registered keys fail
 startup. The RPC, browser bridge and control service
 remain on loopback; the HTTPS gateway has its own bind and Host policy.
+The loopback operator RPC also serves `/operator/peers` with aggregate
+connection counts, source diversity, risk labels and score reasons. It omits
+peer identities so an operator can diagnose admission without publishing the
+peer address book.
+
+The same `run-network` command also accepts an explicitly private Single
+configuration shaped as `{"role":"single","single":{...}}`, where `single`
+contains the existing `run-single` configuration. Its chain must have a fresh
+`octra-single-local-` genesis origin and `settings.mode` must be `single`.
+Private Single uses its own canonical store, execution and services; it does
+not join the public BFT chain or provide BFT finality. Public `network.json`
+keeps its existing shape and rejects a Single consensus mode.
 
 The official public-devnet snapshot completed authenticated download and import
 against the pinned network authority. A separate observer has committed a

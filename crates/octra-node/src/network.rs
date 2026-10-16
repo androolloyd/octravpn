@@ -58,6 +58,21 @@ pub struct Config {
     #[serde(default = "default_startup_seconds")]
     pub startup_seconds: u64,
 }
+
+/// A standard network launch is either the existing public BFT configuration
+/// or an explicitly tagged, isolated private Single configuration.
+pub enum RoleConfig {
+    Public(Box<Config>),
+    Single(Box<crate::single::launch::Config>),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SingleRole {
+    role: String,
+    single: crate::single::launch::Config,
+}
+
 fn default_startup_seconds() -> u64 {
     180
 }
@@ -83,6 +98,49 @@ pub fn read(path: &Path) -> Result<Config> {
         }
     }
     Ok(config)
+}
+
+/// Preserve the public `network.json` shape. Private Single requires a
+/// separate `{"role":"single","single":{...}}` document; BFT trust fields
+/// cannot be mixed into that shape or interpreted as private genesis.
+pub fn read_role(path: &Path) -> Result<RoleConfig> {
+    let raw = bootstrap::read_limited(path, 1024 * 1024)?;
+    let value: serde_json::Value = serde_json::from_slice(&raw)?;
+    match value.get("role") {
+        None => Ok(RoleConfig::Public(Box::new(read(path)?))),
+        Some(serde_json::Value::String(role)) if role == "single" => {
+            let mut role: SingleRole = serde_json::from_value(value)?;
+            ensure!(role.role == "single", "invalid network role");
+            crate::single::launch::validate(&role.single)?;
+            let parent = std::fs::canonicalize(path)?
+                .parent()
+                .context("configuration has no directory")?
+                .to_owned();
+            for file in [
+                &mut role.single.data,
+                &mut role.single.key,
+                &mut role.single.seed.path,
+            ] {
+                if file.is_relative() {
+                    *file = parent.join(&*file);
+                }
+            }
+            if let Some(file) = role
+                .single
+                .services
+                .as_mut()
+                .and_then(|services| services.vpn.as_mut())
+                .and_then(|vpn| vpn.settlement.ip_tunnel.as_mut())
+                .and_then(|tunnel| tunnel.address_book.as_mut())
+            {
+                if file.is_relative() {
+                    *file = parent.join(&*file);
+                }
+            }
+            Ok(RoleConfig::Single(Box::new(role.single)))
+        }
+        _ => anyhow::bail!("invalid network role"),
+    }
 }
 fn entries(raw: Option<&[u8]>) -> Vec<Vec<u8>> {
     raw.unwrap_or_default()
@@ -298,31 +356,113 @@ pub async fn run(config: Config, mut shutdown: watch::Receiver<bool>) -> Result<
 /// Rust configuration supplies an explicit BFT/observer role. The native
 /// shared network environment need not contain a local consensus-mode choice.
 fn network_voting(voting: bool, publisher: bool, mode: Option<&[u8]>) -> Result<bool> {
-    if publisher || !voting {
-        return Ok(false);
-    }
     match mode
         .map(|mode| mode.trim_ascii().to_ascii_lowercase())
         .as_deref()
     {
-        None | Some(b"bft") => Ok(true),
-        Some(b"observer") => Ok(false),
-        _ => anyhow::bail!(
-            "native Single producer mode is not implemented; configure BFT or observer explicitly"
+        Some(b"single") => anyhow::bail!(
+            "private Single mode requires an explicit private genesis and the Single launcher"
         ),
+        None | Some(b"bft") => Ok(voting && !publisher),
+        Some(b"observer") => Ok(false),
+        _ => anyhow::bail!("invalid public network consensus mode"),
     }
 }
 #[cfg(test)]
 mod role_tests {
     use super::*;
+    use octra_exex::{ChainIdentity, StateRoot};
+
+    fn private_single() -> crate::single::launch::Config {
+        crate::single::launch::Config {
+            services: None,
+            chain: ChainIdentity::genesis("octra-single-local-launch-test", StateRoot([7; 32])),
+            data: "data".into(),
+            key: "key".into(),
+            seed: crate::single::launch::Seed {
+                path: "seed.image".into(),
+                bytes: 1,
+                sha256: "00".repeat(32),
+                ledger_root: "00".repeat(32),
+                maximum_records: 1,
+                maximum_string_bytes: 1024,
+                date: 0,
+            },
+            settings: crate::single::Settings {
+                mode: "single".into(),
+                private_prior_fixture: true,
+                wallet_address: vec![],
+                wallet_public: vec![],
+                validators: None,
+                next_validators: None,
+                activation: None,
+                fee_recipient: None,
+                epoch_capacity: "1".into(),
+                stealth_minimum: "1".into(),
+                maximum_defer: 0,
+                inline_ranges: false,
+                maximum_timestamp_drift: 0.,
+                preverify_ttl: 45.,
+                preverify_maximum: 64,
+            },
+            execution: crate::single::launch::Execution {
+                activated_applications: false,
+                release: None,
+                crypto_profile: None,
+                admit_ops: None,
+                emission_guard: false,
+                emission_activation: None,
+                legacy_total: None,
+                sender_key_activation: None,
+                private_result_activation: 0,
+                maximum_fhe: 0,
+                maximum_stealth: 0,
+                maximum_multi_exec: 0,
+                ready_max_lag: 0,
+            },
+            rpc: "127.0.0.1:19870".parse().unwrap(),
+            maximum_http_body: 1024,
+        }
+    }
+
+    fn read_single(value: &serde_json::Value) -> Result<RoleConfig> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("single.json");
+        std::fs::write(&path, serde_json::to_vec(value)?)?;
+        read_role(&path)
+    }
+
     #[test]
-    fn explicit_observer_preserves_native_role_order_without_inventing_single_finality() {
+    fn standard_launcher_selects_only_explicit_private_single_genesis() {
+        let mut value = serde_json::json!({"role":"single","single":private_single()});
+        match read_single(&value).unwrap() {
+            RoleConfig::Single(config) => {
+                assert!(config.data.is_absolute());
+                assert!(config.key.is_absolute());
+                assert!(config.seed.path.is_absolute());
+            }
+            RoleConfig::Public(_) => panic!("Single config selected BFT"),
+        }
+        value["single"]["chain"] =
+            serde_json::to_value(ChainIdentity::genesis("octra-mainnet", StateRoot([7; 32])))
+                .unwrap();
+        assert!(read_single(&value).is_err());
+        value["single"]["chain"] = serde_json::to_value(private_single().chain).unwrap();
+        value["single"]["settings"]["mode"] = serde_json::json!("bft");
+        assert!(read_single(&value).is_err());
+        value["single"]["settings"]["mode"] = serde_json::json!("single");
+        value["network"] = serde_json::json!({});
+        assert!(read_single(&value).is_err());
+    }
+
+    #[test]
+    fn public_network_cannot_reinterpret_private_single_mode() {
         assert!(!network_voting(false, false, None).unwrap());
-        assert!(!network_voting(false, false, Some(b"single")).unwrap());
-        assert!(!network_voting(true, true, Some(b"single")).unwrap());
         assert!(!network_voting(true, false, Some(b"observer")).unwrap());
         assert!(network_voting(true, false, None).unwrap());
         assert!(network_voting(true, false, Some(b" BFT ")).unwrap());
+        assert!(network_voting(false, false, Some(b"single")).is_err());
+        assert!(network_voting(true, true, Some(b"single")).is_err());
         assert!(network_voting(true, false, Some(b"single")).is_err());
         assert!(network_voting(true, false, Some(b"typo")).is_err());
     }

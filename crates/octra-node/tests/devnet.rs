@@ -168,6 +168,18 @@ async fn executable_devnet_transfers_browses_and_recovers() {
         .unwrap();
     for config in &configs {
         reached(&http, config, 2).await;
+        let diagnostics: serde_json::Value = http
+            .get(format!("http://{}/operator/peers", config.rpc))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(diagnostics["connected"].is_number());
+        assert!(diagnostics["score_reasons"].is_object());
     }
     let browser = format!("http://{}/open", configs[0].browser);
     tokio::time::timeout(Duration::from_secs(10), async {
