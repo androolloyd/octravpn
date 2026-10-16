@@ -383,7 +383,8 @@ async fn executable_devnet_transfers_browses_and_recovers() {
 }
 
 async fn gateway_read(http: &reqwest::Client, config: &Config) {
-    tokio::time::timeout(Duration::from_secs(10), async {
+    let timeout = if config.voting { 10 } else { 90 };
+    tokio::time::timeout(Duration::from_secs(timeout), async {
         loop {
             let response = http
                 .get(format!(

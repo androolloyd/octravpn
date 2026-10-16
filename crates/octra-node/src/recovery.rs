@@ -302,13 +302,15 @@ impl<A: Host> Service<A> {
         let head = self.node.quiesce().await?;
         // Include the last observed epoch: cancellation can occur after its
         // canonical cache update and before the driver's pending callback.
-        let first = after.0.max(self.node.store.anchor().cursor.sequence.0 + 1);
-        for sequence in first..=head.cursor.sequence.0 {
-            let sequence = octra_exex::Sequence(sequence);
-            let record = self.node.publisher.record(sequence).await?;
-            let cursor = self.node.store.retained_head(sequence).await?.cursor;
-            let pending = self.pending.clone();
-            tokio::task::spawn_blocking(move || pending.committed(&record, cursor)).await??;
+        if !self.pending.awaiting_recovery()? {
+            let first = after.0.max(self.node.store.anchor().cursor.sequence.0 + 1);
+            for sequence in first..=head.cursor.sequence.0 {
+                let sequence = octra_exex::Sequence(sequence);
+                let record = self.node.publisher.record(sequence).await?;
+                let cursor = self.node.store.retained_head(sequence).await?.cursor;
+                let pending = self.pending.clone();
+                tokio::task::spawn_blocking(move || pending.committed(&record, cursor)).await??;
+            }
         }
         let journal = self.config.journal.clone();
         let epoch = i64::try_from(head.cursor.epoch.0)?;
@@ -365,7 +367,16 @@ impl<A: Host> Service<A> {
         }
     }
     async fn run_inner(&self, driver: Live<A>) -> Result<()> {
-        let mut running = Some(Running::start(driver));
+        // Observers import finalized history through this supervisor. Running
+        // a consensus driver without voting adds no authority and can race
+        // its suspended catch-up lease during a restart.
+        let mut running = if self.voting {
+            Some(Running::start(driver))
+        } else {
+            self.authority.detach();
+            drop(driver);
+            None
+        };
         let mut interval = tokio::time::interval(Duration::from_secs(5));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut last = self.node.head().await?.cursor.sequence;
@@ -401,6 +412,9 @@ impl<A: Host> Service<A> {
                 continue;
             }
             if !connected {
+                if !self.voting && matches!(self.node.status(), crate::Status::Serving(_)) {
+                    self.node.suspend("required consensus peers disconnected");
+                }
                 if let Some(mut driver) = running.take() {
                     self.node.suspend("required consensus peers disconnected");
                     driver.stop().await?;
@@ -429,6 +443,13 @@ impl<A: Host> Service<A> {
                         .epoch
                         .0
             });
+            if !self.voting
+                && connected
+                && !needs_catchup
+                && matches!(self.node.status(), crate::Status::Serving(_))
+            {
+                continue;
+            }
             if running.is_some() && connected && !needs_catchup {
                 continue;
             }
@@ -529,7 +550,9 @@ impl<A: Host> Service<A> {
             }
             ensure!(self.node.resume().await?, "recovery serving lease revoked");
             self.pending.recover(&self.submission).await?;
-            running = Some(Running::start(self.build().await?));
+            if self.voting {
+                running = Some(Running::start(self.build().await?));
+            }
             progress = Instant::now();
         }
     }
@@ -562,7 +585,14 @@ mod tests {
             state_root: Some(root.to_vec()),
         };
         assert_eq!(
-            target_from_verified_roots(chain, 10, &root, &validators, &[signed.clone()]).unwrap(),
+            target_from_verified_roots(
+                chain,
+                10,
+                &root,
+                &validators,
+                std::slice::from_ref(&signed)
+            )
+            .unwrap(),
             Some(11)
         );
         let mut mismatched = signed.clone();

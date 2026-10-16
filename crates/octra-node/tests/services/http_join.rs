@@ -290,7 +290,7 @@ async fn http_join_tries_secondary_after_primary_head_stalls() {
         )
         .await
         .unwrap();
-    assert_eq!(proved, Some(1));
+    assert_eq!(proved, Some(2));
     assert!(head_seen.swap(false, Ordering::SeqCst));
     assert!(range_seen.swap(false, Ordering::SeqCst));
     membership_store.close().await;

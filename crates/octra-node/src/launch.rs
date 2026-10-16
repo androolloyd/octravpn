@@ -518,7 +518,8 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
                 .await?
                 .unwrap_or(0)
                 .max(peer_target);
-            if target > node.head().await?.cursor.epoch.0 {
+            let behind = target > node.head().await?.cursor.epoch.0;
+            if behind && voting {
                 let reached = node
                     .catch_up_range(target, &finality, &executor, 10.)
                     .await?
@@ -532,10 +533,24 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
                     "startup catch-up incomplete"
                 );
             }
-            ensure!(node.resume().await?, "startup serving lease revoked");
-            pending.recover(&submission).await?;
+            if behind && !voting {
+                // Expose suspended observer status while live recovery imports
+                // authenticated history. Voting startup retains the strict gate.
+                node.suspend("observer awaiting authenticated catch-up");
+            } else {
+                ensure!(node.resume().await?, "startup serving lease revoked");
+            }
+            if !behind || voting {
+                // Restored queue entries need a current admission lease. The
+                // observer stays closed until recovery resumes that lease.
+                pending.recover(&submission).await?;
+            }
             let height = node.head().await?.cursor.epoch.0 as i64 + 1;
-            let set = validator.activate(height).await?;
+            let set = if behind && !voting {
+                validator.activate_retained(height).await?
+            } else {
+                validator.activate(height).await?
+            };
             let mut engine = Engine::new(
                 chain.chain_id.as_bytes().to_vec(),
                 address.clone(),
@@ -544,7 +559,11 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
                 protocol,
                 timeouts,
             );
-            validator.recover(&mut engine).await?;
+            if behind && !voting {
+                validator.recover_retained(&mut engine).await?;
+            } else {
+                validator.recover(&mut engine).await?;
+            }
             validator.set_enabled(voting);
             let publication = Canonical::new(node.clone(), bundles.clone(), executor.clone(), 10.)
                 .await?

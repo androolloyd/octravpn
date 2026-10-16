@@ -114,6 +114,13 @@ impl Pending {
     pub fn transactions(&self) -> Result<Vec<Transaction>> {
         Ok(self.lock()?.pool.all().cloned().collect())
     }
+    /// Durable entries are replayed against the current canonical head by
+    /// `recover`; per-commit callbacks must wait until that replay completes.
+    pub(crate) fn awaiting_recovery(&self) -> Result<bool> {
+        let state = self.state.try_lock().map_err(|_| anyhow!("staging busy"))?;
+        anyhow::ensure!(!state.failed, "durable staging unavailable");
+        Ok(state.recovery.is_some())
+    }
     /// Capture queue metadata under the same short read lock. Callers cannot
     /// retain a reference to or mutate the pool through this capability.
     pub(crate) fn inspect<T>(&self, read: impl FnOnce(&Pool) -> T) -> Result<T> {

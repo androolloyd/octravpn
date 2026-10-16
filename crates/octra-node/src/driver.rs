@@ -149,6 +149,61 @@ impl<A: Host> Validator<A> {
     pub fn set_enabled(&self, enabled: bool) {
         self.enabled.store(enabled, Ordering::Release);
     }
+    /// Seed a nonvoting observer from its authenticated retained head while
+    /// public service admission remains suspended during catch-up.
+    pub(crate) async fn activate_retained(&self, number: i64) -> Result<ValidatorSet, Error> {
+        let head = self.node.head().await.map_err(error)?;
+        self.activate_at(number, head).await
+    }
+    async fn activate_at(&self, number: i64, head: Head) -> Result<ValidatorSet, Error> {
+        if i64::try_from(head.cursor.epoch.0)
+            .map_err(error)?
+            .checked_add(1)
+            != Some(number)
+        {
+            return Err("activation is not consecutive".into());
+        }
+        let relief = self
+            .node
+            .store
+            .reader()
+            .relief_after(&head)
+            .await
+            .map_err(error)?;
+        let rules = self
+            .node
+            .host
+            .resolve(&head, number as u64, relief)
+            .await
+            .map_err(error)?;
+        let parent = self
+            .node
+            .publisher
+            .proposal_parent(&head, self.config.policy)
+            .await
+            .map_err(error)?;
+        self.swarm.advance_profile(number)?;
+        let validators = rules.validators.clone();
+        self.swarm.set_validators(
+            validators
+                .validators
+                .iter()
+                .map(|member| member.pubkey.clone())
+                .collect(),
+        )?;
+        self.peers.set_validators(validators.clone())?;
+        self.peers.prune(number - 1)?;
+        let mut cache = self.cache.lock().map_err(error)?;
+        cache.frozen.retain(|(epoch, _), _| *epoch >= number);
+        cache.executions.retain(|_, v| v.epoch() >= number);
+        cache.epoch = Some(Arc::new(Epoch {
+            head,
+            number,
+            parent,
+            rules,
+        }));
+        Ok(validators)
+    }
     /// Restore only the next epoch's authenticated lock, after re-executing its
     /// durable bundle against the canonical parent. Never discard an unresolved lock.
     pub async fn recover(
@@ -156,6 +211,25 @@ impl<A: Host> Validator<A> {
         engine: &mut octra_node_protocol::consensus::engine::Engine,
     ) -> Result<(), Error> {
         let epoch = self.epoch()?;
+        self.recover_at(engine, epoch).await
+    }
+    /// Check an observer's durable journal against its retained head while
+    /// external serving remains suspended during authenticated catch-up.
+    pub(crate) async fn recover_retained(
+        &self,
+        engine: &mut octra_node_protocol::consensus::engine::Engine,
+    ) -> Result<(), Error> {
+        let epoch = self.cached_epoch()?;
+        if self.node.head().await.map_err(error)? != epoch.head {
+            return Err("validator view advanced".into());
+        }
+        self.recover_at(engine, epoch).await
+    }
+    async fn recover_at(
+        &self,
+        engine: &mut octra_node_protocol::consensus::engine::Engine,
+        epoch: Arc<Epoch>,
+    ) -> Result<(), Error> {
         let journal = self.config.journal.clone();
         let records = tokio::task::spawn_blocking(move || journal.pending())
             .await
@@ -215,6 +289,13 @@ impl<A: Host> Validator<A> {
         engine.restore_precommit_lock(recovered.proposal)
     }
     fn epoch(&self) -> Result<Arc<Epoch>, Error> {
+        let epoch = self.cached_epoch()?;
+        if self.node.snapshot().map_err(error)?.head() != &epoch.head {
+            return Err("validator view advanced".into());
+        }
+        Ok(epoch)
+    }
+    fn cached_epoch(&self) -> Result<Arc<Epoch>, Error> {
         let epoch = self
             .cache
             .lock()
@@ -222,9 +303,6 @@ impl<A: Host> Validator<A> {
             .epoch
             .clone()
             .ok_or("validator epoch unavailable")?;
-        if self.node.snapshot().map_err(error)?.head() != &epoch.head {
-            return Err("validator view advanced".into());
-        }
         Ok(epoch)
     }
     fn plan(built: &Built) -> ProposalPlan {
@@ -424,53 +502,7 @@ impl<A: Host> DriverHost for Validator<A> {
     }
     async fn activate(&self, number: i64) -> Result<ValidatorSet, Error> {
         let head = self.node.snapshot().map_err(error)?.head().clone();
-        if i64::try_from(head.cursor.epoch.0)
-            .map_err(error)?
-            .checked_add(1)
-            != Some(number)
-        {
-            return Err("activation is not consecutive".into());
-        }
-        let relief = self
-            .node
-            .store
-            .reader()
-            .relief_after(&head)
-            .await
-            .map_err(error)?;
-        let rules = self
-            .node
-            .host
-            .resolve(&head, number as u64, relief)
-            .await
-            .map_err(error)?;
-        let parent = self
-            .node
-            .publisher
-            .proposal_parent(&head, self.config.policy)
-            .await
-            .map_err(error)?;
-        self.swarm.advance_profile(number)?;
-        let validators = rules.validators.clone();
-        self.swarm.set_validators(
-            validators
-                .validators
-                .iter()
-                .map(|member| member.pubkey.clone())
-                .collect(),
-        )?;
-        self.peers.set_validators(validators.clone())?;
-        self.peers.prune(number - 1)?;
-        let mut cache = self.cache.lock().map_err(error)?;
-        cache.frozen.retain(|(epoch, _), _| *epoch >= number);
-        cache.executions.retain(|_, v| v.epoch() >= number);
-        cache.epoch = Some(Arc::new(Epoch {
-            head,
-            number,
-            parent,
-            rules,
-        }));
-        Ok(validators)
+        self.activate_at(number, head).await
     }
     async fn validators(&self, number: i64) -> Result<ValidatorSet, Error> {
         let epoch = self.epoch()?;

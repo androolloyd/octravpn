@@ -186,8 +186,8 @@ impl Client {
         Ok(records)
     }
     /// A far head is usable only when its QC is signed by independently known
-    /// canonical membership. Unknown future membership falls back to a verified
-    /// consecutive prefix; it is never learned from the HTTP record itself.
+    /// canonical membership. A consecutive range beside the retained head is
+    /// an availability target only; every record is authenticated on import.
     async fn proves<A: Host>(
         &self,
         node: &Node<A>,
@@ -231,6 +231,31 @@ impl Client {
                 if advertised.epoch <= base.cursor.epoch.0 as i64 {
                     return Ok(None);
                 }
+                let from = i64::try_from(base.cursor.epoch.0)?
+                    .checked_add(1)
+                    .context("join epoch overflow")?;
+                if let Ok(records) = self
+                    .range(
+                        source,
+                        from,
+                        (advertised.epoch - from + 1).min(catchup::RANGE_EPOCHS),
+                        source_deadline,
+                    )
+                    .await
+                {
+                    catchup::verify_chain_continuity(&records, from, &base.cursor.state_root.0)?;
+                    for record in &records {
+                        catchup::verify_record_receipts(record)?;
+                    }
+                    // Authenticate the first successor against local rules.
+                    // Later range entries remain hints until sequential import.
+                    node.publisher
+                        .verify_record(&base, &records[0], &executor.graph())
+                        .await?;
+                    return Ok::<_, anyhow::Error>(Some(
+                        records.last().context("join range is empty")?.epoch_id as u64,
+                    ));
+                }
                 if let Ok(records) = self
                     .range(source, advertised.epoch, 1, source_deadline)
                     .await
@@ -245,23 +270,7 @@ impl Client {
                         return Ok(Some(record.epoch_id as u64));
                     }
                 }
-                let from = i64::try_from(base.cursor.epoch.0)?
-                    .checked_add(1)
-                    .context("join epoch overflow")?;
-                let records = self
-                    .range(
-                        source,
-                        from,
-                        (advertised.epoch - from + 1).min(catchup::RANGE_EPOCHS),
-                        source_deadline,
-                    )
-                    .await?;
-                // This includes historical relief and ready-config rules for
-                // the actual parent, unlike an unauthenticated head hint.
-                node.publisher
-                    .verify_record(&base, &records[0], &executor.graph())
-                    .await?;
-                Ok::<_, anyhow::Error>(Some(records[0].epoch_id as u64))
+                Ok(None)
             }
             .await;
             match candidate {
