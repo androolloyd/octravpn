@@ -1,0 +1,54 @@
+{
+  "date": "2026-10-16",
+  "source_commit": "d593003",
+  "status": "PASS_LOCAL_PUBLIC_OBSERVER_DEPLOYED_SUSPENDED",
+  "change": "The standard network CLI accepts an explicitly tagged private Single genesis and dispatches to the existing private Single executor. Public network configuration and BFT execution remain separate. The loopback operator RPC reports aggregate peer diagnostics without identities.",
+  "consensus_change": false,
+  "release_tests": {
+    "command": "cargo test --offline --locked --release -p octra-node --lib --tests",
+    "passed": 81,
+    "ignored": 3,
+    "failed": 0,
+    "scope": "library, executable multi-node devnet, private import, node services, Single CLI restart and native oracle",
+    "log": "out/node-port-final-20261015/single-role-peer-diagnostics-final-tests.log",
+    "log_sha256": "9cc031c446aa97650209a01652c2662eef0b51382bd125497102af5f8dbb1d98"
+  },
+  "strict_clippy": {
+    "command": "CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=1 cargo clippy --offline --locked -p octra-node --all-targets -- -D warnings",
+    "result": "pass",
+    "log": "out/node-port-final-20261015/single-role-peer-diagnostics-final-clippy.log",
+    "log_sha256": "ce0807397859c405c7c9e22789636f81d78de7a96cbf5898005f1c742b585d23"
+  },
+  "release_build": {
+    "command": "cargo build --offline --locked --release -p octra-node --bin octra-node",
+    "result": "pass",
+    "binary_sha256": "9782c9e0324ef4c1dbc94f5deda2f2a147d9018464d42e9a17694d4497665071",
+    "log": "out/node-port-final-20261015/single-role-peer-diagnostics-final-build.log",
+    "log_sha256": "75db6bc9758321c591ef211ed7996b713b06ebe51d07c7d45adbbbab9561452b"
+  },
+  "public_observer": {
+    "network": "Octra public devnet",
+    "chain_id": "octra-devnet-9871-cluster",
+    "nonvoting": true,
+    "vpn": null,
+    "retained_state": true,
+    "restart_pid": 21043,
+    "restart_log": "out/node-port-final-20261015/public-devnet-final-candidate/restart-d593003.log",
+    "http_join": "synced=true verified=4 from official secondary source",
+    "sample_at_utc": "2026-10-16T14:17:29Z",
+    "local_epoch": 1703490,
+    "official_secondary_head_epoch": 1703490,
+    "official_rpc_head_epoch": 1703545,
+    "authenticated_peers": 1,
+    "known_peers": 21,
+    "operator_serving": false,
+    "circle_https_status": 503,
+    "probe_record": "out/node-port-final-20261015/public-devnet-final-candidate/d593003-public-probe.json",
+    "probe_record_sha256": "3cffac751040921da8adf29adc2fae521606f957327aaed87ceebf8388a0a1cd",
+    "result": "retained state reauthenticated and advanced from epoch 1703479 to 1703490; observer remains behind the public RPC and serving is suspended"
+  },
+  "limitations": [
+    "The tagged Single role is restricted to an explicit private genesis; it does not implement public-chain Single finality.",
+    "The public observer has no configured VPN contract or paid tunnel. Its local head matches the official secondary source at the sampled time but trails the public RPC; stable Circle HTTPS and paid VPN qualification remain open."
+  ]
+}
