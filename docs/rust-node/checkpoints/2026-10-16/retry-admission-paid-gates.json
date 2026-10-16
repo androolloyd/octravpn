@@ -87,6 +87,7 @@
       "max_connected_peers_in_twelve_seconds": 8,
       "interpretation": "The signed source-agreement count floor was not met in this bounded sample; weight and freshness checks may impose further conditions. No admission threshold was relaxed.",
       "reachability": "This host advertises 127.0.0.1:20800, which cannot receive public inbound P2P connections. Qualify on a publicly reachable P2P endpoint, or establish enough verified outbound validator links, while retaining the existing source-agreement gate.",
+      "funnel_option": "A local config differing only in advertised endpoint is prepared at out/node-port-final-20261015/public-devnet-final-candidate/network-funnel.json for raw TCP 8443 to the loopback P2P listener. Tailscale reported Funnel disabled on this tailnet; no public forwarding was activated and the existing tailnet HTTPS Serve configuration was unchanged. Tailnet admin enablement or a public host is required before use.",
       "local_report": "out/node-port-final-20261015/public-devnet-final-candidate/retry-fix-admission-probe.json",
       "local_report_sha256": "9ae977a4f8f48cd33449fc229f6929e1ff5107837f6739bd54590941de924bdd"
     }

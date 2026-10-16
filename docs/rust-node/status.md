@@ -25,6 +25,10 @@ upstream behavioral parity and public-network deployment remain unqualified.
   remain open. This local observer advertises a loopback P2P address; the next
   public qualification needs a reachable P2P endpoint or enough verified
   outbound validator links to satisfy the existing source-agreement gate.
+  A raw TCP 8443 Funnel forwarding configuration is prepared locally, but
+  this tailnet has Funnel disabled. Enabling it or providing a public host is
+  required before the observer can advertise a reachable endpoint; the
+  existing tailnet-only Circle HTTPS service remains unchanged.
 - The [bounded public observer recovery checkpoint](checkpoints/2026-10-16/public-prefix-recovery.json)
   records commit `23466d5` passing the executable devnet, node library,
   service and strict lint gates. A nonvoting observer now binds diagnostics
