@@ -79,6 +79,16 @@ clock; exact 24-hour and seven-day maturity boundaries have separate compiled
 AML and native canonical tests. Passing this gate does not qualify stock
 Tailscale paid exits, portal onboarding, public DNS/TLS or Mainnet deployment.
 
+After held receipts are released, the gate waits for the actual durable meter
+to regain credit. Every later phase must authorize and canonically pay for new
+traffic above its preceding counter baseline. UDP probes allow at most three
+application sends per fixture ID, each with a three-second receive deadline;
+each send, timeout, matching echo and stale duplicate is recorded. A canonical
+publication can deliberately drop a datagram while admission is suspended.
+Retry exhaustion still fails the gate, and blocked-credit/revocation probes
+retain their strict no-delivery assertions. Public client, claim and meter
+journals are captured before proxy/process cleanup on failure.
+
 The application requires canonical `epoch_time` and Ed25519 receipt checks.
 The adopted typed Program profile excludes Ed25519; the gate uses the explicit
 local `octra-node compile-legacy --source ... --loops --point-ops` build and

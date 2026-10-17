@@ -37,12 +37,12 @@ RUN --mount=type=cache,id=octra-vpn-qualification-target,target=/work/octra/targ
     cargo test --locked -p octravpn-core --lib identifier::tests && \
     cargo test --locked -p octravpn-core --lib rpc::asset_tests && \
     cargo test --locked -p octravpn-core --lib create_personal_tailnet && \
-    cargo test --locked -p octravpn-client --bin octravpn paid_routes::linux::tests && \
-    cargo test --locked -p octravpn-client --bin octravpn onboarding::tests && \
-    cargo test --locked -p octravpn-client --bin octravpn settlement_guards && \
-    cargo test --locked -p octravpn-client --bin octravpn receipt_context_tests && \
-    cargo test --locked -p octravpn-client --bin octravpn recovery::tests && \
-    cargo test --locked -p octravpn-client --bin octravpn reconnect_real_wireguard && \
+    cargo test --locked -p octravpn-client --lib paid_routes::linux::tests && \
+    cargo test --locked -p octravpn-client --lib onboarding::tests && \
+    cargo test --locked -p octravpn-client --lib settlement_guards && \
+    cargo test --locked -p octravpn-client --lib receipt_context_tests && \
+    cargo test --locked -p octravpn-client --lib recovery::tests && \
+    cargo test --locked -p octravpn-client --lib reconnect_real_wireguard && \
     cargo test --locked -p octravpn-node --lib native_receipt_freezes && \
     cargo test --locked -p octravpn-node --lib personal_ && \
     cargo test --locked -p octravpn-node --lib anchored_mesh_boots_with_deny_all_before_sync && \
@@ -69,12 +69,13 @@ RUN --mount=type=cache,id=octra-vpn-qualification-target,target=/work/octra/targ
     cp target/release/octra-node /tmp/native-binaries/octra-node
 RUN --mount=type=cache,id=octra-vpn-qualification-target,target=/work/octra/target \
     cargo test --locked --release -p octra-node --lib vpn::payments && \
-    cargo test --locked -p octravpn-client --bin octravpn payments:: && \
-    cargo test --locked -p octravpn-client --bin octravpn payment_runner:: && \
+    cargo test --locked -p octravpn-client --lib payments:: && \
+    cargo test --locked -p octravpn-client --lib payment_runner:: && \
     cargo test --locked -p octravpn-node --lib payment_meter:: && \
     cargo test --locked -p octravpn-node --lib payments:: && \
     cargo test --locked -p octra-node-runtime --test octranet_payments
 COPY octra/docker/native-vpn ./docker/native-vpn
+RUN PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s docker/native-vpn -p 'test_payments_qualify.py'
 COPY octra/licenses ./licenses
 RUN python3 docker/native-vpn/manifest.py > /tmp/native-source.json
 

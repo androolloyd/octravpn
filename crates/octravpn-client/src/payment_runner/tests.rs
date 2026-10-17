@@ -7,6 +7,7 @@ use octravpn_core::{
     payments::{Deployment, SignedUsage, Status, TrafficClass, BYTES_PER_MIB},
     Address, KeyPair,
 };
+use parking_lot::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::{
     sync::{watch, Notify},
@@ -16,7 +17,7 @@ use tokio::{
 struct Fixture {
     _directory: tempfile::TempDir,
     plan: Plan,
-    journal: Arc<Mutex<Journal>>,
+    journal: Accounting,
     connect: SignedConnect,
     initial: SignedStatus,
     operator: KeyPair,
@@ -83,7 +84,7 @@ impl Fixture {
         Self {
             _directory: directory,
             plan,
-            journal: Arc::new(Mutex::new(journal)),
+            journal: Accounting::new(journal),
             connect,
             initial,
             operator,
@@ -104,7 +105,7 @@ impl Fixture {
             self.connect.clone(),
             self.plan.clone(),
             self.journal.clone(),
-            self.initial.clone(),
+            Observation::new(self.initial.clone()),
             shutdown,
         ))
     }
@@ -397,4 +398,213 @@ async fn advancing_status_is_polled_while_one_settlement_batch_waits() {
     server_state.release.notify_waiters();
     server.abort();
     let _ = server.await;
+}
+
+fn control(
+    fixture: &Fixture,
+    origin: reqwest::Url,
+    shutdown: watch::Receiver<bool>,
+) -> impl std::future::Future<Output = Result<()>> + Send + 'static {
+    control_loop(
+        reqwest::Client::builder().no_proxy().build().unwrap(),
+        origin,
+        fixture.connect.clone(),
+        fixture.plan.clone(),
+        fixture.journal.clone(),
+        Observation::new(fixture.initial.clone()),
+        shutdown,
+    )
+}
+
+#[tokio::test]
+async fn shutdown_cancels_a_blocked_handoff_and_reports_held_budget() {
+    let fixture = Fixture::new();
+    let (state, origin, server) = ControlFixture::start(&fixture, fixture.initial.clone()).await;
+    let entered = Arc::new(Notify::new());
+    let driver = {
+        let accounting = fixture.journal.clone();
+        let entered = entered.clone();
+        async move {
+            let _reservation = reserve(&accounting, packet(), Direction::Outbound).await?;
+            entered.notify_one();
+            // A blocked write after durable reservation. No completion or
+            // definitely-unsent cancellation is available when shutdown wins.
+            std::future::pending::<Result<()>>().await
+        }
+    };
+    let (stop, stopped) = watch::channel(false);
+    let (cancel, cancelled) = tokio::sync::oneshot::channel();
+    let running = tokio::spawn(supervise(
+        fixture.journal.clone(),
+        driver,
+        control(&fixture, origin, stopped),
+        stop,
+        async {
+            cancelled.await?;
+            Ok(())
+        },
+    ));
+    tokio::time::timeout(Duration::from_secs(2), entered.notified())
+        .await
+        .unwrap();
+    assert!(!running.is_finished());
+    cancel.send(()).unwrap();
+    let summary = tokio::time::timeout(Duration::from_secs(2), running)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(summary.confirmed_bytes, [0]);
+    assert_eq!(summary.authorized_bytes, [0]);
+    assert_eq!(summary.held_bytes, [32]);
+    assert_eq!(summary.remaining_ou, 9_968);
+    assert!(state.received.lock().is_empty());
+    let path = fixture._directory.path().join("plan");
+    drop(fixture.journal);
+    let recovered = Journal::open(
+        &path,
+        fixture.plan.binding.clone(),
+        fixture.plan.tariff.clone(),
+        fixture.plan.original_budget_ou,
+        Arc::new(KeyPair::from_secret_bytes(&[5; 32])),
+        OpenMode::Resume,
+    )
+    .unwrap();
+    assert_eq!(recovered.uncertain_totals(), [32]);
+    assert_eq!(recovered.totals(), [0]);
+    assert_eq!(recovered.remaining_ou().unwrap(), 9_968);
+    assert!(recovered.pending_receipts().unwrap().is_empty());
+    state.release.notify_waiters();
+    server.abort();
+    let _ = server.await;
+}
+
+#[tokio::test]
+async fn control_failure_interrupts_the_whole_blocked_packet_driver() {
+    let fixture = Fixture::new();
+    let (state, origin, server) = ControlFixture::start(&fixture, fixture.initial.clone()).await;
+    let entered = Arc::new(Notify::new());
+    let driver = {
+        let accounting = fixture.journal.clone();
+        let entered = entered.clone();
+        async move {
+            let _reservation = reserve(&accounting, packet(), Direction::Outbound).await?;
+            entered.notify_one();
+            std::future::pending::<Result<()>>().await
+        }
+    };
+    let (stop, stopped) = watch::channel(false);
+    let running = tokio::spawn(supervise(
+        fixture.journal.clone(),
+        driver,
+        control(&fixture, origin, stopped),
+        stop,
+        std::future::pending(),
+    ));
+    tokio::time::timeout(Duration::from_secs(2), entered.notified())
+        .await
+        .unwrap();
+    let mut status = fixture.initial.status.clone();
+    status.server_wireguard_key = [43; 32];
+    *state.status.lock() = SignedStatus::sign(status, &fixture.operator).unwrap();
+    let error = tokio::time::timeout(Duration::from_secs(3), running)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("WireGuard identity changed"));
+    assert_eq!(fixture.journal.lock().held_totals().unwrap(), [32]);
+    assert!(fixture
+        .journal
+        .lock()
+        .pending_receipts()
+        .unwrap()
+        .is_empty());
+    state.release.notify_waiters();
+    server.abort();
+    let _ = server.await;
+}
+
+#[tokio::test]
+async fn cancelling_service_drops_control_and_preserves_receipts_for_resume() {
+    let fixture = Fixture::new();
+    fixture
+        .journal
+        .lock()
+        .count(&packet(), Direction::Outbound)
+        .unwrap();
+    let mut status = fixture.initial.status.clone();
+    status.committed_totals = vec![32];
+    let signed = SignedStatus::sign(status, &fixture.operator).unwrap();
+    let (state, origin, server) = ControlFixture::start(&fixture, signed).await;
+    let (stop, stopped) = watch::channel(false);
+    let running = tokio::spawn(supervise(
+        fixture.journal.clone(),
+        std::future::pending(),
+        control(&fixture, origin, stopped),
+        stop,
+        std::future::pending(),
+    ));
+    tokio::time::timeout(Duration::from_secs(2), state.entered.notified())
+        .await
+        .unwrap();
+    let receipt = fixture.journal.lock().pending_receipts().unwrap();
+    assert_eq!(receipt.len(), 1);
+    running.abort();
+    assert!(running.await.unwrap_err().is_cancelled());
+    let path = fixture._directory.path().join("plan");
+    drop(fixture.journal);
+    let recovered = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Ok(journal) = Journal::open(
+                &path,
+                fixture.plan.binding.clone(),
+                fixture.plan.tariff.clone(),
+                fixture.plan.original_budget_ou,
+                Arc::new(KeyPair::from_secret_bytes(&[5; 32])),
+                OpenMode::Resume,
+            ) {
+                break journal;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(recovered.pending_receipts().unwrap(), receipt);
+    let views = state.views.load(Ordering::Acquire);
+    tokio::time::sleep(Duration::from_millis(1_100)).await;
+    assert_eq!(state.views.load(Ordering::Acquire), views);
+    state.release.notify_waiters();
+    server.abort();
+    let _ = server.await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn delayed_service_start_cannot_renew_an_old_status_observation() {
+    let fixture = Fixture::new();
+    let observation = Observation::new(fixture.initial.clone());
+    let deadline = observation.freshness.deadline;
+    tokio::time::advance(STATUS_MAX_AGE).await;
+    assert!(observation.freshness.ensure_live().is_err());
+    assert_eq!(observation.freshness.deadline, deadline);
+    let (_stop, stopped) = watch::channel(false);
+    let error = control_loop(
+        reqwest::Client::new(),
+        reqwest::Url::parse("http://127.0.0.1:9").unwrap(),
+        fixture.connect.clone(),
+        fixture.plan.clone(),
+        fixture.journal.clone(),
+        observation,
+        stopped,
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("clock stopped advancing"));
+    assert!(fixture
+        .journal
+        .lock()
+        .pending_receipts()
+        .unwrap()
+        .is_empty());
 }

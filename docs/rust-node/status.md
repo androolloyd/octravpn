@@ -9,6 +9,26 @@ upstream behavioral parity and public-network deployment remain unqualified.
 
 ## Recorded local evidence
 
+- The [reusable paid client checkpoint](../audit/octranet-client-service-status.json)
+  records the Rust library and shared CLI service: explicit startup and shutdown,
+  actual interface metadata and durable recovery. The combined release suite
+  passed 1,585 tests across 20 targets; seven isolated Linux migration and
+  WireGuard/TUN checks, strict lint and the public API example also passed.
+  The strengthened four-validator paid kernel gate passed with five matching
+  canonical claims across all ExEx sinks, credit recovery and exit enforcement.
+  Its [review](../audit/octranet-client-service-2026-10-17.md) records cancellation,
+  blocked IO, journal ownership and freshness fixes. Stock Tailscale payment
+  bindings, constrained DERP relay, portal onboarding and the macOS paid route
+  guard remain integration gates.
+- The [Octranet payment checkpoint](../audit/octranet-payments-status.json)
+  records the separate payment-plan candidate at `d6e5fa5`: 1,558 release tests,
+  strict lint, abstract Lean checks and the isolated four-validator paid kernel
+  gate passed. It covers differential rates, bounded credit, client/operator
+  crashes, same-plan recovery, canonical claims, exit revocation, fixed seven-day
+  operator unstake and matching ExEx. The public observer was separately seen
+  serving canonical state with paid settlement unconfigured. Reusable client
+  changes are qualified separately above; stock Tailscale, portal onboarding,
+  public TLS and Mainnet remain open gates.
 - The [durable mesh enrollment checkpoint](checkpoints/2026-10-16/mesh-enrollment.json)
   records 515 passing tests on frozen source and strict lint. The standalone
   mesh CLI and enabled Hub now share persistent users, device registrations,

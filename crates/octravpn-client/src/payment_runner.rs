@@ -12,24 +12,16 @@ use octravpn_core::{
     payments::{Direction, PlanBinding, SignedConnect, SignedStatus, Tariff},
 };
 use octravpn_tun::{amnezia::WireTransport, Tun, TunAddress, TunConfig};
-use parking_lot::Mutex;
 use serde::Deserialize;
+
+mod accounting;
+use accounting::Accounting;
 use std::{
     io::Read as _,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
-
-#[derive(Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Plan {
-    binding: PlanBinding,
-    tariff: Tariff,
-    original_budget_ou: u64,
-    control_url: String,
-    wireguard_endpoint: String,
-}
 
 const STATUS_MAX_AGE: Duration = Duration::from_secs(120);
 
@@ -44,11 +36,15 @@ impl Freshness {
             deadline: tokio::time::Instant::now() + STATUS_MAX_AGE,
         }
     }
-    fn observe(&mut self, canonical_ms: u64) -> Result<()> {
+    fn ensure_live(&self) -> Result<()> {
         ensure!(
             tokio::time::Instant::now() < self.deadline,
             "operator canonical clock stopped advancing"
         );
+        Ok(())
+    }
+    fn observe(&mut self, canonical_ms: u64) -> Result<()> {
+        self.ensure_live()?;
         ensure!(
             canonical_ms >= self.canonical_ms,
             "operator canonical clock regressed"
@@ -61,173 +57,307 @@ impl Freshness {
     }
 }
 
-pub(crate) async fn run(
-    plan_path: &Path,
-    journal_path: PathBuf,
-    receipt_key: &str,
-    name: &str,
-    resume: bool,
-) -> Result<()> {
-    let mut raw = Vec::new();
-    std::fs::File::open(plan_path)?
-        .take(131_073)
-        .read_to_end(&mut raw)?;
-    ensure!(raw.len() <= 131_072, "accepted plan exceeds byte bound");
-    let plan: Plan = serde_json::from_slice(&raw)?;
-    plan.binding.validate()?;
-    ensure!(
-        plan.tariff.hash_hex()? == plan.binding.manifest_hash,
-        "accepted plan tariff differs"
-    );
-    wireguard::validate_endpoint(&plan.wireguard_endpoint)?;
-    let mut origin = reqwest::Url::parse(&plan.control_url)?;
-    ensure!(
-        origin.username().is_empty()
-            && origin.password().is_none()
-            && origin.query().is_none()
-            && origin.fragment().is_none()
-            && origin.path() == "/",
-        "control URL must be a plain origin"
-    );
-    let local = matches!(origin.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
-    ensure!(
-        origin.scheme() == "https" || (origin.scheme() == "http" && local),
-        "control requires HTTPS or loopback HTTP"
-    );
-    origin.set_path("/");
-    let key = Arc::new(crate::wallet::load_keypair(receipt_key)?);
-    let wg = wireguard::public_key(&key);
-    let session = plan.binding.session_id()?;
-    let binding = plan.binding.clone();
-    let tariff = plan.tariff.clone();
-    let journal_key = key.clone();
-    let budget = plan.original_budget_ou;
-    let journal = Arc::new(Mutex::new(
-        tokio::task::spawn_blocking(move || {
-            Journal::open(
-                &journal_path,
-                binding,
-                tariff,
-                budget,
-                journal_key,
-                if resume {
-                    OpenMode::Resume
-                } else {
-                    OpenMode::Create
-                },
-            )
-        })
-        .await??,
-    ));
-    let connect = {
-        let journal = journal.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut journal = journal.lock();
-            tracing::info!(plan = journal.binding().plan, local_bytes = ?journal.totals(),
-                uncertain_bytes = ?journal.uncertain_totals(),
-                authorized_bytes = ?journal.authorized_totals(), remaining_ou = journal.remaining_ou()?,
-                "restored accepted payment plan");
-            journal.connect(wg)
-        }).await??
-    };
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_secs(60))
-        .no_proxy()
-        .build()?;
-    let initial = status(&client, &origin, &connect, &plan).await?;
-    let mut tunnel = wireguard::Tunnel::connect(
-        session.clone(),
-        &key,
-        &plan.wireguard_endpoint,
-        initial.status.server_wireguard_key,
-        None,
-        WireTransport::default(),
-    )
-    .await?;
-    ensure!(
-        !name.is_empty()
-            && name.len() <= 15
-            && name
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b)),
-        "invalid TUN name"
-    );
-    let assigned = ip_tunnel::address(&session, &wg);
-    let name = name.to_owned();
-    let device = tokio::task::spawn_blocking(move || {
-        Tun::open(&TunConfig {
-            name,
-            address: TunAddress::new(assigned, 32),
-            mtu: ip_tunnel::MTU as u16,
-            up_at_open: true,
-        })
-    })
-    .await??;
-    eprintln!(
-        "Octranet interface {} address {}; provision explicit routes to paid destinations",
-        device.name(),
-        assigned
-    );
-    let (stop_control, shutdown) = tokio::sync::watch::channel(false);
-    let mut control = tokio::spawn(control_loop(
-        client,
-        origin,
-        connect,
-        plan,
-        journal.clone(),
-        initial,
-        shutdown,
-    ));
-    let mut control_joined = false;
-    let mut health = tokio::time::interval(Duration::from_millis(250));
-    health.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut packet = vec![0; ip_tunnel::MTU + 1];
-    let outcome = async {
-        loop {
-            tokio::select! {
-                result = &mut control => {
-                    control_joined = true;
-                    result.context("payment control worker failed")??;
-                    anyhow::bail!("payment control worker stopped");
-                },
-                signal = tokio::signal::ctrl_c() => { signal?; return Ok(()); },
-                _ = health.tick() => { tunnel.ensure_available()?; },
-                length = device.recv(&mut packet) => {
-                    let length = length?;
-                    let raw = packet[..length].to_vec();
-                    if ip_tunnel::validate_outbound(&raw, assigned).is_err() { continue; }
-                    let reservation = reserve(&journal, raw.clone(), Direction::Outbound).await?;
-                    if tunnel.send_confirmed(&ip_tunnel::encode(&raw)?).await? {
-                        finish(&journal, reservation, true).await?;
-                    } else {
-                        finish(&journal, reservation, false).await?;
-                    }
-                    tunnel.ensure_available()?;
-                },
-                body = tunnel.recv() => {
-                    let body = body?;
-                    let raw = ip_tunnel::decode(&body)?.to_vec();
-                    ip_tunnel::validate_inbound(&raw, assigned)?;
-                    let reservation = reserve(&journal, raw.clone(), Direction::Inbound).await?;
-                    let length = device.send(&raw).await?;
-                    ensure!(length == raw.len(), "partial client TUN write");
-                    finish(&journal, reservation, true).await?;
-                },
-            }
+struct Observation {
+    signed: SignedStatus,
+    freshness: Freshness,
+}
+impl Observation {
+    fn new(signed: SignedStatus) -> Self {
+        Self {
+            freshness: Freshness::new(signed.status.canonical_ms),
+            signed,
         }
     }
-    .await;
-    stop_control.send_replace(true);
-    let stopped = if control_joined {
-        Ok(())
-    } else {
-        control
-            .await
+}
+
+/// A plan accepted from independently confirmed chain facts. Parsing this data
+/// validates its shape; it does not prove chain finality or authorize traffic.
+#[derive(Clone, Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Plan {
+    pub binding: PlanBinding,
+    pub tariff: Tariff,
+    pub original_budget_ou: u64,
+    pub control_url: String,
+    pub wireguard_endpoint: String,
+}
+impl Plan {
+    pub fn load(path: &Path) -> Result<Self> {
+        let mut raw = Vec::new();
+        std::fs::File::open(path)?
+            .take(131_073)
+            .read_to_end(&mut raw)?;
+        ensure!(raw.len() <= 131_072, "accepted plan exceeds byte bound");
+        let plan: Self = serde_json::from_slice(&raw)?;
+        plan.origin()?;
+        Ok(plan)
+    }
+
+    fn origin(&self) -> Result<reqwest::Url> {
+        self.binding.validate()?;
+        ensure!(self.original_budget_ou > 0, "zero original plan budget");
+        ensure!(
+            self.tariff.hash_hex()? == self.binding.manifest_hash,
+            "accepted plan tariff differs"
+        );
+        wireguard::validate_endpoint(&self.wireguard_endpoint)?;
+        let origin = reqwest::Url::parse(&self.control_url)?;
+        ensure!(
+            origin.username().is_empty()
+                && origin.password().is_none()
+                && origin.query().is_none()
+                && origin.fragment().is_none()
+                && origin.path() == "/",
+            "control URL must be a plain origin"
+        );
+        let local = matches!(origin.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+        ensure!(
+            origin.scheme() == "https" || (origin.scheme() == "http" && local),
+            "control requires HTTPS or loopback HTTP"
+        );
+        Ok(origin)
+    }
+}
+
+/// Startup inputs. Creation requires a genuinely new journal directory; resume
+/// requires the original intact journal. No route or process signal is changed.
+pub struct Options {
+    pub plan: Plan,
+    pub journal: PathBuf,
+    pub receipt_key: Arc<octravpn_core::KeyPair>,
+    pub interface_name: String,
+    pub mode: OpenMode,
+}
+
+/// The actual opened interface. The host provisions its routes explicitly.
+#[derive(Clone, Debug)]
+pub struct Interface {
+    pub name: String,
+    pub address: std::net::Ipv4Addr,
+    pub mtu: u16,
+}
+
+/// Local journal counters in accepted tariff order. Confirmed local IO does
+/// not prove delivery; signed authorization does not prove canonical payment.
+#[derive(Clone, Debug)]
+pub struct Summary {
+    pub confirmed_bytes: Vec<u64>,
+    /// Uncertain and interrupted handoffs, held against the original budget.
+    pub held_bytes: Vec<u64>,
+    pub authorized_bytes: Vec<u64>,
+    /// Remaining local capacity, including held exposure; not a chain balance.
+    pub remaining_ou: u64,
+}
+
+/// One owned paid connection. Opening authenticates the operator and creates
+/// its interface. Running consumes it and accepts the caller's shutdown future.
+/// Dropping a cancelled run aborts its control tasks; already-started journal
+/// writes finish with the writer lease held. Preserve that journal for resume.
+pub struct Client {
+    plan: Plan,
+    journal: Accounting,
+    origin: reqwest::Url,
+    connect: SignedConnect,
+    http: reqwest::Client,
+    initial: Observation,
+    tunnel: wireguard::Tunnel,
+    device: Tun,
+    interface: Interface,
+}
+impl Client {
+    pub async fn open(options: Options) -> Result<Self> {
+        let Options {
+            plan,
+            journal: path,
+            receipt_key: key,
+            interface_name: name,
+            mode,
+        } = options;
+        let origin = plan.origin()?;
+        ensure!(
+            !name.is_empty()
+                && name.len() <= 15
+                && name
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b)),
+            "invalid TUN name"
+        );
+        let wg = wireguard::public_key(&key);
+        let session = plan.binding.session_id()?;
+        let binding = plan.binding.clone();
+        let tariff = plan.tariff.clone();
+        let journal_key = key.clone();
+        let budget = plan.original_budget_ou;
+        let journal = Accounting::new(
+            tokio::task::spawn_blocking(move || {
+                Journal::open(&path, binding, tariff, budget, journal_key, mode)
+            })
+            .await??,
+        );
+        let connect = journal.with(move |journal| {
+            tracing::info!(plan = journal.binding().plan, local_bytes = ?journal.totals(),
+                uncertain_bytes = ?journal.uncertain_totals(), authorized_bytes = ?journal.authorized_totals(),
+                remaining_ou = journal.remaining_ou()?, "restored accepted payment plan");
+            journal.connect(wg)
+        }).await?;
+        let http = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_secs(60))
+            .no_proxy()
+            .build()?;
+        let initial = Observation::new(status(&http, &origin, &connect, &plan).await?);
+        let tunnel = wireguard::Tunnel::connect(
+            session.clone(),
+            &key,
+            &plan.wireguard_endpoint,
+            initial.signed.status.server_wireguard_key,
+            None,
+            WireTransport::default(),
+        )
+        .await?;
+        let assigned = ip_tunnel::address(&session, &wg);
+        let device = tokio::task::spawn_blocking(move || {
+            Tun::open(&TunConfig {
+                name,
+                address: TunAddress::new(assigned, 32),
+                mtu: ip_tunnel::MTU as u16,
+                up_at_open: true,
+            })
+        })
+        .await??;
+        let interface = Interface {
+            name: device.name().to_owned(),
+            address: assigned,
+            mtu: ip_tunnel::MTU as u16,
+        };
+        Ok(Self {
+            plan,
+            journal,
+            origin,
+            connect,
+            http,
+            initial,
+            tunnel,
+            device,
+            interface,
+        })
+    }
+
+    pub const fn interface(&self) -> &Interface {
+        &self.interface
+    }
+
+    pub async fn run(
+        self,
+        shutdown: impl std::future::Future<Output = Result<()>>,
+    ) -> Result<Summary> {
+        let Self {
+            plan,
+            journal,
+            origin,
+            connect,
+            http,
+            initial,
+            mut tunnel,
+            device,
+            interface,
+        } = self;
+        initial.freshness.ensure_live()?;
+        let (stop, stopped) = tokio::sync::watch::channel(false);
+        let control = control_loop(
+            http,
+            origin,
+            connect,
+            plan,
+            journal.clone(),
+            initial,
+            stopped,
+        );
+        let accounting = journal.clone();
+        let driver = async move {
+            let assigned = interface.address;
+            let mut health = tokio::time::interval(Duration::from_millis(250));
+            health.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut packet = vec![0; ip_tunnel::MTU + 1];
+            loop {
+                tokio::select! {
+                    _ = health.tick() => { tunnel.ensure_available()?; },
+                    length = device.recv(&mut packet) => {
+                        let length = length?;
+                        let raw = packet[..length].to_vec();
+                        if ip_tunnel::validate_outbound(&raw, assigned).is_err() { continue; }
+                        let reservation = reserve(&accounting, raw.clone(), Direction::Outbound).await?;
+                        if tunnel.send_confirmed(&ip_tunnel::encode(&raw)?).await? {
+                            finish(&accounting, reservation, true).await?;
+                        } else {
+                            finish(&accounting, reservation, false).await?;
+                        }
+                        tunnel.ensure_available()?;
+                    },
+                    body = tunnel.recv() => {
+                        let body = body?;
+                        let raw = ip_tunnel::decode(&body)?.to_vec();
+                        ip_tunnel::validate_inbound(&raw, assigned)?;
+                        let reservation = reserve(&accounting, raw.clone(), Direction::Inbound).await?;
+                        let length = device.send(&raw).await?;
+                        ensure!(length == raw.len(), "partial client TUN write");
+                        finish(&accounting, reservation, true).await?;
+                    },
+                }
+            }
+        };
+        supervise(journal, driver, control, stop, shutdown).await
+    }
+}
+
+// Race shutdown and control failure against the whole driver, including its
+// nested packet IO/fsync awaits. Cancelling a handoff never releases exposure.
+async fn supervise(
+    journal: Accounting,
+    driver: impl std::future::Future<Output = Result<()>>,
+    control: impl std::future::Future<Output = Result<()>> + Send + 'static,
+    stop: tokio::sync::watch::Sender<bool>,
+    shutdown: impl std::future::Future<Output = Result<()>>,
+) -> Result<Summary> {
+    let mut workers = tokio::task::JoinSet::new();
+    workers.spawn(control);
+    let outcome = {
+        tokio::pin!(driver);
+        tokio::pin!(shutdown);
+        tokio::select! {
+            biased;
+            signal = &mut shutdown => signal,
+            result = workers.join_next() => {
+                result.context("payment control worker missing")
+                    .and_then(|result| result.context("payment control worker failed"))
+                    .and_then(|result| result)
+                    .and_then(|()| Err(anyhow::anyhow!("payment control worker stopped")))
+            },
+            result = &mut driver => result,
+        }
+    };
+    stop.send_replace(true);
+    let mut stopped = Ok(());
+    while let Some(result) = workers.join_next().await {
+        if let Err(error) = result
             .context("payment control worker failed")
             .and_then(|result| result)
-    };
-    outcome.and(stopped)
+        {
+            stopped = Err(error);
+        }
+    }
+    let idle = journal.wait_idle().await;
+    let summary = journal
+        .with(|journal| {
+            Ok(Summary {
+                confirmed_bytes: journal.totals().to_vec(),
+                held_bytes: journal.held_totals()?,
+                authorized_bytes: journal.authorized_totals().to_vec(),
+                remaining_ou: journal.remaining_ou()?,
+            })
+        })
+        .await;
+    outcome.and(stopped).and(idle).and(summary)
 }
 
 /// One bounded control worker. HTTP finality waits never hold the journal lock
@@ -238,18 +368,23 @@ async fn control_loop(
     origin: reqwest::Url,
     connect: SignedConnect,
     plan: Plan,
-    journal: Arc<Mutex<Journal>>,
-    initial: SignedStatus,
+    journal: Accounting,
+    initial: Observation,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
     let mut interval = tokio::time::interval(Duration::from_secs(1));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut freshness = Freshness::new(initial.status.canonical_ms);
+    let Observation {
+        signed: initial,
+        mut freshness,
+    } = initial;
+    freshness.ensure_live()?;
     // At most one receipt batch can wait for canonical settlement. Status
     // polling remains independent even when all traffic classes need claims.
     // Dropping the set aborts its HTTP wait; durable receipts survive retry.
     let mut batches = tokio::task::JoinSet::new();
-    loop {
+    let outcome = async {
+        loop {
         tokio::select! {
             biased;
             _ = shutdown.wait_for(|stopped| *stopped) => return Ok(()),
@@ -286,17 +421,22 @@ async fn control_loop(
                 view.status.committed_totals,
             ));
         }
-    }
+        }
+    }.await;
+    batches.abort_all();
+    while batches.join_next().await.is_some() {}
+    outcome
 }
 
 async fn settle_batch(
     client: reqwest::Client,
     origin: reqwest::Url,
-    journal: Arc<Mutex<Journal>>,
+    journal: Accounting,
     operator_totals: Vec<u64>,
 ) -> Result<()> {
-    let receipts =
-        tokio::task::spawn_blocking(move || journal.lock().receipts(&operator_totals)).await??;
+    let receipts = journal
+        .with(move |journal| journal.receipts(&operator_totals))
+        .await?;
     for receipt in receipts {
         let result = client
             .post(origin.join("payments/usage")?)
@@ -315,28 +455,21 @@ async fn settle_batch(
     Ok(())
 }
 
-async fn reserve(
-    journal: &Arc<Mutex<Journal>>,
-    raw: Vec<u8>,
-    direction: Direction,
-) -> Result<Reservation> {
-    let journal = journal.clone();
-    tokio::task::spawn_blocking(move || journal.lock().reserve(&raw, direction)).await?
+async fn reserve(journal: &Accounting, raw: Vec<u8>, direction: Direction) -> Result<Reservation> {
+    journal
+        .with(move |journal| journal.reserve(&raw, direction))
+        .await
 }
-async fn finish(
-    journal: &Arc<Mutex<Journal>>,
-    reservation: Reservation,
-    confirmed: bool,
-) -> Result<()> {
-    let journal = journal.clone();
-    tokio::task::spawn_blocking(move || {
-        if confirmed {
-            journal.lock().confirm(reservation)
-        } else {
-            journal.lock().cancel(reservation)
-        }
-    })
-    .await?
+async fn finish(journal: &Accounting, reservation: Reservation, confirmed: bool) -> Result<()> {
+    journal
+        .with(move |journal| {
+            if confirmed {
+                journal.confirm(reservation)
+            } else {
+                journal.cancel(reservation)
+            }
+        })
+        .await
 }
 async fn status(
     client: &reqwest::Client,

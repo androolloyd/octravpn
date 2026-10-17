@@ -18,8 +18,8 @@ COPY octra/pvac-sidecar ./pvac-sidecar
 COPY octra/docker/vpn-transport ./docker/vpn-transport
 RUN --mount=type=cache,id=octra-vpn-qualification-target,target=/work/octra/target \
     find crates /work/octra-foundry /work/headscale-rs -name '*.rs' -type f -exec touch {} + && \
-    cargo test --locked -p octravpn-client --bin octravpn --no-run --message-format=json > /tmp/vpn-build.json && \
-    python3 -c 'import json, pathlib, shutil; rows=[json.loads(s) for s in pathlib.Path("/tmp/vpn-build.json").read_text().splitlines()]; paths=[r["executable"] for r in rows if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="octravpn" and r.get("profile",{}).get("test") and r.get("executable")]; assert len(paths)==1, paths; shutil.copyfile(paths[0], "/tmp/vpn-transport-tests")' && \
+    cargo test --locked -p octravpn-client --lib --no-run --message-format=json > /tmp/vpn-build.json && \
+    python3 -c 'import json, pathlib, shutil; rows=[json.loads(s) for s in pathlib.Path("/tmp/vpn-build.json").read_text().splitlines()]; paths=[r["executable"] for r in rows if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="octravpn_client" and "lib" in r.get("target",{}).get("kind",[]) and r.get("profile",{}).get("test") and r.get("executable")]; assert len(paths)==1, paths; shutil.copyfile(paths[0], "/tmp/vpn-transport-tests")' && \
     python3 docker/vpn-transport/source-manifest.py > /tmp/vpn-transport-source.json
 
 FROM debian:bookworm-slim

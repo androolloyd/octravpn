@@ -35,6 +35,10 @@ BUDGET = 500_000
 FUND = 1_000_000
 STAKE = 100_000_000
 CREDIT_BYTES = 32_768
+PAID_MTU = 1280
+UDP_ATTEMPTS = 3
+UDP_TIMEOUT = 3
+UDP_PORT = 20001
 
 
 def canonical(value):
@@ -107,16 +111,68 @@ def route_server():
 
 
 def udp(assigned, count, marker):
+    assert 0 < count <= 64
     total = 0
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as connection:
-        connection.bind((assigned, 0))
-        connection.settimeout(8)
-        for index in range(count):
-            payload = marker + struct.pack('!I', index) + b'payment-plan-udp' * 60
-            connection.sendto(payload, (g.PUBLIC, 20001))
-            received, peer = connection.recvfrom(2048)
-            assert peer == (g.PUBLIC, 20001) and received == payload
-            total += len(payload)
+    completed = set()
+    started = time.monotonic()
+    report = {'phase': marker.decode('ascii'), 'unique_echoes': 0, 'attempts': [],
+              'timeouts': 0, 'stale_duplicates': 0, 'sent_payload_bytes': 0,
+              'max_attempts_per_id': UDP_ATTEMPTS, 'attempt_timeout_s': UDP_TIMEOUT}
+    g.JOURNAL.setdefault('udp_probes', []).append(report)
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as connection:
+            connection.bind((assigned, 0))
+            for index in range(count):
+                payload = marker + struct.pack('!I', index) + b'payment-plan-udp' * 60
+                for attempt in range(1, UDP_ATTEMPTS + 1):
+                    stopped = [name for name, process in g.PROCESSES.items() if process.poll() is not None]
+                    if stopped:
+                        raise RuntimeError(f'UDP probe processes stopped: {stopped}')
+                    row = {'id': index, 'attempt': attempt,
+                           'sent_ms': round((time.monotonic() - started) * 1000, 3),
+                           'outcome': 'pending'}
+                    report['attempts'].append(row)
+                    g.save()
+                    assert connection.sendto(payload, (g.PUBLIC, UDP_PORT)) == len(payload)
+                    report['sent_payload_bytes'] += len(payload)
+                    deadline = time.monotonic() + UDP_TIMEOUT
+                    while time.monotonic() < deadline:
+                        connection.settimeout(max(.001, deadline - time.monotonic()))
+                        try:
+                            received, peer = connection.recvfrom(2048)
+                        except socket.timeout:
+                            break
+                        assert peer == (g.PUBLIC, UDP_PORT), 'unexpected UDP echo endpoint'
+                        if received in completed:
+                            report['stale_duplicates'] += 1
+                            continue
+                        assert received == payload, 'unexpected UDP echo fixture ID or body'
+                        row['outcome'] = 'echoed'
+                        row['echo_ms'] = round((time.monotonic() - started) * 1000, 3)
+                        break
+                    if row['outcome'] == 'echoed':
+                        completed.add(payload)
+                        report['unique_echoes'] += 1
+                        total += len(payload)
+                        g.save()
+                        break
+                    row['outcome'] = 'timeout'
+                    report['timeouts'] += 1
+                    g.save()
+                else:
+                    raise TimeoutError(f'UDP fixture {report["phase"]}{index} exhausted {UDP_ATTEMPTS} attempts')
+    except BaseException as error:
+        report['failure'] = type(error).__name__
+        raise
+    finally:
+        report['echoed_payload_bytes'] = total
+        report['elapsed_ms'] = round((time.monotonic() - started) * 1000, 3)
+        try:
+            report['target_payload_bytes'] = target().get('udp_payload_bytes')
+            g.save()
+        except (OSError, ValueError):
+            if 'failure' not in report:
+                raise
     return total
 
 
@@ -171,6 +227,43 @@ def settled(program, operator, tariff, minimum):
     return (state, actual) if sum(paid) == actual and actual > 0 else None
 
 
+def meter_authorized(record):
+    return [max(redeemed, receipt['usage']['total_bytes'] if receipt else 0)
+            for redeemed, receipt in zip(record['redeemed'], record['authorizations'], strict=True)]
+
+
+def settled_credit(program, operator, tariff, minimum):
+    result = settled(program, operator, tariff, minimum)
+    if result is None:
+        return None
+    state, _earnings = result
+    record = meter()
+    authorized = meter_authorized(record)
+    # Canonical paid OU alone does not establish that the serving meter has
+    # reconciled it. Same-charge/zero-rate coverage can instead be represented
+    # by the durable authorization installed after canonical confirmation.
+    if any(floor < max(required, signed) for floor, required, signed in
+           zip(authorized, minimum, state['authorized_bytes'], strict=True)):
+        return None
+    capacity = exposure(record)
+    assert all(floor <= count for floor, count in zip(authorized, capacity, strict=True))
+    unpaid_bytes = sum(count - floor for count, floor in zip(capacity, authorized, strict=True))
+    assert unpaid_bytes <= CREDIT_BYTES
+    charge = lambda totals: sum((row['rate_ou_per_mib'] * count + 1_048_575) // 1_048_576
+                                for row, count in zip(tariff['classes'], totals, strict=True))
+    unpaid_ou = charge(capacity) - charge(authorized)
+    limit_ou = record['credit']['max_unacknowledged_ou']
+    assert unpaid_ou <= limit_ou
+    # A successful operator UDP handoff may never reach the client. Keep that
+    # one-sided usage and every uncertain reservation held; require room for a
+    # fresh full-MTU round trip rather than pretending all delivery was signed.
+    roundtrip_ou = 2 * max((row['rate_ou_per_mib'] * PAID_MTU + 1_048_575) // 1_048_576
+                          for row in tariff['classes'])
+    if CREDIT_BYTES - unpaid_bytes < 2 * PAID_MTU or limit_ou - unpaid_ou < roundtrip_ou:
+        return None
+    return result
+
+
 def snapshot(label):
     output = g.EVIDENCE / label
     output.mkdir()
@@ -184,6 +277,38 @@ def snapshot(label):
         shutil.copyfile(source, destination)
         count += 1
     assert count >= 2, 'public transport and claim journal evidence missing'
+
+
+def failure_snapshot(control=None, hop=None):
+    """Whitelist public journals before proxy/process teardown can change them."""
+    if not g.EVIDENCE.exists():
+        return
+    output = g.EVIDENCE / 'failure'
+    output.mkdir(exist_ok=True)
+    root = g.ROOT / 'chain/node-0/octranet-payments'
+    sources = [(g.ROOT / 'client-journal/state.json', pathlib.Path('client.json')),
+               (root / 'claims/claims.json', pathlib.Path('claims/claims.json'))]
+    sources.extend((path, path.relative_to(root))
+                   for path in sorted((root / 'transport').glob('*/meter.json'))[:8])
+    report = {'processes': {str(name): {'pid': process.pid, 'exit': process.poll()}
+                            for name, process in g.PROCESSES.items()},
+              'copied': [], 'errors': []}
+    for source, relative in sources:
+        if not source.exists():
+            continue
+        try:
+            assert source.stat().st_size <= 64 * 1024 * 1024, 'public journal exceeds diagnostic bound'
+            destination = output / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+            report['copied'].append(str(relative))
+        except (OSError, AssertionError) as error:
+            report['errors'].append({'file': str(relative), 'error': type(error).__name__})
+    if control is not None:
+        report['proxy'] = control.metrics()
+    if hop is not None:
+        report['hop'] = hop.metrics()
+    (output / 'diagnostics.json').write_text(json.dumps(report, indent=2) + '\n')
 
 
 def meter():
@@ -285,14 +410,18 @@ def bounded_credit(program, operator, tariff, assigned, plan_path, faucet, contr
     assert sum(held_after) <= CREDIT_BYTES and sum(meter_after['redeemed']) == 0
     snapshot('credit-after-restart')
     control.release()
-    g.until(lambda: settled(program, operator, tariff, [0, 2 * successful * 918, 0]),
+    restored, _earnings = g.until(lambda: settled_credit(program, operator, tariff, [0, 2 * successful * 918, 0]),
             120, 'held signed receipts canonically restore credit')
+    meter_restored = meter()
+    snapshot('credit-restored')
     g.step('bounded unpaid credit survives client crash and operator restart',
            byte_ceiling=CREDIT_BYTES, successful_echoes=successful,
            previous_sequence=before['connection_sequence'], resumed_sequence=after['connection_sequence'],
            target_bytes_while_blocked=target_before, meter_exposure_before=held_before,
-           meter_exposure_after=held_after, proxy=control.metrics(),
+           meter_exposure_after=held_after, meter_redeemed_after_settlement=meter_restored['redeemed'],
+           meter_authorized_after_settlement=meter_authorized(meter_restored), proxy=control.metrics(),
            crash_scope='SIGKILL both processes while idle at exhausted credit; not send/fsync fault injection')
+    return restored
 
 
 def archive_claims(program, operator):
@@ -341,11 +470,12 @@ def exercise(program, operator, tariff, plan_path, faucet, hop, control):
                '-d', assigned + '/32', '-j', 'NOTRACK'])
     route = json.loads(ip('-j', 'route', 'get', g.PUBLIC, 'from', assigned, 'iif', 'lo'))[0]
     assert route['dev'] == CLIENT, 'application stack bypassed actual client TUN'
-    bounded_credit(program, operator, tariff, assigned, plan_path, faucet, control)
+    baseline = bounded_credit(program, operator, tariff, assigned, plan_path, faucet, control)
     udp_bytes = udp(assigned, 8, b'before-restart:')
     tcp_bytes = tcp_and_icmp(assigned)
-    before, earnings = g.until(lambda: settled(program, operator, tariff,
-                               [2 * tcp_bytes, 2 * udp_bytes, 1]), 120,
+    minimum = [old + delivered for old, delivered in
+               zip(baseline['authorized_bytes'], [2 * tcp_bytes, 2 * udp_bytes, 1], strict=True)]
+    before, earnings = g.until(lambda: settled_credit(program, operator, tariff, minimum), 120,
                                'actual canonical payment claim')
     assert all(count > 0 for count in before['local_bytes']), 'all three classes must carry packets'
     assert all(count > 0 for count in before['authorized_bytes']), 'client must authorize all classes'
@@ -373,6 +503,8 @@ def exercise(program, operator, tariff, plan_path, faucet, hop, control):
     g.until(lambda: int(g.view(program, 'get_funds', [g.view(program, 'get_plan_payer', [0])]))
             + int(g.view(program, 'get_earnings', [operator])) == FUND,
             30, 'payer balance and operator earnings remain conserved')
+    baseline, _earnings = g.until(lambda: settled_credit(program, operator, tariff, before['authorized_bytes']),
+                                 120, 'resumed meter reflects canonically restored credit')
     new_udp = udp(assigned, 8, b'after-restart:')
     new_tcp = tcp_and_icmp(assigned)
     udp_bytes += new_udp
@@ -381,8 +513,8 @@ def exercise(program, operator, tariff, plan_path, faucet, hop, control):
     # They stay in local exposure, not receipt liability. Add the new delivered
     # load to the last authenticated counters, never those rejected probes.
     minimum = [old + delivered for old, delivered in
-               zip(before['authorized_bytes'], [2 * new_tcp, 2 * new_udp, 1], strict=True)]
-    current, earnings = g.until(lambda: settled(program, operator, tariff, minimum), 120,
+               zip(baseline['authorized_bytes'], [2 * new_tcp, 2 * new_udp, 1], strict=True)]
+    current, earnings = g.until(lambda: settled_credit(program, operator, tariff, minimum), 120,
                                 'canonical claims after client and operator restart')
     g.step('same plan survives crash and native operator restart',
            assigned=assigned, before_sequence=before['connection_sequence'],
@@ -607,7 +739,14 @@ def main():
     hop = Hop(pathlib.Path('/hop'), role='node', name=LINK)
     try:
         with ControlProxy() as control:
-            exercise(program, operator, tariff, plan_path, faucet, hop, control)
+            try:
+                exercise(program, operator, tariff, plan_path, faucet, hop, control)
+            except BaseException:
+                try:
+                    failure_snapshot(control, hop)
+                except Exception as error:
+                    g.JOURNAL['failure_snapshot_error'] = type(error).__name__
+                raise
     finally:
         hop.close()
     for index in list(g.PROCESSES):
@@ -621,9 +760,18 @@ if __name__ == '__main__':
     try:
         main()
     except BaseException:
+        failure = traceback.format_exc()
         if g.EVIDENCE.exists():
-            g.JOURNAL['failure'] = traceback.format_exc()
-            g.save()
+            if not (g.EVIDENCE / 'failure/diagnostics.json').exists():
+                try:
+                    failure_snapshot()
+                except Exception as error:
+                    g.JOURNAL['failure_snapshot_error'] = type(error).__name__
+            g.JOURNAL['failure'] = failure
+            try:
+                g.save()
+            except OSError:
+                pass  # Diagnostic persistence cannot conceal the original failure.
         traceback.print_exc()
         raise SystemExit(1)
     finally:

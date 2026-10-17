@@ -121,3 +121,26 @@ Requesting operator unstake stops forwarding and starts a separate fixed
 seven-day stake hold. Retrying either request cannot extend its deadline.
 The full [payment specification](../architecture/octranet-payment-tier.md)
 records the canonical time, generation and recovery boundaries.
+
+## Embedded clients
+
+`octravpn-client` also provides a Rust library. `AcceptedPlan::load` reads the
+same bounded plan file; `PaymentClient::open(PaymentOptions)` authenticates the
+operator and opens the interface. Read `client.interface()` to obtain the
+actual device name, assigned IPv4 address and MTU before provisioning explicit
+host routes. `client.run(shutdown).await` consumes the client and accepts a
+caller-owned future returning `anyhow::Result<()>`. The CLI uses this same path.
+
+The service installs no global signal handler or tracing subscriber. A graceful
+shutdown interrupts even a blocked packet driver, stops its control and receipt
+tasks, and waits for started journal writes before returning `PaymentSummary`.
+Its confirmed bytes describe local IO, authorized bytes describe signed usage,
+and held bytes include uncertain/interrupted handoffs. Remaining OU is local
+capacity against the original budget, not a confirmed chain balance.
+
+Cancelling an open or run never deletes its journal or rolls back a connection
+watermark. Already-started blocking writes retain the writer lease until they
+finish; resume the original journal once that work has released it. An opened
+handle retains the status deadline observed during startup, so delaying `run`
+cannot renew an old operator clock. The accepted plan must still come from
+independently confirmed state; parsing it supplies no chain-finality proof.

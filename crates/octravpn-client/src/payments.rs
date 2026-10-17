@@ -22,7 +22,7 @@ use storage::Store;
 /// Creation is an explicit fresh-plan operation. Recovery never infers creation
 /// from a missing file or an incomplete previous initialization.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum OpenMode {
+pub enum OpenMode {
     Create,
     Resume,
 }
@@ -494,6 +494,15 @@ impl Journal {
     }
     pub(crate) fn uncertain_totals(&self) -> &[u64] {
         &self.state.uncertain_bytes
+    }
+    pub(crate) fn held_totals(&self) -> Result<Vec<u64>> {
+        Ok(self
+            .state
+            .capacity_totals()?
+            .iter()
+            .zip(&self.state.local_bytes)
+            .map(|(capacity, confirmed)| capacity - confirmed)
+            .collect())
     }
     pub(crate) fn binding(&self) -> &PlanBinding {
         &self.state.identity.binding

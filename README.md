@@ -32,6 +32,10 @@ authorizations and uncertain exposure across restart. The isolated four-validato
 gate passed real kernel TCP/UDP/ICMP, canonical claims, bounded credit, crash
 recovery, exit revocation and matching ExEx. Stock Tailscale/onboarding and public
 qualification remain open; this candidate is not deployed to Mainnet.
+The Rust client library exposes the same paid service as the CLI, with explicit
+startup inputs, interface metadata, caller-owned shutdown and durable recovery.
+Its [service review](docs/audit/octranet-client-service-2026-10-17.md) records
+the lifecycle checks and remaining stock-client integration boundaries.
 
 **Rust node qualification (2026-10-15):** the `octra-node` executable connects the
 native validator driver, authenticated peers, transaction intake, canonical

@@ -5,8 +5,8 @@
 //!
 //! ## Why this bench is poll-loop-shaped, not full-connect-shaped
 //!
-//! `octravpn-client` is a binary crate (no `lib.rs`) — `Cmd::Connect`
-//! and `poll_session_id` are private modules under `src/`. Driving
+//! The legacy `Cmd::Connect` and `poll_session_id` remain internal to
+//! the client library. The reusable payment-plan service is separate. Driving
 //! the real `connect` path requires a wallet, a real (or mocked)
 //! chain RPC, a `tokio::signal::ctrl_c` future, an exit announce
 //! HTTP endpoint, and a TUN device. That is integration-test

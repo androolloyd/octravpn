@@ -1,0 +1,582 @@
+{
+  "schema": "octranet-client-service-qualification/v1",
+  "observed_at": "2026-10-17T06:25:24.575915+00:00",
+  "base_commit": "d6e5fa570f01e153f500945a3a027d8b2e8b5959",
+  "scope": "Reusable paid Rust client service and CLI; local application, lifecycle, isolated transport and four-validator paid kernel qualification only",
+  "source_sha256": {
+    ".cargo/config.toml": "ce1e033cee48a00988852a54e427e11d8fd2fb32fe558b45cc6b996e5ec2d8bd",
+    "Cargo.lock": "41a91382953a23309f5a507b583da6c19faf4f1a0ee95ce485bea0706ef41269",
+    "Cargo.toml": "5fc6af03807621fd437551c765313d75728d3c0c01d3b21f544d6f366efd1925",
+    "crates/octravpn-client/Cargo.toml": "c40c4a680a3bdf77dfe07b63298f64408e0d58c5cbfa79eac83d42db001f12ea",
+    "crates/octravpn-client/ONBOARDING.md": "678b1e0cfa023736f887c11d5d9b329a8ee35be01d30fbcf33967cd3306ddaf1",
+    "crates/octravpn-client/benches/cold_connect.rs": "11c34cc1013cbdc13f919d6d835674229b9ff9cb5260e213bf218c74a43c68ff",
+    "crates/octravpn-client/src/chain_v3.rs": "1f501d82013cc9057b9b8ea265210286f5a362e6246f5190524649155878d785",
+    "crates/octravpn-client/src/cli.rs": "5b64541f44d4a5825368f8bde1a3443ea4a555e27214ee57044d155ecb25e379",
+    "crates/octravpn-client/src/commands.rs": "a2b526971dacfcba9f2aaeba27d10afd8663d85e04d5f24d6f819f3cfa6e2061",
+    "crates/octravpn-client/src/commands/bugreport.rs": "f57bb4640d63144a8babaedf6424b8625f49a4c51773767bc83556efa7c06380",
+    "crates/octravpn-client/src/commands/fetch.rs": "b7f9b7d2ba911bab8b5588695dffe2882cc104488c852d939fea6e0cd189b897",
+    "crates/octravpn-client/src/commands/open_url.rs": "8a122f9ed5685c60ddfc4713a1a76ecff1a9110af02b1c5ff29dde0ce1ab4429",
+    "crates/octravpn-client/src/commands/serve.rs": "05d7bef85145621aa9686420d392c7486c9bba8528a76db722a256d27e274332",
+    "crates/octravpn-client/src/commands/settle.rs": "e3aca51bd7e890114b81443c2b82867640b1fa5ab3a295e17b2c58f09edd08c0",
+    "crates/octravpn-client/src/commands/slash.rs": "fa18dfee6a994da56812ad6ce39f3d1ecb5f2c1fa7a3763b2b09d491738d46dc",
+    "crates/octravpn-client/src/config.rs": "48458ccf191ba9d220b28dddff3832bd017552e20b11b44fd794451c7a2047fe",
+    "crates/octravpn-client/src/discover.rs": "0ddd7b24aa1b1c1242985f6a555acc94216d91004274075c96b1faa990715e78",
+    "crates/octravpn-client/src/discover_v2.rs": "09b4b29c078dc0930c50c109a44261f0415761fb3596ca996d065be7f2492a25",
+    "crates/octravpn-client/src/lib.rs": "6ad27c52b29fc84ab8e42dc9974d23afe1f1b78dba6beff0ef6b424d7f0393f5",
+    "crates/octravpn-client/src/main.rs": "96a000e1a59739d7caf27414639c5d263dc12384800326baf075d54395e8dfc1",
+    "crates/octravpn-client/src/migration.rs": "6d9330eea8326fccecb7a0f9589e2bcca9ba7bb30604b84649ab4777f93245a0",
+    "crates/octravpn-client/src/migration/evidence.rs": "2f85871f9d6e481b1ee7db449a77db97125b6e49f4c4cf30fd1438012bd1c082",
+    "crates/octravpn-client/src/migration/files.rs": "53f0c5dac21b9cbf7f6d6022ed16b523a3a460db24acc100368fd8d1d7fdfb15",
+    "crates/octravpn-client/src/onboarding.rs": "0497cfca4cf927e5d29964f8dd14df805e1b4af0708083ab7c34b8ce80c5beb5",
+    "crates/octravpn-client/src/paid_routes.rs": "314b4c143d86b8f377a4c524164b628fa6c9e192ec7d04f4ffe229ba4d513b25",
+    "crates/octravpn-client/src/payment_runner.rs": "b95abac23f5202f15e172e395d8550d5897045b05aa65579d7121767b76908e9",
+    "crates/octravpn-client/src/payment_runner/accounting.rs": "28fb383ddf0a96615d2c45bd381ddb8a22140635bb942ddb4e0e40d2cad8cdcb",
+    "crates/octravpn-client/src/payment_runner/tests.rs": "2be47199bcb6c825c5e82815c14625d0ff7af4ac1463bdb9483fe53763445bf7",
+    "crates/octravpn-client/src/payments.rs": "675400bcd04075d9e79d854b49bb664fdb3c93c4921b2726d2f30c11b2166c47",
+    "crates/octravpn-client/src/payments/storage.rs": "031e86c08401eb3a6459f6d251d9bc34ed98ade1a62989f23caff41ce7c92c1c",
+    "crates/octravpn-client/src/payments/tests.rs": "61d7f9aefd76370e92c15fc823f16d1418db0d5faaca89d72a8fd9c645215eb4",
+    "crates/octravpn-client/src/portal/chain/api.rs": "ff679161bc1c51dfc3a267702f0ed9d41abdce0f49df4f83d654137a219adb88",
+    "crates/octravpn-client/src/portal/chain/cache.rs": "53a4a4174bc5e2f7aad47d7d55fa32a7a6d1b34460394f834750b054c3e7e3cd",
+    "crates/octravpn-client/src/portal/chain/decrypt.rs": "4c4b45a5fe37be75460745c260d18d6261e98554a09ab179dadec219e9de0bdf",
+    "crates/octravpn-client/src/portal/chain/errors.rs": "12abad389450e207cf34b1239824a184e599f39b82f352d690fe6ed45cab1042",
+    "crates/octravpn-client/src/portal/chain/fetch.rs": "e522e3a6660dc69e769397d629d46457f35b0b583392c2270c1aa344509c0c92",
+    "crates/octravpn-client/src/portal/chain/mod.rs": "457edd09562167fb7db6692703e9571cc302d0643914d6d4cb946bed22d10e69",
+    "crates/octravpn-client/src/portal/mime.rs": "e811017600762ae54cc5399c9ee6605b54679590e131f6059a03cfacab828b5d",
+    "crates/octravpn-client/src/portal/mod.rs": "62b5d08375bf9c2560b81505be34a2e9a89e8d310ee7be5a80650b8e71491f4f",
+    "crates/octravpn-client/src/portal/routes.rs": "a3154d58a3c63ed45401e1bc6d0f57fbbcc929ceb13ba53dfe36df0e1fa70b45",
+    "crates/octravpn-client/src/portal/static_assets.rs": "97cafb907a0241599314b1ac54b55080b7142d430426c362e40b3f7a63e01a36",
+    "crates/octravpn-client/src/runner.rs": "91db4bb0000f6e7b80a0e3d9722363f3e88fd75a4de93a7a79916a9498f2b3bd",
+    "crates/octravpn-client/src/settle_state.rs": "1063c6957412c6c26381fe24ea8ca5274155663da0839416321a364b5f208320",
+    "crates/octravpn-client/src/settler.rs": "4095afde225480384c502f486934d3d54180c46ca5632f3b52bf6cda169d30fa",
+    "crates/octravpn-client/src/tailnet.rs": "f3c07feb871ce02e0d13d900d5bdbbcbc0f90484bebcd158d15de8ceb8834bef",
+    "crates/octravpn-client/src/v2_cache.rs": "2f6391f333b1dc8b9b292c601db274aff8e7b282b0a2d2d3ec3beb75034f0c02",
+    "crates/octravpn-client/src/v2_runner.rs": "1629f669d2eb3f9134ac144833bd96764b7b32574903f2534ae6add0aac93061",
+    "crates/octravpn-client/src/v3_runner.rs": "b70f2f0dab59bb5088e3314285ab1b60d7a057c934193d03ffa86d60356f6fd1",
+    "crates/octravpn-client/src/v3_runner/recovery.rs": "759581c6b59f4eb78694efc7f09992d2839910219192ddc32506875b2ac580c1",
+    "crates/octravpn-client/src/v3_runner/settlement_tests.rs": "8dc3d9fefef3050f55c053c02838c6fd2b11e9a01b1cba0fde03d2e5569a5a67",
+    "crates/octravpn-client/src/wallet.rs": "35ee5b90eea320296f8084868f4d8470acd5b104cc9160fe5cbce15c162de9cb",
+    "crates/octravpn-client/src/wireguard.rs": "6224dd11b6a564c3accca5eb9ddeef81f342d361b91f7570a1a7db3b058dbafb",
+    "crates/octravpn-client/src/wireguard/forward.rs": "f167cbfc7ffd23b3a846e9bdc9feddc626c814ca4d0e7f014b2bf1db148e8f72",
+    "crates/octravpn-client/src/wireguard/integration_tests.rs": "0f37acc1cbd2a0a0b9e925c59c0ca08d8c16d8fae9f27d6cb6110ef5d9329f6e",
+    "crates/octravpn-client/src/wireguard/io.rs": "05953e30f037c2fc40f22dbd02685f358dd95987f55e642e98b639fba0aedbd7",
+    "crates/octravpn-client/src/wireguard/ip.rs": "abc486da4380efb7250723260dc80e236cbcb5796e988a131e92d2f282c406fd",
+    "crates/octravpn-client/src/wireguard/recovery.rs": "ff78984f24c85409a0f7a39eb535c99f63bf61cd68b86663d1b432108dc4023e",
+    "crates/octravpn-client/src/wireguard/tunnel.rs": "86d7c60df2afd2534b84d39f305cec1f7d22c525b3a6b6c2c3f8c09aa27876ce",
+    "crates/octravpn-client/tests/bugreport.rs": "b2086ded54aba0196893161e2972ec7228ea4566c35fa1ec1538379669cd953f",
+    "crates/octravpn-client/tests/payment_service.rs": "823bdbe0d5670a52a8cf1d429c8ed3ba8eb4ad19b6752f5ff6481ff9c8c23c07",
+    "crates/octravpn-client/tests/portal_integration.rs": "a24e137d345894cabb940ba5add6212eedd635644986936cd3fe6308a0898017",
+    "crates/octravpn-client/tests/serve_cli.rs": "f73da16dae3c73748cfb27daaa376d3c20d5001749558888551b27a2e0ca362f",
+    "crates/octravpn-client/tests/tailnet_cli.rs": "9ca8d15a687ba0124cbe77cacf4adc7461e99dc37bb95c536db75c80973dedde",
+    "crates/octravpn-client/tests/v2_cli.rs": "394fa79ad61c33ff7d683cb7d909279ec7e93b095dc928b4034860134e355861",
+    "crates/octravpn-client/tests/v3_client_integration.rs": "71ffde62f3bed0e31d4cd85647b644cfd0b0cc4a54c1163aec78be24e1ccd1ff",
+    "demo/lib/build-linux-binaries.sh": "e1f67a962192d0cb5ca39538b5ddd8cd1982960fcbafb9bd9a2454f7f46e63b0",
+    "docker/native-vpn/Dockerfile": "fbe02a6c1830443f1014f9b87cf9c3cd5894c3e1610ff8eed774b4d167a85c1e",
+    "docker/native-vpn/Dockerfile.dockerignore": "bd83e044784eda4a2fde51457cd1dd8f0c2cc1f8a206ee92380a9aa8463e4c21",
+    "docker/native-vpn/README.md": "c73c7328429d23070b9d732ef9ec32b38d339cb21c79b4a2a745de1b8d1e8c77",
+    "docker/native-vpn/manifest.py": "43aa6c8318107ea89e5593fea6cbdc859dc23472ec8eb615a7c31daf237eb07a",
+    "docker/native-vpn/packet_target.py": "0ae7400f3d376c69e506e6e673c2c4843bcceff5aae0a1b4f0de825c9c0c1dac",
+    "docker/native-vpn/payment_control.py": "45d2f526542732fd9038e7dea827edb6fed3b3f1634b407ea6b8a23a2a7297e5",
+    "docker/native-vpn/payments_qualify.py": "62208c9b258f9f6b00c5daa9a397843e1ab3af541071ee850543784c14af3b31",
+    "docker/native-vpn/qualify.py": "d050d60edbc1bd361d4e09d629576e4b943f3d271e5c7e5199a76b65eecd568e",
+    "docker/native-vpn/run.sh": "6830387dc2fd6d4d8b0005d40535f9c9ae2b4c6647d8895c6e3b11394fd71c6e",
+    "docker/native-vpn/single-run.sh": "35e478f27e0bbea7565b55094769c31914d2ca3d313317ffe16e2db0b407707e",
+    "docker/native-vpn/single_qualify.py": "27122964064bf76cd8288d6938a82bdef6ef06266ab2777480737fe21c7916a5",
+    "docker/native-vpn/test_payments_qualify.py": "39643335e130325d78894f66ce88c5d167bb021e71081e0642e24a922d4c645b",
+    "docker/native-vpn/tun_gate.py": "0f5d2449a5843ce3b7f4704c852058ca8ed38059980d9bf9fe499bef0fd5a8b4",
+    "docker/vpn-transport/Dockerfile": "22a30babb16fbf3e5818e0771a8450a0b4a51891f6d869e45a3467bf161d5189",
+    "docker/vpn-transport/Dockerfile.dockerignore": "da89e5bffb52e09c429848f91e9fc5c0e2995b133f94a9bce21778626d0a9ca0",
+    "docker/vpn-transport/README.md": "0a94cd16334011750b9ffb10343f9ad997630c7fb566c5df94a9ea5cb13c74ce",
+    "docker/vpn-transport/entry.sh": "8623a9b65a030cbd398b3c7a2b0f8b5fcea162fd8a7f3d2e66f74bf10418a20c",
+    "docker/vpn-transport/run.sh": "dce014bd24590318f3664f1de3e40294c5c2de584783691112f34065ce1091c5",
+    "docker/vpn-transport/source-manifest.py": "844d45b9737c697e2ac3ebd07a9ad101969c274fa0dd51d10fed3dfca4aeace3",
+    "program/octranet-payments-factory.aml": "479b996c328b6f5e87cb0c033635dcf6d919708fbc49885ef9b9739189e3f533",
+    "program/octranet-payments.aml": "96e494be368351b4cc4832f0d78541813d842f4ab84229749b75a66fcb6c211b",
+    "proofs/lean/OctranetPayments.lean": "3269c304583047605c4b5f8ad8ca669710a0a03bd017eba75f63a12180793d83",
+    "proofs/lean/lakefile.lean": "e0562ca1bc498841b649c5eeadf05b0397a2867720308bfc3990761a7a6249cf",
+    "proofs/lean/lean-toolchain": "f3ea78fdd417d39483583b721709727c225eeea0c0e9d29283de43f577411095",
+    "rust-toolchain.toml": "abd8063388c533b3e6b91666cd66d6229e61d13fc1139d20006492c2980141f5"
+  },
+  "dependencies": {
+    "adopted_upstream": "7f9be4489870645cfcc95439638cde40f5da9f50",
+    "headscale_git_revision": "5662f202a8448364cb212a12c0489216c74ab6ca",
+    "octra_foundry_head": "d5feaad7f14d6a381e2327dfd6738cae8df95b31",
+    "octra_foundry_dirty": false
+  },
+  "rules": {
+    "payer_exit_ms": 86400000,
+    "operator_unstake_ms": 604800000,
+    "operator_stopped_claim_window_ms": 86400000,
+    "protocol_commission": 0
+  },
+  "checks": {
+    "compiled_aml": {
+      "included_in": "combined_local",
+      "tests_passed": 14,
+      "operator_unstake_boundary_ms": 604800000,
+      "payer_exit_boundary_ms": 86400000,
+      "execution_admission": "legacy-binary",
+      "typed_program_qualified": false
+    },
+    "combined_local": {
+      "tests_passed": 1585,
+      "tests_failed": 0,
+      "tests_ignored": 3,
+      "targets": 20,
+      "log_sha256": "98aec8adc2a8fe2bafe0b1b29ce3581ec0f2a5686e8c228eb83ad9b3a7012d1b",
+      "exit_code": 0,
+      "command": "cargo test --locked --release --no-fail-fast --features octra-node/test-helpers -p octravpn-core -p octravpn-node -p octra-node -p octra-node-runtime -p octra-browser -p octravpn-client -p octravpn-tun --lib --bin octravpn --test octranet_payments --test http --test services --test devnet --test single_native --test payment_service --test bugreport --test portal_integration --test serve_cli --test tailnet_cli --test v2_cli --test v3_client_integration",
+      "snapshot_sha256": "5474523aba297d56a1df62d7151aefee8b40b5bc83ffa9a359a54723e6594863",
+      "compiled_rust_inputs_unchanged": true,
+      "post_freeze_deltas": [
+        {
+          "path": "README.md",
+          "frozen_sha256": "e711ea4b72b12605b54704cbde5c6473480347a5d846bc30516c0f84beb406b2",
+          "current_sha256": "c5fbc7c7248141db671717d6d835769a49d6e9cac6d001f1cf53f6c34d2ef8a7"
+        },
+        {
+          "path": "crates/octravpn-client/tests/payment_service.rs",
+          "frozen_sha256": "e253793d5e36f943c99532f70bce8d5bbb2605532bc0c96c00a0d3d9a853272d",
+          "current_sha256": "823bdbe0d5670a52a8cf1d429c8ed3ba8eb4ad19b6752f5ff6481ff9c8c23c07"
+        },
+        {
+          "path": "docker/native-vpn/Dockerfile",
+          "frozen_sha256": "d2405596bbc82c79bf6d8534f50b87f49d8549d4b6902a91b0a8242827d16cba",
+          "current_sha256": "fbe02a6c1830443f1014f9b87cf9c3cd5894c3e1610ff8eed774b4d167a85c1e"
+        },
+        {
+          "path": "docker/native-vpn/README.md",
+          "frozen_sha256": "b530edb6eac7b85ae5fdd6f5a8eaa058aa589b19af9078c1bf389f1cdf089609",
+          "current_sha256": "c73c7328429d23070b9d732ef9ec32b38d339cb21c79b4a2a745de1b8d1e8c77"
+        },
+        {
+          "path": "docker/native-vpn/payments_qualify.py",
+          "frozen_sha256": "d974773e1c264041375d13ea028e4e2931376da433b429265b5edf619ce56c53",
+          "current_sha256": "62208c9b258f9f6b00c5daa9a397843e1ab3af541071ee850543784c14af3b31"
+        },
+        {
+          "path": "docs/audit/octranet-payments-2026-10-17.md",
+          "frozen_sha256": "6664a3806bca6b78c9a8f7189e8b670ec4a695938f8f76b54b7ff81d97e4298c",
+          "current_sha256": "2da0782c845013dbfed37a0c720bc69939b1d5b5e3a029c2cd12d21b2df47213"
+        },
+        {
+          "path": "docs/rust-node/status.md",
+          "frozen_sha256": "058344b71b3f9970f9fddec874206aa3df215835810351068f26e37b2ec7198e",
+          "current_sha256": "a0b4413f5a584d9faa84ad8c94d014c8fa5aeb4d3b36d42bd6d2664383c7b223"
+        }
+      ],
+      "delta_validation": "The only Rust delta scopes a test MutexGuard with a lexical block before await; all three public API tests and strict lint passed again on final-3. Documentation and qualification-harness deltas do not change compiled Rust inputs; the strengthened harness and six focused regressions were separately qualified in final-4."
+    },
+    "harness_oracles": {
+      "tests_passed": 6,
+      "exit_code": 0,
+      "log_sha256": "247f9918c2150f7f3b12691aaadbdc79ec72a492bf112176538f3280fb39f174"
+    },
+    "owned_task_send": {
+      "command": [
+        "rustc",
+        "+1.96.0",
+        "--edition=2021",
+        "--crate-name",
+        "client_service_send",
+        "--crate-type=lib",
+        "--emit=metadata",
+        "-L",
+        "dependency=/Users/androolloyd/Development/octra/target/release/deps",
+        "--extern",
+        "octravpn_client=/Users/androolloyd/Development/octra/target/release/deps/liboctravpn_client-0767d92118b7a53f.rlib",
+        "/Users/androolloyd/Development/octra/out/octranet-client-service-20261017/client-send.rs",
+        "-o",
+        "/Users/androolloyd/Development/octra/out/octranet-client-service-20261017/client-send.rmeta"
+      ],
+      "exit_code": 0,
+      "library_sha256": "dbad71ec7fdb5d9f15e725d5b92e2502e30ff1e8f803f9bfc3b5e7cc68c49ce4",
+      "source_sha256": "33ab14bacf9493cd446f6d1e789a6568ba10efe24ca4fe61c226e04d8b2d4b91"
+    },
+    "public_api": {
+      "tests_passed": 3,
+      "tests_failed": 0,
+      "tests_ignored": 0,
+      "targets": 1,
+      "log_sha256": "fc16ec50514336296bb0c5715930f9d95e6153e06aa647d7b574e70c7b80e975",
+      "exit_code": 0,
+      "command": "cargo test --locked --release -p octravpn-client --test payment_service",
+      "snapshot_sha256": "bf1d7cf7053c06a5ca29895048decc968ac531ba615bbc8a85344d27fcfe752a"
+    },
+    "rustdoc": {
+      "tests_passed": 1,
+      "tests_failed": 0,
+      "tests_ignored": 0,
+      "targets": 1,
+      "log_sha256": "ff0f2f2503cdd5de26508b3262ec4156c7b729eec26282d5c373ae5ee7f37f60",
+      "exit_code": 0,
+      "command": "cargo test --locked --release -p octravpn-client --doc"
+    },
+    "strict_lint": {
+      "exit_code": 0,
+      "command": "cargo clippy --locked --release --features octra-node/test-helpers -p octravpn-core -p octravpn-node -p octra-node -p octra-node-runtime -p octra-browser -p octravpn-client -p octravpn-tun --lib --bin octravpn --bin octra-node --test octranet_payments --test http --test services --test devnet --test single_native --test payment_service -- -D warnings",
+      "log_sha256": "c9d2fb2bee59b78e3893bce1c1b2c3f61202e0666832f07c5895443176541db9"
+    },
+    "format": {
+      "command": [
+        "rustfmt",
+        "+1.96.0",
+        "--edition",
+        "2021",
+        "--config",
+        "skip_children=true",
+        "--check",
+        "crates/octravpn-client/benches/cold_connect.rs",
+        "crates/octravpn-client/src/cli.rs",
+        "crates/octravpn-client/src/lib.rs",
+        "crates/octravpn-client/src/main.rs",
+        "crates/octravpn-client/src/payment_runner.rs",
+        "crates/octravpn-client/src/payment_runner/accounting.rs",
+        "crates/octravpn-client/src/payment_runner/tests.rs",
+        "crates/octravpn-client/src/payments.rs",
+        "crates/octravpn-client/src/v2_runner.rs",
+        "crates/octravpn-client/tests/payment_service.rs"
+      ],
+      "exit_code": 0,
+      "files": 10
+    },
+    "lean": {
+      "exit_code": 0,
+      "command": "(cd proofs/lean && lake build)",
+      "log_sha256": "a30d6eefe7ccec7803482bd446c3d48f7cc46ed86ba99cb839fca134dd7a5a3d",
+      "abstract_theorems": 19,
+      "aml_refinement_proven": false
+    },
+    "isolated_transport": {
+      "tests_passed": 7,
+      "tests_failed": 0,
+      "tests_ignored": 0,
+      "targets": 3,
+      "log_sha256": "f8a4f67c63c547d597278180e4ebd13befaf0c9d85f152aa719799dfa7ae1355",
+      "exit_code": 0,
+      "image_id": "sha256:b627f025f77072425cc8f1870dce90a31427d5eb3bf073117e82d9b1c3fe0e39",
+      "source_manifest_sha256": "49a85338ff58ebb326880e3f9968c30e97cc12dc105c7ccc9af713ba06afd277",
+      "source_sha256": "df902f4d7f9feac5bacc9d59cd05cdb02742355b8411520e6125290e61c46f90",
+      "test_binary_sha256": "6efd41f7aa864cb38539a7f45b1a885457026846b9024c2ff4fe75007f4fbccc",
+      "scope": "Actual library test executable: migration, WireGuard handshake/credit/rejection, UDP return and kernel TUN/raw IPv4; network none"
+    },
+    "connected_kernel": {
+      "qualified": true,
+      "main_exit": 0,
+      "target_exit": 0,
+      "run_exit": 0,
+      "scope": "isolated four-validator payment-plan application; real client, two endpoint kernels and canonical claims; no public-chain or Mainnet claim",
+      "image_id": "sha256:7ffdcdbae7887dc84335682c54d18a92933468b3ca8fc836b4cccfdaa033b676",
+      "source_manifest_sha256": "138beda27a979d709cfd1ce991b28b6a25d30669559b8ffb7deac4c5abda413b",
+      "source_sha256": "16a4fa439bc10ece074c5308eb580daf8328dccb8d2994baac62f4668b4cf529",
+      "binaries": {
+        "octra-node": "8bbd43f38386c2cbd1d19054f3525dbf5688b9e9578f5a8099b57c2fdbb6c1f7",
+        "octravpn-node": "b36e28fa1069f89a5f32455b3b7397747c4ec5c15b48d2b5002638dfd35738fb",
+        "octravpn": "5cf9fe9ac7eea1e8d1f292869258ed66001ab69427492c6257e81968d51c9cfe",
+        "octra-single-fixture": "4659a5a2aa2c8560ef75cdcb1e87a51f171a7a9a886d5628958a7882bb0525b9",
+        "octra": "d288bb757081db85c1be8221f1dfebe6bf877ec58efaa6d690eb3efeab138264",
+        "octravpn-private-admin": "6653268682d451039f7274ace72e6ae26b106e6ce377d79d7cf6d69361fd5185"
+      },
+      "profiles": {
+        "octravpn-private-admin": "release",
+        "octra-node": "release",
+        "octravpn": "dev",
+        "octravpn-node": "dev",
+        "octra": "dev",
+        "octra-single-fixture": "dev-test"
+      },
+      "production_inputs_unchanged": true,
+      "runtime_binaries_identical_to_initial_frozen_image": true,
+      "snapshot_sha256": "55a4f53b0e76917a0bb90c3e24908ab6782cc7f72d3d929e8e773a3c07d95ec5",
+      "udp_probes": [
+        {
+          "phase": "before-restart:",
+          "unique_echoes": 8,
+          "attempts": [
+            {
+              "id": 0,
+              "attempt": 1,
+              "sent_ms": 0.06,
+              "outcome": "echoed",
+              "echo_ms": 3.697
+            },
+            {
+              "id": 1,
+              "attempt": 1,
+              "sent_ms": 4.32,
+              "outcome": "echoed",
+              "echo_ms": 7.597
+            },
+            {
+              "id": 2,
+              "attempt": 1,
+              "sent_ms": 8.902,
+              "outcome": "echoed",
+              "echo_ms": 11.926
+            },
+            {
+              "id": 3,
+              "attempt": 1,
+              "sent_ms": 12.851,
+              "outcome": "echoed",
+              "echo_ms": 15.645
+            },
+            {
+              "id": 4,
+              "attempt": 1,
+              "sent_ms": 16.579,
+              "outcome": "echoed",
+              "echo_ms": 19.53
+            },
+            {
+              "id": 5,
+              "attempt": 1,
+              "sent_ms": 19.929,
+              "outcome": "echoed",
+              "echo_ms": 23.606
+            },
+            {
+              "id": 6,
+              "attempt": 1,
+              "sent_ms": 23.971,
+              "outcome": "echoed",
+              "echo_ms": 26.882
+            },
+            {
+              "id": 7,
+              "attempt": 1,
+              "sent_ms": 27.24,
+              "outcome": "echoed",
+              "echo_ms": 30.764
+            }
+          ],
+          "timeouts": 0,
+          "stale_duplicates": 0,
+          "sent_payload_bytes": 7832,
+          "max_attempts_per_id": 3,
+          "attempt_timeout_s": 3,
+          "echoed_payload_bytes": 7832,
+          "elapsed_ms": 31.222,
+          "target_payload_bytes": 15606
+        },
+        {
+          "phase": "after-restart:",
+          "unique_echoes": 8,
+          "attempts": [
+            {
+              "id": 0,
+              "attempt": 1,
+              "sent_ms": 0.046,
+              "outcome": "echoed",
+              "echo_ms": 15.684
+            },
+            {
+              "id": 1,
+              "attempt": 1,
+              "sent_ms": 16.303,
+              "outcome": "echoed",
+              "echo_ms": 22.378
+            },
+            {
+              "id": 2,
+              "attempt": 1,
+              "sent_ms": 22.886,
+              "outcome": "echoed",
+              "echo_ms": 28.829
+            },
+            {
+              "id": 3,
+              "attempt": 1,
+              "sent_ms": 29.098,
+              "outcome": "echoed",
+              "echo_ms": 35.59
+            },
+            {
+              "id": 4,
+              "attempt": 1,
+              "sent_ms": 35.91,
+              "outcome": "echoed",
+              "echo_ms": 41.737
+            },
+            {
+              "id": 5,
+              "attempt": 1,
+              "sent_ms": 43.42,
+              "outcome": "echoed",
+              "echo_ms": 48.952
+            },
+            {
+              "id": 6,
+              "attempt": 1,
+              "sent_ms": 49.242,
+              "outcome": "echoed",
+              "echo_ms": 54.979
+            },
+            {
+              "id": 7,
+              "attempt": 1,
+              "sent_ms": 55.289,
+              "outcome": "echoed",
+              "echo_ms": 60.98
+            }
+          ],
+          "timeouts": 0,
+          "stale_duplicates": 0,
+          "sent_payload_bytes": 7824,
+          "max_attempts_per_id": 3,
+          "attempt_timeout_s": 3,
+          "echoed_payload_bytes": 7824,
+          "elapsed_ms": 61.328,
+          "target_payload_bytes": 23438
+        }
+      ],
+      "build_log_sha256": "1871f66714267531760b82ddf6464a64234e6d8acd99f19f47208368aec8f4e5",
+      "run_log_sha256": "b8eacb361ed7a4da9f9f0f5054130b7677e81771ec68a24e6d432510a066a48d",
+      "journal_sha256": "3c0b00fa5550620dfabec97f39be1e36cae4abb54a6237ad78bb67e20d4ed8f5",
+      "credit_recovery": {
+        "step": "bounded unpaid credit survives client crash and operator restart",
+        "byte_ceiling": 32768,
+        "successful_echoes": 17,
+        "previous_sequence": 1,
+        "resumed_sequence": 2,
+        "target_bytes_while_blocked": 15606,
+        "meter_exposure_before": [
+          0,
+          32164,
+          0
+        ],
+        "meter_exposure_after": [
+          0,
+          32164,
+          0
+        ],
+        "meter_redeemed_after_settlement": [
+          0,
+          32164,
+          0
+        ],
+        "meter_authorized_after_settlement": [
+          0,
+          32164,
+          0
+        ],
+        "proxy": {
+          "usage_received": 2,
+          "usage_forwarded": 2,
+          "usage_refused": 0,
+          "status_received": 23,
+          "status_forwarded": 23,
+          "status_refused": 0,
+          "status_waiting": 0,
+          "errors": 0,
+          "held": false,
+          "status_held": false,
+          "closed": false
+        },
+        "crash_scope": "SIGKILL both processes while idle at exhausted credit; not send/fsync fault injection"
+      },
+      "paid_restart": {
+        "step": "same plan survives crash and native operator restart",
+        "assigned": "198.18.82.72",
+        "before_sequence": 2,
+        "resumed_sequence": 3,
+        "original_budget_ou": 500000,
+        "confirmed_bytes": [
+          12000,
+          71024,
+          208
+        ],
+        "authorized_bytes": [
+          12000,
+          64372,
+          208
+        ],
+        "uncertain_bytes": [
+          0,
+          0,
+          0
+        ],
+        "operator_earnings_ou": 626
+      },
+      "canonical_claims": {
+        "step": "identical canonical paid claims on four ExEx sinks",
+        "claims": 5,
+        "per_class_increments_ou": [
+          12,
+          614,
+          0
+        ],
+        "total_earnings_ou": 626
+      },
+      "exit_and_unstake": {
+        "step": "canonical exit and seven-day unstake stop admission without early withdrawal",
+        "payer_deadline_ms": 1792304607005,
+        "operator_unlock_ms": 1792823027018
+      },
+      "limitations": [
+        "No public-network or Mainnet qualification",
+        "24-hour and seven-day maturity use separate canonical-clock boundary tests",
+        "Explicit client --resume after process death; seamless reconnect is not asserted",
+        "No stock Tailscale paid-exit, DNS/TLS or portal onboarding qualification"
+      ]
+    }
+  },
+  "previous_payment_checkpoint": {
+    "commit": "d6e5fa570f01e153f500945a3a027d8b2e8b5959",
+    "file": "docs/audit/octranet-payments-status.json",
+    "sha256": "1795659ed82757a495a64c980a2f424946deb497efd50e09fed8b6cdc33e0914"
+  },
+  "retained_attempts": {
+    "first_kernel": {
+      "qualified": false,
+      "main_exit": 1,
+      "target_exit": 0,
+      "run_exit": 1,
+      "scope": "isolated four-validator payment-plan application; real client, two endpoint kernels and canonical claims; no public-chain or Mainnet claim",
+      "failure": "Traceback (most recent call last):\n  File \"/usr/local/bin/payments_qualify.py\", line 622, in <module>\n    main()\n  File \"/usr/local/bin/payments_qualify.py\", line 610, in main\n    exercise(program, operator, tariff, plan_path, faucet, hop, control)\n  File \"/usr/local/bin/payments_qualify.py\", line 345, in exercise\n    udp_bytes = udp(assigned, 8, b'before-restart:')\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/bin/payments_qualify.py\", line 117, in udp\n    received, peer = connection.recvfrom(2048)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^\nTimeoutError: timed out\n",
+      "image_id": "sha256:236a69af22782a5ab91bc807d67ded17d70ade8af5ab1536a502d538f0cc87ca"
+    },
+    "same_runtime_diagnostic_rerun": {
+      "qualified": true,
+      "main_exit": 0,
+      "target_exit": 0,
+      "run_exit": 0,
+      "scope": "Same frozen final-2 runtime image; only pre-cleanup failure diagnostics overlaid, no oracle or timeout changes",
+      "image_id": "sha256:236a69af22782a5ab91bc807d67ded17d70ade8af5ab1536a502d538f0cc87ca",
+      "overlay_sha256": "4686232935bad870841c1825ebc88bfb0b22394a9b720a3fb144065d178a5676"
+    },
+    "interpretation": "The original one-shot UDP oracle timed out once and passed on an identical-image diagnostic rerun; no runtime defect was established from that single datagram. Canonical publication may intentionally drop UDP. The final gate uses bounded application retries, verifies actual restored meter credit and adds fresh per-phase canonical usage minima."
+  },
+  "local_client_service_qualified": true,
+  "public_observer": {
+    "observed_at": "2026-10-17T06:12:16.025579+00:00",
+    "scope": "read-only observation of existing public-devnet observer; reusable client candidate not deployed",
+    "status": {
+      "epoch": 1707217,
+      "state_root": "c0039ca28830db88725f6e01ab1b1cdee194480d855cc131bbe029df3adfb16e",
+      "serving": false,
+      "vpn_program": null,
+      "vpn_settlement": "unconfigured"
+    },
+    "peers": {
+      "connected": 4,
+      "known": 34,
+      "public_sources": 31,
+      "risks": []
+    }
+  },
+  "public_end_to_end_qualified": false,
+  "mainnet_deployed": false,
+  "deploy_ready": false,
+  "remaining_gates": [
+    "Canonical admission/payment bindings between native mesh enrollment, DERP and the actual stock Tailscale exit data path; headscale routes alone do not connect stock clients to SignedConnect/SignedUsage accounting",
+    "Bounded unpaid Circle onboarding/funding/status, MagicDNS and HTTPS qualified together with actual client and operator controls; when native DERP is enabled, require membership verification and per-peer forwarding policy",
+    "Crash-safe macOS paid route guard; the library opens an interface and leaves host routing explicit",
+    "Sustained public synchronization/recovery and network identity, production TLS/control deployment, funding and a capped stateful Mainnet alpha; isolated kernel tests are not public qualification"
+  ],
+  "qualification_notes": [
+    "Seven-day stake maturity and 24-hour payer settlement use separate finite canonical-clock AML tests; no seven-day wall-clock wait or AML/compiler/VM refinement claim.",
+    "Client summary confirms local IO and signed authorization, not packet delivery or canonical payment. Interrupted handoffs retain nonbillable exposure against the original budget.",
+    "New service lifecycle regressions use durable journals and actual HTTP fixtures. The same library is exercised by the actual CLI in the isolated paid kernel gate.",
+    "The native observer was left running on its existing binary; this reusable-client candidate was not deployed to public devnet or Mainnet."
+  ]
+}

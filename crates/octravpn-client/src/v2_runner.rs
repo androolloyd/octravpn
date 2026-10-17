@@ -1,6 +1,6 @@
 //! Dispatcher for the v2-flavored subcommands (`discover` + `connect-v2`).
 //!
-//! This is the thin glue between `main.rs` clap surface and the
+//! This is the thin glue between the `cli.rs` clap surface and the
 //! `discover_v2` / `v2_cache` modules. The actual chain + sealed-policy
 //! work lives there; here we just resolve config, decide which path
 //! to print, and gate on the `protocol_version` flag.
@@ -11,11 +11,11 @@ use anyhow::{bail, Context, Result};
 use serde_json::json;
 
 use crate::{
+    cli::DiscoverOp,
     config::ClientConfig,
     discover_v2::{self, render_row, resolve_passphrase, CircleListing},
     runner::Client,
     v2_cache::{resolve_cache_dir, PolicyCache},
-    DiscoverOp,
 };
 
 /// Top-level `discover ...` dispatch.
