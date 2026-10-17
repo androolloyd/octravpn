@@ -462,6 +462,7 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
         stealth_slots,
         evidence_dir: services.data.join("evidence"),
         release: driver_release,
+        liveness_clock: None,
     };
     let validator = driver::Validator::new(
         node.clone(),

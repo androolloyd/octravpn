@@ -19,7 +19,11 @@ pub(super) fn snapshot<A: Host>(validator: &Validator<A>) -> Option<LivenessCont
     let voting = validator.enabled.load(Ordering::Acquire);
     Some(LivenessContext {
         expected,
-        now: now().ok()?,
+        now: validator
+            .config
+            .liveness_clock
+            .as_ref()
+            .map_or_else(|| now().ok(), |clock| Some(clock()))?,
         stall_sec: validator.liveness_stall_sec,
         observer: !voting,
         voting,

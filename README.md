@@ -58,6 +58,9 @@ of this candidate remains pending.
 The [native liveness checkpoint](docs/rust-node/checkpoints/2026-10-17/native-liveness.md)
 adds guarded recovery within the existing driver, with 1,012 native policy
 comparisons and real lock, publication, worker and timer regressions.
+The [automatic Service follow-up](docs/rust-node/checkpoints/2026-10-17/service-liveness.md)
+checks that fallback through the actual Node host, with Circle/VPN access, ExEx
+and quarantine revocation, including a normal-feature regression.
 
 **Rust node qualification (2026-10-15):** the `octra-node` executable connects the
 native validator driver, authenticated peers, transaction intake, canonical

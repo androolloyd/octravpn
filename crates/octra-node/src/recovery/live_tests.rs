@@ -1,6 +1,7 @@
 //! Full recovery supervisor with the real native host and signed TCP root peers.
 //! Funding and peer claims are local fixtures; no public-chain qualification.
 mod fixture;
+mod liveness;
 mod vpn;
 use fixture::{Fixture, EXTENSION, WAIT};
 use octra_exex::{CheckpointStore, CommittedEpochSource, Sequence};

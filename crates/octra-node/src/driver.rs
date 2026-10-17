@@ -96,6 +96,9 @@ pub struct Config {
     pub stealth_slots: usize,
     pub evidence_dir: PathBuf,
     pub release: Option<octra_node_runtime::status_read::Release>,
+    /// Trusted health wall clock, like native health wiring's `now` callback.
+    /// None uses system time. Proposal timestamps and monotonic timers are separate.
+    pub liveness_clock: Option<Arc<dyn Fn() -> f64 + Send + Sync>>,
 }
 pub struct Validator<A: Host> {
     node: Arc<Node<A>>,

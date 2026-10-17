@@ -79,3 +79,7 @@ catching up and with payments unconfigured. Actual legacy unjournaled
 IrminPack repair, staged crash recovery, public resource/sync and Circle asset
 qualification, stock Tailscale paid binding, bounded portal onboarding, DNS/TLS
 and the macOS paid route guard remain open.
+
+The [Service follow-up](service-liveness.md) now covers the forced positive
+automatic fallback through the actual Node host locally, including a normal-
+feature run and service revocation. It retains separate public qualification.

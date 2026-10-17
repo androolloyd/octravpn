@@ -9,6 +9,15 @@ upstream behavioral parity and public-network deployment remain unqualified.
 
 ## Recorded local evidence
 
+- The [automatic Service liveness checkpoint](checkpoints/2026-10-17/service-liveness.json)
+  records 287 passing tests across 12 composed targets, four standalone ignores,
+  strict lint, formatting and the unchanged 19-theorem abstract payment model.
+  The actual Service and Node host automatically realign the existing actor,
+  preserving canonical/ExEx/floor state and Circle/VPN access. Hard quarantine
+  stops that actor and revokes both services. The same regression also passes
+  without test helpers. Local dependency source snapshots bind validation to
+  the release candidate. [Review and limits](checkpoints/2026-10-17/service-liveness.md)
+  keep public adoption, legacy repair and Mainnet qualification separate.
 - The [native liveness checkpoint](checkpoints/2026-10-17/native-liveness.json)
   records 320 passing tests across 24 composed targets, four standalone ignores,
   strict lint, formatting, 14 compiled payment AML tests and 19 abstract Lean
@@ -17,9 +26,9 @@ upstream behavioral parity and public-network deployment remain unqualified.
   proposals, block reset during pending finalization and reject stale workers,
   timers and polls across publication. The [review](checkpoints/2026-10-17/native-liveness.md)
   records captured-setting and peer-fixture corrections. Automatic supervisor
-  triggering and actual Node flag projection are reviewed in source; forced
-  positive fallback under that complete production host remains qualification
-  work. The unchanged prior public observer was catching up at epoch 1,707,929
+  triggering and actual Node flag projection were initially reviewed in source;
+  the Service follow-up above now covers a forced positive automatic fallback
+  under that complete production host locally. The unchanged prior public observer was catching up at epoch 1,707,929
   with three peers at 10:06:02 UTC and payments unconfigured. This candidate is
   not installed there; public recovery, legacy repair and Mainnet remain open.
 - The [persistent-directory checkpoint](checkpoints/2026-10-17/persistent-directories.json)

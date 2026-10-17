@@ -47,7 +47,10 @@ use sha2::{Digest, Sha256};
 use std::{
     future::Future,
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU32, AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
     time::Duration,
 };
 use tokio::{net::TcpListener, sync::watch, task::JoinHandle};
@@ -60,6 +63,26 @@ mod circle;
 pub(super) const WAIT: Duration = Duration::from_secs(40);
 pub(super) const EXTENSION: &str = "live-root-health";
 const CIRCLE: &str = "oct11111111111111111111111111111111111111111111";
+
+#[derive(Default)]
+pub(super) struct LivenessClock {
+    now: AtomicU32,
+    reads: AtomicUsize,
+}
+impl LivenessClock {
+    pub(super) fn set(&self, now: u32) {
+        self.now.store(now, Ordering::SeqCst);
+    }
+    pub(super) fn reads(&self) -> usize {
+        self.reads.load(Ordering::SeqCst)
+    }
+    fn sample(&self) -> f64 {
+        // A newly observed read must already have captured its clock value.
+        let now = self.now.load(Ordering::SeqCst);
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        f64::from(now)
+    }
+}
 
 fn key(seed: u8) -> SigningKey {
     SigningKey::from_bytes(&[seed; 32])
@@ -237,16 +260,36 @@ impl Fixture {
         Box::pin(Self::with_health(voting, HealthConfig::default())).await
     }
     pub(super) async fn with_health(voting: bool, health: HealthConfig) -> Self {
-        Box::pin(Self::start(voting, health, false, None)).await
+        Box::pin(Self::start(voting, health, false, None, None)).await
     }
     pub(super) async fn soft_lag(voting: bool) -> Self {
-        Box::pin(Self::start(voting, HealthConfig::default(), true, Some(2))).await
+        Box::pin(Self::start(
+            voting,
+            HealthConfig::default(),
+            true,
+            Some(2),
+            None,
+        ))
+        .await
+    }
+    pub(super) async fn liveness() -> (Self, Arc<LivenessClock>) {
+        let clock = Arc::new(LivenessClock::default());
+        let fixture = Box::pin(Self::start(
+            true,
+            HealthConfig::default(),
+            true,
+            None,
+            Some(clock.clone()),
+        ))
+        .await;
+        (fixture, clock)
     }
     async fn start(
         voting: bool,
         health: HealthConfig,
         initial_matching: bool,
         advertised_head: Option<i64>,
+        clock: Option<Arc<LivenessClock>>,
     ) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let state = genesis();
@@ -429,10 +472,16 @@ impl Fixture {
                 .await
                 .unwrap(),
         );
-        let settings = octra_node_protocol::consensus::profile::Settings::from_values(
-            std::collections::BTreeMap::new(),
-        )
-        .unwrap();
+        let settings =
+            octra_node_protocol::consensus::profile::Settings::from_values(if clock.is_some() {
+                std::collections::BTreeMap::from([(
+                    "OCTRA_BFT_LIVENESS_STALL_SEC".to_owned(),
+                    b"150".to_vec(),
+                )])
+            } else {
+                std::collections::BTreeMap::new()
+            })
+            .unwrap();
         let submission = Arc::new(Submission {
             node: node.clone(),
             executor: executor.clone(),
@@ -463,9 +512,33 @@ impl Fixture {
             epoch_capacity: 10_000_000_000_u64.into(),
             stealth_slots: 4,
             evidence_dir: directory.path().join("evidence"),
-            release: None,
+            release: clock
+                .as_ref()
+                .map(|_| octra_node_runtime::status_read::Release {
+                    settings: settings.clone(),
+                    crypto_engine: vec![],
+                    program_trust: None,
+                    source_commit: None,
+                    binary_hash: None,
+                }),
+            liveness_clock: clock
+                .as_ref()
+                .map(|clock| -> Arc<dyn Fn() -> f64 + Send + Sync> {
+                    let clock = clock.clone();
+                    Arc::new(move || clock.sample())
+                }),
         };
-        let timeouts = TimeoutConfig::default();
+        let timeouts = if clock.is_some() {
+            // Actual native limits keep every step still pending when health
+            // observes a 151s wall-clock stall; no timeout policy is shortened.
+            TimeoutConfig {
+                base: 120_000,
+                propose: 120_000,
+                per_round: 1000,
+            }
+        } else {
+            TimeoutConfig::default()
+        };
         let validator = driver::Validator::new(
             node.clone(),
             executor.clone(),
