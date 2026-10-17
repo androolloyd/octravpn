@@ -4,9 +4,11 @@
 //! for execution, so a proposal's bundle can arrive on the same connection.
 mod diagnostics;
 mod inbound;
+mod liveness;
 mod outputs;
 mod work;
 pub use diagnostics::Diagnostics;
+pub use liveness::{configured_stall_sec, LivenessContext};
 
 use crate::consensus_votes::{Precommit, Readiness, VoteGuard};
 use crate::proposal_relay::{Broadcast, ProposalRelay};
@@ -49,6 +51,11 @@ pub enum Verdict {
 pub trait Host: Send + Sync + 'static {
     fn sign(&self, bytes: &[u8]) -> Result<Bytes, Error>;
     fn readiness(&self) -> Readiness;
+    /// Read current local health when the actor processes a poll. Peer input
+    /// cannot supply these gates or a liveness reset decision.
+    fn liveness(&self) -> Option<LivenessContext> {
+        None
+    }
     fn verify_parent(&self, epoch: i64, parent: Option<&ParentCommit>) -> Result<(), Error>;
     async fn build(&self, epoch: i64) -> Result<Option<ProposalPlan>, Error>;
     async fn verify(&self, proposal: &Proposal) -> Result<Verdict, Error>;
@@ -88,6 +95,7 @@ pub type DutyHandler = Arc<dyn Fn(i64, Option<octra_node_protocol::duty::Proof>)
 enum Input {
     Frame(Peer, Frame),
     Wake,
+    HealthPoll,
 }
 #[derive(Clone)]
 pub struct Handle {
@@ -122,6 +130,13 @@ impl Handle {
     pub fn wake(&self) -> Result<(), Error> {
         self.input
             .try_send(Input::Wake)
+            .map_err(|e| Error::from(e.to_string()))
+    }
+    /// Trigger a current actor-side sample, without carrying an old snapshot
+    /// across queued work or giving the caller round-reset authority.
+    pub fn poll_health(&self) -> Result<(), Error> {
+        self.input
+            .try_send(Input::HealthPoll)
             .map_err(|e| Error::from(e.to_string()))
     }
 }
@@ -183,6 +198,7 @@ pub struct Driver<H: Host, C: Publication> {
     pace: Option<Pace>,
     build_retry: Option<Instant>,
     duty: Option<DutyHandler>,
+    liveness: octra_node_protocol::consensus::liveness::State,
 }
 impl<H: Host, C: Publication> Drop for Driver<H, C> {
     fn drop(&mut self) {
@@ -269,6 +285,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
                 pace: None,
                 build_retry: None,
                 duty: None,
+                liveness: octra_node_protocol::consensus::liveness::State::new(Self::wall_time()),
             },
         ))
     }
@@ -371,7 +388,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
                 self.started + Duration::from_nanos(p.until.max(0) as u64)
             });
             tokio::select! {
-                input=self.input.recv()=>match input {Some(Input::Frame(peer,frame))=>self.receive(&peer,frame).await?,Some(Input::Wake)=>(),None=>return Ok(())},
+                input=self.input.recv()=>match input {Some(Input::Frame(peer,frame))=>self.receive(&peer,frame).await?,Some(Input::Wake)=>(),Some(Input::HealthPoll)=>self.poll_health().await?,None=>return Ok(())},
                 output=self.work.join_next(),if !self.work.is_empty()=>{
                     let work=match output.ok_or("proposal worker disappeared")? {
                         Ok(work)=>work,Err(e) if e.is_cancelled()=>continue,Err(e)=>return Err(e.to_string().into()),

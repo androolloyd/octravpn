@@ -85,9 +85,12 @@ records, certificates, ExEx sequences/checkpoints and signing history intact.
 
 Legacy nonjournaled empty-fork repair, its durable staged recovery and native
 crash-order parity remain separate implementation and qualification work.
-The native stalled-voter liveness fallback also remains unwired: it observes
-step and height age, applies timeout/proposal/finality safety gates, then
-advances the existing driver's round while preserving its locks. Catch-up
-probing or restarting a driver at round zero does not implement that path.
-This quarantine change does not qualify that positive repair path, full native
-health-loop parity or public-network recovery.
+The [stalled-voter fallback](checkpoints/2026-10-17/native-liveness.md) now observes
+step and height age inside the existing driver actor, applies native
+timeout/proposal/finality guards, and advances its round while preserving locks
+and durable signing history. Its policy has an independent unchanged-OCaml
+reference corpus and real driver regressions. The supervisor trigger and actual
+Node flag projection are reviewed; a forced positive fallback under that full
+production host remains separate qualification. Neither this fallback nor root
+quarantine qualifies legacy repair, full native health-loop parity or public
+network recovery.

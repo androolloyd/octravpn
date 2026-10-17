@@ -165,6 +165,10 @@ impl Engine {
     pub const fn generation(&self) -> i64 {
         self.generation
     }
+    pub fn step_timeout_ms(&self) -> i64 {
+        self.timeouts
+            .milliseconds(self.state.round, self.state.step)
+    }
     pub const fn finalized_height(&self) -> i64 {
         self.finalized_height
     }

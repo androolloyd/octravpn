@@ -21,7 +21,7 @@ use octra_node_protocol::{
 };
 use octra_node_runtime::{
     consensus_bundle,
-    consensus_driver::{Driver, Handle, Host, ProposalPlan, Publication, Verdict},
+    consensus_driver::{Driver, Handle, Host, LivenessContext, ProposalPlan, Publication, Verdict},
     consensus_recovery,
     consensus_votes::{Precommit, Readiness},
 };
@@ -34,6 +34,8 @@ use std::{
 };
 use tokio::{net::TcpListener, sync::watch, task::JoinHandle};
 const CHAIN: &[u8] = b"live-consensus-fixture";
+#[path = "live_consensus/liveness.rs"]
+mod liveness;
 fn key(n: u8) -> SigningKey {
     SigningKey::from_bytes(&[n; 32])
 }
@@ -95,11 +97,18 @@ struct Authority {
     wait_verify: Arc<AtomicBool>,
     readiness_checks: Arc<AtomicUsize>,
     verify_gate: watch::Receiver<bool>,
+    publish_gate: watch::Receiver<bool>,
+    liveness: Arc<Mutex<Option<LivenessContext>>>,
+    health_polls: Arc<AtomicUsize>,
     warnings: Arc<Mutex<Vec<String>>>,
     evidence: Arc<Mutex<Vec<VoteConflict>>>,
 }
 #[async_trait::async_trait]
 impl Host for Authority {
+    fn liveness(&self) -> Option<LivenessContext> {
+        self.health_polls.fetch_add(1, Ordering::SeqCst);
+        *self.liveness.lock().unwrap()
+    }
     fn sign(&self, bytes: &[u8]) -> Result<Bytes, Error> {
         Ok(key(self.id).sign(bytes).to_bytes().to_vec())
     }
@@ -195,6 +204,12 @@ impl Publication for Authority {
     }
     async fn finalized(&self, set: &ValidatorSet, f: &Finalize) -> Result<(), Error> {
         self.attempts.fetch_add(1, Ordering::SeqCst);
+        let mut gate = self.publish_gate.clone();
+        while !*gate.borrow_and_update() {
+            gate.changed()
+                .await
+                .map_err(|e| Error::from(e.to_string()))?;
+        }
         if self.reject_publish.load(Ordering::SeqCst) {
             return Err("injected publication failure".into());
         }
@@ -231,6 +246,7 @@ struct Node {
     endpoint: Endpoint,
     seen: Arc<Mutex<Vec<Frame>>>,
     gate: watch::Sender<bool>,
+    publish_gate: watch::Sender<bool>,
     stop: watch::Sender<bool>,
     driver: JoinHandle<Result<(), Error>>,
     network: JoinHandle<()>,
@@ -245,6 +261,24 @@ impl Drop for Node {
     }
 }
 async fn node(id: u8, n: u8, bootstrap: Vec<Endpoint>, restored: Option<Proposal>) -> Node {
+    node_with_timeouts(
+        id,
+        n,
+        bootstrap,
+        restored,
+        TimeoutConfig::default(),
+        Duration::from_secs(60),
+    )
+    .await
+}
+async fn node_with_timeouts(
+    id: u8,
+    n: u8,
+    bootstrap: Vec<Endpoint>,
+    restored: Option<Proposal>,
+    timeouts: TimeoutConfig,
+    read_idle: Duration,
+) -> Node {
     let dir = tempfile::tempdir().unwrap();
     let journal = JournalOwner::open(dir.path()).unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -268,7 +302,7 @@ async fn node(id: u8, n: u8, bootstrap: Vec<Endpoint>, restored: Option<Proposal
             advertised: endpoint.clone(),
             timeouts: Timeouts {
                 handshake_read: Duration::from_secs(10),
-                read_idle: Duration::from_secs(60),
+                read_idle,
                 write_idle: Duration::from_secs(10),
             },
             head: Arc::new(|| (0, [0; 32])),
@@ -277,6 +311,7 @@ async fn node(id: u8, n: u8, bootstrap: Vec<Endpoint>, restored: Option<Proposal
     )
     .unwrap();
     let (gate, verify_gate) = watch::channel(true);
+    let (publish_gate, publish_signal) = watch::channel(true);
     let authority = Authority {
         id,
         set: set.clone(),
@@ -293,6 +328,9 @@ async fn node(id: u8, n: u8, bootstrap: Vec<Endpoint>, restored: Option<Proposal
         wait_verify: Arc::default(),
         readiness_checks: Arc::default(),
         verify_gate,
+        publish_gate: publish_signal,
+        liveness: Arc::default(),
+        health_polls: Arc::default(),
         warnings: Arc::default(),
         evidence: Arc::default(),
     };
@@ -302,7 +340,7 @@ async fn node(id: u8, n: u8, bootstrap: Vec<Endpoint>, restored: Option<Proposal
         set,
         1,
         Protocol::default(),
-        TimeoutConfig::default(),
+        timeouts,
     );
     if let Some(proposal) = restored {
         engine.restore_precommit_lock(proposal).unwrap();
@@ -334,6 +372,7 @@ async fn node(id: u8, n: u8, bootstrap: Vec<Endpoint>, restored: Option<Proposal
         endpoint,
         seen,
         gate,
+        publish_gate,
         stop,
         driver,
         network,

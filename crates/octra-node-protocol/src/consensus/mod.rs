@@ -13,6 +13,7 @@ pub mod hash;
 pub mod health;
 pub mod journal;
 mod journal_io;
+pub mod liveness;
 pub mod pace;
 pub mod parent;
 pub mod pending_log;

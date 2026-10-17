@@ -17,7 +17,7 @@ use octra_node_runtime::{
     bundle_queries::Bundles,
     canonical::Head,
     consensus_bundle,
-    consensus_driver::{Host as DriverHost, ProposalPlan, Verdict},
+    consensus_driver::{Host as DriverHost, LivenessContext, ProposalPlan, Verdict},
     consensus_recovery,
     consensus_votes::{Precommit, Readiness},
     finality::{proposal::Policy, EpochRules},
@@ -31,6 +31,7 @@ use std::{
     },
     time::{SystemTime, UNIX_EPOCH},
 };
+mod liveness;
 mod upgrade;
 
 fn error(e: impl std::fmt::Display) -> Error {
@@ -107,6 +108,7 @@ pub struct Validator<A: Host> {
     cache: Mutex<Cache>,
     enabled: AtomicBool,
     upgrade_block: Mutex<Option<String>>,
+    liveness_stall_sec: f64,
 }
 impl<A: Host> Validator<A> {
     pub fn new(
@@ -138,6 +140,7 @@ impl<A: Host> Validator<A> {
         if config.stealth_slots > 128 || config.epoch_capacity <= 0.into() {
             return Err("invalid staging limits".into());
         }
+        let liveness_stall_sec = liveness::stall_sec(config.release.as_ref());
         Ok(Self {
             node,
             executor,
@@ -149,6 +152,7 @@ impl<A: Host> Validator<A> {
             cache: Mutex::default(),
             enabled: AtomicBool::new(false),
             upgrade_block: Mutex::new(None),
+            liveness_stall_sec,
         })
     }
     pub fn set_enabled(&self, enabled: bool) {
@@ -397,6 +401,9 @@ impl<A: Host> DriverHost for Validator<A> {
                 && matches!(self.node.status(), crate::Status::Serving(_)),
             finality_proof_needed: false,
         }
+    }
+    fn liveness(&self) -> Option<LivenessContext> {
+        liveness::snapshot(self)
     }
     fn verify_parent(&self, number: i64, parent: Option<&ParentCommit>) -> Result<(), Error> {
         let epoch = self.epoch()?;

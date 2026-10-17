@@ -55,6 +55,9 @@ The [persistent-directory checkpoint](docs/rust-node/checkpoints/2026-10-17/pers
 adds cached native commitments and granted page reuse, with 10,564 native tree
 operations and 522 passing tests across composed targets. Public qualification
 of this candidate remains pending.
+The [native liveness checkpoint](docs/rust-node/checkpoints/2026-10-17/native-liveness.md)
+adds guarded recovery within the existing driver, with 1,012 native policy
+comparisons and real lock, publication, worker and timer regressions.
 
 **Rust node qualification (2026-10-15):** the `octra-node` executable connects the
 native validator driver, authenticated peers, transaction intake, canonical

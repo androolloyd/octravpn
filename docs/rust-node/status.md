@@ -9,6 +9,19 @@ upstream behavioral parity and public-network deployment remain unqualified.
 
 ## Recorded local evidence
 
+- The [native liveness checkpoint](checkpoints/2026-10-17/native-liveness.json)
+  records 320 passing tests across 24 composed targets, four standalone ignores,
+  strict lint, formatting, 14 compiled payment AML tests and 19 abstract Lean
+  theorems. Rust matches 1,012 cases from unchanged adopted OCaml policy. Actual
+  driver tests retain a restored lock and durable votes, refuse conflicting
+  proposals, block reset during pending finalization and reject stale workers,
+  timers and polls across publication. The [review](checkpoints/2026-10-17/native-liveness.md)
+  records captured-setting and peer-fixture corrections. Automatic supervisor
+  triggering and actual Node flag projection are reviewed in source; forced
+  positive fallback under that complete production host remains qualification
+  work. The unchanged prior public observer was catching up at epoch 1,707,929
+  with three peers at 10:06:02 UTC and payments unconfigured. This candidate is
+  not installed there; public recovery, legacy repair and Mainnet remain open.
 - The [persistent-directory checkpoint](checkpoints/2026-10-17/persistent-directories.json)
   records 522 passing tests across 123 composed targets, seven standalone ignores,
   strict lint, formatting, 14 compiled payment AML tests and 19 abstract Lean

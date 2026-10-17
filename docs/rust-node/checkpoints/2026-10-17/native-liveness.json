@@ -1,0 +1,1030 @@
+{
+  "schema": "octra_native_liveness_checkpoint_v1",
+  "observed_at": "2026-10-17T10:13:33.120027+00:00",
+  "base_commit": "122e163dc8f8b27a23decf9b4fec3f52bed3cde0",
+  "adopted_upstream": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "scope": "Adopted Consensus_liveness policy and existing-driver round realignment with native guards, preserved locks/journals and actor-side fresh sampling",
+  "source_sha256": {
+    "Cargo.lock": "41a91382953a23309f5a507b583da6c19faf4f1a0ee95ce485bea0706ef41269",
+    "Cargo.toml": "5fc6af03807621fd437551c765313d75728d3c0c01d3b21f544d6f366efd1925",
+    "README.md": "157625eb4ccd5f87a18e83d2dbbf325f2aa59ede90ad8c259ce9ad4a66109e97",
+    "crates/octra-node-protocol/src/consensus/engine.rs": "be206ee6f5b00248075e85c045ec739d866e5d7f2c84233614743b18d67fc28f",
+    "crates/octra-node-protocol/src/consensus/liveness.rs": "afb4b9f6f7e095dae54476b69864d6fd45e2076dbe7d74c9c8d57f435a81ab74",
+    "crates/octra-node-protocol/src/consensus/liveness/tests.rs": "a306cc1f54b6907aeed5142ddcbb14a87217ff9ecb4263f45d80f069f3223003",
+    "crates/octra-node-protocol/src/consensus/mod.rs": "da09de1621ed5812e76e74e197c0aaf0bbdb79a01b8a81c20735971b7345bdb6",
+    "crates/octra-node-protocol/tests/fixtures/liveness.json": "8568e7911c6958454a9098ee16a29db799d6287acb37041789f545b159a670d1",
+    "crates/octra-node-protocol/tests/liveness_parity.rs": "efc25ce67ad04363d2075b0e0297fadbdac96ffcab17e1ebdb3d7998d8dabb4d",
+    "crates/octra-node-runtime/Cargo.toml": "65782b588aee790ff03728e57194a4db907cf77da277ab1a110f4456092b15af",
+    "crates/octra-node-runtime/src/consensus_driver/liveness.rs": "2bea172e672da88246dc97c9d7a8734b2e1419172463a5cc3e60c86eb31ccc2a",
+    "crates/octra-node-runtime/src/consensus_driver/mod.rs": "4459215f6513dedbafefd2e701307dc2f97f59ffa4182f1c8b5e97c116501a2a",
+    "crates/octra-node-runtime/tests/live_consensus.rs": "76e4bb561ae63a73db51a3e31e1155bea814a0ba56f2b2597c3d5d7bbd89e208",
+    "crates/octra-node-runtime/tests/live_consensus/liveness.rs": "3b4322c4884753c5c0cb29aa72e3b9b23455dcd89628267d563778fddce62297",
+    "crates/octra-node/src/driver.rs": "0dd160db8bdad6b0208c2151710230219369b950f465894b04b1788809566725",
+    "crates/octra-node/src/driver/liveness.rs": "82286e47cee2adb42149d89402c2b38b76802ff20beb1cfddaf8a29c27b180d0",
+    "crates/octra-node/src/recovery.rs": "006232436e9ea6751780049596d6b5482a11725568dbde4ac9755ce3884751bb",
+    "docs/rust-node/root-recovery.md": "cafc1c42a69d5ef0cb1ed207c35a931e903a0c4fc007f3d23abf9f25875ff21e",
+    "docs/rust-node/source-map.json": "6440fdf5895e791ce99ff1904aea396fc88c7e12645846a32702286aa9c17efa",
+    "docs/rust-node/status.md": "888a7e97c58d5a02ce898a13fa365462b8b439241fe7dc28068885c5c4b4eaca",
+    "docs/rust-node/upstream.json": "fe933b3bc2ae3070027bc6d616315c8dfe0568017c62280459553bdfd35b7b1e",
+    "program/octranet-payments.aml": "96e494be368351b4cc4832f0d78541813d842f4ab84229749b75a66fcb6c211b",
+    "proofs/lean/OctranetPayments.lean": "3269c304583047605c4b5f8ad8ca669710a0a03bd017eba75f63a12180793d83",
+    "rust-toolchain.toml": "abd8063388c533b3e6b91666cd66d6229e61d13fc1139d20006492c2980141f5",
+    "scripts/node-port/liveness-fixtures.py": "290cc88a7a65beb8cbd6ef9613e114ea8b3048f5b92f35c35d9999f161bbf0d4",
+    "scripts/node-port/liveness-oracle.ml": "9a6b19a5e0a552633d4f75248d6144ee1d83dfc444ab242d36922db8d1be80fc"
+  },
+  "final_source_snapshot_sha256": "9cc7207e7cf3d92f01daeb7a5f1691d769d380a5e39d6cddf85f66fe8f3ee7e5",
+  "source_snapshot_directory": "/Users/androolloyd/Development/octra/out/native-liveness-20261017",
+  "toolchain": {
+    "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+    "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)"
+  },
+  "validation": {
+    "passed": 320,
+    "failed": 0,
+    "ignored": 4,
+    "targets": 24,
+    "rows": [
+      {
+        "package": "octra-node",
+        "target": "unittests src/lib.rs",
+        "passed": 101,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node",
+        "target": "tests/devnet.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node",
+        "target": "tests/services.rs",
+        "passed": 23,
+        "failed": 0,
+        "ignored": 1,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node",
+        "target": "tests/single_native.rs",
+        "passed": 17,
+        "failed": 0,
+        "ignored": 2,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "unittests src/lib.rs",
+        "passed": 54,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/consensus_catchup_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/consensus_engine_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/consensus_journal_owner.rs",
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/consensus_journal_parity.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/consensus_recovery_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/driver_work_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/health_policy_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/liveness_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/network_driver.rs",
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/quarantine_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "unittests src/lib.rs",
+        "passed": 57,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/canonical_recovery.rs",
+        "passed": 7,
+        "failed": 0,
+        "ignored": 1,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/consensus_work.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/driver_votes_parity.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/finality_publication.rs",
+        "passed": 6,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/finality_queries.rs",
+        "passed": 7,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/live_consensus.rs",
+        "passed": 8,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "live-final"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/octranet_payments.rs",
+        "passed": 14,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/pending_recovery.rs",
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      }
+    ],
+    "composition": "One final outer Cargo summary per target; final live_consensus target replaces initial result; nested subprocess helper summaries excluded.",
+    "initial": {
+      "passed": 318,
+      "failed": 2,
+      "ignored": 4,
+      "targets": 24
+    },
+    "final_scope": "Final live driver run uses default production runtime features. Initial combined run and strict lint use top-level test-helpers; liveness implementation has no feature-specific branch.",
+    "payment_aml_tests": 14,
+    "abstract_payment_lean_theorems": 19,
+    "standalone_ignores": [
+      "gateway::canonical_gateway_chromium_fixture ... ignored, launched by the isolated gateway Chromium qualification runner",
+      "facade::initialize_private_single_paid_fixture ... ignored, invoked explicitly by network-none private Single paid qualification",
+      "single_crash_child ... ignored, controlled subprocess crash helper, executed by crash_recovery test",
+      "crash_worker ... ignored, spawned by process_crash_recovery at a controlled commit boundary"
+    ]
+  },
+  "stages": {
+    "native": {
+      "name": "native",
+      "observed_at": "2026-10-17T09:58:21.914596+00:00",
+      "argv": [
+        "python3",
+        "scripts/node-port/liveness-fixtures.py",
+        "--upstream",
+        "/private/tmp/octra-lite-node-native-20261016",
+        "--host-directory",
+        "/Users/androolloyd/Development/octra/out/native-liveness-20261017/native-liveness",
+        "--out",
+        "/Users/androolloyd/Development/octra/out/native-liveness-20261017/liveness.json"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra",
+      "exit_code": 0,
+      "elapsed_seconds": 2.726,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "Cargo.toml",
+        "Cargo.lock",
+        "rust-toolchain.toml",
+        "scripts/node-port/liveness-fixtures.py",
+        "scripts/node-port/liveness-oracle.ml"
+      ],
+      "source_snapshot_sha256": "85178268b3f3cec1798f597331baeef6bf7d7f97c4014e2f7458e5ae29a766ef",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "abfb0d78a942f4060a3a97e89432dd0a88b8d15914ec004e984a17d443032b41",
+      "raw_test_results": {
+        "targets": 0,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "strict-clippy": {
+      "name": "strict-clippy",
+      "observed_at": "2026-10-17T09:59:01.471852+00:00",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "--release",
+        "--features",
+        "octra-node/test-helpers",
+        "-p",
+        "octra-node",
+        "-p",
+        "octra-node-protocol",
+        "-p",
+        "octra-node-runtime",
+        "--lib",
+        "--bins",
+        "--tests",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra",
+      "exit_code": 101,
+      "elapsed_seconds": 28.272,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "Cargo.toml",
+        "Cargo.lock",
+        "rust-toolchain.toml",
+        "scripts/node-port/liveness-fixtures.py",
+        "scripts/node-port/liveness-oracle.ml"
+      ],
+      "source_snapshot_sha256": "2416822a4c5f6cdcf2e76780a405d7cfd234a0d71ad4abddeb75c02990f0e137",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "d2fcc4f32c6151d55ea569534ae1fa9629a1ff17d2757877060c3199d37f797e",
+      "raw_test_results": {
+        "targets": 0,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "strict-clippy-final": {
+      "name": "strict-clippy-final",
+      "observed_at": "2026-10-17T10:00:02.234862+00:00",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "--release",
+        "--features",
+        "octra-node/test-helpers",
+        "-p",
+        "octra-node",
+        "-p",
+        "octra-node-protocol",
+        "-p",
+        "octra-node-runtime",
+        "--lib",
+        "--bins",
+        "--tests",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra",
+      "exit_code": 101,
+      "elapsed_seconds": 12.735,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "Cargo.toml",
+        "Cargo.lock",
+        "rust-toolchain.toml",
+        "scripts/node-port/liveness-fixtures.py",
+        "scripts/node-port/liveness-oracle.ml"
+      ],
+      "source_snapshot_sha256": "c8c3ffeb23b249960d146e777da656a91e176a305cb144bd55399a238f9b9d76",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "9f389bec95ff609c58cff764942675a4a4823e6bb7c5ba2b691ef85108e0480d",
+      "raw_test_results": {
+        "targets": 0,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "strict-clippy-accepted": {
+      "name": "strict-clippy-accepted",
+      "observed_at": "2026-10-17T10:00:34.307817+00:00",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "--release",
+        "--features",
+        "octra-node/test-helpers",
+        "-p",
+        "octra-node",
+        "-p",
+        "octra-node-protocol",
+        "-p",
+        "octra-node-runtime",
+        "--lib",
+        "--bins",
+        "--tests",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra",
+      "exit_code": 0,
+      "elapsed_seconds": 13.011,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "Cargo.toml",
+        "Cargo.lock",
+        "rust-toolchain.toml",
+        "scripts/node-port/liveness-fixtures.py",
+        "scripts/node-port/liveness-oracle.ml"
+      ],
+      "source_snapshot_sha256": "77acd3ebf1d2fb140d8d1e6618fdceb6e4c0a0d86cbc76a02cbc62790d79d599",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "1566c81e38763856a5936448e6d8ceaf32b9c57a78148d4b2ebeee13192f901b",
+      "raw_test_results": {
+        "targets": 0,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "combined": {
+      "name": "combined",
+      "observed_at": "2026-10-17T10:01:07.009325+00:00",
+      "argv": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--release",
+        "--features",
+        "octra-node/test-helpers",
+        "-p",
+        "octra-node",
+        "-p",
+        "octra-node-protocol",
+        "-p",
+        "octra-node-runtime",
+        "--no-fail-fast",
+        "--lib",
+        "--test",
+        "liveness_parity",
+        "--test",
+        "live_consensus",
+        "--test",
+        "consensus_engine_parity",
+        "--test",
+        "driver_work_parity",
+        "--test",
+        "driver_votes_parity",
+        "--test",
+        "consensus_recovery_parity",
+        "--test",
+        "consensus_catchup_parity",
+        "--test",
+        "consensus_journal_owner",
+        "--test",
+        "consensus_journal_parity",
+        "--test",
+        "health_policy_parity",
+        "--test",
+        "quarantine_parity",
+        "--test",
+        "network_driver",
+        "--test",
+        "finality_queries",
+        "--test",
+        "finality_publication",
+        "--test",
+        "pending_recovery",
+        "--test",
+        "canonical_recovery",
+        "--test",
+        "consensus_work",
+        "--test",
+        "octranet_payments",
+        "--test",
+        "devnet",
+        "--test",
+        "services",
+        "--test",
+        "single_native",
+        "--",
+        "--nocapture"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra",
+      "exit_code": 101,
+      "elapsed_seconds": 465.756,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "Cargo.toml",
+        "Cargo.lock",
+        "rust-toolchain.toml",
+        "scripts/node-port/liveness-fixtures.py",
+        "scripts/node-port/liveness-oracle.ml"
+      ],
+      "source_snapshot_sha256": "77acd3ebf1d2fb140d8d1e6618fdceb6e4c0a0d86cbc76a02cbc62790d79d599",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "d97fbcf58ac8b7c481503e29abbf41dfe6bb421f9576971ddd6e18cf1d1ff571",
+      "raw_test_results": {
+        "targets": 27,
+        "passed": 321,
+        "failed": 2,
+        "ignored": 4
+      }
+    },
+    "format": {
+      "name": "format",
+      "observed_at": "2026-10-17T10:01:08.220219+00:00",
+      "argv": [
+        "rustfmt",
+        "--edition",
+        "2021",
+        "--config",
+        "skip_children=true",
+        "--check",
+        "crates/octra-node-protocol/src/consensus/engine.rs",
+        "crates/octra-node-protocol/src/consensus/liveness.rs",
+        "crates/octra-node-protocol/src/consensus/liveness/tests.rs",
+        "crates/octra-node-protocol/src/consensus/mod.rs",
+        "crates/octra-node-protocol/tests/liveness_parity.rs",
+        "crates/octra-node-runtime/src/consensus_driver/liveness.rs",
+        "crates/octra-node-runtime/src/consensus_driver/mod.rs",
+        "crates/octra-node-runtime/tests/live_consensus.rs",
+        "crates/octra-node-runtime/tests/live_consensus/liveness.rs",
+        "crates/octra-node/src/driver.rs",
+        "crates/octra-node/src/driver/liveness.rs",
+        "crates/octra-node/src/recovery.rs"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra",
+      "exit_code": 0,
+      "elapsed_seconds": 0.337,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "Cargo.toml",
+        "Cargo.lock",
+        "rust-toolchain.toml",
+        "scripts/node-port/liveness-fixtures.py",
+        "scripts/node-port/liveness-oracle.ml"
+      ],
+      "source_snapshot_sha256": "77acd3ebf1d2fb140d8d1e6618fdceb6e4c0a0d86cbc76a02cbc62790d79d599",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_test_results": {
+        "targets": 0,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "lean": {
+      "name": "lean",
+      "observed_at": "2026-10-17T10:01:08.220621+00:00",
+      "argv": [
+        "lake",
+        "build",
+        "OctranetPayments"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra/proofs/lean",
+      "exit_code": 0,
+      "elapsed_seconds": 1.155,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "Cargo.toml",
+        "Cargo.lock",
+        "rust-toolchain.toml",
+        "scripts/node-port/liveness-fixtures.py",
+        "scripts/node-port/liveness-oracle.ml"
+      ],
+      "source_snapshot_sha256": "77acd3ebf1d2fb140d8d1e6618fdceb6e4c0a0d86cbc76a02cbc62790d79d599",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "a30d6eefe7ccec7803482bd446c3d48f7cc46ed86ba99cb839fca134dd7a5a3d",
+      "raw_test_results": {
+        "targets": 0,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "live-final": {
+      "name": "live-final",
+      "observed_at": "2026-10-17T10:10:33.526027+00:00",
+      "argv": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--release",
+        "-p",
+        "octra-node-runtime",
+        "--test",
+        "live_consensus",
+        "--",
+        "--nocapture"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra",
+      "exit_code": 0,
+      "elapsed_seconds": 38.818,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "Cargo.toml",
+        "Cargo.lock",
+        "rust-toolchain.toml",
+        "scripts/node-port/liveness-fixtures.py",
+        "scripts/node-port/liveness-oracle.ml"
+      ],
+      "source_snapshot_sha256": "9cc7207e7cf3d92f01daeb7a5f1691d769d380a5e39d6cddf85f66fe8f3ee7e5",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "c06a77f2801bc3e95b6bcf77d373d8dd9b252e808b7433d9e9a228d5783a42a1",
+      "raw_test_results": {
+        "targets": 1,
+        "passed": 8,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "format-confirmed": {
+      "name": "format-confirmed",
+      "observed_at": "2026-10-17T10:12:40.152539+00:00",
+      "argv": [
+        "rustfmt",
+        "--edition",
+        "2021",
+        "--config",
+        "skip_children=true",
+        "--check",
+        "crates/octra-node-protocol/src/consensus/engine.rs",
+        "crates/octra-node-protocol/src/consensus/liveness.rs",
+        "crates/octra-node-protocol/src/consensus/liveness/tests.rs",
+        "crates/octra-node-protocol/src/consensus/mod.rs",
+        "crates/octra-node-protocol/tests/liveness_parity.rs",
+        "crates/octra-node-runtime/src/consensus_driver/liveness.rs",
+        "crates/octra-node-runtime/src/consensus_driver/mod.rs",
+        "crates/octra-node-runtime/tests/live_consensus.rs",
+        "crates/octra-node-runtime/tests/live_consensus/liveness.rs",
+        "crates/octra-node/src/driver.rs",
+        "crates/octra-node/src/driver/liveness.rs",
+        "crates/octra-node/src/recovery.rs"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra",
+      "exit_code": 0,
+      "elapsed_seconds": 0.322,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "Cargo.toml",
+        "Cargo.lock",
+        "rust-toolchain.toml",
+        "scripts/node-port/liveness-fixtures.py",
+        "scripts/node-port/liveness-oracle.ml"
+      ],
+      "source_snapshot_sha256": "9cc7207e7cf3d92f01daeb7a5f1691d769d380a5e39d6cddf85f66fe8f3ee7e5",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_test_results": {
+        "targets": 0,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "strict-clippy-confirmed": {
+      "name": "strict-clippy-confirmed",
+      "observed_at": "2026-10-17T10:12:39.026039+00:00",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "--release",
+        "--features",
+        "octra-node/test-helpers",
+        "-p",
+        "octra-node",
+        "-p",
+        "octra-node-protocol",
+        "-p",
+        "octra-node-runtime",
+        "--lib",
+        "--bins",
+        "--tests",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra",
+      "exit_code": 0,
+      "elapsed_seconds": 1.451,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "Cargo.toml",
+        "Cargo.lock",
+        "rust-toolchain.toml",
+        "scripts/node-port/liveness-fixtures.py",
+        "scripts/node-port/liveness-oracle.ml"
+      ],
+      "source_snapshot_sha256": "9cc7207e7cf3d92f01daeb7a5f1691d769d380a5e39d6cddf85f66fe8f3ee7e5",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "c07314f60f13a3bd662d605567b2fca296530193bc7e97d8eb41e2897450eed6",
+      "raw_test_results": {
+        "targets": 0,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    }
+  },
+  "native": {
+    "fixture_path": "/Users/androolloyd/Development/octra/crates/octra-node-protocol/tests/fixtures/liveness.json",
+    "fixture_sha256": "8568e7911c6958454a9098ee16a29db799d6287acb37041789f545b159a670d1",
+    "vectors": 1012,
+    "vector_groups": {
+      "timers": 6,
+      "blockers": 256,
+      "threshold-selection": 300,
+      "threshold-boundaries": 42,
+      "clock-bits": 100,
+      "byte-keys": 100,
+      "seed-keys": 5,
+      "counter-wrap": 5,
+      "timeouts": 198
+    },
+    "input_sha256": "f25f55bf50ce913e29387437282e9e2c50eece5ea0da73a1b1613ec9f484c79b",
+    "builder_image": "sha256:e61194220c65f9f0b8034a4816fb15d47dfe7dda8ece1087d9850b6d838bae95",
+    "builder_platform": {
+      "os": "linux",
+      "architecture": "arm64"
+    },
+    "native_metadata": {
+      "compiler_version": "4.14.2",
+      "compiler_config": "version: 4.14.2\nstandard_library_default: /home/opam/.opam/4.14.2/lib/ocaml\nstandard_library: /home/opam/.opam/4.14.2/lib/ocaml\nccomp_type: cc\nc_compiler: gcc\nocamlc_cflags: -O2 -fno-strict-aliasing -fwrapv -pthread -fPIC \nocamlc_cppflags: -D_FILE_OFFSET_BITS=64 \nocamlopt_cflags: -O2 -fno-strict-aliasing -fwrapv -pthread -fPIC \nocamlopt_cppflags: -D_FILE_OFFSET_BITS=64 \nbytecomp_c_compiler: gcc -O2 -fno-strict-aliasing -fwrapv -pthread -fPIC  -D_FILE_OFFSET_BITS=64 \nnative_c_compiler: gcc -O2 -fno-strict-aliasing -fwrapv -pthread -fPIC  -D_FILE_OFFSET_BITS=64 \nbytecomp_c_libraries: -lm  -lpthread\nnative_c_libraries: -lm \nnative_pack_linker: ld -r -o \narchitecture: arm64\nmodel: default\nint_size: 63\nword_size: 64\nsystem: linux\nasm: as\nasm_cfi_supported: true\nwith_frame_pointers: false\next_exe: \next_obj: .o\next_asm: .s\next_lib: .a\next_dll: .so\nos_type: Unix\ndefault_executable_name: a.out\nsysthread_supported: true\nhost: aarch64-unknown-linux-gnu\ntarget: aarch64-unknown-linux-gnu\nflambda: false\nsafe_string: true\ndefault_safe_string: true\nflat_float_array: true\nfunction_sections: true\nafl_instrument: false\nwindows_unicode: false\nsupports_shared_libraries: true\nnaked_pointers: true\nexec_magic_number: Caml1999X031\ncmi_magic_number: Caml1999I031\ncmo_magic_number: Caml1999O031\ncma_magic_number: Caml1999A031\ncmx_magic_number: Caml1999Y031\ncmxa_magic_number: Caml1999Z031\nast_impl_magic_number: Caml1999M031\nast_intf_magic_number: Caml1999N031\ncmxs_magic_number: Caml1999D031\ncmt_magic_number: Caml1999T031\nlinear_magic_number: Caml1999L031\n",
+      "opam_version": "2.1.6",
+      "tools": {
+        "opam": {
+          "path": "/usr/bin/opam",
+          "sha256": "8f42016825a9b10fd21802a18c22d37060c95e8c5a1d2be3df5135402c6a494d"
+        },
+        "ocamlopt": {
+          "path": "/home/opam/.opam/4.14.2/bin/ocamlopt.opt",
+          "sha256": "27821f292261a901e52b3f27c0458f8838d4b6078cd6017563febb963b31183e"
+        },
+        "ocamlfind": {
+          "path": "/home/opam/.opam/4.14.2/bin/ocamlfind",
+          "sha256": "96b0e9d0d6a2080f33f88586ae47c00003ac97e754d1fbcd40f2b9a5c5b8f8ae"
+        },
+        "dune": {
+          "path": "/home/opam/.opam/4.14.2/bin/dune",
+          "sha256": "f7ffe2f688331fea60b8cbf274df40b82529bb8f3e1c1fc0b5bc99e90683547c"
+        }
+      },
+      "packages": "angstrom              0.16.1\nasn1-combinators      0.3.2\nastring               0.8.5\nbase                  v0.16.5\nbase-bigarray         base\nbase-bytes            base\nbase-threads          base\nbase-unix             base\nbase64                3.5.2\nbheap                 2.0.0\nbigstringaf           0.10.0\nbos                   0.3.0\nca-certs              1.0.3\ncheckseum             0.5.3\ncmdliner              1.3.0\ncohttp                6.1.1\ncohttp-lwt            6.1.1\ncohttp-lwt-unix       6.1.1\nconduit               8.0.0\nconduit-lwt           8.0.0\nconduit-lwt-unix      8.0.0\nconf-gmp              5\nconf-gmp-powm-sec     4\nconf-libev            4-13\nconf-pkg-config       4\ncppo                  1.8.0\ncsexp                 1.5.2\ncstruct               6.2.0\ndigestif              1.3.0\ndomain-name           0.5.0\ndune                  3.23.0\ndune-compiledb        0.6.0\ndune-configurator     3.23.0\nduration              0.3.1\neither                1.0.0\neqaf                  0.10\nezjsonm               1.3.0\nfaraday               0.8.2\nfaraday-lwt           0.8.2\nfaraday-lwt-unix      0.8.2\nfmt                   0.11.0\nfpath                 0.7.3\ngluten                0.5.2\ngluten-lwt            0.5.2\ngluten-lwt-unix       0.5.2\ngmap                  0.3.0\nh2                    0.13.0\nh2-lwt                0.13.0\nh2-lwt-unix           0.13.0\nhex                   1.5.0\nhpack                 0.13.0\nhttp                  6.1.1\nhttpun-types          0.2.0\nindex                 1.6.2\nipaddr                5.6.2\nipaddr-sexp           5.6.2\nirmin                 3.11.0\nirmin-pack            3.11.0\njsonm                 1.0.2\nkdf                   1.0.0\nlmdb                  1.1.1\nlogs                  0.7.0\nlru                   0.3.1\nlwt                   6.1.2\nmacaddr               5.6.2\nmagic-mime            1.3.1\nmirage-crypto         2.1.0\nmirage-crypto-ec      2.1.0\nmirage-crypto-pk      2.1.0\nmirage-crypto-rng     2.1.0\nmtime                 2.1.0\nnum                   1.6\nocaml                 4.14.2\nocaml-base-compiler   4.14.2\nocaml-compiler-libs   v0.12.4\nocaml-config          2\nocaml-options-vanilla 1\nocaml-syntax-shims    1.0.0\nocamlbuild            0.16.1\nocamlfind             1.9.8\nocamlgraph            2.2.0\nocplib-endian         1.2\nohex                  0.2.0\noptint                0.3.0\nparsexp               v0.16.0\npbrt                  4.1\nppx_derivers          1.2.1\nppx_deriving          6.0.3\nppx_irmin             3.11.0\nppx_repr              0.7.0\nppx_sexp_conv         v0.16.0\nppxlib                0.35.0\nprogress              0.5.0\npsq                   0.2.1\nptime                 1.2.0\nre                    1.14.0\nrepr                  0.7.0\nrresult               0.7.0\nrusage                1.0.0\nsemaphore-compat      1.0.2\nseq                   base\nsexplib               v0.16.0\nsexplib0              v0.16.0\nstdlib-shims          0.3.0\nstringext             1.6.0\nterminal              0.5.0\ntls                   2.0.4\ntls-lwt               2.0.4\ntopkg                 1.1.1\nuri                   4.4.0\nuri-sexp              4.4.0\nuucp                  17.0.0\nuutf                  1.0.4\nvector                1.0.0\nx509                  1.0.6\nyojson                3.0.0\nzarith                1.14\n",
+      "platform": "Linux-7.2.9-orbstack-00391-g2b298d05fbd4-aarch64-with-glibc2.36",
+      "machine": "aarch64",
+      "source_map_sha256": "6440fdf5895e791ce99ff1904aea396fc88c7e12645846a32702286aa9c17efa",
+      "verified_source_count": 1158,
+      "compiled_sources": {
+        "node_runtime/consensus_liveness.ml": {
+          "original_sha256": "85b5d6c1bbd7e0fd705afa151f656d7a1b04e20d16a593e611b61a1b94831d2a",
+          "compiled_sha256": "85b5d6c1bbd7e0fd705afa151f656d7a1b04e20d16a593e611b61a1b94831d2a",
+          "copied_as": "consensus_liveness.ml"
+        }
+      },
+      "omitted_interface": {
+        "path": "node_runtime/consensus_liveness.mli",
+        "source_sha256": "48b3c93914eebb5a1581a7fedc3f7458636588313d8133cf509155153d1e2ec3",
+        "reason": "Pinned public interface hides internal state and pure policy observed by this oracle"
+      },
+      "run_environment_overrides": {
+        "OCAMLRUNPARAM": ""
+      },
+      "commands": [
+        {
+          "name": "compiler-version",
+          "argv": [
+            "/usr/bin/opam",
+            "exec",
+            "--",
+            "ocamlopt",
+            "-version"
+          ],
+          "cwd": "/home/opam/build",
+          "environment_overrides": {}
+        },
+        {
+          "name": "compiler-config",
+          "argv": [
+            "/usr/bin/opam",
+            "exec",
+            "--",
+            "ocamlopt",
+            "-config"
+          ],
+          "cwd": "/home/opam/build",
+          "environment_overrides": {}
+        },
+        {
+          "name": "opam-version",
+          "argv": [
+            "/usr/bin/opam",
+            "--version"
+          ],
+          "cwd": "/home/opam/build",
+          "environment_overrides": {}
+        },
+        {
+          "name": "ocamlopt-path",
+          "argv": [
+            "/usr/bin/opam",
+            "exec",
+            "--",
+            "which",
+            "ocamlopt"
+          ],
+          "cwd": "/home/opam/build",
+          "environment_overrides": {}
+        },
+        {
+          "name": "ocamlfind-path",
+          "argv": [
+            "/usr/bin/opam",
+            "exec",
+            "--",
+            "which",
+            "ocamlfind"
+          ],
+          "cwd": "/home/opam/build",
+          "environment_overrides": {}
+        },
+        {
+          "name": "dune-path",
+          "argv": [
+            "/usr/bin/opam",
+            "exec",
+            "--",
+            "which",
+            "dune"
+          ],
+          "cwd": "/home/opam/build",
+          "environment_overrides": {}
+        },
+        {
+          "name": "packages",
+          "argv": [
+            "/usr/bin/opam",
+            "list",
+            "--installed",
+            "--columns=name,version",
+            "--short"
+          ],
+          "cwd": "/home/opam/build",
+          "environment_overrides": {}
+        },
+        {
+          "name": "build",
+          "argv": [
+            "/usr/bin/opam",
+            "exec",
+            "--",
+            "dune",
+            "build",
+            "./vpn_liveness_oracle/main.exe"
+          ],
+          "cwd": "/home/opam/build",
+          "environment_overrides": {}
+        },
+        {
+          "name": "oracle",
+          "argv": [
+            "/usr/bin/opam",
+            "exec",
+            "--",
+            "/home/opam/build/_build/default/vpn_liveness_oracle/main.exe"
+          ],
+          "cwd": "/home/opam/build",
+          "environment_overrides": {
+            "OCAMLRUNPARAM": ""
+          }
+        }
+      ],
+      "executable_sha256": "4cb601772b571a2eb1395d4bea17cf7b25b3ddce827a86d7701ddc9b699b4c37",
+      "worker_sha256": "05c462e4f24bab32052a6f80758174671430836ddd07d346dc9f88165763657c"
+    },
+    "instrumentation": {},
+    "adapters": {},
+    "qualification": {
+      "body": "Unchanged adopted consensus_liveness.ml linked against restored adopted Octra_consensus",
+      "scope": "Pure create/record/record_snapshot, keys, float bits, every admission blocker, step labels and real timeout_ms_with projection",
+      "excluded": "No live C_driver acquisition, actor scheduling, reset side effects, network supervisor, public devnet or mainnet qualification",
+      "interface": "Pinned .mli verified but omitted only to observe internal policy/state; no source body edits or stubs"
+    }
+  },
+  "acceptance": {
+    "pure_policy": "Exactly1012 native vectors with fixed canonical input digest and exact group counts; full native module body and actual consensus timeout dependency, verified source inventory; no stubs or body patches.",
+    "actor": "Real engine and signed TCP peers cover restored lock plus durable precommit WAL/replay, conflicting proposal NIL prevote, pending finalization and8 polls queued across publication, proposal grace, expired blocked verification and stale generation timer.",
+    "production_wiring": "Supervisor invokes Handle.poll_health for live connected generations after health admission. Node Host supplies actual canonical/Serving equality, quarantine, role and captured release stall. This glue is statically reviewed; positive automatic fallback under actual Service/Node Host is not separately forced by these controlled Host tests.",
+    "clocks": "Native policy wall-clock ages remain separate from monotonic proposal grace and actor timers.",
+    "config": "Captured release settings override process environment; default/min150s, maximum3600s, with actual current step timeout plus30s.",
+    "preserved": "Same-height fallback advances the existing engine round and preserves locked/valid values, POLCs, round evidence, durable pending records, vote/sync journals, floors and canonical state/ExEx.",
+    "formal": "19-theorem abstract payment model only; no liveness or whole-node refinement proof."
+  },
+  "initial_corrections": [
+    "Before testing, review found process env could ignore captured release stall; moved validated capture into Validator construction.",
+    "Initial strict compilation found an Option adapter incorrectly using .ok(); removed it.",
+    "Next strict lint found direct floating-point comparison in the new config test; exact bit comparison now passes.",
+    "Initial combined run found two new fixtures could not start: four validators require at least two peers, but tests supplied only one. Added a third authenticated fixture node and reran all8 driver tests; no production gate was changed."
+  ],
+  "source_delta_since_oracle": {
+    "changed": [
+      "crates/octra-node-runtime/tests/live_consensus/liveness.rs",
+      "crates/octra-node/src/driver/liveness.rs"
+    ],
+    "added": [
+      "crates/octra-node-protocol/tests/fixtures/liveness.json"
+    ],
+    "explanation": "Oracle source, inputs and pure policy unchanged. Only Node cached-head Option extraction, exact config-test assertion and two test peer topologies changed; native fixture copied byte-for-byte. After the combined run, only the integration test file changed; production libraries remain exactly as tested."
+  },
+  "review": "Independent read-only native/production/test review found no remaining concrete unsafe finalization, stale-sample, lock, cancellation or configuration defect; service-level positive qualification limit recorded explicitly.",
+  "economics": {
+    "operator_unstake_ms": 604800000,
+    "payer_exit_ms": 86400000,
+    "protocol_commission": 0
+  },
+  "deployment": {
+    "public_observer_changed": false,
+    "public_image": "f69473b",
+    "candidate_installed": false,
+    "mainnet_qualified": false
+  },
+  "public_observation": {
+    "observed_at": "2026-10-17T10:06:02.329540+00:00",
+    "pid": 87662,
+    "process_query_exit": 0,
+    "exit_evidence": false,
+    "status": {
+      "chain_id": "octra-devnet-9871-cluster",
+      "epoch": 1707929,
+      "peers": 3,
+      "pending": 0,
+      "serving": false,
+      "state_root": "015494d042241dbb9831a916d030b6d7c3c1c2e5eff37a3e45200371591222fe",
+      "suspension_reason": "catching up canonical history",
+      "vpn_program": null,
+      "vpn_settlement": "unconfigured"
+    },
+    "status_http": 503,
+    "binary_sha256": "c95e3dd21e476de5e66202edec6dd8713b14d9872707d3af216fa726a13512b9",
+    "config_sha256": "77a1713c64c3baf2c57a67bb6a9f261bfb5280347bbe71358dbb0984e53c40eb"
+  },
+  "remaining_gates": [
+    "Actual legacy unjournaled IrminPack repair and staged crash recovery",
+    "Positive automatic fallback under the actual Service/Node Host and public recovery/resource qualification",
+    "Stable public Circle asset delivery on the new candidate",
+    "Stock Tailscale paid binding, bounded portal/funding onboarding, DNS/TLS, macOS paid route guard",
+    "Public paid settlement and Mainnet qualification"
+  ]
+}

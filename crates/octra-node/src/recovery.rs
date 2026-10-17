@@ -589,6 +589,16 @@ impl<A: Host> Service<A> {
                 }
             }
             let connected = self.swarm.peers().len() >= self.minimum_peers;
+            if running.is_some()
+                && connected
+                && desired.is_none_or(|target| target <= head.cursor.epoch.0)
+            {
+                if let Some(driver) = self.authority.driver()? {
+                    if let Err(error) = driver.poll_health() {
+                        eprintln!("live liveness poll unavailable: {error}");
+                    }
+                }
+            }
             let hint = self
                 .swarm
                 .peers()
