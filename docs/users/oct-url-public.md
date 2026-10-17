@@ -98,6 +98,21 @@ dispatches to `octravpn open-url <url>`, which:
 The `open-url` flow is documented in
 [`crates/octravpn-client/src/commands/open_url.rs`](../../crates/octravpn-client/src/commands/open_url.rs).
 
+Firefox may ask before an `oct://` link launches the installed handler. For
+links that work in any HTTPS-capable app without an external-protocol prompt,
+the tailnet can publish a trusted gateway hostname instead:
+
+```text
+oct://<circle>/index.html
+https://<gateway-host>/circles/<circle>/index.html
+```
+
+Tailnet DNS maps `<gateway-host>` to the gateway. The gateway resolves the
+Circle and serves the asset; DNS itself cannot rewrite URL schemes or paths.
+The Rust node's canonical read-only gateway implements `/circles/<circle>/<path>`
+behind a tailnet HTTPS reverse proxy. The proxy, certificate, DNS record, and
+tailnet enrollment must be deployed before that HTTPS address is usable.
+
 ## 3. MIME sniff and per-type rendering
 
 The portal doesn't depend on file extensions — it sniffs the first
