@@ -64,6 +64,7 @@ pub(crate) struct Plan {
     pub runtime: CircleRuntime,
     pub compute: octra_node_protocol::resource_compute::provider::Config,
     pub vpn: Option<crate::vpn::Config>,
+    pub payments: Option<crate::vpn::payments::ServiceConfig>,
     pub voting: bool,
     pub state_sync: Option<crate::snapshot_export::Config>,
     pub minimum_peers: usize,
@@ -183,6 +184,7 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
         runtime,
         compute: compute_config,
         vpn,
+        payments,
         voting,
         state_sync,
         minimum_peers,
@@ -192,6 +194,10 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
         stealth_slots,
         status_release,
     } = plan;
+    ensure!(
+        vpn.is_none() || payments.is_none(),
+        "select one VPN payment application"
+    );
     let chain = store.chain().clone();
     let runtime = runtime.with_public_keys(Arc::new(octra_node_runtime::pvac::Files(
         execution.pvac_dir.clone(),
@@ -411,7 +417,14 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
         policy,
         address: address.clone(),
         compute: Some(compute.clone()),
-        vpn_program: vpn.as_ref().map(|config| config.program.clone()),
+        vpn_program: vpn
+            .as_ref()
+            .map(|config| config.program.clone())
+            .or_else(|| {
+                payments
+                    .as_ref()
+                    .map(|config| config.application.program.clone())
+            }),
         status: Some(status),
         tokens: Some(tokens.clone()),
         staging_notify: Arc::new(move || {
@@ -607,6 +620,42 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
             wireguard,
             operator,
         } = crate::vpn::Keys::derive(&key);
+        let paid = if let Some(config) = payments {
+            config.ip_tunnel.validate()?;
+            let application = Arc::new(node.payments(config.application, operator.clone())?);
+            let directory = services.data.join("octranet-payments");
+            tokio::fs::create_dir_all(&directory).await?;
+            let (publisher, claims) = crate::vpn::payments::settlement::Service::open(
+                submission.clone().context(),
+                application.clone(),
+                key.clone(),
+                directory.join("claims"),
+                config.max_claim_fees_ou,
+            )
+            .await?;
+            tasks.spawn(claims.run(stop.subscribe()));
+            Some(
+                node.bind_payments(
+                    services.browser,
+                    octravpn_node::payments::Config {
+                        control_listen: services.control,
+                        tunnel_listen: services.tunnel,
+                        data_dir: directory.join("transport"),
+                        operator_key: Arc::new(octravpn_core::KeyPair::from_secret_bytes(
+                            &key.to_bytes(),
+                        )),
+                        wireguard_secret: wireguard.clone(),
+                        ip_tunnel: config.ip_tunnel,
+                        credit: config.credit,
+                    },
+                    application,
+                    publisher,
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
         let mut ip_tunnel = vpn.as_ref().and_then(|config| config.ip_tunnel.clone());
         if let Some(config) = &mut ip_tunnel {
             config.validate()?;
@@ -693,8 +742,10 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
                 .await
                 .map_err(anyhow::Error::from)
         });
-        let mut bound = node
-            .bind_with_ip_tunnel(
+        let mut bound = if let Some(paid) = paid {
+            paid
+        } else {
+            node.bind_with_ip_tunnel(
                 services.browser,
                 octravpn_node::embedded::Config {
                     control_listen: services.control,
@@ -707,7 +758,8 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
                 settlement,
                 ip_tunnel,
             )
-            .await?;
+            .await?
+        };
         if let Some(publisher) = claim_publisher {
             bound = bound.with_settlement(publisher);
         }

@@ -24,8 +24,12 @@ has a separate **seven-day unstake**. Unstaking stops new paid admission, and
 rebonding cannot revive old plans. The protocol takes no commission.
 [Design and launch boundaries](docs/architecture/octranet-payment-tier.md) and
 [adversarial review](docs/audit/octranet-payments-2026-10-17.md) distinguish the
-compiled application tests and abstract Lean proofs from the forwarding and
-portal work still required. This candidate is not deployed to Mainnet.
+compiled application tests and abstract Lean proofs from deployment qualification.
+The opt-in native `payments` path binds signed connections, durable per-class
+metering and canonical settlement, with explicit postpaid credit and relayer fee
+ceilings. The [payment-plan client](docs/operators/payment-plans.md) retains
+authorizations across restart. Combined kernel/public qualification remains open;
+this candidate is not deployed to Mainnet.
 
 **Rust node qualification (2026-10-15):** the `octra-node` executable connects the
 native validator driver, authenticated peers, transaction intake, canonical

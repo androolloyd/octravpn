@@ -69,6 +69,8 @@ pub struct Config {
     pub voting: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vpn: Option<crate::vpn::Config>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payments: Option<crate::vpn::payments::ServiceConfig>,
     pub peers: Vec<SocketAddr>,
 }
 fn default_voting() -> bool {
@@ -248,6 +250,7 @@ pub async fn init_with_applications(
             compute_provider: false,
             voting: true,
             vpn: None,
+            payments: None,
             peers: peers.iter().copied().filter(|p| p != &peers[i]).collect(),
         };
         let file = data.join("config.json");
@@ -262,6 +265,18 @@ pub async fn init_with_applications(
 }
 pub fn read(path: &Path) -> Result<Config> {
     let mut config: Config = serde_json::from_slice(&std::fs::read(path)?)?;
+    if let Some(book) = config
+        .payments
+        .as_mut()
+        .and_then(|p| p.ip_tunnel.address_book.as_mut())
+    {
+        if book.is_relative() {
+            *book = std::fs::canonicalize(path)?
+                .parent()
+                .context("configuration directory")?
+                .join(&*book);
+        }
+    }
     if let Some(mesh) = &mut config.mesh {
         mesh.resolve_paths(
             std::fs::canonicalize(path)?
@@ -405,6 +420,7 @@ pub async fn run(config: Config, shutdown: watch::Receiver<bool>) -> Result<()> 
                 |name| std::env::var_os(name).map(|value| value.as_encoded_bytes().to_vec()),
             )?,
             vpn: config.vpn,
+            payments: config.payments,
             voting: config.voting,
             minimum_peers: 2,
             startup_timeout: Duration::from_secs(60),

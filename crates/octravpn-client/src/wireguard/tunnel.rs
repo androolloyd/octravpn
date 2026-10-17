@@ -202,6 +202,15 @@ impl Tunnel {
         self.traffic
     }
 
+    /// Callers without a recovery controller must stop instead of silently
+    /// discarding traffic after a transient transport fault clears READY.
+    pub(crate) fn ensure_available(&self) -> Result<()> {
+        if !self.driver.ready() {
+            bail!("WireGuard transport unavailable; reconnect with --resume");
+        }
+        Ok(())
+    }
+
     fn reserve(&self, bytes: u64) -> Result<()> {
         let next = self
             .traffic
@@ -215,9 +224,42 @@ impl Tunnel {
     }
 
     pub(crate) async fn send(&mut self, payload: &[u8]) -> Result<()> {
+        self.send_confirmed(payload).await.map(|_| ())
+    }
+
+    /// True only for an actual transport datagram handed to the connected UDP
+    /// socket here. Queued rekey/recovery payloads are not confirmed usage.
+    pub(crate) async fn send_confirmed(&mut self, payload: &[u8]) -> Result<bool> {
         if !self.driver.ready() {
             debug!("discarding local packet while the existing session recovers");
-            return Ok(());
+            return Ok(false);
+        }
+        // Encapsulating without a current session queues the application
+        // payload inside boringtun. Start only the control handshake here;
+        // later queue drains must never forward untracked payer traffic.
+        // No await separates this session check from data encapsulation below.
+        if self.noise.time_since_last_handshake().is_none() {
+            match self
+                .noise
+                .format_handshake_initiation(&mut self.work, false)
+            {
+                TunnResult::WriteToNetwork(packet) => {
+                    if let Err(error) =
+                        send(&self.socket, &mut self.shield, self.peer, packet).await
+                    {
+                        if transient(&error) {
+                            self.driver.unavailable();
+                            return Ok(false);
+                        }
+                        return Err(error);
+                    }
+                }
+                TunnResult::Done => (),
+                TunnResult::Err(WireGuardError::ConnectionExpired) => self.driver.unavailable(),
+                TunnResult::Err(error) => bail!("operator WireGuard handshake failed: {error:?}"),
+                _ => bail!("operator WireGuard handshake returned tunnel data"),
+            }
+            return Ok(false);
         }
         // Fresh per-layer ECDH keys make the legacy zero-nonce onion encoding
         // safe across packets. No stable ephemeral or pinned-key sender exists.
@@ -229,18 +271,22 @@ impl Tunnel {
         self.reserve(bytes)?;
         match self.noise.encapsulate(&frame, &mut self.work) {
             TunnResult::WriteToNetwork(packet) => {
+                let transport = packet.get(..4) == Some([4, 0, 0, 0].as_slice());
                 match send(&self.socket, &mut self.shield, self.peer, packet).await {
                     Ok(()) => (),
                     Err(error) if transient(&error) => {
                         self.driver.unavailable();
-                        return Ok(());
+                        return Ok(false);
                     }
                     Err(error) => return Err(error),
+                }
+                if !transport {
+                    return Ok(false);
                 }
             }
             TunnResult::Done | TunnResult::Err(WireGuardError::ConnectionExpired) => {
                 self.driver.unavailable();
-                return Ok(());
+                return Ok(false);
             }
             TunnResult::Err(error) => bail!("operator WireGuard encapsulation failed: {error:?}"),
             _ => bail!("operator WireGuard encapsulation returned tunnel data"),
@@ -250,7 +296,7 @@ impl Tunnel {
             .submitted
             .checked_add(bytes)
             .ok_or_else(|| anyhow!("session byte counter exhausted"))?;
-        Ok(())
+        Ok(true)
     }
 
     pub(crate) async fn recv(&mut self) -> Result<Vec<u8>> {
@@ -455,4 +501,81 @@ async fn send_datagram(socket: &UdpSocket, packet: &[u8]) -> Result<()> {
         bail!("short client WireGuard UDP send");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn absent_session_starts_handshake_without_queueing_application_payload() {
+        let server_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let peer = server_socket.local_addr().unwrap();
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        socket.connect(peer).await.unwrap();
+        let secret = StaticSecret::from([8; 32]);
+        let server_secret = StaticSecret::from([9; 32]);
+        let server_key = PublicKey::from(&server_secret);
+        let (recovery, driver) = super::super::recovery::channel();
+        // Model a previously ready driver whose boringtun session expired.
+        driver.initial_authenticated();
+        let mut tunnel = Tunnel {
+            socket,
+            peer,
+            noise: Tunn::new(secret.clone(), server_key, None, Some(25), 0, None),
+            secret: secret.clone(),
+            recovery: Some(recovery),
+            driver,
+            generation: 0,
+            shield: AmneziaShield::new(Default::default()).unwrap(),
+            session: SessionId::from_u64(1),
+            hop: HopBuildInput {
+                static_pubkey: server_key.to_bytes(),
+                endpoint: peer.to_string(),
+            },
+            timer: time::interval(Duration::from_millis(250)),
+            traffic: Traffic::default(),
+            byte_limit: None,
+            work: vec![0; DATAGRAM],
+            network: vec![0; DATAGRAM],
+        };
+        assert!(tunnel.noise.time_since_last_handshake().is_none());
+        assert!(!tunnel
+            .send_confirmed(b"must not be retained for later billing")
+            .await
+            .unwrap());
+        assert_eq!(tunnel.traffic.submitted, 0);
+        let mut packet = vec![0; DATAGRAM];
+        let length = time::timeout(Duration::from_secs(1), server_socket.recv(&mut packet))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(packet.get(..4), Some([1, 0, 0, 0].as_slice()));
+        let mut server = Tunn::new(
+            server_secret,
+            PublicKey::from(&secret),
+            None,
+            Some(25),
+            1,
+            None,
+        );
+        let mut response = vec![0; DATAGRAM];
+        let TunnResult::WriteToNetwork(response) =
+            server.decapsulate(None, &packet[..length], &mut response)
+        else {
+            panic!("fixture server did not answer the handshake")
+        };
+        let response = response.to_vec();
+        assert!(matches!(
+            tunnel.noise.decapsulate(None, &response, &mut tunnel.work),
+            TunnResult::WriteToNetwork(_) | TunnResult::Done
+        ));
+        assert!(tunnel.noise.time_since_last_handshake().is_some());
+        // With a queued application packet, this exact empty-input drain
+        // would return encrypted transport data after the handshake completes.
+        assert!(matches!(
+            tunnel.noise.decapsulate(None, &[], &mut tunnel.work),
+            TunnResult::Done
+        ));
+    }
 }

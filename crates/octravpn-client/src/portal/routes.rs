@@ -1740,7 +1740,7 @@ mod tests {
         assert_eq!(
             body.get("hint")
                 .and_then(|v| v.as_str())
-                .map(|s| s.contains("tunnel")),
+                .map(|s| s.contains("chain RPC") && s.contains("asset path")),
             Some(true),
         );
     }

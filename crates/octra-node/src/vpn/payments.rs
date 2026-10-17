@@ -28,6 +28,7 @@ use std::{
 use crate::Committed;
 #[cfg(test)]
 mod tests;
+mod transport;
 
 const DAY_MS: u64 = 86_400_000;
 const PLAN_MAX_AGE: Duration = Duration::from_secs(120);
@@ -43,6 +44,18 @@ pub struct Config {
     pub domain: String,
     pub operator_circle: String,
     pub offer: u64,
+}
+
+/// Explicit opt-in to the new payment application. The existing VPN config
+/// keeps its original wire and application contract.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceConfig {
+    pub application: Config,
+    pub ip_tunnel: octravpn_node::embedded::IpTunnelConfig,
+    pub credit: octravpn_node::payment_meter::Credit,
+    /// Lifetime relayer fee ceiling for this durable claim directory.
+    pub max_claim_fees_ou: u64,
 }
 
 /// Full-chain origin, rather than an RPC hostname or short network label.
@@ -139,27 +152,20 @@ impl Plan {
         ensure!(self.live(), "Octranet canonical plan lease expired");
         self.increment_at_snapshot(signed)
     }
+    /// Authenticate an idempotent settlement retry even after the original
+    /// authorization was redeemed. This does not grant another increment.
+    pub fn validate_usage(&self, signed: &SignedUsage) -> Result<()> {
+        ensure!(self.live(), "Octranet canonical plan lease expired");
+        self.validate_at_snapshot(signed)
+    }
     fn increment_at_snapshot(&self, signed: &SignedUsage) -> Result<u64> {
-        signed.verify()?;
+        self.validate_at_snapshot(signed)?;
         let usage = &signed.usage;
         ensure!(self.claim_eligible, "Octranet claim window closed");
-        ensure!(
-            usage.deployment == self.deployment
-                && usage.payer == self.payer
-                && usage.generation == self.generation
-                && usage.plan == self.plan
-                && usage.offer == self.offer
-                && usage.manifest_hash == self.manifest_hash
-                && signed.receipt_key == self.receipt_key,
-            "Octranet receipt binding differs"
-        );
         let class = usize::from(usage.traffic_class);
-        let previous = self
-            .redeemed_bytes
-            .get(class)
-            .context("Octranet class not found")?;
+        let previous = self.redeemed_bytes[class];
         ensure!(
-            usage.total_bytes > *previous,
+            usage.total_bytes > previous,
             "Octranet usage already redeemed"
         );
         let cumulative = self.tariff.charge(usage.traffic_class, usage.total_bytes)?;
@@ -171,6 +177,26 @@ impl Plan {
             "Octranet plan budget exhausted"
         );
         Ok(increment)
+    }
+    fn validate_at_snapshot(&self, signed: &SignedUsage) -> Result<()> {
+        signed.verify()?;
+        let usage = &signed.usage;
+        ensure!(
+            usage.deployment == self.deployment
+                && usage.payer == self.payer
+                && usage.generation == self.generation
+                && usage.plan == self.plan
+                && usage.offer == self.offer
+                && usage.manifest_hash == self.manifest_hash
+                && signed.receipt_key == self.receipt_key,
+            "Octranet receipt binding differs"
+        );
+        let class = usize::from(usage.traffic_class);
+        ensure!(
+            class < self.redeemed_bytes.len(),
+            "Octranet class not found"
+        );
+        Ok(())
     }
 }
 
@@ -555,3 +581,8 @@ impl Fields<'_> {
         .to_owned())
     }
 }
+
+#[cfg(test)]
+mod canonical_tests;
+
+pub(crate) mod settlement;

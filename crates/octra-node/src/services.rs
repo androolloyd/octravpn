@@ -12,11 +12,56 @@ use crate::{vpn::Settlement, Host, Node, Shared};
 /// Dropping or cancelling the running service revokes its canonical admission.
 pub struct Services {
     browser: TcpListener,
-    vpn: EmbeddedVpn,
+    vpn: Vpn,
     shared: Arc<Shared>,
+}
+enum Vpn {
+    Legacy(EmbeddedVpn),
+    Payments(octravpn_node::payments::Service),
+}
+impl Vpn {
+    fn control_addr(&self) -> Result<SocketAddr> {
+        match self {
+            Self::Legacy(vpn) => vpn.control_addr(),
+            Self::Payments(vpn) => vpn.control_addr(),
+        }
+    }
+    fn tunnel_addr(&self) -> SocketAddr {
+        match self {
+            Self::Legacy(vpn) => vpn.tunnel_addr(),
+            Self::Payments(vpn) => vpn.tunnel_addr(),
+        }
+    }
+    async fn run(self, shutdown: watch::Receiver<bool>) -> Result<()> {
+        match self {
+            Self::Legacy(vpn) => vpn.run(shutdown).await,
+            Self::Payments(vpn) => vpn.run(shutdown).await,
+        }
+    }
 }
 
 impl<A: Host> Node<A> {
+    /// Native payment-plan service; canonical admission and the browser share
+    /// one publication. The settlement publisher must await canonical claims.
+    pub async fn bind_payments(
+        &self,
+        browser_listen: SocketAddr,
+        config: octravpn_node::payments::Config,
+        payments: Arc<crate::vpn::payments::Payments>,
+        settlement: Arc<dyn octravpn_node::payments::Settlement>,
+    ) -> Result<Services> {
+        anyhow::ensure!(
+            browser_listen.ip().is_loopback(),
+            "browser must bind loopback"
+        );
+        let browser = TcpListener::bind(browser_listen).await?;
+        let vpn = octravpn_node::payments::Service::bind(config, payments, settlement).await?;
+        Ok(Services {
+            browser,
+            vpn: Vpn::Payments(vpn),
+            shared: self.shared.clone(),
+        })
+    }
     pub async fn bind(
         &self,
         browser_listen: SocketAddr,
@@ -57,7 +102,7 @@ impl crate::published::Handle {
             .await?;
         Ok(Services {
             browser,
-            vpn,
+            vpn: Vpn::Legacy(vpn),
             shared: self.shared.clone(),
         })
     }
@@ -68,7 +113,9 @@ impl Services {
         mut self,
         publisher: Arc<dyn octravpn_node::embedded::ReceiptSettlement>,
     ) -> Self {
-        self.vpn = self.vpn.with_settlement(publisher);
+        if let Vpn::Legacy(vpn) = self.vpn {
+            self.vpn = Vpn::Legacy(vpn.with_settlement(publisher));
+        }
         self
     }
     pub fn browser_addr(&self) -> Result<SocketAddr> {

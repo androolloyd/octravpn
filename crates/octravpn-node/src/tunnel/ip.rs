@@ -56,6 +56,11 @@ pub(super) struct Tunnel {
     owners: Arc<owners::Book>,
 }
 impl Tunnel {
+    pub(super) fn sweep(&self) {
+        // Keep temporarily suspended publications; release terminal/replaced
+        // transport capabilities so historical routes cannot pin every meter.
+        self.routes.lock().retain(|_, path| path.retained());
+    }
     async fn open(config: Config, server: [u8; 32]) -> Result<Self> {
         config.validate()?;
         let path = config
@@ -122,6 +127,15 @@ impl Tunnel {
             routes.insert(assigned, path.clone());
         }
         ensure!(path.allowed(), "VPN IP grant revoked");
+        if let Some(connection) = path.paid() {
+            let ticket = connection
+                .meter
+                .reserve(bytes, octravpn_core::payments::Direction::Outbound)
+                .await?;
+            return connection
+                .handoff(ticket, bytes.len(), || self.device.try_send(bytes))
+                .await;
+        }
         let written = tokio::time::timeout(Duration::from_secs(1), self.device.send(bytes))
             .await
             .context("VPN TUN send timeout")??;

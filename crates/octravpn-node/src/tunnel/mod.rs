@@ -51,7 +51,9 @@ use crate::onion::{Direction, OnionRouter};
 // whole tree until those consumers land.
 #[allow(dead_code)]
 pub(crate) mod backend;
+mod binding;
 mod egress;
+use binding::Binding;
 pub(crate) mod ip;
 
 /// Perf-Data-Plane #2: per-peer shard count. boringtun `Tunn` is
@@ -218,6 +220,7 @@ pub(crate) struct Server {
     shield: Arc<Mutex<AmneziaShield>>,
     egress: egress::Flows,
     ip_tunnel: Option<Arc<ip::Tunnel>>,
+    payments: Option<Arc<crate::payments::Registry>>,
 }
 
 impl Server {
@@ -275,6 +278,7 @@ impl Server {
             shield: Arc::new(Mutex::new(shield)),
             egress: egress::Flows::default(),
             ip_tunnel: None,
+            payments: None,
         })
     }
 
@@ -288,6 +292,14 @@ impl Server {
 
     pub(crate) fn local_addr(&self) -> SocketAddr {
         self.local_addr
+    }
+
+    pub(crate) fn with_payments(mut self, registry: Arc<crate::payments::Registry>) -> Self {
+        self.payments = Some(registry);
+        self
+    }
+    fn binding(&self, key: &[u8; 32]) -> Option<Binding> {
+        binding::lookup(&self.allowlist, self.payments.as_deref(), key)
     }
 
     /// Run the UDP receive loop forever.
@@ -368,6 +380,28 @@ impl Server {
     }
 
     async fn shielded_send_to(&self, bytes: &[u8], dst: SocketAddr) -> std::io::Result<usize> {
+        if self.payments.is_some() {
+            let connection = self
+                .peers
+                .get(&dst)
+                .and_then(|peer| self.binding(&peer.client_pubkey))
+                .and_then(|binding| binding.paid().cloned());
+            if let Some(connection) = connection {
+                let mut sent = 0;
+                connection
+                    .current(&mut || {
+                        sent = self.outbound_sock().try_send_to(bytes, dst)?;
+                        Ok(())
+                    })
+                    .map_err(std::io::Error::other)?;
+                return Ok(sent);
+            }
+            // Only the rate limiter cookie can precede authenticated admission.
+            if bytes.get(..4) == Some([3, 0, 0, 0].as_slice()) {
+                return self.outbound_sock().try_send_to(bytes, dst);
+            }
+            return Err(std::io::Error::other("paid peer is not admitted"));
+        }
         egress::send(self.outbound_sock(), &self.shield, bytes, dst).await
     }
 
@@ -378,8 +412,8 @@ impl Server {
             return;
         };
 
-        let binding = self.allowlist.get(&peer.client_pubkey);
-        if !binding.as_ref().is_some_and(AllowedClient::live) {
+        let binding = self.binding(&peer.client_pubkey);
+        if !binding.as_ref().is_some_and(Binding::live) {
             if binding
                 .as_ref()
                 .is_none_or(|binding| !binding.retain_peer())
@@ -398,11 +432,7 @@ impl Server {
         // A handshake response may release buffered return datagrams. The
         // boringtun contract requires empty-input drains after network output.
         for _ in 0..=256 {
-            if !self
-                .allowlist
-                .get(&peer.client_pubkey)
-                .is_some_and(|b| b.live())
-            {
+            if !self.binding(&peer.client_pubkey).is_some_and(|b| b.live()) {
                 return;
             }
             let res = peer.tuns[shard]
@@ -525,11 +555,7 @@ impl Server {
             return;
         };
         let pk = identity.peer_static_public;
-        if !self
-            .allowlist
-            .get(&pk)
-            .is_some_and(|binding| binding.live())
-        {
+        if !self.binding(&pk).is_some_and(|binding| binding.live()) {
             return;
         }
         let mut tun = Tunn::new(
@@ -596,10 +622,10 @@ impl Server {
         let Some(peer) = self.peers.get(&src) else {
             return;
         };
-        let Some(binding) = self.allowlist.get(&peer.client_pubkey) else {
+        let Some(binding) = self.binding(&peer.client_pubkey) else {
             return;
         };
-        if !binding.live() || binding.request.session_id != session_id {
+        if !binding.live() || *binding.session() != session_id {
             debug!(?src, "dropping packet outside authenticated session lease");
             return;
         }

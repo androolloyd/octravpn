@@ -51,6 +51,8 @@ pub struct Config {
     pub compute_provider: bool,
     #[serde(default)]
     pub vpn: Option<crate::vpn::Config>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payments: Option<crate::vpn::payments::ServiceConfig>,
     #[serde(default)]
     pub peers: Vec<String>,
     #[serde(default)]
@@ -97,6 +99,15 @@ pub fn read(path: &Path) -> Result<Config> {
         .as_mut()
         .and_then(|vpn| vpn.ip_tunnel.as_mut())
         .and_then(|tunnel| tunnel.address_book.as_mut())
+    {
+        if path.is_relative() {
+            *path = parent.join(&*path);
+        }
+    }
+    if let Some(path) = config
+        .payments
+        .as_mut()
+        .and_then(|p| p.ip_tunnel.address_book.as_mut())
     {
         if path.is_relative() {
             *path = parent.join(&*path);
@@ -365,6 +376,7 @@ pub async fn run(config: Config, mut shutdown: watch::Receiver<bool>) -> Result<
                 |name| settings.get(name).map(<[u8]>::to_vec),
             )?,
             vpn: config.vpn,
+            payments: config.payments,
             voting,
             state_sync: Some(state_sync),
             minimum_peers: 1,

@@ -6,8 +6,10 @@ use serde::{de::Error as _, Deserialize, Deserializer, Serialize, Serializer};
 use crate::{b64, parse_native_address, sig, Address, CoreError, KeyPair, PublicKey, Signature};
 
 mod budget;
+mod connection;
 mod tariff;
 pub use budget::{Budget, Reservation};
+pub use connection::{Connect, PlanBinding, SignedConnect, SignedStatus, Status};
 pub use tariff::{Direction, IpPrefix, Protocol, Selector, Tariff, TrafficClass};
 
 pub const BYTES_PER_MIB: u64 = 1_048_576;
@@ -176,12 +178,42 @@ pub struct Usage {
     pub total_bytes: u64,
 }
 impl Usage {
+    pub fn binding(&self) -> PlanBinding {
+        PlanBinding {
+            deployment: self.deployment.clone(),
+            payer: self.payer.clone(),
+            generation: self.generation,
+            plan: self.plan,
+            offer: self.offer,
+            manifest_hash: self.manifest_hash.clone(),
+        }
+    }
+
+    pub fn from_binding(
+        binding: PlanBinding,
+        traffic_class: u8,
+        sequence: u64,
+        total_bytes: u64,
+    ) -> Result<Self> {
+        let usage = Self {
+            deployment: binding.deployment,
+            payer: binding.payer,
+            generation: binding.generation,
+            plan: binding.plan,
+            offer: binding.offer,
+            manifest_hash: binding.manifest_hash,
+            traffic_class,
+            sequence,
+            total_bytes,
+        };
+        usage.validate()?;
+        Ok(usage)
+    }
+
     pub fn validate(&self) -> Result<()> {
-        self.deployment.validate()?;
-        native(&self.payer)?;
-        hash(&self.manifest_hash)?;
-        if self.generation == 0 || self.sequence == 0 {
-            return Err(Error::Invalid("zero receipt generation or sequence"));
+        self.binding().validate()?;
+        if self.sequence == 0 {
+            return Err(Error::Invalid("zero receipt sequence"));
         }
         if usize::from(self.traffic_class) >= MAX_CLASSES {
             return Err(Error::UnknownClass(self.traffic_class));
@@ -228,26 +260,11 @@ impl SignedUsage {
     }
 
     pub fn verify(&self) -> Result<()> {
-        // Match the adopted native key guard plus normal Ed25519 verification.
-        // verify_strict additionally rejects R encodings accepted by that VM.
-        let mut y = self.receipt_key.0;
-        y[31] &= 0x7f;
-        let mut prime = [0xff; 32];
-        prime[0] = 0xed;
-        prime[31] = 0x7f;
-        if y.iter().rev().cmp(prime.iter().rev()) != std::cmp::Ordering::Less
-            || CompressedEdwardsY(self.receipt_key.0)
-                .decompress()
-                .is_none_or(|point| point.is_small_order())
-        {
-            return Err(Error::Invalid("unsafe receipt public key"));
-        }
-        sig::verify(
+        verify_authorization(
             &self.receipt_key,
             self.usage.signing_message()?.as_bytes(),
             &self.signature,
-        )?;
-        Ok(())
+        )
     }
 
     /// Ordinary application call arguments; caller still verifies current
@@ -262,6 +279,25 @@ impl SignedUsage {
             b64::encode(self.signature.0)
         ]))
     }
+}
+
+fn verify_authorization(key: &PublicKey, message: &[u8], signature: &Signature) -> Result<()> {
+    // Match the adopted native key guard plus normal Ed25519 verification.
+    // verify_strict additionally rejects R encodings accepted by that VM.
+    let mut y = key.0;
+    y[31] &= 0x7f;
+    let mut prime = [0xff; 32];
+    prime[0] = 0xed;
+    prime[31] = 0x7f;
+    if y.iter().rev().cmp(prime.iter().rev()) != std::cmp::Ordering::Less
+        || CompressedEdwardsY(key.0)
+            .decompress()
+            .is_none_or(|point| point.is_small_order())
+    {
+        return Err(Error::Invalid("unsafe receipt public key"));
+    }
+    sig::verify(key, message, signature)?;
+    Ok(())
 }
 
 #[cfg(test)]

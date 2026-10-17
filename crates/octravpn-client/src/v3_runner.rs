@@ -317,11 +317,7 @@ pub(crate) async fn connect_v3(
             .await;
             let route_result = match route_guard {
                 Some(guard) if result.is_ok() => guard.disconnect(),
-                Some(guard) => {
-                    drop(guard);
-                    Ok(())
-                }
-                None => Ok(()),
+                Some(_) | None => Ok(()),
             };
             active.metered_bytes = Some(traffic.total()?);
             info!(

@@ -34,6 +34,7 @@ serde       = { workspace = true }
 serde_json  = { workspace = true }
 sha2        = { workspace = true }
 thiserror   = { workspace = true }
+tempfile    = { workspace = true }
 tokio       = { workspace = true }
 toml        = { workspace = true }
 tracing     = { workspace = true }
@@ -56,10 +57,10 @@ hmac        = "0.12"
 rpassword   = "7"
 
 [dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
 octravpn-node = { path = "../octravpn-node" }
 assert_cmd  = "2"
 predicates  = "3"
-tempfile    = { workspace = true }
 flate2      = "1"
 tar         = "0.4"
 serde_json  = { workspace = true }

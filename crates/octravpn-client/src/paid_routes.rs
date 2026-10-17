@@ -25,6 +25,8 @@ use anyhow::{bail, Result};
 pub(crate) struct PaidRouteGuard {
     #[cfg(target_os = "linux")]
     lease: linux::Lease,
+    #[cfg(not(target_os = "linux"))]
+    unavailable: std::convert::Infallible,
 }
 
 impl PaidRouteGuard {
@@ -33,12 +35,12 @@ impl PaidRouteGuard {
     /// authenticated socket peer to `activate`; a second DNS lookup is unsafe.
     pub(crate) async fn resolve_public_peer(endpoint: &str) -> Result<SocketAddrV4> {
         crate::wireguard::validate_endpoint(endpoint)?;
-        let addresses =
+        let mut addresses =
             tokio::time::timeout(Duration::from_secs(10), tokio::net::lookup_host(endpoint))
                 .await
                 .map_err(|_| anyhow::anyhow!("operator endpoint DNS lookup timed out"))??;
         addresses
-            .filter_map(|address| match address {
+            .find_map(|address| match address {
                 SocketAddr::V4(peer)
                     if octravpn_core::ip_tunnel::public_ipv4(*peer.ip()) && peer.port() != 0 =>
                 {
@@ -46,7 +48,6 @@ impl PaidRouteGuard {
                 }
                 _ => None,
             })
-            .next()
             .ok_or_else(|| {
                 anyhow::anyhow!("operator endpoint has no public IPv4 address for paid exit")
             })
@@ -122,7 +123,7 @@ impl PaidRouteGuard {
         }
         #[cfg(not(target_os = "linux"))]
         {
-            Ok(())
+            match self.unavailable {}
         }
     }
 }

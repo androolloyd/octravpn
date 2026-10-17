@@ -1,4 +1,4 @@
-use super::Binding;
+use super::{Binding, Credit};
 use anyhow::Result;
 #[cfg(unix)]
 use anyhow::{ensure, Context};
@@ -27,6 +27,12 @@ pub(super) struct Record {
     pub redeemed: Vec<u64>,
     pub uncertain: Vec<u64>,
     pub pending: Vec<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connect: Option<octravpn_core::payments::SignedConnect>,
+    #[serde(default, skip_serializing_if = "Credit::is_unlimited")]
+    pub credit: Credit,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub authorizations: Vec<Option<octravpn_core::payments::SignedUsage>>,
 }
 #[cfg(unix)]
 #[derive(Serialize, Deserialize)]
@@ -47,8 +53,14 @@ pub(super) struct Disk {
 #[cfg(not(unix))]
 pub(super) struct Disk;
 impl Disk {
+    pub(super) fn open(path: &Path) -> Result<(Self, Option<Record>)> {
+        Self::open_mode(path, true)
+    }
+    pub(super) fn resume(path: &Path) -> Result<(Self, Option<Record>)> {
+        Self::open_mode(path, false)
+    }
     #[cfg(not(unix))]
-    pub(super) fn open(_: &Path) -> Result<(Self, Option<Record>)> {
+    fn open_mode(_: &Path, _: bool) -> Result<(Self, Option<Record>)> {
         anyhow::bail!("durable payment metering requires Unix writer locking")
     }
     #[cfg(unix)]
@@ -56,7 +68,7 @@ impl Disk {
         clippy::verbose_bit_mask,
         reason = "Explicit POSIX private-file permission masks."
     )]
-    pub(super) fn open(path: &Path) -> Result<(Self, Option<Record>)> {
+    fn open_mode(path: &Path, create: bool) -> Result<(Self, Option<Record>)> {
         use rustix::fs::{flock, open, openat, unlinkat, AtFlags, FlockOperation, Mode, OFlags};
         use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
         match std::fs::symlink_metadata(path) {
@@ -64,7 +76,7 @@ impl Disk {
                 metadata.is_dir() && !metadata.file_type().is_symlink(),
                 "meter directory must be a real directory"
             ),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Err(error) if create && error.kind() == std::io::ErrorKind::NotFound => {
                 std::fs::DirBuilder::new().mode(0o700).create(path)?;
             }
             Err(error) => return Err(error.into()),
@@ -80,18 +92,25 @@ impl Disk {
             "meter directory must be private"
         );
         let flags = OFlags::RDWR | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK;
-        let (lease, created): (File, bool) = match openat(
-            &directory,
-            "meter.lock",
-            flags | OFlags::CREATE | OFlags::EXCL,
-            Mode::from_bits_truncate(0o600),
-        ) {
-            Ok(file) => (file.into(), true),
-            Err(rustix::io::Errno::EXIST) => (
+        let (lease, created): (File, bool) = if create {
+            match openat(
+                &directory,
+                "meter.lock",
+                flags | OFlags::CREATE | OFlags::EXCL,
+                Mode::from_bits_truncate(0o600),
+            ) {
+                Ok(file) => (file.into(), true),
+                Err(rustix::io::Errno::EXIST) => (
+                    openat(&directory, "meter.lock", flags, Mode::empty())?.into(),
+                    false,
+                ),
+                Err(error) => return Err(error.into()),
+            }
+        } else {
+            (
                 openat(&directory, "meter.lock", flags, Mode::empty())?.into(),
                 false,
-            ),
-            Err(error) => return Err(error.into()),
+            )
         };
         let metadata = lease.metadata()?;
         ensure!(

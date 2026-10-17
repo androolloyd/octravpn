@@ -151,7 +151,9 @@ impl Onboarding {
 
     fn phase(&self, phase: Phase) {
         if let PageKind::Provider { phase: current, .. } = &self.page.kind {
-            *current.lock().unwrap_or_else(|e| e.into_inner()) = phase;
+            *current
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = phase;
         }
     }
 
@@ -191,7 +193,7 @@ impl Onboarding {
                 }
             }
             tokio::select! {
-                _ = tokio::time::sleep(interval) => {},
+                () = tokio::time::sleep(interval) => {},
                 signal = tokio::signal::ctrl_c() => {
                     signal.context("cancel onboarding")?;
                     anyhow::bail!("onboarding cancelled before funding");
@@ -230,7 +232,7 @@ async fn index(State(page): State<Page>, headers: HeaderMap) -> Response {
             escape_html(login_server),
         ),
         PageKind::Provider { wallet, needed_ou, phase } => {
-            let phase = *phase.lock().unwrap_or_else(|e| e.into_inner());
+            let phase = *phase.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let (title, detail) = match phase {
                 Phase::Checking => ("Checking wallet", "Reading the current on-chain balance.".into()),
                 Phase::NeedsFunds(available) => (

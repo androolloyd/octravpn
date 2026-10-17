@@ -22,6 +22,7 @@ pub mod mesh_store;
 mod native_derp;
 mod onion;
 pub mod payment_meter;
+pub mod payments;
 mod pvac;
 mod rate_limit;
 mod relay_claimer;

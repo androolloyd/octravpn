@@ -14,6 +14,8 @@ mod discover_v2;
 mod migration;
 mod onboarding;
 mod paid_routes;
+mod payment_runner;
+mod payments;
 mod portal;
 mod runner;
 mod settle_state;
@@ -39,6 +41,19 @@ struct Cli {
 
 #[derive(Parser, Debug)]
 enum Cmd {
+    /// Run an accepted canonical Octranet payment plan through a raw IPv4 TUN.
+    Payments {
+        #[arg(long)]
+        plan: std::path::PathBuf,
+        #[arg(long)]
+        journal: std::path::PathBuf,
+        #[arg(long)]
+        receipt_key: String,
+        #[arg(long)]
+        tun_name: String,
+        #[arg(long)]
+        resume: bool,
+    },
     /// Print derived addresses/pubkeys for the current wallet.
     Identity,
     /// List active validator-VPN nodes from the on-chain registry.
@@ -309,6 +324,22 @@ async fn main() -> Result<()> {
 
     // Config-less subcommands handled first.
     match &cli.cmd {
+        Cmd::Payments {
+            plan,
+            journal,
+            receipt_key,
+            tun_name,
+            resume,
+        } => {
+            return Box::pin(payment_runner::run(
+                plan,
+                journal.clone(),
+                receipt_key,
+                tun_name,
+                *resume,
+            ))
+            .await;
+        }
         Cmd::Init {
             dir,
             rpc_url,
@@ -488,6 +519,7 @@ async fn main() -> Result<()> {
         }
         // Already handled above.
         Cmd::Init { .. }
+        | Cmd::Payments { .. }
         | Cmd::Keygen { .. }
         | Cmd::Doctor
         | Cmd::BugReport { .. }

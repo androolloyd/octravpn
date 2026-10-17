@@ -46,8 +46,25 @@ send ticket now preserves nonbillable uncertain capacity through later writes
 and restart. Native plan admission now requires a revocable, bounded current
 publication lease; resuming the same retained head cannot renew its freshness
 deadline. Callers cannot replace the plan facts bound to that lease. The
-reviewer found no further concrete defect in those applied fixes. Atomic
-publication checks at actual packet queueing remain an integration requirement.
+reviewer found no further concrete defect in those applied fixes. The connected
+path now guards the actual nonblocking packet handoff; combined kernel
+qualification remains required.
+
+The connected candidate adds explicit bounded postpaid credit, durable signed
+connection watermarks, native publication guards at nonblocking packet handoff,
+and a separate payer journal. Further adversarial review corrected canceled key
+rotation, publication-gap pruning, retired-route retention, receipt-only restart
+recovery, and opaque WireGuard rekey queues. A separate control worker keeps
+traffic and signed-status freshness checks running while settlement waits.
+An immutable persisted fee budget bounds operator relayer spending across
+retries and restart. Already covered rounding intervals and zero-rate traffic
+do not create redundant zero-increment transactions.
+
+Escrow cannot force a payer to sign its final usage receipt. Operators explicitly
+choose the maximum unacknowledged bytes and OU they accept; reconnects and
+uncertain sends cannot reset either limit. This is bounded postpaid risk, not a
+claim of cryptographically fair exchange or proof of packet delivery. Operator
+status signatures authenticate their signer, not independent chain finality.
 
 ## Local qualification
 
@@ -66,6 +83,14 @@ authenticated finality header and refused a substituted captured head. Strict
 Clippy and the full Lean build passed. These results qualify their stated local
 scope, not the pending public or new paid-packet integration.
 
+The subsequent final run includes the client and TUN crates: **1,541 passed,
+zero failed, three ignored helpers across 12 targets**. Strict Clippy, formatting
+and the full Lean build passed on the recorded source snapshot. This run also
+includes the positive native publication, durable credit/fee budgets, signed
+control protocol, stopped-plan receipt recovery and separate client settlement
+worker. The observer remained connected to public devnet but was not serving;
+its current status is recorded separately. No Mainnet transaction was sent.
+
 The production Program transaction adapter compiles the actual application and
 factory and executes signed transactions, staged storage and real ledger
 transfers. The suite covers time boundaries, request retries, payer remainder,
@@ -82,19 +107,20 @@ packet delivery. Native application tests are finite checks of the actual code.
 
 ## Mainnet alpha gates still open
 
-This new application is not connected to the existing v5 native VPN adapter or
-client settlement path. The `can_forward` view specifies admission; exposing it
-does not enforce it on packets. Paid per-class metering, stopped-generation
-revocation, durable receipt delivery and the bounded unpaid Circle portal must
-be wired and tested together before accepting user funds.
+The explicit native `payments` configuration selects the new application;
+legacy v5 mode keeps its own adapter. The new implementation connects canonical
+admission, durable class metering, payer authorization and claim publication.
+Those boundaries still require a combined kernel/client/chain qualification
+with the bounded unpaid Circle portal before accepting user funds.
 
 The staged native reader and meter are components, with their scope described
 in the [architecture](../architecture/octranet-payment-tier.md). The reader's
-positive projection of actual compiled application state is tested separately
-from its negative canonical-clock check and publication-lease checks. A positive
-grant through post-genesis deployment, authenticated epoch history and canonical
-Circle resolution is still required. Local component checks do not close that
-gap or qualify the new application for forwarding.
+positive grant is now tested through actual post-genesis factory/application
+deployment, signed validator QCs, authenticated epoch history and canonical
+Circle resolution. Separate tests cover publication suspension and a guarded
+handoff, payer exit, operator unstake and Circle expiry. These finite checks
+close the reader's previous positive-grant gap; they do not qualify the full
+kernel/client/claim path or prove AML/compiler/VM refinement.
 
 Public network identity, synchronized canonical state, the public control/TLS
 deployment and stateful public end-to-end qualification remain required. A

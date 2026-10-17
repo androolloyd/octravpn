@@ -156,6 +156,12 @@ impl Tun {
         let n = self.inner.send(packet).await.context("tun send")?;
         Ok(n)
     }
+
+    /// One nonblocking kernel handoff. A host can hold its short canonical
+    /// publication guard through this operation without awaiting readiness.
+    pub fn try_send(&self, packet: &[u8]) -> std::io::Result<usize> {
+        self.inner.try_send(packet)
+    }
 }
 
 /// Tracks PMTUD state for a single path (or the device as a whole, if

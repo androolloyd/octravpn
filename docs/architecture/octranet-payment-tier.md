@@ -93,11 +93,45 @@ definitely unsent packet releases its reservation. The host must keep one meter
 per plan and preserve its journal across reconnects and restarts. Packet-level
 fsync is a correctness baseline, with no throughput qualification yet.
 
+The opt-in `payments` node configuration selects the new application and an
+explicit `credit` window, with both `max_unacknowledged_bytes` and
+`max_unacknowledged_ou`. The production transport never uses the meter's
+unlimited component-test policy. Unacknowledged and uncertain capacity counts
+against both limits across reconnection and restart. An operator accepts the
+risk of this bounded postpaid window: a client can refuse its final receipt.
+Neither WireGuard nor an escrow balance proves delivery or forces a payer to
+sign. A zero window refuses traffic; increasing it is an operator risk choice.
+The service restores credit only after its cumulative charge is covered by
+authenticated canonical paid OU. An already paid rounding interval or zero-rate
+class can be acknowledged durably without another on-chain claim; the canonical
+byte counter may lag. A separate immutable lifetime claim-fee budget bounds
+transaction spending, including failed or ambiguous attempts. Transaction fees
+make very small settlement windows costly.
+
+Receipt-key-signed connection requests bind the complete plan and a monotonic
+connection sequence to the client's WireGuard key. Rotation suspends the old
+capability before its durable watermark changes. The current native publication
+guard encloses the actual nonblocking kernel or UDP handoff. Confirmed raw IP
+bytes become billable. Paid payloads never enter boringtun's opaque rekey queue:
+an absent current session starts only the control handshake and drops the
+unsent raw packet without charging it. Ambiguous sends retain uncertain
+capacity. This favors custody safety when delivery cannot be established.
+
+The client `payments` command consumes a locally accepted plan file, an explicit
+receipt-key file and a persistent journal. It verifies the offer operator's
+status signature, manifest, budget, connection sequence and both WireGuard
+keys. That signature authenticates the operator, not chain finality. The plan
+file must be obtained from confirmed state by the onboarding flow. Automatic
+funding, route installation and stock Tailscale payment signing are not implied
+by this command. The client signs at most the lower of its own confirmed class
+counts and the authenticated operator's counts. Its original budget and signed
+authorizations survive reconnects; resume refuses missing or corrupt state.
+
 The gateway's [portal capability](../operators/unpaid-portal.md) limits unpaid
 reads to explicitly selected passive assets in one Circle. It does not confer
-device enrollment, general DNS/DERP access or paid forwarding. These components
-still need a connected native admission, client and settlement path before the
-new application can accept alpha traffic.
+device enrollment, general DNS/DERP access or paid forwarding. The new native
+payment path still requires combined kernel, recovery and public qualification
+before the application can accept alpha traffic.
 
 ## Qualification
 

@@ -1,5 +1,9 @@
 use super::*;
 use octravpn_core::payments::{IpPrefix, Protocol, Selector, TrafficClass, BYTES_PER_MIB};
+use octravpn_core::{
+    payments::{Connect, Usage},
+    KeyPair,
+};
 use std::{os::unix::fs::PermissionsExt, path::Path};
 
 fn tariff() -> Tariff {
@@ -46,6 +50,445 @@ async fn dropped_ticket_finished(meter: &Arc<Meter>) {
     })
     .await
     .unwrap();
+}
+
+fn connect_request(meter: &Meter, sequence: u64, wireguard_key: [u8; 32]) -> SignedConnect {
+    SignedConnect::sign(
+        Connect {
+            binding: meter.binding().clone(),
+            sequence,
+            wireguard_key,
+        },
+        &KeyPair::from_secret_bytes(&[31; 32]),
+    )
+    .unwrap()
+}
+fn usage_receipt(meter: &Meter, class: u8, sequence: u64, bytes: u64) -> SignedUsage {
+    SignedUsage::sign(
+        Usage::from_binding(meter.binding().clone(), class, sequence, bytes).unwrap(),
+        &KeyPair::from_secret_bytes(&[31; 32]),
+    )
+    .unwrap()
+}
+async fn bounded(path: &Path, canonical: Vec<u64>, credit: Credit) -> Arc<Meter> {
+    let tariff = tariff();
+    Meter::open_with_credit(path.into(), binding(&tariff), tariff, 10, canonical, credit)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn resume_requires_existing_private_directory_lease_and_journal() {
+    let root = tempfile::tempdir().unwrap();
+    let credit = Credit {
+        max_unacknowledged_bytes: 100,
+        max_unacknowledged_ou: 2,
+    };
+    let tariff = tariff();
+    let missing = root.path().join("absent");
+    assert!(Meter::resume_with_credit(
+        missing.clone(),
+        binding(&tariff),
+        tariff.clone(),
+        10,
+        vec![0, 0],
+        credit
+    )
+    .await
+    .is_err());
+    assert!(!missing.exists(), "recovery never creates a plan directory");
+    let empty = root.path().join("empty");
+    std::fs::create_dir(&empty).unwrap();
+    std::fs::set_permissions(&empty, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(Meter::resume_with_credit(
+        empty.clone(),
+        binding(&tariff),
+        tariff.clone(),
+        10,
+        vec![0, 0],
+        credit
+    )
+    .await
+    .is_err());
+    assert_eq!(
+        std::fs::read_dir(&empty).unwrap().count(),
+        0,
+        "no lease or journal is created"
+    );
+    let path = root.path().join("valid");
+    let meter = bounded(&path, vec![0, 0], credit).await;
+    meter
+        .connect(connect_request(&meter, 1, [41; 32]))
+        .await
+        .unwrap();
+    meter
+        .reserve_class(0, 64)
+        .await
+        .unwrap()
+        .commit()
+        .await
+        .unwrap();
+    let before = meter.snapshot().unwrap();
+    assert!(
+        Meter::resume_with_credit(
+            path.clone(),
+            binding(&tariff),
+            tariff.clone(),
+            10,
+            vec![0, 0],
+            credit
+        )
+        .await
+        .is_err(),
+        "a writer must retain exclusivity"
+    );
+    drop(meter);
+    let resumed = Meter::resume_with_credit(
+        path,
+        binding(&tariff),
+        tariff.clone(),
+        10,
+        vec![0, 0],
+        credit,
+    )
+    .await
+    .unwrap();
+    assert_eq!(resumed.snapshot().unwrap(), before);
+    drop(resumed);
+    for lost in ["meter.lock", "meter.json"] {
+        let path = root.path().join(lost);
+        drop(bounded(&path, vec![0, 0], credit).await);
+        std::fs::remove_file(path.join(lost)).unwrap();
+        let retained = if lost == "meter.lock" {
+            "meter.json"
+        } else {
+            "meter.lock"
+        };
+        let before = std::fs::read(path.join(retained)).unwrap();
+        assert!(Meter::resume_with_credit(
+            path.clone(),
+            binding(&tariff),
+            tariff.clone(),
+            10,
+            vec![0, 0],
+            credit
+        )
+        .await
+        .is_err());
+        assert!(
+            !path.join(lost).exists(),
+            "missing {lost} is never recreated"
+        );
+        assert_eq!(std::fs::read(path.join(retained)).unwrap(), before);
+        assert_eq!(
+            std::fs::read_dir(path).unwrap().count(),
+            1,
+            "recovery leaves no new files"
+        );
+    }
+}
+
+#[tokio::test]
+async fn nonpaying_credit_stops_reconnect_and_receipts_resume_after_restart() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("credit");
+    let credit = Credit {
+        max_unacknowledged_bytes: 100,
+        max_unacknowledged_ou: 2,
+    };
+    let meter = bounded(&path, vec![0, 0], credit).await;
+    let initial = connect_request(&meter, 1, [41; 32]);
+    meter.connect(initial.clone()).await.unwrap();
+    assert!(meter.connect_is_current(&initial));
+    meter
+        .reserve_class(0, 90)
+        .await
+        .unwrap()
+        .commit()
+        .await
+        .unwrap();
+    let before = meter.snapshot().unwrap();
+    assert!(meter.reserve_class(0, 11).await.is_err());
+    assert_eq!(meter.snapshot().unwrap(), before);
+    let rotated = connect_request(&meter, 2, [42; 32]);
+    meter.connect(rotated.clone()).await.unwrap();
+    assert!(!meter.connect_is_current(&initial));
+    assert!(meter.check_connect(&initial).is_err());
+    assert!(meter.connect(initial.clone()).await.is_err());
+    assert!(meter.connect_is_current(&rotated));
+    assert!(meter.reserve_class(0, 11).await.is_err());
+    assert!(meter.authorizations().unwrap().is_empty());
+    let receipt = usage_receipt(&meter, 0, 1, 90);
+    meter.accept_usage(receipt.clone()).await.unwrap();
+    meter.accept_usage(receipt).await.unwrap();
+    meter
+        .reserve_class(0, 100)
+        .await
+        .unwrap()
+        .commit()
+        .await
+        .unwrap();
+    assert!(meter.reserve_class(0, 1).await.is_err());
+    let receipt = usage_receipt(&meter, 0, 2, 190);
+    meter.accept_usage(receipt.clone()).await.unwrap();
+    assert!(
+        meter
+            .accept_usage(usage_receipt(&meter, 0, 3, 191))
+            .await
+            .is_err(),
+        "no payment for undelivered bytes"
+    );
+    meter
+        .accept_usage(usage_receipt(&meter, 0, 1, 190))
+        .await
+        .unwrap();
+    meter
+        .accept_usage(usage_receipt(&meter, 0, 3, 189))
+        .await
+        .unwrap();
+    assert_eq!(meter.authorizations().unwrap(), [receipt.clone()]);
+    drop(meter);
+    let restarted = bounded(&path, vec![0, 0], credit).await;
+    assert!(restarted.connect_is_current(&rotated));
+    assert!(restarted.check_connect(&initial).is_err());
+    assert_eq!(restarted.authorizations().unwrap(), [receipt]);
+    restarted
+        .reserve_class(0, 100)
+        .await
+        .unwrap()
+        .commit()
+        .await
+        .unwrap();
+    assert!(restarted.reserve_class(0, 1).await.is_err());
+    let wrong = SignedUsage::sign(
+        Usage::from_binding(restarted.binding().clone(), 0, 4, 290).unwrap(),
+        &KeyPair::from_secret_bytes(&[32; 32]),
+    )
+    .unwrap();
+    assert!(restarted.accept_usage(wrong).await.is_err());
+    drop(restarted);
+    let tariff = tariff();
+    assert!(Meter::open(
+        path.clone(),
+        binding(&tariff),
+        tariff.clone(),
+        10,
+        vec![0, 0]
+    )
+    .await
+    .is_err());
+    assert!(Meter::open_with_credit(
+        path,
+        binding(&tariff),
+        tariff,
+        10,
+        vec![0, 0],
+        Credit {
+            max_unacknowledged_bytes: 101,
+            ..credit
+        }
+    )
+    .await
+    .is_err());
+}
+
+#[tokio::test]
+async fn larger_canonical_authorization_wins_over_higher_sequence() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("authorization");
+    let meter = open(&path, 3).await;
+    meter
+        .connect(connect_request(&meter, 1, [41; 32]))
+        .await
+        .unwrap();
+    meter
+        .reserve_class(0, 100)
+        .await
+        .unwrap()
+        .commit()
+        .await
+        .unwrap();
+    let smaller = usage_receipt(&meter, 0, 100, 50);
+    meter.accept_usage(smaller.clone()).await.unwrap();
+    let larger = usage_receipt(&meter, 0, 1, 100);
+    meter.check_usage(&larger).unwrap();
+    meter.accept_usage(larger.clone()).await.unwrap();
+    meter.check_usage(&smaller).unwrap();
+    meter.accept_usage(smaller).await.unwrap();
+    assert_eq!(meter.authorizations().unwrap(), [larger.clone()]);
+    drop(meter);
+    let restarted = open(&path, 3).await;
+    assert_eq!(restarted.authorizations().unwrap(), [larger]);
+}
+
+#[tokio::test]
+async fn credit_counts_uncertain_capacity_and_aggregate_class_charges() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("credit");
+    let credit = Credit {
+        max_unacknowledged_bytes: u64::MAX,
+        max_unacknowledged_ou: 1,
+    };
+    let meter = bounded(&path, vec![0, 0], credit).await;
+    let request = connect_request(&meter, 1, [41; 32]);
+    meter.connect(request).await.unwrap();
+    meter
+        .reserve_class(0, 1)
+        .await
+        .unwrap()
+        .commit()
+        .await
+        .unwrap();
+    let before = meter.snapshot().unwrap();
+    assert!(
+        meter.reserve_class(1, 1).await.is_err(),
+        "two classes share one OU exposure limit"
+    );
+    assert_eq!(meter.snapshot().unwrap(), before);
+    meter
+        .accept_usage(usage_receipt(&meter, 0, 1, 1))
+        .await
+        .unwrap();
+    drop(meter.reserve_class(1, 1).await.unwrap());
+    dropped_ticket_finished(&meter).await;
+    assert_eq!(meter.snapshot().unwrap().committed_totals, [1, 0]);
+    assert_eq!(meter.snapshot().unwrap().uncertain_totals, [0, 1]);
+    assert!(
+        meter
+            .accept_usage(usage_receipt(&meter, 1, 1, 1))
+            .await
+            .is_err(),
+        "uncertainty is never billable delivery"
+    );
+    assert!(
+        meter.reserve_class(0, BYTES_PER_MIB).await.is_err(),
+        "uncertain capacity still consumes OU credit"
+    );
+    drop(meter);
+    let restarted = bounded(&path, vec![0, 0], credit).await;
+    assert!(restarted.reserve_class(0, BYTES_PER_MIB).await.is_err());
+}
+
+#[tokio::test]
+async fn canonical_redemption_authorizes_credit_without_resetting_delivery() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("credit");
+    let credit = Credit {
+        max_unacknowledged_bytes: 64,
+        max_unacknowledged_ou: 1,
+    };
+    let meter = bounded(&path, vec![128, 0], credit).await;
+    meter
+        .reserve_class(0, 64)
+        .await
+        .unwrap()
+        .commit()
+        .await
+        .unwrap();
+    assert!(meter.reserve_class(0, 1).await.is_err());
+    meter.reconcile(vec![192, 0]).await.unwrap();
+    assert!(meter.authorizations().unwrap().is_empty());
+    meter
+        .reserve_class(0, 64)
+        .await
+        .unwrap()
+        .commit()
+        .await
+        .unwrap();
+    assert_eq!(meter.snapshot().unwrap().committed_totals, [256, 0]);
+    assert_eq!(meter.snapshot().unwrap().redeemed_totals, [192, 0]);
+    assert!(meter.reserve_class(0, 1).await.is_err());
+    drop(meter);
+    let restarted = bounded(&path, vec![192, 0], credit).await;
+    assert_eq!(restarted.snapshot().unwrap().committed_totals, [256, 0]);
+    assert!(restarted.reserve_class(0, 1).await.is_err());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[expect(
+    clippy::await_holding_lock,
+    reason = "Deliberately stalls the blocking writer to cancel rotation before persistence."
+)]
+async fn cancelled_rotation_stays_suspended_until_new_watermark_is_durable() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("rotation");
+    let meter = open(&path, 3).await;
+    let initial = connect_request(&meter, 1, [41; 32]);
+    meter.connect(initial.clone()).await.unwrap();
+    let rotation = connect_request(&meter, 2, [42; 32]);
+    let mut conflict = initial.request.clone();
+    conflict.wireguard_key = [43; 32];
+    let conflict = SignedConnect::sign(conflict, &KeyPair::from_secret_bytes(&[31; 32])).unwrap();
+    assert!(meter.check_connect(&conflict).is_err());
+    assert!(meter.connect(conflict).await.is_err());
+    assert!(meter.connect_is_current(&initial));
+    // Hold the writer so cancellation lands after the pending gate is set but
+    // before the blocking filesystem operation can durably install the key.
+    let writer = meter.writer.lock();
+    let task_meter = meter.clone();
+    let task_request = rotation.clone();
+    let task = tokio::spawn(async move { task_meter.connect(task_request).await });
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        while !meter.connect_pending.load(Ordering::Acquire) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(!meter.connect_is_current(&initial));
+    assert!(meter.check_connect(&initial).is_err());
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    assert!(!meter.connect_is_current(&initial));
+    drop(writer);
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        while !meter.connect_is_current(&rotation) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(!meter.connect_is_current(&initial));
+    assert!(meter.check_connect(&initial).is_err());
+    dropped_ticket_finished(&meter).await;
+    drop(meter);
+    let restarted = open(&path, 3).await;
+    assert!(restarted.connect_is_current(&rotation));
+    assert!(restarted.check_connect(&initial).is_err());
+}
+
+#[tokio::test]
+async fn failed_rotation_or_authorization_persistence_poisons_admission() {
+    let root = tempfile::tempdir().unwrap();
+    let meter = open(&root.path().join("rotation"), 3).await;
+    let initial = connect_request(&meter, 1, [41; 32]);
+    meter.connect(initial.clone()).await.unwrap();
+    meter.disk.fail_next_write();
+    assert!(meter
+        .connect(connect_request(&meter, 2, [42; 32]))
+        .await
+        .is_err());
+    assert!(!meter.connect_is_current(&initial));
+    assert!(meter.reserve_class(0, 1).await.is_err());
+    let meter = open(&root.path().join("authorization"), 3).await;
+    meter
+        .connect(connect_request(&meter, 1, [41; 32]))
+        .await
+        .unwrap();
+    meter
+        .reserve_class(0, 1)
+        .await
+        .unwrap()
+        .commit()
+        .await
+        .unwrap();
+    meter.disk.fail_next_write();
+    assert!(meter
+        .accept_usage(usage_receipt(&meter, 0, 1, 1))
+        .await
+        .is_err());
+    assert!(meter.authorizations().is_err());
+    assert!(meter.reserve_class(0, 1).await.is_err());
 }
 
 #[tokio::test]
