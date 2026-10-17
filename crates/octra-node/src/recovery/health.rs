@@ -8,12 +8,12 @@ use super::Service;
 use crate::{Host, RootQuarantineTicket};
 use anyhow::{Context, Result};
 use num_bigint::Sign;
-use octra_node_protocol::consensus::{catchup, ValidatorSet};
+use octra_node_protocol::consensus::{catchup, health as policy, ValidatorSet};
 use octra_node_runtime::{
     canonical::Head,
     epoch_roots::{self, Response, WaitFor},
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Status {
@@ -25,12 +25,20 @@ pub(super) enum Status {
 
 pub(super) struct Sample {
     pub head: Head,
-    pub authority: ValidatorSet,
     pub ticket: RootQuarantineTicket,
-    /// Native target selection over matching-root signers, preserving the
-    /// existing refusal to serve while those peers establish a higher head.
+    /// The native fault-tolerant target includes every authenticated reply,
+    /// independently of whether that peer supplied a current-head root.
+    pub peer_target: i64,
     pub target: Option<u64>,
+    pub required: i64,
+    pub matching: i64,
+    pub responses: i64,
     pub status: Status,
+}
+
+struct Members {
+    active: ValidatorSet,
+    stake: ValidatorSet,
 }
 
 pub(super) async fn query<A: Host>(service: &Service<A>) -> Result<Sample> {
@@ -40,9 +48,12 @@ pub(super) async fn query<A: Host>(service: &Service<A>) -> Result<Sample> {
 #[async_trait::async_trait]
 trait Source: Send + Sync {
     fn chain(&self) -> &[u8];
+    fn config(&self) -> policy::Config {
+        policy::Config::default()
+    }
     fn ticket(&self) -> RootQuarantineTicket;
     async fn head(&self) -> Result<Head>;
-    async fn authority(&self, head: &Head, epoch: i64) -> Result<ValidatorSet>;
+    async fn authority(&self, head: &Head, epoch: i64) -> Result<Members>;
     async fn roots(&self, epoch: i64, wait_for: WaitFor) -> Result<Vec<Response>>;
 }
 
@@ -54,11 +65,25 @@ impl<A: Host> Source for Service<A> {
     fn ticket(&self) -> RootQuarantineTicket {
         self.node.root_quarantine_ticket()
     }
+    fn config(&self) -> policy::Config {
+        self.health.clone()
+    }
     async fn head(&self) -> Result<Head> {
         self.node.head().await
     }
-    async fn authority(&self, head: &Head, epoch: i64) -> Result<ValidatorSet> {
-        Ok(self.membership.stake_set(head, epoch).await?)
+    async fn authority(&self, head: &Head, epoch: i64) -> Result<Members> {
+        let stake = self.membership.stake_set(head, epoch).await?;
+        let relief = self.node.store.reader().relief_after(head).await?;
+        let rules = self
+            .node
+            .host
+            .resolve(head, u64::try_from(epoch)?, relief)
+            .await
+            .map_err(anyhow::Error::msg)?;
+        Ok(Members {
+            active: rules.validators,
+            stake,
+        })
     }
     async fn roots(&self, epoch: i64, wait_for: WaitFor) -> Result<Vec<Response>> {
         Ok(self.roots.query(epoch, 5., wait_for, false).await?)
@@ -77,9 +102,16 @@ async fn query_source(source: &impl Source) -> Result<Sample> {
         let authority = source.authority(&head, next).await?;
         let mut sample = Sample {
             head,
-            authority,
             ticket,
+            peer_target: epoch,
             target: None,
+            required: policy::required_attesters(
+                authority.active.f,
+                authority.active.n,
+                source.config().state_attest_min_peers,
+            ),
+            matching: 0,
+            responses: 0,
             status: Status::Stale,
         };
         if source.head().await? != sample.head {
@@ -89,8 +121,8 @@ async fn query_source(source: &impl Source) -> Result<Sample> {
             }
             return Ok(sample);
         }
-        // Waiting for consensus evidence must not silently strengthen the
-        // existing SourceAgreement admission threshold at the timeout boundary.
+        // Native health waits for consensus evidence, then applies its separate
+        // distinct-peer admission threshold to the replies actually received.
         let responses = source.roots(epoch, WaitFor::ConsensusQuorum).await;
         if source.head().await? != sample.head {
             if retries > 0 {
@@ -99,87 +131,122 @@ async fn query_source(source: &impl Source) -> Result<Sample> {
             }
             return Ok(sample);
         }
-        (sample.status, sample.target) =
-            classify(source.chain(), &sample.head, &sample.authority, &responses?)?;
+        let classified = classify_members(
+            source.chain(),
+            &sample.head,
+            &authority,
+            sample.required,
+            &responses?,
+        )?;
+        sample.status = classified.status;
+        sample.peer_target = classified.peer_target;
+        sample.target = (classified.peer_target > epoch)
+            .then(|| u64::try_from(classified.peer_target))
+            .transpose()?;
+        sample.matching = classified.matching;
+        sample.responses = classified.responses;
         return Ok(sample);
     }
 }
 
-fn classify(
+struct Classified {
+    status: Status,
+    peer_target: i64,
+    matching: i64,
+    responses: i64,
+}
+
+fn classify_members(
     chain: &[u8],
     head: &Head,
-    authority: &ValidatorSet,
+    authority: &Members,
+    required: i64,
     responses: &[Response],
-) -> Result<(Status, Option<u64>)> {
+) -> Result<Classified> {
     let epoch = i64::try_from(head.cursor.epoch.0)?;
     let mut seen = BTreeSet::new();
-    let mut groups: BTreeMap<[u8; 32], Vec<Response>> = BTreeMap::new();
+    let mut records = Vec::new();
     for response in responses {
-        let Some(root) = response.state_root.as_deref() else {
+        // Reject malformed roots before deduplication so an internal malformed
+        // duplicate cannot hide that responder's valid record. Rootless replies
+        // still carry authenticated head hints, as in native peer_target_epoch.
+        if response
+            .state_root
+            .as_ref()
+            .is_some_and(|root| root.len() != 32)
+        {
             continue;
-        };
-        let Ok(root) = <[u8; 32]>::try_from(root) else {
-            continue;
-        };
-        // `reached(SourceAgreement)` relies on its authenticated, deduplicated
-        // caller. Keep that invariant here even for malformed internal inputs.
+        }
         if authority
+            .active
             .public_key(&response.responder_addr)
             .is_none_or(|key| key.len() != 32)
             || authority
+                .stake
                 .weight(&response.responder_addr)
                 .is_none_or(|weight| weight.sign() != Sign::Plus)
             || !seen.insert(response.responder_addr.clone())
         {
             continue;
         }
-        groups.entry(root).or_default().push(response.clone());
+        records.push(response.clone());
     }
-    let matching = groups.get(&head.cursor.state_root.0);
-    let heads = matching
-        .into_iter()
-        .flatten()
+    let heads = records
+        .iter()
         .map(|response| catchup::PeerHead {
             responder_addr: response.responder_addr.clone(),
             responder_head_epoch: response.responder_head_epoch,
         })
         .collect::<Vec<_>>();
-    let target = catchup::pick_target_epoch(&heads, authority.f, epoch)?;
-    let target = if target > epoch {
-        Some(u64::try_from(target)?)
+    let responses = records.len() as i64;
+    let peer_target = if responses >= required {
+        catchup::pick_target_epoch(&heads, authority.active.f, epoch)?
     } else {
-        None
+        epoch
     };
-
-    let mut chosen: Option<([u8; 32], bool, usize)> = None;
-    for (root, records) in groups {
-        let consensus =
-            epoch_roots::reached(chain, epoch, authority, WaitFor::ConsensusQuorum, &records)?;
-        let source =
-            epoch_roots::reached(chain, epoch, authority, WaitFor::SourceAgreement, &records)?;
-        if !consensus && !source {
-            continue;
+    let matching = records
+        .iter()
+        .filter(|r| r.state_root.as_deref() == Some(head.cursor.state_root.0.as_slice()))
+        .count() as i64;
+    let quorum = policy::peer_root_quorum(
+        required,
+        &head.cursor.state_root.0,
+        records.iter().map(|r| r.state_root.as_deref()),
+    );
+    let selected = match quorum {
+        policy::RootQuorum::Matching(majority) | policy::RootQuorum::Mismatching(majority) => {
+            Some(majority.root)
         }
-        let priority = (consensus, records.len());
-        if chosen
-            .as_ref()
-            .is_none_or(|(_, quorum, count)| priority > (*quorum, *count))
-        {
-            chosen = Some((root, consensus, records.len()));
-        }
-    }
-    // Consensus evidence dominates weak agreement. With no consensus root,
-    // prefer the greatest distinct-signer count. Native Hashtbl ties are not
-    // stable; this operational classifier keeps the lexicographically smallest
-    // root on a count tie. That choice has no finality or rollback authority.
-    let status = match chosen {
-        Some((root, consensus, _)) if root == head.cursor.state_root.0 => {
+        _ if required == 0 => Some(head.cursor.state_root.0.to_vec()),
+        _ => None,
+    };
+    let status = if let Some(root) = selected {
+        let group = records
+            .into_iter()
+            .filter(|r| r.state_root.as_deref() == Some(root.as_slice()))
+            .collect::<Vec<_>>();
+        let consensus = epoch_roots::reached(
+            chain,
+            epoch,
+            &authority.stake,
+            WaitFor::ConsensusQuorum,
+            &group,
+        )?;
+        let root: [u8; 32] = root.try_into().expect("validated root length");
+        if root == head.cursor.state_root.0 {
             Status::Attested { consensus }
+        } else {
+            Status::Conflicting { root, consensus }
         }
-        Some((root, consensus, _)) => Status::Conflicting { root, consensus },
-        None => Status::Unknown,
+    } else {
+        Status::Unknown
     };
-    Ok((status, target))
+    Ok(Classified {
+        status,
+        peer_target,
+        matching,
+        responses,
+    })
 }
 
 #[cfg(test)]
@@ -241,9 +308,27 @@ mod tests {
     fn status(authority: &ValidatorSet, responses: &[Response]) -> Status {
         classify(CHAIN, &head(10), authority, responses).unwrap().0
     }
+    fn classify(
+        chain: &[u8],
+        head: &Head,
+        authority: &ValidatorSet,
+        responses: &[Response],
+    ) -> Result<(Status, Option<u64>)> {
+        let members = Members {
+            active: authority.clone(),
+            stake: authority.clone(),
+        };
+        let required = super::policy::required_attesters(authority.f, authority.n, 0);
+        let value = classify_members(chain, head, &members, required, responses)?;
+        let epoch = i64::try_from(head.cursor.epoch.0)?;
+        let target = (value.peer_target > epoch)
+            .then(|| u64::try_from(value.peer_target))
+            .transpose()?;
+        Ok((value.status, target))
+    }
 
     #[test]
-    fn source_agreement_admission_and_weak_conflict_are_preserved() {
+    fn native_count_admission_and_weak_conflict_are_preserved() {
         let authority = validators(4);
         assert_eq!(status(&authority, &[]), Status::Unknown);
         assert_eq!(status(&authority, &[reply(1, LOCAL, 10)]), Status::Unknown);
@@ -281,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn weak_roots_choose_distinct_count_then_deterministic_byte_order() {
+    fn root_choice_counts_distinct_signers_independently_of_byte_order() {
         let authority = validators(7);
         let mut responses = (1..=3)
             .map(|seed| reply(seed, LOCAL, 10))
@@ -294,15 +379,13 @@ mod tests {
                 consensus: false
             }
         );
-        responses.pop();
-        assert_eq!(
-            status(&authority, &responses),
-            Status::Attested { consensus: false }
-        );
         responses.reverse();
         assert_eq!(
             status(&authority, &responses),
-            Status::Attested { consensus: false }
+            Status::Conflicting {
+                root: OTHER,
+                consensus: false
+            }
         );
         for response in &mut responses {
             if response.state_root.as_deref() == Some(OTHER.as_slice()) {
@@ -324,12 +407,16 @@ mod tests {
         let one = reply(1, LOCAL, 10);
         let mut responses = vec![one; 100];
         responses.extend((5..=10).map(|seed| reply(seed, LOCAL, 10)));
-        for root in [None, Some(vec![7; 31]), Some(vec![7; 33])] {
+        for root in [Some(vec![7; 31]), Some(vec![7; 33])] {
             responses.push(Response {
                 state_root: root,
                 ..reply(2, LOCAL, 10)
             });
         }
+        responses.push(Response {
+            state_root: None,
+            ..reply(3, LOCAL, 10)
+        });
         assert_eq!(status(&authority, &responses), Status::Unknown);
         responses.push(reply(2, LOCAL, 10));
         assert_eq!(
@@ -346,7 +433,7 @@ mod tests {
     }
 
     #[test]
-    fn weighted_historical_policy_is_applied_at_the_sample_epoch() {
+    fn count_admission_is_separate_from_historical_weighted_consensus() {
         let authority = ValidatorSet::weighted(vec![
             (validator(1), 100.into()),
             (validator(2), 1.into()),
@@ -365,7 +452,7 @@ mod tests {
             )
             .unwrap()
             .0,
-            Status::Attested { consensus: true }
+            Status::Unknown
         );
         assert_eq!(
             classify(
@@ -385,6 +472,26 @@ mod tests {
             reply(4, OTHER, after),
         ];
         assert_eq!(
+            classify(policy::DEVNET, &head(before as u64), &authority, &responses)
+                .unwrap()
+                .0,
+            Status::Conflicting {
+                root: OTHER,
+                consensus: false
+            }
+        );
+        assert_eq!(
+            classify(
+                policy::DEVNET,
+                &head(before as u64),
+                &authority,
+                &[reply(2, LOCAL, before), reply(3, LOCAL, before)]
+            )
+            .unwrap()
+            .0,
+            Status::Attested { consensus: false }
+        );
+        assert_eq!(
             classify(policy::DEVNET, &head(after as u64), &authority, &responses)
                 .unwrap()
                 .0,
@@ -396,7 +503,62 @@ mod tests {
     }
 
     #[test]
-    fn matching_advertised_heads_keep_native_forward_target_selection() {
+    fn configured_attester_count_cannot_be_replaced_by_weighted_finality() {
+        let authority = ValidatorSet::weighted(vec![
+            (validator(1), 100.into()),
+            (validator(2), 1.into()),
+            (validator(3), 1.into()),
+            (validator(4), 1.into()),
+        ])
+        .unwrap();
+        let members = Members {
+            active: authority.clone(),
+            stake: authority,
+        };
+        let epoch = policy::QUORUM_ACTIVATION - 1;
+        let local = head(epoch as u64);
+        let two = [reply(1, LOCAL, epoch), reply(2, LOCAL, epoch)];
+        assert_eq!(
+            classify_members(policy::DEVNET, &local, &members, 3, &two)
+                .unwrap()
+                .status,
+            Status::Unknown
+        );
+        let three = [
+            reply(1, LOCAL, epoch),
+            reply(2, LOCAL, epoch),
+            reply(3, LOCAL, epoch),
+        ];
+        assert_eq!(
+            classify_members(policy::DEVNET, &local, &members, 3, &three)
+                .unwrap()
+                .status,
+            Status::Attested { consensus: true }
+        );
+    }
+
+    #[test]
+    fn selected_active_set_supplies_count_policy_and_stake_supplies_proof() {
+        let active = validators(4);
+        let members = Members {
+            active,
+            stake: validators(7),
+        };
+        let records = [
+            reply(1, LOCAL, 10),
+            reply(2, LOCAL, 10),
+            reply(7, OTHER, 999),
+        ];
+        let required = super::policy::required_attesters(members.active.f, members.active.n, 0);
+        assert_eq!(required, 2);
+        let classified = classify_members(CHAIN, &head(10), &members, required, &records).unwrap();
+        assert_eq!(classified.responses, 2);
+        assert_eq!(classified.peer_target, 10);
+        assert_eq!(classified.status, Status::Attested { consensus: false });
+    }
+
+    #[test]
+    fn all_authenticated_heads_supply_the_native_fault_tolerant_target() {
         let authority = validators(4);
         let responses = [
             reply(1, LOCAL, 12),
@@ -407,12 +569,12 @@ mod tests {
             classify(CHAIN, &head(10), &authority, &responses)
                 .unwrap()
                 .1,
-            Some(11)
+            Some(12)
         );
         let responses = [
             reply(1, LOCAL, 999),
             reply(2, LOCAL, 10),
-            reply(3, OTHER, 999),
+            reply(3, OTHER, 10),
         ];
         assert_eq!(
             classify(CHAIN, &head(10), &authority, &responses)
@@ -456,10 +618,13 @@ mod tests {
         async fn head(&self) -> Result<Head> {
             Ok(self.head.lock().unwrap().clone())
         }
-        async fn authority(&self, head: &Head, epoch: i64) -> Result<ValidatorSet> {
+        async fn authority(&self, head: &Head, epoch: i64) -> Result<Members> {
             assert_eq!(epoch, head.cursor.epoch.0 as i64 + 1);
             self.authority_epochs.lock().unwrap().push(epoch);
-            Ok(validators(4))
+            Ok(Members {
+                active: validators(4),
+                stake: validators(4),
+            })
         }
         async fn roots(&self, epoch: i64, wait_for: WaitFor) -> Result<Vec<Response>> {
             assert!(matches!(wait_for, WaitFor::ConsensusQuorum));

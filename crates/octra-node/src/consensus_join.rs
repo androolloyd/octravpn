@@ -227,20 +227,15 @@ impl Client {
             }
             let source_deadline = Self::source_deadline(deadline, self.sources.len() - index);
             let candidate = async {
-                let advertised = self.advertised(source, source_deadline).await?;
-                if advertised.epoch <= base.cursor.epoch.0 as i64 {
-                    return Ok(None);
-                }
                 let from = i64::try_from(base.cursor.epoch.0)?
                     .checked_add(1)
                     .context("join epoch overflow")?;
+                // The head advertisement can lag the source's range backend,
+                // or be unavailable while signed successors remain readable.
+                // Probe the bounded consecutive range independently; only its
+                // locally authenticated first record may select a target.
                 if let Ok(records) = self
-                    .range(
-                        source,
-                        from,
-                        (advertised.epoch - from + 1).min(catchup::RANGE_EPOCHS),
-                        source_deadline,
-                    )
+                    .range(source, from, catchup::RANGE_EPOCHS, source_deadline)
                     .await
                 {
                     catchup::verify_chain_continuity(&records, from, &base.cursor.state_root.0)?;
@@ -252,9 +247,14 @@ impl Client {
                     node.publisher
                         .verify_record(&base, &records[0], &executor.graph())
                         .await?;
-                    return Ok::<_, anyhow::Error>(Some(
-                        records.last().context("join range is empty")?.epoch_id as u64,
-                    ));
+                    // Later records have not resolved their actual parent
+                    // rules yet. An unproved suffix cannot become a persistent
+                    // recovery obligation or stop an otherwise healthy driver.
+                    return Ok::<_, anyhow::Error>(Some(records[0].epoch_id as u64));
+                }
+                let advertised = self.advertised(source, source_deadline).await?;
+                if advertised.epoch <= base.cursor.epoch.0 as i64 {
+                    return Ok(None);
                 }
                 if let Ok(records) = self
                     .range(source, advertised.epoch, 1, source_deadline)

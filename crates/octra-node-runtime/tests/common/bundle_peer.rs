@@ -43,6 +43,10 @@ pub(crate) struct Authority {
     pub(crate) requests: Arc<Mutex<Vec<[u8; 32]>>>,
     pub(crate) corrupt: Arc<AtomicBool>,
     pub(crate) duplicate: Arc<AtomicBool>,
+    /// Missing-root replies retain the fixture's genuine advertised head.
+    pub(crate) roots_unavailable: Arc<AtomicBool>,
+    /// Signed head hints can outpace available finality records in test peers.
+    pub(crate) advertised_head: Arc<Mutex<Option<i64>>>,
 }
 #[async_trait::async_trait]
 impl Host for Authority {
@@ -147,6 +151,7 @@ impl epoch_roots::Host for Authority {
         } else {
             fixture_head
         };
+        let head = self.advertised_head.lock().unwrap().unwrap_or(head);
         Ok(epoch_roots::State {
             active: self.validators.clone(),
             stake: self.validators.clone(),
@@ -155,6 +160,9 @@ impl epoch_roots::Host for Authority {
         })
     }
     async fn root(&self, epoch: i64) -> Result<Option<Bytes>, Error> {
+        if self.roots_unavailable.load(Ordering::SeqCst) {
+            return Ok(None);
+        }
         let history = self.history.lock().unwrap().clone();
         if let Some(history) = history {
             return history
@@ -314,6 +322,8 @@ pub(crate) async fn node(
         requests: Arc::default(),
         corrupt: Arc::default(),
         duplicate: Arc::default(),
+        roots_unavailable: Arc::default(),
+        advertised_head: Arc::default(),
     };
     let clock = Arc::new(AtomicI64::new(0));
     let monotonic = clock.clone();

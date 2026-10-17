@@ -10,8 +10,7 @@ use octra_node_protocol::{
 };
 use std::sync::Mutex;
 
-#[path = "../../../../octra-node-runtime/tests/common/bundle_peer.rs"]
-mod peer;
+use super::super::test_peer as peer;
 
 const CHAIN: &[u8] = b"connected-root-health-fixture";
 const EPOCH: i64 = 10;
@@ -80,10 +79,13 @@ impl Source for Connected<'_> {
     async fn head(&self) -> Result<Head> {
         Ok(head())
     }
-    async fn authority(&self, observed: &Head, epoch: i64) -> Result<ValidatorSet> {
+    async fn authority(&self, observed: &Head, epoch: i64) -> Result<Members> {
         assert_eq!(*observed, head());
         assert_eq!(epoch, EPOCH + 1);
-        Ok(self.authority.clone())
+        Ok(Members {
+            active: self.authority.clone(),
+            stake: self.authority.clone(),
+        })
     }
     async fn roots(&self, epoch: i64, wait_for: WaitFor) -> Result<Vec<Response>> {
         let responses = self.reader.roots.query(epoch, 2., wait_for, false).await?;

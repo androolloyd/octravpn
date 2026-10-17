@@ -424,6 +424,7 @@ pub async fn run(config: Config, shutdown: watch::Receiver<bool>) -> Result<()> 
             payments: config.payments,
             voting: config.voting,
             minimum_peers: 2,
+            health: octra_node_protocol::consensus::health::Config::default(),
             startup_timeout: Duration::from_secs(60),
             timeouts: TimeoutConfig::default(),
             epoch_capacity: 10_000_000_000_u64.into(),

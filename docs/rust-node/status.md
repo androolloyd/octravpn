@@ -9,6 +9,18 @@ upstream behavioral parity and public-network deployment remain unqualified.
 
 ## Recorded local evidence
 
+- The [native health admission checkpoint](checkpoints/2026-10-17/recovery-health-policy.json)
+  records 265 passing tests across 17 final targets, with four intentional helper
+  ignores. It includes 1,898 comparisons against adopted OCaml policy bodies,
+  real connected observer/voter quarantine and recovery, startup refusal before
+  attestation, a configured three-peer threshold, initial one-epoch soft-lag
+  admission and HTTP recovery despite stale head advertisements. Canonical
+  history, vote journals, VPN permits, Circle documents and ExEx are checked.
+  Strict lint, formatting, 14 compiled payment AML tests and 19 abstract Lean
+  theorems pass. The [review](checkpoints/2026-10-17/recovery-health-policy.md)
+  records the initial test-fixture failure, later lint corrections and proof
+  limits. Full native health orchestration, legacy repair and public recovery
+  remain separate gates; this batch leaves the public observer running unchanged.
 - The [root quarantine checkpoint](checkpoints/2026-10-17/root-quarantine.json)
   records signed root-conflict checks before connected recovery shortcuts.
   The final node run passed 128 tests; nine unchanged protocol/runtime targets

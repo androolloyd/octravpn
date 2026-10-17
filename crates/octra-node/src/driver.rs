@@ -175,8 +175,8 @@ impl<A: Host> Validator<A> {
         }
         ready
     }
-    /// Seed a nonvoting observer from its authenticated retained head while
-    /// public service admission remains suspended during catch-up.
+    /// Seed startup from authenticated retained history without enabling public
+    /// service admission or signing before current-head peer attestation.
     pub(crate) async fn activate_retained(&self, number: i64) -> Result<ValidatorSet, Error> {
         let head = self.node.head().await.map_err(error)?;
         self.activate_at(number, head).await
@@ -246,18 +246,6 @@ impl<A: Host> Validator<A> {
         engine: &mut octra_node_protocol::consensus::engine::Engine,
     ) -> Result<(), Error> {
         let epoch = self.epoch()?;
-        self.recover_at(engine, epoch).await
-    }
-    /// Check an observer's durable journal against its retained head while
-    /// external serving remains suspended during authenticated catch-up.
-    pub(crate) async fn recover_retained(
-        &self,
-        engine: &mut octra_node_protocol::consensus::engine::Engine,
-    ) -> Result<(), Error> {
-        let epoch = self.cached_epoch()?;
-        if self.node.head().await.map_err(error)? != epoch.head {
-            return Err("validator view advanced".into());
-        }
         self.recover_at(engine, epoch).await
     }
     async fn recover_at(

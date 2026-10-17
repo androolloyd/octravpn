@@ -40,6 +40,9 @@ Its [service review](docs/audit/octranet-client-service-2026-10-17.md) records
 the lifecycle checks and remaining stock-client integration boundaries.
 The node captures trusted [P2P upgrade and rollback schedules](docs/rust-node/transport-upgrades.md)
 and checks the selected canonical consensus configuration before voting.
+Public startup and recovery also apply the adopted [peer health admission policy](docs/rust-node/root-recovery.md)
+before serving or signing; the [connected recovery checkpoint](docs/rust-node/checkpoints/2026-10-17/recovery-health-policy.md)
+records local qualification and its limits.
 
 **Rust node qualification (2026-10-15):** the `octra-node` executable connects the
 native validator driver, authenticated peers, transaction intake, canonical

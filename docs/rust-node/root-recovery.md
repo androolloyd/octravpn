@@ -6,16 +6,16 @@ skip the probe, and forward-target selection discarded conflicting roots.
 Matching-root filtering remains useful for choosing a forward catch-up target;
 it cannot decide whether the current head is safe to serve.
 
-The health query captures the exact canonical head, its next-epoch historical
-stake authority and a quarantine token. It retries one moving-head sample.
+The health query captures the exact canonical head, its next-epoch active and
+historical stake authorities, and a quarantine token. It retries one moving-head sample.
 `EpochRoots` verifies validator signatures and deduplicates responders at its
 receive boundary. The health classifier also refuses duplicate, unknown,
-zero-weight and malformed internal records. It groups responses by root and
-uses the adopted historical source-agreement and consensus-quorum policies.
-Consensus evidence takes precedence over weak agreement. Without consensus,
-the eligible root with the most distinct signers wins. Count ties use byte
-order for this operational health decision; upstream Hashtbl ties are not
-claimed to match. This choice has no finality or rollback authority.
+zero-weight and malformed internal records. Native health admission requires
+`min(n - 1, max(active_f + 1, OCTRA_STATE_ATTEST_MIN_PEERS))` distinct peers,
+independently of the weighted source-agreement and consensus-proof rules.
+The most common root wins, with adopted seed-zero OCaml table traversal deciding
+count ties. Weighted consensus evidence is recorded separately and cannot
+replace the required peer count. This choice has no finality or rollback authority.
 
 A fresh conflict suspends services under the canonical publication lease.
 Existing VPN permits, browser application snapshots and retained gateway URLs
@@ -24,11 +24,23 @@ but neither it nor an ordinary resume can clear the root gate. The supervisor
 joins the stopped driver generation and reconciles already committed pending
 work before another generation can run.
 
-Recovery requires fresh matching root evidence with no established higher
-matching head. Clearing checks both the exact head and the token captured
-before the query. A newer conflict invalidates an older sample even at the
-same head. Clear leaves services suspended; `resume_at` checks the attested
-head again while holding the publication lease and audits canonical history.
+Native ahead grace, drift tolerance, quarantine streak and soft-lag policy
+control admission separately. Authenticated rootless responses still contribute
+head observations; the native fault-tolerant target uses the active set's `f`,
+so one exaggerated head cannot establish a catch-up obligation. A matching
+one-epoch soft lag can admit an initially suspended node before successor data
+arrives. Larger lag must complete authenticated recovery before admission.
+
+Public startup holds services and signing until this policy admits the retained
+head. Peer hello heights cannot establish mandatory startup catch-up targets.
+HTTP recovery probes the consecutive range even when its advertised head is
+stale or unavailable. Only its first locally QC-verified successor becomes a
+persistent target; an unverified suffix cannot stall a healthy driver.
+
+Clearing a quarantine checks both the exact head and the token captured before
+the query. A newer conflict invalidates an older sample even at the same head.
+Clear leaves services suspended; `resume_at` checks the admitted head again
+while holding the publication lease and audits canonical history.
 Resuming the same head preserves its original paid-admission age.
 `GET /operator/status` reports the suspension reason. As in the adopted
 runtime, the quarantine gate is process-local, not a durable ledger marker.

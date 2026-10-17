@@ -30,11 +30,16 @@ use std::{sync::Arc, time::Duration};
 use tokio::{sync::watch, task::JoinHandle, time::Instant};
 
 mod health;
+#[cfg(test)]
+mod live_tests;
+#[cfg(test)]
+#[path = "../../octra-node-runtime/tests/common/bundle_peer.rs"]
+mod test_peer;
 
 pub(crate) type Live<A> = Driver<driver::Validator<A>, Canonical<A, Authority, Native>>;
 /// Responses come only from `EpochRoots::query`, whose handler verifies each
-/// validator signature. A lone higher head is a one-epoch availability hint;
-/// it never supplies canonical state or relaxes finality verification.
+/// validator signature. Only the native fault-tolerant head target may stop a
+/// driver; a lone signed hint cannot create a persistent catch-up obligation.
 fn target_from_verified_roots(
     chain: &[u8],
     epoch: i64,
@@ -60,11 +65,6 @@ fn target_from_verified_roots(
             return Ok(Some(u64::try_from(advertised)?));
         }
     }
-    if matching.iter().any(|r| r.responder_head_epoch > epoch) {
-        return Ok(Some(u64::try_from(
-            epoch.checked_add(1).context("recovery epoch overflow")?,
-        )?));
-    }
     Ok(None)
 }
 pub(crate) struct Service<A: Host> {
@@ -83,6 +83,7 @@ pub(crate) struct Service<A: Host> {
     pub timeouts: TimeoutConfig,
     pub voting: bool,
     pub minimum_peers: usize,
+    pub health: octra_node_protocol::consensus::health::Config,
     pub budget: Duration,
     pub duty: Option<DutyHandler>,
 }
@@ -265,26 +266,144 @@ impl<A: Host> Service<A> {
         self.authority.set_validators(rules.validators)?;
         Ok(())
     }
-    async fn current_attested(&self) -> Result<Option<octra_node_runtime::canonical::Head>> {
+    async fn current_attested(
+        &self,
+        ahead_streak: &mut i64,
+    ) -> Result<Option<octra_node_runtime::canonical::Head>> {
         if self.minimum_peers == 0 {
             return Ok((!self.node.root_quarantined()).then_some(self.node.head().await?));
         }
         let sample = health::query(self).await?;
-        if self.quarantine_conflict(&sample).await? {
+        let Some(sample) = self.admissible(sample, ahead_streak, false).await? else {
             return Ok(None);
-        }
-        if !matches!(sample.status, health::Status::Attested { .. }) || sample.target.is_some() {
-            return Ok(None);
-        }
-        if self.node.root_quarantined()
-            && !self
+        };
+        Ok(self
+            .clear_attested(&sample, ahead_streak)
+            .await?
+            .then_some(sample.head))
+    }
+
+    async fn clear_attested(
+        &self,
+        sample: &health::Sample,
+        ahead_streak: &mut i64,
+    ) -> Result<bool> {
+        if self.node.root_quarantined() {
+            if !self
                 .node
                 .clear_root_quarantine_at(&sample.head, &sample.ticket)
                 .await?
-        {
+            {
+                return Ok(false);
+            }
+            *ahead_streak = 0;
+        }
+        Ok(true)
+    }
+
+    /// Native health distinguishes count attestation from weighted finality,
+    /// and treats ahead, in-sync and soft/hard lag as different admission paths.
+    async fn admissible(
+        &self,
+        sample: health::Sample,
+        ahead_streak: &mut i64,
+        count_ahead: bool,
+    ) -> Result<Option<health::Sample>> {
+        use octra_node_protocol::consensus::health::{
+            self as policy, AheadNoQuorumPlan, AheadQuorumPlan, LagMode,
+        };
+        if matches!(sample.status, health::Status::Stale) {
             return Ok(None);
         }
-        Ok(Some(sample.head))
+        if (sample.responses < sample.required || matches!(sample.status, health::Status::Unknown))
+            && !self.node.root_quarantined()
+            && matches!(self.node.status(), crate::Status::Suspended(_))
+        {
+            self.node.suspend(&format!(
+                "awaiting current-head attestation: epoch {} matching {} responses {} required {} target {}",
+                sample.head.cursor.epoch.0, sample.matching, sample.responses, sample.required, sample.peer_target,
+            ));
+        }
+        if sample.responses < sample.required {
+            return Ok(None);
+        }
+        let epoch = i64::try_from(sample.head.cursor.epoch.0)?;
+        if sample.peer_target < epoch {
+            if count_ahead {
+                *ahead_streak = ahead_streak.saturating_add(1);
+            }
+            let ahead = epoch.saturating_sub(sample.peer_target);
+            if matches!(
+                sample.status,
+                health::Status::Attested { .. } | health::Status::Conflicting { .. }
+            ) {
+                match policy::ahead_quorum_plan(
+                    epoch,
+                    ahead,
+                    *ahead_streak,
+                    self.health.ahead_grace_epochs,
+                    self.health.ahead_drift_tolerance,
+                    self.health.ahead_streak_threshold,
+                    self.node.root_quarantined(),
+                ) {
+                    AheadQuorumPlan::QuarantineAhead => {
+                        self.node
+                            .quarantine_root_at(
+                                &sample.head,
+                                &format!("ahead_of_target_by_{ahead}_streak_{ahead_streak}"),
+                            )
+                            .await?;
+                    }
+                    AheadQuorumPlan::StayActive { wake_ready: true }
+                    | AheadQuorumPlan::DelayQuarantine { wake_ready: true } => {
+                        return Ok(Some(sample))
+                    }
+                    _ => (),
+                }
+                return Ok(None);
+            }
+            if policy::ahead_no_quorum_plan(
+                epoch,
+                ahead,
+                self.health.ahead_grace_epochs,
+                self.health.ahead_drift_tolerance,
+                self.node.root_quarantined(),
+            ) == AheadNoQuorumPlan::WaitCurrentHead
+            {
+                return Ok(Some(sample));
+            }
+            // A fresh current-root proof can recover ahead quarantine. Missing
+            // evidence never authorizes truncating the protected canonical tail.
+            let fresh = health::query(self).await?;
+            if fresh.head != sample.head || matches!(fresh.status, health::Status::Stale) {
+                return Ok(None);
+            }
+            if self.quarantine_conflict(&fresh).await? {
+                return Ok(None);
+            }
+            return Ok(matches!(fresh.status, health::Status::Attested { .. }).then_some(fresh));
+        }
+        if sample.peer_target > epoch {
+            let lag = sample.peer_target.saturating_sub(epoch);
+            if policy::classify_lag_mode(lag, self.health.soft_catchup_max_lag)
+                == LagMode::Quarantine
+            {
+                self.node
+                    .quarantine_root_at(&sample.head, &format!("lag_{lag}"))
+                    .await?;
+                return Ok(None);
+            }
+            // The native first admission permits a matching one-epoch soft lag;
+            // subsequent forward import still checks the complete certificate.
+            return Ok((lag == 1
+                && !matches!(self.node.status(), crate::Status::Serving(_))
+                && matches!(sample.status, health::Status::Attested { .. }))
+            .then_some(sample));
+        }
+        if self.quarantine_conflict(&sample).await? {
+            return Ok(None);
+        }
+        Ok(matches!(sample.status, health::Status::Attested { .. }).then_some(sample))
     }
     async fn quarantine_conflict(&self, sample: &health::Sample) -> Result<bool> {
         let health::Status::Conflicting { root, consensus } = sample.status else {
@@ -370,12 +489,16 @@ impl<A: Host> Service<A> {
         }
     }
     async fn run_inner(&self, driver: Live<A>) -> Result<()> {
-        // Observers import finalized history through this supervisor. Running
-        // a consensus driver without voting adds no authority and can race
-        // its suspended catch-up lease during a restart.
-        let mut running = if self.voting {
+        // Public startup retains no signing or service admission until peer
+        // attestation. The supplied retained generation has never run; rebuild
+        // and replay its durable locks only after that admission succeeds.
+        let mut running = if self.voting && self.minimum_peers == 0 {
             Some(Running::start(driver))
         } else {
+            if self.minimum_peers > 0 {
+                self.node
+                    .suspend("awaiting authenticated current-head attestation");
+            }
             self.authority.detach();
             drop(driver);
             None
@@ -385,6 +508,7 @@ impl<A: Host> Service<A> {
         let mut last = self.node.head().await?.cursor.sequence;
         let mut progress = Instant::now();
         let mut desired = None;
+        let mut ahead_streak = 0;
         loop {
             if let Some(driver) = running.as_mut() {
                 tokio::select! {
@@ -405,10 +529,37 @@ impl<A: Host> Service<A> {
             // root gate survives ordinary publication and resume attempts.
             if connected && self.minimum_peers > 0 {
                 match health::query(self).await {
-                    Ok(sample) => {
-                        self.quarantine_conflict(&sample).await?;
+                    Ok(mut sample) => {
+                        let epoch = sample.head.cursor.epoch.0;
+                        if let Some(queued) = desired.filter(|target| *target > epoch) {
+                            sample.peer_target = sample.peer_target.max(i64::try_from(queued)?);
+                            sample.target = Some(u64::try_from(sample.peer_target)?);
+                        }
+                        let soft_start = sample.target == epoch.checked_add(1)
+                            && self.health.soft_catchup_max_lag >= 1
+                            && running.is_none()
+                            && !matches!(self.node.status(), crate::Status::Serving(_));
                         if let Some(target) = sample.target {
                             desired = Some(desired.map_or(target, |p: u64| p.max(target)));
+                        }
+                        match self.admissible(sample, &mut ahead_streak, true).await {
+                            Ok(Some(sample)) if soft_start => {
+                                // Native soft_lag_current_root admission precedes
+                                // catch-up: unavailable successor data must not
+                                // suppress this first one-epoch admission.
+                                if self.clear_attested(&sample, &mut ahead_streak).await?
+                                    && self.node.resume_at(&sample.head).await?
+                                {
+                                    self.pending.recover(&self.submission).await?;
+                                    if self.voting && running.is_none() {
+                                        running = Some(Running::start(self.build().await?));
+                                    }
+                                    progress = Instant::now();
+                                    continue;
+                                }
+                            }
+                            Err(error) => eprintln!("live root admission unavailable: {error:#}"),
+                            _ => (),
                         }
                     }
                     Err(error) => eprintln!("live root health unavailable: {error:#}"),
@@ -514,9 +665,9 @@ impl<A: Host> Service<A> {
                             .as_secs_f64()
                             .min(8.);
                         if remaining > 0. {
-                            // One successor per attempt keeps a lone signed
-                            // high-head hint bounded. Full QC and execution
-                            // still decide whether that successor commits.
+                            // One successor per attempt bounds unavailable
+                            // source data. Full QC and execution still decide
+                            // whether that successor commits.
                             let next = self
                                 .node
                                 .head()
@@ -579,7 +730,7 @@ impl<A: Host> Service<A> {
             if self.swarm.peers().len() < self.minimum_peers {
                 continue;
             }
-            let observed = match self.current_attested().await {
+            let observed = match self.current_attested(&mut ahead_streak).await {
                 Ok(Some(observed)) => observed,
                 Ok(None) => continue,
                 Err(error) => {
@@ -606,7 +757,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
-    fn one_verified_ahead_head_probes_only_the_successor() {
+    fn one_verified_ahead_head_cannot_stop_a_driver() {
         let chain = b"node-recovery-fixture";
         let root = [7_u8; 32];
         let validators = ValidatorSet::unweighted(
@@ -634,7 +785,7 @@ mod tests {
                 std::slice::from_ref(&signed)
             )
             .unwrap(),
-            Some(11)
+            None
         );
         let mut mismatched = signed.clone();
         mismatched.state_root = Some(vec![0; 32]);
@@ -648,6 +799,11 @@ mod tests {
             responder_head_epoch: 10,
             state_root: Some(root.to_vec()),
         }));
+        assert_eq!(
+            target_from_verified_roots(chain, 10, &root, &validators, &responses).unwrap(),
+            None
+        );
+        responses[1].responder_head_epoch = 11;
         assert_eq!(
             target_from_verified_roots(chain, 10, &root, &validators, &responses).unwrap(),
             Some(11)

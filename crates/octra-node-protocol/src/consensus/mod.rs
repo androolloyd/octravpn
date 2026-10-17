@@ -10,6 +10,7 @@ pub mod engine;
 pub mod evidence;
 pub mod finality_query;
 pub mod hash;
+pub mod health;
 pub mod journal;
 mod journal_io;
 pub mod pace;

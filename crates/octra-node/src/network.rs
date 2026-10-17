@@ -385,6 +385,9 @@ pub async fn run(config: Config, mut shutdown: watch::Receiver<bool>) -> Result<
             voting,
             state_sync: Some(state_sync),
             minimum_peers: 1,
+            health: octra_node_protocol::consensus::health::Config::from_inputs(|name| {
+                settings.get(name)
+            }),
             startup_timeout: Duration::from_secs(config.startup_seconds),
             timeouts,
             epoch_capacity: settings.proposal_ou.clone(),

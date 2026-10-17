@@ -286,7 +286,9 @@ impl<A: Host> Node<A> {
         Ok(self.shared.clear_root_quarantine(ticket))
     }
 
-    async fn serving(&self) -> Result<Serving> {
+    /// Trusted local setup may inspect pinned application code before peer
+    /// attestation. This grants no service, transaction or signing capability.
+    pub(crate) async fn retained_view(&self) -> Result<Committed> {
         let head = self.store.head().await?;
         let assets = CanonicalAssets::capture(&self.store).await?;
         anyhow::ensure!(
@@ -295,6 +297,12 @@ impl<A: Host> Node<A> {
             "canonical writer changed outside the node"
         );
         self.host.check_views(&head).map_err(anyhow::Error::msg)?;
+        Ok(Committed { head, assets })
+    }
+
+    async fn serving(&self) -> Result<Serving> {
+        let committed = self.retained_view().await?;
+        let assets = committed.assets.clone();
         let rules = octra_node_runtime::circle_view::canonical_with_graph(
             &assets,
             &self.view_graph,
@@ -311,7 +319,7 @@ impl<A: Host> Node<A> {
             .with_application(Arc::new(application))?
             .router();
         Ok(Serving {
-            committed: Committed { head, assets },
+            committed,
             router,
             revocation,
             observed_at: std::time::Instant::now(),

@@ -40,6 +40,8 @@ struct JoinFixture {
     first_root: Vec<u8>,
     requests: Arc<Mutex<Vec<i64>>>,
     unavailable: Arc<AtomicBool>,
+    head_response: Arc<Mutex<Option<Vec<u8>>>>,
+    invalid_epoch: Arc<std::sync::atomic::AtomicI64>,
 }
 impl JoinFixture {
     async fn new() -> Self {
@@ -102,51 +104,92 @@ impl JoinFixture {
 
         let requests = Arc::new(Mutex::new(Vec::new()));
         let unavailable = Arc::new(AtomicBool::new(false));
+        let invalid_epoch = Arc::new(std::sync::atomic::AtomicI64::new(0));
+        let base = target.head().await.unwrap();
+        let head_response = Arc::new(Mutex::new(Some(http::head_response(
+            base.cursor.epoch.0 as i64 + 1,
+            Some(&http::Head {
+                epoch: base.cursor.epoch.0 as i64,
+                state_root: hex::encode(base.cursor.state_root.0).into_bytes(),
+                txid_hi: base.txid_hi,
+                irmin_commit: None,
+            }),
+            None,
+        ))));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
-        let router = axum::Router::new().route(
-            "/state-sync/range",
-            axum::routing::get({
-                let requests = requests.clone();
-                let unavailable = unavailable.clone();
-                move |axum::extract::Query(query): axum::extract::Query<
-                    std::collections::HashMap<String, String>,
-                >| {
-                    let records = records.clone();
+        let router = axum::Router::new()
+            .route(
+                "/state-sync/head",
+                axum::routing::get({
+                    let head_response = head_response.clone();
+                    move || {
+                        let response = head_response.lock().unwrap().clone();
+                        async move {
+                            response.map_or_else(
+                                || (axum::http::StatusCode::SERVICE_UNAVAILABLE, Vec::new()),
+                                |body| (axum::http::StatusCode::OK, body),
+                            )
+                        }
+                    }
+                }),
+            )
+            .route(
+                "/state-sync/range",
+                axum::routing::get({
                     let requests = requests.clone();
                     let unavailable = unavailable.clone();
-                    async move {
-                        let from: i64 = query["from_epoch"].parse().unwrap();
-                        let max: i64 = query["max_epochs"].parse().unwrap();
-                        requests.lock().unwrap().push(from);
-                        if unavailable.load(Ordering::SeqCst) {
-                            return (axum::http::StatusCode::SERVICE_UNAVAILABLE, Vec::new());
+                    let invalid_epoch = invalid_epoch.clone();
+                    move |axum::extract::Query(query): axum::extract::Query<
+                        std::collections::HashMap<String, String>,
+                    >| {
+                        let records = records.clone();
+                        let requests = requests.clone();
+                        let unavailable = unavailable.clone();
+                        let invalid_epoch = invalid_epoch.clone();
+                        async move {
+                            let from: i64 = query["from_epoch"].parse().unwrap();
+                            let max: i64 = query["max_epochs"].parse().unwrap();
+                            requests.lock().unwrap().push(from);
+                            if unavailable.load(Ordering::SeqCst) {
+                                return (axum::http::StatusCode::SERVICE_UNAVAILABLE, Vec::new());
+                            }
+                            let query = http::RangeQuery {
+                                from_epoch: from,
+                                max_epochs: max,
+                                part: None,
+                                hash: None,
+                            };
+                            let mut records: Vec<_> = records
+                                .into_iter()
+                                .filter(|record| record.epoch_id >= from)
+                                .take(usize::try_from(max).unwrap())
+                                .collect();
+                            for record in &mut records {
+                                if record.epoch_id == invalid_epoch.load(Ordering::SeqCst) {
+                                    record
+                                        .finality
+                                        .as_mut()
+                                        .unwrap()
+                                        .finalize
+                                        .precommits
+                                        .clear();
+                                }
+                            }
+                            let body = http::range_response(
+                                None,
+                                &query,
+                                &http::RangeResult::Records {
+                                    records,
+                                    next_epoch: None,
+                                },
+                            )
+                            .unwrap();
+                            (axum::http::StatusCode::OK, body)
                         }
-                        let query = http::RangeQuery {
-                            from_epoch: from,
-                            max_epochs: max,
-                            part: None,
-                            hash: None,
-                        };
-                        let records = records
-                            .into_iter()
-                            .filter(|record| record.epoch_id >= from)
-                            .take(usize::try_from(max).unwrap())
-                            .collect();
-                        let body = http::range_response(
-                            None,
-                            &query,
-                            &http::RangeResult::Records {
-                                records,
-                                next_epoch: None,
-                            },
-                        )
-                        .unwrap();
-                        (axum::http::StatusCode::OK, body)
                     }
-                }
-            }),
-        );
+                }),
+            );
         let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
         let client = octra_node::consensus_join::Client::capture(|name| {
             (name == "OCTRA_JOIN_RPC").then(|| endpoint.as_bytes().to_vec())
@@ -162,6 +205,8 @@ impl JoinFixture {
             first_root,
             requests,
             unavailable,
+            head_response,
+            invalid_epoch,
         }
     }
     async fn shutdown(self) {
@@ -170,6 +215,163 @@ impl JoinFixture {
         self.server.abort();
         assert!(self.server.await.unwrap_err().is_cancelled());
     }
+}
+
+#[tokio::test]
+async fn http_target_uses_authenticated_successors_with_stale_or_unavailable_head() {
+    for unavailable_head in [false, true] {
+        let fixture = JoinFixture::new().await;
+        if unavailable_head {
+            *fixture.head_response.lock().unwrap() = None;
+        }
+        let membership_store = CanonicalStore::open(
+            &fixture.directory.path().join("target.db"),
+            &fixture.authority.chain,
+        )
+        .await
+        .unwrap();
+        let membership = octra_node_runtime::validator_history::CanonicalValidators::new(
+            membership_store.reader(),
+            octra_node_runtime::validator_history::Environment::default(),
+        );
+        let executor = ImportExecutor::new(&fixture.authority, &fixture.target);
+        for expected in [1, 2] {
+            let target = fixture
+                .client
+                .proved_target(
+                    &fixture.target,
+                    &membership,
+                    &executor,
+                    Instant::now() + Duration::from_secs(5),
+                )
+                .await
+                .unwrap();
+            assert_eq!(target, Some(expected));
+            // Selecting a target neither commits nor grants serving. Every
+            // successor resolves its own authority after its actual parent.
+            assert_eq!(
+                fixture.target.head().await.unwrap().cursor.epoch.0,
+                expected - 1
+            );
+            assert!(fixture.target.snapshot().is_err());
+            let progress = fixture
+                .client
+                .catch_up(
+                    &fixture.target,
+                    expected,
+                    &executor,
+                    Instant::now() + Duration::from_secs(5),
+                )
+                .await
+                .unwrap();
+            assert!(progress.reached);
+            assert_eq!(progress.head.cursor.epoch.0, expected);
+            assert!(fixture.target.snapshot().is_err());
+        }
+        assert_eq!(
+            fixture.target.head().await.unwrap(),
+            fixture.source.head().await.unwrap()
+        );
+        membership_store.close().await;
+        fixture.shutdown().await;
+    }
+}
+
+#[tokio::test]
+async fn http_target_rejects_successors_without_valid_finality_despite_stale_head() {
+    let fixture = JoinFixture::new().await;
+    fixture.invalid_epoch.store(1, Ordering::SeqCst);
+    let membership_store = CanonicalStore::open(
+        &fixture.directory.path().join("target.db"),
+        &fixture.authority.chain,
+    )
+    .await
+    .unwrap();
+    let membership = octra_node_runtime::validator_history::CanonicalValidators::new(
+        membership_store.reader(),
+        octra_node_runtime::validator_history::Environment::default(),
+    );
+    let executor = ImportExecutor::new(&fixture.authority, &fixture.target);
+    assert_eq!(
+        fixture
+            .client
+            .proved_target(
+                &fixture.target,
+                &membership,
+                &executor,
+                Instant::now() + Duration::from_secs(5),
+            )
+            .await
+            .unwrap(),
+        None
+    );
+    assert_eq!(*fixture.requests.lock().unwrap(), [1]);
+    assert_eq!(fixture.target.head().await.unwrap().cursor.epoch.0, 0);
+    assert!(fixture.target.snapshot().is_err());
+    membership_store.close().await;
+    fixture.shutdown().await;
+}
+
+#[tokio::test]
+async fn http_target_does_not_promote_an_unproved_suffix_to_a_persistent_target() {
+    let fixture = JoinFixture::new().await;
+    fixture.invalid_epoch.store(2, Ordering::SeqCst);
+    let membership_store = CanonicalStore::open(
+        &fixture.directory.path().join("target.db"),
+        &fixture.authority.chain,
+    )
+    .await
+    .unwrap();
+    let membership = octra_node_runtime::validator_history::CanonicalValidators::new(
+        membership_store.reader(),
+        octra_node_runtime::validator_history::Environment::default(),
+    );
+    let executor = ImportExecutor::new(&fixture.authority, &fixture.target);
+    let first = fixture
+        .client
+        .proved_target(
+            &fixture.target,
+            &membership,
+            &executor,
+            Instant::now() + Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first, Some(1));
+    assert_eq!(fixture.target.head().await.unwrap().cursor.epoch.0, 0);
+    let progress = fixture
+        .client
+        .catch_up(
+            &fixture.target,
+            first.unwrap(),
+            &executor,
+            Instant::now() + Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+    assert!(progress.reached);
+    assert_eq!(progress.head.cursor.epoch.0, 1);
+    assert_eq!(
+        progress.head.cursor.state_root.0.as_slice(),
+        fixture.first_root
+    );
+    assert_eq!(
+        fixture
+            .client
+            .proved_target(
+                &fixture.target,
+                &membership,
+                &executor,
+                Instant::now() + Duration::from_secs(5),
+            )
+            .await
+            .unwrap(),
+        None
+    );
+    assert_eq!(fixture.target.head().await.unwrap(), progress.head);
+    assert!(fixture.target.snapshot().is_err());
+    membership_store.close().await;
+    fixture.shutdown().await;
 }
 
 #[tokio::test]
@@ -290,8 +492,8 @@ async fn http_join_tries_secondary_after_primary_head_stalls() {
         )
         .await
         .unwrap();
-    assert_eq!(proved, Some(2));
-    assert!(head_seen.swap(false, Ordering::SeqCst));
+    assert_eq!(proved, Some(1));
+    assert!(!head_seen.swap(false, Ordering::SeqCst));
     assert!(range_seen.swap(false, Ordering::SeqCst));
     membership_store.close().await;
     let report = client

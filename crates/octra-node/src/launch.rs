@@ -69,6 +69,7 @@ pub(crate) struct Plan {
     pub voting: bool,
     pub state_sync: Option<crate::snapshot_export::Config>,
     pub minimum_peers: usize,
+    pub health: octra_node_protocol::consensus::health::Config,
     pub startup_timeout: Duration,
     pub timeouts: TimeoutConfig,
     pub epoch_capacity: num_bigint::BigInt,
@@ -189,6 +190,7 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
         voting,
         state_sync,
         minimum_peers,
+        health,
         startup_timeout,
         timeouts,
         epoch_capacity,
@@ -511,8 +513,9 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
                     report.error.as_deref().unwrap_or("none")
                 );
             }
-            // Peer announcements select a target only. Historical QCs and local
-            // execution authenticate every imported epoch before voting starts.
+            // Connectivity does not authenticate a peer's advertised height.
+            // The supervisor selects native fault-tolerant targets and verifies
+            // every imported epoch before public admission or signing starts.
             let deadline = tokio::time::Instant::now() + startup_timeout;
             while swarm.peers().len() < minimum_peers {
                 ensure!(
@@ -522,13 +525,6 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
-            let peer_target = swarm
-                .peers()
-                .iter()
-                .map(|p| p.hello().best_epoch)
-                .max()
-                .unwrap_or(0)
-                .max(0) as u64;
             let target = join
                 .proved_target(
                     &node,
@@ -537,8 +533,7 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
                     tokio::time::Instant::now() + Duration::from_secs(20),
                 )
                 .await?
-                .unwrap_or(0)
-                .max(peer_target);
+                .unwrap_or(0);
             let behind = target > node.head().await?.cursor.epoch.0;
             if behind && voting {
                 let reached = node
@@ -558,19 +553,21 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
                 // Expose suspended observer status while live recovery imports
                 // authenticated history. Voting startup retains the strict gate.
                 node.suspend("observer awaiting authenticated catch-up");
-            } else {
+            } else if minimum_peers == 0 {
                 ensure!(node.resume().await?, "startup serving lease revoked");
+            } else {
+                node.suspend("awaiting authenticated current-head attestation");
             }
-            if !behind || voting {
-                // Restored queue entries need a current admission lease. The
-                // observer stays closed until recovery resumes that lease.
+            if minimum_peers == 0 && (!behind || voting) {
+                // Public queue recovery waits for the supervisor's current-head
+                // peer attestation, alongside services and signing.
                 pending.recover(&submission).await?;
             }
             let height = node.head().await?.cursor.epoch.0 as i64 + 1;
-            let set = if behind && !voting {
-                validator.activate_retained(height).await?
-            } else {
+            let set = if minimum_peers == 0 && (!behind || voting) {
                 validator.activate(height).await?
+            } else {
+                validator.activate_retained(height).await?
             };
             let mut engine = Engine::new(
                 chain.chain_id.as_bytes().to_vec(),
@@ -580,9 +577,7 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
                 protocol,
                 timeouts,
             );
-            if behind && !voting {
-                validator.recover_retained(&mut engine).await?;
-            } else {
+            if minimum_peers == 0 && (!behind || voting) {
                 validator.recover(&mut engine).await?;
             }
             validator.set_enabled(voting);
@@ -671,7 +666,7 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
                 let domain = config.domain()?;
                 let pinned =
                     crate::vpn::Pinned::new(config, node.store.reader(), receipt_key.public)?;
-                pinned.validate(&node.snapshot()?)?;
+                pinned.validate(&node.retained_view().await?)?;
                 let storage = crate::vpn::storage::paid(
                     &services.data,
                     node.store.chain(),
@@ -724,6 +719,7 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
             timeouts,
             voting,
             minimum_peers,
+            health,
             budget: startup_timeout,
             duty: duty_handler,
         };
