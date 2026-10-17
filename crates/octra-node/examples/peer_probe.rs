@@ -7,7 +7,6 @@ use octra_node_protocol::{
 };
 use rand::{rngs::OsRng, RngCore};
 use std::{net::SocketAddr, path::PathBuf};
-use tokio::net::TcpStream;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -86,8 +85,14 @@ async fn main() -> Result<()> {
         best_epoch: i64::try_from(epoch)?,
         best_root: root,
     };
-    let stream =
-        tokio::time::timeout(std::time::Duration::from_secs(5), TcpStream::connect(peer)).await??;
+    let stream = octra_node_protocol::network::proxy::connect(
+        &octra_node_protocol::network::endpoint::Endpoint {
+            host: peer.ip().to_string().into_bytes(),
+            port: peer.port(),
+        },
+        config.p2p_proxy,
+    )
+    .await?;
     match session::dial(
         stream,
         &local,
@@ -100,7 +105,7 @@ async fn main() -> Result<()> {
     {
         Ok(mut connection) => {
             println!(
-                "authenticated peer {} at {peer}",
+                "verified responder {} at {peer}",
                 String::from_utf8_lossy(&connection.peer().node_address)
             );
             match tokio::time::timeout(std::time::Duration::from_secs(2), connection.receive())

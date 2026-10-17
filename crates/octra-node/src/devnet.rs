@@ -334,6 +334,7 @@ pub async fn run(config: Config, shutdown: watch::Receiver<bool>) -> Result<()> 
             },
             transport: crate::launch::Transport {
                 listen: config.p2p,
+                proxy: None,
                 advertised: endpoint(config.p2p),
                 peers: config.peers.into_iter().map(endpoint).collect(),
                 maximum_peers: 16,

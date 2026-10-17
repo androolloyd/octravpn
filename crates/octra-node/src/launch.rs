@@ -41,6 +41,7 @@ pub(crate) struct Services {
 }
 pub(crate) struct Transport {
     pub listen: SocketAddr,
+    pub proxy: Option<SocketAddr>,
     pub advertised: Endpoint,
     pub peers: Vec<Endpoint>,
     pub maximum_peers: i64,
@@ -377,6 +378,9 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
         validators.clone(),
         journal.clone(),
     )?;
+    if let Some(proxy) = transport.proxy {
+        network.swarm.set_proxy(proxy)?;
+    }
     if !validator_keys.is_empty() {
         network.swarm.set_validators(validator_keys)?;
     }

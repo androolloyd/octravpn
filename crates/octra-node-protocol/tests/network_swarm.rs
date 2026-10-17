@@ -11,7 +11,7 @@ use octra_node_protocol::network::{
 use rand::rngs::OsRng;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{
-    io::AsyncReadExt,
+    io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::mpsc,
     task::JoinHandle,
@@ -113,6 +113,86 @@ async fn client(
         },
     )
     .await
+}
+#[tokio::test]
+async fn proxy_selection_is_local_and_immutable_after_startup() {
+    let listener = listener().await;
+    let address = listener.local_addr().unwrap();
+    let swarm = Swarm::new(
+        config(address.port(), vec![public(1), public(2)], vec![], false),
+        key(1),
+    )
+    .unwrap();
+    assert!(swarm.set_proxy("192.0.2.1:1080".parse().unwrap()).is_err());
+    swarm.set_proxy("127.0.0.1:1080".parse().unwrap()).unwrap();
+    let (task, _) = start(&swarm, listener);
+    let _peer = client(2, address, b"swarm-test").await.unwrap();
+    until(|| swarm.peers().len() == 1).await;
+    assert!(swarm.set_proxy("127.0.0.1:1081".parse().unwrap()).is_err());
+    swarm.stop();
+    task.await.unwrap();
+}
+#[tokio::test]
+async fn bootstrap_and_native_frames_use_the_selected_proxy() {
+    let al = listener().await;
+    let bl = listener().await;
+    let target = bl.local_addr().unwrap();
+    let proxy = listener().await;
+    let proxy_address = proxy.local_addr().unwrap();
+    let relay = tokio::spawn(async move {
+        let (mut incoming, _) = proxy.accept().await.unwrap();
+        let mut greeting = [0; 3];
+        incoming.read_exact(&mut greeting).await.unwrap();
+        assert_eq!(greeting, [5, 1, 0]);
+        incoming.write_all(&[5, 0]).await.unwrap();
+        let mut header = [0; 5];
+        incoming.read_exact(&mut header).await.unwrap();
+        assert_eq!(&header[..4], &[5, 1, 0, 3]);
+        let mut name = vec![0; usize::from(header[4])];
+        incoming.read_exact(&mut name).await.unwrap();
+        assert_eq!(name, b"peer.invalid");
+        assert_eq!(incoming.read_u16().await.unwrap(), 19000);
+        let mut outgoing = TcpStream::connect(target).await.unwrap();
+        incoming
+            .write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 1])
+            .await
+            .unwrap();
+        let _ = tokio::io::copy_bidirectional(&mut incoming, &mut outgoing).await;
+    });
+    let keys = vec![public(1), public(2)];
+    let a = Swarm::new(
+        config(
+            al.local_addr().unwrap().port(),
+            keys.clone(),
+            vec![Endpoint {
+                host: b"peer.invalid".to_vec(),
+                port: 19000,
+            }],
+            false,
+        ),
+        key(1),
+    )
+    .unwrap();
+    let b = Swarm::new(config(target.port(), keys, vec![], false), key(2)).unwrap();
+    a.set_proxy(proxy_address).unwrap();
+    let (at, _) = start(&a, al);
+    let (bt, mut inbox) = start(&b, bl);
+    until(|| a.peers().len() == 1 && b.peers().len() == 1).await;
+    let frame = Frame {
+        message: 0x20,
+        payload: b"authenticated relay transport".to_vec(),
+    };
+    a.broadcast(frame.clone(), None, true).await.unwrap();
+    let (_, delivered) = tokio::time::timeout(WAIT, inbox.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(delivered, frame);
+    a.stop();
+    b.stop();
+    at.await.unwrap();
+    bt.await.unwrap();
+    relay.await.unwrap();
 }
 #[tokio::test]
 async fn handshake_keys_do_not_select_scheduled_or_unknown_validators() {

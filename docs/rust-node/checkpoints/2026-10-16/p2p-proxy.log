@@ -1,0 +1,154 @@
+["cargo", "test", "--locked", "--release", "-p", "octra-node-protocol", "--lib", "network::proxy::tests"]
+   Compiling octra-node-protocol v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node-protocol)
+    Finished `release` profile [optimized] target(s) in 7.97s
+     Running unittests src/lib.rs (target/release/deps/octra_node_protocol-02fecaffc02583a1)
+
+running 5 tests
+test network::proxy::tests::ordinary_direct_transport_is_retained ... ok
+test network::proxy::tests::malformed_proxy_negotiation_is_refused ... ok
+test network::proxy::tests::remote_dns_transport_preserves_native_peer_authentication ... ok
+test network::proxy::tests::rejected_proxy_never_falls_back_to_reachable_direct_target ... ok
+test network::proxy::tests::stalled_proxy_has_a_bounded_connection_lifetime ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 18 filtered out; finished in 10.01s
+
+
+["cargo", "test", "--locked", "--release", "-p", "octra-node-protocol", "--test", "network_swarm"]
+   Compiling octra-node-protocol v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node-protocol)
+    Finished `release` profile [optimized] target(s) in 1.28s
+     Running tests/network_swarm.rs (target/release/deps/network_swarm-54dff70d238c43ed)
+
+running 6 tests
+test bootstrap_and_native_frames_use_the_selected_proxy ... ok
+test proxy_selection_is_local_and_immutable_after_startup ... ok
+test handshake_keys_do_not_select_scheduled_or_unknown_validators ... ok
+test signed_discovery_builds_mesh_and_delivers_native_frames ... ok
+test simultaneous_dials_converge_and_stale_shutdown_cannot_install_peers ... ok
+test observers_are_bounded_and_identity_bans_survive_reconnect ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+
+["cargo", "test", "--locked", "--release", "-p", "octra-node", "--lib", "network::role_tests"]
+warning: variant `Release` is never constructed
+    --> vendor/octra-circle-wasm-host/src/lib.rs:1148:5
+     |
+1146 | enum CacheMessage {
+     |      ------------ variant in this enum
+1147 |     Hold { key: String, root: String, entries: usize, bytes: usize },
+1148 |     Release(u64),
+     |     ^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `octra_circle_wasm_host` (lib) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.25s
+     Running unittests src/lib.rs (target/release/deps/octra_node-5fdd4575b8940eeb)
+
+running 3 tests
+test network::role_tests::public_network_cannot_reinterpret_private_single_mode ... ok
+test network::role_tests::public_bootstrap_merges_configured_base_and_upstream_extra_once ... ok
+test network::role_tests::standard_launcher_selects_only_explicit_private_single_genesis ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 45 filtered out; finished in 0.01s
+
+
+["cargo", "test", "--locked", "--release", "-p", "octra-node", "--test", "devnet"]
+warning: variant `Release` is never constructed
+    --> vendor/octra-circle-wasm-host/src/lib.rs:1148:5
+     |
+1146 | enum CacheMessage {
+     |      ------------ variant in this enum
+1147 |     Hold { key: String, root: String, entries: usize, bytes: usize },
+1148 |     Release(u64),
+     |     ^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `octra_circle_wasm_host` (lib) generated 1 warning
+   Compiling octra-node v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node)
+    Finished `release` profile [optimized] target(s) in 13.08s
+     Running tests/devnet.rs (target/release/deps/devnet-3b44052ca124e692)
+
+running 2 tests
+test genesis_settings_cannot_reuse_a_chain_identity ... ok
+node serving: chain=node serving: chain=octra-rust-local-88cd66a873adb9fd RPC http://127.0.0.1:28011 browser http://127.0.0.1:28012 voting=true
+octra-rust-local-88cd66a873adb9fd RPC http://127.0.0.1:28031 browser http://127.0.0.1:28032 voting=true
+node serving: chain=octra-rust-local-88cd66a873adb9fd RPC http://127.0.0.1:28021 browser http://127.0.0.1:28022 voting=true
+node serving: chain=octra-rust-local-88cd66a873adb9fd RPC http://127.0.0.1:28001 browser http://127.0.0.1:28002 voting=true
+consensus: outcome verification unavailable: proposal epoch time interval has not elapsed
+consensus: outcome verification unavailable: proposal epoch time interval has not elapsed
+consensus: outcome verification unavailable: proposal epoch time interval has not elapsed
+consensus: outcome verification unavailable: proposal epoch time interval has not elapsed
+consensus: outcome verification unavailable: proposal epoch time interval has not elapsed
+consensus: outcome verification unavailable: proposal epoch time interval has not elapsed
+consensus: outcome verification unavailable: proposal epoch time interval has not elapsed
+consensus: outcome verification unavailable: proposal epoch time interval has not elapsed
+consensus: outcome verification unavailable: proposal epoch time interval has not elapsed
+consensus: outcome verification unavailable: proposal epoch time interval has not elapsed
+test executable_devnet_transfers_browses_and_recovers has been running for over 60 seconds
+node serving: chain=octra-rust-local-88cd66a873adb9fd RPC http://127.0.0.1:28031 browser http://127.0.0.1:28032 voting=true
+node serving: chain=octra-rust-local-88cd66a873adb9fd RPC http://127.0.0.1:28041 browser http://127.0.0.1:28042 voting=false
+node serving: chain=octra-rust-local-88cd66a873adb9fd RPC http://127.0.0.1:28041 browser http://127.0.0.1:28042 voting=false
+test executable_devnet_transfers_browses_and_recovers ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 165.47s
+
+
+["cargo", "clippy", "--locked", "--release", "-p", "octra-node-protocol", "--lib", "--test", "network_swarm", "--", "-D", "warnings"]
+    Checking subtle v2.6.1
+    Checking smallvec v1.15.1
+    Checking libc v0.2.186
+    Checking serde_core v1.0.228
+    Checking memchr v2.8.0
+    Checking bitflags v2.11.1
+    Checking generic-array v0.14.7
+    Checking num-integer v0.1.46
+    Checking zeroize v1.8.2
+    Checking thiserror v1.0.69
+    Checking num-bigint v0.4.6
+    Checking getrandom v0.2.17
+    Checking errno v0.3.14
+    Checking cpufeatures v0.2.17
+    Checking parking_lot_core v0.9.12
+    Checking socket2 v0.6.3
+    Checking mio v1.2.0
+    Checking block-buffer v0.10.4
+    Checking crypto-common v0.1.7
+    Checking signal-hook-registry v1.4.8
+    Checking rustix v1.1.4
+    Checking rand_core v0.6.4
+    Checking digest v0.10.7
+    Checking parking_lot v0.12.5
+    Checking rand_chacha v0.3.1
+    Checking sha2 v0.10.9
+    Checking blake2 v0.10.6
+    Checking tokio v1.52.3
+    Checking rand v0.8.6
+    Checking serde v1.0.228
+    Checking serde_json v1.0.149
+    Checking curve25519-dalek v4.1.3
+    Checking ed25519 v2.2.3
+    Checking ed25519-dalek v2.2.0
+    Checking octra-node-protocol v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node-protocol)
+    Finished `release` profile [optimized] target(s) in 10.54s
+
+["cargo", "clippy", "--locked", "--release", "-p", "octra-node", "--lib", "--bin", "octra-node", "--example", "peer_probe", "--", "-D", "warnings"]
+    Checking octra-node-protocol v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node-protocol)
+warning: variant `Release` is never constructed
+    --> vendor/octra-circle-wasm-host/src/lib.rs:1148:5
+     |
+1146 | enum CacheMessage {
+     |      ------------ variant in this enum
+1147 |     Hold { key: String, root: String, entries: usize, bytes: usize },
+1148 |     Release(u64),
+     |     ^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `octra_circle_wasm_host` (lib) generated 1 warning
+    Checking octra-browser v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-browser)
+    Checking octra-exex v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-exex)
+    Checking octra-node-runtime v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node-runtime)
+    Checking octra-node v0.1.0 (/Users/androolloyd/Development/octra/crates/octra-node)
+    Finished `release` profile [optimized] target(s) in 25.54s

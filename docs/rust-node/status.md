@@ -9,6 +9,19 @@ upstream behavioral parity and public-network deployment remain unqualified.
 
 ## Recorded local evidence
 
+- The [native-host P2P relay checkpoint](checkpoints/2026-10-16/p2p-proxy.json)
+  records 16 passing transport, swarm, launcher and four-validator executable
+  tests, plus strict protocol/node lint. An optional loopback SOCKS5 connector
+  carries every bootstrap/discovered-peer dial and DNS lookup through its
+  selected relay, with a bounded deadline and no direct fallback. Native peer
+  authentication, validator membership and source agreement are unchanged.
+  The existing observer stopped cleanly at epoch 1,706,324 and restarted with
+  the same database and identity; only `p2p_proxy` changed in its configuration.
+  Its retained-state audit is live. Two disposable live relay probes verified
+  responder signatures but were closed after the handshake, so they do not
+  establish sustained peer admission. Full relay-backed catch-up, stable
+  serving, canonical gateway HTTP 200 and public native-host ingress remain
+  open. This TCP relay does not carry paid VPN or HTTP recovery traffic.
 - The [receipt retry and paid integration checkpoint](checkpoints/2026-10-16/retry-admission-paid-gates.json)
   records a canonical-opening check for vaulted receipt retries and the same
   frozen image passing both 34-step private Single and four-validator BFT paid

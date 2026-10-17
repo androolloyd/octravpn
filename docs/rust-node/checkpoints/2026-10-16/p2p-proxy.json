@@ -1,0 +1,169 @@
+{
+  "checked_at_utc": "2026-10-17T00:42:28.885632+00:00",
+  "scope": "Optional local SOCKS5 transport for native P2P TCP dials; no consensus, validator-authority, serving-quorum, Circle or fee-policy change",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "goal_baseline": "d3e834919bd586e81f947d0dae91becc6c43c756",
+  "baseline_runtime_delta": false,
+  "base_commit": "07bf7899ee155f4d39ca192003a45cbc24d1340a",
+  "source_sha256": {
+    "crates/octra-node-protocol/src/network/mod.rs": "839b5b15cb54aa9ad0def2626d0a1a1c0b5f1416275c29ff30c8fa90e297f685",
+    "crates/octra-node-protocol/src/network/proxy.rs": "9860b93e185a79403ceb38a9dc7c3d5687c25481fbe2a4b4f565cee9ebde36e1",
+    "crates/octra-node-protocol/src/network/proxy/tests.rs": "65b2240709c1af5e8d4bef2cffa26063a315430525e068e2121afcaed907863b",
+    "crates/octra-node-protocol/src/network/swarm.rs": "1009b07381b2b08e56d478b1effb9e54cd0796959f67113330f159c76b70fac6",
+    "crates/octra-node-protocol/src/network/swarm/service.rs": "b6af9921c374533e5bfa57d654c3081856bc48ca2409f2712c11c0757390be16",
+    "crates/octra-node-protocol/tests/network_swarm.rs": "b67c928490cb65d2abd4618319993fb6aa5d534cd97902aae3e0d8d1d5b634ef",
+    "crates/octra-node/examples/peer_probe.rs": "64d213d6f43e22149c718d51b6849592d236c7de6cf6bd9cc4690dd8f5b16313",
+    "crates/octra-node/src/devnet.rs": "bd2158a556a9a48febfeb1a85a61a05c523355b30cda01a9d27a0edce4595eec",
+    "crates/octra-node/src/launch.rs": "0f1394de776d38fc3866f3f2af4575faf930916f9bbb4e7cc339675147d12eb7",
+    "crates/octra-node/src/network.rs": "f40133a8562b4ff7dbf016927713168b1336e744e4e084de017d922d9f0cde15",
+    "scripts/devnet-relay/README.md": "8b8dd73e02224cd46bf993619eb5d963acb3f8c7f8278a8ca915f19ff3f3033d"
+  },
+  "tests": {
+    "passed": 16,
+    "failed": 0,
+    "commands": [
+      [
+        "cargo",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "octra-node-protocol",
+        "--lib",
+        "network::proxy::tests"
+      ],
+      [
+        "cargo",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "octra-node-protocol",
+        "--test",
+        "network_swarm"
+      ],
+      [
+        "cargo",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "octra-node",
+        "--lib",
+        "network::role_tests"
+      ],
+      [
+        "cargo",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "octra-node",
+        "--test",
+        "devnet"
+      ],
+      [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--release",
+        "-p",
+        "octra-node-protocol",
+        "--lib",
+        "--test",
+        "network_swarm",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--release",
+        "-p",
+        "octra-node",
+        "--lib",
+        "--bin",
+        "octra-node",
+        "--example",
+        "peer_probe",
+        "--",
+        "-D",
+        "warnings"
+      ]
+    ],
+    "log": "docs/rust-node/checkpoints/2026-10-16/p2p-proxy.log",
+    "log_sha256": "e1e64c6718a3f84b431e48ed7d2fd0df82246aa4ca0a9a10b605ec5fe6856ca2"
+  },
+  "negative_controls": [
+    "proxy refusal has no direct TCP fallback",
+    "stalled proxy closes within the ten-second deadline",
+    "malformed SOCKS negotiation is refused",
+    "non-loopback proxy addresses are refused",
+    "transport selection cannot change after swarm startup"
+  ],
+  "private_integration": "Four-validator executable transfer, Circle browsing, canonical ExEx and restart/observer recovery gate passed",
+  "live_relay": {
+    "relay_ipv4": "143.110.222.241",
+    "local_listener": "127.0.0.1:21080",
+    "new_public_ports": false,
+    "probes": [
+      {
+        "endpoint": "62.210.158.229:19000",
+        "verified_responder": "oct6gDGroWmjpY522PWxtaiW9i4v7M1EBhES3KK5MK8JAdL",
+        "post_handshake": "connection_closed"
+      },
+      {
+        "endpoint": "169.58.156.29:19000",
+        "verified_responder": "oct7rgzxRH3gaSb5E28yHWDENP6yGhx8EBVF7UuDYXLrdph",
+        "post_handshake": "connection_closed"
+      }
+    ],
+    "retained_peer_admission_proved": false
+  },
+  "observer_restart": {
+    "prior_status": {
+      "chain_id": "octra-devnet-9871-cluster",
+      "epoch": 1706324,
+      "peers": 14,
+      "pending": 0,
+      "serving": false,
+      "state_root": "7bd54f7a8a610eecc98ed06ed9138814d28a24ef8ed7b04952e19826632055a5",
+      "vpn_program": null,
+      "vpn_settlement": "unconfigured"
+    },
+    "prior_graceful_exit": 0,
+    "same_state_and_identity": true,
+    "configuration_delta": [
+      "p2p_proxy"
+    ],
+    "process": {
+      "pid": 29948,
+      "started_unix": 1792197692.695734,
+      "binary_sha256": "de755cfedf322cbf0ea8d339dbe8631fd3c8210fef7e648eab687ae971449454",
+      "config_sha256": "e9a522f0cca8fe3bffd4bcda891957d9104946a716f9fdcde7744246e4072da4",
+      "config": "out/node-port-final-20261015/public-devnet-final-candidate/network-socks.json",
+      "log": "out/node-port-final-20261015/p2p-proxy-20261017/observer.log"
+    },
+    "startup_status": "live; retained-state audit in progress; not yet requalified",
+    "retained_public_identity_match": {
+      "operator": "oct1JBUrYbeTQazQ39LQn4ZjnPLHfDpLGXouqon1jZhJfYP",
+      "receipt_pubkey_b64": "clBLKtiT6jcEcDxQp9Dh+WjsdXqp8KDHnf3TOfH/mro=",
+      "transport": {
+        "kind": "wireguard"
+      },
+      "wg_pubkey_b64": "YzT02SfSlhPAALHg2bgrqx+eUaQXBjlCdm6SVfUHaQY="
+    }
+  },
+  "transport_scope": "P2P TCP only; HTTP recovery and paid VPN have separate transports. Public inbound bridging is not provided by SOCKS CONNECT.",
+  "full_rust_node_complete": false,
+  "public_deployment_qualified": false,
+  "remaining": [
+    "complete retained-state restart and relay-backed sync observation",
+    "stable nine-signer source agreement and canonical gateway HTTP 200",
+    "public inbound relay bridge for the native host",
+    "funded public VPN and external-device navigation",
+    "full native behavioral parity and reusable mesh control integration"
+  ]
+}

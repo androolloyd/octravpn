@@ -114,18 +114,8 @@ async fn dial(
             return false;
         }
     }
-    let Ok(host) = std::str::from_utf8(&endpoint.host) else {
-        return false;
-    };
-    let Ok(mut addresses) = tokio::net::lookup_host((host, endpoint.port)).await else {
-        return false;
-    };
-    let Some(address) = addresses.find(std::net::SocketAddr::is_ipv4) else {
-        return false;
-    };
-    let Ok(Ok(stream)) =
-        tokio::time::timeout(Duration::from_secs(10), TcpStream::connect(address)).await
-    else {
+    let proxy = swarm.state().proxy;
+    let Ok(stream) = super::super::proxy::connect(endpoint, proxy).await else {
         return false;
     };
     let Ok(local) = swarm.hello(listen_port) else {

@@ -10,6 +10,7 @@ pub mod guard;
 pub mod handshake;
 pub mod peer_diag;
 pub mod peer_record;
+pub mod proxy;
 pub mod session;
 pub mod swarm;
 pub mod swarm_policy;

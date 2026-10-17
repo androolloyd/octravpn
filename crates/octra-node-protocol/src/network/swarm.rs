@@ -74,6 +74,7 @@ struct State {
     record_dialing: BTreeSet<Vec<u8>>,
     due: BTreeMap<Vec<u8>, f64>,
     relayed: super::peer_diag::Relayed,
+    proxy: Option<std::net::SocketAddr>,
 }
 struct Inner {
     config: Config,
@@ -117,6 +118,7 @@ impl Swarm {
             record_dialing: BTreeSet::new(),
             due: BTreeMap::new(),
             relayed: super::peer_diag::Relayed::default(),
+            proxy: None,
         };
         Ok(Self(Arc::new(Inner {
             node_id: handshake::node_id(&key.verifying_key().to_bytes()),
@@ -129,6 +131,17 @@ impl Swarm {
     }
     fn state(&self) -> MutexGuard<'_, State> {
         self.0.state.lock().expect("swarm state poisoned")
+    }
+    /// Select a local transport before startup. This changes neither peer
+    /// identity admission nor validator membership, and has no direct fallback.
+    pub fn set_proxy(&self, proxy: std::net::SocketAddr) -> Result<(), Error> {
+        super::proxy::validate(proxy)?;
+        let mut state = self.state();
+        if state.started {
+            return Err("P2P proxy must be selected before swarm startup".into());
+        }
+        state.proxy = Some(proxy);
+        Ok(())
     }
     pub fn node_id(&self) -> &[u8] {
         &self.0.node_id

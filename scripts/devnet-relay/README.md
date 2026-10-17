@@ -121,6 +121,36 @@ private gateway bridge before tester browser access can move with it. Until
 that bridge passes, keep the current tailnet-only gateway and do not advertise
 the new observer as ready for testers.
 
+## Native host through a local TCP relay
+
+The public BFT launcher also accepts `"p2p_proxy":"127.0.0.1:21080"` in
+`network.json`. It connects every bootstrap and discovered peer through that
+local SOCKS5 endpoint, including remote hostname resolution. A refused, missing,
+or stalled proxy closes the dial; it never retries through the host's direct
+route. Native HELLO/ACK/FINISH authentication, validator membership, finality
+and source-agreement requirements remain unchanged.
+
+For an existing SSH alias with a pinned host key and authorized forwarding:
+
+```sh
+ssh -NT -o BatchMode=yes -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+  -D 127.0.0.1:21080 octra-relay
+```
+
+This keeps the canonical database and executable on the Mac. The proxy affects
+P2P TCP dials only; chain HTTP recovery, Circle HTTPS, and paid VPN traffic retain
+their own configured transports. It supplies outbound relay access, not public
+ingress. Keep the advertised endpoint unchanged until an independently tested
+inbound bridge exists. The existing WireGuard namespace remains the option for
+a full isolated Linux node with both ingress and egress.
+
+`cargo run --release -p octra-node --example peer_probe -- NETWORK_JSON PEER_IP:PORT`
+uses the same configured connector and a disposable observer identity. It
+verifies the responder handshake and reports the first post-handshake frame;
+an ACK alone does not prove the peer retained or admitted the observer session.
+The connector uses the CONNECT exchange from [RFC 1928](https://www.rfc-editor.org/rfc/rfc1928.html).
+
 ## Rollback
 
 Stop only the Octra container gracefully, then run `python3 relay.py down` on

@@ -35,6 +35,9 @@ pub struct Config {
     pub data: PathBuf,
     pub key: PathBuf,
     pub p2p: SocketAddr,
+    /// Optional local SOCKS5 relay; all P2P dials fail closed through it.
+    #[serde(default)]
+    pub p2p_proxy: Option<SocketAddr>,
     pub advertised: String,
     pub rpc: SocketAddr,
     pub browser: SocketAddr,
@@ -173,6 +176,9 @@ fn bootstrap_peers(configured: &[String], settings: &Settings) -> Vec<Endpoint> 
     )
 }
 pub async fn run(config: Config, mut shutdown: watch::Receiver<bool>) -> Result<()> {
+    if let Some(proxy) = config.p2p_proxy {
+        octra_node_protocol::network::proxy::validate(proxy)?;
+    }
     ensure!(
         (1..=3600).contains(&config.startup_seconds),
         "invalid startup timeout"
@@ -319,6 +325,7 @@ pub async fn run(config: Config, mut shutdown: watch::Receiver<bool>) -> Result<
             },
             transport: launch::Transport {
                 listen: config.p2p,
+                proxy: config.p2p_proxy,
                 advertised,
                 peers,
                 maximum_peers: 32,
