@@ -54,7 +54,8 @@ bound to their GitHub run and source commit.
 The public devnet observer has adopted the
 [qualified normal release](docs/rust-node/checkpoints/2026-10-17/audit-reuse-public-adoption.json)
 from retained epoch 1,708,425, preserving its canonical/ExEx/archive prefix, key,
-configuration and relay. Cold startup is still being observed; paid service is
+configuration and relay. RPC has opened and authenticated catch-up has advanced
+to epoch 1,708,443; serving remains suspended during catch-up and paid service is
 unconfigured. Sustained public serving, stock Tailscale
 payment/onboarding, portal funding, DNS/TLS and Mainnet remain open qualification
 gates. This prepaid candidate is **not deployed to Mainnet**. Local build

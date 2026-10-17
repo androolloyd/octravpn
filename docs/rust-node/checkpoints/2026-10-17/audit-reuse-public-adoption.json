@@ -1,6 +1,6 @@
 {
   "format": "octra-audit-reuse-public-adoption-v1",
-  "at": "2026-10-17T13:35:43.571831+00:00",
+  "at": "2026-10-17T13:39:32.065614+00:00",
   "launch": {
     "at": "2026-10-17T13:25:54.019723+00:00",
     "pid": 52612,
@@ -54,19 +54,101 @@
   "release_manifest_sha256": "4efcfa42226d2673c34d305d4adb3a667b1131b2845ba27ab1bb62076c1f95e0",
   "startup_continuity_sha256": "032585660593b1908200dcc760e5cdd7852566966ebf170814440ec777af21ef",
   "latest_status": {
-    "at": "2026-10-17T13:35:02.159585+00:00",
+    "at": "2026-10-17T13:39:19.436453+00:00",
     "pid": 52612,
     "process_query_exit": 0,
-    "process": "52612 52611 Sat Oct 17 10:25:54 2026     09:08   4:06.89  77.0 33258016 R    /Users/androolloyd/Development/octra/out/audit-reuse-20261017/release/octra-node run-network --config /Users/androolloyd/Development/octra/out/octranet-public-20261017/network.json",
+    "process": "52612 52611 Sat Oct 17 10:25:54 2026     13:25   7:16.56  65.0 42897168 R    /Users/androolloyd/Development/octra/out/audit-reuse-20261017/release/octra-node run-network --config /Users/androolloyd/Development/octra/out/octranet-public-20261017/network.json",
     "exit_evidence": false,
     "/operator/status": {
-      "error": "<urlopen error [Errno 61] Connection refused>"
+      "http": 200,
+      "body": {
+        "chain_id": "octra-devnet-9871-cluster",
+        "epoch": 1708443,
+        "peers": 0,
+        "pending": null,
+        "serving": false,
+        "state_root": "3e9cb28e5fdb373623a2310272c374c7fe5f697d08ef3377ffa9fc1a14410731",
+        "suspension_reason": "catching up authenticated HTTP history",
+        "vpn_program": null,
+        "vpn_settlement": "unconfigured"
+      }
     },
     "/operator/peers": {
-      "error": "<urlopen error [Errno 61] Connection refused>"
+      "http": 200,
+      "body": {
+        "connected": 0,
+        "connections": {
+          "dialing": 13,
+          "generation": 1,
+          "outcomes": [
+            {
+              "count": 86,
+              "direction": "outbound",
+              "outcome": "accepted",
+              "phase": "transport"
+            },
+            {
+              "count": 5,
+              "direction": "outbound",
+              "outcome": "timeout",
+              "phase": "transport"
+            },
+            {
+              "count": 28,
+              "direction": "outbound",
+              "outcome": "io",
+              "phase": "transport"
+            },
+            {
+              "count": 76,
+              "direction": "outbound",
+              "outcome": "accepted",
+              "phase": "handshake"
+            },
+            {
+              "count": 9,
+              "direction": "outbound",
+              "outcome": "timeout",
+              "phase": "handshake"
+            },
+            {
+              "count": 39,
+              "direction": "outbound",
+              "outcome": "accepted",
+              "phase": "admission"
+            },
+            {
+              "count": 37,
+              "direction": "outbound",
+              "outcome": "observer",
+              "phase": "admission"
+            },
+            {
+              "count": 39,
+              "direction": "outbound",
+              "outcome": "remote_close",
+              "phase": "session"
+            }
+          ],
+          "proxy": true,
+          "record_dialing": 0,
+          "running": true
+        },
+        "known": 0,
+        "public_sources": 0,
+        "risks": [],
+        "score_reasons": {}
+      }
     },
     "/status": {
-      "error": "<urlopen error [Errno 61] Connection refused>"
+      "http": 503,
+      "body": {
+        "status": "error",
+        "error": {
+          "type": "service_unavailable",
+          "reason": "catching up authenticated HTTP history"
+        }
+      }
     }
   },
   "voting": false,
