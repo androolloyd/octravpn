@@ -67,6 +67,13 @@ RUN --mount=type=cache,id=octra-vpn-qualification-target,target=/work/octra/targ
 RUN --mount=type=cache,id=octra-vpn-qualification-target,target=/work/octra/target \
     cargo build --locked --release -p octra-node && \
     cp target/release/octra-node /tmp/native-binaries/octra-node
+RUN --mount=type=cache,id=octra-vpn-qualification-target,target=/work/octra/target \
+    cargo test --locked --release -p octra-node --lib vpn::payments && \
+    cargo test --locked -p octravpn-client --bin octravpn payments:: && \
+    cargo test --locked -p octravpn-client --bin octravpn payment_runner:: && \
+    cargo test --locked -p octravpn-node --lib payment_meter:: && \
+    cargo test --locked -p octravpn-node --lib payments:: && \
+    cargo test --locked -p octra-node-runtime --test octranet_payments
 COPY octra/docker/native-vpn ./docker/native-vpn
 COPY octra/licenses ./licenses
 RUN python3 docker/native-vpn/manifest.py > /tmp/native-source.json
@@ -77,7 +84,10 @@ COPY --from=binaries /tmp/native-binaries/ /usr/local/bin/
 COPY --from=binaries /tmp/native-source.json /usr/local/share/native-source.json
 COPY --from=binaries /work/octra/licenses /usr/local/share/licenses/octra
 COPY octra/program/main-v5.aml octra/program/private-admin-factory.aml /usr/local/share/aml/
+COPY octra/program/octranet-payments.aml octra/program/octranet-payments-factory.aml /usr/local/share/aml/
 COPY octra/docker/native-vpn/qualify.py /usr/local/bin/qualify.py
+COPY octra/docker/native-vpn/payments_qualify.py /usr/local/bin/payments_qualify.py
+COPY octra/docker/native-vpn/payment_control.py /usr/local/bin/payment_control.py
 COPY octra/docker/native-vpn/single_qualify.py /usr/local/bin/single_qualify.py
 COPY octra/docker/native-vpn/tun_gate.py /usr/local/bin/tun_gate.py
 COPY octra/docker/native-vpn/packet_target.py /usr/local/bin/packet_target.py

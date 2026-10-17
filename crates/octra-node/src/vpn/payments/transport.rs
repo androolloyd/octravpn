@@ -36,6 +36,16 @@ impl Authority for Payments {
     }
     async fn plan(&self, binding: &PlanBinding) -> Result<Grant> {
         let plan = Self::plan(self, binding.plan).await?;
+        self.transport_grant(plan, binding)
+    }
+    async fn claim_plan(&self, binding: &PlanBinding) -> Result<Grant> {
+        let plan = Self::claim_plan(self, binding.plan).await?;
+        self.transport_grant(plan, binding)
+    }
+}
+
+impl Payments {
+    fn transport_grant(&self, plan: Plan, binding: &PlanBinding) -> Result<Grant> {
         let actual = PlanBinding {
             deployment: plan.deployment.clone(),
             payer: plan.payer.clone(),

@@ -9,6 +9,15 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Compile local AML to existing Legacy OCTB; does not grant typed Program authority.
+    CompileLegacy {
+        #[arg(long)]
+        source: PathBuf,
+        #[arg(long)]
+        loops: bool,
+        #[arg(long)]
+        point_ops: bool,
+    },
     #[command(hide = true)]
     SingleRangeWorker {
         #[arg(long)]
@@ -81,6 +90,19 @@ enum Command {
 #[tokio::main]
 async fn main() -> Result<()> {
     match Cli::parse().command {
+        Command::CompileLegacy {
+            source,
+            loops,
+            point_ops,
+        } => {
+            use std::io::Read;
+            let mut bytes = Vec::new();
+            std::fs::File::open(source)?
+                .take(1_048_577)
+                .read_to_end(&mut bytes)?;
+            let report = octra_node_runtime::program::build::legacy(&bytes, loops, point_ops)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
         Command::SingleRangeWorker { parent_pid } => {
             octra_node_runtime::single_private::worker::helper(parent_pid)
                 .map_err(anyhow::Error::msg)?;

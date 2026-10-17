@@ -3,6 +3,7 @@
 //! Legacy contracts and typed Programs inside the caller's speculative epoch.
 //! Artifacts, overlays and canonical persistence keep distinct trust boundaries.
 pub mod artifact;
+pub mod build;
 pub mod execute;
 pub mod input;
 pub mod journal;

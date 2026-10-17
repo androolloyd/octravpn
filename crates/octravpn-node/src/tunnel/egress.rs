@@ -371,7 +371,7 @@ impl Server {
         );
     }
 
-    fn return_path(
+    pub(super) fn return_path(
         &self,
         session: &SessionId,
         peer: SocketAddr,

@@ -246,6 +246,51 @@ async fn canonical_wait_releases_journal_and_shutdown_preserves_durable_receipt(
 }
 
 #[tokio::test]
+async fn asynchronous_operator_view_cannot_authorize_a_pending_local_handoff() {
+    let fixture = Fixture::new();
+    let packet = packet();
+    let reservation = reserve(&fixture.journal, packet.clone(), Direction::Outbound)
+        .await
+        .unwrap();
+    let mut status = fixture.initial.status.clone();
+    status.committed_totals[0] = packet.len() as u64;
+    let operator_totals = status.committed_totals.clone();
+    let status = SignedStatus::sign(status, &fixture.operator).unwrap();
+    let (server_state, origin, server) = ControlFixture::start(&fixture, status).await;
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    settle_batch(
+        client.clone(),
+        origin.clone(),
+        fixture.journal.clone(),
+        operator_totals.clone(),
+    )
+    .await
+    .unwrap();
+    assert!(server_state.received.lock().is_empty());
+    assert!(fixture
+        .journal
+        .lock()
+        .pending_receipts()
+        .unwrap()
+        .is_empty());
+    finish(&fixture.journal, reservation, true).await.unwrap();
+    let journal = fixture.journal.clone();
+    let batch = tokio::spawn(settle_batch(client, origin, journal, operator_totals));
+    tokio::time::timeout(Duration::from_secs(2), server_state.entered.notified())
+        .await
+        .unwrap();
+    assert_eq!(server_state.received.lock().len(), 1);
+    assert_eq!(
+        server_state.received.lock()[0].usage.total_bytes,
+        packet.len() as u64
+    );
+    server_state.release.notify_one();
+    batch.await.unwrap().unwrap();
+    server.abort();
+    let _ = server.await;
+}
+
+#[tokio::test]
 async fn changed_operator_transport_or_plan_and_regressing_canonical_clock_stop_worker() {
     for invalid in 0..3 {
         let fixture = Fixture::new();

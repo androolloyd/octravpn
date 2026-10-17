@@ -36,8 +36,9 @@ material remain in disposable container tmpfs and are excluded from evidence.
 
 The application profile is an explicit local qualification policy anchored to
 its committed genesis. Public `Graph::new`, validator membership, quorum and
-epoch timing remain unchanged. Binary Contract deployments happen inside the
-native 64-epoch ProgramSource overlap. This is not a public-chain activation or
+epoch timing remain unchanged. Raw OCTB binary deployment uses the existing
+Legacy path; the 64-epoch ProgramSource overlap applies to source packages,
+not these raw binaries. This is not a public-chain activation or
 Mainnet parity claim. The development trusted setup is not production ceremony
 evidence. HTTPS gateway backend checks do not qualify external Tailscale/TLS.
 
@@ -60,3 +61,27 @@ four-validator agreement/quorum assertions belong to `run.sh` independently.
 Both gates must be run and reported separately; source preparation alone is not
 qualification. External HTTPS/Tailscale and public-network deployment remain
 separate gates.
+
+The payment-plan candidate has its own gate:
+
+```sh
+OCTRA_NATIVE_VPN_GATE=payments bash docker/native-vpn/run.sh /absolute/path/to/fresh-evidence
+```
+
+It deploys `octranet-payments.aml` and its factory on four fresh validators,
+publishes the hash-pinned tariff in a real Circle, registers and funds the payer,
+and bonds the operator. The `payments` client and native service then carry
+actual kernel TCP, UDP and ICMP through the same isolated two-kernel fixture.
+It checks differential traffic rates, operator-selected free traffic, native
+canonical claims, matching ExEx, crash recovery with `--resume`, retained
+budgets, and canonical exit/early-withdrawal refusal. It uses the normal native
+clock; exact 24-hour and seven-day maturity boundaries have separate compiled
+AML and native canonical tests. Passing this gate does not qualify stock
+Tailscale paid exits, portal onboarding, public DNS/TLS or Mainnet deployment.
+
+The application requires canonical `epoch_time` and Ed25519 receipt checks.
+The adopted typed Program profile excludes Ed25519; the gate uses the explicit
+local `octra-node compile-legacy --source ... --loops --point-ops` build and
+unchanged binary factory admission. Its v1 source certificate pins the emitted
+OCTB but grants no typed ABI/storage authority. No source is sent to a public
+compiler, and no compiler, VM or consensus admission rule is changed.

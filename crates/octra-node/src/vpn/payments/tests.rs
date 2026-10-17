@@ -148,6 +148,7 @@ async fn fixture() -> (tempfile::TempDir, host::Chain, Payments, CanonicalStore)
         history: store.reader(),
         operator,
         shared: Arc::new(crate::Shared::new()),
+        retained: tokio::sync::Mutex::new(RetainedTariff::default()),
     };
     (directory, chain, reader, store)
 }
@@ -298,6 +299,7 @@ async fn pinned_program_assets_and_genesis_clock_fail_closed() {
         deployment: reader.deployment.clone(),
         operator: reader.operator.clone(),
         shared: reader.shared.clone(),
+        retained: tokio::sync::Mutex::new(RetainedTariff::default()),
     };
     assert!(changed
         .read_state(
@@ -372,4 +374,161 @@ async fn resuming_the_same_head_does_not_renew_its_admission_age() {
     reader.shared.suspend("newer catch-up");
     assert!(!reader.shared.install(&ticket, serving()));
     assert!(second.revocation.is_revoked());
+}
+
+#[tokio::test]
+async fn removed_circle_does_not_erase_authenticated_claim_terms() {
+    let (_directory, mut chain, reader, _store) = fixture().await;
+    let plan = reader
+        .read_state(&chain.state.snapshot(), 0, chain.now as u64)
+        .unwrap();
+    let tariff = plan.tariff.clone();
+    let signed = receipt(&plan, 1, 1_048_576);
+    chain
+        .state
+        .remove(&[b"circles", reader.config.operator_circle.as_bytes()])
+        .unwrap();
+    assert!(reader
+        .read_state(&chain.state.snapshot(), 0, chain.now as u64)
+        .is_err());
+    let claim = reader
+        .read_state_with_tariff(
+            &chain.state.snapshot(),
+            0,
+            chain.now as u64,
+            Some(tariff.clone()),
+        )
+        .unwrap();
+    assert!(!claim.eligible && claim.claim_eligible);
+    assert_eq!(claim.increment_at_snapshot(&signed).unwrap(), 100);
+    chain.ok(13, "claim", signed.claim_params().unwrap(), 0);
+    persist_accounts(&mut chain);
+    let redeemed = reader
+        .read_state_with_tariff(
+            &chain.state.snapshot(),
+            0,
+            chain.now as u64,
+            Some(tariff.clone()),
+        )
+        .unwrap();
+    assert_eq!(redeemed.redeemed_ou, [0, 100]);
+    assert!(!redeemed.eligible);
+    chain.now += 1000;
+    chain.ok(12, "request_exit", json!([]), 0);
+    persist_accounts(&mut chain);
+    let before_deadline = reader
+        .read_state_with_tariff(
+            &chain.state.snapshot(),
+            0,
+            chain.now as u64,
+            Some(tariff.clone()),
+        )
+        .unwrap();
+    assert!(!before_deadline.eligible && before_deadline.claim_eligible);
+    let at_deadline = reader
+        .read_state_with_tariff(
+            &chain.state.snapshot(),
+            0,
+            chain.now as u64 + DAY_MS,
+            Some(tariff),
+        )
+        .unwrap();
+    assert!(!at_deadline.eligible && !at_deadline.claim_eligible);
+}
+
+#[tokio::test]
+async fn retained_tariff_does_not_override_current_manifest_rates_or_code() {
+    let (_directory, chain, reader, _store) = fixture().await;
+    let original = chain.state.snapshot();
+    let tariff = reader
+        .read_state(&original, 0, chain.now as u64)
+        .unwrap()
+        .tariff
+        .clone();
+    let changed_tariff = Tariff::new(
+        reader.operator.clone(),
+        vec![TrafficClass {
+            name: "default".into(),
+            rate_ou_per_mib: 1,
+        }],
+        vec![],
+    )
+    .unwrap();
+    assert!(reader
+        .read_state_with_tariff(&original, 0, chain.now as u64, Some(changed_tariff))
+        .is_err());
+    let mut changed = StateBatch::from_snapshot(original.clone());
+    changed.begin().unwrap();
+    let mut key = internal_key(b"map", b"offer_rate");
+    key.extend_from_slice(b"/1#01#1");
+    changed
+        .set(
+            &[b"contracts", chain.program.as_bytes(), b"storage", &key],
+            b"1".to_vec(),
+        )
+        .unwrap();
+    assert!(reader
+        .read_state_with_tariff(
+            &changed.snapshot(),
+            0,
+            chain.now as u64,
+            Some(tariff.clone())
+        )
+        .is_err());
+    let mut changed = StateBatch::from_snapshot(original);
+    changed.begin().unwrap();
+    changed
+        .set(
+            &[b"contracts", chain.program.as_bytes(), b"bytecode"],
+            STANDARD.encode(b"changed").into_bytes(),
+        )
+        .unwrap();
+    assert!(reader
+        .read_state_with_tariff(&changed.snapshot(), 0, chain.now as u64, Some(tariff))
+        .is_err());
+}
+
+struct RefusingArchive;
+impl TariffArchive for RefusingArchive {
+    fn load_tariff(&self) -> Result<Option<Tariff>> {
+        Ok(None)
+    }
+    fn save_tariff(&self, _: Tariff) -> Result<()> {
+        anyhow::bail!("fixture archive IO failure")
+    }
+}
+
+#[tokio::test]
+async fn archive_failure_prevents_retention_and_immutable_terms_cannot_change() {
+    let (_directory, chain, reader, _store) = fixture().await;
+    let tariff = reader
+        .read_state(&chain.state.snapshot(), 0, chain.now as u64)
+        .unwrap()
+        .tariff
+        .clone();
+    reader
+        .attach_archive(Arc::new(RefusingArchive))
+        .await
+        .unwrap();
+    assert!(reader.retain_tariff(tariff.clone()).await.is_err());
+    assert!(reader.retained.lock().await.tariff.is_none());
+    assert!(reader
+        .attach_archive(Arc::new(RefusingArchive))
+        .await
+        .is_err());
+    // A read-only adapter may retain in memory; production attaches its disk
+    // archive before grants. Both enforce one immutable configured offer.
+    let (_directory, _chain, memory, _store) = fixture().await;
+    memory.retain_tariff(tariff.clone()).await.unwrap();
+    memory.retain_tariff(tariff).await.unwrap();
+    let other = Tariff::new(
+        memory.operator.clone(),
+        vec![TrafficClass {
+            name: "default".into(),
+            rate_ou_per_mib: 7,
+        }],
+        vec![],
+    )
+    .unwrap();
+    assert!(memory.retain_tariff(other).await.is_err());
 }

@@ -4,7 +4,7 @@
 //! tariff rounding bucket; this avoids paying another network fee for no debt.
 //! One pending slot per plan/class coalesces smaller vouchers. An immutable
 //! lifetime fee budget reserves every new signed attempt before submission.
-use super::{Payments, Plan};
+use super::{Payments, Plan, TariffArchive};
 use crate::rpc::Context as Submission;
 use anyhow::{ensure, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -14,7 +14,7 @@ use octra_node_protocol::{
     transaction::{self, OpType, Transaction},
 };
 use octra_node_runtime::{account_store, state_batch::StateBatch};
-use octravpn_core::payments::SignedUsage;
+use octravpn_core::payments::{SignedUsage, Tariff, MAX_TARIFF_BYTES};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -56,6 +56,10 @@ struct Journal {
     fee_budget_ou: u64,
     // Never released: rejected/ambiguous attempts may still have paid a fee.
     fees_reserved_ou: u64,
+    // Absence is skipped so prior v2 journals retain their exact checksum and
+    // fee reservations. Only a verified public grant can populate this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tariff: Option<Tariff>,
     // At most one new signed claim per canonical head limits fee amplification.
     // Replaying an identical signed attempt cannot pay twice on chain.
     last_submission_root: Option<String>,
@@ -225,6 +229,7 @@ impl Disk {
                     identity,
                     fee_budget_ou,
                     fees_reserved_ou: 0,
+                    tariff: None,
                     last_submission_root: None,
                     slots: BTreeMap::new(),
                 }
@@ -235,6 +240,12 @@ impl Disk {
             journal.slots.len() <= MAX_SLOTS,
             "claim queue exceeds slot bound"
         );
+        if let Some(tariff) = &journal.tariff {
+            ensure!(
+                tariff.canonical_bytes()?.len() <= MAX_TARIFF_BYTES,
+                "retained tariff exceeds bound"
+            );
+        }
         let mut retained_attempts = 0_u64;
         for (id, slot) in &journal.slots {
             ensure!(
@@ -450,6 +461,32 @@ impl Disk {
     }
 }
 
+impl TariffArchive for Disk {
+    fn load_tariff(&self) -> Result<Option<Tariff>> {
+        self.available()?;
+        Ok(self
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("claim journal poisoned"))?
+            .tariff
+            .clone())
+    }
+    fn save_tariff(&self, tariff: Tariff) -> Result<()> {
+        ensure!(
+            tariff.canonical_bytes()?.len() <= MAX_TARIFF_BYTES,
+            "retained tariff exceeds bound"
+        );
+        self.update(|journal| {
+            if let Some(existing) = &journal.tariff {
+                ensure!(existing == &tariff, "immutable claim tariff changed");
+            } else {
+                journal.tariff = Some(tariff);
+            }
+            Ok(())
+        })
+    }
+}
+
 pub(crate) struct Publisher {
     payments: Arc<Payments>,
     disk: Arc<Disk>,
@@ -468,7 +505,7 @@ pub(crate) struct Service {
     running: Arc<AtomicBool>,
 }
 async fn covered(payments: &Payments, usage: &SignedUsage) -> Result<(Plan, bool)> {
-    let plan = payments.plan(usage.usage.plan).await?;
+    let plan = payments.claim_plan(usage.usage.plan).await?;
     plan.validate_usage(usage)?;
     let class = usize::from(usage.usage.traffic_class);
     let floor = plan.redeemed_bytes[class];
@@ -520,6 +557,7 @@ impl Service {
                 )?;
             }
         }
+        payments.attach_archive(disk.clone()).await?;
         let wake = Arc::new(Notify::new());
         let running = Arc::new(AtomicBool::new(true));
         let publisher = Arc::new(Publisher {
@@ -996,5 +1034,47 @@ mod tests {
         assert!(counters_cover(0, 0, 100, 0)); // Operator explicitly free class.
         assert!(!counters_cover(1, 1, 2, 2)); // Additional debt needs inclusion.
         assert!(counters_cover(2, 2, 2, 2)); // Exact prior byte redemption.
+    }
+
+    #[test]
+    fn tariff_archive_survives_restart_without_resetting_fee_reservations() {
+        use octravpn_core::payments::TrafficClass;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("claims");
+        let identity = serde_json::json!({"deployment":"fixture"});
+        let disk = Disk::open(&path, identity.clone(), FEE_OU).unwrap();
+        // The optional field preserves the old v2 journal encoding/checksum
+        // until an authenticated public tariff is retained.
+        let original = std::fs::read_to_string(path.join("claims.json")).unwrap();
+        assert!(!original.contains("\"tariff\""));
+        let signed = usage(1, 10);
+        let id = disk.enqueue(signed.clone()).unwrap();
+        disk.attempt(&id, attempt(signed), "head1".into()).unwrap();
+        let tariff = Tariff::new(
+            Address::from_pubkey(&[11; 32]),
+            vec![TrafficClass {
+                name: "default".into(),
+                rate_ou_per_mib: 10,
+            }],
+            vec![],
+        )
+        .unwrap();
+        disk.save_tariff(tariff.clone()).unwrap();
+        disk.save_tariff(tariff.clone()).unwrap();
+        let other = Tariff::new(
+            Address::from_pubkey(&[11; 32]),
+            vec![TrafficClass {
+                name: "default".into(),
+                rate_ou_per_mib: 11,
+            }],
+            vec![],
+        )
+        .unwrap();
+        assert!(disk.save_tariff(other).is_err());
+        drop(disk);
+        let recovered = Disk::open(&path, identity, FEE_OU).unwrap();
+        assert_eq!(recovered.load_tariff().unwrap(), Some(tariff));
+        assert_eq!(recovered.state.lock().unwrap().fees_reserved_ou, FEE_OU);
+        assert!(recovered.permits_new("head2").is_err());
     }
 }

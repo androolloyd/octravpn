@@ -1,8 +1,24 @@
 # Native payment-plan candidate
 
-This opt-in path uses `program/octranet-payments.aml`. It has not passed the
-combined kernel/public-network launch gates. Existing v5 deployments and stock
-Tailscale enrollment do not become paid plans by enabling this configuration.
+This opt-in path uses `program/octranet-payments.aml`. It passed the isolated
+native kernel/client/chain gate; public-network launch gates remain open.
+Existing v5 deployments and stock Tailscale enrollment do not become paid plans
+by enabling this configuration.
+
+Build the application locally with the same native emitter used by the node:
+
+```sh
+octra-node compile-legacy --source program/octranet-payments.aml --loops --point-ops > payments.build.json
+```
+
+This explicit build targets the existing Legacy binary VM. The adopted typed
+Program profile excludes Ed25519, while the source needs Program `epoch_time`.
+The build certificate pins source and OCTB hashes; it is not a compiler
+attestation or typed Program admission. Deploy its `bytecode` through the
+deployment-only factory and confirm that exact code hash on the target chain.
+The two opt-in flags select emitter/decoder capabilities; this command does not
+establish whether the target network has activated them. No public compiler is
+needed, and this tooling does not change network rules.
 
 An operator's BFT node configuration selects `payments` instead of `vpn`:
 
@@ -54,6 +70,14 @@ recover a failed session. Missing journals or writer leases fail closed.
 The native host controls admission; an RPC, discovery entry or signed operator
 status cannot substitute for its canonical state.
 
+Before granting the first transport connection, the native claim service also
+retains the exact authenticated tariff in its durable claim journal. Removing
+or expiring that Circle asset stops forwarding but does not erase already
+authorized debt. Receipt recovery uses the retained preimage only for claims,
+and still checks current program pins, class rates, keys, balances and deadlines.
+An older journal with no retained tariff cannot reconstruct a missing preimage;
+restore its original authenticated asset rather than resetting the journal.
+
 After the payer has registered its receipt key, funded its account and opened a
 confirmed plan, construct an accepted plan file from those confirmed facts:
 
@@ -80,6 +104,12 @@ reconnecting cannot reset usage or change price. The client authenticates the
 operator status and signs only cumulative counts bounded by its own confirmed
 handoffs. The status signature authenticates the operator; it is not a finality
 proof. A trusted confirmed-state onboarding flow must supply the plan file.
+
+The client persists a reservation before each packet handoff. A crash between
+the handoff and its final journal update preserves uncertain exposure against
+the original budget. It cannot infer delivery from that interrupted operation,
+so the uncertainty never becomes a signed billable receipt. Preserve the full
+journal when using `--resume`; do not discard uncertainty to regain capacity.
 
 TUN access requires host privileges. This command prints the assigned interface
 and address; explicit routing/NAT provisioning remains a host task. Do not route

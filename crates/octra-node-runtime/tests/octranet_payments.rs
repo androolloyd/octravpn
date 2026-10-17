@@ -15,6 +15,43 @@ mod harness;
 use harness::*;
 
 #[test]
+fn local_compiler_artifact_matches_legacy_factory_execution() {
+    use octra_node_protocol::program_trust::Keys;
+    use octra_node_runtime::program::Artifact;
+    use sha2::{Digest, Sha256};
+    let compiled = payment_compilation();
+    let code = STANDARD
+        .decode(compiled["bytecode"].as_str().unwrap())
+        .unwrap();
+    assert!(code.starts_with(b"OCTB"));
+    assert_eq!(binaries().0, code);
+    assert!(compiled.get("program_envelope").is_none());
+    assert!(compiled.get("deploy_payload").is_none());
+    assert_eq!(compiled["certificate"]["declaration"], "program");
+    assert_eq!(compiled["target_admission"], "legacy-binary");
+    assert_eq!(compiled["typed_admission"], false);
+    assert_eq!(
+        compiled["certificate"]["schema"],
+        "aml_bytecode_certificate_v1"
+    );
+    assert_eq!(
+        compiled["certificate"]["source_hash"],
+        hex::encode(Sha256::digest(include_bytes!(
+            "../../../program/octranet-payments.aml"
+        )))
+    );
+    assert_eq!(
+        compiled["certificate"]["bytecode_hash"],
+        hex::encode(Sha256::digest(&code))
+    );
+    let legacy = Artifact::binary(&code, true, &Keys::default()).unwrap();
+    assert_eq!(legacy.admission(), b"binary");
+    assert!(legacy.admitted().facts().is_none());
+    // Source certificates describe a build; this child is not typed Program
+    // admission. The existing factory API deploys exactly this legacy image.
+}
+
+#[test]
 fn operator_unstake_is_seven_days_and_independent_of_payer_exit() {
     let mut c = Chain::new();
     c.funded_plan();
@@ -246,6 +283,166 @@ fn invalid_clock_and_unauthorized_receipts_cannot_move_money() {
     );
     assert_eq!(c.locked(), STAKE + FUND);
     assert_eq!(c.number("get_reserved", json!([address(12)])), 1000);
+}
+
+#[test]
+fn legacy_uint_entry_guards_reject_negative_arguments_without_moving_custody() {
+    let mut c = Chain::new();
+    c.funded_plan();
+    c.ok(11, "create_offer", json!([MANIFEST]), 0);
+    let receipt = c.receipt(0, 1, 1);
+    // The deployed child has no typed ABI facts. These refusals must come from
+    // the unsigned guards embedded in the exact source-compiled OCTB image.
+    for negative in [json!(-1), json!("-1")] {
+        for index in 0..4 {
+            let mut args = receipt.clone();
+            args[index] = negative.clone();
+            c.denied(13, "claim", args, 0, "execution reverted");
+        }
+        c.denied(
+            12,
+            "open_plan",
+            json!([0, negative.clone()]),
+            0,
+            "execution reverted",
+        );
+        c.denied(
+            11,
+            "append_class",
+            json!([1, negative.clone()]),
+            0,
+            "execution reverted",
+        );
+        c.denied(
+            11,
+            "withdraw_earnings",
+            json!([negative]),
+            0,
+            "execution reverted",
+        );
+    }
+    assert_eq!(c.number("get_offer_classes", json!([1])), 0);
+    assert_eq!(c.number("get_reserved", json!([address(12)])), 1000);
+    assert_eq!(c.number("get_funds", json!([address(12)])), FUND);
+    assert_eq!(c.number("get_earnings", json!([address(11)])), 0);
+    assert_eq!(c.locked(), STAKE + FUND);
+    assert_eq!(c.view("can_forward", json!([0])), true);
+}
+
+#[test]
+fn legacy_uint_entry_guards_reject_values_above_u256() {
+    let mut c = Chain::new();
+    c.funded_plan();
+    c.ok(11, "create_offer", json!([MANIFEST]), 0);
+    let receipt = c.receipt(0, 1, 1);
+    // Legacy JSON accepts numeric strings, including native hexadecimal forms.
+    // Both encodings must be bounded before any uint argument reaches the body.
+    let overflow = BigInt::from(1_u8) << 256_usize;
+    for oversized in [overflow.to_string(), format!("0x1{}", "0".repeat(64))] {
+        for index in 0..4 {
+            let mut args = receipt.clone();
+            args[index] = json!(oversized);
+            c.denied(13, "claim", args, 0, "execution reverted");
+        }
+        c.denied(
+            12,
+            "open_plan",
+            json!([0, oversized]),
+            0,
+            "execution reverted",
+        );
+        c.denied(
+            11,
+            "append_class",
+            json!([1, oversized]),
+            0,
+            "execution reverted",
+        );
+    }
+    assert_eq!(c.number("get_offer_classes", json!([1])), 0);
+    assert_eq!(c.number("get_plan_remaining", json!([0])), 1000);
+    assert_eq!(c.number("get_reserved", json!([address(12)])), 1000);
+    assert_eq!(c.locked(), STAKE + FUND);
+}
+
+#[test]
+fn malformed_legacy_scalar_shapes_cannot_alias_a_funded_account_or_plan() {
+    let mut c = Chain::new();
+    c.funded_plan();
+    let receipt = c.receipt(0, 1, 1);
+    // Legacy deliberately coerces null/list/object arguments to an empty string
+    // rather than applying a typed ABI. Check the actual application guards and
+    // rollback, not a nonexistent typed-input rejection. Some other coercions
+    // (such as a true budget) are accepted and are not asserted invalid here.
+    for malformed in [Value::Null, json!([]), json!({"value": 0})] {
+        c.denied(
+            14,
+            "fund",
+            json!([malformed.clone()]),
+            1,
+            "account not accepting funds",
+        );
+        c.denied(
+            12,
+            "open_plan",
+            json!([0, malformed.clone()]),
+            0,
+            "budget unavailable",
+        );
+        let mut args = receipt.clone();
+        args[0] = malformed;
+        c.denied(13, "claim", args, 0, "plan generation closed");
+    }
+    for account in [json!(true), json!(0), json!("not-an-address")] {
+        c.denied(
+            14,
+            "fund",
+            json!([account]),
+            1,
+            "account not accepting funds",
+        );
+    }
+    assert_eq!(c.number("get_funds", json!([address(12)])), FUND);
+    assert_eq!(c.number("get_reserved", json!([address(12)])), 1000);
+    assert_eq!(c.number("get_earnings", json!([address(11)])), 0);
+    assert_eq!(c.locked(), STAKE + FUND);
+    assert_eq!(c.view("can_forward", json!([0])), true);
+}
+
+#[test]
+fn small_order_receipt_keys_cannot_register_or_receive_custody() {
+    let mut c = Chain::new();
+    c.funded_plan();
+    let mut identity = [0_u8; 32];
+    identity[0] = 1;
+    // R = identity, S = 0 would otherwise pass the signature equation for an
+    // identity public key and any transcript. Exercise the VM's key guard via
+    // real signed registration transactions, not only the Rust receipt codec.
+    let mut forged_signature = [0_u8; 64];
+    forged_signature[..32].copy_from_slice(&identity);
+    for public in [identity, [0_u8; 32]] {
+        assert!(!octra_node_protocol::network::public_key_safe(&public));
+        c.denied(
+            13,
+            "register",
+            json!([STANDARD.encode(public), STANDARD.encode(forged_signature)]),
+            0,
+            "receipt key possession failed",
+        );
+        assert_eq!(c.number("get_active", json!([address(13)])), 0);
+        assert_eq!(c.number("get_generation", json!([address(13)])), 0);
+        c.denied(
+            14,
+            "fund",
+            json!([address(13)]),
+            1,
+            "account not accepting funds",
+        );
+    }
+    assert_eq!(c.number("get_funds", json!([address(13)])), 0);
+    assert_eq!(c.number("get_funds", json!([address(12)])), FUND);
+    assert_eq!(c.number("get_reserved", json!([address(12)])), 1000);
+    assert_eq!(c.locked(), STAKE + FUND);
 }
 
 #[test]

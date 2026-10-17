@@ -46,6 +46,12 @@ pub trait Authority: Send + Sync {
         None
     }
     async fn plan(&self, binding: &PlanBinding) -> Result<Grant>;
+    /// Receipt recovery may outlive public tariff visibility. Hosts retaining
+    /// authenticated terms can override this read; it must never be used for
+    /// admission or refresh. Settlement still rechecks the live claim window.
+    async fn claim_plan(&self, binding: &PlanBinding) -> Result<Grant> {
+        self.plan(binding).await
+    }
 }
 
 #[async_trait]
@@ -318,7 +324,7 @@ impl Registry {
             if let Some(meter) = cached {
                 meter
             } else {
-                let grant = self.authority.plan(&binding).await?;
+                let grant = self.authority.claim_plan(&binding).await?;
                 ensure!(
                     grant.binding == binding && grant.receipt_key == usage.receipt_key,
                     "canonical usage binding or key differs"

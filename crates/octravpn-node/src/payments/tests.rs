@@ -470,6 +470,96 @@ async fn restarted_exiting_plan_recovers_receipts_without_transport_admission() 
     );
 }
 
+/// The host retains the exact tariff for claims after its public asset is
+/// unavailable. This fixture only models that host distinction; native Circle
+/// expiry and authenticated payment publication are tested by octra-node.
+struct RetainedClaimHost {
+    host: Arc<Host>,
+    public: AtomicBool,
+    claim_reads: AtomicUsize,
+}
+#[async_trait::async_trait]
+impl Authority for RetainedClaimHost {
+    async fn plan(&self, binding: &PlanBinding) -> Result<Grant> {
+        ensure!(
+            self.public.load(Ordering::Acquire),
+            "fixture tariff asset removed"
+        );
+        self.host.plan(binding).await
+    }
+    async fn claim_plan(&self, binding: &PlanBinding) -> Result<Grant> {
+        self.claim_reads.fetch_add(1, Ordering::AcqRel);
+        let mut grant = self.host.plan(binding).await?;
+        grant.admissible = false;
+        Ok(grant)
+    }
+}
+
+#[tokio::test]
+async fn removed_tariff_recovers_cached_and_restarted_receipts_without_admission() {
+    let fixture = Fixture::new(64);
+    let authority = Arc::new(RetainedClaimHost {
+        host: fixture.host.clone(),
+        public: AtomicBool::new(true),
+        claim_reads: AtomicUsize::new(0),
+    });
+    let connect = fixture.connect(1, [11; 32]);
+    let usage = fixture.usage(0, 1, 64);
+    {
+        let control = fixture.start_with_authority(authority.clone());
+        let connection = connected(&control, &connect).await;
+        forward(&connection, &packet(false, false, 36), Direction::Outbound).await;
+        authority.public.store(false, Ordering::Release);
+        control.registry.refresh().await;
+        assert!(!connection.live());
+        assert_eq!(
+            post(&control, "/payments/connect", &connect).await.0,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            post(&control, "/payments/usage", &usage).await.0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            authority.claim_reads.load(Ordering::Acquire),
+            0,
+            "cached receipt history still settles without admitting a connection"
+        );
+    }
+    let control = fixture.start_with_authority(authority.clone());
+    assert!(control.registry.meters.read().is_empty());
+    assert_eq!(
+        post(&control, "/payments/connect", &connect).await.0,
+        StatusCode::FORBIDDEN
+    );
+    let wrong =
+        SignedUsage::sign(usage.usage.clone(), &KeyPair::from_secret_bytes(&[8; 32])).unwrap();
+    assert_eq!(
+        post(&control, "/payments/usage", &wrong).await.0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    assert!(control.registry.meters.read().is_empty());
+    fixture.host.0.read().guard.revoke();
+    assert_eq!(
+        post(&control, "/payments/usage", &usage).await.0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    assert!(control.registry.meters.read().is_empty());
+    fixture.host.0.write().guard = Arc::new(HostGuard::new());
+    assert_eq!(
+        post(&control, "/payments/usage", &usage).await.0,
+        StatusCode::OK
+    );
+    assert!(authority.claim_reads.load(Ordering::Acquire) >= 3);
+    assert_eq!(control.registry.meters.read().len(), 1);
+    assert!(control.registry.connections.read().is_empty());
+    assert_eq!(
+        post(&control, "/payments/connect", &connect).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(fixture.host.0.read().redeemed_totals, [64, 0]);
+}
+
 #[tokio::test]
 async fn missing_delivery_journal_never_creates_claim_history_or_admission() {
     let fixture = Fixture::new(64);

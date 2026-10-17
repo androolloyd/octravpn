@@ -672,10 +672,22 @@ async fn public_payment_grant_checks_canonical_circle_asset_expiry() {
     let reader = fixture.payments();
     let active = reader.plan(0).await.unwrap();
     assert!(active.admissible());
+    let signed = receipt(&active, 1_048_576);
     fixture.publish(vec![]).await;
     assert!(!active.admissible());
     let error = reader.plan(0).await.unwrap_err();
     assert_eq!(error.to_string(), "Circle asset is not published");
+    let debt = reader.claim_plan(0).await.unwrap();
+    assert!(!debt.admissible() && debt.claimable());
+    assert_eq!(debt.claim_increment(&signed).unwrap(), 100);
+    fixture
+        .call(13, "claim", signed.claim_params().unwrap(), 0)
+        .await;
+    let paid = reader.claim_plan(0).await.unwrap();
+    assert!(!paid.admissible() && paid.claimable());
+    assert_eq!(paid.remaining_ou, 900);
+    assert_eq!(paid.redeemed_bytes, [0, 1_048_576]);
+    assert!(reader.plan(0).await.is_err());
     fixture.node.shutdown().await.unwrap();
 }
 

@@ -97,6 +97,10 @@ pub(super) struct Store {
     lock: File,
     lock_identity: Stamp,
     state_identity: Option<Stamp>,
+    #[cfg(test)]
+    fail_next: bool,
+    #[cfg(test)]
+    fail_after_install: bool,
 }
 impl Store {
     pub(super) fn open(path: &Path, mode: OpenMode) -> Result<Self> {
@@ -144,6 +148,10 @@ impl Store {
             lock,
             lock_identity,
             state_identity: None,
+            #[cfg(test)]
+            fail_next: false,
+            #[cfg(test)]
+            fail_after_install: false,
         })
     }
 
@@ -216,6 +224,11 @@ impl Store {
     }
 
     pub(super) fn commit(&mut self, bytes: &[u8]) -> Result<()> {
+        #[cfg(test)]
+        ensure!(
+            !std::mem::take(&mut self.fail_next),
+            "injected journal commit failure"
+        );
         ensure!(
             bytes.len() <= MAX_BYTES,
             "payment journal state exceeds bound"
@@ -251,11 +264,25 @@ impl Store {
                 .persist(&destination)
                 .map_err(|error| error.error)?
         };
+        #[cfg(test)]
+        ensure!(
+            !std::mem::take(&mut self.fail_after_install),
+            "injected post-install durability failure"
+        );
         self.directory.sync_all()?;
         let metadata = installed.metadata()?;
         private(&metadata, Some(&directory), false)?;
         self.state_identity = Some(stamp(&metadata));
         self.paths()?;
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(super) fn fail_next_write(&mut self) {
+        self.fail_next = true;
+    }
+    #[cfg(test)]
+    pub(super) fn fail_after_install(&mut self) {
+        self.fail_after_install = true;
     }
 }

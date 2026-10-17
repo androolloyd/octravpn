@@ -4,6 +4,12 @@ task_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 task_context=${OCTRA_NATIVE_VPN_CONTEXT:-$(dirname "$task_root")}
 task_image=${OCTRA_NATIVE_VPN_IMAGE:-octra-native-vpn-qualification:local}
 task_builder=${OCTRAVPN_BUILDER_IMAGE:-octravpn-builder:latest}
+task_gate=${OCTRA_NATIVE_VPN_GATE:-legacy}
+case "$task_gate" in
+    legacy) task_entry=/usr/local/bin/qualify.py ;;
+    payments) task_entry=/usr/local/bin/payments_qualify.py ;;
+    *) printf 'Unknown native VPN gate: %s\n' "$task_gate" >&2; exit 2 ;;
+esac
 task_output=${1:?provide a fresh evidence output directory}
 for task_source in octra octra-foundry headscale-rs; do test -d "$task_context/$task_source"; done
 test ! -e "$task_output"
@@ -24,7 +30,7 @@ task_hop_volume=$(docker volume create)
 task_target=$(docker create --network none --cap-drop ALL --cap-add NET_ADMIN --device /dev/net/tun --security-opt no-new-privileges --read-only --tmpfs /tmp:rw,nosuid,nodev,size=32m --mount "type=volume,src=$task_volume,dst=/evidence" --mount "type=volume,src=$task_hop_volume,dst=/hop" --entrypoint python3 "$task_image" -u /usr/local/bin/packet_target.py)
 # Shared client/operator TCP sockets must not take a cached local receive route
 # before the explicit fixture policy routes traverse both actual VPN TUNs.
-task_container=$(docker create --network none --cap-drop ALL --cap-add NET_ADMIN --cap-add NET_RAW --device /dev/net/tun --sysctl net.ipv4.ip_forward=1 --sysctl net.ipv4.ip_early_demux=0 --sysctl net.ipv4.tcp_early_demux=0 --sysctl net.ipv4.conf.all.rp_filter=0 --sysctl net.ipv4.conf.default.rp_filter=0 --sysctl net.ipv4.conf.all.accept_local=1 --sysctl net.ipv4.conf.default.accept_local=1 --security-opt no-new-privileges --read-only --tmpfs /tmp:rw,nosuid,nodev,size=1g --mount "type=volume,src=$task_volume,dst=/evidence" --mount "type=volume,src=$task_hop_volume,dst=/hop" "$task_image")
+task_container=$(docker create --network none --cap-drop ALL --cap-add NET_ADMIN --cap-add NET_RAW --device /dev/net/tun --sysctl net.ipv4.ip_forward=1 --sysctl net.ipv4.ip_early_demux=0 --sysctl net.ipv4.tcp_early_demux=0 --sysctl net.ipv4.conf.all.rp_filter=0 --sysctl net.ipv4.conf.default.rp_filter=0 --sysctl net.ipv4.conf.all.accept_local=1 --sysctl net.ipv4.conf.default.accept_local=1 --security-opt no-new-privileges --read-only --tmpfs /tmp:rw,nosuid,nodev,size=1g --mount "type=volume,src=$task_volume,dst=/evidence" --mount "type=volume,src=$task_hop_volume,dst=/hop" --entrypoint python3 "$task_image" -u "$task_entry")
 docker image inspect "$task_image" > "$task_output/image.json"
 docker start "$task_target" >/dev/null
 task_ready=0

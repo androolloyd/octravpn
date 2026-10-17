@@ -224,11 +224,17 @@ impl Tunnel {
     }
 
     pub(crate) async fn send(&mut self, payload: &[u8]) -> Result<()> {
-        self.send_confirmed(payload).await.map(|_| ())
+        match self.send_confirmed(payload).await {
+            // Legacy recovery has its own pause/handshake controller. The
+            // explicit confirmed API preserves ambiguous send errors instead.
+            Err(error) if transient(&error) => Ok(()),
+            result => result.map(|_| ()),
+        }
     }
 
     /// True only for an actual transport datagram handed to the connected UDP
-    /// socket here. Queued rekey/recovery payloads are not confirmed usage.
+    /// socket here. False means definitely unsent application data; a send
+    /// error may be ambiguous and must retain the caller's durable reservation.
     pub(crate) async fn send_confirmed(&mut self, payload: &[u8]) -> Result<bool> {
         if !self.driver.ready() {
             debug!("discarding local packet while the existing session recovers");
@@ -272,21 +278,22 @@ impl Tunnel {
         match self.noise.encapsulate(&frame, &mut self.work) {
             TunnResult::WriteToNetwork(packet) => {
                 let transport = packet.get(..4) == Some([4, 0, 0, 0].as_slice());
+                if !transport {
+                    self.driver.unavailable();
+                    bail!("application payload unexpectedly queued during WireGuard encapsulation");
+                }
                 match send(&self.socket, &mut self.shield, self.peer, packet).await {
                     Ok(()) => (),
                     Err(error) if transient(&error) => {
                         self.driver.unavailable();
-                        return Ok(false);
+                        return Err(error);
                     }
                     Err(error) => return Err(error),
-                }
-                if !transport {
-                    return Ok(false);
                 }
             }
             TunnResult::Done | TunnResult::Err(WireGuardError::ConnectionExpired) => {
                 self.driver.unavailable();
-                return Ok(false);
+                bail!("application encapsulation produced no confirmed WireGuard handoff");
             }
             TunnResult::Err(error) => bail!("operator WireGuard encapsulation failed: {error:?}"),
             _ => bail!("operator WireGuard encapsulation returned tunnel data"),
@@ -552,7 +559,7 @@ mod tests {
             .unwrap();
         assert_eq!(packet.get(..4), Some([1, 0, 0, 0].as_slice()));
         let mut server = Tunn::new(
-            server_secret,
+            server_secret.clone(),
             PublicKey::from(&secret),
             None,
             Some(25),
@@ -577,5 +584,25 @@ mod tests {
             tunnel.noise.decapsulate(None, &[], &mut tunnel.work),
             TunnResult::Done
         ));
+        // Once the session exists, a true result corresponds to an actual
+        // encrypted UDP datagram accepted by the connected socket and decoded
+        // by the intended WireGuard peer, rather than a queued application.
+        let payload = b"confirmed local handoff";
+        assert!(tunnel.send_confirmed(payload).await.unwrap());
+        let length = time::timeout(Duration::from_secs(1), server_socket.recv(&mut packet))
+            .await
+            .unwrap()
+            .unwrap();
+        let mut work = vec![0; DATAGRAM];
+        let TunnResult::WriteToTunnelV4(frame, _) =
+            server.decapsulate(None, &packet[..length], &mut work)
+        else {
+            panic!("server did not receive the confirmed transport data")
+        };
+        let inner = tunnel_frame::decode(frame).unwrap();
+        assert_eq!(&inner[..32], tunnel.session.as_bytes());
+        let peeled = octravpn_core::onion::peel_layer(&server_secret, &inner[32..]).unwrap();
+        assert_eq!(peeled.inner.as_slice(), payload);
+        assert!(tunnel.traffic.submitted > 0);
     }
 }

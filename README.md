@@ -28,8 +28,10 @@ compiled application tests and abstract Lean proofs from deployment qualificatio
 The opt-in native `payments` path binds signed connections, durable per-class
 metering and canonical settlement, with explicit postpaid credit and relayer fee
 ceilings. The [payment-plan client](docs/operators/payment-plans.md) retains
-authorizations across restart. Combined kernel/public qualification remains open;
-this candidate is not deployed to Mainnet.
+authorizations and uncertain exposure across restart. The isolated four-validator
+gate passed real kernel TCP/UDP/ICMP, canonical claims, bounded credit, crash
+recovery, exit revocation and matching ExEx. Stock Tailscale/onboarding and public
+qualification remain open; this candidate is not deployed to Mainnet.
 
 **Rust node qualification (2026-10-15):** the `octra-node` executable connects the
 native validator driver, authenticated peers, transaction intake, canonical

@@ -72,6 +72,14 @@ timed payment application and Circles for portal and offer assets. Any future
 Circle clock capability needs a separately specified experimental fork; do not
 change the adopted consensus rules to make this application compile.
 
+The adopted typed Program flow profile does not accept Ed25519 instructions.
+The local `compile-legacy` tool therefore emits this Program source as raw OCTB
+for the factory's existing binary child path. Source syntax enables canonical
+time emission; it does not grant typed Program admission. The v1 build
+certificate is reproducibility evidence only. Binary execution has embedded
+integer guards but lacks typed ABI/storage enforcement; native plan admission
+independently validates canonical state. No consensus/compiler rule is changed.
+
 ## Native boundaries
 
 `octravpn-core::payments` defines the exact receipt message, immutable Circle

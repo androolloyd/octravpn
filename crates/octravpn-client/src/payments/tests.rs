@@ -221,6 +221,130 @@ fn preflight_dropped_and_invalid_packets_do_not_become_billable() {
 }
 
 #[test]
+fn crash_after_handoff_keeps_exposure_without_inventing_confirmed_delivery() {
+    let fixture = Fixture::new(1);
+    let bytes = packet(false, false, 4);
+    let mut journal = fixture.open(OpenMode::Create).unwrap();
+    let reservation = journal.reserve(&bytes, Direction::Outbound).unwrap();
+    let state = fixture.state().payload;
+    assert_eq!(state.pending.as_ref().unwrap().bytes, bytes.len() as u64);
+    assert_eq!(state.local_bytes, [0, 0]);
+    assert_eq!(journal.remaining_ou().unwrap(), 0);
+    assert!(journal
+        .receipts(&[bytes.len() as u64, 0])
+        .unwrap()
+        .is_empty());
+    assert!(
+        journal.reserve(&bytes, Direction::Outbound).is_err(),
+        "an in-flight handoff cannot be overwritten"
+    );
+    // The UDP/TUN syscall succeeded, but its subsequent confirmation fsync
+    // failed. The pre-handoff intent remains durable and cannot regain budget.
+    journal.store.fail_next_write();
+    assert!(journal.confirm(reservation).is_err());
+    assert!(journal.pending_receipts().is_err());
+    drop(journal);
+    let mut resumed = fixture.open(OpenMode::Resume).unwrap();
+    assert_eq!(resumed.totals(), [0, 0]);
+    assert_eq!(resumed.uncertain_totals(), [bytes.len() as u64, 0]);
+    assert!(fixture.state().payload.pending.is_none());
+    assert_eq!(resumed.remaining_ou().unwrap(), 0);
+    assert!(resumed
+        .receipts(&[bytes.len() as u64, 0])
+        .unwrap()
+        .is_empty());
+    assert!(resumed
+        .reserve(&packet(true, false, 0), Direction::Outbound)
+        .is_err());
+    drop(resumed);
+    let resumed = fixture.open(OpenMode::Resume).unwrap();
+    assert_eq!(resumed.uncertain_totals(), [bytes.len() as u64, 0]);
+    assert_eq!(resumed.remaining_ou().unwrap(), 0);
+}
+
+#[test]
+fn interrupted_reservation_is_held_but_explicit_unsent_cancellation_releases_it() {
+    let fixture = Fixture::new(1);
+    let bytes = packet(false, false, 4);
+    let mut journal = fixture.open(OpenMode::Create).unwrap();
+    let unsent = journal.reserve(&bytes, Direction::Outbound).unwrap();
+    journal.cancel(unsent).unwrap();
+    assert_eq!(journal.remaining_ou().unwrap(), 1);
+    assert_eq!(journal.totals(), [0, 0]);
+    let _interrupted = journal.reserve(&bytes, Direction::Inbound).unwrap();
+    assert!(journal.state.pending.is_some());
+    drop(journal);
+    let resumed = fixture.open(OpenMode::Resume).unwrap();
+    assert_eq!(resumed.totals(), [0, 0]);
+    assert_eq!(resumed.uncertain_totals(), [bytes.len() as u64, 0]);
+    assert_eq!(resumed.remaining_ou().unwrap(), 0);
+}
+
+#[test]
+fn failed_directory_sync_recovers_installed_confirmation_without_double_counting() {
+    let fixture = Fixture::new(100);
+    let bytes = packet(false, false, 4);
+    let mut journal = fixture.open(OpenMode::Create).unwrap();
+    let reservation = journal.reserve(&bytes, Direction::Outbound).unwrap();
+    journal.store.fail_after_install();
+    assert!(journal.confirm(reservation).is_err());
+    assert!(journal.pending_receipts().is_err());
+    drop(journal);
+    let mut resumed = fixture.open(OpenMode::Resume).unwrap();
+    assert_eq!(resumed.totals(), [bytes.len() as u64, 0]);
+    assert_eq!(resumed.uncertain_totals(), [0, 0]);
+    let receipts = resumed.receipts(&[bytes.len() as u64, 0]).unwrap();
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(receipts[0].usage.total_bytes, bytes.len() as u64);
+}
+
+#[test]
+fn receipt_snapshots_never_include_pending_or_uncertain_handoffs() {
+    let fixture = Fixture::new(100);
+    let ordinary = packet(false, false, 4);
+    let premium = packet(true, false, 8);
+    let mut journal = fixture.open(OpenMode::Create).unwrap();
+    journal.count(&ordinary, Direction::Outbound).unwrap();
+    let reservation = journal.reserve(&premium, Direction::Outbound).unwrap();
+    let operator = [ordinary.len() as u64, premium.len() as u64];
+    let receipts = journal.receipts(&operator).unwrap();
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(receipts[0].usage.traffic_class, 0);
+    assert_eq!(receipts[0].usage.total_bytes, ordinary.len() as u64);
+    journal.confirm(reservation).unwrap();
+    // A status sampled before the new confirmation cannot authorize it early.
+    assert_eq!(
+        journal.receipts(&[ordinary.len() as u64, 0]).unwrap().len(),
+        1
+    );
+    let receipts = journal.receipts(&operator).unwrap();
+    assert_eq!(receipts.len(), 2);
+    assert_eq!(receipts[1].usage.total_bytes, premium.len() as u64);
+    assert_eq!(journal.authorized_totals(), operator);
+}
+
+#[test]
+fn legacy_confirmed_journal_migrates_without_changing_receipts_or_counters() {
+    let fixture = Fixture::new(100);
+    let mut journal = fixture.open(OpenMode::Create).unwrap();
+    let bytes = packet(false, false, 4);
+    journal.count(&bytes, Direction::Outbound).unwrap();
+    let receipts = journal.receipts(&[bytes.len() as u64, 0]).unwrap();
+    drop(journal);
+    let mut legacy = fixture.state().payload;
+    legacy.handoff_sequence = 0;
+    legacy.uncertain_bytes.clear();
+    fixture.replace(legacy);
+    let text = fs::read_to_string(fixture.path.join("state.json")).unwrap();
+    assert!(!text.contains("handoff_sequence"));
+    assert!(!text.contains("uncertain_bytes"));
+    let recovered = fixture.open(OpenMode::Resume).unwrap();
+    assert_eq!(recovered.totals(), [bytes.len() as u64, 0]);
+    assert_eq!(recovered.uncertain_totals(), [0, 0]);
+    assert_eq!(recovered.pending_receipts().unwrap(), receipts);
+}
+
+#[test]
 fn aggregate_original_budget_cannot_reset_on_receipt_or_reconnect() {
     let fixture = Fixture::new(1);
     let mut journal = fixture.open(OpenMode::Create).unwrap();

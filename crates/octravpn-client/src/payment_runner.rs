@@ -3,7 +3,7 @@
 //! Operator clock progress is a bounded liveness check, not independent chain
 //! proof. Canonical admission remains the pinned native node's responsibility.
 use crate::{
-    payments::{Journal, OpenMode},
+    payments::{Journal, OpenMode, Reservation},
     wireguard,
 };
 use anyhow::{ensure, Context, Result};
@@ -124,6 +124,7 @@ pub(crate) async fn run(
         tokio::task::spawn_blocking(move || {
             let mut journal = journal.lock();
             tracing::info!(plan = journal.binding().plan, local_bytes = ?journal.totals(),
+                uncertain_bytes = ?journal.uncertain_totals(),
                 authorized_bytes = ?journal.authorized_totals(), remaining_ou = journal.remaining_ou()?,
                 "restored accepted payment plan");
             journal.connect(wg)
@@ -196,9 +197,11 @@ pub(crate) async fn run(
                     let length = length?;
                     let raw = packet[..length].to_vec();
                     if ip_tunnel::validate_outbound(&raw, assigned).is_err() { continue; }
-                    check(&journal, raw.clone(), Direction::Outbound).await?;
+                    let reservation = reserve(&journal, raw.clone(), Direction::Outbound).await?;
                     if tunnel.send_confirmed(&ip_tunnel::encode(&raw)?).await? {
-                        count(&journal, raw, Direction::Outbound).await?;
+                        finish(&journal, reservation, true).await?;
+                    } else {
+                        finish(&journal, reservation, false).await?;
                     }
                     tunnel.ensure_available()?;
                 },
@@ -206,10 +209,10 @@ pub(crate) async fn run(
                     let body = body?;
                     let raw = ip_tunnel::decode(&body)?.to_vec();
                     ip_tunnel::validate_inbound(&raw, assigned)?;
-                    check(&journal, raw.clone(), Direction::Inbound).await?;
+                    let reservation = reserve(&journal, raw.clone(), Direction::Inbound).await?;
                     let length = device.send(&raw).await?;
                     ensure!(length == raw.len(), "partial client TUN write");
-                    count(&journal, raw, Direction::Inbound).await?;
+                    finish(&journal, reservation, true).await?;
                 },
             }
         }
@@ -312,15 +315,28 @@ async fn settle_batch(
     Ok(())
 }
 
-async fn check(journal: &Arc<Mutex<Journal>>, raw: Vec<u8>, direction: Direction) -> Result<()> {
+async fn reserve(
+    journal: &Arc<Mutex<Journal>>,
+    raw: Vec<u8>,
+    direction: Direction,
+) -> Result<Reservation> {
     let journal = journal.clone();
-    tokio::task::spawn_blocking(move || journal.lock().check(&raw, direction)).await??;
-    Ok(())
+    tokio::task::spawn_blocking(move || journal.lock().reserve(&raw, direction)).await?
 }
-async fn count(journal: &Arc<Mutex<Journal>>, raw: Vec<u8>, direction: Direction) -> Result<()> {
+async fn finish(
+    journal: &Arc<Mutex<Journal>>,
+    reservation: Reservation,
+    confirmed: bool,
+) -> Result<()> {
     let journal = journal.clone();
-    tokio::task::spawn_blocking(move || journal.lock().count(&raw, direction)).await??;
-    Ok(())
+    tokio::task::spawn_blocking(move || {
+        if confirmed {
+            journal.lock().confirm(reservation)
+        } else {
+            journal.lock().cancel(reservation)
+        }
+    })
+    .await?
 }
 async fn status(
     client: &reqwest::Client,

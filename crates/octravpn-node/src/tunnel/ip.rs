@@ -55,11 +55,17 @@ pub(super) struct Tunnel {
     routes: Mutex<BTreeMap<Ipv4Addr, ReturnPath>>,
     owners: Arc<owners::Book>,
 }
+
+fn retain_routes(routes: &mut BTreeMap<Ipv4Addr, ReturnPath>) {
+    // Suspension forbids handoff but preserves a route's transport identity.
+    routes.retain(|_, path| path.retained());
+}
+
 impl Tunnel {
     pub(super) fn sweep(&self) {
         // Keep temporarily suspended publications; release terminal/replaced
         // transport capabilities so historical routes cannot pin every meter.
-        self.routes.lock().retain(|_, path| path.retained());
+        retain_routes(&mut self.routes.lock());
     }
     async fn open(config: Config, server: [u8; 32]) -> Result<Self> {
         config.validate()?;
@@ -99,7 +105,7 @@ impl Tunnel {
         {
             let mut routes = self.routes.lock();
             if !routes.contains_key(&assigned) && routes.len() >= super::PEERS_CAP {
-                routes.retain(|_, previous| previous.allowed());
+                retain_routes(&mut routes);
                 ensure!(
                     routes.len() < super::PEERS_CAP,
                     "VPN IP route capacity exhausted"
@@ -117,7 +123,7 @@ impl Tunnel {
                 );
             } else {
                 if routes.len() >= super::PEERS_CAP {
-                    routes.retain(|_, previous| previous.allowed());
+                    retain_routes(&mut routes);
                 }
                 ensure!(
                     routes.len() < super::PEERS_CAP,
@@ -182,5 +188,97 @@ impl Server {
             self.ip_tunnel = Some(Arc::new(Tunnel::open(config, key).await?));
         }
         Ok(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        onion::OnionRouter,
+        tunnel::{AllowedClient, Binding, Peer, ADMISSION_LEASE},
+    };
+    use octravpn_core::{
+        bounded::BoundedMap,
+        control::{
+            announce_opener_binding_payload, announce_signing_payload, AnnounceSessionRequest,
+        },
+        session::SessionId,
+        KeyPair,
+    };
+    use std::time::Instant;
+    use x25519_dalek::StaticSecret;
+
+    /// Real route matching and retention, without a kernel interface. This
+    /// component fixture does not establish canonical or WireGuard admission.
+    #[tokio::test]
+    async fn pruning_preserves_suspended_route_and_resumes_without_new_outbound_packet() {
+        let key = KeyPair::from_secret_bytes(&[81; 32]);
+        let opener = KeyPair::from_secret_bytes(&[82; 32]);
+        let session = SessionId::from_u64(83);
+        let client_wg_pubkey = [84; 32];
+        let open_tx_hash = "ab".repeat(32);
+        let request = AnnounceSessionRequest {
+            client_sig: key.sign(&announce_signing_payload(
+                &session,
+                &key.public,
+                &client_wg_pubkey,
+                &open_tx_hash,
+            )),
+            opener_sig: opener.sign(&announce_opener_binding_payload(
+                &session,
+                &key.public,
+                &client_wg_pubkey,
+                &open_tx_hash,
+            )),
+            session_id: session.clone(),
+            client_pubkey: key.public,
+            client_wg_pubkey,
+            open_tx_hash,
+            opener_pubkey: opener.public,
+        };
+        let mut allowed = AllowedClient::new(request);
+        allowed.paused = true;
+        let allowlist = Arc::new(BoundedMap::new(1, ADMISSION_LEASE));
+        assert!(allowlist.insert(client_wg_pubkey, allowed.clone()));
+        let server = Server::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            StaticSecret::from([85; 32]),
+            Arc::new(OnionRouter::new()),
+            allowlist.clone(),
+        )
+        .await
+        .unwrap();
+        let peer = "127.0.0.1:51820".parse().unwrap();
+        // Retention inspects peer identity, not its noise state. No handshake
+        // or forwarding is claimed by this metadata-only peer fixture.
+        assert!(server.peers.insert(
+            peer,
+            Arc::new(Peer {
+                client_pubkey: client_wg_pubkey,
+                tuns: Vec::new(),
+                shard_count: 1
+            })
+        ));
+        let path = server.return_path(&session, peer, &Binding::Legacy(allowed), None);
+        assert!(!path.allowed());
+        assert!(path.retained());
+        let assigned = packet::address(&session, &client_wg_pubkey);
+        let mut routes = BTreeMap::from([(assigned, path)]);
+        // The same pruning rule serves periodic and capacity reclamation.
+        retain_routes(&mut routes);
+        assert!(routes.contains_key(&assigned));
+        allowlist
+            .modify(&client_wg_pubkey, |current| current.paused = false)
+            .unwrap();
+        assert!(routes[&assigned].allowed());
+        // Actual expiry remains reclaimable; retention never extends a lease.
+        allowlist
+            .modify(&client_wg_pubkey, |current| {
+                current.expires_at = Instant::now() - Duration::from_secs(1)
+            })
+            .unwrap();
+        retain_routes(&mut routes);
+        assert!(routes.is_empty());
     }
 }

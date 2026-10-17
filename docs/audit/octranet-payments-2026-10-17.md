@@ -47,8 +47,8 @@ and restart. Native plan admission now requires a revocable, bounded current
 publication lease; resuming the same retained head cannot renew its freshness
 deadline. Callers cannot replace the plan facts bound to that lease. The
 reviewer found no further concrete defect in those applied fixes. The connected
-path now guards the actual nonblocking packet handoff; combined kernel
-qualification remains required.
+path guards the actual nonblocking packet handoff; its isolated kernel
+qualification is recorded below.
 
 The connected candidate adds explicit bounded postpaid credit, durable signed
 connection watermarks, native publication guards at nonblocking packet handoff,
@@ -66,6 +66,39 @@ uncertain sends cannot reset either limit. This is bounded postpaid risk, not a
 claim of cryptographically fair exchange or proof of packet delivery. Operator
 status signatures authenticate their signer, not independent chain finality.
 
+The recovery review also closed two debt/accounting gaps. The operator persists
+the authenticated tariff before admitting traffic, so a removed or expired
+Circle asset cannot erase the preimage needed to redeem existing receipts.
+Recovery still checks current custody, code, keys, rates and deadlines, and its
+claim-only result grants no forwarding capability. The client now reserves
+exposure durably before an actual packet handoff; interrupted sends retain
+nonbillable uncertainty against the original budget. Publication pauses also
+retain valid return paths instead of pruning them under table pressure.
+
+A separate read-only review of Legacy execution found no confirmed custody or
+admission exploit. U256 range guards are embedded in emitted OCTB, and the
+native signature verifier rejects small-order receipt keys. Legacy numeric
+coercions can still let a caller create unusable terms; native plan admission
+rejects noncanonical state. Application regressions exercise negatives,
+values above U256, malformed scalar/account inputs and unsafe receipt keys.
+This is a bounded source review with finite regressions, not a proof of the VM.
+
+## Compilation boundary
+
+The adopted typed Program profile excludes Ed25519 verification, while the
+`epoch_time` source expression is restricted to Program declarations. Full
+`compileAml` Program admission therefore rejects this application. The explicit
+local `octra-node compile-legacy` tool uses the unchanged native source emitter,
+verifies ordinary raw OCTB binary admission and emits a v1 source-build
+certificate. The existing factory deploys that exact binary. Source syntax
+does not grant typed Program authority, and the certificate is not a compiler
+attestation. No compiler, VM or consensus rule was changed.
+
+Execution under this Legacy path lacks typed ABI/storage enforcement. Embedded
+integer guards, signature checks and independent canonical state validation
+remain in force. The local build and the exact factory image are tested
+together; no unpublished application source needs a public compiler endpoint.
+
 ## Local qualification
 
 Run from the repository root, with the pinned toolchain and workspace siblings:
@@ -76,20 +109,34 @@ cargo clippy --locked --release -p octra-node-runtime --test octranet_payments -
 (cd proofs/lean && lake build)
 ```
 
-The combined local run across browser, canonical node, runtime and VPN targets
-passed 1,120 tests, with three explicitly ignored qualification/helper cases.
-The node process test also checked the recovered epoch clock against its actual
-authenticated finality header and refused a substituted captured head. Strict
-Clippy and the full Lean build passed. These results qualify their stated local
-scope, not the pending public or new paid-packet integration.
+The final combined release run across browser, canonical node, runtime, client,
+VPN and TUN targets passed **1,558 tests, zero failures and three designated
+ignored helpers across 12 targets**. The frozen inputs remained unchanged.
+Strict Clippy, formatting and the full Lean build passed. Fourteen application
+tests include exact seven-day operator and 24-hour payer boundaries, malformed
+inputs, signature safety and custody rollback. The node process tests bind the
+recovered clock to actual authenticated finality and refuse substituted heads.
 
-The subsequent final run includes the client and TUN crates: **1,541 passed,
-zero failed, three ignored helpers across 12 targets**. Strict Clippy, formatting
-and the full Lean build passed on the recorded source snapshot. This run also
-includes the positive native publication, durable credit/fee budgets, signed
-control protocol, stopped-plan receipt recovery and separate client settlement
-worker. The observer remained connected to public devnet but was not serving;
-its current status is recorded separately. No Mainnet transaction was sent.
+The final isolated Docker gate also passed. Four native validators execute
+ordinary signed deployment, stake, funding, offer and claim transactions. The
+actual payer client carries TCP, UDP and ICMP through two endpoint kernels with
+no external network. Held receipts exhaust the configured 32,768-byte credit;
+SIGKILL of client and operator cannot reset that exposure. After receipt release,
+canonical charges restore credit. Another restart preserves the same plan,
+address and original budget. A canonical exit blocks traffic from a still-live
+WireGuard client, early withdrawals fail, and retrying operator unstake retains
+its original seven-day deadline. Five successful canonical claims agree across
+all four ExEx sinks, including zero charge for the operator's free class.
+
+These process kills occur while idle at bounded-credit/restart checkpoints;
+they are not send/fsync fault injection. Component regressions cover interrupted
+handoff accounting. Mature 24-hour refunds and seven-day unstake are separate
+finite canonical-clock boundary tests, not elapsed wall-clock tests. The gate
+does not qualify throughput, seamless client reconnection, stock Tailscale,
+portal onboarding, public DNS/TLS or Mainnet. Exact source, executable, image and
+log hashes are in the machine-readable checkpoint. No Mainnet transaction was
+sent. The existing public observer was separately observed serving canonical
+state, with paid settlement unconfigured.
 
 The production Program transaction adapter compiles the actual application and
 factory and executes signed transactions, staged storage and real ledger
@@ -110,19 +157,20 @@ packet delivery. Native application tests are finite checks of the actual code.
 The explicit native `payments` configuration selects the new application;
 legacy v5 mode keeps its own adapter. The new implementation connects canonical
 admission, durable class metering, payer authorization and claim publication.
-Those boundaries still require a combined kernel/client/chain qualification
-with the bounded unpaid Circle portal before accepting user funds.
+The isolated kernel/client/chain path is qualified in the scope above. Stock
+Tailscale paid exits, funding/onboarding, MagicDNS and the bounded unpaid Circle
+portal still require qualification together before accepting user funds.
 
-The staged native reader and meter are components, with their scope described
+The native reader and meter have their scope described
 in the [architecture](../architecture/octranet-payment-tier.md). The reader's
 positive grant is now tested through actual post-genesis factory/application
 deployment, signed validator QCs, authenticated epoch history and canonical
 Circle resolution. Separate tests cover publication suspension and a guarded
 handoff, payer exit, operator unstake and Circle expiry. These finite checks
-close the reader's previous positive-grant gap; they do not qualify the full
-kernel/client/claim path or prove AML/compiler/VM refinement.
+cover the reader's publication boundary. The connected gate covers the local
+kernel/client/claim path; neither proves AML/compiler/VM refinement.
 
-Public network identity, synchronized canonical state, the public control/TLS
+Public network identity, sustained synchronization/recovery, the public control/TLS
 deployment and stateful public end-to-end qualification remain required. A
 provider needs its configured stake (minimum 100 OCT), payer funds and network
 fees; the earlier one-OCT zero-escrow canary is insufficient for an active

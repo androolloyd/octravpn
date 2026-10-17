@@ -1,5 +1,5 @@
-//! Durable payer authorization. Counting is called only after confirmed local
-//! forwarding; dropped or ambiguously queued packets must not enter this state.
+//! Durable payer authorization. Reserve before local forwarding, confirm only
+//! after handoff. Interrupted handoffs retain uncertain, nonbillable capacity.
 //! Canonical plan admission and authenticated operator counters belong to the
 //! runner. This journal stores public authorization material, never secrets.
 //! The runner must keep one stable path per plan and only Create for a genuinely
@@ -46,6 +46,35 @@ struct State {
     local_bytes: Vec<u64>,
     authorized_bytes: Vec<u64>,
     receipts: Vec<Option<SignedUsage>>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    handoff_sequence: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pending: Option<Pending>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    uncertain_bytes: Vec<u64>,
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "Serde's callback takes a reference"
+)]
+const fn is_zero(value: &u64) -> bool {
+    *value == 0
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Pending {
+    sequence: u64,
+    traffic_class: u8,
+    bytes: u64,
+}
+
+/// Opaque single-use handoff identity. Dropping it leaves the durable pending
+/// record held; only an explicit unsent cancellation releases its capacity.
+#[must_use = "confirm successful forwarding or cancel a definitely unsent handoff"]
+pub(crate) struct Reservation {
+    sequence: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -63,6 +92,43 @@ fn checksum(state: &State) -> Result<String> {
 }
 
 impl State {
+    fn capacity_totals(&self) -> Result<Vec<u64>> {
+        ensure!(
+            self.uncertain_bytes.is_empty() || self.uncertain_bytes.len() == self.local_bytes.len(),
+            "client uncertain counter shape differs"
+        );
+        ensure!(
+            !self.uncertain_bytes.is_empty()
+                || (self.handoff_sequence == 0 && self.pending.is_none()),
+            "new handoff history lacks uncertain counters"
+        );
+        let mut totals = self
+            .local_bytes
+            .iter()
+            .enumerate()
+            .map(|(class, local)| {
+                local
+                    .checked_add(self.uncertain_bytes.get(class).copied().unwrap_or(0))
+                    .context("client uncertain byte counter overflow")
+            })
+            .collect::<Result<Vec<_>>>()?;
+        if let Some(pending) = &self.pending {
+            ensure!(
+                pending.sequence > 0
+                    && pending.sequence == self.handoff_sequence
+                    && pending.bytes > 0,
+                "client pending handoff identity differs"
+            );
+            let total = totals
+                .get_mut(usize::from(pending.traffic_class))
+                .context("client pending class missing")?;
+            *total = total
+                .checked_add(pending.bytes)
+                .context("client pending byte counter overflow")?;
+        }
+        Ok(totals)
+    }
+
     fn validate(&self) -> Result<()> {
         ensure!(
             self.version == 1,
@@ -87,7 +153,7 @@ impl State {
         Budget::new(
             self.identity.tariff.clone(),
             self.identity.original_budget_ou,
-            self.local_bytes.clone(),
+            self.capacity_totals()?,
         )?;
         Budget::new(
             self.identity.tariff.clone(),
@@ -170,7 +236,7 @@ impl Journal {
             receipt_key: key.public,
         };
         let mut store = Store::open(path, mode)?;
-        let state = match mode {
+        let mut state = match mode {
             OpenMode::Create => {
                 let classes = identity.tariff.classes().len();
                 let state = State {
@@ -181,6 +247,9 @@ impl Journal {
                     local_bytes: vec![0; classes],
                     authorized_bytes: vec![0; classes],
                     receipts: vec![None; classes],
+                    handoff_sequence: 0,
+                    pending: None,
+                    uncertain_bytes: vec![0; classes],
                 };
                 state.validate()?;
                 let envelope = Envelope {
@@ -205,6 +274,27 @@ impl Journal {
                 envelope.payload
             }
         };
+        let migrated = state.uncertain_bytes.is_empty();
+        if migrated {
+            state.uncertain_bytes.resize(state.local_bytes.len(), 0);
+        }
+        let recovered = if let Some(pending) = state.pending.take() {
+            let uncertain = &mut state.uncertain_bytes[usize::from(pending.traffic_class)];
+            *uncertain = uncertain
+                .checked_add(pending.bytes)
+                .context("client uncertain byte counter overflow")?;
+            true
+        } else {
+            migrated
+        };
+        if recovered {
+            state.validate()?;
+            let envelope = Envelope {
+                checksum: checksum(&state)?,
+                payload: state.clone(),
+            };
+            store.commit(&serde_json::to_vec(&envelope)?)?;
+        }
         Ok(Self {
             store,
             state,
@@ -271,22 +361,78 @@ impl Journal {
         let mut budget = Budget::new(
             self.state.identity.tariff.clone(),
             self.state.identity.original_budget_ou,
-            self.state.local_bytes.clone(),
+            self.state.capacity_totals()?,
         )?;
         budget.reserve(class, u64::try_from(packet.len())?)?;
         Ok(class)
     }
 
-    /// Call only after the runner confirms forwarding this complete raw IPv4
-    /// packet. There is no method that turns queued/ambiguous sends into usage.
-    /// Synchronous durable commits favor correctness over packet throughput.
+    /// Persist intent before any network or TUN handoff. The runner serializes
+    /// application packets; a pending operation cannot be overwritten.
+    pub(crate) fn reserve(&mut self, packet: &[u8], direction: Direction) -> Result<Reservation> {
+        let class = self.check(packet, direction)?;
+        ensure!(
+            self.state.pending.is_none(),
+            "client handoff still pending; reopen to recover uncertain capacity"
+        );
+        let mut next = self.state.clone();
+        next.handoff_sequence = next
+            .handoff_sequence
+            .checked_add(1)
+            .context("client handoff sequence exhausted")?;
+        let sequence = next.handoff_sequence;
+        next.pending = Some(Pending {
+            sequence,
+            traffic_class: class,
+            bytes: u64::try_from(packet.len())?,
+        });
+        self.commit(next)?;
+        Ok(Reservation { sequence })
+    }
+
+    /// Confirm only a complete successful local handoff. A failure leaves the
+    /// pre-handoff record recoverable, even if the send itself already worked.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "Consuming the token prevents reuse"
+    )]
+    pub(crate) fn confirm(&mut self, reservation: Reservation) -> Result<()> {
+        self.ready()?;
+        let mut next = self.state.clone();
+        let pending = next.pending.take().context("client handoff missing")?;
+        ensure!(
+            pending.sequence == reservation.sequence,
+            "client handoff identity differs"
+        );
+        let local = &mut next.local_bytes[usize::from(pending.traffic_class)];
+        *local = local
+            .checked_add(pending.bytes)
+            .context("client byte counter overflow")?;
+        self.commit(next)
+    }
+
+    /// Release only when the caller knows no application packet was handed off.
+    /// Unknown send outcomes must leave the reservation pending instead.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "Consuming the token prevents reuse"
+    )]
+    pub(crate) fn cancel(&mut self, reservation: Reservation) -> Result<()> {
+        self.ready()?;
+        let mut next = self.state.clone();
+        let pending = next.pending.take().context("client handoff missing")?;
+        ensure!(
+            pending.sequence == reservation.sequence,
+            "client handoff identity differs"
+        );
+        self.commit(next)
+    }
+
+    #[cfg(test)]
     pub(crate) fn count(&mut self, packet: &[u8], direction: Direction) -> Result<u8> {
         let class = self.check(packet, direction)?;
-        let mut next = self.state.clone();
-        next.local_bytes[usize::from(class)] = next.local_bytes[usize::from(class)]
-            .checked_add(u64::try_from(packet.len())?)
-            .context("client byte counter overflow")?;
-        self.commit(next)?;
+        let reservation = self.reserve(packet, direction)?;
+        self.confirm(reservation)?;
         Ok(class)
     }
 
@@ -346,6 +492,9 @@ impl Journal {
     pub(crate) fn authorized_totals(&self) -> &[u64] {
         &self.state.authorized_bytes
     }
+    pub(crate) fn uncertain_totals(&self) -> &[u64] {
+        &self.state.uncertain_bytes
+    }
     pub(crate) fn binding(&self) -> &PlanBinding {
         &self.state.identity.binding
     }
@@ -354,7 +503,7 @@ impl Journal {
         Ok(Budget::new(
             self.state.identity.tariff.clone(),
             self.state.identity.original_budget_ou,
-            self.state.local_bytes.clone(),
+            self.state.capacity_totals()?,
         )?
         .remaining_ou())
     }

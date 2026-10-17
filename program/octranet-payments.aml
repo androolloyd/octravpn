@@ -1,6 +1,8 @@
 // Ownerless Octranet payment accounts. Portal access is outside paid admission.
 // Program epoch_time is canonical milliseconds; this source needs no new opcode.
 // Receipts authorize cumulative class usage, not a claim of provable delivery.
+// The adopted typed Program profile excludes Ed25519. Compile this source
+// with compile-legacy and deploy its raw OCTB through the existing factory.
 program OctranetPayments {
   const DAY_MS: uint = 86400000
   const OPERATOR_UNSTAKE_MS: uint = 604800000

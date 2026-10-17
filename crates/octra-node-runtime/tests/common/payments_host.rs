@@ -54,17 +54,27 @@ pub(crate) fn address(n: u8) -> String {
 pub(crate) fn sign(n: u8, message: &str) -> String {
     STANDARD.encode(key(n).sign(message.as_bytes()).to_bytes())
 }
+pub(crate) fn payment_compilation() -> &'static Value {
+    static COMPILATION: OnceLock<Value> = OnceLock::new();
+    COMPILATION.get_or_init(|| {
+        // The same explicit local build used by the node's compile-legacy CLI.
+        // This source needs both Program epoch_time and legacy Ed25519; its
+        // complete typed compileAml admission is deliberately not claimed.
+        octra_node_runtime::program::build::legacy(
+            include_bytes!("../../../../program/octranet-payments.aml"),
+            true,
+            true,
+        )
+        .unwrap_or_else(|error| panic!("payment local compilation: {error}"))
+    })
+}
 pub(crate) fn binaries() -> &'static (Vec<u8>, Vec<u8>) {
     static CODE: OnceLock<(Vec<u8>, Vec<u8>)> = OnceLock::new();
     CODE.get_or_init(|| {
         (
-            source::compile(
-                include_bytes!("../../../../program/octranet-payments.aml"),
-                Syntax::Source,
-                true,
-            )
-            .unwrap()
-            .octb,
+            STANDARD
+                .decode(payment_compilation()["bytecode"].as_str().unwrap())
+                .unwrap(),
             source::compile(
                 include_bytes!("../../../../program/octranet-payments-factory.aml"),
                 Syntax::Source,

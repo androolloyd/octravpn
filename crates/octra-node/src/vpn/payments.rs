@@ -78,6 +78,20 @@ pub struct Payments {
     deployment: Deployment,
     operator: Address,
     shared: Arc<crate::Shared>,
+    retained: tokio::sync::Mutex<RetainedTariff>,
+}
+
+// A service's durable claim journal retains the one immutable tariff bound to
+// its configured sealed offer. Plain read-only adapters may retain in memory;
+// the production settlement service attaches its archive before serving peers.
+trait TariffArchive: Send + Sync {
+    fn load_tariff(&self) -> Result<Option<Tariff>>;
+    fn save_tariff(&self, tariff: Tariff) -> Result<()>;
+}
+#[derive(Default)]
+struct RetainedTariff {
+    tariff: Option<Tariff>,
+    archive: Option<Arc<dyn TariffArchive>>,
 }
 
 /// Read-only facts captured from one canonical publication.
@@ -230,14 +244,39 @@ impl Payments {
             deployment,
             operator,
             shared,
+            retained: tokio::sync::Mutex::new(RetainedTariff::default()),
         })
     }
 
     pub async fn plan(&self, plan: u64) -> Result<Plan> {
+        self.current_plan(plan, false).await
+    }
+
+    /// Re-read current custody, code pins and settlement deadlines against the
+    /// exact tariff previously authenticated for this sealed offer. Asset
+    /// expiry/removal cannot erase earned debt. This lease never grants traffic.
+    pub async fn claim_plan(&self, plan: u64) -> Result<Plan> {
+        self.current_plan(plan, true).await
+    }
+
+    async fn current_plan(&self, plan: u64, claim_only: bool) -> Result<Plan> {
         let serving = self.shared.current()?;
         let expires = serving.observed_at + PLAN_MAX_AGE;
         ensure!(Instant::now() < expires, "Octranet canonical head is stale");
-        let mut result = self.project(&serving.committed, plan).await?;
+        let mut result = if claim_only {
+            let retained = self.retained_tariff().await?;
+            if let Some(tariff) = retained {
+                let now = self.canonical_time(&serving.committed).await?;
+                self.read_state_with_tariff(serving.committed.state(), plan, now, Some(tariff))?
+            } else {
+                self.project(&serving.committed, plan).await?
+            }
+        } else {
+            self.project(&serving.committed, plan).await?
+        };
+        if claim_only {
+            result.eligible = false;
+        }
         ensure!(
             !serving.revocation.is_revoked(),
             "Octranet canonical snapshot changed"
@@ -250,7 +289,7 @@ impl Payments {
         Ok(result)
     }
 
-    async fn project(&self, view: &Committed, plan: u64) -> Result<Plan> {
+    async fn canonical_time(&self, view: &Committed) -> Result<u64> {
         let octra_browser::Provenance::Canonical(identity) = view.provenance() else {
             anyhow::bail!("Octranet requires canonical state");
         };
@@ -275,6 +314,11 @@ impl Payments {
             .context("Octranet canonical epoch clock missing")?;
         let now = u64::try_from(millis).context("Octranet canonical epoch clock invalid")?;
         ensure!(now > 0, "Octranet canonical epoch clock invalid");
+        Ok(now)
+    }
+
+    async fn project(&self, view: &Committed, plan: u64) -> Result<Plan> {
+        let now = self.canonical_time(view).await?;
         let plan = self.read_state(view.state(), plan, now)?;
         // The storage primitive above binds bytes; the canonical resolver also
         // enforces Circle visibility, activation, expiry and revocation policy.
@@ -288,10 +332,24 @@ impl Payments {
             asset.bytes.as_ref() == plan.tariff.canonical_bytes()?,
             "Octranet public tariff differs"
         );
+        // With the production archive attached, durability precedes the grant.
+        // Failed retention therefore prevents forwarding on this publication.
+        self.retain_tariff(plan.tariff.clone()).await?;
         Ok(plan)
     }
 
     fn read_state(&self, snapshot: &Snapshot, plan: u64, now: u64) -> Result<Plan> {
+        self.read_state_with_tariff(snapshot, plan, now, None)
+    }
+
+    fn read_state_with_tariff(
+        &self,
+        snapshot: &Snapshot,
+        plan: u64,
+        now: u64,
+        retained: Option<Tariff>,
+    ) -> Result<Plan> {
+        let claim_only = retained.is_some();
         check_program(
             snapshot,
             &self.config.program,
@@ -334,7 +392,15 @@ impl Payments {
         );
         let manifest = state.text(b"offer_manifest", &[&offer_key])?;
         digest(&manifest)?;
-        let tariff = self.tariff(snapshot, &manifest)?;
+        let tariff = if let Some(tariff) = retained {
+            ensure!(
+                tariff.hash_hex()? == manifest,
+                "Octranet retained tariff hash differs"
+            );
+            tariff
+        } else {
+            self.tariff(snapshot, &manifest)?
+        };
         ensure!(
             tariff.operator() == &self.operator,
             "Octranet tariff operator differs"
@@ -465,10 +531,69 @@ impl Payments {
                 canonical_ms: now,
                 claim_deadline_ms,
             },
-            eligible: available && provider_available && user_deadline == 0 && remaining > 0,
+            eligible: !claim_only
+                && available
+                && provider_available
+                && user_deadline == 0
+                && remaining > 0,
             claim_eligible: available && claim_deadline_ms.is_none_or(|deadline| now < deadline),
             lease: None,
         })
+    }
+
+    async fn retain_tariff(&self, tariff: Tariff) -> Result<()> {
+        let mut retained = self.retained.lock().await;
+        if let Some(previous) = &retained.tariff {
+            ensure!(
+                previous == &tariff,
+                "Octranet retained offer tariff changed"
+            );
+            return Ok(());
+        }
+        if let Some(archive) = retained.archive.clone() {
+            let saved = tariff.clone();
+            tokio::task::spawn_blocking(move || archive.save_tariff(saved)).await??;
+        }
+        retained.tariff = Some(tariff);
+        Ok(())
+    }
+
+    async fn retained_tariff(&self) -> Result<Option<Tariff>> {
+        let mut retained = self.retained.lock().await;
+        if retained.tariff.is_none() {
+            if let Some(archive) = retained.archive.clone() {
+                // A cancelled grant may have finished its durable save without
+                // installing the in-memory copy. Reload rather than stranding
+                // the archive until a process restart.
+                retained.tariff =
+                    tokio::task::spawn_blocking(move || archive.load_tariff()).await??;
+            }
+        }
+        Ok(retained.tariff.clone())
+    }
+
+    async fn attach_archive(&self, archive: Arc<dyn TariffArchive>) -> Result<()> {
+        let mut retained = self.retained.lock().await;
+        ensure!(
+            retained.archive.is_none(),
+            "Octranet tariff archive already attached"
+        );
+        let disk = archive.clone();
+        let existing = tokio::task::spawn_blocking(move || disk.load_tariff()).await??;
+        match (&retained.tariff, existing) {
+            (Some(current), Some(existing)) => {
+                ensure!(current == &existing, "Octranet tariff archives differ");
+            }
+            (Some(current), None) => {
+                let current = current.clone();
+                let disk = archive.clone();
+                tokio::task::spawn_blocking(move || disk.save_tariff(current)).await??;
+            }
+            (None, Some(existing)) => retained.tariff = Some(existing),
+            (None, None) => (),
+        }
+        retained.archive = Some(archive);
+        Ok(())
     }
 
     fn tariff(&self, snapshot: &Snapshot, hash: &str) -> Result<Tariff> {

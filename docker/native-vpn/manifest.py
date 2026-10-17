@@ -16,4 +16,4 @@ for path in sorted(set(paths)):
     row={'path':str(path.relative_to(base)),'sha256':digest(path),'bytes':path.stat().st_size}
     records.append(row);combined.update(json.dumps(row,sort_keys=True,separators=(',',':')).encode()+b'\n')
 binaries={p.name:digest(p) for p in pathlib.Path('/tmp/native-binaries').iterdir()}
-print(json.dumps({'source_sha256':combined.hexdigest(),'binaries':binaries,'profiles':{'octravpn-private-admin':'release','octra-node':'dev','octravpn':'dev','octravpn-node':'dev','octra':'dev','octra-single-fixture':'dev-test'},'rustc':subprocess.check_output(['rustc','-vV'],text=True),'files':records},indent=2))
+print(json.dumps({'source_sha256':combined.hexdigest(),'binaries':binaries,'profiles':{'octravpn-private-admin':'release','octra-node':'release','octravpn':'dev','octravpn-node':'dev','octra':'dev','octra-single-fixture':'dev-test'},'rustc':subprocess.check_output(['rustc','-vV'],text=True),'files':records},indent=2))
