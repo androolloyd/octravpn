@@ -1,0 +1,464 @@
+{
+  "schema": "octra-root-quarantine-qualification/v1",
+  "observed_at": "2026-10-17T07:18:12.262007+00:00",
+  "scope": "Authenticated current-head root conflicts gate serving before connected recovery shortcuts; local qualification only",
+  "base_commit": "c01bb8027fed7db53a7c9eeffa0420f1948300ae",
+  "adopted_upstream": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "source_sha256": {
+    ".cargo/config.toml": "ce1e033cee48a00988852a54e427e11d8fd2fb32fe558b45cc6b996e5ec2d8bd",
+    "Cargo.lock": "41a91382953a23309f5a507b583da6c19faf4f1a0ee95ce485bea0706ef41269",
+    "Cargo.toml": "5fc6af03807621fd437551c765313d75728d3c0c01d3b21f544d6f366efd1925",
+    "crates/octra-node-runtime/tests/common/bundle_peer.rs": "93b42abf3eb50ad4223e8135107cb269a49204c6c9d57dc0389bfe5a975ea7e4",
+    "crates/octra-node-runtime/tests/common/payments_host.rs": "31252e4724a6a8b919bd99323288337f2a9fe4fdff9748194c553a3cc1d93614",
+    "crates/octra-node-runtime/tests/octranet_payments.rs": "ff62496f77af192787cf7e909d40797770fd29c831f491234fe59132f035d1c7",
+    "crates/octra-node/src/lib.rs": "bc37c079df20c68c009e3630d96f1146cd20ca84c0f21a1671bd9dff3652e836",
+    "crates/octra-node/src/published.rs": "54ad012be46702b9e2e0cb480bfd95e83896457f751c3d224b12791dbf91d884",
+    "crates/octra-node/src/recovery.rs": "62de17fa13024db484f9884e149fb8df1be336a9164d91efb61f03089d5a056d",
+    "crates/octra-node/src/recovery/health.rs": "165a0f6cd2bc604f769a9487d7d927ec2f2637e095fe5f25d9aa47f478295d2e",
+    "crates/octra-node/src/recovery/health/network_tests.rs": "5c5aa0c02b70c7abb1081527b82f7350d23d55a35ca58aa9be4243e72141f142",
+    "crates/octra-node/src/rpc.rs": "791923fce9bfd91db40ba5c7a9c528496194c796b4b840637b479dc14d1b27b9",
+    "crates/octra-node/tests/services.rs": "02e6fd1c2d72dad07705084d84025fc4419a7ce290dd30dec607e1b39f7357bb",
+    "crates/octra-node/tests/services/root_quarantine.rs": "b89e94081bf9472204e686a38535eae8e80fa3fca1593ce00ef0a944be96278f",
+    "docs/rust-node/devnet.md": "71ace04cbdcbe9039fab8989200e9b7f2abab9523a765bcc8e0d871f8b492ba7",
+    "docs/rust-node/root-recovery.md": "36dcfaad9eb643c185852520ffed8e89397523fb4ef2d15f7b866cabf8344076",
+    "docs/rust-node/source-map.json": "6440fdf5895e791ce99ff1904aea396fc88c7e12645846a32702286aa9c17efa",
+    "program/octranet-payments-factory.aml": "479b996c328b6f5e87cb0c033635dcf6d919708fbc49885ef9b9739189e3f533",
+    "program/octranet-payments.aml": "96e494be368351b4cc4832f0d78541813d842f4ab84229749b75a66fcb6c211b",
+    "proofs/lean/OctranetPayments.lean": "3269c304583047605c4b5f8ad8ca669710a0a03bd017eba75f63a12180793d83",
+    "proofs/lean/lakefile.lean": "e0562ca1bc498841b649c5eeadf05b0397a2867720308bfc3990761a7a6249cf",
+    "proofs/lean/lean-toolchain": "f3ea78fdd417d39483583b721709727c225eeea0c0e9d29283de43f577411095",
+    "rust-toolchain.toml": "abd8063388c533b3e6b91666cd66d6229e61d13fc1139d20006492c2980141f5"
+  },
+  "source_snapshot_sha256": "6e6390632152ab969365e50b14506ebbfe72457e4789c22db1e611ab9f494e77",
+  "executable": {
+    "path": "target/release/octra-node",
+    "sha256": "99bdc779fc3d0ee8316ae3a5fd33d5315251b4f91cb808d0b5b6cc6c51014edf"
+  },
+  "operator_policy": {
+    "operator_unstake_ms": 604800000,
+    "payer_exit_ms": 86400000,
+    "deadline_origin": "first canonical request; retries preserve deadline",
+    "aml_changed_this_batch": false
+  },
+  "native_review": {
+    "adopted_upstream": "7f9be4489870645cfcc95439638cde40f5da9f50",
+    "verified_source_files": 1158,
+    "reviewed_sources_sha256": {
+      "lib/core/fork_head_repair.ml": "1c7da37c1780e909a2827a9f426cfc74362d77806788a7239216c65455d9cfec",
+      "node_runtime/consensus_epoch_commit.ml": "29f6aea78682d199449b8e7a51a1b084c7e8a9db197dc9fe3c4b8bc98c196daf",
+      "node_runtime/consensus_health_probe.ml": "6570b61846cf3d37f387956288f4f9f0e51dec8f1824c524804f9ec1c047344a",
+      "node_runtime/consensus_runtime_state.ml": "78fdb3c56ae1890011084588130fcd52bfc53a4fc87ad1779938819ff0177a04",
+      "node_runtime/consensus_health_wiring.ml": "bd7801d7aefe7fee3a7a62cf3626190dae294d6636258342de0ffe97675f8628",
+      "test/test_apply_fork.ml": "876606a189bc1dfecaca8eeecf447ac1ff35490ee15c4704c6b03313ff782b8e"
+    },
+    "kind": "static source review, not native executable qualification"
+  },
+  "checks": {
+    "broad_before_corrections": {
+      "targets": [
+        {
+          "target": "unittests src/lib.rs (target/release/deps/octra_node-7125f81ebdcf0308)",
+          "passed": 86,
+          "failed": 3,
+          "ignored": 0
+        },
+        {
+          "target": "tests/devnet.rs (target/release/deps/devnet-4bb615f679c32ef0)",
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "target": "tests/services.rs (target/release/deps/services-e78ff23a43dfc28d)",
+          "passed": 20,
+          "failed": 0,
+          "ignored": 1
+        },
+        {
+          "target": "tests/single_native.rs (target/release/deps/single_native-d7685ee7395048e7)",
+          "passed": 17,
+          "failed": 0,
+          "ignored": 2
+        },
+        {
+          "target": "unittests src/lib.rs (target/release/deps/octra_node_protocol-7f818372927469b4)",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "target": "tests/catchup_agreement.rs (target/release/deps/catchup_agreement-87ca49d0d6d3d0fe)",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "target": "tests/consensus_catchup_parity.rs (target/release/deps/consensus_catchup_parity-9d9197ffdf8d6f96)",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "target": "tests/consensus_recovery_parity.rs (target/release/deps/consensus_recovery_parity-1ebe0efa4da98d45)",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "target": "unittests src/lib.rs (target/release/deps/octra_node_runtime-4a47c368c1401fa4)",
+          "passed": 50,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "target": "tests/canonical_authority.rs (target/release/deps/canonical_authority-c959e40eab7242ba)",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "target": "tests/canonical_recovery.rs (target/release/deps/canonical_recovery-af006739e6773424)",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 1
+        },
+        {
+          "target": "tests/epoch_roots.rs (target/release/deps/epoch_roots-33be67a415a2d779)",
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "target": "tests/octranet_payments.rs (target/release/deps/octranet_payments-91b92710e73052c0)",
+          "passed": 14,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "passed": 234,
+      "failed": 3,
+      "ignored": 4,
+      "log_sha256": "4cef9c6d7330d9f1c8f897348fdb8dacf63a1c1b5d745167869a1af81354f4ff",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--release",
+        "--no-fail-fast",
+        "--features",
+        "octra-node/test-helpers",
+        "-p",
+        "octra-node",
+        "-p",
+        "octra-node-protocol",
+        "-p",
+        "octra-node-runtime",
+        "--lib",
+        "--test",
+        "services",
+        "--test",
+        "devnet",
+        "--test",
+        "single_native",
+        "--test",
+        "consensus_catchup_parity",
+        "--test",
+        "consensus_recovery_parity",
+        "--test",
+        "catchup_agreement",
+        "--test",
+        "epoch_roots",
+        "--test",
+        "canonical_recovery",
+        "--test",
+        "canonical_authority",
+        "--test",
+        "octranet_payments"
+      ],
+      "exit_code": 101,
+      "source_stage": "Initial new unit fixture omitted StateBatch begin; all other targets passed"
+    },
+    "final_node": {
+      "targets": [
+        {
+          "target": "unittests src/lib.rs (target/release/deps/octra_node-7125f81ebdcf0308)",
+          "passed": 89,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "target": "tests/devnet.rs (target/release/deps/devnet-4bb615f679c32ef0)",
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "target": "tests/services.rs (target/release/deps/services-e78ff23a43dfc28d)",
+          "passed": 20,
+          "failed": 0,
+          "ignored": 1
+        },
+        {
+          "target": "tests/single_native.rs (target/release/deps/single_native-d7685ee7395048e7)",
+          "passed": 17,
+          "failed": 0,
+          "ignored": 2
+        }
+      ],
+      "passed": 128,
+      "failed": 0,
+      "ignored": 3,
+      "log_sha256": "80d1b98d498d64e290aeccf7a738a0f5deebad4eb14006a88778c1f98cb171e6",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--release",
+        "--no-fail-fast",
+        "--features",
+        "octra-node/test-helpers",
+        "-p",
+        "octra-node",
+        "--lib",
+        "--test",
+        "services",
+        "--test",
+        "devnet",
+        "--test",
+        "single_native"
+      ],
+      "exit_code": 0,
+      "source_stage": "Final production code; before the last equivalent empty-map test-only lint correction, whose affected services rerun is below"
+    },
+    "unchanged_protocol_runtime": {
+      "targets": [
+        {
+          "target": "unittests src/lib.rs (target/release/deps/octra_node_protocol-7f818372927469b4)",
+          "passed": 32,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "target": "tests/catchup_agreement.rs (target/release/deps/catchup_agreement-87ca49d0d6d3d0fe)",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "target": "tests/consensus_catchup_parity.rs (target/release/deps/consensus_catchup_parity-9d9197ffdf8d6f96)",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "target": "tests/consensus_recovery_parity.rs (target/release/deps/consensus_recovery_parity-1ebe0efa4da98d45)",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "target": "unittests src/lib.rs (target/release/deps/octra_node_runtime-4a47c368c1401fa4)",
+          "passed": 50,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "target": "tests/canonical_authority.rs (target/release/deps/canonical_authority-c959e40eab7242ba)",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "target": "tests/canonical_recovery.rs (target/release/deps/canonical_recovery-af006739e6773424)",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 1
+        },
+        {
+          "target": "tests/epoch_roots.rs (target/release/deps/epoch_roots-33be67a415a2d779)",
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "target": "tests/octranet_payments.rs (target/release/deps/octranet_payments-91b92710e73052c0)",
+          "passed": 14,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "passed": 109,
+      "failed": 0,
+      "ignored": 1,
+      "included_in": "broad_before_corrections"
+    },
+    "final_services": {
+      "targets": [
+        {
+          "target": "tests/services.rs (target/release/deps/services-e78ff23a43dfc28d)",
+          "passed": 20,
+          "failed": 0,
+          "ignored": 1
+        }
+      ],
+      "passed": 20,
+      "failed": 0,
+      "ignored": 1,
+      "log_sha256": "9956f89f9972b812bb61fbceae6a70f655d92d683d45092e29157761d48a4365",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--release",
+        "--features",
+        "octra-node/test-helpers",
+        "-p",
+        "octra-node",
+        "--test",
+        "services"
+      ],
+      "exit_code": 0,
+      "source_stage": "Final test-only explicit BTreeMap default correction"
+    },
+    "initial_lint_attempts": [
+      {
+        "name": "clippy",
+        "argv": [
+          "cargo",
+          "clippy",
+          "--offline",
+          "--locked",
+          "--release",
+          "--features",
+          "octra-node/test-helpers",
+          "-p",
+          "octra-node-protocol",
+          "-p",
+          "octra-node-runtime",
+          "-p",
+          "octra-node",
+          "--lib",
+          "--bins",
+          "--tests",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "exit_code": 101,
+        "elapsed_seconds": 13.008,
+        "log_sha256": "9ba17bb62fb0c1e21669fd477d7d1f25902a50a6538d0ddd1a592e342ba3cf9f"
+      },
+      {
+        "name": "clippy-final",
+        "argv": [
+          "cargo",
+          "clippy",
+          "--offline",
+          "--locked",
+          "--release",
+          "--features",
+          "octra-node/test-helpers",
+          "-p",
+          "octra-node-protocol",
+          "-p",
+          "octra-node-runtime",
+          "-p",
+          "octra-node",
+          "--lib",
+          "--bins",
+          "--tests",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "exit_code": 101,
+        "elapsed_seconds": 12.519,
+        "log_sha256": "ea7f246c53485f0aa848a48a9981a4b64fe2a1338c9300920cd7c88ab06b55aa"
+      }
+    ],
+    "strict_clippy": {
+      "name": "clippy-corrected",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "--release",
+        "--features",
+        "octra-node/test-helpers",
+        "-p",
+        "octra-node-protocol",
+        "-p",
+        "octra-node-runtime",
+        "-p",
+        "octra-node",
+        "--lib",
+        "--bins",
+        "--tests",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 2.234,
+      "log_sha256": "77772e01d11b125687923175ac2f96f698fbd617b2bccb49aeea4d4ee427c456"
+    },
+    "formatting": {
+      "name": "format-corrected",
+      "argv": [
+        "rustfmt",
+        "--edition",
+        "2021",
+        "--check",
+        "--config",
+        "skip_children=true",
+        "crates/octra-node/src/lib.rs",
+        "crates/octra-node/src/published.rs",
+        "crates/octra-node/src/recovery.rs",
+        "crates/octra-node/src/recovery/health.rs",
+        "crates/octra-node/src/recovery/health/network_tests.rs",
+        "crates/octra-node/src/rpc.rs",
+        "crates/octra-node/tests/services.rs",
+        "crates/octra-node/tests/services/root_quarantine.rs"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.063,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lean": {
+      "exit_code": 0,
+      "command": "lake build OctranetPayments",
+      "abstract_theorems": 19,
+      "aml_compiler_vm_refinement_proven": false,
+      "log_sha256": "a30d6eefe7ccec7803482bd446c3d48f7cc46ed86ba99cb839fca134dd7a5a3d"
+    }
+  },
+  "review": {
+    "corrected": [
+      "Connected driver/observer fast paths skipped root health; matching-root target filtering hid conflicting evidence",
+      "Transient admission query errors now retry without clearing quarantine",
+      "Three new unit fixtures now initialize and commit their StateBatch; equivalent filter syntax and test locals and explicit empty-map construction satisfy strict lint"
+    ],
+    "tested": [
+      "Weak/proven conflicts, historical weights, duplicate/unknown/malformed records and bounded stale-head retry",
+      "Real signed TCP root replies, invalid signatures, malformed envelope rejection and fresh matching evidence",
+      "VPN permit, browser token and retained gateway revocation; ordinary publication/resume cannot bypass quarantine",
+      "Expected Head and root-generation token reject stale clear, publication waiters and cancellation",
+      "Authenticated empty epochs, certificates, ExEx outbox/checkpoints and restart prefix remain intact",
+      "Compiled AML first-request seven-day unstake, repeat request, week-minus-one/week boundary and separate 24-hour payer/claim window"
+    ],
+    "unresolved_material_findings_in_this_patch": []
+  },
+  "limitations": [
+    "Full Service::run fault orchestration and complete native health-loop parity are not established by the component boundary tests",
+    "Operational root-count ties are deterministic by byte order; no native Hashtbl tie-order equivalence is claimed",
+    "Legacy nonjournaled empty-fork repair and durable native repair/crash ordering remain unimplemented/unqualified",
+    "Native journal protection was statically reviewed against all 1158 verified source hashes; no new native execution is claimed",
+    "Lean proves an abstract Nat accounting/deadline model, not AML/compiler/VM refinement or packet delivery",
+    "Seven-day and 24-hour maturity are controlled canonical-clock tests, not elapsed public-network qualification",
+    "No public observer restart, public-chain paid qualification or Mainnet deployment was performed in this batch"
+  ]
+}

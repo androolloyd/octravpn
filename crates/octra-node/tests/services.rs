@@ -2092,3 +2092,5 @@ mod live;
 mod pending;
 #[path = "services/proposals.rs"]
 mod proposals;
+#[path = "services/root_quarantine.rs"]
+mod root_quarantine;

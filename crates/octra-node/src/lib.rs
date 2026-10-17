@@ -55,7 +55,7 @@ use octravpn_node::admission::Revocation;
 use tokio::sync::{watch, Mutex as AsyncMutex};
 
 pub use legacy::Status as LegacyStatus;
-pub use published::{Committed, Status};
+pub use published::{Committed, RootQuarantineTicket, Status};
 use published::{Handle as Published, Serving, Shared};
 pub use services::Services;
 
@@ -250,6 +250,42 @@ impl<A: Host> Node<A> {
         self.shared.suspend(reason);
     }
 
+    /// Capture before collecting peer evidence. A newer conflict at the same
+    /// head invalidates this ticket, independently of ordinary publication.
+    pub fn root_quarantine_ticket(&self) -> RootQuarantineTicket {
+        self.shared.root_quarantine_ticket()
+    }
+
+    pub fn root_quarantined(&self) -> bool {
+        self.shared.root_quarantined()
+    }
+
+    /// Trusted recovery-controller input, after authenticated peer queries.
+    /// Drain publication before checking the exact observed parent; stale
+    /// samples cannot suspend a newly committed head.
+    pub async fn quarantine_root_at(&self, observed: &Head, reason: &str) -> Result<bool> {
+        let _operation = self.operations.lock().await;
+        if self.head().await? != *observed {
+            return Ok(false);
+        }
+        self.shared.quarantine_root(observed, reason);
+        Ok(true)
+    }
+
+    /// The host must supply fresh matching root evidence. Clearing admission's
+    /// conflict gate neither alters committed history nor resumes services.
+    pub async fn clear_root_quarantine_at(
+        &self,
+        observed: &Head,
+        ticket: &RootQuarantineTicket,
+    ) -> Result<bool> {
+        let _operation = self.operations.lock().await;
+        if self.head().await? != *observed {
+            return Ok(false);
+        }
+        Ok(self.shared.clear_root_quarantine(ticket))
+    }
+
     async fn serving(&self) -> Result<Serving> {
         let head = self.store.head().await?;
         let assets = CanonicalAssets::capture(&self.store).await?;
@@ -285,8 +321,26 @@ impl<A: Host> Node<A> {
     /// Called by the host after catch-up. Reaudit durable history before enabling
     /// current reads and admission. Cancellation leaves services suspended.
     pub async fn resume(&self) -> Result<bool> {
+        self.resume_observed(None).await
+    }
+
+    /// Resume only the exact head covered by the host's admission evidence.
+    /// A concurrent canonical publication requires another authenticated query.
+    pub async fn resume_at(&self, observed: &Head) -> Result<bool> {
+        self.resume_observed(Some(observed)).await
+    }
+
+    async fn resume_observed(&self, observed: Option<&Head>) -> Result<bool> {
         let _sync = self.syncing.lock().await;
         let _operation = self.operations.lock().await;
+        if self.root_quarantined() {
+            return Ok(false);
+        }
+        if let Some(observed) = observed {
+            if self.head().await? != *observed {
+                return Ok(false);
+            }
+        }
         let (ticket, _) = self.shared.suspend("auditing canonical history");
         let result = async {
             self.publisher.audit().await?;

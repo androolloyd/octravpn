@@ -10,7 +10,7 @@ use crate::{
     sync::{PeerCatchUpError, Peers},
     Host, Node,
 };
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result};
 use octra_node_protocol::{
     consensus::{
         catchup,
@@ -28,6 +28,8 @@ use octra_node_runtime::{
 };
 use std::{sync::Arc, time::Duration};
 use tokio::{sync::watch, task::JoinHandle, time::Instant};
+
+mod health;
 
 pub(crate) type Live<A> = Driver<driver::Validator<A>, Canonical<A, Authority, Native>>;
 /// Responses come only from `EpochRoots::query`, whose handler verifies each
@@ -263,38 +265,39 @@ impl<A: Host> Service<A> {
         self.authority.set_validators(rules.validators)?;
         Ok(())
     }
-    async fn current_attested(&self) -> Result<bool> {
+    async fn current_attested(&self) -> Result<Option<octra_node_runtime::canonical::Head>> {
         if self.minimum_peers == 0 {
-            return Ok(true);
+            return Ok((!self.node.root_quarantined()).then_some(self.node.head().await?));
         }
-        let head = self.node.head().await?;
-        let epoch = i64::try_from(head.cursor.epoch.0)?;
-        let responses = self
-            .roots
-            .query(epoch, 3., WaitFor::SourceAgreement, false)
-            .await?;
-        let matching = responses
-            .into_iter()
-            .filter(|r| r.state_root.as_deref() == Some(head.cursor.state_root.0.as_slice()))
-            .collect::<Vec<_>>();
-        let stake = self.membership.stake_set(&head, epoch + 1).await?;
-        let heads = matching
-            .iter()
-            .map(|r| catchup::PeerHead {
-                responder_addr: r.responder_addr.clone(),
-                responder_head_epoch: r.responder_head_epoch,
-            })
-            .collect::<Vec<_>>();
-        if catchup::pick_target_epoch(&heads, stake.f, epoch)? > epoch {
+        let sample = health::query(self).await?;
+        if self.quarantine_conflict(&sample).await? {
+            return Ok(None);
+        }
+        if !matches!(sample.status, health::Status::Attested { .. }) || sample.target.is_some() {
+            return Ok(None);
+        }
+        if self.node.root_quarantined()
+            && !self
+                .node
+                .clear_root_quarantine_at(&sample.head, &sample.ticket)
+                .await?
+        {
+            return Ok(None);
+        }
+        Ok(Some(sample.head))
+    }
+    async fn quarantine_conflict(&self, sample: &health::Sample) -> Result<bool> {
+        let health::Status::Conflicting { root, consensus } = sample.status else {
             return Ok(false);
-        }
-        Ok(epoch_roots::reached(
-            self.node.store.chain().chain_id.as_bytes(),
-            epoch,
-            &stake,
-            WaitFor::SourceAgreement,
-            &matching,
-        )?)
+        };
+        let reason = format!(
+            "authenticated peer root mismatch at epoch {}: local {}, peer {}, consensus {}",
+            sample.head.cursor.epoch.0,
+            hex::encode(sample.head.cursor.state_root.0),
+            hex::encode(root),
+            consensus,
+        );
+        self.node.quarantine_root_at(&sample.head, &reason).await
     }
     /// Reconcile only records already authenticated and committed. Floor writes
     /// precede removal of stale locks; future pending locks and votes survive.
@@ -391,10 +394,38 @@ impl<A: Host> Service<A> {
             } else {
                 interval.tick().await;
             }
-            let head = self.node.head().await?;
+            let mut head = self.node.head().await?;
             if head.cursor.sequence != last {
                 last = head.cursor.sequence;
                 progress = Instant::now();
+            }
+            let connected = self.swarm.peers().len() >= self.minimum_peers;
+            // A connected/advancing driver used to bypass every root probe.
+            // Inspect conflicting evidence before any fast serving path; a
+            // root gate survives ordinary publication and resume attempts.
+            if connected && self.minimum_peers > 0 {
+                match health::query(self).await {
+                    Ok(sample) => {
+                        self.quarantine_conflict(&sample).await?;
+                        if let Some(target) = sample.target {
+                            desired = Some(desired.map_or(target, |p: u64| p.max(target)));
+                        }
+                    }
+                    Err(error) => eprintln!("live root health unavailable: {error:#}"),
+                }
+                head = self.node.head().await?;
+                if head.cursor.sequence != last {
+                    last = head.cursor.sequence;
+                    progress = Instant::now();
+                }
+            }
+            if self.node.root_quarantined() {
+                if let Some(mut driver) = running.take() {
+                    driver.stop().await?;
+                    self.authority.detach();
+                    self.node.quiesce().await?;
+                    last = self.reconcile(last).await?;
+                }
             }
             let connected = self.swarm.peers().len() >= self.minimum_peers;
             let hint = self
@@ -406,6 +437,8 @@ impl<A: Host> Service<A> {
                 .unwrap_or(0);
             if running.is_some()
                 && connected
+                && !self.node.root_quarantined()
+                && desired.is_none_or(|target| target <= head.cursor.epoch.0)
                 && hint <= head.cursor.epoch.0.saturating_add(3)
                 && progress.elapsed() < Duration::from_secs(30)
             {
@@ -445,12 +478,13 @@ impl<A: Host> Service<A> {
             });
             if !self.voting
                 && connected
+                && !self.node.root_quarantined()
                 && !needs_catchup
                 && matches!(self.node.status(), crate::Status::Serving(_))
             {
                 continue;
             }
-            if running.is_some() && connected && !needs_catchup {
+            if running.is_some() && connected && !needs_catchup && !self.node.root_quarantined() {
                 continue;
             }
             if let Some(mut driver) = running.take() {
@@ -545,10 +579,17 @@ impl<A: Host> Service<A> {
             if self.swarm.peers().len() < self.minimum_peers {
                 continue;
             }
-            if !self.current_attested().await? {
+            let observed = match self.current_attested().await {
+                Ok(Some(observed)) => observed,
+                Ok(None) => continue,
+                Err(error) => {
+                    eprintln!("live admission proof unavailable: {error:#}");
+                    continue;
+                }
+            };
+            if !self.node.resume_at(&observed).await? {
                 continue;
             }
-            ensure!(self.node.resume().await?, "recovery serving lease revoked");
             self.pending.recover(&self.submission).await?;
             if self.voting {
                 running = Some(Running::start(self.build().await?));

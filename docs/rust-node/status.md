@@ -9,6 +9,16 @@ upstream behavioral parity and public-network deployment remain unqualified.
 
 ## Recorded local evidence
 
+- The [root quarantine checkpoint](checkpoints/2026-10-17/root-quarantine.json)
+  records signed root-conflict checks before connected recovery shortcuts.
+  The final node run passed 128 tests; nine unchanged protocol/runtime targets
+  passed 109 tests, including all 14 compiled payment AML tests. After a final
+  test-only lint correction, the affected service target passed all 20 tests;
+  strict lint, formatting and 19 abstract Lean theorems also passed. Stale
+  heads/tokens, service revocation, signed TCP replies and immutable canonical
+  history/ExEx are covered. The [review](checkpoints/2026-10-17/root-quarantine.md)
+  records initial fixture failures and proof limits. Legacy nonjournaled repair,
+  complete native health-loop parity and public recovery remain separate gates.
 - The [P2P upgrade checkpoint](checkpoints/2026-10-17/p2p-upgrades.json)
   records trusted upgrade/rollback settings reaching production transport and
   the native voting-readiness gate. The combined release suite passed 236 tests;

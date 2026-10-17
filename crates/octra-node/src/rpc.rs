@@ -250,8 +250,30 @@ impl p2p_transaction::Host for Captured {
 async fn status(State(host): State<Arc<Context>>) -> impl IntoResponse {
     let head = host.node.head().await;
     match head {
-        Ok(head)=>Json(serde_json::json!({"chain_id":host.node.chain().chain_id,"epoch":head.cursor.epoch.0,"state_root":hex::encode(head.cursor.state_root.0),"serving":matches!(host.node.status(),crate::Status::Serving(_)),"peers":host.peer_count(),"pending":host.pending.transactions().map(|t|t.len()).ok(),"vpn_settlement":if host.vpn_program.is_some(){"configured"}else{"unconfigured"},"vpn_program":host.vpn_program})).into_response(),
-        Err(_)=>(StatusCode::SERVICE_UNAVAILABLE,"canonical state unavailable").into_response(),
+        Ok(head) => {
+            let status = host.node.status();
+            let reason = match &status {
+                crate::Status::Suspended(reason) => Some(reason),
+                crate::Status::Serving(_) => None,
+            };
+            Json(serde_json::json!({
+                "chain_id": host.node.chain().chain_id,
+                "epoch": head.cursor.epoch.0,
+                "state_root": hex::encode(head.cursor.state_root.0),
+                "serving": matches!(status, crate::Status::Serving(_)),
+                "suspension_reason": reason,
+                "peers": host.peer_count(),
+                "pending": host.pending.transactions().map(|t| t.len()).ok(),
+                "vpn_settlement": if host.vpn_program.is_some() {"configured"} else {"unconfigured"},
+                "vpn_program": host.vpn_program,
+            }))
+            .into_response()
+        }
+        Err(_) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "canonical state unavailable",
+        )
+            .into_response(),
     }
 }
 async fn account(

@@ -182,8 +182,8 @@ the broader runtime's final result remain separate qualification gates.
 
 Local operator tools use these separate endpoints:
 
-- `GET /operator/status`: chain, committed epoch/root, serving state, peers and
-  queue size.
+- `GET /operator/status`: chain, committed epoch/root, serving state, suspension
+  reason, peers and queue size.
 - `GET /account/<address>`: committed balance and nonce, with the captured epoch.
 - `POST /transactions`: native signed transaction JSON. A `202` response means
   durable queue acceptance; inclusion must be checked in canonical history/ExEx.
