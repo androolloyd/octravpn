@@ -48,6 +48,9 @@ adds bounded connection diagnostics and authenticated checkpoint allocation
 cleanup. It records a successful public serving sample and canonical/ExEx
 continuity on the previously qualified image; stable public Circle asset delivery
 and paid service remain unqualified.
+The [cause-sensitive recovery checkpoint](docs/rust-node/checkpoints/2026-10-17/quarantine-recovery.md)
+adds native recovery-evidence rules and verified forward self-attestation, with
+37,302 native policy comparisons and real browser/VPN/ExEx recovery checks.
 
 **Rust node qualification (2026-10-15):** the `octra-node` executable connects the
 native validator driver, authenticated peers, transaction intake, canonical

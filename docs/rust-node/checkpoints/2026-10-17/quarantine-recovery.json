@@ -1,0 +1,753 @@
+{
+  "schema": "octra_quarantine_recovery_checkpoint_v1",
+  "observed_at": "2026-10-17T08:42:09.409934+00:00",
+  "base_commit": "1cc932f33f2279c8c5de2a56b76af5c68322ff81",
+  "adopted_upstream": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "scope": "Native cause-sensitive quarantine policy and authenticated forward-completion admission with browser/VPN/ExEx integration",
+  "source_sha256": {
+    "crates/octra-node-protocol/src/consensus/mod.rs": "e2b16dbb5ef2de87dae585ef21fdc5ac083fc8120a6f4c659e7a9e6a08b15e66",
+    "crates/octra-node-protocol/src/consensus/quarantine.rs": "b7237934e8336d546a19196bf7c8f45d207e3a445a13c57576b52f9c02853ed6",
+    "crates/octra-node-protocol/tests/quarantine_parity.rs": "3812d235bd1ae2aebbdb7e24e3ed36d2b692753bbed754cf079833642efa2ca8",
+    "crates/octra-node-runtime/tests/common/bundle_peer.rs": "1edaaff73a6544b0e901aa2c970566cf54c5d028e8c512ea96c03d191ef45b36",
+    "crates/octra-node/src/lib.rs": "85aa6101cd0c815c413ee29aeddd64f062978c232178bcbc96bdb875d013755e",
+    "crates/octra-node/src/published.rs": "cb00136809bd74f1cbeead0afd54b41706baa916d005c636d7a88ceded72d2db",
+    "crates/octra-node/src/recovery.rs": "708c800fec0b6275cf96de04b5ddce42addb929c564980c915f2aff7805c053f",
+    "crates/octra-node/src/recovery/health.rs": "7dc2e61cdf7c2b07d9c5509bb99117c44c4c7dcf915505db26d74792b9bf74f2",
+    "crates/octra-node/src/recovery/health/network_tests.rs": "f2b1251707dcfde3a1b2e7b03b8bd5f19b8c6fc769b06ba37434f2b835fd4381",
+    "crates/octra-node/src/recovery/live_tests.rs": "da51e4a17fd50f84da92d4962659585dfed6e4f063e1607fd95dc63db6671747",
+    "crates/octra-node/src/recovery/live_tests/fixture.rs": "b36fb02174eb690619e9cbdfdf7e2e5d9bc58ef1faea114ba741787e59fd9b32",
+    "crates/octra-node/tests/services/root_quarantine.rs": "71a9009834ef58bb55ce700ef63275276951d7a4f3528819b43b92958bd8daeb",
+    "scripts/node-port/quarantine-fixtures.py": "b03af981bd3b2f4b9d1bb2c31e2433632a118d11eda48759672d75b1031cf82e",
+    "scripts/node-port/quarantine-oracle.ml": "097a333ad4d24b5700b21149d2afdaa9da637decbe6d03687b3ce5667c8bc952",
+    "crates/octra-node-protocol/tests/fixtures/quarantines.json": "6ff803a5171b4a747a7ff54664deb845720516d361f535df5914b3655c314d16",
+    "docs/rust-node/source-map.json": "6440fdf5895e791ce99ff1904aea396fc88c7e12645846a32702286aa9c17efa",
+    "docs/rust-node/root-recovery.md": "ef636bcd4951b72c5120018c89037409318e82a83042012514584e5df030a4f5",
+    "program/octranet-payments.aml": "96e494be368351b4cc4832f0d78541813d842f4ab84229749b75a66fcb6c211b",
+    "proofs/lean/OctranetPayments.lean": "3269c304583047605c4b5f8ad8ca669710a0a03bd017eba75f63a12180793d83",
+    "proofs/lean/lean-toolchain": "f3ea78fdd417d39483583b721709727c225eeea0c0e9d29283de43f577411095",
+    "Cargo.toml": "5fc6af03807621fd437551c765313d75728d3c0c01d3b21f544d6f366efd1925",
+    "Cargo.lock": "41a91382953a23309f5a507b583da6c19faf4f1a0ee95ce485bea0706ef41269"
+  },
+  "final_source_snapshot_sha256": "a5bce94d2a76ff4b521bfe59fb86f037cb1489936f636f4a13c7c20f5d8d5c90",
+  "source_snapshot_directory": "/Users/androolloyd/Development/octra/out/quarantine-recovery-20261017",
+  "toolchain": {
+    "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+    "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)"
+  },
+  "validation": {
+    "passed": 311,
+    "failed": 0,
+    "ignored": 4,
+    "targets": 26,
+    "rows": [
+      {
+        "target": "unittests src/lib.rs",
+        "package": "octra-node",
+        "passed": 100,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "node-lib-final"
+      },
+      {
+        "target": "tests/devnet.rs",
+        "package": "octra-node",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/services.rs",
+        "package": "octra-node",
+        "passed": 23,
+        "failed": 0,
+        "ignored": 1,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/single_native.rs",
+        "package": "octra-node",
+        "passed": 17,
+        "failed": 0,
+        "ignored": 2,
+        "stage": "combined-release"
+      },
+      {
+        "target": "unittests src/lib.rs",
+        "package": "octra-node-protocol",
+        "passed": 42,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/catchup_agreement.rs",
+        "package": "octra-node-protocol",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/consensus_catchup_parity.rs",
+        "package": "octra-node-protocol",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/consensus_recovery_parity.rs",
+        "package": "octra-node-protocol",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/health_policy_parity.rs",
+        "package": "octra-node-protocol",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/network_driver.rs",
+        "package": "octra-node-protocol",
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/network_parity.rs",
+        "package": "octra-node-protocol",
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/network_session.rs",
+        "package": "octra-node-protocol",
+        "passed": 7,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/network_swarm.rs",
+        "package": "octra-node-protocol",
+        "passed": 10,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/network_upgrade.rs",
+        "package": "octra-node-protocol",
+        "passed": 6,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/peer_policy_parity.rs",
+        "package": "octra-node-protocol",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/quarantine_parity.rs",
+        "package": "octra-node-protocol",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/swarm_policy_parity.rs",
+        "package": "octra-node-protocol",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/upgrade_config_parity.rs",
+        "package": "octra-node-protocol",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "unittests src/lib.rs",
+        "package": "octra-node-runtime",
+        "passed": 50,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/bundle_queries.rs",
+        "package": "octra-node-runtime",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/canonical_authority.rs",
+        "package": "octra-node-runtime",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/canonical_recovery.rs",
+        "package": "octra-node-runtime",
+        "passed": 7,
+        "failed": 0,
+        "ignored": 1,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/epoch_roots.rs",
+        "package": "octra-node-runtime",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/finality_publication.rs",
+        "package": "octra-node-runtime",
+        "passed": 6,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/finality_queries.rs",
+        "package": "octra-node-runtime",
+        "passed": 7,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/octranet_payments.rs",
+        "package": "octra-node-runtime",
+        "passed": 14,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      }
+    ],
+    "stages": {
+      "quarantine-native": {
+        "source_snapshot_sha256": "45079d1e3b9f4971e243b1955ec6017c266ec6bbe87f568eda54218bfd5fa8f6",
+        "name": "quarantine-native",
+        "argv": [
+          "python3",
+          "scripts/node-port/quarantine-fixtures.py",
+          "--upstream",
+          "/private/tmp/octra-lite-node-native-20261016",
+          "--opam-switch",
+          "4.14.2",
+          "--host-directory",
+          "/Users/androolloyd/Development/octra/out/quarantine-recovery-20261017/native-oracle",
+          "--out",
+          "crates/octra-node-protocol/tests/fixtures/quarantines.json"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra",
+        "exit_code": 0,
+        "elapsed_seconds": 1.158,
+        "log_sha256": "44dd7b01183c350c194ff5d2e57f670d4fa84036e992a6ad86ff3879f0b46d1b"
+      },
+      "combined-release": {
+        "source_snapshot_sha256": "bd102759982754b80e70c3ecaf91f7bf25d64920e2d58149309dd99a60153059",
+        "name": "combined-release",
+        "argv": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--release",
+          "--no-fail-fast",
+          "--features",
+          "octra-node/test-helpers",
+          "-p",
+          "octra-node",
+          "-p",
+          "octra-node-protocol",
+          "-p",
+          "octra-node-runtime",
+          "--lib",
+          "--test",
+          "services",
+          "--test",
+          "devnet",
+          "--test",
+          "single_native",
+          "--test",
+          "health_policy_parity",
+          "--test",
+          "quarantine_parity",
+          "--test",
+          "consensus_catchup_parity",
+          "--test",
+          "consensus_recovery_parity",
+          "--test",
+          "catchup_agreement",
+          "--test",
+          "epoch_roots",
+          "--test",
+          "canonical_recovery",
+          "--test",
+          "canonical_authority",
+          "--test",
+          "octranet_payments",
+          "--test",
+          "bundle_queries",
+          "--test",
+          "finality_queries",
+          "--test",
+          "finality_publication",
+          "--test",
+          "network_parity",
+          "--test",
+          "network_upgrade",
+          "--test",
+          "network_session",
+          "--test",
+          "upgrade_config_parity",
+          "--test",
+          "peer_policy_parity",
+          "--test",
+          "network_driver",
+          "--test",
+          "swarm_policy_parity",
+          "--test",
+          "network_swarm"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra",
+        "exit_code": 101,
+        "elapsed_seconds": 432.22,
+        "log_sha256": "f98fcd820b9ddd2c77db7437c1ccfb660f3ea5986b904088b17f75bc8f759cf1"
+      },
+      "node-lib-final": {
+        "source_snapshot_sha256": "a5bce94d2a76ff4b521bfe59fb86f037cb1489936f636f4a13c7c20f5d8d5c90",
+        "name": "node-lib-final",
+        "argv": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--release",
+          "--features",
+          "octra-node/test-helpers",
+          "-p",
+          "octra-node",
+          "--lib"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra",
+        "exit_code": 0,
+        "elapsed_seconds": 85.989,
+        "log_sha256": "de5a766531ac6d08455cb28b8dfee65f217ac37936a2eac5683bb3992deec91b"
+      },
+      "strict-clippy-final": {
+        "source_snapshot_sha256": "a5bce94d2a76ff4b521bfe59fb86f037cb1489936f636f4a13c7c20f5d8d5c90",
+        "name": "strict-clippy-final",
+        "argv": [
+          "cargo",
+          "clippy",
+          "--offline",
+          "--locked",
+          "--release",
+          "--features",
+          "octra-node/test-helpers",
+          "-p",
+          "octra-node-protocol",
+          "-p",
+          "octra-node-runtime",
+          "-p",
+          "octra-node",
+          "--lib",
+          "--bins",
+          "--tests",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra",
+        "exit_code": 0,
+        "elapsed_seconds": 28.904,
+        "log_sha256": "763f2a62e320e063d08ae4014dde0d6706b9bdb6204719243bb07d34e91006f6"
+      },
+      "lean": {
+        "source_snapshot_sha256": "bd102759982754b80e70c3ecaf91f7bf25d64920e2d58149309dd99a60153059",
+        "name": "lean",
+        "argv": [
+          "lake",
+          "build",
+          "OctranetPayments"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra/proofs/lean",
+        "exit_code": 0,
+        "elapsed_seconds": 0.353,
+        "log_sha256": "a30d6eefe7ccec7803482bd446c3d48f7cc46ed86ba99cb839fca134dd7a5a3d"
+      },
+      "format-final": {
+        "argv": [
+          "rustfmt",
+          "--edition",
+          "2021",
+          "--check",
+          "--config",
+          "skip_children=true",
+          "crates/octra-node-protocol/src/consensus/mod.rs",
+          "crates/octra-node-protocol/src/consensus/quarantine.rs",
+          "crates/octra-node-protocol/tests/quarantine_parity.rs",
+          "crates/octra-node-runtime/tests/common/bundle_peer.rs",
+          "crates/octra-node/src/lib.rs",
+          "crates/octra-node/src/published.rs",
+          "crates/octra-node/src/recovery.rs",
+          "crates/octra-node/src/recovery/health.rs",
+          "crates/octra-node/src/recovery/health/network_tests.rs",
+          "crates/octra-node/src/recovery/live_tests.rs",
+          "crates/octra-node/src/recovery/live_tests/fixture.rs",
+          "crates/octra-node/tests/services/root_quarantine.rs"
+        ],
+        "exit_code": 0,
+        "source_sha256": {
+          "crates/octra-node-protocol/src/consensus/mod.rs": "e2b16dbb5ef2de87dae585ef21fdc5ac083fc8120a6f4c659e7a9e6a08b15e66",
+          "crates/octra-node-protocol/src/consensus/quarantine.rs": "b7237934e8336d546a19196bf7c8f45d207e3a445a13c57576b52f9c02853ed6",
+          "crates/octra-node-protocol/tests/quarantine_parity.rs": "3812d235bd1ae2aebbdb7e24e3ed36d2b692753bbed754cf079833642efa2ca8",
+          "crates/octra-node-runtime/tests/common/bundle_peer.rs": "1edaaff73a6544b0e901aa2c970566cf54c5d028e8c512ea96c03d191ef45b36",
+          "crates/octra-node/src/lib.rs": "85aa6101cd0c815c413ee29aeddd64f062978c232178bcbc96bdb875d013755e",
+          "crates/octra-node/src/published.rs": "cb00136809bd74f1cbeead0afd54b41706baa916d005c636d7a88ceded72d2db",
+          "crates/octra-node/src/recovery.rs": "708c800fec0b6275cf96de04b5ddce42addb929c564980c915f2aff7805c053f",
+          "crates/octra-node/src/recovery/health.rs": "7dc2e61cdf7c2b07d9c5509bb99117c44c4c7dcf915505db26d74792b9bf74f2",
+          "crates/octra-node/src/recovery/health/network_tests.rs": "f2b1251707dcfde3a1b2e7b03b8bd5f19b8c6fc769b06ba37434f2b835fd4381",
+          "crates/octra-node/src/recovery/live_tests.rs": "da51e4a17fd50f84da92d4962659585dfed6e4f063e1607fd95dc63db6671747",
+          "crates/octra-node/src/recovery/live_tests/fixture.rs": "b36fb02174eb690619e9cbdfdf7e2e5d9bc58ef1faea114ba741787e59fd9b32",
+          "crates/octra-node/tests/services/root_quarantine.rs": "71a9009834ef58bb55ce700ef63275276951d7a4f3528819b43b92958bd8daeb"
+        },
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "changed_after_initial_combined": [
+      "crates/octra-node/src/recovery/live_tests.rs",
+      "crates/octra-node/src/recovery/live_tests/fixture.rs"
+    ],
+    "composition": "Final100-test Node library plus25 other unchanged targets from combined release; final lint on identical Node snapshot",
+    "compiled_payment_tests": 14,
+    "abstract_lean_theorems": 19,
+    "initial_failure": "New helper regression observed ExEx callback before durable checkpoint; corrected both positive tests to wait for exact SqliteCheckpoints cursor, retaining separate callback assertions",
+    "proof_limit": "Pure policy parity and bounded local integration; no whole-node refinement, deployed seven-day operation, public paid service or mainnet qualification"
+  },
+  "native_policy": {
+    "fixture": "crates/octra-node-protocol/tests/fixtures/quarantines.json",
+    "sha256": "6ff803a5171b4a747a7ff54664deb845720516d361f535df5914b3655c314d16",
+    "cases": 37302,
+    "groups": {
+      "reason-bytes": 6414,
+      "reason-recovery": 6414,
+      "evidence-bytes": 3486,
+      "clear-evidence-bytes": 10458,
+      "evidence-recovery": 3486,
+      "known-clear": 322,
+      "known-recovery": 644,
+      "entry-transitions": 1296,
+      "transition-clear": 1296,
+      "inactive": 3486
+    },
+    "qualification": {
+      "body": "Unchanged adopted consensus_runtime_state.ml implementation; pinned public interface verified but omitted",
+      "scope": "Byte-prefix reason/evidence predicates and actual native quarantine entry, replacement and clear transitions",
+      "excluded": "No orchestrator, peer authentication, history rollback, public-network or mainnet qualification",
+      "runner": "Host OCaml4.14.2 standalone module; no hermetic-build claim"
+    },
+    "host": {
+      "opam_switch": "4.14.2",
+      "compiler_version": "4.14.2",
+      "compiler_config": "version: 4.14.2\nstandard_library_default: /Users/androolloyd/.opam/4.14.2/lib/ocaml\nstandard_library: /Users/androolloyd/.opam/4.14.2/lib/ocaml\nccomp_type: cc\nc_compiler: cc\nocamlc_cflags: -O2 -fno-strict-aliasing -fwrapv -pthread  \nocamlc_cppflags: -D_FILE_OFFSET_BITS=64 \nocamlopt_cflags: -O2 -fno-strict-aliasing -fwrapv -pthread  \nocamlopt_cppflags: -D_FILE_OFFSET_BITS=64 \nbytecomp_c_compiler: cc -O2 -fno-strict-aliasing -fwrapv -pthread   -D_FILE_OFFSET_BITS=64 \nnative_c_compiler: cc -O2 -fno-strict-aliasing -fwrapv -pthread   -D_FILE_OFFSET_BITS=64 \nbytecomp_c_libraries: -lm  -lpthread\nnative_c_libraries: -lm \nnative_pack_linker: ld -r -o \narchitecture: arm64\nmodel: default\nint_size: 63\nword_size: 64\nsystem: macosx\nasm: cc -c -Wno-trigraphs\nasm_cfi_supported: true\nwith_frame_pointers: false\next_exe: \next_obj: .o\next_asm: .s\next_lib: .a\next_dll: .so\nos_type: Unix\ndefault_executable_name: a.out\nsysthread_supported: true\nhost: aarch64-apple-darwin25.1.0\ntarget: aarch64-apple-darwin25.1.0\nflambda: false\nsafe_string: true\ndefault_safe_string: true\nflat_float_array: true\nfunction_sections: false\nafl_instrument: false\nwindows_unicode: false\nsupports_shared_libraries: true\nnaked_pointers: true\nexec_magic_number: Caml1999X031\ncmi_magic_number: Caml1999I031\ncmo_magic_number: Caml1999O031\ncma_magic_number: Caml1999A031\ncmx_magic_number: Caml1999Y031\ncmxa_magic_number: Caml1999Z031\nast_impl_magic_number: Caml1999M031\nast_intf_magic_number: Caml1999N031\ncmxs_magic_number: Caml1999D031\ncmt_magic_number: Caml1999T031\nlinear_magic_number: Caml1999L031\n",
+      "opam_version": "2.5.2",
+      "tools": {
+        "opam": {
+          "path": "/opt/homebrew/Cellar/opam/2.5.2/bin/opam",
+          "sha256": "1d5d8e029ae0b71623e6f34ba2858a6b8d436e440dd3e7a0603268a02c026013"
+        },
+        "ocamlopt": {
+          "path": "/Users/androolloyd/.opam/4.14.2/bin/ocamlopt.opt",
+          "sha256": "04551b0afa764c0f1c12b3b304e02af3e814355b3e7446dea2aa16b2751ad181"
+        },
+        "ocamlfind": {
+          "path": "/Users/androolloyd/.opam/4.14.2/bin/ocamlfind",
+          "sha256": "9904e54c397bd06eb9e1a379c01aa7c1898ac2c9f09635199420b6f7258583a9"
+        }
+      },
+      "packages": {
+        "yojson": {
+          "version": "3.0.0",
+          "directory": "/Users/androolloyd/.opam/4.14.2/lib/yojson",
+          "artifact_sha256": {
+            "META": "020dfbe545f1616767b220395b738bc32baa67fcbbf7948f15ba1476a72f9c38",
+            "yojson.a": "1047024bb415d27f68d8f44af38e90f54f7cad40a570426aa050c9dda250afe3",
+            "yojson.cma": "b595fbbfe3962c50e9b02d8a5b02845cb13bb2a45822a0fce6733db4a05c5035",
+            "yojson.cmi": "23d315cc118d44cb6162290215df09fec4bf194e8cfc70c5c5fbb766e0215473",
+            "yojson.cmx": "61bd9a55087cc56c3d803770bff417aa9abf44782ed7eea9c85962ab9bb4e6b6",
+            "yojson.cmxa": "72bdcc8fca0babccd3b2e7d80d4e4e999876efad7e454d145f268e07f633e026",
+            "yojson.cmxs": "980f68e04f2cb7460bed7fee1da95b847663d7715bc343536901860af6858366",
+            "yojson__.cmi": "251c563789d9e36fd144ec59947639cbeafea481b19973282defb2a78f9c62cc",
+            "yojson__.cmx": "f19b955e0402004e770b8664f949c9db5935176b5dd90c0beea7c43dc153a00f",
+            "yojson__Basic.cmi": "1fdc4f810c8c7f6461aa152e041b44626c34dfce79e848b215db4878cdf307ff",
+            "yojson__Basic.cmx": "efe0cd6eec26e5159764ddc0d0fc4c1136a0dceb5a01020ec6f8c674203a5dda",
+            "yojson__Codec.cmi": "3918610ae94b342e2c2792cf3e90fbeb7bf9b7d70a6a9a282bf7643cd13c1814",
+            "yojson__Codec.cmx": "6d98219b289144e8ba14a734336113a9e1418b16de9121636d9cf8a1cb9f146d",
+            "yojson__Common.cmi": "b4451c07a6d0f82bb29a8af416be7d588cf17422307d0cda5c930b542503778f",
+            "yojson__Common.cmx": "f6abdb78a5c6ece7169aa54cbb82af69e8215813da636c838873d6f997223337",
+            "yojson__Lexer_utils.cmi": "f2c4e4b0eaadc2f7da142f7660ff04fa3f7e267a162e51fb2869beb58948ebf7",
+            "yojson__Lexer_utils.cmx": "c3356585442075442360d6ae163e3527d3cfcdef6ac098ae85a86cead021ea97",
+            "yojson__Raw.cmi": "cdb41909f6776475ffd3ac9f8abef4e531e093c3ddddd7e6e63851aa4026a418",
+            "yojson__Raw.cmx": "f02d68fb2387e205b3c99e7d8f9c4c12b694bc7d0fc9916c775549bfb12a66dd",
+            "yojson__Safe.cmi": "3ec365fe93249e5768391318220c24c8e17dd0833b8f283beac5a7d815dc546b",
+            "yojson__Safe.cmx": "006c87750a5e68f14da8e0f7f24358251b97ccc1eded5462a4f1e0b47d9de0d1",
+            "yojson__T.cmi": "7d83a2ac57f8011b20cd3cbc3535016f2922de6f4561c39201acbf4f184fa232",
+            "yojson__T.cmx": "19c1b91f415b2bbb3048258de6f1ffd44e7aef20ccec67ed0af37718159ad1b1"
+          }
+        },
+        "base64": {
+          "version": "3.5.2",
+          "directory": "/Users/androolloyd/.opam/4.14.2/lib/base64",
+          "artifact_sha256": {
+            "META": "5901175266061d5736ac278aa8ef8d1fad87447bb2f977dbf8c0152165e3aecb",
+            "base64.a": "d859f3e7b09c7390cf593617bb2fae61450e1474abebf64df19b3111fd692664",
+            "base64.cma": "8f8757f0fc977621512d8f35c38598b72e869b1fc552fcf7168cacd30f26e5f3",
+            "base64.cmi": "498edd07b4f277c9c492f78c629299a44c688705cf5e179cf6419cf287054fdb",
+            "base64.cmx": "941174cd1bb2b28b1c7f70cf147d3a61dae1916d3f37a44a928eb1067841544d",
+            "base64.cmxa": "98593c59b360b13225b7c841efaea658b1fa0e781fe3b5e563d3dbae8fa3b40e",
+            "base64.cmxs": "b26f6280fe786102bbb59a39dfa71ef9284558e57cd3f84712beeeac53fe32ed",
+            "rfc2045/base64_rfc2045.a": "d4954fd17f2f982b176dbf4f5c0f8f81eb78ad161c82f3be31e7301df9799b7d",
+            "rfc2045/base64_rfc2045.cma": "a0de6ce433ef98490346664dc22cdcc47ebccd90a022a8406ae370d17e4339ac",
+            "rfc2045/base64_rfc2045.cmi": "5d35f9a817e6d31f4591d6bdd73cb3764e776ad46c6fdb20a6b9c05a314968d4",
+            "rfc2045/base64_rfc2045.cmx": "729eec5df2167a27d2fdf4352effca90033aca33d90f77a71a709d008d0358de",
+            "rfc2045/base64_rfc2045.cmxa": "dd31cf7767e4b0f9af187ad61c4c572f6b47899f578d5f9f466d134e82b0a49c",
+            "rfc2045/base64_rfc2045.cmxs": "b3643563378a596aced8a37d08f60305164ca83441dce20d5282305e945fd745"
+          }
+        }
+      },
+      "platform": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+      "machine": "arm64",
+      "source_map_sha256": "6440fdf5895e791ce99ff1904aea396fc88c7e12645846a32702286aa9c17efa",
+      "verified_source_count": 1158,
+      "compiled_sources": {
+        "node_runtime/consensus_runtime_state.ml": {
+          "original_sha256": "78fdb3c56ae1890011084588130fcd52bfc53a4fc87ad1779938819ff0177a04",
+          "compiled_sha256": "78fdb3c56ae1890011084588130fcd52bfc53a4fc87ad1779938819ff0177a04",
+          "copied_as": "consensus_runtime_state.ml"
+        }
+      },
+      "omitted_interface": {
+        "path": "node_runtime/consensus_runtime_state.mli",
+        "source_sha256": "14601c39c6ff4dcfe03421022dbe77b4e41134527ad0202ac4d3200e3f129ecb",
+        "reason": "Pinned public interface hides internal pure policy functions observed by this oracle"
+      },
+      "run_environment_overrides": {
+        "OCAMLRUNPARAM": ""
+      },
+      "commands": [
+        {
+          "name": "upstream-pin",
+          "argv": [
+            "git",
+            "-C",
+            "/private/tmp/octra-lite-node-native-20261016",
+            "rev-parse",
+            "HEAD"
+          ],
+          "cwd": "/Users/androolloyd/Development/octra/out/quarantine-recovery-20261017/native-oracle",
+          "environment_overrides": {}
+        },
+        {
+          "name": "compiler-version",
+          "argv": [
+            "/opt/homebrew/Cellar/opam/2.5.2/bin/opam",
+            "exec",
+            "--switch=4.14.2",
+            "--",
+            "ocamlopt",
+            "-version"
+          ],
+          "cwd": "/Users/androolloyd/Development/octra/out/quarantine-recovery-20261017/native-oracle",
+          "environment_overrides": {}
+        },
+        {
+          "name": "compiler-config",
+          "argv": [
+            "/opt/homebrew/Cellar/opam/2.5.2/bin/opam",
+            "exec",
+            "--switch=4.14.2",
+            "--",
+            "ocamlopt",
+            "-config"
+          ],
+          "cwd": "/Users/androolloyd/Development/octra/out/quarantine-recovery-20261017/native-oracle",
+          "environment_overrides": {}
+        },
+        {
+          "name": "opam-version",
+          "argv": [
+            "/opt/homebrew/Cellar/opam/2.5.2/bin/opam",
+            "--version"
+          ],
+          "cwd": "/Users/androolloyd/Development/octra/out/quarantine-recovery-20261017/native-oracle",
+          "environment_overrides": {}
+        },
+        {
+          "name": "ocamlopt-path",
+          "argv": [
+            "/opt/homebrew/Cellar/opam/2.5.2/bin/opam",
+            "exec",
+            "--switch=4.14.2",
+            "--",
+            "which",
+            "ocamlopt"
+          ],
+          "cwd": "/Users/androolloyd/Development/octra/out/quarantine-recovery-20261017/native-oracle",
+          "environment_overrides": {}
+        },
+        {
+          "name": "ocamlfind-path",
+          "argv": [
+            "/opt/homebrew/Cellar/opam/2.5.2/bin/opam",
+            "exec",
+            "--switch=4.14.2",
+            "--",
+            "which",
+            "ocamlfind"
+          ],
+          "cwd": "/Users/androolloyd/Development/octra/out/quarantine-recovery-20261017/native-oracle",
+          "environment_overrides": {}
+        },
+        {
+          "name": "packages",
+          "argv": [
+            "/opt/homebrew/Cellar/opam/2.5.2/bin/opam",
+            "exec",
+            "--switch=4.14.2",
+            "--",
+            "ocamlfind",
+            "query",
+            "-recursive",
+            "-format",
+            "%p\t%v\t%d",
+            "yojson",
+            "base64"
+          ],
+          "cwd": "/Users/androolloyd/Development/octra/out/quarantine-recovery-20261017/native-oracle",
+          "environment_overrides": {}
+        },
+        {
+          "name": "build",
+          "argv": [
+            "/opt/homebrew/Cellar/opam/2.5.2/bin/opam",
+            "exec",
+            "--switch=4.14.2",
+            "--",
+            "ocamlfind",
+            "ocamlopt",
+            "-linkpkg",
+            "-package",
+            "yojson,base64",
+            "consensus_runtime_state.ml",
+            "main.ml",
+            "-o",
+            "quarantine-oracle"
+          ],
+          "cwd": "/Users/androolloyd/Development/octra/out/quarantine-recovery-20261017/native-oracle",
+          "environment_overrides": {}
+        },
+        {
+          "name": "oracle",
+          "argv": [
+            "/Users/androolloyd/Development/octra/out/quarantine-recovery-20261017/native-oracle/quarantine-oracle"
+          ],
+          "cwd": "/Users/androolloyd/Development/octra/out/quarantine-recovery-20261017/native-oracle",
+          "environment_overrides": {
+            "OCAMLRUNPARAM": ""
+          }
+        }
+      ],
+      "executable_sha256": "17f06c2c461f4ee91923999746083890da6ae035ece04a62ee1eccb3c5e62db3"
+    }
+  },
+  "behavior": {
+    "original_cause": "retained; native recoverable-to-hard replacement only",
+    "new_observation": "always invalidates earlier evidence tickets",
+    "root_recovery": "explicit native RootEvidence; originating catch-up failure needs in_sync plus weighted consensus",
+    "hard_causes": "matching count, weighted root attestation and forward catch-up cannot clear hard local causes",
+    "catchup_failure": "quarantine before reconciliation; remove obsolete desired target",
+    "forward_completion": "complete target, strict new canonical sequence, exact retained start/current Head and fresh token; no redundant root poll; retain connection and resume_at gates",
+    "zero_progress": "cannot self-attest or clear failed catch-up",
+    "counters": "ahead streak resets when active quarantine is cleared",
+    "history_rewind": false,
+    "consensus_wire_or_rule_change": false,
+    "protocol_commission": 0,
+    "operator_unstake_ms": 604800000,
+    "payer_exit_ms": 86400000,
+    "aml_changed": false
+  },
+  "integration_cases": [
+    "Real signedTCP current-root/head3 hints produce unavailable softlag2 catch-up; distinct2-of4 roots cannot recover failure, weighted3-of4 can; obsolete desired3 no longer stalls",
+    "Hard local root cause survives actual lag7 and later matching in-sync probes; services/signing/VPN closed; canonical certificate/history/ExEx unchanged",
+    "Actual Native successor plus3signatureQC tests zero-progress, stale head/token and forged retained start refusal, actual forward acceptance and hard-cause refusal",
+    "Actual Service imports genuine signed successor2 while every epoch2 root reply is withheld; canonical record, browser, VPN admission and durable ExEx cursor2 agree"
+  ],
+  "adversarial_review": {
+    "status": "No remaining concrete issue found in bounded source review",
+    "corrections": [
+      "Removed redundant post-forward peer attestation dependency",
+      "Reset ahead streak only when successful completion cleared active quarantine",
+      "Await actual durable checkpoint separately from extension callback"
+    ]
+  },
+  "public_observer": {
+    "new_batch_installed": false,
+    "source_commit": "f69473bd331ad36b22b8da7c29ee6f2660a9b72c",
+    "pid": 87662,
+    "at": "2026-10-17T08:36:43.154163+00:00",
+    "alive": true,
+    "exit_evidence": false,
+    "status": {
+      "http": 200,
+      "body": {
+        "chain_id": "octra-devnet-9871-cluster",
+        "epoch": 1707647,
+        "peers": 22,
+        "pending": 0,
+        "serving": false,
+        "state_root": "c77b81f5fcb1fc9ef0d2e5be674f484eec22530a06a039cb1565520c94bd0a53",
+        "suspension_reason": "lag_7",
+        "vpn_program": null,
+        "vpn_settlement": "unconfigured"
+      }
+    },
+    "process_restarted": false,
+    "configuration_changed": false,
+    "funds_spent": 0,
+    "qualification": "Existing observer remains alive on prior separately qualified image; lag7 sample and unconfigured VPN do not establish stable public service"
+  },
+  "remaining": [
+    "Native stalled-voter liveness fallback and serialized actor realignment",
+    "Positive legacy unprotected empty-fork repair with actual native storage adapter and staged restart lifecycle",
+    "Wide-directory persistence CPU scaling and retained-state resource qualification",
+    "Stock-client paid bindings, portal onboarding, stable public Circle/TLS/paid routing and Mainnet qualification"
+  ]
+}

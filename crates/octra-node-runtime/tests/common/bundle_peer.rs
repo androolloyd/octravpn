@@ -45,6 +45,7 @@ pub(crate) struct Authority {
     pub(crate) duplicate: Arc<AtomicBool>,
     /// Missing-root replies retain the fixture's genuine advertised head.
     pub(crate) roots_unavailable: Arc<AtomicBool>,
+    pub(crate) withheld_root_epochs: Arc<Mutex<BTreeSet<i64>>>,
     /// Signed head hints can outpace available finality records in test peers.
     pub(crate) advertised_head: Arc<Mutex<Option<i64>>>,
 }
@@ -160,7 +161,9 @@ impl epoch_roots::Host for Authority {
         })
     }
     async fn root(&self, epoch: i64) -> Result<Option<Bytes>, Error> {
-        if self.roots_unavailable.load(Ordering::SeqCst) {
+        if self.roots_unavailable.load(Ordering::SeqCst)
+            || self.withheld_root_epochs.lock().unwrap().contains(&epoch)
+        {
             return Ok(None);
         }
         let history = self.history.lock().unwrap().clone();
@@ -323,6 +326,7 @@ pub(crate) async fn node(
         corrupt: Arc::default(),
         duplicate: Arc::default(),
         roots_unavailable: Arc::default(),
+        withheld_root_epochs: Arc::default(),
         advertised_head: Arc::default(),
     };
     let clock = Arc::new(AtomicI64::new(0));

@@ -8,7 +8,7 @@ use crate::{
     peers::Authority,
     rpc::Submission,
     sync::{PeerCatchUpError, Peers},
-    Host, Node,
+    Host, Node, RootEvidence,
 };
 use anyhow::{Context, Result};
 use octra_node_protocol::{
@@ -274,11 +274,11 @@ impl<A: Host> Service<A> {
             return Ok((!self.node.root_quarantined()).then_some(self.node.head().await?));
         }
         let sample = health::query(self).await?;
-        let Some(sample) = self.admissible(sample, ahead_streak, false).await? else {
+        let Some((sample, evidence)) = self.admissible(sample, ahead_streak, false).await? else {
             return Ok(None);
         };
         Ok(self
-            .clear_attested(&sample, ahead_streak)
+            .clear_attested(&sample, evidence, ahead_streak)
             .await?
             .then_some(sample.head))
     }
@@ -286,12 +286,18 @@ impl<A: Host> Service<A> {
     async fn clear_attested(
         &self,
         sample: &health::Sample,
+        evidence: RootEvidence,
         ahead_streak: &mut i64,
     ) -> Result<bool> {
         if self.node.root_quarantined() {
             if !self
                 .node
-                .clear_root_quarantine_at(&sample.head, &sample.ticket)
+                .clear_root_quarantine_at(
+                    &sample.head,
+                    &sample.ticket,
+                    evidence,
+                    matches!(sample.status, health::Status::Attested { consensus: true }),
+                )
                 .await?
             {
                 return Ok(false);
@@ -308,7 +314,7 @@ impl<A: Host> Service<A> {
         sample: health::Sample,
         ahead_streak: &mut i64,
         count_ahead: bool,
-    ) -> Result<Option<health::Sample>> {
+    ) -> Result<Option<(health::Sample, RootEvidence)>> {
         use octra_node_protocol::consensus::health::{
             self as policy, AheadNoQuorumPlan, AheadQuorumPlan, LagMode,
         };
@@ -356,7 +362,7 @@ impl<A: Host> Service<A> {
                     }
                     AheadQuorumPlan::StayActive { wake_ready: true }
                     | AheadQuorumPlan::DelayQuarantine { wake_ready: true } => {
-                        return Ok(Some(sample))
+                        return Ok(Some((sample, RootEvidence::AheadCurrentRootQuorum)))
                     }
                     _ => (),
                 }
@@ -370,7 +376,7 @@ impl<A: Host> Service<A> {
                 self.node.root_quarantined(),
             ) == AheadNoQuorumPlan::WaitCurrentHead
             {
-                return Ok(Some(sample));
+                return Ok(Some((sample, RootEvidence::AheadWaitCurrentHead)));
             }
             // A fresh current-root proof can recover ahead quarantine. Missing
             // evidence never authorizes truncating the protected canonical tail.
@@ -381,7 +387,8 @@ impl<A: Host> Service<A> {
             if self.quarantine_conflict(&fresh).await? {
                 return Ok(None);
             }
-            return Ok(matches!(fresh.status, health::Status::Attested { .. }).then_some(fresh));
+            return Ok(matches!(fresh.status, health::Status::Attested { .. })
+                .then_some((fresh, RootEvidence::AheadCurrentRootQuorum)));
         }
         if sample.peer_target > epoch {
             let lag = sample.peer_target.saturating_sub(epoch);
@@ -398,19 +405,20 @@ impl<A: Host> Service<A> {
             return Ok((lag == 1
                 && !matches!(self.node.status(), crate::Status::Serving(_))
                 && matches!(sample.status, health::Status::Attested { .. }))
-            .then_some(sample));
+            .then_some((sample, RootEvidence::SoftLagCurrentRoot)));
         }
         if self.quarantine_conflict(&sample).await? {
             return Ok(None);
         }
-        Ok(matches!(sample.status, health::Status::Attested { .. }).then_some(sample))
+        Ok(matches!(sample.status, health::Status::Attested { .. })
+            .then_some((sample, RootEvidence::InSync)))
     }
     async fn quarantine_conflict(&self, sample: &health::Sample) -> Result<bool> {
         let health::Status::Conflicting { root, consensus } = sample.status else {
             return Ok(false);
         };
         let reason = format!(
-            "authenticated peer root mismatch at epoch {}: local {}, peer {}, consensus {}",
+            "peer_root_mismatch_at_head epoch = {} local = {} peer = {} consensus = {}",
             sample.head.cursor.epoch.0,
             hex::encode(sample.head.cursor.state_root.0),
             hex::encode(root),
@@ -543,11 +551,13 @@ impl<A: Host> Service<A> {
                             desired = Some(desired.map_or(target, |p: u64| p.max(target)));
                         }
                         match self.admissible(sample, &mut ahead_streak, true).await {
-                            Ok(Some(sample)) if soft_start => {
+                            Ok(Some((sample, evidence))) if soft_start => {
                                 // Native soft_lag_current_root admission precedes
                                 // catch-up: unavailable successor data must not
                                 // suppress this first one-epoch admission.
-                                if self.clear_attested(&sample, &mut ahead_streak).await?
+                                if self
+                                    .clear_attested(&sample, evidence, &mut ahead_streak)
+                                    .await?
                                     && self.node.resume_at(&sample.head).await?
                                 {
                                     self.pending.recover(&self.submission).await?;
@@ -647,7 +657,10 @@ impl<A: Host> Service<A> {
                 last = self.reconcile(last).await?;
             }
             self.refresh_transport().await?;
+            let mut forward_attested = None;
             if let Some(target) = desired {
+                let catchup_start = self.node.head().await?;
+                let catchup_ticket = self.node.root_quarantine_ticket();
                 let catchup = async {
                     let reached = connected
                         && self
@@ -714,10 +727,37 @@ impl<A: Host> Service<A> {
                     )
                 }
                 .await;
+                // Preserve the failure cause before journal reconciliation or
+                // transport refresh can themselves fail. A failed attempt no
+                // longer owns a persistent queued target.
+                let failure = match &catchup {
+                    Ok(false) => Some("catchup_failed:unavailable"),
+                    Err(_) => Some("catchup_apply_failed:invalid"),
+                    Ok(true) => None,
+                };
+                if let Some(reason) = failure {
+                    desired = None;
+                    let failed = self.node.head().await?;
+                    self.node.quarantine_root_at(&failed, reason).await?;
+                }
                 last = self.reconcile(last).await?;
                 self.refresh_transport().await?;
                 match catchup {
-                    Ok(true) => desired = None,
+                    Ok(true) => {
+                        desired = None;
+                        let committed = self.node.head().await?;
+                        let was_quarantined = self.node.root_quarantined();
+                        if self
+                            .node
+                            .complete_catchup_at(&catchup_start, &committed, &catchup_ticket)
+                            .await?
+                        {
+                            if was_quarantined {
+                                ahead_streak = 0;
+                            }
+                            forward_attested = Some(committed);
+                        }
+                    }
                     Ok(false) => continue,
                     Err(error) => {
                         eprintln!("live catch-up incomplete, admission suspended: {error:#}");
@@ -730,13 +770,16 @@ impl<A: Host> Service<A> {
             if self.swarm.peers().len() < self.minimum_peers {
                 continue;
             }
-            let observed = match self.current_attested(&mut ahead_streak).await {
-                Ok(Some(observed)) => observed,
-                Ok(None) => continue,
-                Err(error) => {
-                    eprintln!("live admission proof unavailable: {error:#}");
-                    continue;
-                }
+            let observed = match forward_attested {
+                Some(observed) => observed,
+                None => match self.current_attested(&mut ahead_streak).await {
+                    Ok(Some(observed)) => observed,
+                    Ok(None) => continue,
+                    Err(error) => {
+                        eprintln!("live admission proof unavailable: {error:#}");
+                        continue;
+                    }
+                },
             };
             if !self.node.resume_at(&observed).await? {
                 continue;

@@ -1,6 +1,7 @@
 //! A root conflict suspends services without undoing authenticated empty epochs.
 use super::*;
 use octra_exex::{CheckpointStore, CommittedEpochSource, Cursor, Sequence};
+use octra_node::RootEvidence;
 use tokio::{sync::Notify, task::JoinHandle};
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -196,7 +197,10 @@ async fn root_quarantine_revokes_services_without_rewinding_empty_finality_or_ex
     assert!(matches!(node.status(), Status::Serving(_)));
     assert!(permit.live(), "stale resume revoked the serving head");
     assert!(node
-        .quarantine_root_at(&first, "authenticated root conflict")
+        .quarantine_root_at(
+            &first,
+            "peer_root_mismatch_at_head authenticated root conflict"
+        )
         .await
         .unwrap());
     assert!(node.root_quarantined());
@@ -211,17 +215,20 @@ async fn root_quarantine_revokes_services_without_rewinding_empty_finality_or_ex
 
     let superseded = node.root_quarantine_ticket();
     assert!(node
-        .quarantine_root_at(&first, "newer conflict at the same head")
+        .quarantine_root_at(
+            &first,
+            "peer_root_mismatch_at_head newer conflict at the same head"
+        )
         .await
         .unwrap());
     assert!(!node
-        .clear_root_quarantine_at(&first, &superseded)
+        .clear_root_quarantine_at(&first, &superseded, RootEvidence::InSync, false)
         .await
         .unwrap());
     assert!(node.root_quarantined());
     let current_ticket = node.root_quarantine_ticket();
     assert!(!node
-        .clear_root_quarantine_at(genesis.head(), &current_ticket)
+        .clear_root_quarantine_at(genesis.head(), &current_ticket, RootEvidence::InSync, false)
         .await
         .unwrap());
 
@@ -239,13 +246,13 @@ async fn root_quarantine_revokes_services_without_rewinding_empty_finality_or_ex
         .await
         .unwrap());
     assert!(!node
-        .clear_root_quarantine_at(&first, &current_ticket)
+        .clear_root_quarantine_at(&first, &current_ticket, RootEvidence::InSync, false)
         .await
         .unwrap());
     assert!(node.root_quarantined());
     // Publication and stale samples cannot invalidate the current probe ticket.
     assert!(node
-        .clear_root_quarantine_at(&second, &current_ticket)
+        .clear_root_quarantine_at(&second, &current_ticket, RootEvidence::InSync, false)
         .await
         .unwrap());
     assert!(!node.root_quarantined());

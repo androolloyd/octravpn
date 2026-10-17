@@ -39,6 +39,25 @@ persistent target; an unverified suffix cannot stall a healthy driver.
 
 Clearing a quarantine checks both the exact head and the token captured before
 the query. A newer conflict invalidates an older sample even at the same head.
+The original cause also controls which evidence may clear it. The adopted
+runtime permits ordinary peer-root, ahead and lag causes to recover through
+their corresponding root evidence. An originating `catchup_failed:` or
+`catchup_apply_failed:` cause requires an in-sync sample with weighted consensus
+proof; the distinct-peer admission count alone is insufficient. Hard local
+causes survive both kinds of root evidence and later recoverable observations.
+The first cause remains until recovery, except that a hard cause may replace a
+recoverable one. Every new quarantine observation still invalidates old tokens.
+
+Failed catch-up clears the queued target and records its failure cause. Complete
+forward catch-up can clear a recoverable cause only with a fresh token, an exact
+current head and an actual canonical successor of the retained starting head.
+An already-reached target with no new committed epoch supplies no such evidence.
+Neither this path nor root attestation removes a hard local cause.
+Successful verified forward recovery supplies the native self-attestation for
+that head, so it does not wait for another peer-root poll. The configured
+connection gate and the final `resume_at` head/token checks still apply; clearing
+an active quarantine also resets the controller's ahead streak.
+
 Clear leaves services suspended; `resume_at` checks the admitted head again
 while holding the publication lease and audits canonical history.
 Resuming the same head preserves its original paid-admission age.
@@ -66,5 +85,9 @@ records, certificates, ExEx sequences/checkpoints and signing history intact.
 
 Legacy nonjournaled empty-fork repair, its durable staged recovery and native
 crash-order parity remain separate implementation and qualification work.
+The native stalled-voter liveness fallback also remains unwired: it observes
+step and height age, applies timeout/proposal/finality safety gates, then
+advances the existing driver's round while preserving its locks. Catch-up
+probing or restarting a driver at round zero does not implement that path.
 This quarantine change does not qualify that positive repair path, full native
 health-loop parity or public-network recovery.

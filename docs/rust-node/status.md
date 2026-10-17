@@ -9,6 +9,18 @@ upstream behavioral parity and public-network deployment remain unqualified.
 
 ## Recorded local evidence
 
+- The [cause-sensitive recovery checkpoint](checkpoints/2026-10-17/quarantine-recovery.json)
+  records 311 passing tests across 26 composed targets, four intentional helper
+  ignores, strict lint, formatting, 14 compiled payment AML tests and 19 abstract
+  Lean theorems. Rust matches 37,302 cases from unchanged adopted OCaml quarantine
+  policy. Actual signed-peer tests distinguish count from weighted recovery,
+  preserve hard causes, clear failed targets and self-attest a real QC-backed
+  successor despite withheld successor-root replies. Browser/VPN admission and
+  durable ExEx are checked. The [review](checkpoints/2026-10-17/quarantine-recovery.md)
+  records the initial checkpoint-wait race and final source boundaries. This
+  batch is not installed on the public observer. Native stalled-voter realignment,
+  actual legacy repair, persistence CPU scaling and public qualification remain
+  open.
 - The [peer diagnostics and recovery checkpoint](checkpoints/2026-10-17/peer-recovery-diagnostics.json)
   records 305 passing tests across 25 composed targets, four intentional helper
   ignores, strict lint, formatting, 14 compiled payment AML tests and 19 abstract

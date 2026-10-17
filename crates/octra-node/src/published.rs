@@ -3,6 +3,7 @@
 use anyhow::Result;
 use axum::Router;
 use octra_browser::Provenance;
+use octra_node_protocol::consensus::quarantine::{self, RootEvidence};
 use octra_node_runtime::{
     canonical::Head,
     circle_assets::{CanonicalAssets, RetainedAssets},
@@ -162,7 +163,11 @@ impl Shared {
             previous.revocation.revoke();
         }
         state.publishing_assets = None;
-        state.root_conflict = Some((head.clone(), reason.into()));
+        if state.root_conflict.as_ref().is_none_or(|(_, existing)| {
+            quarantine::replace_reason(existing.as_bytes(), reason.as_bytes())
+        }) {
+            state.root_conflict = Some((head.clone(), reason.into()));
+        }
         state.root_ticket = Arc::new(());
         state.ticket = Arc::new(());
         self.1.send_replace(());
@@ -185,9 +190,43 @@ impl Shared {
     }
     /// Only the host's fresh authenticated matching sample may clear this
     /// token. Recovery still requires a new resume ticket and canonical audit.
-    pub(crate) fn clear_root_quarantine(&self, ticket: &RootQuarantineTicket) -> bool {
+    pub(crate) fn clear_root_quarantine(
+        &self,
+        ticket: &RootQuarantineTicket,
+        evidence: RootEvidence,
+        consensus_proved: bool,
+    ) -> bool {
+        self.clear_quarantine(ticket, false, |reason| {
+            quarantine::root_recovery_evidence(
+                reason.as_bytes(),
+                evidence.as_bytes(),
+                consensus_proved,
+            )
+            .is_some_and(|evidence| quarantine::clear_allowed(reason.as_bytes(), evidence))
+        })
+    }
+    pub(crate) fn complete_catchup(&self, ticket: &RootQuarantineTicket) -> bool {
+        self.clear_quarantine(ticket, true, |reason| {
+            quarantine::clear_allowed(
+                reason.as_bytes(),
+                b"catchup_complete:root_verified:canonical_forward",
+            )
+        })
+    }
+    fn clear_quarantine(
+        &self,
+        ticket: &RootQuarantineTicket,
+        allow_inactive: bool,
+        allowed: impl FnOnce(&str) -> bool,
+    ) -> bool {
         let mut state = self.0.lock().expect("service state lock");
-        if state.root_conflict.is_none() || !Arc::ptr_eq(&ticket.0, &state.root_ticket) {
+        if !Arc::ptr_eq(&ticket.0, &state.root_ticket) {
+            return false;
+        }
+        let Some((_, reason)) = &state.root_conflict else {
+            return allow_inactive;
+        };
+        if !allowed(reason) {
             return false;
         }
         state.root_conflict = None;
@@ -406,23 +445,105 @@ mod tests {
         let preconflict_query = fixture.shared.root_quarantine_ticket();
         fixture
             .shared
-            .quarantine_root(&fixture.head, "first conflict");
-        assert!(!fixture.shared.clear_root_quarantine(&preconflict_query));
+            .quarantine_root(&fixture.head, "peer_root_mismatch_at_head first conflict");
+        assert!(!fixture.shared.clear_root_quarantine(
+            &preconflict_query,
+            RootEvidence::InSync,
+            false
+        ));
         let stale_query = fixture.shared.root_quarantine_ticket();
-        fixture
+        fixture.shared.quarantine_root(
+            &fixture.head,
+            "peer_root_mismatch_at_head new same-head conflict",
+        );
+        assert!(!fixture
             .shared
-            .quarantine_root(&fixture.head, "new same-head conflict");
-        assert!(!fixture.shared.clear_root_quarantine(&stale_query));
+            .clear_root_quarantine(&stale_query, RootEvidence::InSync, false));
         let current_query = fixture.shared.root_quarantine_ticket();
         let (before_clear, _) = fixture.shared.suspend("auditing canonical history");
-        assert!(fixture.shared.clear_root_quarantine(&current_query));
+        assert!(fixture
+            .shared
+            .clear_root_quarantine(&current_query, RootEvidence::InSync, false));
         assert!(fixture.shared.current().is_err());
         assert!(fixture.shared.gateway_view().is_err());
         assert!(!fixture.shared.install(&before_clear, fixture.serving()));
-        assert!(!fixture.shared.clear_root_quarantine(&current_query));
+        assert!(!fixture
+            .shared
+            .clear_root_quarantine(&current_query, RootEvidence::InSync, false));
         let current = fixture.install();
         assert!(!current.revocation.is_revoked());
         assert_eq!(current.observed_at, previous.observed_at);
         assert!(previous.revocation.is_revoked());
+    }
+
+    #[tokio::test]
+    async fn first_cause_survives_soft_observations_and_hard_causes_never_root_clear() {
+        let fixture = Fixture::new().await;
+        fixture.shared.quarantine_root(&fixture.head, "lag_7");
+        let first = fixture.shared.root_quarantine_ticket();
+        fixture
+            .shared
+            .quarantine_root(&fixture.head, "catchup_failed:unavailable");
+        assert_eq!(fixture.shared.status(), Status::Suspended("lag_7".into()));
+        assert!(!fixture
+            .shared
+            .clear_root_quarantine(&first, RootEvidence::InSync, true));
+
+        let mut hard_head = fixture.head.clone();
+        hard_head.cursor.epoch.0 += 1;
+        fixture
+            .shared
+            .quarantine_root(&hard_head, "local_state_root_mismatch_at_head_1");
+        let hard = fixture.shared.root_quarantine_ticket();
+        fixture
+            .shared
+            .quarantine_root(&fixture.head, "peer_root_mismatch_at_head new sample");
+        assert!(!fixture
+            .shared
+            .clear_root_quarantine(&hard, RootEvidence::InSync, true));
+        let current = fixture.shared.root_quarantine_ticket();
+        for evidence in [
+            RootEvidence::InSync,
+            RootEvidence::AheadCurrentRootQuorum,
+            RootEvidence::SoftLagCurrentRoot,
+        ] {
+            assert!(!fixture
+                .shared
+                .clear_root_quarantine(&current, evidence, true));
+        }
+        assert!(!fixture.shared.complete_catchup(&current));
+        let state = fixture.shared.0.lock().unwrap();
+        assert_eq!(state.root_conflict.as_ref().unwrap().0, hard_head);
+        assert_eq!(state.reason(), "local_state_root_mismatch_at_head_1");
+    }
+
+    #[tokio::test]
+    async fn failed_catchup_requires_in_sync_consensus_or_verified_forward_recovery() {
+        let fixture = Fixture::new().await;
+        fixture
+            .shared
+            .quarantine_root(&fixture.head, "catchup_failed:unavailable");
+        let ticket = fixture.shared.root_quarantine_ticket();
+        assert!(!fixture
+            .shared
+            .clear_root_quarantine(&ticket, RootEvidence::InSync, false));
+        for evidence in [
+            RootEvidence::AheadWaitCurrentHead,
+            RootEvidence::AheadCurrentRootQuorum,
+            RootEvidence::SoftLagCurrentRoot,
+        ] {
+            assert!(!fixture
+                .shared
+                .clear_root_quarantine(&ticket, evidence, true));
+        }
+        assert!(fixture
+            .shared
+            .clear_root_quarantine(&ticket, RootEvidence::InSync, true));
+        fixture
+            .shared
+            .quarantine_root(&fixture.head, "catchup_apply_failed:invalid");
+        let ticket = fixture.shared.root_quarantine_ticket();
+        assert!(fixture.shared.complete_catchup(&ticket));
+        assert!(!fixture.shared.complete_catchup(&ticket));
     }
 }

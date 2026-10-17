@@ -15,8 +15,8 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use ed25519_dalek::{Signer, SigningKey};
 use octra_browser::application::UnavailableHost;
 use octra_exex::{
-    native_history::NativeTransaction, sqlite::SqliteCheckpoints, ChainIdentity, CommittedEpoch,
-    Cursor, ExEx, ExtensionStatus, StateRoot,
+    native_history::NativeTransaction, sqlite::SqliteCheckpoints, ChainIdentity, CheckpointStore,
+    CommittedEpoch, Cursor, ExEx, ExtensionStatus, StateRoot,
 };
 use octra_node_protocol::{
     circles::{self, AssetMeta, LocatorMode, MetadataMode, ResourceMode},
@@ -216,6 +216,7 @@ impl Tasks {
 pub(super) struct Fixture {
     pub(super) directory: tempfile::TempDir,
     pub(super) node: Arc<Node<Authority>>,
+    executor: Native,
     pub(super) authority: crate::peers::Authority,
     pub(super) swarm: swarm::Swarm,
     pub(super) peers: Vec<peer::Node>,
@@ -502,7 +503,7 @@ impl Fixture {
         let service = Service {
             node: node.clone(),
             submission,
-            executor,
+            executor: executor.clone(),
             pending,
             authority: authority.clone(),
             swarm: swarm.clone(),
@@ -542,6 +543,7 @@ impl Fixture {
         Self {
             directory,
             node,
+            executor,
             authority,
             swarm,
             peers,
@@ -570,6 +572,78 @@ impl Fixture {
             peer.authority
                 .roots_unavailable
                 .store(root.is_none(), std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    pub(super) async fn successor(&self) -> (Vec<u8>, octra_node_runtime::finality::ExecutedEpoch) {
+        let draft = self
+            .node
+            .proposal_draft(
+                &self.executor.graph(),
+                Policy {
+                    protocol: Protocol::new(2).unwrap(),
+                    genesis_time: Some(0.),
+                },
+                &self.address,
+                20.,
+            )
+            .await
+            .unwrap();
+        let built = self
+            .executor
+            .build_proposal(Arc::new(draft), vec![])
+            .await
+            .unwrap();
+        let mut finalized = Finalize {
+            chain_id: self.node.store.chain().chain_id.as_bytes().to_vec(),
+            epoch_id: built.plan().header.epoch_id,
+            commit_round: 0,
+            header: built.plan().header.clone(),
+            proposal_id: hash::proposal_id(&built.plan().header).unwrap().to_vec(),
+            precommits: vec![],
+            parent_commit: built.plan().parent_commit.clone(),
+        };
+        finalized.precommits = (1..=3)
+            .map(|seed| {
+                let mut vote = Vote {
+                    chain_id: finalized.chain_id.clone(),
+                    epoch_id: finalized.epoch_id,
+                    round: 0,
+                    vote_type: VoteType::Precommit,
+                    proposal_id: finalized.proposal_id.clone(),
+                    validator: member(seed).address,
+                    signature: vec![],
+                };
+                vote.signature = key(seed)
+                    .sign(&hash::vote_sign_bytes(&vote).unwrap())
+                    .to_bytes()
+                    .to_vec();
+                vote
+            })
+            .collect();
+        (finalized.encode().unwrap(), built.execution().clone())
+    }
+    pub(super) async fn successor_record(&self) -> CatchupEpochRecord {
+        let (certificate, executed) = self.successor().await;
+        assert!(executed.transactions.is_empty());
+        let finalized = Finalize::decode(&certificate).unwrap();
+        let header = &finalized.header;
+        CatchupEpochRecord {
+            epoch_id: finalized.epoch_id,
+            prev_state_root: header.prev_state_root.clone(),
+            state_root: header.proposed_state_root.clone(),
+            tx_list_hash: header.tx_list_hash.clone(),
+            tx_hashes: vec![],
+            txs_json: vec![],
+            receipt_root: header.receipt_root.clone(),
+            receipts_json: executed.consensus_receipts,
+            epoch_ts: header.ts,
+            creator_addr: header.creator_addr.clone(),
+            commit_round: finalized.commit_round,
+            reward_source: Some(executed.reward_source),
+            finality: Some(octra_node_protocol::consensus::CatchupFinality {
+                finalize: finalized,
+                validator_set: self.peers[0].authority.validators.clone(),
+            }),
         }
     }
     pub(super) fn matching_roots(&self, count: usize) {
@@ -644,6 +718,25 @@ impl Fixture {
         })
         .await
         .expect("recovery supervisor condition timed out");
+    }
+    pub(super) async fn wait_checkpoint(&self, expected: Cursor) {
+        tokio::time::timeout(WAIT, async {
+            loop {
+                self.tasks.healthy();
+                if self
+                    .checkpoints
+                    .load(self.node.store.chain(), EXTENSION)
+                    .await
+                    .unwrap()
+                    == Some(expected)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("recovery ExEx checkpoint did not become durable");
     }
 }
 async fn checkpoint(node: &Node<Authority>, cursor: Cursor) {

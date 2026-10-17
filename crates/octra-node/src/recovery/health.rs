@@ -693,7 +693,11 @@ mod tests {
         let sample = query_source(&fixture).await.unwrap();
         assert_eq!(sample.status, Status::Attested { consensus: true });
         assert!(fixture.shared.root_quarantined());
-        assert!(!fixture.shared.clear_root_quarantine(&sample.ticket));
+        assert!(!fixture.shared.clear_root_quarantine(
+            &sample.ticket,
+            super::super::RootEvidence::InSync,
+            true
+        ));
         assert!(fixture.shared.root_quarantined());
     }
 }

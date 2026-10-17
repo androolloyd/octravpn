@@ -121,6 +121,334 @@ async fn one_epoch_soft_lag_first_admission_precedes_unavailable_successor() {
     fixture.node.shutdown().await.unwrap();
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn failed_catchup_requires_consensus_recovery_and_hard_causes_survive_live_probes() {
+    let mut fixture = Box::pin(Fixture::new(true)).await;
+    let http = reqwest::Client::builder().timeout(WAIT).build().unwrap();
+    let admission = fixture.node.vpn_authority(fixture.vpn.settlement.clone());
+    fixture
+        .wait(|| fixture.initial.wake().is_err() && fixture.authority.driver().unwrap().is_none())
+        .await;
+    // Signed current-root replies establish the native fault-tolerant target,
+    // but these peers deliberately have no successor data. Lag2 uses soft
+    // recovery without first installing a different quarantine cause.
+    for peer in &fixture.peers {
+        *peer.authority.advertised_head.lock().unwrap() = Some(3);
+    }
+    fixture.roots(Some(fixture.head.cursor.state_root.0));
+    fixture
+        .wait(|| matches!(fixture.node.status(), crate::Status::Suspended(ref reason) if reason.starts_with("catchup_failed:")))
+        .await;
+    assert!(fixture.node.root_quarantined());
+    assert!(fixture.authority.driver().unwrap().is_none());
+    assert_history_unchanged(&fixture).await;
+
+    // Withdraw the old target. Two of four validators satisfy the independent
+    // distinct-peer count, but cannot supply the three-signature consensus
+    // proof required to recover a failed catch-up at the unchanged head.
+    fixture.matching_roots(2);
+    for peer in &fixture.peers {
+        *peer.authority.advertised_head.lock().unwrap() = Some(1);
+    }
+    let counts = fixture.query_counts();
+    fixture
+        .wait(|| {
+            assert!(fixture.node.root_quarantined());
+            assert!(matches!(fixture.node.status(), crate::Status::Suspended(ref reason) if reason.starts_with("catchup_failed:")));
+            assert!(fixture.authority.driver().unwrap().is_none());
+            fixture.query_counts().iter().zip(&counts).all(|(now, before)| *now >= before + 2)
+        })
+        .await;
+    assert!(admission
+        .authorize(&fixture.vpn.request, &fixture.vpn.domain)
+        .await
+        .is_err());
+    assert_eq!(http.get(&fixture.page).send().await.unwrap().status(), 503);
+    assert!(fixture
+        .journal
+        .max_round(
+            fixture.node.store.chain().chain_id.as_bytes(),
+            &fixture.address,
+            2
+        )
+        .unwrap()
+        .is_none());
+
+    fixture.matching_roots(3);
+    fixture
+        .wait(|| {
+            !fixture.node.root_quarantined()
+                && matches!(fixture.node.status(), crate::Status::Serving(_))
+                && fixture.authority.driver().unwrap().is_some_and(|driver| {
+                    driver.status().borrow().started && driver.status().borrow().voting
+                })
+        })
+        .await;
+    // Recovery without any epoch3 data proves the obsolete desired target was
+    // cleared when the actual catch-up attempt failed.
+    let permit = admission
+        .authorize(&fixture.vpn.request, &fixture.vpn.domain)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(permit.live());
+    circle_document(&http, &fixture).await;
+    assert_history_unchanged(&fixture).await;
+
+    let hard = "local_state_root_mismatch_at_head_1";
+    assert!(fixture
+        .node
+        .quarantine_root_at(&fixture.head, hard)
+        .await
+        .unwrap());
+    for peer in &fixture.peers {
+        *peer.authority.advertised_head.lock().unwrap() = Some(8);
+    }
+    fixture
+        .wait(|| fixture.authority.driver().unwrap().is_none())
+        .await;
+    let votes = fixture.vote_journal();
+    let counts = fixture.query_counts();
+    fixture
+        .wait(|| {
+            assert_eq!(fixture.node.status(), crate::Status::Suspended(hard.into()));
+            fixture
+                .query_counts()
+                .iter()
+                .zip(&counts)
+                .all(|(now, before)| *now >= before + 2)
+        })
+        .await;
+    // The supervisor has attempted lag7 quarantine. Later failure and in-sync
+    // matching-root probes must retain the original hard cause as well.
+    for peer in &fixture.peers {
+        *peer.authority.advertised_head.lock().unwrap() = Some(1);
+    }
+    let counts = fixture.query_counts();
+    fixture
+        .wait(|| {
+            assert_eq!(fixture.node.status(), crate::Status::Suspended(hard.into()));
+            assert!(fixture.authority.driver().unwrap().is_none());
+            fixture
+                .query_counts()
+                .iter()
+                .zip(&counts)
+                .all(|(now, before)| *now >= before + 2)
+        })
+        .await;
+    assert!(!permit.live());
+    assert!(!fixture.node.resume().await.unwrap());
+    assert!(admission
+        .authorize(&fixture.vpn.request, &fixture.vpn.domain)
+        .await
+        .is_err());
+    assert_eq!(http.get(&fixture.page).send().await.unwrap().status(), 503);
+    assert_eq!(fixture.vote_journal(), votes);
+    assert_history_unchanged(&fixture).await;
+    fixture.tasks.stop().await;
+    fixture.node.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn canonical_forward_recovery_needs_new_publication_fresh_ticket_and_recoverable_cause() {
+    let mut fixture = Box::pin(Fixture::new(false)).await;
+    fixture.roots(Some(fixture.head.cursor.state_root.0));
+    fixture
+        .wait(|| matches!(fixture.node.status(), crate::Status::Serving(_)))
+        .await;
+    let (certificate, execution) = fixture.successor().await;
+    fixture.tasks.stop().await;
+    let start = fixture.node.head().await.unwrap();
+    assert!(fixture
+        .node
+        .quarantine_root_at(&start, "catchup_failed:unavailable")
+        .await
+        .unwrap());
+    let stale = fixture.node.root_quarantine_ticket();
+    assert!(fixture
+        .node
+        .quarantine_root_at(&start, "lag_2")
+        .await
+        .unwrap());
+    let ticket = fixture.node.root_quarantine_ticket();
+    assert!(!fixture
+        .node
+        .complete_catchup_at(&start, &start, &ticket)
+        .await
+        .unwrap());
+    let committed = fixture
+        .node
+        .publish(&start, &certificate, execution)
+        .await
+        .unwrap()
+        .head;
+    assert_eq!(
+        committed.cursor.sequence,
+        Sequence(start.cursor.sequence.0 + 1)
+    );
+    assert!(fixture.node.root_quarantined());
+    assert!(!fixture
+        .node
+        .complete_catchup_at(&start, &committed, &stale)
+        .await
+        .unwrap());
+    assert!(!fixture
+        .node
+        .complete_catchup_at(&start, &start, &ticket)
+        .await
+        .unwrap());
+    let mut forged_start = start.clone();
+    forged_start.cursor.state_root.0[0] ^= 1;
+    assert!(!fixture
+        .node
+        .complete_catchup_at(&forged_start, &committed, &ticket)
+        .await
+        .unwrap());
+    assert!(fixture
+        .node
+        .complete_catchup_at(&start, &committed, &ticket)
+        .await
+        .unwrap());
+    assert!(!fixture.node.root_quarantined());
+    assert!(
+        fixture.node.snapshot().is_err(),
+        "recovery evidence must not resume services itself"
+    );
+    let inactive = fixture.node.root_quarantine_ticket();
+    assert!(fixture
+        .node
+        .complete_catchup_at(&start, &committed, &inactive)
+        .await
+        .unwrap());
+
+    assert!(fixture
+        .node
+        .quarantine_root_at(&committed, "local_state_root_mismatch_at_head_2")
+        .await
+        .unwrap());
+    assert!(!fixture
+        .node
+        .complete_catchup_at(&start, &committed, &ticket)
+        .await
+        .unwrap());
+    let current = fixture.node.root_quarantine_ticket();
+    assert!(!fixture
+        .node
+        .complete_catchup_at(&start, &committed, &current)
+        .await
+        .unwrap());
+    assert!(fixture.node.root_quarantined());
+    fixture
+        .wait(|| fixture.epochs.lock().unwrap().len() == 2)
+        .await;
+    fixture.wait_checkpoint(committed.cursor).await;
+    assert_eq!(
+        fixture
+            .checkpoints
+            .load(fixture.node.store.chain(), EXTENSION)
+            .await
+            .unwrap(),
+        Some(committed.cursor)
+    );
+    assert_eq!(
+        fixture
+            .node
+            .publisher
+            .record(start.cursor.sequence)
+            .await
+            .unwrap(),
+        fixture.baseline
+    );
+    fixture.node.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn verified_service_catchup_self_attests_without_successor_root_replies() {
+    let mut fixture = Box::pin(Fixture::new(false)).await;
+    fixture.roots(Some(fixture.head.cursor.state_root.0));
+    fixture
+        .wait(|| matches!(fixture.node.status(), crate::Status::Serving(_)))
+        .await;
+    let record = fixture.successor_record().await;
+    assert_eq!(record.epoch_id, 2);
+    assert!(fixture
+        .node
+        .quarantine_root_at(&fixture.head, "catchup_failed:fixture")
+        .await
+        .unwrap());
+    for peer in &fixture.peers {
+        peer.authority
+            .withheld_root_epochs
+            .lock()
+            .unwrap()
+            .insert(2);
+        peer.authority
+            .ranges
+            .lock()
+            .unwrap()
+            .insert(2, record.clone());
+        assert!(
+            octra_node_runtime::epoch_roots::Host::root(&peer.authority, 2)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+    fixture.wait(|| matches!(fixture.node.status(), crate::Status::Serving(ref head) if head.cursor.epoch.0 == 2)).await;
+    let committed = fixture.node.head().await.unwrap();
+    assert_eq!(committed.cursor.sequence, Sequence(2));
+    assert_eq!(committed.cursor.state_root.0.as_slice(), record.state_root);
+    assert!(!fixture.node.root_quarantined());
+    assert_eq!(
+        fixture.node.publisher.record(Sequence(2)).await.unwrap(),
+        record
+    );
+    fixture
+        .wait(|| fixture.epochs.lock().unwrap().len() == 2)
+        .await;
+    fixture.wait_checkpoint(committed.cursor).await;
+    assert_eq!(
+        fixture
+            .checkpoints
+            .load(fixture.node.store.chain(), EXTENSION)
+            .await
+            .unwrap(),
+        Some(committed.cursor)
+    );
+    let http = reqwest::Client::builder().timeout(WAIT).build().unwrap();
+    assert_eq!(
+        http.get(format!("{}/", fixture.browser))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    assert!(fixture
+        .node
+        .vpn_authority(fixture.vpn.settlement.clone())
+        .authorize(&fixture.vpn.request, &fixture.vpn.domain)
+        .await
+        .unwrap()
+        .unwrap()
+        .live());
+    for peer in &fixture.peers {
+        assert!(
+            octra_node_runtime::epoch_roots::Host::root(&peer.authority, 2)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(!peer.authority.range_requests.lock().unwrap().is_empty());
+    }
+    assert_eq!(
+        fixture.node.publisher.record(Sequence(1)).await.unwrap(),
+        fixture.baseline
+    );
+    fixture.tasks.stop().await;
+    fixture.node.shutdown().await.unwrap();
+}
+
 async fn assert_history_unchanged(fixture: &Fixture) {
     assert_eq!(fixture.node.head().await.unwrap(), fixture.head);
     assert_eq!(

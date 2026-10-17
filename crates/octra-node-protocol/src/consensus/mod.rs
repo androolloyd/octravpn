@@ -19,6 +19,7 @@ pub mod pending_log;
 pub mod policy;
 pub mod profile;
 pub mod qc;
+pub mod quarantine;
 pub mod relief;
 pub mod relief_log;
 pub mod resource_attestation_admission;

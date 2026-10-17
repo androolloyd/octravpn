@@ -55,6 +55,7 @@ use octravpn_node::admission::Revocation;
 use tokio::sync::{watch, Mutex as AsyncMutex};
 
 pub use legacy::Status as LegacyStatus;
+pub use octra_node_protocol::consensus::quarantine::RootEvidence;
 pub use published::{Committed, RootQuarantineTicket, Status};
 use published::{Handle as Published, Serving, Shared};
 pub use services::Services;
@@ -278,12 +279,35 @@ impl<A: Host> Node<A> {
         &self,
         observed: &Head,
         ticket: &RootQuarantineTicket,
+        evidence: RootEvidence,
+        consensus_proved: bool,
     ) -> Result<bool> {
         let _operation = self.operations.lock().await;
         if self.head().await? != *observed {
             return Ok(false);
         }
-        Ok(self.shared.clear_root_quarantine(ticket))
+        Ok(self
+            .shared
+            .clear_root_quarantine(ticket, evidence, consensus_proved))
+    }
+
+    /// Only a complete forward catch-up may use canonical publication as root
+    /// recovery evidence. A zero-progress retry cannot clear a failed catch-up.
+    pub(crate) async fn complete_catchup_at(
+        &self,
+        start: &Head,
+        observed: &Head,
+        ticket: &RootQuarantineTicket,
+    ) -> Result<bool> {
+        let _operation = self.operations.lock().await;
+        if self.head().await? != *observed
+            || observed.cursor.sequence <= start.cursor.sequence
+            || start.cursor.sequence < self.store.anchor().cursor.sequence
+            || self.store.retained_head(start.cursor.sequence).await? != *start
+        {
+            return Ok(false);
+        }
+        Ok(self.shared.complete_catchup(ticket))
     }
 
     /// Trusted local setup may inspect pinned application code before peer

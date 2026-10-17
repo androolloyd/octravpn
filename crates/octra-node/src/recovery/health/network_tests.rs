@@ -134,11 +134,16 @@ async fn authenticated_connected_roots_quarantine_and_clear_only_fresh_matching_
         }
     );
     assert_eq!(source.responses.lock().unwrap().len(), 3);
-    source
-        .shared
-        .quarantine_root(&conflict.head, "signed peer conflict");
+    source.shared.quarantine_root(
+        &conflict.head,
+        "peer_root_mismatch_at_head signed peer conflict",
+    );
     assert!(source.shared.root_quarantined());
-    assert!(!source.shared.clear_root_quarantine(&conflict.ticket));
+    assert!(!source.shared.clear_root_quarantine(
+        &conflict.ticket,
+        super::super::RootEvidence::InSync,
+        true
+    ));
 
     // One bad signature and one missing root leave only one usable signer.
     peers[0]
@@ -237,6 +242,10 @@ async fn authenticated_connected_roots_quarantine_and_clear_only_fresh_matching_
     assert_eq!(matching.status, Status::Attested { consensus: true });
     assert_eq!(matching.head, conflict.head);
     assert_eq!(source.responses.lock().unwrap().len(), 3);
-    assert!(source.shared.clear_root_quarantine(&matching.ticket));
+    assert!(source.shared.clear_root_quarantine(
+        &matching.ticket,
+        super::super::RootEvidence::InSync,
+        true
+    ));
     assert!(!source.shared.root_quarantined());
 }
