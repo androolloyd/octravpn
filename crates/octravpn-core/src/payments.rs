@@ -159,6 +159,8 @@ impl Deployment {
     }
 }
 
+/// Payer authorization to buy a cumulative byte allowance for one traffic class.
+/// The wire field name remains `usage`; this is not evidence of packet delivery.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Usage {
@@ -225,7 +227,7 @@ impl Usage {
     pub fn signing_message(&self) -> Result<String> {
         self.validate()?;
         Ok(format!(
-            "Octranet usage v1|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            "Octranet prepaid v1|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
             self.deployment.domain,
             self.deployment.program,
             self.payer,
@@ -328,7 +330,7 @@ mod tests {
         assert_eq!(
             u.signing_message().unwrap(),
             format!(
-                "Octranet usage v1|{}|{}|{}|1|0|3|{}|1|7|1048577",
+                "Octranet prepaid v1|{}|{}|{}|1|0|3|{}|1|7|1048577",
                 "a".repeat(64),
                 u.deployment.program,
                 u.payer,
@@ -349,7 +351,7 @@ mod tests {
         signed.verify().unwrap();
         assert_eq!(
             signed.claim_params().unwrap(),
-            json!([0, 1, 7, 1048577, b64::encode(signed.signature.0)])
+            json!([0, 1, 7, 1_048_577, b64::encode(signed.signature.0)])
         );
         let raw = serde_json::to_vec(&signed).unwrap();
         let restored: SignedUsage = serde_json::from_slice(&raw).unwrap();

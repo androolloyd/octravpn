@@ -1,7 +1,7 @@
-//! Durable payer authorization. Reserve before local forwarding, confirm only
-//! after handoff. Interrupted handoffs retain uncertain, nonbillable capacity.
-//! Canonical plan admission and authenticated operator counters belong to the
-//! runner. This journal stores public authorization material, never secrets.
+//! Durable prepaid purchases and separate local delivery accounting. Purchase
+//! the explicit class caps before forwarding; interrupted handoffs retain
+//! uncertain capacity. Canonical purchase confirmation belongs to the runner.
+//! This journal stores public authorization material, never secrets.
 //! The runner must keep one stable path per plan and only Create for a genuinely
 //! new plan. Full directory rollback or deletion by the host owner requires an
 //! independent operator/chain high-water mark; a local checksum cannot detect it.
@@ -33,6 +33,7 @@ struct Identity {
     binding: PlanBinding,
     tariff: Tariff,
     original_budget_ou: u64,
+    prepaid_bytes: Vec<u64>,
     receipt_key: PublicKey,
 }
 
@@ -77,6 +78,15 @@ pub(crate) struct Reservation {
     sequence: u64,
 }
 
+#[derive(Debug)]
+pub(crate) struct PrepaidExhausted;
+impl std::fmt::Display for PrepaidExhausted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("prepaid traffic class capacity exhausted")
+    }
+}
+impl std::error::Error for PrepaidExhausted {}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Envelope {
@@ -86,7 +96,7 @@ struct Envelope {
 
 fn checksum(state: &State) -> Result<String> {
     let mut hash = Sha256::new();
-    hash.update(b"Octranet client payment state v1\0");
+    hash.update(b"Octranet client prepaid state v2\0");
     hash.update(serde_json::to_vec(state)?);
     Ok(hex::encode(hash.finalize()))
 }
@@ -131,8 +141,8 @@ impl State {
 
     fn validate(&self) -> Result<()> {
         ensure!(
-            self.version == 1,
-            "unsupported client payment journal version"
+            self.version == 2,
+            "postpaid or unsupported client payment journal version"
         );
         self.identity.binding.validate()?;
         ensure!(
@@ -147,8 +157,26 @@ impl State {
         ensure!(
             self.local_bytes.len() == classes
                 && self.authorized_bytes.len() == classes
-                && self.receipts.len() == classes,
+                && self.receipts.len() == classes
+                && self.identity.prepaid_bytes.len() == classes,
             "client payment counter shape differs from the tariff"
+        );
+        validate_purchase(
+            &self.identity.tariff,
+            self.identity.original_budget_ou,
+            &self.identity.prepaid_bytes,
+        )?;
+        ensure!(
+            self.authorized_bytes.iter().all(|bytes| *bytes == 0)
+                || self.authorized_bytes == self.identity.prepaid_bytes,
+            "client purchase differs from explicit immutable target"
+        );
+        ensure!(
+            self.capacity_totals()?
+                .iter()
+                .zip(&self.authorized_bytes)
+                .all(|(used, purchased)| used <= purchased),
+            "client delivery exposure exceeds purchased capacity"
         );
         Budget::new(
             self.identity.tariff.clone(),
@@ -161,16 +189,7 @@ impl State {
             self.authorized_bytes.clone(),
         )?;
         let mut sequences = BTreeSet::new();
-        for (class, (local, authorized)) in self
-            .local_bytes
-            .iter()
-            .zip(&self.authorized_bytes)
-            .enumerate()
-        {
-            ensure!(
-                authorized <= local,
-                "authorization exceeds confirmed local traffic"
-            );
+        for (class, authorized) in self.authorized_bytes.iter().enumerate() {
             match &self.receipts[class] {
                 Some(receipt) => {
                     receipt.verify()?;
@@ -217,6 +236,7 @@ impl Journal {
         binding: PlanBinding,
         tariff: Tariff,
         original_budget_ou: u64,
+        prepaid_bytes: Vec<u64>,
         key: Arc<KeyPair>,
         mode: OpenMode,
     ) -> Result<Self> {
@@ -226,6 +246,7 @@ impl Journal {
             "tariff differs from plan manifest"
         );
         ensure!(original_budget_ou > 0, "zero original plan budget");
+        validate_purchase(&tariff, original_budget_ou, &prepaid_bytes)?;
         let possession = b"Octranet client payment key possession v1\0";
         verify(&key.public, possession, &key.sign(possession))
             .context("receipt key does not match its signing secret")?;
@@ -233,6 +254,7 @@ impl Journal {
             binding,
             tariff,
             original_budget_ou,
+            prepaid_bytes,
             receipt_key: key.public,
         };
         let mut store = Store::open(path, mode)?;
@@ -240,7 +262,7 @@ impl Journal {
             OpenMode::Create => {
                 let classes = identity.tariff.classes().len();
                 let state = State {
-                    version: 1,
+                    version: 2,
                     identity,
                     connection_sequence: 0,
                     usage_sequence: 0,
@@ -274,10 +296,6 @@ impl Journal {
                 envelope.payload
             }
         };
-        let migrated = state.uncertain_bytes.is_empty();
-        if migrated {
-            state.uncertain_bytes.resize(state.local_bytes.len(), 0);
-        }
         let recovered = if let Some(pending) = state.pending.take() {
             let uncertain = &mut state.uncertain_bytes[usize::from(pending.traffic_class)];
             *uncertain = uncertain
@@ -285,7 +303,7 @@ impl Journal {
                 .context("client uncertain byte counter overflow")?;
             true
         } else {
-            migrated
+            false
         };
         if recovered {
             state.validate()?;
@@ -349,7 +367,7 @@ impl Journal {
         Ok(signed)
     }
 
-    /// Non-mutating budget preflight. The runner must serialize its I/O and
+    /// Non-mutating prepaid preflight. The runner must serialize its I/O and
     /// confirmation path; this is not a reservation for concurrent sends.
     pub(crate) fn check(&self, packet: &[u8], direction: Direction) -> Result<u8> {
         self.ready()?;
@@ -358,23 +376,23 @@ impl Journal {
             .identity
             .tariff
             .classify_ipv4(packet, direction)?;
-        let mut budget = Budget::new(
-            self.state.identity.tariff.clone(),
-            self.state.identity.original_budget_ou,
-            self.state.capacity_totals()?,
-        )?;
-        budget.reserve(class, u64::try_from(packet.len())?)?;
+        let total = self.state.capacity_totals()?[usize::from(class)]
+            .checked_add(u64::try_from(packet.len())?)
+            .context("client prepaid byte counter overflow")?;
+        if total > self.state.authorized_bytes[usize::from(class)] {
+            return Err(PrepaidExhausted.into());
+        }
         Ok(class)
     }
 
     /// Persist intent before any network or TUN handoff. The runner serializes
     /// application packets; a pending operation cannot be overwritten.
     pub(crate) fn reserve(&mut self, packet: &[u8], direction: Direction) -> Result<Reservation> {
-        let class = self.check(packet, direction)?;
         ensure!(
             self.state.pending.is_none(),
             "client handoff still pending; reopen to recover uncertain capacity"
         );
+        let class = self.check(packet, direction)?;
         let mut next = self.state.clone();
         next.handoff_sequence = next
             .handoff_sequence
@@ -436,30 +454,20 @@ impl Journal {
         Ok(class)
     }
 
-    /// The runner authenticates these counters to the same plan/operator first.
-    /// New authorizations never exceed either party's confirmed cumulative
-    /// count. A regressing operator cannot revoke an already-issued receipt.
-    /// Return all latest receipts, permitting idempotent transport retry.
-    pub(crate) fn receipts(&mut self, operator_totals: &[u64]) -> Result<Vec<SignedUsage>> {
+    /// Persist the explicit purchase before returning its signature. Neither
+    /// local delivery nor any operator-proposed counter can increase this cap.
+    /// Resume returns the identical receipts for idempotent canonical retry.
+    pub(crate) fn purchases(&mut self) -> Result<Vec<SignedUsage>> {
         self.ready()?;
-        ensure!(
-            operator_totals.len() == self.state.local_bytes.len(),
-            "operator class counter shape differs"
-        );
         let mut next = self.state.clone();
         let mut changed = false;
-        for (class, operator_total) in operator_totals.iter().enumerate() {
-            ensure!(
-                *operator_total >= next.authorized_bytes[class],
-                "operator counters regressed below durable authorization"
-            );
-            let bytes = next.local_bytes[class].min(*operator_total);
+        for (class, &bytes) in self.state.identity.prepaid_bytes.iter().enumerate() {
             if bytes == next.authorized_bytes[class] {
                 continue;
             }
             ensure!(
                 bytes > next.authorized_bytes[class],
-                "local authorization counter regressed"
+                "prepaid authorization counter regressed"
             );
             next.usage_sequence = next
                 .usage_sequence
@@ -512,10 +520,23 @@ impl Journal {
         Ok(Budget::new(
             self.state.identity.tariff.clone(),
             self.state.identity.original_budget_ou,
-            self.state.capacity_totals()?,
+            self.state.authorized_bytes.clone(),
         )?
         .remaining_ou())
     }
+}
+
+pub(crate) fn validate_purchase(tariff: &Tariff, budget: u64, targets: &[u64]) -> Result<()> {
+    ensure!(
+        targets.len() == tariff.classes().len(),
+        "prepaid purchase class count differs"
+    );
+    ensure!(
+        targets.iter().any(|bytes| *bytes > 0),
+        "prepaid purchase requires a finite byte target"
+    );
+    Budget::new(tariff.clone(), budget, targets.to_vec())?;
+    Ok(())
 }
 
 #[cfg(test)]

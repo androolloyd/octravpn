@@ -1,6 +1,6 @@
 # Octranet onboarding and payment tier
 
-This is the implementation target agreed on 2026-10-17. It supersedes the
+This is the prepaid implementation target revised on 2026-10-17. It supersedes the
 assumption that joining a stock Tailscale mesh opens a paid traffic session.
 The existing v5 deployments and their recorded tests remain separate.
 
@@ -15,8 +15,9 @@ device identity, not a payment authorization.
 Operators choose their prices, including zero. Offers contain a default rate
 and named traffic classes; for example, a premium class for a specified set of
 Hyperliquid destinations. The selected offer, selectors, counting rules and
-rates are immutable for an opened plan. Repricing creates another offer and
-requires another accepted plan. All traffic payments go to the operator; the
+rates are immutable for an opened plan. A replacement rate becomes available
+after a full 24-hour notice period and requires another accepted purchase.
+All traffic payments go to the operator; the
 protocol has no commission. Ordinary Octra transaction fees are separate.
 
 Classification must use facts the forwarding path can enforce: destination
@@ -35,35 +36,81 @@ forwarding, including return traffic.
 
 ## Custody and claims
 
-Payment accounts reserve explicit budgets for operator plans. Opening another
-plan cannot spend an already reserved budget. Operators submit client-authorized
-cumulative receipts against their own plan and its immutable tariff. A
-successful claim transfers only the new increment from the payer's held
-balance to that operator's earnings. Pending, malformed, replayed or excessive
-claims transfer nothing. Claims bind the deployment domain, program, account
-generation, plan, class, sequence and cumulative usage.
+The channel holds OCT that can pay for traffic or be withdrawn. Its balance is
+the account's remaining funds plus its exit earnings; operator stake is separate.
+Opening a plan automatically reuses enough earned OCT to cover any funding
+shortfall, without an external withdrawal and deposit. This is internal balance
+netting, not a protocol commission or an operator credit line. Every purchase
+still records its full charge and payee.
 
-Disconnecting is immediate. Requesting exit from the payment tier stops new
-paid admission and starts exactly 86,400,000 milliseconds of settlement time,
-measured by the canonical epoch timestamp. Authorized claims may succeed
-strictly before that deadline. Neither a claim nor a retry extends it. At and
-after the deadline claims are refused, and the user can withdraw the remaining
-balance. Successful claims reduce that balance; unresolved claims do not keep
-it locked. Rejoining starts another generation, so old authorizations cannot
-consume new funds. A chain halt still prevents all chain transactions.
+Payment accounts reserve explicit budgets for operator plans. Opening another
+plan cannot spend an already reserved budget. The payer signs an explicit
+cumulative byte purchase per class before any traffic. An ordinary `claim`
+settles that purchase on chain, moving only the new tariff increment from held
+funds to operator earnings. The forwarding path then consumes the canonically
+purchased byte allowance. Funding escrow, signing an authorization or submitting
+a transaction is insufficient by itself. With no purchase there is no paid
+traffic, and exhaustion pauses traffic without increasing the purchase.
+
+For each class the cumulative price is `ceil(bytes * rate_ou_per_mib / 1048576)`
+in the smallest OCT unit. Only the difference from the previous cumulative
+price is charged. Claims bind the deployment domain, program, payer generation,
+plan, immutable offer/manifest, class, sequence and cumulative purchased bytes.
+The new signature tag is `Octranet prepaid v1`; old postpaid signatures cannot
+buy bytes under this revision. Replays and over-budget claims move no value.
+
+`withdraw_remaining` immediately returns the channel's available OCT and closes
+the account; no prior exit request or payer withdrawal delay is required.
+`withdraw_channel(amount)` withdraws part of the balance and keeps the account
+open. It advances the payer generation and clears all old reservations, so
+old plans and held purchase signatures cannot claim against the remainder.
+Previously reserved but unspent OCT is withdrawable through these operations.
+Both operations stop the old plan connections; any unused purchased allowance
+on those plans is not refunded.
+An optional `request_exit` stops admission immediately and imposes no hold.
+
+The canonical transaction order decides a purchase/withdrawal race. A purchase
+that settles first remains final and reduces the withdrawable balance. A
+withdrawal that settles first invalidates the old purchase authorization.
+Forwarding waits for canonical purchase settlement, so the operator never
+extends credit against a signature that the payer can later invalidate.
+Rejoining uses another generation. A chain halt still prevents withdrawals and
+other chain transactions; immediate means no application waiting period.
 
 Operator stake has a separate fixed seven-day unstake period: 604,800,000
 canonical milliseconds from the operator's first unstake request. That request
 immediately stops new plans and paid admission for the operator. Repeated
 requests leave the original deadline intact; top-ups cannot bypass an ongoing
-unstake. Already authorized usage claims remain redeemable strictly before the
-earlier of the payer's exit deadline and 24 hours after the operator stopped.
-The payer can then release any unused plan reservation. Offers bind an operator
+unstake. New purchases stop immediately, including held signatures. The payer
+can release an unused stopped-plan reservation immediately.
+Offers bind an operator
 generation, so rebonding cannot revive old plans or claim windows. At the
 seven-day boundary the operator can withdraw its
-stake. Operator earnings and payer balances are separate liabilities; neither
-withdrawal spends the other's funds. The custody cap includes operator stake.
+stake. Traffic earnings are available to their owner for withdrawal or traffic
+purchases; no account can spend another account's balance. The custody cap
+includes operator stake.
 This application does not invent an unverified automatic slashing mechanism.
+
+## Rate changes
+
+An initial offer is usable when sealed. `create_rate_change(parent, manifest)`
+creates an immutable replacement in that offer's lineage. Sealing the replacement
+publishes its full manifest and rates and sets activation to canonical
+`epoch_time + 86400000`. Before that boundary only the parent sells new bytes;
+at the boundary only the replacement does. Already purchased bytes retain their
+original price and allowance after the old quote retires.
+
+Replacing a pending change restarts the full notice period and permanently
+cancels the superseded quote. An operator may also cancel a pending change
+before activation. Neither operation can reactivate an old quote later or
+apply a price change retroactively. Independent offers remain separate products
+that require their own explicit payer consent.
+
+The native service's configured offer identifies the lineage root. Each actual
+plan still binds its precise offer, tariff hash and generation. A new price
+cannot silently replace those facts or create another client authorization.
+The current client accepts finite purchase targets; it does not auto-renew,
+automatically accept future rates or implement a collateral-backed PAYG mode.
 
 Custody logic belongs in the application. The adopted AML runtime already
 offers signature verification and Program `epoch_time`; Circle compilation
@@ -92,7 +139,7 @@ network origin, actual custody, generations, the authenticated epoch clock and
 the canonical Circle tariff. Its returned plan has immutable bound facts and a
 revocable lease. A stopped node cannot renew that lease indefinitely from the
 same retained head. The local lease clock limits service availability; it never
-advances an on-chain withdrawal deadline.
+advances an on-chain rate activation or operator unstake deadline.
 
 `octravpn-node::payment_meter` reserves a shared lifetime budget durably before
 forwarding. Confirmed sends become committed counters. An unresolved send holds
@@ -101,26 +148,21 @@ definitely unsent packet releases its reservation. The host must keep one meter
 per plan and preserve its journal across reconnects and restarts. Packet-level
 fsync is a correctness baseline, with no throughput qualification yet.
 
-The opt-in `payments` node configuration selects the new application and an
-explicit `credit` window, with both `max_unacknowledged_bytes` and
-`max_unacknowledged_ou`. The production transport never uses the meter's
-unlimited component-test policy. Unacknowledged and uncertain capacity counts
-against both limits across reconnection and restart. An operator accepts the
-risk of this bounded postpaid window: a client can refuse its final receipt.
-Neither WireGuard nor an escrow balance proves delivery or forces a payer to
-sign. A zero window refuses traffic; increasing it is an operator risk choice.
-The service restores credit only after its cumulative charge is covered by
-authenticated canonical paid OU. An already paid rounding interval or zero-rate
-class can be acknowledged durably without another on-chain claim; the canonical
-byte counter may lag. A separate immutable lifetime claim-fee budget bounds
-transaction spending, including failed or ambiguous attempts. Transaction fees
-make very small settlement windows costly.
+The opt-in `payments` node has no credit configuration or unlimited fallback.
+Its meter separates actual consumed/pending/uncertain bytes from canonical
+purchased capacity. Each packet reservation must fit the purchased allowance
+of its own class, including zero-rate classes. Same-price rounding does not
+permit an unrecorded extra purchase: the exact canonical byte floor is required.
+A fully spent monetary budget can still have purchased bytes left to consume.
+A separate immutable lifetime claim-fee budget bounds transaction spending,
+including failed or ambiguous attempts. Larger prepaid batches amortize fees.
+Old postpaid journals are rejected instead of reinterpreted.
 
 Receipt-key-signed connection requests bind the complete plan and a monotonic
 connection sequence to the client's WireGuard key. Rotation suspends the old
 capability before its durable watermark changes. The current native publication
 guard encloses the actual nonblocking kernel or UDP handoff. Confirmed raw IP
-bytes become billable. Paid payloads never enter boringtun's opaque rekey queue:
+bytes consume prepaid capacity. Paid payloads never enter boringtun's opaque rekey queue:
 an absent current session starts only the control handshake and drops the
 unsent raw packet without charging it. Ambiguous sends retain uncertain
 capacity. This favors custody safety when delivery cannot be established.
@@ -131,9 +173,11 @@ status signature, manifest, budget, connection sequence and both WireGuard
 keys. That signature authenticates the operator, not chain finality. The plan
 file must be obtained from confirmed state by the onboarding flow. Automatic
 funding, route installation and stock Tailscale payment signing are not implied
-by this command. The client signs at most the lower of its own confirmed class
-counts and the authenticated operator's counts. Its original budget and signed
-authorizations survive reconnects; resume refuses missing or corrupt state.
+by this command. The client requires explicit finite `prepaid_bytes` targets by class and persists
+their exact purchase signatures before submission. Its traffic interface opens
+only after purchase confirmation. Operator counters cannot cause another
+purchase. Its immutable targets, original budget and consumed/uncertain bytes
+survive reconnects; resume refuses missing, corrupt or old postpaid state.
 
 The gateway's [portal capability](../operators/unpaid-portal.md) limits unpaid
 reads to explicitly selected passive assets in one Circle. It does not confer
@@ -141,13 +185,34 @@ device enrollment, general DNS/DERP access or paid forwarding. The new native
 payment path still requires combined kernel, recovery and public qualification
 before the application can accept alpha traffic.
 
+## Trustless delivery boundary
+
+A prepaid signature proves spending consent, not delivery. An operator that
+drops a packet and an operator that forwards correctly before the client,
+router or destination drops the reply can leave identical chain evidence.
+Payer-controlled timeouts or withheld acknowledgments cannot distinguish them.
+No arbitrary Web non-delivery proof or slashing state machine exists here.
+
+A successful purchase immediately credits operator earnings, available for
+withdrawal or further traffic purchases. Payer withdrawal returns only OCT
+still in the channel; settled byte purchases are final, including unused
+purchased bytes. Seven-day operator unstaking does not insure future delivery.
+This prepaid product does not implement refundable delivery insurance.
+
+Signed conflicting obligations or a missed on-chain response deadline could
+support narrower objective penalties after that service obligation is specified.
+A chain-response promise does not itself prove general Internet availability.
+There is no trusted arbiter or witness voting fallback. A launch advertised as
+trustless non-delivery protection is blocked on a verifiable service predicate.
+
 ## Qualification
 
 Before an alpha launch, exercise the actual compiled AML, node admission,
 client metering and kernel forwarding together. Include unfunded portal use,
 denied unpaid web access, distinct class rates, agreement before repricing,
 budget exhaustion, claim replay, concurrent claims, just-before/at/after the
-24-hour boundary, remainder withdrawal, rejoin, crash recovery and a suspended
+24-hour rate boundary, immediate full/partial withdrawal, withdrawal/claim races,
+earnings reuse, rejoin, crash recovery and a suspended
 canonical node. Formal accounting and deadline models must identify their link
 to the AML source and their limits; model proofs alone do not qualify the VM.
 

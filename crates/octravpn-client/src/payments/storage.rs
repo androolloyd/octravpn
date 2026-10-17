@@ -11,7 +11,7 @@ use super::OpenMode;
 
 const STATE: &str = "state.json";
 const LOCK: &str = "writer.lock";
-const MAGIC: &[u8] = b"Octranet client payment journal v1\n";
+const MAGIC: &[u8] = b"Octranet client prepaid journal v2\n";
 const MAX_BYTES: usize = 256 * 1024;
 
 #[derive(Clone, Copy, PartialEq, Eq)]

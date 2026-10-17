@@ -21,6 +21,7 @@ use octravpn_node::admission::Revocation;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::BTreeMap,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -34,7 +35,6 @@ mod test_host;
 mod tests;
 mod transport;
 
-const DAY_MS: u64 = 86_400_000;
 const PLAN_MAX_AGE: Duration = Duration::from_secs(120);
 const TARIFF_BYTES: i64 = 65_536;
 
@@ -47,6 +47,7 @@ pub struct Config {
     pub factory_code_hash: String,
     pub domain: String,
     pub operator_circle: String,
+    /// Root offer of this product lineage; successor plans bind their actual ID.
     pub offer: u64,
 }
 
@@ -57,7 +58,6 @@ pub struct Config {
 pub struct ServiceConfig {
     pub application: Config,
     pub ip_tunnel: octravpn_node::embedded::IpTunnelConfig,
-    pub credit: octravpn_node::payment_meter::Credit,
     /// Lifetime relayer fee ceiling for this durable claim directory.
     pub max_claim_fees_ou: u64,
 }
@@ -85,16 +85,16 @@ pub struct Payments {
     retained: tokio::sync::Mutex<RetainedTariff>,
 }
 
-// A service's durable claim journal retains the one immutable tariff bound to
-// its configured sealed offer. Plain read-only adapters may retain in memory;
+// A service's durable claim journal retains immutable tariffs per actual offer
+// in the configured lineage. Plain read-only adapters may retain in memory;
 // the production settlement service attaches its archive before serving peers.
 trait TariffArchive: Send + Sync {
-    fn load_tariff(&self) -> Result<Option<Tariff>>;
-    fn save_tariff(&self, tariff: Tariff) -> Result<()>;
+    fn load_tariff(&self, offer: u64) -> Result<Option<Tariff>>;
+    fn save_tariff(&self, offer: u64, tariff: Tariff) -> Result<()>;
 }
 #[derive(Default)]
 struct RetainedTariff {
-    tariff: Option<Tariff>,
+    tariffs: BTreeMap<u64, Tariff>,
     archive: Option<Arc<dyn TariffArchive>>,
 }
 
@@ -108,10 +108,13 @@ pub struct PlanData {
     pub plan: u64,
     pub offer: u64,
     pub operator_generation: u64,
+    pub offer_start_ms: u64,
+    pub offer_end_ms: u64,
     pub manifest_hash: String,
     pub tariff: Tariff,
     pub original_budget_ou: u64,
     pub remaining_ou: u64,
+    /// Canonical cumulative purchased bytes, independent of packet delivery.
     pub redeemed_bytes: Vec<u64>,
     pub redeemed_ou: Vec<u64>,
     pub opened_ms: u64,
@@ -214,6 +217,12 @@ impl Plan {
             class < self.redeemed_bytes.len(),
             "Octranet class not found"
         );
+        let mut purchased = self.redeemed_bytes.clone();
+        purchased[class] = purchased[class].max(usage.total_bytes);
+        ensure!(
+            self.tariff.total_charge(&purchased)? <= self.original_budget_ou,
+            "Octranet purchase exceeds original budget"
+        );
         Ok(())
     }
 }
@@ -256,9 +265,10 @@ impl Payments {
         self.current_plan(plan, false).await
     }
 
-    /// Re-read current custody, code pins and settlement deadlines against the
-    /// exact tariff previously authenticated for this sealed offer. Asset
-    /// expiry/removal cannot erase earned debt. This lease never grants traffic.
+    /// Re-read current custody and code pins against the exact retained tariff.
+    /// Asset expiry cannot erase an already canonical purchase acknowledgment.
+    /// New purchases still require an open payer and operator. This lease never
+    /// grants traffic.
     pub async fn claim_plan(&self, plan: u64) -> Result<Plan> {
         self.current_plan(plan, true).await
     }
@@ -268,7 +278,16 @@ impl Payments {
         let expires = serving.observed_at + PLAN_MAX_AGE;
         ensure!(Instant::now() < expires, "Octranet canonical head is stale");
         let mut result = if claim_only {
-            let retained = self.retained_tariff().await?;
+            let fields = Fields {
+                snapshot: serving.committed.state(),
+                program: self.config.program.as_bytes(),
+            };
+            ensure!(
+                plan < fields.uint(b"plan_count", &[])?,
+                "Octranet plan not found"
+            );
+            let offer = fields.uint(b"plan_offer", &[&plan.to_string()])?;
+            let retained = self.retained_tariff(offer).await?;
             if let Some(tariff) = retained {
                 let now = self.canonical_time(&serving.committed).await?;
                 self.read_state_with_tariff(serving.committed.state(), plan, now, Some(tariff))?
@@ -338,7 +357,7 @@ impl Payments {
         );
         // With the production archive attached, durability precedes the grant.
         // Failed retention therefore prevents forwarding on this publication.
-        self.retain_tariff(plan.tariff.clone()).await?;
+        self.retain_tariff(plan.offer, plan.tariff.clone()).await?;
         Ok(plan)
     }
 
@@ -381,10 +400,18 @@ impl Payments {
         let plan_key = plan.to_string();
         let offer = state.uint(b"plan_offer", &[&plan_key])?;
         ensure!(
-            offer == self.config.offer && offer < state.uint(b"offer_count", &[])?,
+            offer < state.uint(b"offer_count", &[])?,
             "Octranet offer differs"
         );
         let offer_key = offer.to_string();
+        let series = state.uint(b"offer_series", &[&offer_key])?;
+        let series_key = series.to_string();
+        ensure!(
+            series == self.config.offer
+                && series < state.uint(b"offer_count", &[])?
+                && state.uint(b"offer_series", &[&series_key])? == series,
+            "Octranet offer lineage differs"
+        );
         let operator = state.text(b"offer_owner", &[&offer_key])?;
         ensure!(
             operator == self.operator.display(),
@@ -421,7 +448,7 @@ impl Payments {
         let active = state.uint(b"active", &[&payer_text])? == 1
             && active_generation == generation
             && generation > 0;
-        let receipt_key_text = state.text(b"receipt_key", &[&payer_text])?;
+        let receipt_key_text = state.text(b"plan_receipt_key", &[&plan_key])?;
         let key = decode_base64(receipt_key_text.as_bytes())?;
         ensure!(
             STANDARD.encode(&key) == receipt_key_text,
@@ -481,6 +508,11 @@ impl Payments {
         )?
         .is_some_and(|account| account.balance >= locked.into());
         let provider_generation = state.uint(b"offer_generation", &[&offer_key])?;
+        ensure!(
+            state.text(b"offer_owner", &[&series_key])? == operator
+                && state.uint(b"offer_generation", &[&series_key])? == provider_generation,
+            "Octranet offer lineage operator differs"
+        );
         let provider_current = state.uint(b"operator_generation", &[&operator])?;
         let provider_key = provider_generation.to_string();
         let stopped = state.uint(b"operator_stopped", &[&operator, &provider_key])?;
@@ -490,26 +522,26 @@ impl Payments {
             "Octranet operator stop clock differs"
         );
         ensure!(
-            user_deadline == 0
-                || user_deadline
-                    .checked_sub(DAY_MS)
-                    .is_some_and(|requested| requested <= now),
+            user_deadline == 0 || user_deadline <= now,
             "Octranet payer exit clock differs"
         );
-        let provider_deadline = if stopped == 0 {
-            None
-        } else {
-            Some(
-                stopped
-                    .checked_add(DAY_MS)
-                    .context("Octranet operator deadline overflow")?,
-            )
+        let claim_deadline_ms = match (user_deadline, stopped) {
+            (0, 0) => None,
+            (0, stop) => Some(stop),
+            (exit, 0) => Some(exit),
+            (exit, stop) => Some(exit.min(stop)),
         };
-        let claim_deadline_ms = match (user_deadline, provider_deadline) {
-            (0, other) => other,
-            (value, None) => Some(value),
-            (value, Some(other)) => Some(value.min(other)),
-        };
+        let offer_start_ms = state.uint(b"offer_start_ms", &[&offer_key])?;
+        let offer_end_ms = state.uint(b"offer_end_ms", &[&offer_key])?;
+        let cancelled = state.uint(b"offer_cancelled", &[&offer_key])?;
+        ensure!(
+            offer_start_ms > 0
+                && (offer_end_ms == 0 || offer_end_ms > offer_start_ms)
+                && cancelled <= 1,
+            "Octranet offer quote clock differs"
+        );
+        let quote_started = now >= offer_start_ms && cancelled == 0;
+        let purchase_open = quote_started && (offer_end_ms == 0 || now < offer_end_ms);
         let available = active && liquid && remaining <= reserved && remaining <= funds;
         let provider_available = provider_generation > 0
             && provider_generation == provider_current
@@ -525,6 +557,8 @@ impl Payments {
                 plan,
                 offer,
                 operator_generation: provider_generation,
+                offer_start_ms,
+                offer_end_ms,
                 manifest_hash: manifest,
                 tariff,
                 original_budget_ou: budget,
@@ -539,15 +573,15 @@ impl Payments {
                 && available
                 && provider_available
                 && user_deadline == 0
-                && remaining > 0,
-            claim_eligible: available && claim_deadline_ms.is_none_or(|deadline| now < deadline),
+                && quote_started,
+            claim_eligible: available && provider_available && user_deadline == 0 && purchase_open,
             lease: None,
         })
     }
 
-    async fn retain_tariff(&self, tariff: Tariff) -> Result<()> {
+    async fn retain_tariff(&self, offer: u64, tariff: Tariff) -> Result<()> {
         let mut retained = self.retained.lock().await;
-        if let Some(previous) = &retained.tariff {
+        if let Some(previous) = retained.tariffs.get(&offer) {
             ensure!(
                 previous == &tariff,
                 "Octranet retained offer tariff changed"
@@ -556,24 +590,26 @@ impl Payments {
         }
         if let Some(archive) = retained.archive.clone() {
             let saved = tariff.clone();
-            tokio::task::spawn_blocking(move || archive.save_tariff(saved)).await??;
+            tokio::task::spawn_blocking(move || archive.save_tariff(offer, saved)).await??;
         }
-        retained.tariff = Some(tariff);
+        retained.tariffs.insert(offer, tariff);
         Ok(())
     }
 
-    async fn retained_tariff(&self) -> Result<Option<Tariff>> {
+    async fn retained_tariff(&self, offer: u64) -> Result<Option<Tariff>> {
         let mut retained = self.retained.lock().await;
-        if retained.tariff.is_none() {
+        if !retained.tariffs.contains_key(&offer) {
             if let Some(archive) = retained.archive.clone() {
-                // A cancelled grant may have finished its durable save without
-                // installing the in-memory copy. Reload rather than stranding
-                // the archive until a process restart.
-                retained.tariff =
-                    tokio::task::spawn_blocking(move || archive.load_tariff()).await??;
+                // A cancelled grant may have durably saved before installing
+                // its memory copy. Reload the exact offer after cancellation.
+                if let Some(tariff) =
+                    tokio::task::spawn_blocking(move || archive.load_tariff(offer)).await??
+                {
+                    retained.tariffs.insert(offer, tariff);
+                }
             }
         }
-        Ok(retained.tariff.clone())
+        Ok(retained.tariffs.get(&offer).cloned())
     }
 
     async fn attach_archive(&self, archive: Arc<dyn TariffArchive>) -> Result<()> {
@@ -582,19 +618,16 @@ impl Payments {
             retained.archive.is_none(),
             "Octranet tariff archive already attached"
         );
-        let disk = archive.clone();
-        let existing = tokio::task::spawn_blocking(move || disk.load_tariff()).await??;
-        match (&retained.tariff, existing) {
-            (Some(current), Some(existing)) => {
+        for (&offer, current) in &retained.tariffs {
+            let disk = archive.clone();
+            let existing = tokio::task::spawn_blocking(move || disk.load_tariff(offer)).await??;
+            if let Some(existing) = existing {
                 ensure!(current == &existing, "Octranet tariff archives differ");
-            }
-            (Some(current), None) => {
+            } else {
                 let current = current.clone();
                 let disk = archive.clone();
-                tokio::task::spawn_blocking(move || disk.save_tariff(current)).await??;
+                tokio::task::spawn_blocking(move || disk.save_tariff(offer, current)).await??;
             }
-            (None, Some(existing)) => retained.tariff = Some(existing),
-            (None, None) => (),
         }
         retained.archive = Some(archive);
         Ok(())

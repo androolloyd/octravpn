@@ -2,31 +2,35 @@
 //! state. Canonical confirmation is deliberately held while packet accounting
 //! continues; no kernel TUN or public-chain qualification is implied.
 use super::*;
+use axum::response::IntoResponse as _;
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use octravpn_core::{
     payments::{Deployment, SignedUsage, Status, TrafficClass, BYTES_PER_MIB},
     Address, KeyPair,
 };
 use parking_lot::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tokio::{
     sync::{watch, Notify},
     task::JoinHandle,
 };
 
 struct Fixture {
-    _directory: tempfile::TempDir,
+    directory: tempfile::TempDir,
     plan: Plan,
     journal: Accounting,
     connect: SignedConnect,
     initial: SignedStatus,
-    operator: KeyPair,
+    operator: Arc<KeyPair>,
 }
 impl Fixture {
     fn new() -> Self {
+        Self::with_budget(10_000)
+    }
+    fn with_budget(budget: u64) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let payer = Arc::new(KeyPair::from_secret_bytes(&[5; 32]));
-        let operator = KeyPair::from_secret_bytes(&[6; 32]);
+        let operator = Arc::new(KeyPair::from_secret_bytes(&[6; 32]));
         let tariff = Tariff::new(
             Address::from_pubkey(&operator.public.0),
             vec![TrafficClass {
@@ -50,7 +54,8 @@ impl Fixture {
         let plan = Plan {
             binding: binding.clone(),
             tariff: tariff.clone(),
-            original_budget_ou: 10_000,
+            original_budget_ou: budget,
+            prepaid_bytes: vec![128],
             control_url: "http://127.0.0.1/".into(),
             wireguard_endpoint: "127.0.0.1:51820".into(),
         };
@@ -58,7 +63,8 @@ impl Fixture {
             &directory.path().join("plan"),
             binding.clone(),
             tariff.clone(),
-            10_000,
+            budget,
+            plan.prepaid_bytes.clone(),
             payer,
             OpenMode::Create,
         )
@@ -71,8 +77,8 @@ impl Fixture {
                 client_wireguard_key: [11; 32],
                 server_wireguard_key: [42; 32],
                 tariff,
-                original_budget_ou: 10_000,
-                remaining_ou: 10_000,
+                original_budget_ou: budget,
+                remaining_ou: budget,
                 committed_totals: vec![0],
                 redeemed_totals: vec![0],
                 canonical_ms: 1_000,
@@ -82,13 +88,45 @@ impl Fixture {
         )
         .unwrap();
         Self {
-            _directory: directory,
+            directory,
             plan,
             journal: Accounting::new(journal),
             connect,
             initial,
             operator,
         }
+    }
+    fn paid(&self) -> SignedStatus {
+        let mut status = self.initial.status.clone();
+        status.redeemed_totals = self.plan.prepaid_bytes.clone();
+        status.remaining_ou -= self
+            .plan
+            .tariff
+            .total_charge(&self.plan.prepaid_bytes)
+            .unwrap();
+        SignedStatus::sign(status, &self.operator).unwrap()
+    }
+    fn prepayer(&self, origin: reqwest::Url) -> JoinHandle<Result<Observation>> {
+        let plan = self.plan.clone();
+        let journal = self.journal.clone();
+        let connect = self.connect.clone();
+        let initial = self.initial.clone();
+        tokio::spawn(async move {
+            let http = reqwest::Client::builder()
+                .timeout(Duration::from_secs(300))
+                .no_proxy()
+                .build()
+                .unwrap();
+            prepay(
+                &http,
+                &origin,
+                &connect,
+                &plan,
+                &journal,
+                Observation::new(initial),
+            )
+            .await
+        })
     }
     fn worker(
         &self,
@@ -104,8 +142,7 @@ impl Fixture {
             origin,
             self.connect.clone(),
             self.plan.clone(),
-            self.journal.clone(),
-            Observation::new(self.initial.clone()),
+            Observation::new(self.paid()),
             shutdown,
         ))
     }
@@ -119,6 +156,9 @@ struct ControlFixture {
     entered: Arc<Notify>,
     release: Arc<Notify>,
     received: Arc<Mutex<Vec<SignedUsage>>>,
+    operator: Arc<KeyPair>,
+    publish: Arc<AtomicBool>,
+    refuse: Arc<AtomicBool>,
 }
 impl ControlFixture {
     async fn start(
@@ -132,6 +172,9 @@ impl ControlFixture {
             entered: Arc::new(Notify::new()),
             release: Arc::new(Notify::new()),
             received: Arc::new(Mutex::new(Vec::new())),
+            operator: fixture.operator.clone(),
+            publish: Arc::new(AtomicBool::new(true)),
+            refuse: Arc::new(AtomicBool::new(false)),
         };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let origin =
@@ -149,20 +192,34 @@ impl ControlFixture {
 async fn view(
     State(state): State<ControlFixture>,
     Json(connect): Json<SignedConnect>,
-) -> Json<SignedStatus> {
+) -> axum::response::Response {
     connect.verify().unwrap();
     assert_eq!(connect, state.connect);
     let status = state.status.lock().clone();
     state.views.fetch_add(1, Ordering::AcqRel);
-    Json(status)
+    if state.refuse.load(Ordering::Acquire) {
+        (StatusCode::FORBIDDEN, "canonical plan unavailable").into_response()
+    } else {
+        Json(status).into_response()
+    }
 }
 async fn settle(State(state): State<ControlFixture>, Json(usage): Json<SignedUsage>) -> StatusCode {
     usage.verify().unwrap();
     assert_eq!(usage.receipt_key, state.connect.receipt_key);
     assert_eq!(usage.usage.binding(), state.connect.request.binding);
-    state.received.lock().push(usage);
+    state.received.lock().push(usage.clone());
     state.entered.notify_one();
     state.release.notified().await;
+    if !state.publish.load(Ordering::Acquire) {
+        return StatusCode::OK;
+    }
+    let mut status = state.status.lock();
+    let mut next = status.status.clone();
+    let class = usize::from(usage.usage.traffic_class);
+    next.redeemed_totals[class] = next.redeemed_totals[class].max(usage.usage.total_bytes);
+    next.remaining_ou =
+        next.original_budget_ou - next.tariff.total_charge(&next.redeemed_totals).unwrap();
+    *status = SignedStatus::sign(next, &state.operator).unwrap();
     StatusCode::OK
 }
 
@@ -188,121 +245,309 @@ fn packet() -> Vec<u8> {
     raw
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn canonical_wait_releases_journal_and_shutdown_preserves_durable_receipt() {
-    for close_sender in [false, true] {
-        let fixture = Fixture::new();
-        let packet = packet();
-        fixture
-            .journal
-            .lock()
-            .count(&packet, Direction::Outbound)
-            .unwrap();
-        let mut status = fixture.initial.status.clone();
-        status.committed_totals[0] = packet.len() as u64;
-        let status = SignedStatus::sign(status, &fixture.operator).unwrap();
-        let (server_state, origin, server) = ControlFixture::start(&fixture, status).await;
-        let (stop, shutdown) = watch::channel(false);
-        let worker = fixture.worker(origin, shutdown);
-        tokio::time::timeout(Duration::from_secs(2), server_state.entered.notified())
-            .await
-            .unwrap();
-        assert!(!worker.is_finished());
-        // The request is still waiting for finality; a confirmed packet can
-        // nevertheless acquire, count and fsync through the same journal.
-        let journal = fixture.journal.clone();
-        let delivered = packet.clone();
-        tokio::time::timeout(
-            Duration::from_secs(2),
-            tokio::task::spawn_blocking(move || {
-                journal.lock().count(&delivered, Direction::Outbound)
-            }),
-        )
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-        assert_eq!(fixture.journal.lock().totals(), [2 * packet.len() as u64]);
-        assert_eq!(
-            fixture.journal.lock().authorized_totals(),
-            [packet.len() as u64]
-        );
-        let issued = fixture.journal.lock().pending_receipts().unwrap();
-        assert_eq!(server_state.received.lock().as_slice(), issued);
-        if close_sender {
-            drop(stop);
-        } else {
-            stop.send_replace(true);
-        }
-        tokio::time::timeout(Duration::from_secs(2), worker)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-        assert_eq!(fixture.journal.lock().pending_receipts().unwrap(), issued);
-        server_state.release.notify_waiters();
-        server.abort();
-        let _ = server.await;
-    }
-}
-
 #[tokio::test]
-async fn asynchronous_operator_view_cannot_authorize_a_pending_local_handoff() {
+async fn purchase_is_durable_before_http_and_canonical_confirmation_opens_the_barrier() {
     let fixture = Fixture::new();
-    let packet = packet();
-    let reservation = reserve(&fixture.journal, packet.clone(), Direction::Outbound)
+    let (state, origin, server) = ControlFixture::start(&fixture, fixture.initial.clone()).await;
+    let preparing = fixture.prepayer(origin);
+    tokio::time::timeout(Duration::from_secs(2), state.entered.notified())
         .await
         .unwrap();
-    let mut status = fixture.initial.status.clone();
-    status.committed_totals[0] = packet.len() as u64;
-    let operator_totals = status.committed_totals.clone();
-    let status = SignedStatus::sign(status, &fixture.operator).unwrap();
-    let (server_state, origin, server) = ControlFixture::start(&fixture, status).await;
-    let client = reqwest::Client::builder().no_proxy().build().unwrap();
-    settle_batch(
-        client.clone(),
-        origin.clone(),
-        fixture.journal.clone(),
-        operator_totals.clone(),
-    )
-    .await
-    .unwrap();
-    assert!(server_state.received.lock().is_empty());
-    assert!(fixture
-        .journal
-        .lock()
-        .pending_receipts()
+    assert!(!preparing.is_finished());
+    let purchases = fixture.journal.lock().pending_receipts().unwrap();
+    assert_eq!(purchases.len(), 1);
+    assert_eq!(purchases[0].usage.total_bytes, 128);
+    assert_eq!(fixture.journal.lock().totals(), [0]);
+    assert_eq!(state.received.lock().as_slice(), purchases);
+    // A server delivery report has no authority to change the finite purchase.
+    assert_eq!(fixture.journal.lock().purchases().unwrap(), purchases);
+    state.release.notify_one();
+    let confirmed = tokio::time::timeout(Duration::from_secs(3), preparing)
+        .await
         .unwrap()
-        .is_empty());
-    finish(&fixture.journal, reservation, true).await.unwrap();
-    let journal = fixture.journal.clone();
-    let batch = tokio::spawn(settle_batch(client, origin, journal, operator_totals));
-    tokio::time::timeout(Duration::from_secs(2), server_state.entered.notified())
-        .await
+        .unwrap()
         .unwrap();
-    assert_eq!(server_state.received.lock().len(), 1);
-    assert_eq!(
-        server_state.received.lock()[0].usage.total_bytes,
-        packet.len() as u64
-    );
-    server_state.release.notify_one();
-    batch.await.unwrap().unwrap();
+    assert!(purchased(&confirmed.signed, &fixture.plan));
+    assert_eq!(fixture.journal.lock().authorized_totals(), [128]);
+    assert_eq!(fixture.journal.lock().totals(), [0]);
     server.abort();
     let _ = server.await;
 }
 
 #[tokio::test]
-async fn changed_operator_transport_or_plan_and_regressing_canonical_clock_stop_worker() {
-    for invalid in 0..3 {
+async fn accepted_http_response_and_delivery_report_cannot_open_the_purchase_barrier() {
+    let fixture = Fixture::new();
+    let (state, origin, server) = ControlFixture::start(&fixture, fixture.initial.clone()).await;
+    state.publish.store(false, Ordering::Release);
+    let preparing = fixture.prepayer(origin);
+    tokio::time::timeout(Duration::from_secs(2), state.entered.notified())
+        .await
+        .unwrap();
+    let mut partial = fixture.paid().status;
+    partial.redeemed_totals = vec![127];
+    partial.committed_totals = vec![127];
+    partial.remaining_ou += 1;
+    *state.status.lock() = SignedStatus::sign(partial, &fixture.operator).unwrap();
+    state.release.notify_one();
+    let before = state.views.load(Ordering::Acquire);
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while state.views.load(Ordering::Acquire) < before + 2 {
+            assert!(!preparing.is_finished());
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(!preparing.is_finished());
+    assert_eq!(fixture.journal.lock().totals(), [0]);
+    assert_eq!(fixture.journal.lock().authorized_totals(), [128]);
+    *state.status.lock() = fixture.paid();
+    let ready = tokio::time::timeout(Duration::from_secs(3), preparing)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(purchased(&ready.signed, &fixture.plan));
+    assert_eq!(state.received.lock().len(), 1);
+    server.abort();
+    let _ = server.await;
+}
+
+#[tokio::test]
+async fn exhausted_class_drops_only_its_packets_and_storage_errors_remain_fatal() {
+    use octravpn_core::payments::{IpPrefix, Protocol, Selector};
+    let fixture = Fixture::new();
+    let tariff = Tariff::new(
+        fixture.plan.tariff.operator().clone(),
+        vec![
+            TrafficClass {
+                name: "default".into(),
+                rate_ou_per_mib: BYTES_PER_MIB,
+            },
+            TrafficClass {
+                name: "premium".into(),
+                rate_ou_per_mib: BYTES_PER_MIB,
+            },
+        ],
+        vec![Selector {
+            prefix: IpPrefix::new("8.8.8.8".parse().unwrap(), 32).unwrap(),
+            protocol: Protocol::Udp,
+            port: Some(53),
+            traffic_class: 1,
+        }],
+    )
+    .unwrap();
+    let mut binding = fixture.plan.binding.clone();
+    binding.manifest_hash = tariff.hash_hex().unwrap();
+    let path = fixture.directory.path().join("classes");
+    let mut journal = Journal::open(
+        &path,
+        binding,
+        tariff,
+        10_000,
+        vec![64, 32],
+        Arc::new(KeyPair::from_secret_bytes(&[5; 32])),
+        OpenMode::Create,
+    )
+    .unwrap();
+    journal.purchases().unwrap();
+    let accounting = Accounting::new(journal);
+    let premium = packet();
+    let reservation = reserve(&accounting, premium.clone(), Direction::Outbound)
+        .await
+        .unwrap()
+        .unwrap();
+    finish(&accounting, reservation, true).await.unwrap();
+    assert!(reserve(&accounting, premium, Direction::Outbound)
+        .await
+        .unwrap()
+        .is_none());
+    let mut ordinary = packet();
+    ordinary[16..20].copy_from_slice(&[1, 1, 1, 1]);
+    ordinary[10..12].fill(0);
+    let mut sum = ordinary[..20]
+        .chunks_exact(2)
+        .map(|word| u32::from(u16::from_be_bytes([word[0], word[1]])))
+        .sum::<u32>();
+    while sum >> 16 != 0 {
+        sum = (sum & 0xffff) + (sum >> 16);
+    }
+    ordinary[10..12].copy_from_slice(&(!(sum as u16)).to_be_bytes());
+    let reservation = reserve(&accounting, ordinary.clone(), Direction::Outbound)
+        .await
+        .unwrap()
+        .unwrap();
+    finish(&accounting, reservation, true).await.unwrap();
+    assert_eq!(accounting.lock().totals(), [32, 32]);
+    assert_eq!(accounting.lock().authorized_totals(), [64, 32]);
+    std::fs::remove_file(path.join("writer.lock")).unwrap();
+    assert!(reserve(&accounting, ordinary, Direction::Outbound)
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn canonical_floor_cannot_be_replaced_by_delivery_or_same_price_rounding() {
+    let fixture = Fixture::new();
+    let mut plan = fixture.plan.clone();
+    let mut signed = fixture.paid();
+    assert!(purchased(&signed, &plan));
+    let mut view = signed.status.clone();
+    view.redeemed_totals = vec![127];
+    view.remaining_ou += 1;
+    signed = SignedStatus::sign(view, &fixture.operator).unwrap();
+    assert!(!purchased(&signed, &plan));
+    let zero = Tariff::new(
+        fixture.plan.tariff.operator().clone(),
+        vec![TrafficClass {
+            name: "operator-free".into(),
+            rate_ou_per_mib: 0,
+        }],
+        vec![],
+    )
+    .unwrap();
+    plan.tariff = zero;
+    plan.binding.manifest_hash = plan.tariff.hash_hex().unwrap();
+    let mut view = signed.status;
+    view.binding = plan.binding.clone();
+    view.tariff = plan.tariff.clone();
+    view.remaining_ou = view.original_budget_ou;
+    signed = SignedStatus::sign(view, &fixture.operator).unwrap();
+    assert_eq!(
+        plan.tariff.charge(0, 127).unwrap(),
+        plan.tariff.charge(0, 128).unwrap()
+    );
+    assert!(!purchased(&signed, &plan));
+}
+
+#[tokio::test]
+async fn cancelling_purchase_preserves_identical_authorization_for_resume() {
+    let fixture = Fixture::new();
+    let (state, origin, server) = ControlFixture::start(&fixture, fixture.initial.clone()).await;
+    let preparing = fixture.prepayer(origin);
+    tokio::time::timeout(Duration::from_secs(2), state.entered.notified())
+        .await
+        .unwrap();
+    let issued = fixture.journal.lock().pending_receipts().unwrap();
+    preparing.abort();
+    assert!(preparing.await.unwrap_err().is_cancelled());
+    fixture.journal.wait_idle().await.unwrap();
+    let path = fixture.directory.path().join("plan");
+    drop(fixture.journal);
+    let mut resumed = Journal::open(
+        &path,
+        fixture.plan.binding.clone(),
+        fixture.plan.tariff.clone(),
+        fixture.plan.original_budget_ou,
+        fixture.plan.prepaid_bytes.clone(),
+        Arc::new(KeyPair::from_secret_bytes(&[5; 32])),
+        OpenMode::Resume,
+    )
+    .unwrap();
+    assert_eq!(resumed.purchases().unwrap(), issued);
+    assert_eq!(resumed.totals(), [0]);
+    assert_eq!(resumed.authorized_totals(), [128]);
+    state.release.notify_waiters();
+    server.abort();
+    let _ = server.await;
+}
+
+#[tokio::test]
+async fn paid_resume_does_not_send_another_purchase_or_require_unspent_ou() {
+    let fixture = Fixture::with_budget(128);
+    let plan = fixture.plan.clone();
+    let paid = fixture.paid();
+    let (state, origin, server) = ControlFixture::start(&fixture, paid.clone()).await;
+    let http = reqwest::Client::builder().no_proxy().build().unwrap();
+    let ready = prepay(
+        &http,
+        &origin,
+        &fixture.connect,
+        &plan,
+        &fixture.journal,
+        Observation::new(paid),
+    )
+    .await
+    .unwrap();
+    assert!(purchased(&ready.signed, &plan));
+    assert_eq!(ready.signed.status.remaining_ou, 0);
+    assert!(state.received.lock().is_empty());
+    assert_eq!(fixture.journal.lock().totals(), [0]);
+    server.abort();
+    let _ = server.await;
+}
+
+#[tokio::test]
+async fn advancing_status_is_polled_while_one_purchase_batch_waits() {
+    let fixture = Fixture::new();
+    let (state, origin, server) = ControlFixture::start(&fixture, fixture.initial.clone()).await;
+    let preparing = fixture.prepayer(origin);
+    tokio::time::timeout(Duration::from_secs(2), state.entered.notified())
+        .await
+        .unwrap();
+    tokio::time::pause();
+    for _ in 0..5 {
+        let before = state.views.load(Ordering::Acquire);
+        let mut next = state.status.lock().status.clone();
+        next.canonical_ms += 1;
+        *state.status.lock() = SignedStatus::sign(next, &fixture.operator).unwrap();
+        tokio::time::advance(Duration::from_secs(30)).await;
+        for _ in 0..20_000 {
+            if state.views.load(Ordering::Acquire) > before {
+                break;
+            }
+            assert!(
+                !preparing.is_finished(),
+                "purchase stopped while canonical clock advanced"
+            );
+            tokio::task::yield_now().await;
+        }
+        assert!(state.views.load(Ordering::Acquire) > before);
+        for _ in 0..100 {
+            tokio::task::yield_now().await;
+        }
+        assert!(!preparing.is_finished());
+    }
+    assert_eq!(state.received.lock().len(), 1);
+    preparing.abort();
+    let _ = preparing.await;
+    state.release.notify_waiters();
+    server.abort();
+    let _ = server.await;
+}
+
+#[tokio::test]
+async fn changed_transport_plan_clock_or_canonical_capacity_stops_runtime_monitor() {
+    for invalid in 0..8 {
         let fixture = Fixture::new();
-        let mut status = fixture.initial.status.clone();
+        let mut status = fixture.paid().status;
         match invalid {
             0 => status.server_wireguard_key = [43; 32],
             1 => status.binding.plan += 1,
-            _ => status.canonical_ms -= 1,
+            2 => status.canonical_ms -= 1,
+            3 => {
+                status.redeemed_totals = vec![127];
+                status.remaining_ou += 1;
+            }
+            4 => status.binding.generation += 1,
+            5 => {
+                let mut classes = status.tariff.classes().to_vec();
+                classes[0].rate_ou_per_mib += 1;
+                status.tariff = Tariff::new(
+                    status.tariff.operator().clone(),
+                    classes,
+                    status.tariff.selectors().to_vec(),
+                )
+                .unwrap();
+                status.binding.manifest_hash = status.tariff.hash_hex().unwrap();
+                status.remaining_ou = status.original_budget_ou
+                    - status.tariff.total_charge(&status.redeemed_totals).unwrap();
+            }
+            6 => status.original_budget_ou += 1,
+            _ => status.binding.offer += 1,
         }
         let status = SignedStatus::sign(status, &fixture.operator).unwrap();
-        let (_, origin, server) = ControlFixture::start(&fixture, status).await;
+        let (state, origin, server) = ControlFixture::start(&fixture, status).await;
         let (_stop, shutdown) = watch::channel(false);
         let error = tokio::time::timeout(Duration::from_secs(2), fixture.worker(origin, shutdown))
             .await
@@ -311,9 +556,11 @@ async fn changed_operator_transport_or_plan_and_regressing_canonical_clock_stop_
             .unwrap_err();
         assert!(format!("{error:#}").contains(match invalid {
             0 => "WireGuard identity changed",
-            1 => "differs from accepted plan",
-            _ => "clock regressed",
+            2 => "clock regressed",
+            3 => "prepaid capacity regressed",
+            _ => "differs from accepted plan",
         }));
+        assert!(state.received.lock().is_empty());
         assert!(fixture
             .journal
             .lock()
@@ -336,68 +583,10 @@ async fn replayed_same_clock_never_renews_freshness_but_progress_does() {
     let progressed_deadline = freshness.deadline;
     assert!(progressed_deadline > first_deadline);
     assert!(freshness.observe(999).is_err());
-    assert_eq!(freshness.deadline, progressed_deadline);
-    tokio::time::advance(Duration::from_secs(119)).await;
-    freshness.observe(1_001).unwrap();
-    assert_eq!(freshness.deadline, progressed_deadline);
-    tokio::time::advance(Duration::from_secs(1)).await;
+    tokio::time::advance(Duration::from_secs(120)).await;
     assert!(freshness.observe(1_001).is_err());
-    // A response arriving after the deadline cannot revive a stopped worker.
     assert!(freshness.observe(1_002).is_err());
     assert_eq!(freshness.deadline, progressed_deadline);
-}
-
-#[tokio::test]
-async fn advancing_status_is_polled_while_one_settlement_batch_waits() {
-    let fixture = Fixture::new();
-    let packet = packet();
-    fixture
-        .journal
-        .lock()
-        .count(&packet, Direction::Outbound)
-        .unwrap();
-    let mut status = fixture.initial.status.clone();
-    status.committed_totals[0] = packet.len() as u64;
-    let status = SignedStatus::sign(status, &fixture.operator).unwrap();
-    let (server_state, origin, server) = ControlFixture::start(&fixture, status).await;
-    let (stop, shutdown) = watch::channel(false);
-    let worker = fixture.worker(origin, shutdown);
-    tokio::time::timeout(Duration::from_secs(2), server_state.entered.notified())
-        .await
-        .unwrap();
-    // The held canonical response spans more than the freshness interval.
-    // Independent authenticated clock progress must keep the control alive.
-    tokio::time::pause();
-    for _ in 0..5 {
-        let before = server_state.views.load(Ordering::Acquire);
-        let mut status = server_state.status.lock().status.clone();
-        status.canonical_ms += 1;
-        *server_state.status.lock() = SignedStatus::sign(status, &fixture.operator).unwrap();
-        tokio::time::advance(Duration::from_secs(30)).await;
-        // Yielding keeps Tokio from automatically advancing virtual time
-        // while the real loopback HTTP request/response is being serviced.
-        for _ in 0..20_000 {
-            if server_state.views.load(Ordering::Acquire) > before {
-                break;
-            }
-            assert!(
-                !worker.is_finished(),
-                "control stopped while canonical clock advanced"
-            );
-            tokio::task::yield_now().await;
-        }
-        assert!(server_state.views.load(Ordering::Acquire) > before);
-        for _ in 0..100 {
-            tokio::task::yield_now().await;
-        }
-        assert!(!worker.is_finished());
-    }
-    assert_eq!(server_state.received.lock().len(), 1);
-    stop.send_replace(true);
-    worker.await.unwrap().unwrap();
-    server_state.release.notify_waiters();
-    server.abort();
-    let _ = server.await;
 }
 
 fn control(
@@ -410,25 +599,25 @@ fn control(
         origin,
         fixture.connect.clone(),
         fixture.plan.clone(),
-        fixture.journal.clone(),
-        Observation::new(fixture.initial.clone()),
+        Observation::new(fixture.paid()),
         shutdown,
     )
 }
 
 #[tokio::test]
-async fn shutdown_cancels_a_blocked_handoff_and_reports_held_budget() {
+async fn shutdown_cancels_blocked_handoff_without_restoring_spent_purchase() {
     let fixture = Fixture::new();
-    let (state, origin, server) = ControlFixture::start(&fixture, fixture.initial.clone()).await;
+    fixture.journal.lock().purchases().unwrap();
+    let (state, origin, server) = ControlFixture::start(&fixture, fixture.paid()).await;
     let entered = Arc::new(Notify::new());
     let driver = {
         let accounting = fixture.journal.clone();
         let entered = entered.clone();
         async move {
-            let _reservation = reserve(&accounting, packet(), Direction::Outbound).await?;
+            let _pending = reserve(&accounting, packet(), Direction::Outbound)
+                .await?
+                .context("fixture prepaid allowance unexpectedly exhausted")?;
             entered.notify_one();
-            // A blocked write after durable reservation. No completion or
-            // definitely-unsent cancellation is available when shutdown wins.
             std::future::pending::<Result<()>>().await
         }
     };
@@ -447,7 +636,6 @@ async fn shutdown_cancels_a_blocked_handoff_and_reports_held_budget() {
     tokio::time::timeout(Duration::from_secs(2), entered.notified())
         .await
         .unwrap();
-    assert!(!running.is_finished());
     cancel.send(()).unwrap();
     let summary = tokio::time::timeout(Duration::from_secs(2), running)
         .await
@@ -455,40 +643,28 @@ async fn shutdown_cancels_a_blocked_handoff_and_reports_held_budget() {
         .unwrap()
         .unwrap();
     assert_eq!(summary.confirmed_bytes, [0]);
-    assert_eq!(summary.authorized_bytes, [0]);
     assert_eq!(summary.held_bytes, [32]);
-    assert_eq!(summary.remaining_ou, 9_968);
+    assert_eq!(summary.authorized_bytes, [128]);
+    assert_eq!(summary.remaining_ou, 9_872);
     assert!(state.received.lock().is_empty());
-    let path = fixture._directory.path().join("plan");
-    drop(fixture.journal);
-    let recovered = Journal::open(
-        &path,
-        fixture.plan.binding.clone(),
-        fixture.plan.tariff.clone(),
-        fixture.plan.original_budget_ou,
-        Arc::new(KeyPair::from_secret_bytes(&[5; 32])),
-        OpenMode::Resume,
-    )
-    .unwrap();
-    assert_eq!(recovered.uncertain_totals(), [32]);
-    assert_eq!(recovered.totals(), [0]);
-    assert_eq!(recovered.remaining_ou().unwrap(), 9_968);
-    assert!(recovered.pending_receipts().unwrap().is_empty());
     state.release.notify_waiters();
     server.abort();
     let _ = server.await;
 }
 
 #[tokio::test]
-async fn control_failure_interrupts_the_whole_blocked_packet_driver() {
+async fn canonical_plan_refusal_cancels_the_packet_driver_without_resetting_purchases() {
     let fixture = Fixture::new();
-    let (state, origin, server) = ControlFixture::start(&fixture, fixture.initial.clone()).await;
+    let purchases = fixture.journal.lock().purchases().unwrap();
+    let (state, origin, server) = ControlFixture::start(&fixture, fixture.paid()).await;
     let entered = Arc::new(Notify::new());
     let driver = {
         let accounting = fixture.journal.clone();
         let entered = entered.clone();
         async move {
-            let _reservation = reserve(&accounting, packet(), Direction::Outbound).await?;
+            let _pending = reserve(&accounting, packet(), Direction::Outbound)
+                .await?
+                .context("fixture prepaid allowance unexpectedly exhausted")?;
             entered.notify_one();
             std::future::pending::<Result<()>>().await
         }
@@ -504,78 +680,77 @@ async fn control_failure_interrupts_the_whole_blocked_packet_driver() {
     tokio::time::timeout(Duration::from_secs(2), entered.notified())
         .await
         .unwrap();
-    let mut status = fixture.initial.status.clone();
-    status.server_wireguard_key = [43; 32];
-    *state.status.lock() = SignedStatus::sign(status, &fixture.operator).unwrap();
+    // The native authority invalidates the old plan when a channel withdrawal
+    // changes its generation. This HTTP fixture models that canonical refusal;
+    // actual withdrawal and generation transitions belong to the native gate.
+    let persisted = std::fs::read(fixture.directory.path().join("plan/state.json")).unwrap();
+    state.refuse.store(true, Ordering::Release);
     let error = tokio::time::timeout(Duration::from_secs(3), running)
         .await
         .unwrap()
         .unwrap()
         .unwrap_err();
-    assert!(format!("{error:#}").contains("WireGuard identity changed"));
+    assert_eq!(
+        error
+            .downcast_ref::<reqwest::Error>()
+            .and_then(reqwest::Error::status),
+        Some(StatusCode::FORBIDDEN)
+    );
+    assert_eq!(fixture.journal.lock().totals(), [0]);
     assert_eq!(fixture.journal.lock().held_totals().unwrap(), [32]);
-    assert!(fixture
-        .journal
-        .lock()
-        .pending_receipts()
-        .unwrap()
-        .is_empty());
-    state.release.notify_waiters();
+    assert_eq!(fixture.journal.lock().authorized_totals(), [128]);
+    assert_eq!(
+        fixture.journal.lock().pending_receipts().unwrap(),
+        purchases
+    );
+    assert_eq!(fixture.journal.lock().remaining_ou().unwrap(), 9_872);
+    assert_eq!(
+        std::fs::read(fixture.directory.path().join("plan/state.json")).unwrap(),
+        persisted
+    );
+    assert!(state.received.lock().is_empty());
     server.abort();
     let _ = server.await;
 }
 
 #[tokio::test]
-async fn cancelling_service_drops_control_and_preserves_receipts_for_resume() {
+async fn paid_status_keeps_the_accepted_purchase_without_fetching_a_replacement_quote() {
     let fixture = Fixture::new();
-    fixture
-        .journal
-        .lock()
-        .count(&packet(), Direction::Outbound)
-        .unwrap();
-    let mut status = fixture.initial.status.clone();
-    status.committed_totals = vec![32];
-    let signed = SignedStatus::sign(status, &fixture.operator).unwrap();
-    let (state, origin, server) = ControlFixture::start(&fixture, signed).await;
+    let purchases = fixture.journal.lock().purchases().unwrap();
+    let mut continued = fixture.paid().status;
+    // The canonical host decides whether an old quote's already purchased
+    // capacity remains valid. The client imposes no local quote-retirement or
+    // payer-withdrawal wait and never discovers/accepts new prices on its own.
+    continued.canonical_ms = 86_402_000;
+    continued.claim_deadline_ms = u64::MAX;
+    let continued = SignedStatus::sign(continued, &fixture.operator).unwrap();
+    let (state, origin, server) = ControlFixture::start(&fixture, continued).await;
     let (stop, stopped) = watch::channel(false);
-    let running = tokio::spawn(supervise(
-        fixture.journal.clone(),
-        std::future::pending(),
-        control(&fixture, origin, stopped),
-        stop,
-        std::future::pending(),
-    ));
-    tokio::time::timeout(Duration::from_secs(2), state.entered.notified())
-        .await
-        .unwrap();
-    let receipt = fixture.journal.lock().pending_receipts().unwrap();
-    assert_eq!(receipt.len(), 1);
-    running.abort();
-    assert!(running.await.unwrap_err().is_cancelled());
-    let path = fixture._directory.path().join("plan");
-    drop(fixture.journal);
-    let recovered = tokio::time::timeout(Duration::from_secs(2), async {
-        loop {
-            if let Ok(journal) = Journal::open(
-                &path,
-                fixture.plan.binding.clone(),
-                fixture.plan.tariff.clone(),
-                fixture.plan.original_budget_ou,
-                Arc::new(KeyPair::from_secret_bytes(&[5; 32])),
-                OpenMode::Resume,
-            ) {
-                break journal;
-            }
+    let worker = fixture.worker(origin, stopped);
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while state.views.load(Ordering::Acquire) < 2 {
+            assert!(!worker.is_finished());
             tokio::task::yield_now().await;
         }
     })
     .await
     .unwrap();
-    assert_eq!(recovered.pending_receipts().unwrap(), receipt);
-    let views = state.views.load(Ordering::Acquire);
-    tokio::time::sleep(Duration::from_millis(1_100)).await;
-    assert_eq!(state.views.load(Ordering::Acquire), views);
-    state.release.notify_waiters();
+    assert!(!worker.is_finished());
+    let reservation = reserve(&fixture.journal, packet(), Direction::Outbound)
+        .await
+        .unwrap()
+        .unwrap();
+    finish(&fixture.journal, reservation, true).await.unwrap();
+    assert_eq!(fixture.journal.lock().totals(), [32]);
+    assert_eq!(fixture.journal.lock().authorized_totals(), [128]);
+    assert_eq!(
+        fixture.journal.lock().pending_receipts().unwrap(),
+        purchases
+    );
+    assert_eq!(fixture.journal.lock().remaining_ou().unwrap(), 9_872);
+    assert!(state.received.lock().is_empty());
+    stop.send_replace(true);
+    worker.await.unwrap().unwrap();
     server.abort();
     let _ = server.await;
 }
@@ -583,28 +758,18 @@ async fn cancelling_service_drops_control_and_preserves_receipts_for_resume() {
 #[tokio::test(start_paused = true)]
 async fn delayed_service_start_cannot_renew_an_old_status_observation() {
     let fixture = Fixture::new();
-    let observation = Observation::new(fixture.initial.clone());
-    let deadline = observation.freshness.deadline;
+    let observation = Observation::new(fixture.paid());
     tokio::time::advance(STATUS_MAX_AGE).await;
-    assert!(observation.freshness.ensure_live().is_err());
-    assert_eq!(observation.freshness.deadline, deadline);
     let (_stop, stopped) = watch::channel(false);
     let error = control_loop(
         reqwest::Client::new(),
         reqwest::Url::parse("http://127.0.0.1:9").unwrap(),
         fixture.connect.clone(),
         fixture.plan.clone(),
-        fixture.journal.clone(),
         observation,
         stopped,
     )
     .await
     .unwrap_err();
     assert!(error.to_string().contains("clock stopped advancing"));
-    assert!(fixture
-        .journal
-        .lock()
-        .pending_receipts()
-        .unwrap()
-        .is_empty());
 }

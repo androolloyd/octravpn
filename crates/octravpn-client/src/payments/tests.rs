@@ -12,6 +12,7 @@ struct Fixture {
     tariff: Tariff,
     key: Arc<KeyPair>,
     budget: u64,
+    prepaid: Vec<u64>,
 }
 
 impl Fixture {
@@ -56,6 +57,7 @@ impl Fixture {
             tariff,
             key,
             budget,
+            prepaid: vec![1024, 1024],
         }
     }
 
@@ -65,6 +67,7 @@ impl Fixture {
             self.binding.clone(),
             self.tariff.clone(),
             self.budget,
+            self.prepaid.clone(),
             self.key.clone(),
             mode,
         )
@@ -120,265 +123,202 @@ fn packet(premium: bool, inbound: bool, payload: usize) -> Vec<u8> {
 }
 
 #[test]
-fn confirmed_raw_counters_receipts_and_connection_sequences_survive_restart() {
+fn explicit_purchases_precede_delivery_and_retry_identically_across_restart() {
     let fixture = Fixture::new(100);
     let mut journal = fixture.open(OpenMode::Create).unwrap();
+    let ordinary = packet(false, false, 8);
+    assert!(journal.check(&ordinary, Direction::Outbound).is_err());
     let first = journal.connect([3; 32]).unwrap();
     first.verify().unwrap();
     assert_eq!(first.request.sequence, 1);
-    assert_eq!(fixture.state().payload.connection_sequence, 1);
-    assert_eq!(journal.binding(), &fixture.binding);
-    let ordinary = packet(false, false, 8);
+    let purchases = journal.purchases().unwrap();
+    assert_eq!(journal.totals(), [0, 0]);
+    assert_eq!(journal.authorized_totals(), fixture.prepaid);
+    assert_eq!(purchases.len(), 2);
+    for (class, receipt) in purchases.iter().enumerate() {
+        receipt.verify().unwrap();
+        assert_eq!(receipt.usage.total_bytes, fixture.prepaid[class]);
+        assert!(receipt
+            .usage
+            .signing_message()
+            .unwrap()
+            .starts_with("Octranet prepaid v1|"));
+    }
+    let persisted = fs::read(fixture.path.join("state.json")).unwrap();
+    assert_eq!(journal.purchases().unwrap(), purchases);
+    assert_eq!(
+        fs::read(fixture.path.join("state.json")).unwrap(),
+        persisted
+    );
     let outgoing = packet(true, false, 10);
     let incoming = packet(true, true, 14);
-    assert_eq!(journal.count(&ordinary, Direction::Outbound).unwrap(), 0);
-    assert_eq!(journal.count(&outgoing, Direction::Outbound).unwrap(), 1);
-    assert_eq!(journal.count(&incoming, Direction::Inbound).unwrap(), 1);
+    journal.count(&ordinary, Direction::Outbound).unwrap();
+    journal.count(&outgoing, Direction::Outbound).unwrap();
+    journal.count(&incoming, Direction::Inbound).unwrap();
     let totals = vec![
         ordinary.len() as u64,
         (outgoing.len() + incoming.len()) as u64,
     ];
     assert_eq!(journal.totals(), totals);
-    let receipts = journal.receipts(&[u64::MAX, 40]).unwrap();
-    assert_eq!(receipts.len(), 2);
-    assert_eq!(receipts[0].usage.total_bytes, totals[0]);
-    assert_eq!(receipts[1].usage.total_bytes, 40);
-    assert_eq!(journal.authorized_totals(), [totals[0], 40]);
-    assert_eq!(fixture.state().payload.authorized_bytes, [totals[0], 40]);
-    let receipts = journal.receipts(&totals).unwrap();
-    assert_eq!(receipts[0].usage.sequence, 1);
-    assert_eq!(receipts[1].usage.sequence, 3);
+    assert_eq!(journal.purchases().unwrap(), purchases);
     assert_eq!(journal.remaining_ou().unwrap(), 98);
-    let second = journal.connect([4; 32]).unwrap();
-    assert_eq!(second.request.sequence, 2);
-    assert_eq!(
-        first.request.binding.session_id().unwrap(),
-        second.request.binding.session_id().unwrap()
-    );
     drop(journal);
-    let mut recovered = fixture.open(OpenMode::Resume).unwrap();
-    assert_eq!(recovered.totals(), totals);
-    assert_eq!(recovered.authorized_totals(), totals);
-    assert_eq!(recovered.pending_receipts().unwrap(), receipts);
-    assert_eq!(recovered.receipts(&totals).unwrap(), receipts);
-    for receipt in recovered.pending_receipts().unwrap() {
-        receipt.verify().unwrap();
+    let mut resumed = fixture.open(OpenMode::Resume).unwrap();
+    assert_eq!(resumed.totals(), totals);
+    assert_eq!(resumed.purchases().unwrap(), purchases);
+    assert_eq!(resumed.connect([4; 32]).unwrap().request.sequence, 2);
+    assert_eq!(resumed.authorized_totals(), fixture.prepaid);
+    assert_eq!(resumed.remaining_ou().unwrap(), 98);
+}
+
+#[test]
+fn finite_class_targets_and_aggregate_purchase_price_are_checked_before_creation() {
+    for (budget, target) in [
+        (1, vec![1024, 1024]),
+        (100, vec![1]),
+        (100, vec![0, 0]),
+        (1, vec![0, u64::MAX]),
+    ] {
+        let mut fixture = Fixture::new(budget);
+        fixture.prepaid = target;
+        assert!(fixture.open(OpenMode::Create).is_err());
+        assert!(!fixture.path.exists());
     }
-    assert_eq!(recovered.connect([5; 32]).unwrap().request.sequence, 3);
-    assert_eq!(recovered.remaining_ou().unwrap(), 98);
 }
 
 #[test]
-fn operator_overstatement_is_capped_and_regression_is_atomic() {
-    let fixture = Fixture::new(100);
+fn zero_unspent_ou_keeps_only_the_purchased_byte_allowance() {
+    let mut fixture = Fixture::new(1);
+    fixture.prepaid = vec![56, 0];
     let mut journal = fixture.open(OpenMode::Create).unwrap();
-    let ordinary = packet(false, false, 1);
-    let premium = packet(true, false, 2);
-    journal.count(&ordinary, Direction::Outbound).unwrap();
-    journal.count(&premium, Direction::Outbound).unwrap();
-    let receipts = journal.receipts(&[u64::MAX, u64::MAX]).unwrap();
-    assert_eq!(journal.authorized_totals(), journal.totals());
-    let authorized = journal.authorized_totals().to_vec();
-    journal.count(&ordinary, Direction::Outbound).unwrap();
-    journal.count(&premium, Direction::Outbound).unwrap();
-    let before = fs::read(fixture.path.join("state.json")).unwrap();
-    // Class zero could advance, but the later class regression rejects the
-    // complete batch and cannot burn sequence numbers or publish half of it.
-    assert!(journal.receipts(&[u64::MAX, authorized[1] - 1]).is_err());
-    assert_eq!(journal.authorized_totals(), authorized);
-    assert_eq!(journal.pending_receipts().unwrap(), receipts);
-    assert_eq!(fs::read(fixture.path.join("state.json")).unwrap(), before);
-    assert!(journal.receipts(&[u64::MAX]).is_err());
-    let updated = journal.receipts(&[u64::MAX, u64::MAX]).unwrap();
-    assert_eq!(updated[0].usage.sequence, 3);
-    assert_eq!(updated[1].usage.sequence, 4);
-    assert_eq!(updated[0].usage.total_bytes, 2 * ordinary.len() as u64);
-    assert_eq!(updated[1].usage.total_bytes, 2 * premium.len() as u64);
-    assert_eq!(fixture.state().payload.usage_sequence, 4);
-}
-
-#[test]
-fn preflight_dropped_and_invalid_packets_do_not_become_billable() {
-    let fixture = Fixture::new(100);
-    let mut journal = fixture.open(OpenMode::Create).unwrap();
-    let bytes = packet(true, false, 40);
-    assert_eq!(journal.check(&bytes, Direction::Outbound).unwrap(), 1);
-    assert_eq!(journal.totals(), [0, 0]);
-    assert!(journal.receipts(&[0, u64::MAX]).unwrap().is_empty());
-    let before = fs::read(fixture.path.join("state.json")).unwrap();
-    let mut invalid = bytes.clone();
-    invalid[10] ^= 1;
-    assert!(journal.count(&invalid, Direction::Outbound).is_err());
-    assert!(journal
-        .count(&bytes[..bytes.len() - 1], Direction::Outbound)
-        .is_err());
-    assert_eq!(journal.totals(), [0, 0]);
-    assert_eq!(fs::read(fixture.path.join("state.json")).unwrap(), before);
-    drop(journal);
-    let journal = fixture.open(OpenMode::Resume).unwrap();
-    assert_eq!(journal.totals(), [0, 0]);
-    assert_eq!(journal.authorized_totals(), [0, 0]);
-}
-
-#[test]
-fn crash_after_handoff_keeps_exposure_without_inventing_confirmed_delivery() {
-    let fixture = Fixture::new(1);
-    let bytes = packet(false, false, 4);
-    let mut journal = fixture.open(OpenMode::Create).unwrap();
-    let reservation = journal.reserve(&bytes, Direction::Outbound).unwrap();
-    let state = fixture.state().payload;
-    assert_eq!(state.pending.as_ref().unwrap().bytes, bytes.len() as u64);
-    assert_eq!(state.local_bytes, [0, 0]);
+    journal.purchases().unwrap();
     assert_eq!(journal.remaining_ou().unwrap(), 0);
-    assert!(journal
-        .receipts(&[bytes.len() as u64, 0])
-        .unwrap()
-        .is_empty());
-    assert!(
-        journal.reserve(&bytes, Direction::Outbound).is_err(),
-        "an in-flight handoff cannot be overwritten"
-    );
-    // The UDP/TUN syscall succeeded, but its subsequent confirmation fsync
-    // failed. The pre-handoff intent remains durable and cannot regain budget.
-    journal.store.fail_next_write();
-    assert!(journal.confirm(reservation).is_err());
-    assert!(journal.pending_receipts().is_err());
-    drop(journal);
-    let mut resumed = fixture.open(OpenMode::Resume).unwrap();
-    assert_eq!(resumed.totals(), [0, 0]);
-    assert_eq!(resumed.uncertain_totals(), [bytes.len() as u64, 0]);
-    assert!(fixture.state().payload.pending.is_none());
-    assert_eq!(resumed.remaining_ou().unwrap(), 0);
-    assert!(resumed
-        .receipts(&[bytes.len() as u64, 0])
-        .unwrap()
-        .is_empty());
-    assert!(resumed
-        .reserve(&packet(true, false, 0), Direction::Outbound)
-        .is_err());
-    drop(resumed);
-    let resumed = fixture.open(OpenMode::Resume).unwrap();
-    assert_eq!(resumed.uncertain_totals(), [bytes.len() as u64, 0]);
-    assert_eq!(resumed.remaining_ou().unwrap(), 0);
-}
-
-#[test]
-fn interrupted_reservation_is_held_but_explicit_unsent_cancellation_releases_it() {
-    let fixture = Fixture::new(1);
-    let bytes = packet(false, false, 4);
-    let mut journal = fixture.open(OpenMode::Create).unwrap();
-    let unsent = journal.reserve(&bytes, Direction::Outbound).unwrap();
-    journal.cancel(unsent).unwrap();
-    assert_eq!(journal.remaining_ou().unwrap(), 1);
-    assert_eq!(journal.totals(), [0, 0]);
-    let _interrupted = journal.reserve(&bytes, Direction::Inbound).unwrap();
-    assert!(journal.state.pending.is_some());
-    drop(journal);
-    let resumed = fixture.open(OpenMode::Resume).unwrap();
-    assert_eq!(resumed.totals(), [0, 0]);
-    assert_eq!(resumed.uncertain_totals(), [bytes.len() as u64, 0]);
-    assert_eq!(resumed.remaining_ou().unwrap(), 0);
-}
-
-#[test]
-fn failed_directory_sync_recovers_installed_confirmation_without_double_counting() {
-    let fixture = Fixture::new(100);
-    let bytes = packet(false, false, 4);
-    let mut journal = fixture.open(OpenMode::Create).unwrap();
-    let reservation = journal.reserve(&bytes, Direction::Outbound).unwrap();
-    journal.store.fail_after_install();
-    assert!(journal.confirm(reservation).is_err());
-    assert!(journal.pending_receipts().is_err());
-    drop(journal);
-    let mut resumed = fixture.open(OpenMode::Resume).unwrap();
-    assert_eq!(resumed.totals(), [bytes.len() as u64, 0]);
-    assert_eq!(resumed.uncertain_totals(), [0, 0]);
-    let receipts = resumed.receipts(&[bytes.len() as u64, 0]).unwrap();
-    assert_eq!(receipts.len(), 1);
-    assert_eq!(receipts[0].usage.total_bytes, bytes.len() as u64);
-}
-
-#[test]
-fn receipt_snapshots_never_include_pending_or_uncertain_handoffs() {
-    let fixture = Fixture::new(100);
-    let ordinary = packet(false, false, 4);
-    let premium = packet(true, false, 8);
-    let mut journal = fixture.open(OpenMode::Create).unwrap();
+    let ordinary = packet(false, false, 0);
     journal.count(&ordinary, Direction::Outbound).unwrap();
-    let reservation = journal.reserve(&premium, Direction::Outbound).unwrap();
-    let operator = [ordinary.len() as u64, premium.len() as u64];
-    let receipts = journal.receipts(&operator).unwrap();
-    assert_eq!(receipts.len(), 1);
-    assert_eq!(receipts[0].usage.traffic_class, 0);
-    assert_eq!(receipts[0].usage.total_bytes, ordinary.len() as u64);
-    journal.confirm(reservation).unwrap();
-    // A status sampled before the new confirmation cannot authorize it early.
-    assert_eq!(
-        journal.receipts(&[ordinary.len() as u64, 0]).unwrap().len(),
-        1
-    );
-    let receipts = journal.receipts(&operator).unwrap();
-    assert_eq!(receipts.len(), 2);
-    assert_eq!(receipts[1].usage.total_bytes, premium.len() as u64);
-    assert_eq!(journal.authorized_totals(), operator);
-}
-
-#[test]
-fn legacy_confirmed_journal_migrates_without_changing_receipts_or_counters() {
-    let fixture = Fixture::new(100);
-    let mut journal = fixture.open(OpenMode::Create).unwrap();
-    let bytes = packet(false, false, 4);
-    journal.count(&bytes, Direction::Outbound).unwrap();
-    let receipts = journal.receipts(&[bytes.len() as u64, 0]).unwrap();
-    drop(journal);
-    let mut legacy = fixture.state().payload;
-    legacy.handoff_sequence = 0;
-    legacy.uncertain_bytes.clear();
-    fixture.replace(legacy);
-    let text = fs::read_to_string(fixture.path.join("state.json")).unwrap();
-    assert!(!text.contains("handoff_sequence"));
-    assert!(!text.contains("uncertain_bytes"));
-    let recovered = fixture.open(OpenMode::Resume).unwrap();
-    assert_eq!(recovered.totals(), [bytes.len() as u64, 0]);
-    assert_eq!(recovered.uncertain_totals(), [0, 0]);
-    assert_eq!(recovered.pending_receipts().unwrap(), receipts);
-}
-
-#[test]
-fn aggregate_original_budget_cannot_reset_on_receipt_or_reconnect() {
-    let fixture = Fixture::new(1);
-    let mut journal = fixture.open(OpenMode::Create).unwrap();
-    journal
-        .count(&packet(false, false, 0), Direction::Outbound)
-        .unwrap();
-    assert_eq!(journal.remaining_ou().unwrap(), 0);
-    let before = journal.totals().to_vec();
-    assert!(journal
-        .check(&packet(true, false, 0), Direction::Outbound)
-        .is_err());
-    assert!(journal
-        .count(&packet(true, false, 0), Direction::Outbound)
-        .is_err());
-    assert_eq!(journal.totals(), before);
-    journal.receipts(&[u64::MAX, u64::MAX]).unwrap();
-    journal.connect([1; 32]).unwrap();
-    drop(journal);
-    let mut journal = fixture.open(OpenMode::Resume).unwrap();
-    assert_eq!(journal.remaining_ou().unwrap(), 0);
-    assert!(journal
-        .count(&packet(true, true, 0), Direction::Inbound)
-        .is_err());
-    // Cumulative rounding permits more default bytes within the first MiB.
     journal
         .count(&packet(false, true, 0), Direction::Inbound)
         .unwrap();
-    assert_eq!(journal.remaining_ou().unwrap(), 0);
+    assert!(journal.check(&ordinary, Direction::Outbound).is_err());
+    assert!(journal
+        .check(&packet(true, false, 0), Direction::Outbound)
+        .is_err());
+    drop(journal);
+    let mut resumed = fixture.open(OpenMode::Resume).unwrap();
+    assert_eq!(resumed.purchases().unwrap().len(), 1);
+    assert!(resumed.check(&ordinary, Direction::Outbound).is_err());
+    assert_eq!(resumed.remaining_ou().unwrap(), 0);
+}
+
+#[test]
+fn pending_and_uncertain_handoffs_consume_prepaid_bytes_but_not_new_purchases() {
+    let mut fixture = Fixture::new(1);
+    fixture.prepaid = vec![56, 0];
+    let raw = packet(false, false, 0);
+    let mut journal = fixture.open(OpenMode::Create).unwrap();
+    let purchases = journal.purchases().unwrap();
+    let reservation = journal.reserve(&raw, Direction::Outbound).unwrap();
+    assert_eq!(journal.held_totals().unwrap(), [28, 0]);
+    assert_eq!(journal.purchases().unwrap(), purchases);
+    journal.cancel(reservation).unwrap();
+    assert_eq!(journal.held_totals().unwrap(), [0, 0]);
+    let _uncertain = journal.reserve(&raw, Direction::Outbound).unwrap();
+    drop(journal);
+    let mut resumed = fixture.open(OpenMode::Resume).unwrap();
+    assert_eq!(resumed.uncertain_totals(), [28, 0]);
+    assert_eq!(resumed.totals(), [0, 0]);
+    assert_eq!(resumed.purchases().unwrap(), purchases);
+    resumed.count(&raw, Direction::Outbound).unwrap();
+    assert!(resumed.check(&raw, Direction::Outbound).is_err());
+    assert_eq!(resumed.authorized_totals(), [56, 0]);
+}
+
+#[test]
+fn ambiguous_purchase_commit_is_poisoned_and_resume_keeps_identical_signatures() {
+    let fixture = Fixture::new(100);
+    let mut journal = fixture.open(OpenMode::Create).unwrap();
+    journal.store.fail_after_install();
+    assert!(journal.purchases().is_err());
+    assert!(journal.purchases().is_err());
+    assert!(journal.connect([1; 32]).is_err());
+    let installed = fixture
+        .state()
+        .payload
+        .receipts
+        .iter()
+        .flatten()
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(installed.len(), 2);
+    drop(journal);
+    let mut resumed = fixture.open(OpenMode::Resume).unwrap();
+    assert_eq!(resumed.purchases().unwrap(), installed);
+    assert_eq!(resumed.totals(), [0, 0]);
+    assert_eq!(resumed.authorized_totals(), fixture.prepaid);
+}
+
+#[test]
+fn failed_purchase_write_and_invalid_packets_do_not_release_authorization() {
+    let fixture = Fixture::new(100);
+    let mut journal = fixture.open(OpenMode::Create).unwrap();
+    journal.store.fail_next_write();
+    assert!(journal.purchases().is_err());
+    assert!(journal.pending_receipts().is_err());
+    assert_eq!(fixture.state().payload.authorized_bytes, [0, 0]);
+    drop(journal);
+    let mut resumed = fixture.open(OpenMode::Resume).unwrap();
+    let purchases = resumed.purchases().unwrap();
+    let mut invalid = packet(false, false, 0);
+    invalid[10] ^= 1;
+    assert!(resumed.count(&invalid, Direction::Outbound).is_err());
+    assert_eq!(resumed.totals(), [0, 0]);
+    assert_eq!(resumed.purchases().unwrap(), purchases);
+}
+
+#[test]
+fn installed_confirmation_recovers_without_recounting_or_reauthorizing() {
+    let mut fixture = Fixture::new(1);
+    fixture.prepaid = vec![56, 0];
+    let raw = packet(false, false, 0);
+    let mut journal = fixture.open(OpenMode::Create).unwrap();
+    let purchases = journal.purchases().unwrap();
+    let reservation = journal.reserve(&raw, Direction::Outbound).unwrap();
+    journal.store.fail_after_install();
+    assert!(journal.confirm(reservation).is_err());
+    assert!(journal.check(&raw, Direction::Outbound).is_err());
+    drop(journal);
+    let mut resumed = fixture.open(OpenMode::Resume).unwrap();
+    assert_eq!(resumed.totals(), [28, 0]);
+    assert_eq!(resumed.uncertain_totals(), [0, 0]);
+    assert_eq!(resumed.purchases().unwrap(), purchases);
+    resumed.count(&raw, Direction::Outbound).unwrap();
+    assert!(resumed.check(&raw, Direction::Outbound).is_err());
+    assert_eq!(resumed.authorized_totals(), [56, 0]);
+}
+
+#[test]
+fn postpaid_versions_and_lease_markers_are_never_reinterpreted() {
+    let fixture = Fixture::new(100);
+    drop(fixture.open(OpenMode::Create).unwrap());
+    let state = fixture.state().payload;
+    let mut legacy = state.clone();
+    legacy.version = 1;
+    fixture.replace(legacy);
+    assert!(fixture.open(OpenMode::Resume).is_err());
+    fixture.replace(state);
+    fs::write(
+        fixture.path.join("writer.lock"),
+        b"Octranet client payment journal v1\n",
+    )
+    .unwrap();
+    assert!(fixture.open(OpenMode::Resume).is_err());
 }
 
 #[test]
 fn immutable_binding_tariff_original_budget_and_key_are_required_on_resume() {
     let fixture = Fixture::new(100);
-    drop(fixture.open(OpenMode::Create).unwrap());
+    let mut journal = fixture.open(OpenMode::Create).unwrap();
+    let purchases = journal.purchases().unwrap();
+    drop(journal);
     let mut bindings = Vec::new();
     for field in 0..6 {
         let mut binding = fixture.binding.clone();
@@ -398,6 +338,7 @@ fn immutable_binding_tariff_original_budget_and_key_are_required_on_resume() {
             binding,
             fixture.tariff.clone(),
             fixture.budget,
+            fixture.prepaid.clone(),
             fixture.key.clone(),
             OpenMode::Resume
         )
@@ -408,6 +349,7 @@ fn immutable_binding_tariff_original_budget_and_key_are_required_on_resume() {
         fixture.binding.clone(),
         fixture.tariff.clone(),
         99,
+        fixture.prepaid.clone(),
         fixture.key.clone(),
         OpenMode::Resume
     )
@@ -417,6 +359,7 @@ fn immutable_binding_tariff_original_budget_and_key_are_required_on_resume() {
         fixture.binding.clone(),
         fixture.tariff.clone(),
         100,
+        fixture.prepaid.clone(),
         Arc::new(KeyPair::from_secret_bytes(&[8; 32])),
         OpenMode::Resume
     )
@@ -436,12 +379,27 @@ fn immutable_binding_tariff_original_budget_and_key_are_required_on_resume() {
         binding,
         tariff,
         100,
+        fixture.prepaid.clone(),
         fixture.key.clone(),
         OpenMode::Resume
     )
     .is_err());
-    let journal = fixture.open(OpenMode::Resume).unwrap();
+    let mut changed_target = fixture.prepaid.clone();
+    changed_target[0] += 1;
+    assert!(Journal::open(
+        &fixture.path,
+        fixture.binding.clone(),
+        fixture.tariff.clone(),
+        fixture.budget,
+        changed_target,
+        fixture.key.clone(),
+        OpenMode::Resume
+    )
+    .is_err());
+    let mut journal = fixture.open(OpenMode::Resume).unwrap();
     assert_eq!(journal.totals(), [0, 0]);
+    assert_eq!(journal.authorized_totals(), fixture.prepaid);
+    assert_eq!(journal.purchases().unwrap(), purchases);
 }
 
 #[test]
@@ -472,11 +430,12 @@ fn missing_live_state_or_lease_stops_authorization_without_recreation() {
     for remove in ["state.json", "writer.lock"] {
         let fixture = Fixture::new(100);
         let mut journal = fixture.open(OpenMode::Create).unwrap();
+        journal.purchases().unwrap();
         journal
             .count(&packet(false, false, 0), Direction::Outbound)
             .unwrap();
         fs::remove_file(fixture.path.join(remove)).unwrap();
-        assert!(journal.receipts(&[u64::MAX, 0]).is_err());
+        assert!(journal.purchases().is_err());
         assert!(journal.connect([1; 32]).is_err());
         assert!(journal.pending_receipts().is_err());
         assert!(!fixture.path.join(remove).exists());
@@ -487,10 +446,11 @@ fn missing_live_state_or_lease_stops_authorization_without_recreation() {
 fn corrupt_truncated_unknown_or_forged_state_is_refused_without_repair() {
     let fixture = Fixture::new(100);
     let mut journal = fixture.open(OpenMode::Create).unwrap();
+    journal.purchases().unwrap();
     journal
         .count(&packet(false, false, 0), Direction::Outbound)
         .unwrap();
-    journal.receipts(&[u64::MAX, 0]).unwrap();
+    journal.purchases().unwrap();
     drop(journal);
     let original = fs::read(fixture.path.join("state.json")).unwrap();
     let mut value: serde_json::Value = serde_json::from_slice(&original).unwrap();
@@ -523,10 +483,11 @@ fn corrupt_truncated_unknown_or_forged_state_is_refused_without_repair() {
 fn receipt_snapshot_invariants_are_checked_even_with_a_valid_checksum() {
     let fixture = Fixture::new(100);
     let mut journal = fixture.open(OpenMode::Create).unwrap();
+    journal.purchases().unwrap();
     journal
         .count(&packet(false, false, 0), Direction::Outbound)
         .unwrap();
-    journal.receipts(&[u64::MAX, 0]).unwrap();
+    journal.purchases().unwrap();
     drop(journal);
     let state = fixture.state().payload;
     let mut invalid = Vec::new();
@@ -556,7 +517,7 @@ fn receipt_snapshot_invariants_are_checked_even_with_a_valid_checksum() {
 }
 
 #[test]
-fn exhausted_sequences_and_invalid_connect_keys_do_not_modify_journal() {
+fn exhausted_connection_sequence_and_invalid_keys_do_not_modify_journal() {
     let fixture = Fixture::new(100);
     let mut journal = fixture.open(OpenMode::Create).unwrap();
     let before = fs::read(fixture.path.join("state.json")).unwrap();
@@ -567,24 +528,8 @@ fn exhausted_sequences_and_invalid_connect_keys_do_not_modify_journal() {
     journal.commit(next).unwrap();
     assert!(journal.connect([1; 32]).is_err());
     assert_eq!(journal.state.connection_sequence, u64::MAX);
-    journal
-        .count(&packet(false, false, 0), Direction::Outbound)
-        .unwrap();
-    let mut next = journal.state.clone();
-    next.usage_sequence = u64::MAX;
-    next.authorized_bytes[0] = 1;
-    next.receipts[0] = Some(
-        SignedUsage::sign(
-            Usage::from_binding(fixture.binding.clone(), 0, u64::MAX, 1).unwrap(),
-            &fixture.key,
-        )
-        .unwrap(),
-    );
-    journal.commit(next).unwrap();
-    let before = fs::read(fixture.path.join("state.json")).unwrap();
-    assert!(journal.receipts(&[u64::MAX, 0]).is_err());
-    assert_eq!(journal.authorized_totals(), [1, 0]);
-    assert_eq!(fs::read(fixture.path.join("state.json")).unwrap(), before);
+    let purchases = journal.purchases().unwrap();
+    assert_eq!(journal.purchases().unwrap(), purchases);
 }
 
 #[test]
@@ -592,11 +537,12 @@ fn signing_secret_is_not_persisted_and_mismatched_key_objects_are_refused() {
     use base64::Engine as _;
     let fixture = Fixture::new(100);
     let mut journal = fixture.open(OpenMode::Create).unwrap();
+    journal.purchases().unwrap();
     journal.connect([1; 32]).unwrap();
     journal
         .count(&packet(false, false, 0), Direction::Outbound)
         .unwrap();
-    journal.receipts(&[u64::MAX, 0]).unwrap();
+    journal.purchases().unwrap();
     let text = fs::read_to_string(fixture.path.join("state.json")).unwrap();
     assert!(!text.contains(&hex::encode([0x9d; 32])));
     assert!(!text.contains(&base64::engine::general_purpose::STANDARD.encode([0x9d; 32])));
@@ -609,6 +555,7 @@ fn signing_secret_is_not_persisted_and_mismatched_key_objects_are_refused() {
         other.binding.clone(),
         other.tariff.clone(),
         100,
+        other.prepaid.clone(),
         Arc::new(mismatch),
         OpenMode::Create
     )

@@ -4,76 +4,60 @@
 [![Proof of working state](https://github.com/androolloyd/octravpn/actions/workflows/proof.yml/badge.svg)](https://github.com/androolloyd/octravpn/actions/workflows/proof.yml)
 [![HFHE bridge status](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fandroolloyd%2Foctravpn%2Fmain%2Fdocs%2Faudit%2Ffhe-load-pk-status.json)](docs/audit/fhe-load-pk-status.json)
 
-A decentralized VPN — Tailscale-style mesh with on-chain coordination —
-that runs on Octra. Operators stake OCT, sessions escrow their traffic cost in
-OCT, and traffic flows over WireGuard. Existing v5 settlement is **two-tx**: the operator
-claims bytes and the agreed charge, then the client confirms that exact amount.
-The current application uses private admin credentials; historical owner,
-tailnet and slashing variants below retain their own separate deployment scope.
+A decentralized VPN on Octra with WireGuard traffic, Circle-hosted offers and
+portal assets, and OCT payments directly between users and operators.
 
-**Current economics:** operators receive the full traffic payment in OCT.
-There is no VPN protocol commission; ordinary Octra transaction fees are
-separate. The [canary candidate](docs/audit/2026-10-11-canary-security.md)
-remains unqualified for launch. [First-party integration](docs/octra-vpn-inclusion.md)
-tracks Circle applications, ExEx and the Rust node's qualification boundaries.
+The current [prepaid channel application](program/octranet-payments.aml) buys
+finite byte allowances before forwarding. Operators choose per-class prices;
+the protocol takes **zero commission**, with ordinary Octra transaction fees
+separate. The model supports:
 
-The staged [Octranet payment application](program/octranet-payments.aml) adds
-immutable per-class offers and payer-signed cumulative usage claims. Users exit
-the payment tier after a fixed **24-hour settlement window**; operator stake
-has a separate **seven-day unstake**. Unstaking stops new paid admission, and
-rebonding cannot revive old plans. The protocol takes no commission.
-The seven-day deadline starts at the first unstake request; retries cannot
-shorten or extend it.
-[Design and launch boundaries](docs/architecture/octranet-payment-tier.md) and
-[adversarial review](docs/audit/octranet-payments-2026-10-17.md) distinguish the
-compiled application tests and abstract Lean proofs from deployment qualification.
-The opt-in native `payments` path binds signed connections, durable per-class
-metering and canonical settlement, with explicit postpaid credit and relayer fee
-ceilings. The [payment-plan client](docs/operators/payment-plans.md) retains
-authorizations and uncertain exposure across restart. The isolated four-validator
-gate passed real kernel TCP/UDP/ICMP, canonical claims, bounded credit, crash
-recovery, exit revocation and matching ExEx. Stock Tailscale/onboarding and public
-qualification remain open; this candidate is not deployed to Mainnet.
-The Rust client library exposes the same paid service as the CLI, with explicit
-startup inputs, interface metadata, caller-owned shutdown and durable recovery.
-Its [service review](docs/audit/octranet-client-service-2026-10-17.md) records
-the lifecycle checks and remaining stock-client integration boundaries.
-The node captures trusted [P2P upgrade and rollback schedules](docs/rust-node/transport-upgrades.md)
-and checks the selected canonical consensus configuration before voting.
-Public startup and recovery also apply the adopted [peer health admission policy](docs/rust-node/root-recovery.md)
-before serving or signing; the [connected recovery checkpoint](docs/rust-node/checkpoints/2026-10-17/recovery-health-policy.md)
-records local qualification and its limits.
-The [peer recovery follow-up](docs/rust-node/checkpoints/2026-10-17/peer-recovery-diagnostics.md)
-adds bounded connection diagnostics and authenticated checkpoint allocation
-cleanup. It records a successful public serving sample and canonical/ExEx
-continuity on the previously qualified image; stable public Circle asset delivery
-and paid service remain unqualified.
-The [cause-sensitive recovery checkpoint](docs/rust-node/checkpoints/2026-10-17/quarantine-recovery.md)
-adds native recovery-evidence rules and verified forward self-attestation, with
-37,302 native policy comparisons and real browser/VPN/ExEx recovery checks.
-The [persistent-directory checkpoint](docs/rust-node/checkpoints/2026-10-17/persistent-directories.md)
-adds cached native commitments and granted page reuse, with 10,564 native tree
-operations and 522 passing tests across composed targets. Public qualification
-of this candidate remains pending.
-The [native liveness checkpoint](docs/rust-node/checkpoints/2026-10-17/native-liveness.md)
-adds guarded recovery within the existing driver, with 1,012 native policy
-comparisons and real lock, publication, worker and timer regressions.
-The [automatic Service follow-up](docs/rust-node/checkpoints/2026-10-17/service-liveness.md)
-checks that fallback through the actual Node host, with Circle/VPN access, ExEx
-and quarantine revocation, including a normal-feature regression.
+- **Immediate withdrawal** of available channel OCT. Settled purchases stay final.
+- **Exit earnings funding outgoing traffic** without a withdrawal/deposit round trip.
+- **24-hour notice** before replacement rates activate. Bought bytes keep their price.
+- **Seven-day operator unstaking**, fixed from the first request.
 
-**Rust node qualification (2026-10-15):** the `octra-node` executable connects the
-native validator driver, authenticated peers, transaction intake, canonical
-commits, ExEx and Circle browsing. The [local devnet guide](docs/rust-node/devnet.md)
-runs four persistent validator processes, each with embedded VPN sockets.
-VPN session admission remains closed until a real settlement application is configured.
-The [paid local checkpoint](docs/rust-node/checkpoints/2026-10-15/native-vpn.json)
-passed actual application deployment, private handoff/rotation, paid UDP and OS
-TUN TCP/UDP/ICMP, same-session restart recovery, matching ExEx and canonical
-gateway delivery on an isolated four-validator chain. Public synchronization,
-external Tailscale/TLS, production setup and full native parity remain separate
-gates. See [current status](docs/rust-node/status.md) and the
-[bounded formal checkpoint](docs/rust-node/checkpoints/2026-10-15/formal.json).
+Exact purchased bytes must settle canonically before traffic flows. There are
+no operator credit lines or automatic top-ups. Full or partial channel
+withdrawal invalidates old plan connections and unsettled authorizations;
+unused purchased bytes are not refunded. See the
+[payment design](docs/architecture/octranet-payment-tier.md) and
+[operator/client guide](docs/operators/payment-plans.md).
+
+The [current checkpoint](docs/audit/octranet-prepaid-status.json) records **1,719
+passing tests** across 20 targets, **20 compiled AML tests**, **39 bounded Lean
+theorems**, strict lint and an isolated four-validator/two-kernel qualification.
+It covers TCP/UDP/ICMP, canonical advance purchases, class exhaustion, crash
+recovery, instant withdrawals, earnings reuse and matching ExEx. The
+[adversarial review](docs/audit/octranet-prepaid-2026-10-17.md) records fixes,
+source pins and proof limits. Purchase authorization does not prove Internet
+delivery; no arbitrary non-delivery slashing or delivery insurance is implemented.
+
+The Rust node integrates transaction execution, authenticated peers, the native
+validator driver, canonical commitments, ExEx, Circle browsing and the opt-in
+paid VPN service. Its adopted reference is lite_node
+`7f9be4489870645cfcc95439638cde40f5da9f50`; this application changes no consensus
+rules. The Rust client library exposes the same paid service as the CLI, with
+explicit startup, shutdown and durable recovery. The
+[local devnet guide](docs/rust-node/devnet.md) and
+[current node status](docs/rust-node/status.md) describe configuration and
+qualification. [Offline legacy repair](docs/rust-node/legacy-repair.md) resumes
+trusted native-format plans through a pinned compatibility backend; it does not
+rewind modern canonical history or supply an all-Rust physical backend.
+
+The unchanged public devnet observer has [319 new retained epochs with matching
+canonical/ExEx continuity](docs/rust-node/checkpoints/2026-10-17/service-public-progress.md).
+Its paid service is unconfigured. Sustained public serving, stock Tailscale
+payment/onboarding, portal funding, DNS/TLS and Mainnet remain open qualification
+gates. This prepaid candidate is **not deployed to Mainnet**. Local build
+artifacts and tests do not establish public deployment readiness.
+
+The separate [v5 application](docs/private-administration.md) retains private
+admin credentials and cooperative two-transaction settlement. Its existing
+deployments, historical owner/tailnet/slashing variants and
+[canary](docs/audit/2026-10-11-canary-security.md) have their own qualification
+scope; enabling prepaid mode does not migrate them. See
+[first-party integration](docs/octra-vpn-inclusion.md) for the broader roadmap.
 
 The dated deployment notes below are historical records, not qualification of
 the current application or a present Mainnet readiness claim.

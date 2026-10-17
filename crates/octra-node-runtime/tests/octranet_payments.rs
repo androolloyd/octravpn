@@ -52,11 +52,55 @@ fn local_compiler_artifact_matches_legacy_factory_execution() {
 }
 
 #[test]
+fn prepaid_purchase_settles_before_delivery_and_rejects_old_usage_authority() {
+    let mut c = Chain::new();
+    c.funded_plan();
+    assert_eq!(c.number("get_prepaid_bytes", json!([0, 0])), 0);
+    let mut old = c.receipt(0, 1, 1_048_576);
+    let legacy_message = format!(
+        "Octranet usage v1|{DOMAIN}|{}|{}|1|0|0|{MANIFEST}|0|1|1048576",
+        c.program,
+        address(12)
+    );
+    old[4] = json!(sign(21, &legacy_message));
+    c.denied(13, "claim", old, 0, "invalid usage authorization");
+    assert_eq!(c.number("get_earnings", json!([address(11)])), 0);
+    // This is an advance purchase, with no delivery acknowledgment or traffic
+    // in this transaction harness. The forwarding meter is qualified separately.
+    let bytes = 100 * 1_048_576;
+    c.ok(13, "claim", c.receipt(0, 2, bytes), 0);
+    assert_eq!(c.number("get_prepaid_bytes", json!([0, 0])), bytes);
+    assert_eq!(c.number("get_prepaid_cost", json!([0, 0])), 1000);
+    assert_eq!(c.number("get_plan_remaining", json!([0])), 0);
+    assert_eq!(c.number("get_earnings", json!([address(11)])), 1000);
+    assert_eq!(c.number("get_funds", json!([address(12)])), FUND - 1000);
+    // Spending the monetary budget purchases the allowance; it must not revoke
+    // the plan before the payer has an opportunity to consume those bytes.
+    assert_eq!(c.view("can_forward", json!([0])), true);
+    c.denied(
+        13,
+        "claim",
+        c.receipt(0, 2, bytes),
+        0,
+        "usage already redeemed or exceeds uint64",
+    );
+    c.denied(
+        13,
+        "claim",
+        c.receipt(0, 3, bytes + 1),
+        0,
+        "plan budget exhausted",
+    );
+}
+
+#[test]
 fn operator_unstake_is_seven_days_and_independent_of_payer_exit() {
     let mut c = Chain::new();
     c.funded_plan();
     assert_eq!(c.number("get_operator_unstake_ms", json!([])), WEEK as u64);
-    assert_eq!(c.number("get_user_exit_ms", json!([])), DAY as u64);
+    assert_eq!(c.number("get_user_exit_ms", json!([])), 0);
+    c.ok(13, "claim", c.receipt(0, 1, 1_048_576), 0);
+    let held_purchase = c.receipt(0, 2, 2_097_152);
     c.now += 1000;
     let stopped = c.now;
     c.ok(11, "request_operator_unstake", json!([]), 0);
@@ -74,8 +118,21 @@ fn operator_unstake_is_seven_days_and_independent_of_payer_exit() {
         0,
         "unstake not requested",
     );
+    c.denied(
+        13,
+        "claim",
+        held_purchase.clone(),
+        0,
+        "operator settlement window closed",
+    );
     c.now = stopped + DAY - 1;
-    c.ok(13, "claim", c.receipt(0, 1, 1_048_576), 0);
+    c.denied(
+        13,
+        "claim",
+        held_purchase,
+        0,
+        "operator settlement window closed",
+    );
     assert_eq!(c.number("get_earnings", json!([address(11)])), 10);
     c.now = stopped + DAY;
     c.denied(
@@ -93,7 +150,6 @@ fn operator_unstake_is_seven_days_and_independent_of_payer_exit() {
         (stopped + WEEK) as u64
     );
     c.ok(12, "request_exit", json!([]), 0);
-    c.now += DAY;
     c.ok(12, "withdraw_remaining", json!([]), 0);
     assert_eq!(c.locked(), STAKE + 10);
     c.denied(
@@ -131,11 +187,13 @@ fn operator_unstake_is_seven_days_and_independent_of_payer_exit() {
 }
 
 #[test]
-fn payer_has_exactly_24_hours_and_withdraws_successful_claim_difference() {
+fn payer_instantly_withdraws_available_oct_and_revokes_held_purchases() {
     let mut c = Chain::new();
     c.funded_plan();
-    let deadline = START + DAY;
+    c.ok(14, "claim", c.receipt(1, 1, 1_048_576), 0);
+    let held_purchase = c.receipt(1, 2, 2_097_152);
     c.ok(12, "request_exit", json!([]), 0);
+    c.denied(14, "claim", held_purchase.clone(), 0, "claim window closed");
     assert_eq!(c.view("can_forward", json!([0])), false);
     c.denied(
         12,
@@ -144,30 +202,27 @@ fn payer_has_exactly_24_hours_and_withdraws_successful_claim_difference() {
         1,
         "account not accepting funds",
     );
-    c.now = deadline - 1;
-    c.denied(
-        12,
-        "withdraw_remaining",
-        json!([]),
-        0,
-        "settlement window open",
-    );
-    c.ok(14, "claim", c.receipt(1, 1, 1_048_576), 0);
+    c.denied(14, "claim", held_purchase, 0, "claim window closed");
+    c.now += 1;
     c.ok(12, "request_exit", json!([]), 0);
     assert_eq!(
         c.number("get_exit_deadline_ms", json!([address(12)])),
-        deadline as u64
+        START as u64
     );
-    c.now = deadline;
-    c.denied(
-        14,
-        "claim",
-        c.receipt(1, 2, 2_097_152),
-        0,
-        "claim window closed",
-    );
+    let before = c
+        .ledger
+        .account(address(12).as_bytes())
+        .unwrap()
+        .balance
+        .clone();
     c.ok(12, "withdraw_remaining", json!([]), 0);
     assert_eq!(c.number("get_funds", json!([address(12)])), 0);
+    assert_eq!(c.number("get_reserved", json!([address(12)])), 0);
+    assert_eq!(c.number("get_channel_balance", json!([address(12)])), 0);
+    assert_eq!(
+        c.ledger.account(address(12).as_bytes()).unwrap().balance,
+        before - FEE + FUND - 100
+    );
     assert_eq!(c.locked(), STAKE + 100);
     c.register(2);
     c.ok(12, "fund", json!([address(12)]), FUND);
@@ -179,6 +234,263 @@ fn payer_has_exactly_24_hours_and_withdraws_successful_claim_difference() {
         "plan generation closed",
     );
     assert_eq!(c.number("get_funds", json!([address(12)])), FUND);
+}
+
+fn register_account(c: &mut Chain, who: u8, receipt_key: u8, generation: u64) {
+    let message = format!(
+        "Octranet register v1|{DOMAIN}|{}|{}|{generation}",
+        c.program,
+        address(who)
+    );
+    c.ok(
+        who,
+        "register",
+        json!([
+            STANDARD.encode(key(receipt_key).verifying_key().as_bytes()),
+            sign(receipt_key, &message)
+        ]),
+        0,
+    );
+}
+
+fn purchase(c: &Chain, plan: u64, class: u64, sequence: u64, bytes: u64, receipt_key: u8) -> Value {
+    let message = c.view("get_usage_message", json!([plan, class, sequence, bytes]));
+    json!([
+        plan,
+        class,
+        sequence,
+        bytes,
+        sign(receipt_key, message.as_str().unwrap())
+    ])
+}
+
+#[test]
+fn instant_withdrawal_races_are_atomic_in_both_orders_and_stake_is_separate() {
+    let mut paid_first = Chain::new();
+    paid_first.funded_plan();
+    paid_first.ok(13, "claim", paid_first.receipt(0, 1, 1_048_576), 0);
+    paid_first.ok(12, "withdraw_remaining", json!([]), 0);
+    assert_eq!(paid_first.locked(), STAKE + 10);
+    assert_eq!(
+        paid_first.number("get_prepaid_bytes", json!([0, 0])),
+        1_048_576
+    );
+    assert_eq!(paid_first.number("get_earnings", json!([address(11)])), 10);
+
+    let mut withdrawn_first = Chain::new();
+    withdrawn_first.funded_plan();
+    let held = withdrawn_first.receipt(0, 1, 1_048_576);
+    withdrawn_first.ok(12, "withdraw_remaining", json!([]), 0);
+    withdrawn_first.denied(13, "claim", held, 0, "plan generation closed");
+    assert_eq!(withdrawn_first.locked(), STAKE);
+    assert_eq!(
+        withdrawn_first.number("get_earnings", json!([address(11)])),
+        0
+    );
+    assert_eq!(
+        withdrawn_first.number("get_operator_stake", json!([address(11)])),
+        STAKE
+    );
+}
+
+#[test]
+fn partial_channel_withdrawal_invalidates_all_plans_and_preserves_receipt_key() {
+    let mut c = Chain::new();
+    c.funded_plan();
+    c.ok(12, "open_plan", json!([0, 500]), 0);
+    c.ok(13, "claim", c.receipt(0, 1, 1_048_576), 0);
+    let held = c.receipt(0, 2, 2_097_152);
+    let old_key = c.view("get_plan_receipt_key", json!([0]));
+    c.denied(
+        12,
+        "withdraw_channel",
+        json!([0]),
+        0,
+        "channel balance unavailable",
+    );
+    c.denied(
+        12,
+        "withdraw_channel",
+        json!([FUND]),
+        0,
+        "channel balance unavailable",
+    );
+    c.ok(12, "withdraw_channel", json!([100]), 0);
+    assert_eq!(c.number("get_generation", json!([address(12)])), 2);
+    assert_eq!(c.number("get_active", json!([address(12)])), 1);
+    assert_eq!(c.number("get_reserved", json!([address(12)])), 0);
+    assert_eq!(
+        c.number("get_channel_balance", json!([address(12)])),
+        FUND - 110
+    );
+    assert_eq!(c.view("can_forward", json!([0])), false);
+    assert_eq!(c.view("can_forward", json!([1])), false);
+    assert_eq!(c.number("get_prepaid_bytes", json!([0, 0])), 1_048_576);
+    c.denied(13, "claim", held, 0, "plan generation closed");
+    c.ok(12, "open_plan", json!([0, 1000]), 0);
+    assert_eq!(c.number("get_plan_generation", json!([2])), 2);
+    assert_eq!(c.view("get_plan_receipt_key", json!([2])), old_key);
+    c.ok(13, "claim", purchase(&c, 2, 0, 1, 1_048_576, 21), 0);
+    assert_eq!(c.number("get_earnings", json!([address(11)])), 20);
+    c.ok(12, "withdraw_remaining", json!([]), 0);
+    register_account(&mut c, 12, 22, 3);
+    assert_eq!(c.view("get_plan_receipt_key", json!([0])), old_key);
+    assert_ne!(c.view("get_receipt_key", json!([address(12)])), old_key);
+}
+
+#[test]
+fn exit_earnings_fund_own_traffic_and_cross_operator_purchases_without_custody_changes() {
+    let mut c = Chain::with_cap(300_000_000);
+    c.funded_plan();
+    c.ok(13, "claim", c.receipt(0, 1, 10_485_760), 0);
+    assert_eq!(c.number("get_channel_balance", json!([address(11)])), 100);
+    register_account(&mut c, 11, 23, 1);
+    c.ok(11, "fund", json!([address(11)]), 3);
+    let locked = c.locked();
+    let before = c.ok(11, "open_plan", json!([0, 10]), 0);
+    assert!(before["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["event"] == "EarningsAllocated"));
+    assert_eq!(c.number("get_funds", json!([address(11)])), 10);
+    assert_eq!(c.number("get_earnings", json!([address(11)])), 93);
+    assert_eq!(c.number("get_channel_balance", json!([address(11)])), 103);
+    assert_eq!(c.locked(), locked);
+    c.ok(13, "claim", purchase(&c, 1, 0, 1, 1_048_576, 23), 0);
+    assert_eq!(c.number("get_channel_balance", json!([address(11)])), 103);
+    assert_eq!(c.locked(), locked);
+
+    c.ok(13, "bond_operator", json!([]), STAKE);
+    c.ok(13, "create_offer", json!([MANIFEST]), 0);
+    c.ok(13, "append_class", json!([1, 10]), 0);
+    c.ok(13, "seal_offer", json!([1]), 0);
+    let locked = c.locked();
+    c.ok(11, "open_plan", json!([1, 20]), 0);
+    c.ok(14, "claim", purchase(&c, 2, 0, 1, 1_048_576, 23), 0);
+    assert_eq!(c.number("get_channel_balance", json!([address(11)])), 93);
+    assert_eq!(c.number("get_channel_balance", json!([address(13)])), 10);
+    assert_eq!(c.locked(), locked);
+    c.ok(11, "withdraw_channel", json!([90]), 0);
+    assert_eq!(c.number("get_channel_balance", json!([address(11)])), 3);
+    assert_eq!(c.number("get_reserved", json!([address(11)])), 0);
+    assert_eq!(c.number("get_operator_stake", json!([address(11)])), STAKE);
+    assert_eq!(c.number("get_operator_stake", json!([address(13)])), STAKE);
+    c.ok(13, "withdraw_remaining", json!([]), 0);
+    assert_eq!(c.number("get_channel_balance", json!([address(13)])), 0);
+}
+
+#[test]
+fn immutable_rate_successors_enforce_full_notice_and_exact_quote_boundary() {
+    let mut c = Chain::new();
+    c.funded_plan();
+    assert_eq!(c.number("get_rate_notice_ms", json!([])), DAY as u64);
+    assert_eq!(c.number("get_offer_series", json!([0])), 0);
+    assert_eq!(c.number("get_offer_start_ms", json!([0])), START as u64);
+    c.ok(13, "claim", c.receipt(0, 1, 1_048_576), 0);
+    let old_held = c.receipt(0, 2, 2_097_152);
+    c.denied(
+        13,
+        "create_rate_change",
+        json!([0, MANIFEST]),
+        0,
+        "not offer operator",
+    );
+    c.ok(11, "create_rate_change", json!([0, "c".repeat(64)]), 0);
+    c.ok(11, "append_class", json!([1, 20]), 0);
+    c.ok(11, "seal_offer", json!([1]), 0);
+    let activation = START + DAY;
+    assert_eq!(c.number("get_offer_series", json!([1])), 0);
+    assert_eq!(c.number("get_offer_parent", json!([1])), 0);
+    assert_eq!(c.number("get_offer_has_parent", json!([1])), 1);
+    assert_eq!(
+        c.number("get_offer_start_ms", json!([1])),
+        activation as u64
+    );
+    assert_eq!(c.number("get_offer_end_ms", json!([0])), activation as u64);
+    c.denied(12, "open_plan", json!([1, 100]), 0, "offer quote inactive");
+    c.denied(11, "append_class", json!([1, 30]), 0, "offer immutable");
+    c.now = activation - 1;
+    c.ok(13, "claim", c.receipt(0, 2, 1_048_577), 0);
+    c.ok(12, "open_plan", json!([0, 100]), 0);
+    c.denied(12, "open_plan", json!([1, 100]), 0, "offer quote inactive");
+    c.now = activation;
+    c.denied(13, "claim", old_held, 0, "offer quote inactive");
+    c.denied(12, "open_plan", json!([0, 100]), 0, "offer quote inactive");
+    c.denied(
+        11,
+        "create_rate_change",
+        json!([0, MANIFEST]),
+        0,
+        "parent quote inactive",
+    );
+    c.denied(
+        11,
+        "cancel_rate_change",
+        json!([1]),
+        0,
+        "rate change already active",
+    );
+    c.ok(12, "open_plan", json!([1, 100]), 0);
+    c.ok(13, "claim", purchase(&c, 2, 0, 1, 1_048_576, 21), 0);
+    assert_eq!(c.number("get_prepaid_cost", json!([2, 0])), 20);
+    assert_eq!(
+        c.view("can_forward", json!([0])),
+        true,
+        "already purchased old-price bytes remain eligible"
+    );
+    c.now = activation + 1;
+    c.denied(
+        13,
+        "claim",
+        c.receipt(0, 3, 3_145_728),
+        0,
+        "offer quote inactive",
+    );
+    c.ok(12, "open_plan", json!([1, 100]), 0);
+}
+
+#[test]
+fn rescheduling_and_cancelling_rate_notice_never_activates_stale_quotes() {
+    let mut c = Chain::new();
+    c.funded_plan();
+    c.ok(11, "create_rate_change", json!([0, MANIFEST]), 0);
+    c.ok(11, "append_class", json!([1, 20]), 0);
+    c.ok(11, "seal_offer", json!([1]), 0);
+    c.now += DAY / 2;
+    c.ok(11, "create_rate_change", json!([0, "c".repeat(64)]), 0);
+    c.ok(11, "append_class", json!([2, 30]), 0);
+    c.ok(11, "seal_offer", json!([2]), 0);
+    let activation = c.now + DAY;
+    assert_eq!(c.number("get_offer_cancelled", json!([1])), 1);
+    assert_eq!(c.number("get_offer_replacement", json!([0])), 2);
+    assert_eq!(c.number("get_offer_end_ms", json!([0])), activation as u64);
+    assert_eq!(
+        c.number("get_offer_start_ms", json!([2])),
+        activation as u64
+    );
+    c.now = START + DAY;
+    c.denied(12, "open_plan", json!([1, 100]), 0, "offer quote inactive");
+    c.denied(12, "open_plan", json!([2, 100]), 0, "offer quote inactive");
+    c.ok(12, "open_plan", json!([0, 100]), 0);
+    c.denied(
+        13,
+        "cancel_rate_change",
+        json!([2]),
+        0,
+        "not offer operator",
+    );
+    c.ok(11, "cancel_rate_change", json!([2]), 0);
+    assert_eq!(c.number("get_offer_end_ms", json!([0])), 0);
+    assert_eq!(c.number("get_offer_replacement", json!([0])), 0);
+    c.now = activation;
+    c.denied(12, "open_plan", json!([2, 100]), 0, "offer quote inactive");
+    c.ok(12, "open_plan", json!([0, 100]), 0);
+    c.ok(11, "create_offer", json!(["d".repeat(64)]), 0);
+    c.ok(11, "append_class", json!([3, 40]), 0);
+    c.ok(11, "seal_offer", json!([3]), 0);
+    assert_eq!(c.number("get_offer_series", json!([3])), 3);
+    c.ok(12, "open_plan", json!([3, 100]), 0);
 }
 
 #[test]
@@ -316,6 +628,27 @@ fn legacy_uint_entry_guards_reject_negative_arguments_without_moving_custody() {
         c.denied(
             11,
             "withdraw_earnings",
+            json!([negative.clone()]),
+            0,
+            "execution reverted",
+        );
+        c.denied(
+            12,
+            "withdraw_channel",
+            json!([negative.clone()]),
+            0,
+            "execution reverted",
+        );
+        c.denied(
+            11,
+            "create_rate_change",
+            json!([negative.clone(), MANIFEST]),
+            0,
+            "execution reverted",
+        );
+        c.denied(
+            11,
+            "cancel_rate_change",
             json!([negative]),
             0,
             "execution reverted",
@@ -354,7 +687,28 @@ fn legacy_uint_entry_guards_reject_values_above_u256() {
         c.denied(
             11,
             "append_class",
-            json!([1, oversized]),
+            json!([1, oversized.clone()]),
+            0,
+            "execution reverted",
+        );
+        c.denied(
+            12,
+            "withdraw_channel",
+            json!([oversized.clone()]),
+            0,
+            "execution reverted",
+        );
+        c.denied(
+            11,
+            "create_rate_change",
+            json!([oversized.clone(), MANIFEST]),
+            0,
+            "execution reverted",
+        );
+        c.denied(
+            11,
+            "cancel_rate_change",
+            json!([oversized]),
             0,
             "execution reverted",
         );
@@ -388,6 +742,34 @@ fn malformed_legacy_scalar_shapes_cannot_alias_a_funded_account_or_plan() {
             json!([0, malformed.clone()]),
             0,
             "budget unavailable",
+        );
+        c.denied(
+            12,
+            "withdraw_channel",
+            json!([malformed.clone()]),
+            0,
+            "channel balance unavailable",
+        );
+        c.denied(
+            11,
+            "create_rate_change",
+            json!([malformed.clone(), MANIFEST]),
+            0,
+            "not offer operator",
+        );
+        c.denied(
+            11,
+            "create_rate_change",
+            json!([0, malformed.clone()]),
+            0,
+            "digest must be lowercase SHA256",
+        );
+        c.denied(
+            11,
+            "cancel_rate_change",
+            json!([malformed.clone()]),
+            0,
+            "not offer operator",
         );
         let mut args = receipt.clone();
         args[0] = malformed;
@@ -525,7 +907,7 @@ fn signatures_cannot_be_replayed_into_another_program_or_domain() {
     c.funded_plan();
     c.denied(13, "claim", authorization, 0, "invalid usage authorization");
     let wrong_domain = format!(
-        "Octranet usage v1|{MANIFEST}|{}|{}|1|0|0|{MANIFEST}|0|1|1048576",
+        "Octranet prepaid v1|{MANIFEST}|{}|{}|1|0|0|{MANIFEST}|0|1|1048576",
         c.program,
         address(12)
     );
@@ -595,9 +977,17 @@ fn failed_transfers_roll_back_liabilities_and_custody_cap_includes_stake() {
         "earnings transfer failed",
     );
     assert_eq!(c.number("get_earnings", json!([address(11)])), 10);
+    c.denied(
+        12,
+        "withdraw_channel",
+        json!([1]),
+        0,
+        "channel withdrawal failed",
+    );
+    assert_eq!(c.number("get_generation", json!([address(12)])), 1);
+    assert_eq!(c.number("get_reserved", json!([address(12)])), 990);
     c.ok(12, "request_exit", json!([]), 0);
     c.ok(11, "request_operator_unstake", json!([]), 0);
-    c.now += DAY;
     c.denied(12, "withdraw_remaining", json!([]), 0, "withdrawal failed");
     assert_eq!(c.number("get_funds", json!([address(12)])), FUND - 10);
     c.now = START + WEEK;

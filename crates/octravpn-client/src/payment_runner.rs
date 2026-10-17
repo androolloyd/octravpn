@@ -1,9 +1,9 @@
-//! An explicitly accepted payment plan. The operator status signature binds
+//! An explicitly accepted prepaid plan. The operator status signature binds
 //! transport and counters; the plan file must come from confirmed chain state.
 //! Operator clock progress is a bounded liveness check, not independent chain
 //! proof. Canonical admission remains the pinned native node's responsibility.
 use crate::{
-    payments::{Journal, OpenMode, Reservation},
+    payments::{validate_purchase, Journal, OpenMode, PrepaidExhausted, Reservation},
     wireguard,
 };
 use anyhow::{ensure, Context, Result};
@@ -25,6 +25,7 @@ use std::{
 
 const STATUS_MAX_AGE: Duration = Duration::from_secs(120);
 
+#[derive(Debug)]
 struct Freshness {
     canonical_ms: u64,
     deadline: tokio::time::Instant,
@@ -57,6 +58,7 @@ impl Freshness {
     }
 }
 
+#[derive(Debug)]
 struct Observation {
     signed: SignedStatus,
     freshness: Freshness,
@@ -72,12 +74,16 @@ impl Observation {
 
 /// A plan accepted from independently confirmed chain facts. Parsing this data
 /// validates its shape; it does not prove chain finality or authorize traffic.
+/// Targets and prices stay fixed for this journal. Quote replacement, channel
+/// withdrawals and new earnings never consent to another purchase.
 #[derive(Clone, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Plan {
     pub binding: PlanBinding,
     pub tariff: Tariff,
     pub original_budget_ou: u64,
+    /// Explicit finite cumulative byte purchase in immutable tariff order.
+    pub prepaid_bytes: Vec<u64>,
     pub control_url: String,
     pub wireguard_endpoint: String,
 }
@@ -96,6 +102,7 @@ impl Plan {
     fn origin(&self) -> Result<reqwest::Url> {
         self.binding.validate()?;
         ensure!(self.original_budget_ou > 0, "zero original plan budget");
+        validate_purchase(&self.tariff, self.original_budget_ou, &self.prepaid_bytes)?;
         ensure!(
             self.tariff.hash_hex()? == self.binding.manifest_hash,
             "accepted plan tariff differs"
@@ -142,10 +149,12 @@ pub struct Interface {
 #[derive(Clone, Debug)]
 pub struct Summary {
     pub confirmed_bytes: Vec<u64>,
-    /// Uncertain and interrupted handoffs, held against the original budget.
+    /// Uncertain and interrupted handoffs, held against purchased bytes.
     pub held_bytes: Vec<u64>,
+    /// Durable cumulative purchase caps, independent of delivery counters.
     pub authorized_bytes: Vec<u64>,
-    /// Remaining local capacity, including held exposure; not a chain balance.
+    /// Original budget less authorized purchases; zero does not exhaust bytes.
+    /// This is not the channel's currently withdrawable OCT balance.
     pub remaining_ou: u64,
 }
 
@@ -188,9 +197,10 @@ impl Client {
         let tariff = plan.tariff.clone();
         let journal_key = key.clone();
         let budget = plan.original_budget_ou;
+        let prepaid = plan.prepaid_bytes.clone();
         let journal = Accounting::new(
             tokio::task::spawn_blocking(move || {
-                Journal::open(&path, binding, tariff, budget, journal_key, mode)
+                Journal::open(&path, binding, tariff, budget, prepaid, journal_key, mode)
             })
             .await??,
         );
@@ -206,6 +216,9 @@ impl Client {
             .no_proxy()
             .build()?;
         let initial = Observation::new(status(&http, &origin, &connect, &plan).await?);
+        // A control connection is allowed before payment. No WireGuard/TUN
+        // payload path is opened until the exact purchases are canonical.
+        let initial = prepay(&http, &origin, &connect, &plan, &journal, initial).await?;
         let tunnel = wireguard::Tunnel::connect(
             session.clone(),
             &key,
@@ -264,15 +277,7 @@ impl Client {
         } = self;
         initial.freshness.ensure_live()?;
         let (stop, stopped) = tokio::sync::watch::channel(false);
-        let control = control_loop(
-            http,
-            origin,
-            connect,
-            plan,
-            journal.clone(),
-            initial,
-            stopped,
-        );
+        let control = control_loop(http, origin, connect, plan, initial, stopped);
         let accounting = journal.clone();
         let driver = async move {
             let assigned = interface.address;
@@ -286,7 +291,7 @@ impl Client {
                         let length = length?;
                         let raw = packet[..length].to_vec();
                         if ip_tunnel::validate_outbound(&raw, assigned).is_err() { continue; }
-                        let reservation = reserve(&accounting, raw.clone(), Direction::Outbound).await?;
+                        let Some(reservation) = reserve(&accounting, raw.clone(), Direction::Outbound).await? else {continue;};
                         if tunnel.send_confirmed(&ip_tunnel::encode(&raw)?).await? {
                             finish(&accounting, reservation, true).await?;
                         } else {
@@ -298,7 +303,7 @@ impl Client {
                         let body = body?;
                         let raw = ip_tunnel::decode(&body)?.to_vec();
                         ip_tunnel::validate_inbound(&raw, assigned)?;
-                        let reservation = reserve(&accounting, raw.clone(), Direction::Inbound).await?;
+                        let Some(reservation) = reserve(&accounting, raw.clone(), Direction::Inbound).await? else {continue;};
                         let length = device.send(&raw).await?;
                         ensure!(length == raw.len(), "partial client TUN write");
                         finish(&accounting, reservation, true).await?;
@@ -360,15 +365,13 @@ async fn supervise(
     outcome.and(stopped).and(idle).and(summary)
 }
 
-/// One bounded control worker. HTTP finality waits never hold the journal lock
-/// or pause WireGuard/TUN processing. Cancelling a request leaves already
-/// persisted signed receipts available for a later --resume retry.
+/// Bounded authenticated status monitoring after the purchase barrier. Operator
+/// delivery counters cannot create new payment authorizations.
 async fn control_loop(
     client: reqwest::Client,
     origin: reqwest::Url,
     connect: SignedConnect,
     plan: Plan,
-    journal: Accounting,
     initial: Observation,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
@@ -379,64 +382,100 @@ async fn control_loop(
         mut freshness,
     } = initial;
     freshness.ensure_live()?;
-    // At most one receipt batch can wait for canonical settlement. Status
-    // polling remains independent even when all traffic classes need claims.
-    // Dropping the set aborts its HTTP wait; durable receipts survive retry.
-    let mut batches = tokio::task::JoinSet::new();
-    let outcome = async {
-        loop {
+    ensure!(
+        purchased(&initial, &plan),
+        "canonical prepaid capacity missing"
+    );
+    loop {
         tokio::select! {
             biased;
             _ = shutdown.wait_for(|stopped| *stopped) => return Ok(()),
             () = tokio::time::sleep_until(freshness.deadline) => anyhow::bail!("operator canonical clock stopped advancing"),
-            result = batches.join_next(), if !batches.is_empty() => {
-                result.context("settlement batch missing")?.context("settlement batch failed")??;
-                continue;
-            },
             _ = interval.tick() => (),
         }
         let poll = status(&client, &origin, &connect, &plan);
         tokio::pin!(poll);
-        let view = loop {
-            tokio::select! {
-                biased;
-                _ = shutdown.wait_for(|stopped| *stopped) => return Ok(()),
-                () = tokio::time::sleep_until(freshness.deadline) => anyhow::bail!("operator canonical clock stopped advancing"),
-                result = batches.join_next(), if !batches.is_empty() => {
-                    result.context("settlement batch missing")?.context("settlement batch failed")??;
-                },
-                view = &mut poll => break view?,
-            }
+        let view = tokio::select! {
+            biased;
+            _ = shutdown.wait_for(|stopped| *stopped) => return Ok(()),
+            () = tokio::time::sleep_until(freshness.deadline) => anyhow::bail!("operator canonical clock stopped advancing"),
+            view = &mut poll => view?,
         };
         ensure!(
             view.status.server_wireguard_key == initial.status.server_wireguard_key,
             "operator WireGuard identity changed during connection"
         );
         freshness.observe(view.status.canonical_ms)?;
-        if batches.is_empty() {
-            batches.spawn(settle_batch(
-                client.clone(),
-                origin.clone(),
-                journal.clone(),
-                view.status.committed_totals,
-            ));
+        ensure!(
+            purchased(&view, &plan),
+            "canonical prepaid capacity regressed"
+        );
+    }
+}
+
+fn purchased(view: &SignedStatus, plan: &Plan) -> bool {
+    view.status.redeemed_totals.len() == plan.prepaid_bytes.len()
+        && view
+            .status
+            .redeemed_totals
+            .iter()
+            .zip(&plan.prepaid_bytes)
+            .all(|(canonical, target)| canonical >= target)
+}
+
+/// Keep status polling independent of at most one bounded purchase batch. Only
+/// an authenticated canonical class floor opens the data path, including when
+/// the original OCT allocation was fully spent buying the allowance.
+async fn prepay(
+    client: &reqwest::Client,
+    origin: &reqwest::Url,
+    connect: &SignedConnect,
+    plan: &Plan,
+    journal: &Accounting,
+    initial: Observation,
+) -> Result<Observation> {
+    let receipts = journal.with(Journal::purchases).await?;
+    initial.freshness.ensure_live()?;
+    if purchased(&initial.signed, plan) {
+        return Ok(initial);
+    }
+    let mut batches = tokio::task::JoinSet::new();
+    batches.spawn(settle_batch(client.clone(), origin.clone(), receipts));
+    let mut interval = tokio::time::interval(Duration::from_secs(1));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let Observation {
+        mut signed,
+        mut freshness,
+    } = initial;
+    // Every tariff has at most 32 classes and each HTTP operation times out.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60 * 32 + 120);
+    loop {
+        tokio::select! {
+            biased;
+            () = tokio::time::sleep_until(freshness.deadline) => anyhow::bail!("operator canonical clock stopped advancing"),
+            () = tokio::time::sleep_until(deadline) => anyhow::bail!("canonical prepaid purchase deadline exceeded"),
+            result = batches.join_next(), if !batches.is_empty() => {
+                result.context("purchase batch missing")?.context("purchase batch failed")??;
+            },
+            _ = interval.tick() => {
+                let view = tokio::time::timeout_at(freshness.deadline.min(deadline), status(client, origin, connect, plan)).await??;
+                ensure!(view.status.server_wireguard_key == signed.status.server_wireguard_key,
+                    "operator WireGuard identity changed during purchase");
+                freshness.observe(view.status.canonical_ms)?;
+                signed = view;
+                if purchased(&signed, plan) {
+                    return Ok(Observation { signed, freshness });
+                }
+            },
         }
-        }
-    }.await;
-    batches.abort_all();
-    while batches.join_next().await.is_some() {}
-    outcome
+    }
 }
 
 async fn settle_batch(
     client: reqwest::Client,
     origin: reqwest::Url,
-    journal: Accounting,
-    operator_totals: Vec<u64>,
+    receipts: Vec<octravpn_core::payments::SignedUsage>,
 ) -> Result<()> {
-    let receipts = journal
-        .with(move |journal| journal.receipts(&operator_totals))
-        .await?;
     for receipt in receipts {
         let result = client
             .post(origin.join("payments/usage")?)
@@ -451,14 +490,31 @@ async fn settle_batch(
             result.content_length().is_none_or(|n| n <= 1024),
             "settlement response exceeds bound"
         );
+        let mut result = result;
+        let mut bytes = 0_usize;
+        while let Some(chunk) = result.chunk().await? {
+            bytes = bytes
+                .checked_add(chunk.len())
+                .context("purchase response size overflow")?;
+            ensure!(bytes <= 1024, "settlement response exceeds bound");
+        }
     }
     Ok(())
 }
 
-async fn reserve(journal: &Accounting, raw: Vec<u8>, direction: Direction) -> Result<Reservation> {
-    journal
+async fn reserve(
+    journal: &Accounting,
+    raw: Vec<u8>,
+    direction: Direction,
+) -> Result<Option<Reservation>> {
+    match journal
         .with(move |journal| journal.reserve(&raw, direction))
         .await
+    {
+        Ok(reservation) => Ok(Some(reservation)),
+        Err(error) if error.is::<PrepaidExhausted>() => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 async fn finish(journal: &Accounting, reservation: Reservation, confirmed: bool) -> Result<()> {
     journal

@@ -36,6 +36,7 @@ fn plan() -> AcceptedPlan {
         },
         tariff,
         original_budget_ou: 10_000,
+        prepaid_bytes: vec![1024],
         control_url: "http://127.0.0.1:9/".into(),
         wireguard_endpoint: "127.0.0.1:51820".into(),
     }
@@ -53,7 +54,7 @@ fn options(plan: AcceptedPlan, journal: PathBuf, mode: JournalMode) -> PaymentOp
 #[tokio::test]
 async fn malformed_public_inputs_fail_before_journal_or_network_side_effects() {
     let directory = tempfile::tempdir().unwrap();
-    for invalid in 0..7 {
+    for invalid in 0..10 {
         let mut accepted = plan();
         match invalid {
             0 => accepted.binding.manifest_hash = "cd".repeat(32),
@@ -62,7 +63,10 @@ async fn malformed_public_inputs_fail_before_journal_or_network_side_effects() {
             3 => accepted.control_url = "https://user:password@example.test/".into(),
             4 => accepted.control_url = "https://example.test/path".into(),
             5 => accepted.wireguard_endpoint = "invalid-endpoint".into(),
-            _ => accepted.binding.generation = 0,
+            6 => accepted.binding.generation = 0,
+            7 => accepted.prepaid_bytes = vec![],
+            8 => accepted.prepaid_bytes = vec![0],
+            _ => accepted.prepaid_bytes = vec![u64::MAX],
         }
         let path = directory.path().join(format!("plan-{invalid}"));
         let error = tokio::time::timeout(
@@ -96,6 +100,11 @@ fn public_plan_loader_bounds_files_and_rejects_unknown_fields() {
     assert_eq!(actual.binding, expected.binding);
     assert_eq!(actual.tariff, expected.tariff);
     assert_eq!(actual.original_budget_ou, expected.original_budget_ou);
+    assert_eq!(actual.prepaid_bytes, expected.prepaid_bytes);
+    let mut postpaid = serde_json::to_value(&expected).unwrap();
+    postpaid.as_object_mut().unwrap().remove("prepaid_bytes");
+    std::fs::write(&path, serde_json::to_vec(&postpaid).unwrap()).unwrap();
+    assert!(AcceptedPlan::load(&path).is_err());
     let mut value = serde_json::to_value(expected).unwrap();
     value["trust_me"] = true.into();
     std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();

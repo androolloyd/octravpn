@@ -513,6 +513,7 @@ async fn send_datagram(socket: &UdpSocket, packet: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use octravpn_tun::amnezia::AmneziaConfig;
 
     #[tokio::test]
     async fn absent_session_starts_handshake_without_queueing_application_payload() {
@@ -534,7 +535,7 @@ mod tests {
             recovery: Some(recovery),
             driver,
             generation: 0,
-            shield: AmneziaShield::new(Default::default()).unwrap(),
+            shield: AmneziaShield::new(AmneziaConfig::default()).unwrap(),
             session: SessionId::from_u64(1),
             hop: HopBuildInput {
                 static_pubkey: server_key.to_bytes(),

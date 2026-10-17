@@ -1,4 +1,5 @@
 {
+  "historical_checkpoint": true,
   "schema": "octranet-payment-qualification/v1",
   "observed_at": "2026-10-17T05:29:59.064947+00:00",
   "scope": "Local compiled AML and isolated four-validator native payment-plan qualification: actual client, two endpoint kernels, canonical claims and ExEx; public paid service and Mainnet remain unqualified",
@@ -335,5 +336,12 @@
     "Full compileAml typed Program admission rejects Ed25519. Explicit local Legacy emission and existing binary factory admission preserve clock and signature semantics without compiler, VM or consensus changes.",
     "Mature 24-hour refunds and seven-day unstake use separate finite canonical-clock boundary tests, not elapsed wall-clock qualification.",
     "Earlier failed compiler-admission and sandbox socket runs remain under out/octranet-payments-20261017; final results come from connected-4."
-  ]
+  ],
+  "current_revision": "prepaid-channel-instant-withdrawal-delayed-rates",
+  "current_revision_qualified": true,
+  "current_revision_document": "octranet-prepaid-2026-10-17.md",
+  "historical_results_below": true,
+  "revision_note": "These historical result records qualify the earlier postpaid candidate at their own source pins. See octranet-prepaid-status.json for the separately qualified prepaid channel revision.",
+  "superseded_by": "octranet-prepaid-status.json",
+  "current_revision_qualification_scope": "Local compiled AML, native components and isolated four-validator two-kernel forwarding; public service and Mainnet remain unqualified"
 }

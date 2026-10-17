@@ -11,10 +11,7 @@ use octravpn_core::{
 use parking_lot::RwLock;
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use crate::{
-    admission::Revocation,
-    payment_meter::{Credit, Meter},
-};
+use crate::{admission::Revocation, payment_meter::Meter};
 mod service;
 pub use service::{Config, Service};
 
@@ -31,6 +28,7 @@ pub struct Grant {
     pub tariff: Tariff,
     pub original_budget_ou: u64,
     pub remaining_ou: u64,
+    /// Authenticated cumulative prepaid byte entitlements, per class.
     pub redeemed_totals: Vec<u64>,
     pub canonical_ms: u64,
     pub claim_deadline_ms: Option<u64>,
@@ -56,10 +54,10 @@ pub trait Authority: Send + Sync {
 
 #[async_trait]
 pub trait Settlement: Send + Sync {
-    /// Return only once authenticated canonical paid OU covers the exact
-    /// cumulative charge. Byte counters may lag within an already paid rounding
-    /// interval or a zero-rate class. Pool acknowledgements never qualify;
-    /// durably queue an authorization before submitting a new claim.
+    /// Return only once authenticated canonical purchased bytes cover the
+    /// exact cumulative authorization, including zero-rate and rounded-price
+    /// classes. Pool acknowledgements never qualify; durably queue before
+    /// submitting a new purchase transaction.
     async fn confirm(&self, usage: SignedUsage) -> Result<()>;
 }
 
@@ -135,17 +133,11 @@ pub(crate) struct Registry {
     pub(crate) stop: Revocation,
     // Held by every in-flight control operation and tunnel connection.
     _writer: Arc<std::fs::File>,
-    credit: Credit,
 }
 const MAX_PLANS: usize = 4096;
 
 impl Registry {
-    fn new(
-        root: PathBuf,
-        authority: Arc<dyn Authority>,
-        writer: Arc<std::fs::File>,
-        credit: Credit,
-    ) -> Self {
+    fn new(root: PathBuf, authority: Arc<dyn Authority>, writer: Arc<std::fs::File>) -> Self {
         Self {
             root,
             authority,
@@ -154,7 +146,6 @@ impl Registry {
             meters: RwLock::new(HashMap::new()),
             stop: Revocation::default(),
             _writer: writer,
-            credit,
         }
     }
     pub(crate) fn get(&self, key: &[u8; 32]) -> Option<Arc<Connection>> {
@@ -168,6 +159,15 @@ impl Registry {
         ensure!(
             grant.binding.manifest_hash == grant.tariff.hash_hex()?,
             "paid tariff differs"
+        );
+        Ok(())
+    }
+    fn check_meter(grant: &Grant, meter: &Meter) -> Result<()> {
+        ensure!(
+            meter.binding() == &grant.binding
+                && meter.tariff() == &grant.tariff
+                && meter.budget_ou() == grant.original_budget_ou,
+            "paid immutable plan changed"
         );
         Ok(())
     }
@@ -197,7 +197,7 @@ impl Registry {
         // rotations. Capacity exhaustion never evicts a live meter journal.
         let existing = self.meters.read().get(&session).cloned();
         let meter = if let Some(meter) = existing {
-            ensure!(meter.tariff() == &grant.tariff, "paid tariff changed");
+            Self::check_meter(&grant, &meter)?;
             meter.reconcile(grant.redeemed_totals.clone()).await?;
             meter
         } else {
@@ -210,13 +210,12 @@ impl Registry {
                 self.meters.read().len() < MAX_PLANS,
                 "paid plan capacity exhausted"
             );
-            let meter = Meter::open_with_credit(
+            let meter = Meter::open(
                 self.root.join(hex::encode(session.as_bytes())),
                 grant.binding.clone(),
                 grant.tariff.clone(),
                 grant.original_budget_ou,
                 grant.redeemed_totals.clone(),
-                self.credit,
             )
             .await?;
             self.meters.write().insert(session.clone(), meter.clone());
@@ -294,6 +293,7 @@ impl Registry {
             }
             let result = async {
                 Self::check(&grant, &connection.request)?;
+                Self::check_meter(&grant, &connection.meter)?;
                 ensure!(
                     connection.meter.connect_is_current(&connection.request),
                     "connection watermark changed"
@@ -308,6 +308,29 @@ impl Registry {
             .await;
             *connection.grant.write() = result.ok();
         }
+    }
+    async fn confirm_usage(&self, meter: &Arc<Meter>, usage: SignedUsage) -> Result<()> {
+        let _serial = self.serial.lock().await;
+        ensure!(!self.stop.is_revoked(), "paid VPN stopped");
+        let grant = self.authority.claim_plan(&usage.usage.binding()).await?;
+        Self::check_meter(&grant, meter)?;
+        ensure!(
+            grant.receipt_key == usage.receipt_key && grant.guard.live(),
+            "canonical purchase lease or key differs"
+        );
+        let floor = grant
+            .redeemed_totals
+            .get(usize::from(usage.usage.traffic_class))
+            .context("purchase class missing")?;
+        ensure!(
+            *floor >= usage.usage.total_bytes,
+            "canonical purchased bytes do not cover authorization"
+        );
+        meter.reconcile(grant.redeemed_totals.clone()).await?;
+        ensure!(grant.guard.live(), "canonical purchase publication changed");
+        meter.accept_usage(usage).await?;
+        ensure!(grant.guard.live(), "canonical purchase publication changed");
+        Ok(())
     }
     async fn usage(&self, usage: &SignedUsage) -> Result<Arc<Meter>> {
         usage.verify()?;
@@ -341,13 +364,12 @@ impl Registry {
                     self.meters.read().len() < MAX_PLANS,
                     "paid plan capacity exhausted"
                 );
-                let meter = Meter::resume_with_credit(
+                let meter = Meter::resume(
                     self.root.join(hex::encode(session.as_bytes())),
                     grant.binding.clone(),
                     grant.tariff,
                     grant.original_budget_ou,
                     grant.redeemed_totals,
-                    self.credit,
                 )
                 .await?;
                 ensure!(grant.guard.live(), "canonical payment lease revoked");

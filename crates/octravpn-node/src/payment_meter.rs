@@ -8,7 +8,7 @@ use octravpn_core::payments::{Budget, Direction, SignedConnect, SignedUsage, Tar
 #[cfg(test)]
 use octravpn_core::{payments::Deployment, Address};
 use parking_lot::{Mutex, RwLock};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -25,35 +25,11 @@ const MAX_PENDING: usize = 1024;
 
 pub use octravpn_core::payments::PlanBinding as Binding;
 
-/// Operator's explicit maximum postpaid exposure before another authorization.
-/// Limits include pending and uncertain sends, across every traffic class.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Credit {
-    pub max_unacknowledged_bytes: u64,
-    pub max_unacknowledged_ou: u64,
-}
-impl Credit {
-    /// Component/testing policy. Production hosts must choose bounded credit.
-    pub const UNLIMITED: Self = Self {
-        max_unacknowledged_bytes: u64::MAX,
-        max_unacknowledged_ou: u64::MAX,
-    };
-    fn is_unlimited(&self) -> bool {
-        *self == Self::UNLIMITED
-    }
-}
-impl Default for Credit {
-    fn default() -> Self {
-        Self::UNLIMITED
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Snapshot {
-    /// Includes authenticated canonical redemption floors, never uncertain IO.
+    /// Actual confirmed delivery only; purchased bytes never imply delivery.
     pub committed_totals: Vec<u64>,
-    pub redeemed_totals: Vec<u64>,
+    pub purchased_totals: Vec<u64>,
     pub uncertain_totals: Vec<u64>,
     pub pending_totals: Vec<u64>,
     pub committed_charge_ou: u64,
@@ -112,56 +88,34 @@ fn sum(record: &Record) -> Result<Vec<u64>> {
 fn snapshot(record: &Record, capacity: &Budget, tariff: &Tariff) -> Result<Snapshot> {
     Ok(Snapshot {
         committed_totals: record.committed.clone(),
-        redeemed_totals: record.redeemed.clone(),
+        purchased_totals: record.purchased.clone(),
         uncertain_totals: record.uncertain.clone(),
         pending_totals: record.pending.clone(),
         committed_charge_ou: tariff.total_charge(&record.committed)?,
         capacity_charge_ou: capacity.total_charge_ou(),
-        remaining_ou: capacity.remaining_ou(),
+        remaining_ou: record
+            .budget_ou
+            .checked_sub(tariff.total_charge(&record.purchased)?)
+            .context("purchased charge exceeds plan budget")?,
     })
 }
 
-fn authorized(record: &Record) -> Result<Vec<u64>> {
+fn check_prepaid(record: &Record, capacity: &Budget, tariff: &Tariff) -> Result<()> {
     ensure!(
-        record.authorizations.len() == record.redeemed.len(),
-        "meter authorization shape differs"
-    );
-    Ok(record
-        .authorizations
-        .iter()
-        .zip(&record.redeemed)
-        .map(|(usage, redeemed)| {
-            usage
-                .as_ref()
-                .map_or(*redeemed, |u| (*redeemed).max(u.usage.total_bytes))
-        })
-        .collect())
-}
-fn check_credit(record: &Record, capacity: &Budget, tariff: &Tariff) -> Result<()> {
-    let authorized = authorized(record)?;
-    let unacknowledged = capacity.totals().iter().zip(&authorized).try_fold(
-        0_u128,
-        |sum, (total, authorized)| -> Result<u128> {
-            Ok(sum
-                + u128::from(
-                    total
-                        .checked_sub(*authorized)
-                        .context("authorized bytes exceed meter capacity")?,
-                ))
-        },
-    )?;
-    let unacknowledged_ou = capacity
-        .total_charge_ou()
-        .checked_sub(tariff.total_charge(&authorized)?)
-        .context("authorized charge exceeds meter capacity")?;
-    ensure!(
-        record.credit.is_unlimited()
-            || unacknowledged <= u128::from(record.credit.max_unacknowledged_bytes),
-        "unacknowledged traffic byte credit exhausted"
+        capacity.totals().len() == record.purchased.len(),
+        "meter purchase shape differs"
     );
     ensure!(
-        unacknowledged_ou <= record.credit.max_unacknowledged_ou,
-        "unacknowledged traffic payment credit exhausted"
+        tariff.total_charge(&record.purchased)? <= record.budget_ou,
+        "purchased tariff charge exceeds plan budget"
+    );
+    ensure!(
+        capacity
+            .totals()
+            .iter()
+            .zip(&record.purchased)
+            .all(|(used, paid)| used <= paid),
+        "prepaid traffic bytes exhausted"
     );
     Ok(())
 }
@@ -180,9 +134,8 @@ fn check_previous(previous: Option<&SignedConnect>, connect: &SignedConnect) -> 
 }
 
 impl Meter {
-    /// The host supplies only authenticated, same-generation canonical floors.
-    /// Original budget includes amounts already redeemed, not just the current
-    /// on-chain remainder. Never delete this directory while a plan can reopen.
+    /// Canonical floors are cumulative purchased bytes, never delivery. Keep
+    /// this journal for the plan lifetime: reconnect cannot reset consumption.
     pub async fn open(
         directory: PathBuf,
         binding: Binding,
@@ -190,47 +143,24 @@ impl Meter {
         original_budget_ou: u64,
         canonical_totals: Vec<u64>,
     ) -> Result<Arc<Self>> {
-        Self::open_with_credit(
-            directory,
-            binding,
-            tariff,
-            original_budget_ou,
-            canonical_totals,
-            Credit::UNLIMITED,
-        )
-        .await
-    }
-
-    /// Production hosts set and persist their maximum unacknowledged exposure.
-    pub async fn open_with_credit(
-        directory: PathBuf,
-        binding: Binding,
-        tariff: Tariff,
-        original_budget_ou: u64,
-        canonical_totals: Vec<u64>,
-        credit: Credit,
-    ) -> Result<Arc<Self>> {
         Self::open_mode(
             directory,
             binding,
             tariff,
             original_budget_ou,
             canonical_totals,
-            credit,
             false,
         )
         .await
     }
 
-    /// Recover an existing delivery journal for settlement without creating
-    /// a directory, writer lease or empty accounting record when absent.
-    pub async fn resume_with_credit(
+    /// Existing-only recovery creates no directory, lease or empty journal.
+    pub async fn resume(
         directory: PathBuf,
         binding: Binding,
         tariff: Tariff,
         original_budget_ou: u64,
         canonical_totals: Vec<u64>,
-        credit: Credit,
     ) -> Result<Arc<Self>> {
         Self::open_mode(
             directory,
@@ -238,7 +168,6 @@ impl Meter {
             tariff,
             original_budget_ou,
             canonical_totals,
-            credit,
             true,
         )
         .await
@@ -250,7 +179,6 @@ impl Meter {
         tariff: Tariff,
         original_budget_ou: u64,
         canonical_totals: Vec<u64>,
-        credit: Credit,
         existing_only: bool,
     ) -> Result<Arc<Self>> {
         tokio::task::spawn_blocking(move || {
@@ -260,7 +188,6 @@ impl Meter {
                 tariff,
                 original_budget_ou,
                 &canonical_totals,
-                credit,
                 existing_only,
             )
         })
@@ -272,7 +199,6 @@ impl Meter {
         tariff: Tariff,
         budget_ou: u64,
         canonical: &[u64],
-        credit: Credit,
         existing_only: bool,
     ) -> Result<Arc<Self>> {
         binding.validate()?;
@@ -296,34 +222,30 @@ impl Meter {
                 ensure!(
                     record.binding == binding
                         && record.tariff_hash == tariff_hash
-                        && record.budget_ou == budget_ou
-                        && record.credit == credit,
-                    "meter plan binding, budget or credit differs"
+                        && record.budget_ou == budget_ou,
+                    "meter plan binding or budget differs"
                 );
                 ensure!(
-                    record.redeemed.len() == canonical.len()
+                    record.purchased.len() == canonical.len()
                         && record.committed.len() == canonical.len(),
                     "meter canonical counter shape differs"
                 );
-                Budget::new(tariff.clone(), budget_ou, sum(&record)?)?;
+                let capacity = Budget::new(tariff.clone(), budget_ou, sum(&record)?)?;
+                check_prepaid(&record, &capacity, &tariff)?;
                 record
             }
             None => Record {
                 binding: binding.clone(),
                 tariff_hash,
                 budget_ou,
-                committed: canonical.to_vec(),
-                redeemed: canonical.to_vec(),
+                committed: vec![0; canonical.len()],
+                purchased: canonical.to_vec(),
                 uncertain: vec![0; canonical.len()],
                 pending: vec![0; canonical.len()],
                 connect: None,
-                credit,
                 authorizations: vec![None; canonical.len()],
             },
         };
-        if record.authorizations.is_empty() {
-            record.authorizations.resize(canonical.len(), None);
-        }
         ensure!(
             record.authorizations.len() == canonical.len(),
             "meter authorization shape differs"
@@ -351,26 +273,26 @@ impl Meter {
                     "stored usage receipt key differs"
                 );
                 ensure!(
-                    usage.usage.total_bytes <= record.committed[class],
-                    "stored authorization exceeds delivery"
+                    usage.usage.total_bytes <= record.purchased[class],
+                    "stored authorization exceeds canonical purchase"
                 );
             }
         }
-        let prior_capacity = sum(&record)?;
         for (class, &floor) in canonical.iter().enumerate() {
             ensure!(
-                floor >= record.redeemed[class]
-                    && record.redeemed[class] <= record.committed[class],
-                "meter canonical counter moved backwards"
+                floor >= record.purchased[class],
+                "meter canonical purchase moved backwards"
             );
-            record.committed[class] = record.committed[class].max(floor);
-            record.redeemed[class] = floor;
-            // A canonical receipt can resolve some prior uncertain usage.
-            record.uncertain[class] = prior_capacity[class].saturating_sub(record.committed[class]);
+            record.purchased[class] = floor;
+            // A purchase never proves that a previously handed-off packet was
+            // received. Recover pending IO as permanently held uncertainty.
+            record.uncertain[class] = record.uncertain[class]
+                .checked_add(record.pending[class])
+                .context("meter uncertain overflow")?;
             record.pending[class] = 0;
         }
         let capacity = Budget::new(tariff.clone(), budget_ou, sum(&record)?)?;
-        check_credit(&record, &capacity, &tariff)?;
+        check_prepaid(&record, &capacity, &tariff)?;
         disk.persist(&record)?;
         let published = snapshot(&record, &capacity, &tariff)?;
         let current_connect = record.connect.clone();
@@ -395,6 +317,9 @@ impl Meter {
     }
     pub fn binding(&self) -> &Binding {
         &self.binding
+    }
+    pub fn budget_ou(&self) -> u64 {
+        self.budget_ou
     }
     pub fn tariff(&self) -> &Tariff {
         &self.tariff
@@ -442,7 +367,8 @@ impl Meter {
         Ok(result)
     }
 
-    /// Authentication and delivery preflight. Previously covered cumulative
+    /// Authenticate a purchase within the original plan budget, before delivery.
+    /// Previously covered cumulative
     /// authorizations remain valid retries regardless of their sequence.
     pub fn check_usage(&self, usage: &SignedUsage) -> Result<()> {
         self.available()?;
@@ -455,20 +381,20 @@ impl Meter {
                 .is_some_and(|c| c.receipt_key == usage.receipt_key),
             "usage receipt key differs from current connection"
         );
-        let snapshot = self.snapshot()?;
-        let committed = snapshot
-            .committed_totals
-            .get(usize::from(usage.usage.traffic_class))
+        let mut purchased = self.snapshot()?.purchased_totals;
+        let floor = purchased
+            .get_mut(usize::from(usage.usage.traffic_class))
             .context("usage class missing")?;
+        *floor = (*floor).max(usage.usage.total_bytes);
         ensure!(
-            usage.usage.total_bytes <= *committed,
-            "authorization exceeds confirmed delivery"
+            self.tariff.total_charge(&purchased)? <= self.budget_ou,
+            "purchase exceeds original plan budget"
         );
         self.available()
     }
 
-    /// The host invokes this only after the cumulative authorized charge is
-    /// covered by canonical paid OU. A signature alone does not grant credit.
+    /// Record a purchase authorization only after its exact canonical byte floor
+    /// was authenticated and reconciled. A signature never grants capacity.
     pub async fn accept_usage(self: &Arc<Self>, usage: SignedUsage) -> Result<()> {
         self.check_usage(&usage)?;
         let meter = self.clone();
@@ -484,14 +410,14 @@ impl Meter {
                 "usage receipt key differs from current connection"
             );
             let class = usize::from(usage.usage.traffic_class);
-            let committed = state
+            let purchased = state
                 .record
-                .committed
+                .purchased
                 .get(class)
                 .context("usage class missing")?;
             ensure!(
-                usage.usage.total_bytes <= *committed,
-                "authorization exceeds confirmed delivery"
+                usage.usage.total_bytes <= *purchased,
+                "authorization exceeds canonical purchase"
             );
             if let Some(previous) = &state.record.authorizations[class] {
                 // AML settles the greatest cumulative byte authorization.
@@ -502,10 +428,6 @@ impl Meter {
             }
             let mut record = state.record.clone();
             record.authorizations[class] = Some(usage);
-            ensure!(
-                meter.tariff.total_charge(&authorized(&record)?)? <= meter.budget_ou,
-                "authorized tariff charge exceeds plan budget"
-            );
             meter.persist(&record)?;
             state.record = record;
             *meter.receipts.write() = state
@@ -554,7 +476,7 @@ impl Meter {
         .await?
     }
 
-    /// Reconcile authenticated cumulative redemption floors without resetting
+    /// Reconcile authenticated cumulative purchased bytes without resetting
     /// outstanding packet reservations or releasing uncertain capacity.
     pub async fn reconcile(self: &Arc<Self>, canonical: Vec<u64>) -> Result<()> {
         let meter = self.clone();
@@ -562,24 +484,19 @@ impl Meter {
             let mut state = meter.writer.lock();
             meter.available()?;
             ensure!(
-                canonical.len() == state.record.redeemed.len(),
+                canonical.len() == state.record.purchased.len(),
                 "canonical class shape differs"
             );
             let mut record = state.record.clone();
             for (class, floor) in canonical.into_iter().enumerate() {
                 ensure!(
-                    floor >= record.redeemed[class],
-                    "canonical redemption regressed"
+                    floor >= record.purchased[class],
+                    "canonical purchase regressed"
                 );
-                // A live process only accepts claims for its committed usage.
-                // Recovery of an external claim requires reopening the journal.
-                ensure!(
-                    floor <= record.committed[class],
-                    "canonical usage exceeds local delivery"
-                );
-                record.redeemed[class] = floor;
+                record.purchased[class] = floor;
             }
-            if record.redeemed != state.record.redeemed {
+            check_prepaid(&record, &state.capacity, &meter.tariff)?;
+            if record.purchased != state.record.purchased {
                 meter.persist(&record)?;
                 state.record = record;
                 meter.publish(&state)?;
@@ -643,7 +560,7 @@ impl Meter {
         capacity.reserve(class, bytes)?;
         let mut record = state.record.clone();
         record.pending[index] = next_pending;
-        check_credit(&record, &capacity, &self.tariff)?;
+        check_prepaid(&record, &capacity, &self.tariff)?;
         self.persist(&record)?;
         state.record = record;
         state.capacity = capacity;

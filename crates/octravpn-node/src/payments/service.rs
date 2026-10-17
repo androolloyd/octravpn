@@ -35,9 +35,6 @@ pub struct Config {
     pub operator_key: Arc<KeyPair>,
     pub wireguard_secret: StaticSecret,
     pub ip_tunnel: IpTunnelConfig,
-    /// Explicit operator risk between payer acknowledgements. This is a
-    /// bounded postpaid window, not a proof of delivery or guaranteed payment.
-    pub credit: crate::payment_meter::Credit,
 }
 
 struct Control {
@@ -59,14 +56,8 @@ impl Service {
         authority: Arc<dyn Authority>,
         settlement: Arc<dyn Settlement>,
     ) -> Result<Self> {
-        ensure!(
-            config.credit.max_unacknowledged_bytes < u64::MAX
-                && config.credit.max_unacknowledged_ou < u64::MAX,
-            "production payment service requires explicit bounded postpaid credit"
-        );
         let wireguard = PublicKey::from(&config.wireguard_secret).to_bytes();
-        let identity =
-            serde_json::to_vec(&(1_u8, config.operator_key.public, wireguard, config.credit))?;
+        let identity = serde_json::to_vec(&(2_u8, config.operator_key.public, wireguard))?;
         let root = config.data_dir.clone();
         let writer =
             tokio::task::spawn_blocking(move || open_directory(&root, &identity)).await??;
@@ -74,7 +65,6 @@ impl Service {
             config.data_dir.clone(),
             authority,
             Arc::new(writer),
-            config.credit,
         ));
         // Payment mode has no legacy announcement, UDP-proxy, receipt or mesh
         // admission routes. The shared transport selects only this registry.
@@ -222,10 +212,7 @@ async fn usage(
     let result = async {
         let meter = state.registry.usage(&usage).await?;
         state.settlement.confirm(usage.clone()).await?;
-        // Credit resumes only after its cumulative charge is canonically paid.
-        // Same-charge rounding/free-class acknowledgements are durable locally;
-        // they cannot authorize a larger economic claim by themselves.
-        meter.accept_usage(usage).await
+        state.registry.confirm_usage(&meter, usage).await
     }
     .await;
     result

@@ -109,6 +109,7 @@ mod tests {
             },
             tariff,
             1000,
+            vec![1024],
             key,
             OpenMode::Create,
         )

@@ -275,7 +275,7 @@ mod tests {
         // Actual expiry remains reclaimable; retention never extends a lease.
         allowlist
             .modify(&client_wg_pubkey, |current| {
-                current.expires_at = Instant::now() - Duration::from_secs(1)
+                current.expires_at = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
             })
             .unwrap();
         retain_routes(&mut routes);

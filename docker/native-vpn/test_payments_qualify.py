@@ -94,48 +94,26 @@ class PaymentQualificationTests(unittest.TestCase):
         self.assertEqual(len(report['attempts']), 1)
         self.assertEqual(report['failure'], 'AssertionError')
 
-    def test_canonical_payment_does_not_imply_meter_credit_is_restored(self):
-        state = {'authorized_bytes': [32164]}
+    def test_paid_purchase_requires_reconciled_entitlement_and_never_borrows_unsigned_capacity(self):
+        state = {'authorized_bytes': [32164], 'local_bytes': [0]}
         tariff = {'classes': [{'rate_ou_per_mib': 10000}]}
-        record = {'committed': [32164], 'redeemed': [0], 'authorizations': [None],
-                  'uncertain': [0], 'pending': [0],
-                  'credit': {'max_unacknowledged_ou': 100000}}
-        with patch.object(gate, 'settled', return_value=(state, 307)), \
+        record = {'committed': [0], 'purchased': [0], 'authorizations': [None],
+                  'uncertain': [0], 'pending': [0]}
+        with patch.object(gate, 'PREPAID_BYTES', [32164]), \
+                patch.object(gate, 'settled', return_value=(state, 307)), \
                 patch.object(gate, 'meter', return_value=record):
-            self.assertIsNone(gate.settled_credit('program', 'operator', tariff, [32164]))
-            record['redeemed'] = [32164]
-            self.assertEqual(gate.settled_credit('program', 'operator', tariff, [32164]), (state, 307))
-            # Same-charge and zero-rate receipts can be durably acknowledged
-            # after canonical payment while its raw byte floor still lags.
-            record['redeemed'] = [32163]
+            self.assertIsNone(gate.settled_prepaid('program', 'operator', tariff, [32164]))
+            record['purchased'] = [32164]
+            self.assertEqual(gate.settled_prepaid('program', 'operator', tariff, [32164]), (state, 307))
+            # A signature or already paid rounding bucket cannot stand in for
+            # the exact authenticated canonical byte entitlement.
+            record['purchased'] = [32163]
             record['authorizations'] = [{'usage': {'total_bytes': 32164}}]
-            self.assertEqual(gate.settled_credit('program', 'operator', tariff, [32164]), (state, 307))
-            record['uncertain'] = [gate.CREDIT_BYTES + 1]
+            self.assertIsNone(gate.settled_prepaid('program', 'operator', tariff, [32164]))
+            record['purchased'] = [32164]
+            record['uncertain'] = [32165]
             with self.assertRaises(AssertionError):
-                gate.settled_credit('program', 'operator', tariff, [32164])
-
-    def test_credit_readiness_preserves_one_sided_usage_and_requires_roundtrip_headroom(self):
-        state = {'authorized_bytes': [32164]}
-        tariff = {'classes': [{'rate_ou_per_mib': 10000}]}
-        record = {'committed': [33164], 'redeemed': [32164], 'authorizations': [None],
-                  'uncertain': [0], 'pending': [0],
-                  'credit': {'max_unacknowledged_ou': 100000}}
-        with patch.object(gate, 'settled', return_value=(state, 307)), \
-                patch.object(gate, 'meter', return_value=record):
-            # The extra successful server handoff was lost before the client
-            # observed it. It stays unacknowledged, without blocking readiness.
-            self.assertEqual(gate.settled_credit('program', 'operator', tariff, [32164]), (state, 307))
-            self.assertEqual(record['committed'], [33164])
-            self.assertEqual(record['redeemed'], [32164])
-            record['uncertain'] = [gate.CREDIT_BYTES - 1000 - 2 * gate.PAID_MTU + 1]
-            self.assertIsNone(gate.settled_credit('program', 'operator', tariff, [32164]))
-            record['uncertain'] = [0]
-            # 1,000 held bytes cost 10 OU here; another worst-class full-MTU
-            # round trip needs 26 OU. A 35 OU limit leaves insufficient room.
-            record['credit']['max_unacknowledged_ou'] = 35
-            self.assertIsNone(gate.settled_credit('program', 'operator', tariff, [32164]))
-            record['credit']['max_unacknowledged_ou'] = 36
-            self.assertEqual(gate.settled_credit('program', 'operator', tariff, [32164]), (state, 307))
+                gate.settled_prepaid('program', 'operator', tariff, [32164])
 
     def test_failure_snapshot_copies_only_public_journals_before_teardown(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -150,7 +128,8 @@ class PaymentQualificationTests(unittest.TestCase):
             process.poll.return_value = None
             control = Mock()
             control.metrics.return_value = {'closed': False}
-            with patch.multiple(gate.g, ROOT=root, EVIDENCE=evidence, PROCESSES={'payer': process}):
+            with patch.multiple(gate.g, ROOT=root, EVIDENCE=evidence, PROCESSES={'payer': process}), \
+                    patch.object(gate, 'public_status', return_value={'http': 503, 'body': {'reason': 'fixture'}}):
                 gate.failure_snapshot(control)
             report = json.loads((evidence / 'failure/diagnostics.json').read_text())
             self.assertEqual(report['processes']['payer'], {'pid': 123, 'exit': None})
@@ -158,6 +137,34 @@ class PaymentQualificationTests(unittest.TestCase):
             self.assertEqual(report['copied'], ['client.json'])
             self.assertEqual(sorted(path.name for path in (evidence / 'failure').iterdir()),
                              ['client.json', 'diagnostics.json'])
+
+
+    def test_operator_readiness_requires_serving_retained_epoch_and_public_200(self):
+        observations = []
+        for serving, epoch, public in [(False, 7, 200), (True, 6, 200),
+                                       (True, 7, 503), (True, 7, 200)]:
+            observations.extend([{'http': 200, 'body': {'serving': serving, 'epoch': epoch}},
+                                 {'http': public, 'body': {}}])
+
+        def poll(check, seconds, label):
+            self.assertEqual(seconds, 120)
+            self.assertIn('Serving', label)
+            for _ in range(3):
+                self.assertFalse(check())
+            self.assertTrue(check())
+
+        journal = {}
+        with patch.object(gate, 'public_status', side_effect=observations), \
+                patch.object(gate.g, 'JOURNAL', journal), \
+                patch.object(gate.g, 'until', side_effect=poll), \
+                patch.object(gate.g, 'save') as save:
+            gate.operator_ready(7)
+        report = journal['operator_readiness'][0]
+        self.assertTrue(report['ready'])
+        self.assertEqual(report['attempts'], 4)
+        self.assertEqual(report['minimum_epoch'], 7)
+        self.assertEqual(report['last']['/operator/status']['body']['epoch'], 7)
+        save.assert_called_once()
 
 
 if __name__ == '__main__':

@@ -1,6 +1,7 @@
 // Ownerless Octranet payment accounts. Portal access is outside paid admission.
 // Program epoch_time is canonical milliseconds; this source needs no new opcode.
-// Receipts authorize cumulative class usage, not a claim of provable delivery.
+// Receipts buy cumulative class byte allowances before traffic is carried.
+// A purchase authorization is not evidence of delivery or a slashing proof.
 // The adopted typed Program profile excludes Ed25519. Compile this source
 // with compile-legacy and deploy its raw OCTB through the existing factory.
 program OctranetPayments {
@@ -27,6 +28,13 @@ program OctranetPayments {
     offer_classes: map[uint]uint
     offer_rate: map[uint]map[uint]uint
     offer_sealed: map[uint]uint
+    offer_series: map[uint]uint
+    offer_parent: map[uint]uint
+    offer_has_parent: map[uint]uint
+    offer_start_ms: map[uint]uint
+    offer_end_ms: map[uint]uint
+    offer_replacement: map[uint]uint
+    offer_cancelled: map[uint]uint
     generation: map[address]uint
     active: map[address]uint
     receipt_key: map[address]string
@@ -36,6 +44,7 @@ program OctranetPayments {
     plan_count: uint
     plan_payer: map[uint]address
     plan_generation: map[uint]uint
+    plan_receipt_key: map[uint]string
     plan_offer: map[uint]uint
     plan_budget: map[uint]uint
     plan_opened_ms: map[uint]uint
@@ -50,11 +59,15 @@ program OctranetPayments {
   event Funded(account: address, amount: uint)
   event OfferCreated(offer: uint, operator: address, manifest: string)
   event OfferSealed(offer: uint, classes: uint)
+  event RateChangeScheduled(parent: uint, offer: uint, activation_ms: uint)
+  event RateChangeCancelled(parent: uint, offer: uint)
   event PlanOpened(plan: uint, account: address, generation: uint, offer: uint, budget: uint)
   event UsageCharged(plan: uint, traffic_class: uint, sequence: uint, total_bytes: uint, increment: uint)
   event ExitRequested(account: address, deadline_ms: uint)
   event Exited(account: address, remaining: uint)
   event EarningsWithdrawn(operator: address, amount: uint)
+  event EarningsAllocated(account: address, amount: uint)
+  event ChannelWithdrawn(account: address, amount: uint, generation: uint)
   event OperatorBonded(operator: address, amount: uint)
   event OperatorUnstakeRequested(operator: address, deadline_ms: uint)
   event OperatorUnstaked(operator: address, amount: uint)
@@ -128,8 +141,8 @@ program OctranetPayments {
     return amount
   }
 
-  // Receipt keys are scoped to a funding generation. Rotation cannot strand
-  // funded obligations: exit first, wait the fixed window, then register again.
+  // Receipt keys are scoped to a funding generation. Closing or partially
+  // withdrawing the channel invalidates old plans before value leaves custody.
   fn register(receipt_key: string, signature: string): uint {
     require(self.active[caller] == 0, "account already active")
     require(self.funds[caller] == 0 && self.reserved[caller] == 0, "account not empty")
@@ -169,6 +182,34 @@ program OctranetPayments {
     self.offer_owner[id] = caller
     self.offer_generation[id] = self.operator_generation[caller]
     self.offer_manifest[id] = manifest_hash
+    self.offer_series[id] = id
+    emit OfferCreated(id, caller, manifest_hash)
+    return id
+  }
+
+  private fn quote_open(offer: uint): bool {
+    let end = self.offer_end_ms[offer]
+    return self.offer_sealed[offer] == 1 && self.offer_cancelled[offer] == 0 && epoch_time >= self.offer_start_ms[offer] && (end == 0 || epoch_time < end)
+  }
+
+  // A replacement is a fresh immutable quote in the same product lineage.
+  // Separate base offers are separate products, never a reprice of old consent.
+  fn create_rate_change(parent: uint, manifest_hash: string): uint {
+    require_clock()
+    require(parent < self.offer_count && self.offer_owner[parent] == caller, "not offer operator")
+    require(operator_open(caller), "operator unavailable")
+    require(self.offer_generation[parent] == self.operator_generation[caller], "operator generation closed")
+    require(quote_open(parent), "parent quote inactive")
+    require_digest(manifest_hash)
+    require(self.offer_count < MAX_UINT, "offers exhausted")
+    let id = self.offer_count
+    self.offer_count = id + 1
+    self.offer_owner[id] = caller
+    self.offer_generation[id] = self.operator_generation[caller]
+    self.offer_manifest[id] = manifest_hash
+    self.offer_series[id] = self.offer_series[parent]
+    self.offer_parent[id] = parent
+    self.offer_has_parent[id] = 1
     emit OfferCreated(id, caller, manifest_hash)
     return id
   }
@@ -185,12 +226,44 @@ program OctranetPayments {
   }
 
   fn seal_offer(offer: uint): bool {
+    require_clock()
     require(offer < self.offer_count && self.offer_owner[offer] == caller, "not offer operator")
     require(self.offer_sealed[offer] == 0 && self.offer_classes[offer] > 0, "invalid offer state")
     require(operator_open(caller), "operator unavailable")
     require(self.offer_generation[offer] == self.operator_generation[caller], "operator generation closed")
+    if self.offer_has_parent[offer] == 1 {
+      let parent = self.offer_parent[offer]
+      require(quote_open(parent), "parent quote inactive")
+      let previous = self.offer_replacement[parent]
+      if previous > 0 {
+        require(epoch_time < self.offer_start_ms[previous], "rate change already active")
+        self.offer_cancelled[previous] = 1
+        emit RateChangeCancelled(parent, previous)
+      }
+      let activation = epoch_time + DAY_MS
+      self.offer_start_ms[offer] = activation
+      self.offer_end_ms[parent] = activation
+      self.offer_replacement[parent] = offer
+      emit RateChangeScheduled(parent, offer, activation)
+    } else {
+      self.offer_start_ms[offer] = epoch_time
+    }
     self.offer_sealed[offer] = 1
     emit OfferSealed(offer, self.offer_classes[offer])
+    return true
+  }
+
+  fn cancel_rate_change(offer: uint): bool {
+    require_clock()
+    require(offer < self.offer_count && self.offer_owner[offer] == caller, "not offer operator")
+    require(self.offer_sealed[offer] == 1 && self.offer_has_parent[offer] == 1 && self.offer_cancelled[offer] == 0, "rate change not pending")
+    require(epoch_time < self.offer_start_ms[offer], "rate change already active")
+    let parent = self.offer_parent[offer]
+    require(self.offer_replacement[parent] == offer, "rate change not pending")
+    self.offer_cancelled[offer] = 1
+    self.offer_replacement[parent] = 0
+    self.offer_end_ms[parent] = 0
+    emit RateChangeCancelled(parent, offer)
     return true
   }
 
@@ -198,14 +271,24 @@ program OctranetPayments {
     require_clock()
     require(account_open(caller), "account exiting or inactive")
     require(offer < self.offer_count && self.offer_sealed[offer] == 1, "offer not sealed")
+    require(quote_open(offer), "offer quote inactive")
     require(operator_open(self.offer_owner[offer]), "operator unavailable")
     require(self.offer_generation[offer] == self.operator_generation[self.offer_owner[offer]], "operator generation closed")
-    require(budget > 0 && budget <= self.funds[caller] - self.reserved[caller], "budget unavailable")
+    require(budget > 0, "budget unavailable")
+    let available = self.funds[caller] - self.reserved[caller]
+    if budget > available {
+      let needed = budget - available
+      require(needed <= self.earnings[caller], "budget unavailable")
+      self.earnings[caller] = self.earnings[caller] - needed
+      self.funds[caller] = self.funds[caller] + needed
+      emit EarningsAllocated(caller, needed)
+    }
     require(self.plan_count < MAX_UINT, "plans exhausted")
     let id = self.plan_count
     self.plan_count = id + 1
     self.plan_payer[id] = caller
     self.plan_generation[id] = self.generation[caller]
+    self.plan_receipt_key[id] = self.receipt_key[caller]
     self.plan_offer[id] = offer
     self.plan_budget[id] = budget
     self.plan_opened_ms[id] = epoch_time
@@ -216,7 +299,7 @@ program OctranetPayments {
   }
 
   private fn usage_message(plan: uint, traffic_class: uint, sequence: uint, total_bytes: uint): string {
-    let message = concat("Octranet usage v1|", self.domain)
+    let message = concat("Octranet prepaid v1|", self.domain)
     message = concat(message, concat("|", self_addr))
     message = concat(message, concat("|", self.plan_payer[plan]))
     message = concat(message, concat("|", to_string(self.plan_generation[plan])))
@@ -229,21 +312,25 @@ program OctranetPayments {
   }
 
   private fn operator_claim_open(offer: uint): bool {
-    let stopped = self.operator_stopped[self.offer_owner[offer]][self.offer_generation[offer]]
-    return stopped == 0 || epoch_time < stopped + DAY_MS
+    let operator = self.offer_owner[offer]
+    return operator_open(operator) && self.offer_generation[offer] == self.operator_generation[operator]
   }
 
-  // Anyone can deliver the payer's exact authorization. The immutable offer
-  // selects the beneficiary; a relayer can neither redirect nor increase it.
+  // Anyone can deliver the payer's exact prepaid purchase authorization.
+  // The immutable offer selects the beneficiary; a relayer can neither redirect
+  // nor increase it. Purchased capacity is separate from off-chain consumption.
   nonreentrant fn claim(plan: uint, traffic_class: uint, sequence: uint, total_bytes: uint, signature: string): uint {
     require_clock()
     require(plan < self.plan_count, "plan not found")
     let payer = self.plan_payer[plan]
     require(self.active[payer] == 1 && self.plan_generation[plan] == self.generation[payer], "plan generation closed")
     let deadline = self.exit_deadline[payer]
-    require(deadline == 0 || epoch_time < deadline, "claim window closed")
+    // A stopped connection must not buy unusable future bytes from a held
+    // signature. Prepaid forwarding has no delivered-but-unsettled traffic debt.
+    require(deadline == 0, "claim window closed")
     let offer = self.plan_offer[plan]
     require(operator_claim_open(offer), "operator settlement window closed")
+    require(quote_open(offer), "offer quote inactive")
     require(traffic_class < self.offer_classes[offer], "class not found")
     require(sequence > 0 && sequence <= MAX_UINT, "invalid receipt sequence")
     // A payer must not invalidate a larger authorization by racing a tiny
@@ -272,16 +359,15 @@ program OctranetPayments {
     return increment
   }
 
-  // An operator's stopped generation cannot strand a payer's reserved budget.
-  // Release is available after its fixed receipt deadline; claims cannot revive
-  // the released plan, including after the operator bonds a new generation.
+  // Stopped providers cannot accept another prepaid purchase, so their unused
+  // allocations can be released immediately. Purchased bytes remain final.
   fn release_stopped_plan(plan: uint): uint {
     require_clock()
     require(plan < self.plan_count && self.plan_payer[plan] == caller, "not plan payer")
     require(self.active[caller] == 1 && self.plan_generation[plan] == self.generation[caller], "plan generation closed")
     let offer = self.plan_offer[plan]
     let stopped = self.operator_stopped[self.offer_owner[offer]][self.offer_generation[offer]]
-    require(stopped > 0 && epoch_time >= stopped + DAY_MS, "operator settlement window open")
+    require(stopped > 0, "operator not stopped")
     let amount = self.plan_remaining[plan]
     self.plan_remaining[plan] = 0
     self.reserved[caller] = self.reserved[caller] - amount
@@ -292,7 +378,7 @@ program OctranetPayments {
     require_clock()
     require(self.active[caller] == 1, "account inactive")
     if self.exit_deadline[caller] == 0 {
-      self.exit_deadline[caller] = epoch_time + DAY_MS
+      self.exit_deadline[caller] = epoch_time
       emit ExitRequested(caller, self.exit_deadline[caller])
     }
     return self.exit_deadline[caller]
@@ -300,18 +386,42 @@ program OctranetPayments {
 
   nonreentrant fn withdraw_remaining(): uint {
     require_clock()
-    require(self.active[caller] == 1 && self.exit_deadline[caller] > 0, "exit not requested")
-    require(epoch_time >= self.exit_deadline[caller], "settlement window open")
-    let amount = self.funds[caller]
+    let amount = self.funds[caller] + self.earnings[caller]
+    require(self.active[caller] == 1 || amount > 0, "channel inactive or empty")
     self.funds[caller] = 0
+    self.earnings[caller] = 0
     self.reserved[caller] = 0
     self.active[caller] = 0
+    self.exit_deadline[caller] = epoch_time
     self.locked_value = self.locked_value - amount
     if amount > 0 {
       require(transfer(caller, amount), "withdrawal failed")
     }
     emit Exited(caller, amount)
     return amount
+  }
+
+  // Every old plan is invalidated before even a partial withdrawal. This
+  // releases its unspent allocations without making old purchase signatures
+  // redeemable against the remaining channel balance.
+  nonreentrant fn withdraw_channel(amount: uint): bool {
+    require_clock()
+    require(self.active[caller] == 1, "account inactive")
+    require(amount > 0 && amount <= self.funds[caller] + self.earnings[caller], "channel balance unavailable")
+    require(self.generation[caller] < MAX_UINT, "generation exhausted")
+    self.generation[caller] = self.generation[caller] + 1
+    self.reserved[caller] = 0
+    if amount <= self.funds[caller] {
+      self.funds[caller] = self.funds[caller] - amount
+    } else {
+      let rest = amount - self.funds[caller]
+      self.funds[caller] = 0
+      self.earnings[caller] = self.earnings[caller] - rest
+    }
+    self.locked_value = self.locked_value - amount
+    require(transfer(caller, amount), "channel withdrawal failed")
+    emit ChannelWithdrawn(caller, amount, self.generation[caller])
+    return true
   }
 
   nonreentrant fn withdraw_earnings(amount: uint): bool {
@@ -324,6 +434,7 @@ program OctranetPayments {
   }
 
   view fn get_funds(account: address): uint { return self.funds[account] }
+  view fn get_channel_balance(account: address): uint { return self.funds[account] + self.earnings[account] }
   view fn get_domain(): string { return self.domain }
   view fn get_custody_cap(): uint { return self.max_locked_value }
   view fn get_min_operator_stake(): uint { return self.min_operator_stake }
@@ -339,7 +450,8 @@ program OctranetPayments {
   view fn get_operator_generation(operator: address): uint { return self.operator_generation[operator] }
   view fn get_operator_stopped_ms(operator: address, generation: uint): uint { return self.operator_stopped[operator][generation] }
   view fn get_operator_unstake_ms(): uint { return OPERATOR_UNSTAKE_MS }
-  view fn get_user_exit_ms(): uint { return DAY_MS }
+  view fn get_user_exit_ms(): uint { return 0 }
+  view fn get_rate_notice_ms(): uint { return DAY_MS }
   view fn get_locked_value(): uint { return self.locked_value }
   view fn get_plan_remaining(plan: uint): uint {
     require(plan < self.plan_count, "plan not found")
@@ -361,6 +473,10 @@ program OctranetPayments {
     require(plan < self.plan_count, "plan not found")
     return self.plan_generation[plan]
   }
+  view fn get_plan_receipt_key(plan: uint): string {
+    require(plan < self.plan_count, "plan not found")
+    return self.plan_receipt_key[plan]
+  }
   view fn get_plan_offer(plan: uint): uint {
     require(plan < self.plan_count, "plan not found")
     return self.plan_offer[plan]
@@ -370,7 +486,17 @@ program OctranetPayments {
     let payer = self.plan_payer[plan]
     let offer = self.plan_offer[plan]
     let operator = self.offer_owner[offer]
-    return account_open(payer) && self.plan_generation[plan] == self.generation[payer] && self.plan_remaining[plan] > 0 && operator_open(operator) && self.offer_generation[offer] == self.operator_generation[operator]
+    // State eligibility only. The host additionally requires unconsumed,
+    // canonically purchased bytes; an escrow balance never grants traffic.
+    return account_open(payer) && self.plan_generation[plan] == self.generation[payer] && operator_open(operator) && self.offer_generation[offer] == self.operator_generation[operator]
+  }
+  view fn get_prepaid_bytes(plan: uint, traffic_class: uint): uint {
+    require(plan < self.plan_count && traffic_class < self.offer_classes[self.plan_offer[plan]], "plan or class not found")
+    return self.class_bytes[plan][traffic_class]
+  }
+  view fn get_prepaid_cost(plan: uint, traffic_class: uint): uint {
+    require(plan < self.plan_count && traffic_class < self.offer_classes[self.plan_offer[plan]], "plan or class not found")
+    return self.class_paid[plan][traffic_class]
   }
   view fn get_offer_manifest(offer: uint): string {
     require(offer < self.offer_count, "offer not found")
@@ -383,6 +509,34 @@ program OctranetPayments {
   view fn get_offer_generation(offer: uint): uint {
     require(offer < self.offer_count, "offer not found")
     return self.offer_generation[offer]
+  }
+  view fn get_offer_series(offer: uint): uint {
+    require(offer < self.offer_count, "offer not found")
+    return self.offer_series[offer]
+  }
+  view fn get_offer_parent(offer: uint): uint {
+    require(offer < self.offer_count, "offer not found")
+    return self.offer_parent[offer]
+  }
+  view fn get_offer_has_parent(offer: uint): uint {
+    require(offer < self.offer_count, "offer not found")
+    return self.offer_has_parent[offer]
+  }
+  view fn get_offer_start_ms(offer: uint): uint {
+    require(offer < self.offer_count, "offer not found")
+    return self.offer_start_ms[offer]
+  }
+  view fn get_offer_end_ms(offer: uint): uint {
+    require(offer < self.offer_count, "offer not found")
+    return self.offer_end_ms[offer]
+  }
+  view fn get_offer_replacement(offer: uint): uint {
+    require(offer < self.offer_count, "offer not found")
+    return self.offer_replacement[offer]
+  }
+  view fn get_offer_cancelled(offer: uint): uint {
+    require(offer < self.offer_count, "offer not found")
+    return self.offer_cancelled[offer]
   }
   view fn get_offer_classes(offer: uint): uint {
     require(offer < self.offer_count, "offer not found")

@@ -233,43 +233,6 @@ fn encapsulate<'a>(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use x25519_dalek::{PublicKey, StaticSecret};
-    #[test]
-    fn paid_rekey_never_enters_the_opaque_payload_queue() {
-        let a = StaticSecret::from([91; 32]);
-        let b = StaticSecret::from([92; 32]);
-        let mut sender =
-            super::super::Tunn::new(a.clone(), PublicKey::from(&b), None, None, 0, None);
-        let mut receiver = super::super::Tunn::new(b, PublicKey::from(&a), None, None, 0, None);
-        let mut work = [0; 4096];
-        let (first, unsent) = encapsulate(&mut sender, b"paid bytes", &mut work, true);
-        assert!(unsent);
-        let TunnResult::WriteToNetwork(init) = first else {
-            panic!("handshake expected")
-        };
-        let init = init.to_vec();
-        let TunnResult::WriteToNetwork(reply) = receiver.decapsulate(None, &init, &mut work) else {
-            panic!("handshake response expected")
-        };
-        let reply = reply.to_vec();
-        let _ = sender.decapsulate(None, &reply, &mut work);
-        assert!(sender.time_since_last_handshake().is_some());
-        assert!(
-            matches!(sender.decapsulate(None, &[], &mut work), TunnResult::Done),
-            "no paid payload may emerge from a later queue drain"
-        );
-        let (data, unsent) = encapsulate(&mut sender, b"paid bytes", &mut work, true);
-        assert!(!unsent);
-        let TunnResult::WriteToNetwork(data) = data else {
-            panic!("transport expected")
-        };
-        assert_eq!(&data[..4], &[4, 0, 0, 0]);
-    }
-}
-
 async fn run(path: ReturnPath, mut receive: mpsc::Receiver<Datagram>) -> Result<()> {
     let socket = UdpSocket::bind("0.0.0.0:0").await?;
     // A connected socket accepts replies only from this authenticated request's
@@ -429,5 +392,42 @@ impl Server {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use x25519_dalek::{PublicKey, StaticSecret};
+    #[test]
+    fn paid_rekey_never_enters_the_opaque_payload_queue() {
+        let a = StaticSecret::from([91; 32]);
+        let b = StaticSecret::from([92; 32]);
+        let mut sender =
+            super::super::Tunn::new(a.clone(), PublicKey::from(&b), None, None, 0, None);
+        let mut receiver = super::super::Tunn::new(b, PublicKey::from(&a), None, None, 0, None);
+        let mut work = [0; 4096];
+        let (first, unsent) = encapsulate(&mut sender, b"paid bytes", &mut work, true);
+        assert!(unsent);
+        let TunnResult::WriteToNetwork(init) = first else {
+            panic!("handshake expected")
+        };
+        let init = init.to_vec();
+        let TunnResult::WriteToNetwork(reply) = receiver.decapsulate(None, &init, &mut work) else {
+            panic!("handshake response expected")
+        };
+        let reply = reply.to_vec();
+        let _ = sender.decapsulate(None, &reply, &mut work);
+        assert!(sender.time_since_last_handshake().is_some());
+        assert!(
+            matches!(sender.decapsulate(None, &[], &mut work), TunnResult::Done),
+            "no paid payload may emerge from a later queue drain"
+        );
+        let (data, unsent) = encapsulate(&mut sender, b"paid bytes", &mut work, true);
+        assert!(!unsent);
+        let TunnResult::WriteToNetwork(data) = data else {
+            panic!("transport expected")
+        };
+        assert_eq!(&data[..4], &[4, 0, 0, 0]);
     }
 }

@@ -1,7 +1,6 @@
-//! Durable cumulative usage becomes an ordinary signed Program claim. Intake
-//! acknowledgement never completes a receipt: only authenticated canonical
-//! counters do. Canonical paid OU can also cover additional bytes in the same
-//! tariff rounding bucket; this avoids paying another network fee for no debt.
+//! Durable prepaid byte authorizations become ordinary signed Program claims.
+//! Intake acknowledgement never completes a purchase: only authenticated
+//! canonical byte floors do, including zero-rate and rounded-price classes.
 //! One pending slot per plan/class coalesces smaller vouchers. An immutable
 //! lifetime fee budget reserves every new signed attempt before submission.
 use super::{Payments, Plan, TariffArchive};
@@ -56,10 +55,8 @@ struct Journal {
     fee_budget_ou: u64,
     // Never released: rejected/ambiguous attempts may still have paid a fee.
     fees_reserved_ou: u64,
-    // Absence is skipped so prior v2 journals retain their exact checksum and
-    // fee reservations. Only a verified public grant can populate this field.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    tariff: Option<Tariff>,
+    // Exact immutable quote per actual offer, not one mutable lineage tariff.
+    tariffs: BTreeMap<u64, Tariff>,
     // At most one new signed claim per canonical head limits fee amplification.
     // Replaying an identical signed attempt cannot pay twice on chain.
     last_submission_root: Option<String>,
@@ -211,7 +208,7 @@ impl Disk {
                     "claim journal checksum differs"
                 );
                 ensure!(
-                    envelope.journal.version == 2 && envelope.journal.identity == identity,
+                    envelope.journal.version == 3 && envelope.journal.identity == identity,
                     "claim journal deployment or wallet identity differs"
                 );
                 ensure!(
@@ -225,11 +222,11 @@ impl Disk {
             Err(rustix::io::Errno::NOENT) => {
                 ensure!(created, "claim journal is missing; refusing queue reset");
                 Journal {
-                    version: 2,
+                    version: 3,
                     identity,
                     fee_budget_ou,
                     fees_reserved_ou: 0,
-                    tariff: None,
+                    tariffs: BTreeMap::new(),
                     last_submission_root: None,
                     slots: BTreeMap::new(),
                 }
@@ -240,7 +237,11 @@ impl Disk {
             journal.slots.len() <= MAX_SLOTS,
             "claim queue exceeds slot bound"
         );
-        if let Some(tariff) = &journal.tariff {
+        ensure!(
+            journal.tariffs.len() <= MAX_SLOTS,
+            "retained tariff count exceeds bound"
+        );
+        for tariff in journal.tariffs.values() {
             ensure!(
                 tariff.canonical_bytes()?.len() <= MAX_TARIFF_BYTES,
                 "retained tariff exceeds bound"
@@ -462,25 +463,30 @@ impl Disk {
 }
 
 impl TariffArchive for Disk {
-    fn load_tariff(&self) -> Result<Option<Tariff>> {
+    fn load_tariff(&self, offer: u64) -> Result<Option<Tariff>> {
         self.available()?;
         Ok(self
             .state
             .lock()
             .map_err(|_| anyhow::anyhow!("claim journal poisoned"))?
-            .tariff
-            .clone())
+            .tariffs
+            .get(&offer)
+            .cloned())
     }
-    fn save_tariff(&self, tariff: Tariff) -> Result<()> {
+    fn save_tariff(&self, offer: u64, tariff: Tariff) -> Result<()> {
         ensure!(
             tariff.canonical_bytes()?.len() <= MAX_TARIFF_BYTES,
             "retained tariff exceeds bound"
         );
         self.update(|journal| {
-            if let Some(existing) = &journal.tariff {
+            if let Some(existing) = journal.tariffs.get(&offer) {
                 ensure!(existing == &tariff, "immutable claim tariff changed");
             } else {
-                journal.tariff = Some(tariff);
+                ensure!(
+                    journal.tariffs.len() < MAX_SLOTS,
+                    "retained tariff count exceeds bound"
+                );
+                journal.tariffs.insert(offer, tariff);
             }
             Ok(())
         })
@@ -509,20 +515,12 @@ async fn covered(payments: &Payments, usage: &SignedUsage) -> Result<(Plan, bool
     plan.validate_usage(usage)?;
     let class = usize::from(usage.usage.traffic_class);
     let floor = plan.redeemed_bytes[class];
-    let charge = plan
-        .tariff
-        .charge(usage.usage.traffic_class, usage.usage.total_bytes)?;
-    let settled = counters_cover(
-        floor,
-        plan.redeemed_ou[class],
-        usage.usage.total_bytes,
-        charge,
-    );
+    let settled = bytes_cover(floor, usage.usage.total_bytes);
     ensure!(plan.live(), "canonical payment publication changed");
     Ok((plan, settled))
 }
-fn counters_cover(bytes: u64, paid_ou: u64, requested_bytes: u64, requested_ou: u64) -> bool {
-    bytes >= requested_bytes || paid_ou >= requested_ou
+fn bytes_cover(purchased: u64, requested: u64) -> bool {
+    purchased >= requested
 }
 impl Service {
     pub(crate) async fn open(
@@ -593,14 +591,8 @@ impl Service {
                 .iter()
                 .any(|attempt| attempt.authorization.usage.total_bytes <= floor)
         {
-            // Economic coverage can exceed the raw canonical byte counter in
-            // its rounding bucket. Remove this authorization, preserving any
-            // concurrently enqueued larger voucher for its own recheck.
-            let floor = if complete {
-                floor.max(slot.usage.usage.total_bytes)
-            } else {
-                floor
-            };
+            // Only exact canonical purchased bytes retire an authorization.
+            // Equal rounded OU does not buy another byte by itself.
             let disk = self.disk.clone();
             let id = id.to_owned();
             tokio::task::spawn_blocking(move || disk.reconcile(&id, floor)).await??;
@@ -612,6 +604,9 @@ impl Service {
         let Some(slot) = self.disk.slot(id)? else {
             return Ok(());
         };
+        // Closed prepaid plans retain their queued authorization for audit,
+        // but cannot reserve another relayer fee or submit a new transaction.
+        // Already canonical byte purchases were acknowledged above.
         plan.claim_increment(&slot.usage)?;
         let wallet = Arc::new(self.submission.executor.operator_wallet().await);
         let (plan, complete) = covered(&self.payments, &slot.usage).await?;
@@ -753,7 +748,7 @@ impl Drop for Service {
 fn validate_scope(usage: &SignedUsage, payments: &Payments) -> Result<()> {
     usage.verify()?;
     ensure!(
-        usage.usage.deployment == payments.deployment && usage.usage.offer == payments.config.offer,
+        usage.usage.deployment == payments.deployment,
         "claim authorization targets another payment deployment"
     );
     slot_id(usage)?;
@@ -1029,11 +1024,24 @@ mod tests {
     }
 
     #[test]
-    fn canonical_economic_coverage_avoids_zero_increment_claims() {
-        assert!(counters_cover(1, 1, 2, 1)); // Same prepaid rounding bucket.
-        assert!(counters_cover(0, 0, 100, 0)); // Operator explicitly free class.
-        assert!(!counters_cover(1, 1, 2, 2)); // Additional debt needs inclusion.
-        assert!(counters_cover(2, 2, 2, 2)); // Exact prior byte redemption.
+    fn canonical_confirmation_requires_purchased_bytes_even_at_the_same_or_zero_price() {
+        use octravpn_core::payments::TrafficClass;
+        for rate in [0, 1] {
+            let tariff = Tariff::new(
+                Address::from_pubkey(&[11; 32]),
+                vec![TrafficClass {
+                    name: "default".into(),
+                    rate_ou_per_mib: rate,
+                }],
+                vec![],
+            )
+            .unwrap();
+            assert_eq!(tariff.charge(0, 1).unwrap(), tariff.charge(0, 2).unwrap());
+            assert!(!bytes_cover(1, 2));
+            assert!(bytes_cover(2, 2));
+            assert!(bytes_cover(2, 1));
+        }
+        assert!(!bytes_cover(0, 100));
     }
 
     #[test]
@@ -1043,10 +1051,10 @@ mod tests {
         let path = root.path().join("claims");
         let identity = serde_json::json!({"deployment":"fixture"});
         let disk = Disk::open(&path, identity.clone(), FEE_OU).unwrap();
-        // The optional field preserves the old v2 journal encoding/checksum
-        // until an authenticated public tariff is retained.
+        // A new version rejects old single-quote journals rather than
+        // interpreting one quote as every successor in a lineage.
         let original = std::fs::read_to_string(path.join("claims.json")).unwrap();
-        assert!(!original.contains("\"tariff\""));
+        assert!(original.contains("\"tariffs\":{}"));
         let signed = usage(1, 10);
         let id = disk.enqueue(signed.clone()).unwrap();
         disk.attempt(&id, attempt(signed), "head1".into()).unwrap();
@@ -1059,8 +1067,8 @@ mod tests {
             vec![],
         )
         .unwrap();
-        disk.save_tariff(tariff.clone()).unwrap();
-        disk.save_tariff(tariff.clone()).unwrap();
+        disk.save_tariff(4, tariff.clone()).unwrap();
+        disk.save_tariff(4, tariff.clone()).unwrap();
         let other = Tariff::new(
             Address::from_pubkey(&[11; 32]),
             vec![TrafficClass {
@@ -1070,10 +1078,13 @@ mod tests {
             vec![],
         )
         .unwrap();
-        assert!(disk.save_tariff(other).is_err());
+        assert!(disk.save_tariff(4, other.clone()).is_err());
+        disk.save_tariff(5, other.clone()).unwrap();
         drop(disk);
         let recovered = Disk::open(&path, identity, FEE_OU).unwrap();
-        assert_eq!(recovered.load_tariff().unwrap(), Some(tariff));
+        assert_eq!(recovered.load_tariff(4).unwrap(), Some(tariff));
+        assert_eq!(recovered.load_tariff(5).unwrap(), Some(other));
+        assert!(recovered.load_tariff(6).unwrap().is_none());
         assert_eq!(recovered.state.lock().unwrap().fees_reserved_ou, FEE_OU);
         assert!(recovered.permits_new("head2").is_err());
     }

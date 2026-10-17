@@ -3,7 +3,7 @@
 
 Run only via the disposable, network-disabled two-container gate. Every app
 deployment and payment is an ordinary signed transaction on four fresh native
-validators. Canonical time is never overridden to fast-forward a withdrawal.
+validators. Canonical time is never overridden for rate notice or unstaking.
 """
 
 import base64
@@ -34,7 +34,9 @@ SNAT = '192.0.2.1'
 BUDGET = 500_000
 FUND = 1_000_000
 STAKE = 100_000_000
-CREDIT_BYTES = 32_768
+PREPAID_BYTES = [65_536, 65_536, 4_096]
+CLIENT_LOG = None
+CLIENT_LAUNCHES = 0
 PAID_MTU = 1280
 UDP_ATTEMPTS = 3
 UDP_TIMEOUT = 3
@@ -74,9 +76,11 @@ def journal():
     return json.loads((g.ROOT / 'client-journal/state.json').read_text())['payload']
 
 
-def launch_client(plan, receipt_key, *, resume):
-    log = g.EVIDENCE / ('client-resumed.log' if resume else 'client.log')
-    stream = log.open('w')
+def launch_client(plan, receipt_key, *, resume, wait_interface=True):
+    global CLIENT_LOG, CLIENT_LAUNCHES
+    CLIENT_LAUNCHES += 1
+    CLIENT_LOG = g.EVIDENCE / f'client-{CLIENT_LAUNCHES}.log'
+    stream = CLIENT_LOG.open('x')
     args = ['octravpn', 'payments', '--plan', str(plan), '--receipt-key', str(receipt_key),
             '--journal', str(g.ROOT / 'client-journal'), '--tun-name', CLIENT]
     if resume:
@@ -85,7 +89,14 @@ def launch_client(plan, receipt_key, *, resume):
                                env={**os.environ, 'RUST_LOG': 'info'})
     g.PROCESSES['payer'] = process
     g.FILES['payer'] = stream
-    g.until(lambda: 'Octranet interface ' in log.read_text(), 90, 'real paid client TUN')
+    return client_ready() if wait_interface else None
+
+
+def client_ready():
+    def ready():
+        assert g.PROCESSES['payer'].poll() is None, 'prepaid client exited before opening TUN'
+        return 'Octranet interface ' in CLIENT_LOG.read_text()
+    g.until(ready, 120, 'real prepaid client TUN after canonical purchase')
     addresses = json.loads(ip('-j', 'address', 'show', 'dev', CLIENT))[0]['addr_info']
     assigned = [item['local'] for item in addresses if item['family'] == 'inet']
     assert len(assigned) == 1
@@ -105,9 +116,63 @@ def stop_client(*, crash=False):
         assert process.returncode == 0, 'payment client did not stop cleanly'
 
 
-def route_server():
+def public_status(path):
+    """Bounded GETs of fixed public loopback diagnostics, without credentials."""
+    assert path in ('/operator/status', '/status')
+    row = {}
+    try:
+        try:
+            response = urllib.request.urlopen(f'http://127.0.0.1:{g.BASE + 1}{path}', timeout=3)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            row['http'] = response.code
+            raw = response.read(16_385)
+        if len(raw) > 16_384:
+            row['error'] = 'public status exceeds diagnostic byte bound'
+            return row
+        try:
+            row['body'] = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            row['body'] = raw.decode(errors='replace')
+            row['error'] = 'public status is not JSON'
+    except (OSError, ValueError) as error:
+        row['error'] = type(error).__name__
+        row['detail'] = str(error)[:512]
+    return row
+
+
+def operator_ready(minimum_epoch):
+    # Binding a TUN/listener precedes the supervisor's peer-root attestation,
+    # canonical catch-up and publication. Never substitute OS readiness for it.
+    assert type(minimum_epoch) is int and minimum_epoch >= 0
+    report = {'minimum_epoch': minimum_epoch, 'attempts': 0, 'ready': False}
+    g.JOURNAL.setdefault('operator_readiness', []).append(report)
+    started = time.monotonic()
+
+    def ready():
+        report['attempts'] += 1
+        report['last'] = {path: public_status(path) for path in ('/operator/status', '/status')}
+        operator = report['last']['/operator/status']
+        public = report['last']['/status']
+        body = operator.get('body')
+        return (operator.get('http') == 200 and 'error' not in operator
+                and isinstance(body, dict) and body.get('serving') is True
+                and type(body.get('epoch')) is int and body['epoch'] >= minimum_epoch
+                and public.get('http') == 200 and 'error' not in public)
+
+    try:
+        g.until(ready, 120, 'operator canonical Serving after restart')
+        report['ready'] = True
+    finally:
+        report['elapsed_ms'] = round((time.monotonic() - started) * 1000, 3)
+    g.save()
+
+
+def route_server(minimum_epoch):
     g.until(lambda: SERVER in ip('-j', 'link', 'show'), 90, 'real paid operator TUN')
     ip('route', 'replace', '198.18.0.0/15', 'dev', SERVER, 'table', '402')
+    operator_ready(minimum_epoch)
 
 
 def udp(assigned, count, marker):
@@ -210,57 +275,34 @@ def tcp_and_icmp(assigned):
 
 def settled(program, operator, tariff, minimum):
     state = journal()
-    assert all(state['local_bytes'][i] >= value
-               for i, value in enumerate(state['authorized_bytes']))
-    if any(authorized < floor for authorized, floor in
-           zip(state['authorized_bytes'], minimum, strict=True)):
+    assert state['authorized_bytes'] == PREPAID_BYTES
+    assert all(count <= bought for count, bought in zip(client_exposure(state), PREPAID_BYTES, strict=True))
+    purchased = [int(g.view(program, 'get_prepaid_bytes', [0, index]))
+                 for index in range(len(tariff['classes']))]
+    if any(bought < max(required, accepted) for bought, required, accepted in
+           zip(purchased, minimum, PREPAID_BYTES, strict=True)):
         return None
     paid = [0] * len(tariff['classes'])
     for _name, _event, _transaction, events in archive_claims(program, operator):
         for event in events:
             values = list(map(int, event['values']))
             paid[values[1]] += values[4]
-    for row, authorized, canonical_paid in zip(tariff['classes'], state['authorized_bytes'], paid, strict=True):
-        if canonical_paid < (row['rate_ou_per_mib'] * authorized + 1_048_575) // 1_048_576:
-            return None
+    expected = [(row['rate_ou_per_mib'] * bought + 1_048_575) // 1_048_576
+                for row, bought in zip(tariff['classes'], PREPAID_BYTES, strict=True)]
+    if paid != expected:
+        return None
     actual = int(g.view(program, 'get_earnings', [operator]))
     return (state, actual) if sum(paid) == actual and actual > 0 else None
 
 
-def meter_authorized(record):
-    return [max(redeemed, receipt['usage']['total_bytes'] if receipt else 0)
-            for redeemed, receipt in zip(record['redeemed'], record['authorizations'], strict=True)]
-
-
-def settled_credit(program, operator, tariff, minimum):
+def settled_prepaid(program, operator, tariff, minimum):
     result = settled(program, operator, tariff, minimum)
     if result is None:
         return None
-    state, _earnings = result
     record = meter()
-    authorized = meter_authorized(record)
-    # Canonical paid OU alone does not establish that the serving meter has
-    # reconciled it. Same-charge/zero-rate coverage can instead be represented
-    # by the durable authorization installed after canonical confirmation.
-    if any(floor < max(required, signed) for floor, required, signed in
-           zip(authorized, minimum, state['authorized_bytes'], strict=True)):
+    if any(purchased < accepted for purchased, accepted in zip(record['purchased'], PREPAID_BYTES, strict=True)):
         return None
-    capacity = exposure(record)
-    assert all(floor <= count for floor, count in zip(authorized, capacity, strict=True))
-    unpaid_bytes = sum(count - floor for count, floor in zip(capacity, authorized, strict=True))
-    assert unpaid_bytes <= CREDIT_BYTES
-    charge = lambda totals: sum((row['rate_ou_per_mib'] * count + 1_048_575) // 1_048_576
-                                for row, count in zip(tariff['classes'], totals, strict=True))
-    unpaid_ou = charge(capacity) - charge(authorized)
-    limit_ou = record['credit']['max_unacknowledged_ou']
-    assert unpaid_ou <= limit_ou
-    # A successful operator UDP handoff may never reach the client. Keep that
-    # one-sided usage and every uncertain reservation held; require room for a
-    # fresh full-MTU round trip rather than pretending all delivery was signed.
-    roundtrip_ou = 2 * max((row['rate_ou_per_mib'] * PAID_MTU + 1_048_575) // 1_048_576
-                          for row in tariff['classes'])
-    if CREDIT_BYTES - unpaid_bytes < 2 * PAID_MTU or limit_ou - unpaid_ou < roundtrip_ou:
-        return None
+    assert all(held <= purchased for held, purchased in zip(exposure(record), record['purchased'], strict=True))
     return result
 
 
@@ -292,7 +334,10 @@ def failure_snapshot(control=None, hop=None):
                    for path in sorted((root / 'transport').glob('*/meter.json'))[:8])
     report = {'processes': {str(name): {'pid': process.pid, 'exit': process.poll()}
                             for name, process in g.PROCESSES.items()},
-              'copied': [], 'errors': []}
+              'copied': [], 'errors': [],
+              'public_status': {path: public_status(path)
+                                for path in ('/operator/status', '/status')},
+              'operator_readiness': g.JOURNAL.get('operator_readiness', [])}
     for source, relative in sources:
         if not source.exists():
             continue
@@ -317,8 +362,7 @@ def meter():
     record = json.loads(files[0].read_text())['record']
     accepted = json.loads((g.ROOT / 'accepted-plan.json').read_text())
     assert record['binding'] == accepted['binding'] and record['budget_ou'] == BUDGET
-    assert record['credit'] == {'max_unacknowledged_bytes': CREDIT_BYTES,
-                                'max_unacknowledged_ou': 100_000}
+    assert 'credit' not in record, 'postpaid credit must not be configurable'
     return record
 
 
@@ -338,11 +382,13 @@ def client_exposure(record):
 
 
 def crash_operator():
+    retained_epoch = g.epoch()
     process = g.PROCESSES.pop(0)
     process.kill()
     process.wait(timeout=15)
     g.FILES.pop(0).close()
     assert process.returncode == -signal.SIGKILL
+    return retained_epoch
 
 
 def blocked_probe(assigned):
@@ -350,78 +396,124 @@ def blocked_probe(assigned):
         connection.bind((assigned, 0))
         connection.settimeout(2)
         for index in range(3):
-            connection.sendto(b'credit-exhausted-probe' + bytes([index]) + b'x' * 900,
+            connection.sendto(b'allowance-exhausted-probe' + bytes([index]) + b'x' * 900,
                               (g.PUBLIC, 20001))
             try:
                 reply = connection.recvfrom(2048)
             except socket.timeout:
                 continue
-            raise AssertionError(f'credit exhausted but tunnel returned {len(reply[0])} bytes')
+            raise AssertionError(f'exhausted allowance but tunnel returned {len(reply[0])} bytes')
 
 
-def bounded_credit(program, operator, tariff, assigned, plan_path, faucet, control):
+def prepaid_start(program, operator, tariff, plan_path, faucet, control):
+    # Hold the real payer authorization before it reaches native settlement.
+    # A funded escrow and a signed control connection must yield zero traffic.
+    launch_client(plan_path, faucet, resume=False, wait_interface=False)
+    g.until(lambda: control.metrics()['usage_received'] >= 1, 30, 'initial prepaid purchase held')
+    before = journal()
+    before_meter = meter()
+    assert before['authorized_bytes'] == PREPAID_BYTES
+    assert before['local_bytes'] == [0] * len(PREPAID_BYTES)
+    assert exposure(before_meter) == [0] * len(PREPAID_BYTES)
+    assert before_meter['purchased'] == [0] * len(PREPAID_BYTES)
+    assert int(g.view(program, 'get_earnings', [operator])) == 0
+    assert control.metrics()['usage_forwarded'] == 0
+    assert not any(item['ifname'] == CLIENT for item in json.loads(ip('-j', 'link', 'show')))
+    snapshot('unpaid-before-restart')
+    stop_client(crash=True)
+    retained_epoch = crash_operator()
+    peer_epoch = g.epoch(1)
+    g.until(lambda: g.epoch(1) >= peer_epoch + 2, 90, 'native quorum progresses during unpaid restart')
+    g.start(0)
+    g.until(lambda: g.epoch() >= g.epoch(1), 120, 'unpaid operator restart catches up')
+    route_server(retained_epoch)
+    requests = control.metrics()['usage_received']
+    launch_client(plan_path, faucet, resume=True, wait_interface=False)
+    g.until(lambda: control.metrics()['usage_received'] > requests, 30, 'same durable purchase retried')
+    after = journal()
+    assert after['receipts'] == before['receipts'], 'restart replaced the exact purchase authorization'
+    assert after['connection_sequence'] > before['connection_sequence']
+    assert after['local_bytes'] == [0] * len(PREPAID_BYTES)
+    assert meter()['purchased'] == [0] * len(PREPAID_BYTES)
+    assert int(g.view(program, 'get_earnings', [operator])) == 0
+    assert not any(item['ifname'] == CLIENT for item in json.loads(ip('-j', 'link', 'show')))
+    snapshot('unpaid-after-restart')
+    control.release()
+    assigned = client_ready()
+    state, earnings = g.until(lambda: settled_prepaid(program, operator, tariff, PREPAID_BYTES),
+                               120, 'all purchased bytes canonically paid before traffic')
+    assert state['local_bytes'] == [0] * len(PREPAID_BYTES)
+    assert exposure(meter()) == [0] * len(PREPAID_BYTES)
+    g.step('canonical prepaid purchase precedes first traffic across crash recovery',
+           prepaid_bytes=PREPAID_BYTES, earnings_ou=earnings,
+           previous_sequence=before['connection_sequence'], resumed_sequence=after['connection_sequence'],
+           proxy=control.metrics(), crash_scope='idle before purchase; no syscall/power-loss claim')
+    return assigned, state
+
+
+def exhaust_prepaid(assigned, program, operator, tariff):
+    prior = int(g.view(program, 'get_earnings', [operator]))
     successful = 0
+    initial_client = client_exposure(journal())
+    initial_server = exposure(meter())
+    initial_receipts = journal()['receipts']
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as connection:
-        connection.bind((assigned, 0))
-        connection.settimeout(3)
-        for index in range(64):
-            payload = b'credit-fixture' + struct.pack('!I', index) + b'x' * 900
-            connection.sendto(payload, (g.PUBLIC, 20001))
+        connection.bind((assigned, 0)); connection.settimeout(3)
+        for index in range(128):
+            payload = b'prepaid-exhaust:' + struct.pack('!I', index) + b'x' * 900
+            connection.sendto(payload, (g.PUBLIC, UDP_PORT))
             try:
                 reply, _peer = connection.recvfrom(2048)
             except socket.timeout:
+                pass
+            else:
+                assert reply == payload
+                successful += 1
+            client_left = PREPAID_BYTES[1] - client_exposure(journal())[1]
+            server_left = meter()['purchased'][1] - exposure(meter())[1]
+            assert min(client_left, server_left) >= 0
+            if min(client_left, server_left) < len(payload) + 28:
                 break
-            assert reply == payload
-            successful += 1
         else:
-            raise AssertionError('unacknowledged byte ceiling did not stop traffic')
-    assert successful >= 8, 'traffic failed before exercising a substantial credit window'
-    assert int(g.view(program, 'get_earnings', [operator])) == 0
-    assert control.metrics()['usage_forwarded'] == 0
+            raise AssertionError('finite prepaid allowance failed to stop traffic')
     blocked_probe(assigned)
     time.sleep(1)
     target_before = target()['udp_payload_bytes']
-    before = journal()
-    meter_before = meter()
-    held_before = exposure(meter_before)
-    assert CREDIT_BYTES - 1280 <= sum(held_before) <= CREDIT_BYTES
-    assert sum(meter_before['redeemed']) == 0
-    snapshot('credit-before-restart')
-    stop_client(crash=True)
-    crash_operator()
-    peer_epoch = g.epoch(1)
-    g.until(lambda: g.epoch(1) >= peer_epoch + 2, 90, 'native quorum continues during credit recovery')
-    g.start(0)
-    route_server()
-    g.until(lambda: g.epoch() >= g.epoch(1), 120, 'credit-recovering operator catches up')
-    assert launch_client(plan_path, faucet, resume=True) == assigned
     blocked_probe(assigned)
     time.sleep(1)
-    assert target()['udp_payload_bytes'] == target_before, 'restart reset unpaid packet exposure'
-    assert int(g.view(program, 'get_earnings', [operator])) == 0
-    after = journal()
-    meter_after = meter()
-    held_after = exposure(meter_after)
-    assert after['connection_sequence'] > before['connection_sequence']
-    assert all(new >= old for new, old in zip(after['local_bytes'], before['local_bytes'], strict=True))
-    assert all(new >= old for new, old in zip(held_after, held_before, strict=True))
-    assert all(new >= old for new, old in zip(client_exposure(after), client_exposure(before), strict=True))
-    assert meter_after['connect']['request']['sequence'] > meter_before['connect']['request']['sequence']
-    assert sum(held_after) <= CREDIT_BYTES and sum(meter_after['redeemed']) == 0
-    snapshot('credit-after-restart')
-    control.release()
-    restored, _earnings = g.until(lambda: settled_credit(program, operator, tariff, [0, 2 * successful * 918, 0]),
-            120, 'held signed receipts canonically restore credit')
-    meter_restored = meter()
-    snapshot('credit-restored')
-    g.step('bounded unpaid credit survives client crash and operator restart',
-           byte_ceiling=CREDIT_BYTES, successful_echoes=successful,
-           previous_sequence=before['connection_sequence'], resumed_sequence=after['connection_sequence'],
-           target_bytes_while_blocked=target_before, meter_exposure_before=held_before,
-           meter_exposure_after=held_after, meter_redeemed_after_settlement=meter_restored['redeemed'],
-           meter_authorized_after_settlement=meter_authorized(meter_restored), proxy=control.metrics(),
-           crash_scope='SIGKILL both processes while idle at exhausted credit; not send/fsync fault injection')
-    return restored
+    assert target()['udp_payload_bytes'] == target_before
+    record = meter()
+    assert all(held <= purchased for held, purchased in zip(exposure(record), record['purchased'], strict=True))
+    assert record['purchased'] == PREPAID_BYTES
+    assert min(PREPAID_BYTES[1] - client_exposure(journal())[1],
+               record['purchased'][1] - exposure(record)[1]) < len(payload) + 28
+    assert all(new >= old for new, old in zip(client_exposure(journal()), initial_client, strict=True))
+    assert all(new >= old for new, old in zip(exposure(record), initial_server, strict=True))
+    assert journal()['receipts'] == initial_receipts
+    assert int(g.view(program, 'get_earnings', [operator])) == prior
+    assert journal()['authorized_bytes'] == PREPAID_BYTES, 'consumption silently bought more bytes'
+    assert settled_prepaid(program, operator, tariff, PREPAID_BYTES)
+    g.step('finite prepaid UDP capacity exhausts without another payment or unpaid forwarding',
+           successful_echoes=successful, operator_exposure=exposure(record), purchased=record['purchased'],
+           earnings_ou=prior, target_payload_bytes=target_before)
+
+
+def blocked_icmp_probe(assigned):
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_ICMP) as ping:
+        ping.bind((assigned, 0)); ping.settimeout(2)
+        for index in range(3):
+            raw = bytearray(struct.pack('!BBHHH', 8, 0, 0, 31, index) + b'revoked-prepaid-plan')
+            padded = raw + (b'\0' if len(raw) % 2 else b'')
+            checksum = sum(struct.unpack('!' + str(len(padded) // 2) + 'H', padded))
+            while checksum >> 16:
+                checksum = (checksum & 65535) + (checksum >> 16)
+            struct.pack_into('!H', raw, 2, (~checksum) & 65535)
+            ping.sendto(raw, (g.PUBLIC, 0))
+            try:
+                ping.recvfrom(2048)
+            except socket.timeout:
+                continue
+            raise AssertionError('revoked prepaid plan still forwarded ICMP')
 
 
 def archive_claims(program, operator):
@@ -463,19 +555,17 @@ def exercise(program, operator, tariff, plan_path, faucet, hop, control):
                '-d', g.PUBLIC + '/32', '-o', LINK, '-j', 'SNAT', '--to-source', SNAT])
     ip('rule', 'add', 'priority', '5', 'iif', LINK, 'to', '198.18.0.0/15', 'lookup', '402')
     ip('rule', 'add', 'priority', '10', 'iif', 'lo', 'to', g.PUBLIC + '/32', 'lookup', '401')
-    assigned = launch_client(plan_path, faucet, resume=False)
+    assigned, baseline = prepaid_start(program, operator, tariff, plan_path, faucet, control)
     g.command(['iptables', '-t', 'raw', '-A', 'OUTPUT', '-o', CLIENT, '-s', assigned + '/32',
                '-d', g.PUBLIC + '/32', '-j', 'NOTRACK'])
     g.command(['iptables', '-t', 'raw', '-A', 'PREROUTING', '-i', CLIENT, '-s', g.PUBLIC + '/32',
                '-d', assigned + '/32', '-j', 'NOTRACK'])
     route = json.loads(ip('-j', 'route', 'get', g.PUBLIC, 'from', assigned, 'iif', 'lo'))[0]
     assert route['dev'] == CLIENT, 'application stack bypassed actual client TUN'
-    baseline = bounded_credit(program, operator, tariff, assigned, plan_path, faucet, control)
     udp_bytes = udp(assigned, 8, b'before-restart:')
     tcp_bytes = tcp_and_icmp(assigned)
-    minimum = [old + delivered for old, delivered in
-               zip(baseline['authorized_bytes'], [2 * tcp_bytes, 2 * udp_bytes, 1], strict=True)]
-    before, earnings = g.until(lambda: settled_credit(program, operator, tariff, minimum), 120,
+    minimum = PREPAID_BYTES
+    before, earnings = g.until(lambda: settled_prepaid(program, operator, tariff, minimum), 120,
                                'actual canonical payment claim')
     assert all(count > 0 for count in before['local_bytes']), 'all three classes must carry packets'
     assert all(count > 0 for count in before['authorized_bytes']), 'client must authorize all classes'
@@ -489,12 +579,13 @@ def exercise(program, operator, tariff, plan_path, faucet, hop, control):
     # Abrupt client death and a separate operator restart retain both independent
     # journals. --resume reuses this plan and key without a new fund/open call.
     stop_client(crash=True)
+    retained_epoch = g.epoch()
     g.stop(0)
     peer_epoch = g.epoch(1)
     g.until(lambda: g.epoch(1) >= peer_epoch + 2, 90, 'remaining native quorum progresses')
     g.start(0)
-    route_server()
     g.until(lambda: g.epoch() >= g.epoch(1), 120, 'operator canonical restart catches up')
+    route_server(retained_epoch)
     assert launch_client(plan_path, faucet, resume=True) == assigned
     after = journal()
     assert after['connection_sequence'] > before['connection_sequence']
@@ -503,19 +594,16 @@ def exercise(program, operator, tariff, plan_path, faucet, hop, control):
     g.until(lambda: int(g.view(program, 'get_funds', [g.view(program, 'get_plan_payer', [0])]))
             + int(g.view(program, 'get_earnings', [operator])) == FUND,
             30, 'payer balance and operator earnings remain conserved')
-    baseline, _earnings = g.until(lambda: settled_credit(program, operator, tariff, before['authorized_bytes']),
-                                 120, 'resumed meter reflects canonically restored credit')
+    baseline, _earnings = g.until(lambda: settled_prepaid(program, operator, tariff, before['authorized_bytes']),
+                                 120, 'resumed meter retains purchased capacity')
     new_udp = udp(assigned, 8, b'after-restart:')
     new_tcp = tcp_and_icmp(assigned)
     udp_bytes += new_udp
     tcp_bytes += new_tcp
-    # Exhausted-window probes reached the local WG socket but not the operator.
-    # They stay in local exposure, not receipt liability. Add the new delivered
-    # load to the last authenticated counters, never those rejected probes.
-    minimum = [old + delivered for old, delivered in
-               zip(baseline['authorized_bytes'], [2 * new_tcp, 2 * new_udp, 1], strict=True)]
-    current, earnings = g.until(lambda: settled_credit(program, operator, tariff, minimum), 120,
-                                'canonical claims after client and operator restart')
+    # Traffic consumes the original purchase; it never creates a new authorization.
+    minimum = PREPAID_BYTES
+    current, earnings = g.until(lambda: settled_prepaid(program, operator, tariff, minimum), 120,
+                                'retained canonical purchases after client and operator restart')
     g.step('same plan survives crash and native operator restart',
            assigned=assigned, before_sequence=before['connection_sequence'],
            resumed_sequence=current['connection_sequence'], original_budget_ou=BUDGET,
@@ -523,25 +611,39 @@ def exercise(program, operator, tariff, plan_path, faucet, hop, control):
            uncertain_bytes=current.get('uncertain_bytes', []), operator_earnings_ou=earnings)
     snapshot('settled-after-restart')
 
+    exhaust_prepaid(assigned, program, operator, tariff)
+    # A live still-funded class rules out a dead tunnel masquerading as exhaustion.
+    tcp_bytes += tcp_and_icmp(assigned)
+    g.step('other prepaid classes still deliver after premium exhaustion', icmp_echo=True)
+
     # Delay the next HTTP status without altering its signed bytes. The actual
     # client still owns its established WG peer/TUN, so a local client stop
     # cannot masquerade as native server data-plane revocation.
     control.hold_status()
     g.until(lambda: control.metrics()['status_waiting'] >= 1, 10, 'client status poll held')
-    g.send('canonical payer exit revokes forwarding', faucet, program, 'request_exit', [])
-    deadline = int(g.view(program, 'get_exit_deadline_ms', [g.view(program, 'get_plan_payer', [0])]))
-    assert deadline > 0 and int(g.view(program, 'get_user_exit_ms')) == 86_400_000
+    payer = g.view(program, 'get_plan_payer', [0])
+    generation = int(g.view(program, 'get_generation', [payer]))
+    channel_before = int(g.view(program, 'get_channel_balance', [payer]))
+    locked_before = int(g.view(program, 'get_locked_value'))
+    g.send('partial channel withdrawal revokes old generation immediately', faucet, program,
+           'withdraw_channel', [1])
+    assert int(g.view(program, 'get_generation', [payer])) == generation + 1
+    assert int(g.view(program, 'get_active', [payer])) == 1
+    assert int(g.view(program, 'get_reserved', [payer])) == 0
+    assert int(g.view(program, 'get_channel_balance', [payer])) == channel_before - 1
+    assert int(g.view(program, 'get_locked_value')) == locked_before - 1
+    assert int(g.view(program, 'get_user_exit_ms')) == 0
     assert g.view(program, 'can_forward', [0]) is False
-    before_probe = journal()['local_bytes'][1]
-    target_before = target()['udp_payload_bytes']
-    blocked_probe(assigned)
+    before_probe = journal()['local_bytes'][2]
+    target_before = hop.metrics()['sent_packets']
+    blocked_icmp_probe(assigned)
     time.sleep(1)
     assert g.PROCESSES['payer'].poll() is None, 'client stop hid server packet revocation'
-    assert journal()['local_bytes'][1] > before_probe, 'no real WG handoff attempted after exit'
-    assert target()['udp_payload_bytes'] == target_before, 'native exit still forwarded packets'
-    g.step('canonical native exit blocks packets from live established WireGuard client',
-           attempted_local_bytes=journal()['local_bytes'][1] - before_probe,
-           target_bytes_after_exit=target_before)
+    assert journal()['local_bytes'][2] > before_probe, 'no real WG handoff attempted after exit'
+    assert hop.metrics()['sent_packets'] == target_before, 'partial withdrawal still forwarded old-generation packets'
+    g.step('canonical partial withdrawal blocks old generation from live WireGuard client',
+           attempted_local_bytes=journal()['local_bytes'][2] - before_probe,
+           target_packets_after_exit=target_before)
     payer_process = g.PROCESSES.pop('payer')
     stream = g.FILES.pop('payer')
     control.release_status()
@@ -553,29 +655,23 @@ def exercise(program, operator, tariff, plan_path, faucet, hop, control):
                              '--journal', str(g.ROOT / 'client-journal'), '--tun-name', CLIENT, '--resume'],
                             cwd=g.ROOT, capture_output=True, text=True, timeout=20)
     (g.EVIDENCE / 'exiting-client.log').write_text(result.stdout + result.stderr)
-    assert result.returncode != 0, 'exit replay admitted another tunnel'
+    assert result.returncode != 0, 'old-generation replay admitted another tunnel'
 
-    # Normal chain time remains in force. Neither the user nor operator can
-    # withdraw early; this gate does not fake 24 hours or a week of consensus.
-    g.send('early payer refund refused', faucet, program, 'withdraw_remaining', [], expected=False)
-    # The CLI and native claim worker use the same operator wallet. Drain its
-    # already-authorized claims before the fixture submits another operator
-    # transaction, so it cannot manufacture an external nonce race.
+    # Available balance is withdrawable immediately without requesting exit;
+    # completed byte purchases and operator proceeds are final.
+    remaining = int(g.view(program, 'get_channel_balance', [payer]))
+    g.send('withdraw all available channel OCT immediately', faucet, program, 'withdraw_remaining', [])
+    assert int(g.view(program, 'get_channel_balance', [payer])) == 0
+    assert int(g.view(program, 'get_funds', [payer])) == 0
+    assert int(g.view(program, 'get_reserved', [payer])) == 0
+    assert int(g.view(program, 'get_active', [payer])) == 0
+    assert int(g.view(program, 'get_locked_value')) == locked_before - 1 - remaining
+    assert int(g.view(program, 'get_rate_notice_ms')) == 86_400_000
+    # Drain the shared operator wallet's already-authorized claim queue before
+    # the fixture submits another transaction from that wallet.
     claim_journal = g.ROOT / 'chain/node-0/octranet-payments/claims/claims.json'
     g.until(lambda: not json.loads(claim_journal.read_text())['journal']['slots'],
             90, 'native claim queue drained before operator transaction')
-    g.send('request canonical operator unstake', g.ROOT / 'operator.hex', program,
-           'request_operator_unstake', [])
-    unlock = int(g.view(program, 'get_operator_unlock_ms', [operator]))
-    assert int(g.view(program, 'get_operator_unstake_ms')) == 604_800_000
-    assert unlock > deadline and int(g.view(program, 'get_operator_stake', [operator])) == STAKE
-    g.send('operator unstake retry keeps original deadline', g.ROOT / 'operator.hex', program,
-           'request_operator_unstake', [])
-    assert int(g.view(program, 'get_operator_unlock_ms', [operator])) == unlock
-    g.send('early operator stake withdrawal refused', g.ROOT / 'operator.hex', program,
-           'withdraw_operator_stake', [], expected=False)
-    g.step('canonical exit and seven-day unstake stop admission without early withdrawal',
-           payer_deadline_ms=deadline, operator_unlock_ms=unlock)
 
     def stable_claims():
         records = archive_claims(program, operator)
@@ -597,13 +693,71 @@ def exercise(program, operator, tariff, plan_path, faucet, hop, control):
         (g.EVIDENCE / ('claims-' + name)).write_text(json.dumps(event, indent=2))
     assert sum(increments) == final_earnings and increments[0] > 0 and increments[1] > 0
     assert increments[2] == 0, 'operator zero-rate class incurred a protocol commission'
-    payer = g.view(program, 'get_plan_payer', [0])
-    assert int(g.view(program, 'get_funds', [payer])) == FUND - final_earnings
-    assert int(g.view(program, 'get_reserved', [payer])) == BUDGET - final_earnings
-    assert int(g.view(program, 'get_plan_remaining', [0])) == BUDGET - final_earnings
-    assert int(g.view(program, 'get_locked_value')) == STAKE + FUND
-    g.step('identical canonical paid claims on four ExEx sinks',
-           claims=len(claims), per_class_increments_ou=increments, total_earnings_ou=final_earnings)
+    assert channel_before + final_earnings == FUND
+    assert 1 + remaining + final_earnings == FUND
+    assert int(g.view(program, 'get_earnings', [operator])) == final_earnings
+    assert int(g.view(program, 'get_locked_value')) == STAKE + final_earnings
+    g.step('identical canonical paid claims on four ExEx sinks with instant available withdrawal',
+           claims=len(claims), per_class_increments_ou=increments, total_earnings_ou=final_earnings,
+           payer_withdrawn_ou=1 + remaining)
+
+    # Register the operator as a buyer, then allocate its earned OCT directly
+    # into a new prepaid plan, without depositing another token.
+    operator_key = g.ROOT / 'operator.hex'
+    own_generation = int(g.view(program, 'get_generation', [operator])) + 1
+    operator_public = g.JOURNAL['genesis']['validators'][0].split(':', 1)[1]
+    domain = json.loads(plan_path.read_text())['binding']['deployment']['domain']
+    registration = f'Octranet register v1|{domain}|{program}|{operator}|{own_generation}'
+    proof = g.command(['octra', 'cast', 'wallet', 'sign', '--key', operator_key, registration])
+    g.send('operator registers its own prepaid channel', operator_key, program,
+           'register', [operator_public, proof])
+    own_budget = max(1, final_earnings // 2)
+    assert int(g.view(program, 'get_funds', [operator])) == 0
+    assert int(g.view(program, 'get_earnings', [operator])) == final_earnings
+    own_open = g.send('exit earnings fund operator own traffic without another deposit', operator_key,
+                      program, 'open_plan', [0, own_budget])
+    own_plan = int(next(event['values'][0] for event in own_open['events']
+                        if event['event'] == 'PlanOpened'))
+    assert int(g.view(program, 'get_funds', [operator])) == own_budget
+    assert int(g.view(program, 'get_earnings', [operator])) == final_earnings - own_budget
+    assert int(g.view(program, 'get_reserved', [operator])) == own_budget
+    assert int(g.view(program, 'get_channel_balance', [operator])) == final_earnings
+    assert int(g.view(program, 'get_locked_value')) == STAKE + final_earnings
+    manifest = json.loads(plan_path.read_text())['binding']['manifest_hash']
+    purchase = f'Octranet prepaid v1|{domain}|{program}|{operator}|{own_generation}|{own_plan}|0|{manifest}|0|1|32'
+    signature = g.command(['octra', 'cast', 'wallet', 'sign', '--key', operator_key, purchase])
+    g.send('earned OCT purchases operator own prepaid bytes', operator_key, program,
+           'claim', [own_plan, 0, 1, 32, signature])
+    assert int(g.view(program, 'get_prepaid_bytes', [own_plan, 0])) == 32
+    assert int(g.view(program, 'get_plan_remaining', [own_plan])) == own_budget - 1
+    assert int(g.view(program, 'get_channel_balance', [operator])) == final_earnings
+    own_claims = g.until(lambda: [row for row in archive_claims(program, operator)
+                                 if any(int(event['values'][0]) == own_plan for event in row[3])],
+                         30, 'canonical operator own-byte purchase in ExEx')
+    for name, event, _transaction, _charged in own_claims:
+        for index in range(1, 4):
+            peer = g.ROOT / f'chain/node-{index}/exex' / name
+            g.until(peer.exists, 60, 'matching own-byte purchase peer ExEx')
+            assert json.loads(peer.read_text()) == event
+    g.send('request canonical operator unstake', operator_key, program, 'request_operator_unstake', [])
+    unlock = int(g.view(program, 'get_operator_unlock_ms', [operator]))
+    assert int(g.view(program, 'get_operator_unstake_ms')) == 604_800_000
+    assert unlock > 0 and int(g.view(program, 'get_operator_stake', [operator])) == STAKE
+    g.send('operator unstake retry keeps original deadline', operator_key, program,
+           'request_operator_unstake', [])
+    assert int(g.view(program, 'get_operator_unlock_ms', [operator])) == unlock
+    g.send('stopped operator releases its unused prepaid allocation immediately', operator_key,
+           program, 'release_stopped_plan', [own_plan])
+    assert int(g.view(program, 'get_plan_remaining', [own_plan])) == 0
+    g.send('operator channel balance withdraws while stake remains locked', operator_key,
+           program, 'withdraw_remaining', [])
+    assert int(g.view(program, 'get_channel_balance', [operator])) == 0
+    assert int(g.view(program, 'get_locked_value')) == STAKE
+    g.send('early operator stake withdrawal refused', operator_key, program,
+           'withdraw_operator_stake', [], expected=False)
+    g.step('available channel OCT withdraws instantly while operator stake remains seven days',
+           operator_reused_earnings_ou=own_budget, own_prepaid_bytes=32,
+           operator_unlock_ms=unlock, locked_stake_ou=STAKE)
 
     observed = g.until(lambda: target() if target().get('udp_payload_bytes', 0) >= udp_bytes
                        and target().get('tcp_payload_bytes', 0) >= tcp_bytes else None,
@@ -618,13 +772,14 @@ def exercise(program, operator, tariff, plan_path, faucet, hop, control):
     (g.EVIDENCE / 'payment-network.json').write_text(json.dumps(network, indent=2))
     assert 'SNAT' in network['nat_rules'] and SNAT in network['nat_rules']
     g.JOURNAL['limitations'] = ['No public-network or Mainnet qualification',
-        '24-hour and seven-day maturity use separate canonical-clock boundary tests',
+        '24-hour replacement-rate notice and seven-day unstake use separate canonical-clock boundary tests',
         'Explicit client --resume after process death; seamless reconnect is not asserted',
-        'No stock Tailscale paid-exit, DNS/TLS or portal onboarding qualification']
+        'No stock Tailscale paid-exit, DNS/TLS or portal onboarding qualification',
+        'Prepaid consent does not prove delivery; no trustless Web non-delivery slashing or prepaid refund remedy']
 
 
 def main():
-    g.JOURNAL.update(scope='isolated four-validator payment-plan application; real client, '
+    g.JOURNAL.update(scope='isolated four-validator prepaid payment-plan application; real client, '
                      'two endpoint kernels and canonical claims; no public-chain or Mainnet claim')
     g.native_guard()
     g.ROOT.mkdir(mode=0o700)
@@ -721,21 +876,21 @@ def main():
     binding = {'deployment': {'domain': domain, 'program': program}, 'payer': payer,
                'generation': 1, 'plan': 0, 'offer': 0, 'manifest_hash': manifest}
     accepted = {'binding': binding, 'tariff': tariff, 'original_budget_ou': BUDGET,
-                'control_url': 'http://127.0.0.1:19879', 'wireguard_endpoint': '127.0.0.1:19874'}
+                'control_url': 'http://127.0.0.1:19879', 'wireguard_endpoint': '127.0.0.1:19874',
+                'prepaid_bytes': PREPAID_BYTES}
     plan_path = g.ROOT / 'accepted-plan.json'
     plan_path.write_text(json.dumps(accepted))
     (g.EVIDENCE / 'accepted-plan.json').write_text(json.dumps(accepted, indent=2))
     application = {'program': program, 'code_hash': artifacts['octranet-payments.aml']['code_hash'],
                    'factory': factory, 'factory_code_hash': artifacts['octranet-payments-factory.aml']['code_hash'],
                    'domain': domain, 'operator_circle': circle, 'offer': 0}
+    retained_epoch = g.epoch()
     g.stop(0)
     configs[0]['payments'] = {'application': application, 'ip_tunnel': {'name': SERVER},
-                              'credit': {'max_unacknowledged_bytes': CREDIT_BYTES,
-                                         'max_unacknowledged_ou': 100_000},
                               'max_claim_fees_ou': 100_000}
     (g.ROOT / 'chain/node-0/config.json').write_text(json.dumps(configs[0]))
     g.start(0)
-    route_server()
+    route_server(retained_epoch)
     hop = Hop(pathlib.Path('/hop'), role='node', name=LINK)
     try:
         with ControlProxy() as control:

@@ -1,4 +1,4 @@
-use super::{Binding, Credit};
+use super::Binding;
 use anyhow::Result;
 #[cfg(unix)]
 use anyhow::{ensure, Context};
@@ -15,7 +15,9 @@ use std::{
 #[cfg(unix)]
 const MAX_BYTES: u64 = 131_072;
 #[cfg(unix)]
-const VERSION: u8 = 1;
+// Version 1 treated redemption as delivered bytes and allowed operator credit.
+// It must never be reinterpreted as a prepaid consumption journal.
+const VERSION: u8 = 2;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -24,13 +26,11 @@ pub(super) struct Record {
     pub tariff_hash: String,
     pub budget_ou: u64,
     pub committed: Vec<u64>,
-    pub redeemed: Vec<u64>,
+    pub purchased: Vec<u64>,
     pub uncertain: Vec<u64>,
     pub pending: Vec<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connect: Option<octravpn_core::payments::SignedConnect>,
-    #[serde(default, skip_serializing_if = "Credit::is_unlimited")]
-    pub credit: Credit,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub authorizations: Vec<Option<octravpn_core::payments::SignedUsage>>,
 }

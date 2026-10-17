@@ -140,7 +140,9 @@ mod tests {
             Arc::new(TailnetIpAllocator::new("persistent-hub")),
             machines,
             policy,
-            octravpn_mesh::tailscale_wire::DerpMapStore::shared(Default::default()),
+            octravpn_mesh::tailscale_wire::DerpMapStore::shared(
+                octravpn_mesh::tailscale_wire::DerpMap::default(),
+            ),
         )
         .registration_store(Some(stores.machines.clone()))
         .build();

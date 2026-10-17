@@ -236,7 +236,7 @@ mod linux {
     }
 
     pub(super) fn preflight_peer(tun_name: &str, peer: SocketAddrV4) -> Result<()> {
-        let output = System.run(&vec![
+        let output = System.run(&[
             "-4".into(),
             "-j".into(),
             "route".into(),
@@ -318,7 +318,7 @@ mod linux {
     }
 
     fn paid_route_present(runner: &impl Runner, route: &Route) -> Result<bool> {
-        let output = runner.run(&vec![
+        let output = runner.run(&[
             "-4".into(),
             "-j".into(),
             "route".into(),
@@ -346,7 +346,7 @@ mod linux {
         require_address(runner, tun_name, false)?;
         require_address(runner, "tailscale0", true)?;
         require_physical_public_path(runner)?;
-        let route_get = runner.run(&vec![
+        let route_get = runner.run(&[
             "-4".into(),
             "-j".into(),
             "route".into(),
@@ -403,7 +403,7 @@ mod linux {
             ("100.100.100.100".to_owned(), "tailscale0"),
             (peer.ip().to_string(), dev),
         ] {
-            let output = runner.run(&vec![
+            let output = runner.run(&[
                 "-4".into(),
                 "-j".into(),
                 "route".into(),
@@ -424,7 +424,7 @@ mod linux {
 
     fn reject_stale(runner: &impl Runner) -> Result<()> {
         for family in ["-4", "-6"] {
-            let output = runner.run(&vec![
+            let output = runner.run(&[
                 family.into(),
                 "-j".into(),
                 "route".into(),
@@ -441,7 +441,7 @@ mod linux {
 
     fn require_physical_public_path(runner: &impl Runner) -> Result<()> {
         for address in ["1.1.1.1", "129.0.0.1"] {
-            let output = runner.run(&vec![
+            let output = runner.run(&[
                 "-4".into(),
                 "-j".into(),
                 "route".into(),
@@ -462,7 +462,7 @@ mod linux {
     }
 
     fn require_ipv6_guard_capability(runner: &impl Runner) -> Result<()> {
-        let output = runner.run(&vec![
+        let output = runner.run(&[
             "-6".into(),
             "-j".into(),
             "address".into(),
@@ -484,7 +484,7 @@ mod linux {
     }
 
     fn require_address(runner: &impl Runner, interface: &str, tailnet: bool) -> Result<()> {
-        let output = runner.run(&vec![
+        let output = runner.run(&[
             "-4".into(),
             "-j".into(),
             "address".into(),
@@ -617,7 +617,7 @@ mod linux {
                     ));
                 }
                 if args.contains(&"get".to_owned()) {
-                    let address = args.last().map(String::as_str).unwrap_or("");
+                    let address = args.last().map_or("", String::as_str);
                     let dev = match address {
                         "100.100.100.100" => "tailscale0",
                         "1.1.1.1" | "129.0.0.1" => "octvpn0",

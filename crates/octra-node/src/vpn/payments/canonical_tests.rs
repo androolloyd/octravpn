@@ -43,7 +43,6 @@ use super::test_host::{self as payment_host, common as circle_host};
 const CHAIN: &str = "octra-rust-local-7061796d656e7473";
 const GENESIS_SECONDS: f64 = 1_800_000_000.;
 const GENESIS_BALANCE: u64 = 1_000_000_000_000;
-const DAY_MS: u64 = 86_400_000;
 
 #[derive(Clone)]
 struct Authority {
@@ -598,27 +597,25 @@ async fn public_payment_grant_uses_post_genesis_deployment_and_authenticated_epo
     assert!(resumed.admissible());
     assert!(!granted.admissible(), "resume cannot revive an old grant");
 
-    fixture.call(12, "request_exit", json!([]), 0).await;
-    assert!(!resumed.admissible());
-    let exiting = reader.plan(0).await.unwrap();
-    assert!(!exiting.admissible() && exiting.claimable());
-    assert_eq!(exiting.claim_increment(&signed).unwrap(), 100);
-    let deadline = exiting.claim_deadline_ms.unwrap();
-    assert_eq!(deadline, exiting.canonical_ms + DAY_MS);
+    // Buy while the connection is open. A later exit cannot charge a held
+    // signature for additional, unusable capacity after the connection closes.
     fixture
         .call(13, "claim", signed.claim_params().unwrap(), 0)
         .await;
-    assert!(!exiting.claimable());
-    let settled = reader.plan(0).await.unwrap();
-    assert_eq!(settled.remaining_ou, 900);
-    assert_eq!(settled.redeemed_bytes, [0, 1_048_576]);
-    assert!(settled.claim_increment(&signed).is_err());
-    #[allow(clippy::cast_precision_loss)] // Fixture timestamps fit f64's exact integer range.
-    let deadline_seconds = deadline as f64 / 1000.;
-    fixture.publish_at(vec![], deadline_seconds).await;
-    assert!(!settled.claimable());
-    let closed = reader.plan(0).await.unwrap();
-    assert!(!closed.admissible() && !closed.claimable());
+    let purchased = reader.plan(0).await.unwrap();
+    assert_eq!(purchased.remaining_ou, 900);
+    assert_eq!(purchased.redeemed_bytes, [0, 1_048_576]);
+    assert!(purchased.admissible() && purchased.claimable());
+    let held = receipt(&purchased, 2 * 1_048_576);
+    fixture.call(12, "request_exit", json!([]), 0).await;
+    assert!(!resumed.admissible() && !purchased.admissible());
+    let exiting = reader.plan(0).await.unwrap();
+    assert!(!exiting.admissible() && !exiting.claimable());
+    assert!(exiting.claim_increment(&held).is_err());
+    exiting.validate_usage(&signed).unwrap();
+    assert!(exiting.redeemed_bytes[1] >= signed.usage.total_bytes);
+    let deadline = exiting.claim_deadline_ms.unwrap();
+    assert_eq!(deadline, exiting.canonical_ms);
     fixture.call(12, "withdraw_remaining", json!([]), 0).await;
     let withdrawn = reader.plan(0).await.unwrap();
     assert!(!withdrawn.admissible() && !withdrawn.claimable());
@@ -626,7 +623,7 @@ async fn public_payment_grant_uses_post_genesis_deployment_and_authenticated_epo
 }
 
 #[tokio::test]
-async fn public_payment_grant_revokes_on_operator_unstake_and_uses_fixed_claim_cutoff() {
+async fn public_payment_grant_revokes_new_purchases_on_unstake_and_releases_unspent_immediately() {
     let mut fixture = Box::pin(Fixture::new(None)).await;
     let reader = fixture.payments();
     let active = reader.plan(0).await.unwrap();
@@ -635,9 +632,12 @@ async fn public_payment_grant_revokes_on_operator_unstake_and_uses_fixed_claim_c
         .await;
     assert!(!active.admissible() && !active.claimable());
     let stopped = reader.plan(0).await.unwrap();
-    assert!(!stopped.admissible() && stopped.claimable());
+    assert!(!stopped.admissible() && !stopped.claimable());
+    assert!(stopped
+        .claim_increment(&receipt(&stopped, 1_048_576))
+        .is_err());
     let cutoff = stopped.claim_deadline_ms.unwrap();
-    assert_eq!(cutoff, stopped.canonical_ms + DAY_MS);
+    assert_eq!(cutoff, stopped.canonical_ms);
     fixture
         .call(11, "request_operator_unstake", json!([]), 0)
         .await;
@@ -645,11 +645,6 @@ async fn public_payment_grant_revokes_on_operator_unstake_and_uses_fixed_claim_c
         reader.plan(0).await.unwrap().claim_deadline_ms,
         Some(cutoff)
     );
-    #[allow(clippy::cast_precision_loss)] // Fixture timestamps fit f64's exact integer range.
-    let cutoff_seconds = cutoff as f64 / 1000.;
-    fixture.publish_at(vec![], cutoff_seconds).await;
-    let expired = reader.plan(0).await.unwrap();
-    assert!(!expired.admissible() && !expired.claimable());
     fixture
         .call(12, "release_stopped_plan", json!([0]), 0)
         .await;
@@ -762,5 +757,100 @@ async fn packet_capability_checks_actual_canonical_publication_at_handoff() {
         })
         .is_err());
     assert_eq!(writes, 2);
+    fixture.node.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn canonical_replacement_notice_preserves_purchased_traffic_and_admits_successor_lineage() {
+    let mut fixture = Box::pin(Fixture::new(None)).await;
+    let reader = fixture.payments();
+    let original = reader.plan(0).await.unwrap();
+    let purchased = receipt(&original, 1_048_576);
+    fixture
+        .call(13, "claim", purchased.claim_params().unwrap(), 0)
+        .await;
+    fixture
+        .call(
+            11,
+            "create_rate_change",
+            json!([0, original.manifest_hash]),
+            0,
+        )
+        .await;
+    for class in original.tariff.classes() {
+        fixture
+            .call(11, "append_class", json!([1, class.rate_ou_per_mib]), 0)
+            .await;
+    }
+    fixture.call(11, "seal_offer", json!([1]), 0).await;
+    let notice = reader.plan(0).await.unwrap();
+    let activation = notice.offer_end_ms;
+    assert_eq!(activation, notice.canonical_ms + 86_400_000);
+    assert!(notice.admissible() && notice.claimable());
+    #[allow(clippy::cast_precision_loss)]
+    // Canonical fixture milliseconds fit f64's exact integer range.
+    let activation_seconds = activation as f64 / 1000.;
+    fixture.publish_at(vec![], activation_seconds).await;
+    let retired = reader.plan(0).await.unwrap();
+    assert!(retired.admissible());
+    assert!(!retired.claimable());
+    assert_eq!(retired.claim_deadline_ms, None);
+    assert_eq!(retired.redeemed_bytes, [0, 1_048_576]);
+    retired.validate_usage(&purchased).unwrap();
+    assert!(retired
+        .claim_increment(&receipt(&retired, 2 * 1_048_576))
+        .is_err());
+    let binding = purchased.usage.binding();
+    let granted = <Payments as octravpn_node::payments::Authority>::plan(&reader, &binding)
+        .await
+        .unwrap();
+    assert!(granted.admissible && granted.guard.live());
+    let mut called = false;
+    granted
+        .guard
+        .current(&mut || {
+            called = true;
+            Ok(())
+        })
+        .unwrap();
+    assert!(called, "retiring a quote cannot revoke purchased traffic");
+    fixture.call(12, "open_plan", json!([1, 1000]), 0).await;
+    let successor = reader.plan(1).await.unwrap();
+    assert_eq!(successor.offer, 1);
+    assert!(successor.admissible() && successor.claimable());
+    assert_eq!(successor.offer_start_ms, activation);
+    assert_eq!(successor.tariff, original.tariff);
+    fixture.node.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn canonical_partial_withdrawal_revokes_existing_transport_generation_immediately() {
+    let mut fixture = Box::pin(Fixture::new(None)).await;
+    let reader = fixture.payments();
+    let original = reader.plan(0).await.unwrap();
+    let purchased = receipt(&original, 1_048_576);
+    fixture
+        .call(13, "claim", purchased.claim_params().unwrap(), 0)
+        .await;
+    let binding = purchased.usage.binding();
+    let granted = <Payments as octravpn_node::payments::Authority>::plan(&reader, &binding)
+        .await
+        .unwrap();
+    assert!(granted.admissible && granted.guard.live());
+    fixture.call(12, "withdraw_channel", json!([1]), 0).await;
+    assert!(!granted.guard.live());
+    let revoked = <Payments as octravpn_node::payments::Authority>::plan(&reader, &binding)
+        .await
+        .unwrap();
+    assert!(!revoked.admissible && revoked.guard.live());
+    assert!(revoked.guard.current(&mut || Ok(())).is_err());
+    let closed = reader.claim_plan(0).await.unwrap();
+    closed.validate_usage(&purchased).unwrap();
+    assert!(!closed.admissible() && !closed.claimable());
+    assert_eq!(closed.redeemed_bytes, [0, 1_048_576]);
+    fixture.call(12, "withdraw_remaining", json!([]), 0).await;
+    let withdrawn = reader.claim_plan(0).await.unwrap();
+    withdrawn.validate_usage(&purchased).unwrap();
+    assert!(!withdrawn.admissible() && !withdrawn.claimable());
     fixture.node.shutdown().await.unwrap();
 }

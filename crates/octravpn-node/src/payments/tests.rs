@@ -3,7 +3,6 @@
 //! qualification is inferred from this in-process control-plane coverage.
 use super::super::{Grant, Guard};
 use super::*;
-use crate::payment_meter::Credit;
 use axum::{
     body::{to_bytes, Body},
     http::{Method, Request},
@@ -113,30 +112,19 @@ impl Settlement for CanonicalSettlement {
             usage.receipt_key == plan.receipt_key,
             "fixture claim receipt key differs"
         );
-        ensure!(
-            plan.canonical_ms < plan.claim_deadline_ms,
-            "fixture claim deadline elapsed"
-        );
         let class = usize::from(usage.usage.traffic_class);
         let floor = *plan
             .redeemed_totals
             .get(class)
             .context("fixture unknown class")?;
-        ensure!(usage.usage.total_bytes >= floor, "fixture claim regressed");
-        let mut accepted = self.accepted.lock();
-        if let Some(previous) = accepted
-            .iter()
-            .rev()
-            .find(|previous| previous.usage.traffic_class == usage.usage.traffic_class)
-        {
-            if previous == &usage {
-                return Ok(());
-            }
-            ensure!(
-                usage.usage.sequence > previous.usage.sequence,
-                "fixture claim replay"
-            );
+        if usage.usage.total_bytes <= floor {
+            return Ok(());
         }
+        ensure!(
+            plan.admissible && plan.canonical_ms < plan.claim_deadline_ms,
+            "fixture new purchase closed"
+        );
+        let mut accepted = self.accepted.lock();
         let mut redeemed = plan.redeemed_totals.clone();
         redeemed[class] = usage.usage.total_bytes;
         let charge = plan.tariff.total_charge(&redeemed)?;
@@ -158,10 +146,9 @@ struct Fixture {
     operator: Arc<KeyPair>,
     host: Arc<Host>,
     settlement: Arc<CanonicalSettlement>,
-    credit: Credit,
 }
 impl Fixture {
-    fn new(credit_bytes: u64) -> Self {
+    fn new(purchased_bytes: u64) -> Self {
         let root = tempfile::tempdir().unwrap();
         let payer = Arc::new(KeyPair::from_secret_bytes(&[5; 32]));
         let operator = Arc::new(KeyPair::from_secret_bytes(&[6; 32]));
@@ -201,8 +188,8 @@ impl Fixture {
             receipt_key: payer.public,
             tariff,
             original_budget_ou: 10_000,
-            remaining_ou: 10_000,
-            redeemed_totals: vec![0, 0],
+            remaining_ou: 10_000 - 3 * purchased_bytes,
+            redeemed_totals: vec![purchased_bytes, purchased_bytes],
             canonical_ms: 1_000,
             claim_deadline_ms: 86_401_000,
             admissible: true,
@@ -221,10 +208,6 @@ impl Fixture {
             operator,
             host,
             settlement,
-            credit: Credit {
-                max_unacknowledged_bytes: credit_bytes,
-                max_unacknowledged_ou: credit_bytes * 2,
-            },
         }
     }
     fn start(&self) -> Arc<Control> {
@@ -232,15 +215,13 @@ impl Fixture {
     }
     fn start_with_authority(&self, authority: Arc<dyn Authority>) -> Arc<Control> {
         let wireguard = [42; 32];
-        let identity =
-            serde_json::to_vec(&(1_u8, self.operator.public, wireguard, self.credit)).unwrap();
+        let identity = serde_json::to_vec(&(2_u8, self.operator.public, wireguard)).unwrap();
         let writer = open_directory(&self.path, &identity).unwrap();
         Arc::new(Control {
             registry: Arc::new(Registry::new(
                 self.path.clone(),
                 authority,
                 Arc::new(writer),
-                self.credit,
             )),
             settlement: self.settlement.clone(),
             operator: self.operator.clone(),
@@ -450,8 +431,11 @@ async fn restarted_exiting_plan_recovers_receipts_without_transport_admission() 
         .cloned()
         .unwrap();
     assert_eq!(recovered.snapshot().unwrap().committed_totals, [64, 0]);
-    assert_eq!(recovered.authorizations().unwrap(), [usage.clone()]);
-    assert_eq!(fixture.host.0.read().redeemed_totals, [64, 0]);
+    assert_eq!(
+        recovered.authorizations().unwrap(),
+        std::slice::from_ref(&usage)
+    );
+    assert_eq!(fixture.host.0.read().redeemed_totals, [64, 64]);
     assert!(
         control.registry.connections.read().is_empty(),
         "receipt recovery creates no tunnel capability"
@@ -461,7 +445,7 @@ async fn restarted_exiting_plan_recovers_receipts_without_transport_admission() 
         StatusCode::OK
     );
     assert!(Arc::ptr_eq(
-        &control.registry.meters.read().get(&session).unwrap(),
+        control.registry.meters.read().get(&session).unwrap(),
         &recovered
     ));
     assert_eq!(
@@ -522,8 +506,8 @@ async fn removed_tariff_recovers_cached_and_restarted_receipts_without_admission
         );
         assert_eq!(
             authority.claim_reads.load(Ordering::Acquire),
-            0,
-            "cached receipt history still settles without admitting a connection"
+            1,
+            "a successful confirmation rechecks the authenticated byte purchase"
         );
     }
     let control = fixture.start_with_authority(authority.clone());
@@ -557,7 +541,7 @@ async fn removed_tariff_recovers_cached_and_restarted_receipts_without_admission
         post(&control, "/payments/connect", &connect).await.0,
         StatusCode::FORBIDDEN
     );
-    assert_eq!(fixture.host.0.read().redeemed_totals, [64, 0]);
+    assert_eq!(fixture.host.0.read().redeemed_totals, [64, 64]);
 }
 
 #[tokio::test]
@@ -692,7 +676,7 @@ async fn signed_status_binds_exact_plan_tariff_keys_sequence_and_counters() {
     assert_eq!(status.status.tariff, fixture.host.0.read().tariff);
     assert_eq!(status.status.original_budget_ou, 10_000);
     assert_eq!(status.status.committed_totals, [0, 0]);
-    assert_eq!(status.status.redeemed_totals, [0, 0]);
+    assert_eq!(status.status.redeemed_totals, [256, 256]);
     assert_eq!(status.status.canonical_ms, 1_000);
     assert_eq!(status.status.claim_deadline_ms, 86_401_000);
     let connection = control.registry.get(&[11; 32]).unwrap();
@@ -907,24 +891,32 @@ async fn revoked_canonical_guard_and_service_stop_prevent_kernel_handoff_and_new
 }
 
 #[tokio::test]
-async fn only_confirmed_metered_bytes_can_reach_canonical_settlement() {
-    let fixture = Fixture::new(256);
+async fn unsigned_and_unconfirmed_purchases_cannot_forward_and_handoff_never_returns_uncertain_bytes(
+) {
+    let fixture = Fixture::new(0);
     let control = fixture.start();
     let connect = fixture.connect(1, [11; 32]);
     let connection = connected(&control, &connect).await;
     let bytes = packet(false, false, 4);
-    let ticket = connection
+    assert!(connection
         .meter
         .reserve(&bytes, Direction::Outbound)
         .await
-        .unwrap();
-    let usage = fixture.usage(0, 1, bytes.len() as u64);
+        .is_err());
+    assert!(connection
+        .meter
+        .check_usage(&fixture.usage(0, 1, 64))
+        .is_ok());
     assert_eq!(
-        post(&control, "/payments/usage", &usage).await.0,
-        StatusCode::SERVICE_UNAVAILABLE
+        post(&control, "/payments/usage", &fixture.usage(0, 1, 64))
+            .await
+            .0,
+        StatusCode::OK
     );
-    assert_eq!(fixture.settlement.attempts.load(Ordering::Acquire), 0);
-    ticket.cancel().await.unwrap();
+    assert_eq!(
+        connection.meter.snapshot().unwrap().committed_totals,
+        [0, 0]
+    );
     let ticket = connection
         .meter
         .reserve(&bytes, Direction::Outbound)
@@ -936,11 +928,7 @@ async fn only_confirmed_metered_bytes_can_reach_canonical_settlement() {
         )))
         .await
         .is_err());
-    assert_eq!(
-        post(&control, "/payments/usage", &usage).await.0,
-        StatusCode::SERVICE_UNAVAILABLE
-    );
-    assert_eq!(fixture.settlement.attempts.load(Ordering::Acquire), 0);
+    assert_eq!(connection.meter.snapshot().unwrap().pending_totals, [0, 0]);
     let ticket = connection
         .meter
         .reserve(&bytes, Direction::Outbound)
@@ -960,53 +948,38 @@ async fn only_confirmed_metered_bytes_can_reach_canonical_settlement() {
     let snapshot = connection.meter.snapshot().unwrap();
     assert_eq!(snapshot.committed_totals, [0, 0]);
     assert_eq!(snapshot.uncertain_totals, [bytes.len() as u64, 0]);
-    assert_eq!(
-        post(&control, "/payments/usage", &usage).await.0,
-        StatusCode::SERVICE_UNAVAILABLE
-    );
-    assert_eq!(fixture.settlement.attempts.load(Ordering::Acquire), 0);
     forward(&connection, &bytes, Direction::Outbound).await;
+    assert!(connection.meter.reserve_class(0, 1).await.is_err());
+    assert!(connection.meter.reserve_class(1, 1).await.is_err());
     assert_eq!(
-        post(
-            &control,
-            "/payments/usage",
-            &fixture.usage(0, 1, bytes.len() as u64 + 1)
-        )
-        .await
-        .0,
-        StatusCode::SERVICE_UNAVAILABLE
-    );
-    assert_eq!(fixture.settlement.attempts.load(Ordering::Acquire), 0);
-    assert_eq!(
-        post(&control, "/payments/usage", &usage).await.0,
+        post(&control, "/payments/usage", &fixture.usage(0, 1, 64))
+            .await
+            .0,
         StatusCode::OK
     );
-    assert_eq!(connection.meter.authorizations().unwrap(), vec![usage]);
-    assert_eq!(
-        fixture.host.0.read().redeemed_totals,
-        [bytes.len() as u64, 0]
-    );
-    assert_eq!(
-        connection.meter.snapshot().unwrap().uncertain_totals,
-        [bytes.len() as u64, 0]
+    assert!(
+        connection.meter.reserve_class(0, 1).await.is_err(),
+        "retry does not replenish purchased bytes"
     );
 }
 
 #[tokio::test]
-async fn failed_canonical_settlement_never_restores_credit_even_after_restart() {
-    let fixture = Fixture::new(64);
+async fn failed_canonical_purchase_never_unlocks_capacity_even_after_restart() {
+    let fixture = Fixture::new(0);
     let connect = fixture.connect(1, [11; 32]);
     let bytes = packet(false, false, 36);
-    assert_eq!(bytes.len(), 64);
-    let usage = fixture.usage(0, 1, 64);
+    let purchase = fixture.usage(0, 1, 64);
     fixture.settlement.fail.store(true, Ordering::Release);
     {
         let control = fixture.start();
         let connection = connected(&control, &connect).await;
-        forward(&connection, &bytes, Direction::Outbound).await;
-        assert!(connection.meter.reserve_class(0, 1).await.is_err());
+        assert!(connection
+            .meter
+            .reserve(&bytes, Direction::Outbound)
+            .await
+            .is_err());
         assert_eq!(
-            post(&control, "/payments/usage", &usage).await.0,
+            post(&control, "/payments/usage", &purchase).await.0,
             StatusCode::SERVICE_UNAVAILABLE
         );
         assert!(connection.meter.authorizations().unwrap().is_empty());
@@ -1017,88 +990,187 @@ async fn failed_canonical_settlement_never_restores_credit_even_after_restart() 
     let connection = connected(&control, &connect).await;
     assert!(connection.meter.reserve_class(0, 1).await.is_err());
     assert_eq!(
-        post(&control, "/payments/usage", &usage).await.0,
+        post(&control, "/payments/usage", &purchase).await.0,
         StatusCode::SERVICE_UNAVAILABLE
     );
-    assert!(connection.meter.authorizations().unwrap().is_empty());
-    assert!(connection.meter.reserve_class(0, 1).await.is_err());
     fixture.settlement.fail.store(false, Ordering::Release);
     assert_eq!(
-        post(&control, "/payments/usage", &usage).await.0,
+        post(&control, "/payments/usage", &purchase).await.0,
         StatusCode::OK
     );
     assert_eq!(
         connection.meter.authorizations().unwrap(),
-        vec![usage.clone()]
+        std::slice::from_ref(&purchase)
     );
-    let ticket = connection.meter.reserve_class(0, 1).await.unwrap();
-    ticket.cancel().await.unwrap();
-    // Exact retry is idempotent and does not reset original lifetime liability.
+    forward(&connection, &bytes, Direction::Outbound).await;
+    assert!(connection.meter.reserve_class(0, 1).await.is_err());
     assert_eq!(
-        post(&control, "/payments/usage", &usage).await.0,
+        post(&control, "/payments/usage", &purchase).await.0,
         StatusCode::OK
     );
-    assert_eq!(connection.meter.snapshot().unwrap().capacity_charge_ou, 64);
+    assert!(connection.meter.reserve_class(0, 1).await.is_err());
+    assert_eq!(
+        connection.meter.snapshot().unwrap().committed_totals,
+        [64, 0]
+    );
     assert_eq!(connection.meter.snapshot().unwrap().remaining_ou, 9_936);
 }
 
 #[tokio::test]
-async fn wrong_receipt_key_or_bad_signature_cannot_restore_credit() {
-    let fixture = Fixture::new(64);
+async fn bad_receipt_key_signature_unknown_class_and_oversized_purchase_never_reach_settlement() {
+    let fixture = Fixture::new(0);
     let control = fixture.start();
     let connection = connected(&control, &fixture.connect(1, [11; 32])).await;
-    forward(&connection, &packet(false, false, 36), Direction::Outbound).await;
     let valid = fixture.usage(0, 1, 64);
-    let mut invalid = valid.clone();
-    invalid.signature.0[0] ^= 1;
-    assert_eq!(
-        post(&control, "/payments/usage", &invalid).await.0,
-        StatusCode::SERVICE_UNAVAILABLE
-    );
-    let invalid = SignedUsage::sign(valid.usage, &KeyPair::from_secret_bytes(&[8; 32])).unwrap();
-    assert_eq!(
-        post(&control, "/payments/usage", &invalid).await.0,
-        StatusCode::SERVICE_UNAVAILABLE
-    );
+    let mut invalid_signature = valid.clone();
+    invalid_signature.signature.0[0] ^= 1;
+    let wrong_key = SignedUsage::sign(valid.usage, &KeyPair::from_secret_bytes(&[8; 32])).unwrap();
+    for invalid in [
+        invalid_signature,
+        wrong_key,
+        fixture.usage(2, 1, 64),
+        fixture.usage(1, 1, 5001),
+    ] {
+        assert_eq!(
+            post(&control, "/payments/usage", &invalid).await.0,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+    assert_eq!(fixture.settlement.attempts.load(Ordering::Acquire), 0);
     assert!(connection.meter.authorizations().unwrap().is_empty());
     assert!(connection.meter.reserve_class(0, 1).await.is_err());
     assert_eq!(fixture.host.0.read().redeemed_totals, [0, 0]);
 }
 
 #[tokio::test]
-async fn usage_replay_and_unknown_class_cannot_replace_durable_authorization() {
-    let fixture = Fixture::new(128);
+async fn cumulative_purchase_retries_do_not_reset_delivery_and_classes_are_isolated() {
+    let fixture = Fixture::new(0);
     let control = fixture.start();
     let connection = connected(&control, &fixture.connect(1, [11; 32])).await;
-    let bytes = packet(false, false, 4);
-    forward(&connection, &bytes, Direction::Outbound).await;
-    let first = fixture.usage(0, 1, bytes.len() as u64);
+    let first = fixture.usage(0, 100, 32);
     assert_eq!(
         post(&control, "/payments/usage", &first).await.0,
         StatusCode::OK
     );
-    forward(&connection, &bytes, Direction::Outbound).await;
-    let current = fixture.usage(0, 3, 2 * bytes.len() as u64);
+    forward(&connection, &packet(false, false, 4), Direction::Outbound).await;
+    assert!(connection.meter.reserve_class(0, 1).await.is_err());
+    let larger = fixture.usage(0, 1, 64);
     assert_eq!(
-        post(&control, "/payments/usage", &current).await.0,
+        post(&control, "/payments/usage", &larger).await.0,
         StatusCode::OK
     );
-    for invalid in [
-        first,
-        fixture.usage(0, 2, 2 * bytes.len() as u64),
-        fixture.usage(2, 4, 1),
-    ] {
+    forward(&connection, &packet(false, false, 4), Direction::Outbound).await;
+    for retry in [first, fixture.usage(0, 200, 63), larger.clone()] {
         assert_eq!(
-            post(&control, "/payments/usage", &invalid).await.0,
-            StatusCode::SERVICE_UNAVAILABLE
+            post(&control, "/payments/usage", &retry).await.0,
+            StatusCode::OK
         );
         assert_eq!(
             connection.meter.authorizations().unwrap(),
-            vec![current.clone()]
+            std::slice::from_ref(&larger)
         );
-        assert_eq!(
-            fixture.host.0.read().redeemed_totals,
-            [2 * bytes.len() as u64, 0]
-        );
+        assert!(connection.meter.reserve_class(0, 1).await.is_err());
+        assert!(connection.meter.reserve_class(1, 1).await.is_err());
     }
+    let premium = fixture.usage(1, 1, 32);
+    assert_eq!(
+        post(&control, "/payments/usage", &premium).await.0,
+        StatusCode::OK
+    );
+    forward(&connection, &packet(true, false, 4), Direction::Outbound).await;
+    assert!(connection.meter.reserve_class(1, 1).await.is_err());
+}
+
+#[tokio::test]
+async fn spent_monetary_budget_still_delivers_purchased_bytes_without_another_charge() {
+    let fixture = Fixture::new(0);
+    let control = fixture.start();
+    let request = fixture.connect(1, [11; 32]);
+    let connection = connected(&control, &request).await;
+    let purchase = fixture.usage(0, 1, 10_000);
+    assert_eq!(
+        post(&control, "/payments/usage", &purchase).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(fixture.host.0.read().remaining_ou, 0);
+    let current = connected(&control, &request).await;
+    assert!(Arc::ptr_eq(&connection, &current));
+    assert!(current.live());
+    assert_eq!(current.meter.snapshot().unwrap().committed_totals, [0, 0]);
+    current
+        .meter
+        .reserve_class(0, 10_000)
+        .await
+        .unwrap()
+        .commit()
+        .await
+        .unwrap();
+    assert!(current.meter.reserve_class(0, 1).await.is_err());
+}
+
+struct AcknowledgedOnly;
+#[async_trait::async_trait]
+impl Settlement for AcknowledgedOnly {
+    async fn confirm(&self, _: SignedUsage) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn settlement_acknowledgement_without_fresh_canonical_bytes_never_unlocks_traffic() {
+    let fixture = Fixture::new(0);
+    let mut control = fixture.start();
+    Arc::get_mut(&mut control).unwrap().settlement = Arc::new(AcknowledgedOnly);
+    let connection = connected(&control, &fixture.connect(1, [11; 32])).await;
+    let purchase = fixture.usage(0, 1, 64);
+    assert_eq!(
+        post(&control, "/payments/usage", &purchase.usage).await.0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        post(&control, "/payments/usage", &purchase).await.0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    assert!(connection.meter.authorizations().unwrap().is_empty());
+    assert_eq!(
+        connection.meter.snapshot().unwrap().purchased_totals,
+        [0, 0]
+    );
+    assert!(connection.meter.reserve_class(0, 1).await.is_err());
+}
+
+#[tokio::test]
+async fn closing_prepaid_connection_rejects_held_new_purchase_but_acknowledges_canonical_bytes() {
+    let fixture = Fixture::new(0);
+    let control = fixture.start();
+    let connection = connected(&control, &fixture.connect(1, [11; 32])).await;
+    let purchased = fixture.usage(0, 1, 32);
+    let held = fixture.usage(0, 2, 64);
+    assert_eq!(
+        post(&control, "/payments/usage", &purchased).await.0,
+        StatusCode::OK
+    );
+    fixture.host.0.read().guard.revoke();
+    {
+        let mut plan = fixture.host.0.write();
+        plan.admissible = false;
+        plan.guard = Arc::new(HostGuard::new());
+    }
+    control.registry.refresh().await;
+    assert!(!connection.live());
+    assert_eq!(
+        post(&control, "/payments/usage", &held).await.0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    assert_eq!(fixture.host.0.read().redeemed_totals, [32, 0]);
+    assert_eq!(
+        connection.meter.authorizations().unwrap(),
+        std::slice::from_ref(&purchased)
+    );
+    assert_eq!(
+        post(&control, "/payments/usage", &purchased).await.0,
+        StatusCode::OK
+    );
+    assert!(control.registry.connections.read().is_empty());
+    assert!(!connection.live());
 }

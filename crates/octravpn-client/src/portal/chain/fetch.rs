@@ -385,7 +385,6 @@ mod tests {
                     let body = b"<html>public Circle</html>";
                     let resource_key = resource_key(circle, path);
                     let result = match request["method"].as_str().unwrap_or_default() {
-                        "circle_asset_ciphertext_by_resource_key" => None,
                         "circle_info" => Some(json!({
                             "circle_id": circle,
                             "privacy_class": if resource_mode == "public_resources" { "public" } else { "sealed" },

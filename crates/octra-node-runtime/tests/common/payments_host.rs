@@ -98,6 +98,12 @@ impl Chain {
         Self::with_code(&binaries().0)
     }
     pub(crate) fn with_code(payment_code: &[u8]) -> Self {
+        Self::with_code_and_cap(payment_code, 200_000_000)
+    }
+    pub(crate) fn with_cap(cap: u64) -> Self {
+        Self::with_code_and_cap(&binaries().0, cap)
+    }
+    fn with_code_and_cap(payment_code: &[u8], cap: u64) -> Self {
         let accounts = (11..=14)
             .map(|n| {
                 (
@@ -142,7 +148,7 @@ impl Chain {
             11,
             &factory,
             "deploy_payments",
-            json!([STANDARD.encode(payment_code), DOMAIN, 200_000_000, STAKE]),
+            json!([STANDARD.encode(payment_code), DOMAIN, cap, STAKE]),
             0,
         );
         receipt["events"]
@@ -380,7 +386,7 @@ impl Chain {
     }
     pub(crate) fn receipt(&self, class: u64, seq: u64, bytes: u64) -> Value {
         let message = format!(
-            "Octranet usage v1|{DOMAIN}|{}|{}|1|0|0|{MANIFEST}|{class}|{seq}|{bytes}",
+            "Octranet prepaid v1|{DOMAIN}|{}|{}|1|0|0|{MANIFEST}|{class}|{seq}|{bytes}",
             self.program,
             address(12)
         );

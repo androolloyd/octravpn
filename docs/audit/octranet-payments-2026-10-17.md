@@ -1,5 +1,9 @@
 # Octranet payment application review
 
+The source-pinned results below describe the earlier postpaid candidate. The
+[new prepaid revision](octranet-prepaid-2026-10-17.md) removes operator credit and
+requires its own validation record; these historical results do not qualify it.
+
 This record covers the staged `program/octranet-payments.aml` and its
 deployment-only factory. Existing v5 contracts and their qualification are
 separate. No public transaction was broadcast for this candidate.

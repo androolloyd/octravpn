@@ -1,0 +1,92 @@
+{
+  "schema": "octra_public_observer_progress_v1",
+  "observed_at": "2026-10-17T12:22:40.172621+00:00",
+  "release_commit": "2516b7cd493e94d108a67ea6454c0c830a678c03",
+  "pid": 84816,
+  "serving": false,
+  "suspension_reason": "auditing canonical history",
+  "sequence": 10591,
+  "epoch": 1708351,
+  "state_root": [
+    66,
+    207,
+    186,
+    180,
+    158,
+    76,
+    28,
+    236,
+    232,
+    129,
+    123,
+    120,
+    77,
+    120,
+    85,
+    8,
+    98,
+    152,
+    46,
+    234,
+    178,
+    96,
+    65,
+    13,
+    187,
+    163,
+    153,
+    85,
+    142,
+    180,
+    124,
+    160
+  ],
+  "growth_epochs": 319,
+  "new_transactions": 2816,
+  "checkpoints": [
+    {
+      "extension": "devnet-archive",
+      "namespace": "9ebcbe2009256807e94a63b2b4d11865fbe684a7acfcdea1fa96a25111a53981",
+      "sequence": 10591,
+      "epoch": 1708351,
+      "root": "42cfbab49e4c1cece8817b784d78550862982eeab260410dbba399558eb47ca0"
+    }
+  ],
+  "evidence_path": "out/service-liveness-20261017/public-adoption/channel-final-continuity.json",
+  "evidence_sha256": "dcce9aff8c2d6013b7ef1f7920dd8a2d17071ff2735a5118cf1f97e98ad825b4",
+  "scope": "Read-only retained prefix, canonical/outbox/checkpoint/archive consistency; not independent QC verification",
+  "paid_settlement": "unconfigured",
+  "mainnet_qualified": false,
+  "earlier_audit": {
+    "observed_at": "2026-10-17T11:28:36.265166+00:00",
+    "sequence": 10430,
+    "epoch": 1708190,
+    "growth_epochs": 158,
+    "new_transactions": 1559,
+    "evidence_path": "out/service-liveness-20261017/public-adoption/prepaid-development-continuity.json",
+    "evidence_sha256": "89343e563de76eb89da6aa4a01b7a4d4421abd351162c09db96199df6a9874c2"
+  },
+  "intermediate_status_sample": {
+    "observed_at": "2026-10-17T11:48:56.798818+00:00",
+    "operator_status": {
+      "http": 200,
+      "body": {
+        "chain_id": "octra-devnet-9871-cluster",
+        "epoch": 1708208,
+        "peers": 8,
+        "pending": 0,
+        "serving": true,
+        "state_root": "ed08255bc7aa4be82148b47a7c6bbaeb9e6b2fb31cab031a60a3bc2ebebdd41e",
+        "suspension_reason": null,
+        "vpn_program": null,
+        "vpn_settlement": "unconfigured"
+      }
+    },
+    "public_status": {
+      "error": "timed out"
+    },
+    "evidence_path": "out/service-liveness-20261017/public-adoption/prepaid-later-status.json",
+    "evidence_sha256": "de3736c04e1ec5edec881386e9c0652abf789bb0ccd76b5c0f48fc9b61edd731",
+    "scope": "Bounded live status sample; not retained-prefix audit or sustained service qualification"
+  }
+}

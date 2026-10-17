@@ -1,11 +1,14 @@
 import Lean
 
 /-!
-Abstract accounting and deadline model for program/octranet-payments.aml.
+Abstract prepaid accounting and deadline model for program/octranet-payments.aml.
 The compiled-AML transaction tests exercise the implementation separately.
 This file does not prove compiler/VM correctness, signatures, packet delivery,
 network admission, or refinement of the entire AML state into this model.
 Time is the canonical Program epoch_time in milliseconds, not epoch count.
+Purchasing bytes is not a proof that an operator delivered Internet service.
+The separate forwarding model below assumes authenticated purchased capacity;
+its connection to the Rust meter is tested, not a proven refinement.
 -/
 namespace OctranetPayments
 
@@ -33,7 +36,7 @@ def Invariant (s : State) : Prop :=
 
 def requestExit (s : State) (now : Nat) : Option State :=
   if s.userActive = false ∨ now = 0 then none
-  else if s.userDeadline = 0 then some { s with userDeadline := now + day }
+  else if s.userDeadline = 0 then some { s with userDeadline := now }
   else some s
 
 def requestUnstake (s : State) (now : Nat) : Option State :=
@@ -44,17 +47,34 @@ def requestUnstake (s : State) (now : Nat) : Option State :=
 
 -- planStop is read from the immutable operator_stopped[operator][generation]
 -- map entry for this plan's offer. Rebonding does not clear that entry.
-def claim (s : State) (now generation planStop amount : Nat)
+def claim (s : State) (_now generation planStop amount : Nat)
     (authorized : Bool) : Option State :=
   if authorized = false ∨ s.userActive = false ∨ generation ≠ s.userGeneration then none
-  else if s.userDeadline ≠ 0 ∧ now ≥ s.userDeadline then none
-  else if planStop ≠ 0 ∧ now ≥ planStop + day then none
+  else if s.userDeadline ≠ 0 then none
+  else if planStop ≠ 0 then none
   else if amount > s.reserved ∨ amount > s.funds then none
   else some { s with funds := s.funds - amount, reserved := s.reserved - amount, earned := s.earned + amount }
 
+-- Available channel OCT includes funds and earned traffic proceeds. Stake is
+-- a separate liability. Reservations are allocations, not withdrawal holds.
+def channelBalance (s : State) : Nat := s.funds + s.earned
+
 def withdrawUser (s : State) (now : Nat) : Option State :=
-  if s.userActive = false ∨ s.userDeadline = 0 ∨ now < s.userDeadline then none
-  else some { s with funds := 0, reserved := 0, userActive := false, locked := s.locked - s.funds }
+  if now = 0 ∨ (s.userActive = false ∧ channelBalance s = 0) then none
+  else some { s with funds := 0, earned := 0, reserved := 0, userActive := false, userDeadline := now, locked := s.locked - channelBalance s }
+
+def withdrawPartial (s : State) (amount : Nat) : Option State :=
+  if s.userActive = false ∨ amount = 0 ∨ amount > channelBalance s then none
+  else some { s with funds := s.funds - amount, earned := s.earned - (amount - s.funds), reserved := 0, userGeneration := s.userGeneration + 1, locked := s.locked - amount }
+
+def allocateEarnings (s : State) (amount : Nat) : Option State :=
+  if amount > s.earned then none
+  else some { s with funds := s.funds + amount, earned := s.earned - amount }
+
+-- Other payees' earnings remain in custody but leave this channel's balance.
+def payOther (s : State) (amount : Nat) : Option State :=
+  if amount > s.reserved ∨ amount > s.funds then none
+  else some { s with funds := s.funds - amount, reserved := s.reserved - amount, other := s.other + amount }
 
 def withdrawOperator (s : State) (now : Nat) : Option State :=
   if s.stake = 0 ∨ s.operatorUnlock = 0 ∨ now < s.operatorUnlock then none
@@ -62,13 +82,13 @@ def withdrawOperator (s : State) (now : Nat) : Option State :=
 
 def canForward (s : State) (payerGeneration providerGeneration minStake : Nat) : Bool :=
   s.userActive && decide (s.userDeadline = 0) &&
-  decide (payerGeneration = s.userGeneration) && decide (s.reserved > 0) &&
+  decide (payerGeneration = s.userGeneration) &&
   decide (s.stake ≥ minStake) && decide (s.operatorUnlock = 0) &&
   decide (providerGeneration = s.operatorGeneration)
 
-theorem user_exit_exactly_one_day (s : State) (now : Nat)
+theorem user_exit_stops_immediately (s : State) (now : Nat)
     (ha : s.userActive = true) (hn : now ≠ 0) (hd : s.userDeadline = 0) :
-    requestExit s now = some { s with userDeadline := now + day } := by
+    requestExit s now = some { s with userDeadline := now } := by
   simp [requestExit, ha, hn, hd]
 
 theorem user_exit_retry_preserves_deadline (s : State) (now : Nat)
@@ -111,10 +131,11 @@ theorem receipt_cannot_extend_user_deadline (s s' : State)
     (h : claim s now gen stop amount auth = some s') :
     s'.userDeadline = s.userDeadline := by
   unfold claim at h
-  split at h <;> simp_all
-  split at h <;> simp_all
-  split at h <;> simp_all
-  split at h <;> simp_all
+  split at h <;> try contradiction
+  split at h <;> try contradiction
+  split at h <;> try contradiction
+  split at h <;> try contradiction
+  have hs := Option.some.inj h
   subst s'
   rfl
 
@@ -123,25 +144,88 @@ theorem claim_preserves_accounting (s s' : State)
     (hi : Invariant s) (h : claim s now gen stop amount auth = some s') :
     Invariant s' := by
   unfold claim at h
-  split at h <;> simp_all
-  split at h <;> simp_all
-  split at h <;> simp_all
-  split at h <;> simp_all
+  split at h <;> try contradiction
+  split at h <;> try contradiction
+  split at h <;> try contradiction
+  split at h <;> try contradiction
+  have hs := Option.some.inj h
   subst s'
   simp only [Invariant] at *
   try dsimp
   omega
 
-theorem withdrawal_returns_only_difference (s s' : State) (now : Nat)
+theorem withdrawal_returns_available_channel_only (s s' : State) (now : Nat)
     (hi : Invariant s) (h : withdrawUser s now = some s') :
-    Invariant s' ∧ s'.earned = s.earned ∧ s'.stake = s.stake ∧
-    s'.locked + s.funds = s.locked := by
+    Invariant s' ∧ s'.funds = 0 ∧ s'.earned = 0 ∧ s'.stake = s.stake ∧
+    s'.locked + channelBalance s = s.locked := by
   unfold withdrawUser at h
   split at h <;> simp_all
   subst s'
-  simp only [Invariant] at *
+  simp only [Invariant, channelBalance] at *
   try dsimp
-  refine ⟨⟨by omega, ?_, by omega⟩, True.intro, True.intro, ?_⟩ <;> omega
+  refine ⟨⟨by omega, ?_, by omega⟩, True.intro, True.intro, True.intro, ?_⟩ <;> omega
+
+theorem withdrawal_requires_no_payer_delay (s : State) (now : Nat)
+    (ha : s.userActive = true) (hn : now ≠ 0) :
+    withdrawUser s now = some { s with funds := 0, earned := 0, reserved := 0, userActive := false, userDeadline := now, locked := s.locked - channelBalance s } := by
+  simp [withdrawUser, ha, hn]
+
+theorem partial_withdrawal_preserves_accounting (s s' : State) (amount : Nat)
+    (hi : Invariant s) (h : withdrawPartial s amount = some s') :
+    Invariant s' ∧ s'.reserved = 0 ∧ s'.userGeneration = s.userGeneration + 1 ∧
+      s'.stake = s.stake ∧ s'.locked + amount = s.locked := by
+  unfold withdrawPartial at h
+  split at h <;> simp_all
+  subst s'
+  simp only [Invariant, channelBalance] at *
+  try dsimp
+  refine ⟨⟨by omega, ?_, by omega⟩, True.intro, True.intro, True.intro, ?_⟩ <;> omega
+
+theorem earnings_allocation_preserves_custody (s s' : State) (amount : Nat)
+    (hi : Invariant s) (h : allocateEarnings s amount = some s') :
+    Invariant s' ∧ channelBalance s' = channelBalance s ∧ s'.locked = s.locked := by
+  unfold allocateEarnings at h
+  split at h <;> simp_all
+  subst s'
+  simp only [Invariant, channelBalance] at *
+  try dsimp
+  refine ⟨⟨by omega, ?_, by omega⟩, ?_, True.intro⟩ <;> omega
+
+theorem partial_withdrawal_invalidates_old_generation (s s' : State)
+    (amount now stop charge : Nat) (auth : Bool)
+    (h : withdrawPartial s amount = some s') :
+    claim s' now s.userGeneration stop charge auth = none := by
+  unfold withdrawPartial at h
+  split at h <;> simp_all
+  subst s'
+  have hg : s.userGeneration ≠ s.userGeneration + 1 := by omega
+  simp [claim, hg]
+
+theorem self_payment_preserves_channel_balance (s s' : State)
+    (now gen stop amount : Nat) (auth : Bool)
+    (h : claim s now gen stop amount auth = some s') :
+    channelBalance s' = channelBalance s := by
+  unfold claim at h
+  split at h <;> try contradiction
+  split at h <;> try contradiction
+  split at h <;> try contradiction
+  split at h <;> try contradiction
+  have hs := Option.some.inj h
+  subst s'
+  simp only [channelBalance]
+  try dsimp
+  omega
+
+theorem cross_operator_payment_conserves_custody (s s' : State) (amount : Nat)
+    (hi : Invariant s) (h : payOther s amount = some s') :
+    Invariant s' ∧ channelBalance s' + amount = channelBalance s ∧
+    s'.locked = s.locked ∧ s'.stake = s.stake := by
+  unfold payOther at h
+  split at h <;> simp_all
+  subst s'
+  simp only [Invariant, channelBalance] at *
+  try dsimp
+  refine ⟨⟨by omega, ?_, by omega⟩, ?_, True.intro, True.intro⟩ <;> omega
 
 theorem unstake_preserves_payer_and_earnings (s s' : State) (now : Nat)
     (hi : Invariant s) (h : withdrawOperator s now = some s') :
@@ -162,14 +246,29 @@ theorem old_provider_generation_cannot_forward (s : State) (payer provider minim
     (h : provider ≠ s.operatorGeneration) : canForward s payer provider minimum = false := by
   simp [canForward, h]
 
+theorem eligibility_independent_of_remaining_escrow (s : State) (payer provider minimum : Nat) :
+    canForward { s with reserved := 0 } payer provider minimum =
+      canForward s payer provider minimum := by
+  rfl
+
 theorem old_payer_generation_cannot_claim (s : State) (now gen stop amount : Nat)
     (auth : Bool) (h : gen ≠ s.userGeneration) : claim s now gen stop amount auth = none := by
   simp [claim, h]
 
-theorem all_stopped_receipts_expire_before_unstake (stopped : Nat) :
-    stopped + day < stopped + operatorDelay := by
-  unfold day operatorDelay
+theorem instant_channel_release_precedes_unstake (stopped : Nat) :
+    stopped < stopped + operatorDelay := by
+  unfold operatorDelay
   omega
+
+theorem stopped_payer_cannot_buy_more (s : State) (now gen stop amount : Nat)
+    (auth : Bool) (hd : s.userDeadline ≠ 0) :
+    claim s now gen stop amount auth = none := by
+  simp [claim, hd]
+
+theorem stopped_operator_cannot_sell_more (s : State) (now gen stop amount : Nat)
+    (auth : Bool) (hs : stop ≠ 0) :
+    claim s now gen stop amount auth = none := by
+  simp [claim, hs]
 
 theorem cumulative_increments_do_not_overcharge (previous middle latest : Nat)
     (h1 : previous ≤ middle) (h2 : middle ≤ latest) :
@@ -199,5 +298,107 @@ theorem duplicate_usage_cannot_charge_again (s : Cumulative)
     (bytes charge sequence : Nat) (auth : Bool) (hb : bytes ≤ s.bytes) :
     redeem s bytes charge sequence auth = none := by
   simp [redeem, hb]
+
+-- Immutable successor quotes change NEW purchase eligibility only. Existing
+-- purchased capacity retains its original tariff and is modeled below.
+structure Quote where
+  start : Nat
+  finish : Nat
+  cancelled : Bool
+  sealed : Bool
+  deriving DecidableEq, Repr
+
+def quoteOpen (q : Quote) (now : Nat) : Bool :=
+  q.sealed && !q.cancelled && decide (q.start ≤ now) &&
+    decide (q.finish = 0 ∨ now < q.finish)
+
+def scheduledParent (q : Quote) (now : Nat) : Quote := { q with finish := now + day }
+def scheduledSuccessor (now : Nat) : Quote :=
+  { start := now + day, finish := 0, cancelled := false, sealed := true }
+
+theorem successor_requires_full_notice (now before : Nat) (h : before < now + day) :
+    quoteOpen (scheduledSuccessor now) before = false := by
+  simp [quoteOpen, scheduledSuccessor, Nat.not_le_of_lt h]
+
+theorem successor_opens_at_exact_boundary (now : Nat) :
+    quoteOpen (scheduledSuccessor now) (now + day) = true := by
+  simp [quoteOpen, scheduledSuccessor]
+
+theorem parent_retires_at_exact_boundary (q : Quote) (now : Nat) :
+    quoteOpen (scheduledParent q now) (now + day) = false := by
+  have h : now + day ≠ 0 := by unfold day; omega
+  simp [quoteOpen, scheduledParent, h]
+
+theorem cancelled_quote_never_opens (q : Quote) (now : Nat) :
+    quoteOpen { q with cancelled := true } now = false := by
+  simp [quoteOpen]
+
+theorem rescheduling_restarts_full_notice (first second : Nat) (h : first ≤ second) :
+    (scheduledSuccessor second).start = second + day ∧
+      (scheduledSuccessor first).start ≤ (scheduledSuccessor second).start := by
+  dsimp [scheduledSuccessor]
+  exact ⟨rfl, Nat.add_le_add_right h day⟩
+
+theorem parent_and_successor_quotes_are_exclusive (q : Quote) (scheduled now : Nat)
+    (h : quoteOpen (scheduledParent q scheduled) now = true) :
+    quoteOpen (scheduledSuccessor scheduled) now = false := by
+  by_cases before : now < scheduled + day
+  · exact successor_requires_full_notice scheduled now before
+  · have nonzero : scheduled + day ≠ 0 := by unfold day; omega
+    simp [quoteOpen, scheduledParent, nonzero, before] at h
+
+-- A class's prepaid capacity is independent of actual packet handoffs.
+structure Capacity where
+  purchased : Nat
+  consumed : Nat
+  pending : Nat
+  uncertain : Nat
+  deriving DecidableEq, Repr
+
+def held (s : Capacity) : Nat := s.consumed + s.pending + s.uncertain
+def Prepaid (s : Capacity) : Prop := held s ≤ s.purchased
+
+def reserveBytes (s : Capacity) (bytes : Nat) : Option Capacity :=
+  if bytes = 0 ∨ held s + bytes > s.purchased then none
+  else some { s with pending := s.pending + bytes }
+
+def confirmBytes (s : Capacity) (bytes : Nat) : Option Capacity :=
+  if bytes > s.pending then none
+  else some { s with pending := s.pending - bytes, consumed := s.consumed + bytes }
+
+theorem unpaid_class_cannot_reserve (s : Capacity) (bytes : Nat)
+    (hp : s.purchased = 0) (hb : bytes > 0) : reserveBytes s bytes = none := by
+  have h : held s + bytes > 0 := by omega
+  simp [reserveBytes, hp, h]
+
+theorem reservation_never_exceeds_prepaid (s s' : Capacity) (bytes : Nat)
+    (h : reserveBytes s bytes = some s') : Prepaid s' := by
+  unfold reserveBytes at h
+  split at h <;> simp_all
+  subst s'
+  simp only [Prepaid, held] at *
+  omega
+
+theorem reservation_cannot_create_payment (s s' : Capacity) (bytes : Nat)
+    (h : reserveBytes s bytes = some s') : s'.purchased = s.purchased := by
+  unfold reserveBytes at h
+  split at h <;> simp_all
+  subst s'
+  rfl
+
+theorem confirmation_preserves_prepaid (s s' : Capacity) (bytes : Nat)
+    (hi : Prepaid s) (h : confirmBytes s bytes = some s') : Prepaid s' := by
+  unfold confirmBytes at h
+  split at h <;> simp_all
+  subst s'
+  simp only [Prepaid, held] at *
+  omega
+
+theorem confirmation_cannot_create_payment (s s' : Capacity) (bytes : Nat)
+    (h : confirmBytes s bytes = some s') : s'.purchased = s.purchased := by
+  unfold confirmBytes at h
+  split at h <;> simp_all
+  subst s'
+  rfl
 
 end OctranetPayments

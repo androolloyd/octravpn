@@ -9,12 +9,32 @@ upstream behavioral parity and public-network deployment remain unqualified.
 
 ## Recorded local evidence
 
+- The [prepaid channel revision](../audit/octranet-prepaid-2026-10-17.md) qualifies
+  1,719 passing tests across 20 targets, 39 bounded Lean theorems, strict lint
+  and a frozen-source four-validator/two-kernel gate. It covers
+  exact byte purchases before forwarding, immediate withdrawal of available
+  channel OCT, exit-earnings reuse and 24-hour replacement-rate notice.
+  Operator unstaking remains seven days and protocol commission is zero.
+  Older credit-based payment checkpoints below retain their original scope.
+  Public paid service remains unqualified. Settled purchases
+  are final and do not prove Internet delivery or provide non-delivery insurance.
+- The [offline legacy repair checkpoint](checkpoints/2026-10-17/legacy-repair.json)
+  records 173 native codec/finality vectors and 26 passing physical recovery,
+  process-death, signed-proof corruption and ownership cases. The
+  [command](legacy-repair.md) resumes an existing locally trusted staged plan
+  through an unchanged pinned native backend. It neither rewinds modern Rust
+  canonical history nor supplies automatic fork selection or an all-Rust
+  Irmin/chaindata backend. The normal release passes the same 26 physical
+  cases; its code is included in the combined candidate validation above.
 - The [guarded public release adoption](checkpoints/2026-10-17/service-public-adoption.json)
   installed frozen normal release `2516b7c` after a clean old-process
   exit at epoch 1,708,032. Existing canonical/outbox/archive prefixes,
   checkpoint bindings, key, configuration and relay were preserved. The new
-  supervised process is alive and restoring retained state; authenticated
-  post-restart progress and serving admission remain pending. Payments are
+  supervised process remains alive. A [later read-only prefix audit](checkpoints/2026-10-17/service-public-progress.md)
+  records 319 new epochs and 2,816 transaction events with matching canonical/ExEx
+  continuity. An intermediate sample reported serving admission enabled, while
+  its separate public status request timed out. Sustained public availability
+  remains unqualified. Payments are
   unconfigured. [Operational scope](checkpoints/2026-10-17/service-public-adoption.md)
   distinguishes launch from public service and Mainnet qualification.
 - The [automatic Service liveness checkpoint](checkpoints/2026-10-17/service-liveness.json)
@@ -338,8 +358,8 @@ SQLite ExEx outbox and archive. The canary deposited no escrow or operator stake
 Funded VPN service and independent public-chain replay remain unqualified.
 
 There is no VPN protocol commission: operators receive the agreed traffic charge
-in OCT, with ordinary chain transaction fees separate. Settlement checks the
-opening's immutable tariff and exact claimed amount. Its cooperative two-step
+in OCT, with ordinary chain transaction fees separate. The historical v5
+settlement checks the opening's immutable tariff and exact claimed amount. Its cooperative two-step
 protocol still depends on timely operator claim and client confirmation; it does
 not establish adversarial payment fairness when a party refuses to cooperate.
 Only one funded exit is supported. Multi-hop selection is refused before escrow.

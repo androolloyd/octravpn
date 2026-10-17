@@ -321,13 +321,13 @@ mod tests {
         tokio::pin!(waiting);
         tokio::select! {
             _ = &mut waiting => panic!("first balance was insufficient"),
-            _ = tokio::time::sleep(Duration::from_millis(30)) => {},
+            () = tokio::time::sleep(Duration::from_millis(30)) => {},
         }
         let response = client.get(&url).send().await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body = response.text().await.unwrap();
         assert!(body.contains("Fund this wallet"));
-        assert!(body.contains(&wallet.display()));
+        assert!(body.contains(wallet.display()));
         assert!(body.contains("Self-carried Octranet traffic has no operator toll"));
         tokio::time::timeout(Duration::from_secs(5), waiting)
             .await

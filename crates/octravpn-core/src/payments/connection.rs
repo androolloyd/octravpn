@@ -141,7 +141,9 @@ pub struct Status {
     pub tariff: Tariff,
     pub original_budget_ou: u64,
     pub remaining_ou: u64,
+    /// Locally confirmed forwarded bytes, separately from purchased capacity.
     pub committed_totals: Vec<u64>,
+    /// Cumulative prepaid byte entitlements from canonical application state.
     pub redeemed_totals: Vec<u64>,
     #[serde(deserialize_with = "deserialize_positive")]
     pub canonical_ms: u64,
@@ -169,19 +171,18 @@ impl Status {
             .redeemed_totals
             .iter()
             .zip(&self.committed_totals)
-            .any(|(redeemed, committed)| redeemed > committed)
+            .any(|(redeemed, committed)| committed > redeemed)
         {
-            return Err(Error::Invalid("redeemed bytes exceed committed delivery"));
+            return Err(Error::Invalid("delivery exceeds prepaid bytes"));
         }
-        let charge = self.tariff.total_charge(&self.committed_totals)?;
+        let charge = self.tariff.total_charge(&self.redeemed_totals)?;
         if charge > self.original_budget_ou {
             return Err(Error::BudgetExceeded {
                 required: charge,
                 budget: self.original_budget_ou,
             });
         }
-        // Canonical redemption and local unredeemed delivery are different
-        // snapshots. Their remaining balances need not equal each other.
+        // The signed status is an operator view, not a canonical state proof.
         if self.remaining_ou > self.original_budget_ou {
             return Err(Error::Invalid("remaining balance exceeds original budget"));
         }
@@ -194,7 +195,7 @@ impl Status {
     /// Domain-separated canonical JSON bytes, without a prehash.
     pub fn signing_message(&self) -> Result<Vec<u8>> {
         self.validate()?;
-        let mut message = b"Octranet status v1\0".to_vec();
+        let mut message = b"Octranet prepaid status v1\0".to_vec();
         crate::v3_canonical::canonical_write(&serde_json::to_value(self)?, &mut message);
         Ok(message)
     }
@@ -322,8 +323,8 @@ mod tests {
             tariff,
             original_budget_ou: 20,
             remaining_ou: 17,
-            committed_totals: vec![BYTES_PER_MIB, BYTES_PER_MIB / 2],
-            redeemed_totals: vec![BYTES_PER_MIB / 2, 0],
+            committed_totals: vec![BYTES_PER_MIB / 2, 0],
+            redeemed_totals: vec![BYTES_PER_MIB, BYTES_PER_MIB / 2],
             canonical_ms: 1_000,
             claim_deadline_ms: 86_401_000,
         }
@@ -382,7 +383,7 @@ mod tests {
         assert_eq!(
             usage.signing_message().unwrap(),
             format!(
-                "Octranet usage v1|{}|{}|{}|1|0|3|{}|2|9|100",
+                "Octranet prepaid v1|{}|{}|{}|1|0|3|{}|2|9|100",
                 "a".repeat(64),
                 binding.deployment.program,
                 binding.payer,
@@ -549,12 +550,12 @@ mod tests {
         let status = &signed.status;
         let expected = format!(
             concat!(
-                "Octranet status v1\0",
+                "Octranet prepaid status v1\0",
                 "{{\"binding\":{{\"deployment\":{{\"domain\":\"{}\",\"program\":\"{}\"}},",
                 "\"generation\":1,\"manifest_hash\":\"{}\",\"offer\":3,\"payer\":\"{}\",\"plan\":0}},",
                 "\"canonical_ms\":1000,\"claim_deadline_ms\":86401000,",
-                "\"client_wireguard_key\":\"{}\",\"committed_totals\":[1048576,524288],",
-                "\"connect_sequence\":7,\"original_budget_ou\":20,\"redeemed_totals\":[524288,0],",
+                "\"client_wireguard_key\":\"{}\",\"committed_totals\":[524288,0],",
+                "\"connect_sequence\":7,\"original_budget_ou\":20,\"redeemed_totals\":[1048576,524288],",
                 "\"remaining_ou\":17,\"server_wireguard_key\":\"{}\",",
                 "\"tariff\":{{\"classes\":[{{\"name\":\"default\",\"rate_ou_per_mib\":2}},",
                 "{{\"name\":\"premium\",\"rate_ou_per_mib\":4}}],",
@@ -709,7 +710,7 @@ mod tests {
             assert!(invalid.validate().is_err());
         }
         let mut invalid = status();
-        invalid.redeemed_totals[1] = invalid.committed_totals[1] + 1;
+        invalid.committed_totals[1] = invalid.redeemed_totals[1] + 1;
         assert!(invalid.validate().is_err());
         let mut invalid = status();
         invalid.original_budget_ou = 3;
@@ -741,7 +742,7 @@ mod tests {
         .unwrap();
         invalid.binding.manifest_hash = invalid.tariff.hash_hex().unwrap();
         invalid.committed_totals = vec![u64::MAX];
-        invalid.redeemed_totals = vec![0];
+        invalid.redeemed_totals = vec![u64::MAX];
         assert!(matches!(invalid.validate(), Err(Error::Overflow)));
     }
 

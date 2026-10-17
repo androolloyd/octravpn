@@ -645,7 +645,6 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
                         )),
                         wireguard_secret: wireguard.clone(),
                         ip_tunnel: config.ip_tunnel,
-                        credit: config.credit,
                     },
                     application,
                     publisher,

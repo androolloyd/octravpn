@@ -74,20 +74,21 @@ and bonds the operator. The `payments` client and native service then carry
 actual kernel TCP, UDP and ICMP through the same isolated two-kernel fixture.
 It checks differential traffic rates, operator-selected free traffic, native
 canonical claims, matching ExEx, crash recovery with `--resume`, retained
-budgets, and canonical exit/early-withdrawal refusal. It uses the normal native
-clock; exact 24-hour and seven-day maturity boundaries have separate compiled
+budgets, immediate channel withdrawal, earnings reuse and early operator-stake
+withdrawal refusal. It uses the normal native
+clock; exact 24-hour rate activation and seven-day unstake boundaries have separate compiled
 AML and native canonical tests. Passing this gate does not qualify stock
 Tailscale paid exits, portal onboarding, public DNS/TLS or Mainnet deployment.
 
-After held receipts are released, the gate waits for the actual durable meter
-to regain credit. Every later phase must authorize and canonically pay for new
-traffic above its preceding counter baseline. UDP probes allow at most three
-application sends per fixture ID, each with a three-second receive deadline;
-each send, timeout, matching echo and stale duplicate is recorded. A canonical
-publication can deliberately drop a datagram while admission is suspended.
-Retry exhaustion still fails the gate, and blocked-credit/revocation probes
-retain their strict no-delivery assertions. Public client, claim and meter
-journals are captured before proxy/process cleanup on failure.
+The prepaid gate holds initial purchase authorizations and requires zero
+delivery, zero earnings and no client traffic interface before their canonical
+settlement, including client/operator crash recovery. Once released, exact
+finite byte purchases precede real traffic. The same purchase survives restart;
+consumption cannot trigger top-ups. Exhausting a class must stop its packets,
+while a still-funded class provides a positive control before exit revocation.
+UDP retries remain bounded and journal/packet evidence is retained on failure.
+These checks do not prove arbitrary Internet delivery or implement non-delivery
+slashing, refunds of unused purchased bytes or future-obligation insurance.
 
 The application requires canonical `epoch_time` and Ed25519 receipt checks.
 The adopted typed Program profile excludes Ed25519; the gate uses the explicit

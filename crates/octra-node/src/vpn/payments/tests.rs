@@ -18,29 +18,8 @@ fn persist_accounts(chain: &mut host::Chain) {
     }
 }
 
-async fn fixture() -> (tempfile::TempDir, host::Chain, Payments, CanonicalStore) {
-    let directory = tempfile::tempdir().unwrap();
-    let mut chain = host::Chain::new();
-    let operator = parse_native_address(&host::address(11)).unwrap();
-    let tariff = Tariff::new(
-        operator.clone(),
-        vec![
-            TrafficClass {
-                name: "default".into(),
-                rate_ou_per_mib: 10,
-            },
-            TrafficClass {
-                name: "premium".into(),
-                rate_ou_per_mib: 100,
-            },
-        ],
-        vec![],
-    )
-    .unwrap();
+fn publish_tariff(chain: &mut host::Chain, circle: &str, tariff: &Tariff) {
     let hash = tariff.hash_hex().unwrap();
-    chain.funded_plan_for_manifest(&hash);
-    persist_accounts(&mut chain);
-    let circle = host::address(14);
     let path = format!("/offers/{hash}/tariff.json");
     let path_key = circles::path_key(path.as_bytes());
     let raw = tariff.canonical_bytes().unwrap();
@@ -95,6 +74,32 @@ async fn fixture() -> (tempfile::TempDir, host::Chain, Payments, CanonicalStore)
             )
             .unwrap();
     }
+}
+
+async fn fixture() -> (tempfile::TempDir, host::Chain, Payments, CanonicalStore) {
+    let directory = tempfile::tempdir().unwrap();
+    let mut chain = host::Chain::new();
+    let operator = parse_native_address(&host::address(11)).unwrap();
+    let tariff = Tariff::new(
+        operator.clone(),
+        vec![
+            TrafficClass {
+                name: "default".into(),
+                rate_ou_per_mib: 10,
+            },
+            TrafficClass {
+                name: "premium".into(),
+                rate_ou_per_mib: 100,
+            },
+        ],
+        vec![],
+    )
+    .unwrap();
+    let hash = tariff.hash_hex().unwrap();
+    chain.funded_plan_for_manifest(&hash);
+    persist_accounts(&mut chain);
+    let circle = host::address(14);
+    publish_tariff(&mut chain, &circle, &tariff);
     chain
         .state
         .set(&[b"meta", b"last_epoch"], b"0".to_vec())
@@ -217,7 +222,7 @@ async fn compiled_state_tariff_and_payer_signature_agree_on_exact_claim_incremen
 }
 
 #[tokio::test]
-async fn native_plan_admission_and_receipt_window_follow_compiled_unstake_state() {
+async fn native_plan_admission_and_new_purchases_stop_at_compiled_unstake() {
     let (_directory, mut chain, reader, _store) = fixture().await;
     chain.now += 1000;
     chain.ok(11, "request_operator_unstake", json!([]), 0);
@@ -226,11 +231,14 @@ async fn native_plan_admission_and_receipt_window_follow_compiled_unstake_state(
     let plan = reader
         .read_state(&chain.state.snapshot(), 0, stopped)
         .unwrap();
-    assert!(!plan.eligible && plan.claim_eligible);
-    assert_eq!(plan.claim_deadline_ms, Some(stopped + DAY_MS));
+    assert!(!plan.eligible && !plan.claim_eligible);
+    assert_eq!(plan.claim_deadline_ms, Some(stopped));
+    assert!(plan
+        .increment_at_snapshot(&receipt(&plan, 1, 1_048_576))
+        .is_err());
     assert!(
         !reader
-            .read_state(&chain.state.snapshot(), 0, stopped + DAY_MS)
+            .read_state(&chain.state.snapshot(), 0, stopped + 86_400_000)
             .unwrap()
             .claim_eligible
     );
@@ -422,12 +430,19 @@ async fn removed_circle_does_not_erase_authenticated_claim_terms() {
             Some(tariff.clone()),
         )
         .unwrap();
-    assert!(!before_deadline.eligible && before_deadline.claim_eligible);
+    assert!(!before_deadline.eligible && !before_deadline.claim_eligible);
+    assert!(
+        before_deadline.validate_at_snapshot(&signed).is_ok(),
+        "canonical purchase acknowledgements remain valid"
+    );
+    assert!(before_deadline
+        .increment_at_snapshot(&receipt(&before_deadline, 2, 2 * 1_048_576))
+        .is_err());
     let at_deadline = reader
         .read_state_with_tariff(
             &chain.state.snapshot(),
             0,
-            chain.now as u64 + DAY_MS,
+            chain.now as u64 + 86_400_000,
             Some(tariff),
         )
         .unwrap();
@@ -488,10 +503,10 @@ async fn retained_tariff_does_not_override_current_manifest_rates_or_code() {
 
 struct RefusingArchive;
 impl TariffArchive for RefusingArchive {
-    fn load_tariff(&self) -> Result<Option<Tariff>> {
+    fn load_tariff(&self, _: u64) -> Result<Option<Tariff>> {
         Ok(None)
     }
-    fn save_tariff(&self, _: Tariff) -> Result<()> {
+    fn save_tariff(&self, _: u64, _: Tariff) -> Result<()> {
         anyhow::bail!("fixture archive IO failure")
     }
 }
@@ -508,8 +523,8 @@ async fn archive_failure_prevents_retention_and_immutable_terms_cannot_change() 
         .attach_archive(Arc::new(RefusingArchive))
         .await
         .unwrap();
-    assert!(reader.retain_tariff(tariff.clone()).await.is_err());
-    assert!(reader.retained.lock().await.tariff.is_none());
+    assert!(reader.retain_tariff(0, tariff.clone()).await.is_err());
+    assert!(reader.retained.lock().await.tariffs.is_empty());
     assert!(reader
         .attach_archive(Arc::new(RefusingArchive))
         .await
@@ -517,8 +532,8 @@ async fn archive_failure_prevents_retention_and_immutable_terms_cannot_change() 
     // A read-only adapter may retain in memory; production attaches its disk
     // archive before grants. Both enforce one immutable configured offer.
     let (_directory, _chain, memory, _store) = fixture().await;
-    memory.retain_tariff(tariff.clone()).await.unwrap();
-    memory.retain_tariff(tariff).await.unwrap();
+    memory.retain_tariff(0, tariff.clone()).await.unwrap();
+    memory.retain_tariff(0, tariff).await.unwrap();
     let other = Tariff::new(
         memory.operator.clone(),
         vec![TrafficClass {
@@ -528,5 +543,268 @@ async fn archive_failure_prevents_retention_and_immutable_terms_cannot_change() 
         vec![],
     )
     .unwrap();
-    assert!(memory.retain_tariff(other).await.is_err());
+    assert!(memory.retain_tariff(0, other).await.is_err());
+}
+
+#[tokio::test]
+async fn fully_spent_plan_remains_eligible_for_its_canonical_prepaid_bytes() {
+    let (directory, mut chain, reader, _store) = fixture().await;
+    let plan = reader
+        .read_state(
+            &chain.state.snapshot(),
+            0,
+            u64::try_from(chain.now).unwrap(),
+        )
+        .unwrap();
+    let purchase = receipt(&plan, 1, 10 * 1_048_576);
+    assert_eq!(plan.increment_at_snapshot(&purchase).unwrap(), 1000);
+    chain.ok(13, "claim", purchase.claim_params().unwrap(), 0);
+    persist_accounts(&mut chain);
+    let plan = reader
+        .read_state(
+            &chain.state.snapshot(),
+            0,
+            u64::try_from(chain.now).unwrap(),
+        )
+        .unwrap();
+    assert_eq!(plan.remaining_ou, 0);
+    assert_eq!(plan.redeemed_bytes, [0, 10 * 1_048_576]);
+    assert!(
+        plan.eligible,
+        "purchased bytes outlive the monetary remainder"
+    );
+    assert!(plan.validate_at_snapshot(&purchase).is_ok());
+    assert!(plan
+        .increment_at_snapshot(&receipt(&plan, 2, 10 * 1_048_576 + 1))
+        .is_err());
+    let meter = octravpn_node::payment_meter::Meter::open(
+        directory.path().join("prepaid"),
+        purchase.usage.binding(),
+        plan.tariff.clone(),
+        plan.original_budget_ou,
+        plan.redeemed_bytes.clone(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(meter.snapshot().unwrap().committed_totals, [0, 0]);
+    meter
+        .reserve_class(1, 10 * 1_048_576)
+        .await
+        .unwrap()
+        .commit()
+        .await
+        .unwrap();
+    assert!(meter.reserve_class(1, 1).await.is_err());
+    assert!(meter.reserve_class(0, 1).await.is_err());
+}
+
+#[tokio::test]
+async fn replacement_quote_changes_purchase_window_without_repricing_bought_bytes() {
+    let (_directory, mut chain, reader, _store) = fixture().await;
+    let old = reader
+        .read_state(&chain.state.snapshot(), 0, chain.now as u64)
+        .unwrap();
+    let purchased = receipt(&old, 1, 1_048_576);
+    chain.ok(13, "claim", purchased.claim_params().unwrap(), 0);
+    let successor = Tariff::new(
+        reader.operator.clone(),
+        vec![
+            TrafficClass {
+                name: "default".into(),
+                rate_ou_per_mib: 20,
+            },
+            TrafficClass {
+                name: "premium".into(),
+                rate_ou_per_mib: 200,
+            },
+        ],
+        vec![],
+    )
+    .unwrap();
+    publish_tariff(&mut chain, &reader.config.operator_circle, &successor);
+    chain.ok(
+        11,
+        "create_rate_change",
+        json!([0, successor.hash_hex().unwrap()]),
+        0,
+    );
+    chain.ok(11, "append_class", json!([1, 20]), 0);
+    chain.ok(11, "append_class", json!([1, 200]), 0);
+    chain.ok(11, "seal_offer", json!([1]), 0);
+    persist_accounts(&mut chain);
+    let activation = chain.now + host::DAY;
+    let before = reader
+        .read_state(&chain.state.snapshot(), 0, (activation - 1) as u64)
+        .unwrap();
+    assert!(before.eligible && before.claim_eligible);
+    assert_eq!(before.offer_end_ms, activation as u64);
+    assert_eq!(
+        before
+            .increment_at_snapshot(&receipt(&before, 2, 2 * 1_048_576))
+            .unwrap(),
+        100
+    );
+    chain.denied(12, "open_plan", json!([1, 1000]), 0, "offer quote inactive");
+    chain.now = activation;
+    let retired = reader
+        .read_state(&chain.state.snapshot(), 0, chain.now as u64)
+        .unwrap();
+    assert!(
+        retired.eligible,
+        "previously bought bytes remain deliverable"
+    );
+    assert!(!retired.claim_eligible);
+    assert_eq!(
+        retired.claim_deadline_ms, None,
+        "rate retirement cannot expire delivery status"
+    );
+    retired.validate_at_snapshot(&purchased).unwrap();
+    chain.denied(
+        13,
+        "claim",
+        receipt(&retired, 2, 2 * 1_048_576).claim_params().unwrap(),
+        0,
+        "offer quote inactive",
+    );
+    chain.ok(12, "open_plan", json!([1, 1000]), 0);
+    persist_accounts(&mut chain);
+    let new = reader
+        .read_state(&chain.state.snapshot(), 1, chain.now as u64)
+        .unwrap();
+    assert!(new.eligible && new.claim_eligible);
+    assert_eq!(new.offer, 1);
+    assert_eq!(new.tariff, successor);
+    assert_eq!(
+        new.increment_at_snapshot(&receipt(&new, 1, 1_048_576))
+            .unwrap(),
+        200
+    );
+    reader.retain_tariff(0, old.tariff.clone()).await.unwrap();
+    reader.retain_tariff(1, new.tariff.clone()).await.unwrap();
+    assert_eq!(
+        reader.retained_tariff(0).await.unwrap(),
+        Some(old.tariff.clone())
+    );
+    assert_eq!(
+        reader.retained_tariff(1).await.unwrap(),
+        Some(new.tariff.clone())
+    );
+    // A separate product by the same operator is not a successor in this host.
+    chain.ok(11, "create_offer", json!([old.manifest_hash]), 0);
+    chain.ok(11, "append_class", json!([2, 10]), 0);
+    chain.ok(11, "append_class", json!([2, 100]), 0);
+    chain.ok(11, "seal_offer", json!([2]), 0);
+    chain.ok(12, "open_plan", json!([2, 1000]), 0);
+    assert!(reader
+        .read_state(&chain.state.snapshot(), 2, chain.now as u64)
+        .is_err());
+}
+
+#[tokio::test]
+async fn instant_partial_and_full_withdrawal_revoke_old_plans_without_erasing_purchases() {
+    let (_directory, mut chain, reader, _store) = fixture().await;
+    let plan = reader
+        .read_state(&chain.state.snapshot(), 0, chain.now as u64)
+        .unwrap();
+    let purchased = receipt(&plan, 1, 1_048_576);
+    chain.ok(13, "claim", purchased.claim_params().unwrap(), 0);
+    chain.ok(12, "withdraw_channel", json!([1]), 0);
+    persist_accounts(&mut chain);
+    let invalidated = reader
+        .read_state(&chain.state.snapshot(), 0, chain.now as u64)
+        .unwrap();
+    assert!(!invalidated.eligible && !invalidated.claim_eligible);
+    assert_eq!(invalidated.redeemed_bytes, [0, 1_048_576]);
+    invalidated.validate_at_snapshot(&purchased).unwrap();
+    chain.denied(
+        13,
+        "claim",
+        receipt(&invalidated, 2, 2 * 1_048_576)
+            .claim_params()
+            .unwrap(),
+        0,
+        "plan generation closed",
+    );
+    chain.ok(12, "open_plan", json!([0, 1000]), 0);
+    let current = reader
+        .read_state(&chain.state.snapshot(), 1, chain.now as u64)
+        .unwrap();
+    assert!(current.eligible && current.claim_eligible);
+    assert_eq!(current.generation, plan.generation + 1);
+    chain.ok(12, "withdraw_remaining", json!([]), 0);
+    persist_accounts(&mut chain);
+    let closed = reader
+        .read_state(&chain.state.snapshot(), 1, chain.now as u64)
+        .unwrap();
+    assert!(!closed.eligible && !closed.claim_eligible);
+    assert_eq!(closed.claim_deadline_ms, Some(chain.now as u64));
+    assert_eq!(
+        chain.number("get_channel_balance", json!([host::address(12)])),
+        0
+    );
+    // Re-registration with another key must not replace old plan identity.
+    let message = format!(
+        "Octranet register v1|{}|{}|{}|3",
+        host::DOMAIN,
+        chain.program,
+        host::address(12)
+    );
+    chain.ok(
+        12,
+        "register",
+        json!([
+            STANDARD.encode(host::key(22).verifying_key().to_bytes()),
+            host::sign(22, &message)
+        ]),
+        0,
+    );
+    let archived = reader
+        .read_state(&chain.state.snapshot(), 0, chain.now as u64)
+        .unwrap();
+    assert!(!archived.eligible && !archived.claim_eligible);
+    archived.validate_at_snapshot(&purchased).unwrap();
+    assert_eq!(archived.receipt_key, purchased.receipt_key);
+}
+
+#[tokio::test]
+async fn operator_earnings_allocate_to_own_prepaid_plan_without_another_deposit() {
+    let (_directory, mut chain, reader, _store) = fixture().await;
+    let plan = reader
+        .read_state(&chain.state.snapshot(), 0, chain.now as u64)
+        .unwrap();
+    chain.ok(
+        13,
+        "claim",
+        receipt(&plan, 1, 1_048_576).claim_params().unwrap(),
+        0,
+    );
+    let operator = host::address(11);
+    let message = format!(
+        "Octranet register v1|{}|{}|{}|1",
+        host::DOMAIN,
+        chain.program,
+        operator
+    );
+    chain.ok(
+        11,
+        "register",
+        json!([
+            STANDARD.encode(host::key(11).verifying_key().to_bytes()),
+            host::sign(11, &message)
+        ]),
+        0,
+    );
+    let locked = chain.number("get_locked_value", json!([]));
+    chain.ok(11, "open_plan", json!([0, 50]), 0);
+    persist_accounts(&mut chain);
+    assert_eq!(chain.number("get_funds", json!([operator])), 50);
+    assert_eq!(chain.number("get_earnings", json!([operator])), 50);
+    assert_eq!(chain.number("get_channel_balance", json!([operator])), 100);
+    assert_eq!(chain.number("get_locked_value", json!([])), locked);
+    let own = reader
+        .read_state(&chain.state.snapshot(), 1, chain.now as u64)
+        .unwrap();
+    assert!(own.eligible && own.claim_eligible);
+    assert_eq!(own.payer, reader.operator);
+    assert_eq!(own.original_budget_ou, 50);
 }

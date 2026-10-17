@@ -25,7 +25,7 @@ struct Cli {
 
 #[derive(Parser, Debug)]
 enum Cmd {
-    /// Run an accepted canonical Octranet payment plan through a raw IPv4 TUN.
+    /// Buy explicit prepaid class allowances, then run their raw IPv4 TUN.
     Payments {
         #[arg(long)]
         plan: std::path::PathBuf,
