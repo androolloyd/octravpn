@@ -1,3 +1,5 @@
+#[path = "common/crypto_worker.rs"]
+mod crypto_worker;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use octra_browser::{
     application::{ApplicationHost, Context, ReadMethod, ReadRequest},
@@ -90,6 +92,7 @@ fn native_rpc_context_matches_octb_view_receipts_and_immutable_roots() {
         );
     }
     for (index, case) in fixture["cases"].as_array().unwrap().iter().enumerate() {
+        let _scope = crypto_worker::scope(true);
         let input = &case["input"];
         let expected = &case["expected"];
         let (state, profile) = setup(input);

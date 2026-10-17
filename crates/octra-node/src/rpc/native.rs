@@ -380,7 +380,26 @@ async fn body(host: &Arc<Context>, raw: &[u8]) -> anyhow::Result<Vec<u8>> {
     out.push(b']');
     Ok(out)
 }
-pub(super) async fn handle(State(host): State<Arc<Context>>, raw: Bytes) -> impl IntoResponse {
+pub(super) fn request_body(
+    raw: std::result::Result<Bytes, axum::extract::rejection::BytesRejection>,
+) -> std::result::Result<Bytes, Box<axum::response::Response>> {
+    raw.map_err(|error| {
+        if error.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            Box::new(super::http::rpc_body_limit())
+        } else {
+            Box::new(error.into_response())
+        }
+    })
+}
+
+pub(super) async fn handle(
+    State(host): State<Arc<Context>>,
+    raw: std::result::Result<Bytes, axum::extract::rejection::BytesRejection>,
+) -> impl IntoResponse {
+    let raw = match request_body(raw) {
+        Ok(raw) => raw,
+        Err(response) => return *response,
+    };
     match body(&host, &raw).await {
         Ok(raw) => (
             StatusCode::OK,

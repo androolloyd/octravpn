@@ -56,6 +56,7 @@ let run dir chain_id channel =
  Fun.protect ~finally:(fun () -> SC.close chain) (fun () ->
  let store = Lwt_main.run (SI.open_store (Filename.concat dir "irmin_store")) in
  Fun.protect ~finally:(fun () -> Lwt_main.run (SI.close store)) (fun () ->
+ let selection = ref None in
  let reply value =
   let bytes = Yojson.Safe.to_string value in
   require "backend response exceeds bound" (String.length bytes < 1048576);
@@ -70,6 +71,14 @@ let run dir chain_id channel =
     let json = Yojson.Safe.from_string line in
     let operation = json |> member "op" |> to_string in
     let value = match operation with
+    | "selection" ->
+      require "selection already captured" (!selection = None);
+      let settings = Legacy_repair_selection.settings (json |> member "settings") in
+      let captured = Legacy_repair_selection.capture dir chain store chain_id settings (json |> member "origin") in
+      selection := Some (settings,captured); captured
+    | "stage" ->
+      let settings,captured = some "selection was not captured" !selection in
+      Legacy_repair_selection.stage dir chain store chain_id settings captured json
     | "read_plan" -> let p = plan dir in `String (Base64.encode_exn (Yojson.Safe.to_string (Plan.to_json p)))
     | "head" -> `String (Base64.encode_exn (HM.to_json (head dir)))
     | "preflight" -> preflight dir chain store chain_id; `Null

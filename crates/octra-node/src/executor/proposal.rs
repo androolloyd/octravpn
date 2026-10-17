@@ -46,6 +46,11 @@ pub struct Prepared {
     bundle: RawBundle,
     execution: ExecutedEpoch,
 }
+#[derive(Clone, Copy)]
+enum ReceiptSource {
+    Supplied,
+    Captured,
+}
 impl Prepared {
     pub fn candidate(&self) -> &Candidate {
         &self.candidate
@@ -86,7 +91,75 @@ impl Native {
             .map_err(unavailable)?;
         let host = self.clone();
         run_worker(self.worker.clone(), move || {
-            Ok(host.prepare(candidate, bundle, &inputs, &rules, &roots))
+            Ok(host.prepare(
+                candidate,
+                bundle,
+                &inputs,
+                &rules,
+                &roots,
+                ReceiptSource::Supplied,
+            ))
+        })
+        .await
+        .map_err(unavailable)?
+    }
+
+    /// Capture a complete locally staged proposal in the proposal's exact hash
+    /// order. Native proof and Circle execution generate the receipts; the same
+    /// commitment, outcome and state checks as supplied bundles still follow.
+    /// A failed local attempt permits the driver to fetch outcome artifacts.
+    pub async fn verify_local_proposal(
+        &self,
+        candidate: Arc<Candidate>,
+        inputs: Vec<Transaction>,
+    ) -> Result<Prepared, ProposalError> {
+        let context = candidate.context();
+        let proposal = context.proposal();
+        let rules = self.proposal_rules(&candidate).map_err(unavailable)?;
+        let hashes = inputs
+            .iter()
+            .map(|tx| {
+                octra_node_protocol::transaction_payload::admit(rules.payload, tx)
+                    .map_err(invalid)?;
+                tx.hash()
+                    .map(|hash| hex::encode(hash).into_bytes())
+                    .map_err(invalid)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let expected = proposal
+            .tx_hashes
+            .iter()
+            .map(|hash| {
+                if hash.len() == 32 {
+                    hex::encode(hash).into_bytes()
+                } else {
+                    hash.clone()
+                }
+            })
+            .collect::<Vec<_>>();
+        if hashes != expected {
+            return Err(invalid("local_preverify_tx_mismatch"));
+        }
+        let roots = self
+            .ready_roots(context.parent(), context.rules(), &inputs)
+            .await
+            .map_err(unavailable)?;
+        let bundle = Accepted {
+            tx_hashes: hashes,
+            txs: inputs.clone(),
+            receipts_json: vec![],
+            rejections: vec![],
+        };
+        let host = self.clone();
+        run_worker(self.worker.clone(), move || {
+            Ok(host.prepare(
+                candidate,
+                bundle,
+                &inputs,
+                &rules,
+                &roots,
+                ReceiptSource::Captured,
+            ))
         })
         .await
         .map_err(unavailable)?
@@ -95,10 +168,11 @@ impl Native {
     fn prepare(
         &self,
         candidate: Arc<Candidate>,
-        bundle: Accepted,
+        mut bundle: Accepted,
         inputs: &[Transaction],
         rules: &Rules,
         roots: &BTreeMap<i64, Option<Vec<u8>>>,
+        source: ReceiptSource,
     ) -> Result<Prepared, ProposalError> {
         let context = candidate.context();
         let proposal = context.proposal();
@@ -115,7 +189,14 @@ impl Native {
             &ledger,
         )
         .map_err(invalid)?;
-        let local = self.proposal_proofs(parent, candidate.state(), bound, inputs, rules)?;
+        let local = self.proposal_proofs(
+            parent,
+            candidate.state(),
+            (bound, context.authority()),
+            inputs,
+            rules,
+            octra_node_runtime::consensus_preverify_cache::Purpose::Validate,
+        )?;
         let keys = context
             .authority()
             .validators
@@ -160,9 +241,24 @@ impl Native {
             .iter()
             .map(Receipt::canonical)
             .collect::<Vec<_>>();
-        let received = transaction_outcome::split(&bundle.receipts_json, true).map_err(invalid)?;
-        if receipts != received.preverify {
-            return Err(invalid("local_preverify_receipt_mismatch"));
+        match source {
+            ReceiptSource::Supplied => {
+                let received =
+                    transaction_outcome::split(&bundle.receipts_json, true).map_err(invalid)?;
+                if receipts != received.preverify {
+                    return Err(invalid("local_preverify_receipt_mismatch"));
+                }
+            }
+            ReceiptSource::Captured => {
+                bundle.receipts_json =
+                    transaction_outcome::encode(&receipts, &[]).map_err(invalid)?;
+                consensus_bundle::proposal_wire(
+                    proposal,
+                    &bundle.to_raw().map_err(unavailable)?,
+                    rules,
+                )
+                .map_err(invalid)?;
+            }
         }
         if !bundle.rejections.is_empty() {
             let all = Partition::candidates(&bundle.txs, &bundle.rejections).map_err(invalid)?;

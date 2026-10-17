@@ -185,7 +185,14 @@ impl Native {
                 octra_node_protocol::transaction_payload::admit(rules.payload, tx)
                     .map_err(invalid)?;
             }
-            self.proposal_proofs(parent, draft.state(), context.rules(), inputs, rules)?
+            self.proposal_proofs(
+                parent,
+                draft.state(),
+                (context.rules(), context.authority()),
+                inputs,
+                rules,
+                octra_node_runtime::consensus_preverify_cache::Purpose::Build,
+            )?
         } else {
             vec![]
         };
@@ -355,9 +362,10 @@ impl Host for Capture<'_> {
             .prepare_proofs(
                 context.parent(),
                 self.draft.state(),
-                context.rules(),
+                (context.rules(), context.authority()),
                 &inputs,
                 self.rules,
+                octra_node_runtime::consensus_preverify_cache::Purpose::Build,
             )
             .map_err(execution_error)?;
         let ready = batch

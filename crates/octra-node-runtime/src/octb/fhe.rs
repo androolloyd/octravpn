@@ -1,21 +1,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
 use super::{Budget, Exec, Host, Instruction as I, Machine, Trap, Unavailable, Value};
+use crate::crypto_worker::{self, Cipher, Key, Operation, Request, Response};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use num_traits::ToPrimitive;
-use octra_hfhe::{
-    cipher::Cipher,
-    field::Fp,
-    keys::PublicKey,
-    proof::{
-        generators,
-        zero::{self, BoundProfile, ZeroProof},
-    },
-    scalar::{Scalar, ScalarRule},
-};
+use octra_hfhe::{proof::generators, scalar::Scalar};
 use octra_node_protocol::{
     native_base64,
-    octb::fhe_work::{self, Memory, Operation, Shape},
+    octb::fhe_work::{self, Memory, Operation as WorkOperation, Shape},
 };
 use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
@@ -36,7 +28,8 @@ pub enum Capability {
 #[derive(Clone)]
 pub enum KeySource {
     Bytes(Arc<[u8]>),
-    Value(Arc<PublicKey>),
+    /// Already serialized image supplied by the trusted host.
+    Value(Arc<Key>),
 }
 #[derive(Clone, Copy)]
 pub enum ProofKind {
@@ -46,52 +39,51 @@ pub enum ProofKind {
 }
 pub struct Proof<'a> {
     pub kind: ProofKind,
-    pub public: &'a PublicKey,
+    pub public: &'a Key,
     pub cipher: &'a Cipher,
     pub raw: &'a [u8],
     pub commitment: Option<[u8; 32]>,
     pub math: bool,
+    /// Native asynchronous suspension releases the verifier lane before work.
+    pub asynchronous: bool,
 }
 pub(super) struct State {
     pub memory: Option<Memory>,
-    keys: Vec<(Arc<PublicKey>, Arc<[u8]>)>,
-    ciphers: Vec<(Arc<Cipher>, Arc<[u8]>)>,
 }
 impl State {
     pub(super) fn new(memory: Option<Memory>) -> Self {
-        Self {
-            memory,
-            keys: vec![],
-            ciphers: vec![],
-        }
+        Self { memory }
     }
-    fn key(&mut self, key: &Arc<PublicKey>) -> Exec<Arc<[u8]>> {
-        if let Some((_, raw)) = self.keys.iter().find(|(saved, _)| Arc::ptr_eq(saved, key)) {
-            return Ok(raw.clone());
-        }
-        let raw = key.to_bytes().map_err(native)?;
-        if self.keys.len() >= 4 {
-            self.keys.clear();
-        }
-        let raw: Arc<[u8]> = raw.into();
-        self.keys.push((key.clone(), raw.clone()));
-        Ok(raw)
+}
+fn worker(error: crypto_worker::Error) -> Trap {
+    match error {
+        crypto_worker::Error::Invalid => Trap::Refused,
+        crypto_worker::Error::Unavailable(reason) => Unavailable(reason).into(),
     }
-    fn cipher(&mut self, cipher: &Arc<Cipher>) -> Exec<Arc<[u8]>> {
-        if let Some((_, raw)) = self
-            .ciphers
-            .iter()
-            .find(|(saved, _)| Arc::ptr_eq(saved, cipher))
-        {
-            return Ok(raw.clone());
-        }
-        let raw = cipher.to_bytes().map_err(native)?;
-        if self.ciphers.len() >= 32 {
-            self.ciphers.clear();
-        }
-        let raw: Arc<[u8]> = raw.into();
-        self.ciphers.push((cipher.clone(), raw.clone()));
-        Ok(raw)
+}
+fn calculate(
+    key: &Key,
+    cipher: &Cipher,
+    other: Option<&Cipher>,
+    operation: Operation,
+) -> Exec<Response> {
+    crypto_worker::call(Request::Calculate {
+        key: key.clone(),
+        cipher: cipher.clone(),
+        other: other.cloned(),
+        operation,
+    })
+    .map_err(worker)
+}
+fn calculated_cipher(
+    key: &Key,
+    cipher: &Cipher,
+    other: Option<&Cipher>,
+    operation: Operation,
+) -> Exec<Arc<Cipher>> {
+    match calculate(key, cipher, other, operation)? {
+        Response::Cipher(value) => Ok(Arc::new(value)),
+        _ => Err(Unavailable("crypto response kind differs".into()).into()),
     }
 }
 // Preserve the native owned-input and typed diagnostic interface.
@@ -127,55 +119,27 @@ static VERIFIER: Mutex<()> = Mutex::new(());
 // Preserve the native owned-input and typed diagnostic interface.
 #[allow(clippy::needless_pass_by_value)]
 pub(super) fn verify(proof: Proof<'_>) -> Result<bool, Unavailable> {
-    if !proof.public.supports_alias_rejection() {
-        return Ok(false);
-    }
-    let strict = !matches!(proof.kind, ProofKind::Zero);
-    let cipher = proof
-        .cipher
-        .to_bytes()
-        .and_then(|raw| Cipher::from_bytes_with_policy(&raw, strict, true));
-    let cipher = match cipher {
-        Ok(v) => v,
-        Err(e) if e.is_operational() => return Err(Unavailable(e.to_string())),
-        Err(_) => return Ok(false),
+    let kind = match proof.kind {
+        ProofKind::Zero => 0,
+        ProofKind::Range => 1,
+        ProofKind::Bound => 2,
     };
-    let parsed = match proof.kind {
-        ProofKind::Range => ZeroProof::from_bound_range_bytes(proof.raw),
-        _ => ZeroProof::from_raw_bytes(proof.raw),
-    };
-    let parsed = match parsed {
-        Ok(v) => v,
-        Err(e) if e.is_operational() => return Err(Unavailable(e.to_string())),
-        Err(_) => return Ok(false),
-    };
-    let math = if proof.math {
-        ScalarRule::Wide
-    } else {
-        ScalarRule::Prior
-    };
-    let result = match proof.kind {
-        ProofKind::Zero => zero::verify_zero(proof.public, &cipher, &parsed, math),
-        ProofKind::Range => zero::verify_embedded_range(proof.public, &cipher, &parsed, true, math),
-        ProofKind::Bound => match proof.commitment {
-            Some(commitment) => zero::verify_bound(
-                proof.public,
-                &cipher,
-                &parsed,
-                &commitment,
-                BoundProfile::Standard,
-                true,
-                math,
-            ),
-            None => return Ok(false),
-        },
-    };
-    match result {
-        Ok(v) => Ok(v),
-        Err(e) if e.is_operational() => Err(Unavailable(e.to_string())),
-        Err(_) => Ok(false),
+    match crypto_worker::call(Request::Verify {
+        key: proof.public.clone(),
+        cipher: proof.cipher.clone(),
+        proof: proof.raw.to_vec(),
+        kind,
+        commitment: proof.commitment,
+        math: proof.math,
+        asynchronous: proof.asynchronous,
+    }) {
+        Ok(Response::Verified(valid)) => Ok(valid),
+        Err(crypto_worker::Error::Invalid) => Ok(false),
+        Err(crypto_worker::Error::Unavailable(reason)) => Err(Unavailable(reason)),
+        _ => Err(Unavailable("crypto verifier response differs".into())),
     }
 }
+
 impl Machine {
     fn reserve_fhe(&self, amount: Option<u64>) -> Exec {
         let amount = amount.ok_or(Trap::Refused)?;
@@ -185,7 +149,7 @@ impl Machine {
             Err(Trap::Refused)
         }
     }
-    fn public(&self, register: u8) -> Exec<Arc<PublicKey>> {
+    fn public(&self, register: u8) -> Exec<Arc<Key>> {
         match self.get(register)? {
             Value::PublicKey(v) => Ok(v.clone()),
             _ => Err(Trap::Refused),
@@ -203,45 +167,33 @@ impl Machine {
             .map(<[u8]>::to_vec)
             .ok_or(Trap::Refused)
     }
-    fn key_cost(&mut self, public: &Arc<PublicKey>) -> Exec {
+    fn key_cost(&mut self, public: &Arc<Key>) -> Exec {
         if self.options.proof_exec || self.options.is_view {
-            let raw = self.fhe.key(public)?;
+            let raw = public.bytes();
             let image = public.image_size().map_err(native)?;
             let volume = image.checked_add(raw.len() as u64).ok_or(Trap::Refused)?;
             self.charge(fhe_work::key_effort(volume, true).ok_or(Trap::Refused)?)?;
         }
         Ok(())
     }
-    fn serialize_result(&mut self, value: Value) -> Exec<Value> {
-        // Every native Fhe_task arithmetic result becomes a serialized image
-        // before entering a register. Preserve serialization failure timing.
-        match &value {
-            Value::Cipher(v) => {
-                self.fhe.cipher(v)?;
-            }
-            Value::PublicKey(v) => {
-                self.fhe.key(v)?;
-            }
-            _ => (),
-        }
-        Ok(value)
-    }
     pub(super) fn prepare_fhe(&mut self, op: &I) -> Exec {
         if !self.options.is_view && !self.options.fhe_work {
             return Ok(());
         }
         let operands = match op {
-            I::FheAdd(_, _, a, b) | I::FheSub(_, _, a, b) => Some((Operation::Join, *a, *b, None)),
-            I::FheMul(_, key, a, b) => Some((Operation::Product, *a, *b, Some(*key))),
+            I::FheAdd(_, _, a, b) | I::FheSub(_, _, a, b) => {
+                Some((WorkOperation::Join, *a, *b, None))
+            }
+            I::FheMul(_, key, a, b) => Some((WorkOperation::Product, *a, *b, Some(*key))),
             I::FheScale(_, _, a, _)
             | I::FheDivConst(_, _, a, _)
             | I::FheAddConst(_, _, a, _)
             | I::FheSubConst(_, _, a, _)
             | I::FheSer(_, a)
-            | I::FheCommit(_, _, a) => Some((Operation::Copy, *a, *a, None)),
+            | I::FheCommit(_, _, a) => Some((WorkOperation::Copy, *a, *a, None)),
             I::FheVerifyZero(_, key, a, _)
             | I::FheVerifyRange(_, key, a, _)
-            | I::FheVerifyBound(_, key, a, _, _) => Some((Operation::Copy, *a, *a, Some(*key))),
+            | I::FheVerifyBound(_, key, a, _, _) => Some((WorkOperation::Copy, *a, *a, Some(*key))),
             _ => None,
         };
         let Some((kind, a, b, key)) = operands else {
@@ -328,7 +280,7 @@ impl Machine {
         if decode(&input).len() > 49_152 {
             return self.set(dest, Value::Bool(false));
         }
-        let Ok(_lane) = VERIFIER.try_lock() else {
+        let Ok(lane) = VERIFIER.try_lock() else {
             return self.finish_proof(
                 dest,
                 Err(Unavailable("fhe verifier unavailable".into())),
@@ -352,6 +304,15 @@ impl Machine {
         } else {
             decode(&input)
         };
+        // Native pack_proof raises Suspend under async_exec. Its protected
+        // parser lane unwinds before Fhe_task actually queues/runs the proof.
+        // Synchronous execution retains the lane through the immediate try.
+        let _lane = if self.options.async_exec {
+            drop(lane);
+            None
+        } else {
+            Some(lane)
+        };
         let result = host.fhe_verify(Proof {
             kind,
             public: &key,
@@ -359,6 +320,7 @@ impl Machine {
             raw: &raw,
             commitment: commitment.flatten(),
             math: self.options.math,
+            asynchronous: self.options.async_exec,
         });
         self.finish_proof(dest, result, budget)
     }
@@ -454,10 +416,14 @@ impl Machine {
                         if !shape {
                             return self.refuse_reason(reason, budget);
                         }
-                        match PublicKey::from_bytes(&raw) {
+                        match Key::read(&raw, true) {
                             Ok(v) => Arc::new(v),
-                            Err(e) if e.is_operational() => return Err(native(e)),
-                            Err(_) => return self.refuse_reason(reason, budget),
+                            Err(crypto_worker::Error::Unavailable(reason)) => {
+                                return Err(Unavailable(reason).into())
+                            }
+                            Err(crypto_worker::Error::Invalid) => {
+                                return self.refuse_reason(reason, budget)
+                            }
                         }
                     }
                 };
@@ -473,9 +439,9 @@ impl Machine {
                     return Err(Trap::Refused);
                 }
                 self.key_cost(&key)?;
-                let cipher = match op {
-                    I::FheAdd(..) => a.add(&key, &b),
-                    I::FheSub(..) => a.subtract(&key, &b),
+                let operation = match op {
+                    I::FheAdd(..) => Operation::Add,
+                    I::FheSub(..) => Operation::Sub,
                     _ => {
                         let mut hash = Sha256::new();
                         let pc = self.pc.to_string();
@@ -495,22 +461,19 @@ impl Machine {
                             }
                             hash.update(part);
                         }
-                        a.multiply_seeded(
-                            &key,
-                            &b,
-                            &hash.finalize().into(),
-                            8,
-                            self.options.math,
-                            if self.options.is_view || self.options.fhe_work {
+                        Operation::Mul {
+                            seed: hash.finalize().into(),
+                            math: self.options.math,
+                            draws: if self.options.is_view || self.options.fhe_work {
                                 32
                             } else {
                                 0
                             },
-                        )
+                        }
                     }
-                }
-                .map_err(native)?;
-                (dest, Value::Cipher(Arc::new(cipher)))
+                };
+                let cipher = calculated_cipher(&key, &a, Some(&b), operation)?;
+                (dest, Value::Cipher(cipher))
             }
             I::FheScale(dest, key, c, amount)
             | I::FheAddConst(dest, key, c, amount)
@@ -525,37 +488,27 @@ impl Machine {
                 }
                 let amount = number.to_i64().ok_or(Trap::Exception)?;
                 self.key_cost(&key)?;
-                let result = match op {
-                    I::FheScale(..) => {
-                        if self.options.math {
-                            cipher.mul_constant_i64(amount)
-                        } else {
-                            cipher.mul_constant_u64(amount as u64)
-                        }
-                    }
-                    I::FheAddConst(..) => cipher
-                        .add_constant(
-                            if self.options.math && amount < 0 {
-                                Fp::from_words(amount.wrapping_sub(1) as u64, i64::MAX as u64)
-                            } else {
-                                Fp::from_words(amount as u64, 0)
-                            },
-                            self.options.math,
-                        )
-                        .map_err(native)?,
-                    I::FheSubConst(..) => if self.options.math && amount < 0 {
-                        cipher.add_constant(Fp::from_words(amount.wrapping_neg() as u64, 0), true)
-                    } else {
-                        cipher
-                            .subtract_constant(Fp::from_words(amount as u64, 0), self.options.math)
-                    }
-                    .map_err(native)?,
-                    _ => cipher
-                        .divide_constant(Fp::from_words(amount as u64, 0))
-                        .map_err(native)?,
+                let operation = match op {
+                    I::FheScale(..) => Operation::Scale {
+                        math: self.options.math,
+                        amount,
+                    },
+                    I::FheAddConst(..) => Operation::AddInt {
+                        math: self.options.math,
+                        amount,
+                    },
+                    I::FheSubConst(..) => Operation::SubInt {
+                        math: self.options.math,
+                        amount,
+                    },
+                    _ => Operation::Divide(amount),
                 };
-                (dest, Value::Cipher(Arc::new(result)))
+                (
+                    dest,
+                    Value::Cipher(calculated_cipher(&key, &cipher, None, operation)?),
+                )
             }
+
             I::FheVerifyZero(d, k, c, p) => {
                 return self.proof(d, k, c, p, None, ProofKind::Zero, host, budget)
             }
@@ -569,11 +522,13 @@ impl Machine {
                 let key = self.public(key)?;
                 let cipher = self.cipher(c)?;
                 self.key_cost(&key)?;
-                (
-                    dest,
-                    Value::string(STANDARD.encode(cipher.commitment(&key)).into_bytes()),
-                )
+                let Response::Digest(digest) = calculate(&key, &cipher, None, Operation::Commit)?
+                else {
+                    return Err(Unavailable("crypto commitment response differs".into()).into());
+                };
+                (dest, Value::string(STANDARD.encode(digest).into_bytes()))
             }
+
             I::FhePedersen(dest, amount, blind) => {
                 let blind = self.raw(blind)?;
                 let amount = self
@@ -612,7 +567,7 @@ impl Machine {
             ),
             I::FheSer(dest, c) => {
                 let cipher = self.cipher(c)?;
-                let raw = self.fhe.cipher(&cipher)?;
+                let raw = cipher.bytes().clone();
                 (dest, Value::string(STANDARD.encode(raw).into_bytes()))
             }
             I::FheDeser(dest, source) => {
@@ -623,19 +578,25 @@ impl Machine {
                     return Err(Trap::Refused);
                 }
                 self.reserve_fhe(fhe_work::cipher_decode(raw.len()))?;
-                let cipher = Cipher::from_bytes_with_policy(
+                let cipher = Cipher::read(
                     &raw,
                     self.options.point_ops,
                     self.options.is_view || self.options.point_ops || self.options.fhe_work,
                 )
-                .map_err(native)?;
+                .map_err(worker)?;
                 (dest, Value::Cipher(Arc::new(cipher)))
             }
             I::FheSerPk(dest, p) => {
                 let key = self.public(p)?;
-                self.key_charge(&KeySource::Value(key.clone()))?;
+                let active = self.options.is_view || self.options.proof_exec;
+                if active || self.options.fhe_work {
+                    self.charge(
+                        fhe_work::key_effort(key.image_size().map_err(native)?, active)
+                            .ok_or(Trap::Refused)?,
+                    )?;
+                }
                 self.reserve_fhe(fhe_work::key_value(key.image_size().map_err(native)?))?;
-                let raw = self.fhe.key(&key)?;
+                let raw = key.bytes().clone();
                 (dest, Value::string(STANDARD.encode(raw).into_bytes()))
             }
             I::FheDeserPk(dest, source) => {
@@ -651,12 +612,16 @@ impl Machine {
                 }
                 (
                     dest,
-                    Value::PublicKey(Arc::new(PublicKey::from_bytes(&raw).map_err(native)?)),
+                    Value::PublicKey(Arc::new(Key::read(&raw, false).map_err(worker)?)),
                 )
             }
             _ => unreachable!("FHE opcode family was selected"),
         };
-        let value = self.serialize_result(value)?;
+        // Native Fhe_image serialization has already completed in the owned
+        // process before any result is installed into the register file.
         self.set(dest, value)
     }
 }
+
+#[cfg(test)]
+mod tests;

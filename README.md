@@ -24,7 +24,7 @@ unused purchased bytes are not refunded. See the
 [payment design](docs/architecture/octranet-payment-tier.md) and
 [operator/client guide](docs/operators/payment-plans.md).
 
-The [current checkpoint](docs/audit/octranet-prepaid-status.json) records **1,719
+The [prepaid revision checkpoint](docs/audit/octranet-prepaid-status.json) records **1,719
 passing tests** across 20 targets, **20 compiled AML tests**, **39 bounded Lean
 theorems**, strict lint and an isolated four-validator/two-kernel qualification.
 It covers TCP/UDP/ICMP, canonical advance purchases, class exhaustion, crash
@@ -45,18 +45,29 @@ qualification. [Offline legacy repair](docs/rust-node/legacy-repair.md) resumes
 trusted native-format plans through a pinned compatibility backend; it does not
 rewind modern canonical history or supply an all-Rust physical backend.
 
+The [core parity checkpoint](docs/rust-node/checkpoints/2026-10-17/core-parity.json)
+records **2,616 passing nonignored tests across 237 targets** and qualifies the
+subsequent driver recovery, proposal/proof caches, isolated private
+workers, native legacy staging and live mesh admission changes. It combines
+source-bound native comparisons, workspace tests, actual Rust/OCaml peers,
+four-validator paid kernel traffic, stock Tailscale relay/restart/ACL checks and
+real browser tests. The [review](docs/rust-node/checkpoints/2026-10-17/core-parity-review.md)
+records test corrections, host storage differences and precise qualification
+limits. Complete upstream behavioral equivalence and public paid service remain
+unqualified.
+
 Retained finality audits can [reuse verified work within one process](docs/rust-node/checkpoints/2026-10-17/audit-reuse.md).
 Every audit still rereads the full prefix and authenticates historical validator
 authority; startup, exported records and new publication retain their complete
 verification gates. Demo jobs publish only fresh, complete recording groups
 bound to their GitHub run and source commit.
 
-The public devnet observer has adopted the
-[qualified normal release](docs/rust-node/checkpoints/2026-10-17/audit-reuse-public-adoption.json)
-from retained epoch 1,708,425, preserving its canonical/ExEx/archive prefix, key,
-configuration and relay. RPC has opened and authenticated catch-up has advanced
-to epoch 1,708,443; serving remains suspended during catch-up and paid service is
-unconfigured. Sustained public serving, stock Tailscale
+The [previous public devnet observer adoption](docs/rust-node/checkpoints/2026-10-17/audit-reuse-public-adoption.json)
+preserved the canonical/ExEx/archive prefix at epoch 1,708,425, its key,
+configuration and relay. That launch checkpoint recorded RPC opening and
+authenticated catch-up to epoch 1,708,443. The current parity candidate has not
+replaced that observer; paid service remains unconfigured. Sustained public
+serving, stock Tailscale
 payment/onboarding, portal funding, DNS/TLS and Mainnet remain open qualification
 gates. This prepaid candidate is **not deployed to Mainnet**. Local build
 artifacts and tests do not establish public deployment readiness.

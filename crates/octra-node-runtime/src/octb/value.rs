@@ -39,8 +39,8 @@ pub enum Value {
     U256(Arc<BigInt>),
     Address(Arc<[u8]>),
     Capability(Capability),
-    Cipher(Arc<octra_hfhe::cipher::Cipher>),
-    PublicKey(Arc<octra_hfhe::keys::PublicKey>),
+    Cipher(Arc<crate::crypto_worker::Cipher>),
+    PublicKey(Arc<crate::crypto_worker::Key>),
 }
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {

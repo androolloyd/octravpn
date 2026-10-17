@@ -1,7 +1,5 @@
 //! Native status and light proofs from captured canonical heads.
-use super::{
-    account_store, rpc, Arc, Context, Document, Fault, StateBatch, SystemTime, Value, UNIX_EPOCH,
-};
+use super::{rpc, Arc, Context, Document, Fault, SystemTime, Value, UNIX_EPOCH};
 use octra_node_protocol::{light_rpc::EpochProof, status_rpc};
 use octra_node_runtime::canonical::Head;
 fn unavailable(_: impl std::fmt::Display) -> Fault {
@@ -33,9 +31,8 @@ pub(super) async fn read(
     if method == b"node_stats" {
         return node_stats(host).await;
     }
-    // Irmin pack collection metrics cannot describe a SQLite object archive.
     if method == b"octra_epochTags" {
-        return Err(unavailable("Irmin pack metadata unavailable"));
+        return epoch_tags(&host.node.reader()).await;
     }
     if method == b"octra_validatorViewPubkey" {
         return service(host)?.validator_view_pubkey();
@@ -129,6 +126,24 @@ pub(super) async fn read(
         _ => Err(Fault::missing(method)),
     }
 }
+
+async fn epoch_tags(
+    reader: &octra_node_runtime::canonical::Reader,
+) -> std::result::Result<Vec<u8>, Fault> {
+    let tags = reader.epoch_tag_stats().await.map_err(unavailable)?;
+    Ok(status_rpc::EpochTags {
+        count: tags.count,
+        min_epoch: tags.min_epoch,
+        max_epoch: tags.max_epoch,
+        keep_epochs: tags.keep_epochs,
+        split_epoch: tags.split_epoch,
+        gc_enabled: tags.gc_enabled,
+        gc_running: tags.gc_running,
+        gc_need: tags.gc_need,
+    }
+    .to_json())
+}
+
 async fn head_proposal_id(host: &Arc<Context>, head: &Head) -> std::result::Result<String, Fault> {
     let finality = host
         .finality
@@ -189,6 +204,7 @@ async fn node_stats(host: &Arc<Context>) -> std::result::Result<Vec<u8>, Fault> 
         }
     }
     let pending = host.pending.clone();
+    let executor = host.executor.clone();
     let policy = host.executor.emission_policy();
     let fallback = if policy.emission_guard {
         policy.legacy_total.clone()
@@ -197,7 +213,8 @@ async fn node_stats(host: &Arc<Context>) -> std::result::Result<Vec<u8>, Fault> 
     };
     host.executor
         .read(move || {
-            let ledger = account_store::ledger(&StateBatch::from_snapshot(view.state().clone()))
+            let summary = executor
+                .account_summary(view.state())
                 .map_err(unavailable)?;
             let total = view
                 .state()
@@ -206,10 +223,10 @@ async fn node_stats(host: &Arc<Context>) -> std::result::Result<Vec<u8>, Fault> 
                 .and_then(parse_integer)
                 .ok_or_else(|| unavailable("total supply unavailable"))?;
             let maximum = BigInt::from(MAX_SUPPLY);
-            if total < *ledger.total_supply() || total > maximum {
+            if total < *summary.total_supply() || total > maximum {
                 return Err(Fault::new(111, b"supply violation"));
             }
-            let encrypted = &total - ledger.total_supply();
+            let encrypted = &total - summary.total_supply();
             let staging = pending
                 .inspect(octra_node_runtime::staging::Pool::len)
                 .map_err(unavailable)? as i64;
@@ -222,9 +239,9 @@ async fn node_stats(host: &Arc<Context>) -> std::result::Result<Vec<u8>, Fault> 
             };
             status_rpc::stats::Stats {
                 current_epoch: legacy.epoch,
-                total_accounts: ledger.accounts().len() as i64,
-                active_accounts: ledger.active_accounts() as i64,
-                true_total: ledger.total_supply(),
+                total_accounts: summary.accounts() as i64,
+                active_accounts: summary.active_accounts() as i64,
+                true_total: summary.total_supply(),
                 encrypted: &encrypted,
                 max_supply: &maximum,
                 total_confirmed: view.head().txid_hi.wrapping_add(1).wrapping_shl(1) >> 1,
@@ -338,5 +355,76 @@ fn public_tx_data(raw: &[u8]) -> std::result::Result<Vec<u8>, Fault> {
         Ok(raw.to_vec())
     } else {
         Ok(b"null".to_vec())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use octra_exex::{ChainIdentity, StateRoot};
+    use octra_node_protocol::epoch_index;
+    use octra_node_runtime::{canonical::CanonicalStore, state_batch::StateBatch};
+
+    #[tokio::test]
+    async fn epoch_tag_rpc_reads_actual_backend_metadata_without_serving_admission() {
+        // Native Status_read_rpc.epoch_tags reads Store_irmin directly rather
+        // than requiring an admitted ledger snapshot or a signing capability.
+        let source: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../../docs/rust-node/source-map.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            source["upstream_commit"],
+            "7f9be4489870645cfcc95439638cde40f5da9f50"
+        );
+        assert_eq!(
+            source["files"]["node_runtime/status_read_rpc.ml"],
+            "5a2a25826e21f88a6c827683ba677bf6534d2504734513a933908295120d5870"
+        );
+        assert_eq!(
+            source["files"]["node_runtime/rpc_view.ml"],
+            "18b1b175d1699f3e327915738c4ec997199558c1fbe43c032e6650ba7b1cfbbf"
+        );
+        let directory = tempfile::tempdir().unwrap();
+        let state = StateBatch::default().snapshot();
+        let (_, index) =
+            epoch_index::next_root(hex::encode(epoch_index::genesis_root()).as_bytes(), 0, &[])
+                .unwrap();
+        let root = epoch_index::folded_state_root(
+            hex::encode(state.root().unwrap()).as_bytes(),
+            hex::encode(index).as_bytes(),
+        )
+        .unwrap();
+        let store = CanonicalStore::create(
+            &directory.path().join("node.db"),
+            ChainIdentity::genesis("rpc-epoch-tags", StateRoot(root)),
+            state,
+            0,
+        )
+        .await
+        .unwrap();
+        let reader = store.reader();
+        let tags = reader.epoch_tag_stats().await.unwrap();
+        let raw = epoch_tags(&reader).await.unwrap();
+        let result: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!({
+                "count":tags.count,
+                "min_epoch":tags.min_epoch,
+                "max_epoch":tags.max_epoch,
+                "keep_epochs":tags.keep_epochs,
+                "split_epoch":tags.split_epoch,
+                "pack_gc_enabled":tags.gc_enabled,
+                "pack_gc_running":tags.gc_running,
+                "pack_gc_need_bytes":tags.gc_need.map(|value|value.to_string()),
+            })
+        );
+        // These values describe the actual SQLite archive: no synthetic Irmin
+        // pack split or running collector is substituted for missing metadata.
+        assert_eq!(result["pack_gc_enabled"], false);
+        assert_eq!(result["pack_gc_running"], false);
+        assert!(result["split_epoch"].is_null());
+        assert!(result["pack_gc_need_bytes"].is_null());
     }
 }

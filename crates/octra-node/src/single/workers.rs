@@ -53,12 +53,12 @@ impl Done {
     }
 }
 impl Jobs {
-    pub(super) fn capture() -> Result<Self> {
-        Ok(Self {
-            worker: Worker::capture().map_err(anyhow::Error::msg)?,
+    pub(super) fn new(worker: Arc<Worker>) -> Self {
+        Self {
+            worker,
             entries: Mutex::new(BTreeMap::new()),
             next: AtomicU64::new(1),
-        })
+        }
     }
     pub(super) fn pending(&self) -> usize {
         self.entries

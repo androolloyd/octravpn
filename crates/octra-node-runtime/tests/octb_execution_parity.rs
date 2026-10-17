@@ -1,3 +1,5 @@
+#[path = "common/crypto_worker.rs"]
+mod crypto_worker;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use num_bigint::BigInt;
 use num_traits::Zero;
@@ -139,6 +141,7 @@ impl Host for FixtureHost {
     }
 }
 fn run(v: &Value, stepped: bool) -> Value {
+    let _scope = crypto_worker::scope(flag(v, "view"));
     let image = Image::decode(&bytes(&v["raw"]), true).unwrap();
     let code = octb::fix_jumps(&image.code);
     let mut budget = if flag(v, "bytes") {

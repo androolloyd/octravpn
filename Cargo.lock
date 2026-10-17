@@ -2073,7 +2073,7 @@ dependencies = [
 [[package]]
 name = "headscale-api"
 version = "0.1.0"
-source = "git+https://github.com/androolloyd/headscale-rs?rev=5662f202a8448364cb212a12c0489216c74ab6ca#5662f202a8448364cb212a12c0489216c74ab6ca"
+source = "git+https://github.com/androolloyd/headscale-rs?rev=64bc54312ff9c4c2946f563f21875cf55e3f8f55#64bc54312ff9c4c2946f563f21875cf55e3f8f55"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -2131,7 +2131,7 @@ dependencies = [
 [[package]]
 name = "headscale-api-acl"
 version = "0.1.0"
-source = "git+https://github.com/androolloyd/headscale-rs?rev=5662f202a8448364cb212a12c0489216c74ab6ca#5662f202a8448364cb212a12c0489216c74ab6ca"
+source = "git+https://github.com/androolloyd/headscale-rs?rev=64bc54312ff9c4c2946f563f21875cf55e3f8f55#64bc54312ff9c4c2946f563f21875cf55e3f8f55"
 dependencies = [
  "ipnet",
  "serde",
@@ -2144,7 +2144,7 @@ dependencies = [
 [[package]]
 name = "headscale-cli"
 version = "0.1.0"
-source = "git+https://github.com/androolloyd/headscale-rs?rev=5662f202a8448364cb212a12c0489216c74ab6ca#5662f202a8448364cb212a12c0489216c74ab6ca"
+source = "git+https://github.com/androolloyd/headscale-rs?rev=64bc54312ff9c4c2946f563f21875cf55e3f8f55#64bc54312ff9c4c2946f563f21875cf55e3f8f55"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -2189,7 +2189,7 @@ dependencies = [
 [[package]]
 name = "headscale-core"
 version = "0.1.0"
-source = "git+https://github.com/androolloyd/headscale-rs?rev=5662f202a8448364cb212a12c0489216c74ab6ca#5662f202a8448364cb212a12c0489216c74ab6ca"
+source = "git+https://github.com/androolloyd/headscale-rs?rev=64bc54312ff9c4c2946f563f21875cf55e3f8f55#64bc54312ff9c4c2946f563f21875cf55e3f8f55"
 dependencies = [
  "async-trait",
  "base64",
@@ -2214,7 +2214,7 @@ dependencies = [
 [[package]]
 name = "headscale-db"
 version = "0.1.0"
-source = "git+https://github.com/androolloyd/headscale-rs?rev=5662f202a8448364cb212a12c0489216c74ab6ca#5662f202a8448364cb212a12c0489216c74ab6ca"
+source = "git+https://github.com/androolloyd/headscale-rs?rev=64bc54312ff9c4c2946f563f21875cf55e3f8f55#64bc54312ff9c4c2946f563f21875cf55e3f8f55"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2236,7 +2236,7 @@ dependencies = [
 [[package]]
 name = "headscale-identity"
 version = "0.1.0"
-source = "git+https://github.com/androolloyd/headscale-rs?rev=5662f202a8448364cb212a12c0489216c74ab6ca#5662f202a8448364cb212a12c0489216c74ab6ca"
+source = "git+https://github.com/androolloyd/headscale-rs?rev=64bc54312ff9c4c2946f563f21875cf55e3f8f55#64bc54312ff9c4c2946f563f21875cf55e3f8f55"
 dependencies = [
  "blake2",
  "bs58",
@@ -2251,7 +2251,7 @@ dependencies = [
 [[package]]
 name = "headscale-payments"
 version = "0.1.0"
-source = "git+https://github.com/androolloyd/headscale-rs?rev=5662f202a8448364cb212a12c0489216c74ab6ca#5662f202a8448364cb212a12c0489216c74ab6ca"
+source = "git+https://github.com/androolloyd/headscale-rs?rev=64bc54312ff9c4c2946f563f21875cf55e3f8f55#64bc54312ff9c4c2946f563f21875cf55e3f8f55"
 dependencies = [
  "async-trait",
  "headscale-identity",
@@ -2267,7 +2267,7 @@ dependencies = [
 [[package]]
 name = "headscale-resources"
 version = "0.1.0"
-source = "git+https://github.com/androolloyd/headscale-rs?rev=5662f202a8448364cb212a12c0489216c74ab6ca#5662f202a8448364cb212a12c0489216c74ab6ca"
+source = "git+https://github.com/androolloyd/headscale-rs?rev=64bc54312ff9c4c2946f563f21875cf55e3f8f55#64bc54312ff9c4c2946f563f21875cf55e3f8f55"
 dependencies = [
  "headscale-identity",
  "prometheus-client",

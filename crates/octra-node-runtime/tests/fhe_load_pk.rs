@@ -1,5 +1,7 @@
 //! Actual AML compilation and registered public-key loading. The canonical
 //! binding is a local fixture; no public-network execution is inferred.
+#[path = "common/crypto_worker.rs"]
+mod crypto_worker;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use octra_hfhe::keys::{keygen_from_seed, Params};
 use octra_node_protocol::{
@@ -69,17 +71,20 @@ fn compiled_aml_loads_registered_key_and_refuses_missing_or_corrupt_material() {
         .unwrap();
     let snapshot = state.snapshot();
     let root = snapshot.root().unwrap();
-    let loaded = Query::new(&snapshot, &profile)
-        .unwrap()
-        .with_runtime(&runtime)
-        .program(
-            address.as_bytes(),
-            b"probe",
-            &params,
-            wallet.as_bytes(),
-            10_000_000,
-        )
-        .unwrap();
+    let loaded = {
+        let _scope = crypto_worker::scope(true);
+        Query::new(&snapshot, &profile)
+            .unwrap()
+            .with_runtime(&runtime)
+            .program(
+                address.as_bytes(),
+                b"probe",
+                &params,
+                wallet.as_bytes(),
+                10_000_000,
+            )
+            .unwrap()
+    };
     assert!(loaded.success, "{:?}", loaded.error);
     assert_eq!(
         loaded.response.unwrap().result_json(),

@@ -157,17 +157,6 @@ impl Hub {
                 // Wall 6: optionally load a DERP-map fixture from the
                 // path advertised in OCTRAVPN_DERP_MAP_PATH. Unset ⇒
                 // empty map ⇒ matches pre-Wall-6 behaviour.
-                let native_derp = if self.cfg.control.derp.serve {
-                    let runtime = crate::native_derp::load_native_derp_runtime(&dir)?;
-                    info!(
-                        host_name = %listen.ip(),
-                        key = %dir.join("derp.key").display(),
-                        "native DERP enabled on control plane"
-                    );
-                    Some(runtime)
-                } else {
-                    None
-                };
                 let derp_map = if self.cfg.control.derp.serve {
                     crate::native_derp::self_derp_map(listen.ip().to_string(), listen.port())
                 } else {
@@ -199,18 +188,38 @@ impl Hub {
                 // the loop itself never returns.
                 let policy_store = Arc::new(stores.policy.clone());
                 let mut registration_gate = None;
+                let mut relay_members = None;
                 if self.cfg.control.members_policy.enabled {
                     crate::members_policy::install_boot_deny_all(policy_store.as_ref())?;
                     let sync = crate::members_policy::MembersPolicySync::from_hub(&self)?;
                     // Taken before `run` consumes the sync — the gate and the
                     // loop share one membership snapshot.
                     registration_gate = sync.registration_gate();
+                    relay_members = Some(sync.relay_membership());
                     tokio::spawn(sync.run(crate::members_policy::MembersPolicyWiring {
                         machines: Arc::clone(&machines),
                         policy: Arc::clone(&policy_store),
                         registration_store: Some(registration_store.clone()),
                     }));
                 }
+                let native_derp = if self.cfg.control.derp.serve {
+                    let runtime = crate::native_derp::load_native_derp_runtime(
+                        &dir,
+                        server_noise_key.public_bytes(),
+                        machines.clone(),
+                        stores.policy.clone(),
+                        Arc::new(|| true),
+                        relay_members,
+                    )?;
+                    info!(
+                        host_name = %listen.ip(),
+                        key = %dir.join("derp.key").display(),
+                        "native DERP enabled with live registration and peer policy"
+                    );
+                    Some(runtime)
+                } else {
+                    None
+                };
                 Some((
                     octravpn_mesh::WireStateBuilder::new(
                         server_noise_key,
@@ -220,7 +229,7 @@ impl Hub {
                         policy_store,
                         octravpn_mesh::tailscale_wire::DerpMapStore::shared(derp_map),
                     )
-                    .native_derp(native_derp.clone())
+                    .native_derp(native_derp)
                     .registration_store(Some(registration_store))
                     .registration_gate(registration_gate)
                     .build(),
@@ -244,7 +253,7 @@ impl Hub {
                 None => {
                     return Err(anyhow!(
                         "session admission requires the operator circle identity"
-                    ))
+                    ));
                 }
             };
             let mut state = ControlState::with_metrics(

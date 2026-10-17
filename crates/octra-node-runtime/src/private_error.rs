@@ -27,17 +27,36 @@ pub(crate) fn failure(tag: &'static str, reason: impl AsRef<[u8]>, user: Option<
     })
 }
 pub(crate) fn check<T>(
-    result: Result<T, crypto::Error>,
+    result: Result<T, impl CryptoFailure>,
     tag: &'static str,
     prefix: &[u8],
     user: Option<&[u8]>,
 ) -> Result<T, Error> {
-    result.map_err(|error| match error {
-        crypto::Error::Rejected(reason) => failure(
+    result.map_err(|error| match error.classify() {
+        Ok(reason) => failure(
             tag,
             [prefix, &reason].concat(),
             user.map(|p| [p, &reason].concat()),
         ),
-        crypto::Error::Unavailable(error) => Error::Unavailable(error.to_string()),
+        Err(error) => Error::Unavailable(error),
     })
+}
+pub(crate) trait CryptoFailure {
+    fn classify(self) -> Result<Vec<u8>, String>;
+}
+impl CryptoFailure for crypto::Error {
+    fn classify(self) -> Result<Vec<u8>, String> {
+        match self {
+            Self::Rejected(reason) => Ok(reason),
+            Self::Unavailable(error) => Err(error.to_string()),
+        }
+    }
+}
+impl CryptoFailure for crypto::isolated::Error {
+    fn classify(self) -> Result<Vec<u8>, String> {
+        match self {
+            Self::Rejected(reason) => Ok(reason),
+            Self::Unavailable(reason) => Err(reason),
+        }
+    }
 }

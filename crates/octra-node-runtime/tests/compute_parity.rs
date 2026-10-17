@@ -30,6 +30,13 @@ struct Work {
 #[tokio::test]
 async fn native_compute_traces() {
     let fixture: Value = serde_json::from_str(include_str!("fixtures/compute.json")).unwrap();
+    check_fixture(
+        &fixture,
+        include_bytes!("../../../scripts/node-port/compute-oracle.ml"),
+    )
+    .await;
+}
+async fn check_fixture(fixture: &Value, oracle: &[u8]) {
     let pin: Value =
         serde_json::from_str(include_str!("../../../docs/rust-node/source-map.json")).unwrap();
     assert_eq!(fixture["upstream_commit"], pin["upstream_commit"]);
@@ -37,9 +44,7 @@ async fn native_compute_traces() {
     assert_eq!(fixture["instrumentation"], json!({}));
     assert_eq!(
         fixture["oracle_sha256"],
-        json!(hex::encode(Sha256::digest(include_bytes!(
-            "../../../scripts/node-port/compute-oracle.ml"
-        ))))
+        json!(hex::encode(Sha256::digest(oracle)))
     );
     for (case_index, case) in fixture["cases"].as_array().unwrap().iter().enumerate() {
         let input = &case["input"];
@@ -141,6 +146,73 @@ async fn native_compute_traces() {
         settle().await;
         assert_eq!(pool.stats().active, 0);
     }
+}
+
+#[tokio::test]
+async fn exact_native_pvac_channel_limits_and_fairness() {
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/pvac-admission.json")).unwrap();
+    assert_eq!(
+        fixture["builder_image"],
+        "sha256:e61194220c65f9f0b8034a4816fb15d47dfe7dda8ece1087d9850b6d838bae95"
+    );
+    for (name, bytes) in [
+        (
+            "generator_sha256",
+            include_bytes!("../../../scripts/node-port/pvac-admission-fixtures.py").as_slice(),
+        ),
+        (
+            "runner_sha256",
+            include_bytes!("../../../scripts/node-port/native-oracle.py").as_slice(),
+        ),
+    ] {
+        assert_eq!(fixture[name], hex::encode(Sha256::digest(bytes)), "{name}");
+    }
+    let cases = fixture["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 8);
+    fn canonical(value: &Value) -> Value {
+        match value {
+            Value::Object(fields) => Value::Object(
+                fields
+                    .iter()
+                    .map(|(name, value)| (name.clone(), canonical(value)))
+                    .collect::<BTreeMap<_, _>>()
+                    .into_iter()
+                    .collect(),
+            ),
+            Value::Array(values) => Value::Array(values.iter().map(canonical).collect()),
+            value => value.clone(),
+        }
+    }
+    const DIGEST: &str = "90294df8c6edd15182b99f91f66baa956daea0c7b439a76ba4e177da7b54b81c";
+    let inputs = Value::Array(cases.iter().map(|case| case["input"].clone()).collect());
+    assert_eq!(fixture["input_sha256"], DIGEST);
+    assert_eq!(
+        hex::encode(Sha256::digest(
+            serde_json::to_vec(&canonical(&inputs)).unwrap()
+        )),
+        DIGEST
+    );
+    for case in cases {
+        let limits = Limits::proof(case["input"]["capacity"].as_u64().unwrap() as usize);
+        assert_eq!(
+            limits.required,
+            case["input"]["required"].as_u64().unwrap() as usize
+        );
+        assert_eq!(
+            limits.speculative,
+            case["input"]["speculative"].as_u64().unwrap() as usize
+        );
+        assert_eq!(
+            limits.required_burst,
+            case["input"]["burst"].as_u64().unwrap() as usize
+        );
+    }
+    check_fixture(
+        &fixture,
+        include_bytes!("../../../scripts/node-port/pvac-admission-oracle.ml"),
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

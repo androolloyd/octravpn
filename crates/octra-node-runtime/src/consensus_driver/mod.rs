@@ -6,6 +6,7 @@ mod diagnostics;
 mod inbound;
 mod liveness;
 mod outputs;
+mod round_recovery;
 mod work;
 pub use diagnostics::Diagnostics;
 pub use liveness::{configured_stall_sec, LivenessContext};
@@ -179,6 +180,7 @@ pub struct Driver<H: Host, C: Publication> {
     active_work: Option<driver_policy::ProposalBuild>,
     seen: Seen,
     historical_replays: Seen,
+    evidence: octra_node_protocol::consensus::evidence::Pool,
     round_replies: BTreeMap<Bytes, (i64, i64, RoundStep, Instant)>,
     initialized: bool,
     work_grace_ms: (i64, i64),
@@ -192,6 +194,8 @@ pub struct Driver<H: Host, C: Publication> {
     verified: BTreeMap<(i64, i64), Proposal>,
     timers: JoinSet<Timeout>,
     round_pool: RoundPool,
+    past_round: Option<driver_policy::PastRound>,
+    sync_retry: Option<round_recovery::ReplayRetry>,
     pending_votes: BTreeMap<Bytes, Vote>,
     started: Instant,
     epoch_started: i64,
@@ -263,6 +267,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
                 active_work: None,
                 seen: Seen::new(10_000)?,
                 historical_replays: Seen::new(4096)?,
+                evidence: octra_node_protocol::consensus::evidence::Pool::default(),
                 round_replies: BTreeMap::new(),
                 initialized: false,
                 work_grace_ms: (
@@ -279,6 +284,8 @@ impl<H: Host, C: Publication> Driver<H, C> {
                 verified: BTreeMap::new(),
                 timers: JoinSet::new(),
                 round_pool: RoundPool::default(),
+                past_round: None,
+                sync_retry: None,
                 pending_votes: BTreeMap::new(),
                 started: Instant::now(),
                 epoch_started: 0,
@@ -408,6 +415,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
                     if let Some(p)=self.pace.filter(|p|p.until<=self.now()) {self.pace=None;if p.current(self.engine.state().height,self.engine.generation()){self.epoch_started=self.now();}}
                     if self.build_retry.is_some_and(|until|until<=Instant::now()){self.build_retry=None;}
                     if self.publish_retry.is_some_and(|until|until<=Instant::now()){self.publish_retry=None;}
+                    self.retry_round_sync().await?;
                 },
             }
         }

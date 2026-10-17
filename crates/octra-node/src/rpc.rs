@@ -26,6 +26,7 @@ use octra_node_runtime::{
     state_batch::StateBatch,
 };
 use std::{
+    cell::RefCell,
     collections::BTreeMap,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -131,41 +132,35 @@ impl<A: Host> Submission<A> {
             }) else {
                 return Ok(());
             };
-            let Ok(view) = self.node.snapshot() else {
-                continue;
-            };
-            let Some(queued) = self.pending.ingress_transactions()? else {
-                continue;
-            };
-            let ledger = account_store::ledger(&StateBatch::from_snapshot(view.state().clone()))?;
-            let mut captured = Captured {
-                now: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64(),
-                pending: queued
-                    .into_iter()
-                    .map(|tx| Ok((hex::encode(tx.hash()?).into_bytes(), tx)))
-                    .collect::<Result<_>>()?,
-                ledger,
-                transactions: vec![],
-                effects: vec![],
-            };
-            let mode = octra_node_protocol::rules::at(
-                self.node.store.chain().chain_id.as_bytes(),
-                octra_node_protocol::rules::Rule::ReadyExecution,
-                view.head().cursor.epoch.0 as i64 + 1,
-            );
-            if ingress
-                .receive(
-                    &peer.hello().node_id,
-                    &frame.payload,
-                    p2p_transaction::Rules {
-                        max_drift: 300.,
-                        duty: Some((view.head().cursor.epoch.0 as i64, mode)),
-                        bft: true,
-                    },
-                    &mut captured,
+            let view = self.node.snapshot().ok();
+            let mut captured = Captured::capture(
+                self.executor.shared_transactions(),
+                SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64(),
+                self.pending.clone(),
+                view.as_ref()
+                    .map(|view| StateBatch::from_snapshot(view.state().clone())),
+            )?;
+            let duty = view.as_ref().map(|view| {
+                let head = view.head().cursor.epoch.0 as i64;
+                (
+                    head,
+                    octra_node_protocol::rules::at(
+                        self.node.store.chain().chain_id.as_bytes(),
+                        octra_node_protocol::rules::Rule::ReadyExecution,
+                        head + 1,
+                    ),
                 )
-                .is_err()
-            {
+            });
+            if !captured.receive(
+                &mut ingress,
+                &peer.hello().node_id,
+                &frame.payload,
+                p2p_transaction::Rules {
+                    max_drift: 300.,
+                    duty,
+                    bft: true,
+                },
+            )? {
                 continue;
             }
             for effect in captured.effects {
@@ -217,30 +212,93 @@ fn router_base_with_limit(host: Arc<Context>, maximum: usize) -> Router {
         .with_state(host)
 }
 struct Captured {
+    shared: octra_node_runtime::consensus_preverify_cache::Shared,
     now: f64,
-    pending: BTreeMap<Vec<u8>, Transaction>,
-    ledger: octra_node_protocol::state::Ledger,
+    pending: Arc<Pending>,
+    state: Option<StateBatch>,
+    admitting: bool,
+    failure: RefCell<Option<anyhow::Error>>,
     transactions: Vec<Transaction>,
     effects: Vec<Effect>,
+}
+impl Captured {
+    fn capture(
+        shared: octra_node_runtime::consensus_preverify_cache::Shared,
+        now: f64,
+        pending: Arc<Pending>,
+        state: Option<StateBatch>,
+    ) -> Result<Self> {
+        let available = pending.ingress_read(|_| ())?.is_some();
+        Ok(Self {
+            shared,
+            now,
+            pending,
+            admitting: available && state.is_some(),
+            state,
+            failure: RefCell::new(None),
+            transactions: vec![],
+            effects: vec![],
+        })
+    }
+    fn receive(
+        &mut self,
+        ingress: &mut p2p_transaction::Ingress,
+        peer: &[u8],
+        payload: &[u8],
+        rules: p2p_transaction::Rules,
+    ) -> Result<bool> {
+        let result = ingress.receive(peer, payload, rules, self);
+        // Native callbacks cannot return a storage error. Do not mistake a
+        // corrupt sender account/cache for a missing key or deliver effects
+        // produced after that failed lookup.
+        if let Some(error) = self.failure.take() {
+            self.effects.clear();
+            self.transactions.clear();
+            return Err(error);
+        }
+        Ok(result.is_ok())
+    }
+    fn read<T>(&self, result: Result<T>) -> Option<T> {
+        match result {
+            Ok(value) => Some(value),
+            Err(error) => {
+                self.failure.borrow_mut().get_or_insert(error);
+                None
+            }
+        }
+    }
 }
 impl p2p_transaction::Host for Captured {
     fn now(&self) -> f64 {
         self.now
     }
     fn has(&self, h: &[u8]) -> bool {
-        self.pending.contains_key(h)
+        self.read(self.pending.ingress_read(|pool| pool.find(h).is_some()))
+            .flatten()
+            .unwrap_or(false)
+            || self
+                .read(self.shared.contains(h).map_err(Into::into))
+                .unwrap_or(false)
     }
     fn find(&self, h: &[u8]) -> Option<Transaction> {
-        self.pending.get(h).cloned()
+        self.read(self.pending.ingress_read(|pool| pool.find(h).cloned()))
+            .flatten()
+            .flatten()
+            .or_else(|| self.read(self.shared.find(h).map_err(Into::into)).flatten())
     }
     fn sender_key(&self, tx: &Transaction) -> Option<Vec<u8>> {
-        self.ledger
-            .account(&tx.from)
-            .and_then(|a| a.public_key.clone())
-            .or(tx.public_key.clone())
+        if !self.admitting {
+            return None;
+        }
+        let state = self.state.as_ref()?;
+        self.read(account_store::load(state, &tx.from).map_err(Into::into))?
+            .and_then(|a| a.public_key)
+            .or_else(|| tx.public_key.clone())
     }
     fn add(&mut self, tx: Transaction) -> Result<Vec<u8>, String> {
-        self.transactions.push(tx);
+        if self.admitting && self.failure.borrow().is_none() {
+            self.transactions.push(tx);
+        }
         // Proof work and final queue admission happen outside the peer reader.
         Err("admission queued".into())
     }
@@ -248,6 +306,8 @@ impl p2p_transaction::Host for Captured {
         self.effects.push(effect);
     }
 }
+#[cfg(test)]
+mod gossip_tests;
 async fn status(State(host): State<Arc<Context>>) -> impl IntoResponse {
     let head = host.node.head().await;
     match head {
@@ -283,19 +343,34 @@ async fn account(
 ) -> impl IntoResponse {
     let result = (|| -> Result<serde_json::Value> {
         let view = host.node.snapshot()?;
-        let ledger = account_store::ledger(&StateBatch::from_snapshot(view.state().clone()))?;
-        let account = ledger
-            .account(address.as_bytes())
-            .ok_or_else(|| anyhow::anyhow!("account unavailable"))?;
-        Ok(
-            serde_json::json!({"address":address,"balance":account.balance.to_string(),"nonce":account.nonce.get(),"epoch":view.head().cursor.epoch.0}),
-        )
+        account_value(view.state(), &address, view.head().cursor.epoch.0)
     })();
     match result {
         Ok(v) => Json(v).into_response(),
         Err(_) => (StatusCode::NOT_FOUND, "account unavailable").into_response(),
     }
 }
+fn account_value(
+    state: &octra_node_runtime::state_batch::Snapshot,
+    address: &str,
+    epoch: u64,
+) -> Result<serde_json::Value> {
+    let account = account_store::load(
+        &StateBatch::from_snapshot(state.clone()),
+        address.as_bytes(),
+    )?
+    .ok_or_else(|| anyhow::anyhow!("account unavailable"))?;
+    anyhow::ensure!(
+        account.encrypted_balance.as_deref() == Some(b"0")
+            || octra_node_protocol::state::valid_cipher(account.encrypted_balance.as_deref()),
+        "account cipher format unsupported"
+    );
+    Ok(
+        serde_json::json!({"address":address,"balance":account.balance.to_string(),"nonce":account.nonce.get(),"epoch":epoch}),
+    )
+}
+#[cfg(test)]
+mod account_tests;
 async fn submit(State(host): State<Arc<Context>>, body: Bytes) -> impl IntoResponse {
     let result = async {
         let tx = Transaction::from_document(&Document::parse(&body)?)?;

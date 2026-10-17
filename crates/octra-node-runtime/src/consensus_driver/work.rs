@@ -41,6 +41,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
         self.build_retry
             .into_iter()
             .chain(self.publish_retry)
+            .chain(self.sync_retry.as_ref().map(|retry| retry.deadline))
             .chain(
                 self.pending_checks
                     .values()

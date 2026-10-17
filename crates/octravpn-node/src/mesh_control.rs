@@ -20,7 +20,12 @@ use std::{
     sync::Arc,
 };
 use tokio::{sync::watch, task::JoinHandle};
+mod admission;
 mod preauth;
+
+/// Local host availability, read for each registration and relay frame.
+/// This capability does not establish a funded traffic purchase.
+pub type Admission = Arc<dyn Fn() -> bool + Send + Sync>;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -82,12 +87,18 @@ impl Config {
     }
 
     pub async fn bind(self) -> Result<Service> {
+        self.bind_guarded(Arc::new(|| true)).await
+    }
+
+    /// Bind against live host availability. Existing direct WireGuard links
+    /// remain governed by their endpoints, not by the control service.
+    pub async fn bind_guarded(self, admission: Admission) -> Result<Service> {
         let token = self
             .admin_token_file
             .as_ref()
             .map(|path| read_token(path))
             .transpose()?;
-        bind(self, token, None, KnockConfig::disabled()).await
+        bind_guarded(self, token, None, KnockConfig::disabled(), admission).await
     }
 }
 
@@ -147,6 +158,16 @@ pub(crate) async fn bind(
     token: Option<Arc<str>>,
     members: Option<crate::members_policy::MembersPolicySync>,
     knock: KnockConfig,
+) -> Result<Service> {
+    bind_guarded(config, token, members, knock, Arc::new(|| true)).await
+}
+
+async fn bind_guarded(
+    config: Config,
+    token: Option<Arc<str>>,
+    members: Option<crate::members_policy::MembersPolicySync>,
+    knock: KnockConfig,
+    admission: Admission,
 ) -> Result<Service> {
     ensure!(
         config.http_addr.is_some() || config.https_addr.is_some(),
@@ -226,7 +247,18 @@ pub(crate) async fn bind(
     }
     let native_derp = config
         .serve_derp
-        .then(|| crate::native_derp::load_native_derp_runtime(&config.state_dir))
+        .then(|| {
+            crate::native_derp::load_native_derp_runtime(
+                &config.state_dir,
+                key.public_bytes(),
+                machines.clone(),
+                policy.clone(),
+                admission.clone(),
+                members
+                    .as_ref()
+                    .map(crate::members_policy::MembersPolicySync::relay_membership),
+            )
+        })
         .transpose()?;
     let derp_map = if config.serve_derp {
         crate::native_derp::self_derp_map(
@@ -247,11 +279,12 @@ pub(crate) async fn bind(
         octravpn_mesh::tailscale_wire::DerpMapStore::shared(derp_map),
     )
     .registration_store(Some(stores.machines.clone()))
-    .registration_gate(
+    .registration_gate(Some(Arc::new(admission::GuardedRegistration::new(
+        admission,
         members
             .as_ref()
             .and_then(crate::members_policy::MembersPolicySync::registration_gate),
-    )
+    ))))
     .native_derp(native_derp)
     .knock(knock)
     .build();

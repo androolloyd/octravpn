@@ -36,6 +36,8 @@ use tokio::{net::TcpListener, sync::watch, task::JoinHandle};
 const CHAIN: &[u8] = b"live-consensus-fixture";
 #[path = "live_consensus/liveness.rs"]
 mod liveness;
+#[path = "live_consensus/round_recovery.rs"]
+mod round_recovery;
 fn key(n: u8) -> SigningKey {
     SigningKey::from_bytes(&[n; 32])
 }

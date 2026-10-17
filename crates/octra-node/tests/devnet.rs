@@ -574,6 +574,27 @@ async fn gateway_read(http: &reqwest::Client, config: &Config) {
 }
 
 #[tokio::test]
+async fn embedded_launcher_requires_crypto_before_opening_data_or_keys() {
+    use octra_node_runtime::{circle::CircleRuntime, circle_hfhe::Backend};
+    use std::sync::Arc;
+
+    let temp = tempfile::tempdir().unwrap();
+    let paths = devnet::init(&temp.path().join("network"), 19870)
+        .await
+        .unwrap();
+    let mut config = devnet::read(&paths[0]).unwrap();
+    config.data = temp.path().join("unopened");
+    config.key = temp.path().join("missing-key");
+    let data = config.data.clone();
+    let (_stop, shutdown) = watch::channel(false);
+    let error = devnet::run(config, CircleRuntime::new(Arc::new(Backend)), shutdown)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("native crypto worker"));
+    assert!(!data.exists());
+}
+
+#[tokio::test]
 async fn genesis_settings_cannot_reuse_a_chain_identity() {
     let temp = tempfile::tempdir().unwrap();
     let directory = temp.path().join("network");
@@ -584,6 +605,18 @@ async fn genesis_settings_cannot_reuse_a_chain_identity() {
     assert_eq!(key, std::fs::read(&config.key).unwrap());
     config.genesis.validators.remove(0);
     let (_stop, shutdown) = watch::channel(false);
-    let error = devnet::run(config, shutdown).await.unwrap_err();
+    let error = devnet::run(
+        config,
+        octra_node_runtime::circle::CircleRuntime::isolated(
+            octra_node_runtime::crypto_worker::Pool::open(
+                std::path::Path::new(env!("CARGO_BIN_EXE_octra-node")),
+                octra_node_runtime::crypto_worker::Limits::capture(),
+            )
+            .unwrap(),
+        ),
+        shutdown,
+    )
+    .await
+    .unwrap_err();
     assert!(error.to_string().contains("genesis commitment differs"));
 }

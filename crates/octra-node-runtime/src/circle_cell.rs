@@ -4,10 +4,10 @@
 //! active execution reconstructs the plan and verifies the proof again.
 use crate::{
     circle::CircleRuntime,
-    circle_cell_crypto::{self as worker, Kind as WorkerKind},
+    circle_cell_crypto::Kind as WorkerKind,
     circle_error::{self, refused, unavailable, Failure},
     circle_operation as host, circle_store, circle_transport_store as outbox, execution,
-    private_crypto,
+    private_crypto::isolated as private_crypto,
     state_batch::{Snapshot, StateBatch},
 };
 use octra_hfhe::scalar::ScalarRule;
@@ -284,7 +284,7 @@ impl Prepared {
         &self.raw_cipher
     }
     pub fn verify(&self, strict: bool, math: ScalarRule) -> Result<()> {
-        worker::verify(
+        private_crypto::verify_cell(
             &self.public,
             &self.cipher,
             &self.request.ciphertext_commitment,

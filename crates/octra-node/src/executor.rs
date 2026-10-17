@@ -1,5 +1,6 @@
 //! Staged native execution for proposals and finalized imports. The publisher
 //! owns finality, canonical commits and ExEx; this host owns no canonical writer.
+mod account_summary;
 mod admission;
 mod build;
 mod compiler;
@@ -79,6 +80,8 @@ pub struct Native {
     reads: Arc<Semaphore>,
     operator_wallet: Arc<tokio::sync::Mutex<()>>,
     migration_status: octra_node_runtime::pvac_status_actor::Service,
+    proof_cache: octra_node_runtime::consensus_preverify_cache::Cache<proofs::ProofBinding>,
+    account_summary: Arc<octra_node_runtime::account_summary::Cache>,
 }
 impl Native {
     pub(crate) fn with_submission_policy(
@@ -94,6 +97,22 @@ impl Native {
         &self.config.emission
     }
     pub fn new(config: Config, runtime: CircleRuntime, history: Arc<dyn History>) -> Result<Self> {
+        let capacity = std::env::var("OCTRA_BUNDLE_CACHE_CAP").ok();
+        Self::new_with_cache_inputs(
+            config,
+            runtime,
+            history,
+            capacity.as_deref().map(str::as_bytes),
+        )
+    }
+    /// Use the effective captured startup setting, including its native absent default.
+    /// Do not consult process environment after a network profile has been captured.
+    pub(crate) fn new_with_cache_inputs(
+        config: Config,
+        runtime: CircleRuntime,
+        history: Arc<dyn History>,
+        bundle_cache_cap: Option<&[u8]>,
+    ) -> Result<Self> {
         ensure!(
             (1..=64).contains(&config.max_multi_exec_calls),
             "invalid multi-exec call limit"
@@ -101,6 +120,10 @@ impl Native {
         ensure!(
             (0..1_i64 << 62).contains(&config.private_result_activation),
             "invalid private result activation epoch"
+        );
+        let migration_status = runtime.crypto_pool().map_or_else(
+            octra_node_runtime::pvac_status_actor::Service::default,
+            |pool| octra_node_runtime::pvac_status_actor::Service::isolated(pool.clone()),
         );
         Ok(Self {
             config: Arc::new(config),
@@ -116,7 +139,9 @@ impl Native {
             circle_views: Arc::new(Semaphore::new(2)),
             reads: Arc::new(Semaphore::new(4)),
             operator_wallet: Arc::new(tokio::sync::Mutex::new(())),
-            migration_status: octra_node_runtime::pvac_status_actor::Service::default(),
+            migration_status,
+            proof_cache: proof_cache(bundle_cache_cap),
+            account_summary: Arc::default(),
         })
     }
 
@@ -330,6 +355,11 @@ async fn run_worker<T: Send + 'static>(
     .context("native execution worker failed")?
 }
 
+fn proof_cache<B>(value: Option<&[u8]>) -> octra_node_runtime::consensus_preverify_cache::Cache<B> {
+    use octra_node_runtime::consensus_preverify_cache::{configured_capacity, Cache};
+    Cache::new(configured_capacity(value), 32 * 1024 * 1024)
+}
+
 #[cfg(test)]
 mod tests {
     use super::run_worker;
@@ -338,6 +368,48 @@ mod tests {
         time::Duration,
     };
     use tokio::sync::{oneshot, Semaphore};
+
+    #[test]
+    fn captured_setting_caps_proof_cache_without_process_environment() {
+        use octra_node_protocol::{
+            consensus::profile::Settings,
+            transaction::{Nonce, OpType, Transaction},
+        };
+        use octra_node_runtime::{consensus_preverify_cache::Purpose, preverify_batch::Checked};
+        use std::collections::BTreeMap;
+        let settings = Settings::from_values(BTreeMap::from([(
+            "OCTRA_BUNDLE_CACHE_CAP".into(),
+            b"64".to_vec(),
+        )]))
+        .unwrap();
+        let cache = super::proof_cache(settings.get("OCTRA_BUNDLE_CACHE_CAP"));
+        let scope = cache.select(b"captured-root", ()).unwrap();
+        let tx = |nonce| Transaction {
+            from: b"fixture".to_vec(),
+            to: b"fixture".to_vec(),
+            amount: 0.into(),
+            nonce: Nonce::new(nonce).unwrap(),
+            ou: 3000.into(),
+            timestamp: 1.,
+            signature: b"fixture".to_vec(),
+            public_key: None,
+            message: None,
+            op_type: OpType::Standard,
+            encrypted_data: None,
+        };
+        let mut calls = 0;
+        for nonce in (0..65).chain([64, 0]) {
+            cache
+                .run(&scope, 1, Purpose::Validate, &tx(nonce), || {
+                    calls += 1;
+                    Ok(Checked::Ready(None))
+                })
+                .unwrap();
+        }
+        // The newest item hits, while item0 was evicted at the captured limit.
+        // The default4096 cache would incorrectly invoke only65 callbacks.
+        assert_eq!(calls, 66);
+    }
 
     #[tokio::test]
     async fn cancelled_import_keeps_its_worker_until_execution_stops() {

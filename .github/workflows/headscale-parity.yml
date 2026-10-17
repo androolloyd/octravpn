@@ -61,7 +61,7 @@ jobs:
           # confirm the golden still matches (refresh it deliberately with
           # PARITY_UPDATE_GOLDEN=1 ./scripts/headscale_go_diff.sh if the
           # bump intentionally changes observable output).
-          ref: 5662f202a8448364cb212a12c0489216c74ab6ca
+          ref: 64bc54312ff9c4c2946f563f21875cf55e3f8f55
 
       # --- toolchains ---------------------------------------------------
       # setup-rust also installs protoc (headscale-api's tonic build script
@@ -71,6 +71,9 @@ jobs:
       - uses: ./octra/.github/actions/setup-rust
         with:
           cache: "false"
+
+      - name: Native DERP enforcement under the pinned backend lockfile
+        run: cargo test --locked -p headscale-api --features full --lib tailscale_wire::derp::tests
 
       # Go for the headscale-go side of the diff. The version is read from
       # the harness go.mod (currently `go 1.26.3`) so it always tracks the

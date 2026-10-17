@@ -7,7 +7,7 @@ mod migration;
 mod payload;
 use crate::{
     private_balance::{Evidence, Profile},
-    private_crypto as crypto,
+    private_crypto::isolated as crypto,
     private_error::{check, failure, Error},
     state_batch::StateBatch,
 };
@@ -44,7 +44,7 @@ fn current<'a>(ledger: &'a Ledger, tx: &Transaction) -> Result<&'a [u8]> {
         .map(|a| a.encrypted_balance.as_deref().unwrap_or(b"0"))
         .ok_or_else(|| rejected("account not found"))
 }
-fn canonical(raw: &[u8]) -> Result<(octra_hfhe::keys::PublicKey, Vec<u8>)> {
+fn canonical(raw: &[u8]) -> Result<(crypto::PublicKey, Vec<u8>)> {
     let raw = octra_node_protocol::transaction::decode_base64(raw)
         .map_err(|e| rejected(format!("Invalid_argument({:?})", e.to_string())))?;
     if raw.len() > 5_000_000 {

@@ -117,6 +117,7 @@ impl CanonicalStore {
         expected_chain: &ChainIdentity,
         trust: &Trust<'_>,
     ) -> Result<Self> {
+        let epoch_tag_keep = super::epoch_tags::capture_keep()?;
         expected_chain.validate().map_err(error)?;
         if expected_chain.chain_id.as_bytes() != trust.chain_id {
             return Err(error("bootstrap chain identity differs"));
@@ -161,6 +162,7 @@ impl CanonicalStore {
             source,
             head_cache,
             snapshots: Arc::default(),
+            epoch_tag_keep,
         };
         store.verify_history().await?;
         let head = store.head().await?;
@@ -176,6 +178,7 @@ impl CanonicalStore {
             drop(restored);
         }
         store.snapshot().await?;
+        store.initialize_epoch_tags().await?;
         store.index_vm_receipts().await?;
         store.index_transactions().await?;
         Ok(store)

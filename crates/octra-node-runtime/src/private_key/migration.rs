@@ -7,10 +7,11 @@ use super::{
     payload::{Migration as M, Payload},
     rejected, Policy, Result,
 };
+use crate::private_crypto::isolated::PublicKey;
 use crate::private_transfer::wrapped;
 use num_bigint::BigInt;
 use num_traits::Zero;
-use octra_hfhe::{keys::PublicKey, proof::zero::BoundProfile};
+use octra_hfhe::proof::zero::BoundProfile;
 use octra_node_protocol::{
     state_sync::migration::{Admission, Audit, Entry},
     transaction::RuleMode,

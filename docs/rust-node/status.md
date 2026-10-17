@@ -9,6 +9,24 @@ upstream behavioral parity and public-network deployment remain unqualified.
 
 ## Recorded local evidence
 
+- The [core parity checkpoint](checkpoints/2026-10-17/core-parity.json) closes
+  the concrete gaps found in the current active-node review: driver recovery,
+  proposal/proof reuse with fresh authority checks, owned private worker
+  processes, captured cache limits, native legacy staging, epoch metadata,
+  account summaries and live mesh relay admission. The broad workspace result
+  plus corrected complete targets and unchanged HFHE component cover **2,616
+  passing nonignored tests across 237 targets**; overlapping reruns are not
+  added to that count. Strict lint, normal-feature Service tests and the normal
+  production build pass. The [review](checkpoints/2026-10-17/core-parity-review.md)
+  preserves initial failures, source applicability and host storage differences.
+  Separate actual Rust/OCaml peers, private-process failures, Chrome application
+  and gateway checks, four-validator prepaid kernel traffic, Single-mode traffic,
+  and stock Tailscale persistence/forced-DERP/live-ACL checks have their exact
+  scope recorded. Stock-client tests use a standalone self-hosted mesh; paid
+  stock onboarding, system DNS, public `octra.to` TLS and portal funding remain
+  open. This candidate has not replaced the retained public observer. Complete
+  upstream behavioral equivalence, whole experimental HFHE library parity and
+  Mainnet are not certified by these local results.
 - The [retained-audit checkpoint](checkpoints/2026-10-17/audit-reuse.json) records
   1,744 passing tests across 23 targets, 39 unchanged bounded Lean theorems,
   strict lint and a normal-feature Service regression. Audit-only reuse keeps

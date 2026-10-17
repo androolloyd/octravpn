@@ -242,6 +242,9 @@ impl<H: Host, C: Publication> Driver<H, C> {
                         step != RoundStep::Propose,
                     )
                     .await?;
+                    if step == RoundStep::Propose {
+                        self.ask_past().await?;
+                    }
                 }
                 Output::Finalized { epoch_id, finalize } => {
                     let duty = self.duty_event(&finalize);
@@ -282,6 +285,8 @@ impl<H: Host, C: Publication> Driver<H, C> {
                     self.replies.clear();
                     self.round_replies.clear();
                     self.round_peers.clear();
+                    self.past_round = None;
+                    self.sync_retry = None;
                     let now = self.now();
                     self.pace = Pace::new(
                         next,

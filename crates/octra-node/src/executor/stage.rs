@@ -204,6 +204,12 @@ impl Native {
             &mut ledger,
             &mut state,
             |tx, ledger, state| {
+                // Each invocation owns its native crypto deadline. A cancelled
+                // consensus waiter cannot cancel this protected execution.
+                let _crypto = self.runtime.crypto_scope(
+                    false,
+                    std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                );
                 if transaction_policy::is_validator(tx.op_type) {
                     return Effect::from_completion(
                         tx,

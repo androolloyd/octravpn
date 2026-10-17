@@ -85,6 +85,9 @@ impl<H: Host, C: Publication> Driver<H, C> {
         self.build_retry = None;
         self.pace = None;
         self.pending_votes.clear();
+        self.past_round = None;
+        self.sync_retry = None;
+        self.replies.clear();
         self.epoch_started = self.now();
         self.pending_checks
             .retain(|&(epoch, candidate), _| epoch == height && candidate >= round);

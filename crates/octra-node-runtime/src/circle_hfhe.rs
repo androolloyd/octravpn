@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
 //! Native Circle HFHE callback policy over the Rust PVAC implementation.
+pub(crate) mod preflight;
 use crate::{
     circle::{Error, HfheBackend},
     private_crypto::{self, Error as CryptoError},
@@ -367,22 +368,46 @@ fn run(input: &Value) -> Result<Value> {
         _ => verify(input, &public, action, cap, math),
     }
 }
+pub(crate) fn local(input: &Value) -> Value {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let raw = zeroize::Zeroizing::new(serde_json::to_vec(input).map_err(exception)?);
+        if raw.is_empty() || raw.len() > 16 * 1024 * 1024 {
+            return Err(rejected("hfhe request exceeds resource policy"));
+        }
+        run(input)
+    }))
+    .unwrap_or_else(|_| Err(exception("backend panic")));
+    match result {
+        Ok(value) => json!({"ok":true,"value":value}),
+        Err(Error::Rejected(reason)) => json!({"ok":false,"class":"rejected","error":reason}),
+        Err(Error::Unavailable(reason)) => {
+            json!({"ok":false,"class":"unavailable","error":reason})
+        }
+    }
+}
+/// Explicit in-process compatibility backend. Production node execution uses
+/// `isolated` and a host-owned invocation scope; this local adapter alone does
+/// not supply native cancellation, deadlines or RSS containment.
 impl HfheBackend for Backend {
     fn call(&self, input: &Value) -> Result<Value> {
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let raw = serde_json::to_vec(input).map_err(exception)?;
-            if raw.is_empty() || raw.len() > 16 * 1024 * 1024 {
-                return Err(rejected("hfhe request exceeds resource policy"));
-            }
-            run(input)
-        }))
-        .unwrap_or_else(|_| Err(exception("backend panic")));
-        Ok(match result {
-            Ok(value) => json!({"ok":true,"value":value}),
-            Err(Error::Rejected(reason)) => json!({"ok":false,"class":"rejected","error":reason}),
-            Err(Error::Unavailable(reason)) => {
-                json!({"ok":false,"class":"unavailable","error":reason})
-            }
-        })
+        Ok(local(input))
+    }
+}
+pub struct Isolated {
+    pool: std::sync::Arc<crate::crypto_worker::Pool>,
+}
+impl Backend {
+    pub fn isolated(pool: std::sync::Arc<crate::crypto_worker::Pool>) -> Isolated {
+        Isolated { pool }
+    }
+}
+impl HfheBackend for Isolated {
+    fn call(&self, input: &Value) -> Result<Value> {
+        // Keep the native callback error envelope; operational failure must not
+        // become a deterministic false proof or successful empty key result.
+        match crate::crypto_worker::circle(&self.pool, input) {
+            Ok(value) => Ok(value),
+            Err(reason) => Ok(json!({"ok":false,"class":"unavailable","error":reason})),
+        }
     }
 }

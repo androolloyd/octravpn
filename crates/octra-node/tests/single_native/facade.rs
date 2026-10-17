@@ -361,7 +361,9 @@ fn seed_config(
 async fn private_single_app_opt_in_binds_seed_runtime_and_native_circle_view() {
     let dir = tempfile::tempdir().unwrap();
     let config = app_config(dir.path(), true);
-    let node = single::launch::open(&config).await.unwrap();
+    let node = single::launch::open(&config, isolated_runtime())
+        .await
+        .unwrap();
     let rpc = Rpc::start(node.clone(), &config.data).await;
     let response = rpc
         .call(
@@ -383,7 +385,7 @@ async fn private_single_app_opt_in_binds_seed_runtime_and_native_circle_view() {
     drop(node);
     let mut altered = config.clone();
     altered.execution.activated_applications = false;
-    assert!(single::launch::open(&altered)
+    assert!(single::launch::open(&altered, isolated_runtime())
         .await
         .err()
         .unwrap()
@@ -391,7 +393,7 @@ async fn private_single_app_opt_in_binds_seed_runtime_and_native_circle_view() {
         .contains("origin or authority differs"));
     let bad = tempfile::tempdir().unwrap();
     let config = app_config(bad.path(), false);
-    assert!(single::launch::open(&config)
+    assert!(single::launch::open(&config, isolated_runtime())
         .await
         .err()
         .unwrap()
@@ -421,7 +423,9 @@ async fn single_peer_broadcast_uses_actual_committed_epoch_without_state_import(
     }
     let dir = tempfile::tempdir().unwrap();
     let mut config = app_config(dir.path(), true);
-    let node = single::launch::open(&config).await.unwrap();
+    let node = single::launch::open(&config, isolated_runtime())
+        .await
+        .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let peer_address = listener.local_addr().unwrap();
     let chain = config.chain.chain_id.as_bytes().to_vec();

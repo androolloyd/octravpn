@@ -6,8 +6,9 @@ runs:
     - shell: bash
       working-directory: octra
       run: |
-        # The sibling intentionally has no committed standalone lockfile.
-        # Passthrough tests must use the graph qualified by Octra's lockfile.
+        # Passthrough tests use the tool graph qualified by Octra's lockfile.
+        # The pinned Headscale sibling has its own committed Cargo.lock,
+        # used separately by the component qualification job.
         cargo build --locked -p headscale-cli --bin headscale
         echo "HEADSCALE_BIN=$PWD/target/debug/headscale" >> "$GITHUB_ENV"
     - id: upstream

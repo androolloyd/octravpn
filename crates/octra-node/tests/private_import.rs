@@ -33,9 +33,6 @@ use octra_node_runtime::{
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
-#[path = "../../octra-node-runtime/tests/common/circle_host.rs"]
-#[allow(dead_code)] // This private-only path uses the runtime, not Circle fixtures.
-mod circle_host;
 #[path = "../../octra-node-runtime/tests/common/finality_host.rs"]
 mod common;
 
@@ -171,7 +168,14 @@ async fn finalized_mixed_import_uses_bound_key_files_and_survives_restart() {
         ready_max_lag: 10,
         pvac_dir: pvac,
     };
-    let executor = Native::new(config, circle_host::runtime(), publisher.clone()).unwrap();
+    let runtime = octra_node_runtime::circle::CircleRuntime::isolated(
+        octra_node_runtime::crypto_worker::Pool::open(
+            std::path::Path::new(env!("CARGO_BIN_EXE_octra-node")),
+            octra_node_runtime::crypto_worker::Limits::capture(),
+        )
+        .unwrap(),
+    );
+    let executor = Native::new(config, runtime.clone(), publisher.clone()).unwrap();
     let (parent, state) = store.snapshot().await.unwrap();
     let mut tx = Transaction {
         from: sender.clone(),
@@ -309,7 +313,7 @@ async fn finalized_mixed_import_uses_bound_key_files_and_survives_restart() {
     let node = Node::open(
         CanonicalStore::open(&database, &chain).await.unwrap(),
         authority.clone(),
-        circle_host::runtime(),
+        runtime,
         Arc::new(octra_browser::application::UnavailableHost),
         Arc::new(
             octra_exex::sqlite::SqliteCheckpoints::open(&dir.path().join("exex.db"))

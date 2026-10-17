@@ -128,7 +128,8 @@ fn seed(config: &Config) -> Result<StateBatch> {
     );
     Ok(StateBatch::from_snapshot(restored.state))
 }
-pub async fn open(config: &Config) -> Result<Arc<Node>> {
+pub async fn open(config: &Config, runtime: CircleRuntime) -> Result<Arc<Node>> {
+    crate::launch::require_crypto(&runtime)?;
     validate(config)?;
     let key = crate::identity::read(&config.key)?;
     let public = STANDARD.encode(key.verifying_key().as_bytes()).into_bytes();
@@ -185,7 +186,6 @@ pub async fn open(config: &Config) -> Result<Arc<Node>> {
         pvac_dir: config.data.join("pvac"),
         migration: None,
     };
-    let runtime = CircleRuntime::new(Arc::new(octra_node_runtime::circle_hfhe::Backend));
     let policy = Native::single_policy_for(&config_native(), &config.settings)?;
     let authority = Authority::new(config.chain.clone(), key, policy)?;
     let store = if database.exists() {
@@ -264,8 +264,12 @@ impl ExEx<NativeTransaction> for Archive {
         .map_err(|e| e.to_string())
     }
 }
-pub async fn run(config: Config, shutdown: watch::Receiver<bool>) -> Result<()> {
-    let node = open(&config).await?;
+pub async fn run(
+    config: Config,
+    runtime: CircleRuntime,
+    shutdown: watch::Receiver<bool>,
+) -> Result<()> {
+    let node = open(&config, runtime).await?;
     let services = config.services.clone().unwrap_or_default();
     let result = super::service::run(&config, node.clone(), services, shutdown).await;
     node.shutdown().await?;

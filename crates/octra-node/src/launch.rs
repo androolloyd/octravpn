@@ -143,6 +143,13 @@ pub(crate) fn service_stopped(
         _ => anyhow::anyhow!("node service stopped unexpectedly"),
     }
 }
+pub(crate) fn require_crypto(runtime: &CircleRuntime) -> Result<()> {
+    ensure!(
+        runtime.crypto_pool().is_some(),
+        "node launch requires an explicitly configured native crypto worker"
+    );
+    Ok(())
+}
 pub(crate) async fn supervise_archive(
     mut status: watch::Receiver<ExtensionStatus>,
     mut shutdown: watch::Receiver<bool>,
@@ -172,7 +179,18 @@ pub(crate) async fn supervise_archive(
     }
 }
 
+fn resolve_local_setting(
+    release: Option<&octra_node_runtime::status_read::Release>,
+    name: &str,
+) -> Option<Vec<u8>> {
+    match release {
+        Some(release) => release.settings.get(name).map(<[u8]>::to_vec),
+        None => std::env::var_os(name).map(|value| value.as_encoded_bytes().to_vec()),
+    }
+}
+
 pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Result<()> {
+    require_crypto(&plan.runtime)?;
     let Plan {
         services,
         transport,
@@ -227,10 +245,8 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
     }
     .unwrap_or(100)
     .max(1);
-    let local_setting = |name: &str| match &status_release {
-        Some(release) => release.settings.get(name).map(<[u8]>::to_vec),
-        None => std::env::var_os(name).map(|value| value.as_encoded_bytes().to_vec()),
-    };
+    let local_setting = |name: &str| resolve_local_setting(status_release.as_ref(), name);
+    let bundle_cache_cap = local_setting("OCTRA_BUNDLE_CACHE_CAP");
     let fees = octra_node_protocol::submit_rpc::Fees::capture(local_setting);
     let grpc =
         octra_node_protocol::grpc::Config::capture(local_setting).map_err(anyhow::Error::msg)?;
@@ -356,11 +372,16 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
         .collect::<Vec<_>>();
     let compute_graph = execution.graph.clone();
     let compute_runtime = runtime.clone();
-    let executor = Native::new(execution, runtime, node.history())?
-        .with_submission_policy(observer_submissions, pending_nonce_window);
+    let executor = Native::new_with_cache_inputs(
+        execution,
+        runtime,
+        node.history(),
+        bundle_cache_cap.as_deref(),
+    )?
+    .with_submission_policy(observer_submissions, pending_nonce_window);
     let view = node.clone();
     let fallback = head.clone();
-    let mut network = Network::new(
+    let mut network = Network::new_with_cache_inputs(
         TcpListener::bind(transport.listen).await?,
         swarm::Config {
             chain_id: chain.chain_id.as_bytes().to_vec(),
@@ -388,6 +409,7 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
         membership.clone(),
         validators.clone(),
         journal.clone(),
+        bundle_cache_cap.as_deref(),
     )?;
     if let Some(proxy) = transport.proxy {
         network.swarm.set_proxy(proxy)?;
@@ -764,7 +786,9 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
         }
         tasks.spawn(bound.run(stop.subscribe()));
         if let Some(mesh) = services.mesh.clone() {
-            let service = mesh.bind().await?;
+            let service = mesh
+                .bind_guarded(crate::mesh::admission(node.shared.clone()))
+                .await?;
             tasks.spawn(service.run(stop.subscribe()));
         }
         if let Some(config) = services.gateway.clone() {
@@ -829,6 +853,35 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
 mod tests {
     use super::*;
     use octra_exex::{Cursor, EpochId, Sequence, StateRoot};
+
+    #[test]
+    fn captured_bundle_cache_setting_is_authoritative_including_absence() {
+        use octra_node_protocol::consensus::profile::Settings;
+        use octra_node_runtime::{
+            consensus_preverify_cache::configured_capacity, status_read::Release,
+        };
+        use std::collections::BTreeMap;
+        for (value, expected) in [
+            (Some(b"64".as_slice()), 64),
+            (Some(b"65536".as_slice()), 65_536),
+            (Some(b"63".as_slice()), 4096),
+            (None, 4096),
+        ] {
+            let settings = value.map_or_else(BTreeMap::new, |value| {
+                BTreeMap::from([("OCTRA_BUNDLE_CACHE_CAP".into(), value.to_vec())])
+            });
+            let release = Release {
+                settings: Settings::from_values(settings).unwrap(),
+                crypto_engine: vec![],
+                program_trust: None,
+                source_commit: None,
+                binary_hash: None,
+            };
+            let captured = resolve_local_setting(Some(&release), "OCTRA_BUNDLE_CACHE_CAP");
+            assert_eq!(captured.as_deref(), value);
+            assert_eq!(configured_capacity(captured.as_deref()), expected);
+        }
+    }
 
     fn cursor() -> Cursor {
         Cursor {

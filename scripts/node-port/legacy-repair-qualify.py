@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 UPSTREAM = "7f9be4489870645cfcc95439638cde40f5da9f50"
 IMAGE = "sha256:e61194220c65f9f0b8034a4816fb15d47dfe7dda8ece1087d9850b6d838bae95"
 CHAIN = "legacy-repair-fixture"
+STAGE_TEST = "signed_peer_selection_stages_only_an_unprotected_native_empty_suffix"
 WRONG_CHAIN = CHAIN + "-wrong"
 LABEL = "org.octra.legacy-repair-qualification"
 MAX_OUTPUT = 4 * 1024 * 1024
@@ -186,7 +187,14 @@ class Qualification:
         node_hash = sha(arguments.node)
         shutil.copyfile(arguments.node, self.node); self.node.chmod(0o555)
         assert sha(self.node) == node_hash == sha(arguments.node), "node changed while freezing"
+        regular(arguments.stage_test_binary)
+        stage_hash = sha(arguments.stage_test_binary)
+        self.stage_test = self.tools / "legacy-stage-test"
+        shutil.copyfile(arguments.stage_test_binary, self.stage_test); self.stage_test.chmod(0o555)
+        assert sha(self.stage_test) == stage_hash == sha(arguments.stage_test_binary), "staging test binary changed while freezing"
         self.report["artifacts"] = dict(node_sha256=node_hash, node_source=str(arguments.node.resolve()),
+                                        stage_test_sha256=stage_hash, stage_test_source=str(arguments.stage_test_binary.resolve()),
+                                        stage_test_source_sha256=sha(ROOT / "crates/octra-node/tests/legacy_stage.rs"),
                                         native_manifest_sha256=sha(source / "manifest.json"),
                                         backend_sha256=manifest["backend_sha256"], cases_sha256=manifest["cases_sha256"])
         self.manifest = manifest
@@ -375,6 +383,74 @@ os.execve({self.docker!r},argv,{self.environment!r})
                                      marker_retained=before["plan_present"], preserved=guard,
                                      current_source_proof_still_valid=True, exit_code=refused.process.returncode))
 
+    def stage_selection(self, seed, signing, protected):
+        """Real authenticated TCP selection, then unchanged native physical stage.
+
+        The Rust ignored test is an explicit fixture-only entry point. It calls
+        the public staging API without a supplied quorum/target capability;
+        fixed development peer keys match the native certified fixture.
+        """
+        certified = self.copy(seed, "stage-certified-seed")
+        self.fixture("stage-certify", "certify", certified)
+        plan = json.loads((certified / "fork_repair.json").read_bytes())
+        modes = ["positive", "current-root", "weak-target", "bad-signature", "unknown-signer",
+                 "target-mismatch", "source-changed", "protected-prepare", "protected-commit",
+                 "protected-aborted", "missing-finality", "tampered-qc", "origin-mismatch", "environment-mismatch"]
+        for mode in modes:
+            directory = self.copy(certified, "stage-" + mode)
+            if mode in ["protected-prepare", "protected-commit", "protected-aborted", "missing-finality", "tampered-qc"]:
+                self.fixture("stage-mutate-" + mode, "mutate", directory, mode)
+            self.fixture("stage-unstage-" + mode, "unstage", directory)
+            assert not (directory / "fork_repair.json").exists()
+            before = self.inspect("stage-before-" + mode, directory)
+            guarded = self.guard(directory)
+            metadata = self.out / ("stage-" + mode + ".json")
+            result_path = self.out / ("stage-" + mode + "-result.json")
+            write(metadata, dict(schema="octra-legacy-stage-test-v1", test=STAGE_TEST, test_only=True,
+                                 directory=str(directory), source_head_sha256=sha(directory / "HEAD.json"),
+                                 plan=plan, mode=mode, backend=str(self.bridge), backend_sha256=self.bridge_sha,
+                                 report=str(result_path)))
+            environment = {**self.environment, "OCTRA_LEGACY_STAGE_FIXTURE": str(metadata)}
+            invocation = Command(self, "stage-signed-tcp-" + mode,
+                                 [str(self.stage_test), "--ignored", "--exact", STAGE_TEST, "--nocapture"],
+                                 environment=environment).wait(timeout=120)
+            regular(result_path)
+            report = json.loads(result_path.read_bytes())
+            after = self.inspect("stage-after-" + mode, directory)
+            after_guard = self.guard(directory)
+            if mode == "positive":
+                assert report["staged"] is True and report["restart_required"] is True
+                assert report["source"] == plan["source"]["epoch_id"] and report["target"] == plan["head"]["epoch_id"]
+                assert report["root"] == plan["head"]["state_root"]
+                assert json.loads((directory / "fork_repair.json").read_bytes()) == plan
+                assert after == {**before, "plan_present": True}, "staging changed physical head/store/chain"
+                assert {name: value for name, value in after_guard["files"].items() if name != "fork_repair.json"} == {
+                    name: value for name, value in guarded["files"].items() if name != "fork_repair.json"}
+                expected = self.copy(directory, "stage-positive-native")
+                native = self.fixture("stage-positive-native-finish", "phase", expected, "finish").json()
+                self.rust("stage-positive-rust-resume", directory)
+                resumed = self.inspect("stage-positive-resumed", directory)
+                assert resumed == native
+                self.repaired(resumed, plan["head"])
+                assert self.fixture("stage-positive-verify-committed", "verify-committed", directory).json() is True
+                self.results.append(dict(case="stage-" + mode, selection=report, resumed=resumed,
+                                         stage_only_unchanged=True, native_finish_equal=True))
+            else:
+                assert not (directory / "fork_repair.json").exists()
+                if mode == "source-changed":
+                    assert report["refused"] is True
+                    altered = json.loads(json.dumps(before))
+                    altered["head"]["ts"] = 1.0
+                    assert after == altered
+                    assert {name: value for name, value in after_guard["files"].items() if name != "HEAD.json"} == {
+                        name: value for name, value in guarded["files"].items() if name != "HEAD.json"}
+                else:
+                    assert after == before and after_guard == guarded
+                self.results.append(dict(case="stage-" + mode, selection=report, marker_absent=True,
+                                         physical_unchanged=mode != "source-changed", preserved=after_guard))
+            assert self.signing(directory) == signing
+            self.check_prefix(directory, protected)
+
     def qualify(self):
         self.configure_docker()
         seed = self.cases / "seed"
@@ -399,6 +475,7 @@ os.execve({self.docker!r},argv,{self.environment!r})
             protected[name] = dict(bytes=count, sha256=hashlib.sha256(raw).hexdigest())
         write(self.out / "initial.json", dict(inspection=prepared, plan=plan, signing=signing, protected_prefix=protected))
         self.certified(seed, signing, protected)
+        self.stage_selection(seed, signing, protected)
 
         native = self.copy(seed, "native-finish")
         rust = self.copy(seed, "rust-finish")
@@ -513,6 +590,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--node", type=Path, required=True)
     parser.add_argument("--backend-directory", type=Path, required=True)
+    parser.add_argument("--stage-test-binary", type=Path, required=True,
+                        help="fresh `octra-node --test legacy_stage` executable built from the frozen sources")
     parser.add_argument("--out", type=Path, required=True)
     arguments = parser.parse_args()
     qualification = Qualification(arguments)
@@ -528,7 +607,8 @@ def main():
         qualification.report["scope"] = (
             "Actual native Irmin-pack/chaindata legacy stores: Rust/native finish agreement, protected prefix and signing preservation, "
             "genuine quorum-signed committed-finality rewind and authentication refusals, genuine successor/reopen, "
-            "SIGKILL after durable phase boundaries and native exclusive ownership. "
+            "SIGKILL after durable phase boundaries, native exclusive ownership and actual signed TCP peer-selected staging "
+            "under a continuous native store lease. Fixed development keys and explicit trusted fixture network only. "
             "No full public node boot, arbitrary syscall/power-loss crash, public-network certificate or mainnet qualification.")
         qualification.report["bridge_logs"] = {str(path.relative_to(qualification.out)): dict(bytes=path.stat().st_size, sha256=sha(path))
                                                 for path in sorted((qualification.out / "bridge-stderr").glob("*.log"))}

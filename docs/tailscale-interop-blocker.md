@@ -1,5 +1,11 @@
 # Tailscale-interop: blocker handoff
 
+This is a historical May 2026 investigation. Its missing-endpoint statements
+are superseded by the embedded Headscale wire service. See the current
+[mesh configuration](operators/mesh-admin.md) and
+[Rust node qualification](rust-node/status.md) for implemented behavior and
+remaining paid stock-client integration gates.
+
 This document captures **what's still blocking exit code 0** on
 `docker/devnet/tailscale-interop/run-interop.sh` after the preauth
 minter work pass landed. Read it together with

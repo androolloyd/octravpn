@@ -1,0 +1,2504 @@
+{
+  "schema": "octra_core_parity_qualification_v1",
+  "at": "2026-10-17T17:07:47.990004+00:00",
+  "status": "local_active_node_candidate_qualified_with_explicit_limits",
+  "workspace_base": "4d6b57acbc8168c50b03f0815b5a9cd2309fa35e",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "upstream_main_rechecked": "2026-10-17T16:47Z",
+  "headscale_commit": "64bc54312ff9c4c2946f563f21875cf55e3f8f55",
+  "foundry_commit": "d5feaad7f14d6a381e2327dfd6738cae8df95b31",
+  "consensus_changes": false,
+  "full_consensus_execution": false,
+  "full_native_behavioral_parity": false,
+  "flag_scope": "Complete native behavioral equivalence is not certified; these flags do not mean the Rust driver or transaction execution is absent.",
+  "final_test_source_snapshot_sha256": "e7a7ca63271f275e4567059b4d2f7b2f9f6a446eadbdd65e794eebd6988f2645",
+  "source_applicability": {
+    "path": "out/mesh-admission-20261017/applicability-final.json",
+    "sha256": "38f6c32555d39979c60c58ef557dfee60e8cba2d55395ef7558d407a502e76d9",
+    "result": {
+      "schema": "octra_candidate_evidence_applicability_v1",
+      "observed_at": "2026-10-17T16:49:36.140307+00:00",
+      "status": "PASS_APPLICABILITY",
+      "scope": "Current candidate source/input applicability to retained evidence only; no tests, builds, Cargo commands, Docker commands, network requests or observer changes were performed by this audit.",
+      "current_root": {
+        "path": "/Users/androolloyd/Development/octra",
+        "git_head": "4d6b57acbc8168c50b03f0815b5a9cd2309fa35e",
+        "source_snapshot_sha256": "e7a7ca63271f275e4567059b4d2f7b2f9f6a446eadbdd65e794eebd6988f2645",
+        "roots": [
+          {
+            "root": "/Users/androolloyd/Development/octra",
+            "files_before": 2118,
+            "files_current": 2118,
+            "snapshot_sha256_before": "4e86d5ca085c851e79ac598f6d9c4d0f890f7f5fc42738eebf9bec0224a17d89",
+            "snapshot_sha256_current": "70b321544e1a85aa3ea4c641ee9dff1b6203f7476eabb58e75e9964a96609ede",
+            "changed": 9
+          },
+          {
+            "root": "/Users/androolloyd/Development/octra-foundry",
+            "files_before": 126,
+            "files_current": 126,
+            "snapshot_sha256_before": "0e75c6d7824a58af0106d1a916b69dbafe2747ccbbbba0877057bae53c848a22",
+            "snapshot_sha256_current": "0e75c6d7824a58af0106d1a916b69dbafe2747ccbbbba0877057bae53c848a22",
+            "changed": 0
+          },
+          {
+            "root": "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/headscale",
+            "files_before": 1212,
+            "files_current": 1212,
+            "snapshot_sha256_before": "8084ce1edb2f86226c23e23e46a01eb3d189cfe504053f6dbebe8c6c8f9836b2",
+            "snapshot_sha256_current": "8084ce1edb2f86226c23e23e46a01eb3d189cfe504053f6dbebe8c6c8f9836b2",
+            "changed": 0
+          }
+        ],
+        "uncommitted_candidate": true
+      },
+      "workspace_v3": {
+        "path": "out/mesh-admission-20261017/workspace-v3.json",
+        "sha256": "fa6790e575b2748ff1065f72f6bc404369b1cfd7c327a154d3e4c9b08d3b52da",
+        "source_manifest": {
+          "path": "out/mesh-admission-20261017/workspace-v3-sources.json",
+          "sha256": "ee70190adf77f81a760d7a8e660697db4c1e3451ba7838145b14e30cd32e5244"
+        },
+        "log_sha256": "d9bc4efc317cddd3ece1f40ff98a2e8f326295104e6f59cd84f2d1da4f4e71b1",
+        "exit_code": 101,
+        "tests": {
+          "targets": 209,
+          "passed": 2563,
+          "failed": 4,
+          "ignored": 12
+        },
+        "production_inputs_unchanged": true,
+        "all_drift": [
+          {
+            "root": "/Users/androolloyd/Development/octra",
+            "path": ".github/actions/prepare-native-tests/action.yml",
+            "before": "1179716103fde753e4434046082f839d1fb5fd1a2e8cff278f06b5cd8da03fd8",
+            "current": "6a167d4f390bf3df13c08f8bd4c7a2720fafc7fedfc0a851326c964999bace51",
+            "classification": "ci_only"
+          },
+          {
+            "root": "/Users/androolloyd/Development/octra",
+            "path": ".github/workflows/ci.yml",
+            "before": "09432da5954aa31b1a872e47f70d2d46f23eefef2b96608e0314aae8751989ff",
+            "current": "f93dc5c199a0f65fb91d057d07dfeb09b7898741684d6ede140ab8552415c06d",
+            "classification": "ci_only"
+          },
+          {
+            "root": "/Users/androolloyd/Development/octra",
+            "path": ".github/workflows/circle-vpn.yml",
+            "before": "b3e8d01b9bbbb8db2b96162ad280aeb16e732c4d7483e16aeb2ff6e5f8572974",
+            "current": "86c25330cb60f5bcd779cd2c1d74759930e7d33021e0a859ba19fc06dcac0a54",
+            "classification": "ci_only"
+          },
+          {
+            "root": "/Users/androolloyd/Development/octra",
+            "path": ".github/workflows/coverage.yml",
+            "before": "3a5c94e3e81e081cb60cd2313d925524271b6c245cd87057e5b13db01cf2ab0c",
+            "current": "087a3c8656d277ebc3a643c0f4b2a7647dad15836fd05ec2adf8bb2ca7d998db",
+            "classification": "ci_only"
+          },
+          {
+            "root": "/Users/androolloyd/Development/octra",
+            "path": ".github/workflows/proof.yml",
+            "before": "8f3fcece464bd2d7a3e8b80aa92f6ea1bf94f2c78150535e91f5597d0450fd1b",
+            "current": "7451e7bc90efdc909c45d110c543dfff8f6d8ead1c31c0ea88db4754d0370852",
+            "classification": "ci_only"
+          },
+          {
+            "root": "/Users/androolloyd/Development/octra",
+            "path": "crates/octra-node-runtime/tests/fixtures/circle-engine.json",
+            "before": "777943eecde2592b12768254278b239b98673050b7f64a305dc72c42467c5c84",
+            "current": "e077057316f3518dc76b02ab2baf30b1695387a4b95908a0c0ca050ac1a6a397",
+            "classification": "native_test_reference_only"
+          },
+          {
+            "root": "/Users/androolloyd/Development/octra",
+            "path": "crates/octra-node/tests/services.rs",
+            "before": "d05e429fb0f3c0bfebf65a9fd257d8f982531611a2f80f9b3aac4ee318041997",
+            "current": "5372bd11376a96818cca754a20c8e74fec2fb7ea6a70c34d70ce5b24bb126fae",
+            "classification": "test_fixture_only"
+          },
+          {
+            "root": "/Users/androolloyd/Development/octra",
+            "path": "crates/octra-node/tests/services/local_bundles.rs",
+            "before": "a1e9c10309fce36bff19e17a597bf9867c08412360d1b42c7085b71664257307",
+            "current": "d76b941c5bc7b724e5cd55b7300899ef7d99b2fea09ef27eb82ca6e1cea09631",
+            "classification": "test_fixture_only"
+          },
+          {
+            "root": "/Users/androolloyd/Development/octra",
+            "path": "docker/devnet/tailscale-interop/run-interop.sh",
+            "before": "476f613130c349636e75a6945a54f18c1fb79622ef5b8797a4dc68f787335029",
+            "current": "6a0f354b95e1007de115a9440a03021832f69584d0dc4b7a359e860f40ff9c7f",
+            "classification": "test_harness_only"
+          }
+        ],
+        "production_or_dependency_drift": [],
+        "scope_note": "Complete tracked/nonignored source scope reproduced with original Git enumeration for all captured local dependency roots. Cargo/build/toolchain inputs, local crate sources, vendor and native-sidecar inputs are unchanged. Registry revisions/checksums are bound by unchanged Cargo.lock; this is not a fresh audit of every Cargo registry file or the compiler installation. The failed workspace run remains failed; component applicability does not convert it to a pass."
+      },
+      "dependency_resolution": {
+        "metadata": {
+          "path": "out/mesh-admission-20261017/metadata-resolved.json",
+          "sha256": "cd3c92102f80964eb5520fca1a93cf488ec921e00922dad72e15478ffeb7b4dc"
+        },
+        "local_package_count": 27,
+        "captured_local_roots": [
+          "/Users/androolloyd/Development/octra",
+          "/Users/androolloyd/Development/octra-foundry",
+          "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/headscale"
+        ],
+        "resolution_inputs_unchanged": true,
+        "scope": "No Cargo metadata rerun; unchanged manifests/lock and the retained resolved metadata define the same captured local source set."
+      },
+      "hfhe_component": {
+        "path": "out/mesh-admission-20261017/hfhe-component-v1.json",
+        "sha256": "bd50785ea3d417220ea3a678238088347f844ac856c58cb30d0e2019a33d8a36",
+        "record_status": "passed",
+        "origin_run": "workspace-v2",
+        "origin_run_status": "interrupted_after_confirmed_unrelated_node_authority_failures",
+        "passed_as_recorded": 49,
+        "targets_as_recorded": 28,
+        "source_inputs": 413,
+        "source_map_sha256": "cf0aaa57077fd3abab2cfed03423af98e686a59aaa11363e0a9fb262930df4e3",
+        "current_source_drift": [],
+        "origin_log_matches": true,
+        "claim": "Retained49-test component result remains applicable to unchanged HFHE inputs; no new HFHE execution claim."
+      },
+      "native_source_inventory": {
+        "path": "docs/rust-node/source-map.json",
+        "sha256": "6440fdf5895e791ce99ff1904aea396fc88c7e12645846a32702286aa9c17efa",
+        "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+        "actual_upstream_head": "7f9be4489870645cfcc95439638cde40f5da9f50",
+        "files_checked": 1158,
+        "mismatches": [],
+        "active_hfhe_map": {
+          "path": "docs/rust-node/checkpoints/2026-10-17/hfhe-active-census.json",
+          "sha256": "0d9f592cf8c137ea4ca101f9d7f98ead2bdb04f3a063c91f34f5e87a99429340",
+          "native_files_checked": 13,
+          "mismatches": []
+        }
+      },
+      "connected_v5": {
+        "path": "out/mesh-admission-20261017/connected-v5/report.json",
+        "sha256": "93bee3120ffaeaea6ac2f3378c00d158fa5f25e6bceb647cfaec6d944709e9f6",
+        "exit_code_as_recorded": 0,
+        "qualified_as_recorded": true,
+        "sources_unchanged_during_run": true,
+        "harness_overrides": [],
+        "native_manifest": {
+          "path": "out/mesh-admission-20261017/connected-v5/evidence/source.json",
+          "sha256": "df970ebc4871f4677da923883dabb6863603b6bc58089ecdd212a5a1ae893db2"
+        },
+        "source_snapshot": {
+          "path": "out/mesh-admission-20261017/connected-v5/source-snapshot.json",
+          "sha256": "68b0d58b1eb42c3098962b44b928170be4d3533df4e61904a9ece39c95758ef5"
+        },
+        "manifest_transcript_sha256": "3aaccd990f21c54b5d0db5c90e5c1bba2034cded97b2b38275472e34eed1540f",
+        "frozen_context_files_reverified": 3398,
+        "manifest_verified_here": true,
+        "production_inputs_unchanged": true,
+        "root_drift": [
+          {
+            "path": "crates/octra-node-runtime/tests/fixtures/circle-engine.json",
+            "before": "777943eecde2592b12768254278b239b98673050b7f64a305dc72c42467c5c84",
+            "current": "e077057316f3518dc76b02ab2baf30b1695387a4b95908a0c0ca050ac1a6a397",
+            "classification": "native_test_reference_only"
+          },
+          {
+            "path": "crates/octra-node/tests/services.rs",
+            "before": "d05e429fb0f3c0bfebf65a9fd257d8f982531611a2f80f9b3aac4ee318041997",
+            "current": "5372bd11376a96818cca754a20c8e74fec2fb7ea6a70c34d70ce5b24bb126fae",
+            "classification": "test_fixture_only"
+          },
+          {
+            "path": "crates/octra-node/tests/services/local_bundles.rs",
+            "before": "a1e9c10309fce36bff19e17a597bf9867c08412360d1b42c7085b71664257307",
+            "current": "d76b941c5bc7b724e5cd55b7300899ef7d99b2fea09ef27eb82ca6e1cea09631",
+            "classification": "test_fixture_only"
+          }
+        ],
+        "image_binaries_as_recorded": {
+          "octra-node": "b75e4480217b69e0ccfbbe7e479ee6e6e98091307a8e573b9022a83917125247",
+          "octravpn-node": "12001f9c73ee124097a18c44d4f050ac8d8aa29d86628857110e1045fe95e1ce",
+          "octravpn": "9d9efe4344d2f622bb289ace1c5d09e45a4f177cc512f39be591a47927a9f9ce",
+          "octra-single-fixture": "d2b906e523a5b6e86d8d78ab446eea3056e8fbd1d9524f4dd36e48b9a2d0dd08",
+          "octra": "d288bb757081db85c1be8221f1dfebe6bf877ec58efaa6d690eb3efeab138264",
+          "octravpn-private-admin": "6653268682d451039f7274ace72e6ae26b106e6ce377d79d7cf6d69361fd5185"
+        },
+        "scope": "isolated four-validator prepaid payment-plan application; real client, two endpoint kernels and canonical claims; no public-chain or Mainnet claim"
+      },
+      "supplementary_qualifications": {
+        "native_peer": {
+          "path": "out/mesh-admission-20261017/native-peer-v3/result.json",
+          "sha256": "2701e7a24899e6d110de683019c7a6bbce5e17e4adea6d523e397143147fdd39",
+          "status": "PASS",
+          "provenance": {
+            "path": "out/mesh-admission-20261017/native-peer-v3/provenance.json",
+            "sha256": "e0adc1f831e132d402c0959366882905ab3d358bdb184de9c3951b428958d2e9"
+          },
+          "provenance_status": "PASS",
+          "frozen_binary_sha256": "2d97b84933187bce98cc9f61ffc00bd09787ddb783526c4f27fdb7867e81317e",
+          "frozen_binary_matches": true,
+          "cargo_invoked": false,
+          "scope": "Rust outbound HELLO/ACK/FINISH against native inbound swarm; bidirectional native framing, signed PEX records, signed profile offers, inventory/request exchange and clean shutdown. Public deterministic development keys. No consensus execution or funded VPN claim."
+        },
+        "public_snapshot": {
+          "path": "out/mesh-admission-20261017/public-snapshot-v3/result.json",
+          "sha256": "7c0b168e0d308654a2109ba4616ff016e690318d4ec20cc15f1a914228134439",
+          "status": "PASS",
+          "frozen_binary_sha256": "e2dbfcb6230a755335e3401105ca26742088e201fc9932fab1b04faa363c3ec9",
+          "frozen_binary_matches": true,
+          "cargo_invoked": false,
+          "scope": "Current Rust certificate verifier against a genuine retained public Octra devnet certificate, using independently Git-pinned adopted network authority and current wall-clock freshness. No public download, ledger import, sync, serving, funded VPN or mainnet qualification."
+        }
+      },
+      "audit_runner_sha256": "534b4e97a34c47615682ea5ec7e516e3ed009b59762ac0b54dba7b55218f80ad",
+      "no_new_test_claim": true,
+      "snapshot_stable_during_audit": true
+    }
+  },
+  "normal_release": {
+    "path": "out/mesh-admission-20261017/normal-release/artifact.json",
+    "sha256": "76605499add5ed8629deceb79281c0abe2fc42bd714f5bdb685108823c93038c",
+    "result": {
+      "path": "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/normal-release/octra-node",
+      "sha256": "04cf5ab0b7be1d9fe7fafed814efe40989128485274c11ac5a66072d2e4e36ec",
+      "features": "normal production; no test-helpers",
+      "build_report": "production-build-v1.json"
+    }
+  },
+  "aggregate": {
+    "passing_nonignored_test_identities": 2616,
+    "targets": 237,
+    "calculation": "2563 workspace-v3 passing tests + 4 failures repaired and passed in complete 33-test target rerun + 49 unchanged-source HFHE component passes. No overlapping rerun or separate controlled-gate counts added.",
+    "component_evidence_policy": "The failed workspace-v3 remains failed. Its unaffected passing components are applicable under the audited source/dependency manifest; both failed targets were rerun completely. The HFHE component completed before the unrelated earlier whole-run interruption and all 413 relevant inputs were reverified.",
+    "initial_workspace_ignored": 12,
+    "doctests_passed_separately": 2,
+    "fresh_cpp_sidecar_normal_passed": 43,
+    "fresh_cpp_sidecar_stress_passed_separately": 3,
+    "ignored_policy": "Controlled server/initializer/crash helpers run through owning external gates or parent tests, never reported as ordinary standalone passes. Native peer, retained public cert, kernel lifecycle and all three stress cases were executed explicitly."
+  },
+  "checks": {
+    "final-fixtures-v2": {
+      "path": "out/mesh-admission-20261017/final-fixtures-v2.json",
+      "sha256": "b529c8d3784a73e884ce32487c6f3b9bcb19da1685f3682b82c59898b9d60b48",
+      "result": {
+        "name": "final-fixtures-v2",
+        "harness_sha256": "137379c8f0a413ede9a84ee1544f4404738ab008eda933ebc0fcf13787d778a3",
+        "harness_unchanged": true,
+        "at": "2026-10-17T16:47:17.396270+00:00",
+        "argv": [
+          "cargo",
+          "test",
+          "--release",
+          "--locked",
+          "--all-features",
+          "-p",
+          "octra-node",
+          "--test",
+          "services",
+          "-p",
+          "octra-node-runtime",
+          "--test",
+          "circle_parity"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra",
+        "exit_code": 0,
+        "seconds": 21.911,
+        "source_scope": [
+          "crates",
+          "vendor",
+          "pvac-sidecar",
+          "tests",
+          "licenses",
+          "docs/rust-node/source-map.json",
+          "docs/rust-node/upstream.json",
+          "docs/rust-node/network-authority.json",
+          ".github",
+          ".cargo",
+          "Cargo.toml",
+          "Cargo.lock",
+          "rust-toolchain.toml",
+          "program",
+          "proofs/lean/OctranetPayments.lean",
+          "scripts/node-port",
+          "docker/native-vpn",
+          "docker/devnet/tailscale-interop",
+          "docker/Dockerfile.builder",
+          "docker-compose.mesh-demo.yml",
+          "demo/lib"
+        ],
+        "sources_sha256": "e7a7ca63271f275e4567059b4d2f7b2f9f6a446eadbdd65e794eebd6988f2645",
+        "sources_unchanged": true,
+        "source_drift": {},
+        "log_sha256": "ecedad1349a7c6afbcdb156f1480f0ea2130a2dc8292d757a72cfcc417e594d0",
+        "tests": {
+          "targets": 2,
+          "passed": 33,
+          "failed": 0,
+          "ignored": 1
+        }
+      }
+    },
+    "production-service-v1": {
+      "path": "out/mesh-admission-20261017/production-service-v1.json",
+      "sha256": "0a093073a882c82ed0574239704d7efe56c0c2f67bb6ab51cd35a562a1546604",
+      "result": {
+        "name": "production-service-v1",
+        "harness_sha256": "137379c8f0a413ede9a84ee1544f4404738ab008eda933ebc0fcf13787d778a3",
+        "harness_unchanged": true,
+        "at": "2026-10-17T16:48:30.380064+00:00",
+        "argv": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--release",
+          "-p",
+          "octra-node",
+          "--test",
+          "services"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra",
+        "exit_code": 0,
+        "seconds": 221.184,
+        "source_scope": [
+          "crates",
+          "vendor",
+          "pvac-sidecar",
+          "tests",
+          "licenses",
+          "docs/rust-node/source-map.json",
+          "docs/rust-node/upstream.json",
+          "docs/rust-node/network-authority.json",
+          ".github",
+          ".cargo",
+          "Cargo.toml",
+          "Cargo.lock",
+          "rust-toolchain.toml",
+          "program",
+          "proofs/lean/OctranetPayments.lean",
+          "scripts/node-port",
+          "docker/native-vpn",
+          "docker/devnet/tailscale-interop",
+          "docker/Dockerfile.builder",
+          "docker-compose.mesh-demo.yml",
+          "demo/lib"
+        ],
+        "sources_sha256": "e7a7ca63271f275e4567059b4d2f7b2f9f6a446eadbdd65e794eebd6988f2645",
+        "sources_unchanged": true,
+        "source_drift": {},
+        "log_sha256": "cbc898087cba25cede49bf11b3b131f5c5b8ea098cb2c2f63687e78cf95103de",
+        "tests": {
+          "targets": 1,
+          "passed": 31,
+          "failed": 0,
+          "ignored": 1
+        }
+      }
+    },
+    "production-private-v1": {
+      "path": "out/mesh-admission-20261017/production-private-v1.json",
+      "sha256": "3086ecaffede2110a692a8ddd32559a452d5322ad11eb98df342feb2e300e86e",
+      "result": {
+        "name": "production-private-v1",
+        "harness_sha256": "137379c8f0a413ede9a84ee1544f4404738ab008eda933ebc0fcf13787d778a3",
+        "harness_unchanged": true,
+        "at": "2026-10-17T16:53:51.353208+00:00",
+        "argv": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--release",
+          "-p",
+          "octra-node",
+          "--test",
+          "private_import"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra",
+        "exit_code": 0,
+        "seconds": 120.234,
+        "source_scope": [
+          "crates",
+          "vendor",
+          "pvac-sidecar",
+          "tests",
+          "licenses",
+          "docs/rust-node/source-map.json",
+          "docs/rust-node/upstream.json",
+          "docs/rust-node/network-authority.json",
+          ".github",
+          ".cargo",
+          "Cargo.toml",
+          "Cargo.lock",
+          "rust-toolchain.toml",
+          "program",
+          "proofs/lean/OctranetPayments.lean",
+          "scripts/node-port",
+          "docker/native-vpn",
+          "docker/devnet/tailscale-interop",
+          "docker/Dockerfile.builder",
+          "docker-compose.mesh-demo.yml",
+          "demo/lib"
+        ],
+        "sources_sha256": "e7a7ca63271f275e4567059b4d2f7b2f9f6a446eadbdd65e794eebd6988f2645",
+        "sources_unchanged": true,
+        "source_drift": {},
+        "log_sha256": "f86e377ced6ab8a2b285b6558347b3c4b7e12227537510aa5327209b9c4ef93e",
+        "tests": {
+          "targets": 1,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        }
+      }
+    },
+    "production-build-v1": {
+      "path": "out/mesh-admission-20261017/production-build-v1.json",
+      "sha256": "5d037407b799dfe5da754616b46b5ad238827239709abbc0fbd17898a0da465f",
+      "result": {
+        "name": "production-build-v1",
+        "harness_sha256": "137379c8f0a413ede9a84ee1544f4404738ab008eda933ebc0fcf13787d778a3",
+        "harness_unchanged": true,
+        "at": "2026-10-17T16:52:59.135812+00:00",
+        "argv": [
+          "cargo",
+          "build",
+          "--offline",
+          "--locked",
+          "--release",
+          "-p",
+          "octra-node",
+          "--bin",
+          "octra-node"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra",
+        "exit_code": 0,
+        "seconds": 1.318,
+        "source_scope": [
+          "crates",
+          "vendor",
+          "pvac-sidecar",
+          "tests",
+          "licenses",
+          "docs/rust-node/source-map.json",
+          "docs/rust-node/upstream.json",
+          "docs/rust-node/network-authority.json",
+          ".github",
+          ".cargo",
+          "Cargo.toml",
+          "Cargo.lock",
+          "rust-toolchain.toml",
+          "program",
+          "proofs/lean/OctranetPayments.lean",
+          "scripts/node-port",
+          "docker/native-vpn",
+          "docker/devnet/tailscale-interop",
+          "docker/Dockerfile.builder",
+          "docker-compose.mesh-demo.yml",
+          "demo/lib"
+        ],
+        "sources_sha256": "e7a7ca63271f275e4567059b4d2f7b2f9f6a446eadbdd65e794eebd6988f2645",
+        "sources_unchanged": true,
+        "source_drift": {},
+        "log_sha256": "359abaa461c072ed0acc1ba69e800c4db168ed0742335e6ce3b01547e95674b7",
+        "tests": {
+          "targets": 0,
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        }
+      }
+    },
+    "legacy-physical-final-v1": {
+      "path": "out/mesh-admission-20261017/legacy-physical-final-v1.json",
+      "sha256": "51587d7772376f1a13eab80935f271f744dc57ab488aec8965a150063406cfa4",
+      "result": {
+        "name": "legacy-physical-final-v1",
+        "harness_sha256": "137379c8f0a413ede9a84ee1544f4404738ab008eda933ebc0fcf13787d778a3",
+        "harness_unchanged": true,
+        "at": "2026-10-17T16:53:34.696223+00:00",
+        "argv": [
+          "python3",
+          "scripts/node-port/legacy-repair-qualify.py",
+          "--node",
+          "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/normal-release/octra-node",
+          "--backend-directory",
+          "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/legacy-backend-native-v2",
+          "--stage-test-binary",
+          "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/stress-final/legacy_stage-88915e1f2bedc262",
+          "--out",
+          "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/legacy-physical-final-v1-evidence"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra",
+        "exit_code": 0,
+        "seconds": 135.549,
+        "source_scope": [
+          "crates",
+          "vendor",
+          "pvac-sidecar",
+          "tests",
+          "licenses",
+          "docs/rust-node/source-map.json",
+          "docs/rust-node/upstream.json",
+          "docs/rust-node/network-authority.json",
+          ".github",
+          ".cargo",
+          "Cargo.toml",
+          "Cargo.lock",
+          "rust-toolchain.toml",
+          "program",
+          "proofs/lean/OctranetPayments.lean",
+          "scripts/node-port",
+          "docker/native-vpn",
+          "docker/devnet/tailscale-interop",
+          "docker/Dockerfile.builder",
+          "docker-compose.mesh-demo.yml",
+          "demo/lib"
+        ],
+        "sources_sha256": "e7a7ca63271f275e4567059b4d2f7b2f9f6a446eadbdd65e794eebd6988f2645",
+        "sources_unchanged": true,
+        "source_drift": {},
+        "log_sha256": "7cbd54cb89a868ebece55dc5c07859c49500b307d2626000b81e922a08bf2af8",
+        "tests": {
+          "targets": 0,
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        }
+      }
+    },
+    "strict-final-v1": {
+      "path": "out/mesh-admission-20261017/strict-final-v1.json",
+      "sha256": "6c705f50da9f7f9e89f2c2b1e958a098a7dda48412ee5b6187e0eb79333a0037",
+      "result": {
+        "name": "strict-final-v1",
+        "harness_sha256": "137379c8f0a413ede9a84ee1544f4404738ab008eda933ebc0fcf13787d778a3",
+        "harness_unchanged": true,
+        "at": "2026-10-17T16:48:12.757014+00:00",
+        "argv": [
+          "cargo",
+          "clippy",
+          "--offline",
+          "--locked",
+          "--release",
+          "--workspace",
+          "--all-targets",
+          "--all-features",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra",
+        "exit_code": 0,
+        "seconds": 4.712,
+        "source_scope": [
+          "crates",
+          "vendor",
+          "pvac-sidecar",
+          "tests",
+          "licenses",
+          "docs/rust-node/source-map.json",
+          "docs/rust-node/upstream.json",
+          "docs/rust-node/network-authority.json",
+          ".github",
+          ".cargo",
+          "Cargo.toml",
+          "Cargo.lock",
+          "rust-toolchain.toml",
+          "program",
+          "proofs/lean/OctranetPayments.lean",
+          "scripts/node-port",
+          "docker/native-vpn",
+          "docker/devnet/tailscale-interop",
+          "docker/Dockerfile.builder",
+          "docker-compose.mesh-demo.yml",
+          "demo/lib"
+        ],
+        "sources_sha256": "e7a7ca63271f275e4567059b4d2f7b2f9f6a446eadbdd65e794eebd6988f2645",
+        "sources_unchanged": true,
+        "source_drift": {},
+        "log_sha256": "1b834d534c1cf9d183d406fdf8238439add27749a7cc7d4cdf76e1d8e38c1d0e",
+        "tests": {
+          "targets": 0,
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        }
+      }
+    },
+    "format-final-v1": {
+      "path": "out/mesh-admission-20261017/format-final-v1.json",
+      "sha256": "1058ca5251b0225875cf9ec8b0001b44c52f35a5d4917cd5fbe0b7528da77fd5",
+      "result": {
+        "name": "format-final-v1",
+        "harness_sha256": "137379c8f0a413ede9a84ee1544f4404738ab008eda933ebc0fcf13787d778a3",
+        "harness_unchanged": true,
+        "at": "2026-10-17T16:48:13.936088+00:00",
+        "argv": [
+          "cargo",
+          "fmt",
+          "--",
+          "--check"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra",
+        "exit_code": 0,
+        "seconds": 3.44,
+        "source_scope": [
+          "crates",
+          "vendor",
+          "pvac-sidecar",
+          "tests",
+          "licenses",
+          "docs/rust-node/source-map.json",
+          "docs/rust-node/upstream.json",
+          "docs/rust-node/network-authority.json",
+          ".github",
+          ".cargo",
+          "Cargo.toml",
+          "Cargo.lock",
+          "rust-toolchain.toml",
+          "program",
+          "proofs/lean/OctranetPayments.lean",
+          "scripts/node-port",
+          "docker/native-vpn",
+          "docker/devnet/tailscale-interop",
+          "docker/Dockerfile.builder",
+          "docker-compose.mesh-demo.yml",
+          "demo/lib"
+        ],
+        "sources_sha256": "e7a7ca63271f275e4567059b4d2f7b2f9f6a446eadbdd65e794eebd6988f2645",
+        "sources_unchanged": true,
+        "source_drift": {},
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tests": {
+          "targets": 0,
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        }
+      }
+    },
+    "doctests-final-v1": {
+      "path": "out/mesh-admission-20261017/doctests-final-v1.json",
+      "sha256": "468d8b9763bc3f91f742367161fb32bc4343b5d678005bddfe6c71a164e5dbd9",
+      "result": {
+        "name": "doctests-final-v1",
+        "harness_sha256": "137379c8f0a413ede9a84ee1544f4404738ab008eda933ebc0fcf13787d778a3",
+        "harness_unchanged": true,
+        "at": "2026-10-17T16:56:31.266271+00:00",
+        "argv": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--release",
+          "--workspace",
+          "--all-features",
+          "--doc"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra",
+        "exit_code": 0,
+        "seconds": 6.365,
+        "source_scope": [
+          "crates",
+          "vendor",
+          "pvac-sidecar",
+          "tests",
+          "licenses",
+          "docs/rust-node/source-map.json",
+          "docs/rust-node/upstream.json",
+          "docs/rust-node/network-authority.json",
+          ".github",
+          ".cargo",
+          "Cargo.toml",
+          "Cargo.lock",
+          "rust-toolchain.toml",
+          "program",
+          "proofs/lean/OctranetPayments.lean",
+          "scripts/node-port",
+          "docker/native-vpn",
+          "docker/devnet/tailscale-interop",
+          "docker/Dockerfile.builder",
+          "docker-compose.mesh-demo.yml",
+          "demo/lib"
+        ],
+        "sources_sha256": "e7a7ca63271f275e4567059b4d2f7b2f9f6a446eadbdd65e794eebd6988f2645",
+        "sources_unchanged": true,
+        "source_drift": {},
+        "log_sha256": "99ed9fa54e6f62a869fe7d41fc75e78708f6a6699cef6eb7087b7d6d6d104c9d",
+        "tests": {
+          "targets": 21,
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        }
+      }
+    },
+    "registry-native-v1": {
+      "path": "out/mesh-admission-20261017/registry-native-v1.json",
+      "sha256": "7d4de754ed0cdf60df8ebb638227f15a4ad28fcc96120b55dd47f675ff292202",
+      "result": {
+        "name": "registry-native-v1",
+        "harness_sha256": "137379c8f0a413ede9a84ee1544f4404738ab008eda933ebc0fcf13787d778a3",
+        "harness_unchanged": true,
+        "at": "2026-10-17T16:42:15.688599+00:00",
+        "argv": [
+          "python3",
+          "scripts/circle-apps/test-registry-native.py",
+          "--upstream",
+          "/private/tmp/octra-lite-node-native-20261016",
+          "--out",
+          "out/mesh-admission-20261017/registry-native-final.json",
+          "--runtime-fixture",
+          "out/mesh-admission-20261017/circle-engine-final.json"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra",
+        "exit_code": 0,
+        "seconds": 7.129,
+        "source_scope": [
+          "crates",
+          "vendor",
+          "pvac-sidecar",
+          "tests",
+          "licenses",
+          "docs/rust-node/source-map.json",
+          "docs/rust-node/upstream.json",
+          "docs/rust-node/network-authority.json",
+          ".github",
+          ".cargo",
+          "Cargo.toml",
+          "Cargo.lock",
+          "rust-toolchain.toml",
+          "program",
+          "proofs/lean/OctranetPayments.lean",
+          "scripts/node-port",
+          "docker/native-vpn",
+          "docker/devnet/tailscale-interop",
+          "docker/Dockerfile.builder",
+          "docker-compose.mesh-demo.yml",
+          "demo/lib"
+        ],
+        "sources_sha256": "17a12a64bb16a693484ccb6e31ea80119cba13cc8cca7495158f5ee277ac30aa",
+        "sources_unchanged": true,
+        "source_drift": {},
+        "log_sha256": "7697a1e2e41dab352cfa25e6a952888a04a19a811e5dd0e1ea6667f034a94d04",
+        "tests": {
+          "targets": 1,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        }
+      }
+    },
+    "headscale-component-v1": {
+      "path": "out/mesh-admission-20261017/headscale-component-v1.json",
+      "sha256": "b8808c8119172c248b08dc9f70786fd44633bedd381b0536176fa68ad6a04f23",
+      "result": {
+        "name": "headscale-component-v1",
+        "harness_sha256": "4cf313085301b1e1e115e401ab13c1a9a20dc2994a9b3c5a1eb471e91d24b3e2",
+        "at": "2026-10-17T14:58:18.274167+00:00",
+        "argv": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--release",
+          "--target-dir",
+          "/Users/androolloyd/Development/octra/target",
+          "-p",
+          "headscale-api",
+          "--no-default-features"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/headscale",
+        "exit_code": 0,
+        "seconds": 91.472,
+        "source_scope": [
+          "crates",
+          ".github",
+          ".cargo",
+          "Cargo.toml",
+          "Cargo.lock",
+          "rust-toolchain.toml",
+          "program",
+          "proofs/lean/OctranetPayments.lean",
+          "scripts/node-port",
+          "docker/native-vpn",
+          "docker/devnet/tailscale-interop",
+          "docker/Dockerfile.builder",
+          "docker-compose.mesh-demo.yml",
+          "demo/lib"
+        ],
+        "sources_sha256": "9abca196e9312fbd703449fc716430e9b02ae2017d9ab3f32934f293678e5cb0",
+        "sources_unchanged": true,
+        "source_drift": {},
+        "log_sha256": "4a6f7620fab45716f5005fea40df6cfa5a4cbce685b15ec69fff13db7ac87730",
+        "tests": {
+          "targets": 24,
+          "passed": 786,
+          "failed": 0,
+          "ignored": 1
+        }
+      }
+    },
+    "headscale-derp-v1": {
+      "path": "out/mesh-admission-20261017/headscale-derp-v1.json",
+      "sha256": "f8daf23919b828e4519b187395b6a5726bce6a613a5145e5e66d0b21389b7b9d",
+      "result": {
+        "name": "headscale-derp-v1",
+        "harness_sha256": "4cf313085301b1e1e115e401ab13c1a9a20dc2994a9b3c5a1eb471e91d24b3e2",
+        "at": "2026-10-17T15:01:06.957154+00:00",
+        "argv": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--release",
+          "--target-dir",
+          "/Users/androolloyd/Development/octra/target",
+          "-p",
+          "headscale-api",
+          "--features",
+          "full",
+          "--lib",
+          "tailscale_wire::derp::tests"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/headscale",
+        "exit_code": 0,
+        "seconds": 47.81,
+        "source_scope": [
+          "crates",
+          ".github",
+          ".cargo",
+          "Cargo.toml",
+          "Cargo.lock",
+          "rust-toolchain.toml",
+          "program",
+          "proofs/lean/OctranetPayments.lean",
+          "scripts/node-port",
+          "docker/native-vpn",
+          "docker/devnet/tailscale-interop",
+          "docker/Dockerfile.builder",
+          "docker-compose.mesh-demo.yml",
+          "demo/lib"
+        ],
+        "sources_sha256": "9abca196e9312fbd703449fc716430e9b02ae2017d9ab3f32934f293678e5cb0",
+        "sources_unchanged": true,
+        "source_drift": {},
+        "log_sha256": "b9869e00f5076ec4612148d4e8233549f108f66d52fc218c22b1fc983a90a062",
+        "tests": {
+          "targets": 1,
+          "passed": 42,
+          "failed": 0,
+          "ignored": 0
+        }
+      }
+    },
+    "headscale-strict-v1": {
+      "path": "out/mesh-admission-20261017/headscale-strict-v1.json",
+      "sha256": "c73030e4b2af39a5ff20bf4a66240f5024184c68a6b5e99a751330b14b7e0e97",
+      "result": {
+        "name": "headscale-strict-v1",
+        "harness_sha256": "4cf313085301b1e1e115e401ab13c1a9a20dc2994a9b3c5a1eb471e91d24b3e2",
+        "at": "2026-10-17T15:02:11.187974+00:00",
+        "argv": [
+          "cargo",
+          "clippy",
+          "--offline",
+          "--locked",
+          "--release",
+          "--target-dir",
+          "/Users/androolloyd/Development/octra/target",
+          "-p",
+          "headscale-api",
+          "--features",
+          "full",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/headscale",
+        "exit_code": 0,
+        "seconds": 18.382,
+        "source_scope": [
+          "crates",
+          ".github",
+          ".cargo",
+          "Cargo.toml",
+          "Cargo.lock",
+          "rust-toolchain.toml",
+          "program",
+          "proofs/lean/OctranetPayments.lean",
+          "scripts/node-port",
+          "docker/native-vpn",
+          "docker/devnet/tailscale-interop",
+          "docker/Dockerfile.builder",
+          "docker-compose.mesh-demo.yml",
+          "demo/lib"
+        ],
+        "sources_sha256": "9abca196e9312fbd703449fc716430e9b02ae2017d9ab3f32934f293678e5cb0",
+        "sources_unchanged": true,
+        "source_drift": {},
+        "log_sha256": "f5af53e02538b72625ded243617bb7d50ffbf2bedff9faaedaaf970ea24b6d3d",
+        "tests": {
+          "targets": 0,
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        }
+      }
+    },
+    "headscale-format-v1": {
+      "path": "out/mesh-admission-20261017/headscale-format-v1.json",
+      "sha256": "3c55eb831828bf07be4f643c732068bf0eff53e7cdcd91ab20b59486ef5f3670",
+      "result": {
+        "name": "headscale-format-v1",
+        "harness_sha256": "137379c8f0a413ede9a84ee1544f4404738ab008eda933ebc0fcf13787d778a3",
+        "harness_unchanged": true,
+        "at": "2026-10-17T15:02:58.155308+00:00",
+        "argv": [
+          "cargo",
+          "fmt",
+          "--",
+          "--check"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/headscale",
+        "exit_code": 0,
+        "seconds": 1.105,
+        "source_scope": [
+          "headscale tracked and nonignored sources"
+        ],
+        "sources_sha256": "9abca196e9312fbd703449fc716430e9b02ae2017d9ab3f32934f293678e5cb0",
+        "sources_unchanged": true,
+        "source_drift": {},
+        "log_sha256": "fb043c44db87922a52ef87ef65b0152873b26a5acf9d20634beaa3dcdae1353a",
+        "tests": {
+          "targets": 0,
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        }
+      }
+    },
+    "workspace-v3_initial": {
+      "path": "out/mesh-admission-20261017/workspace-v3.json",
+      "sha256": "fa6790e575b2748ff1065f72f6bc404369b1cfd7c327a154d3e4c9b08d3b52da",
+      "result": {
+        "name": "workspace-v3",
+        "harness_sha256": "137379c8f0a413ede9a84ee1544f4404738ab008eda933ebc0fcf13787d778a3",
+        "harness_unchanged": true,
+        "at": "2026-10-17T15:58:19.412530+00:00",
+        "argv": [
+          "/usr/bin/env",
+          "HEADSCALE_BIN=/Users/androolloyd/Development/octra/target/release/headscale",
+          "CARGO_BUILD_JOBS=4",
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--release",
+          "--workspace",
+          "--exclude",
+          "octra-hfhe",
+          "--lib",
+          "--bins",
+          "--tests",
+          "--all-features",
+          "--no-fail-fast",
+          "--",
+          "--test-threads=4"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra",
+        "exit_code": 101,
+        "seconds": 2510.696,
+        "source_scope": [
+          "crates",
+          "vendor",
+          "pvac-sidecar",
+          "tests",
+          "licenses",
+          "docs/rust-node/source-map.json",
+          "docs/rust-node/upstream.json",
+          "docs/rust-node/network-authority.json",
+          ".github",
+          ".cargo",
+          "Cargo.toml",
+          "Cargo.lock",
+          "rust-toolchain.toml",
+          "program",
+          "proofs/lean/OctranetPayments.lean",
+          "scripts/node-port",
+          "docker/native-vpn",
+          "docker/devnet/tailscale-interop",
+          "docker/Dockerfile.builder",
+          "docker-compose.mesh-demo.yml",
+          "demo/lib"
+        ],
+        "sources_sha256": "379eabdd82a29389778fb2fc641008322fe8bcf5b9d50a29d153d70eddf5a624",
+        "sources_unchanged": true,
+        "source_drift": {},
+        "log_sha256": "d9bc4efc317cddd3ece1f40ff98a2e8f326295104e6f59cd84f2d1da4f4e71b1",
+        "tests": {
+          "targets": 209,
+          "passed": 2563,
+          "failed": 4,
+          "ignored": 12
+        }
+      }
+    },
+    "hfhe_component": {
+      "path": "out/mesh-admission-20261017/hfhe-component-v1.json",
+      "sha256": "bd50785ea3d417220ea3a678238088347f844ac856c58cb30d0e2019a33d8a36",
+      "result": {
+        "schema": "octra_unchanged_hfhe_component_qualification_v1",
+        "status": "passed",
+        "origin_run": "workspace-v2",
+        "origin_run_status": "interrupted_after_confirmed_unrelated_node_authority_failures",
+        "origin_log_sha256": "a992e4b40bbfe15b9de5e962d60c44d59024b95309e2f76d1f71d0abc2fdac2e",
+        "targets": [
+          {
+            "target": "octra_hfhe",
+            "passed": 3,
+            "test_names": [
+              "decrypt::tests::malformed_objects_preserve_native_decryption_rejection_order",
+              "proof::range::tests::native_legacy_range_construction_and_disabled_verification",
+              "proof::zero::tests::native_zero_constraint_proof_transcript_and_entropy_parity"
+            ]
+          },
+          {
+            "target": "arithmetic_parity",
+            "passed": 3,
+            "test_names": [
+              "uncapped_legacy_constant_allocation_fails_without_panicking",
+              "sigma_permutation_checks_native_out_of_bounds_accesses",
+              "linear_arithmetic_and_compaction_match_complete_native_bytes"
+            ]
+          },
+          {
+            "target": "budget_parity",
+            "passed": 1,
+            "test_names": [
+              "native_noise_budgets_match_at_cancellation_and_floor_boundaries"
+            ]
+          },
+          {
+            "target": "cipher_wire_parity",
+            "passed": 2,
+            "test_names": [
+              "legacy_public_layer_capacity_overflow_returns_allocation_failure",
+              "cipher_legacy_imports_policy_and_complete_bytes_match_native"
+            ]
+          },
+          {
+            "target": "circuit_prf_parity",
+            "passed": 3,
+            "test_names": [
+              "active_round_constants_powers_and_profiles_match_native",
+              "full_toeplitz_output_window_and_rejections_match_native",
+              "active_masks_noise_and_complete_layer_commitments_match_native"
+            ]
+          },
+          {
+            "target": "com_parity",
+            "passed": 1,
+            "test_names": [
+              "native_composable_commitments_match_bytes_and_acceptance"
+            ]
+          },
+          {
+            "target": "commitment_parity",
+            "passed": 1,
+            "test_names": [
+              "signed_commitments_match_native_field_and_scalar_boundaries"
+            ]
+          },
+          {
+            "target": "decrypt_parity",
+            "passed": 2,
+            "test_names": [
+              "uncapped_legacy_slots_return_allocation_failure_without_panicking",
+              "decryption_policies_and_native_source_masks_match_native"
+            ]
+          },
+          {
+            "target": "encrypt_parity",
+            "passed": 1,
+            "test_names": [
+              "complete_seeded_ciphertexts_match_native_bytes_and_refusals"
+            ]
+          },
+          {
+            "target": "field_parity",
+            "passed": 1,
+            "test_names": [
+              "field_bytes_match_pinned_cpp_at_boundaries_and_random_inputs"
+            ]
+          },
+          {
+            "target": "gadgets_parity",
+            "passed": 2,
+            "test_names": [
+              "range_gadget_rejects_native_assertion_inputs_before_mutation",
+              "native_gadget_constraints_full_proofs_and_acceptance"
+            ]
+          },
+          {
+            "target": "hidden_parity",
+            "passed": 2,
+            "test_names": [
+              "hidden_output_allocation_and_undefined_native_zero_slots_fail_closed",
+              "native_hidden_coefficients_and_chosen_statement_decisions"
+            ]
+          },
+          {
+            "target": "inner_product_parity",
+            "passed": 2,
+            "test_names": [
+              "malformed_dimensions_and_impossible_allocations_do_not_panic",
+              "proof_bytes_scalar_helpers_and_verifier_transcripts_match_native"
+            ]
+          },
+          {
+            "target": "key_parity",
+            "passed": 4,
+            "test_names": [
+              "matrix_draw_order_and_effort_refusals_match_native",
+              "legacy_and_malformed_key_imports_match_native",
+              "compressed_bytes_and_malformed_refusals_match_native",
+              "seeded_v5_keys_match_native_complete_bytes"
+            ]
+          },
+          {
+            "target": "lpn_parity",
+            "passed": 2,
+            "test_names": [
+              "low_127_bit_convolution_matches_native_scalar_and_hardware",
+              "retained_lpn_words_and_prf_fields_match_native"
+            ]
+          },
+          {
+            "target": "product_parity",
+            "passed": 2,
+            "test_names": [
+              "legacy_unbounded_slots_return_allocation_error",
+              "seeded_products_match_native_graph_bytes_and_refusals"
+            ]
+          },
+          {
+            "target": "proof_foundation_parity",
+            "passed": 3,
+            "test_names": [
+              "generator_domains_cache_growth_and_size_rejections_match_native",
+              "transcript_framing_and_both_reduction_profiles_match_native",
+              "group_operations_raw_scalars_and_invalid_encodings_match_native"
+            ]
+          },
+          {
+            "target": "proof_raw_wire_parity",
+            "passed": 1,
+            "test_names": [
+              "native_raw_zero_proof_wire_acceptance_and_canonical_output"
+            ]
+          },
+          {
+            "target": "proof_wire_parity",
+            "passed": 1,
+            "test_names": [
+              "native_zero_proof_wire_acceptance_and_canonical_output"
+            ]
+          },
+          {
+            "target": "public_recrypt_parity",
+            "passed": 1,
+            "test_names": [
+              "native_public_recryption_proofs_and_bundles_match_bytes_and_entropy"
+            ]
+          },
+          {
+            "target": "r1cs_parity",
+            "passed": 2,
+            "test_names": [
+              "verifier_prechecks_resource_and_variable_boundaries",
+              "native_r1cs_proof_bytes_entropy_and_verifier_transcripts"
+            ]
+          },
+          {
+            "target": "random_encrypt_parity",
+            "passed": 1,
+            "test_names": [
+              "native_unseeded_cipher_bytes_and_entropy_draws"
+            ]
+          },
+          {
+            "target": "range_wire_parity",
+            "passed": 1,
+            "test_names": [
+              "native_range_proof_wire_acceptance_and_canonical_output"
+            ]
+          },
+          {
+            "target": "recrypt_legacy_parity",
+            "passed": 1,
+            "test_names": [
+              "native_legacy_reset_rebalance_rank_and_shape"
+            ]
+          },
+          {
+            "target": "reset_profile_parity",
+            "passed": 1,
+            "test_names": [
+              "native_reset_profile_overflow_and_admission_arithmetic"
+            ]
+          },
+          {
+            "target": "reusable_parity",
+            "passed": 1,
+            "test_names": [
+              "native_reusable_key_ciphertexts_digests_and_admission"
+            ]
+          },
+          {
+            "target": "rng_parity",
+            "passed": 1,
+            "test_names": [
+              "seeded_aes_counter_and_entropy_consumption_match_native"
+            ]
+          },
+          {
+            "target": "scalar_parity",
+            "passed": 3,
+            "test_names": [
+              "signed_and_unsigned_field_conversion_match_native",
+              "reduction_preserves_native_prior_and_wide_profiles",
+              "raw_scalar_arithmetic_and_inverses_match_native"
+            ]
+          }
+        ],
+        "passed": 49,
+        "source_sha256": {
+          ".cargo/audit.toml": "3f7abd67a93a879fc5c24597c569b98a115e032bece302b2f26217c73a01edd8",
+          ".cargo/config.toml": "ce1e033cee48a00988852a54e427e11d8fd2fb32fe558b45cc6b996e5ec2d8bd",
+          "Cargo.lock": "578add0308a1069c1d411294c7940e008354b04e6b0dcb6d7111f33dbd659f05",
+          "Cargo.toml": "5fc6af03807621fd437551c765313d75728d3c0c01d3b21f544d6f366efd1925",
+          "crates/octra-hfhe/Cargo.toml": "2696907106e269508539036dd3a4175f517a2d5aa573c0bb518ed4323d7215a7",
+          "crates/octra-hfhe/README.md": "be54749aa66775d07575a875699459c49454d30909ede1fd4c45073dba7d385e",
+          "crates/octra-hfhe/src/arithmetic.rs": "3b2cfe11a56a5a887546c1fb8f303821be367a875d081bd3e6ce5aa20c5956e9",
+          "crates/octra-hfhe/src/cipher.rs": "0641316fdcc51c0f4dc1de049dbf11b87d871ad546e4563a7cd7b345c8506b43",
+          "crates/octra-hfhe/src/cipher_wire.rs": "8aa072492b8b90b022b3f98ec4798baf2e9e9bd7cd42abd1e4c57c0e842a5325",
+          "crates/octra-hfhe/src/circuit_prf.rs": "9d928f18447fb9a1d83f2ff4b3a3a6c0d5910170077244a7432fb6635ea68125",
+          "crates/octra-hfhe/src/compression.rs": "66cd6017222775c5f0e86f0ebc97d794a978256fefbf1b8924c6e7186859d089",
+          "crates/octra-hfhe/src/decrypt.rs": "7ed77a23abbdfdd253af2952181f7283f7ca3c647710f0f7b4e614ef17e70f2a",
+          "crates/octra-hfhe/src/encrypt.rs": "df6f9b8a5512bb072c91e24f177647a9c66cf6921ff10d4c8d8000ff92313b2d",
+          "crates/octra-hfhe/src/field.rs": "a40e04f0a12ae4465a4c348c2456b6c44bd19fc0deff941a766f3af27ef6b9d0",
+          "crates/octra-hfhe/src/key_wire.rs": "e82cce899b48789f08eb115c41539e67a779e1a21e36c2db5c419ef2898baa92",
+          "crates/octra-hfhe/src/keys.rs": "67efb4552fbc12690344d89188379023b4f6eb648a968f00bb5bc98bce621d9c",
+          "crates/octra-hfhe/src/lib.rs": "defd17f85667d37a9d57e15e42a99faddab2a55d34cf471b4088e43b5795342e",
+          "crates/octra-hfhe/src/lpn.rs": "f053f8296e894d077ceaf5ed2f7084adee74701aabffa17145431203b89c1235",
+          "crates/octra-hfhe/src/matrix.rs": "8a4c4ff4cd0916047baf2a5a48e863ce48161e219553d83e01da481124af5f6c",
+          "crates/octra-hfhe/src/product.rs": "bc5f4b25390528522fa098d2f379153e45786d1e84ebc7b97dc4419b2faf2730",
+          "crates/octra-hfhe/src/proof/gadgets.rs": "e4d8221284e1405d15dd9a7192704063388936d512c3b36476947b61a1c0a4c3",
+          "crates/octra-hfhe/src/proof/generators.rs": "7ed95dd6745bfb263a038de2965fe7834247f39aaae6b71ef7679f899adb52dc",
+          "crates/octra-hfhe/src/proof/inner_product.rs": "6265cc2a038fdc02eacdad3ae7eb95464077a876ce864f09501b0aa7166cb6e5",
+          "crates/octra-hfhe/src/proof/mod.rs": "bab4601caa03b2128acc10394579a16709299ac86f21140d49215f6f06d8a89f",
+          "crates/octra-hfhe/src/proof/r1cs.rs": "bf736461615d14936a3680e2a94ce6e5a4865cdd270083c77b30fe291eda2e82",
+          "crates/octra-hfhe/src/proof/range.rs": "6219f4973890bd50206cfd397650eb410fae2feaa67399cb1458a270cb0c334a",
+          "crates/octra-hfhe/src/proof/range_tests.rs": "eea34bb1d1451c71509ae12e5c88a92ff0849a6589ecbfc625298197cd32aa82",
+          "crates/octra-hfhe/src/proof/transcript.rs": "67cab2e8213ec8c528a0e00d57acfeadd2559c1ad3d007486d8febb75cc8ccc2",
+          "crates/octra-hfhe/src/proof/wire.rs": "6c5de03cab43f56240a2891044dd9ec34f7de7986d983bf647d1223c75c58172",
+          "crates/octra-hfhe/src/proof/zero.rs": "d3f7406e2e8eed766b40736e69484d9aae4c970a0f13ecb753a7f01e91f93815",
+          "crates/octra-hfhe/src/proof/zero_tests.rs": "9bc374659bfa902636498f309a022f6e552c6a0951585ff5c575cb89aee2dfd3",
+          "crates/octra-hfhe/src/recrypt/chosen.rs": "8741cfe5b4240b49d46df2c5047c4f8d6cc0a6f2521384bb13ee7e845d181794",
+          "crates/octra-hfhe/src/recrypt/commitment.rs": "9ed3ecb8c312c5b601559f7fe48304c446fde3450cce5290fa8f3743cbb4956d",
+          "crates/octra-hfhe/src/recrypt/digest.rs": "b45d6d0d2f335b139acc1b090b92378a9fe37d78a92d3ba932e1f1102125291d",
+          "crates/octra-hfhe/src/recrypt/hidden.rs": "81d8a228ee51e60c757669d93c45f01fbed4da9cdb212504d08ea309507ed139",
+          "crates/octra-hfhe/src/recrypt/legacy.rs": "9dbf59216e62cd0473180ce3a24ba5653a5c278fa25323c74f677f7138b9041b",
+          "crates/octra-hfhe/src/recrypt/mod.rs": "61429994da2adfe4edff6ac84f8c248c292fa452e3d2ac8ea2af8361254041e7",
+          "crates/octra-hfhe/src/recrypt/native.rs": "cc8193fe67a54c09eddf5301e97623f4c2931c37b29b5eef2e9613a15ddcb2b4",
+          "crates/octra-hfhe/src/recrypt/profile.rs": "072d6f7bcb5907324cdb54db26f868792487d2bff97f9e5f10a2e870c80b9cdc",
+          "crates/octra-hfhe/src/recrypt/public.rs": "1a6db6de00312a7ec40461c5135ef806e1c26fb13b7ba5ba56934b39b3dc92d9",
+          "crates/octra-hfhe/src/recrypt/reusable.rs": "fc199c73fcfd091770e084023f58c8b64cd7bc3449a1715bd1d878ea35145d22",
+          "crates/octra-hfhe/src/scalar.rs": "ae7192b993749578dfc44a3de0a44acc6784e94cfe30da431faa2015dab9100a",
+          "crates/octra-hfhe/src/seeded_rng.rs": "058b47dec63c95db159a511d5c1c9903309dbc1f1aba649494ac611baa96cc0a",
+          "crates/octra-hfhe/tests/arithmetic_parity.rs": "1af23928b4fdbbc35727dbd9970fce8e089d2af0f724e273f174c400adf55d84",
+          "crates/octra-hfhe/tests/budget_parity.rs": "df668b9e28729cc1da3aaf82ff48d06fce87f95ba74bb1a77410987882368328",
+          "crates/octra-hfhe/tests/cipher_wire_parity.rs": "f15b40caabc9df50430841ef48fdd0b5ebcd0a891a6ebe99798247c4bcd84d87",
+          "crates/octra-hfhe/tests/circuit_prf_parity.rs": "7213268eca6a2276adb86cdb07fdc292ba0db86489c8731b0d6660ce15d1297e",
+          "crates/octra-hfhe/tests/com_parity.rs": "e4d443017c4de93bef1400b7837fec6f7104baebc138a31d08ce6963299abb4b",
+          "crates/octra-hfhe/tests/commitment_parity.rs": "0be2b74316a0cb849880ff3e07f8f722e018732fdc75a6f4aab2ceda6951ed3f",
+          "crates/octra-hfhe/tests/common/entropy.rs": "10360684f06b7563434c7576cedc50dbfe3bd3771dfb4cae0d0d0363071299d9",
+          "crates/octra-hfhe/tests/common/mod.rs": "8bd37e2f5d314b443a52cd37c7dc9032b841e21f5668a10cc0e6c27b630d518a",
+          "crates/octra-hfhe/tests/decrypt_parity.rs": "f346bd523f22a375a81c5eefe767242bd0539f6dfd396b316aeef794505a2869",
+          "crates/octra-hfhe/tests/encrypt_parity.rs": "2561f24162c6fe68f28e7b6aea4e0b6099b05f835d5bdd4e39eefed43bfcd260",
+          "crates/octra-hfhe/tests/field_parity.rs": "b0957392e5f781bfd6e9e6ce7831cde2030c6841501e9bc81a528df72017d51c",
+          "crates/octra-hfhe/tests/fixtures/arithmetic.json": "7f197ad628830540c23f93496b601d15a2d4f7a2db2d815cbddce5f977459ca1",
+          "crates/octra-hfhe/tests/fixtures/cipher-wire.json": "537afc77f311563ac47f5aaffd622b15f021483b1e539da78cbfd18727d6de65",
+          "crates/octra-hfhe/tests/fixtures/circuit-prf.json": "26755acc4b1f08e4bc1c3ec3868710ceb56ec05fe16dc2066902d2d963f37d84",
+          "crates/octra-hfhe/tests/fixtures/com.json": "156b5163907489ef92fb12a9212f19224559990d0aaab9602486c41cc09f74b7",
+          "crates/octra-hfhe/tests/fixtures/commitments.json": "c59187651c1cb76c0b942faf73eee563b0a80eff82b5b0cc8d0d384f92e3d405",
+          "crates/octra-hfhe/tests/fixtures/decrypt.json": "53bde45000e3a7acbe98b43fe7c77a473e869c273144fec521321f3a8d2f4069",
+          "crates/octra-hfhe/tests/fixtures/encrypt.json": "8116a0804752007f494850601d4e6cedb2e143b8e361da55b1add63678c669f7",
+          "crates/octra-hfhe/tests/fixtures/field.json": "f9d731a4294a8ffae1c0d074e5194ebccddc46be99de9f08b6952f17e7ca46d1",
+          "crates/octra-hfhe/tests/fixtures/gadgets.json": "d33ad866ff3d6472da0ace37c15fe0bbcf5903bc33e50997d77816a40bdb0588",
+          "crates/octra-hfhe/tests/fixtures/hidden.json": "798c88e2ce9ff2aa1a8f189b563a7e0bd360a92d4975759f1b744bb9355296d9",
+          "crates/octra-hfhe/tests/fixtures/inner-product.json": "7920d587dffa6a5e809984b2435ea726d2e5003d8004a0199f9e01145cd2321b",
+          "crates/octra-hfhe/tests/fixtures/keys.json": "4f8d1004faad46272609abdb69060a3febbca2eaede752a333efe123393289ee",
+          "crates/octra-hfhe/tests/fixtures/lpn.json": "e93c5536984428843de8846d2cccfd457a9bf479f2b3eaff2d4ad4237a67d47d",
+          "crates/octra-hfhe/tests/fixtures/noise-budget.json": "917991ef421792e387053997dcdb46c66d95ffff40267c6448ddfd00f465372d",
+          "crates/octra-hfhe/tests/fixtures/products.json": "e78c88af69d785ad0f5d821e40e3196e1f7f61fd98eae38cc6117af85718f8c3",
+          "crates/octra-hfhe/tests/fixtures/proof-foundation.json": "0acbbdec0f3d36dd806a34c31506d02eb55a22f65c4d80ed19bf91f5e7bc81b2",
+          "crates/octra-hfhe/tests/fixtures/proof_raw_wire.json": "59c9a159ec65a4dceab046dad367fa19b1eb773f80e870e1394ad6aa243d768a",
+          "crates/octra-hfhe/tests/fixtures/proof_wire.json": "5428e9500106425c29156678f30f79a346589e2b5d126f5d283fb615de17178f",
+          "crates/octra-hfhe/tests/fixtures/public_recrypt.json": "e0b69087b4206bfd06507723732c60347d8439ea30f2fd7b177e729621dc4988",
+          "crates/octra-hfhe/tests/fixtures/r1cs.json": "547d46313f38bbc8ddb32bfda40876346cb84f5da8398e85bc1d3607451dc720",
+          "crates/octra-hfhe/tests/fixtures/random_encrypt.json": "f2e5408159d48e7e9f668560504a6156564884dd8f090d5622ed34356945873d",
+          "crates/octra-hfhe/tests/fixtures/range.json": "99c328b494a27fc9c8e835352df8741ebe7468eb0b415f9a02385118b2f735c8",
+          "crates/octra-hfhe/tests/fixtures/range_wire.json": "1492f25b11f60db122713cd626cfad00aadcdc05f342ad494847cfd334575044",
+          "crates/octra-hfhe/tests/fixtures/recrypt_legacy.json": "3834ef3ef522be148dac0c50a229edb736d5b3967c36e4b094aacea8d2c4938d",
+          "crates/octra-hfhe/tests/fixtures/reset_profiles.json": "b850fddb13dc36c1946ec756d1d4c7519e2aedc214df06f3519279416b7e444a",
+          "crates/octra-hfhe/tests/fixtures/reusable.json": "968c12976a6fba2350ef310c8c04ffb6a4e317864c7487afd152864ce5b23fce",
+          "crates/octra-hfhe/tests/fixtures/rng.json": "0d7d6f779eec8a280ea192b3c47e5d885da8155261e3964bbf81abcf1ec0a843",
+          "crates/octra-hfhe/tests/fixtures/scalars.json": "8f6114fef031bf6bbc4eaca5cab8ce5143959d409f825369b8c79807553f3b2b",
+          "crates/octra-hfhe/tests/fixtures/zero.json": "a52f6af33192c279eb4e62b85064c652b70f8736a81c21751c745a4c8ccfdd5f",
+          "crates/octra-hfhe/tests/gadgets_parity.rs": "16fb34c41037e2bca7632962f7e9ad77239c3af4199da7f02f5ec786457013af",
+          "crates/octra-hfhe/tests/hidden_parity.rs": "5be22f18b5976816c7f429a548e3e98cfc32966a8a4525c50c6bb821044e70bc",
+          "crates/octra-hfhe/tests/inner_product_parity.rs": "d5536896b59ea8c7056d61a78cf2d2f2021eab4d671092fd7aeb13856f3f1abd",
+          "crates/octra-hfhe/tests/key_parity.rs": "434e37a96b418a7165b585bc5d5510fe08d7bbeea07ba482a66727ff31a266e6",
+          "crates/octra-hfhe/tests/lpn_parity.rs": "e0aaa11438addd005706998625e60fcfe3e1d7b2533f46eaa82d2824d1a0891f",
+          "crates/octra-hfhe/tests/product_parity.rs": "70370ad8b8a69b81ca015f14c0ced2492ad91398e9ade0683ad20ba883d9875f",
+          "crates/octra-hfhe/tests/proof_foundation_parity.rs": "32f870f7b019b5be5fac4f9fa7783129522f9b6b3289d94cabfad52f4fc1e975",
+          "crates/octra-hfhe/tests/proof_raw_wire_parity.rs": "9cb49e4705c1e7cc95ecdbf1c4284a981d74a66901fc195f42abe78328ccd386",
+          "crates/octra-hfhe/tests/proof_wire_parity.rs": "109f367377bcaef1abc248fb9d8fbf5532538f7043e44bfe61dc5a8c576e033b",
+          "crates/octra-hfhe/tests/public_recrypt_parity.rs": "3507ee0e347f524f86e9d9adb5b491ab71d3b3233dac78812868810c38dea18e",
+          "crates/octra-hfhe/tests/r1cs_parity.rs": "2bd261b3392d7f2cec139a71a69131747e1c20ca3bfcf79db724c2f7e7170dbe",
+          "crates/octra-hfhe/tests/random_encrypt_parity.rs": "01e8f4e183c89b845594f3e09c28e975236a4317e6534f3eb83af40846488ba9",
+          "crates/octra-hfhe/tests/range_wire_parity.rs": "02d2c79375beda8bf7bf44de5231ba6248d7273774b5ea94feecc8d052487700",
+          "crates/octra-hfhe/tests/recrypt_legacy_parity.rs": "0775a7806c1149c21cb8cc287b943be8b3d2ada7dce40f4de83a18ec32841e0e",
+          "crates/octra-hfhe/tests/reset_profile_parity.rs": "b3573ac74b8a87fb2c3c7597c07ea1b7f3cbc00b15358e411ebf809aebe45d9b",
+          "crates/octra-hfhe/tests/reusable_parity.rs": "64f000eaacae8a397b48f2c8f0d22e45d8799079acf70cd2c8ded2d83da2c3f4",
+          "crates/octra-hfhe/tests/rng_parity.rs": "d19e58611216c553ce5723b5306297a29368a0220b462bdc710436a722de5b0a",
+          "crates/octra-hfhe/tests/scalar_parity.rs": "6b2549ea1246bc0294ee7be25587e946ae9c4e3487373285993940abe1192ba0",
+          "docs/rust-node/source-map.json": "6440fdf5895e791ce99ff1904aea396fc88c7e12645846a32702286aa9c17efa",
+          "rust-toolchain.toml": "abd8063388c533b3e6b91666cd66d6229e61d13fc1139d20006492c2980141f5",
+          "scripts/node-port/account-pack-fixtures.py": "dde5914e4fcb00b2fbfa516da31a0c51dfb47ff94bfc144db87ac175da7b2923",
+          "scripts/node-port/account-pack-oracle.ml": "36b416e58cced7769a238755df8e097a6f6137c099cf64761ce29be226574984",
+          "scripts/node-port/aml-public-fixtures.py": "a9503abf655f310ba82f35ddf5f9ae1b3d35ab6b221d9ee3952c603bcdb3ef34",
+          "scripts/node-port/aml-public-oracle.ml": "b0e2de1b634b9e8054c259ec878e40f2b2da92f80fce1346b6599e193bfa0cb1",
+          "scripts/node-port/build-legacy-repair.py": "101c0dc3d08783b0ac66b1e27648ee3b4280adce0580515dd7c82c89f4eb9705",
+          "scripts/node-port/bundle-query-lifecycle-oracle.ml": "fc4b41e1c3d760d77ee6e2bbe42233346827282ac3733554a0146d4ecbf93f15",
+          "scripts/node-port/bundle-query-lifecycle.py": "d24996a5613d9ecfd9517b6194d1c47d79ec2e8116ba00806b6735f862bcaf32",
+          "scripts/node-port/bundle-query-ownership.patch": "c2f4d43c19be1c9229fdc7e25c6e588c5c5cb236b4c2b3de203d540dabf245a0",
+          "scripts/node-port/bundle-query-ownership.py": "99897e22ea4f20117f49accad6a61548c6bb312d2bf2a658c19466773cf2bb93",
+          "scripts/node-port/catchup-agreement-fixtures.py": "7f20526e96a9cfc00823dfb8a8900ea12967a7433b2c11b226147d25b38eca00",
+          "scripts/node-port/catchup-agreement-oracle.ml": "2693aba3439eec0ee805f616f4d6d3a426c222b5cca05122507166010f6807be",
+          "scripts/node-port/check-native-sources.py": "dee48c8be30f0e3eccbc90e8e3fe06cc618d111e1daaaf20d17735cf40e4b8bc",
+          "scripts/node-port/circle-assets-fixtures.py": "207c35eb635c05842ee936e53dcfb7275ab3c051eafbccabae4813b7a49236eb",
+          "scripts/node-port/circle-assets-oracle.ml": "6cab464f46b4f9541af336d144019a76f60c12e71f2f190c0216f8fd265c134f",
+          "scripts/node-port/circle-bindings-fixtures.py": "1796bddad20b2b80f5bdb4206a3140e05b28189973130a59f851e96c020778d0",
+          "scripts/node-port/circle-bindings-oracle.ml": "df80aab58ff9126a1180baea0a56ac8c7808459720e8a703821c5e773e8d5698",
+          "scripts/node-port/circle-byte-errors-fixtures.py": "6d3823e7618f4bf1d62f504b02f194db27aa852e295ae10849fb562a7f777a1a",
+          "scripts/node-port/circle-call-fixtures.py": "5430439d44f6ea9698bd10b3b892fa4ba859d20312c5fbb2e85e6419bfe8df45",
+          "scripts/node-port/circle-call-oracle.ml": "04bde61e82ca3104b57eaa48f6ccb7021ca3bdccfb7b66750302f37360ef52d0",
+          "scripts/node-port/circle-code-fixtures.py": "f22ec9304c36f38cced5b8f508563c01d2b1a663486406f3a3609b3957dc0941",
+          "scripts/node-port/circle-code-oracle.ml": "adce35c7a737f44ad1e1cb6fca2283a6d5d078467cd3dd55c1c265d7ffa227de",
+          "scripts/node-port/circle-effects-fixtures.py": "0c007c2ecbe1f3f32e3567be970ad720c39ee4b06be8789f803e29ded68e234b",
+          "scripts/node-port/circle-effects-guest.rs": "31b3dc409fcf904f5927a8bb02f342f4c2b4be23928e46460882dffc84082b6b",
+          "scripts/node-port/circle-host-rust-api.patch": "b499d3a66bbcaeb80d763c2b85da7f0a4792fc30bd74312fc9717d7925cba684",
+          "scripts/node-port/circle-journal-fixtures.py": "dac71d0fd5905a1264b6e53c6e2afe8cb32d7324fc5baa34a1dc36323cda197a",
+          "scripts/node-port/circle-journal-guest.rs": "8332b6dd1b57af262db032a4163d30bcf6d7893d97dc51e64579c182446fe70d",
+          "scripts/node-port/circle-octb-execution-fixtures.py": "a2eb126e8c32c29ac56fa8b4a15af34a8116184798d25ee0e79cdb546a88fcd9",
+          "scripts/node-port/circle-octb-fixtures.py": "a5eb81584e29c77594f4e10dbd1b0069cadf059d49ab0868ea32f376a6dad4d6",
+          "scripts/node-port/circle-octb-journal-fixtures.py": "dd1fea775ff83a36c1467466a0fb71fa3221ef3c2ed21b04755f3395f1a0fab2",
+          "scripts/node-port/circle-octb-journal-oracle.ml": "d59cad6eab5add1afa24d32896f2729f5d936636ed395d02e10ed470c54163ae",
+          "scripts/node-port/circle-octb-spawn-fixtures.py": "41e0e19103a5141f49a5359b1fbfb0c668667476c14d1613bf8fe880c66cbef9",
+          "scripts/node-port/circle-octb-view-fixtures.py": "d46421d3ebb1e9e0238b557c082c8ccd1f2f4ebb4db33bce7b5364ed97628de3",
+          "scripts/node-port/circle-octb-view-oracle.ml": "079611d7e692836e16cba60561cc08bd8a28bbefb21337b246231732dbeb9d67",
+          "scripts/node-port/circle-policy-fixtures.py": "e68483abcffcb57d8719bc62170dc7d838fff812aa1af8c5e09526d9e0dc91a6",
+          "scripts/node-port/circle-policy-guest.rs": "3a9645c3b166669010b15fd96e6a9b08bbc099bf046d11401c6bdb3bcba09739",
+          "scripts/node-port/circle-rpc-fixtures.py": "487ea7e3c8a5a0f4a5362c69d8a9ae849a0452d7b0a4e5441df2d23d80313f19",
+          "scripts/node-port/circle-rpc-oracle.ml": "94dfc86ec60d00cdf51bdd9fe0d032060f94ab0bedf934e655e9b422965b7632",
+          "scripts/node-port/circle-stable-fixtures.py": "3525a91db9532897529ec60b925677e8f312bfda4b592f5f5cc19b4e3b6120c7",
+          "scripts/node-port/circle-stable-oracle.ml": "b3632c01a9a23e1892f0a2bcdb534a844f98db62773f3cff43c5c07fb0009a76",
+          "scripts/node-port/circle-state-fixtures.py": "5c2469fad8e3f27a9b82658760fcee5055e68d05959a2b06ca2432dd57f9de34",
+          "scripts/node-port/circle-state-oracle.ml": "5b50dc1d527380bd14bffb050ef44522daaec8514e86059f35c81ab0e1580b10",
+          "scripts/node-port/circle-storage-fixtures.py": "d304cc316aaef972b6e4b7a549966bd2fea91750d31a0bd80eb1d196a92e759a",
+          "scripts/node-port/circle-storage-oracle.ml": "9b0adfe50bd1186869e62dc705ae22fbb5b1b38aa472cd35258557b713fdc2d5",
+          "scripts/node-port/circle-transaction-fixtures.py": "36909ade688a0f46ec0f655611e16202c1f1843902c366e75f1ff0ce7797f577",
+          "scripts/node-port/circle-transaction-oracle.ml": "a352cfb7c1afd0dd0d79d1d3bdbbb1d8398d657f0067d6548afea96d6c2ecb6d",
+          "scripts/node-port/circle-update-fixtures.py": "e17b69fe71c87d4e2ef4a989b7b595dd28782baded1d1cc910ae3630d6a07b89",
+          "scripts/node-port/circle-update-oracle.ml": "8d46a0fb5f8014babd7bcea6f8ac2657668a8b8fe9f964b7889d3490fa9246db",
+          "scripts/node-port/circle-view-fixtures.py": "2acbf51e71c073a16e22135c58d5f0ea6c51bbcada50cb8c784eb8894a367731",
+          "scripts/node-port/circle-view-oracle.ml": "266fe755770c65d66e50955b1cbbd6bbea8e2f3b9e34d3ae89a5a760b1d6cebd",
+          "scripts/node-port/compute-fixtures.py": "d27f37ef33ce42d6449a60490ae649d36f33b34beae1af96bcf3271207eb4252",
+          "scripts/node-port/compute-oracle.ml": "0e21267539e656b212c8e510447f7d6783addb913ccbe1f23c332e585ba9b9ed",
+          "scripts/node-port/consensus-catchup-fixtures.py": "4cf6cc366afe21fb964b8aa2856c81546ecb5e007fff656b406df43134fcc554",
+          "scripts/node-port/consensus-catchup-oracle.ml": "401fba0fa5c964f7a25f0d70b452ac294532d92a4be2b7532da2a0c5b99f279d",
+          "scripts/node-port/consensus-engine-fixtures.py": "0b46f37eb18316fee87ce67167e7b21171f6fdd8dfa41c9c45e09c7771c700d1",
+          "scripts/node-port/consensus-engine-oracle.ml": "02c438189054356a45224cc12fac9deea6ba8f242be82a763cd1ecbd1d55c250",
+          "scripts/node-port/consensus-journal-fixtures.py": "974defb8f2baf6ab5733efd13523ff783c2e939396ad2decabf2313f08548c65",
+          "scripts/node-port/consensus-journal-oracle.ml": "29c9866e3115f3366a581d56cb83d60aa29a1c6e1f90a4b15cf3a2175b1bf130",
+          "scripts/node-port/consensus-preverify-cache-fixtures.py": "be50c11ce69abbc03b83d278d6b796bdb07229fb2d354dfdcf67716be8ee6112",
+          "scripts/node-port/consensus-preverify-cache-oracle.ml": "a431024d846596f7c3476981510a5d8993d0107e824fd48e4a195b0ff6a9cfc4",
+          "scripts/node-port/consensus-recovery-fixtures.py": "4b41f2896dbafcbb55f9bd5ccd9d6457da8c83bfb9c42220ec7e9170d5340f4f",
+          "scripts/node-port/consensus-recovery-oracle.ml": "fd5751c8e840e16c9197e4681cf18862f9a7d8dbee534c40194d3c9837aa580c",
+          "scripts/node-port/consensus-validator-fixtures.py": "66022caa09ea61a07c4ad212c86c0cb83daae8a67385bf1837c508c136228472",
+          "scripts/node-port/consensus-validator-oracle.ml": "ad483d71cdc5f76050c82d979fc1f8d122373e3c1c4640b6adf80a4ec14ec47d",
+          "scripts/node-port/consensus-wire-fixtures.py": "6e8aa468e1be5586b7e3c674a1a2945c8046442e3cbd4bb769b0255fb918f35a",
+          "scripts/node-port/consensus-wire-oracle.ml": "5914de67350a667fedd21d08f9ed4620f04987e2a64a6347259f55826a48ec47",
+          "scripts/node-port/control-payload-fixtures.py": "01563ac12487b1b69e455f185562c0f2e08778e9b6e12174558594edc3c0de0a",
+          "scripts/node-port/control-payload-oracle.ml": "753a6055aa1d7b1b05ada98611d3698388c9cdb7ca9feadecb11c3d337047bd3",
+          "scripts/node-port/driver-round-recovery-fixtures.py": "2e3cb635f22f8c5c5212f0b58810a2d2f1800ce25424e11a494ae0fd1de4fe44",
+          "scripts/node-port/driver-round-recovery-oracle.ml": "e89a9d212e504d232f008d04f02227b8a4dee5ac40eb56dae0f8444f57cda618",
+          "scripts/node-port/driver-votes-fixtures.py": "0e903de3193b8f13313d0fa29b0cda874cf9e8af55faafc63afbfd96460b6002",
+          "scripts/node-port/driver-votes-oracle.ml": "64dc1cb8ed9fa7dcc9495f6007d128a4e7f46a96562630c67cbe062cb80a4212",
+          "scripts/node-port/driver-work-fixtures.py": "0a1b5d68d3fb6ad2ebc96d8f0b2f6c8f4d70dacf9319c69edad1af245639a13d",
+          "scripts/node-port/driver-work-oracle.ml": "2378963781f08288ddebb57af1ed61ccf50cf3c19f272a7c6be336f5b4fda2a0",
+          "scripts/node-port/duty-intent-fixtures.py": "748a864a71461c937213e16df042c682951887c57c3700d65e53578458e0592e",
+          "scripts/node-port/duty-intent-oracle.ml": "d8ba96a50d02d4a12e061e7d20ea050b30c562a2e34d1beea37541ec426f2dcb",
+          "scripts/node-port/epoch-circle-fixtures.py": "5bec6872597ee02f30d913e23ddb61ab055dafb1c551b1dfe95406f5f60b42d8",
+          "scripts/node-port/epoch-circle-oracle.ml": "84d71cd92eed43638943b2a45c97fa408b09694ff79e2d677786d272058ad264",
+          "scripts/node-port/epoch-execution-fixtures.py": "2ab076a52545366176009b21970455ca8e0d206a87a80ee46af75ae7d64da5cb",
+          "scripts/node-port/epoch-execution-oracle.ml": "6b7129337b04093743191e8232d8460bc41c28d004a722b37c9ddd9e4f98c723",
+          "scripts/node-port/epoch-guest.rs": "6eb3d6c41cc0b3d70fd86eb852f47c96dc22364e0230d5f350b2a5b5d54e546e",
+          "scripts/node-port/epoch-index-fixtures.py": "35527b9246e3d68f6f2e8c76d664183b8603c79494acbbd0e6de4c78b2fccc17",
+          "scripts/node-port/epoch-index-oracle.ml": "049680af46e392910320b5902b68506f581a97312a9ebdf764ecf27b611c99af",
+          "scripts/node-port/epoch-partition-fixtures.py": "199295002834c1f6c2427c3bba62616fe609b160c14903b4013cf365d48c9c5b",
+          "scripts/node-port/epoch-partition-oracle.ml": "83937147fd869e84d11bf9d1e688b7361cf976908ca15bd0bf149ec19bca799c",
+          "scripts/node-port/epoch-roots-fixtures.py": "33eae362f39fc47307b70447627ac795dbc39a8e19f9dea490d9834466936a84",
+          "scripts/node-port/epoch-roots-oracle.ml": "48150c3abe067c33203108abd16a0583814c52ef96c4fe53844e203b523f7da9",
+          "scripts/node-port/epoch-tags-fixtures.py": "607dcc33f00156eed068e1da4a70bb0070336c9fd969cba2073396a5a4517026",
+          "scripts/node-port/epoch-tags-native.ml": "4561a8968045e27cc171ad2034406c8f437971951ac452c209b54bbecf3fd3d9",
+          "scripts/node-port/execution-rules-fixtures.py": "1856509ef093c3fb66aae8c0e8f8bbc7d27caf9216b17cf2def011a46af8a15c",
+          "scripts/node-port/execution-rules-oracle.ml": "495afd0e9e19fe02425f8e73c9762d6e99723cc90d2c8eae49c1c93236cec515",
+          "scripts/node-port/finality-query-fixtures.py": "279567af7810836516f7fb23a9d3b8bb46d7b034306b24893b6d45eb7ce91804",
+          "scripts/node-port/finality-query-oracle.ml": "12d7f1b3fff34301963ba94be45f829465cbc3f3ff92d990c0adf9c8381a769a",
+          "scripts/node-port/footer-fixtures.py": "44eda673e7ce4f0b75cb714b2019b9e22f1692ea076fe6e9ef031eeb80cce00b",
+          "scripts/node-port/footer-oracle.ml": "7ba7cbd66ff2a2d88e53654eb9b63ecb78b46f1887270a842ea9cbe724daece1",
+          "scripts/node-port/fork-repair-fixtures.py": "a81a980220d5b53c1f7e6b342f23ce18a85f96916df4887ebae952cf59f74b19",
+          "scripts/node-port/fork-repair-oracle.ml": "393a4dde44fba74be37aff674886a3352ceacfe1668f3fcc63f84942c0910e6b",
+          "scripts/node-port/gossip-guard-fixtures.py": "7d0cd52325f465e2235292cc210f2204bc78e08c3c518175d251dae5d95ce099",
+          "scripts/node-port/gossip-guard-oracle.ml": "2141fab609ee023aac9b3d356ab7dd83536e44ab19d475004f6a6f0071b14cce",
+          "scripts/node-port/groth16-fixtures.py": "ee3098ae303aea24ff27dc138ec9e620a1d8a8235a00ee0766cc4cecb7eea066",
+          "scripts/node-port/groth16-oracle.ml": "87454d6dc330565938ee024206b049c1d1df595f65e59632a43e3132f5f6a68c",
+          "scripts/node-port/health-policy-fixtures.py": "6810f578e2c4b27fad086a2ef34386c984c5f4b4f7516b002ed5c963e511189d",
+          "scripts/node-port/health-policy-oracle.ml": "4c1317dde495b7ec3888ca177f65506f025fabbced55ab90f2b009e340a2cb02",
+          "scripts/node-port/hfhe-arithmetic-fixtures.py": "596aaaf8fb4c59dc9fec84ebf0615e759ceeb70b8f4f9104ff0c8d9ae893fb10",
+          "scripts/node-port/hfhe-arithmetic-oracle.cpp": "4e38c91c1663407ea6df828108dc77bcd16fe0ed5a4aa90c40ef28f96d79afaf",
+          "scripts/node-port/hfhe-budget-fixtures.py": "0994a0ef7a8b18dd45faa2a3bcfb00f4a782d0e0152c78c5a2c0ceff428b6b32",
+          "scripts/node-port/hfhe-budget-oracle.cpp": "cf8adf2af0b07b0256fdc19f353c5cc312583125e0e025ab544682a725d4d24e",
+          "scripts/node-port/hfhe-cipher-wire-fixtures.py": "371bf4903e5dc7edf2e380d3eb046219808df780c2f807086f1c85f1ac3d9cb8",
+          "scripts/node-port/hfhe-cipher-wire-oracle.cpp": "69b8bbd0665951c11270e704b6d9393e937660855a791c3ae6cfb0860d7a57ff",
+          "scripts/node-port/hfhe-circuit-prf-fixtures.py": "3f484e97312aec38229d5dfb5109e46e3972ea798b5107bd721acbfbba3237a9",
+          "scripts/node-port/hfhe-circuit-prf-oracle.cpp": "18132f4db3030d2902284e263b1a9a7fbb5d358e544d15e5798680caf5264a43",
+          "scripts/node-port/hfhe-com-fixtures.py": "3c0b31ffa2f57ddba0dfcdc9f41a558ffada0963c6698679a498061f7648381d",
+          "scripts/node-port/hfhe-com-oracle.cpp": "1b7a9a9174c47f683a0956a2cb59b66cebfd5f0af0c8c2bfe764af02d9d8663d",
+          "scripts/node-port/hfhe-commitment-fixtures.py": "a32bc69ad4a6c9f84fe500bd0e803cbf1211c348a91e58df9ca68f607a50f2a1",
+          "scripts/node-port/hfhe-commitment-oracle.cpp": "7bdd373b259bca6a4d97f261b7a4ea3369d7ed02f6ef9b4383700cd07d9c7a50",
+          "scripts/node-port/hfhe-decrypt-fixtures.py": "d4780333b63bb60c4e74deab1f5d9722c75d464299e47e732befd1cf3278223f",
+          "scripts/node-port/hfhe-decrypt-oracle.cpp": "d6a071db7db1d5f620beb12fe888852c37724f7592cfd2387a753c1d27e8fcab",
+          "scripts/node-port/hfhe-encrypt-fixtures.py": "5d92022b319d78b65e8e451a33e10d1a0d7c9e7b4c99389497da2a67cd4156ab",
+          "scripts/node-port/hfhe-encrypt-oracle.cpp": "4bb19ba163ff9e866ab6e4d60906aac265e9a1912fac68c58500d745f02f722a",
+          "scripts/node-port/hfhe-field-fixtures.py": "8ba93d41e4f07037eb87877275ca3b4ea2fade27223592752743bdf115ddf75a",
+          "scripts/node-port/hfhe-field-oracle.cpp": "eb0c70dc936848518e1f685df4c579cc1d3bd3d34762b62eb73601cb7a98dd03",
+          "scripts/node-port/hfhe-gadgets-fixtures.py": "537bd9115894856c1a9783a44f82daa27977c7cd2c169e1171374c91accacbcb",
+          "scripts/node-port/hfhe-gadgets-oracle.cpp": "318f599629c9dddb83e62987343a3c51db877daa4472bb7bf8c606d93f3640b7",
+          "scripts/node-port/hfhe-hidden-fixtures.py": "bfa6c79a15ee4b8b3de3a19a8b2cc1068db45dedcbdead0c916e14f78fa01127",
+          "scripts/node-port/hfhe-hidden-oracle.cpp": "1c2626887dae329681a50cc1740fb97ded7a789a53bea95bdb815681d65fda51",
+          "scripts/node-port/hfhe-inner-product-fixtures.py": "6ccc70c0c433c6c1aa792d51e5a598bc6aa03e9fdc82b8a3b0859d63ad751093",
+          "scripts/node-port/hfhe-inner-product-oracle.cpp": "5c39e7a8364735d1a52531815572757158fd765e996268e9de368f9a0a8bf326",
+          "scripts/node-port/hfhe-key-fixtures.py": "8d0c6f1b53636386f1023acea521ae485d4c0855c7f5a19869235383e8937f27",
+          "scripts/node-port/hfhe-key-oracle.cpp": "14f5d8cb11808ef9d07012ce6829830f22674f7f36128073e6943ebeb82191f1",
+          "scripts/node-port/hfhe-lpn-fixtures.py": "917b8fa14c481551a9426d03e7ef9cb7306b39f7ec16abee737f85c3a5d8c8ea",
+          "scripts/node-port/hfhe-product-fixtures.py": "ccfd39e315adcaff9a4ed1ee9428d8869d1ead082f96a21a867c9798a44ca29c",
+          "scripts/node-port/hfhe-product-oracle.cpp": "ce91583b8a86ceba872b5dd02ccf11996f078b5e268adea1aded3e644d5bf2b2",
+          "scripts/node-port/hfhe-proof-foundation-fixtures.py": "47de48c94f2d3ad6be3dfa1890abae065deed1b5707e3caea786ec11b512d54a",
+          "scripts/node-port/hfhe-proof-foundation-oracle.cpp": "61049c1fa2c9f6d23aec426fea1bf91d4de73346ac6c17130310ec9ab89bd4ab",
+          "scripts/node-port/hfhe-proof-raw-wire-fixtures.py": "a13bf606ebc53f85d95a1aa7234ddf06ac4bdd7f8bb92ebb92f61ba6b509fd24",
+          "scripts/node-port/hfhe-proof-raw-wire-oracle.cpp": "d6ea51184cd55b4bc93edeaa054594de551c883f79edef9120115d2bc91ccbfd",
+          "scripts/node-port/hfhe-proof-wire-fixtures.py": "206be0de51b9a18e4d5c31776dd7ffb3ec7cded267ae45da886ab8568ed73a92",
+          "scripts/node-port/hfhe-proof-wire-oracle.cpp": "7b42737bcfb9d5f1f62312f06af94f4f1ed8a1cd6cebbbc0484100b70387f0d9",
+          "scripts/node-port/hfhe-public-recrypt-fixtures.py": "bc772f0ed54e0877deef8cd13dec4724b1b0e187d69e2659a7f64a5f2a59270c",
+          "scripts/node-port/hfhe-public-recrypt-oracle.cpp": "b783542bc190e315b44ef9cd0cd8c5dab06edb755b34beb8aadaeaacd0710570",
+          "scripts/node-port/hfhe-r1cs-fixtures.py": "943124b2a089218ce3608b20c7d06c935356e933b0df0981446b43f686c879fe",
+          "scripts/node-port/hfhe-r1cs-oracle.cpp": "ca9cf99e8ff22237bc4c7801e9a3aa2440be0022204f4e2764dd904cc34d2afe",
+          "scripts/node-port/hfhe-random-encrypt-fixtures.py": "d5a82b6bb3ed155f07abd778decb5eafc51d1c87e14a19323932d06f939790d9",
+          "scripts/node-port/hfhe-random-encrypt-oracle.cpp": "82ed95c77fad883c92c6db28a23f2be5275092fe011feea276e91d3aa6ca36cc",
+          "scripts/node-port/hfhe-range-fixtures.py": "8e88dcf7090c4779ce8c6c31b0bb5da2075d0ca0f24b7d950c234ef8e5b1a42d",
+          "scripts/node-port/hfhe-range-oracle.cpp": "f226e7535c67d9a63f4deabb05769ff5c6b16fff6f5277829490a76fd41eeba1",
+          "scripts/node-port/hfhe-range-wire-fixtures.py": "643cce3d8b076b032c1a533bffc0dae418bf9899a62ea3e479b6bc893d1e98f9",
+          "scripts/node-port/hfhe-range-wire-oracle.cpp": "4155df302fb7da2f50d5656f84b953d68236eccdb65835722d675d5a5482a9ba",
+          "scripts/node-port/hfhe-recrypt-legacy-fixtures.py": "3e46938ab2071adeca881ad7cba340af2e3b0fe9b872f3bea057af39f1d2c0dc",
+          "scripts/node-port/hfhe-recrypt-legacy-oracle.cpp": "e7910f944bfd28cd9d2247ebb048ba16edc36dc0e0d7789b4966d8892fa145df",
+          "scripts/node-port/hfhe-reset-profile-fixtures.py": "19151c8a4c2bf7779c7607be7d394feca54177a3ee4b30661ac2116a760ea70c",
+          "scripts/node-port/hfhe-reset-profile-oracle.cpp": "99e5e886fd228a64c5bbe66eb7737eec89cfdcfbb6dbdd43a1128070ac5caad3",
+          "scripts/node-port/hfhe-reusable-fixtures.py": "67363ed8144b632cc9ebd98959b2d8f16a11a580621fd8f5cec5bd791ae9e943",
+          "scripts/node-port/hfhe-reusable-oracle.cpp": "8132f8de40466440f9e53cb445784a45e5fa17cf0bd5bf8f553ba6551670e1b0",
+          "scripts/node-port/hfhe-rng-fixtures.py": "4f758ba80d5cf2dead557847e24dac6d8587fb5917b1d023b0a78a07e008ad1a",
+          "scripts/node-port/hfhe-rng-oracle.cpp": "b70a3b1c606b527d0f6afc874e1f81effd608fc7942edfb8500dd32ae4c528d3",
+          "scripts/node-port/hfhe-scalar-fixtures.py": "1891aeea3ada750a4f882668a6aa08f1ab6cdbf1f036d4e3e2a29afaca5588a5",
+          "scripts/node-port/hfhe-scalar-oracle.cpp": "29def031855bb72bad1b01da4d05a49c3b7e17db998bf7688bb4bb0bc889d031",
+          "scripts/node-port/hfhe-zero-fixtures.py": "7c6901d8897bb6e243e6e08cf978c779eaa312b5e12a2e92c749a88ebc4edeb4",
+          "scripts/node-port/hfhe-zero-oracle.cpp": "f80e9fa2285dee49a13ccfcbac7e6b958af7a6697d5c6e3d732f52f100cec99e",
+          "scripts/node-port/http-state-sync-fixtures.py": "6d97aef9e8ab9b9a7846201ca3c1b6c874b01adab4510e7e9cd1e8047d3abe81",
+          "scripts/node-port/http-state-sync-oracle.ml": "7d27e892271ecdbf650a970501b1f5756ef6cb6572eec8d777dd0d266499f1a4",
+          "scripts/node-port/inventory.py": "d7ef86be8465431a6a3fa4fe95e194daea3f2fd3aaafa282692dbdd2e4abe995",
+          "scripts/node-port/irmin-proof-fixtures.py": "7bf95df1f67e109f69e43f106b6b1c6615b8e5131b63a5517c48fc5d72954738",
+          "scripts/node-port/irmin-proof-oracle.ml": "86fd9fb5969de44241c270697e1d8f37c0a9dfd048a93925288f1676d948621f",
+          "scripts/node-port/ledger-image-fixtures.py": "82227304ee00b2b2380349a1056798228b694b6a269c8a01aa7261bd55115892",
+          "scripts/node-port/ledger-image-oracle.ml": "ca757b403094141c81da33171a24a1c89ee3970162b9cd14494c9dc7c1e955a7",
+          "scripts/node-port/legacy-epoch-fixtures.py": "3f14836eb4333c1889f27fd678a7d8c890e23e43f2edb1a2cf28436bdfc92aea",
+          "scripts/node-port/legacy-epoch-oracle.ml": "ed56f1381c4afbad1e0a6a3d266cfee7028e76d8206b521f37af206c1060e6fb",
+          "scripts/node-port/legacy-repair-backend.ml": "fa123ca0775e4092d1b606383fcdaa18ee8be26278f1b7c12aa2b13ad3344071",
+          "scripts/node-port/legacy-repair-cases.ml": "09470a9fbc14263c202f56379b799ead04e51119de405952830d37696e9c381e",
+          "scripts/node-port/legacy-repair-qualify.py": "9f64a6646f151ce063bf3b18e054afbb096e43651d8237aaa307526406bdaefb",
+          "scripts/node-port/legacy-repair-selection.ml": "2958550bac1dcaedf9ab97b28ce291aac63b56c0fb0b6e2569756f3e7b5fa939",
+          "scripts/node-port/legacy-repair-storage.ml": "8943f28484a5d3507eecff6768afb136b6b79e5e7d10fa7fdac1bb3544b0e2b6",
+          "scripts/node-port/legacy-tree-fixtures.py": "cc42df8a76c1cdb543b3eb7aa75ea000095adb854c6b691d42d6c222aeb9097b",
+          "scripts/node-port/legacy-tree-oracle.ml": "4b85cf3a0717ddbea362890e50070ecdd030f825231a95e8fc557035cb23ee0e",
+          "scripts/node-port/liveness-fixtures.py": "290cc88a7a65beb8cbd6ef9613e114ea8b3048f5b92f35c35d9999f161bbf0d4",
+          "scripts/node-port/liveness-oracle.ml": "9a6b19a5e0a552633d4f75248d6144ee1d83dfc444ab242d36922db8d1be80fc",
+          "scripts/node-port/native-history-export.ml": "2171b5f5b99f592e2771146ede8ec72e62efc825b8c9c4c05b0662a07bed64b6",
+          "scripts/node-port/native-history-fixtures.ml": "9634f06b8da39f86a44b7e57de3fdcb71b39717135af267ec2ce9da2eeef1427",
+          "scripts/node-port/native-history-fixtures.py": "51e19dd60ecd7c450c36a53a90788b41b2a1cf69cf0f9c34394e138eab42a23a",
+          "scripts/node-port/native-history-main.ml": "4f13f9a9d69643e77ace5a8a0ee0a5296499216911ad122be678432a8c9c702c",
+          "scripts/node-port/native-inode-fixtures.py": "28d32c070efbe1a3e62955d90f933e3f246d902b0dc4bb71528167fb8c1f5936",
+          "scripts/node-port/native-oracle.py": "b9b3362a4223a7a6a29318e2d0198bafaf6938fc4a32ec96de66a1d724832796",
+          "scripts/node-port/native-peer-server.ml": "28c72227ff3502dc3c594864384c49734501b694eb2d5997aa1e3ff194ead28a",
+          "scripts/node-port/network-fixtures.py": "2c3085f25b43c3e82753c25ddbcf46f85ba2d6ae4355f3c0e7bd8d5cfb6711f4",
+          "scripts/node-port/network-oracle.ml": "4942dd64c6b804cde4db72f923b9f75d3117b299235d06305c9737e24cfbc0ec",
+          "scripts/node-port/octb-execution-fixtures.py": "4f17cd75e50fd9a45e0ede6052b01cf69bd67bbbf0a6a1c269535a752f09d0e4",
+          "scripts/node-port/octb-execution-oracle.ml": "eeb98ee16b39ff10dc87d4973147a95370dca35e3615bc1b2ef4c449c24de0c4",
+          "scripts/node-port/octb-fixtures.py": "a2895875fa563918906065146d272b17e0f24428f0b84ec51a43305b1fa012f9",
+          "scripts/node-port/octb-oracle.ml": "a5f4d02b4c2826f23e0fdd3af41a9a8fe1d50874012924f2c3976900afb5551d",
+          "scripts/node-port/octb-spawn-fixtures.py": "386ac4c019d7e843b53927dac135e1c19375d914a15a066b6ff1dabc30aa16ef",
+          "scripts/node-port/octb-spawn-oracle.ml": "5dee49192f3f1adf09e62cdc6c6e44340275e24d5fb5e082a0a0ce3a2105ba22",
+          "scripts/node-port/octb-work-fixtures.py": "a7356bf6dafbae972fdf32a1a12fdbeca1725c78f08b702597f1dfce3efc466c",
+          "scripts/node-port/octb-work-oracle.ml": "2a72d2f6b84dee0a06aae37ea161dc496f893629242441ba8609bb01e14db58f",
+          "scripts/node-port/outcome-fixtures.py": "98725385bf82df520b178faeca30c31737f0fc1484219419bef7ff11ef220d77",
+          "scripts/node-port/outcome-oracle.ml": "d1601eb56a99368bba5733dabac3e6e7f2abf046423ad74c4874c4f8b8b65588",
+          "scripts/node-port/p2p-transaction-fixtures.py": "e30093f6c71213c0514593fb0868f99faa9df7407e0592b69c7cc267f8358c24",
+          "scripts/node-port/p2p-transaction-oracle.ml": "325a6bb664aabbe28f6cb374df94b2f40a75256292cd7b00e2600527ad1b0ede",
+          "scripts/node-port/peer-fixtures.py": "94fb4cd3fd30d7a9b56d7ccc4b1e13e0b0d0f9ce5f105dc557cbd2b6a50fb7b8",
+          "scripts/node-port/peer-oracle.ml": "c4a764a9f7f9c03fce2e1aa1460d8f9d8e022cdb5dc5a9c8309ad194e2631251",
+          "scripts/node-port/pending-log-fixtures.py": "ca5ccbc1cd226570078d55c1064332fe68b015f5cf11ef664f0f9ce253be258d",
+          "scripts/node-port/pending-log-oracle.ml": "e8cc2a43a117e4c951822a36d9ba77e11397e6a9e3fc7f74ba35bf9eb91a8fda",
+          "scripts/node-port/pending-reconciliation-fixtures.py": "7652d14af60151fce07d8b68dd37d7c776d9fbbb3caab1227b1a483551b694ff",
+          "scripts/node-port/pending-reconciliation-oracle.ml": "1c923831db9fbadf8551d9414e7e4b60211286ee16b104dfcbd1f62fee918528",
+          "scripts/node-port/pending-recovery-fixtures.py": "1c952a25d38fde7c8185ae3a77a8344026c70f8266395b8bb74ffafbf44e7f2d",
+          "scripts/node-port/pending-recovery-oracle.ml": "bd0693a19f426966395a3e5621eb627b1add4a1ac6fe685e1ebe4983b6be3463",
+          "scripts/node-port/preverify-batch-fixtures.py": "8db6ea4dbfc336bc8e035cfd3aace79fc894edbaaeab9e60ff6b55e17dcc5c71",
+          "scripts/node-port/preverify-batch-oracle.ml": "a900052b0dae8efdbed0b45a9b054fd7b8a12ce3e8dca0fc4bf514d2d7a795c8",
+          "scripts/node-port/preverify-commit-fixtures.py": "20909814fcb93e0cf0418eb3e237ae0d861ec554a31dfd315397f0fc8b073324",
+          "scripts/node-port/preverify-commit-oracle.ml": "e99e0bf877b6f08eb119f2fa584d0ed48a7a69685155a5dbb90fa9ca180c31f3",
+          "scripts/node-port/preverify-fixtures.py": "c00ecbccd98e33c6a29772c4d6bbd2cf1809efc89a32b819069278c5cc6cd887",
+          "scripts/node-port/preverify-oracle.ml": "54f619856ee0f1d9b38022ab407a367ee9422248b0c2f856d7974d3fbd80020b",
+          "scripts/node-port/preverify-receipt-fixtures.py": "490b49d86e49b2e18d5824814af16c14a53979c9f37bc1ce8ee242243ff21cce",
+          "scripts/node-port/preverify-receipt-oracle.ml": "6ec38f5025a01c51a55357bb6a56fd8ea6c29b69e808e67a603b716dd15d1ef5",
+          "scripts/node-port/preverify-state-fixtures.py": "684679efb08c48c5faa14250e8b118a73f51de33aef21289b62d154421c9e238",
+          "scripts/node-port/preverify-state-oracle.ml": "5aee2cbfbe41b2dd45c8c7b16446ebada24c1754384d055c5d21b3fb2174a9a2",
+          "scripts/node-port/private-balance-fixtures.py": "2d2dc1477a2f4fa5fe9331adeab00264294653a0b2b30bdfdbcaa7d7fd9d75bc",
+          "scripts/node-port/private-balance-material.cpp": "8d85d7edeb898e26256ff3349f678564fb02d7288ea913f9fb32f78f958f1773",
+          "scripts/node-port/private-balance-oracle.ml": "51034d1bdd91d10b956ada690e7e7e45c30c375cb111c85bd3d143fe5c2e6f0f",
+          "scripts/node-port/private-crypto-fixtures.py": "3eafb8e5be63c8d5ac614f70d1d9d3e415cb497a73862e8a773f60f416fd2ce0",
+          "scripts/node-port/private-crypto-oracle.ml": "1a098d8d07a0b3d64b08a2d0f442f7abb5c37acd63379b66548e81c756871599",
+          "scripts/node-port/private-epoch-fixtures.py": "572efc08a9089d25f24d57284e22beea60bc68770b74e1905cfc19548f0f3e64",
+          "scripts/node-port/private-epoch-oracle.ml": "459e9b446daca351cbec685ad511af228902cd44ce70e3276108384e41e98bcb",
+          "scripts/node-port/private-output-fixtures.py": "a98d1f3b4733cb88b09fdf0107179a483bd73fe68c09e099e230774f0f1495c7",
+          "scripts/node-port/private-output-oracle.ml": "e83d249bcb3a704ec73a4ec3ef0b7908dd93106ab5be369b7ef89dcc1ef6c64a",
+          "scripts/node-port/proposal-build-fixtures.py": "8710e13288917680bb1b3968d5effd4834ed88a070743957b90b776716c0d3a1",
+          "scripts/node-port/proposal-build-oracle.ml": "2792744b0a83df4b10ea600a901c21842c39ca6ab8491580b82d31a85b9d613e",
+          "scripts/node-port/proposal-bundles-fixtures.py": "2407fa46b0e5f7032c220c5318de54a9f127349276af5b84c271226d6da5d9bc",
+          "scripts/node-port/proposal-bundles-oracle.ml": "03158ea06c02afffaa72c300fafef0429515bc1744d5c7cdaf1af98d2bfcd0e0",
+          "scripts/node-port/proposal-selection-fixtures.py": "2e3018bfbb7f166a6fdcead0594e3d47f38b792d056fbbd1a1add33b41852a41",
+          "scripts/node-port/proposal-selection-oracle.ml": "34907a1d86c4f6ea9ba051fead2ff03088dd7d9d5d59d8128d7977966a265fb5",
+          "scripts/node-port/pvac-admission-fixtures.py": "220148ae771de0c011e1d5a95b8fa8421c1cbef9d286bfcb2ca51cc4c5ed9fec",
+          "scripts/node-port/pvac-admission-oracle.ml": "ee2e67af52fda7c8b81b6659d68d5b516639880bf68c5b0048ba71856403e102",
+          "scripts/node-port/qualification-checkpoint.py": "0e50435ac498d74cca3a7d77e8793a9854c8556d79e8f1125c88fdea2627ef90",
+          "scripts/node-port/quarantine-fixtures.py": "b03af981bd3b2f4b9d1bb2c31e2433632a118d11eda48759672d75b1031cf82e",
+          "scripts/node-port/quarantine-oracle.ml": "097a333ad4d24b5700b21149d2afdaa9da637decbe6d03687b3ce5667c8bc952",
+          "scripts/node-port/query-peers-fixtures.py": "d6f74dae8244002efc7a8020b0ca521723587206e92118cee34c7002bbf3f470",
+          "scripts/node-port/query-peers-oracle.ml": "69af2a5d7c00dd272be28405dcf3866a1d36d8d2042eb339e02229ca3760edb6",
+          "scripts/node-port/relief-log-fixtures.py": "5c847f9508ab5959b07f501cee0675fe4522a88472c5af7e4cc85b3d98a723c5",
+          "scripts/node-port/relief-log-oracle.ml": "c2ed7e0b7c8932c89b3283cbca0d5f6cf4f4bd479d49aeb56ef4a4a6fbc82aa1",
+          "scripts/node-port/resource-attestation-oracle.ml": "a4dd3bdabadab77791acce7506067b59469837e7c3c2c2a123891b26e11bfd3a",
+          "scripts/node-port/resource-fixtures.py": "97de41dd06dd8c9eec441ec360d2e86abfbc144bb7063ad41c953b8697bb80c2",
+          "scripts/node-port/resource-lanes-fixtures.py": "0e3439a312243cb4a0379e7be486be067e4770e809f65e09e5557ac5c5ce7b20",
+          "scripts/node-port/resource-lanes-oracle.ml": "ca14fe5e6376b341be57282dad1ab546edec26ee59399f076cc85a7e7d5771ca",
+          "scripts/node-port/resource-native-oracle.py": "287a1aae54a5db9c89e11f35529304b5f57a076589111cb08e55e114f7c8e4eb",
+          "scripts/node-port/reward-attribution-fixtures.py": "eff9dc735a9778a59bf0ea9fbd027cbec79965065eeec4f3e6a981e0c47c1a96",
+          "scripts/node-port/reward-attribution-oracle.ml": "fdfeff8f64d9c7588858b6317ba2bfaaa1c91d1ccbe69d59d010a0b566f0902b",
+          "scripts/node-port/reward-fixtures.py": "957de3010b9c61410f4e44172d0461950b8200035da5a3f375e0be3999880ef0",
+          "scripts/node-port/reward-oracle.ml": "46520f4fee3837252c6e2fd6f454808a383024320162cdb47ab6a55527ec53d9",
+          "scripts/node-port/rule-activation-fixtures.py": "f5420230ba2a54fb1b8eb48eb92cc1f02edd09079d540c7c47a97f2315dce557",
+          "scripts/node-port/rule-activation-oracle.ml": "4ccfe97451421606516ecefe556a27f9ce22ae2d4780f2d477d7badbd70c51c3",
+          "scripts/node-port/sender-execution-fixtures.py": "d14354c3105bcc4cf8c850beec63a95995793e890df949bbe15c5d610e8ba773",
+          "scripts/node-port/sender-execution-oracle.ml": "8eec6825ee1a3717cf53195a3b22b0e9031b960455540d1342f5b99e307201c4",
+          "scripts/node-port/set-fold-fixtures.py": "f25d58ac319e3f131d3f8d834a37769518171554f82a44c0404c9f97603e4b85",
+          "scripts/node-port/set-fold-oracle.ml": "4139b1139a898c951530e00d675f8754a9cf98cb95256ca647226ed3d9ef3430",
+          "scripts/node-port/single-oracle.ml": "daf6d549f6f0c45f292ca1e44d67a243eb0eb978cc90d7adf664f485eb4436e4",
+          "scripts/node-port/single-oracle.py": "d7c3509b7ee78b23b23d542238aab6c778471fad52e9ceb620cc52688f79de53",
+          "scripts/node-port/single-policy-oracle.ml": "6d8eeccb92d07874a16a3facf92b0faf3680da7cb35fea80eaaea7f7aff401ad",
+          "scripts/node-port/single-policy-oracle.py": "b5efdc7ce2f7ab447ee4cdb6c43f60633150e45080a56c5ff4fec203af5001b1",
+          "scripts/node-port/single-private-material.cpp": "5abb396518dec0705da3c8a79713269394c9bf2e45728e095504d7b4b5892b1a",
+          "scripts/node-port/single-registration-fixtures.py": "280b68f8d45ac8a6231ef0fc9de0d8632043cc8d084388ab17a5ce83aca4ed93",
+          "scripts/node-port/single-registration-oracle.ml": "53a89cbdcd09ad455836c067b09071e0fe15311cfe962b1c14901c74b423d66c",
+          "scripts/node-port/single-worker-limits-oracle.ml": "c24424176247619c834e549c6d9dbd8d64205f5e8d7652ab714e5434eef5a8c5",
+          "scripts/node-port/single-worker-limits-oracle.py": "de9521723d85da4aba50b5f7ba299aa58dc414784cbcb6528dc719e40d5d755c",
+          "scripts/node-port/snapshot-service-fixtures.py": "480ec267fe679606fdb7569beb8c06fadf288436cb06acf76f406eb83f7b790c",
+          "scripts/node-port/snapshot-service-oracle.ml": "3d864b392fcbf6aab91f552ab902d98205a155d0e7067b3f1e62494880c03409",
+          "scripts/node-port/staging-fixtures.py": "593777584a164b1fd8c7866539367c5806370e70aed9566f459a8b3dabd03298",
+          "scripts/node-port/staging-intake-fixtures.py": "cf7f7a988f8482d9502fe6599f2ef4cbdf83074765bf563c78b0c0aa5e96fba7",
+          "scripts/node-port/staging-intake-oracle.ml": "a32abce98e464043fa80ebd432ee2a8bf0f07e438ed752ebaaea94a7cd9a8e1b",
+          "scripts/node-port/staging-oracle.ml": "03b5e05d42b48b56c0027f6b7cbc152a07537a0247966158aa90ca3167d41553",
+          "scripts/node-port/staging-order.py": "3e48e2edf6687cf8557e8f238bd6da234a9e972c9e2585c636865ced23ccb23c",
+          "scripts/node-port/staging-rebase-fixture.py": "53cffaf1e8a41c4b1752acd14d14641de6e805b2485995a3950adcad37e8984e",
+          "scripts/node-port/staging-reservations.patch": "1e134d206a4ac4a1f41a547015e33553415d011f2d79efdda249a6a188e6a405",
+          "scripts/node-port/staging-reservations.py": "e7c9b432bf55fecfd48be70effd19f6b50d0fe5ced1c25aff05e6383315f97ac",
+          "scripts/node-port/state-sync-fixtures.py": "2daf979753008e9379aee330443236b2c155068adb36dffcbf29b763c350f5e4",
+          "scripts/node-port/state-sync-oracle.ml": "c8344f2932c5f2a068ead16ff1617bef1d5fe82f581d1bba453beeeb4abe6896",
+          "scripts/node-port/storage-fixtures.py": "0a55d985a3a1463bafcf959d9a6ebc74f990afaf340d215a0bd73e23ccc906c5",
+          "scripts/node-port/storage-oracle.ml": "0a6406f8afe85cced94439d6cf6b0fa17343666ee6bdd1bd2b90177af8d89878",
+          "scripts/node-port/submit-fees-fixtures.py": "a78886e4de69db37757159916e8535f09ec616d32c3c7b4267f798cd3c0bfeb9",
+          "scripts/node-port/submit-fees-oracle.ml": "5760d2158b9515cb47b32128672d787f4e35d41ef9e1337d831e97d73d91289e",
+          "scripts/node-port/swarm-policy-fixtures.py": "123b343b9bea441b69de00150904f8ec6268afe75a21c3eda61561b1eb280343",
+          "scripts/node-port/swarm-policy-oracle.ml": "1c94855f8869bc99e2a5a73057c7a8bccb0aca8c2f3bd42127ccbfe784a5a516",
+          "scripts/node-port/test-circle-browser.mjs": "de9c57af2ea35a5c22e8f579d0312dbb9839a4beb0c608455fa432912e9dcd47",
+          "scripts/node-port/test-native-peer.py": "f41f99aa67911de3bfd21b0c2918523111673bf19f57044fb8d382fa0ddb8b37",
+          "scripts/node-port/transaction-admission-fixtures.py": "ab778738459decb0f88829b9e6216e35c03c4c1738f445c1dd682b6efd8ebb38",
+          "scripts/node-port/transaction-admission-oracle.ml": "6151d44dcc52e2a45167cf08dfa8e9fe573a2cd81efd46a7756732bde50a1a9e",
+          "scripts/node-port/transaction-archive-fixtures.py": "63758196574158aed07d7cef601454fabdf3f1d5b32de268ee4454e9da660847",
+          "scripts/node-port/transaction-archive-oracle.ml": "6597edc9d7fe3a797c35ccd1c98239b2e81f766f3230d50fd8e3d582c76c443d",
+          "scripts/node-port/transaction-state-fixtures.py": "14fe650aa81fccebb671a0f6b9789a8a33f6b97aeeb312161ae1d93332c33287",
+          "scripts/node-port/transaction-state-oracle.ml": "a5fefac2afbf0d0907eb2557b2f9b35e1f76e00fda61d8396bd3bacf37c48fe7",
+          "scripts/node-port/tx-gossip-fixtures.py": "262eb9060cf39ad855cda592dcfbc5d5df10bc1d9a9c70c8ad8194b7077c2dcf",
+          "scripts/node-port/tx-gossip-oracle.ml": "fd6cd16134bc4647b2d98079a229a82431f9b9edf9491464921ef4b4b2e0bb99",
+          "scripts/node-port/upgrade-config-fixtures.py": "99148121d0600a7d60c891db1004ae7c186648b469a6a1945f001644e8222161",
+          "scripts/node-port/upgrade-config-oracle.ml": "cd32c91aa82235cacb49a28be061999bffae2ac89dc7284320c44aff79558f2a",
+          "scripts/node-port/validator-config-fixtures.py": "f72f60ebf4b15f5d1d954a8a8ecddb30d85b25b22679e4abefef8d9e263ae187",
+          "scripts/node-port/validator-config-oracle.ml": "88503f0d5b0773adaa4a272bb1d9111e75140389858caa5cae971f08f25b5b3d",
+          "scripts/node-port/validator-epoch-fixtures.py": "5080c91f49661b64ae525bfb3f0d1adcb4a7f1a829e9a1a15ca5e089398a23fe",
+          "scripts/node-port/validator-epoch-oracle.ml": "47b35780344c4492fbd974fa933b56841f9c6baabb9c3952f491e65fd1840249",
+          "scripts/node-port/validator-lifecycle-fixtures.py": "f3287241465d5dd63683ad788fa5a24096d3d96745930deb8026dcf9375e78eb",
+          "scripts/node-port/validator-lifecycle-oracle.ml": "257a30ee35c505424ba6c1008daafa2f47685daedef01892f5370f407a911022",
+          "scripts/node-port/validator-ready-fixtures.py": "45c1b79bf2d35f83a2eb74bfa1ed12c52865b0e879f31c3f005a534376fac123",
+          "scripts/node-port/validator-ready-oracle.ml": "862036088faeadabdacaceb59d853ca4102d62214499937c604df42cbadd02cf",
+          "scripts/node-port/validator-transaction-fixtures.py": "07db2b8933da891854e4f6585072af05aba0e66bc158c3bafc689d614c71717b",
+          "scripts/node-port/validator-transaction-oracle.ml": "8c1a94e1236f6344007be9081b4022ba8c8fc016db8cf1c3a6d1c044242b72e1",
+          "scripts/node-port/vpn-admin-fixtures.py": "1c0f2166ea97419fa7c01dee1ecc3b1490242beac4bf54bb58d9b482c59911b1",
+          "scripts/node-port/vpn-admin-oracle.ml": "bc16d29d1eda450566f2b83575b73106705fbe58f231a359693dd86662b5dcd6",
+          "scripts/node-port/vpn-compiler-fixtures.py": "3dace6e8d9acf6e31cc2763ec39aba703d127ba20c74bfb9451cf2296771fd9d",
+          "scripts/node-port/vpn-compiler-oracle.ml": "5305805d8f24050bc142adc26c1a6646da8f0298d54ec34e8538980651acea6c",
+          "scripts/node-port/vpn-settlement-fixtures.py": "f592f3ee14b09f9bb8e35615acf262e2485a1e54fdc7b264198e73895027a666",
+          "scripts/node-port/vpn-settlement-oracle.ml": "e8c5c4eba9951e5b2349effe133a2125a46f9ecbfe902ce4c7820972ed1c9046"
+        },
+        "dependency_note": "HFHE has no local crate dependencies; same root manifest/lock/toolchain/config, adopted source inventory and oracle/test sources. Revalidate these hashes before final applicability. This does not turn the failed full workspace run into a passing run."
+      }
+    },
+    "lean": {
+      "path": "out/mesh-admission-20261017/lean-final-v1/report.json",
+      "sha256": "3d73640a454a4373a97e92b8ee25df521b6d4fd8465cbb1195cd0121779ec898",
+      "result": {
+        "argv": [
+          "lake",
+          "build",
+          "OctranetPayments"
+        ],
+        "cwd": "proofs/lean",
+        "exit_code": 0,
+        "seconds": 0.875,
+        "model_sha256": "97df8efe4efff73ff4c1ddd1e805a780560798e8b9898c456d9cc90660c03500",
+        "model_unchanged": true,
+        "theorems": 39,
+        "log_sha256": "a30d6eefe7ccec7803482bd446c3d48f7cc46ed86ba99cb839fca134dd7a5a3d",
+        "scope": "Bounded abstract accounting/deadline/capacity model, not AML compiler/VM refinement or arbitrary Internet delivery proof."
+      }
+    },
+    "static": {
+      "path": "out/mesh-admission-20261017/static-final-v1.json",
+      "sha256": "64c85e1b581770f77ccbf6c79a4acd89c36d8f1f1f5de5cc5f80e2d0ba4b3d77",
+      "result": [
+        {
+          "argv": [
+            "ruby",
+            "-rpsych",
+            "-e",
+            "ARGV.each { |path| Psych.parse_file(path) }",
+            ".github/actions/prepare-native-tests/action.yml",
+            ".github/actions/setup-rust/action.yml",
+            ".github/workflows/ci.yml",
+            ".github/workflows/circle-vpn.yml",
+            ".github/workflows/coverage.yml",
+            ".github/workflows/demo.yml",
+            ".github/workflows/fhe-load-pk-probe.yml",
+            ".github/workflows/fuzz.yml",
+            ".github/workflows/headscale-parity.yml",
+            ".github/workflows/octra-release-canary.yml",
+            ".github/workflows/perf-10-kernel-wg.yml",
+            ".github/workflows/private-admin.yml",
+            ".github/workflows/proof.yml",
+            ".github/workflows/release.yml",
+            ".github/workflows/v4-relay-devnet-e2e.yml",
+            "docker-compose.mesh-demo.yml"
+          ],
+          "exit_code": 0,
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "argv": [
+            "python3",
+            "-B",
+            "demo/lib/gen-vtts.py",
+            "--check"
+          ],
+          "exit_code": 0,
+          "log_sha256": "0a2af62e90ebefc31767bd619723dd62655d97788fc80fc5c44c7c87d0a8a12b"
+        },
+        {
+          "argv": [
+            "bash",
+            "-n",
+            "demo/lib/3node-mesh-bringup.sh"
+          ],
+          "exit_code": 0,
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "argv": [
+            "bash",
+            "-n",
+            "demo/lib/build-linux-binaries.sh"
+          ],
+          "exit_code": 0,
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "argv": [
+            "bash",
+            "-n",
+            "docker/devnet/tailscale-interop/run-interop.sh"
+          ],
+          "exit_code": 0,
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "argv": [
+            "bash",
+            "-n",
+            "docker/native-vpn/run.sh"
+          ],
+          "exit_code": 0,
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "argv": [
+            "bash",
+            "-n",
+            "scripts/coverage.sh"
+          ],
+          "exit_code": 0,
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    "native_registry": {
+      "path": "out/mesh-admission-20261017/registry-native-final.json",
+      "sha256": "eacd3af022c8674608e5634fc61b19ca49be59cfcbc26f4669ea7f2a4b96efc2",
+      "result": {
+        "cases": [
+          "manifest",
+          "publish",
+          "query",
+          "replay rejection",
+          "caller ownership",
+          "retire",
+          "republication",
+          "view mutation refusal",
+          "malformed frame"
+        ],
+        "passed": true,
+        "scope": "upstream Rust WASM Circle host ABI; not OCaml Circle commit or chain finality",
+        "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+        "wasm_sha256": "ca5530c7fdc82adedb5290a9da4192cf7d2727d74193dee73f91a62020a7d42f",
+        "source_sha256": {
+          "lib/core/circle_wasm_native/Cargo.toml": "9743e4fd5aa87c02d4c6f22ae698f178d97f787bf94450e618b086ef0f17b40a",
+          "lib/core/circle_wasm_native/Cargo.lock": "c3c6e2e05bad621856ed5efc5924acbc9e6549da7d6886df39c5f0a0d4bbc762",
+          "lib/core/circle_wasm_native/src/call_step.rs": "6b065ff7d1faca146d35912a24e589cd41efb588e02518209d080217178c94d2",
+          "lib/core/circle_wasm_native/src/compute_replay.rs": "d607211ba60e27ac65fab1d1f3acbd4521add78ee45c7520a53fb06a35e292bb",
+          "lib/core/circle_wasm_native/src/deterministic_tensor.rs": "730f71348353955c610a1950f732de4de3c445131028990a82dddc4fb53f3d5b",
+          "lib/core/circle_wasm_native/src/float_cases.rs": "4b29ced3759f51399a31cae0c6f1e4897f8d91da769c0c19cf5919b3408f865f",
+          "lib/core/circle_wasm_native/src/float_ops.rs": "5380b06120667c0d1c6ae0e44d9b4fdd76efa8e0fb0a395e87b17203d9b00730",
+          "lib/core/circle_wasm_native/src/lib.rs": "247d00dd7043e5ed8bedfc1eec8a15c23220c19a5b2072d19e1e3fbedc8c7e1a",
+          "lib/core/circle_wasm_native/src/native_bytes.rs": "7499907438644814672af2d6d478aabab33b94550ce230edb4be5bdbd8bdfbc7",
+          "lib/core/circle_wasm_native/src/parse_memory.rs": "5b543060c24f2879a90adae6a1efc0e13051f62e4aa91a2f0616ba1d52b9a621",
+          "lib/core/circle_wasm_native/src/reply.rs": "1d945b71b5ac0c6a5f8e03ea9536bc85ba858727bfcd213b73f77ca1b969d2f2"
+        },
+        "app_source_sha256": {
+          "crates/octravpn-circle-registry/Cargo.toml": "b6c0703cfbbd8092a69303d0a4e56d143ec7afcc102ba09d771c248ebaee7ef5",
+          "Cargo.lock": "578add0308a1069c1d411294c7940e008354b04e6b0dcb6d7111f33dbd659f05",
+          "crates/octravpn-circle-registry/src/codec.rs": "f27f591c478d08afc6b2dfff5f8e197fa6a9dd2c6677d865976564246c74f6d1",
+          "crates/octravpn-circle-registry/src/guest.rs": "0b79437db796592d2cbf519153466bb9dc971312d4ebe7aad65cfcfb2cdf539a",
+          "crates/octravpn-circle-registry/src/lib.rs": "b24b82f806fdba2c0c6b85ac7f3821be89826ce7f9aa04bbb798e6fa11473053",
+          "crates/octravpn-circle-registry/src/projection.rs": "7feb422fb67fb8170a470255af5fbf6ce2344597a1bdd5d403bd66778de65648"
+        }
+      }
+    },
+    "browser": {
+      "path": "out/mesh-admission-20261017/browser-final/result.json",
+      "sha256": "27fb7f21a0313d648d1e1768f99d9b27f1e040b6a95df6f2b50574d1cf66747f",
+      "result": {
+        "gates": [
+          {
+            "gate": "canonical Circle browser + native upstream site",
+            "argv": [
+              "/opt/homebrew/Cellar/node/26.0.0/bin/node",
+              "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/browser-final/circle_browser.mjs",
+              "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/browser-final/circle.json",
+              "/private/tmp/octra-lite-node-native-20261016"
+            ],
+            "exit_code": 0,
+            "seconds": 11.006,
+            "log_sha256": "8656dbb734f7616225d3ef5c2b4f901a671cfc02c1dd3c074d8075d4a6ce5e6c"
+          },
+          {
+            "gate": "actual Node canonical gateway renderer",
+            "argv": [
+              "/opt/homebrew/Cellar/node/26.0.0/bin/node",
+              "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/browser-final/gateway_browser.mjs",
+              "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/browser-final/gateway-fixture.json",
+              "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/browser-final/gateway.json",
+              "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/browser-final/gateway_http.py"
+            ],
+            "exit_code": 0,
+            "seconds": 4.477,
+            "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        ],
+        "sources_unchanged": true,
+        "source_drift": {},
+        "executables": {
+          "canonical_assets": {
+            "source": "/Users/androolloyd/Development/octra/target/release/deps/canonical_assets-879a6e6d41cac10d",
+            "sha256": "42c73a0e16c9e7fdd03f6ddb6f77cdff23c5570f3fc28846bf8cc7019990c1c1"
+          },
+          "services": {
+            "source": "/Users/androolloyd/Development/octra/target/release/deps/services-7aa03ea04086e093",
+            "sha256": "7f5b3674be0eb2711e4b9d40ba3781cdbbd70359fb33839585521c5f494ca969"
+          }
+        },
+        "runtimes": {
+          "at": "2026-10-17T16:47:03.227824+00:00",
+          "chrome_path": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+          "chrome_launcher_sha256": "63ee57066ef61169445ded279701d974ad23c805a60b8f77a4b8776183ac58fb",
+          "chrome_framework_path": "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/155.0.8059.84/Google Chrome Framework",
+          "chrome_framework_sha256": "411ae3540d9ef03b537364ab2f44477be73a9af32651e261504382f4d2b98e70",
+          "node_path": "/opt/homebrew/Cellar/node/26.0.0/bin/node",
+          "node_sha256": "08dad0581f00a0cabf4d49ec92ca1f25fdfd01c2c18fa8e92b35f04d4c24c164",
+          "upstream": "7f9be4489870645cfcc95439638cde40f5da9f50"
+        },
+        "processes_reaped": true,
+        "scope": "isolated Chromium profiles + public local canonical fixtures; gateway HTTPS origin supplied through controlled CDP, no public/TLS/tailnet qualification",
+        "qualified": true,
+        "circle_application_checks": 21,
+        "gateway_checks": 8,
+        "browser": "Chrome/155.0.8059.84",
+        "artifacts": {
+          "gateway.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "circle_browser.mjs": "56bfaf57b2c965c211457cb61bf28a5fe2074b403ab0f8eceb991cc53c74ab5b",
+          "run.py": "6b36f2b3c2a6db400a5fc0e4a5ca5fc6f22c690ffb3aa33b955109347f39adcf",
+          "runtime.json": "20353ab72129197844b1cb73bbb6b2e61ff5830a0524cb8bacd1db45ddeacd7e",
+          "circle.approval.png": "08126c0329bcd42f6922fd5c3b16536c345b0339561d540b2d1bd526a2870d7e",
+          "executables.json": "4abf44089ed6f5449d2b5fe46ce09ea945b846de329476b5d378c367f503c052",
+          "sources-after.json": "4ce9fc75d95da3422f7f2d885b623f567d57f4bc887e31ef8859a2576f7ed12f",
+          "gateway-runner.patch": "bb167af8c5b126edb4a533f857aca00d33d9195f62e0337f28e593c2efb74344",
+          "harnesses.json": "d12e7dde134d9a7a609612f60c741218286f06fdf79536a004e8060f3dde9c9d",
+          "gateway_http.py": "c7f81e4c16fada859c4d76632c90d013a86225b22d28938463c5470517d5ae33",
+          "circle-runner.patch": "29808f802db9ffa100b26e4ac2696596fb0e5c420e4e25d048e58c0ef90098ac",
+          "circle.png": "c3f5b08a0f5cd57b3469fbc2e11f3359f9e8cfe45ecd0aa3b6b8b88593b1474c",
+          "services-applicability.patch": "fb657ab8589abf46c148b2bee326128ccf95192f6379ef384d0a9f0ae86b356c",
+          "gateway_browser.mjs": "6ee49d5d7f37dfd8cf0adb5d09ea72ae37ba561c5da9d524e48332b7789f628a",
+          "circle.json": "e8dd9659dbd1c700e4c1c5f3e5afd5c70933428b4908d65aec763aed90ba4ddb",
+          "gateway-fixture.json": "b3682e554c829bd7c0710b279f3bb902cff0ff6d827f244f4305c097a6fa24eb",
+          "local_bundles-applicability.patch": "c7a09e563dfe5092b2ea02a0825b8dbde5c24e5e70ea8beeb14a42be78365a17",
+          "circle.log": "8656dbb734f7616225d3ef5c2b4f901a671cfc02c1dd3c074d8075d4a6ce5e6c",
+          "sources-before.json": "4ce9fc75d95da3422f7f2d885b623f567d57f4bc887e31ef8859a2576f7ed12f",
+          "gateway.json": "1341bc5602d1f4a78bdf749de8cb2dd7a7dd2870cd225208af6421ee9e7106c1",
+          "source-applicability.json": "d2c8ac9a2c85a56af4603e9c6e448379d5cd48b421bf246593d4140d7e1c5687",
+          "progress.json": "3d8f0855e9eea677428ca399b947331f78fedfde9fe27a2ef6f0d71af3f352b3",
+          "gateway-fixture.log": "daf071121a9ffe32bbce44190e37a068c96d08bff63fd7b660dd95b77d786dca",
+          "gateway-transport.patch": "cb85c117b72bd29e8decced9355d13e1f411893e66c423cf808142674d30f798"
+        }
+      }
+    },
+    "single": {
+      "path": "out/mesh-admission-20261017/single-kernel-v3/qualification.json",
+      "sha256": "b9292b2dfa67dd8fd65045d2e90f8ff5a278c01485c450224b93015b90c00d7b",
+      "result": {
+        "qualified": true,
+        "image": "sha256:cee4a8ad076b1dd92c5799444beba5cfbb2c480f59b07fe0540f55359817877c",
+        "cargo_or_build_executed": false,
+        "scope": "private Single paid VPN; signed local history, two isolated Linux TUN namespaces; no BFT/public-network qualification",
+        "current_test_drift": [
+          {
+            "path": "crates/octra-node-runtime/tests/fixtures/circle-engine.json",
+            "frozen": "777943eecde2592b12768254278b239b98673050b7f64a305dc72c42467c5c84",
+            "current": "e077057316f3518dc76b02ab2baf30b1695387a4b95908a0c0ca050ac1a6a397",
+            "scope": "test or golden only"
+          },
+          {
+            "path": "crates/octra-node/tests/services.rs",
+            "frozen": "d05e429fb0f3c0bfebf65a9fd257d8f982531611a2f80f9b3aac4ee318041997",
+            "current": "5372bd11376a96818cca754a20c8e74fec2fb7ea6a70c34d70ce5b24bb126fae",
+            "scope": "test or golden only"
+          },
+          {
+            "path": "crates/octra-node/tests/services/local_bundles.rs",
+            "frozen": "a1e9c10309fce36bff19e17a597bf9867c08412360d1b42c7085b71664257307",
+            "current": "d76b941c5bc7b724e5cd55b7300899ef7d99b2fea09ef27eb82ca6e1cea09631",
+            "scope": "test or golden only"
+          }
+        ],
+        "source_sha256": "3aaccd990f21c54b5d0db5c90e5c1bba2034cded97b2b38275472e34eed1540f",
+        "binaries": {
+          "octra-node": "b75e4480217b69e0ccfbbe7e479ee6e6e98091307a8e573b9022a83917125247",
+          "octravpn-node": "12001f9c73ee124097a18c44d4f050ac8d8aa29d86628857110e1045fe95e1ce",
+          "octravpn": "9d9efe4344d2f622bb289ace1c5d09e45a4f177cc512f39be591a47927a9f9ce",
+          "octra-single-fixture": "d2b906e523a5b6e86d8d78ab446eea3056e8fbd1d9524f4dd36e48b9a2d0dd08",
+          "octra": "d288bb757081db85c1be8221f1dfebe6bf877ec58efaa6d690eb3efeab138264",
+          "octravpn-private-admin": "6653268682d451039f7274ace72e6ae26b106e6ce377d79d7cf6d69361fd5185"
+        },
+        "source_snapshot_sha256": "68b0d58b1eb42c3098962b44b928170be4d3533df4e61904a9ece39c95758ef5",
+        "provenance_verified": true,
+        "attach_exit": 0,
+        "main_exit": 0,
+        "target_exit": 0,
+        "frozen_context_unchanged": true,
+        "production_sources_unchanged": true,
+        "sources_unchanged": false,
+        "journal_sha256": "a6a78085ed1daf399b3870b7cb23ec3fc0f3eb67c34022486a9eb42f2b99b5db",
+        "seconds": 426.323,
+        "cleanup": [
+          {
+            "argv": [
+              "docker",
+              "rm",
+              "-f",
+              "octra-single-81ada88df975-main"
+            ],
+            "exit_code": 0
+          },
+          {
+            "argv": [
+              "docker",
+              "rm",
+              "-f",
+              "octra-single-81ada88df975-target"
+            ],
+            "exit_code": 0
+          },
+          {
+            "argv": [
+              "docker",
+              "rm",
+              "-f",
+              "octra-single-81ada88df975-provenance"
+            ],
+            "exit_code": 0
+          },
+          {
+            "argv": [
+              "docker",
+              "volume",
+              "rm",
+              "octra-single-81ada88df975-hop"
+            ],
+            "exit_code": 0
+          },
+          {
+            "argv": [
+              "docker",
+              "volume",
+              "rm",
+              "octra-single-81ada88df975-evidence"
+            ],
+            "exit_code": 0
+          }
+        ]
+      }
+    },
+    "kernel_wireguard": {
+      "path": "out/mesh-admission-20261017/kernel-wireguard-v2/qualification.json",
+      "sha256": "c5f87691316dd37715a414d5ce5e8ce41fa2dcb32861e7fdcf77200f1e397c7d",
+      "result": {
+        "qualified": true,
+        "frozen_runtime": "sha256:cee4a8ad076b1dd92c5799444beba5cfbb2c480f59b07fe0540f55359817877c",
+        "host_cargo_executed": false,
+        "dockerfile_sha256": "4d2b167ca9344161de9ef2af82fb96d7f0e82788c164427e6068517232f5fcba",
+        "gate_sha256": "8fbc3953b4032169fbfcd254420ade9ca936179a1e629f9cd9b923dd621da87b",
+        "current_test_drift": [
+          {
+            "path": "crates/octra-node-runtime/tests/fixtures/circle-engine.json",
+            "frozen": "777943eecde2592b12768254278b239b98673050b7f64a305dc72c42467c5c84",
+            "current": "e077057316f3518dc76b02ab2baf30b1695387a4b95908a0c0ca050ac1a6a397",
+            "scope": "test or golden only"
+          },
+          {
+            "path": "crates/octra-node/tests/services.rs",
+            "frozen": "d05e429fb0f3c0bfebf65a9fd257d8f982531611a2f80f9b3aac4ee318041997",
+            "current": "5372bd11376a96818cca754a20c8e74fec2fb7ea6a70c34d70ce5b24bb126fae",
+            "scope": "test or golden only"
+          },
+          {
+            "path": "crates/octra-node/tests/services/local_bundles.rs",
+            "frozen": "a1e9c10309fce36bff19e17a597bf9867c08412360d1b42c7085b71664257307",
+            "current": "d76b941c5bc7b724e5cd55b7300899ef7d99b2fea09ef27eb82ca6e1cea09631",
+            "scope": "test or golden only"
+          }
+        ],
+        "test_image": "sha256:c3210e4a88ab4cca7b2e856deb5702f0360617992555eae5205dda66e37261b9",
+        "exit_code": 0,
+        "scope": "actual Linux wg/ip kernel lifecycle shellout surface; private Rust KernelBackend is not instantiated by this integration test",
+        "source": {
+          "test_executable_sha256": "1841de51a91b711b320f32b60534c0c5ecf4dce7ae306a8d81eb05ac9b27941e",
+          "test_source_sha256": "e49b5e7a053cac6b6809ccb8a6f423611463fd4265935b2293d93e6543e30670",
+          "application_manifest_sha256": "df970ebc4871f4677da923883dabb6863603b6bc58089ecdd212a5a1ae893db2",
+          "cargo_argv": [
+            "cargo",
+            "test",
+            "--offline",
+            "--locked",
+            "-p",
+            "octravpn-node",
+            "--test",
+            "wg_kernel_backend",
+            "--no-run",
+            "--message-format=json"
+          ]
+        },
+        "seconds": 28.157,
+        "cleanup": [
+          {
+            "container_remove_exit": 0
+          },
+          {
+            "volume_remove_exit": 0
+          }
+        ]
+      }
+    },
+    "fresh_sidecar": {
+      "path": "out/mesh-admission-20261017/pvac-fresh/result.json",
+      "sha256": "f0bdb05b52325fa5695312d174a4ea3bdb293e75ab85aeafb74f3aea6aacad2a",
+      "result": {
+        "at": "2026-10-17T17:07:05.656954+00:00",
+        "stages": [
+          {
+            "stage": "fresh-build",
+            "argv": [
+              "/usr/bin/make",
+              "-C",
+              "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/pvac-fresh/source",
+              "CXX=/usr/bin/clang++",
+              "-j2"
+            ],
+            "exit_code": 0,
+            "seconds": 5.293,
+            "log_sha256": "7f5a290906fbf67e1e62d60b05c700d50c61f0ddda81354a539ca556414a7e8b"
+          },
+          {
+            "stage": "ipc_lib",
+            "argv": [
+              "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/pvac-fresh/tests/ipc_lib",
+              "--test-threads=1",
+              "--nocapture"
+            ],
+            "exit_code": 0,
+            "seconds": 0.318,
+            "summary": [
+              "ok",
+              "0",
+              "0",
+              "0"
+            ],
+            "expected": 0,
+            "qualified": true,
+            "log_sha256": "df166913f47ff1f04202cae9b31df67ed272d692d99a0023a8117dc3029100dd",
+            "sidecar_sha256": "baf756cc8bda87514bd81a83022908c1278ace49bf3da333ad5adfa50f3c44fb"
+          },
+          {
+            "stage": "chain_compat",
+            "argv": [
+              "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/pvac-fresh/tests/chain_compat",
+              "--test-threads=1",
+              "--nocapture"
+            ],
+            "exit_code": 0,
+            "seconds": 15.796,
+            "summary": [
+              "ok",
+              "8",
+              "0",
+              "0"
+            ],
+            "expected": 8,
+            "qualified": true,
+            "log_sha256": "949b4471b93552e401fe80d9bc74c90756f7bd638dbe89c37474a9d820c05ade",
+            "sidecar_sha256": "baf756cc8bda87514bd81a83022908c1278ace49bf3da333ad5adfa50f3c44fb"
+          },
+          {
+            "stage": "error_paths",
+            "argv": [
+              "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/pvac-fresh/tests/error_paths",
+              "--test-threads=1",
+              "--nocapture"
+            ],
+            "exit_code": 0,
+            "seconds": 10.809,
+            "summary": [
+              "ok",
+              "18",
+              "0",
+              "0"
+            ],
+            "expected": 18,
+            "qualified": true,
+            "log_sha256": "331b062482b8c481cbdc2dae7d81b11c0f7e99ea8c33903908219e10810862ec",
+            "sidecar_sha256": "baf756cc8bda87514bd81a83022908c1278ace49bf3da333ad5adfa50f3c44fb"
+          },
+          {
+            "stage": "ipc_contract",
+            "argv": [
+              "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/pvac-fresh/tests/ipc_contract",
+              "--test-threads=1",
+              "--nocapture"
+            ],
+            "exit_code": 0,
+            "seconds": 22.176,
+            "summary": [
+              "ok",
+              "13",
+              "0",
+              "0"
+            ],
+            "expected": 13,
+            "qualified": true,
+            "log_sha256": "a76fcd64a2f80323ba95663a2db14f469dc71fb38f80918b098c947b42b7e84c",
+            "sidecar_sha256": "baf756cc8bda87514bd81a83022908c1278ace49bf3da333ad5adfa50f3c44fb"
+          },
+          {
+            "stage": "pvac_pubkey_roundtrip",
+            "argv": [
+              "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/pvac-fresh/tests/pvac_pubkey_roundtrip",
+              "--test-threads=1",
+              "--nocapture"
+            ],
+            "exit_code": 0,
+            "seconds": 35.573,
+            "summary": [
+              "ok",
+              "4",
+              "0",
+              "0"
+            ],
+            "expected": 4,
+            "qualified": true,
+            "log_sha256": "160e18d8961c2debda4f4d406a54cd1d1c9641cad68206fc8125ec86fcce8bee",
+            "sidecar_sha256": "baf756cc8bda87514bd81a83022908c1278ace49bf3da333ad5adfa50f3c44fb"
+          },
+          {
+            "stage": "stress_roundtrip",
+            "argv": [
+              "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/pvac-fresh/tests/stress_roundtrip",
+              "--test-threads=1",
+              "--nocapture",
+              "--ignored"
+            ],
+            "exit_code": 0,
+            "seconds": 952.283,
+            "summary": [
+              "ok",
+              "3",
+              "0",
+              "0"
+            ],
+            "expected": 3,
+            "qualified": true,
+            "log_sha256": "f2262e85da9c32b81e8a70f62dd6b80c3f844e3afc8ff33ddc8b924dcb2904bf",
+            "sidecar_sha256": "baf756cc8bda87514bd81a83022908c1278ace49bf3da333ad5adfa50f3c44fb"
+          }
+        ],
+        "failure": null,
+        "inputs_unchanged": true,
+        "root_sidecar_unchanged": true,
+        "processes_reaped": true,
+        "qualified": true,
+        "normal_passed": 43,
+        "stress_passed": 3,
+        "scope": "fresh local arm64 source build of sidecar vendored webcli IPC backend; not the separate native7f9 HFHEbackend",
+        "cleanup": {
+          "observed_unix": 1792256856.465865,
+          "exact_private_sidecar_children_remaining": [],
+          "clean": true
+        },
+        "qualification_boundary": "43 existing IPC tests and3 explicit stress tests against a freshly built exact vendored sidecar. Tests check serialization/KAT/prefix/framing/determinism/error/refusal behavior; stress does not measure RSS leaks or prove native chain admission, decryption or the separate modern Rust HFHE backend.",
+        "counting": "43 ordinary tests replace the prior old-binary applicability;3 previously ignored stress cases are separately qualified. Do not add repeated43 tests to whole-workspace unique-test totals.",
+        "artifact": {
+          "path": "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/pvac-fresh/source/octra-pvac-sidecar",
+          "sha256": "baf756cc8bda87514bd81a83022908c1278ace49bf3da333ad5adfa50f3c44fb",
+          "size": 636528,
+          "linked_libraries": "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/pvac-fresh/source/octra-pvac-sidecar:\n\t/usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 2000.67.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)\n"
+        },
+        "input_manifest_sha256": "f49fcffe4eda08547f016cf4358443b1dcfb0936f324ae23ed8d792982697aac",
+        "harness_sha256": "7004ac15bc93b998e871c44ea8324aa11e1b28db38dad649d09797b4d98d8b07",
+        "evidence_sha256": {
+          "chain_compat.log": "949b4471b93552e401fe80d9bc74c90756f7bd638dbe89c37474a9d820c05ade",
+          "compiler-identity.json": "84565ddc5e32f7f98889f152544ab0f4f8050332a903f8e73eb3d2c0652fd2be",
+          "run.py": "7004ac15bc93b998e871c44ea8324aa11e1b28db38dad649d09797b4d98d8b07",
+          "executables.json": "81e545841684f24ca6290e68d96466b78f9dfa52335018d17f9d29718778e56e",
+          "stress_roundtrip.log": "f2262e85da9c32b81e8a70f62dd6b80c3f844e3afc8ff33ddc8b924dcb2904bf",
+          "active-process-sample.json": "3e8941de6b93af72cbe823a2308c5d714d219cc0157360d9c138c158346b088e",
+          "ipc_lib.log": "df166913f47ff1f04202cae9b31df67ed272d692d99a0023a8117dc3029100dd",
+          "ipc_contract.log": "a76fcd64a2f80323ba95663a2db14f469dc71fb38f80918b098c947b42b7e84c",
+          "cleanup.json": "a233b4e08838d671ab23573887c338df629ac783197ae9771d94ca88d7611452",
+          "pvac_pubkey_roundtrip.log": "160e18d8961c2debda4f4d406a54cd1d1c9641cad68206fc8125ec86fcce8bee",
+          "build-plan.json": "9f50ae9dc7b271341a4602b4dbd3e69e22234e7cf89b5cc7b757ba2d444c3878",
+          "inputs.json": "f49fcffe4eda08547f016cf4358443b1dcfb0936f324ae23ed8d792982697aac",
+          "progress.json": "df17ad8043ae5ce37f82b8dcf23fee2423ff530f043fb38bdd253583905db35e",
+          "active-final-case-sample.json": "fe9333870ab0a3e5b93f83a30f2010a903d015731e5a2ef10918997c3e888cf2",
+          "error_paths.log": "331b062482b8c481cbdc2dae7d81b11c0f7e99ea8c33903908219e10810862ec",
+          "build.log": "7f5a290906fbf67e1e62d60b05c700d50c61f0ddda81354a539ca556414a7e8b",
+          "artifact.json": "ace6dc0df938c67774c850cd049f5b4c93f07accb10229d585f27f0d82a8d8af"
+        }
+      }
+    },
+    "fresh_sidecar_build": {
+      "path": "out/mesh-admission-20261017/pvac-fresh/artifact.json",
+      "sha256": "ace6dc0df938c67774c850cd049f5b4c93f07accb10229d585f27f0d82a8d8af",
+      "result": {
+        "path": "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/pvac-fresh/source/octra-pvac-sidecar",
+        "sha256": "baf756cc8bda87514bd81a83022908c1278ace49bf3da333ad5adfa50f3c44fb",
+        "size": 636528,
+        "linked_libraries": "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/pvac-fresh/source/octra-pvac-sidecar:\n\t/usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 2000.67.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)\n"
+      }
+    },
+    "linux_connected": {
+      "path": "out/mesh-admission-20261017/connected-v5/report.json",
+      "sha256": "93bee3120ffaeaea6ac2f3378c00d158fa5f25e6bceb647cfaec6d944709e9f6",
+      "result": {
+        "exit_code": 0,
+        "seconds": 1342.504,
+        "source_snapshot_sha256": "68b0d58b1eb42c3098962b44b928170be4d3533df4e61904a9ece39c95758ef5",
+        "driver_log_sha256": "343a83170a6bbe3987b70d2baf572ace8c83d029e6e135c508f83450452ed33f",
+        "sources_unchanged": true,
+        "harness_overrides": [],
+        "manifest_verified": true,
+        "source_manifest_sha256": "df970ebc4871f4677da923883dabb6863603b6bc58089ecdd212a5a1ae893db2"
+      },
+      "qualification": {
+        "qualified": true,
+        "main_exit": 0,
+        "target_exit": 0,
+        "run_exit": 0,
+        "scope": "isolated four-validator prepaid payment-plan application; real client, two endpoint kernels and canonical claims; no public-chain or Mainnet claim"
+      },
+      "image": "sha256:cee4a8ad076b1dd92c5799444beba5cfbb2c480f59b07fe0540f55359817877c"
+    },
+    "stock_tailscale": {
+      "path": "out/mesh-admission-20261017/stock-interop-v2/report.json",
+      "sha256": "9881690b7e02cd5221f0701aabbd4dcc505dac45d6c2d1ee00672afd9264c00a",
+      "result": {
+        "exit_code": 0,
+        "seconds": 20.261,
+        "log_sha256": "b9d29e0dd490b78ded36a8b45ee78400adfe3cfa277aa8f1e0f3e68f1961cc2c",
+        "image": "sha256:cee4a8ad076b1dd92c5799444beba5cfbb2c480f59b07fe0540f55359817877c",
+        "binary_sha256": "12001f9c73ee124097a18c44d4f050ac8d8aa29d86628857110e1045fe95e1ce",
+        "containers_left_for_bounded_followup": true
+      },
+      "final_cleanup": {
+        "path": "out/mesh-admission-20261017/stock-interop-v2/cleanup.json",
+        "sha256": "b9a8e26917d99b1528665d16278045fefd448fa689de8ae4e077bdc90de34a1e",
+        "result": {
+          "exit_code": 0,
+          "owned_containers_absent": true,
+          "other_containers_preserved": [
+            "octra-devnet-observer",
+            "octra-local-node-octra-node-1"
+          ],
+          "log_sha256": "a8cd774d8add5021b00e69a6cf60960885eece4206ba9253122d50ae4cc7ec60"
+        }
+      },
+      "forced_derp_acl": {
+        "status": "passed",
+        "path": "out/mesh-admission-20261017/stock-interop-v2/derp-verified.json",
+        "sha256": "124b42ffc6d296c35c2334957d180b7cf421591452a29a56e747d90bc40c0607",
+        "scope": "Two disposable stock userspace clients; outbound UDP except DNS blocked on both. Native TLS DERP, encrypted TSMP/ICMP, peer name, live ACL revocation/restoration. Not a canonical paid stock client or system-DNS qualification.",
+        "stock_version": "1.104.1",
+        "stock_oci_digest": "sha256:87c55d6be56ad85b3d8bceca5f87f73de288c609131460dd1be1874c250cc41d"
+      }
+    },
+    "native_peer": {
+      "path": "out/mesh-admission-20261017/native-peer-v3/result.json",
+      "sha256": "2701e7a24899e6d110de683019c7a6bbce5e17e4adea6d523e397143147fdd39",
+      "status": "PASS",
+      "provenance": {
+        "path": "out/mesh-admission-20261017/native-peer-v3/provenance.json",
+        "sha256": "e0adc1f831e132d402c0959366882905ab3d358bdb184de9c3951b428958d2e9"
+      },
+      "provenance_status": "PASS",
+      "frozen_binary_sha256": "2d97b84933187bce98cc9f61ffc00bd09787ddb783526c4f27fdb7867e81317e",
+      "frozen_binary_matches": true,
+      "cargo_invoked": false,
+      "scope": "Rust outbound HELLO/ACK/FINISH against native inbound swarm; bidirectional native framing, signed PEX records, signed profile offers, inventory/request exchange and clean shutdown. Public deterministic development keys. No consensus execution or funded VPN claim."
+    },
+    "retained_public_certificate": {
+      "path": "out/mesh-admission-20261017/public-snapshot-v3/result.json",
+      "sha256": "7c0b168e0d308654a2109ba4616ff016e690318d4ec20cc15f1a914228134439",
+      "status": "PASS",
+      "frozen_binary_sha256": "e2dbfcb6230a755335e3401105ca26742088e201fc9932fab1b04faa363c3ec9",
+      "frozen_binary_matches": true,
+      "cargo_invoked": false,
+      "scope": "Current Rust certificate verifier against a genuine retained public Octra devnet certificate, using independently Git-pinned adopted network authority and current wall-clock freshness. No public download, ledger import, sync, serving, funded VPN or mainnet qualification."
+    },
+    "physical_legacy": {
+      "path": "out/mesh-admission-20261017/legacy-physical-final-v1-evidence/qualification.json",
+      "sha256": "5592b23dd61d3f183a13a798fd8f073e1209d0c946ebcd92960973e7ef4d2659",
+      "status": "passed",
+      "cases": 40,
+      "case_names": [
+        "certified-native-positive",
+        "certified-rust-positive",
+        "certified-refuse-wrong-chain",
+        "certified-refuse-tampered-qc",
+        "stage-positive",
+        "stage-current-root",
+        "stage-weak-target",
+        "stage-bad-signature",
+        "stage-unknown-signer",
+        "stage-target-mismatch",
+        "stage-source-changed",
+        "stage-protected-prepare",
+        "stage-protected-commit",
+        "stage-protected-aborted",
+        "stage-missing-finality",
+        "stage-tampered-qc",
+        "stage-origin-mismatch",
+        "stage-environment-mismatch",
+        "native-positive",
+        "rust-positive",
+        "crash-stage",
+        "crash-pack",
+        "crash-store",
+        "crash-chain",
+        "crash-trim",
+        "refuse-protected-prepare",
+        "refuse-protected-commit",
+        "refuse-protected-aborted",
+        "refuse-torn-journal",
+        "refuse-missing-finality",
+        "refuse-bad-finality-root",
+        "refuse-bad-finality-txid",
+        "refuse-bad-index",
+        "refuse-bad-offset",
+        "refuse-bad-txlog",
+        "refuse-missing-tag",
+        "refuse-source-changed",
+        "refuse-orphan-staged",
+        "refuse-corrupt-plan",
+        "exclusive-native-owner"
+      ],
+      "artifacts": {
+        "node_sha256": "04cf5ab0b7be1d9fe7fafed814efe40989128485274c11ac5a66072d2e4e36ec",
+        "node_source": "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/normal-release/octra-node",
+        "stage_test_sha256": "9f8084729105c4cdc07ba8972e701b59e0d491479da1f00863b91109d533cfb9",
+        "stage_test_source": "/Users/androolloyd/Development/octra/out/mesh-admission-20261017/stress-final/legacy_stage-88915e1f2bedc262",
+        "stage_test_source_sha256": "e27af155b0ee24a4810241dcb1c4f046be5e49fd15012650f81ba196e49e93cf",
+        "native_manifest_sha256": "44bfc822797964fba16dd55e9ebf392c0bc8f1eff111402f4526813f51c33dc4",
+        "backend_sha256": "ea170eaa9758d4e57bf6acf11c47edc88f8e9454e83d4b30da32884ffa46ccc8",
+        "cases_sha256": "0b0acc19ee822dcbef1e75a91e894414ab5d49dec03123182facdafd50df6b97"
+      },
+      "native_image": "sha256:e61194220c65f9f0b8034a4816fb15d47dfe7dda8ece1087d9850b6d838bae95",
+      "qualifier_sha256": "9f64a6646f151ce063bf3b18e054afbb096e43651d8237aaa307526406bdaefb"
+    },
+    "native_references": {
+      "path": "out/mesh-admission-20261017/native-references.json",
+      "sha256": "956357d315bb76a58e76ff0aa3d35b436c9202ce5c7061ac9eb5570f8cf23320",
+      "upstream": "7f9be4489870645cfcc95439638cde40f5da9f50",
+      "fixtures": [
+        {
+          "path": "crates/octra-node-protocol/tests/fixtures/driver-round-recovery.json",
+          "sha256": "af242b938f55723658fa693fc103c57d03e2676fa20ec32fd468290adf73e5ca",
+          "source_count": 1158,
+          "cases": 1202
+        },
+        {
+          "path": "crates/octra-node-runtime/tests/fixtures/consensus-preverify-cache.json",
+          "sha256": "753c78ff9bfe572d1ee6e91e6ae99671699fabe2caf4fec26b476cf7df5cfae6",
+          "source_count": 1158,
+          "cases": 400
+        },
+        {
+          "path": "crates/octra-node-runtime/tests/fixtures/pvac-admission.json",
+          "sha256": "91bb6af4f39897056967ccd410248dcfade578c35fe504ce8e02de6a0b4ce0ab",
+          "source_count": 1158,
+          "cases": 8
+        },
+        {
+          "path": "crates/octra-node-runtime/tests/fixtures/epoch-tags-native.json",
+          "sha256": "1c6ef505fa65db5b4769b3b7e8edaf730929b32ffd8e9046a023cf4e5516c234",
+          "source_count": 1158,
+          "cases": null,
+          "native_pack_status": {
+            "split_epoch": null,
+            "pack_gc_enabled": true,
+            "pack_gc_running": false,
+            "pack_gc_need_bytes": null
+          }
+        }
+      ],
+      "verified_source_files": 1158
+    }
+  },
+  "preserved_failures": [
+    {
+      "record": "workspace-v2.json",
+      "outcome": "interrupted after confirmed proposal authority bug; exact completed HFHE component retained separately"
+    },
+    {
+      "record": "workspace-v3.json",
+      "outcome": "completed 2563 passes/4 failures/12 ignores; four test fixture failures corrected and full targets rerun"
+    },
+    {
+      "record": "final-fixtures-v1.json",
+      "outcome": "sandbox denied loopback listeners; unchanged sources pass final-fixtures-v2 with listeners allowed"
+    },
+    {
+      "record": "connected-v1 through connected-v4",
+      "outcome": "initial process/performance/test-concurrency harness failures preserved; final connected-v5 has no harness overrides"
+    },
+    {
+      "record": "stock-interop-v1",
+      "outcome": "obsolete log-pattern restart assertion replaced by authenticated node identity persistence while clients paused; actual final script passes"
+    },
+    {
+      "record": "single-kernel-v1/v2 and kernel-wireguard-v1",
+      "outcome": "source preflight and disposable apt network setup failures; corrected out-only provenance/tooling wrappers retained"
+    },
+    {
+      "record": "stress-final-v1.json",
+      "outcome": "old May24 sidecar stress deliberately retired; fresh exact-source sidecar build and all normal/stress tests qualify instead"
+    }
+  ],
+  "remaining_qualification": [
+    "Current candidate public observer adoption, sustained public catch-up/serving and retained-state restart at production state size.",
+    "Canonical paid stock-Tailscale onboarding, portal funding, system DNS, public octra.to TLS and additional-device browsing; stock mesh tests and controlled browser origin tests do not establish these.",
+    "Whole-library experimental hidden HFHE carrier/reset/reusable APIs are absent and outside the inspected active C/OCaml/node call surface; released Recrypt remains native-disabled.",
+    "Modern persistence intentionally adapts native intent to authenticated SQLite/object storage; native physical Irmin uses a pinned compatibility backend, not an all-Rust pack implementation.",
+    "Cross-architecture equality, exhaustive asynchronous OS/worker schedules, production load and side-channel properties are not certified by finite fixtures.",
+    "The kernel lifecycle test exercises real wg/ip shellouts and interfaces but does not instantiate the private Rust KernelBackend type.",
+    "Paid Single gate uses the existing private-administration/cooperative application; the separate four-validator gate qualifies the current prepaid application.",
+    "Public funded deployment and Mainnet qualification remain separate; no public transactions or consensus changes were made."
+  ],
+  "economic_scope": "Protocol commission zero; operator-defined prepaid class prices; settled purchases final; immediate available-OCT withdrawal; 24h replacement notice; fixed seven-day operator unstake. A purchase is not proof of arbitrary Internet delivery or non-delivery insurance.",
+  "public_observer_changed": false,
+  "evidence_policy": "Local out/ artifacts remain ignored; this checkpoint publishes result records, exact digests and replay entrypoints. Sources and generated native references are committed separately. Earlier dated checkpoints retain their original scope."
+}

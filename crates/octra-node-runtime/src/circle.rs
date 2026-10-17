@@ -11,6 +11,20 @@ pub use octra_circle_wasm_host::rust_api::{Error, HfheBackend, Reply};
 pub const MAX_INPUT_BYTES: usize = 16_777_216;
 pub const MAX_CALL_INPUT_BYTES: usize = 67_108_864;
 
+fn input_view(input: &[u8], maximum: usize) -> bool {
+    #[derive(serde::Deserialize)]
+    struct Classification {
+        #[serde(default)]
+        is_view: bool,
+    }
+    // Classify only the host's bounded input; the engine retains its native
+    // validation and diagnostics. No parse error becomes a new VM verdict.
+    if input.len() > maximum {
+        return false;
+    }
+    serde_json::from_slice::<Classification>(input).is_ok_and(|value| value.is_view)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WasmProfile {
     Standard,
@@ -39,6 +53,7 @@ pub struct WasmRules {
 #[derive(Clone)]
 pub struct CircleRuntime {
     backend: Arc<dyn HfheBackend>,
+    crypto: Option<Arc<crate::crypto_worker::Pool>>,
     program_keys: Arc<octra_node_protocol::program_trust::Keys>,
     public_keys: Option<Arc<dyn crate::pvac::Source>>,
 }
@@ -47,9 +62,41 @@ impl CircleRuntime {
     pub fn new(backend: Arc<dyn HfheBackend>) -> Self {
         Self {
             backend,
+            crypto: None,
             program_keys: Arc::new(octra_node_protocol::program_trust::Keys::default()),
             public_keys: None,
         }
+    }
+    /// Configure the packaged native crypto helper explicitly. The same pool
+    /// supplies OCTB tasks, Circle callbacks and speculative Single admission.
+    pub fn isolated(pool: Arc<crate::crypto_worker::Pool>) -> Self {
+        let mut runtime = Self::new(Arc::new(crate::circle_hfhe::Backend::isolated(
+            pool.clone(),
+        )));
+        runtime.crypto = Some(pool);
+        runtime
+    }
+    pub fn crypto_pool(&self) -> Option<&Arc<crate::crypto_worker::Pool>> {
+        self.crypto.as_ref()
+    }
+    /// Enter inside synchronous execution, never across an asynchronous await.
+    /// Nested calls retain the original deadline and cancellation authority.
+    pub fn crypto_scope(
+        &self,
+        view: bool,
+        cancelled: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Option<crate::crypto_worker::Scope> {
+        self.crypto.as_ref().map(|pool| pool.scope(view, cancelled))
+    }
+    pub fn crypto_scope_until(
+        &self,
+        view: bool,
+        cancelled: Arc<std::sync::atomic::AtomicBool>,
+        deadline: std::time::Instant,
+    ) -> Option<crate::crypto_worker::Scope> {
+        self.crypto
+            .as_ref()
+            .map(|pool| pool.scope_until(view, cancelled, deadline))
     }
     pub fn with_program_keys(mut self, keys: octra_node_protocol::program_trust::Keys) -> Self {
         self.program_keys = Arc::new(keys);
@@ -84,6 +131,10 @@ impl CircleRuntime {
     /// Host-owned native input only. Execution is synchronous and returns
     /// effects; the host must check success/unavailable before applying them.
     pub fn execute(&self, input: &[u8]) -> Result<Reply, Error> {
+        let _crypto = self.crypto_scope(
+            input_view(input, MAX_INPUT_BYTES),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        );
         if input.len() > MAX_INPUT_BYTES {
             return Err(Error::Rejected(format!(
                 "input too large: bytes={} limit={MAX_INPUT_BYTES}",
@@ -114,6 +165,7 @@ impl CircleRuntime {
         input: &crate::circle_input::Encoded,
         before: &StorageTable,
     ) -> Result<Receipt, circle_wasm::Error> {
+        let _crypto = self.crypto_scope(false, Arc::new(std::sync::atomic::AtomicBool::new(false)));
         if input.calls() {
             return Err(circle_wasm::Error::Unavailable(
                 b"Circle call input requires a journal".to_vec(),
@@ -158,6 +210,10 @@ impl CircleRuntime {
         mut call: impl FnMut(&[u8]) -> Result<Vec<u8>, circle_wasm::Error>,
         mut adapted: bool,
     ) -> Result<Receipt, circle_wasm::Error> {
+        let _crypto = self.crypto_scope(
+            input_view(input, MAX_CALL_INPUT_BYTES),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        );
         use octra_circle_wasm_host::rust_api::{CallSession, CallStep};
         let mut session = CallSession::new(self.backend.clone());
         let mut reply;

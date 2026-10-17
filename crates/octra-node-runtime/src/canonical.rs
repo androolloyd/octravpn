@@ -19,7 +19,9 @@ use sqlx::{
 };
 
 use crate::state_batch::{Snapshot, StateBatch, StoredObject};
+mod epoch_tags;
 mod epochs;
+pub use epoch_tags::EpochTagStats;
 mod inodes;
 mod reader;
 mod records;
@@ -130,6 +132,7 @@ pub struct CanonicalStore {
     source: Arc<SqliteEpochSource<NativeTransaction>>,
     head_cache: Arc<HeadCache>,
     snapshots: Arc<snapshots::Cache>,
+    epoch_tag_keep: i64,
 }
 
 struct HeadCache(std::sync::RwLock<Head>);
@@ -319,6 +322,7 @@ impl CanonicalStore {
         anchor: Head,
         bootstrap: Option<bootstrap::Bootstrap>,
     ) -> Result<Self> {
+        let epoch_tag_keep = epoch_tags::capture_keep()?;
         let state = state.with_persisted_counter().map_err(error)?;
         anchor.validate()?;
         let cursor = anchor.cursor;
@@ -380,7 +384,9 @@ impl CanonicalStore {
             source,
             head_cache,
             snapshots,
+            epoch_tag_keep,
         };
+        store.initialize_epoch_tags().await?;
         store.index_vm_receipts().await?;
         store.index_transactions().await?;
         Ok(store)
@@ -389,6 +395,7 @@ impl CanonicalStore {
     /// Reopen without repairing missing history. Corruption or mismatched chain
     /// identity requires explicit recovery; no new anchor is silently installed.
     pub async fn open(path: &Path, expected_chain: &ChainIdentity) -> Result<Self> {
+        let epoch_tag_keep = epoch_tags::capture_keep()?;
         let pool = connect(path).await?;
         let row = sqlx::query("SELECT chain,anchor FROM node_identity WHERE id=0")
             .fetch_one(&pool)
@@ -422,9 +429,11 @@ impl CanonicalStore {
             source,
             head_cache,
             snapshots: Arc::default(),
+            epoch_tag_keep,
         };
         store.verify_history().await?;
         store.snapshot().await?;
+        store.initialize_epoch_tags().await?;
         store.index_vm_receipts().await?;
         store.index_transactions().await?;
         Ok(store)
@@ -466,6 +475,7 @@ impl CanonicalStore {
             self.chain.clone(),
             self.anchor.cursor,
             self.snapshots.clone(),
+            self.epoch_tag_keep,
         )
     }
 
@@ -624,6 +634,7 @@ impl CanonicalStore {
         }
         write_snapshot(&mut tx, &applied.state, Some(&persisted)).await?;
         write_head(&mut tx, &head, &applied.certificate).await?;
+        epoch_tags::record(&mut tx, &head, self.epoch_tag_keep).await?;
         transactions::retain(&mut tx, head.cursor.sequence, &applied.transactions).await?;
         transactions::advance(&mut tx, base.cursor.sequence, head.cursor.sequence).await?;
         self.source

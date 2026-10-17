@@ -19,6 +19,7 @@ if ! cargo tarpaulin --version >/dev/null 2>&1; then
 fi
 
 cargo tarpaulin \
+  --release \
   --workspace \
   --all-targets \
   --timeout "$test_timeout" \

@@ -114,21 +114,24 @@ impl Pending {
     pub fn transactions(&self) -> Result<Vec<Transaction>> {
         Ok(self.lock()?.pool.all().cloned().collect())
     }
-    /// P2P gossip may arrive before a lagging observer restores its durable
-    /// queue. Defer that frame while recovery or a short queue write owns the
-    /// lock, but keep a failed journal fatal to the ingress service.
-    pub(crate) fn ingress_transactions(&self) -> Result<Option<Vec<Transaction>>> {
-        let Ok(state) = self.state.try_lock() else {
-            return Ok(None);
+    /// Gossip reads only the requested queue hashes. Recovery or a concurrent
+    /// writer may defer that lookup; a corrupt journal or poisoned owner never
+    /// becomes an apparently empty queue.
+    pub(crate) fn ingress_read<T>(&self, read: impl FnOnce(&Pool) -> T) -> Result<Option<T>> {
+        let state = match self.state.try_lock() {
+            Ok(state) => state,
+            Err(std::sync::TryLockError::WouldBlock) => return Ok(None),
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                return Err(anyhow!(Unavailable(
+                    "durable staging owner poisoned".into()
+                )));
+            }
         };
         anyhow::ensure!(
             !state.failed,
             Unavailable("durable staging unavailable".into())
         );
-        Ok(state
-            .recovery
-            .is_none()
-            .then(|| state.pool.all().cloned().collect()))
+        Ok(state.recovery.is_none().then(|| read(&state.pool)))
     }
     /// Durable entries are replayed against the current canonical head by
     /// `recover`; per-commit callbacks must wait until that replay completes.
@@ -778,9 +781,15 @@ mod ingress_tests {
     #[test]
     fn gossip_waits_for_queue_recovery_but_fails_on_poisoned_persistence() {
         let pending = Pending::new(Pool::default());
-        assert!(pending.ingress_transactions().unwrap().unwrap().is_empty());
+        assert_eq!(
+            pending.ingress_read(|pool| pool.all().count()).unwrap(),
+            Some(0)
+        );
         let state = pending.state.lock().unwrap();
-        assert!(pending.ingress_transactions().unwrap().is_none());
+        assert!(pending
+            .ingress_read(|_| panic!("busy queue must not be inspected"))
+            .unwrap()
+            .is_none());
         drop(state);
         let mut state = pending.state.lock().unwrap();
         state.recovery = Some(Recovery {
@@ -793,10 +802,30 @@ mod ingress_tests {
             preview: Pool::default().preview_state(),
         });
         drop(state);
-        assert!(pending.ingress_transactions().unwrap().is_none());
+        assert!(pending
+            .ingress_read(|_| panic!("recovering queue must not be inspected"))
+            .unwrap()
+            .is_none());
         let mut state = pending.state.lock().unwrap();
         state.failed = true;
         drop(state);
-        assert!(pending.ingress_transactions().is_err());
+        assert!(pending
+            .ingress_read(|_| panic!("failed journal must not be inspected"))
+            .is_err());
+    }
+    #[test]
+    fn poisoned_gossip_owner_is_fatal_instead_of_empty() {
+        let pending = Pending::new(Pool::default());
+        let poisoned = pending.clone();
+        let _ = std::thread::spawn(move || {
+            let _owner = poisoned.state.lock().unwrap();
+            panic!("deliberate owner poison");
+        })
+        .join();
+        assert!(pending
+            .ingress_read(|_| ())
+            .unwrap_err()
+            .to_string()
+            .contains("poisoned"));
     }
 }

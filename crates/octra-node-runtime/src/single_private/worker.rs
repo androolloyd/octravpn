@@ -1,5 +1,6 @@
 //! Owned, bounded native-style speculative range workers. The helper is trusted
 //! code in this very executable, not a proof supplied by a peer or caller.
+mod session;
 use super::CacheBinding;
 use crate::{
     private_balance::{self, Profile},
@@ -12,6 +13,7 @@ use octra_node_protocol::{
     transaction::{RuleMode, Transaction},
 };
 use serde::{Deserialize, Serialize};
+pub(crate) use session::Session;
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
@@ -20,7 +22,7 @@ use std::{
     process::{Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex, OnceLock,
+        Arc, OnceLock,
     },
     time::{Duration, Instant},
 };
@@ -35,7 +37,7 @@ pub struct Limits {
     pub rss_mb: u64,
 }
 impl Limits {
-    fn capture() -> Self {
+    pub fn capture() -> Self {
         Self::of_getenv(|name| std::env::var(name).ok())
     }
     fn of_getenv(get: impl Fn(&str) -> Option<String>) -> Self {
@@ -276,7 +278,7 @@ enum Outcome {
     Unavailable(String),
 }
 #[derive(Debug)]
-enum Failure {
+pub(crate) enum Failure {
     Cancelled,
     QueueBusy,
     TimedOut,
@@ -306,26 +308,40 @@ impl From<&str> for Failure {
         Self::Failed(reason.into())
     }
 }
-struct Slot<'a>(&'a Worker);
-impl Drop for Slot<'_> {
-    fn drop(&mut self) {
-        let mut active = self
-            .0
-            .active
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        *active -= 1;
-    }
-}
 /// Trusted executable, capacity and OS child ownership are sealed in Runtime.
 /// Neither its path nor its limits can be supplied by a request.
 pub struct Worker {
     executable: PathBuf,
     executable_sha: [u8; 32],
     limits: Limits,
-    active: Mutex<usize>,
+    proofs: crate::compute::Pool,
 }
 impl Worker {
+    /// Explicit trusted helper capability for libraries and embedded runtimes.
+    /// The executable must implement the worker commands used by its caller.
+    pub fn open(executable: &std::path::Path, limits: Limits) -> Result<Arc<Self>, String> {
+        if !(1..=2).contains(&limits.capacity)
+            || !limits.timeout_seconds.is_finite()
+            || !(1.0..=1800.0).contains(&limits.timeout_seconds)
+            || !(64..=32768).contains(&limits.rss_mb)
+        {
+            return Err("invalid captured worker limits".into());
+        }
+        let executable = std::fs::canonicalize(executable).map_err(|e| e.to_string())?;
+        if !std::fs::metadata(&executable)
+            .map_err(|e| e.to_string())?
+            .is_file()
+        {
+            return Err("worker executable is not a regular file".into());
+        }
+        let executable_sha = file_hash(&executable)?;
+        Ok(Arc::new(Self {
+            executable,
+            executable_sha,
+            proofs: crate::compute::Pool::new_sync(crate::compute::Limits::proof(limits.capacity))?,
+            limits,
+        }))
+    }
     pub fn capture() -> Result<Arc<Self>, String> {
         static WORKER: OnceLock<Result<Arc<Worker>, String>> = OnceLock::new();
         WORKER
@@ -334,17 +350,23 @@ impl Worker {
                     .and_then(std::fs::canonicalize)
                     .map_err(|e| e.to_string())?;
                 let executable_sha = file_hash(&executable)?;
+                let limits = Limits::capture();
                 Ok(Arc::new(Self {
                     executable,
                     executable_sha,
-                    limits: Limits::capture(),
-                    active: Mutex::new(0),
+                    proofs: crate::compute::Pool::new_sync(crate::compute::Limits::proof(
+                        limits.capacity,
+                    ))?,
+                    limits,
                 }))
             })
             .clone()
     }
     pub fn limits(&self) -> &Limits {
         &self.limits
+    }
+    pub(crate) fn proofs(&self) -> &crate::compute::Pool {
+        &self.proofs
     }
     /// This synchronous runner belongs on an owned OS worker. Dropping a caller
     /// future never drops its child. Cancellation is explicit and always reaps.
@@ -373,17 +395,29 @@ impl Worker {
             ranges: (delta, balance),
         })
     }
-    fn acquire(&self, cancelled: &AtomicBool, queue_waits: &mut u8) -> Result<Slot<'_>, Failure> {
+    #[cfg(test)]
+    fn acquire(
+        &self,
+        cancelled: &AtomicBool,
+        queue_waits: &mut u8,
+    ) -> Result<crate::compute::Permit, Failure> {
+        self.acquire_check(&|| cancelled.load(Ordering::Acquire), queue_waits)
+    }
+    fn acquire_check(
+        &self,
+        cancelled: &impl Fn() -> bool,
+        queue_waits: &mut u8,
+    ) -> Result<crate::compute::Permit, Failure> {
         loop {
-            if cancelled.load(Ordering::Acquire) {
+            if cancelled() {
                 return Err(Failure::Cancelled);
             }
-            let mut active = self.active.lock().map_err(|_| "worker capacity poisoned")?;
-            if *active < self.limits.capacity {
-                *active += 1;
-                return Ok(Slot(self));
+            if let Some(permit) = self
+                .proofs
+                .acquire_sync(crate::compute::Priority::Speculative, false)
+            {
+                return Ok(permit);
             }
-            drop(active);
             if *queue_waits == 40 {
                 return Err(Failure::QueueBusy);
             }
@@ -392,7 +426,7 @@ impl Worker {
             // cancellation to release a waiting job without another 50ms delay.
             let started = Instant::now();
             while started.elapsed() < Duration::from_millis(50) {
-                if cancelled.load(Ordering::Acquire) {
+                if cancelled() {
                     return Err(Failure::Cancelled);
                 }
                 std::thread::sleep(Duration::from_millis(5));
@@ -432,15 +466,6 @@ impl Worker {
         attempt: u8,
         queue_waits: &mut u8,
     ) -> Result<bool, Failure> {
-        let _slot = self.acquire(cancelled, queue_waits)?;
-        if cancelled.load(Ordering::Acquire) {
-            return Err(Failure::Cancelled);
-        }
-        if file_hash(&self.executable)? != self.executable_sha {
-            return Err(Failure::Unavailable(
-                "worker executable changed; restart required".into(),
-            ));
-        }
         let input = Request {
             attempt,
             balance,
@@ -457,13 +482,54 @@ impl Worker {
         if bytes.len() > MAX_INPUT + 1024 {
             return Err("worker request exceeds local limit".into());
         }
+        let _proof = self.acquire_check(&|| cancelled.load(Ordering::Acquire), queue_waits)?;
+        let deadline = Instant::now() + Duration::from_secs_f64(self.limits.timeout_seconds);
+        let output = self.exchange("single-range-worker", &bytes, MAX_OUTPUT, deadline, || {
+            cancelled.load(Ordering::Acquire)
+        })?;
+        let response: Response = serde_json::from_slice(&output)
+            .map_err(|e| format!("worker response malformed: {e}"))?;
+        if response.generation != generation
+            || response.digest != task.digest
+            || response.balance != balance
+            || response.attempt != attempt
+        {
+            return Err("worker completion binding differs".into());
+        }
+        match response.outcome {
+            Outcome::Checked(valid) => Ok(valid),
+            Outcome::Unavailable(reason) => Err(Failure::Unavailable(reason)),
+        }
+    }
+    /// Owned native process runner. The caller holds either a proof-channel
+    /// permit or native FHE actor admission; independent lanes can coexist.
+    pub(crate) fn exchange(
+        &self,
+        command: &str,
+        bytes: &[u8],
+        output_limit: usize,
+        deadline: Instant,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<Vec<u8>, Failure> {
+        if cancelled() {
+            return Err(Failure::Cancelled);
+        }
+        let timeout = deadline.saturating_duration_since(Instant::now());
+        if timeout.is_zero() {
+            return Err(Failure::TimedOut);
+        }
+        if file_hash(&self.executable)? != self.executable_sha {
+            return Err(Failure::Unavailable(
+                "worker executable changed; restart required".into(),
+            ));
+        }
         let mut child = Command::new(&self.executable)
-            .arg("single-range-worker")
+            .arg(command)
             .arg("--parent-pid")
             .arg(std::process::id().to_string())
             .env(
                 "OCTRA_PVAC_VERIFY_TIMEOUT_SEC",
-                self.limits.timeout_seconds.to_string(),
+                timeout.as_secs_f64().max(1.0).to_string(),
             )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -493,20 +559,19 @@ impl Worker {
                 }
                 let owned = ChildGuard(&mut child);
                 let input_thread = scope.spawn(|| {
-                    let r = stdin.write_all(&bytes);
+                    let r = stdin.write_all(bytes);
                     drop(stdin);
                     if r.is_err() {
                         io_failed.store(true, Ordering::Release);
                     }
                     r
                 });
-                let output_thread = scope.spawn(|| bounded_read(stdout, MAX_OUTPUT, &io_failed));
+                let output_thread = scope.spawn(|| bounded_read(stdout, output_limit, &io_failed));
                 let error_thread = scope.spawn(|| bounded_read(stderr, MAX_OUTPUT, &io_failed));
-                let started = Instant::now();
                 let status = loop {
-                    let why = if cancelled.load(Ordering::Acquire) {
+                    let why = if cancelled() {
                         Some(Failure::Cancelled)
-                    } else if started.elapsed().as_secs_f64() >= self.limits.timeout_seconds {
+                    } else if Instant::now() >= deadline {
                         Some(Failure::TimedOut)
                     } else if io_failed.load(Ordering::Acquire) {
                         Some(Failure::Failed(
@@ -546,22 +611,10 @@ impl Worker {
                 if !status.success() {
                     return Err(Failure::Failed(format!("worker exited {status}")));
                 }
-                if cancelled.load(Ordering::Acquire) {
+                if cancelled() {
                     return Err(Failure::Cancelled);
                 }
-                let response: Response = serde_json::from_slice(&output)
-                    .map_err(|e| format!("worker response malformed: {e}"))?;
-                if response.generation != generation
-                    || response.digest != task.digest
-                    || response.balance != balance
-                    || response.attempt != attempt
-                {
-                    return Err("worker completion binding differs".into());
-                }
-                match response.outcome {
-                    Outcome::Checked(valid) => Ok(valid),
-                    Outcome::Unavailable(reason) => Err(Failure::Unavailable(reason)),
-                }
+                Ok(output)
             })
         })();
         let _ = child.kill();
@@ -582,7 +635,7 @@ fn file_hash(path: &std::path::Path) -> Result<[u8; 32], String> {
     }
     Ok(h.finalize().into())
 }
-fn bounded_read(
+pub(crate) fn bounded_read(
     mut pipe: impl Read,
     maximum: usize,
     failed: &AtomicBool,
@@ -620,9 +673,15 @@ fn rss_mb(pid: u32) -> Option<u64> {
         .ok()?;
     Some(raw.div_ceil(1024))
 }
-struct Watchdog(Arc<AtomicBool>);
+pub(crate) struct Watchdog(Arc<AtomicBool>);
 impl Watchdog {
-    fn start(parent: u32) -> Result<Self, String> {
+    pub(crate) fn start(parent: u32) -> Result<Self, String> {
+        Self::start_inner(parent, Some(Limits::capture().timeout_seconds + 0.1))
+    }
+    pub(crate) fn start_session(parent: u32) -> Result<Self, String> {
+        Self::start_inner(parent, None)
+    }
+    fn start_inner(parent: u32, deadline: Option<f64>) -> Result<Self, String> {
         #[cfg(not(unix))]
         return Err("Single range helper requires Unix parent ownership".into());
         #[cfg(unix)]
@@ -637,12 +696,14 @@ impl Watchdog {
             let stopped = Arc::new(AtomicBool::new(false));
             let stop = stopped.clone();
             let started = Instant::now();
-            let deadline = Limits::capture().timeout_seconds + 0.1;
             std::thread::Builder::new()
                 .name("octra-range-watchdog".into())
                 .spawn(move || {
                     while !stop.load(Ordering::Acquire) {
-                        if !is_parent() || started.elapsed().as_secs_f64() >= deadline {
+                        if !is_parent()
+                            || deadline
+                                .is_some_and(|deadline| started.elapsed().as_secs_f64() >= deadline)
+                        {
                             std::process::exit(74)
                         }
                         std::thread::sleep(Duration::from_millis(50));
@@ -741,8 +802,12 @@ mod tests {
                 timeout_seconds: 600.,
                 rss_mb: 9216,
             },
-            active: Mutex::new(1),
+            proofs: crate::compute::Pool::new_sync(crate::compute::Limits::proof(1)).unwrap(),
         };
+        let held = worker
+            .proofs
+            .acquire_sync(crate::compute::Priority::Required, false)
+            .unwrap();
         let cancelled = AtomicBool::new(false);
         let mut waits = 0;
         let started = Instant::now();
@@ -763,12 +828,12 @@ mod tests {
             worker.acquire(&cancelled, &mut waits),
             Err(Failure::Cancelled)
         ));
-        *worker.active.lock().unwrap() = 0;
+        drop(held);
         cancelled.store(false, Ordering::Release);
         let slot = worker.acquire(&cancelled, &mut waits).unwrap();
-        assert_eq!(*worker.active.lock().unwrap(), 1);
+        assert_eq!(worker.proofs.stats().active, 1);
         drop(slot);
-        assert_eq!(*worker.active.lock().unwrap(), 0);
+        assert_eq!(worker.proofs.stats().active, 0);
     }
     #[test]
     fn pristine_native_worker_environment_limits() {

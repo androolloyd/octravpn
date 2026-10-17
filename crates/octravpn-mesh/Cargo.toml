@@ -22,13 +22,13 @@ octravpn-core = { path = "../octravpn-core" }
 # keep working. `full` keeps the public control-router WireState shape
 # aligned with the embedded headscale CLI build; native DERP is threaded
 # through WireStateBuilder and enabled per host via [control.derp].serve.
-headscale-api = { git = "https://github.com/androolloyd/headscale-rs", rev = "5662f202a8448364cb212a12c0489216c74ab6ca", default-features = false, features = ["admin", "full"] }
+headscale-api = { git = "https://github.com/androolloyd/headscale-rs", rev = "64bc54312ff9c4c2946f563f21875cf55e3f8f55", default-features = false, features = ["admin", "full"] }
 # Canonical ACL evaluator — shared with headscale-api as of
 # 2026-05-20. Lives in the headscale-rs workspace alongside
 # headscale-api so neither side has a dep cycle. The OctraVPN-only
 # extension (`SignedAclDoc`, ed25519 owner-signed wrapper) lives in
 # our `acl.rs` and consumes the canonical `AclDoc` from here.
-headscale-api-acl = { git = "https://github.com/androolloyd/headscale-rs", rev = "5662f202a8448364cb212a12c0489216c74ab6ca" }
+headscale-api-acl = { git = "https://github.com/androolloyd/headscale-rs", rev = "64bc54312ff9c4c2946f563f21875cf55e3f8f55" }
 
 anyhow      = { workspace = true }
 async-trait = { workspace = true }

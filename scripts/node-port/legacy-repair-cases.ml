@@ -117,7 +117,7 @@ let certify dir =
  let selected=Option.get(unwrap(Fork.read_plan dir))in
  let key n=Mirage_crypto_ec.Ed25519.priv_of_octets(String.make 32(Char.chr n))|>Result.get_ok in
  let public n=Mirage_crypto_ec.Ed25519.(pub_to_octets(pub_of_priv(key n)))in
- let address n="legacy-validator-"^string_of_int n in
+ let address n=Octra_core.Crypto.Address.address_from_pubkey(Base64.encode_exn(public n))in
  let validators=T.make_validator_set(List.init 4(fun i->T.{address=address(i+1);pubkey=public(i+1)}))in
  let certificate (value:C.HM.t) previous : T.finalize =
   let header:T.epoch_header={proto_version=T.proto_version_parent_legacy;
@@ -180,6 +180,7 @@ let () =
   |"inspect"->inspect dir
   |"mutate"->(if Sys.argv.(3)="tampered-qc" then tamper_qc dir else mutate dir Sys.argv.(3));`Null
   |"certify"->certify dir;`Bool true
+  |"unstage"->Fork.clear dir;inspect dir
   |"verify-committed"->let value=head dir in let entry=Option.get(FL.find(FL.index dir)value.epoch_id)in
     ignore(unwrap(Journal.committed_for ~chain_id:"legacy-repair-fixture" ~entry dir));`Bool true
   |"advance"->C.advance dir (head dir);

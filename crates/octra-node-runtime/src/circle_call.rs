@@ -291,6 +291,10 @@ pub(crate) fn execute_journalled(
     value: &BigInt,
     mut journal: Option<&mut crate::circle_journal::Journal<'_>>,
 ) -> Result<Call, Error> {
+    let _crypto = runtime.crypto_scope(
+        false,
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    );
     let priced = ctx.profile.proof_exec;
     let limit = if priced {
         ctx.limit.clamp(0, 20_000_000)

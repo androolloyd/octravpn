@@ -28,6 +28,16 @@ use octra_node_runtime::{
 };
 use serde_json::Value;
 use std::{collections::BTreeMap, sync::Arc};
+fn isolated_runtime() -> CircleRuntime {
+    use octra_node_runtime::crypto_worker::{Limits, Pool};
+    CircleRuntime::isolated(
+        Pool::open(
+            std::path::Path::new(env!("CARGO_BIN_EXE_octra-node")),
+            Limits::capture(),
+        )
+        .unwrap(),
+    )
+}
 struct LocalHistory(Head);
 #[async_trait::async_trait]
 impl History for LocalHistory {
@@ -198,7 +208,7 @@ async fn pristine_single_sender_footer_tree_and_commit_bytes() {
         cfg.max_stealth = case["input"]["stealth"].as_u64().unwrap() as usize;
         let native = Native::new(
             cfg,
-            CircleRuntime::new(Arc::new(octra_node_runtime::circle_hfhe::Backend)),
+            isolated_runtime(),
             Arc::new(LocalHistory(parent.clone())),
         )
         .unwrap();
@@ -446,7 +456,7 @@ async fn open_node(path: &std::path::Path, now: f64) -> Arc<single::Node> {
     let store = Arc::new(store);
     let native = Native::new(
         config(path),
-        CircleRuntime::new(Arc::new(octra_node_runtime::circle_hfhe::Backend)),
+        isolated_runtime(),
         Arc::new(single::History(store.clone())),
     )
     .unwrap();
@@ -1007,7 +1017,7 @@ async fn activated_public_single_preserves_native_missing_parent_refusal() {
         );
         let native = Native::new(
             cfg,
-            CircleRuntime::new(Arc::new(octra_node_runtime::circle_hfhe::Backend)),
+            isolated_runtime(),
             Arc::new(AnchorHistory {
                 head: head.clone(),
                 roots,

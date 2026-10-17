@@ -58,7 +58,12 @@ impl<A: Host> Node<A> {
             .await?;
         let header = &finalized.header;
         let rules = executor.rules(&parent, header, &context)?;
-        let bundle = if header.tx_list_hash == engine::tx_list_hash_for_header(&[])
+        let id = hash::proposal_id(header)?;
+        let bundle = if let Some(raw) = peers.local(&id).await? {
+            // A cache hit is not execution evidence. Bind every retained byte
+            // again, exactly as for a signed peer response, before replay.
+            consensus_bundle::finalized(header, &raw, &rules)?
+        } else if header.tx_list_hash == engine::tx_list_hash_for_header(&[])
             && header.receipt_root == hash::receipt_root(&[])?
         {
             consensus_bundle::finalized(
@@ -70,17 +75,21 @@ impl<A: Host> Node<A> {
                 },
                 &rules,
             )?
+        } else if let Some((_, bundle)) = peers
+            .query(header.epoch_id, id, timeout, |response| {
+                Ok(consensus_bundle::finalized(header, &response.bundle, &rules).ok())
+            })
+            .await?
+        {
+            bundle
         } else {
-            let id = hash::proposal_id(header)?;
-            let Some((_, bundle)) = peers
-                .query(header.epoch_id, id, timeout, |response| {
-                    Ok(consensus_bundle::finalized(header, &response.bundle, &rules).ok())
-                })
-                .await?
-            else {
+            // Native finalized acquisition rechecks its cache after a
+            // missed query: another proposal worker may have supplied
+            // the exact bundle while the peer request was pending.
+            let Some(raw) = peers.local(&id).await? else {
                 return Ok(None);
             };
-            bundle
+            consensus_bundle::finalized(header, &raw, &rules)?
         };
         let bundle = bundle.replay(rules.envelope)?;
         let executed = executor

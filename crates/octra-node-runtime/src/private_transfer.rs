@@ -2,14 +2,14 @@
 // Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
 //! Native V5 stealth sends and claims. Only verified or certificate-bound plans
 //! can debit an encrypted balance, create an output, or consume a claim.
+use crate::private_crypto::isolated::PublicKey;
 use crate::{
     private_balance::{Evidence, Profile},
-    private_crypto as crypto,
+    private_crypto::isolated as crypto,
     private_error::{check, failure, Error},
     private_outputs::{self, Output},
     state_batch::StateBatch,
 };
-use octra_hfhe::keys::PublicKey;
 use octra_node_protocol::{
     native_json::{Document, Value},
     state::Ledger,

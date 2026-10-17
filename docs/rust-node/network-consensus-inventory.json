@@ -9452,62 +9452,80 @@
   },
   "historical_qualification_scope": "Dated local_* qualification records below preserve their original snapshots, commands, hashes and remaining-work lists. They are historical evidence, not current source-completeness counters; current_qualification supersedes their release status.",
   "current_qualification": {
-    "date": "2026-10-15",
-    "status": "local_release_and_paid18_qualified_public_observer_and_storage_followups_active",
+    "date": "2026-10-17",
+    "status": "active_node_local_candidate_qualified_public_operation_open",
     "guide": "docs/rust-node/status.md",
-    "checkpoints": [
-      "docs/rust-node/checkpoints/2026-10-15/native-vpn.json",
-      "docs/rust-node/checkpoints/2026-10-15/formal.json",
-      "docs/rust-node/checkpoints/2026-10-15/browser.json",
-      "docs/rust-node/checkpoints/2026-10-15/snapshot-service.json",
-      "docs/rust-node/checkpoints/2026-10-15/node.json",
-      "docs/rust-node/checkpoints/2026-10-15/runtime.json",
-      "docs/rust-node/checkpoints/2026-10-15/optional-resource.json",
-      "docs/rust-node/checkpoints/2026-10-15/canonical-read.json",
-      "docs/rust-node/checkpoints/2026-10-15/canonical-storage.json",
-      "docs/rust-node/checkpoints/2026-10-15/public-devnet.json"
-    ],
-    "isolated_paid_application": "Actual factory/main-v5 signed deployment, private administration, canonical escrow/claim/confirm/refunds, real WG UDP and client/node OS TUN TCP/UDP/ICMP, operator restart with same opening and original TCP continuation, matching4validator ExEx and gateway asset. Explicit private-genesis application profile only.",
-    "node_release_tests": 54,
-    "hfhe_release_tests": 49,
-    "paid_fixture_focused_tests": 51,
+    "source_review": "docs/rust-node/checkpoints/2026-10-17/core-parity-review.md",
+    "implementation_census": "docs/rust-node/checkpoints/2026-10-17/core-parity-census.json",
+    "active_hfhe_census": "docs/rust-node/checkpoints/2026-10-17/hfhe-active-census.json",
+    "result_policy": "Source-bound core-parity checkpoint supersedes candidate-pending descriptions: workspace and complete failed-target reruns, unchanged HFHE component, generated native references, strict lint, normal production tests/build and composed Linux/browser/stock-mesh gates have explicit results. Initial failures remain preserved. This is bounded local qualification, not full native behavioral equivalence or public launch.",
     "remaining": [
-      "Public observer catch-up, healthy canonical services and retained-state restart qualification",
-      "External Tailscale HTTPS and additional-device navigation",
-      "Native inode storage full qualification and combined Node/browser/paid-image adoption gates",
-      "Distinct native Single-mode implementation and source-bound qualification",
-      "Production private-admin setup/upgrade custody and funded identity",
-      "Full native behavioral parity and cross-architecture/failure-boundary qualification"
+      "Qualify sustained public observer catch-up, healthy canonical services and retained-state restart at production state size, including current status-summary availability; each changed account root still requires a full validated cold load",
+      "Canonical paid stock-Tailscale onboarding, portal funding, system DNS and public octra.to TLS remain separately unqualified; standalone stock mesh registration/restart/forced DERP/ACL tests pass locally",
+      "External Tailscale HTTPS and additional-device navigation qualification",
+      "Production identity, private administration custody and funded deployment prerequisites",
+      "Cross-architecture and asynchronous failure-schedule qualification; source mappings and finite fixtures do not establish complete behavioral equivalence"
     ],
-    "economic_scope": "Zero VPN commission; exact opening tariff/claim net binding. Cooperative operator-claim/client-confirm protocol is not adversarial payment-fairness proof.",
-    "node_release_evidence": {
-      "checkpoint": "docs/rust-node/checkpoints/2026-10-15/node.json",
-      "qualification": "out/node-port-final-20261015/inode-combined-qualification.json",
-      "passed": 54,
-      "exex_passed": 25,
-      "native_pvac_passed": 1,
-      "targets": 13,
-      "log_sha256": "a1e9913f3aba0cb814dcacd988466931e7ebd3087fed1a7fc11fa4af26e9e289",
-      "scope": "Fresh full Node/ExEx/PVAC release on adopted inode,observer-admission,optional libraries and published Foundry source. Public replay/serving are separate gates."
+    "economic_scope": "Current payments use explicit prepaid byte purchases with immutable accepted tariffs, instant withdrawal of available channel OCT, final settled purchases, 24-hour replacement-rate notice and seven-day operator unstake. Protocol commission is zero. Arbitrary internet nondelivery is not a trustlessly proven slash predicate.",
+    "historical_20261015": {
+      "date": "2026-10-15",
+      "status": "local_release_and_paid18_qualified_public_observer_and_storage_followups_active",
+      "guide": "docs/rust-node/status.md",
+      "checkpoints": [
+        "docs/rust-node/checkpoints/2026-10-15/native-vpn.json",
+        "docs/rust-node/checkpoints/2026-10-15/formal.json",
+        "docs/rust-node/checkpoints/2026-10-15/browser.json",
+        "docs/rust-node/checkpoints/2026-10-15/snapshot-service.json",
+        "docs/rust-node/checkpoints/2026-10-15/node.json",
+        "docs/rust-node/checkpoints/2026-10-15/runtime.json",
+        "docs/rust-node/checkpoints/2026-10-15/optional-resource.json",
+        "docs/rust-node/checkpoints/2026-10-15/canonical-read.json",
+        "docs/rust-node/checkpoints/2026-10-15/canonical-storage.json",
+        "docs/rust-node/checkpoints/2026-10-15/public-devnet.json"
+      ],
+      "isolated_paid_application": "Actual factory/main-v5 signed deployment, private administration, canonical escrow/claim/confirm/refunds, real WG UDP and client/node OS TUN TCP/UDP/ICMP, operator restart with same opening and original TCP continuation, matching4validator ExEx and gateway asset. Explicit private-genesis application profile only.",
+      "node_release_tests": 54,
+      "hfhe_release_tests": 49,
+      "paid_fixture_focused_tests": 51,
+      "remaining": [
+        "Public observer catch-up, healthy canonical services and retained-state restart qualification",
+        "External Tailscale HTTPS and additional-device navigation",
+        "Native inode storage full qualification and combined Node/browser/paid-image adoption gates",
+        "Distinct native Single-mode implementation and source-bound qualification",
+        "Production private-admin setup/upgrade custody and funded identity",
+        "Full native behavioral parity and cross-architecture/failure-boundary qualification"
+      ],
+      "economic_scope": "Zero VPN commission; exact opening tariff/claim net binding. Cooperative operator-claim/client-confirm protocol is not adversarial payment-fairness proof.",
+      "node_release_evidence": {
+        "checkpoint": "docs/rust-node/checkpoints/2026-10-15/node.json",
+        "qualification": "out/node-port-final-20261015/inode-combined-qualification.json",
+        "passed": 54,
+        "exex_passed": 25,
+        "native_pvac_passed": 1,
+        "targets": 13,
+        "log_sha256": "a1e9913f3aba0cb814dcacd988466931e7ebd3087fed1a7fc11fa4af26e9e289",
+        "scope": "Fresh full Node/ExEx/PVAC release on adopted inode,observer-admission,optional libraries and published Foundry source. Public replay/serving are separate gates."
+      },
+      "snapshot_exporter_evidence": {
+        "checkpoint": "docs/rust-node/checkpoints/2026-10-15/snapshot-service.json",
+        "host_lifecycle_and_role_tests": 8,
+        "native_vectors": 39,
+        "strict_node_clippy": "all-targets --no-deps passed",
+        "public_producer_qualified": false
+      },
+      "composed_node_exex_pvac_tests": 80,
+      "paid_fixture_native_comparisons": 39,
+      "runtime_release_tests": 187,
+      "optional_resource_native_cases": 1070,
+      "protocol_release_tests": 107
     },
-    "snapshot_exporter_evidence": {
-      "checkpoint": "docs/rust-node/checkpoints/2026-10-15/snapshot-service.json",
-      "host_lifecycle_and_role_tests": 8,
-      "native_vectors": 39,
-      "strict_node_clippy": "all-targets --no-deps passed",
-      "public_producer_qualified": false
-    },
-    "composed_node_exex_pvac_tests": 80,
-    "paid_fixture_native_comparisons": 39,
-    "runtime_release_tests": 187,
-    "optional_resource_native_cases": 1070,
-    "protocol_release_tests": 107
+    "checkpoint": "docs/rust-node/checkpoints/2026-10-17/core-parity.json"
   },
   "operational_partials": [
     {
       "native": "node_runtime/sync_publish.ml",
       "implemented": "Manual explicit-signature CLI plus automatic retained-evidence exporter cycle, configured role/force/retry, in-memory signer and native placement are integrated in source.",
-      "remaining": "Public producer qualification and final Linux combined rerun; private host publication/restart/capture-failure tests and39 actual native comparisons passed.",
+      "remaining": "Public producer qualification remains separate; final composed Linux run passes locally, and private host publication/restart/capture-failure tests and39 actual native comparisons passed.",
       "native_call_sites": [
         "bin/octra_node.ml:2014",
         "node_runtime/sync_publish.ml:875",
@@ -9518,7 +9536,7 @@
     {
       "native": "node_runtime/sync_lease.ml",
       "implemented": "Descriptor-safe chunk lease renewal plus automatic bounded lease-aware owned retention, staged cleanup and durable inode-bound removal recovery are integrated in source.",
-      "remaining": "Public producer qualification and final Linux combined rerun; private host lease/pruning/foreign-path/interrupted-removal tests passed.",
+      "remaining": "Public producer qualification remains separate; final composed Linux run passes locally, and private host lease/pruning/foreign-path/interrupted-removal tests passed.",
       "native_call_sites": [
         "node_runtime/sync_publish.ml:279",
         "node_runtime/sync_publish.ml:288"

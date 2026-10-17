@@ -130,7 +130,9 @@ pub async fn run(
             });
         }
         if let Some(mesh) = services.mesh {
-            let service = mesh.bind().await?;
+            let service = mesh
+                .bind_guarded(crate::mesh::admission(facade.published().shared.clone()))
+                .await?;
             tasks.spawn(service.run(stopped.clone()));
         }
         if let Some(gateway) = services.gateway {

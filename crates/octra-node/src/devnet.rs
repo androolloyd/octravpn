@@ -29,7 +29,6 @@ use sha2::{Digest, Sha256};
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
-    sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::watch;
@@ -288,7 +287,12 @@ pub fn read(path: &Path) -> Result<Config> {
 }
 pub use crate::identity::read as read_key;
 
-pub async fn run(config: Config, shutdown: watch::Receiver<bool>) -> Result<()> {
+pub async fn run(
+    config: Config,
+    runtime: CircleRuntime,
+    shutdown: watch::Receiver<bool>,
+) -> Result<()> {
+    crate::launch::require_crypto(&runtime)?;
     ensure!(
         config
             .genesis
@@ -415,7 +419,7 @@ pub async fn run(config: Config, shutdown: watch::Receiver<bool>) -> Result<()> 
                 pvac_dir: config.data.join("pvac"),
                 migration: None,
             },
-            runtime: CircleRuntime::new(Arc::new(octra_node_runtime::circle_hfhe::Backend)),
+            runtime,
             compute: octra_node_protocol::resource_compute::provider::Config::from_inputs(
                 config.compute_provider,
                 |name| std::env::var_os(name).map(|value| value.as_encoded_bytes().to_vec()),

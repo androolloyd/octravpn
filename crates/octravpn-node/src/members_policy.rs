@@ -581,6 +581,11 @@ impl MembersPolicySync {
         )))
     }
 
+    /// DERP cannot delegate membership enforcement to a client's packet filter.
+    pub(crate) fn relay_membership(&self) -> SharedMembership {
+        self.membership.clone()
+    }
+
     /// The sync loop. Never returns; dropped on shutdown with the runtime.
     pub(crate) async fn run(self, wiring: MembersPolicyWiring) {
         let MembersPolicyWiring {
@@ -995,6 +1000,56 @@ mod tests {
         );
     }
 
+    #[test]
+    fn native_relay_membership_revokes_hydrated_peers_without_registration_pruning() {
+        let directory = tempfile::tempdir().unwrap();
+        let membership = SharedMembership::new();
+        let machines = Arc::new(MachineRegistry::new());
+        let alice = [0x21; 32];
+        let bob = [0x22; 32];
+        for (key, last) in [(alice, 1), (bob, 2)] {
+            let key = hex::encode(key);
+            machines.upsert(key.clone(), machine(&key, Ipv4Addr::new(100, 64, 0, last)));
+        }
+        let policy = PolicyStore::new();
+        let raw = r#"{"acls":[{"action":"accept","src":["*"],"dst":["*:*"]}]}"#;
+        policy.set(parse_hujson_policy(raw).unwrap(), raw.into());
+        let relay = crate::native_derp::load_native_derp_runtime(
+            directory.path(),
+            [0; 32],
+            machines.clone(),
+            policy,
+            Arc::new(|| true),
+            Some(membership.clone()),
+        )
+        .unwrap();
+        assert!(
+            !relay.admit_client(&alice),
+            "hydrated registration is not an anchor"
+        );
+        assert!(!relay.admit_peer(&alice, &bob));
+        membership.publish(&AnchoredMembers {
+            root: Some("first".into()),
+            node_keys: BTreeSet::from([hex::encode(alice), hex::encode(bob)]),
+            machine_keys: BTreeSet::new(),
+        });
+        assert!(relay.admit_peer(&alice, &bob));
+        membership.publish(&AnchoredMembers {
+            root: Some("second".into()),
+            node_keys: BTreeSet::from([hex::encode(alice)]),
+            machine_keys: BTreeSet::new(),
+        });
+        assert_eq!(
+            machines.snapshot().len(),
+            2,
+            "registration pruning has not run"
+        );
+        assert!(relay.admit_client(&alice));
+        assert!(!relay.admit_client(&bob));
+        assert!(!relay.admit_peer(&alice, &bob));
+        assert!(!relay.admit_peer(&bob, &alice));
+    }
+
     #[tokio::test]
     async fn gate_answers_through_the_wire_trait() {
         let (_, member_hex) = key(0x23);
@@ -1292,7 +1347,10 @@ mod tests {
         };
         assert!(state.plan(Some(11), 1).fetch);
         // Fetch failed; the production Err branch keeps the previous anchor.
-        assert!(state.plan(Some(11), 1).fetch, "the changed anchor must be retried after an I/O failure even while the epoch is unchanged");
+        assert!(
+            state.plan(Some(11), 1).fetch,
+            "the changed anchor must be retried after an I/O failure even while the epoch is unchanged"
+        );
     }
 
     #[test]

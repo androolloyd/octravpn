@@ -15,6 +15,7 @@
 #   30  tailscale up failed on at least one peer.
 #   40  peers never converged on the IP plane.
 #   50  tailscale ping failed despite peers being up.
+#   60  durable registrations or encrypted traffic failed across restart.
 #
 # This harness is intentionally **docker-only**. The OctraVPN test
 # rig forbids running daemons natively (see
@@ -125,6 +126,13 @@ fi
 # layer is healthy, the second peer needs a key it can actually
 # redeem.)
 PREAUTH_KEY="${HTTP_KEY:-${CLI_KEY}}"
+
+# Explicit fixture-only peer adjacency; an unconfigured relay must deny traffic.
+curl -fsS --max-time 5 \
+    -X PUT -H "Authorization: Bearer interop-test-token" \
+    -H "Content-Type: application/json" \
+    -d '{"acls":[{"action":"accept","src":["*"],"dst":["*:*"]}]}' \
+    http://127.0.0.1:51821/api/v1/policy >/dev/null
 
 # ---------------------------------------------------------------------------
 # Step 4 — `tailscale up` on both peers using the minted key.
@@ -265,39 +273,138 @@ for probe in --tsmp --icmp; do
     fi
 done
 
-# Optional: prove registrations are durable. Restart mesh-control (its
-# state dir is bind-mounted, so <state>/tailscale-wire/machines.sqlite
-# survives), wait for it to come back, and ping again WITHOUT re-running
-# `tailscale up`. If the registry were memory-only the peers would be
-# unknown to the restarted control plane and the map would empty out.
+# Optional: prove restart persistence without allowing live clients to repair a
+# missing registry through re-registration. Admin snapshots are authenticated;
+# public identity fields must survive while both disposable clients are paused.
 if [ "${INTEROP_RESTART:-0}" = "1" ]; then
-  step "Step 7: restart mesh-control, peers must still be mapped (durable registrations)"
-  IP_BEFORE="$(docker exec tsi-peer-b tailscale ip -4 2>/dev/null | head -1)"
+  step "Step 7: restart mesh-control while clients are paused (durable registrations)"
+  EVIDENCE_DIR="${OCTRAVPN_INTEROP_EVIDENCE_DIR:-${STATE_DIR}/interop-evidence}"
+  mkdir -p "${EVIDENCE_DIR}"
+  PAUSED_PEERS=()
+  restore_clients() {
+    local failed=0 peer paused
+    # Bash 3's nounset mode needs an explicit empty-array guard.
+    if [[ -z ${PAUSED_PEERS[*]-} ]]; then
+      return 0
+    fi
+    for peer in "${PAUSED_PEERS[@]}"; do
+      if ! paused=$(docker inspect --format '{{.State.Paused}}' "$peer"); then
+        echo "RESTART CLEANUP FAIL: cannot inspect $peer" >&2
+        failed=1
+      elif [[ "$paused" == true ]]; then
+        if ! docker unpause "$peer" >/dev/null; then
+          echo "RESTART CLEANUP FAIL: cannot unpause $peer" >&2
+          failed=1
+        fi
+      fi
+    done
+    return "$failed"
+  }
+  trap 'result=$?; trap - EXIT; if ! restore_clients; then result=60; fi; exit "$result"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  admin_snapshot() {
+    curl -fsS --max-time 5 --max-filesize 1048576 \
+      -H "Authorization: Bearer interop-test-token" \
+      http://127.0.0.1:51821/api/v1/machines >"$1"
+  }
+  normalize_machines() {
+    python3 - "$1" "$2" "$IP_A_BEFORE" "$IP_B_BEFORE" <<'PY_MACHINES'
+import ipaddress, json, pathlib, re, sys
+source, target, ip_a, ip_b = sys.argv[1:]
+def require(condition, reason):
+    if not condition:
+        raise SystemExit('RESTART FAIL: ' + reason)
+rows = json.loads(pathlib.Path(source).read_text())
+require(isinstance(rows, list) and len(rows) >= 2, 'admin registry must contain at least two machines')
+normalized = []
+ids, node_ids, keys, ips, names = set(), set(), set(), set(), set()
+for row in rows:
+    require(isinstance(row, dict), 'admin machine must be an object')
+    for field in ('id', 'machine_key_hex', 'ipv4', 'name', 'user'):
+        require(isinstance(row.get(field), str) and bool(row[field]), 'missing machine identity field ' + field)
+    require(type(row.get('node_id')) is int and row['node_id'] > 0, 'durable numeric node ID is missing')
+    require(re.fullmatch('[0-9a-f]{64}', row['machine_key_hex']) is not None, 'invalid machine key identity')
+    require(isinstance(ipaddress.ip_address(row['ipv4']), ipaddress.IPv4Address), 'machine IPv4 is invalid')
+    for seen, field in ((ids, 'id'), (node_ids, 'node_id'), (keys, 'machine_key_hex'), (ips, 'ipv4'), (names, 'name')):
+        require(row[field] not in seen, 'duplicate machine identity field ' + field)
+        seen.add(row[field])
+    normalized.append({field: row[field] for field in ('node_id', 'id', 'machine_key_hex', 'name', 'user', 'ipv4')}
+                      | {'ipv6': row.get('ipv6')})
+for name, expected_ip in (('tsi-peer-a', ip_a), ('tsi-peer-b', ip_b)):
+    require(any(row['name'] == name and row['ipv4'] == expected_ip for row in normalized),
+            'stock client identity/IP missing for ' + name)
+pathlib.Path(target).write_text(json.dumps(sorted(normalized, key=lambda row: row['id']), sort_keys=True, indent=2) + '\n')
+PY_MACHINES
+  }
+  IP_A_BEFORE="$(docker exec tsi-peer-a tailscale ip -4 2>/dev/null | head -1)"
+  IP_B_BEFORE="$(docker exec tsi-peer-b tailscale ip -4 2>/dev/null | head -1)"
+  if [[ -z "$IP_A_BEFORE" || -z "$IP_B_BEFORE" ]]; then
+    echo "RESTART FAIL: both stock client IPs are required" >&2
+    exit 60
+  fi
+  for peer in tsi-peer-a tsi-peer-b; do
+    if [[ $(docker inspect --format '{{.State.Paused}}' "$peer") != false ]]; then
+      echo "RESTART FAIL: fixture client was already paused: $peer" >&2
+      exit 60
+    fi
+    # Record ownership before pause so interruption cannot leave a client paused.
+    PAUSED_PEERS+=("$peer")
+    if ! docker pause "$peer" >/dev/null; then
+      echo "RESTART FAIL: could not pause $peer" >&2
+      exit 60
+    fi
+  done
+  if ! admin_snapshot "${EVIDENCE_DIR}/machines-before.json"; then
+    echo "RESTART FAIL: authenticated pre-restart registry snapshot unavailable" >&2
+    exit 60
+  fi
+  if ! normalize_machines "${EVIDENCE_DIR}/machines-before.json" "${EVIDENCE_DIR}/machines-before-stable.json"; then
+    exit 60
+  fi
   docker restart tsi-mesh-control >/dev/null
+  ADMIN_READY=0
   for _ in $(seq 1 40); do
-    if curl -ksf -m 3 "https://127.0.0.1:8443/derp/probe" >/dev/null 2>&1 || curl -sf -m 3 "http://127.0.0.1:51821/health" >/dev/null 2>&1; then break; fi
+    if admin_snapshot "${EVIDENCE_DIR}/machines-after.json"; then
+      ADMIN_READY=1
+      break
+    fi
     sleep 2
   done
-  sleep 8
-  IP_AFTER="$(docker exec tsi-peer-b tailscale ip -4 2>/dev/null | head -1)"
-  if [ -z "$IP_AFTER" ] || [ "$IP_AFTER" != "$IP_BEFORE" ]; then
-    echo "RESTART FAIL: peer-b ip before=$IP_BEFORE after=$IP_AFTER (registrations not durable)" >&2
+  if [[ "$ADMIN_READY" != 1 ]]; then
+    echo "RESTART FAIL: authenticated post-restart registry snapshot unavailable" >&2
     exit 60
   fi
-  if ! docker exec tsi-peer-a tailscale ping --tsmp -c 3 --timeout 5s "$IP_AFTER" 2>&1 | tail -3; then
-    echo "RESTART FAIL: ping after mesh-control restart failed" >&2
+  for peer in tsi-peer-a tsi-peer-b; do
+    if [[ $(docker inspect --format '{{.State.Paused}}' "$peer") != true ]]; then
+      echo "RESTART FAIL: client resumed before persistence was checked: $peer" >&2
+      exit 60
+    fi
+  done
+  if ! normalize_machines "${EVIDENCE_DIR}/machines-after.json" "${EVIDENCE_DIR}/machines-after-stable.json"; then
     exit 60
   fi
-  # A cached map lets the data plane survive a control-plane blip even with a
-  # memory-only registry, so the ping alone is not proof. The control plane
-  # itself must show it re-learned the machines from the store.
-  HYDRATED="$(docker logs tsi-mesh-control 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -o 'machine registrations hydrated.*nodes=[0-9]*' | tail -1 | grep -o 'nodes=[0-9]*' | cut -d= -f2)"
-  if [ -z "$HYDRATED" ] || [ "$HYDRATED" -lt 2 ]; then
-    echo "RESTART FAIL: mesh-control did not hydrate >=2 machines from machines.sqlite after restart (got '${HYDRATED:-none}')" >&2
-    docker logs tsi-mesh-control 2>&1 | tail -15 >&2
+  if ! cmp -s "${EVIDENCE_DIR}/machines-before-stable.json" "${EVIDENCE_DIR}/machines-after-stable.json"; then
+    echo "RESTART FAIL: durable machine IDs, keys or allocated IPs changed while clients were paused" >&2
     exit 60
   fi
-  echo "OK: peers survived a mesh-control restart with the same IPs, and the control plane hydrated ${HYDRATED} machines from SQLite"
+  if ! restore_clients; then
+    exit 60
+  fi
+  PAUSED_PEERS=()
+  IP_A_AFTER="$(docker exec tsi-peer-a tailscale ip -4 2>/dev/null | head -1)"
+  IP_B_AFTER="$(docker exec tsi-peer-b tailscale ip -4 2>/dev/null | head -1)"
+  if [[ "$IP_A_AFTER" != "$IP_A_BEFORE" || "$IP_B_AFTER" != "$IP_B_BEFORE" ]]; then
+    echo "RESTART FAIL: client allocated IPs changed after restart" >&2
+    exit 60
+  fi
+  for probe in --tsmp --icmp; do
+    if ! docker exec tsi-peer-a tailscale ping "$probe" --c 3 --timeout 5s "$IP_B_AFTER"; then
+      echo "RESTART FAIL: encrypted ping after mesh-control restart failed ($probe)" >&2
+      exit 60
+    fi
+  done
+  echo "OK: authenticated registry identities survived restart with clients paused; same-IP encrypted traffic resumed without tailscale up"
 fi
 echo "OK: tailscale interop succeeded" >&2
 exit 0

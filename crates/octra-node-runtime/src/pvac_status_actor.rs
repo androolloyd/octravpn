@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     sync::{
-        atomic::{AtomicI64, Ordering},
+        atomic::{AtomicBool, AtomicI64, Ordering},
         Arc, Mutex,
     },
     time::{SystemTime, UNIX_EPOCH},
@@ -51,9 +51,13 @@ struct Handle {
     requests: mpsc::Sender<Command>,
     control: mpsc::Sender<Control>,
     open: Arc<Mutex<bool>>,
+    stopping: Arc<AtomicBool>,
 }
 #[derive(Clone, Default)]
-pub struct Service(Arc<Mutex<Lifecycle>>);
+pub struct Service {
+    lifecycle: Arc<Mutex<Lifecycle>>,
+    crypto: Option<Arc<crate::crypto_worker::Pool>>,
+}
 #[derive(Default)]
 struct Lifecycle {
     handle: Option<Handle>,
@@ -181,6 +185,8 @@ async fn actor(
     mut requests: mpsc::Receiver<Command>,
     mut control: mpsc::Receiver<Control>,
     open: Arc<Mutex<bool>>,
+    stopping: Arc<AtomicBool>,
+    crypto: Option<Arc<crate::crypto_worker::Pool>>,
 ) {
     let mut cache = Cache::default();
     let generation = AtomicI64::new(0);
@@ -202,6 +208,7 @@ async fn actor(
                 });
             }
             Next::Control(Some(Control::Stop(reply))) => {
+                stopping.store(true, Ordering::Release);
                 // Enqueue and stop/drain share this short gate. A concurrent
                 // request cannot slip in after the stopped queue was drained.
                 let mut opened = open
@@ -236,7 +243,10 @@ async fn actor(
                 let was_cached = cached.is_some();
                 let hash_scope = command.query.scope.clone();
                 let reply = command.reply;
+                let pool = crypto.clone();
+                let cancelled = stopping.clone();
                 let result = tokio::task::spawn_blocking(move || {
+                    let _crypto = pool.map(|pool| pool.scope(true, cancelled));
                     classify(&command.query, command.load, cached)
                 })
                 .await;
@@ -265,8 +275,15 @@ async fn actor(
         .unwrap_or_else(std::sync::PoisonError::into_inner) = false;
 }
 impl Service {
+    /// Production classifier work shares the node's bounded crypto service.
+    pub fn isolated(crypto: Arc<crate::crypto_worker::Pool>) -> Self {
+        Self {
+            lifecycle: Arc::default(),
+            crypto: Some(crypto),
+        }
+    }
     fn handle(&self) -> Result<Handle, Error> {
-        let mut current = self.0.lock().map_err(|_| Error::ReadFailed)?;
+        let mut current = self.lifecycle.lock().map_err(|_| Error::ReadFailed)?;
         if current.stopped {
             return Err(Error::Busy);
         }
@@ -276,11 +293,19 @@ impl Service {
         let (requests, request_rx) = mpsc::channel(REQUEST_CAPACITY);
         let (control, control_rx) = mpsc::channel(CONTROL_CAPACITY);
         let open = Arc::new(Mutex::new(true));
-        tokio::spawn(actor(request_rx, control_rx, open.clone()));
+        let stopping = Arc::new(AtomicBool::new(false));
+        tokio::spawn(actor(
+            request_rx,
+            control_rx,
+            open.clone(),
+            stopping.clone(),
+            self.crypto.clone(),
+        ));
         let handle = Handle {
             requests,
             control,
             open,
+            stopping,
         };
         current.handle = Some(handle.clone());
         Ok(handle)
@@ -328,27 +353,31 @@ impl Service {
         response.await.unwrap_or_default()
     }
     pub async fn shutdown(&self) {
-        let handle = self.0.lock().ok().and_then(|mut current| {
-            if current.handle.is_none() {
-                current.stopped = true;
-            }
+        let handle = self.lifecycle.lock().ok().and_then(|mut current| {
+            current.stopped = true;
             current.handle.clone()
         });
         let Some(handle) = handle else {
             return;
         };
+        // The actor may be waiting for a synchronous classifier. Cancel its
+        // owned crypto job before awaiting control-queue capacity or draining.
+        handle.stopping.store(true, Ordering::Release);
         let (reply, response) = oneshot::channel();
-        {
+        // The stop request remains owned if the awaiting HTTP/service future
+        // disappears while the control queue is full.
+        tokio::spawn(async move {
+            let Ok(slot) = handle.control.reserve().await else {
+                return;
+            };
             let Ok(opened) = handle.open.lock() else {
                 return;
             };
             if !*opened {
                 return;
             }
-            if handle.control.try_send(Control::Stop(reply)).is_err() {
-                return;
-            }
-        }
+            slot.send(Control::Stop(reply));
+        });
         let _ = response.await;
     }
 }

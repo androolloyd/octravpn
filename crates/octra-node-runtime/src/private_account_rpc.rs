@@ -1,7 +1,7 @@
 //! Native private-account projections over one authenticated canonical snapshot.
 //! Public stealth output rows intentionally omit amount and sender_addr.
 use crate::{
-    private_crypto as crypto,
+    private_crypto::isolated as crypto,
     private_key::classify::{self, Cipher, Key, Route},
     private_outputs::{self, Output},
     state_batch::Snapshot,

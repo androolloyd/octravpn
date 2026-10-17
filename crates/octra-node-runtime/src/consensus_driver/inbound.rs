@@ -6,7 +6,7 @@ use super::{
 };
 use octra_node_protocol::{
     consensus::{evidence, RoundFetch},
-    network::{domain_hash, handshake},
+    network::handshake,
 };
 impl<H: Host, C: Publication> Driver<H, C> {
     pub(super) async fn receive(&mut self, peer: &Peer, frame: Frame) -> Result<(), Error> {
@@ -31,12 +31,23 @@ impl<H: Host, C: Publication> Driver<H, C> {
                 "consensus frame {} rejected: {reason}",
                 frame.message
             ));
-            self.swarm.report_peer(peer, b"invalid_frame_consensus");
+            self.swarm.report_peer(
+                peer,
+                match frame.message {
+                    0x30 => b"invalid_frame_propose",
+                    0x31 => b"invalid_frame_vote",
+                    0x32 => b"invalid_frame_finalize",
+                    0x3d => b"invalid_frame_vote_evidence",
+                    0x3e => b"invalid_frame_round_sync",
+                    0x3f => b"invalid_frame_round_fetch",
+                    _ => b"invalid_frame_consensus",
+                },
+            );
         }
         Ok(())
     }
     async fn admit(&mut self, peer: &Peer, frame: &Frame) -> Result<(), Error> {
-        let id = domain_hash(&[frame.message], &frame.payload);
+        let id = driver_policy::frame_id(self.engine.generation(), frame.message, &frame.payload);
         let repeatable = frame.message == 0x3f
             || frame.message == 0x3e && RoundSync::decode(&frame.payload)?.request;
         if !repeatable && self.seen.known(&id) {
@@ -92,13 +103,38 @@ impl<H: Host, C: Publication> Driver<H, C> {
                     self.engine.protocol(),
                     &p,
                 )? {
-                    return Err(reason.label().into());
+                    // An unresolved future set is not evidence against its
+                    // relay. Current authenticated errors retain native fault
+                    // ownership: envelope faults belong to the signer.
+                    if p.epoch_id == height {
+                        self.host.warning(reason.label());
+                        self.seen.remember(&id);
+                        match reason.source() {
+                            driver_policy::FaultSource::Unresolved => (),
+                            driver_policy::FaultSource::Sender => {
+                                self.swarm
+                                    .report_peer(peer, reason.peer_reason().as_bytes());
+                            }
+                            driver_policy::FaultSource::Signer => {
+                                self.report_validator(
+                                    &validators,
+                                    &p.proposer,
+                                    reason.peer_reason().as_bytes(),
+                                );
+                            }
+                        }
+                    }
+                    return Ok(());
                 }
                 if p.epoch_id == height {
                     if !self.current(&p) {
                         return Ok(());
                     }
-                    self.host.verify_parent(height, p.parent_commit.as_ref())?;
+                    if let Err(reason) = self.host.verify_parent(height, p.parent_commit.as_ref()) {
+                        self.host.warning(&reason.to_string());
+                        self.seen.remember(&id);
+                        return Ok(());
+                    }
                 } else {
                     self.swarm
                         .broadcast(frame.clone(), Some(&peer.hello().node_id), false)
@@ -121,11 +157,17 @@ impl<H: Host, C: Publication> Driver<H, C> {
                 } else {
                     self.host.validators(vote.epoch_id).await?
                 };
-                let public = validators
-                    .public_key(&vote.validator)
-                    .ok_or("unknown vote validator")?;
+                let Some(public) = validators.public_key(&vote.validator) else {
+                    if vote.epoch_id == height {
+                        self.seen.remember(&id);
+                    }
+                    return Ok(());
+                };
                 if !hash::verify_vote(public, &vote)? {
-                    return Err("invalid vote signature".into());
+                    self.host.warning("invalid vote signature");
+                    self.swarm.report_peer(peer, b"bad_signature_vote");
+                    self.seen.remember(&id);
+                    return Ok(());
                 }
                 let conflict = if vote.epoch_id == height {
                     self.engine
@@ -137,7 +179,7 @@ impl<H: Host, C: Publication> Driver<H, C> {
                         .and_then(|prior| evidence::vote_conflict(prior, &vote))
                 };
                 if let Some(conflict) = conflict {
-                    self.record_conflict(conflict).await?;
+                    self.record_conflict(conflict, &validators).await?;
                 } else if vote.epoch_id == height {
                     self.engine
                         .on_vote(vote.clone(), &mut |bytes| self.host.sign(bytes))?;
@@ -160,8 +202,26 @@ impl<H: Host, C: Publication> Driver<H, C> {
                 if f.chain_id != self.chain || f.epoch_id != height {
                     return Ok(());
                 }
-                self.host.verify_parent(height, f.parent_commit.as_ref())?;
-                if self.engine.accept_finalize(f)? {
+                if let Err(reason) = self.host.verify_parent(height, f.parent_commit.as_ref()) {
+                    self.host.warning(&reason.to_string());
+                    self.seen.remember(&id);
+                    return Ok(());
+                }
+                let accepted = match self.engine.accept_finalize(f) {
+                    Ok(accepted) => accepted,
+                    Err(reason) => {
+                        self.host.warning(&reason.to_string());
+                        let reason = if reason.as_bytes() == b"signature" {
+                            b"bad_signature_finalize".to_vec()
+                        } else {
+                            [b"invalid_frame_finalize_qc_".as_slice(), reason.as_bytes()].concat()
+                        };
+                        self.swarm.report_peer(peer, &reason);
+                        self.seen.remember(&id);
+                        return Ok(());
+                    }
+                };
+                if accepted {
                     self.swarm
                         .broadcast(frame.clone(), Some(&peer.hello().node_id), false)
                         .await?;
@@ -169,33 +229,46 @@ impl<H: Host, C: Publication> Driver<H, C> {
             }
             0x3d => {
                 let conflict = VoteConflict::decode(&frame.payload)?;
-                if conflict.first.chain_id != self.chain {
+                if conflict.second.chain_id != self.chain || !evidence::in_window(height, &conflict)
+                {
+                    self.swarm.report_peer(peer, b"invalid_vote_evidence");
+                    self.seen.remember(&id);
                     return Ok(());
                 }
                 let set = self.host.validators(conflict.first.epoch_id).await?;
-                let public = set
-                    .public_key(&conflict.first.validator)
-                    .ok_or("unknown evidence validator")?;
+                let Some(public) = set.public_key(&conflict.first.validator) else {
+                    if conflict.first.epoch_id <= height {
+                        self.seen.remember(&id);
+                    }
+                    return Ok(());
+                };
                 if !conflict.verify(public)? {
-                    return Err("invalid vote evidence".into());
+                    self.swarm.report_peer(peer, b"invalid_vote_evidence");
+                    self.seen.remember(&id);
+                    return Ok(());
                 }
-                self.host.evidence(conflict).await?;
-                self.swarm
-                    .broadcast(frame.clone(), Some(&peer.hello().node_id), false)
-                    .await?;
+                self.report_validator(&set, &conflict.first.validator, b"vote_equivocation");
+                if self.evidence.remember(&conflict)? {
+                    self.host.evidence(conflict).await?;
+                    self.swarm
+                        .broadcast(frame.clone(), Some(&peer.hello().node_id), false)
+                        .await?;
+                }
             }
             0x3e => {
                 let sync = RoundSync::decode(&frame.payload)?;
                 if sync.chain_id != self.chain || sync.epoch_id != height {
                     return Ok(());
                 }
-                let public = self
-                    .engine
-                    .validators()
-                    .public_key(&sync.validator)
-                    .ok_or("unknown round sync validator")?;
+                let Some(public) = self.engine.validators().public_key(&sync.validator) else {
+                    self.seen.remember(&id);
+                    return Ok(());
+                };
                 if !hash::verify_round_sync(public, &sync)? {
-                    return Err("invalid round sync signature".into());
+                    self.host.warning("invalid round sync signature");
+                    self.swarm.report_peer(peer, b"bad_signature_round_sync");
+                    self.seen.remember(&id);
+                    return Ok(());
                 }
                 self.remember_round_peer(&sync);
                 if !driver_policy::round_sync_allowed(round, &sync) {
@@ -209,11 +282,10 @@ impl<H: Host, C: Publication> Driver<H, C> {
                         .await?;
                 }
                 if self.engine.on_round_sync(&sync)? {
-                    self.work.abort_all();
-                    self.active_work = None;
-                    self.build_retry = None;
+                    self.clear_round_sync_jump();
                     self.round_sync(self.engine.state().round, self.engine.state().step, true)
                         .await?;
+                    self.schedule_sync_retry();
                 }
                 if sync.request
                     || sync.round < self.engine.state().round
@@ -365,7 +437,15 @@ impl<H: Host, C: Publication> Driver<H, C> {
         }
         Ok(())
     }
-    async fn record_conflict(&self, conflict: VoteConflict) -> Result<(), Error> {
+    async fn record_conflict(
+        &mut self,
+        conflict: VoteConflict,
+        validators: &octra_node_protocol::consensus::ValidatorSet,
+    ) -> Result<(), Error> {
+        self.report_validator(validators, &conflict.first.validator, b"vote_equivocation");
+        if !self.evidence.remember(&conflict)? {
+            return Ok(());
+        }
         self.host.evidence(conflict.clone()).await?;
         self.swarm
             .broadcast(
@@ -377,6 +457,16 @@ impl<H: Host, C: Publication> Driver<H, C> {
                 false,
             )
             .await
+    }
+    fn report_validator(
+        &self,
+        validators: &octra_node_protocol::consensus::ValidatorSet,
+        validator: &[u8],
+        reason: &[u8],
+    ) {
+        if let Some(public) = validators.public_key(validator) {
+            self.swarm.report_bad(&handshake::node_id(public), reason);
+        }
     }
     pub(super) async fn replay_votes(&mut self) -> Result<(), Error> {
         let height = self.engine.state().height;
@@ -409,7 +499,8 @@ impl<H: Host, C: Publication> Driver<H, C> {
                 .conflicting_vote(&vote)
                 .and_then(|prior| evidence::vote_conflict(prior, &vote))
             {
-                self.record_conflict(conflict).await?;
+                let validators = self.engine.validators().clone();
+                self.record_conflict(conflict, &validators).await?;
             } else {
                 self.engine
                     .on_vote(vote, &mut |bytes| self.host.sign(bytes))?;

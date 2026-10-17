@@ -53,7 +53,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: androolloyd/headscale-rs
-          ref: 5662f202a8448364cb212a12c0489216c74ab6ca
+          ref: 64bc54312ff9c4c2946f563f21875cf55e3f8f55
           path: headscale-rs
 
       - name: Checkout sibling octra-foundry
@@ -89,12 +89,12 @@ jobs:
         working-directory: octra
         run: cargo build --locked --workspace
 
-      - name: cargo test --workspace
+      - name: cargo test --release --workspace
         id: test_workspace
         working-directory: octra
         run: |
           set -o pipefail
-          cargo test --locked --workspace 2>&1 | tee /tmp/test-workspace.log
+          cargo test --locked --release --workspace 2>&1 | tee /tmp/test-workspace.log
           # Pull out the "N passed" count from cargo's summary lines.
           # cargo emits one "test result: ok. N passed; ..." per test
           # binary; sum them.
@@ -102,9 +102,9 @@ jobs:
                    | awk '{ s += $4 } END { print s+0 }')
           echo "passed=${passed}" >> "$GITHUB_OUTPUT"
 
-      - name: cargo test -p octravpn-mesh --features test-helpers
+      - name: cargo test --release -p octravpn-mesh --features test-helpers
         working-directory: octra
-        run: cargo test --locked -p octravpn-mesh --features test-helpers
+        run: cargo test --locked --release -p octravpn-mesh --features test-helpers
 
       - name: Pinned Headscale API component tests without default features
         id: headscale_component
@@ -113,7 +113,7 @@ jobs:
         # Octra's workspace/mesh tests above qualify its integration graph.
         run: |
           set -euo pipefail
-          pin=5662f202a8448364cb212a12c0489216c74ab6ca
+          pin=64bc54312ff9c4c2946f563f21875cf55e3f8f55
           test "$(git rev-parse HEAD)" = "$pin"
           git ls-files --error-unmatch Cargo.lock >/dev/null
           cargo test --locked -p headscale-api --no-default-features 2>&1 | tee /tmp/test-headscale-component.log
@@ -348,7 +348,7 @@ jobs:
           {
             echo "# OctraVPN — proof of working state"
             echo ""
-            echo "- $(tick "${{ steps.test_workspace.outcome }}") \`cargo test --workspace\`: ${{ steps.test_workspace.outcome }} (${tests_passed:-?} tests)"
+            echo "- $(tick "${{ steps.test_workspace.outcome }}") \`cargo test --release --workspace\`: ${{ steps.test_workspace.outcome }} (${tests_passed:-?} tests)"
             echo "- $(tick "${{ steps.headscale_component.outcome }}") Headscale API component, separate pinned lockfile, no default features: ${{ steps.headscale_component.outcome }} (${{ steps.headscale_component.outputs.passed }} tests, \`${{ steps.headscale_component.outputs.commit }}\`)"
             echo "- $(tick "${clippy_outcome}") \`cargo clippy --workspace -- -D warnings\`: ${clippy_outcome}"
             echo "- Lean proofs: ${lean_count} theorems counted; \`lake build\` ${lake_status}"

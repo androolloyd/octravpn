@@ -71,11 +71,11 @@ struct Inner {
     limits: Limits,
     state: Mutex<State>,
     changed: Condvar,
-    runtime: Handle,
+    runtime: Option<Handle>,
 }
 #[derive(Clone)]
 pub struct Pool(Arc<Inner>);
-struct Permit {
+pub(crate) struct Permit {
     pool: Pool,
     id: u64,
     ready: Arc<Notify>,
@@ -95,6 +95,14 @@ impl Drop for Permit {
 }
 impl Pool {
     pub fn new(limits: Limits, runtime: Handle) -> Result<Self, &'static str> {
+        Self::with_runtime(limits, Some(runtime))
+    }
+    /// Synchronous users share the exact scheduler without creating a runtime
+    /// or an extra set of OS workers.
+    pub(crate) fn new_sync(limits: Limits) -> Result<Self, &'static str> {
+        Self::with_runtime(limits, None)
+    }
+    fn with_runtime(limits: Limits, runtime: Option<Handle>) -> Result<Self, &'static str> {
         if limits.capacity == 0
             || limits.required == 0
             || limits.speculative == 0
@@ -187,7 +195,7 @@ impl Pool {
             permit.ready.notified().await;
         }
     }
-    fn acquire_sync(&self, priority: Priority, wait: bool) -> Option<Permit> {
+    pub(crate) fn acquire_sync(&self, priority: Priority, wait: bool) -> Option<Permit> {
         let permit = self.enqueue(priority)?;
         let mut state = self.state();
         loop {
@@ -218,6 +226,8 @@ impl Pool {
         // The task owns capacity until it finishes, even if the caller disappears.
         self.0
             .runtime
+            .as_ref()
+            .expect("synchronous compute pool used asynchronously")
             .spawn(async move {
                 let _permit = permit;
                 task().await
@@ -239,6 +249,8 @@ impl Pool {
         };
         self.0
             .runtime
+            .as_ref()
+            .expect("synchronous compute pool used asynchronously")
             .spawn_blocking(move || {
                 let _permit = permit;
                 task()

@@ -14,6 +14,8 @@ use std::{
     path::{Path, PathBuf},
 };
 mod process;
+mod staging;
+pub use staging::{stage_if_proven, StageOptions};
 const MAX: u64 = 1_048_576;
 const UPSTREAM: &str = "7f9be4489870645cfcc95439638cde40f5da9f50";
 #[derive(Args)]

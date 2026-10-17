@@ -10,6 +10,12 @@ use octra_node_runtime::{
 };
 
 pub(crate) struct ViewLease(tokio::sync::OwnedSemaphorePermit);
+struct ViewCancellation(Clock);
+impl Drop for ViewCancellation {
+    fn drop(&mut self) {
+        self.0.stop();
+    }
+}
 impl Native {
     pub(crate) fn circle_runtime(&self) -> octra_node_runtime::circle::CircleRuntime {
         self.runtime.clone()
@@ -26,8 +32,12 @@ impl Native {
             .clone()
             .try_acquire_owned()
             .map_err(|_| Fault::new(110, b"service unavailable"))?;
+        let clock = Clock::new(std::time::Duration::from_secs(10));
+        let _cancellation = ViewCancellation(clock.clone());
+        let runtime = self.runtime.clone();
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
+            let _crypto = runtime.crypto_scope_until(true, clock.cancellation(), clock.deadline());
             job()
         })
         .await
@@ -84,9 +94,12 @@ impl Native {
     ) -> Result<Vec<u8>, Fault> {
         use octra_node_runtime::circle_rpc::view;
         let runtime = self.runtime.clone();
+        let _cancellation = ViewCancellation(clock.clone());
         let running = clock.clone();
         let result = tokio::task::spawn_blocking(move || {
             let _lease = lease.0;
+            let _crypto =
+                runtime.crypto_scope_until(true, running.cancellation(), running.deadline());
             if !running.running() {
                 return Err(view::time_limit());
             }
@@ -136,10 +149,13 @@ impl Native {
         .await
         .map_err(|error| Fault::new(-32005, error.to_string().as_bytes()))?;
         let runtime = self.runtime.clone();
+        let _cancellation = ViewCancellation(clock.clone());
         let running = clock.clone();
         let result = tokio::task::spawn_blocking(move || {
             // This permit outlives a timed-out or cancelled HTTP future.
             let _lease = lease.0;
+            let _crypto =
+                runtime.crypto_scope_until(true, running.cancellation(), running.deadline());
             if !running.running() {
                 return Err(view::time_limit());
             }

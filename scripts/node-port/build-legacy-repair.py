@@ -16,7 +16,7 @@ for name,expected in inventory.items():
   path.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(pathlib.Path('/native')/name,path)
  if sha(path)!=expected:raise RuntimeError('native source differs: '+name)
 program=root/'vpn_legacy_repair_backend';program.mkdir()
-for name in ['backend.ml','cases.ml','legacy_repair_storage.ml','legacy_repair_version.ml','dune']:
+for name in ['backend.ml','cases.ml','legacy_repair_storage.ml','legacy_repair_selection.ml','legacy_repair_version.ml','dune']:
  shutil.copyfile(pathlib.Path('/inputs')/name,program/name)
 commands=[]
 def run(name,argv):
@@ -53,12 +53,13 @@ def main():
  if image['Id']!=a.builder_image:raise RuntimeError('builder identity differs')
  with tempfile.TemporaryDirectory(prefix='octra-legacy-build-')as temporary:
   inputs=Path(temporary)
-  for source,target in [('legacy-repair-backend.ml','backend.ml'),('legacy-repair-cases.ml','cases.ml'),('legacy-repair-storage.ml','legacy_repair_storage.ml')]:shutil.copyfile(ROOT/'scripts/node-port'/source,inputs/target)
-  helper_digests={name:sha(ROOT/'scripts/node-port'/name)for name in ['legacy-repair-backend.ml','legacy-repair-cases.ml','legacy-repair-storage.ml']}
-  assert helper_digests=={name:sha(inputs/target)for name,target in [('legacy-repair-backend.ml','backend.ml'),('legacy-repair-cases.ml','cases.ml'),('legacy-repair-storage.ml','legacy_repair_storage.ml')]}
+  helpers=[('legacy-repair-backend.ml','backend.ml'),('legacy-repair-cases.ml','cases.ml'),('legacy-repair-storage.ml','legacy_repair_storage.ml'),('legacy-repair-selection.ml','legacy_repair_selection.ml')]
+  for source,target in helpers:shutil.copyfile(ROOT/'scripts/node-port'/source,inputs/target)
+  helper_digests={name:sha(ROOT/'scripts/node-port'/name)for name,_ in helpers}
+  assert helper_digests=={name:sha(inputs/target)for name,target in helpers}
   (inputs/'inventory.json').write_text(json.dumps(inventory,indent=2)+'\n')
   (inputs/'legacy_repair_version.ml').write_text(f'let upstream = "{pin}"\n')
-  (inputs/'dune').write_text('(library (name legacy_repair_storage) (wrapped false) (modules legacy_repair_storage) (libraries octra_core octra_node_runtime))\n(executable (name backend) (modules backend legacy_repair_version) (libraries legacy_repair_storage octra_core octra_node_runtime octra_consensus base64 lwt.unix unix yojson))\n(executable (name cases) (modules cases) (libraries legacy_repair_storage octra_core octra_node_runtime octra_consensus octra_recovery_case mirage-crypto-ec lwt.unix unix yojson))\n')
+  (inputs/'dune').write_text('(library (name legacy_repair_storage) (wrapped false) (modules legacy_repair_storage legacy_repair_selection) (libraries octra_core octra_node_runtime octra_consensus digestif base64 lwt.unix unix yojson))\n(executable (name backend) (modules backend legacy_repair_version) (libraries legacy_repair_storage octra_core octra_node_runtime octra_consensus base64 lwt.unix unix yojson))\n(executable (name cases) (modules cases) (libraries legacy_repair_storage octra_core octra_node_runtime octra_consensus octra_recovery_case mirage-crypto-ec lwt.unix unix yojson))\n')
   (inputs/'worker.py').write_text(WORKER)
   argv=['docker','run','--rm','--network','none','--mount',f'type=bind,source={inputs},target=/inputs,readonly','--mount',f'type=bind,source={upstream},target=/native,readonly','--mount',f'type=bind,source={out},target=/output',a.builder_image,'bash','-lc','python3 /inputs/worker.py']
   (out/'host-command.json').write_text(json.dumps(argv,indent=2)+'\n')

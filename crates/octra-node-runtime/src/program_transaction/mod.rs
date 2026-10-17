@@ -474,6 +474,10 @@ impl OperationHost for Calls<'_> {
         ledger: &mut Ledger,
         state: &mut StateBatch,
     ) -> Result<Completion, Error> {
+        let _crypto = self.runtime.crypto_scope(
+            false,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        );
         match tx.op_type {
             OpType::ContractDeploy | OpType::ProgramDeploy => self.deploy(tx, ledger, state),
             OpType::ContractCall | OpType::ProgramExec => self.call(tx, ledger, state),

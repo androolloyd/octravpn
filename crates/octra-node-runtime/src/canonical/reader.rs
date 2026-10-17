@@ -24,6 +24,7 @@ pub struct Reader {
     chain: ChainIdentity,
     anchor: Cursor,
     snapshots: Arc<super::snapshots::Cache>,
+    pub(super) epoch_tag_keep: i64,
 }
 impl Reader {
     pub(super) fn new(
@@ -31,12 +32,14 @@ impl Reader {
         chain: ChainIdentity,
         anchor: Cursor,
         snapshots: Arc<super::snapshots::Cache>,
+        epoch_tag_keep: i64,
     ) -> Self {
         Self {
             pool,
             chain,
             anchor,
             snapshots,
+            epoch_tag_keep,
         }
     }
     pub fn chain(&self) -> &ChainIdentity {

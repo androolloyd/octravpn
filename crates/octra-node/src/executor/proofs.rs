@@ -10,12 +10,75 @@ use octra_node_protocol::{
     transaction::{OpType, Transaction},
 };
 use octra_node_runtime::{
+    consensus_preverify_cache::Purpose,
     preverify_batch::{Checked, Kind},
     private_balance,
     state_batch::Snapshot,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+
+/// A cache belongs to one immutable Native configuration. Also bind the full
+/// freshly selected epoch authority and every policy consumed by prove().
+/// Proposal contexts carry that authority separately from their uncertified Bound.
+#[derive(PartialEq)]
+pub(super) struct ProofBinding {
+    validators: octra_node_protocol::consensus::ValidatorSet,
+    required: bool,
+    crypto_active: bool,
+    minimum: BigInt,
+    selected_minimum: BigInt,
+    selected_crypto_active: bool,
+    fields: octra_node_protocol::transaction::RuleMode,
+    strict: bool,
+    math: octra_hfhe::scalar::ScalarRule,
+    result: octra_node_runtime::private_crypto::ResultPolicy,
+    owner: octra_node_protocol::transaction::RuleMode,
+    cipher: octra_node_protocol::transaction::RuleMode,
+}
+impl ProofBinding {
+    fn new(
+        authority: &octra_node_runtime::finality::EpochRules,
+        policy: octra_node_runtime::private_key::Policy,
+        rules: &octra_node_runtime::consensus_bundle::Rules,
+    ) -> Self {
+        let octra_node_runtime::finality::EpochRules {
+            validators,
+            receipts,
+            ..
+        } = authority;
+        let octra_node_runtime::finality::ReceiptRules {
+            required,
+            crypto_active,
+            stealth_minimum,
+        } = receipts;
+        let octra_node_runtime::private_key::Policy {
+            balance,
+            owner,
+            cipher,
+        } = policy;
+        let private_balance::Profile {
+            fields,
+            strict,
+            math,
+            result,
+        } = balance;
+        Self {
+            validators: validators.clone(),
+            required: *required,
+            crypto_active: *crypto_active,
+            minimum: stealth_minimum.clone(),
+            selected_minimum: rules.stealth_minimum.clone(),
+            selected_crypto_active: rules.crypto_active,
+            fields,
+            strict,
+            math,
+            result,
+            owner,
+            cipher,
+        }
+    }
+}
 
 pub(super) fn receipt(tx: &Transaction, binding: Binding, minimum: &BigInt) -> Result<Receipt> {
     let input = binding.input_hash(tx).map_err(anyhow::Error::msg)?;
@@ -59,16 +122,32 @@ fn skip(kind: Kind, reason: impl Into<Vec<u8>>) -> Checked {
     }
 }
 impl Native {
+    pub(crate) fn share_transactions(&self, txs: &[Transaction]) -> Result<Vec<Vec<u8>>> {
+        self.proof_cache.shared().share(txs).map_err(Into::into)
+    }
+    /// Cache lookup only; retained transaction bytes grant no admission authority.
+    pub fn shared_transaction(&self, hash: &[u8]) -> Result<Option<Transaction>> {
+        self.proof_cache.shared().find(hash).map_err(Into::into)
+    }
+    pub(crate) fn shared_transactions(
+        &self,
+    ) -> octra_node_runtime::consensus_preverify_cache::Shared {
+        self.proof_cache.shared().clone()
+    }
     pub(super) fn proposal_proofs(
         &self,
         parent: &octra_node_runtime::canonical::Head,
         state: &Snapshot,
-        bound: &octra_node_runtime::execution_rules::Bound,
+        context: (
+            &octra_node_runtime::execution_rules::Bound,
+            &octra_node_runtime::finality::EpochRules,
+        ),
         inputs: &[Transaction],
         rules: &octra_node_runtime::consensus_bundle::Rules,
+        purpose: Purpose,
     ) -> Result<Vec<Receipt>, super::ProposalError> {
         use super::proposal::{invalid, unavailable};
-        let batch = self.prepare_proofs(parent, state, bound, inputs, rules)?;
+        let batch = self.prepare_proofs(parent, state, context, inputs, rules, purpose)?;
         let hashes = inputs
             .iter()
             .map(Transaction::hash)
@@ -93,25 +172,40 @@ impl Native {
         &self,
         parent: &octra_node_runtime::canonical::Head,
         state: &Snapshot,
-        bound: &octra_node_runtime::execution_rules::Bound,
+        context: (
+            &octra_node_runtime::execution_rules::Bound,
+            &octra_node_runtime::finality::EpochRules,
+        ),
         inputs: &[Transaction],
         rules: &octra_node_runtime::consensus_bundle::Rules,
+        purpose: Purpose,
     ) -> Result<octra_node_runtime::preverify_batch::Batch, super::ProposalError> {
         use super::proposal::unavailable;
         use octra_node_runtime::{account_store, preverify_batch, state_batch::StateBatch};
         let ledger = account_store::ledger(&StateBatch::from_snapshot(state.clone()))
             .map_err(unavailable)?;
         let epoch = i64::try_from(parent.cursor.epoch.0 + 1).map_err(unavailable)?;
-        preverify_batch::prepare(inputs, true, &rules.stealth_minimum, |tx| {
-            Ok(self.prove(
-                tx,
-                &ledger,
-                state,
+        let (bound, authority) = context;
+        let policy = self.private_policy(bound, epoch);
+        let scope = self
+            .proof_cache
+            .select(
                 parent.ledger_root.as_bytes(),
-                epoch,
-                self.private_policy(bound, epoch),
-                &rules.stealth_minimum,
-            ))
+                ProofBinding::new(authority, policy, rules),
+            )
+            .map_err(unavailable)?;
+        preverify_batch::prepare(inputs, true, &rules.stealth_minimum, |tx| {
+            self.proof_cache.run(&scope, epoch, purpose, tx, || {
+                Ok(self.prove(
+                    tx,
+                    &ledger,
+                    state,
+                    parent.ledger_root.as_bytes(),
+                    epoch,
+                    policy,
+                    &rules.stealth_minimum,
+                ))
+            })
         })
         .map_err(unavailable)
     }
@@ -126,6 +220,10 @@ impl Native {
         policy: octra_node_runtime::private_key::Policy,
         minimum: &BigInt,
     ) -> Checked {
+        let _crypto = self.runtime.crypto_scope(
+            false,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        );
         if !preverify_commit::managed(tx) {
             return Checked::Ready(None);
         }
@@ -273,3 +371,6 @@ impl Native {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

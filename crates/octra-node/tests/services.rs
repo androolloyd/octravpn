@@ -1536,7 +1536,15 @@ async fn empty_finalized_import_needs_no_peer_and_rejects_wrong_parent() {
         .unwrap();
     assert_eq!(committed.head.cursor.epoch.0, 1);
     assert!(matches!(committed.services, Status::Suspended(_)));
-    assert!(reader.authority.requests.lock().unwrap().is_empty());
+    // This fixture records Host.lookup calls, including the explicit local
+    // cache read; it does not record network requests. The wrong-parent
+    // certificate was refused before lookup, and the valid empty import made
+    // exactly one local lookup without needing a connected peer.
+    assert!(reader.swarm.peers().is_empty());
+    assert_eq!(
+        reader.authority.requests.lock().unwrap().as_slice(),
+        &[hash::proposal_id(&certificate.header).unwrap()]
+    );
     node.shutdown().await.unwrap();
 }
 
@@ -2088,6 +2096,8 @@ mod gateway;
 mod http_join;
 #[path = "services/live.rs"]
 mod live;
+#[path = "services/local_bundles.rs"]
+mod local_bundles;
 #[path = "services/pending.rs"]
 mod pending;
 #[path = "services/proposals.rs"]

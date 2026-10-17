@@ -52,7 +52,7 @@ pub(crate) fn cipher(raw: &[u8], cap: bool) -> Result<(Cipher, Vec<u8>)> {
             vec![],
         )),
         Err(crypto::Error::Rejected(reason)) => Ok((Cipher::Malformed, reason)),
-        Err(crypto::Error::Unavailable(error)) => Err(Error::Unavailable(error.to_string())),
+        Err(crypto::Error::Unavailable(error)) => Err(Error::Unavailable(error)),
     }
 }
 pub(crate) fn status(raw: &[u8], public: Option<&[u8]>, cap: bool) -> Result<Status> {
@@ -73,9 +73,7 @@ pub(crate) fn key(public: Option<&[u8]>) -> Result<(Key, Vec<u8>)> {
                 vec![],
             ),
             Err(crypto::Error::Rejected(reason)) => (Key::Malformed, reason),
-            Err(crypto::Error::Unavailable(error)) => {
-                return Err(Error::Unavailable(error.to_string()))
-            }
+            Err(crypto::Error::Unavailable(error)) => return Err(Error::Unavailable(error)),
         },
     })
 }

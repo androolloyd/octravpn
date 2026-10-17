@@ -28,6 +28,11 @@ RUN --mount=type=cache,id=octra-vpn-qualification-target,target=/work/octra/targ
     cargo test --locked -p octra-node-protocol --lib isolated_tests && \
     cargo test --locked -p octra-node-runtime --lib canonical::storage_tests && \
     cargo test --locked -p octra-node-runtime --lib state_batch::storage::tests && \
+    cargo test --locked -p octra-node-runtime --lib account_summary::tests && \
+    cargo test --locked -p octra-node --lib rpc::account_tests && \
+    cargo test --locked -p octra-node --lib rpc::native::status::tests && \
+    cargo test --locked -p octra-node --lib executor::proofs::tests && \
+    cargo test --locked -p octra-node --lib captured_ && \
     cargo test --locked -p octra-node-runtime --lib canonical::reader::paths && \
     cargo test --locked -p octra-node-runtime --test canonical_assets -- --skip browser_fixture && \
     cargo test --locked -p octra-node-runtime --test live_consensus resource_gossip_reaches_actor_without_enabling_optional_committees && \
@@ -64,6 +69,11 @@ RUN --mount=type=cache,id=octra-vpn-qualification-target,target=/work/octra/targ
     cargo test --locked -p octra-node --test single_native facade:: && \
     cargo test --locked -p octra-node --test single_native --no-run --message-format=json > /tmp/single-fixture-build.json && \
     python3 -c 'import json,shutil; rows=[json.loads(line) for line in open("/tmp/single-fixture-build.json") if line.startswith("{")]; bins=[row["executable"] for row in rows if row.get("reason")=="compiler-artifact" and row.get("target",{}).get("name")=="single_native" and row.get("executable")]; assert len(bins)==1; shutil.copy2(bins[0],"/tmp/native-binaries/octra-single-fixture")'
+RUN --mount=type=cache,id=octra-vpn-qualification-target,target=/work/octra/target \
+    cargo test --locked --release -p octra-node-runtime --features test-helpers \
+      --test crypto_process --test private_isolation --test private_admission --test pvac_status_service && \
+    cargo test --locked -p octravpn-node --lib native_derp && \
+    cargo test --locked -p octra-node --lib mesh::
 RUN --mount=type=cache,id=octra-vpn-qualification-target,target=/work/octra/target \
     cargo build --locked --release -p octra-node && \
     cp target/release/octra-node /tmp/native-binaries/octra-node

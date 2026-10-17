@@ -1,6 +1,7 @@
 //! Native services for the Rust Octra node. Consensus and canonical storage
 //! remain separate from execution; speculative effects never enter ExEx.
 pub mod account_store;
+pub mod account_summary;
 pub mod admission;
 pub mod aml_input;
 pub mod browser_wallet;
@@ -39,10 +40,12 @@ pub mod compute_settle;
 pub mod compute_transaction;
 pub mod consensus_bundle;
 pub mod consensus_driver;
+pub mod consensus_preverify_cache;
 pub mod consensus_recovery;
 pub mod consensus_votes;
 pub mod consensus_work;
 pub mod crypto_payload;
+pub mod crypto_worker;
 pub mod epoch_execution;
 pub mod epoch_footer;
 pub mod epoch_partition;

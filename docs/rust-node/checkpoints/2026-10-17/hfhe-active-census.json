@@ -1,0 +1,78 @@
+{
+  "schema": "octra_active_hfhe_census_v1",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "validation": "Source census; frozen candidate qualification is recorded separately.",
+  "source_sha256": {
+    "lib/core/preverify_worker.ml": "a4338752618dc621e193f54d1c44fee8b35f6570aade9ab7f34f1362e8096e2b",
+    "lib/core/private_ledger.ml": "6c298ec69409251ba98bf91221cee33412514dbc173241ce2aec582c5b7f45ad",
+    "lib/core/private_transition.ml": "236087d9b077bb5f6e5f89e1cbe2bb19998e960b3fa63b08d52f457d7c9fa993",
+    "lib/core/pvac_verify_worker.ml": "eaf540a7db2e6c164e8969115adefcaadbb6695d1d775b46dfa883b134ba95ac",
+    "pvac_ffi/pvac_ffi.mli": "047570d0eb48cd02c8d99461c03b553411628e7851569ffcf9fdbed611f2ac9c",
+    "pvac_ffi/pvac_ffi.ml": "9a231e55c680780a24d1093964b1e90ee256ffe0aa07498bb657b514d8e35105",
+    "pvac_ffi/pvac_stubs.cpp": "492fea49fce2d47b2ebc3705fc6300a619a682494d36459a01dce870819b4cbe",
+    "pvac/pvac_c_api.h": "2099dfe09e0e21bca780acd35c379a2fbf850761e79cb846957bc2623311fc00",
+    "pvac/pvac_c_api.cpp": "5e60c148352656bf9a43b234a784a8f4d51c6caaea198e3fd5883c9fb8c8d590",
+    "pvac/include/pvac/ops/recrypt_native.hpp": "1b48ccbb847ef84f876e9587cf1da02db0286f24bff27f2cb5efa9f5b4754cec",
+    "pvac/include/pvac/ops/recrypt_runtime_eval.hpp": "dbd56fef7f40fc5fcab52c9a858c2a69efe7b39032c0627579e4cf0297fc3495",
+    "pvac/include/pvac/ops/recrypt_eval.hpp": "271057b0ccf26f0b6ca8a7d548f591e031fc004fe1cabea97396534195c0e82e",
+    "pvac/include/pvac/ops/recrypt_public.hpp": "a00b09c76c5266515019117d4f12a70acff2d48eb6dc87e620218a4a2d8d2bb1"
+  },
+  "active_node_gap": {
+    "finding": "Private BFT proof checks expanded keys/cipher graphs and executed cryptography synchronously in the parent, unlike native classified PVAC workers. A semaphore alone does not enforce native timeout/RSS.",
+    "native": [
+      "lib/core/preverify_worker.ml:200,218,312-325",
+      "lib/core/private_ledger.ml:889,1020,1054,1536,1758,1775,2323,2335,2382",
+      "lib/core/pvac_verify_worker.ml:31-96"
+    ],
+    "implementation": [
+      "crates/octra-node-runtime/src/crypto_worker/private.rs",
+      "crates/octra-node-runtime/src/private_crypto/isolated.rs",
+      "crates/octra-node-runtime/src/private_balance.rs",
+      "crates/octra-node-runtime/src/private_key/mod.rs",
+      "crates/octra-node-runtime/src/private_transfer.rs",
+      "crates/octra-node-runtime/src/circle_cell.rs",
+      "crates/octra-node-runtime/src/private_account_rpc.rs",
+      "crates/octra-node/src/executor/proofs.rs",
+      "crates/octra-node-runtime/src/crypto_worker/private/admission.rs",
+      "crates/octra-node-runtime/src/compute.rs",
+      "crates/octra-node-runtime/src/single_private/worker.rs"
+    ],
+    "behavior": "Public immutable byte images+metadata only in the parent; required scoped requests use the shared owned process service for decode, serialization, amount/range/claim/key-switch verification and balance arithmetic. Exact deterministic rejection bytes are separate from operational errors. Host scopes, cancellation, PVAC actor propagation and the shared pool are integrated by the native executor and runtime adapters. Standalone component APIs retain explicit no-Scope local behavior; production CLI uses isolated runtime.",
+    "new_regression": "crates/octra-node-runtime/tests/private_isolation.rs:259 actual existing native private-crypto vectors through packaged helper; cancelled/expired scoped decode must be unavailable and never fall back.",
+    "admission": "The same owned runner uses independent native lanes: FHE actor1active; PVAC Compute_pool capacity1/2, Required128, Speculative6, burst4. Native BFT private proofs queue Required; Circle typed prepared proofs and synchronous OCTB use immediate Speculative; asynchronous OCTB uses FHE actor. Single speculative range jobs join the same proof channel with native40x50ms retry. No generic global active cap serializes the independent native lanes. Typed Circle parsing and invocation scopes are part of the executor/runtime integration.",
+    "new_regressions": [
+      "crates/octra-node-runtime/tests/private_isolation.rs",
+      "crates/octra-node-runtime/tests/private_admission.rs",
+      "crates/octra-node-runtime/tests/compute_parity.rs (pvac-admission.json)",
+      "crates/octra-node-runtime/tests/crypto_process.rs"
+    ],
+    "pending_validation": "Frozen implementation and regressions are under the final combined qualification batch; its exact-source results must be read from the final qualification checkpoint when present. This source census records no pending-run pass."
+  },
+  "library_only_unimplemented": [
+    {
+      "native": [
+        "pvac/include/pvac/ops/recrypt_native.hpp:native_recrypt_seeded,verify_native_recrypt",
+        "pvac/include/pvac/ops/recrypt_runtime_eval.hpp:make_native_runtime_source_carrier,make_native_runtime_linear_carrier,make_native_runtime_product_carrier,eval_native_runtime_hidden_reset_chain",
+        "pvac/include/pvac/ops/recrypt_eval.hpp:recrypt_hidden,recrypt_hidden_verify"
+      ],
+      "rust": "Recryption policy/material/commitment/profile helpers exist, but full hidden carriers, native reset proof certificates and reusable hidden evaluation are still absent.",
+      "reachability": "These exact entry points are not exported by pvac_c_api.h or pvac_ffi.mli and have no node/OCaml call sites. Their C++ availability is a whole-library parity boundary, not an active lite-node execution omission."
+    }
+  ],
+  "stale_or_overbroad_claims": [
+    {
+      "claim": "Missing public equality prover wrapper",
+      "evidence": "crates/octra-hfhe/src/recrypt/public.rs::prove,verify,bundle_seeded plus public_recrypt.json already implement and compare8 native complete outputs. This finite scope does not certify all reset protocols."
+    },
+    {
+      "claim": "Recrypt transaction must implement reusable reset now",
+      "evidence": "Native preverify_worker.ml332 returns recrypt_disabled; private_transition.ml705-707 refuses the released transaction profile. Rust preserves that refusal. The OCaml ct_recrypt_seeded FFI exists but has no production ML caller; its legacy EvalKey implementation is a separate existing Rust legacy.rs port."
+    }
+  ],
+  "not_claimed": [
+    "Whole HFHE library completion",
+    "Side-channel/secret lifetime certification",
+    "Cross-architecture equality",
+    "Public chain/Mainnet readiness"
+  ]
+}

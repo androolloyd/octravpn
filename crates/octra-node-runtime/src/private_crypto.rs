@@ -15,6 +15,7 @@ use octra_hfhe::{
     scalar::{Scalar, ScalarRule},
 };
 use octra_node_protocol::transaction::decode_base64;
+pub mod isolated;
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {

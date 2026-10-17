@@ -28,13 +28,13 @@ jobs:
       - uses: actions/checkout@v4
         with: { repository: androolloyd/octra-foundry, ref: d5feaad7f14d6a381e2327dfd6738cae8df95b31, path: octra-foundry }
       - uses: actions/checkout@v4
-        with: { repository: androolloyd/headscale-rs, ref: 5662f202a8448364cb212a12c0489216c74ab6ca, path: headscale-rs }
+        with: { repository: androolloyd/headscale-rs, ref: 64bc54312ff9c4c2946f563f21875cf55e3f8f55, path: headscale-rs }
       - uses: ./octra/.github/actions/setup-rust
       - uses: ./octra/.github/actions/prepare-native-tests
-      - name: Circle application and durable ExEx delivery
+      - name: Circle application and durable ExEx delivery (release tests)
         working-directory: octra
         run: |
-          cargo test --locked -p octra-hfhe -p octra-node-runtime -p octra-pvac -p octra-node-protocol -p octra-exex -p octravpn-circle-registry --all-features
+          cargo test --locked --release -p octra-hfhe -p octra-node-runtime -p octra-pvac -p octra-node-protocol -p octra-exex -p octravpn-circle-registry --all-features
           cargo clippy --locked -p octra-hfhe -p octra-node-runtime -p octra-pvac -p octra-node-protocol -p octra-exex -p octravpn-circle-registry --all-targets --all-features -- -D warnings
           cargo clippy --locked -p octravpn-circle-registry --target wasm32-unknown-unknown --lib -- -D warnings
       - name: Pinned native host ABI and unsigned package

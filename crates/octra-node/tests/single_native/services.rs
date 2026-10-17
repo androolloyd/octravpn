@@ -80,7 +80,7 @@ async fn unregistered_node(path: &Path, genesis: Option<Snapshot>) -> Arc<single
     });
     let native = Native::new(
         cfg,
-        CircleRuntime::new(Arc::new(octra_node_runtime::circle_hfhe::Backend)),
+        isolated_runtime(),
         Arc::new(single::History(store.clone())),
     )
     .unwrap();

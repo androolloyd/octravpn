@@ -29,6 +29,7 @@ pub struct Ready {
     pub index: usize,
     pub receipt: Option<Receipt>,
 }
+#[derive(Clone)]
 pub enum Checked {
     Ready(Option<Box<Receipt>>),
     Skip { reason: Vec<u8>, kind: Kind },

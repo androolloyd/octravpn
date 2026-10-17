@@ -120,6 +120,23 @@ policy before opening listeners; unreadable or malformed stored policy aborts
 startup. An explicit empty ACL remains deny-all after a restart. A fresh store
 with no ACL retains Headscale's existing default policy behavior.
 
+Native DERP forwarding requires an explicit loaded ACL, live registered keys
+and unexpired registrations for both peers. An empty ACL denies forwarding.
+The relay rechecks both endpoints and peer adjacency on each incoming packet
+and before writing queued packets. Circle-managed membership is checked from
+the current verified member set even when registration-only enforcement is
+disabled. Native node and Single launchers additionally gate new registration
+and relay frames on their current canonical Serving publication; standalone
+`mesh serve` remains controlled by its operator.
+
+DERP carries encrypted packets. Its peer-adjacency check cannot enforce inner
+destination ports, portal paths, tariffs or prepaid balances. Direct WireGuard
+links remain subject to the endpoint's packet policy. These relay checks do not
+establish paid stock-client enrollment or the bounded unpaid portal service.
+Membership or Serving revocation is checked on the next frame or keepalive;
+pair ACL changes are checked on each relayed packet. Already completed IO
+cannot be recalled.
+
 When Circle membership controls the Hub or `mesh serve` policy, admin policy
 replacement returns 403. The verified Circle source owns those ACL updates.
 

@@ -21,18 +21,18 @@ use std::{
 /// resets the deadline or grants mutation authority.
 #[derive(Clone)]
 pub struct Clock {
-    active: Arc<AtomicBool>,
+    cancelled: Arc<AtomicBool>,
     deadline: Instant,
 }
 impl Clock {
     pub fn new(seconds: Duration) -> Self {
         Self {
-            active: Arc::new(AtomicBool::new(true)),
+            cancelled: Arc::new(AtomicBool::new(false)),
             deadline: Instant::now() + seconds,
         }
     }
     pub fn running(&self) -> bool {
-        self.active.load(Ordering::Acquire) && Instant::now() < self.deadline
+        !self.cancelled.load(Ordering::Acquire) && Instant::now() < self.deadline
     }
     pub fn expired(&self) -> bool {
         Instant::now() >= self.deadline
@@ -40,8 +40,13 @@ impl Clock {
     pub fn deadline(&self) -> Instant {
         self.deadline
     }
+    /// Shared with the owned crypto helper, so request cancellation stops work
+    /// even when the synchronous VM is waiting for its child process.
+    pub fn cancellation(&self) -> Arc<AtomicBool> {
+        self.cancelled.clone()
+    }
     pub fn stop(&self) {
-        self.active.store(false, Ordering::Release);
+        self.cancelled.store(true, Ordering::Release);
     }
 }
 

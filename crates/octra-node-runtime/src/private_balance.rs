@@ -2,7 +2,7 @@
 // Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
 //! Verified encrypt/decrypt ledger transitions. Epoch admission (caps, bound
 //! keys, KAT and receipts) belongs to the caller; no unchecked plan is exposed.
-use crate::private_crypto::{self as crypto, AmountProof, ResultPolicy};
+use crate::private_crypto::isolated::{self as crypto, AmountProof, ResultPolicy};
 use num_bigint::BigInt;
 use octra_hfhe::scalar::ScalarRule;
 use octra_node_protocol::{

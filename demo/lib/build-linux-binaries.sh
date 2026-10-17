@@ -4,7 +4,7 @@
 # Build all the Linux binaries the demo harnesses need, from a macOS
 # (or any) dev host, using docker as the cross-compile runtime. We
 # don't actually cross-compile in the cargo sense — we run cargo
-# inside `rust:1.88-bookworm`, so the toolchain IS Linux and the
+# inside `rust:1.96.0-bookworm`, so the toolchain IS Linux and the
 # emitted ELF binaries match the debian:bookworm-slim containers the
 # bringups mount them into.
 #
@@ -27,19 +27,10 @@
 # including library modules, build inputs and the mounted sibling repos.
 # Existing target directories retain incremental artifacts for warm builds.
 #
-# Measured on this repo, Apple M-series host (rust:1.88-bookworm
-# pre-pulled, target/linux-debug wiped, host cargo cache untouched):
-#   cold (`rm -rf target/linux-debug && time bash …`): ~103 s real
-#     (octravpn workspace 1m15s in cargo, mock-rpc 10s, plus the apt
-#     protobuf-compiler libprotobuf-dev install). Linker is the long pole; `dev`
-#     profile keeps it bearable.
-# Subsequent cold rebuilds (target wiped, cargo-registry preserved)
-# typically come in under 60 s because crates.io fetch is skipped.
-#
 # Env overrides:
 #   OCTRA_BUILDER_IMAGE  Override the docker image (default
 #                        octravpn-builder:latest if present, else
-#                        rust:1.88-bookworm).
+#                        rust:1.96.0-bookworm).
 #   OCTRA_FOUNDRY_PATH   Path to ../octra-foundry sibling (default
 #                        ${REPO_ROOT}/../octra-foundry).
 #   HEADSCALE_RS_PATH    Path to ../headscale-rs sibling (default
@@ -92,7 +83,7 @@ if [[ -z "${BUILDER_IMAGE}" ]]; then
     if docker image inspect octravpn-builder:latest >/dev/null 2>&1; then
         BUILDER_IMAGE="octravpn-builder:latest"
     else
-        BUILDER_IMAGE="rust:1.88-bookworm"
+        BUILDER_IMAGE="rust:1.96.0-bookworm"
     fi
 fi
 
@@ -100,7 +91,7 @@ fi
 # prebuilt builder image already has it, the vanilla rust image needs
 # the apt step.
 BUILD_PREAMBLE=""
-if [[ "${BUILDER_IMAGE}" == "rust:1.88-bookworm" ]]; then
+if [[ "${BUILDER_IMAGE}" == "rust:1.96.0-bookworm" ]]; then
     BUILD_PREAMBLE="apt-get update >/dev/null 2>&1 && \
         apt-get install -y --no-install-recommends protobuf-compiler libprotobuf-dev >/dev/null 2>&1 && "
 fi
@@ -136,7 +127,7 @@ human_size() {
 #
 # We used to drop to the caller's uid via `--user`, but the
 # BUILD_PREAMBLE (apt-get install protobuf-compiler libprotobuf-dev when falling back
-# to vanilla rust:1.88-bookworm) needs root inside the container. The
+# to vanilla rust:1.96.0-bookworm) needs root inside the container. The
 # robust fix: build as root inside, then chown the output tree to
 # the caller after — the bind mount preserves the chown.
 DOCKER_USER_ARGS=""

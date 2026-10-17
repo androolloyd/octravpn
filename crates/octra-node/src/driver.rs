@@ -161,6 +161,134 @@ impl<A: Host> Validator<A> {
     pub fn set_enabled(&self, enabled: bool) {
         self.enabled.store(enabled, Ordering::Release);
     }
+    async fn prepare_bundle(
+        &self,
+        candidate: Arc<crate::proposal::Candidate>,
+    ) -> Result<Option<Prepared>, ProposalError> {
+        let proposal = candidate.context().proposal();
+        let id = hash::proposal_id(&proposal.header)
+            .map_err(|e| ProposalError::Invalid(e.to_string()))?;
+        if let Some(raw) = self
+            .bundles
+            .local(&id)
+            .await
+            .map_err(|e| ProposalError::Unavailable(e.to_string()))?
+        {
+            return self
+                .executor
+                .verify_proposal(candidate, &raw)
+                .await
+                .map(Some);
+        }
+        // Native select_staged indexes the first transaction for each hash,
+        // then follows the authenticated proposal's order, not queue order.
+        let staged = self
+            .pending
+            .transactions()
+            .map_err(|e| ProposalError::Unavailable(e.to_string()))?;
+        let mut index = BTreeMap::new();
+        for tx in staged {
+            let hash = tx
+                .hash()
+                .map_err(|e| ProposalError::Unavailable(e.to_string()))?;
+            index.entry(hex::encode(hash).into_bytes()).or_insert(tx);
+        }
+        let local = proposal
+            .tx_hashes
+            .iter()
+            .filter_map(|hash| {
+                let hash = if hash.len() == 32 {
+                    hex::encode(hash).into_bytes()
+                } else {
+                    hash.clone()
+                };
+                index.get(&hash).cloned()
+            })
+            .collect::<Vec<_>>();
+        if local.len() == proposal.tx_hashes.len() {
+            match self
+                .executor
+                .verify_local_proposal(candidate.clone(), local)
+                .await
+            {
+                Ok(prepared) => return Ok(Some(prepared)),
+                Err(reason) => self.warning(&reason.to_string()),
+            }
+        }
+        if !self.node.proposal_current(&candidate) {
+            return Ok(None);
+        }
+        let rules = self
+            .executor
+            .proposal_rules(&candidate)
+            .map_err(|e| ProposalError::Unavailable(e.to_string()))?;
+        let Some((_, bundle)) = self
+            .bundles
+            .query(proposal.epoch_id, id, 10., |r| {
+                Ok(consensus_bundle::proposal_wire(proposal, &r.bundle, &rules).ok())
+            })
+            .await
+            .map_err(|e| ProposalError::Unavailable(e.to_string()))?
+        else {
+            return Ok(None);
+        };
+        self.executor
+            .verify_proposal(
+                candidate,
+                &bundle
+                    .to_raw()
+                    .map_err(|e| ProposalError::Unavailable(e.to_string()))?,
+            )
+            .await
+            .map(Some)
+    }
+    /// Only a fully verified, still-current proposal may seed native gossip's
+    /// shared cache. Its lifetime spans root changes; it grants no admission.
+    fn share_verified(&self, raw: &consensus_bundle::RawBundle) -> Result<(), Error> {
+        let transactions = raw
+            .txs_json
+            .iter()
+            .map(|bytes| {
+                let doc =
+                    octra_node_protocol::native_json::Document::parse(bytes).map_err(error)?;
+                octra_node_protocol::transaction::Transaction::from_document(&doc).map_err(error)
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
+        let hashes = self
+            .executor
+            .share_transactions(&transactions)
+            .map_err(error)?;
+        if !hashes.is_empty() && self.peers.driver()?.is_some() {
+            let swarm = self.swarm.clone();
+            tokio::spawn(async move {
+                use octra_node_protocol::network::{
+                    frame::Frame,
+                    transaction_gossip::{Message, MAX_HASHES},
+                };
+                for batch in hashes.chunks(MAX_HASHES) {
+                    let result = async {
+                        let payload = Message::Inventory(batch.to_vec()).encode()?;
+                        swarm
+                            .broadcast(
+                                Frame {
+                                    message: 0x20,
+                                    payload,
+                                },
+                                None,
+                                false,
+                            )
+                            .await
+                    }
+                    .await;
+                    if let Err(reason) = result {
+                        eprintln!("consensus: tx relay failed: {reason}");
+                        break;
+                    }
+                }
+            });
+        }
+        Ok(())
+    }
     fn upgrade_ready(&self, epoch: &Epoch) -> bool {
         let reason = self
             .swarm
@@ -492,22 +620,9 @@ impl<A: Host> DriverHost for Validator<A> {
             }
         };
         let id = hash::proposal_id(&proposal.header)?;
-        let rules = self.executor.proposal_rules(&candidate).map_err(error)?;
-        let Some((_, bundle)) = self
-            .bundles
-            .query(proposal.epoch_id, id, 10., |r| {
-                Ok(consensus_bundle::proposal_wire(proposal, &r.bundle, &rules).ok())
-            })
-            .await?
-        else {
-            return Ok(Verdict::Wait);
-        };
-        let prepared = match self
-            .executor
-            .verify_proposal(candidate.clone(), &bundle.to_raw()?)
-            .await
-        {
-            Ok(p) => Arc::new(p),
+        let prepared = match self.prepare_bundle(candidate.clone()).await {
+            Ok(Some(p)) => Arc::new(p),
+            Ok(None) => return Ok(Verdict::Wait),
             Err(ProposalError::Invalid(_)) => return Ok(Verdict::Reject),
             Err(e) => {
                 self.warning(&e.to_string());
@@ -517,6 +632,7 @@ impl<A: Host> DriverHost for Validator<A> {
         if !self.node.proposal_current(&candidate) {
             return Ok(Verdict::Wait);
         }
+        self.share_verified(prepared.bundle())?;
         self.peers
             .cache(proposal.epoch_id, id, prepared.bundle().clone())?;
         self.cache

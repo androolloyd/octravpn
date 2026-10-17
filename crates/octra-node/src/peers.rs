@@ -33,6 +33,8 @@ fn error(e: impl std::fmt::Display) -> Error {
     e.to_string().into()
 }
 type Missing = (i64, Vec<epoch_roots::Response>);
+mod raw_cache;
+use raw_cache::RawCache;
 
 struct Shared {
     history: Arc<dyn History>,
@@ -41,7 +43,7 @@ struct Shared {
     key: SigningKey,
     journal: JournalOwner,
     active: RwLock<ValidatorSet>,
-    bundles: Mutex<BTreeMap<[u8; 32], (i64, RawBundle)>>,
+    bundles: Mutex<RawCache>,
     driver: Mutex<Option<Handle>>,
     peer_states: Mutex<BTreeMap<Bytes, octra_node_protocol::status_rpc::consensus::Peer>>,
     missing: mpsc::Sender<Missing>,
@@ -126,23 +128,14 @@ impl Authority {
         Ok(())
     }
     pub fn cache(&self, epoch: i64, id: [u8; 32], bundle: RawBundle) -> Result<(), Error> {
-        let mut cache = self.0.bundles.lock().map_err(error)?;
-        // A proposal ID commits to the bundle. Never replace its contents.
-        if let Some((prior, raw)) = cache.get(&id) {
-            if *prior != epoch || raw != &bundle {
-                return Err("proposal cache commitment conflict".into());
-            }
-            return Ok(());
-        }
-        cache.insert(id, (epoch, bundle));
-        Ok(())
-    }
-    pub fn prune(&self, committed: i64) -> Result<(), Error> {
         self.0
             .bundles
             .lock()
             .map_err(error)?
-            .retain(|_, (epoch, _)| *epoch > committed);
+            .store(epoch, id, bundle)
+    }
+    pub fn prune(&self, committed: i64) -> Result<(), Error> {
+        self.0.bundles.lock().map_err(error)?.prune(committed);
         Ok(())
     }
     async fn set_at(&self, epoch: i64) -> Result<ValidatorSet, Error> {
@@ -187,13 +180,7 @@ impl bundle_queries::Host for Authority {
         Ok(self.0.active.read().map_err(error)?.clone())
     }
     async fn lookup(&self, id: &[u8; 32]) -> Result<Option<RawBundle>, Error> {
-        let pending = self
-            .0
-            .bundles
-            .lock()
-            .map_err(error)?
-            .get(id)
-            .map(|(_, b)| b.clone());
+        let pending = self.0.bundles.lock().map_err(error)?.lookup(id);
         if pending.is_some() {
             return Ok(pending);
         }
@@ -342,6 +329,31 @@ impl Network {
         validators: ValidatorSet,
         journal: JournalOwner,
     ) -> Result<Self, Error> {
+        let capacity = std::env::var("OCTRA_BUNDLE_CACHE_CAP").ok();
+        Self::new_with_cache_inputs(
+            listener,
+            config,
+            key,
+            history,
+            reader,
+            membership,
+            validators,
+            journal,
+            capacity.as_deref().map(str::as_bytes),
+        )
+    }
+    /// Supply the effective captured startup setting rather than ambient environment.
+    pub(crate) fn new_with_cache_inputs(
+        listener: TcpListener,
+        config: Config,
+        key: SigningKey,
+        history: Arc<dyn History>,
+        reader: Reader,
+        membership: CanonicalValidators,
+        validators: ValidatorSet,
+        journal: JournalOwner,
+        bundle_cache_cap: Option<&[u8]>,
+    ) -> Result<Self, Error> {
         let chain = config.chain_id.clone();
         let address = config.node_address.clone();
         let swarm = Swarm::new(config, key.clone())?;
@@ -356,7 +368,7 @@ impl Network {
             key,
             journal,
             active: RwLock::new(validators),
-            bundles: Mutex::default(),
+            bundles: Mutex::new(RawCache::from_inputs(bundle_cache_cap)),
             driver: Mutex::default(),
             peer_states: Mutex::default(),
             missing: send,

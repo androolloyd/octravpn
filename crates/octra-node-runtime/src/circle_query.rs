@@ -142,6 +142,16 @@ impl<'a> Query<'a> {
         self.scope = Some(scope);
         self
     }
+    fn crypto_scope(&self) -> Option<crate::crypto_worker::Scope> {
+        let runtime = self.runtime.as_ref()?;
+        match &self.clock {
+            Some(clock) => runtime.crypto_scope_until(true, clock.cancellation(), clock.deadline()),
+            None => runtime.crypto_scope(
+                true,
+                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            ),
+        }
+    }
     /// Native legacy-program view with one verifier allowance shared by its
     /// invocation tree. The committed admission marker selects reload rules.
     pub fn program(
@@ -152,6 +162,7 @@ impl<'a> Query<'a> {
         caller: &[u8],
         limit: i64,
     ) -> Result<VmReceipt, Error> {
+        let _crypto = self.crypto_scope();
         let verifier = Cell::new(true);
         match self.legacy(
             address,
@@ -200,6 +211,7 @@ impl<'a> Query<'a> {
         caller: &[u8],
         limit: i64,
     ) -> Result<VmReceipt, Error> {
+        let _crypto = self.crypto_scope();
         let result = (|| {
             let info = circle_store::info(self.state, circle)
                 .map_err(unavailable)?

@@ -11,6 +11,8 @@ struct Cli {
 enum Command {
     /// Resume a locally staged repair in a stopped native-format store.
     LegacyRepair(octra_node::legacy_repair::Options),
+    /// Stage an empty native-format fork only after authenticated peer proof.
+    LegacyStage(octra_node::legacy_repair::StageOptions),
     /// Compile local AML to existing Legacy OCTB; does not grant typed Program authority.
     CompileLegacy {
         #[arg(long)]
@@ -24,6 +26,13 @@ enum Command {
     SingleRangeWorker {
         #[arg(long)]
         parent_pid: u32,
+    },
+    #[command(hide = true)]
+    CryptoWorker {
+        #[arg(long)]
+        parent_pid: u32,
+        #[arg(long)]
+        session: bool,
     },
     /// Manage the signed local validator duty pause; no network transaction.
     ValidatorControl(octra_node::validator_cli::Options),
@@ -93,6 +102,7 @@ enum Command {
 async fn main() -> Result<()> {
     match Cli::parse().command {
         Command::LegacyRepair(options) => options.run()?,
+        Command::LegacyStage(options) => options.run().await?,
         Command::CompileLegacy {
             source,
             loops,
@@ -109,6 +119,17 @@ async fn main() -> Result<()> {
         Command::SingleRangeWorker { parent_pid } => {
             octra_node_runtime::single_private::worker::helper(parent_pid)
                 .map_err(anyhow::Error::msg)?;
+        }
+        Command::CryptoWorker {
+            parent_pid,
+            session,
+        } => {
+            if session {
+                octra_node_runtime::crypto_worker::helper_session(parent_pid)
+            } else {
+                octra_node_runtime::crypto_worker::helper(parent_pid)
+            }
+            .map_err(anyhow::Error::msg)?;
         }
         Command::ValidatorControl(options) => options.run()?,
         Command::Snapshot { command } => command.run(shutdown()).await?,
@@ -166,8 +187,12 @@ async fn main() -> Result<()> {
             }
         }
         Command::RunSingle { config } => {
-            octra_node::single::launch::run(octra_node::single::launch::read(&config)?, shutdown())
-                .await?;
+            octra_node::single::launch::run(
+                octra_node::single::launch::read(&config)?,
+                crypto()?,
+                shutdown(),
+            )
+            .await?;
         }
         Command::Run {
             config,
@@ -175,7 +200,7 @@ async fn main() -> Result<()> {
         } => {
             let mut config = octra_node::devnet::read(&config)?;
             config.compute_provider |= compute_provider;
-            octra_node::devnet::run(config, shutdown()).await?;
+            octra_node::devnet::run(config, crypto()?, shutdown()).await?;
         }
         Command::RunNetwork {
             config,
@@ -185,18 +210,29 @@ async fn main() -> Result<()> {
             octra_node::network::RoleConfig::Public(mut config) => {
                 config.compute_provider |= compute_provider;
                 config.publisher |= publisher;
-                octra_node::network::run(*config, shutdown()).await?;
+                octra_node::network::run(*config, crypto()?, shutdown()).await?;
             }
             octra_node::network::RoleConfig::Single(config) => {
                 anyhow::ensure!(
                     !compute_provider && !publisher,
                     "public-network flags cannot select private Single services"
                 );
-                octra_node::single::launch::run(*config, shutdown()).await?;
+                octra_node::single::launch::run(*config, crypto()?, shutdown()).await?;
             }
         },
     }
     Ok(())
+}
+/// Only this CLI assumes that its own executable implements the hidden helper.
+/// Library launchers receive the runtime capability from their embedding host.
+fn crypto() -> Result<octra_node_runtime::circle::CircleRuntime> {
+    use octra_node_runtime::{
+        circle::CircleRuntime,
+        crypto_worker::{Limits, Pool},
+    };
+    let pool =
+        Pool::open(&std::env::current_exe()?, Limits::capture()).map_err(anyhow::Error::msg)?;
+    Ok(CircleRuntime::isolated(pool))
 }
 fn shutdown() -> tokio::sync::watch::Receiver<bool> {
     let (stop, shutdown) = tokio::sync::watch::channel(false);

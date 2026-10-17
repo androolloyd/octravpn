@@ -220,7 +220,7 @@ impl Wasm {
         }
         let invalid = || Error::Rejected(b"wasm key size invalid".to_vec());
         let mut effort = 0i64;
-        let secret = active.map(|(_, pair)| pair.secret.to_bytes());
+        let secret = active.map(|(_, pair)| pair.secret.clone());
         if view || proof {
             if let Some((_, pair)) = active {
                 let image = pair
@@ -249,13 +249,22 @@ impl Wasm {
                 return Err(Error::Rejected(b"wasm key effort exceeds limit".to_vec()));
             }
         }
+        let _deadline = if active.is_some() || !sources.is_empty() {
+            Some(crate::crypto_worker::Scope::batch().map_err(|e| match e {
+                crate::crypto_worker::Error::Unavailable(reason) => {
+                    Error::Unavailable(reason.into_bytes())
+                }
+                crate::crypto_worker::Error::Invalid => {
+                    Error::Unavailable(b"HFHE key worker unavailable".to_vec())
+                }
+            })?)
+        } else {
+            None
+        };
         let mut public = vec![];
         let active = match (active, secret) {
             (Some((id, pair)), Some(secret)) => {
-                let raw = pair
-                    .public
-                    .to_bytes()
-                    .map_err(|e| Error::Unavailable(e.to_string().into_bytes()))?;
+                let raw = pair.public.bytes();
                 Some(Active {
                     id: id.clone(),
                     public: STANDARD.encode(raw).into_bytes(),
@@ -279,16 +288,14 @@ impl Wasm {
             if !allowed {
                 continue;
             }
-            let key = match octra_hfhe::keys::PublicKey::from_bytes(&raw) {
+            let key = match crate::crypto_worker::Key::read(&raw, true) {
                 Ok(v) => v,
-                Err(e) if e.is_operational() => {
-                    return Err(Error::Unavailable(e.to_string().into_bytes()))
+                Err(crate::crypto_worker::Error::Unavailable(reason)) => {
+                    return Err(Error::Unavailable(reason.into_bytes()))
                 }
-                Err(_) => continue,
+                Err(crate::crypto_worker::Error::Invalid) => continue,
             };
-            let raw = key
-                .to_bytes()
-                .map_err(|e| Error::Unavailable(e.to_string().into_bytes()))?;
+            let raw = key.bytes();
             public.push((address, STANDARD.encode(raw).into_bytes()));
         }
         Ok(Self {

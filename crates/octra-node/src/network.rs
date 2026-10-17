@@ -199,7 +199,12 @@ fn bootstrap_peers(configured: &[String], settings: &Settings) -> Vec<Endpoint> 
             .unwrap_or_default(),
     )
 }
-pub async fn run(config: Config, mut shutdown: watch::Receiver<bool>) -> Result<()> {
+pub async fn run(
+    config: Config,
+    runtime: CircleRuntime,
+    mut shutdown: watch::Receiver<bool>,
+) -> Result<()> {
+    launch::require_crypto(&runtime)?;
     if let Some(proxy) = config.p2p_proxy {
         octra_node_protocol::network::proxy::validate(proxy)?;
     }
@@ -374,8 +379,7 @@ pub async fn run(config: Config, mut shutdown: watch::Receiver<bool>) -> Result<
                 genesis_time: None,
             },
             execution,
-            runtime: CircleRuntime::new(Arc::new(octra_node_runtime::circle_hfhe::Backend))
-                .with_program_keys(profile.keys.clone()),
+            runtime: runtime.with_program_keys(profile.keys.clone()),
             compute: octra_node_protocol::resource_compute::provider::Config::from_inputs(
                 config.compute_provider,
                 |name| settings.get(name).map(<[u8]>::to_vec),

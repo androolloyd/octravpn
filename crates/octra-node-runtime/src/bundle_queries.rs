@@ -73,6 +73,12 @@ impl<H: Host> Bundles<H> {
             slots: Mutex::new(Slots::default()),
         }))
     }
+    /// Read a locally retained bundle without opening a remote query. This is
+    /// acquisition only: callers must bind it to the expected header, epoch
+    /// rules and local execution before accepting it.
+    pub async fn local(&self, proposal: &ProposalId) -> Result<Option<RawBundle>, Error> {
+        self.0.host.lookup(proposal).await
+    }
     /// The driver logs operational errors without treating malformed query
     /// payloads as consensus votes. Unknown message types return false.
     pub async fn handle(&self, peer: &Peer, frame: &Frame) -> Result<bool, Error> {
@@ -317,6 +323,9 @@ mod tests {
         }
     }
     fn service() -> Bundles<Empty> {
+        with_host(Empty)
+    }
+    fn with_host<H: Host>(host: H) -> Bundles<H> {
         let config = Config {
             chain_id: b"lifecycle-fixture".to_vec(),
             node_address: b"v1".to_vec(),
@@ -338,9 +347,70 @@ mod tests {
         Bundles::new(
             config.chain_id.clone(),
             config.node_address.clone(),
-            Empty,
+            host,
             Swarm::new(config, SigningKey::from_bytes(&[1; 32])).unwrap(),
         )
+    }
+    struct Local {
+        calls: Arc<Mutex<Vec<ProposalId>>>,
+        bundle: Option<RawBundle>,
+        fail: bool,
+    }
+    #[async_trait::async_trait]
+    impl Host for Local {
+        fn validators(&self) -> Result<ValidatorSet, Error> {
+            Ok(ValidatorSet::unweighted(vec![]))
+        }
+        async fn lookup(&self, id: &ProposalId) -> Result<Option<RawBundle>, Error> {
+            self.calls.lock().unwrap().push(*id);
+            if self.fail {
+                Err("retained bundle unavailable".into())
+            } else {
+                Ok(self.bundle.clone())
+            }
+        }
+        fn sign(&self, _: &[u8]) -> Result<Bytes, Error> {
+            unreachable!()
+        }
+    }
+    #[tokio::test]
+    async fn local_lookup_is_explicit_and_never_creates_a_remote_reader() {
+        let id = [7; 32];
+        let raw = RawBundle {
+            tx_hashes: vec![b"unvalidated local hash".to_vec()],
+            txs_json: vec![b"unvalidated local body".to_vec()],
+            receipts_json: vec![b"unvalidated local receipt".to_vec()],
+        };
+        for (bundle, fail) in [(Some(raw), false), (None, false), (None, true)] {
+            let calls = Arc::new(Mutex::new(vec![]));
+            let service = with_host(Local {
+                calls: calls.clone(),
+                bundle: bundle.clone(),
+                fail,
+            });
+            let result = service.local(&id).await;
+            if fail {
+                assert_eq!(
+                    result.unwrap_err().to_string(),
+                    "retained bundle unavailable"
+                );
+            } else {
+                assert_eq!(result.unwrap(), bundle);
+            }
+            assert_eq!(*calls.lock().unwrap(), vec![id]);
+            assert!(service.0.slots.lock().unwrap().replies.is_empty());
+            assert!(service.0.slots.lock().unwrap().gates.is_empty());
+            assert!(service
+                .query::<()>(1, id, 0., |_| panic!("no peer response"))
+                .await
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                *calls.lock().unwrap(),
+                vec![id],
+                "remote query must not silently trust local bytes"
+            );
+        }
     }
     async fn started(service: &Bundles<Empty>, id: ProposalId) {
         tokio::time::timeout(Duration::from_secs(2), async {

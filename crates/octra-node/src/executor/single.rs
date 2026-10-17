@@ -258,6 +258,10 @@ impl Native {
                          ledger: &mut octra_node_protocol::state::Ledger,
                          state: &mut StateBatch|
          -> Result<Completion, Error> {
+            let _crypto = self.runtime.crypto_scope(
+                false,
+                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            );
             if route == Route::Validator {
                 return validators.execute(route, tx, ledger, state);
             }

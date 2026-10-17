@@ -13,8 +13,8 @@ pub struct Scope {
 }
 #[derive(Clone)]
 pub(crate) struct KeyPair {
-    pub public: Arc<PublicKey>,
-    pub secret: Arc<SecretKey>,
+    pub public: Arc<crate::crypto_worker::Key>,
+    pub secret: Arc<zeroize::Zeroizing<Vec<u8>>>,
 }
 impl Scope {
     pub fn new(key: Option<Vec<u8>>, intent: Option<Vec<u8>>, relay: Option<Vec<u8>>) -> Self {
@@ -26,9 +26,19 @@ impl Scope {
         }
     }
     /// Supplying material does not bypass the scoped key policy or HFHE modes.
-    pub fn with_keypair(mut self, public: Arc<PublicKey>, secret: Arc<SecretKey>) -> Self {
+    /// Material is explicitly trusted, expanded host configuration. Serialize
+    /// it once here, before an untrusted invocation starts its native deadline.
+    /// Execution retains only immutable images; secret bytes are zeroizing and
+    /// neither this capability nor its material is exposed through Debug.
+    pub fn with_keypair(
+        mut self,
+        public: &PublicKey,
+        secret: &SecretKey,
+    ) -> Result<Self, octra_hfhe::Error> {
+        let public = Arc::new(crate::crypto_worker::Key::from_public_key(public)?);
+        let secret = Arc::new(secret.to_bytes());
         self.pair = Some(KeyPair { public, secret });
-        self
+        Ok(self)
     }
 }
 impl fmt::Debug for Scope {

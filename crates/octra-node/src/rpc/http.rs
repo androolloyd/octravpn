@@ -16,7 +16,7 @@ use octra_node_protocol::{
     native_json::Document,
     state_sync::{http as wire, manifest, range_part::Encoded},
 };
-use octra_node_runtime::{account_store, canonical::Head, state_batch::StateBatch};
+use octra_node_runtime::canonical::Head;
 use sha2::{Digest, Sha256};
 use std::{
     path::{Path, PathBuf},
@@ -29,6 +29,10 @@ use std::{
 use tokio::sync::Semaphore;
 mod certificate;
 mod range;
+
+// Rpc_http.max_body_bytes at the adopted native source pin. This is the HTTP
+// ingress limit, separate from the JSON parser and response budgets.
+const RPC_BODY_MAX: usize = 5_000_000 + 65_536;
 
 pub(crate) struct Service {
     data: PathBuf,
@@ -148,7 +152,15 @@ async fn transport(request: Request<Body>, next: Next) -> Response {
         );
         response
     } else {
-        match tokio::time::timeout(Duration::from_secs(30), next.run(request)).await {
+        match tokio::time::timeout(Duration::from_secs(30), async {
+            if rpc && rpc_content_length_too_large(&request) {
+                rpc_body_limit()
+            } else {
+                next.run(request).await
+            }
+        })
+        .await
+        {
             Ok(response) => response,
             Err(_) => (
                 StatusCode::GATEWAY_TIMEOUT,
@@ -173,6 +185,27 @@ async fn transport(request: Request<Body>, next: Next) -> Response {
     }
     response
 }
+
+fn rpc_content_length_too_large(request: &Request<Body>) -> bool {
+    request.method() == Method::POST
+        && request
+            .headers()
+            .get(header::CONTENT_LENGTH)
+            .and_then(|value| {
+                native_integer::parse_int64(octra_node_protocol::network::endpoint::native_trim(
+                    value.as_bytes(),
+                ))
+            })
+            .is_some_and(|length| length > RPC_BODY_MAX as i64)
+}
+
+pub(super) fn rpc_body_limit() -> Response {
+    json_response(
+        StatusCode::PAYLOAD_TOO_LARGE,
+        b"{\"error\":\"request body too large\"}".to_vec(),
+    )
+}
+
 fn json_response(status: StatusCode, raw: Vec<u8>) -> Response {
     let mut response = (status, raw).into_response();
     response.headers_mut().insert(
@@ -650,6 +683,7 @@ async fn status(host: &Arc<Context>) -> Response {
         Err(reason) => return unavailable(reason),
     };
     let address = host.address.clone();
+    let executor = host.executor.clone();
     let policy = host.executor.emission_policy();
     let fallback = if policy.emission_guard {
         policy.legacy_total.clone()
@@ -659,7 +693,8 @@ async fn status(host: &Arc<Context>) -> Response {
     let result = host
         .executor
         .read(move || {
-            let ledger = account_store::ledger(&StateBatch::from_snapshot(view.state().clone()))
+            let summary = executor
+                .account_summary(view.state())
                 .map_err(|_| octra_node_protocol::rpc::Fault::new(110, b"service unavailable"))?;
             let total = view
                 .state()
@@ -667,11 +702,11 @@ async fn status(host: &Arc<Context>) -> Response {
                 .or(fallback.as_deref())
                 .and_then(native_integer::parse_integer)
                 .filter(|n| {
-                    n >= ledger.total_supply()
+                    n >= summary.total_supply()
                         && n <= &num_bigint::BigInt::from(octra_node_protocol::state::MAX_SUPPLY)
                 })
                 .ok_or_else(|| octra_node_protocol::rpc::Fault::new(110, b"service unavailable"))?;
-            let encrypted = &total - ledger.total_supply();
+            let encrypted = &total - summary.total_supply();
             let head = head(view.head());
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -685,11 +720,11 @@ async fn status(host: &Arc<Context>) -> Response {
                 ("validator", json::string(address)),
                 ("root_count", json::number(legacy.roots)),
                 ("timestamp", timestamp),
-                ("total_accounts", json::number(ledger.accounts().len())),
+                ("total_accounts", json::number(summary.accounts())),
                 ("total_supply", json::string(denomination(&total))),
                 ("circulating_supply", json::string(denomination(&total))),
                 ("encrypted_supply", json::string(denomination(&encrypted))),
-                ("active_accounts", json::number(ledger.active_accounts())),
+                ("active_accounts", json::number(summary.active_accounts())),
                 ("network_version", json::string(b"v3.0.0-irmin")),
                 ("storage_backend", json::string(b"sqlite")),
                 ("head_epoch", json::number(head.epoch)),
@@ -1099,7 +1134,166 @@ fn legacy(method: &Method, path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::Bytes;
     use tower::ServiceExt;
+
+    fn assert_rpc_http_source_pin() {
+        let source: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../docs/rust-node/source-map.json"))
+                .unwrap();
+        assert_eq!(
+            source["upstream_commit"],
+            "7f9be4489870645cfcc95439638cde40f5da9f50"
+        );
+        assert_eq!(
+            source["files"]["node_runtime/rpc_http.ml"],
+            "6abd8ac69869cab4db10686cc2274cbf508e03c0caaf995d7d3e8a67e5216f09"
+        );
+    }
+
+    fn rpc_body_router(maximum: usize) -> Router {
+        async fn receive(raw: Result<Bytes, axum::extract::rejection::BytesRejection>) -> Response {
+            match native::request_body(raw) {
+                Ok(raw) => raw.len().to_string().into_response(),
+                Err(response) => *response,
+            }
+        }
+        native_layer(
+            Router::new()
+                .route(
+                    "/rpc",
+                    axum::routing::post(receive)
+                        .layer(axum::extract::DefaultBodyLimit::max(maximum)),
+                )
+                .route("/other", axum::routing::post(receive)),
+        )
+    }
+
+    async fn assert_rpc_body_refusal(response: Response) {
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
+        assert_eq!(response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
+        assert_eq!(response.headers()[header::CONNECTION], "close");
+        // Rpc_http.respond_error, rather than a JSON-RPC method refusal or the
+        // REST {status,error:{type,reason}} envelope.
+        assert_eq!(
+            body::to_bytes(response.into_body(), 1024)
+                .await
+                .unwrap()
+                .as_ref(),
+            b"{\"error\":\"request body too large\"}"
+        );
+    }
+
+    #[test]
+    fn rpc_declared_limit_uses_native_trim_and_int64_fallbacks() {
+        assert_rpc_http_source_pin();
+        // Rpc_http.content_length_too_large uses Int64.of_string_opt, not the
+        // JSON integer parser or an unbounded usize conversion.
+        for (length, refused) in [
+            ("5065536", false),
+            ("5065537", true),
+            (" 5065537 ", true),
+            ("+5065537", true),
+            ("5_065_537", true),
+            ("-1", false),
+            ("invalid", false),
+            ("9223372036854775808", false),
+        ] {
+            let request = Request::builder()
+                .method(Method::POST)
+                .uri("/rpc")
+                .header(header::CONTENT_LENGTH, length)
+                .body(Body::empty())
+                .unwrap();
+            assert_eq!(rpc_content_length_too_large(&request), refused, "{length}");
+        }
+    }
+
+    #[tokio::test]
+    async fn rpc_declared_oversize_refuses_before_polling_the_body() {
+        assert_rpc_http_source_pin();
+        let polled = Arc::new(AtomicBool::new(false));
+        let body_polled = polled.clone();
+        let stream = futures::stream::once(async move {
+            body_polled.store(true, Ordering::SeqCst);
+            Ok::<_, std::io::Error>(Bytes::from_static(b"must not be read"))
+        });
+        let response = rpc_body_router(RPC_BODY_MAX)
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/rpc")
+                    .header(header::CONTENT_LENGTH, "5065537")
+                    .body(Body::from_stream(stream))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_rpc_body_refusal(response).await;
+        assert!(!polled.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn rpc_stream_overflow_preserves_native_error_body_and_boundary() {
+        assert_rpc_http_source_pin();
+        let chunks = futures::stream::iter([
+            Ok::<_, std::io::Error>(Bytes::from_static(b"1234")),
+            Ok(Bytes::from_static(b"56789")),
+        ]);
+        let response = rpc_body_router(8)
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/rpc")
+                    .body(Body::from_stream(chunks))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_rpc_body_refusal(response).await;
+        let response = rpc_body_router(RPC_BODY_MAX)
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/rpc")
+                    .header(header::CONTENT_LENGTH, "5065536")
+                    .body(Body::from(vec![b' '; RPC_BODY_MAX]))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            body::to_bytes(response.into_body(), 100)
+                .await
+                .unwrap()
+                .as_ref(),
+            b"5065536"
+        );
+    }
+
+    #[tokio::test]
+    async fn rpc_declared_limit_does_not_override_other_methods_or_routes() {
+        for (method, path, status) in [
+            (Method::GET, "/rpc", StatusCode::METHOD_NOT_ALLOWED),
+            (Method::POST, "/other", StatusCode::OK),
+        ] {
+            let response = rpc_body_router(RPC_BODY_MAX)
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(path)
+                        .header(header::CONTENT_LENGTH, "5065537")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), status);
+        }
+    }
+
     #[test]
     fn native_uri_query_vectors_preserve_bare_keys_commas_and_duplicate_precedence() {
         use base64::{engine::general_purpose::STANDARD, Engine};

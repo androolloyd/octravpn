@@ -1,0 +1,625 @@
+{
+  "schema": "octra_core_parity_census_v1",
+  "date": "2026-10-17",
+  "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "workspace_base": "4d6b57acbc8168c50b03f0815b5a9cd2309fa35e",
+  "method": "Bounded source census of all 31 historical partial mappings and their current production callers, unchanged adopted native source hashes, existing regression locations, and concrete implementation repairs. Historical mapping counts do not establish semantic equivalence of every native function.",
+  "validation": "See core-parity.json for source-bound local qualification, preserved initial failures, corrected complete target reruns and explicit public/whole-library limits. Historical source labels do not change the measured scope.",
+  "historical_partial_count": 31,
+  "full_consensus_execution": false,
+  "full_native_behavioral_parity": false,
+  "concrete_repairs": [
+    "generation-scoped native proposal/vote frame identity",
+    "native historical round-window acquisition and retry cursor",
+    "round-sync jump work/pacing/vote/throttle cleanup and 1.1s replay retry",
+    "native signer-versus-relay fault ownership and unresolved-membership nonpenalty",
+    "native vote-evidence current-head window and bounded signing-slot retention",
+    "cached/local-complete proposal and finalized-bundle acquisition with fresh authentication and execution",
+    "root/purpose/epoch/transaction/policy-bound per-item proof cache with Ready/Invalid-only retention, FIFO count and 32MiB limits, owner-ticket cancellation and shared waiters",
+    "bounded verified shared transaction cache and staged-first lazy transaction gossip lookup",
+    "raw proposal-bundle FIFO cap captured at startup; nonrefreshing hits/retries and safe epoch-prune/reinsertion bookkeeping",
+    "private proof/key/cipher operations through the same owned process runner as Circle/OCTB; required/speculative native proof-channel admission independent of the FHE actor",
+    "trusted stopped-store legacy peer-root selection and empty-suffix staging through the pinned real native Irmin backend"
+  ],
+  "remaining_boundaries": [
+    {
+      "boundary": "legacy physical storage adaptation",
+      "evidence": [
+        "node_runtime/consensus_catchup_shell.ml",
+        "crates/octra-node/src/legacy_repair/staging.rs",
+        "crates/octra-node/tests/legacy_stage.rs",
+        "scripts/node-port/legacy-repair-qualify.py"
+      ],
+      "detail": "Peer-selected stage_if_proven is implemented and physically qualified for a stopped native-format store: trusted authority/origin, fresh signed root queries, native current-root refusal and ahead policy, retained backend lease and token recheck. Forty controlled physical stage/finish/crash/ownership cases qualify the pinned adapter; see core-parity.json for final binaries. Modern canonical Service never rewinds authenticated history. Physical legacy storage remains a pinned OCaml/Irmin helper, not an all-Rust pack implementation."
+    },
+    {
+      "boundary": "cache and isolated-worker behavioral scope",
+      "evidence": [
+        "node_runtime/consensus_bundle_cache.ml",
+        "crates/octra-node-runtime/src/consensus_preverify_cache.rs",
+        "crates/octra-node/src/peers/raw_cache.rs",
+        "crates/octra-node-runtime/src/crypto_worker/private/admission.rs",
+        "crates/octra-node-runtime/tests/private_admission.rs",
+        "crates/octra-node-runtime/tests/private_isolation.rs"
+      ],
+      "detail": "Source-bound native cache/scheduler comparisons and actual process contention/reaping/RSS failure regressions pass locally, including the composed Linux gate. Fresh dependency/work/output checks remain outside cache hits; only verified public transactions enter the shared cache. Deterministic rejection differs from unavailability and scoped failure has no in-process fallback. Rust ownership does not reproduce OCaml weak-reference GC identity or heap-byte layout; see core-parity.json for exact coverage and retained limits."
+    },
+    {
+      "boundary": "whole-driver, profile and public-operation equivalence",
+      "detail": "Native differential cases and composed TCP/WireGuard/canonical recovery regressions cover finite schedules. They do not prove every asynchronous OS/worker failure schedule, all retained/active VM/HFHE combinations, cross-architecture output/resource behavior, sustained public catch-up, or mainnet deployment readiness."
+    },
+    {
+      "boundary": "HFHE whole-library experimental profiles",
+      "evidence": [
+        "docs/rust-node/checkpoints/2026-10-17/hfhe-active-census.json",
+        "crates/octra-hfhe/src/recrypt/public.rs"
+      ],
+      "detail": "Full hidden carriers, native reset certificates and reusable hidden evaluation remain unimplemented library APIs. The cited census found no exported C/OCaml or active lite-node caller for those exact entrypoints; released Recrypt transactions remain native-disabled. This is not a whole-HFHE-library parity claim."
+    }
+  ],
+  "additional_core_review": {
+    "transaction_vm": "Actual private balance, program/OCPG trust and nested VM capture/replay exist; old documentation saying absent is stale. No additional concrete consensus transaction mismatch was established by this bounded pass.",
+    "hfhe": "Active private, Circle and OCTB cryptography now uses immutable parent images and an explicitly configured shared owned-process service in production launch paths. BFT private proofs queue Required; prepared Circle and synchronous OCTB proofs try Speculative; asynchronous OCTB and nonproof work use the independent FHE actor. Standalone low-level primitive APIs remain local components and do not confer launcher isolation. Whole-library experimental reset/carrier APIs remain outside active-node parity.",
+    "hfhe_active_census": "docs/rust-node/checkpoints/2026-10-17/hfhe-active-census.json"
+  },
+  "sources": [
+    {
+      "source": "lib/consensus/c_catchup.ml",
+      "native_sha256": "b28bb36a3ca85efb4d7dcc44f88b599d36ba2751c9f688949bc2c7176d1a7503",
+      "native_functions": 18,
+      "historical_status": "partial",
+      "current_review": "implemented_policy_and_adapted_storage",
+      "comparison": "Target/lag/distance/continuity/finality/receipt and fork-decision policies are implemented. Modern authenticated history is protected. The separate stopped-native-store stage_if_proven command now acquires fresh authenticated peer roots and stages only a native-authorized unjournaled empty suffix; physical completion remains the pinned native adapter.",
+      "rust_files": [
+        "crates/octra-node-protocol/src/consensus/catchup.rs",
+        "crates/octra-node/src/recovery.rs",
+        "crates/octra-node/src/legacy_repair.rs",
+        "crates/octra-node/src/legacy_repair/staging.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-protocol/tests/consensus_catchup_parity.rs",
+        "docs/rust-node/checkpoints/2026-10-17/legacy-repair.json",
+        "crates/octra-node/tests/legacy_stage.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "lib/consensus/c_driver.ml",
+      "native_sha256": "bcd31e4c3de477b3b4e748de9a65081212f39c3f7264be205d83f08a765d7d64",
+      "native_functions": 267,
+      "historical_status": "partial",
+      "current_review": "implemented_concrete_repairs_locally_qualified",
+      "comparison": "Generation-scoped proposal/vote dedup, bounded past-round acquisition, jump cleanup/retry, native fault ownership, and vote-evidence age/slot bounds are implemented. The live actor, round pool, vote journal, proposal workers and recovery are production paths. Complete native asynchronous trace equivalence is not established.",
+      "rust_files": [
+        "crates/octra-node-runtime/src/consensus_driver/mod.rs",
+        "crates/octra-node-protocol/src/consensus/driver_policy.rs",
+        "crates/octra-node-protocol/src/consensus/evidence.rs",
+        "crates/octra-node-runtime/src/consensus_driver/inbound.rs",
+        "crates/octra-node-runtime/src/consensus_driver/round_recovery.rs",
+        "crates/octra-node/src/driver.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-protocol/tests/driver_round_recovery_parity.rs",
+        "crates/octra-node-runtime/tests/live_consensus/round_recovery.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "lib/consensus/c_pace.ml",
+      "native_sha256": "397ebbb7e674f7ad72a4bbd5cab66de3d84dd4121dad09680c1406fbc1a834cb",
+      "native_functions": 3,
+      "historical_status": "partial",
+      "current_review": "implemented_policy",
+      "comparison": "Native monotonic int64 wrapping arithmetic, strict100ms creation threshold, and height/generation binding are present; no missing branch found in this comparison.",
+      "rust_files": [
+        "crates/octra-node-protocol/src/consensus/pace.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-protocol/tests/consensus_wire_parity.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "lib/consensus/c_parent_commit.ml",
+      "native_sha256": "68534a9293e5f6030af123179a0f975f4ca3a3a91e6efa0dbf7d08a50298ead2",
+      "native_functions": 11,
+      "historical_status": "partial",
+      "current_review": "implemented_split_boundary",
+      "comparison": "Canonical encode/decode, participant/proposer selection and equality live in parent/codec/hash; expected-parent chain/epoch/proposal/root/set/QC verification lives in qc::validate_parent. Original single-file mapping understated scope.",
+      "rust_files": [
+        "crates/octra-node-protocol/src/consensus/parent.rs",
+        "crates/octra-node-protocol/src/consensus/codec.rs",
+        "crates/octra-node-protocol/src/consensus/qc.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-protocol/tests/consensus_wire_parity.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "lib/consensus/c_protocol.ml",
+      "native_sha256": "29e9eca729d6cf09572320f9585febda32031ef8b3b4c0cd594612af1437939d",
+      "native_functions": 9,
+      "historical_status": "partial",
+      "current_review": "implemented_policy",
+      "comparison": "Protocol::from_activation_value already accepts captured native activation settings, rejects negative/invalid values, selects historical versions, and exposes consensus_id/supported_version. The older env-loading omission is stale.",
+      "rust_files": [
+        "crates/octra-node-protocol/src/consensus/policy.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-protocol/tests/consensus_recovery_parity.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "lib/consensus/c_reward_source.ml",
+      "native_sha256": "5032d67289d8cfae6af842b4db81b5e4b4c264c9ab477fd756b859a0ab460095",
+      "native_functions": 21,
+      "historical_status": "partial",
+      "current_review": "implemented_storage_adaptation",
+      "comparison": "Canonical reward member/weight/public-key validation and native wire encoding exist. Modern canonical SQL stores native-encoded reward bytes; a complete legacy Yojson epochlog importer is a distinct storage compatibility boundary, not permission to omit reward/finality checks.",
+      "rust_files": [
+        "crates/octra-node-protocol/src/consensus/reward.rs",
+        "crates/octra-node-runtime/src/finality/history.rs",
+        "crates/octra-node-runtime/src/canonical.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-runtime/tests/finality_publication.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "lib/consensus/c_role.ml",
+      "native_sha256": "044e74b68d5f99bc394f5ed18f8afed5ed900987fceeb77c084857a9d5cd211c",
+      "native_functions": 6,
+      "historical_status": "partial",
+      "current_review": "implemented_explicit_host_configuration",
+      "comparison": "Single, validator and observer production paths exist. Rust deliberately requires an explicit private Single document rather than native unknown-mode fallback; this is a documented host configuration adaptation, not an absent Single engine.",
+      "rust_files": [
+        "crates/octra-node/src/launch.rs",
+        "crates/octra-node/src/network.rs",
+        "crates/octra-node/src/single/launch.rs",
+        "crates/octra-node/src/single/service.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node/tests/single_native.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "lib/consensus/c_seen.ml",
+      "native_sha256": "7bb70817aeb9fd0297732b8b51d70e5f87ece974e6072752a3d0df65de817863",
+      "native_functions": 5,
+      "historical_status": "partial",
+      "current_review": "implemented_policy",
+      "comparison": "Bounded FIFO duplicate suppression and nonrefreshing hits match native; actor generation scope was independently missing and is fixed in this batch.",
+      "rust_files": [
+        "crates/octra-node-protocol/src/consensus/seen.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-protocol/tests/consensus_wire_parity.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "net/hash_domain.ml",
+      "native_sha256": "4da5d93da24f9be2a34d787697ada6612d6fcb56e9ec614f9163fe3a828d6963",
+      "native_functions": 6,
+      "historical_status": "partial",
+      "current_review": "implemented_policy",
+      "comparison": "domain_hash feeds tag,NUL,payload exactly. Historical partial label does not denote an absent hashing primitive.",
+      "rust_files": [
+        "crates/octra-node-protocol/src/network/mod.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-protocol/tests/network_parity.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "net/p2p_conn.ml",
+      "native_sha256": "d931b6330dc781cc1c0caf7e5b02f54f92876aa084d7b989e73fd71b826d342e",
+      "native_functions": 20,
+      "historical_status": "partial",
+      "current_review": "implemented_transport_qualification_limited",
+      "comparison": "Authenticated full-duplex driver, bounded mailbox, deadline/cancellation and peer-role budgets exist. Platform-specific accept/I/O failures and exhaustive session schedule equivalence remain qualification scope; no concrete missing framing branch selected in this pass.",
+      "rust_files": [
+        "crates/octra-node-protocol/src/network/session.rs",
+        "crates/octra-node-protocol/src/network/session/driver.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-protocol/tests/network_session.rs",
+        "crates/octra-node-protocol/tests/network_driver.rs",
+        "crates/octra-node-protocol/tests/network_swarm.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "net/p2p_endpoint.ml",
+      "native_sha256": "23b328c9856bf56136e2f39507a6604b72aa5e4d0dd84b1ba6a43884b6c79c7c",
+      "native_functions": 8,
+      "historical_status": "partial",
+      "current_review": "implemented_captured_configuration",
+      "comparison": "Parse/trim/CSV/dedupe/bootstrap/advertisement helpers exist. Production network::read supplies captured OCTRA_BOOTSTRAP_PEERS and EXTRA settings; process-global reads intentionally reside outside protocol helper.",
+      "rust_files": [
+        "crates/octra-node-protocol/src/network/endpoint.rs",
+        "crates/octra-node/src/network.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-protocol/tests/network_parity.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "net/p2p_swarm.ml",
+      "native_sha256": "8a1a5752c887c00db0b922e80619a6299616df68b5e58fb56df55407be03b829",
+      "native_functions": 87,
+      "historical_status": "partial",
+      "current_review": "implemented_transport_qualification_limited",
+      "comparison": "Live signed sessions/discovery, bounded roles, reconnect, profile/upgrade handshakes, peer guard and diagnostics exist; transport has local signed/native interop evidence. Complete public deployment and arbitrary asynchronous OS failure traces are not inferred from these mappings.",
+      "rust_files": [
+        "crates/octra-node-protocol/src/network/swarm.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-protocol/tests/network_upgrade.rs",
+        "docs/rust-node/checkpoints/2026-10-17/peer-recovery-diagnostics.json"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "net/p2p_upgrade_plan.ml",
+      "native_sha256": "996162d96f1422dfd0bc0705df77c649dfee5369aa9e22e1928a7840ff91e130",
+      "native_functions": 11,
+      "historical_status": "partial",
+      "current_review": "implemented_captured_configuration",
+      "comparison": "Trusted from_inputs and upgrade_ready consume current consensus configuration and running binary. Mixed schedules, target/rollback binaries and activation tests already exist; older env-loader disclaimer is stale.",
+      "rust_files": [
+        "crates/octra-node-protocol/src/network/upgrade.rs",
+        "crates/octra-node/src/network.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-protocol/tests/network_upgrade.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "node_runtime/consensus_bundle_cache.ml",
+      "native_sha256": "6e83bd52262040e47dc7f92ec766c64fbbd44e0f49d84181923cee4e7ec8d81d",
+      "native_functions": 40,
+      "historical_status": "partial",
+      "current_review": "implemented_caches_with_explicit_host_adaptations",
+      "comparison": "Native root/purpose/epoch/transaction proof-job reuse is integrated with a full immutable proof-policy namespace, Ready/Invalid-only retention, FIFO count/32MiB limits, owner tickets and coalesced waiters. Shared verified transaction cache and staged-first gossip lookup are integrated. Raw proposal bundles now capture native default4096/startup bounds64..65536 with count FIFO and nonrefreshing hits/retries. Rust retains its immutable-ID conflict rejection and epoch raw-cache release; prune also removes FIFO records. Arc-owned values replace native weak-string interning; native heap-byte diagnostics and GC timing are not reproduced.",
+      "rust_files": [
+        "crates/octra-node-runtime/src/consensus_bundle.rs",
+        "crates/octra-node/src/driver.rs",
+        "crates/octra-node/src/peers.rs",
+        "crates/octra-node/src/executor/proofs.rs",
+        "crates/octra-node-runtime/src/preverify.rs",
+        "crates/octra-node-runtime/src/consensus_preverify_cache.rs",
+        "crates/octra-node-runtime/src/consensus_preverify_cache/shared.rs",
+        "crates/octra-node/src/peers/raw_cache.rs",
+        "crates/octra-node/src/rpc.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-runtime/src/consensus_preverify_cache/tests.rs",
+        "crates/octra-node-runtime/src/consensus_preverify_cache/tests/parity.rs",
+        "crates/octra-node-runtime/src/consensus_preverify_cache/shared.rs",
+        "crates/octra-node/src/peers/raw_cache.rs",
+        "crates/octra-node/src/rpc/gossip_tests.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "node_runtime/consensus_bundle_fetch.ml",
+      "native_sha256": "c0b93606f3346019472c0f6eff46e7993bcdaa6d863902c3d52ff40ee0ae57c2",
+      "native_functions": 11,
+      "historical_status": "partial",
+      "current_review": "implemented_cached_and_local_acquisition",
+      "comparison": "Finalized import and Validator verification call Bundles::local (Host.lookup) before the remote-only Bundles::query. A complete local Pending transaction list can build captured receipts before remote fallback, matching native staging_txs/select_staged; the separate shared transaction cache serves gossip fallback. Every path preserves exact expected hashes/order, authenticated candidate freshness, proof and receipt reexecution, state-root and txid checks. Cached bytes are not execution authority.",
+      "rust_files": [
+        "crates/octra-node/src/import.rs",
+        "crates/octra-node/src/driver.rs",
+        "crates/octra-node-runtime/src/bundle_queries.rs",
+        "crates/octra-node/src/executor/proposal.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-runtime/tests/bundle_queries.rs",
+        "crates/octra-node/tests/services/local_bundles.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "node_runtime/consensus_catchup_read.ml",
+      "native_sha256": "04dd708587b9bbebe37ffd7a0e078a54faab2d03140399523dbd198abf84f494",
+      "native_functions": 11,
+      "historical_status": "partial",
+      "current_review": "implemented_modern_history_adaptation",
+      "comparison": "Canonical history exports authenticated roots/QCs/reward/bundles/ranges with bounded records. Raw malformed legacy epochlog JSON fallback is not a modern Publisher path; legacy repair/import remains explicit, and missing canonical evidence fails closed.",
+      "rust_files": [
+        "crates/octra-node-runtime/src/finality/history.rs",
+        "crates/octra-node-runtime/src/canonical/reader.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-runtime/tests/finality_publication.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "node_runtime/consensus_catchup_shell.ml",
+      "native_sha256": "55010ea9ab44c1db4cc3019e5eb8fd6548c102e0565d3cea962a8269058eb16b",
+      "native_functions": 60,
+      "historical_status": "partial",
+      "current_review": "implemented_supervisor_with_legacy_boundary",
+      "comparison": "Signed range/root agreement, actual-parent execution, HTTP/snapshot boot and cause-sensitive health/liveness/restart supervision are implemented. Trusted peer-selected legacy empty-suffix staging is implemented in a separate stopped-store maintenance command; it does not expose modern canonical rollback through Service.",
+      "rust_files": [
+        "crates/octra-node/src/sync.rs",
+        "crates/octra-node/src/recovery.rs",
+        "crates/octra-node/src/recovery/health.rs",
+        "crates/octra-node/src/bootstrap.rs",
+        "crates/octra-node/src/legacy_repair.rs",
+        "crates/octra-node/src/legacy_repair/staging.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node/src/recovery/live_tests.rs",
+        "docs/rust-node/checkpoints/2026-10-17/recovery-health-policy.json",
+        "crates/octra-node/tests/legacy_stage.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "node_runtime/consensus_circle_code_admission.ml",
+      "native_sha256": "f2c187374532f449babc589de4a688b7a11cc979650399351df1a215c656cc5f",
+      "native_functions": 5,
+      "historical_status": "partial",
+      "current_review": "implemented_code_admission",
+      "comparison": "OCTB deployment/update checks and OCPG trusted certificate/type-flow admission are implemented across circle_code, octb/program, program wire/attestation. Historical OCPG-unavailable statement is stale.",
+      "rust_files": [
+        "crates/octra-node-runtime/src/circle_code.rs",
+        "crates/octra-node-protocol/src/program_attestation.rs",
+        "crates/octra-node-runtime/src/program_transaction/mod.rs",
+        "crates/octra-node-protocol/src/octb/program/mod.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-runtime/tests/circle_code_parity.rs",
+        "crates/octra-node-runtime/tests/octb_execution_parity.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "node_runtime/consensus_circle_preverify.ml",
+      "native_sha256": "3a77308adcdf9528173674d5ca1ed2f91d922be16bc75bf1ecb3dcb261f6a123",
+      "native_functions": 2,
+      "historical_status": "partial",
+      "current_review": "implemented_state_bound_capture",
+      "comparison": "Historical RuleGraph context, state hash/root binding, Circle capture and canonical transcript receipt comparison are production proof/staging paths. Per-item reuse includes root, purpose, epoch, transaction hash and effective immutable proof policy; fresh dependency/output checks stay outside cache reuse.",
+      "rust_files": [
+        "crates/octra-node-runtime/src/circle_transaction.rs",
+        "crates/octra-node/src/executor/proofs.rs",
+        "crates/octra-node/src/executor/proposal.rs",
+        "crates/octra-node-runtime/src/consensus_preverify_cache.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-runtime/tests/circle_transaction_parity.rs",
+        "crates/octra-node-runtime/src/consensus_preverify_cache/tests.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "node_runtime/consensus_epoch_vm_shell.ml",
+      "native_sha256": "3f98e6df7b4d1e1b03f6c0bf80b1ef8b2fceeea8216dd10f5d81fb489da09f93",
+      "native_functions": 41,
+      "historical_status": "partial",
+      "current_review": "implemented_vm_journal_boundary",
+      "comparison": "Value/program journals, nested calls, deploy/update, Program/WASM/OCTB and atomic multi-exec share staged outcomes and receipts. Historical native module is distributed across Rust runtime modules; complete fixture cross-product of all feature profiles is not implied.",
+      "rust_files": [
+        "crates/octra-node-runtime/src/circle_journal.rs",
+        "crates/octra-node-runtime/src/program_transaction/mod.rs",
+        "crates/octra-node-runtime/src/circle_call.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-runtime/tests/circle_transaction_parity.rs",
+        "crates/octra-node-runtime/tests/octb_execution_parity.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "node_runtime/consensus_finalized_apply.ml",
+      "native_sha256": "4c367740d3d134a519265a3c0d6f5829a2bc10246a515afed9ff58bf0437fe07",
+      "native_functions": 7,
+      "historical_status": "partial",
+      "current_review": "implemented_durable_publication_with_acquisition_fix",
+      "comparison": "Authenticated execution and atomic canonical+outbox publication, retained native finality, interrupted-return retry and serving revocation are implemented. Finalized acquisition now reuses retained bundles while repeating admission and execution gates. Native malformed epochlog compatibility is not silently substituted.",
+      "rust_files": [
+        "crates/octra-node/src/import.rs",
+        "crates/octra-node/src/consensus.rs",
+        "crates/octra-node-runtime/src/finality.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node/tests/services.rs",
+        "crates/octra-node/tests/services/local_bundles.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "node_runtime/consensus_pending_commit_recovery.ml",
+      "native_sha256": "1e5cc20de555b850d21357343004e8f2ce3e9b844f4dfe1899128ddea0616fc6",
+      "native_functions": 18,
+      "historical_status": "partial",
+      "current_review": "implemented_signed_recovery",
+      "comparison": "Native signed pending proposal/vote restore, legacy reconciliation, durable floor/lock ownership and canonical host recovery are production paths. The separate stopped-store legacy stage command now selects an eligible unjournaled empty suffix from signed peer evidence without changing canonical modern history.",
+      "rust_files": [
+        "crates/octra-node-runtime/src/consensus_recovery.rs",
+        "crates/octra-node/src/driver.rs",
+        "crates/octra-node-runtime/src/pending_reconciliation.rs",
+        "crates/octra-node/src/legacy_repair/staging.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-runtime/tests/relay_peers.rs",
+        "crates/octra-node/tests/legacy_stage.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "node_runtime/consensus_proposal.ml",
+      "native_sha256": "ac587584360918761eee859662772993a1d99b83d93b3f1a8d22ae6040a491fe",
+      "native_functions": 73,
+      "historical_status": "partial",
+      "current_review": "implemented_distributed_host",
+      "comparison": "Ordered cap/slot/turn selection, outcome rejection/refill, preview isolation and freeze reuse are implemented across proposal_select/proposal_build/executor/driver. Retained raw and complete local transaction acquisition are integrated and reexecute the same proposal proof/receipt/root checks before acceptance.",
+      "rust_files": [
+        "crates/octra-node-runtime/src/consensus_recovery.rs",
+        "crates/octra-node-runtime/src/proposal_select.rs",
+        "crates/octra-node-runtime/src/proposal_build.rs",
+        "crates/octra-node/src/executor/build.rs",
+        "crates/octra-node/src/driver.rs",
+        "crates/octra-node/src/executor/proposal.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-runtime/tests/proposal_build.rs",
+        "crates/octra-node/tests/services/local_bundles.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "node_runtime/consensus_proposal_preview_shell.ml",
+      "native_sha256": "ca3c92a8da34e0f60d412fbf41d6fc75800844189bd565c1dadbb7716e593f36",
+      "native_functions": 5,
+      "historical_status": "partial",
+      "current_review": "implemented_bound_rules_preview",
+      "comparison": "Bound captures historical rules, parent membership and anchor reads; Native stages each preview from immutable parent and verifies committed roots/receipts. No speculative-state authority fallback found in reviewed path.",
+      "rust_files": [
+        "crates/octra-node-runtime/src/execution_rules.rs",
+        "crates/octra-node/src/executor/proposal.rs",
+        "crates/octra-node/src/executor/stage.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-runtime/tests/execution_rules.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "node_runtime/consensus_reward_attribution.ml",
+      "native_sha256": "24582b5759cb2c57d61609f7adba2adb912fc205b437807bc6230ff625bef1e5",
+      "native_functions": 17,
+      "historical_status": "partial",
+      "current_review": "implemented_policy",
+      "comparison": "Parent participants/proposer, native prior/current source selection and finality binding exist; peer metadata cannot choose validator authority. Current finality auditor reauthenticates complete reward metadata.",
+      "rust_files": [
+        "crates/octra-node-protocol/src/consensus/reward_attribution.rs",
+        "crates/octra-node-runtime/src/finality.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-protocol/tests/reward_attribution.rs",
+        "crates/octra-node-runtime/tests/finality_publication.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "node_runtime/consensus_vm_transition.ml",
+      "native_sha256": "7292ee657ca33eddaf1d0c7287da3e80d6d0e601b416f9a0a57ab6fb934444d0",
+      "native_functions": 12,
+      "historical_status": "partial",
+      "current_review": "implemented_transactional_capture_replay",
+      "comparison": "VM fee/value/state/receipt savepoint semantics and Circle HFHE transcript capture/replay are wired into actual epoch execution. Full transaction/VM/HFHE profile cross-product and cross-architecture timing are qualification limits, not proof of a presently missing operation.",
+      "rust_files": [
+        "crates/octra-node-runtime/src/circle_transaction.rs",
+        "crates/octra-node-runtime/src/circle_journal.rs",
+        "crates/octra-node/src/executor/stage.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-runtime/tests/circle_transaction_parity.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "node_runtime/p2p_tx_admit.ml",
+      "native_sha256": "3e297a575205f098fc8511fc6f184d99045d3c27e245785cede52d50f56157e7",
+      "native_functions": 4,
+      "historical_status": "partial",
+      "current_review": "implemented_admission",
+      "comparison": "Address route, payload size/shape, timestamp duty retry and native signature admission exist before queue mutation; full staging policy is delegated to authenticated host add().",
+      "rust_files": [
+        "crates/octra-node-runtime/src/p2p_transaction.rs",
+        "crates/octra-node/src/rpc.rs",
+        "crates/octra-node/src/single/network.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-runtime/tests/p2p_transaction_parity.rs",
+        "crates/octra-node-runtime/tests/peer_staging.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "node_runtime/p2p_tx_handler.ml",
+      "native_sha256": "c418c947e1fec8ebbeb8d198b8fbd546d4bfa84b383e511708949b316427dbad",
+      "native_functions": 7,
+      "historical_status": "partial",
+      "current_review": "implemented_receiver",
+      "comparison": "Ordered guarded inventory/request/legacy delivery uses durable production Pending and Single queue hosts. Public transaction lookup is lazy and staged-first, then the bounded verified shared cache; lookup failure discards the reply effects. No shared transaction bypasses fresh staging or proposal admission.",
+      "rust_files": [
+        "crates/octra-node-runtime/src/p2p_transaction.rs",
+        "crates/octra-node/src/rpc.rs",
+        "crates/octra-node/src/single/network.rs",
+        "crates/octra-node-runtime/src/consensus_preverify_cache/shared.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-runtime/tests/peer_staging.rs",
+        "crates/octra-node/src/rpc/gossip_tests.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "node_runtime/p2p_tx_plan.ml",
+      "native_sha256": "8c5824bbf42867b0c7bea2b40f03d9b525bf0311b69cd2832b8cf3e07d6c559a",
+      "native_functions": 4,
+      "historical_status": "partial",
+      "current_review": "implemented_policy_and_dispatch",
+      "comparison": "Inventory/request normalization, guard transitions, legacy fallback and receiver dispatch are production paths. Native gossip frame hashing and bounded wire policy are independent of actor consensus dedup fixed above.",
+      "rust_files": [
+        "crates/octra-node-protocol/src/network/transaction_gossip.rs",
+        "crates/octra-node-runtime/src/p2p_transaction.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node-protocol/tests/tx_gossip_parity.rs",
+        "crates/octra-node-runtime/tests/p2p_transaction_parity.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "node_runtime/sync_lease.ml",
+      "native_sha256": "926f7548896008c2805f0021ecba08bac6471427ae4cf433f5d56d5bffa9d85c",
+      "native_functions": 10,
+      "historical_status": "partial",
+      "current_review": "implemented_filesystem_adaptation",
+      "comparison": "Descriptor-safe leases, bounds, retention and inode-bound interrupted deletion exist with actual filesystem lifecycle tests. Root clock/OS interruption matrix remains qualification scope.",
+      "rust_files": [
+        "crates/octra-node/src/rpc/http.rs",
+        "crates/octra-node-protocol/src/state_sync/lease.rs",
+        "crates/octra-node/src/bootstrap/export/serve.rs",
+        "crates/octra-node/src/snapshot_export/archive.rs"
+      ],
+      "existing_evidence": [
+        "crates/octra-node/tests/snapshot_service_parity.rs"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    },
+    {
+      "source": "node_runtime/sync_publish.ml",
+      "native_sha256": "e4034692d804329401d90d4dd71873d6f2885eeb208b21a5ac18da23eb2da6e9",
+      "native_functions": 39,
+      "historical_status": "partial",
+      "current_review": "implemented_exporter",
+      "comparison": "Cycle/role/force/retry, retained transition anchor, loaded-identity signing, package certificate placement and owned retention exist. Public long-running producer availability and cross-platform file lifecycle remain qualification gates.",
+      "rust_files": [
+        "crates/octra-node/src/bootstrap/export.rs",
+        "crates/octra-node/src/snapshot_export.rs",
+        "crates/octra-node-protocol/src/state_sync/cycle.rs"
+      ],
+      "existing_evidence": [
+        "docs/rust-node/checkpoints/2026-10-15/snapshot-service.json"
+      ],
+      "planned_or_unresolved_evidence_paths": []
+    }
+  ],
+  "evidence_policy": "All current Rust/source and existing_evidence paths were checked for existence at documentation refresh. Historical checkpoint results retain their original scope. Missing historical planned paths, if any, remain explicitly unresolved."
+}

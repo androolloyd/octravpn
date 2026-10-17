@@ -187,6 +187,12 @@ impl Node {
         let context = native.single_context(&head, &members).await?;
         let manager = ExExManager::new(store.source(), checkpoints)?;
         let legacy_tree = Tree::create(Nonce::new(epoch)?, legacy_parent.clone());
+        let worker = native
+            .circle_runtime()
+            .crypto_pool()
+            .context("Single requires an explicit crypto worker service")?
+            .worker()
+            .clone();
         let node = Arc::new(Self {
             store,
             native,
@@ -209,7 +215,7 @@ impl Node {
             stopped: AtomicBool::new(false),
             clock,
             exex: AsyncMutex::new(manager),
-            jobs: workers::Jobs::capture()?,
+            jobs: workers::Jobs::new(worker),
             hook: Mutex::new(None),
         });
         node.schedule(&state.snapshot(), &context, epoch)?;

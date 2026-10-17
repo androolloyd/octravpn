@@ -309,6 +309,56 @@ pub fn round_fetch_valid(chain: &[u8], height: i64, round: i64, fetch: &RoundFet
         && fetch.through_round <= round
         && int63_add(fetch.through_round, -fetch.after_round) <= engine::ROUND_HISTORY_LIMIT
 }
+
+/// Native proposals and votes become replayable after an engine generation
+/// change. Other consensus frames retain their generation-independent identity.
+pub fn frame_id(generation: i64, message: u8, payload: &[u8]) -> [u8; 32] {
+    let mut scoped = if matches!(message, 0x30 | 0x31) {
+        format!("{generation}:").into_bytes()
+    } else {
+        Vec::new()
+    };
+    scoped.push(message);
+    scoped.extend_from_slice(payload);
+    crate::network::domain_hash(b"octra:seen:consensus:v1", &scoped)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PastRound {
+    pub epoch_id: i64,
+    pub target: i64,
+    pub sent_at: i64,
+    pub tries: i64,
+}
+
+/// Exact C_driver.next_past_round cursor policy. Time is monotonic nanoseconds;
+/// round arithmetic uses the native signed 63-bit host integer range.
+pub fn next_past_round(
+    height: i64,
+    round: i64,
+    limit: i64,
+    prior: Option<&PastRound>,
+    now: i64,
+) -> Option<(i64, i64)> {
+    match prior {
+        Some(prior)
+            if prior.epoch_id == height && now.wrapping_sub(prior.sent_at) < 5_000_000_000 =>
+        {
+            None
+        }
+        Some(prior) if prior.epoch_id == height && prior.tries == 0 && round < prior.target => {
+            Some((prior.target, 1))
+        }
+        Some(prior) if prior.epoch_id == height => Some((
+            limit.min(int63_add(
+                round.max(prior.target),
+                engine::ROUND_HISTORY_LIMIT,
+            )),
+            0,
+        )),
+        Some(_) | None => Some((limit.min(int63_add(round, engine::ROUND_HISTORY_LIMIT)), 0)),
+    }
+}
 fn int63_add(a: i64, b: i64) -> i64 {
     (a.wrapping_add(b) << 1) >> 1
 }
