@@ -12,6 +12,7 @@ pub mod epoch_index;
 pub mod epoch_journal;
 pub mod epoch_page;
 pub mod epoch_rewards;
+pub mod fork_repair;
 pub mod grpc;
 pub mod light_rpc;
 pub mod metrics;

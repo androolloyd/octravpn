@@ -9,6 +9,8 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Resume a locally staged repair in a stopped native-format store.
+    LegacyRepair(octra_node::legacy_repair::Options),
     /// Compile local AML to existing Legacy OCTB; does not grant typed Program authority.
     CompileLegacy {
         #[arg(long)]
@@ -90,6 +92,7 @@ enum Command {
 #[tokio::main]
 async fn main() -> Result<()> {
     match Cli::parse().command {
+        Command::LegacyRepair(options) => options.run()?,
         Command::CompileLegacy {
             source,
             loops,

@@ -17,6 +17,7 @@ pub mod identity;
 pub mod import;
 mod launch;
 mod legacy;
+pub mod legacy_repair;
 pub mod network;
 pub mod network_profile;
 pub mod peers;
