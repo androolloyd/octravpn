@@ -51,6 +51,10 @@ and paid service remain unqualified.
 The [cause-sensitive recovery checkpoint](docs/rust-node/checkpoints/2026-10-17/quarantine-recovery.md)
 adds native recovery-evidence rules and verified forward self-attestation, with
 37,302 native policy comparisons and real browser/VPN/ExEx recovery checks.
+The [persistent-directory checkpoint](docs/rust-node/checkpoints/2026-10-17/persistent-directories.md)
+adds cached native commitments and granted page reuse, with 10,564 native tree
+operations and 522 passing tests across composed targets. Public qualification
+of this candidate remains pending.
 
 **Rust node qualification (2026-10-15):** the `octra-node` executable connects the
 native validator driver, authenticated peers, transaction intake, canonical

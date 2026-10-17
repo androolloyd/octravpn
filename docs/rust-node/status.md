@@ -9,6 +9,18 @@ upstream behavioral parity and public-network deployment remain unqualified.
 
 ## Recorded local evidence
 
+- The [persistent-directory checkpoint](checkpoints/2026-10-17/persistent-directories.json)
+  records 522 passing tests across 123 composed targets, seven standalone ignores,
+  strict lint, formatting, 14 compiled payment AML tests and 19 abstract Lean
+  theorems. Cached native commitments and authenticated page reuse match 10,564
+  native tree operations across two corpora. Bounded hot-edit counts avoid full-width
+  walks; cold load, public throughput and RSS remain separate concerns. Fresh
+  native references cover 33 admin calls, 42 settlement methods and nine Circle
+  cases. The [review](checkpoints/2026-10-17/persistent-directories.md) preserves
+  initial fixture failures, the isolated-method harness correction and source
+  boundaries. Seven-day operator unstake remains fixed from the first request;
+  payer exit remains 24 hours and commission is zero. The public observer is
+  unchanged; candidate deployment and Mainnet remain unqualified.
 - The [cause-sensitive recovery checkpoint](checkpoints/2026-10-17/quarantine-recovery.json)
   records 311 passing tests across 26 composed targets, four intentional helper
   ignores, strict lint, formatting, 14 compiled payment AML tests and 19 abstract
@@ -18,9 +30,10 @@ upstream behavioral parity and public-network deployment remain unqualified.
   successor despite withheld successor-root replies. Browser/VPN admission and
   durable ExEx are checked. The [review](checkpoints/2026-10-17/quarantine-recovery.md)
   records the initial checkpoint-wait race and final source boundaries. This
-  batch is not installed on the public observer. Native stalled-voter realignment,
-  actual legacy repair, persistence CPU scaling and public qualification remain
-  open.
+  batch is not installed on the public observer. At that checkpoint, native
+  stalled-voter realignment, actual legacy repair, persistence CPU scaling and
+  public qualification remained open; the follow-up above addresses bounded
+  hot-directory work locally.
 - The [peer diagnostics and recovery checkpoint](checkpoints/2026-10-17/peer-recovery-diagnostics.json)
   records 305 passing tests across 25 composed targets, four intentional helper
   ignores, strict lint, formatting, 14 compiled payment AML tests and 19 abstract

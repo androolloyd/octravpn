@@ -50,12 +50,18 @@ fn fragment(path: &str) -> &'static str {
         _ => panic!("unknown security fragment"),
     }
 }
-fn test_source(path: &str) -> String {
+fn test_source(path: &str, method: &str) -> String {
     let production = include_str!("../../../program/main-v5.aml");
+    let fragments = fragment(path);
+    let helpers_end = fragments.find("\nfn test_").unwrap() + 1;
+    let start = fragments.find(&format!("\nfn {method}(")).unwrap() + 1;
+    let selected = &fragments[start..];
+    let end = selected.find("\nfn test_").unwrap_or(selected.len());
     format!(
-        "{}\n{}\n}}\n",
+        "{}\n{}\n{}\n}}\n",
         production.trim_end().strip_suffix('}').unwrap(),
-        fragment(path)
+        &fragments[..helpers_end],
+        &selected[..end]
     )
 }
 
@@ -89,6 +95,7 @@ fn rust_compiled_settlement_security_matches_pinned_native_vm() {
     }
     let fragments = report["fragments_sha256"].as_object().unwrap();
     assert_eq!(fragments.len(), 7);
+    assert_eq!(report["test_functions_per_program"], 1);
     for (path, expected) in fragments {
         assert_eq!(
             *expected,
@@ -97,11 +104,44 @@ fn rust_compiled_settlement_security_matches_pinned_native_vm() {
         );
     }
     let cases = report["cases"].as_array().unwrap();
-    assert!(cases.len() >= 30);
+    let expected = fragments
+        .keys()
+        .flat_map(|path| {
+            let refusals = fragment(path)
+                .lines()
+                .filter_map(|line| {
+                    let (method, reason) =
+                        line.strip_prefix("// expect-revert ")?.split_once(' ')?;
+                    Some((method, reason.strip_prefix('"')?.strip_suffix('"')?))
+                })
+                .collect::<std::collections::BTreeMap<_, _>>();
+            fragment(path).lines().filter_map(move |line| {
+                let (method, _) = line.strip_prefix("fn ")?.split_once('(')?;
+                method.starts_with("test_").then_some((
+                    path.as_str(),
+                    method,
+                    refusals.get(method).copied(),
+                ))
+            })
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    let actual = cases
+        .iter()
+        .map(|case| {
+            assert!(case["input"]["refusal"].is_null() || case["input"]["refusal"].is_string());
+            (
+                case["input"]["fragment"].as_str().unwrap(),
+                case["input"]["method"].as_str().unwrap(),
+                case["input"]["refusal"].as_str(),
+            )
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(actual, expected, "every declared security method must run");
+    assert_eq!(cases.len(), expected.len(), "duplicate security case");
     for case in cases {
         let method = case["input"]["method"].as_str().unwrap();
         let compiled = source::compile(
-            test_source(case["input"]["fragment"].as_str().unwrap()).as_bytes(),
+            test_source(case["input"]["fragment"].as_str().unwrap(), method).as_bytes(),
             Syntax::Source,
             true,
         )

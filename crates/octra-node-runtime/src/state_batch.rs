@@ -1,19 +1,55 @@
 //! Persistent object tree and transaction savepoints used by execution.
 //! Directory commitments use the native Irmin hash layout. An active batch is
 //! speculative until the durable host publishes it.
-use octra_node_protocol::irmin::{self, Entry, Hash, Kind, MaxDepth};
+use octra_node_protocol::irmin::{self, directory::Directory, Entry, Hash, Kind, MaxDepth};
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     sync::{Arc, OnceLock},
 };
+#[cfg(test)]
+mod performance_tests;
 mod proof;
 pub(crate) mod storage;
+#[cfg(test)]
+mod work;
 type Children = imbl::OrdMap<Vec<u8>, Arc<Node>>;
+#[derive(Clone, Debug, Default)]
+struct TreeCache {
+    hash: OnceLock<Hash>,
+    directory: OnceLock<Directory>,
+    previous: Option<Directory>,
+    dirty: imbl::OrdSet<Vec<u8>>,
+}
+impl TreeCache {
+    fn changed(&mut self, name: &[u8]) {
+        if let Some(directory) = self.directory.take() {
+            self.previous = Some(directory);
+            self.dirty.clear();
+        }
+        self.hash.take();
+        if self.previous.is_some() {
+            self.dirty.insert(name.to_vec());
+        }
+    }
+}
 #[derive(Clone, Debug)]
 enum Node {
-    Tree(Children, OnceLock<Hash>),
+    Tree(Children, TreeCache),
     Contents(Vec<u8>, OnceLock<Hash>),
+}
+// Persistent-map diff must never compare ledger descendants recursively.
+impl PartialEq for Node {
+    fn eq(&self, other: &Self) -> bool {
+        #[cfg(test)]
+        work::visit_child();
+        std::ptr::eq(self, other)
+            || (std::mem::discriminant(self) == std::mem::discriminant(other)
+                && self
+                    .cache()
+                    .get()
+                    .is_some_and(|hash| other.cache().get() == Some(hash)))
+    }
 }
 impl Default for Node {
     fn default() -> Self {
@@ -22,19 +58,22 @@ impl Default for Node {
 }
 impl Node {
     fn tree(children: Children) -> Self {
-        Self::Tree(children, OnceLock::new())
+        Self::Tree(children, TreeCache::default())
     }
     fn contents(value: Vec<u8>) -> Self {
         Self::Contents(value, OnceLock::new())
     }
     fn cache(&self) -> &OnceLock<Hash> {
         match self {
-            Self::Tree(_, cache) | Self::Contents(_, cache) => cache,
+            Self::Tree(_, cache) => &cache.hash,
+            Self::Contents(_, cache) => cache,
         }
     }
+    #[cfg(test)]
     fn invalidate(&mut self) {
         match self {
-            Self::Tree(_, cache) | Self::Contents(_, cache) => {
+            Self::Tree(_, cache) => *cache = TreeCache::default(),
+            Self::Contents(_, cache) => {
                 cache.take();
             }
         }
@@ -47,31 +86,48 @@ impl Node {
             }
             let hash = match node {
                 Self::Contents(value, _) => irmin::contents_hash(value),
-                Self::Tree(children, _) if !finish => {
+                Self::Tree(children, cache) if !finish => {
                     pending.push((node, true));
-                    pending.extend(
-                        children
-                            .values()
-                            .rev()
-                            .filter(|child| child.cache().get().is_none())
-                            .map(|child| (child.as_ref(), false)),
-                    );
+                    if cache.previous.is_some() {
+                        pending.extend(cache.dirty.iter().filter_map(|name| {
+                            #[cfg(test)]
+                            work::visit_child();
+                            children
+                                .get(name)
+                                .filter(|child| child.cache().get().is_none())
+                                .map(|child| (child.as_ref(), false))
+                        }));
+                    } else {
+                        pending.extend(children.values().rev().filter_map(|child| {
+                            #[cfg(test)]
+                            work::visit_child();
+                            child
+                                .cache()
+                                .get()
+                                .is_none()
+                                .then_some((child.as_ref(), false))
+                        }));
+                    }
                     continue;
                 }
-                Self::Tree(children, _) => {
-                    let entries = children
-                        .iter()
-                        .map(|(name, child)| Entry {
-                            name: name.clone(),
-                            kind: if matches!(child.as_ref(), Self::Contents(_, _)) {
-                                Kind::Contents
-                            } else {
-                                Kind::Node
-                            },
-                            hash: *child.cache().get().expect("finished immutable child"),
-                        })
-                        .collect::<Vec<_>>();
-                    irmin::node_hash(&entries)?
+                Self::Tree(children, cache) => {
+                    let directory = if let Some(previous) = &cache.previous {
+                        let mut directory = previous.clone();
+                        for name in &cache.dirty {
+                            #[cfg(test)]
+                            work::visit_child();
+                            directory = match children.get(name) {
+                                Some(child) => directory.set(entry(name, child))?,
+                                None => directory.remove(name)?,
+                            };
+                        }
+                        directory
+                    } else {
+                        Directory::from_entries(&storage::entries(children))?
+                    };
+                    let hash = directory.hash();
+                    let _ = cache.directory.set(directory);
+                    hash
                 }
             };
             let _ = node.cache().set(hash);
@@ -91,32 +147,81 @@ impl Node {
     }
 
     fn remove(&mut self, path: &[&[u8]]) {
-        self.invalidate();
         let mut current = std::mem::take(self);
         let mut ancestors = Vec::new();
         let mut depth = 0;
         while depth < path.len() {
-            let Self::Tree(children, _) = &mut current else {
+            let Self::Tree(children, cache) = &mut current else {
                 break;
             };
             let Some(child) = children.remove(path[depth]) else {
                 break;
             };
-            ancestors.push((path[depth].to_vec(), std::mem::take(children)));
+            cache.changed(path[depth]);
+            ancestors.push((
+                path[depth].to_vec(),
+                std::mem::take(children),
+                std::mem::take(cache),
+            ));
             current = Arc::try_unwrap(child).unwrap_or_else(|node| node.as_ref().clone());
             depth += 1;
         }
         if depth == path.len() {
             current = Self::default();
         }
-        while let Some((name, mut siblings)) = ancestors.pop() {
+        while let Some((name, mut siblings, cache)) = ancestors.pop() {
             if !matches!(&current,Self::Tree(children, _) if children.is_empty()) {
                 siblings.insert(name, Arc::new(current));
             }
-            current = Self::tree(siblings);
+            current = Self::Tree(siblings, cache);
         }
         *self = current;
     }
+}
+
+fn entry(name: &[u8], child: &Node) -> Entry {
+    Entry {
+        name: name.to_vec(),
+        kind: if matches!(child, Node::Contents(_, _)) {
+            Kind::Contents
+        } else {
+            Kind::Node
+        },
+        hash: *child.cache().get().expect("hashed immutable child"),
+    }
+}
+
+fn changed_children<'a>(
+    children: &'a Children,
+    previous: Option<&'a Children>,
+) -> impl Iterator<Item = (&'a Arc<Node>, Option<&'a Arc<Node>>)> {
+    let changes = previous
+        .into_iter()
+        .flat_map(move |old| old.diff(children))
+        .filter_map(|change| {
+            #[cfg(test)]
+            work::visit_child();
+            match change {
+                imbl::ordmap::DiffItem::Add(_, child) => Some((child, None)),
+                imbl::ordmap::DiffItem::Update {
+                    old: (_, old),
+                    new: (_, child),
+                } => Some((child, Some(old))),
+                imbl::ordmap::DiffItem::Remove(_, _) => None,
+            }
+        });
+    changes.chain(
+        previous
+            .is_none()
+            .then(|| children.values().rev())
+            .into_iter()
+            .flatten()
+            .map(|child| {
+                #[cfg(test)]
+                work::visit_child();
+                (child, None)
+            }),
+    )
 }
 thread_local! {
     // Let the persistent map free only unshared B+tree branches. Nested ledger
@@ -212,7 +317,7 @@ type Links = Vec<(Vec<u8>, bool, Vec<u8>)>;
 pub(crate) struct Objects<'a> {
     pending: Vec<(&'a Node, Option<&'a Node>, bool)>,
     seen: BTreeSet<Hash>,
-    physical: Vec<StoredObject>,
+    physical: Option<irmin::directory::Pages>,
     reusable_roots: BTreeSet<Hash>,
 }
 impl Iterator for Objects<'_> {
@@ -220,7 +325,14 @@ impl Iterator for Objects<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if let Some(object) = self.physical.pop() {
+            if let Some((hash, page)) = self.physical.as_mut().and_then(Iterator::next) {
+                if self.seen.contains(&hash) {
+                    continue;
+                }
+                let object = match storage::encode_page(hash, &page) {
+                    Ok(object) => object,
+                    Err(error) => return Some(Err(error)),
+                };
                 if self.seen.insert(object.hash) {
                     return Some(Ok(object));
                 }
@@ -228,10 +340,7 @@ impl Iterator for Objects<'_> {
             }
             let (node, previous, finish) = self.pending.pop()?;
             let hash = *node.cache().get().expect("hashed immutable object");
-            if self.seen.contains(&hash)
-                || previous
-                    .is_some_and(|old| std::ptr::eq(node, old) || old.cache().get() == Some(&hash))
-            {
+            if self.seen.contains(&hash) || previous.is_some_and(|old| node == old) {
                 continue;
             }
             let (contents, data, children) = match node {
@@ -242,70 +351,54 @@ impl Iterator for Objects<'_> {
                         Some(Node::Tree(children, _)) => Some(children),
                         _ => None,
                     };
-                    self.pending
-                        .extend(children.iter().rev().map(|(name, child)| {
-                            (
-                                child.as_ref(),
-                                old.and_then(|children| children.get(name)).map(Arc::as_ref),
-                                false,
-                            )
-                        }));
+                    self.pending.extend(changed_children(children, old).map(
+                        |(child, previous)| (child.as_ref(), previous.map(Arc::as_ref), false),
+                    ));
                     continue;
                 }
-                Node::Tree(children, _) if children.len() > 256 => {
-                    let entries = storage::entries(children);
-                    let mut reusable = BTreeSet::new();
-                    if let Some(Node::Tree(old, cache)) = previous {
-                        if cache
-                            .get()
-                            .is_some_and(|hash| self.reusable_roots.contains(hash))
+                Node::Tree(children, cache) if children.len() > 256 => {
+                    let base = match previous {
+                        Some(Node::Tree(_, cache))
+                            if cache
+                                .hash
+                                .get()
+                                .is_some_and(|hash| self.reusable_roots.contains(hash)) =>
                         {
-                            let old_pages = match storage::pages(&storage::entries(old)) {
-                                Ok(pages) => pages,
-                                Err(error) => return Some(Err(error)),
-                            };
-                            reusable.extend(old_pages.into_iter().map(|page| page.hash));
+                            cache.directory.get()
                         }
-                    }
-                    let pages = match storage::pages(&entries) {
-                        Ok(pages) => pages,
-                        Err(error) => return Some(Err(error)),
+                        _ => None,
                     };
-                    self.physical = pages
-                        .into_iter()
-                        .rev()
-                        .filter(|page| !reusable.contains(&page.hash))
-                        .collect();
+                    self.physical = Some(
+                        cache
+                            .directory
+                            .get()
+                            .expect("hashed immutable directory")
+                            .pages_since(base),
+                    );
                     continue;
                 }
                 Node::Tree(children, _) => {
-                    let links = children
-                        .iter()
-                        .map(|(name, child)| {
-                            (
-                                name.clone(),
-                                matches!(child.as_ref(), Node::Contents(_, _)),
-                                child
-                                    .cache()
-                                    .get()
-                                    .expect("hashed immutable child")
-                                    .to_vec(),
-                            )
-                        })
-                        .collect::<Links>();
+                    let mut links = Links::with_capacity(children.len());
+                    let mut hashes = Vec::with_capacity(children.len());
+                    for (name, child) in children {
+                        #[cfg(test)]
+                        work::visit_child();
+                        let hash = *child.cache().get().expect("hashed immutable child");
+                        links.push((
+                            name.clone(),
+                            matches!(child.as_ref(), Node::Contents(_, _)),
+                            hash.to_vec(),
+                        ));
+                        hashes.push(hash);
+                    }
                     let Ok(data) = serde_json::to_vec(&links) else {
                         return Some(Err(Error("object encoding failed")));
                     };
-                    (
-                        false,
-                        data,
-                        children
-                            .values()
-                            .map(|child| *child.cache().get().expect("hashed immutable child"))
-                            .collect(),
-                    )
+                    (false, data, hashes)
                 }
             };
+            #[cfg(test)]
+            work::encode_object();
             self.seen.insert(hash);
             return Some(Ok(StoredObject {
                 hash,
@@ -465,7 +558,7 @@ impl Snapshot {
                 false,
             )],
             seen: BTreeSet::new(),
-            physical: Vec::new(),
+            physical: None,
             reusable_roots,
         })
     }
@@ -480,18 +573,19 @@ impl Snapshot {
         let mut roots = BTreeSet::new();
         let mut pending = vec![(self.tree.as_ref(), base.tree.as_ref())];
         while let Some((node, old)) = pending.pop() {
-            if std::ptr::eq(node, old) || node.cache().get() == old.cache().get() {
+            if node == old {
                 continue;
             }
             let (Node::Tree(children, _), Node::Tree(previous, cache)) = (node, old) else {
                 continue;
             };
             if children.len() > 256 && previous.len() > 256 {
-                roots.insert(*cache.get().expect("hashed parent directory"));
+                roots.insert(*cache.hash.get().expect("hashed parent directory"));
             }
-            pending.extend(children.iter().filter_map(|(name, child)| {
-                previous.get(name).map(|old| (child.as_ref(), old.as_ref()))
-            }));
+            pending.extend(
+                changed_children(children, Some(previous))
+                    .filter_map(|(child, old)| old.map(|old| (child.as_ref(), old.as_ref()))),
+            );
         }
         Ok(roots)
     }
@@ -558,6 +652,11 @@ impl Snapshot {
                 }
                 Visit::Finish(directory) => {
                     let (hash, links) = directory.into_parts();
+                    let directory = Directory::from_entries(&links)
+                        .map_err(|_| Error("Irmin inode depth exhausted"))?;
+                    if directory.hash() != hash {
+                        return Err(Error("state object commitment differs"));
+                    }
                     let mut children = Children::new();
                     for entry in links {
                         let child = cache
@@ -571,8 +670,14 @@ impl Snapshot {
                             return Err(Error("invalid tree child"));
                         }
                     }
-                    let node = Node::tree(children);
-                    let _ = node.cache().set(hash);
+                    let node = Node::Tree(
+                        children,
+                        TreeCache {
+                            hash: OnceLock::from(hash),
+                            directory: OnceLock::from(directory),
+                            ..TreeCache::default()
+                        },
+                    );
                     cache.insert(hash, Arc::new(node));
                     active.remove(&hash);
                 }
@@ -708,15 +813,21 @@ impl StateBatch {
             .batch
             .as_mut()
             .ok_or(Error("store batch is not active"))?;
+        if current.at(path).is_some_and(|old| {
+            old == value.as_ref()
+                || matches!((old, value.as_ref()), (Node::Contents(old, _), Node::Contents(new, _)) if old == new)
+        }) {
+            return Ok(());
+        }
         for step in path {
             let node = Arc::make_mut(current);
-            node.invalidate();
             if !matches!(node, Node::Tree(_, _)) {
                 *node = Node::default();
             }
-            let Node::Tree(children, _) = node else {
+            let Node::Tree(children, cache) = node else {
                 unreachable!()
             };
+            cache.changed(step);
             current = children.entry(step.to_vec()).or_default();
         }
         *current = value;
@@ -728,6 +839,12 @@ impl StateBatch {
             .batch
             .as_mut()
             .ok_or(Error("store batch is not active"))?;
+        if current.at(path).is_none()
+            || (path.is_empty()
+                && matches!(current.as_ref(), Node::Tree(children, _) if children.is_empty()))
+        {
+            return Ok(());
+        }
         Arc::make_mut(current).remove(path);
         Ok(())
     }

@@ -6,6 +6,7 @@
 use blake2::{Blake2b512, Digest};
 use std::collections::BTreeMap;
 
+pub mod directory;
 pub mod page;
 pub mod proof;
 

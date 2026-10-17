@@ -1,0 +1,2004 @@
+{
+  "schema": "octra_persistent_directory_checkpoint_v1",
+  "observed_at": "2026-10-17T09:44:14.654469+00:00",
+  "base_commit": "4b2478dc70a64ae272131e9927b4201268bd30c9",
+  "adopted_upstream": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "scope": "Persistent native Irmin directory hashing and granted page reuse; refresh independent VPN and Circle references",
+  "source_sha256": {
+    "Cargo.lock": "41a91382953a23309f5a507b583da6c19faf4f1a0ee95ce485bea0706ef41269",
+    "Cargo.toml": "5fc6af03807621fd437551c765313d75728d3c0c01d3b21f544d6f366efd1925",
+    "crates/octra-node-protocol/src/irmin.rs": "9c1a5b9527a4d60ef8c7a0483f5e12f43d5ec279117cc2b66df46cb9c9b93578",
+    "crates/octra-node-protocol/src/irmin/directory.rs": "f6c2a8c52ecf9e41a5caf28417eea77f045228f0b07751d2c33446fa829e8762",
+    "crates/octra-node-protocol/src/irmin/directory/inode.rs": "b4709cf4bf6c1bddcb7c666cb050acc9ac6c7a3fb24e541d68e090786620ed3c",
+    "crates/octra-node-protocol/src/irmin/directory/tests.rs": "07a6bb6b92f1359dc0cde7652aa813beafb5f49e0522e7e81f2e22a2e025a7b2",
+    "crates/octra-node-protocol/src/irmin/directory/tests/native.rs": "3c1d50711dd2a8b3f34821b64ee1ab6774d2b558f13f924da16ed0e7d18c97e8",
+    "crates/octra-node-runtime/src/state_batch.rs": "99f6bb254c4559e07aa7ce81bb1d57935fc98adea4392d9ffed3100f253f27b9",
+    "crates/octra-node-runtime/src/state_batch/performance_tests.rs": "20a1c131ecd55725e76ea027e23f164f70007e0df49a8545a27ff18f7b6a2825",
+    "crates/octra-node-runtime/src/state_batch/storage.rs": "08783cb5f51004455f1bcf151fcd713657050342c933e4bc9d2558cc317c2cff",
+    "crates/octra-node-runtime/src/state_batch/work.rs": "f505eb84c8f7a6c30e3a4dde63aa4ba8505897f613f69fafcbbad835fcac7abb",
+    "crates/octra-node-runtime/tests/fixtures/vpn-admin.json": "b8cb3ebb1a7e0c62b84a3788b66cbaa18b2d91f8012dc11a19e2d89820ff843e",
+    "crates/octra-node-runtime/tests/fixtures/vpn-settlement.json": "52a40673fd9772130ac59c197ba671e5612fce98b57c61d8d0c0fd476619ce8f",
+    "crates/octra-node-runtime/tests/vpn_settlement_security.rs": "2707ede4cd0ad49d5747121652eba8602e436e3e9eb776b1253e6350c2b93e69",
+    "docs/rust-node/source-map.json": "6440fdf5895e791ce99ff1904aea396fc88c7e12645846a32702286aa9c17efa",
+    "docs/rust-node/upstream.json": "fe933b3bc2ae3070027bc6d616315c8dfe0568017c62280459553bdfd35b7b1e",
+    "program/main-v5.aml": "047a58fba02b9948745223beb7999d4fd41594d00d6fe67173934994eae07e90",
+    "program/octranet-payments.aml": "96e494be368351b4cc4832f0d78541813d842f4ab84229749b75a66fcb6c211b",
+    "proofs/lean/OctranetPayments.lean": "3269c304583047605c4b5f8ad8ca669710a0a03bd017eba75f63a12180793d83",
+    "rust-toolchain.toml": "abd8063388c533b3e6b91666cd66d6229e61d13fc1139d20006492c2980141f5",
+    "scripts/node-port/vpn-settlement-fixtures.py": "f592f3ee14b09f9bb8e35615acf262e2485a1e54fdc7b264198e73895027a666"
+  },
+  "final_source_snapshot_sha256": "ba36112e0af1ef521f653ec20a6b373e9299c393003029508684ff6a54b44072",
+  "source_snapshot_directory": "/Users/androolloyd/Development/octra/out/persistent-directories-20261017",
+  "toolchain": {
+    "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+    "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)"
+  },
+  "validation": {
+    "passed": 522,
+    "failed": 0,
+    "ignored": 7,
+    "targets": 123,
+    "rows": [
+      {
+        "package": "octra-node",
+        "target": "unittests src/lib.rs",
+        "passed": 100,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "library-accepted"
+      },
+      {
+        "package": "octra-node",
+        "target": "unittests src/main.rs",
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node",
+        "target": "tests/devnet.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node",
+        "target": "tests/private_import.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node",
+        "target": "tests/services.rs",
+        "passed": 23,
+        "failed": 0,
+        "ignored": 1,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node",
+        "target": "tests/single_native.rs",
+        "passed": 17,
+        "failed": 0,
+        "ignored": 2,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node",
+        "target": "tests/snapshot_service_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "unittests src/lib.rs",
+        "passed": 50,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "library-accepted"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/aml_public_parity.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/catchup_agreement.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/chain_identity.rs",
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/circle_call_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/circle_storage_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/consensus_catchup_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/consensus_engine_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/consensus_journal_owner.rs",
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/consensus_journal_parity.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/consensus_recovery_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/consensus_validators_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/consensus_wire_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/control_payload_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/driver_work_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/epoch_index_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/epoch_rewards_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/gossip_guard_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/grpc_protocol.rs",
+        "passed": 6,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/health_policy_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/legacy_epoch.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/legacy_tree_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/native_peer_interop.rs",
+        "passed": 0,
+        "failed": 0,
+        "ignored": 1,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/network_driver.rs",
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/network_parity.rs",
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/network_session.rs",
+        "passed": 7,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/network_swarm.rs",
+        "passed": 10,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/network_upgrade.rs",
+        "passed": 6,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/octb_work_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/optional_resource_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/peer_policy_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/pending_log_parity.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/preverify_commit_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/preverify_receipt_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/public_manifest.rs",
+        "passed": 0,
+        "failed": 0,
+        "ignored": 1,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/quarantine_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/relief_log_parity.rs",
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/resource_lanes_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/reward_attribution.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/set_fold_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/single_policy.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/single_registration.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/state_sync_http.rs",
+        "passed": 7,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/state_sync_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/submit_fees_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/swarm_policy_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/transaction_archive_parity.rs",
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/transaction_outcome_parity.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/transaction_state_parity.rs",
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/tx_gossip_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/upgrade_config_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/validator_config.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/validator_intent_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/validator_lifecycle_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-protocol",
+        "target": "tests/vpn_compiler_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "unittests src/lib.rs",
+        "passed": 57,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "library-accepted"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/account_store_parity.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/bundle_queries.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/canonical_assets.rs",
+        "passed": 4,
+        "failed": 0,
+        "ignored": 1,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/canonical_authority.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/canonical_recovery.rs",
+        "passed": 7,
+        "failed": 0,
+        "ignored": 1,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/circle_application.rs",
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/circle_assets_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/circle_code_parity.rs",
+        "passed": 12,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/circle_parity.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "library-accepted"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/circle_query.rs",
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/circle_rpc.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/circle_stable_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/circle_state_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/circle_transaction_parity.rs",
+        "passed": 5,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/circle_update_parity.rs",
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/circle_view_capture.rs",
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/compute_parity.rs",
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/consensus_work.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/driver_votes_parity.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/epoch_execution.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/epoch_footer_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/epoch_partition.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/epoch_roots.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/execution_rules.rs",
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/fhe_load_pk.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/finality_publication.rs",
+        "passed": 6,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/finality_queries.rs",
+        "passed": 7,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/groth16_parity.rs",
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "library-accepted"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/ledger_image_parity.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/live_consensus.rs",
+        "passed": 5,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/octb_execution_parity.rs",
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/octranet_payments.rs",
+        "passed": 14,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "library-accepted"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/p2p_transaction_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/peer_staging.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/pending_reconciliation.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/pending_recovery.rs",
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/preverify_batch.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/preverify_parity.rs",
+        "passed": 5,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/preverify_state.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/private_application.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/private_balance.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/private_crypto.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/private_epoch.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/private_outputs.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/proposal_authentication.rs",
+        "passed": 8,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/proposal_build.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/proposal_relay.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/proposal_selection.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/query_peers.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/relay_peers.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/rule_activation.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/sender_execution_parity.rs",
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/staging_intake_parity.rs",
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/staging_parity.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/storage_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "library-accepted"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/transaction_admission_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/validator_duty.rs",
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/validator_epoch.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/validator_transactions.rs",
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined"
+      },
+      {
+        "package": "octra-node-runtime",
+        "target": "tests/vpn_settlement_security.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "library-accepted"
+      }
+    ],
+    "composition": "Last outer Cargo summary per target; final target results replace initial results. Nested controlled child summaries and repeated stages are not added.",
+    "initial": {
+      "passed": 518,
+      "failed": 4,
+      "ignored": 7,
+      "targets": 123
+    },
+    "standalone_ignores": [
+      "canonical_gateway_chromium_fixture: requires isolated Chromium qualification runner",
+      "initialize_private_single_paid_fixture: requires isolated private Single paid qualification",
+      "single_crash_child: invoked by controlled crash recovery parent",
+      "rust_swarm_interoperates_with_pinned_ocaml_swarm: requires independently built native peer",
+      "public_snapshot_authenticates_against_the_adopted_network_configuration: requires independent network.env and public certificate",
+      "browser_fixture: requires browser qualification runner",
+      "crash_worker: invoked by controlled process crash recovery parent"
+    ]
+  },
+  "stages": {
+    "combined": {
+      "name": "combined",
+      "observed_at": "2026-10-17T08:55:16.871353+00:00",
+      "argv": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--release",
+        "--features",
+        "octra-node/test-helpers",
+        "-p",
+        "octra-node",
+        "-p",
+        "octra-node-protocol",
+        "-p",
+        "octra-node-runtime",
+        "--no-fail-fast",
+        "--lib",
+        "--tests",
+        "--",
+        "--nocapture"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra",
+      "exit_code": 101,
+      "elapsed_seconds": 1821.535,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "rust-toolchain.toml",
+        "Cargo.toml",
+        "Cargo.lock"
+      ],
+      "source_snapshot_sha256": "390bf2b429f39a35629e1ced571538eed68bfda504bfd138b7cc36bf732337f8",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "081a69621ff4b9166ba88cdf7cb6086fb22e8c46c9d4dec7641d875ddab9481e",
+      "test_results": {
+        "targets": 125,
+        "passed": 520,
+        "failed": 4,
+        "ignored": 7
+      }
+    },
+    "library-final": {
+      "name": "library-final",
+      "observed_at": "2026-10-17T09:36:06.221629+00:00",
+      "argv": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--release",
+        "--features",
+        "octra-node/test-helpers",
+        "-p",
+        "octra-node",
+        "-p",
+        "octra-node-protocol",
+        "-p",
+        "octra-node-runtime",
+        "--no-fail-fast",
+        "--lib",
+        "--test",
+        "storage_parity",
+        "--test",
+        "octranet_payments",
+        "--test",
+        "circle_parity",
+        "--test",
+        "groth16_parity",
+        "--test",
+        "vpn_settlement_security",
+        "--",
+        "--nocapture"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra",
+      "exit_code": 0,
+      "elapsed_seconds": 166.813,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "rust-toolchain.toml",
+        "Cargo.toml",
+        "Cargo.lock",
+        "crates/octravpn-circle-registry",
+        "scripts/circle-apps",
+        "vendor/octra-circle-wasm-host/PROVENANCE.json",
+        "program/main-v5.aml",
+        "scripts/node-port/vpn-admin-fixtures.py",
+        "scripts/node-port/vpn-admin-oracle.ml",
+        "scripts/node-port/native-oracle.py",
+        "scripts/node-port/vpn-settlement-fixtures.py",
+        "scripts/node-port/vpn-settlement-oracle.ml",
+        "program/tests/v5"
+      ],
+      "source_snapshot_sha256": "bf310973c00ad328b4eb9f1eadf084a449fc3ddfa94fe95a37c42f3520b9979a",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "44c3e0da78c708c10aa8d19667114fc95eeea7c8dbc179165da8f1e96d765b0d",
+      "test_results": {
+        "targets": 8,
+        "passed": 228,
+        "failed": 0,
+        "ignored": 0
+      },
+      "external_inputs_sha256": {
+        "registry.wasm": "ca5530c7fdc82adedb5290a9da4192cf7d2727d74193dee73f91a62020a7d42f",
+        "circle-engine.json": "7e9608bc0d8c83fbd5520cf637f66094413e71ad1160e4f19f39673058780c2c",
+        "registry-native.json": "6e1e8988b6b4c064a34efa726bd5472d760dbf1aabed4c61e2758e9af3ae3d26"
+      },
+      "external_inputs_unchanged": true
+    },
+    "format-final": {
+      "name": "format-final",
+      "observed_at": "2026-10-17T09:36:15.945961+00:00",
+      "argv": [
+        "rustfmt",
+        "--edition",
+        "2021",
+        "--config",
+        "skip_children=true",
+        "--check",
+        "crates/octra-node-protocol/src/irmin.rs",
+        "crates/octra-node-protocol/src/irmin/directory.rs",
+        "crates/octra-node-protocol/src/irmin/directory/inode.rs",
+        "crates/octra-node-protocol/src/irmin/directory/tests.rs",
+        "crates/octra-node-protocol/src/irmin/directory/tests/native.rs",
+        "crates/octra-node-runtime/src/state_batch.rs",
+        "crates/octra-node-runtime/src/state_batch/performance_tests.rs",
+        "crates/octra-node-runtime/src/state_batch/storage.rs",
+        "crates/octra-node-runtime/src/state_batch/work.rs",
+        "crates/octra-node-runtime/tests/vpn_settlement_security.rs"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra",
+      "exit_code": 0,
+      "elapsed_seconds": 0.314,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "rust-toolchain.toml",
+        "Cargo.toml",
+        "Cargo.lock",
+        "crates/octravpn-circle-registry",
+        "scripts/circle-apps",
+        "vendor/octra-circle-wasm-host/PROVENANCE.json",
+        "program/main-v5.aml",
+        "scripts/node-port/vpn-admin-fixtures.py",
+        "scripts/node-port/vpn-admin-oracle.ml",
+        "scripts/node-port/native-oracle.py",
+        "scripts/node-port/vpn-settlement-fixtures.py",
+        "scripts/node-port/vpn-settlement-oracle.ml",
+        "program/tests/v5"
+      ],
+      "source_snapshot_sha256": "bf310973c00ad328b4eb9f1eadf084a449fc3ddfa94fe95a37c42f3520b9979a",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "test_results": {
+        "targets": 0,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "strict-clippy-final": {
+      "name": "strict-clippy-final",
+      "observed_at": "2026-10-17T09:39:07.482580+00:00",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "--release",
+        "--features",
+        "octra-node/test-helpers",
+        "-p",
+        "octra-node",
+        "-p",
+        "octra-node-protocol",
+        "-p",
+        "octra-node-runtime",
+        "--lib",
+        "--bins",
+        "--tests",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra",
+      "exit_code": 101,
+      "elapsed_seconds": 9.873,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "rust-toolchain.toml",
+        "Cargo.toml",
+        "Cargo.lock",
+        "crates/octravpn-circle-registry",
+        "scripts/circle-apps",
+        "vendor/octra-circle-wasm-host/PROVENANCE.json",
+        "program/main-v5.aml",
+        "scripts/node-port/vpn-admin-fixtures.py",
+        "scripts/node-port/vpn-admin-oracle.ml",
+        "scripts/node-port/native-oracle.py",
+        "scripts/node-port/vpn-settlement-fixtures.py",
+        "scripts/node-port/vpn-settlement-oracle.ml",
+        "program/tests/v5"
+      ],
+      "source_snapshot_sha256": "bf310973c00ad328b4eb9f1eadf084a449fc3ddfa94fe95a37c42f3520b9979a",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "38098f33440f586554fa6aa863df12da49bc55d544ac957a1c2d82b878b05f2e",
+      "test_results": {
+        "targets": 0,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "format-confirmed": {
+      "name": "format-confirmed",
+      "observed_at": "2026-10-17T09:40:17.131518+00:00",
+      "argv": [
+        "rustfmt",
+        "--edition",
+        "2021",
+        "--config",
+        "skip_children=true",
+        "--check",
+        "crates/octra-node-protocol/src/irmin.rs",
+        "crates/octra-node-protocol/src/irmin/directory.rs",
+        "crates/octra-node-protocol/src/irmin/directory/inode.rs",
+        "crates/octra-node-protocol/src/irmin/directory/tests.rs",
+        "crates/octra-node-protocol/src/irmin/directory/tests/native.rs",
+        "crates/octra-node-runtime/src/state_batch.rs",
+        "crates/octra-node-runtime/src/state_batch/performance_tests.rs",
+        "crates/octra-node-runtime/src/state_batch/storage.rs",
+        "crates/octra-node-runtime/src/state_batch/work.rs",
+        "crates/octra-node-runtime/tests/vpn_settlement_security.rs"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra",
+      "exit_code": 0,
+      "elapsed_seconds": 0.31,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "rust-toolchain.toml",
+        "Cargo.toml",
+        "Cargo.lock",
+        "crates/octravpn-circle-registry",
+        "scripts/circle-apps",
+        "vendor/octra-circle-wasm-host/PROVENANCE.json",
+        "program/main-v5.aml",
+        "scripts/node-port/vpn-admin-fixtures.py",
+        "scripts/node-port/vpn-admin-oracle.ml",
+        "scripts/node-port/native-oracle.py",
+        "scripts/node-port/vpn-settlement-fixtures.py",
+        "scripts/node-port/vpn-settlement-oracle.ml",
+        "program/tests/v5"
+      ],
+      "source_snapshot_sha256": "aea63757e6d054390f6fcde62826d3c16c6f997555c3ac3857ecdd24adcf0277",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "test_results": {
+        "targets": 0,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "strict-clippy-confirmed": {
+      "name": "strict-clippy-confirmed",
+      "observed_at": "2026-10-17T09:40:04.968516+00:00",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "--release",
+        "--features",
+        "octra-node/test-helpers",
+        "-p",
+        "octra-node",
+        "-p",
+        "octra-node-protocol",
+        "-p",
+        "octra-node-runtime",
+        "--lib",
+        "--bins",
+        "--tests",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra",
+      "exit_code": 101,
+      "elapsed_seconds": 16.594,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "rust-toolchain.toml",
+        "Cargo.toml",
+        "Cargo.lock",
+        "crates/octravpn-circle-registry",
+        "scripts/circle-apps",
+        "vendor/octra-circle-wasm-host/PROVENANCE.json",
+        "program/main-v5.aml",
+        "scripts/node-port/vpn-admin-fixtures.py",
+        "scripts/node-port/vpn-admin-oracle.ml",
+        "scripts/node-port/native-oracle.py",
+        "scripts/node-port/vpn-settlement-fixtures.py",
+        "scripts/node-port/vpn-settlement-oracle.ml",
+        "program/tests/v5"
+      ],
+      "source_snapshot_sha256": "aea63757e6d054390f6fcde62826d3c16c6f997555c3ac3857ecdd24adcf0277",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "a48ad33e9c5d911318ce0de6b9ca63e440abef304024f5b1d60eb5e279d4c44f",
+      "test_results": {
+        "targets": 0,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "library-accepted": {
+      "name": "library-accepted",
+      "observed_at": "2026-10-17T09:41:13.393823+00:00",
+      "argv": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--release",
+        "--features",
+        "octra-node/test-helpers",
+        "-p",
+        "octra-node",
+        "-p",
+        "octra-node-protocol",
+        "-p",
+        "octra-node-runtime",
+        "--no-fail-fast",
+        "--lib",
+        "--test",
+        "storage_parity",
+        "--test",
+        "octranet_payments",
+        "--test",
+        "circle_parity",
+        "--test",
+        "groth16_parity",
+        "--test",
+        "vpn_settlement_security",
+        "--",
+        "--nocapture"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra",
+      "exit_code": 0,
+      "elapsed_seconds": 164.982,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "rust-toolchain.toml",
+        "Cargo.toml",
+        "Cargo.lock",
+        "crates/octravpn-circle-registry",
+        "scripts/circle-apps",
+        "vendor/octra-circle-wasm-host/PROVENANCE.json",
+        "program/main-v5.aml",
+        "scripts/node-port/vpn-admin-fixtures.py",
+        "scripts/node-port/vpn-admin-oracle.ml",
+        "scripts/node-port/native-oracle.py",
+        "scripts/node-port/vpn-settlement-fixtures.py",
+        "scripts/node-port/vpn-settlement-oracle.ml",
+        "program/tests/v5"
+      ],
+      "source_snapshot_sha256": "ba36112e0af1ef521f653ec20a6b373e9299c393003029508684ff6a54b44072",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "e33d8e9589c8ad6e11819a967adcc5ef69f35aee4ac826ccb3042e0f905423e5",
+      "test_results": {
+        "targets": 8,
+        "passed": 228,
+        "failed": 0,
+        "ignored": 0
+      },
+      "external_inputs_sha256": {
+        "registry.wasm": "ca5530c7fdc82adedb5290a9da4192cf7d2727d74193dee73f91a62020a7d42f",
+        "circle-engine.json": "7e9608bc0d8c83fbd5520cf637f66094413e71ad1160e4f19f39673058780c2c",
+        "registry-native.json": "6e1e8988b6b4c064a34efa726bd5472d760dbf1aabed4c61e2758e9af3ae3d26"
+      },
+      "external_inputs_unchanged": true
+    },
+    "format-accepted": {
+      "name": "format-accepted",
+      "observed_at": "2026-10-17T09:41:14.579157+00:00",
+      "argv": [
+        "rustfmt",
+        "--edition",
+        "2021",
+        "--config",
+        "skip_children=true",
+        "--check",
+        "crates/octra-node-protocol/src/irmin.rs",
+        "crates/octra-node-protocol/src/irmin/directory.rs",
+        "crates/octra-node-protocol/src/irmin/directory/inode.rs",
+        "crates/octra-node-protocol/src/irmin/directory/tests.rs",
+        "crates/octra-node-protocol/src/irmin/directory/tests/native.rs",
+        "crates/octra-node-runtime/src/state_batch.rs",
+        "crates/octra-node-runtime/src/state_batch/performance_tests.rs",
+        "crates/octra-node-runtime/src/state_batch/storage.rs",
+        "crates/octra-node-runtime/src/state_batch/work.rs",
+        "crates/octra-node-runtime/tests/vpn_settlement_security.rs"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra",
+      "exit_code": 0,
+      "elapsed_seconds": 0.308,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "rust-toolchain.toml",
+        "Cargo.toml",
+        "Cargo.lock",
+        "crates/octravpn-circle-registry",
+        "scripts/circle-apps",
+        "vendor/octra-circle-wasm-host/PROVENANCE.json",
+        "program/main-v5.aml",
+        "scripts/node-port/vpn-admin-fixtures.py",
+        "scripts/node-port/vpn-admin-oracle.ml",
+        "scripts/node-port/native-oracle.py",
+        "scripts/node-port/vpn-settlement-fixtures.py",
+        "scripts/node-port/vpn-settlement-oracle.ml",
+        "program/tests/v5"
+      ],
+      "source_snapshot_sha256": "ba36112e0af1ef521f653ec20a6b373e9299c393003029508684ff6a54b44072",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "test_results": {
+        "targets": 0,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "strict-clippy-accepted": {
+      "name": "strict-clippy-accepted",
+      "observed_at": "2026-10-17T09:40:39.140312+00:00",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "--release",
+        "--features",
+        "octra-node/test-helpers",
+        "-p",
+        "octra-node",
+        "-p",
+        "octra-node-protocol",
+        "-p",
+        "octra-node-runtime",
+        "--lib",
+        "--bins",
+        "--tests",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra",
+      "exit_code": 0,
+      "elapsed_seconds": 19.102,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "rust-toolchain.toml",
+        "Cargo.toml",
+        "Cargo.lock",
+        "crates/octravpn-circle-registry",
+        "scripts/circle-apps",
+        "vendor/octra-circle-wasm-host/PROVENANCE.json",
+        "program/main-v5.aml",
+        "scripts/node-port/vpn-admin-fixtures.py",
+        "scripts/node-port/vpn-admin-oracle.ml",
+        "scripts/node-port/native-oracle.py",
+        "scripts/node-port/vpn-settlement-fixtures.py",
+        "scripts/node-port/vpn-settlement-oracle.ml",
+        "program/tests/v5"
+      ],
+      "source_snapshot_sha256": "ba36112e0af1ef521f653ec20a6b373e9299c393003029508684ff6a54b44072",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "87bb1485bfa74547b58ac73f9a9e30c63845548549574fa32f34fb9359a6273e",
+      "test_results": {
+        "targets": 0,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "lean": {
+      "name": "lean",
+      "observed_at": "2026-10-17T08:55:14.022016+00:00",
+      "argv": [
+        "lake",
+        "build",
+        "OctranetPayments"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra/proofs/lean",
+      "exit_code": 0,
+      "elapsed_seconds": 1.113,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "rust-toolchain.toml",
+        "Cargo.toml",
+        "Cargo.lock"
+      ],
+      "source_snapshot_sha256": "390bf2b429f39a35629e1ced571538eed68bfda504bfd138b7cc36bf732337f8",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "a30d6eefe7ccec7803482bd446c3d48f7cc46ed86ba99cb839fca134dd7a5a3d",
+      "test_results": {
+        "targets": 0,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "native-vpn-admin": {
+      "name": "native-vpn-admin",
+      "observed_at": "2026-10-17T09:23:20.641029+00:00",
+      "argv": [
+        "python3",
+        "scripts/node-port/vpn-admin-fixtures.py",
+        "--upstream",
+        "/private/tmp/octra-lite-node-native-20261016",
+        "--builder-image",
+        "sha256:e61194220c65f9f0b8034a4816fb15d47dfe7dda8ece1087d9850b6d838bae95",
+        "--public-fixture",
+        "crates/octra-node-runtime/tests/fixtures/vpn-admin-public.json",
+        "--out",
+        "/Users/androolloyd/Development/octra/out/persistent-directories-20261017/vpn-admin.json"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra",
+      "exit_code": 0,
+      "elapsed_seconds": 7.435,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "rust-toolchain.toml",
+        "Cargo.toml",
+        "Cargo.lock",
+        "crates/octravpn-circle-registry",
+        "scripts/circle-apps",
+        "vendor/octra-circle-wasm-host/PROVENANCE.json",
+        "program/main-v5.aml",
+        "scripts/node-port/vpn-admin-fixtures.py",
+        "scripts/node-port/vpn-admin-oracle.ml",
+        "scripts/node-port/native-oracle.py"
+      ],
+      "source_snapshot_sha256": "87eb783dff7474ef6de26103cab852a47b8d1543aa8045ae4db7a6af8ec7b44c",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "c131b2254a9f7dc32d728dadb458b931eae0d917464c84fbcbb372bc8500ec1b",
+      "test_results": {
+        "targets": 0,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "native-vpn-settlement": {
+      "name": "native-vpn-settlement",
+      "observed_at": "2026-10-17T09:29:04.726175+00:00",
+      "argv": [
+        "python3",
+        "scripts/node-port/vpn-settlement-fixtures.py",
+        "--upstream",
+        "/private/tmp/octra-lite-node-native-20261016",
+        "--builder-image",
+        "sha256:e61194220c65f9f0b8034a4816fb15d47dfe7dda8ece1087d9850b6d838bae95",
+        "--out",
+        "/Users/androolloyd/Development/octra/out/persistent-directories-20261017/vpn-settlement.json"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra",
+      "exit_code": 1,
+      "elapsed_seconds": 6.788,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "rust-toolchain.toml",
+        "Cargo.toml",
+        "Cargo.lock",
+        "crates/octravpn-circle-registry",
+        "scripts/circle-apps",
+        "vendor/octra-circle-wasm-host/PROVENANCE.json",
+        "program/main-v5.aml",
+        "scripts/node-port/vpn-admin-fixtures.py",
+        "scripts/node-port/vpn-admin-oracle.ml",
+        "scripts/node-port/native-oracle.py",
+        "scripts/node-port/vpn-settlement-fixtures.py",
+        "scripts/node-port/vpn-settlement-oracle.ml",
+        "program/tests/v5"
+      ],
+      "source_snapshot_sha256": "160e0f697d7ec641f2cc9e0c75e534c82215f8c0e8adf9bb27e1e7b95939964a",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "b5f07f60effc3f1de3fa7e03c46e93f6ce381263da84e6769d348084ab6dfaf7",
+      "test_results": {
+        "targets": 0,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "native-vpn-settlement-final": {
+      "name": "native-vpn-settlement-final",
+      "observed_at": "2026-10-17T09:32:51.637281+00:00",
+      "argv": [
+        "python3",
+        "scripts/node-port/vpn-settlement-fixtures.py",
+        "--upstream",
+        "/private/tmp/octra-lite-node-native-20261016",
+        "--builder-image",
+        "sha256:e61194220c65f9f0b8034a4816fb15d47dfe7dda8ece1087d9850b6d838bae95",
+        "--out",
+        "/Users/androolloyd/Development/octra/out/persistent-directories-20261017/vpn-settlement-final.json"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra",
+      "exit_code": 0,
+      "elapsed_seconds": 5.94,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "rust-toolchain.toml",
+        "Cargo.toml",
+        "Cargo.lock",
+        "crates/octravpn-circle-registry",
+        "scripts/circle-apps",
+        "vendor/octra-circle-wasm-host/PROVENANCE.json",
+        "program/main-v5.aml",
+        "scripts/node-port/vpn-admin-fixtures.py",
+        "scripts/node-port/vpn-admin-oracle.ml",
+        "scripts/node-port/native-oracle.py",
+        "scripts/node-port/vpn-settlement-fixtures.py",
+        "scripts/node-port/vpn-settlement-oracle.ml",
+        "program/tests/v5"
+      ],
+      "source_snapshot_sha256": "e6f773575001382f89b4f099bdabac6075cb910dacdd1498f5d1aa68e267c7e8",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "49dfe1b12f8b84c13c4fe721cc3d9c2e984d550c6dbbe4bcd2c097eeb468c78e",
+      "test_results": {
+        "targets": 0,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "native-registry": {
+      "name": "native-registry",
+      "observed_at": "2026-10-17T09:29:03.059025+00:00",
+      "argv": [
+        "python3",
+        "scripts/circle-apps/test-registry-native.py",
+        "--upstream",
+        "/private/tmp/octra-lite-node-native-20261016",
+        "--out",
+        "/Users/androolloyd/Development/octra/out/persistent-directories-20261017/registry-native.json",
+        "--runtime-fixture",
+        "/Users/androolloyd/Development/octra/out/persistent-directories-20261017/circle-engine.json"
+      ],
+      "cwd": "/Users/androolloyd/Development/octra",
+      "exit_code": 0,
+      "elapsed_seconds": 18.002,
+      "source_scope": [
+        "crates/octra-node",
+        "crates/octra-node-protocol",
+        "crates/octra-node-runtime",
+        "program/octranet-payments.aml",
+        "proofs/lean/OctranetPayments.lean",
+        "docs/rust-node/source-map.json",
+        "docs/rust-node/upstream.json",
+        "rust-toolchain.toml",
+        "Cargo.toml",
+        "Cargo.lock",
+        "crates/octravpn-circle-registry",
+        "scripts/circle-apps",
+        "vendor/octra-circle-wasm-host/PROVENANCE.json",
+        "program/main-v5.aml",
+        "scripts/node-port/vpn-admin-fixtures.py",
+        "scripts/node-port/vpn-admin-oracle.ml",
+        "scripts/node-port/native-oracle.py",
+        "scripts/node-port/vpn-settlement-fixtures.py",
+        "scripts/node-port/vpn-settlement-oracle.ml",
+        "program/tests/v5"
+      ],
+      "source_snapshot_sha256": "160e0f697d7ec641f2cc9e0c75e534c82215f8c0e8adf9bb27e1e7b95939964a",
+      "sources_unchanged": true,
+      "source_drift": [],
+      "log_sha256": "04f60240ea767bc0d6e9a2943bb5f920a6aaa61405440d818ea9afe7bfd24672",
+      "test_results": {
+        "targets": 1,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0
+      }
+    }
+  },
+  "source_delta_between_test_stages": {
+    "changed": [
+      "crates/octra-node-protocol/src/irmin/directory.rs",
+      "crates/octra-node-protocol/src/irmin/directory/inode.rs",
+      "crates/octra-node-protocol/src/irmin/directory/tests.rs",
+      "crates/octra-node-runtime/src/state_batch.rs",
+      "crates/octra-node-runtime/src/state_batch/storage.rs",
+      "crates/octra-node-runtime/tests/fixtures/vpn-admin.json",
+      "crates/octra-node-runtime/tests/fixtures/vpn-settlement.json",
+      "crates/octra-node-runtime/tests/vpn_settlement_security.rs"
+    ],
+    "scope_added": [
+      "crates/octravpn-circle-registry/Cargo.toml",
+      "crates/octravpn-circle-registry/README.md",
+      "crates/octravpn-circle-registry/src/codec.rs",
+      "crates/octravpn-circle-registry/src/guest.rs",
+      "crates/octravpn-circle-registry/src/lib.rs",
+      "crates/octravpn-circle-registry/src/projection.rs",
+      "crates/octravpn-circle-registry/tests/projection.rs",
+      "program/main-v5.aml",
+      "program/tests/v5/security-02.t.aml",
+      "program/tests/v5/security-03.t.aml",
+      "program/tests/v5/security-04.t.aml",
+      "program/tests/v5/security-05.t.aml",
+      "program/tests/v5/security-06.t.aml",
+      "program/tests/v5/security-07.t.aml",
+      "program/tests/v5/security.t.aml",
+      "scripts/circle-apps/prepare-registry.py",
+      "scripts/circle-apps/registry_native_tests.rs",
+      "scripts/circle-apps/test-registry-native.py",
+      "scripts/circle-apps/test-registry-node.py",
+      "scripts/node-port/native-oracle.py",
+      "scripts/node-port/vpn-admin-fixtures.py",
+      "scripts/node-port/vpn-admin-oracle.ml",
+      "scripts/node-port/vpn-settlement-fixtures.py",
+      "scripts/node-port/vpn-settlement-oracle.ml",
+      "vendor/octra-circle-wasm-host/PROVENANCE.json"
+    ],
+    "explanation": "Production deltas after the full sweep are cfg(test) on a counter-only binding and lint-only signatures: pass an 8-byte Copy route by value and borrow a page during encoding. Other changes are fresh native references and exact per-method/refusal coverage in the security harness. Compiler, VM, payment AML and consensus code are unchanged. All three libraries and affected parity/payment targets pass again on the final snapshot."
+  },
+  "native_references": {
+    "vpn-admin.json": {
+      "path": "/Users/androolloyd/Development/octra/out/persistent-directories-20261017/vpn-admin.json",
+      "sha256": "b8cb3ebb1a7e0c62b84a3788b66cbaa18b2d91f8012dc11a19e2d89820ff843e",
+      "cases": 33,
+      "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+      "builder_image": "sha256:e61194220c65f9f0b8034a4816fb15d47dfe7dda8ece1087d9850b6d838bae95",
+      "instrumentation": {},
+      "aml_sha256": "047a58fba02b9948745223beb7999d4fd41594d00d6fe67173934994eae07e90"
+    },
+    "vpn-settlement-final.json": {
+      "path": "/Users/androolloyd/Development/octra/out/persistent-directories-20261017/vpn-settlement-final.json",
+      "sha256": "52a40673fd9772130ac59c197ba671e5612fce98b57c61d8d0c0fd476619ce8f",
+      "cases": 42,
+      "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50",
+      "builder_image": "sha256:e61194220c65f9f0b8034a4816fb15d47dfe7dda8ece1087d9850b6d838bae95",
+      "instrumentation": {},
+      "aml_sha256": "047a58fba02b9948745223beb7999d4fd41594d00d6fe67173934994eae07e90",
+      "test_functions_per_program": 1
+    },
+    "registry-native.json": {
+      "path": "/Users/androolloyd/Development/octra/out/persistent-directories-20261017/registry-native.json",
+      "sha256": "6e1e8988b6b4c064a34efa726bd5472d760dbf1aabed4c61e2758e9af3ae3d26",
+      "cases": 9,
+      "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50"
+    },
+    "circle-engine.json": {
+      "path": "/Users/androolloyd/Development/octra/out/persistent-directories-20261017/circle-engine.json",
+      "sha256": "7e9608bc0d8c83fbd5520cf637f66094413e71ad1160e4f19f39673058780c2c",
+      "cases": 9,
+      "upstream_commit": "7f9be4489870645cfcc95439638cde40f5da9f50"
+    }
+  },
+  "native_builder": {
+    "argv": [
+      "docker",
+      "build",
+      "--progress",
+      "plain",
+      "--target",
+      "builder",
+      "--build-arg",
+      "SOURCE_COMMIT=7f9be4489870645cfcc95439638cde40f5da9f50",
+      "--iidfile",
+      "/Users/androolloyd/Development/octra/out/persistent-directories-20261017/native-builder.id",
+      "-t",
+      "octra-native-oracle-recovery:20261017",
+      "-f",
+      "/Users/androolloyd/Development/octra-foundry/docker/octra-node/Dockerfile",
+      "/Users/androolloyd/Development/octra-foundry/docker/octra-node"
+    ],
+    "exit_code": 0,
+    "seconds": 264.498,
+    "dockerfile_sha256": "6124167cc141140efb8978dfa0acf6de2231d2c2b60dca7a61f52e5cfea1b2dc",
+    "log_sha256": "8a73250d9e65e21eee04ab64a9e3b058c67e22433b6ae3115a0cb873c7d7005e",
+    "image_id": "sha256:e61194220c65f9f0b8034a4816fb15d47dfe7dda8ece1087d9850b6d838bae95"
+  },
+  "native_source_inventory_files": 1158,
+  "storage_corpus": {
+    "irmin_storage_tree_cases": 92,
+    "irmin_storage_tree_operations": 7464,
+    "inode_tree_cases": 3,
+    "inode_tree_operations": 3100,
+    "native_tree_operations_across_corpora": 10564
+  },
+  "observed_work": {
+    "runtime_hot_edit": [
+      {
+        "width": 512,
+        "child_visits": 38,
+        "encoded_objects": 4,
+        "epochs": 8
+      },
+      {
+        "width": 4096,
+        "child_visits": 38,
+        "encoded_objects": 5,
+        "epochs": 8
+      },
+      {
+        "width": 32768,
+        "child_visits": 38,
+        "encoded_objects": 6,
+        "epochs": 8
+      }
+    ],
+    "runtime_restored_hot_edit": {
+      "width": 8192,
+      "child_visits": 38,
+      "encoded_objects": 5
+    },
+    "protocol_hot_edit": [
+      {
+        "width": 4096,
+        "set_entry_visits": 21,
+        "remove_entry_visits": 13,
+        "name_hashes_per_edit": 1,
+        "page_encodes_per_edit": 3
+      },
+      {
+        "width": 131072,
+        "set_entry_visits": 6,
+        "remove_entry_visits": 3,
+        "name_hashes_per_edit": 1,
+        "page_encodes_per_edit": 4
+      }
+    ],
+    "limits": "Operation counts from bounded deterministic regressions, not measured public throughput, RSS or whole-epoch complexity."
+  },
+  "economics": {
+    "operator_unstake_ms": 604800000,
+    "payer_exit_ms": 86400000,
+    "protocol_commission": 0,
+    "operator_deadline": "Fixed from first request; retries preserve deadline; new paid admission stops immediately.",
+    "compiled_payment_aml_tests": 14,
+    "abstract_lean_theorems": 19,
+    "formal_scope": "Abstract payment-state model; no AML compiler or VM refinement proof."
+  },
+  "review": {
+    "persistent_cache": "Independent read-only adversarial review found no remaining concrete invalidation, reuse-grant or retention defect.",
+    "settlement_selector": "Independent read-only review found all production methods and shared helpers retained. Final harness binds every declared method, no duplicates, and all expected refusal reasons."
+  },
+  "initial_failures": [
+    "circle_parity: missing registry WASM; built current locked app and replayed 9 cases in pristine pinned native engine, selected both fresh artifact and fresh native reference explicitly.",
+    "groth16_parity (2) and vpn_settlement_security (1): stale main-v5 source-bound golden references; regenerated by unchanged pinned OCaml compiler/VM after verifying full adopted source inventory.",
+    "Native settlement regeneration initially hit repeated jump destination 10000 when appending all tests. Isolating each declared test with the complete production program and shared helpers avoids the fixed native label namespace collision without changing compiler or VM. All 42 cases, 24 expected refusals, remain required."
+  ],
+  "lint_corrections": "Initial strict passes found three trivially-copy-pass-by-ref warnings and one needless-pass-by-value warning. Corrected signatures and callers; final strict pass and affected release tests use the same final source snapshot.",
+  "deployment": {
+    "public_observer_changed": false,
+    "public_image": "f69473b",
+    "candidate_installed": false,
+    "mainnet_qualified": false
+  },
+  "remaining_gates": [
+    "Native stalled-voter liveness realignment",
+    "Actual legacy unjournaled IrminPack repair and crash recovery",
+    "Sustained public sync/resource and Circle asset qualification on the candidate image",
+    "Stock Tailscale paid binding, bounded portal onboarding/funding, DNS/TLS and macOS paid-route guard",
+    "Public paid settlement and Mainnet qualification"
+  ]
+}

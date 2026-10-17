@@ -25,12 +25,21 @@ def main():
     for path in fragment_paths:
         fragments = path.read_text()
         refusals = dict(re.findall(r'^// expect-revert (test_\w+) "([^"]*)"$', fragments, re.M))
-        names = re.findall(r'^fn (test_\w+)\(', fragments, re.M)
-        assert len(names) <= 6, 'Native fixed labels require bounded fragments'
+        declarations = list(re.finditer(r'^fn (test_\w+)\(', fragments, re.M))
+        names = [declaration.group(1) for declaration in declarations]
+        assert names and len(set(names)) == len(names), 'Require distinct test methods'
         assert set(refusals).issubset(names)
-        combined = source.rstrip().removesuffix('}') + '\n' + fragments + '\n}\n'
-        methods.extend(dict(method=name, refusal=refusals.get(name), source=combined,
-                            fragment=str(path.relative_to(ROOT))) for name in names)
+        # Retain shared private seed helpers, but append only the selected test.
+        # Adding all six tests to the current production source collides with
+        # the adopted compiler's fixed function/control label namespace.
+        helpers = fragments[:declarations[0].start()]
+        for index, declaration in enumerate(declarations):
+            end = declarations[index+1].start() if index+1 < len(declarations) else len(fragments)
+            selected = fragments[declaration.start():end]
+            combined = source.rstrip().removesuffix('}') + '\n' + helpers + '\n' + selected + '\n}\n'
+            name = declaration.group(1)
+            methods.append(dict(method=name, refusal=refusals.get(name), source=combined,
+                                fragment=str(path.relative_to(ROOT))))
     assert len(methods) >= 30
     spec = importlib.util.spec_from_file_location('native', ROOT/'scripts/node-port/native-oracle.py')
     native = importlib.util.module_from_spec(spec)
@@ -49,6 +58,7 @@ def main():
     report['generator_sha256'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     report['aml_sha256'] = hashlib.sha256(source.encode()).hexdigest()
     report['fragments_sha256'] = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in fragment_paths}
+    report['test_functions_per_program'] = 1
     report['scope'] = ('Production main-v5 method bodies with appended isolated AML security methods; '
                        'native compiler/VM exact state, effort, events and successful-transfer transcript. '
                        'Covers amount binding, zero traffic, amount equivocation, migration, policy anchor '

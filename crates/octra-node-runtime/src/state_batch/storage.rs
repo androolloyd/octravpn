@@ -74,17 +74,21 @@ pub(crate) fn pages(entries: &[Entry]) -> Result<Vec<StoredObject>, Error> {
     irmin::page::directory(entries)
         .map_err(|_| Error("Irmin inode depth exhausted"))?
         .into_iter()
-        .map(|(hash, page)| {
-            let mut data = MAGIC.to_vec();
-            data.extend(page.encode().map_err(|_| Error("invalid inode page"))?);
-            Ok(StoredObject {
-                hash,
-                contents: false,
-                data,
-                children: page.children(),
-            })
-        })
+        .map(|(hash, page)| encode_page(hash, &page))
         .collect()
+}
+
+pub(super) fn encode_page(hash: Hash, page: &Page) -> Result<StoredObject, Error> {
+    #[cfg(test)]
+    super::work::encode_object();
+    let mut data = MAGIC.to_vec();
+    data.extend(page.encode().map_err(|_| Error("invalid inode page"))?);
+    Ok(StoredObject {
+        hash,
+        contents: false,
+        data,
+        children: page.children(),
+    })
 }
 
 /// Only native root pages and legacy logical directories can be two encodings
@@ -108,14 +112,10 @@ pub(crate) fn compatible(hash: &Hash, existing: &[u8], incoming: &[u8]) -> Resul
 pub(super) fn entries(children: &super::Children) -> Vec<Entry> {
     children
         .iter()
-        .map(|(name, child)| Entry {
-            name: name.clone(),
-            kind: if matches!(child.as_ref(), super::Node::Contents(_, _)) {
-                Kind::Contents
-            } else {
-                Kind::Node
-            },
-            hash: *child.cache().get().expect("hashed immutable child"),
+        .map(|(name, child)| {
+            #[cfg(test)]
+            super::work::visit_child();
+            super::entry(name, child)
         })
         .collect()
 }
