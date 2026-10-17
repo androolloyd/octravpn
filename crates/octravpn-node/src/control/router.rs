@@ -91,6 +91,10 @@ pub(crate) fn router_axum(state: Arc<ControlState>) -> Router {
     // stock-client wire paths here; `/health`, `/metrics`, and
     // operator diagnostics remain owned by Octra's control plane.
     if let Some(ws) = state.wire_state.clone() {
+        if let Some(stores) = &state.mesh_store {
+            merged = merged
+                .merge(stores.admin_router(ws.policy.as_ref().clone(), state.admin_token.clone()));
+        }
         merged = merged.merge(tailscale_wire_embedded_control_router(ws));
     }
 
@@ -108,6 +112,81 @@ mod tests {
     use octravpn_mesh::{ip_alloc::TailnetIpAllocator, PreauthMinter, ServerNoiseKey};
     use std::{sync::Arc, time::Duration};
     use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn hub_admin_mints_and_wire_redemption_share_persistent_credentials() {
+        use octravpn_mesh::tailscale_wire::RedeemError;
+        let directory = tempfile::tempdir().unwrap();
+        let machines = Arc::new(octravpn_mesh::MachineRegistry::new());
+        let stores = crate::mesh_store::MeshStore::open(directory.path(), machines.clone())
+            .await
+            .unwrap();
+        let policy = Arc::new(octravpn_mesh::policy::PolicyStore::new());
+        let mut state = ControlState::new(
+            Arc::new(KeyPair::generate()),
+            Arc::new(crate::onion::OnionRouter::new()),
+            Arc::new(BoundedMap::new(10, Duration::from_secs(60))),
+        )
+        .with_admin_token(Some("secret".into()));
+        let wire = octravpn_mesh::WireStateBuilder::new(
+            Arc::new(ServerNoiseKey::load_or_generate(directory.path()).unwrap()),
+            stores.redeemer(Some(state.metrics.clone())),
+            Arc::new(TailnetIpAllocator::new("persistent-hub")),
+            machines,
+            policy,
+            octravpn_mesh::tailscale_wire::DerpMapStore::shared(Default::default()),
+        )
+        .registration_store(Some(stores.machines.clone()))
+        .build();
+        let redeemer = wire.preauth.clone();
+        state.wire_state = Some(wire);
+        state.mesh_store = Some(stores);
+        let metrics = state.metrics.clone();
+        let app = Arc::new(state).router_axum();
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/admin/preauth")
+                    .header("authorization", "Bearer secret")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"user":"alice","ttl_secs":90}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let minted: serde_json::Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.unwrap()).unwrap();
+        let key = minted["key"].as_str().unwrap();
+        assert_eq!(redeemer.redeem(key).await.unwrap().user, "alice");
+        assert!(matches!(
+            redeemer.redeem(key).await,
+            Err(RedeemError::AlreadyUsed)
+        ));
+        assert_eq!(
+            metrics
+                .preauth_redemptions_total
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/preauthkeys")
+                    .header("authorization", "Bearer secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let rows: Vec<serde_json::Value> =
+            serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["redemptions"], 1);
+    }
 
     fn control_state_with_wire() -> Arc<ControlState> {
         let dir = tempfile::tempdir().unwrap();

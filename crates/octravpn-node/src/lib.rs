@@ -17,6 +17,7 @@ mod events;
 mod hub;
 mod members_policy;
 mod mesh_ops;
+pub mod mesh_store;
 mod native_derp;
 mod onion;
 mod pvac;

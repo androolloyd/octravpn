@@ -1,0 +1,80 @@
+{
+  "checked_at_utc": "2026-10-17T00:58:16.562025+00:00",
+  "scope": "Bounded live public-devnet native-host restart, P2P relay loss/recovery and ExEx archive audit; no consensus or serving-gate changes",
+  "source_commit": "078f19b",
+  "binary_sha256": "de755cfedf322cbf0ea8d339dbe8631fd3c8210fef7e648eab687ae971449454",
+  "node_pid": 29948,
+  "relay_loss": {
+    "before": {
+      "status": {
+        "chain_id": "octra-devnet-9871-cluster",
+        "epoch": 1706367,
+        "peers": 8,
+        "pending": null,
+        "serving": false,
+        "state_root": "d77650b8f62daf8dfe99a28106e60c5e771f1255de4c668b2ce8ce700ddab7ca",
+        "vpn_program": null,
+        "vpn_settlement": "unconfigured"
+      },
+      "proxy_tcp_streams": 8,
+      "direct_public_19000_streams": 0
+    },
+    "interrupted": {
+      "status": {
+        "chain_id": "octra-devnet-9871-cluster",
+        "epoch": 1706369,
+        "peers": 0,
+        "pending": null,
+        "serving": false,
+        "state_root": "2513f1deb223cf01b72c332e9e11a95269593e45daff554b1161e5104bcb91b6",
+        "vpn_program": null,
+        "vpn_settlement": "unconfigured"
+      },
+      "non_http_peer_streams": 0,
+      "direct_fallback": false
+    },
+    "restored": {
+      "status": {
+        "chain_id": "octra-devnet-9871-cluster",
+        "epoch": 1706374,
+        "peers": 2,
+        "pending": null,
+        "serving": false,
+        "state_root": "1286368792e453610d4ee645fe5139ae8fd24292fd2b5cf4cccacd55db6278bb",
+        "vpn_program": null,
+        "vpn_settlement": "unconfigured"
+      },
+      "proxy_tcp_streams": 5,
+      "same_node_pid": 29948
+    },
+    "same_node_process": true,
+    "direct_p2p_fallback_observed": false
+  },
+  "canonical_exex": {
+    "epochs": 57,
+    "from_epoch": 1706325,
+    "through_epoch": 1706381,
+    "events": 552,
+    "canonical_outbox_archive_equal": true,
+    "archive_list_sha256": "3cbfa60ad77f4ca69b56207b3ffe3cc834b470856d4582bc9d98a41763648fb5"
+  },
+  "gateway": {
+    "http_status": 503,
+    "body": "Node is synchronizing",
+    "stable_availability_qualified": false
+  },
+  "observed_relay_peer_failures": [
+    "Temporary failure in name resolution",
+    "Name or service not known",
+    "Connection refused",
+    "Connection timed out"
+  ],
+  "public_paid_vpn_configured": false,
+  "full_rust_node_complete": false,
+  "remaining": [
+    "stable source-agreement admission and current-release gateway HTTP 200",
+    "native-host public P2P ingress qualification",
+    "public funded VPN service and external-device HTTPS browsing",
+    "full native behavioral parity"
+  ]
+}

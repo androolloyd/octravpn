@@ -9,6 +9,17 @@ upstream behavioral parity and public-network deployment remain unqualified.
 
 ## Recorded local evidence
 
+- The [durable mesh enrollment checkpoint](checkpoints/2026-10-16/mesh-enrollment.json)
+  records 515 passing tests on frozen source and strict lint. The standalone
+  mesh CLI and enabled Hub now share persistent users, device registrations,
+  hashed preauth credentials, admin APIs and wire redemption. The actual CLI
+  test crashes and restarts the process, registers a device, verifies atomic
+  single-use redemption and replay rejection, revokes a reusable credential,
+  restarts again and verifies refusal. Requested TTL, malformed JSON, hidden
+  bearer failures and absence of raw tokens in state files are checked. The
+  actual Hub router shares that backend and counts successful redemption once.
+  This does not establish stock-client enrollment through deployed HTTPS,
+  durable operator ACL/API-key policy or the native node's mesh-control launcher.
 - The [native-host P2P relay checkpoint](checkpoints/2026-10-16/p2p-proxy.json)
   records 16 passing transport, swarm, launcher and four-validator executable
   tests, plus strict protocol/node lint. An optional loopback SOCKS5 connector
@@ -17,11 +28,17 @@ upstream behavioral parity and public-network deployment remain unqualified.
   authentication, validator membership and source agreement are unchanged.
   The existing observer stopped cleanly at epoch 1,706,324 and restarted with
   the same database and identity; only `p2p_proxy` changed in its configuration.
-  Its retained-state audit is live. Two disposable live relay probes verified
+  Its retained-state audit completed in the follow-up below. Two disposable live relay probes verified
   responder signatures but were closed after the handshake, so they do not
   establish sustained peer admission. Full relay-backed catch-up, stable
   serving, canonical gateway HTTP 200 and public native-host ingress remain
   open. This TCP relay does not carry paid VPN or HTTP recovery traffic.
+  Its [live recovery follow-up](checkpoints/2026-10-16/p2p-proxy-recovery.json)
+  verified 57 consecutive post-restart epochs and 552 transaction events against
+  the canonical ExEx outbox and archive. Interrupting only the SSH relay dropped
+  peers to zero with no direct P2P fallback; restoring it reconnected the same
+  node process. Peer availability still fluctuated, and the canonical gateway
+  remained suspended with HTTP 503 in the sampled request.
 - The [receipt retry and paid integration checkpoint](checkpoints/2026-10-16/retry-admission-paid-gates.json)
   records a canonical-opening check for vaulted receipt retries and the same
   frozen image passing both 34-step private Single and four-validator BFT paid

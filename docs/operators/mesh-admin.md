@@ -11,6 +11,10 @@ inspect and mutate a running mesh. It is mounted by BOTH:
 
 Both shells call the same `octravpn_mesh::build_admin_router` builder
 over an `AdminState`, so the on-wire shape never drifts between them.
+The Hub mounts it when its Tailscale wire state directory is configured.
+Both listeners share persistent users, machine registrations and preauth
+credentials with their wire registration path. Minting, single-use redemption,
+expiry and revocation use the same `machines.sqlite` database.
 
 ## Auth posture
 

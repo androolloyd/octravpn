@@ -19,6 +19,7 @@ use crate::control::state::ControlState;
 /// minted credential, used later by the (not-yet-implemented)
 /// register handler to attribute a joining device.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct MintPreauthRequest {
     /// User label to bind the key to. Defaults to `"default"` so the
     /// interop test can `curl -d '{}'` and still get a usable key.
@@ -29,6 +30,8 @@ pub(crate) struct MintPreauthRequest {
     /// behaviour.
     #[serde(default)]
     reusable: bool,
+    #[serde(default)]
+    ttl_secs: Option<u64>,
 }
 
 fn default_user() -> String {
@@ -56,7 +59,7 @@ pub(crate) struct MintPreauthResponse {
 pub(crate) async fn mint_preauth(
     State(s): State<Arc<ControlState>>,
     headers: axum::http::HeaderMap,
-    body: Option<Json<MintPreauthRequest>>,
+    body: axum::body::Bytes,
 ) -> impl IntoResponse {
     // Bearer gate (Hidden policy): every failure returns 404 +
     // `NGINX_404_BODY`. The check returns the rejection response
@@ -66,16 +69,50 @@ pub(crate) async fn mint_preauth(
     }
     // Tolerate an empty body — curl-without-data is a common
     // operator habit; we just mint a key for the default user.
-    let req = match body {
-        Some(Json(b)) => b,
-        None => MintPreauthRequest {
+    let req = if body.is_empty() {
+        MintPreauthRequest {
             user: default_user(),
             reusable: false,
-        },
+            ttl_secs: None,
+        }
+    } else {
+        match serde_json::from_slice::<MintPreauthRequest>(&body) {
+            Ok(request) => request,
+            Err(_) => {
+                return (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    "invalid preauth request",
+                )
+                    .into_response()
+            }
+        }
     };
-    let pk = s
-        .preauth_minter
-        .mint(req.user, DEFAULT_PREAUTH_TTL, req.reusable);
+    let ttl = req.ttl_secs.unwrap_or(DEFAULT_PREAUTH_TTL.as_secs());
+    let response = if let Some(stores) = &s.mesh_store {
+        let Ok(pk) = stores.mint_for_user(req.user, ttl, req.reusable).await else {
+            return (
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "preauth mint unavailable",
+            )
+                .into_response();
+        };
+        MintPreauthResponse {
+            key: pk.key,
+            user: pk.user,
+            expires_at: pk.expires_at,
+            reusable: pk.reusable,
+        }
+    } else {
+        let pk = s
+            .preauth_minter
+            .mint(req.user, std::time::Duration::from_secs(ttl), req.reusable);
+        MintPreauthResponse {
+            key: pk.key,
+            user: pk.user,
+            expires_at: pk.expires_at,
+            reusable: pk.reusable,
+        }
+    };
     // Bump the mint counter here rather than inside PreauthMinter so
     // a node-local CLI mint (which also goes through `mint()` directly)
     // doesn't double-count when the bridge eventually wires its own
@@ -84,13 +121,7 @@ pub(crate) async fn mint_preauth(
     s.metrics
         .preauth_mints_total
         .fetch_add(1, Ordering::Relaxed);
-    Json(MintPreauthResponse {
-        key: pk.key,
-        user: pk.user,
-        expires_at: pk.expires_at,
-        reusable: pk.reusable,
-    })
-    .into_response()
+    Json(response).into_response()
 }
 
 #[cfg(test)]
@@ -115,7 +146,7 @@ mod tests {
             axum::http::header::AUTHORIZATION,
             HeaderValue::from_static("Bearer anything"),
         );
-        let resp = mint_preauth(State(state), headers, None)
+        let resp = mint_preauth(State(state), headers, axum::body::Bytes::new())
             .await
             .into_response();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -135,9 +166,13 @@ mod tests {
 
         // Missing → 404.
         {
-            let resp = mint_preauth(State(state.clone()), axum::http::HeaderMap::new(), None)
-                .await
-                .into_response();
+            let resp = mint_preauth(
+                State(state.clone()),
+                axum::http::HeaderMap::new(),
+                axum::body::Bytes::new(),
+            )
+            .await
+            .into_response();
             assert_eq!(resp.status(), StatusCode::NOT_FOUND);
         }
         // Wrong → 404.
@@ -147,7 +182,7 @@ mod tests {
                 axum::http::header::AUTHORIZATION,
                 HeaderValue::from_static("Bearer wrong"),
             );
-            let resp = mint_preauth(State(state.clone()), headers, None)
+            let resp = mint_preauth(State(state.clone()), headers, axum::body::Bytes::new())
                 .await
                 .into_response();
             assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -162,10 +197,7 @@ mod tests {
             let resp = mint_preauth(
                 State(state.clone()),
                 headers,
-                Some(Json(MintPreauthRequest {
-                    user: "alice".into(),
-                    reusable: false,
-                })),
+                axum::body::Bytes::from_static(br#"{"user":"alice","reusable":false}"#),
             )
             .await
             .into_response();
@@ -200,10 +232,7 @@ mod tests {
         let resp = mint_preauth(
             State(state.clone()),
             headers,
-            Some(Json(MintPreauthRequest {
-                user: "alice".into(),
-                reusable: false,
-            })),
+            axum::body::Bytes::from_static(br#"{"user":"alice","reusable":false}"#),
         )
         .await
         .into_response();
@@ -223,9 +252,13 @@ mod tests {
         let allowlist = Arc::new(BoundedMap::new(16, std::time::Duration::from_secs(60)));
         let state = Arc::new(ControlState::new(node_kp, router, allowlist));
         let before = state.metrics.preauth_mints_total.load(Ordering::Relaxed);
-        let resp = mint_preauth(State(state.clone()), axum::http::HeaderMap::new(), None)
-            .await
-            .into_response();
+        let resp = mint_preauth(
+            State(state.clone()),
+            axum::http::HeaderMap::new(),
+            axum::body::Bytes::new(),
+        )
+        .await
+        .into_response();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
         assert_eq!(
             state.metrics.preauth_mints_total.load(Ordering::Relaxed),

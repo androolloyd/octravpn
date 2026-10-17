@@ -15,17 +15,14 @@ DM, vault entry — anywhere that is **not** public):
 
 ### A preauth key
 
-A short string. Two formats are in use, both work:
+A daemon-bound token such as `hskey-auth-…`, minted by the running control
+service through `mesh mint-preauth --remote … --admin-token …` or
+`octravpn-node headscale preauthkeys create --user <ID>` (see
+[`docs/operators/cli-migration.md`](../operators/cli-migration.md)).
 
-- **OctraVPN format** — `octrapreauth-<hex>`. Minted via the
-  embedded `octravpn-node mesh mint-preauth` command (see
-  [`crates/octravpn-node/src/cli/mesh.rs`](../../crates/octravpn-node/src/cli/mesh.rs)).
-- **Headscale-stock format** — a 48-character hex blob. Minted via
-  `octravpn-node headscale preauthkeys create --user <ID>` (see
-  [`docs/operators/cli-migration.md`](../operators/cli-migration.md)).
-
-You don't need to know which format you got — `tailscale up` accepts
-both via the same `--authkey` flag. Just paste the value verbatim.
+Pass that value verbatim to `tailscale up --authkey`. Offline
+`mesh mint-preauth` keys are fixtures; request a key minted by the running
+control service for a real join.
 
 Preauth keys are **single-use by default**. If you re-run
 `tailscale up --authkey <key>` after a successful join, the second

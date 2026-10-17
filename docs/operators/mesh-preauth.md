@@ -1,7 +1,7 @@
 # Operator guide: minting mesh preauth keys
 
 `octravpn-node mesh mint-preauth` is the operator surface for emitting
-Tailscale-style preauth keys (`octrapreauth-…`) that a joining
+Tailscale-compatible preauth keys that a joining
 `tailscale up --authkey "$KEY"` redeems against the daemon's wire
 control plane. The same command has **two modes** — the only
 difference is whether the key is bound to the running daemon's
@@ -38,9 +38,12 @@ tailscale up --login-server http://mesh-control:51821 --authkey "$KEY"
 ```
 
 The CLI POSTs `{user, reusable, ttl_secs}` to `<remote>/admin/preauth`
-with `Authorization: Bearer <admin-token>`. The daemon's persistent
-`PreauthMinter` materialises the key so it survives across process
-boundaries — and is honoured by a real `tailscale up` join.
+with `Authorization: Bearer <admin-token>`. The Hub's enabled mesh listener
+and standalone `mesh serve` share their hashed SQLite enrollment store with
+wire redemption and `/api/v1/preauthkeys`. Outstanding keys, single-use
+consumption, expiry, users and revocation survive restart. Daemon-bound tokens
+use Headscale's `hskey-auth-…` format; offline `octrapreauth-…` tokens remain
+local fixtures and cannot authorize enrollment in another process.
 
 Both `--remote` and `--admin-token` are clap-`requires`-linked:
 supplying one without the other prints a clear parse error rather
@@ -50,7 +53,7 @@ than failing later with a 401.
 |---|---|---|---|
 | `--user` | string | `default` | User label bound into the key. |
 | `--reusable` | bool | off | Off = single-use (safer Tailscale default). |
-| `--ttl-secs` | u64 | `DEFAULT_PREAUTH_TTL` (3600) | Best-effort: current daemon hard-codes the TTL. |
+| `--ttl-secs` | u64 | `DEFAULT_PREAUTH_TTL` (3600) | Honored by both native mesh listeners. |
 | `--remote` | URL | _unset_ | Switches to daemon-bound mode. |
 | `--admin-token` | string | _unset_ | Bearer token; required when `--remote` is set. |
 
@@ -129,6 +132,7 @@ KEY=$(octravpn-node mesh mint-preauth --user alice [--remote … --admin-token �
     surface; this page is the operator playbook).
   * `crates/octravpn-node/src/control/handlers/preauth.rs` — the
     server-side handler.
+  * `crates/octravpn-node/src/mesh_store.rs` — shared persistent users,
+    machine registrations and hashed credentials.
   * `crates/octravpn-mesh/src/headscale_bridge/preauth.rs` — the
-    persistent `PreauthMinter` that survives across process
-    boundaries.
+    bounded in-memory minter used by offline fixtures.

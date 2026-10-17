@@ -98,11 +98,10 @@ pub(crate) struct ControlState {
     /// client-countersigned receipt blobs. Separate from
     /// `receipt_journal`, which remains a fixed-width seq-floor store.
     pub receipt_vault: Arc<ReceiptVault>,
-    /// In-memory preauth-key minter the `POST /admin/preauth`
-    /// endpoint hands out tokens from. Shared with `octravpn-node`'s
-    /// `mesh mint-preauth` CLI surface so a `docker exec` can mint a
-    /// key without touching the HTTP plane.
+    /// In-memory fallback for fixtures without an enabled mesh listener.
+    /// Production mesh enrollment uses `mesh_store` below.
     pub preauth_minter: PreauthMinter,
+    pub mesh_store: Option<crate::mesh_store::MeshStore>,
     /// Bearer token gating `POST /admin/preauth`. `None` hides the
     /// endpoint (any request returns 404, matching `/events`).
     pub admin_token: Option<Arc<str>>,
@@ -587,6 +586,7 @@ impl ControlState {
             receipt_totals: Arc::new(ReceiptJournal::in_memory()),
             receipt_vault: Arc::new(ReceiptVault::in_memory()),
             preauth_minter: PreauthMinter::new(),
+            mesh_store: None,
             admin_token: None,
             wire_state: None,
             rate_limit_cfg: crate::rate_limit::RateLimitCfg::default(),

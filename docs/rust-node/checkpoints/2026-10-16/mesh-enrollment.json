@@ -1,0 +1,87 @@
+{
+  "source_sha256": {
+    "crates/octravpn-node/src/cli/mesh.rs": "3e40648d502c9e5476c88fe01c50a7bd5e3bb2e6b6933af192b0a59362192016",
+    "crates/octravpn-node/src/control/handlers/preauth.rs": "f70c32326a91b26ed9ac3c15d2333d23116110c97b3a820ab97ff04a8ac3522a",
+    "crates/octravpn-node/src/control/router.rs": "1b2ef4cdb6d762d809dbeb4acb068bada860046b5b1aad894dad22cab61a0853",
+    "crates/octravpn-node/src/control/state.rs": "79bc3ecb10ad74695cc5f19517a823847597ed1d08aa3968b347ff0694826e28",
+    "crates/octravpn-node/src/hub/spawn.rs": "111423ba7ee2f23a96dd0f3525220a45841536b3a56ae10737036a2dc07dbb6b",
+    "crates/octravpn-node/src/lib.rs": "5304db848eeb55952601bf42a8a2d0f9310cdbb8a6399c581005a55c1aca2ffd",
+    "crates/octravpn-node/src/mesh_store.rs": "c0e6d2a8a359dbcef899d255d25a959916df146888a6e3e953f6a7b1fa946bfb",
+    "crates/octravpn-node/tests/mesh_enrollment_restart.rs": "494ed23ca7ba8f53c706f3d7c7fc3a54608123ab330610024af9435fd7366c46"
+  },
+  "sources_unchanged": true,
+  "gates": [
+    {
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--release",
+        "-p",
+        "octravpn-node",
+        "--lib",
+        "--test",
+        "mesh_enrollment_restart",
+        "--test",
+        "mesh_serve_admin"
+      ],
+      "exit_code": 0,
+      "seconds": 142.07,
+      "passed": 515,
+      "log": "docs/rust-node/checkpoints/2026-10-16/mesh-enrollment-tests.log",
+      "log_sha256": "0ba2880635c9a1c08fff9db0a999c8121e0a96075bf9eb8e104021bcab9d67fb"
+    },
+    {
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--release",
+        "-p",
+        "octravpn-node",
+        "--lib",
+        "--bin",
+        "octravpn-node",
+        "--test",
+        "mesh_enrollment_restart",
+        "--test",
+        "mesh_serve_admin",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 8.88,
+      "passed": 0,
+      "log": "docs/rust-node/checkpoints/2026-10-16/mesh-enrollment-clippy.log",
+      "log_sha256": "48c02437f8ed18e74d35471b9d681001882b42d2e149a1f99fcbd62b854d4585"
+    }
+  ],
+  "checked_at_utc": "2026-10-17T00:59:54.786065+00:00",
+  "scope": "Durable shared mesh enrollment for the standalone CLI and enabled Hub control plane; no consensus or payment-policy change",
+  "headscale_commit": "7b6b71b245ceff25f27a400588d78dd28e6e340f",
+  "base_commit": "078f19b",
+  "binary_sha256": "ff4c5568295f981e5563711cef84f585fd26c9a00165a9d890a0cc8b0e0ef4fc",
+  "verified": [
+    "Actual mesh CLI HTTP minting and admin API use the same store as the wire redeemer",
+    "Outstanding credentials, users and device registration survive process crash and restart",
+    "Concurrent single-use redemption succeeds once; replay remains rejected after restart",
+    "Admin revocation of a reusable credential remains effective after restart",
+    "Requested TTL is honored and malformed authenticated JSON mints nothing",
+    "Missing and wrong admin bearers produce the same hidden response",
+    "Raw tokens are absent from persisted state files",
+    "Actual Hub control router shares its durable credentials with wire redemption and counts one successful redemption"
+  ],
+  "source_integration": [
+    "Anchored Hub member policy starts deny-all before asynchronous refresh"
+  ],
+  "full_rust_node_complete": false,
+  "public_deployment_qualified": false,
+  "remaining": [
+    "stock Tailscale enrollment through the deployed trusted HTTPS control endpoint",
+    "persistent operator ACL policy and API-key lifecycle qualification",
+    "native octra-node mesh-control service configuration and combined integration",
+    "funded public VPN and sustained canonical Circle gateway availability",
+    "full native behavior parity"
+  ]
+}

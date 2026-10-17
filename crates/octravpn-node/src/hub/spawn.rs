@@ -141,7 +141,7 @@ impl Hub {
                         derp_config::{empty_derp_map, load_derp_map},
                         MachineRegistry,
                     },
-                    PreauthMinter, ServerNoiseKey,
+                    ServerNoiseKey,
                 };
                 let server_noise_key = Arc::new(
                     ServerNoiseKey::load_or_generate(&dir)
@@ -153,23 +153,7 @@ impl Hub {
                     .tailscale_tailnet_id
                     .clone()
                     .unwrap_or_else(|| "octravpn-interop".to_string());
-                // PreauthMinter is constructed *here* and then shared
-                // into ControlState below. Reusing the same Arc<Mutex>
-                // means an `/admin/preauth`-minted key is visible to
-                // the wire `register` handler.
-                //
-                // The wire layer (now in headscale-api) sees the
-                // minter only through the `PreauthRedeemer` trait —
-                // implemented in `octravpn_mesh::headscale_bridge`.
-                // Attach the node's metrics sink so the wire-side
-                // `redeem` path bumps `preauth_redemptions_total`
-                // without round-tripping through the control plane.
-                // Mints from `/admin/preauth` are bumped at the
-                // handler instead (control.rs::mint_preauth); the
-                // sink path is for redemptions issued from the
-                // headscale-api wire register handler.
                 let metrics_sink: Arc<dyn octravpn_mesh::MetricsSink> = self.metrics.clone();
-                let shared_minter = PreauthMinter::new().with_metrics_sink(metrics_sink);
                 // Wall 6: optionally load a DERP-map fixture from the
                 // path advertised in OCTRAVPN_DERP_MAP_PATH. Unset ⇒
                 // empty map ⇒ matches pre-Wall-6 behaviour.
@@ -204,8 +188,8 @@ impl Hub {
                 // hydrate the registry from <state dir>/machines.sqlite so a
                 // daemon restart does not wipe node identities and IPs.
                 let machines = Arc::new(MachineRegistry::new());
-                let registration_store =
-                    crate::cli::mesh::open_machine_registration_store(&dir, &machines).await?;
+                let stores = crate::mesh_store::MeshStore::open(&dir, machines.clone()).await?;
+                let registration_store = stores.machines.clone();
                 // Item 4: the policy store is hoisted so the members-policy
                 // sync task can replace the allow-all fallback with the
                 // packet filter rendered from the anchored member set.
@@ -214,6 +198,7 @@ impl Hub {
                 let policy_store = Arc::new(octravpn_mesh::policy::PolicyStore::new());
                 let mut registration_gate = None;
                 if self.cfg.control.members_policy.enabled {
+                    crate::members_policy::install_boot_deny_all(policy_store.as_ref())?;
                     let sync = crate::members_policy::MembersPolicySync::from_hub(&self)?;
                     // Taken before `run` consumes the sync — the gate and the
                     // loop share one membership snapshot.
@@ -221,13 +206,13 @@ impl Hub {
                     tokio::spawn(sync.run(crate::members_policy::MembersPolicyWiring {
                         machines: Arc::clone(&machines),
                         policy: Arc::clone(&policy_store),
-                        registration_store: Some(Arc::clone(&registration_store)),
+                        registration_store: Some(registration_store.clone()),
                     }));
                 }
                 Some((
                     octravpn_mesh::WireStateBuilder::new(
                         server_noise_key,
-                        Arc::new(shared_minter.clone()),
+                        stores.redeemer(Some(metrics_sink)),
                         Arc::new(TailnetIpAllocator::new(tailnet_id)),
                         machines,
                         policy_store,
@@ -237,7 +222,7 @@ impl Hub {
                     .registration_store(Some(registration_store))
                     .registration_gate(registration_gate)
                     .build(),
-                    shared_minter,
+                    stores,
                 ))
             } else {
                 None
@@ -296,11 +281,9 @@ impl Hub {
             state.bearer_metrics().warn_if_unconfigured();
             state.bearer_admin().warn_if_unconfigured();
             state.bearer_events().warn_if_unconfigured();
-            // If the wire surface is enabled, swap the auto-constructed
-            // preauth minter for the one shared with the wire router so
-            // both paths see the same store.
+            // HTTP minting, revocation and wire redemption share the same DB.
             if let Some((_, shared)) = wire_state {
-                state.preauth_minter = shared;
+                state.mesh_store = Some(shared);
             }
             // Open the audit log next to the wallet secret unless a
             // dedicated path is configured.

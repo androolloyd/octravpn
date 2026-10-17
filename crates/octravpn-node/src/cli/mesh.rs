@@ -47,10 +47,9 @@ pub(crate) enum MeshCmd {
     /// 2. **Daemon-bound (remote)** — pass both `--remote <URL>` and
     ///    `--admin-token <TOKEN>`. The CLI POSTs to
     ///    `<remote>/admin/preauth` with `Authorization: Bearer
-    ///    <token>`; the running daemon's persistent `PreauthMinter`
-    ///    materialises the key so it survives across process
-    ///    boundaries and is honoured by a real
-    ///    `tailscale up --authkey "$KEY"`. The minted key is printed
+    ///    <token>`; the running daemon stores a hashed key in its durable
+    ///    enrollment database and accepts it through the wire registration
+    ///    path used by `tailscale up --authkey "$KEY"`. The key is printed
     ///    to stdout in the same shape as the local mode so existing
     ///    shell scripts work unchanged.
     MintPreauth {
@@ -88,8 +87,7 @@ pub(crate) enum MeshCmd {
     ///   - `POST /admin/preauth` for minting keys over HTTP (bearer
     ///     token from `--admin-token` or `OCTRAVPN_ADMIN_TOKEN`).
     ///
-    /// Both surfaces share one `PreauthMinter` so a key minted over
-    /// HTTP is immediately redeemable through `register`.
+    /// Admin minting and wire redemption share one persistent key store.
     Serve {
         /// `host:port` to listen on for plain HTTP. Defaults to
         /// `127.0.0.1:51821`; set an explicit public address for
@@ -299,52 +297,6 @@ pub(crate) async fn run_mesh_cmd(sub: MeshCmd, cfg_path: &str) -> Result<()> {
     }
 }
 
-/// Hub-free wire surface entry point. See `MeshCmd::Serve` for the
-/// rationale.
-/// Open (creating if absent) the durable machine-registration store under a
-/// Tailscale-wire state dir, run migrations, and hydrate `registry` from it.
-///
-/// Without this, every registration lives only in the in-memory
-/// [`MachineRegistry`]: a daemon restart wipes node identities and tailnet
-/// IPs and every client has to re-register. The store is the same
-/// `PersistentMachineAdmin` headscale-rs' own server uses, over a SQLite
-/// file next to the noise key and DERP key.
-pub(crate) async fn open_machine_registration_store(
-    state_dir: &std::path::Path,
-    registry: &octravpn_mesh::tailscale_wire::MachineRegistry,
-) -> anyhow::Result<std::sync::Arc<dyn headscale_api::tailscale_wire::MachineRegistrationStore>> {
-    use anyhow::Context as _;
-    std::fs::create_dir_all(state_dir)
-        .with_context(|| format!("create wire state dir {}", state_dir.display()))?;
-    let path = state_dir.join("machines.sqlite");
-    // headscale-db does not set create_if_missing; an empty file is a valid
-    // new SQLite database, so create it ourselves and keep the URL plain
-    // rather than depending on how the URL's query string is parsed.
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .with_context(|| format!("create {}", path.display()))?;
-    let url = format!("sqlite://{}", path.display());
-    let db = headscale_db::Database::new(&url)
-        .await
-        .with_context(|| format!("open machine registration store {}", path.display()))?;
-    db.migrate()
-        .await
-        .context("migrate machine registration store")?;
-    let admin = headscale_api::admin::PersistentMachineAdmin::new(db.pool().clone());
-    let hydrated = admin
-        .hydrate_wire_registry(registry)
-        .await
-        .map_err(|e| anyhow::anyhow!("hydrate wire registry from {}: {e}", path.display()))?;
-    tracing::info!(
-        store = %path.display(),
-        nodes = hydrated,
-        "machine registrations hydrated from durable store"
-    );
-    Ok(std::sync::Arc::new(admin))
-}
-
 #[allow(clippy::too_many_arguments)]
 async fn run_mesh_serve(
     listen: String,
@@ -371,7 +323,7 @@ async fn run_mesh_serve(
             tls::{SanConfig, TlsMaterialSource},
             MachineRegistry,
         },
-        PreauthMinter, ServerNoiseKey, DEFAULT_PREAUTH_TTL,
+        ServerNoiseKey, DEFAULT_PREAUTH_TTL,
     };
     use serde::{Deserialize, Serialize};
     use std::{net::SocketAddr, sync::Arc};
@@ -389,7 +341,6 @@ async fn run_mesh_serve(
         ServerNoiseKey::load_or_generate(&state_dir_path)
             .context("load tailscale_wire noise static key")?,
     );
-    let minter = PreauthMinter::new();
     // Wall 6: optional DERP-map fixture for the interop harness. The
     // env var points at a JSON file in the same shape as the on-wire
     // `DerpMap`. Unset (the production default) ⇒ empty map ⇒ same
@@ -438,7 +389,8 @@ async fn run_mesh_serve(
     let machines = Arc::new(MachineRegistry::new());
     // Durable registrations: hydrate the in-memory registry from the SQLite
     // store under --state-dir so a restart keeps node identities and IPs.
-    let registration_store = open_machine_registration_store(&state_dir_path, &machines).await?;
+    let stores = crate::mesh_store::MeshStore::open(&state_dir_path, machines.clone()).await?;
+    let registration_store = stores.machines.clone();
     let policy = octravpn_mesh::policy::PolicyStore::new();
     if members_policy.is_some() {
         // The durable registry is already hydrated. Deny every packet until
@@ -461,7 +413,7 @@ async fn run_mesh_serve(
         .and_then(crate::members_policy::MembersPolicySync::registration_gate);
     let ws = octravpn_mesh::WireStateBuilder::new(
         server_noise_key.clone(),
-        Arc::new(minter.clone()),
+        stores.redeemer(None),
         Arc::new(TailnetIpAllocator::new(tailnet_id)),
         machines.clone(),
         Arc::new(policy.clone()),
@@ -491,19 +443,30 @@ async fn run_mesh_serve(
     // succeeds.
     #[derive(Clone)]
     struct AdminCtx {
-        minter: PreauthMinter,
+        stores: crate::mesh_store::MeshStore,
         token: Option<Arc<str>>,
     }
-    #[derive(Deserialize, Default)]
-    #[serde(rename_all = "snake_case")]
+    #[derive(Deserialize)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
     struct AdminReq {
         #[serde(default = "default_user")]
         user: String,
         #[serde(default)]
         reusable: bool,
+        #[serde(default)]
+        ttl_secs: Option<u64>,
     }
     fn default_user() -> String {
         "default".into()
+    }
+    impl Default for AdminReq {
+        fn default() -> Self {
+            Self {
+                user: default_user(),
+                reusable: false,
+                ttl_secs: None,
+            }
+        }
     }
     #[derive(Serialize)]
     struct AdminResp {
@@ -515,21 +478,34 @@ async fn run_mesh_serve(
     async fn mint_handler(
         State(ctx): State<AdminCtx>,
         headers: HeaderMap,
-        body: Option<Json<AdminReq>>,
+        body: axum::body::Bytes,
     ) -> impl IntoResponse {
-        let Some(want) = ctx.token.as_deref() else {
-            return (StatusCode::NOT_FOUND, "").into_response();
-        };
-        let got = headers
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|h| h.strip_prefix("Bearer "));
-        let authed = got.is_some_and(|t| t == want);
-        if !authed {
-            return (StatusCode::NOT_FOUND, "").into_response();
+        if let Err(response) =
+            octravpn_core::bearer::BearerCheck::hidden(ctx.token.clone()).check(&headers)
+        {
+            return response;
         }
-        let req = body.map(|Json(b)| b).unwrap_or_default();
-        let pk = ctx.minter.mint(req.user, DEFAULT_PREAUTH_TTL, req.reusable);
+        let req = if body.is_empty() {
+            AdminReq::default()
+        } else {
+            match serde_json::from_slice::<AdminReq>(&body) {
+                Ok(request) => request,
+                Err(_) => {
+                    return (StatusCode::BAD_REQUEST, "invalid preauth request").into_response()
+                }
+            }
+        };
+        let Ok(pk) = ctx
+            .stores
+            .mint_for_user(
+                req.user,
+                req.ttl_secs.unwrap_or(DEFAULT_PREAUTH_TTL.as_secs()),
+                req.reusable,
+            )
+            .await
+        else {
+            return (StatusCode::SERVICE_UNAVAILABLE, "preauth mint unavailable").into_response();
+        };
         Json(AdminResp {
             key: pk.key,
             user: pk.user,
@@ -545,11 +521,12 @@ async fn run_mesh_serve(
     // 404 reject path on missing / wrong tokens.
     let admin_token_arc: Option<Arc<str>> = admin_token.map(Arc::from);
     let admin_ctx = AdminCtx {
-        minter: minter.clone(),
+        stores: stores.clone(),
         token: admin_token_arc.clone(),
     };
     let legacy_preauth_router = Router::new()
         .route("/admin/preauth", post(mint_handler))
+        .layer(axum::extract::DefaultBodyLimit::max(4096))
         .with_state(admin_ctx);
 
     // Unified admin surface — same routes the full Hub would mount
@@ -565,21 +542,7 @@ async fn run_mesh_serve(
     // is byte-stable `(404, NGINX_404_BODY)` — preserves the Audit-3
     // H-1 invariant `BearerCheck::Hidden` already enforces for
     // `/admin/preauth` and `/events`.
-    let unified_admin_router = {
-        let admin_state = octravpn_mesh::admin_surface::AdminState::builder()
-            .bearer_token(admin_token_arc.as_deref().unwrap_or("").to_string())
-            .users(octravpn_mesh::headscale_api::admin::UserRegistry::new())
-            .machines(Arc::new(
-                octravpn_mesh::headscale_api::admin::WireMachineAdmin::new(machines.clone()),
-            ))
-            .preauth(Arc::new(
-                octravpn_mesh::headscale_api::admin::InMemoryPreauthAdmin::new(),
-            ))
-            .derp_regions(0)
-            .policy(policy.clone())
-            .build();
-        octravpn_mesh::admin_surface::build_admin_router(admin_state, admin_token_arc.clone())
-    };
+    let unified_admin_router = stores.admin_router(policy.clone(), admin_token_arc.clone());
 
     let admin_router = legacy_preauth_router.merge(unified_admin_router);
 
@@ -670,11 +633,7 @@ pub(crate) struct RemoteMintOutcome {
 /// operator-friendly messages here so the parent CLI can `?`-propagate
 /// straight to stderr.
 ///
-/// `ttl_secs` is best-effort: the current daemon handler hard-codes
-/// `DEFAULT_PREAUTH_TTL` and ignores any TTL field in the body. We
-/// still send it (named `ttl_secs`, matching the contract the operator
-/// docs advertise) so a future daemon-side patch can pick it up
-/// without a wire-format break.
+/// Both native mesh listeners honor `ttl_secs`; absent/null uses the default.
 pub(crate) async fn run_remote_mint(
     remote: &str,
     admin_token: &str,
