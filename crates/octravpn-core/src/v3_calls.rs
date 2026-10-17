@@ -111,6 +111,8 @@ pub mod method {
     pub const SLASH_DOUBLE_SIGN: &str = "slash_double_sign";
     /// `payable create_tailnet(members_root)`.
     pub const CREATE_TAILNET: &str = "create_tailnet";
+    /// `create_personal_tailnet(members_root)` with no treasury deposit.
+    pub const CREATE_PERSONAL_TAILNET: &str = "create_personal_tailnet";
     /// `update_members_root(tailnet_id, new_members_root)`.
     pub const UPDATE_MEMBERS_ROOT: &str = "update_members_root";
     /// `retire_tailnet(tailnet_id)`.
@@ -361,6 +363,23 @@ impl ContractCallBuilder {
     /// `params` order: `[members_root_hex]`. `value` is the initial deposit.
     pub fn create_tailnet_call(&self, params: &[Value], value: u64, fee: u64, nonce: u64) -> Value {
         self.call(method::CREATE_TAILNET, params, value, fee, nonce)
+    }
+
+    /// Build a zero-deposit personal tailnet registration. Paid exits still
+    /// use the existing funded session calls.
+    pub fn create_personal_tailnet_call(
+        &self,
+        members_root_hex: &str,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call(
+            method::CREATE_PERSONAL_TAILNET,
+            &[json!(members_root_hex)],
+            0,
+            fee,
+            nonce,
+        )
     }
 
     /// Build an `update_members_root` call.
@@ -974,6 +993,16 @@ mod tests {
     }
 
     #[test]
+    fn create_personal_tailnet_has_only_chain_fee() {
+        let b = builder();
+        let got = b.create_personal_tailnet_call(&anchor_hex(), 500, 15);
+        assert_eq!(got["method"], method::CREATE_PERSONAL_TAILNET);
+        assert_eq!(got["params"], json!([anchor_hex()]));
+        assert_eq!(got["value"], 0);
+        assert_eq!(got["fee"], 500);
+    }
+
+    #[test]
     fn update_members_root_shape() {
         let b = builder();
         let got = b.update_members_root_call(&[json!(0u64), json!(anchor_hex())], 0, 500, 16);
@@ -1399,6 +1428,7 @@ mod tests {
         assert_eq!(method::FINALIZE_UNBOND, "finalize_unbond");
         assert_eq!(method::SLASH_DOUBLE_SIGN, "slash_double_sign");
         assert_eq!(method::CREATE_TAILNET, "create_tailnet");
+        assert_eq!(method::CREATE_PERSONAL_TAILNET, "create_personal_tailnet");
         assert_eq!(method::UPDATE_MEMBERS_ROOT, "update_members_root");
         assert_eq!(method::RETIRE_TAILNET, "retire_tailnet");
         assert_eq!(method::DEPOSIT_TO_TAILNET, "deposit_to_tailnet");

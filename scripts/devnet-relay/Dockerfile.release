@@ -1,0 +1,11 @@
+ARG BUILDER_IMAGE=octravpn-builder:latest
+ARG OBSERVER_IMAGE=octra-devnet-observer:20261016
+FROM ${BUILDER_IMAGE} AS release
+WORKDIR /work/octra
+COPY octra/.cargo/config.toml ./.cargo/config.toml
+COPY octra/docs/rust-node/source-map.json octra/docs/rust-node/upstream.json octra/docs/rust-node/network-authority.json ./docs/rust-node/
+COPY octra/scripts/node-port ./scripts/node-port
+RUN cargo build --locked --release -p octra-node
+
+FROM ${OBSERVER_IMAGE}
+COPY --from=release /work/octra/target/release/octra-node /usr/local/bin/octra-node

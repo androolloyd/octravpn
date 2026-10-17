@@ -11,9 +11,13 @@ Keep deterministic protocol logic in Circle apps. Embed the VPN service in
 the node and expose it through the wallet. Users who only need the VPN do
 not need to run a validator.
 
-There is no VPN protocol commission. Agreed traffic charges are paid in OCT
-to the serving operators. Ordinary chain transaction fees remain the network's
+There is no VPN protocol commission or protocol-set traffic rate. Operators
+quote their own rates and peers pay them directly in OCT for carriage or exit.
+Ordinary chain transaction fees remain the network's
 fee policy. The legacy fee argument is reserved at zero and cannot enable a cut.
+Creating a personal tailnet needs no treasury deposit, and self-carried traffic
+has no operator toll. A third-party relay or exit requires a paid session for
+the operator's committed tariff; tailnet membership is not a payment grant.
 
 | Component | Boundary |
 | --- | --- |

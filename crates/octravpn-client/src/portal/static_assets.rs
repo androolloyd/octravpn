@@ -49,10 +49,10 @@ img.asset { max-width: 100%; height: auto; }
 
 /// Index page (when no URL is open). The form submits to `/go` which
 /// redirects to `/o/<b64>`.
-pub(crate) const INDEX_BODY: &str = r#"<p>Paste an <code>oct://&lt;circle&gt;/&lt;path&gt;</code> URL above. The portal will fetch the asset over the active VPN session and render it locally — content is content-addressed via the on-chain resource_key.</p>
+pub(crate) const INDEX_BODY: &str = r#"<p>Paste an <code>oct://&lt;circle&gt;/&lt;path&gt;</code> URL above. The portal fetches the asset from the configured chain RPC and renders it locally. Its resource key and returned bytes are verified before rendering. This browser route does not establish a VPN session.</p>
 <p>Security gates active in this session:</p>
 <ul>
-<li>Tunnel-up check: portal refuses to start without <code>protocol_version=v3</code> (or v2 fallback).</li>
+<li>The configured protocol version must support Circle asset reads.</li>
 <li>HTML rendered inside a <code>sandbox="allow-popups"</code> iframe — no scripts, no same-origin.</li>
 <li>First fetch per circle requires explicit confirm.</li>
 <li>Unknown / encrypted bytes fall back to Save-As, never inline-rendered.</li>

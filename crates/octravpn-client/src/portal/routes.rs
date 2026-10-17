@@ -251,7 +251,7 @@ async fn api_resolve(State(state): State<PortalState>, Query(q): Query<ResolveQu
                 ),
                 _ => (
                     StatusCode::BAD_GATEWAY,
-                    "is the tunnel up? portal requires the VPN session to reach circle_asset RPC.",
+                    "check the configured chain RPC, Circle publication, and asset path.",
                 ),
             };
             return (
@@ -484,7 +484,7 @@ fn raw_error_response(circle_id: &str, path: &str, err: &FetchAssetError) -> Res
             "hint": match err {
                 FetchAssetError::MissingPassphrase { .. } | FetchAssetError::DecryptFailed { .. } =>
                     "open the URL in a browser to use the interactive unseal form, or set OCTRAVPN_SEALED_PASSPHRASE before launching `octravpn portal`",
-                _ => "is the tunnel up? raw endpoint requires the VPN session to reach circle_asset RPC.",
+                _ => "check the configured chain RPC, Circle publication, and asset path.",
             },
         })),
     )

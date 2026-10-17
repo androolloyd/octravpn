@@ -28,3 +28,54 @@ fn test_claim_sweep_before_expiry_rejected(): bool {
   self.session_opened_at[sid] = epoch - 999
   return sweep_expired_session(sid)
 }
+
+fn test_personal_tailnet_starts_without_locked_treasury(): bool {
+  self.min_tailnet_deposit = 100
+  let root = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  let tid = create_personal_tailnet(root)
+  require(tid == 0, "wrong tailnet id")
+  require(self.tailnet_count == 1, "tailnet not created")
+  require(self.tailnet_owner[tid] == caller, "wrong owner")
+  require(get_tailnet_owner(tid) == caller, "owner view differs")
+  require(self.tailnet_members_root[tid] == root, "wrong members root")
+  require(self.tailnet_treasury[tid] == 0, "personal tailnet locked value")
+  require(get_tailnet_active(tid), "personal tailnet inactive")
+  require(!get_circle_active(caller), "personal owner gained paid operator status")
+  return true
+}
+
+fn test_retired_personal_tailnet_is_inactive(): bool {
+  let root = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  let tid = create_personal_tailnet(root)
+  require(retire_tailnet(tid), "retire failed")
+  require(!get_tailnet_active(tid), "retired tailnet still active")
+  return true
+}
+
+fn test_personal_member_root_rotates_without_deposit(): bool {
+  let first = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  let second = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  let tid = create_personal_tailnet(first)
+  require(update_members_root(tid, second), "root update failed")
+  require(get_tailnet_members_root(tid) == second, "root did not rotate")
+  require(self.tailnet_treasury[tid] == 0, "rotation locked value")
+  return true
+}
+
+// expect-revert test_paid_tailnet_still_requires_deposit "deposit below minimum"
+fn test_paid_tailnet_still_requires_deposit(): bool {
+  self.min_tailnet_deposit = 100
+  let root = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  let tid = create_tailnet(root)
+  return tid == 0
+}
+
+// expect-revert test_personal_tailnet_cannot_bypass_paid_session_escrow "deposit below min"
+fn test_personal_tailnet_cannot_bypass_paid_session_escrow(): bool {
+  test_seed_circle()
+  self.min_session_deposit = 100
+  let root = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  let tid = create_personal_tailnet(root)
+  let sid = open_session(tid, caller, 0)
+  return sid == 0
+}

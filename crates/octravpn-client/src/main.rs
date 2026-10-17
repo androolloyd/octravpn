@@ -12,6 +12,8 @@ mod config;
 mod discover;
 mod discover_v2;
 mod migration;
+mod onboarding;
+mod paid_routes;
 mod portal;
 mod runner;
 mod settle_state;
@@ -165,6 +167,14 @@ enum Cmd {
         /// Raw IPv4 TUN; requires the operator's ip_tunnel_v1 capability.
         #[arg(long, conflicts_with_all = ["udp_target", "udp_bind", "bytes_used", "no_show"])]
         tun_name: Option<String>,
+        /// Open a local, read-only funding/status page before a paid provider
+        /// TUN session. Requires --tun-name; does not change host routes.
+        #[arg(long, requires = "tun_name")]
+        onboard: bool,
+        /// Route this Linux host's public IPv4 traffic through the paid TUN.
+        /// Requires an active personal Tailscale mesh and explicit disconnect.
+        #[arg(long, requires = "tun_name")]
+        paid_exit: bool,
     },
     /// Historical v2 connection ABI; rejected before funds are submitted.
     ConnectV2 {
@@ -208,6 +218,21 @@ enum Cmd {
         /// Loopback bind address. Defaults to 127.0.0.1:51823.
         #[arg(long)]
         bind: Option<std::net::SocketAddr>,
+    },
+    /// Open the local Octranet onboarding guide.
+    Onboard {
+        #[command(subcommand)]
+        op: OnboardOp,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum OnboardOp {
+    /// Guide a direct personal mesh join through stock Tailscale.
+    Personal {
+        /// HTTPS origin of your Octranet mesh control server.
+        #[arg(long)]
+        login_server: String,
     },
 }
 
@@ -341,6 +366,12 @@ async fn main() -> Result<()> {
             });
             return portal::run_portal(chain, bind).await;
         }
+        Cmd::Onboard {
+            op: OnboardOp::Personal { login_server },
+        } => {
+            let page = onboarding::Onboarding::personal(login_server).await?;
+            return page.until_cancelled().await;
+        }
         _ => {}
     }
 
@@ -433,6 +464,8 @@ async fn main() -> Result<()> {
             udp_target,
             udp_bind,
             tun_name,
+            onboard,
+            paid_exit,
         } => {
             // Per-protocol dispatch — v3 is the only variant routed
             // through `protocol_version()` for now; v1.1 and v2 keep
@@ -441,7 +474,7 @@ async fn main() -> Result<()> {
                 ProtocolVersion::V3 => {
                     let mode = forwarding_mode(udp_target, udp_bind, tun_name);
                     Box::pin(v3_runner::connect_v3(
-                        &client, &cfg, bytes_used, no_show, mode,
+                        &client, &cfg, bytes_used, no_show, mode, onboard, paid_exit,
                     ))
                     .await
                 }
@@ -462,7 +495,8 @@ async fn main() -> Result<()> {
         | Cmd::Funnel { .. }
         | Cmd::OpenUrl(_)
         | Cmd::Fetch(_)
-        | Cmd::Portal { .. } => unreachable!(),
+        | Cmd::Portal { .. }
+        | Cmd::Onboard { .. } => unreachable!(),
     }
 }
 

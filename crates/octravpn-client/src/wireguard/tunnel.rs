@@ -1,5 +1,8 @@
 //! One authenticated session over a single connected WireGuard endpoint.
-use std::{net::SocketAddr, time::Duration};
+use std::{
+    net::{SocketAddr, SocketAddrV4},
+    time::Duration,
+};
 
 use anyhow::{anyhow, bail, Context, Result};
 use boringtun::noise::{errors::WireGuardError, Tunn, TunnResult};
@@ -63,12 +66,6 @@ impl Tunnel {
         transport: WireTransport,
     ) -> Result<Self> {
         validate_peer_key(server_key)?;
-        let shield = AmneziaShield::new(
-            transport
-                .config()
-                .map_err(|error| anyhow!("invalid operator transport: {error}"))?,
-        )
-        .map_err(|error| anyhow!("invalid operator transport: {error}"))?;
         let endpoint = validate_endpoint(endpoint)?;
         let peer = time::timeout(Duration::from_secs(10), tokio::net::lookup_host(endpoint))
             .await
@@ -77,6 +74,60 @@ impl Tunnel {
                 peer.port() != 0 && !peer.ip().is_unspecified() && !peer.ip().is_multicast()
             })
             .ok_or_else(|| anyhow!("operator WireGuard endpoint has no usable address"))?;
+        Self::connect_resolved(
+            session, identity, endpoint, peer, server_key, byte_limit, transport,
+        )
+        .await
+    }
+
+    /// Handshake with the exact public IPv4 address pinned before escrow.
+    /// No second DNS lookup is performed, so the route guard can bypass the
+    /// same authenticated UDP peer after the handshake.
+    pub(crate) async fn connect_to_addr(
+        session: SessionId,
+        identity: &KeyPair,
+        endpoint: &str,
+        peer: SocketAddrV4,
+        server_key: [u8; 32],
+        byte_limit: Option<u64>,
+        transport: WireTransport,
+    ) -> Result<Self> {
+        let endpoint = validate_endpoint(endpoint)?;
+        if peer.port() == 0 || !octravpn_core::ip_tunnel::public_ipv4(*peer.ip()) {
+            bail!("pinned paid-exit peer is not a public IPv4 endpoint");
+        }
+        Self::connect_resolved(
+            session,
+            identity,
+            endpoint,
+            SocketAddr::V4(peer),
+            server_key,
+            byte_limit,
+            transport,
+        )
+        .await
+    }
+
+    pub(crate) fn peer_addr(&self) -> SocketAddr {
+        self.peer
+    }
+
+    async fn connect_resolved(
+        session: SessionId,
+        identity: &KeyPair,
+        endpoint: &str,
+        peer: SocketAddr,
+        server_key: [u8; 32],
+        byte_limit: Option<u64>,
+        transport: WireTransport,
+    ) -> Result<Self> {
+        validate_peer_key(server_key)?;
+        let shield = AmneziaShield::new(
+            transport
+                .config()
+                .map_err(|error| anyhow!("invalid operator transport: {error}"))?,
+        )
+        .map_err(|error| anyhow!("invalid operator transport: {error}"))?;
         let bind = if peer.is_ipv4() {
             "0.0.0.0:0"
         } else {

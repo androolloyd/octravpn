@@ -30,12 +30,10 @@
 //! that have left it. A non-member therefore never appears in a member's
 //! netmap at all — the packet filter alone leaves it visible-but-mute.
 //!
-//! Failure posture is fail-closed at boot and sticky afterwards: with no
-//! good anchor loaded yet the wire gets a deny-all filter and refuses
-//! registration (an unreachable chain must not degrade to allow-all), and
-//! once a good anchor has been applied a later read failure keeps that
-//! last good policy and set. Eviction only ever runs off a *verified*
-//! fetch, so a chain outage cannot delete an operator's tailnet.
+//! Failure posture is fail-closed at boot. Operator policy retains the last
+//! verified set during a later read failure. Personal tailnets revoke their
+//! cached set instead: an outage must not preserve admission after a possible
+//! ownership transfer.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -205,6 +203,13 @@ pub(crate) fn render_policy(
     Ok(RenderedPolicy { doc, raw, matched })
 }
 
+/// Close the restart window before the wire listener sees hydrated machines.
+pub(crate) fn install_boot_deny_all(store: &PolicyStore) -> Result<()> {
+    let denied = render_policy("boot", &AnchoredMembers::empty(None), &HashMap::new())?;
+    store.set(denied.doc, denied.raw);
+    Ok(())
+}
+
 /// Read the anchored member set: state root → `auth_members_hash` →
 /// sealed `/auth/members.json` verified against it.
 pub(crate) async fn fetch_anchored_members(
@@ -238,6 +243,67 @@ pub(crate) async fn fetch_anchored_members(
         SealedRead::Corrupt => Err(anyhow!(
             "members policy: {MEMBERS_PATH} failed hash/decrypt verification against auth_members_hash={expected}"
         )),
+    }
+}
+
+fn personal_members_from_asset(
+    tailnet_id: u64,
+    root: &str,
+    asset: SealedRead,
+) -> Result<AnchoredMembers> {
+    let SealedRead::Valid(bytes) = asset else {
+        return Err(anyhow!(
+            "personal tailnet member asset is absent or corrupt"
+        ));
+    };
+    let members =
+        TailnetMembers::decode_lenient(&bytes).context("decode personal tailnet members")?;
+    if members.tailnet_id != tailnet_id {
+        return Err(anyhow!("personal member asset names another tailnet"));
+    }
+    AnchoredMembers::from_members(Some(root.to_owned()), &members)
+}
+
+/// Personal tailnets use their own on-chain member root and a sealed asset in
+/// the owner's Circle. No operator registration, stake or paid session is
+/// required. Any asset failure revokes admission instead of retaining a stale
+/// member set after an on-chain root rotation.
+pub(crate) async fn fetch_personal_anchored_members(
+    ctx: &ChainCtxV3,
+    tailnet_id: u64,
+    circle_id: &str,
+    expected_owner: &str,
+    creds: &SealedAssetCreds,
+) -> Result<AnchoredMembers> {
+    if !ctx.get_tailnet_active(tailnet_id).await? {
+        return Ok(AnchoredMembers::empty(None));
+    }
+    if ctx.get_tailnet_owner(tailnet_id).await? != expected_owner {
+        return Ok(AnchoredMembers::empty(None));
+    }
+    let Some(root) = ctx.get_tailnet_members_root(tailnet_id).await? else {
+        return Ok(AnchoredMembers::empty(None));
+    };
+    let path = format!("/tailnet-{tailnet_id}/members.json");
+    let members =
+        match circle_update::read_sealed_asset(ctx, circle_id, &path, KEY_ID, creds, &root).await {
+            Ok(asset) => personal_members_from_asset(tailnet_id, &root, asset),
+            Err(e) => Err(e.context("read personal tailnet member asset")),
+        };
+    // A concurrent retirement or root rotation invalidates the just-read
+    // asset. The next sync tick will fetch the new root.
+    if !ctx.get_tailnet_active(tailnet_id).await?
+        || ctx.get_tailnet_owner(tailnet_id).await? != expected_owner
+        || ctx.get_tailnet_members_root(tailnet_id).await? != Some(root.clone())
+    {
+        return Ok(AnchoredMembers::empty(None));
+    }
+    match members {
+        Ok(members) => Ok(members),
+        Err(error) => {
+            warn!(tailnet_id, error = %error, "personal member asset unavailable; denying membership");
+            Ok(AnchoredMembers::empty(Some(root)))
+        }
     }
 }
 
@@ -373,6 +439,15 @@ impl SyncState {
             .clone()
             .unwrap_or_else(|| AnchoredMembers::empty(None))
     }
+
+    /// A personal tailnet cannot retain previously admitted members when a
+    /// chain read fails: its owner or root may have changed during the outage.
+    fn revoke_personal(&mut self, epoch: Option<u64>) -> AnchoredMembers {
+        let revoked = AnchoredMembers::empty(None);
+        self.anchored = Some(revoked.clone());
+        self.last_epoch = epoch;
+        revoked
+    }
 }
 
 /// Where the sync reads chain state from: the Hub's own context, or a
@@ -398,6 +473,8 @@ impl ChainHandle {
 pub(crate) struct MembersPolicySync {
     chain: ChainHandle,
     circle_id: String,
+    personal_tailnet_id: Option<u64>,
+    personal_owner: Option<String>,
     creds: SealedAssetCreds,
     period: Duration,
     /// Published on every verified fetch; read by the registration gate.
@@ -406,6 +483,15 @@ pub(crate) struct MembersPolicySync {
     /// devices that leave the set. See `[control.members_policy]
     /// enforce_registration`.
     enforce_registration: bool,
+}
+
+fn require_personal_owner_binding(tailnet_id: Option<u64>, owner: Option<&str>) -> Result<()> {
+    if tailnet_id.is_some() != owner.is_some() || owner.is_some_and(|o| o.trim().is_empty()) {
+        return Err(anyhow!(
+            "personal membership requires both --members-policy-tailnet-id and --members-policy-owner"
+        ));
+    }
+    Ok(())
 }
 
 impl MembersPolicySync {
@@ -428,6 +514,8 @@ impl MembersPolicySync {
         Ok(Self {
             chain: ChainHandle::Hub(Arc::clone(hub)),
             circle_id,
+            personal_tailnet_id: None,
+            personal_owner: None,
             creds,
             period: cfg.resolved_sync_period(),
             membership: SharedMembership::new(),
@@ -442,8 +530,11 @@ impl MembersPolicySync {
     pub(crate) fn from_config(
         cfg: &NodeConfig,
         circle_override: Option<String>,
+        personal_tailnet_id: Option<u64>,
+        personal_owner: Option<String>,
         period_secs_override: Option<u64>,
     ) -> Result<Self> {
+        require_personal_owner_binding(personal_tailnet_id, personal_owner.as_deref())?;
         let mp = &cfg.control.members_policy;
         let circle_id = circle_override
             .or_else(|| mp.circle_id.clone())
@@ -468,10 +559,12 @@ impl MembersPolicySync {
         Ok(Self {
             chain: ChainHandle::Owned(Arc::new(chain)),
             circle_id,
+            personal_tailnet_id,
+            personal_owner,
             creds: SealedAssetCreds::new(passphrase.as_str()),
             period,
             membership: SharedMembership::new(),
-            enforce_registration: mp.enforce_registration,
+            enforce_registration: personal_tailnet_id.is_some() || mp.enforce_registration,
         })
     }
 
@@ -497,6 +590,8 @@ impl MembersPolicySync {
         } = wiring;
         info!(
             circle = %self.circle_id,
+            personal_tailnet_id = ?self.personal_tailnet_id,
+            personal_owner = ?self.personal_owner,
             period_secs = self.period.as_secs(),
             enforce_registration = self.enforce_registration,
             "members policy sync started"
@@ -512,10 +607,32 @@ impl MembersPolicySync {
                 }
             };
             let generation = *generation_rx.borrow();
-            let plan = state.plan(epoch, generation);
+            let mut plan = state.plan(epoch, generation);
+            // A personal owner may rotate the root or retire the tailnet;
+            // poll on every tick so revocation does not wait for a local
+            // epoch observation.
+            if self.personal_tailnet_id.is_some() {
+                plan.fetch = true;
+                plan.render = true;
+            }
 
             if plan.fetch {
-                match fetch_anchored_members(self.chain.ctx(), &self.circle_id, &self.creds).await {
+                let fetched = match self.personal_tailnet_id {
+                    Some(tailnet_id) => {
+                        fetch_personal_anchored_members(
+                            self.chain.ctx(),
+                            tailnet_id,
+                            &self.circle_id,
+                            self.personal_owner.as_deref().expect("validated at boot"),
+                            &self.creds,
+                        )
+                        .await
+                    }
+                    None => {
+                        fetch_anchored_members(self.chain.ctx(), &self.circle_id, &self.creds).await
+                    }
+                };
+                match fetched {
                     Ok(a) => {
                         if state.anchored.as_ref() != Some(&a) {
                             info!(
@@ -534,6 +651,15 @@ impl MembersPolicySync {
                         }
                         state.anchored = Some(a);
                         state.last_epoch = epoch;
+                    }
+                    Err(e) if self.personal_tailnet_id.is_some() => {
+                        warn!(error = %e, "personal member anchor read failed; revoking cached admission");
+                        let revoked = state.revoke_personal(epoch);
+                        self.membership.publish(&revoked);
+                        if self.enforce_registration {
+                            evict_non_members(&machines, registration_store.as_ref(), &revoked)
+                                .await;
+                        }
                     }
                     Err(e) if state.anchored.is_some() => {
                         warn!(error = %e, "members policy: anchor read failed; keeping last good policy");
@@ -693,6 +819,65 @@ mod tests {
         let mut corrupt = members;
         corrupt.members[0].wg_pubkey_b64 = "short".into();
         assert!(AnchoredMembers::from_members(None, &corrupt).is_err());
+    }
+
+    #[test]
+    fn personal_root_rotation_revokes_member_without_paid_session() {
+        let (wg_key, node_key) = key(0x27);
+        let members = TailnetMembers::new_v1(
+            7,
+            "00".repeat(32),
+            vec![Member {
+                wallet: "octMember".into(),
+                wg_pubkey_b64: wg_key,
+                machine_key_hex: String::new(),
+                joined_epoch: 1,
+            }],
+            1,
+            0,
+        );
+        let root = members.hash_hex().unwrap();
+        let loaded = personal_members_from_asset(
+            7,
+            &root,
+            SealedRead::Valid(members.canonical_bytes().unwrap()),
+        )
+        .unwrap();
+        let shared = SharedMembership::new();
+        shared.publish(&loaded);
+        assert!(shared.admit(&node_key, "").is_ok());
+
+        // A new chain root with the member removed immediately denies both
+        // existing and fresh registrations; no escrow state is consulted.
+        let removed = AnchoredMembers::empty(Some("bb".repeat(32)));
+        shared.publish(&removed);
+        assert!(shared.admit(&node_key, "").is_err());
+        let registry = HashMap::from([(
+            node_key.clone(),
+            machine(&node_key, Ipv4Addr::new(100, 64, 0, 10)),
+        )]);
+        assert_eq!(
+            non_member_registrations(&registry, &removed),
+            vec![node_key]
+        );
+
+        assert!(personal_members_from_asset(
+            8,
+            &root,
+            SealedRead::Valid(members.canonical_bytes().unwrap())
+        )
+        .is_err());
+        assert!(personal_members_from_asset(7, &root, SealedRead::Absent).is_err());
+        assert!(personal_members_from_asset(7, &root, SealedRead::Corrupt).is_err());
+    }
+
+    #[test]
+    fn anchored_mesh_boots_with_deny_all_before_sync() {
+        let policy = PolicyStore::new();
+        assert!(!policy.is_loaded());
+        install_boot_deny_all(&policy).unwrap();
+        assert!(policy.is_loaded());
+        assert!(policy.filter_rules().is_empty());
     }
 
     #[test]
@@ -1029,6 +1214,8 @@ mod tests {
                     octravpn_core::sig::KeyPair::from_secret_bytes(&[7u8; 32]),
                 ))),
                 circle_id: "octCircle".into(),
+                personal_tailnet_id: None,
+                personal_owner: None,
                 creds: SealedAssetCreds::new("pass"),
                 period: Duration::from_secs(10),
                 membership: SharedMembership::new(),
@@ -1106,5 +1293,32 @@ mod tests {
         assert!(state.plan(Some(11), 1).fetch);
         // Fetch failed; the production Err branch keeps the previous anchor.
         assert!(state.plan(Some(11), 1).fetch, "the changed anchor must be retried after an I/O failure even while the epoch is unchanged");
+    }
+
+    #[test]
+    fn personal_read_failure_revokes_cached_members_and_forces_deny_all() {
+        let mut state = SyncState {
+            anchored: Some(AnchoredMembers {
+                root: Some("old-root".into()),
+                node_keys: BTreeSet::from(["ab".into()]),
+                machine_keys: BTreeSet::new(),
+            }),
+            ..SyncState::default()
+        };
+        let published = SharedMembership::new();
+        let revoked = state.revoke_personal(Some(12));
+        published.publish(&revoked);
+        assert!(state.effective().node_keys.is_empty());
+        assert!(published.admit("ab", "").is_err());
+        assert_eq!(state.last_epoch, Some(12));
+    }
+
+    #[test]
+    fn personal_binding_requires_separate_owner_wallet() {
+        assert!(require_personal_owner_binding(None, None).is_ok());
+        assert!(require_personal_owner_binding(Some(7), Some("octOwnerWallet")).is_ok());
+        assert!(require_personal_owner_binding(Some(7), None).is_err());
+        assert!(require_personal_owner_binding(None, Some("octOwnerWallet")).is_err());
+        assert!(require_personal_owner_binding(Some(7), Some("  ")).is_err());
     }
 }

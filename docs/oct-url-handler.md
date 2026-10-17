@@ -1,6 +1,8 @@
 # `oct://` URL handler design
 
-Status: **draft / scaffolding only**. Ships:
+Status: historical design notes. The current browser behavior and installation steps are in [the public Circle guide](users/oct-url-public.md) and [the packaging guide](../dist/README.md). The macOS installer now builds a native Apple Event handler; details below predate that implementation.
+
+The original design covered:
 
   - `crates/octravpn-client/src/commands/open_url.rs` — stub subcommand.
   - `dist/macos/` — `octravpn-oct-handler.plist` + `install-handler.sh`.
@@ -13,9 +15,7 @@ Cross-platform install index: `dist/README.md`.
 
 ## What `oct://<addr>/<path>` actually means today
 
-`oct://` is **not** a registered URL scheme anywhere in this repo or any
-shipped client. There is no existing OS protocol handler. What does exist
-is a **naming convention** for sealed assets stored inside an Octra
+`oct://` began as a naming convention for assets stored inside an Octra
 circle, used in comments and v3 docs as the canonical reference to "the
 sealed JSON at this resource path inside this circle":
 

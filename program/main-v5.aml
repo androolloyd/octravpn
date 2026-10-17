@@ -643,21 +643,33 @@ contract OctraVPN_V5 {
 
   // members_root = sha256 of /tailnet-{id}/members.json sealed in the
   // tailnet-owner's circle. ACL policy is entirely off-chain.
-  payable fn create_tailnet(members_root: bytes): uint {
-    require_fund_cap()
-    require_not_paused()
-    require(value >= self.min_tailnet_deposit, "deposit below minimum")
+  private fn write_tailnet(members_root: bytes, treasury_deposit: uint): uint {
     require(len(members_root) == 64, "members_root must be 64-char hex sha256")
     let tid = self.tailnet_count
     self.tailnet_count = tid + 1
     self.tailnet_owner[tid] = caller
     self.tailnet_spender_epoch[tid] = 1
-    self.tailnet_treasury[tid] = value
+    self.tailnet_treasury[tid] = treasury_deposit
     self.tailnet_members_root[tid] = members_root
     self.tailnet_root_version[tid] = 1
     self.tailnet_retired[tid] = 0
     emit TailnetCreated(tid, caller, members_root)
     return tid
+  }
+
+  // Tailnet creation has no mandatory treasury. Self-carried traffic has no
+  // operator toll; another operator's transport or exit needs a paid session.
+  fn create_personal_tailnet(members_root: bytes): uint {
+    require_not_paused()
+    require(value == 0, "personal tailnet accepts no deposit")
+    return write_tailnet(members_root, 0)
+  }
+
+  payable fn create_tailnet(members_root: bytes): uint {
+    require_fund_cap()
+    require_not_paused()
+    require(value >= self.min_tailnet_deposit, "deposit below minimum")
+    return write_tailnet(members_root, value)
   }
 
   payable fn deposit_to_tailnet(tailnet_id: uint): bool {
@@ -1117,6 +1129,15 @@ contract OctraVPN_V5 {
 
   view fn get_tailnet_members_root(tailnet_id: uint): bytes {
     return self.tailnet_members_root[tailnet_id]
+  }
+
+  view fn get_tailnet_active(tailnet_id: uint): bool {
+    return tailnet_id < self.tailnet_count && self.tailnet_retired[tailnet_id] == 0
+  }
+
+  view fn get_tailnet_owner(tailnet_id: uint): address {
+    require(tailnet_id < self.tailnet_count, "tailnet not found")
+    return self.tailnet_owner[tailnet_id]
   }
 
   view fn get_tailnet_treasury(tailnet_id: uint): uint {

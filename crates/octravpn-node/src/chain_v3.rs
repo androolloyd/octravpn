@@ -262,6 +262,64 @@ impl ChainCtxV3 {
         Ok(Some(s))
     }
 
+    /// A tailnet's direct member commitment does not require a bonded
+    /// operator circle. It may be published by a personal network.
+    pub(crate) async fn get_tailnet_members_root(&self, tailnet_id: u64) -> Result<Option<String>> {
+        let v = self
+            .rpc
+            .application_call(
+                self.application,
+                &self.program_addr,
+                "get_tailnet_members_root",
+                &[json!(tailnet_id)],
+                Some(&self.wallet_addr),
+            )
+            .await
+            .context("get_tailnet_members_root")?;
+        let s = v
+            .as_str()
+            .ok_or_else(|| anyhow!("invalid tailnet members root result"))?;
+        if s.is_empty() || s == "0" {
+            return Ok(None);
+        }
+        Ok(Some(s.to_owned()))
+    }
+
+    /// Retiring a personal tailnet revokes its wire membership without
+    /// touching paid-session recovery or the registered operator role.
+    pub(crate) async fn get_tailnet_active(&self, tailnet_id: u64) -> Result<bool> {
+        self.rpc
+            .application_call(
+                self.application,
+                &self.program_addr,
+                "get_tailnet_active",
+                &[json!(tailnet_id)],
+                Some(&self.wallet_addr),
+            )
+            .await
+            .context("get_tailnet_active")?
+            .as_bool()
+            .ok_or_else(|| anyhow!("invalid tailnet active result"))
+    }
+
+    /// Current owner account whose Circle must publish this personal mesh's
+    /// sealed member asset. Ownership transfer revokes the previous server.
+    pub(crate) async fn get_tailnet_owner(&self, tailnet_id: u64) -> Result<String> {
+        self.rpc
+            .application_call(
+                self.application,
+                &self.program_addr,
+                "get_tailnet_owner",
+                &[json!(tailnet_id)],
+                Some(&self.wallet_addr),
+            )
+            .await
+            .context("get_tailnet_owner")?
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| anyhow!("invalid tailnet owner result"))
+    }
+
     /// `get_circle_state_version(circle) -> int` view.
     #[allow(dead_code)]
     pub(crate) async fn get_circle_state_version(&self, circle: &str) -> Result<u64> {
@@ -610,6 +668,18 @@ impl ChainCtxV3 {
     ) -> Value {
         self.call_builder()
             .create_tailnet_call(&[json!(members_root_hex)], deposit, fee, nonce)
+    }
+
+    /// Register a personal tailnet with zero treasury deposit. The caller
+    /// still pays the ordinary Octra transaction fee.
+    pub(crate) fn build_create_personal_tailnet_call(
+        &self,
+        members_root_hex: &str,
+        fee: u64,
+        nonce: u64,
+    ) -> Value {
+        self.call_builder()
+            .create_personal_tailnet_call(members_root_hex, fee, nonce)
     }
 
     /// `update_members_root(tailnet_id, new_members_root)` — bump the
@@ -1797,6 +1867,16 @@ mod tests {
         let params = call["params"].as_array().unwrap();
         assert_eq!(params.len(), 1);
         assert_eq!(params[0], anchor_64());
+    }
+
+    #[test]
+    fn create_personal_tailnet_call_shape() {
+        let c = ctx();
+        let call = c.build_create_personal_tailnet_call(&anchor_64(), 500, 15);
+        assert_eq!(call["method"], "create_personal_tailnet");
+        assert_eq!(call["value"], 0);
+        assert_eq!(call["fee"], 500);
+        assert_eq!(call["params"], json!([anchor_64()]));
     }
 
     #[test]

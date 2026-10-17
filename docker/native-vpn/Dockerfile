@@ -32,14 +32,20 @@ RUN --mount=type=cache,id=octra-vpn-qualification-target,target=/work/octra/targ
     cargo test --locked -p octra-node-runtime --test canonical_assets -- --skip browser_fixture && \
     cargo test --locked -p octra-node-runtime --test live_consensus resource_gossip_reaches_actor_without_enabling_optional_committees && \
     cargo test --locked -p octra-node-protocol --test optional_resource_parity --test resource_lanes_parity && \
+    cargo test --locked -p octra-node-protocol --test vpn_compiler_parity && \
     cargo test --locked -p octra-browser --lib --tests && \
     cargo test --locked -p octravpn-core --lib identifier::tests && \
     cargo test --locked -p octravpn-core --lib rpc::asset_tests && \
+    cargo test --locked -p octravpn-core --lib create_personal_tailnet && \
+    cargo test --locked -p octravpn-client --bin octravpn paid_routes::linux::tests && \
+    cargo test --locked -p octravpn-client --bin octravpn onboarding::tests && \
     cargo test --locked -p octravpn-client --bin octravpn settlement_guards && \
     cargo test --locked -p octravpn-client --bin octravpn receipt_context_tests && \
     cargo test --locked -p octravpn-client --bin octravpn recovery::tests && \
     cargo test --locked -p octravpn-client --bin octravpn reconnect_real_wireguard && \
     cargo test --locked -p octravpn-node --lib native_receipt_freezes && \
+    cargo test --locked -p octravpn-node --lib personal_ && \
+    cargo test --locked -p octravpn-node --lib anchored_mesh_boots_with_deny_all_before_sync && \
     cargo test --locked -p octravpn-node --lib v3_boot::publication::tests && \
     cargo test --locked -p octra-node --lib vpn::settlement::tests && \
     cargo test --locked -p octra-node --lib native_vpn_directories && \
@@ -58,6 +64,9 @@ RUN --mount=type=cache,id=octra-vpn-qualification-target,target=/work/octra/targ
     cargo test --locked -p octra-node --test single_native facade:: && \
     cargo test --locked -p octra-node --test single_native --no-run --message-format=json > /tmp/single-fixture-build.json && \
     python3 -c 'import json,shutil; rows=[json.loads(line) for line in open("/tmp/single-fixture-build.json") if line.startswith("{")]; bins=[row["executable"] for row in rows if row.get("reason")=="compiler-artifact" and row.get("target",{}).get("name")=="single_native" and row.get("executable")]; assert len(bins)==1; shutil.copy2(bins[0],"/tmp/native-binaries/octra-single-fixture")'
+RUN --mount=type=cache,id=octra-vpn-qualification-target,target=/work/octra/target \
+    cargo build --locked --release -p octra-node && \
+    cp target/release/octra-node /tmp/native-binaries/octra-node
 COPY octra/docker/native-vpn ./docker/native-vpn
 COPY octra/licenses ./licenses
 RUN python3 docker/native-vpn/manifest.py > /tmp/native-source.json

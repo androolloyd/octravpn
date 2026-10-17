@@ -1,5 +1,28 @@
 # Tailnet User Guide
 
+> This guide describes the historical public-membership tailnet ABI. The
+> current v5 client rejects these `octravpn tailnet` commands. For personal
+> Octranet onboarding and the separate funded provider tunnel, use
+> [the current onboarding guide](../crates/octravpn-client/ONBOARDING.md).
+> Stock Tailscale exit-node selection does not create a paid session.
+
+Personal tailnet creation has no treasury deposit. Self-carried Octranet
+traffic has no operator toll; a different operator carrying or exiting traffic
+must be paid in OCT. The current stock Tailscale relay path does not create or
+meter that session, so membership does not make third-party transport ready.
+
+For a current chain-anchored personal mesh, create a zero-deposit tailnet with
+`octravpn-node v3 create-personal-tailnet`, publish and commit its sealed member
+asset, then start `octravpn-node mesh serve` with
+`--members-policy-tailnet-id <id> --members-policy-owner <owner-wallet>
+--members-policy-circle <asset-host-circle>`. The owner wallet is the account
+that created the tailnet; it is distinct from the Circle address. The daemon
+denies admission if the current chain owner differs from that configured
+wallet, if it cannot read the chain, or if the member asset fails verification.
+After transferring ownership, the new owner must configure the daemon with
+their wallet address, publish a member asset, and update the on-chain root;
+the previous owner's daemon revokes its members on its next sync tick.
+
 This guide walks you through everyday use of OctraVPN: creating a
 tailnet, adding devices, configuring an exit node, and setting an
 access policy.

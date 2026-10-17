@@ -1,5 +1,5 @@
 //! `octravpn open-url oct://<circle>/<path>` — fetch a circle asset
-//! over the active VPN session and either stream it, save it, or hand
+//! from the configured chain RPC and either stream it, save it, or hand
 //! it off to the local portal for in-browser rendering.
 //!
 //! Modes (mutually exclusive on the CLI):

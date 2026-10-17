@@ -132,6 +132,15 @@ pub(crate) enum MeshCmd {
         /// `[chain].sealed_passphrase`. Absent ⇒ allow-all (unchanged).
         #[arg(long)]
         members_policy_circle: Option<String>,
+        /// Enforce the personal tailnet's own member root instead of the
+        /// registered operator Circle's /auth/members.json anchor. The
+        /// Circle named above stores /tailnet-{id}/members.json.
+        #[arg(long, requires = "members_policy_circle")]
+        members_policy_tailnet_id: Option<u64>,
+        /// Wallet that currently owns the personal tailnet. Distinct from
+        /// the Circle address hosting its sealed member asset.
+        #[arg(long, requires = "members_policy_tailnet_id")]
+        members_policy_owner: Option<String>,
         /// Sync period for `--members-policy-circle`, seconds (default:
         /// `[control.members_policy].sync_period_secs`, i.e. 10).
         #[arg(long)]
@@ -224,6 +233,8 @@ pub(crate) async fn run_mesh_cmd(sub: MeshCmd, cfg_path: &str) -> Result<()> {
             admin_token,
             serve_derp,
             members_policy_circle,
+            members_policy_tailnet_id,
+            members_policy_owner,
             members_policy_period_secs,
         } => {
             // Resolved before the listeners come up so a bad circle /
@@ -235,6 +246,8 @@ pub(crate) async fn run_mesh_cmd(sub: MeshCmd, cfg_path: &str) -> Result<()> {
                     Some(crate::members_policy::MembersPolicySync::from_config(
                         &cfg,
                         Some(circle),
+                        members_policy_tailnet_id,
+                        members_policy_owner,
                         members_policy_period_secs,
                     )?)
                 }
@@ -427,6 +440,11 @@ async fn run_mesh_serve(
     // store under --state-dir so a restart keeps node identities and IPs.
     let registration_store = open_machine_registration_store(&state_dir_path, &machines).await?;
     let policy = octravpn_mesh::policy::PolicyStore::new();
+    if members_policy.is_some() {
+        // The durable registry is already hydrated. Deny every packet until
+        // a fresh anchored set verifies, including after a restart.
+        crate::members_policy::install_boot_deny_all(&policy)?;
+    }
     // The admin surface (when mounted) holds `Arc` clones of `machines`
     // + `policy`, so a `PUT /api/v1/policy` mutates the same store the
     // wire `/map` handler reads. An empty policy store ⇒ the wire layer

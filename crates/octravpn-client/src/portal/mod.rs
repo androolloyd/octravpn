@@ -88,7 +88,12 @@ pub(crate) fn open_in_browser(url: &str) -> Result<()> {
     // the `webbrowser` crate does internally on the platforms we care
     // about. `Command::status` so the child runs detached.
     #[cfg(target_os = "macos")]
-    let (cmd, args) = ("open", vec![url.to_string()]);
+    let (cmd, args) = match std::env::var("OCTRAVPN_BROWSER_APP") {
+        Ok(browser) if !browser.trim().is_empty() => {
+            ("open", vec!["-a".to_string(), browser, url.to_string()])
+        }
+        _ => ("open", vec![url.to_string()]),
+    };
     #[cfg(target_os = "windows")]
     let (cmd, args) = (
         "cmd",

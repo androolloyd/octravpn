@@ -60,6 +60,8 @@ pub(crate) async fn connect_v3(
     bytes_used_override: Option<u64>,
     force_no_show: bool,
     mode: Option<Mode>,
+    onboard: bool,
+    paid_exit: bool,
 ) -> Result<()> {
     require_v3(cfg)?;
     if mode.is_some() && (bytes_used_override.is_some() || force_no_show) {
@@ -68,10 +70,24 @@ pub(crate) async fn connect_v3(
     if mode.is_none() && bytes_used_override.is_none() && !force_no_show {
         bail!("connect-v3 requires --udp-target or --tun-name for live traffic; --bytes-used is an explicit settlement fixture");
     }
+    let paid_tun_name = if paid_exit {
+        match mode.as_ref() {
+            Some(Mode::Ip { name }) => {
+                crate::paid_routes::PaidRouteGuard::preflight(name)?;
+                Some(name.clone())
+            }
+            _ => bail!("paid host exit requires --tun-name"),
+        }
+    } else {
+        None
+    };
     let prepared = match mode {
         Some(mode) => Some(mode.prepare().await?),
         None => None,
     };
+    if onboard && !matches!(prepared.as_ref(), Some(mode) if mode.raw_ip()) {
+        bail!("provider onboarding requires a live --tun-name connection");
+    }
 
     let v3 = &cfg.v3;
     if v3.circle_id.trim().is_empty() {
@@ -153,6 +169,14 @@ pub(crate) async fn connect_v3(
     {
         bail!("operator policy does not advertise ip_tunnel_v1; no raw-IP escrow was opened");
     }
+    let pinned_peer = if let Some(name) = paid_tun_name.as_deref() {
+        let peer =
+            crate::paid_routes::PaidRouteGuard::resolve_public_peer(&policy.endpoint).await?;
+        crate::paid_routes::PaidRouteGuard::preflight_for_peer(name, peer)?;
+        Some(peer)
+    } else {
+        None
+    };
     info!(
         circle = v3.circle_id.as_str(),
         endpoint = policy.endpoint.as_str(),
@@ -190,6 +214,17 @@ pub(crate) async fn connect_v3(
 
     // 4. payable open_session(tailnet_id, circle, max_pay) with value=max_pay.
     let fee = ctx.fee_or_fallback("contract_call").await;
+    let onboarding = if onboard {
+        // The page can guide funding, but only the CLI may sign the opening.
+        // Reserve two estimated transaction fees for open + settle/recovery.
+        // The chain's current fee and balance checks remain authoritative.
+        let needed_ou = u128::from(v3.max_pay) + 2 * u128::from(fee);
+        let page = crate::onboarding::Onboarding::start(ctx.wallet_addr(), needed_ou).await?;
+        page.wait_for_funds(client.rpc(), ctx.wallet_addr()).await?;
+        Some(page)
+    } else {
+        None
+    };
     let open_call = ctx.build_open_session_call(v3.tailnet_id, &v3.circle_id, v3.max_pay, fee, 0);
     let tx_hash = ctx
         .submit_call(open_call)
@@ -235,16 +270,37 @@ pub(crate) async fn connect_v3(
             .await
             .context("announce v3 relay session to exit")?;
         let transport_result = if let Some(ready) = ready {
-            let mut tunnel = Tunnel::connect(
-                active.session_id.clone(),
-                &active.session_kp,
-                &policy.endpoint,
-                active.exit.wg_pubkey.0,
-                traffic_ceiling(v3.max_pay, price_per_mb),
-                transport,
-            )
-            .await
+            let mut tunnel = if let Some(peer) = pinned_peer {
+                Tunnel::connect_to_addr(
+                    active.session_id.clone(),
+                    &active.session_kp,
+                    &policy.endpoint,
+                    peer,
+                    active.exit.wg_pubkey.0,
+                    traffic_ceiling(v3.max_pay, price_per_mb),
+                    transport,
+                )
+                .await
+            } else {
+                Tunnel::connect(
+                    active.session_id.clone(),
+                    &active.session_kp,
+                    &policy.endpoint,
+                    active.exit.wg_pubkey.0,
+                    traffic_ceiling(v3.max_pay, price_per_mb),
+                    transport,
+                )
+                .await
+            }
             .context("authenticate operator WireGuard peer")?;
+            let route_guard = paid_tun_name
+                .as_deref()
+                .map(|name| crate::paid_routes::PaidRouteGuard::activate(name, tunnel.peer_addr()))
+                .transpose()
+                .context("activate paid-exit host routes")?;
+            if let Some(page) = onboarding.as_ref() {
+                page.connected();
+            }
             let control = tunnel.recovery()?;
             let (traffic, result) = Box::pin(ready.run(
                 tunnel,
@@ -259,6 +315,14 @@ pub(crate) async fn connect_v3(
                 ),
             ))
             .await;
+            let route_result = match route_guard {
+                Some(guard) if result.is_ok() => guard.disconnect(),
+                Some(guard) => {
+                    drop(guard);
+                    Ok(())
+                }
+                None => Ok(()),
+            };
             active.metered_bytes = Some(traffic.total()?);
             info!(
                 session_id,
@@ -266,7 +330,7 @@ pub(crate) async fn connect_v3(
                 received = traffic.received,
                 "forwarding closed; retaining local ceiling for final receipt"
             );
-            result
+            result.and(route_result)
         } else {
             active.metered_bytes = bytes_used_override;
             Ok(())
@@ -767,6 +831,7 @@ mod tests {
         let two_mib = 2 * BYTES_PER_MB;
         assert_eq!(compute_net(two_mib, 750), 1_500);
         assert_eq!(compute_net(two_mib, 0), 0);
+        assert_eq!(traffic_ceiling(1_000, 0), None);
         // Saturating multiplication branch.
         assert_eq!(compute_net(two_mib, u64::MAX), u64::MAX);
     }

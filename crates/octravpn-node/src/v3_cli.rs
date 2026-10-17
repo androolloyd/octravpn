@@ -83,6 +83,9 @@ pub(crate) enum V3Cmd {
     /// with `--deposit` OU initial treasury. The assigned `tailnet_id`
     /// is fetched best-effort post-submit.
     CreateTailnet(CreateTailnetArgs),
+    /// Register a personal tailnet with zero treasury deposit. Only the
+    /// ordinary Octra transaction fee is paid at creation.
+    CreatePersonalTailnet(CreatePersonalTailnetArgs),
     /// `update_members_root(tailnet_id, new_members_root)` — bump the
     /// members-root anchor for an existing tailnet.
     UpdateMembersRoot(UpdateMembersArgs),
@@ -191,6 +194,13 @@ pub(crate) struct CreateTailnetArgs {
     /// Initial OU deposit into the tailnet treasury.
     #[arg(long)]
     pub deposit: u64,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct CreatePersonalTailnetArgs {
+    /// 64-char hex sha256 of the sealed canonical members.json.
+    #[arg(long)]
+    pub members_root: String,
 }
 
 #[derive(Args, Debug)]
@@ -303,6 +313,7 @@ pub(crate) async fn dispatch(cfg_path: &Path, cmd: V3Cmd) -> Result<()> {
         V3Cmd::RotateReceiptPubkey(a) => run_rotate(&ctx, &a).await,
         V3Cmd::Retire(a) => run_retire(&ctx, &a).await,
         V3Cmd::CreateTailnet(a) => run_create_tailnet(&ctx, &a).await,
+        V3Cmd::CreatePersonalTailnet(a) => run_create_personal_tailnet(&ctx, &a).await,
         V3Cmd::UpdateMembersRoot(a) => run_update_members_root(&ctx, &a).await,
         V3Cmd::RetireTailnet(a) => run_retire_tailnet(&ctx, &a).await,
         V3Cmd::DepositTailnet(a) => run_deposit_tailnet(&ctx, &a).await,
@@ -410,6 +421,21 @@ async fn run_create_tailnet(ctx: &ChainCtxV3, a: &CreateTailnetArgs) -> Result<(
     let fee = call_fee(ctx).await?;
     let call = ctx.build_create_tailnet_call(&a.members_root, a.deposit, fee, 0);
     submit_and_log(ctx, "create_tailnet", call, Some(ReturnLog::TailnetId)).await
+}
+
+async fn run_create_personal_tailnet(
+    ctx: &ChainCtxV3,
+    a: &CreatePersonalTailnetArgs,
+) -> Result<()> {
+    let fee = call_fee(ctx).await?;
+    let call = ctx.build_create_personal_tailnet_call(&a.members_root, fee, 0);
+    submit_and_log(
+        ctx,
+        "create_personal_tailnet",
+        call,
+        Some(ReturnLog::TailnetId),
+    )
+    .await
 }
 
 async fn run_update_members_root(ctx: &ChainCtxV3, a: &UpdateMembersArgs) -> Result<()> {
@@ -717,6 +743,16 @@ mod tests {
         assert_eq!(call["method"], "create_tailnet");
         assert_eq!(call["value"], 5_000_000);
         assert_eq!(call["params"][0], ANCHOR);
+    }
+
+    #[test]
+    fn create_personal_tailnet_args_build_expected_call() {
+        let c = ctx();
+        let call = c.build_create_personal_tailnet_call(ANCHOR, 500, 7);
+        assert_eq!(call["method"], "create_personal_tailnet");
+        assert_eq!(call["value"], 0);
+        assert_eq!(call["fee"], 500);
+        assert_eq!(call["params"], serde_json::json!([ANCHOR]));
     }
 
     #[test]

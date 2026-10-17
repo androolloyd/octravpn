@@ -17,6 +17,7 @@ use octravpn_core::{
     rpc::RpcClient,
 };
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::{sync::Arc, time::Instant};
 use zeroize::Zeroizing;
 
@@ -107,6 +108,9 @@ impl PortalChain {
                     || msg.contains("not found")
                     || msg.contains("no such")
                 {
+                    if let Some(public) = self.fetch_public_asset(circle_id, &path, &rkey).await {
+                        return public;
+                    }
                     return Err(FetchAssetError::NotPublished {
                         circle_id: circle_id.to_string(),
                         path,
@@ -123,6 +127,9 @@ impl PortalChain {
         };
 
         if resp.is_null() {
+            if let Some(public) = self.fetch_public_asset(circle_id, &path, &rkey).await {
+                return public;
+            }
             return Err(FetchAssetError::NotPublished {
                 circle_id: circle_id.to_string(),
                 path,
@@ -201,6 +208,91 @@ impl PortalChain {
             }),
         }
     }
+
+    /// The resource-key RPC intentionally hides sealed paths. Only disclose
+    /// a plaintext path after the chain reports a public Circle and public
+    /// resource mode. A miss or failure to establish that mode keeps the
+    /// original resource-key result.
+    async fn fetch_public_asset(
+        &self,
+        circle_id: &str,
+        path: &str,
+        resource_key: &str,
+    ) -> Option<Result<Vec<u8>, FetchAssetError>> {
+        let info = self
+            .rpc
+            .raw_call("circle_info", json!([circle_id]))
+            .await
+            .ok()?;
+        if info.get("circle_id").and_then(Value::as_str) != Some(circle_id)
+            || info.get("privacy_class").and_then(Value::as_str) != Some("public")
+            || info.get("resource_mode").and_then(Value::as_str) != Some("public_resources")
+        {
+            return None;
+        }
+
+        Some(
+            self.fetch_public_asset_confirmed(circle_id, path, resource_key)
+                .await,
+        )
+    }
+
+    async fn fetch_public_asset_confirmed(
+        &self,
+        circle_id: &str,
+        path: &str,
+        resource_key: &str,
+    ) -> Result<Vec<u8>, FetchAssetError> {
+        let response = self
+            .rpc
+            .raw_call("circle_asset", json!([circle_id, path]))
+            .await
+            .map_err(|source| FetchAssetError::Rpc {
+                circle_id: circle_id.to_string(),
+                path: path.to_string(),
+                source: anyhow::Error::new(source).context("fetch public circle_asset"),
+            })?;
+        if response.is_null() {
+            return Err(FetchAssetError::NotPublished {
+                circle_id: circle_id.to_string(),
+                path: path.to_string(),
+                resource_key: resource_key.to_string(),
+            });
+        }
+        let invalid = |reason| FetchAssetError::Rpc {
+            circle_id: circle_id.to_string(),
+            path: path.to_string(),
+            source: anyhow::anyhow!("invalid public circle_asset response: {reason}"),
+        };
+        if response.get("circle_id").and_then(Value::as_str) != Some(circle_id)
+            || response.get("canonical_path").and_then(Value::as_str) != Some(path)
+            || response.get("resource_key").and_then(Value::as_str) != Some(resource_key)
+            || response.get("resource_mode").and_then(Value::as_str) != Some("public_resources")
+        {
+            return Err(invalid("identity or mode mismatch"));
+        }
+        let body_b64 = response
+            .get("body_b64")
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid("missing body_b64"))?;
+        let bytes = octravpn_core::b64::decode(body_b64.as_bytes())
+            .map_err(|_| invalid("invalid body_b64"))?;
+        let declared_size = response
+            .get("size_bytes")
+            .and_then(|value| value.as_str().and_then(|s| s.parse::<usize>().ok()))
+            .ok_or_else(|| invalid("invalid size_bytes"))?;
+        if bytes.len() != declared_size {
+            return Err(invalid("size mismatch"));
+        }
+        let expected_hash = response
+            .get("blob_hash")
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid("missing blob_hash"))?;
+        if hex::encode(Sha256::digest(&bytes)) != expected_hash {
+            return Err(invalid("blob hash mismatch"));
+        }
+        Ok(bytes)
+    }
 }
 
 /// Mirror of `runner::build_rpc` but visible here without making the
@@ -271,6 +363,110 @@ mod tests {
         build_sealed_fixture, plaintext_payload, sealed_payload, spawn_error_rpc, spawn_mock_rpc,
     };
     use crate::portal::chain::PortalChain;
+    use axum::{routing::post, Json, Router};
+    use std::{
+        net::SocketAddr,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    async fn spawn_public_circle_rpc(
+        resource_mode: &'static str,
+        valid_hash: bool,
+    ) -> (SocketAddr, Arc<AtomicUsize>) {
+        let asset_calls = Arc::new(AtomicUsize::new(0));
+        let calls = Arc::clone(&asset_calls);
+        let app = Router::new().route(
+            "/",
+            post(move |Json(request): Json<Value>| {
+                let calls = Arc::clone(&calls);
+                async move {
+                    let circle = "octPUBLIC";
+                    let path = "/index.html";
+                    let body = b"<html>public Circle</html>";
+                    let resource_key = resource_key(circle, path);
+                    let result = match request["method"].as_str().unwrap_or_default() {
+                        "circle_asset_ciphertext_by_resource_key" => None,
+                        "circle_info" => Some(json!({
+                            "circle_id": circle,
+                            "privacy_class": if resource_mode == "public_resources" { "public" } else { "sealed" },
+                            "resource_mode": resource_mode,
+                        })),
+                        "circle_asset" => {
+                            calls.fetch_add(1, Ordering::SeqCst);
+                            Some(json!({
+                                "circle_id": circle,
+                                "canonical_path": path,
+                                "resource_key": resource_key,
+                                "resource_mode": resource_mode,
+                                "body_b64": octravpn_core::b64::encode(body),
+                                "size_bytes": body.len().to_string(),
+                                "blob_hash": if valid_hash { hex::encode(Sha256::digest(body)) } else { "0".repeat(64) },
+                            }))
+                        }
+                        _ => None,
+                    };
+                    let id = request.get("id").cloned().unwrap_or(json!(1));
+                    match result {
+                        Some(result) => Json(json!({"jsonrpc":"2.0","id":id,"result":result})),
+                        None => Json(json!({"jsonrpc":"2.0","id":id,"error":{"code":112,"message":"not found"}})),
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (address, asset_calls)
+    }
+
+    #[tokio::test]
+    async fn public_circle_falls_back_to_verified_plaintext_asset() {
+        let (address, calls) = spawn_public_circle_rpc("public_resources", true).await;
+        let chain = PortalChain::from_rpc(
+            RpcClient::new(format!("http://{address}/")),
+            "octPROG".into(),
+            0,
+        );
+        let bytes = chain
+            .fetch_circle_asset_bytes("octPUBLIC", "/index.html")
+            .await
+            .unwrap();
+        assert_eq!(bytes, b"<html>public Circle</html>");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn sealed_circle_never_discloses_plaintext_path_on_miss() {
+        let (address, calls) = spawn_public_circle_rpc("sealed_read", true).await;
+        let chain = PortalChain::from_rpc(
+            RpcClient::new(format!("http://{address}/")),
+            "octPROG".into(),
+            0,
+        );
+        assert!(matches!(
+            chain
+                .fetch_circle_asset_bytes("octPUBLIC", "/index.html")
+                .await,
+            Err(FetchAssetError::NotPublished { .. })
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn public_circle_rejects_mismatched_asset_hash() {
+        let (address, _) = spawn_public_circle_rpc("public_resources", false).await;
+        let chain = PortalChain::from_rpc(
+            RpcClient::new(format!("http://{address}/")),
+            "octPROG".into(),
+            0,
+        );
+        assert!(matches!(
+            chain
+                .fetch_circle_asset_bytes("octPUBLIC", "/index.html")
+                .await,
+            Err(FetchAssetError::Rpc { .. })
+        ));
+    }
 
     #[tokio::test]
     async fn decrypts_sealed_envelope_with_passphrase() {

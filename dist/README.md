@@ -12,13 +12,17 @@ cargo build --release -p octravpn-client
 ## macOS
 
 ```
-bash dist/macos/install-handler.sh
+OCTRAVPN_CONFIG=/absolute/path/to/client.toml \
+OCTRAVPN_BROWSER_APP=Firefox bash dist/macos/install-handler.sh
 open "oct://octdeadbeef.../policy.json"        # manual test
 bash dist/macos/install-handler.sh uninstall   # remove
 ```
 
 Writes `~/Library/Application Support/octravpn/handler/OctravpnUrlHandler.app`
-and registers it with LaunchServices.
+and registers it with LaunchServices. The native helper receives macOS URL
+Apple Events, then launches the configured client. `OCTRAVPN_BROWSER_APP` is
+optional; without it the client opens the system default browser. The client
+config must exist and both its path and the binary path must be absolute.
 
 ## Linux
 

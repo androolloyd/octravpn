@@ -25,12 +25,14 @@ oct://<circle_id>/<canonical_path>
                                        (hex)
 ```
 
-The chain RPC `circle_asset_ciphertext_by_resource_key([circle, rkey])`
-returns the asset envelope. For **public** assets, the envelope is
-straight bytes — no encryption, no key wrapping, just the asset
-payload identified by its plaintext hash. For sealed assets, the
-envelope starts with the `OCRS1` magic prefix and goes through the
-unseal flow described in [`oct-url-sealed.md`](oct-url-sealed.md).
+The client first tries
+`circle_asset_ciphertext_by_resource_key([circle, rkey])`. If that view
+misses, it checks `circle_info` before disclosing the path. Only a Circle
+reporting both `privacy_class=public` and `resource_mode=public_resources`
+can use `circle_asset([circle, path])`. The client verifies the returned
+Circle, path, resource key, byte count, and SHA-256 blob hash. Sealed assets
+keep the resource-key path and the `OCRS1` unseal flow described in
+[`oct-url-sealed.md`](oct-url-sealed.md).
 
 What the operator publishes as public:
 - `index.html` for the operator's landing page
@@ -60,10 +62,10 @@ Open `http://127.0.0.1:51823/` in your browser. You'll see a small
 address bar — paste `oct://octCircleX/index.html` and the portal:
 
 1. Splits the URL into `(circle_id, path)`.
-2. Asks the chain RPC for the envelope at that resource key.
-3. Notices the envelope is **not** sealed (no `OCRS1` magic, see
-   [`crates/octravpn-client/src/portal/chain/cache.rs:60`](../../crates/octravpn-client/src/portal/chain/cache.rs)
-   — `SEALED_MAGIC = b"OCRS1"`).
+2. Checks the resource-key view and, for a confirmed public Circle, reads
+   the plaintext asset by path and verifies its hash.
+3. Notices the bytes are **not** sealed (no `OCRS1` magic, see
+   [`crates/octravpn-client/src/portal/chain/cache.rs`](../../crates/octravpn-client/src/portal/chain/cache.rs)).
 4. Sniffs the MIME (see §3).
 5. Renders the asset using the type-appropriate handler.
 
@@ -155,28 +157,17 @@ cache-bypass invariant".
 
 ## 5. Privacy: what an observer learns
 
-The interesting question: if someone is sniffing your tailnet
-traffic (your operator, your ISP, a passive listener on the wire),
-what do they learn from your `oct://` requests?
+The portal binds to loopback, then contacts the configured chain RPC over
+HTTPS. It does not establish a VPN session or hide your source IP from that
+RPC. A separate, active VPN route may carry the RPC connection if you have
+configured one.
 
-The portal talks to the chain RPC over your live VPN session (so
-the connection is end-to-end-encrypted to the validator). The
-chain RPC sees:
-
-- The **circle id** you queried (public).
-- The **resource key** you requested (a SHA-256 derived from the
-  public circle id + the public canonical path).
-- **Not** what user you authenticated as, beyond the wallet that
-  signed the session-open call — which is already on-chain anyway.
-- **Not** the path through your local browser that led you to ask
-  for it. The portal sees the click; the RPC sees only the asset
-  pull.
-
-In particular: a friend clicking your `oct://` link and an automated
-crawler hitting the same circle look identical to the RPC. The
-"who's browsing what?" privacy story is the same as fetching a
-file from S3 via curl over Tailscale — the operator of the asset
-store sees the asset, not the upstream UX.
+For a sealed asset, the RPC sees the Circle id and derived resource key. On
+a sealed-asset miss, the client checks Circle metadata but does not disclose
+the plaintext path. For a public Circle with public resources, the fallback
+`circle_asset` request includes the plaintext path. The RPC can also observe
+the connection metadata and timing. Browsing a public Circle does not require
+a wallet or a paid VPN session.
 
 ## 6. Worked example: fetching a public `index.html`
 
@@ -184,10 +175,8 @@ The operator has a circle `octOperatorMain` and a public landing
 page at `oct://octOperatorMain/index.html`.
 
 ```sh
-# Make sure your VPN session is up:
-octravpn connect-v2 --tailnet-id <tid> --deposit 1000   # or connect-v3
-# In another terminal, start the portal:
-octravpn portal
+# Configure [chain].rpc_url for the intended network, then start the portal:
+octravpn --config client.toml portal
 # Then paste oct://octOperatorMain/index.html into the portal's
 # address bar.
 ```
