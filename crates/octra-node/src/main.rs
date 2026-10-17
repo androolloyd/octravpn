@@ -22,6 +22,15 @@ enum Command {
         #[arg(long)]
         point_ops: bool,
     },
+    /// Build immutable-term prepaid custody for the existing OCTB Circle host.
+    CompileCirclePayments {
+        #[arg(long)]
+        domain: String,
+        #[arg(long)]
+        custody_cap: u64,
+        #[arg(long)]
+        minimum_stake: u64,
+    },
     #[command(hide = true)]
     SingleRangeWorker {
         #[arg(long)]
@@ -115,6 +124,20 @@ async fn main() -> Result<()> {
                 .read_to_end(&mut bytes)?;
             let report = octra_node_runtime::program::build::legacy(&bytes, loops, point_ops)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Command::CompileCirclePayments {
+            domain,
+            custody_cap,
+            minimum_stake,
+        } => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&octra_node::vpn::payments::build::compile(
+                    &domain,
+                    custody_cap,
+                    minimum_stake
+                )?)?
+            );
         }
         Command::SingleRangeWorker { parent_pid } => {
             octra_node_runtime::single_private::worker::helper(parent_pid)

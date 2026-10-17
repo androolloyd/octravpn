@@ -1,0 +1,22 @@
+  // Generated immutable terms. initialize is permissionless and idempotent:
+  // another caller can only install the exact terms already pinned by this code.
+  const CIRCLE_DOMAIN: string = "$DOMAIN"
+  const CIRCLE_CUSTODY_CAP: uint = $CUSTODY_CAP
+  const CIRCLE_MIN_STAKE: uint = $MIN_STAKE
+
+  fn initialize(): bool {
+    if self.circle_initialized == 1 {
+      require_initialized()
+      return true
+    }
+    require(self.circle_initialized == 0, "invalid initialization state")
+    self.domain = CIRCLE_DOMAIN
+    self.max_locked_value = CIRCLE_CUSTODY_CAP
+    self.min_operator_stake = CIRCLE_MIN_STAKE
+    self.circle_initialized = 1
+    return true
+  }
+
+  private fn require_initialized() {
+    require(self.circle_initialized == 1 && self.domain == CIRCLE_DOMAIN && self.max_locked_value == CIRCLE_CUSTODY_CAP && self.min_operator_stake == CIRCLE_MIN_STAKE, "Circle payments not initialized")
+  }

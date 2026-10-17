@@ -873,9 +873,17 @@ fn assert_bft_epochs_with_oracle(fixture: &Value, oracle: &[u8]) {
         fixture["wasm_sha256"],
         hex::encode(Sha256::digest(bytes(&fixture["wasm_b64"])))
     );
+    let mut retained = None;
     for (index, case) in fixture["cases"].as_array().unwrap().iter().enumerate() {
         let input = &case["input"];
-        let (mut state, mut ledger, transactions) = setup(input, fixture);
+        let (initial, initial_ledger, transactions) = setup(input, fixture);
+        let (mut state, mut ledger) = if input["continuation"] == true {
+            retained
+                .take()
+                .expect("continuation requires its preceding native epoch")
+        } else {
+            (initial, initial_ledger)
+        };
         state
             .set(
                 &[b"meta", b"total_supply"],
@@ -988,5 +996,61 @@ fn assert_bft_epochs_with_oracle(fixture: &Value, oracle: &[u8]) {
             "native Circle code epoch {index}: {}",
             input["name"]
         );
+        retained = Some((state, ledger));
     }
+}
+
+/// Run explicitly after generating the source-bound unchanged-native artifact.
+/// This gate refuses absence rather than substituting a Rust-made expectation.
+#[test]
+#[ignore = "requires OCTRA_CIRCLE_PREPAID_ORACLE from the unchanged-native generator"]
+fn native_prepaid_circle_custody_epochs_match() {
+    let path =
+        std::env::var("OCTRA_CIRCLE_PREPAID_ORACLE").expect("native Circle artifact required");
+    let fixture: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    let base = include_str!("../../../scripts/node-port/circle-code-oracle.ml");
+    let prefix = base
+        .split_once("let ()=let input=Yojson.Safe.from_channel stdin")
+        .unwrap()
+        .0;
+    let (head, run) = prefix.split_once("let run index input=\n").unwrap();
+    let (initial, epoch) = run
+        .split_once(" let root=Lwt_main.run(S.state_hash store)in\n")
+        .unwrap();
+    let epoch = epoch.replace(
+        " Lwt_main.run(S.close store);output",
+        " output,(store,ledger)",
+    );
+    let oracle = format!("{head}let run_saved index input saved=\n let tx_inputs=member\"transactions\"input|>to_list in\n let store,ledger=match saved with Some pair->pair|None->\n{initial} (store,ledger) in\n let root=Lwt_main.run(S.state_hash store)in\n{epoch}{}", include_str!("../../../scripts/node-port/circle-prepaid-oracle-tail.ml"));
+    assert_eq!(
+        fixture["generator_sha256"],
+        hex::encode(Sha256::digest(include_bytes!(
+            "../../../scripts/node-port/circle-prepaid-fixtures.py"
+        )))
+    );
+    for (name, content) in [
+        (
+            "program/octranet-payments.aml",
+            include_bytes!("../../../program/octranet-payments.aml").as_slice(),
+        ),
+        (
+            "program/octranet-payments-circle-init.aml.in",
+            include_bytes!("../../../program/octranet-payments-circle-init.aml.in").as_slice(),
+        ),
+        (
+            "program/octranet-payments-circle-factory.aml",
+            include_bytes!("../../../program/octranet-payments-circle-factory.aml").as_slice(),
+        ),
+        (
+            "scripts/node-port/circle-prepaid-oracle-tail.ml",
+            include_bytes!("../../../scripts/node-port/circle-prepaid-oracle-tail.ml").as_slice(),
+        ),
+    ] {
+        assert_eq!(
+            fixture["dependencies"][name],
+            hex::encode(Sha256::digest(content))
+        );
+    }
+    assert_eq!(fixture["cases"].as_array().unwrap().len(), 13);
+    assert_bft_epochs_with_oracle(&fixture, oracle.as_bytes());
 }

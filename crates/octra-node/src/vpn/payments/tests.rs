@@ -125,6 +125,7 @@ async fn fixture() -> (tempfile::TempDir, host::Chain, Payments, CanonicalStore)
     .await
     .unwrap();
     let config = Config {
+        application: Application::Program,
         program: chain.program.clone(),
         code_hash: hex::encode(Sha256::digest(&host::binaries().0)),
         factory: chain.factory.clone(),
@@ -151,6 +152,7 @@ async fn fixture() -> (tempfile::TempDir, host::Chain, Payments, CanonicalStore)
         history: store.reader(),
         operator,
         shared: Arc::new(crate::Shared::new()),
+        circle_authority: None,
         retained: tokio::sync::Mutex::new(RetainedTariff::default()),
     };
     (directory, chain, reader, store)
@@ -305,6 +307,7 @@ async fn pinned_program_assets_and_genesis_clock_fail_closed() {
         deployment: reader.deployment.clone(),
         operator: reader.operator.clone(),
         shared: reader.shared.clone(),
+        circle_authority: None,
         retained: tokio::sync::Mutex::new(RetainedTariff::default()),
     };
     assert!(changed

@@ -1,5 +1,5 @@
 //! Canonical snapshot adapter for the Octranet payment application. Offers stay
-//! in Circles; the existing Program clock governs custody and settlement.
+//! in Circles; custody can use the existing Program or OCTB Circle host.
 //! This reader does not grant packet forwarding without a host-owned meter.
 use anyhow::{ensure, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -8,7 +8,8 @@ use octra_node_protocol::{aml::emit::internal_key, transaction::decode_base64};
 use octra_node_runtime::{
     account_store,
     canonical::Reader,
-    circle_assets,
+    circle_assets, circle_store,
+    finality::history::History,
     program::store,
     state_batch::{Snapshot, StateBatch},
 };
@@ -27,6 +28,9 @@ use std::{
 };
 
 use crate::Committed;
+pub mod build;
+#[cfg(test)]
+mod circle_tests;
 #[cfg(test)]
 #[path = "../../../octra-node-runtime/tests/common/payments_host.rs"]
 #[allow(dead_code)]
@@ -38,9 +42,33 @@ mod transport;
 const PLAN_MAX_AGE: Duration = Duration::from_secs(120);
 const TARIFF_BYTES: i64 = 65_536;
 
+/// Storage and call authority are selected explicitly. The legacy default is
+/// unchanged; Circle applications use a separate receipt domain.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Application {
+    #[default]
+    Program,
+    Circle,
+}
+impl Application {
+    fn is_program(&self) -> bool {
+        *self == Self::Program
+    }
+    fn call(self) -> octra_node_protocol::transaction::OpType {
+        use octra_node_protocol::transaction::OpType;
+        match self {
+            Self::Program => OpType::ContractCall,
+            Self::Circle => OpType::CircleCall,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    #[serde(default, skip_serializing_if = "Application::is_program")]
+    pub application: Application,
     pub program: String,
     pub code_hash: String,
     pub factory: String,
@@ -64,8 +92,15 @@ pub struct ServiceConfig {
 
 /// Full-chain origin, rather than an RPC hostname or short network label.
 pub fn network_domain(chain: &ChainIdentity) -> String {
+    application_domain(chain, Application::Program)
+}
+/// Distinct application kinds cannot reinterpret an accepted receipt or journal.
+pub fn application_domain(chain: &ChainIdentity, application: Application) -> String {
     let mut hash = Sha256::new();
-    hash.update(b"Octranet payments network v1\0");
+    hash.update(match application {
+        Application::Program => b"Octranet payments network v1\0".as_slice(),
+        Application::Circle => b"Octranet Circle payments network v1\0".as_slice(),
+    });
     hash.update(
         u64::try_from(chain.chain_id.len())
             .expect("chain identifier fits uint64")
@@ -82,6 +117,7 @@ pub struct Payments {
     deployment: Deployment,
     operator: Address,
     shared: Arc<crate::Shared>,
+    circle_authority: Option<(octra_node_protocol::rules::Graph, Arc<dyn History>)>,
     retained: tokio::sync::Mutex<RetainedTariff>,
 }
 
@@ -235,7 +271,7 @@ impl Payments {
         shared: Arc<crate::Shared>,
     ) -> Result<Self> {
         ensure!(
-            config.domain == network_domain(history.chain()),
+            config.domain == application_domain(history.chain(), config.application),
             "Octranet domain differs from full chain origin"
         );
         let deployment = Deployment {
@@ -257,6 +293,7 @@ impl Payments {
             deployment,
             operator,
             shared,
+            circle_authority: None,
             retained: tokio::sync::Mutex::new(RetainedTariff::default()),
         })
     }
@@ -277,11 +314,24 @@ impl Payments {
         let serving = self.shared.current()?;
         let expires = serving.observed_at + PLAN_MAX_AGE;
         ensure!(Instant::now() < expires, "Octranet canonical head is stale");
+        if self.config.application == Application::Circle {
+            let (graph, history) = self
+                .circle_authority
+                .as_ref()
+                .context("Octranet Circle execution authority is missing")?;
+            let rules = octra_node_runtime::circle_view::canonical_with_graph(
+                &serving.committed.assets,
+                graph,
+                history.as_ref(),
+            )
+            .await?;
+            ensure!(
+                rules.proof_exec == octra_node_protocol::transaction::RuleMode::Active,
+                "Octranet Circle value effects are inactive"
+            );
+        }
         let mut result = if claim_only {
-            let fields = Fields {
-                snapshot: serving.committed.state(),
-                program: self.config.program.as_bytes(),
-            };
+            let fields = Fields::new(serving.committed.state(), &self.config);
             ensure!(
                 plan < fields.uint(b"plan_count", &[])?,
                 "Octranet plan not found"
@@ -373,22 +423,27 @@ impl Payments {
         retained: Option<Tariff>,
     ) -> Result<Plan> {
         let claim_only = retained.is_some();
-        check_program(
+        check_application(
+            self.config.application,
             snapshot,
             &self.config.program,
             &self.config.code_hash,
             Some(self.config.factory.as_bytes()),
         )?;
-        check_program(
+        check_application(
+            self.config.application,
             snapshot,
             &self.config.factory,
             &self.config.factory_code_hash,
             None,
         )?;
-        let state = Fields {
-            snapshot,
-            program: self.config.program.as_bytes(),
-        };
+        let state = Fields::new(snapshot, &self.config);
+        if self.config.application == Application::Circle {
+            ensure!(
+                state.uint(b"circle_initialized", &[])? == 1,
+                "Octranet Circle is not initialized"
+            );
+        }
         ensure!(
             state.text(b"domain", &[])? == self.config.domain,
             "Octranet deployment domain differs"
@@ -670,7 +725,10 @@ impl<A: crate::Host> crate::Node<A> {
     /// Bind payment reads to the same suspension and revocation capability as
     /// the node's other native services. A history reader alone cannot grant it.
     pub fn payments(&self, config: Config, operator: Address) -> Result<Payments> {
-        Payments::new(config, self.store.reader(), operator, self.shared.clone())
+        let mut payments =
+            Payments::new(config, self.store.reader(), operator, self.shared.clone())?;
+        payments.circle_authority = Some((self.view_graph.clone(), self.publisher.clone()));
+        Ok(payments)
     }
 }
 
@@ -685,7 +743,47 @@ fn digest(value: &str) -> Result<()> {
     Ok(())
 }
 
-fn check_program(state: &Snapshot, program: &str, hash: &str, owner: Option<&[u8]>) -> Result<()> {
+fn check_application(
+    application: Application,
+    state: &Snapshot,
+    program: &str,
+    hash: &str,
+    owner: Option<&[u8]>,
+) -> Result<()> {
+    if application == Application::Circle {
+        let address = program.as_bytes();
+        let info = circle_store::info(state, address)?.context("Octranet Circle not deployed")?;
+        ensure!(
+            info.runtime == b"octb"
+                && info.circle_id == address
+                && info.code_hash == hash.as_bytes()
+                && owner.is_none_or(|owner| info.owner == owner),
+            "Octranet Circle metadata differs"
+        );
+        ensure!(
+            state.get(&[b"circles", address, b"call_code"]) == Some(hash.as_bytes()),
+            "Octranet Circle value effects require current code admission"
+        );
+        let code = state
+            .get(&[b"circles", address, b"program", b"code_b64"])
+            .context("Octranet Circle bytecode missing")?;
+        ensure!(
+            hex::encode(Sha256::digest(decode_base64(code)?)) == hash,
+            "Octranet Circle bytecode pin differs"
+        );
+        // Initialization writes a native stable root; a metadata-only spawn is
+        // deliberately not an initialized payment application.
+        if owner.is_some() {
+            let root = state
+                .hash_at(&[b"circles", address, b"stable"])?
+                .context("Octranet Circle stable storage missing")?;
+            ensure!(
+                hex::encode(root).as_bytes() == info.stable_root,
+                "Octranet Circle stable root differs"
+            );
+        }
+        return Ok(());
+    }
     let address = program.as_bytes();
     let meta = store::meta(state, address)?.context("Octranet program not deployed")?;
     ensure!(
@@ -705,9 +803,17 @@ fn check_program(state: &Snapshot, program: &str, hash: &str, owner: Option<&[u8
 struct Fields<'a> {
     snapshot: &'a Snapshot,
     program: &'a [u8],
+    application: Application,
 }
-impl Fields<'_> {
-    fn bytes(&self, field: &[u8], indices: &[&str]) -> Option<&[u8]> {
+impl<'a> Fields<'a> {
+    fn new(snapshot: &'a Snapshot, config: &'a Config) -> Self {
+        Self {
+            snapshot,
+            program: config.program.as_bytes(),
+            application: config.application,
+        }
+    }
+    fn bytes(&self, field: &[u8], indices: &[&str]) -> Result<Option<Vec<u8>>> {
         let key = if indices.is_empty() {
             field.to_vec()
         } else {
@@ -720,14 +826,42 @@ impl Fields<'_> {
             }
             key
         };
-        self.snapshot
-            .get(&[b"contracts", self.program, b"storage", &key])
+        if self.application == Application::Program {
+            return Ok(self
+                .snapshot
+                .get(&[b"contracts", self.program, b"storage", &key])
+                .map(<[u8]>::to_vec));
+        }
+        let hash = octra_node_protocol::circles::stable_key(&key);
+        let Some(raw) = self.snapshot.get(&[
+            b"circles",
+            self.program,
+            b"stable",
+            b"by_hash",
+            hash.as_bytes(),
+        ]) else {
+            return Ok(None);
+        };
+        ensure!(
+            raw.len() <= 6 * 65_536 + 1024,
+            "Octranet Circle field exceeds bound"
+        );
+        let entry = circle_store::StableEntry::parse(raw)?;
+        ensure!(
+            entry.key == key && entry.hash == hash.as_bytes(),
+            "Octranet Circle field binding differs"
+        );
+        let circle_store::StableValue::Inline(value) = entry.value else {
+            anyhow::bail!("Octranet Circle field is not inline");
+        };
+        ensure!(value.len() <= 65_536, "Octranet Circle value exceeds bound");
+        Ok(Some(value))
     }
     fn uint(&self, field: &[u8], indices: &[&str]) -> Result<u64> {
-        let Some(raw) = self.bytes(field, indices) else {
+        let Some(raw) = self.bytes(field, indices)? else {
             return Ok(0);
         };
-        let text = std::str::from_utf8(raw)?;
+        let text = std::str::from_utf8(&raw)?;
         let value: u64 = text.parse()?;
         ensure!(
             value.to_string() == text,
@@ -737,7 +871,8 @@ impl Fields<'_> {
     }
     fn text(&self, field: &[u8], indices: &[&str]) -> Result<String> {
         Ok(std::str::from_utf8(
-            self.bytes(field, indices)
+            &self
+                .bytes(field, indices)?
                 .context("Octranet state field missing")?,
         )?
         .to_owned())

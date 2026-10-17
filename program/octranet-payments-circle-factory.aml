@@ -1,0 +1,11 @@
+// Deploy this bytecode in a Circle. Native spawn installs the child only after
+// this call succeeds. initialize() is a separate finalized CircleCall; no atomic
+// constructor or initialized custody is promised by this deployment event.
+contract OctranetCirclePaymentsFactory {
+  event PaymentsCircleDeployed(child: address)
+  fn deploy_payments(payload_b64: string): address {
+    let child = circle_spawn(payload_b64, "parent")
+    emit PaymentsCircleDeployed(child)
+    return child
+  }
+}

@@ -3,7 +3,7 @@
 //! canonical byte floors do, including zero-rate and rounded-price classes.
 //! One pending slot per plan/class coalesces smaller vouchers. An immutable
 //! lifetime fee budget reserves every new signed attempt before submission.
-use super::{Payments, Plan, TariffArchive};
+use super::{Application, Payments, Plan, TariffArchive};
 use crate::rpc::Context as Submission;
 use anyhow::{ensure, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -85,14 +85,19 @@ fn slot_id(usage: &SignedUsage) -> Result<String> {
 fn clock() -> Result<f64> {
     Ok(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64())
 }
-fn check_transaction(tx: &Transaction, signed: &SignedUsage, operator_key: &[u8]) -> Result<()> {
+fn check_transaction(
+    tx: &Transaction,
+    signed: &SignedUsage,
+    operator_key: &[u8],
+    application: Application,
+) -> Result<()> {
     let expected = serde_json::to_vec(&signed.claim_params()?)?;
     ensure!(
         tx.from == transaction::address_from_public_key(operator_key)
             && tx.to == signed.usage.deployment.program.display().as_bytes()
             && tx.amount == 0.into()
             && tx.ou == FEE_OU.into()
-            && tx.op_type == OpType::ContractCall
+            && tx.op_type == application.call()
             && tx.encrypted_data.as_deref() == Some(b"claim")
             && tx.message.as_deref() == Some(expected.as_slice())
             && tx.public_key.as_deref() == Some(operator_key)
@@ -552,6 +557,7 @@ impl Service {
                     &decode_attempt(&attempt)?,
                     &attempt.authorization,
                     &operator_key,
+                    payments.config.application,
                 )?;
             }
         }
@@ -628,7 +634,12 @@ impl Service {
         let mut candidate = None;
         for attempt in &slot.attempts {
             let tx = decode_attempt(attempt)?;
-            check_transaction(&tx, &attempt.authorization, &self.operator_key)?;
+            check_transaction(
+                &tx,
+                &attempt.authorization,
+                &self.operator_key,
+                self.payments.config.application,
+            )?;
             if account.nonce < tx.nonce && (-5.0..=300.0).contains(&(now - tx.timestamp)) {
                 candidate = Some((tx, attempt.authorization.clone()));
             }
@@ -665,7 +676,7 @@ impl Service {
                 public_key: Some(self.operator_key.clone()),
                 message: Some(serde_json::to_vec(&slot.usage.claim_params()?)?),
                 encrypted_data: Some(b"claim".to_vec()),
-                op_type: OpType::ContractCall,
+                op_type: self.payments.config.application.call(),
             };
             ensure!(
                 octra_node_protocol::transaction_policy::ou_cost(
@@ -677,7 +688,12 @@ impl Service {
             tx.signature = STANDARD
                 .encode(self.key.sign(&tx.signing_bytes()?).to_bytes())
                 .into_bytes();
-            check_transaction(&tx, &slot.usage, &self.operator_key)?;
+            check_transaction(
+                &tx,
+                &slot.usage,
+                &self.operator_key,
+                self.payments.config.application,
+            )?;
             let attempt = Attempt {
                 authorization: slot.usage.clone(),
                 transaction: String::from_utf8(tx.to_json_bytes()?)?,
@@ -904,10 +920,21 @@ mod tests {
     fn signed_transaction_cannot_change_receipt_or_sender() {
         let signed = usage(1, 100);
         let (original, public) = tx(&signed);
-        check_transaction(&original, &signed, &public).unwrap();
+        check_transaction(&original, &signed, &public, Application::Program).unwrap();
+        assert!(check_transaction(&original, &signed, &public, Application::Circle).is_err());
+        let mut circle = original.clone();
+        circle.op_type = OpType::CircleCall;
+        let key = SigningKey::from_bytes(&[11; 32]);
+        circle.signature = STANDARD
+            .encode(key.sign(&circle.signing_bytes().unwrap()).to_bytes())
+            .into_bytes();
+        check_transaction(&circle, &signed, &public, Application::Circle).unwrap();
+        assert!(check_transaction(&circle, &signed, &public, Application::Program).is_err());
         let encoded = attempt(signed.clone());
         assert_eq!(decode_attempt(&encoded).unwrap(), original);
-        assert!(check_transaction(&original, &usage(2, 101), &public).is_err());
+        assert!(
+            check_transaction(&original, &usage(2, 101), &public, Application::Program).is_err()
+        );
         let key = SigningKey::from_bytes(&[11; 32]);
         for case in 0..4 {
             let mut forged = original.clone();
@@ -922,7 +949,7 @@ mod tests {
             forged.signature = STANDARD
                 .encode(key.sign(&forged.signing_bytes().unwrap()).to_bytes())
                 .into_bytes();
-            assert!(check_transaction(&forged, &signed, &public).is_err());
+            assert!(check_transaction(&forged, &signed, &public, Application::Program).is_err());
         }
     }
 
@@ -1087,5 +1114,25 @@ mod tests {
         assert!(recovered.load_tariff(6).unwrap().is_none());
         assert_eq!(recovered.state.lock().unwrap().fees_reserved_ou, FEE_OU);
         assert!(recovered.permits_new("head2").is_err());
+    }
+}
+
+#[cfg(test)]
+mod application_kind_tests {
+    use super::*;
+    #[test]
+    fn claim_journal_cannot_reopen_as_another_application_kind() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("claims");
+        let program =
+            serde_json::json!({"config":{"program":"same-address","domain":"program-domain"}});
+        let circle = serde_json::json!({"config":{"application":"circle","program":"same-address","domain":"circle-domain"}});
+        let disk = Disk::open(&path, program.clone(), FEE_OU).unwrap();
+        drop(disk);
+        assert!(Disk::open(&path, circle, FEE_OU).is_err());
+        assert!(
+            Disk::open(&path, program, FEE_OU).is_ok(),
+            "refusal must not replace the original journal"
+        );
     }
 }

@@ -4,7 +4,7 @@
 //! genesis, executed by Native, and published only with signed native QCs.
 //! No payment state, epoch clock or Plan lease is fabricated by these tests.
 //! This does not qualify public networking, packet forwarding or key custody.
-use super::{network_domain, Config, Payments, Plan};
+use super::{application_domain, network_domain, Application, Config, Payments, Plan};
 use crate::{executor, Host, Node, Status};
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -197,10 +197,16 @@ struct Fixture {
     now: f64,
     factory: String,
     program: String,
+    application: Application,
+    payment_code: Vec<u8>,
+    factory_code: Vec<u8>,
     _directory: tempfile::TempDir,
 }
 impl Fixture {
     async fn new(expires: Option<i64>) -> Self {
+        Self::with_application(expires, Application::Program).await
+    }
+    async fn with_application(expires: Option<i64>, application: Application) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let operator = parse_native_address(&payment_host::address(11)).unwrap();
         let tariff = Tariff::new(
@@ -228,7 +234,27 @@ impl Fixture {
         )
         .unwrap();
         let chain = ChainIdentity::genesis(CHAIN, StateRoot(root));
-        let domain = network_domain(&chain);
+        let domain = application_domain(&chain, application);
+        let (payment_code, factory_code) = match application {
+            Application::Program => payment_host::binaries().clone(),
+            Application::Circle => (
+                STANDARD
+                    .decode(
+                        super::build::compile(&domain, 200_000_000, payment_host::STAKE).unwrap()
+                            ["bytecode"]
+                            .as_str()
+                            .unwrap(),
+                    )
+                    .unwrap(),
+                octra_node_protocol::aml::source::compile(
+                    include_bytes!("../../../../../program/octranet-payments-circle-factory.aml"),
+                    octra_node_protocol::aml::source::Syntax::Source,
+                    true,
+                )
+                .unwrap()
+                .octb,
+            ),
+        };
         let graph = Graph::isolated_applications(CHAIN.as_bytes().to_vec(), None, root).unwrap();
         let store = CanonicalStore::create(
             &directory.path().join("node.db"),
@@ -253,6 +279,11 @@ impl Fixture {
         )
         .await
         .unwrap();
+        let node = if application == Application::Circle {
+            node.with_view_graph(graph.clone()).unwrap()
+        } else {
+            node
+        };
         let protocol = Protocol::new(2).unwrap();
         let native = executor::Native::new(
             executor::Config {
@@ -294,6 +325,9 @@ impl Fixture {
             now: GENESIS_SECONDS,
             factory: String::new(),
             program: String::new(),
+            application,
+            payment_code,
+            factory_code,
             _directory: directory,
         };
         fixture.deploy_and_fund().await;
@@ -433,7 +467,7 @@ impl Fixture {
         let tx = self.transaction(
             who,
             &self.program,
-            OpType::ContractCall,
+            self.application.call(),
             params,
             amount,
             method.as_bytes().to_vec(),
@@ -453,44 +487,80 @@ impl Fixture {
         .unwrap()
         .nonce
         .successor();
-        self.factory = String::from_utf8(contract::address(
-            &payment_host::binaries().1,
-            operator.as_bytes(),
-            nonce.get(),
-        ))
-        .unwrap();
-        let tx = self.transaction(
-            11,
-            &self.factory,
-            OpType::ContractDeploy,
-            json!([]),
-            0,
-            STANDARD.encode(&payment_host::binaries().1).into_bytes(),
-        );
-        self.publish(vec![tx]).await;
-        let tx = self.transaction(
-            11,
-            &self.factory,
-            OpType::ContractCall,
-            json!([
-                STANDARD.encode(&payment_host::binaries().0),
-                self.domain,
-                200_000_000,
-                payment_host::STAKE
-            ]),
-            0,
-            b"deploy_payments".to_vec(),
-        );
-        let receipt = self.publish(vec![tx]).await;
-        self.program = receipt["events"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|event| event["event"] == "PaymentsDeployed")
-            .unwrap()["values"][0]
-            .as_str()
-            .unwrap()
-            .to_owned();
+        if self.application == Application::Circle {
+            let payload = super::circle_tests::payload(&self.factory_code);
+            let parsed = octra_node_protocol::circle_program::Deploy::from_document(
+                &octra_node_protocol::native_json::Document::parse(
+                    &serde_json::to_vec(&payload).unwrap(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            self.factory = String::from_utf8(parsed.id(operator.as_bytes(), nonce)).unwrap();
+            let tx = self.transaction(11, &self.factory, OpType::CircleDeploy, payload, 0, vec![]);
+            self.publish(vec![tx]).await;
+            let tx = self.transaction(
+                11,
+                &self.factory,
+                OpType::CircleCall,
+                json!([STANDARD.encode(
+                    serde_json::to_vec(&super::circle_tests::payload(&self.payment_code)).unwrap()
+                )]),
+                0,
+                b"deploy_payments".to_vec(),
+            );
+            let receipt = self.publish(vec![tx]).await;
+            self.program = receipt["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|event| event["event"] == "PaymentsCircleDeployed")
+                .unwrap()["values"][0]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            // Separate finalized initialization: the native spawn is deferred.
+            self.call(14, "initialize", json!([]), 0).await;
+        } else {
+            self.factory = String::from_utf8(contract::address(
+                &self.factory_code,
+                operator.as_bytes(),
+                nonce.get(),
+            ))
+            .unwrap();
+            let tx = self.transaction(
+                11,
+                &self.factory,
+                OpType::ContractDeploy,
+                json!([]),
+                0,
+                STANDARD.encode(&self.factory_code).into_bytes(),
+            );
+            self.publish(vec![tx]).await;
+            let tx = self.transaction(
+                11,
+                &self.factory,
+                OpType::ContractCall,
+                json!([
+                    STANDARD.encode(&self.payment_code),
+                    self.domain,
+                    200_000_000,
+                    payment_host::STAKE
+                ]),
+                0,
+                b"deploy_payments".to_vec(),
+            );
+            let receipt = self.publish(vec![tx]).await;
+            self.program = receipt["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|event| event["event"] == "PaymentsDeployed")
+                .unwrap()["values"][0]
+                .as_str()
+                .unwrap()
+                .to_owned();
+        }
         self.call(11, "bond_operator", json!([]), payment_host::STAKE)
             .await;
         let registration = format!(
@@ -527,17 +597,21 @@ impl Fixture {
         self.call(11, "append_class", json!([0, 100]), 0).await;
         self.call(11, "seal_offer", json!([0]), 0).await;
         self.call(12, "open_plan", json!([0, 1000]), 0).await;
-        assert_eq!(self.node.snapshot().unwrap().head().cursor.epoch.0, 10);
+        assert_eq!(
+            self.node.snapshot().unwrap().head().cursor.epoch.0,
+            10 + u64::from(self.application == Application::Circle)
+        );
     }
 
     fn payments(&self) -> Payments {
         self.node
             .payments(
                 Config {
+                    application: self.application,
                     program: self.program.clone(),
-                    code_hash: hex::encode(Sha256::digest(&payment_host::binaries().0)),
+                    code_hash: hex::encode(Sha256::digest(&self.payment_code)),
                     factory: self.factory.clone(),
-                    factory_code_hash: hex::encode(Sha256::digest(&payment_host::binaries().1)),
+                    factory_code_hash: hex::encode(Sha256::digest(&self.factory_code)),
                     domain: self.domain.clone(),
                     operator_circle: payment_host::address(14),
                     offer: 0,
@@ -851,6 +925,58 @@ async fn canonical_partial_withdrawal_revokes_existing_transport_generation_imme
     fixture.call(12, "withdraw_remaining", json!([]), 0).await;
     let withdrawn = reader.claim_plan(0).await.unwrap();
     withdrawn.validate_usage(&purchased).unwrap();
+    assert!(!withdrawn.admissible() && !withdrawn.claimable());
+    fixture.node.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn circle_prepaid_authority_uses_real_qc_storage_clock_and_refuses_program_replay() {
+    let mut fixture = Box::pin(Fixture::with_application(None, Application::Circle)).await;
+    let reader = fixture.payments();
+    let active = reader.plan(0).await.unwrap();
+    assert!(active.admissible() && active.claimable());
+    assert_eq!(active.tariff, fixture.tariff);
+    assert_eq!(
+        active.deployment.domain,
+        application_domain(fixture.node.store.chain(), Application::Circle)
+    );
+    assert_ne!(
+        active.deployment.domain,
+        network_domain(fixture.node.store.chain())
+    );
+    let signed = receipt(&active, 1_048_576);
+    let mut wrong = signed.usage.clone();
+    wrong.deployment.domain = network_domain(fixture.node.store.chain());
+    let cross_kind = SignedUsage::sign(wrong, &KeyPair::from_secret_bytes(&[21; 32])).unwrap();
+    assert!(active.validate_usage(&cross_kind).is_err());
+    fixture
+        .call(13, "claim", signed.claim_params().unwrap(), 0)
+        .await;
+    assert!(!active.admissible());
+    let purchased = reader.plan(0).await.unwrap();
+    assert_eq!(purchased.redeemed_bytes, [0, 1_048_576]);
+    assert_eq!(purchased.remaining_ou, 900);
+    assert!(purchased.admissible());
+    let view = fixture.node.snapshot().unwrap();
+    assert!(view
+        .state()
+        .get(&[
+            b"contracts",
+            fixture.program.as_bytes(),
+            b"storage",
+            b"domain"
+        ])
+        .is_none());
+    assert_eq!(view.head().cursor.epoch.0, 12);
+    fixture
+        .node
+        .suspend("Circle fixture lost canonical availability");
+    assert!(!purchased.admissible());
+    assert!(reader.plan(0).await.is_err());
+    assert!(fixture.node.resume().await.unwrap());
+    assert!(reader.plan(0).await.unwrap().admissible());
+    fixture.call(12, "withdraw_remaining", json!([]), 0).await;
+    let withdrawn = reader.plan(0).await.unwrap();
     assert!(!withdrawn.admissible() && !withdrawn.claimable());
     fixture.node.shutdown().await.unwrap();
 }
