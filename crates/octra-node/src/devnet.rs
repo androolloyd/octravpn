@@ -368,6 +368,7 @@ pub async fn run(config: Config, shutdown: watch::Receiver<bool>) -> Result<()> 
                 config_hash: None,
                 binary_hash: Sha256::digest(b"octra-rust-local-devnet-v1").to_vec(),
                 require_binary_hash: false,
+                upgrade: None,
                 profiles: vec![],
             },
             store,

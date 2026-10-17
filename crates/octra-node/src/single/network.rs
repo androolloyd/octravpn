@@ -38,10 +38,14 @@ pub struct Config {
     pub config_hash: String,
     pub binary_hash: String,
     pub require_binary_hash: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upgrade: Option<Upgrade>,
     pub maximum_peers: i64,
     #[serde(default)]
     pub allow_dynamic_peers: bool,
 }
+mod upgrade;
+pub use upgrade::{Target, Upgrade};
 pub(super) struct Network {
     listener: TcpListener,
     pub swarm: Swarm,
@@ -124,6 +128,14 @@ impl Network {
             .iter()
             .map(|value| endpoint(*value))
             .collect::<Result<Vec<_>>>()?;
+        let config_hash = hash(&config.config_hash)?;
+        let binary_hash = hash(&config.binary_hash)?;
+        let upgrade = config
+            .upgrade
+            .as_ref()
+            .map(|upgrade| upgrade.plan(&config_hash, config.require_binary_hash))
+            .transpose()?
+            .flatten();
         let listener = TcpListener::bind(config.listen).await?;
         let advertised = endpoint(listener.local_addr()?)?;
         let view = node.clone();
@@ -131,10 +143,10 @@ impl Network {
             swarm::Config {
                 chain_id: node.store().chain().chain_id.as_bytes().to_vec(),
                 node_address: node.settings().wallet_address.clone(),
-                config_hash: hash(&config.config_hash)?,
-                binary_hash: hash(&config.binary_hash)?,
+                config_hash,
+                binary_hash,
                 require_binary_hash: config.require_binary_hash,
-                upgrade: None,
+                upgrade,
                 profiles: vec![],
                 allowed_public_keys: if config.allow_dynamic_peers {
                     vec![]
@@ -317,6 +329,7 @@ mod tests {
             config_hash: hex::encode([9; 32]),
             binary_hash: hex::encode([8; 32]),
             require_binary_hash: true,
+            upgrade: None,
             maximum_peers: 16,
             allow_dynamic_peers: dynamic,
         }

@@ -474,6 +474,7 @@ async fn single_peer_broadcast_uses_actual_committed_epoch_without_state_import(
                     config_hash: hex::encode([9; 32]),
                     binary_hash: hex::encode([8; 32]),
                     require_binary_hash: true,
+                    upgrade: None,
                     maximum_peers: 16,
                     allow_dynamic_peers: true,
                 }),

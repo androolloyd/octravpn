@@ -20,7 +20,7 @@ use octra_node_protocol::{
         engine::{Engine, TimeoutConfig},
         journal::JournalOwner,
     },
-    network::{endpoint::Endpoint, session::Timeouts, swarm},
+    network::{endpoint::Endpoint, session::Timeouts, swarm, upgrade},
 };
 use octra_node_runtime::{
     canonical::CanonicalStore,
@@ -49,6 +49,7 @@ pub(crate) struct Transport {
     pub config_hash: Option<Vec<u8>>,
     pub binary_hash: Vec<u8>,
     pub require_binary_hash: bool,
+    pub upgrade: Option<upgrade::Plan>,
     pub profiles: Vec<swarm::Activation>,
 }
 pub(crate) struct Plan {
@@ -265,6 +266,7 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
         use ed25519_dalek::Signer;
         status_key.sign(bytes).to_bytes().to_vec()
     });
+    let driver_release = status_release.clone();
     let status = octra_node_runtime::status_read::Service::new(
         reader.clone(),
         membership.clone(),
@@ -366,7 +368,7 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
                 .unwrap_or_else(|| native_config.hash.to_vec()),
             binary_hash: transport.binary_hash,
             require_binary_hash: transport.require_binary_hash,
-            upgrade: None,
+            upgrade: transport.upgrade,
             profiles: transport.profiles,
             allowed_public_keys: handshake_keys,
             bootstrap: transport.peers,
@@ -457,6 +459,7 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
         epoch_capacity,
         stealth_slots,
         evidence_dir: services.data.join("evidence"),
+        release: driver_release,
     };
     let validator = driver::Validator::new(
         node.clone(),

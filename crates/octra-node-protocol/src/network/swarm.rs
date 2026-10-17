@@ -157,6 +157,18 @@ impl Swarm {
             .get(&epoch)
             .cloned()
     }
+    /// Local voting readiness at the selected canonical epoch. This never
+    /// selects or replaces the running binary or trusts a peer's schedule.
+    pub fn upgrade_ready(&self, epoch: i64, consensus_config_hash: &[u8]) -> Result<(), Error> {
+        self.0.config.upgrade.as_ref().map_or(Ok(()), |plan| {
+            plan.ready(
+                epoch,
+                consensus_config_hash,
+                &self.0.config.binary_hash,
+                self.0.config.require_binary_hash,
+            )
+        })
+    }
     fn local_validator(&self, s: &State) -> bool {
         policy::local_is_validator(
             s.validators.as_deref(),

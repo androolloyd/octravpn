@@ -38,12 +38,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
-#[path = "../../../../octra-node-runtime/tests/common/circle_host.rs"]
-#[allow(dead_code)]
-mod circle_host;
-#[path = "../../../../octra-node-runtime/tests/common/payments_host.rs"]
-#[allow(dead_code)]
-mod payment_host;
+use super::test_host::{self as payment_host, common as circle_host};
 
 const CHAIN: &str = "octra-rust-local-7061796d656e7473";
 const GENESIS_SECONDS: f64 = 1_800_000_000.;
@@ -574,7 +569,7 @@ fn receipt(plan: &Plan, bytes: u64) -> SignedUsage {
 
 #[tokio::test]
 async fn public_payment_grant_uses_post_genesis_deployment_and_authenticated_epoch_clock() {
-    let mut fixture = Fixture::new(None).await;
+    let mut fixture = Box::pin(Fixture::new(None)).await;
     let reader = fixture.payments();
     let granted = reader.plan(0).await.unwrap();
     assert!(granted.admissible() && granted.claimable());
@@ -632,7 +627,7 @@ async fn public_payment_grant_uses_post_genesis_deployment_and_authenticated_epo
 
 #[tokio::test]
 async fn public_payment_grant_revokes_on_operator_unstake_and_uses_fixed_claim_cutoff() {
-    let mut fixture = Fixture::new(None).await;
+    let mut fixture = Box::pin(Fixture::new(None)).await;
     let reader = fixture.payments();
     let active = reader.plan(0).await.unwrap();
     fixture
@@ -668,7 +663,7 @@ async fn public_payment_grant_revokes_on_operator_unstake_and_uses_fixed_claim_c
 async fn public_payment_grant_checks_canonical_circle_asset_expiry() {
     // Public Circle reads evaluate visibility at the next epoch. The offer
     // asset is visible at captured epoch10 and expires at policy epoch12.
-    let mut fixture = Fixture::new(Some(12)).await;
+    let mut fixture = Box::pin(Fixture::new(Some(12))).await;
     let reader = fixture.payments();
     let active = reader.plan(0).await.unwrap();
     assert!(active.admissible());
@@ -694,7 +689,7 @@ async fn public_payment_grant_checks_canonical_circle_asset_expiry() {
 #[tokio::test]
 async fn packet_capability_checks_actual_canonical_publication_at_handoff() {
     use octravpn_core::payments::PlanBinding;
-    let mut fixture = Fixture::new(None).await;
+    let mut fixture = Box::pin(Fixture::new(None)).await;
     let reader = fixture.payments();
     let plan = reader.plan(0).await.unwrap();
     let binding = PlanBinding {

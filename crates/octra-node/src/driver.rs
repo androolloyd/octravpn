@@ -31,6 +31,7 @@ use std::{
     },
     time::{SystemTime, UNIX_EPOCH},
 };
+mod upgrade;
 
 fn error(e: impl std::fmt::Display) -> Error {
     e.to_string().into()
@@ -76,6 +77,7 @@ struct Epoch {
     number: i64,
     parent: Option<ParentCommit>,
     rules: EpochRules,
+    consensus_hash: Vec<u8>,
 }
 #[derive(Default)]
 struct Cache {
@@ -92,6 +94,7 @@ pub struct Config {
     pub epoch_capacity: num_bigint::BigInt,
     pub stealth_slots: usize,
     pub evidence_dir: PathBuf,
+    pub release: Option<octra_node_runtime::status_read::Release>,
 }
 pub struct Validator<A: Host> {
     node: Arc<Node<A>>,
@@ -103,6 +106,7 @@ pub struct Validator<A: Host> {
     config: Config,
     cache: Mutex<Cache>,
     enabled: AtomicBool,
+    upgrade_block: Mutex<Option<String>>,
 }
 impl<A: Host> Validator<A> {
     pub fn new(
@@ -144,10 +148,32 @@ impl<A: Host> Validator<A> {
             config,
             cache: Mutex::default(),
             enabled: AtomicBool::new(false),
+            upgrade_block: Mutex::new(None),
         })
     }
     pub fn set_enabled(&self, enabled: bool) {
         self.enabled.store(enabled, Ordering::Release);
+    }
+    fn upgrade_ready(&self, epoch: &Epoch) -> bool {
+        let reason = self
+            .swarm
+            .upgrade_ready(epoch.number, &epoch.consensus_hash)
+            .err()
+            .map(|error| error.to_string());
+        let Ok(mut previous) = self.upgrade_block.lock() else {
+            return false;
+        };
+        let ready = reason.is_none();
+        if *previous != reason {
+            if let Some(reason) = &reason {
+                eprintln!(
+                    "consensus: P2P upgrade blocked at epoch {}: {reason}",
+                    epoch.number
+                );
+            }
+            *previous = reason;
+        }
+        ready
     }
     /// Seed a nonvoting observer from its authenticated retained head while
     /// public service admission remains suspended during catch-up.
@@ -182,6 +208,14 @@ impl<A: Host> Validator<A> {
             .proposal_parent(&head, self.config.policy)
             .await
             .map_err(error)?;
+        let canonical = self.peers.config(&head).await?;
+        let consensus_hash = upgrade::config_hash(
+            self.node.store.chain().chain_id.as_bytes(),
+            number,
+            &rules,
+            &canonical,
+            self.config.release.as_ref(),
+        )?;
         self.swarm.advance_profile(number)?;
         let validators = rules.validators.clone();
         self.swarm.set_validators(
@@ -201,6 +235,7 @@ impl<A: Host> Validator<A> {
             number,
             parent,
             rules,
+            consensus_hash,
         }));
         Ok(validators)
     }
@@ -368,7 +403,9 @@ impl<A: Host> DriverHost for Validator<A> {
                     == Some(self.config.key.verifying_key().as_bytes())
             }),
             can_vote: self.enabled.load(Ordering::Acquire)
-                && epoch.is_some()
+                && epoch
+                    .as_ref()
+                    .is_some_and(|epoch| self.upgrade_ready(epoch))
                 && matches!(self.node.status(), crate::Status::Serving(_)),
             finality_proof_needed: false,
         }

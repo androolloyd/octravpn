@@ -10,9 +10,7 @@ use octravpn_core::{
 };
 use serde_json::json;
 
-#[path = "../../../../octra-node-runtime/tests/common/payments_host.rs"]
-#[allow(dead_code)]
-mod host;
+use super::test_host as host;
 
 fn persist_accounts(chain: &mut host::Chain) {
     for (address, account) in chain.ledger.accounts() {

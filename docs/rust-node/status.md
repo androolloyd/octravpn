@@ -9,6 +9,15 @@ upstream behavioral parity and public-network deployment remain unqualified.
 
 ## Recorded local evidence
 
+- The [P2P upgrade checkpoint](checkpoints/2026-10-17/p2p-upgrades.json)
+  records trusted upgrade/rollback settings reaching production transport and
+  the native voting-readiness gate. The combined release suite passed 236 tests;
+  496 new native parser cases match Rust, and real TCP tests cover mixed binaries,
+  conflicting schedules, activation, rollback and profile transitions. The
+  [review](checkpoints/2026-10-17/p2p-upgrades.md) distinguishes the canonical
+  consensus hash from the transport hash and records the final source checks.
+  These are local checks; installed-binary attestation and public deployment
+  qualification are outside their scope.
 - The [reusable paid client checkpoint](../audit/octranet-client-service-status.json)
   records the Rust library and shared CLI service: explicit startup and shutdown,
   actual interface metadata and durable recovery. The combined release suite

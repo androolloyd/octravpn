@@ -28,7 +28,7 @@ use std::{collections::BTreeMap, sync::OnceLock};
 
 #[path = "circle_host.rs"]
 #[allow(dead_code)]
-mod common;
+pub(crate) mod common;
 
 pub(crate) const DAY: i64 = 86_400_000;
 pub(crate) const WEEK: i64 = 604_800_000;

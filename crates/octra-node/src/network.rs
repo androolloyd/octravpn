@@ -286,6 +286,10 @@ pub async fn run(config: Config, mut shutdown: watch::Receiver<bool>) -> Result<
         .map(|s| upgrade::normalize_hash("OCTRA_BINARY_HASH", s))
         .transpose()?
         .unwrap_or_else(|| vec![0; 32]);
+    let config_hash = profile.wire_hash(chain, next)?;
+    let require_binary_hash = settings.get("OCTRA_P2P_REQUIRE_BINARY_HASH") == Some(b"1");
+    let upgrade =
+        upgrade::from_inputs(&config_hash, require_binary_hash, |name| settings.get(name))?;
     let protocol = settings.protocol;
     let receipts = ReceiptPolicy::new(
         settings.get("OCTRA_PREVERIFY_RECEIPT_ACTIVATION_EPOCH"),
@@ -354,9 +358,10 @@ pub async fn run(config: Config, mut shutdown: watch::Receiver<bool>) -> Result<
                 advertised,
                 peers,
                 maximum_peers: 32,
-                config_hash: Some(profile.wire_hash(chain, next)?),
+                config_hash: Some(config_hash),
                 binary_hash,
-                require_binary_hash: settings.get("OCTRA_P2P_REQUIRE_BINARY_HASH") == Some(b"1"),
+                require_binary_hash,
+                upgrade,
                 profiles: profile.transitions(chain)?,
             },
             store,

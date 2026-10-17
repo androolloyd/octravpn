@@ -1,0 +1,132 @@
+{
+  "schema": "octra-p2p-upgrade-qualification/v1",
+  "observed_at": "2026-10-17T06:49:23.463493+00:00",
+  "base_commit": "cdc5ff0bd50cad2178c3cbc9fb7c61d1dea0082c",
+  "adopted_upstream": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "scope": "Trusted P2P upgrade/rollback capture, transport wiring and canonical BFT readiness; local qualification only",
+  "source_sha256": {
+    ".cargo/config.toml": "ce1e033cee48a00988852a54e427e11d8fd2fb32fe558b45cc6b996e5ec2d8bd",
+    "Cargo.lock": "41a91382953a23309f5a507b583da6c19faf4f1a0ee95ce485bea0706ef41269",
+    "Cargo.toml": "5fc6af03807621fd437551c765313d75728d3c0c01d3b21f544d6f366efd1925",
+    "crates/octra-node-protocol/src/network/swarm.rs": "f6cca7fe655f004eabce446dbe83ae1a9a201ffc9b9abd2ffb116edab6eab1cd",
+    "crates/octra-node-protocol/src/network/upgrade.rs": "f37f9bda630101e578d39b3712694156cbc48415305e2aeba9205fffcf4ed61a",
+    "crates/octra-node-protocol/tests/fixtures/upgrade-config.json": "70666332c9f7d1e0dc38b5c1eacdb0b820653168b667f837238dccf7c81a31a9",
+    "crates/octra-node-protocol/tests/network_upgrade.rs": "265672c3eecd35991967318bead26a44048479ae4f2a96142db2046bc4f3ba6a",
+    "crates/octra-node-protocol/tests/upgrade_config_parity.rs": "71242466beddd24de81ff9a652c1b7285e80b2ce5c9c1e0cf30bb90ba65da1a0",
+    "crates/octra-node-runtime/tests/common/payments_host.rs": "31252e4724a6a8b919bd99323288337f2a9fe4fdff9748194c553a3cc1d93614",
+    "crates/octra-node/src/devnet.rs": "3447f01f09a746c03d1a60d691d5a6d90540a2fafe5dd73cd8c2f19d72cf4571",
+    "crates/octra-node/src/driver.rs": "961109632be0b0f775c3d0029603aa93727b87e2ef006ec38dbbbe0d9151d7ac",
+    "crates/octra-node/src/driver/upgrade.rs": "6010792387775d266e5f9700ae15fb0a61582da29fef29fee4349f679285f724",
+    "crates/octra-node/src/launch.rs": "729b1e505252ef2b3515701ae613d20a37d65e841f2760c10a2ece94ac1d3418",
+    "crates/octra-node/src/network.rs": "ec13abb702043e36be0227f80bc58154f0b33a23ad56bc8a1f21b21d4471790e",
+    "crates/octra-node/src/single/network.rs": "80371c62aef73e7c886fb71a73739df9ac86fff47e7e4976a853578bab90897a",
+    "crates/octra-node/src/single/network/upgrade.rs": "195c8ea414fbeb0f16479010a214027679c0f751a07e36734064d73d9fee7722",
+    "crates/octra-node/src/vpn/payments.rs": "aab02e0c4fa31ff1409a351154f6437ce3685ebbbd210301852a62dfbc24c9a9",
+    "crates/octra-node/src/vpn/payments/canonical_tests.rs": "b78089e0af420ee66b2b0efb9d9b376a495f447661aceb6c7ca82fbe5420339c",
+    "crates/octra-node/src/vpn/payments/tests.rs": "c74f218a3cdcdb113a9ca86c9e6a9fc2bea1ebfbd6d86d135b0ffdc3e57287ef",
+    "crates/octra-node/tests/single_native/facade.rs": "259d41bbe5063387ce8966f4714771ce163beac99f56ee8ddb9e31d6a496ca3c",
+    "docs/rust-node/source-map.json": "6440fdf5895e791ce99ff1904aea396fc88c7e12645846a32702286aa9c17efa",
+    "program/octranet-payments-factory.aml": "479b996c328b6f5e87cb0c033635dcf6d919708fbc49885ef9b9739189e3f533",
+    "program/octranet-payments.aml": "96e494be368351b4cc4832f0d78541813d842f4ab84229749b75a66fcb6c211b",
+    "proofs/lean/OctranetPayments.lean": "3269c304583047605c4b5f8ad8ca669710a0a03bd017eba75f63a12180793d83",
+    "proofs/lean/lakefile.lean": "e0562ca1bc498841b649c5eeadf05b0397a2867720308bfc3990761a7a6249cf",
+    "proofs/lean/lean-toolchain": "f3ea78fdd417d39483583b721709727c225eeea0c0e9d29283de43f577411095",
+    "rust-toolchain.toml": "abd8063388c533b3e6b91666cd66d6229e61d13fc1139d20006492c2980141f5",
+    "scripts/node-port/upgrade-config-fixtures.py": "99148121d0600a7d60c891db1004ae7c186648b469a6a1945f001644e8222161",
+    "scripts/node-port/upgrade-config-oracle.ml": "cd32c91aa82235cacb49a28be061999bffae2ac89dc7284320c44aff79558f2a"
+  },
+  "source_snapshot_sha256": "7ea90149e3724f6e97d0c13588c02f1942e0b0bd546aeab47f23f0045f68c307",
+  "operator_policy": {
+    "operator_unstake_ms": 604800000,
+    "payer_exit_ms": 86400000,
+    "deadline_origin": "first canonical request; retries preserve deadline",
+    "aml_changed_this_batch": false,
+    "compiled_aml_tests": 14
+  },
+  "checks": {
+    "combined_release": {
+      "targets": 14,
+      "passed": 236,
+      "failed": 0,
+      "ignored": 3,
+      "log_sha256": "d10b897ad3122e397ffa421f208944f28d1dd47a5eed77128e80785b397c4d82",
+      "exit_code": 0,
+      "command": "cargo test --offline --locked --release --no-fail-fast --features octra-node/test-helpers -p octra-node-protocol -p octra-node-runtime -p octra-node --lib --test network_upgrade --test network_swarm --test network_session --test network_driver --test network_parity --test swarm_policy_parity --test peer_policy_parity --test octranet_payments --test services --test devnet --test single_native",
+      "source_stage": "Implementation batch before lint-only logging allocation, equivalent negative-test syntax and shared fixture refactors; final affected targets rerun below"
+    },
+    "final_frozen_source": {
+      "targets": 6,
+      "passed": 178,
+      "failed": 0,
+      "ignored": 0,
+      "log_sha256": "f96615245e6261cf6ebf5a7d3a360215fd7ec22284b7c10d746bcc58f2ba7986",
+      "exit_code": 0,
+      "command": "cargo test --offline --locked --release --no-fail-fast --features octra-node/test-helpers -p octra-node -p octra-node-protocol -p octra-node-runtime --lib --test network_upgrade --test upgrade_config_parity --test octranet_payments"
+    },
+    "tcp_upgrade": {
+      "passed": 6,
+      "included_in": "final_frozen_source",
+      "scope": [
+        "mixed binaries before activation",
+        "each trusted schedule field bound",
+        "activation binary and transport mismatch",
+        "rollback binary and transport mismatch",
+        "live profile retirement/reconnect",
+        "consensus readiness separated from transport hash"
+      ]
+    },
+    "native_differential": {
+      "passed": 1,
+      "cases": 496,
+      "verified_upstream_sources": 1158,
+      "fixture_sha256": "70666332c9f7d1e0dc38b5c1eacdb0b820653168b667f837238dccf7c81a31a9",
+      "host_compiler": "4.14.2",
+      "runner_kind": "host-ocaml",
+      "summary_sha256": "2b4e05e8b2726144f550cd6f61de45e7efbf63424c5ba5ef31d9ecf3cea44f63",
+      "native_executable_sha256": "4aab2c25f58387ba58f9d241f9c62491f60c99c4418530841f7a1cb539f9fb90",
+      "instrumentation": "Only a recorded Sys.getenv_opt prefix; native function bodies and dependency sources unchanged",
+      "hermetic": false
+    },
+    "strict_clippy": {
+      "exit_code": 0,
+      "command": "cargo clippy --offline --locked --release --features octra-node/test-helpers -p octra-node-protocol -p octra-node-runtime -p octra-node --lib --bins --tests -- -D warnings",
+      "log_sha256": "dfe246af9ba108bd0081ba561da1a6cd15c09bd37b1892d4c716d55b81252d23"
+    },
+    "rustfmt": {
+      "exit_code": 0,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "python_syntax": {
+      "passed": true,
+      "path": "scripts/node-port/upgrade-config-fixtures.py"
+    },
+    "lean": {
+      "exit_code": 0,
+      "command": "lake build OctranetPayments",
+      "abstract_theorems": 19,
+      "aml_compiler_vm_refinement_proven": false,
+      "log_sha256": "a30d6eefe7ccec7803482bd446c3d48f7cc46ed86ba99cb839fca134dd7a5a3d"
+    }
+  },
+  "review": {
+    "corrected_before_qualification": "Voting readiness requires the selected canonical consensus hash, not the transport/network hash",
+    "vote_paths_reviewed": [
+      "new proposals and votes",
+      "pending vote broadcast",
+      "precommit retry",
+      "finalized vote persistence",
+      "round-sync requests"
+    ],
+    "unresolved_material_findings_in_this_patch": []
+  },
+  "limitations": [
+    "Configured binary identity is trusted local input, without executable attestation or installation",
+    "Native environment getter is explicitly instrumented; real process environment acquisition is not qualified",
+    "The previous native Docker builder was unavailable; host OCaml packages and artifacts were recorded instead",
+    "This is not full upstream node parity or public upgrade rollout qualification",
+    "Public sync/recovery, constrained mesh/DERP admission and stock paid-client integration remain release gates",
+    "Seven-day and 24-hour maturity use canonical-clock AML boundary tests, not elapsed public deployment time",
+    "No Mainnet deployment; running public observer left unchanged"
+  ],
+  "retained_evidence_directory": "/Users/androolloyd/Development/octra/out/transport-upgrades-20261017"
+}

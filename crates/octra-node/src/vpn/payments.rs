@@ -27,6 +27,10 @@ use std::{
 
 use crate::Committed;
 #[cfg(test)]
+#[path = "../../../octra-node-runtime/tests/common/payments_host.rs"]
+#[allow(dead_code)]
+mod test_host;
+#[cfg(test)]
 mod tests;
 mod transport;
 

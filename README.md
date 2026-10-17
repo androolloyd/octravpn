@@ -22,6 +22,8 @@ immutable per-class offers and payer-signed cumulative usage claims. Users exit
 the payment tier after a fixed **24-hour settlement window**; operator stake
 has a separate **seven-day unstake**. Unstaking stops new paid admission, and
 rebonding cannot revive old plans. The protocol takes no commission.
+The seven-day deadline starts at the first unstake request; retries cannot
+shorten or extend it.
 [Design and launch boundaries](docs/architecture/octranet-payment-tier.md) and
 [adversarial review](docs/audit/octranet-payments-2026-10-17.md) distinguish the
 compiled application tests and abstract Lean proofs from deployment qualification.
@@ -36,6 +38,8 @@ The Rust client library exposes the same paid service as the CLI, with explicit
 startup inputs, interface metadata, caller-owned shutdown and durable recovery.
 Its [service review](docs/audit/octranet-client-service-2026-10-17.md) records
 the lifecycle checks and remaining stock-client integration boundaries.
+The node captures trusted [P2P upgrade and rollback schedules](docs/rust-node/transport-upgrades.md)
+and checks the selected canonical consensus configuration before voting.
 
 **Rust node qualification (2026-10-15):** the `octra-node` executable connects the
 native validator driver, authenticated peers, transaction intake, canonical
