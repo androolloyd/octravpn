@@ -1,86 +1,79 @@
-//! Unified admin-router builder shared by the full Hub daemon AND the
-//! Hub-free `mesh serve` shape.
-//!
-//! The wire-protocol admin routes (`/api/v1/machines`, `/api/v1/policy`,
-//! `/api/v1/preauthkeys`, …) are implemented in
-//! [`headscale_api::admin::router`]. Both control-plane shells in
-//! octravpn-node need the same surface, but with two extra concerns
-//! layered on top of the upstream router:
-//!
-//!   1. **Byte-stable 404 (Audit-3 H-1 invariant).** External probes
-//!      MUST not be able to tell whether the admin token is configured.
-//!      The headscale admin auth returns `401` for API requests with
-//!      no/bad bearer; we wrap the whole router in an
-//!      [`octravpn_core::bearer::BearerCheck::hidden`] middleware so
-//!      every reject reason emits `(404, NGINX_404_BODY)` — same shape
-//!      `/events` + `/admin/preauth` already use.
-//!
-//!   2. **Single source of truth.** The full Hub builds [`AdminState`]
-//!      from the `[control]` config block; `mesh serve` builds it from
-//!      its own CLI args + env. Both call [`build_admin_router`] with
-//!      that state, so the on-wire shape never drifts between the two
-//!      shells.
-//!
-//! ## What is NOT in the unified router
-//!
-//! Routes whose implementation requires the *full* Hub assembly
-//! (chain RPC, PVAC sidecar, wallet keypair) stay on the
-//! `ControlState` side of `octravpn-node`. Specifically:
-//!
-//!   - `/session`, `/session/:id` — need the wallet keypair to sign
-//!     receipts and the chain RPC to verify the open-tx.
-//!   - `/events` SSE — needs the in-process `EventBus`.
-//!   - `/metrics` — exposes Hub-internal NodeMetrics counters.
-//!   - The Tailscale-wire surface (`/key`, `/ts2021`, `/machine/...`)
-//!     is mounted by `tailscale_wire_router` independently of this
-//!     admin surface; both shells already mount it.
-//!
-//! Those gaps are intentional and documented in
-//! `docs/operators/mesh-admin.md`.
-
+//! Shared hidden admin surface. API handlers accept the configured bootstrap
+//! bearer or a durable Headscale API key. HTML keeps the static bearer gate.
 use std::sync::Arc;
 
-use axum::Router;
-use octravpn_core::bearer::{bearer_middleware, BearerCheck};
+use axum::{
+    extract::{Request, State},
+    http::{header, StatusCode},
+    middleware::Next,
+    response::{IntoResponse, Response},
+    Router,
+};
+use octravpn_core::bearer::{BearerCheck, NGINX_404_BODY};
 
-/// Re-export so consumers don't need to depend on `headscale_api`
-/// transitively just to construct the admin state.
 pub use headscale_api::admin::{AdminState, AdminStateBuilder};
 
-/// Build the unified admin router.
-///
-/// `admin_token` MUST match the token embedded in `state.auth` — the
-/// outer [`BearerCheck::hidden`] middleware uses it to emit a
-/// byte-stable 404 for every reject reason, and the inner upstream
-/// router re-checks the same token before letting the handler run.
-/// Both checks pass for the same `Bearer <token>` request, so a
-/// correctly-credentialled call lands at the upstream handler exactly
-/// once.
-///
-/// When `admin_token` is `None` the function returns an empty router —
-/// no routes are mounted, so a request to `/api/v1/machines` (or any
-/// other admin URI) hits the *outer* axum router's 404 fallback. This
-/// matches the `/admin/preauth` "endpoint hidden when token unset"
-/// behaviour that `BearerCheck::hidden` already documents.
+/// No bootstrap token disables the entire admin surface, including stored keys.
+/// API authorization stays in Headscale, so key revocation is checked on every
+/// request. Failed authorization keeps the same empty 404 as an absent route.
 pub fn build_admin_router(state: AdminState, admin_token: Option<Arc<str>>) -> Router {
-    let Some(tok) = admin_token else {
-        // No token ⇒ no admin surface. Returning an empty router keeps
-        // the caller code site-symmetric (always `.merge(build_admin_router(...))`)
-        // and lets the outer axum router emit the same 404-shaped
-        // response a non-existent route would emit anyway.
-        return Router::new();
+    let hidden = Router::new()
+        .route("/api/v1", axum::routing::any(hidden_route))
+        .route("/api/v1/*path", axum::routing::any(hidden_route))
+        .route("/admin", axum::routing::any(hidden_route))
+        .route("/admin/*path", axum::routing::any(hidden_route));
+    let Some(token) = admin_token else {
+        return hidden.route("/admin/", axum::routing::any(hidden_route));
     };
-    let check = BearerCheck::hidden(Some(tok));
-    let inner = headscale_api::admin::router(state);
-    // Layer the bearer middleware on the merged router. Every request
-    // to any admin path goes through `bearer_middleware` first; on
-    // reject the upstream handlers never run.
-    Router::new()
-        .merge(inner)
-        .layer(axum::middleware::from_fn_with_state(
-            check,
-            bearer_middleware,
-        ))
+    let gate = AdminGate {
+        check: BearerCheck::hidden(Some(token)),
+        keys: state.api_keys.clone(),
+    };
+    headscale_api::admin::router(state)
+        .merge(hidden)
+        .layer(axum::middleware::from_fn_with_state(gate, hidden_auth))
+}
+
+async fn hidden_route() -> Response {
+    (StatusCode::NOT_FOUND, NGINX_404_BODY).into_response()
+}
+
+#[derive(Clone)]
+struct AdminGate {
+    check: BearerCheck,
+    keys: Arc<dyn headscale_api::admin::ApiKeyAdmin>,
+}
+
+async fn hidden_auth(State(gate): State<AdminGate>, mut request: Request, next: Next) -> Response {
+    if request.uri().path().starts_with("/api/v1/") {
+        let mut values = request.headers().get_all(header::AUTHORIZATION).iter();
+        let bearer = values
+            .next()
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.strip_prefix("Bearer "));
+        if !bearer.is_some_and(|token| !token.is_empty() && token.len() <= 1024)
+            || values.next().is_some()
+        {
+            return (StatusCode::NOT_FOUND, NGINX_404_BODY).into_response();
+        }
+        if gate.check.check(request.headers()).is_err()
+            && !gate.keys.validate(bearer.expect("validated bearer")).await
+        {
+            return (StatusCode::NOT_FOUND, NGINX_404_BODY).into_response();
+        }
+        // API routes require a bearer even if an admin browser session exists.
+        request.headers_mut().remove(header::COOKIE);
+        let response = next.run(request).await;
+        if response.status() == StatusCode::UNAUTHORIZED {
+            return (StatusCode::NOT_FOUND, NGINX_404_BODY).into_response();
+        }
+        response
+    } else {
+        match gate.check.check(request.headers()) {
+            Ok(()) => next.run(request).await,
+            Err(response) => response,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -106,11 +99,10 @@ mod tests {
             .build()
     }
 
-    /// No admin token configured ⇒ the function returns an empty
-    /// `Router`, so a request to `/api/v1/machines` falls through to
-    /// the outer router's 404 fallback (no panic, no route match).
+    /// No admin token configured keeps the entire namespace hidden, even
+    /// when the wire listener has a public fallback.
     #[tokio::test]
-    async fn no_token_returns_empty_router() {
+    async fn no_token_hides_admin_namespace() {
         let r = build_admin_router(dummy_state(""), None);
         // Wrap in an outer router so the unmatched path resolves to a
         // 404 the way an axum app would in production.
@@ -188,5 +180,51 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn api_rejects_cookies_and_ambiguous_authorization() {
+        let state = dummy_state("tok-1");
+        let login = headscale_api::admin::router(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/admin/login")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from("token=tok-1"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(login.status(), StatusCode::SEE_OTHER);
+        let cookie = login.headers()["set-cookie"]
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_owned();
+        let app = build_admin_router(state, Some(Arc::from("tok-1")));
+        for (bearer, duplicate) in [(None, false), (Some("wrong"), false), (Some("tok-1"), true)] {
+            let mut request = Request::builder()
+                .uri("/api/v1/machines")
+                .header("cookie", &cookie);
+            if let Some(bearer) = bearer {
+                request = request.header("authorization", format!("Bearer {bearer}"));
+            }
+            if duplicate {
+                request = request.header("authorization", "Bearer other");
+            }
+            let response = app
+                .clone()
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+            assert_eq!(
+                to_bytes(response.into_body(), 64).await.unwrap().as_ref(),
+                NGINX_404_BODY
+            );
+        }
     }
 }

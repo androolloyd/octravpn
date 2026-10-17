@@ -33,6 +33,35 @@ fn launch(directory: &Path, address: &str) -> Daemon {
             .unwrap(),
     )
 }
+fn launch_config(directory: &Path, address: &str) -> Daemon {
+    let parent = directory.parent().unwrap();
+    let token = parent.join("admin.token");
+    std::fs::write(&token, TOKEN).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let config = parent.join("mesh.json");
+    std::fs::write(
+        &config,
+        serde_json::to_vec(&json!({
+            "state_dir":"wire", "admin_token_file":"admin.token", "http_addr":address,
+            "dns":{"base_domain":"octranet.test", "override_local_dns":false}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    Daemon(
+        Command::new(env!("CARGO_BIN_EXE_octravpn-node"))
+            .args(["mesh", "run", "--service-config"])
+            .arg(config)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    )
+}
 async fn ready(http: &reqwest::Client, base: &str) {
     tokio::time::timeout(Duration::from_secs(15), async {
         loop {
@@ -155,6 +184,48 @@ async fn cli_admin_and_wire_enrollment_share_durable_keys_and_revocation() {
         .find(|row| row["key"] == reusable["key"])
         .unwrap()["id"]
         .clone();
+    let policy = "// durable operator ACL\n{\"acls\":[],}";
+    assert_eq!(
+        http.put(format!("{base}/api/v1/policy"))
+            .bearer_auth(TOKEN)
+            .body(policy)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        reqwest::StatusCode::OK
+    );
+    let api_key: Value = http
+        .post(format!("{base}/api/v1/apikey"))
+        .bearer_auth(TOKEN)
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let api_token = api_key["api_key"].as_str().unwrap();
+    assert_eq!(
+        http.get(format!("{base}/api/v1/users"))
+            .bearer_auth(api_token)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        reqwest::StatusCode::OK
+    );
+    assert_eq!(
+        http.get(format!("{base}/admin/"))
+            .bearer_auth(api_token)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        reqwest::StatusCode::NOT_FOUND
+    );
     drop(daemon); // An abrupt exit must not reset credential use or expiry.
 
     let store = MeshStore::open(&state, Arc::new(MachineRegistry::new()))
@@ -194,8 +265,63 @@ async fn cli_admin_and_wire_enrollment_share_durable_keys_and_revocation() {
     );
     drop(store);
 
-    let daemon = launch(&state, &address);
+    let daemon = launch_config(&state, &address);
     ready(&http, &base).await;
+    let restored_policy: Value = http
+        .get(format!("{base}/api/v1/policy"))
+        .bearer_auth(api_token)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(restored_policy["loaded"], true);
+    assert_eq!(restored_policy["raw"], policy);
+    assert_eq!(
+        http.put(format!("{base}/api/v1/policy"))
+            .bearer_auth(api_token)
+            .body("invalid")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        reqwest::StatusCode::BAD_REQUEST
+    );
+    let api_rows: Value = http
+        .get(format!("{base}/api/v1/apikey"))
+        .bearer_auth(api_token)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let api_rows = api_rows["api_keys"].as_array().unwrap();
+    assert_eq!(api_rows.len(), 1);
+    assert_eq!(
+        http.post(format!("{base}/api/v1/apikey/expire"))
+            .bearer_auth(TOKEN)
+            .json(&json!({"id":api_rows[0]["id"]}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        reqwest::StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        http.get(format!("{base}/api/v1/users"))
+            .bearer_auth(api_token)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        reqwest::StatusCode::NOT_FOUND
+    );
     let restored = keys(&http, &base).await;
     let row = restored
         .iter()
@@ -244,6 +370,18 @@ async fn cli_admin_and_wire_enrollment_share_durable_keys_and_revocation() {
     assert!(machines.iter().any(|machine| machine["name"] == "test-mac"));
     drop(daemon);
 
+    let daemon = launch(&state, &address);
+    ready(&http, &base).await;
+    assert_eq!(
+        http.get(format!("{base}/api/v1/users"))
+            .bearer_auth(api_token)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        reqwest::StatusCode::NOT_FOUND
+    );
+    drop(daemon);
     let store = MeshStore::open(&state, Arc::new(MachineRegistry::new()))
         .await
         .unwrap();
@@ -262,10 +400,38 @@ async fn cli_admin_and_wire_enrollment_share_durable_keys_and_revocation() {
         let path = entry.unwrap().path();
         if path.is_file() {
             let bytes = std::fs::read(path).unwrap();
-            for secret in [&single["key"], &reusable["key"], &default["key"]] {
+            for secret in [
+                &single["key"],
+                &reusable["key"],
+                &default["key"],
+                &api_key["api_key"],
+            ] {
                 let secret = secret.as_str().unwrap().as_bytes();
                 assert!(!bytes.windows(secret.len()).any(|window| window == secret));
             }
         }
+    }
+}
+
+#[tokio::test]
+async fn configured_knock_without_a_valid_psk_refuses_startup() {
+    for psk in [None, Some("invalid-psk")] {
+        let temp = tempfile::tempdir().unwrap();
+        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_octravpn-node"));
+        command
+            .args(["mesh", "serve", "--listen", "127.0.0.1:0", "--state-dir"])
+            .arg(temp.path())
+            .env("OCTRAVPN_KNOCK_ENABLED", "1")
+            .env_remove("OCTRAVPN_KNOCK_PSK")
+            .kill_on_drop(true);
+        if let Some(psk) = psk {
+            command.env("OCTRAVPN_KNOCK_PSK", psk);
+        }
+        let result = tokio::time::timeout(Duration::from_secs(5), command.output())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!result.status.success());
+        assert!(String::from_utf8(result.stderr).unwrap().contains("knock"));
     }
 }

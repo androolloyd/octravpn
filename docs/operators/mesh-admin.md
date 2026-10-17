@@ -1,29 +1,30 @@
 # Mesh admin surface
 
 The mesh admin surface is the HTTP control plane the operator uses to
-inspect and mutate a running mesh. It is mounted by BOTH:
+inspect and mutate a running mesh. It is mounted by:
 
 - the **full Hub daemon** (`octravpn-node` with `[control]` + `[chain]`
   configured), and
 - the **Hub-free `mesh serve`** shell
   (`octravpn-node mesh serve --admin-token <T>`) used in the
-  `mesh-demo` and `tailscale-interop` docker stacks.
+  `mesh-demo` and `tailscale-interop` docker stacks; and
+- the native `octra-node` process when its `mesh` service is configured.
 
-Both shells call the same `octravpn_mesh::build_admin_router` builder
+The hosts call the same `octravpn_mesh::build_admin_router` builder
 over an `AdminState`, so the on-wire shape never drifts between them.
 The Hub mounts it when its Tailscale wire state directory is configured.
-Both listeners share persistent users, machine registrations and preauth
-credentials with their wire registration path. Minting, single-use redemption,
+The listeners share persistent users, machine registrations, preauth
+credentials, API keys and ACL policy with their wire registration path. Minting, single-use redemption,
 expiry and revocation use the same `machines.sqlite` database.
 
 ## Auth posture
 
-The whole admin router is wrapped in
-`octravpn_core::bearer::BearerCheck::hidden`. Every reject reason
-(no token configured, missing header, wrong bearer) returns the
-byte-stable `(404, NGINX_404_BODY)` shape — same Audit-3 H-1 invariant
-`/events` and `/admin/preauth` already enforce. An external probe can
-NOT tell whether the surface exists.
+The bootstrap bearer enables the admin surface. JSON API routes also accept
+persisted Headscale API keys; revocation is checked on every request. HTML
+routes and the legacy `/admin/preauth` shim require the bootstrap bearer.
+Missing, invalid, expired or revoked credentials receive the same empty 404.
+Browser cookies cannot authorize the API, and ambiguous Authorization headers
+are rejected before routing.
 
 To call the surface successfully:
 
@@ -38,13 +39,96 @@ The token is configured via:
 |-|-|
 | Full Hub | `[control].admin_token` in `node.toml` (or the `OCTRAVPN_ADMIN_TOKEN` env var as fallback) |
 | `mesh serve` | `--admin-token <T>` CLI flag (or the `OCTRAVPN_ADMIN_TOKEN` env var) |
+| `octra-node` | `mesh.admin_token_file`; owner-only permissions on Unix |
 
-If the token is unset, the surface is not mounted at all — requests fall
-through to the outer axum 404 fallback, which emits the same on-wire
-bytes as the Hidden-mode rejection. Operators MUST set a long random
+If the token is unset, all admin routes remain hidden behind empty 404
+responses, including on the public wire listener with its blank-200 fallback. Operators MUST set a long random
 token in production.
 
-## Routes mounted in BOTH shells
+## Native node configuration
+
+Add `mesh` to the public-network or isolated devnet JSON configuration. Private
+Single uses the same object under `single.services.mesh`:
+
+```json
+{
+  "mesh": {
+    "state_dir": "mesh",
+    "tailnet_id": "personal-octranet",
+    "http_addr": "127.0.0.1:51821",
+    "https_addr": "0.0.0.0:443",
+    "hostname": "control.example.com",
+    "control_url": "https://control.example.com",
+    "admin_token_file": "secrets/mesh-admin.token",
+    "tls": {"certificate": "tls/fullchain.pem", "key": "tls/key.pem"},
+    "dns": {
+      "base_domain": "mesh.example.com",
+      "override_local_dns": false,
+      "extra_records": [
+        {"name": "circles.example.com", "type": "A", "value": "100.64.0.1"}
+      ]
+    },
+    "serve_derp": true
+  }
+}
+```
+
+File paths resolve against the node configuration's directory. The mesh service
+owns its state directory exclusively and runs within the node's supervised
+lifecycle. It retains its Noise identity, enrollment, API keys and ACL across
+restarts. Omit `tls` only for development with explicitly trusted self-signed
+certificates. Use HTTPS for remote administration; plaintext HTTP is intended
+for a loopback reverse-proxy backend or an isolated test network.
+
+The same service can run separately with `octravpn-node mesh run --service-config
+mesh.json`; that JSON contains the mesh object itself. This supports a control
+endpoint reachable over an existing VPN IP. Stock Tailscale needs to reach its
+selected control endpoint before establishing a new tunnel, so first enrollment
+needs an existing route, an optional reachable operator bootstrap, or a local
+compatibility adapter. A deployment is not required to share a central bootstrap.
+
+DNS configuration is distributed through client netmaps. An extra record directs
+clients to a reachable service address; it does not create the gateway, a route,
+a certificate or an `oct://` handler. The Circle gateway retains its separate
+`gateway` configuration and requires an HTTPS reverse proxy. This configuration
+does not enroll the local OS client or establish its VPN connection.
+
+The gateway's `sites` map binds HTTPS DNS hostnames to published Circle assets:
+
+```json
+{
+  "gateway": {
+    "listen": "127.0.0.1:20803",
+    "origin": "https://circles.octra.to",
+    "sites": {"octra.to": "<published-Circle-address>"}
+  }
+}
+```
+
+For example, `/index.html` on `octra.to` resolves that Circle's `/index.html`.
+HTML, CSS and subresources retain canonical snapshot checks and Circle isolation.
+Missing assets return an error; there is no local website directory fallback.
+Only configured hosts are accepted. The `sites` map creates no DNS records,
+certificates or VPN routes. The HTTPS proxy must route native Tailscale control
+and DERP paths to the mesh service; website paths go to the Circle gateway.
+
+## Durable policy and API keys
+
+Successful ACL updates commit to `machines.sqlite` before becoming live. A
+failed write leaves the previous policy in place. Startup loads the persisted
+policy before opening listeners; unreadable or malformed stored policy aborts
+startup. An explicit empty ACL remains deny-all after a restart. A fresh store
+with no ACL retains Headscale's existing default policy behavior.
+
+When Circle membership controls the Hub or `mesh serve` policy, admin policy
+replacement returns 403. The verified Circle source owns those ACL updates.
+
+`POST /api/v1/apikey` mints a key once. `GET /api/v1/apikey` returns metadata,
+`POST /api/v1/apikey/expire` revokes by `id` or `prefix`, and
+`DELETE /api/v1/apikey/:prefix` removes it. Stored keys are hashed. Turning off
+the bootstrap token disables the whole admin surface, including stored keys.
+
+## Routes mounted in each host
 
 | Method + path | Purpose | Source |
 |-|-|-|

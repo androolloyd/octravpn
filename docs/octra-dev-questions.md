@@ -38,6 +38,16 @@ plus a docs update so we can stop re-deriving the behavior.
 
 ## 1. AML → HFHE host-call bridge
 
+**2026-10-17 recheck:** the observations below are historical. The old daily
+probe used obsolete named RPC arguments and called `probe_load_pk`, which is
+absent from the deployed ABI. Its actual view is `probe_addr_view`. The selected
+wallet currently has no registered PVAC key on either queried endpoint, and
+Mainnet has no copy of that devnet probe. Its revert cannot now establish a
+bridge defect. Current checks are in [the audit status](audit/fhe-load-pk-status.json)
+and the read-only `scripts/probes/fhe_load_pk.py` diagnostic. Local compiled AML
+key loading is covered by `crates/octra-node-runtime/tests/fhe_load_pk.rs`;
+public stateful HFHE settlement remains unqualified.
+
 ### Observed
 
 Every `fhe_*` AML host call reverts on newly-deployed contracts on devnet.

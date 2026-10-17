@@ -17,6 +17,8 @@ pub struct Services {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gateway: Option<crate::gateway::Config>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh: Option<octravpn_node::mesh_control::Config>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vpn: Option<Vpn>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub network: Option<super::network::Config>,
@@ -126,6 +128,10 @@ pub async fn run(
                     .await?;
                 Ok(())
             });
+        }
+        if let Some(mesh) = services.mesh {
+            let service = mesh.bind().await?;
+            tasks.spawn(service.run(stopped.clone()));
         }
         if let Some(gateway) = services.gateway {
             let service = facade.published().bind_gateway(gateway).await?;

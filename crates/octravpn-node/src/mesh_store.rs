@@ -2,8 +2,8 @@
 use anyhow::{Context, Result};
 use octravpn_mesh::{
     headscale_api::admin::{
-        PersistentMachineAdmin, PersistentPreauthAdmin, PersistentUserAdmin, PreauthAdmin,
-        PreauthAdminKey, PreauthMintRequest, UserAdmin, UserRegistryError,
+        PersistentApiKeyAdmin, PersistentMachineAdmin, PersistentPreauthAdmin, PersistentUserAdmin,
+        PreauthAdmin, PreauthAdminKey, PreauthMintRequest, UserAdmin, UserRegistryError,
     },
     MachineRegistry,
 };
@@ -14,6 +14,10 @@ pub struct MeshStore {
     pub machines: Arc<PersistentMachineAdmin>,
     pub users: Arc<PersistentUserAdmin>,
     pub preauth: Arc<PersistentPreauthAdmin>,
+    pub api_keys: Arc<PersistentApiKeyAdmin>,
+    pub policy: octravpn_mesh::policy::PolicyStore,
+    policy_storage: Arc<dyn octravpn_mesh::policy::persistence::PolicyPersistence>,
+    policy_managed: bool,
 }
 
 impl MeshStore {
@@ -28,11 +32,31 @@ impl MeshStore {
                 .with_wire_registry(registry.clone()),
         );
         machines.hydrate_wire_registry(&registry).await?;
+        let api_keys = Arc::new(PersistentApiKeyAdmin::new(db.pool().clone()));
+        let policy = octravpn_mesh::policy::PolicyStore::new();
+        let policy_storage = Arc::new(db.pool().clone());
+        octravpn_mesh::admin_surface::AdminState::builder()
+            .policy(policy.clone())
+            .policy_persistence(policy_storage.clone())
+            .build()
+            .load_policy_from_persistence()
+            .await
+            .map_err(anyhow::Error::msg)
+            .context("load mesh policy")?;
         Ok(Self {
             machines,
             users,
             preauth,
+            api_keys,
+            policy,
+            policy_storage,
+            policy_managed: false,
         })
+    }
+
+    pub(crate) fn managed_policy(mut self, managed: bool) -> Self {
+        self.policy_managed = managed;
+        self
     }
 
     /// The legacy mint endpoint creates its named user as before, but its
@@ -71,7 +95,10 @@ impl MeshStore {
             .users_arc(self.users.clone())
             .machines(self.machines.clone())
             .preauth(self.preauth.clone())
+            .api_keys(self.api_keys.clone())
             .policy(policy)
+            .policy_persistence(self.policy_storage.clone())
+            .policy_read_only(self.policy_managed)
             .build();
         octravpn_mesh::admin_surface::build_admin_router(state, token)
     }

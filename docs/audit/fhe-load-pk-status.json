@@ -1,1 +1,72 @@
-{"schemaVersion":1,"label":"fhe_load_pk","message":"blocked (reverts)","color":"yellow","bridge_status":"blocked","last_check":"2026-05-20T00:00:00Z","probes":{"baseline":"true","private_predict":"false","probe_load_pk":"false"},"errors":{"private_predict":"execution reverted","probe_load_pk":"execution reverted"},"workflow":"fhe-load-pk-probe","source":"docs/octra-dev-questions.md §1"}
+{
+  "schemaVersion": 1,
+  "label": "fhe_load_pk",
+  "message": "test key not registered",
+  "color": "lightgrey",
+  "bridge_status": "inconclusive",
+  "last_check": "2026-10-17T01:46:48.842990+00:00",
+  "rpc_url": "https://devnet.octrascan.io/rpc",
+  "wallet": "oct8Tdgu4RLbSGah1fVoVHW4T4cLFDmsoKhTyVD8gCndNFm",
+  "program": "octaUNQtHpsmGrd4m4pftsjhE7zYwK4fVEgsDTKQ4BsXDRB",
+  "method": "probe_addr_view",
+  "probes": {
+    "baseline": "false"
+  },
+  "errors": {
+    "baseline": "No registered PVAC key for the selected test wallet"
+  },
+  "scope": "Read-only legacy program diagnostic; no paid traffic, encrypted settlement or Mainnet qualification.",
+  "historical_observation": {
+    "schemaVersion": 1,
+    "label": "fhe_load_pk",
+    "message": "blocked (reverts)",
+    "color": "yellow",
+    "bridge_status": "blocked",
+    "last_check": "2026-05-20T00:00:00Z",
+    "probes": {
+      "baseline": "true",
+      "private_predict": "false",
+      "probe_load_pk": "false"
+    },
+    "errors": {
+      "private_predict": "execution reverted",
+      "probe_load_pk": "execution reverted"
+    },
+    "workflow": "fhe-load-pk-probe",
+    "source": "docs/octra-dev-questions.md \u00a71"
+  },
+  "mainnet": {
+    "schemaVersion": 1,
+    "label": "fhe_load_pk",
+    "message": "test key not registered",
+    "color": "lightgrey",
+    "bridge_status": "inconclusive",
+    "last_check": "2026-10-17T01:46:49.212760+00:00",
+    "rpc_url": "https://octra.network/rpc",
+    "wallet": "oct8Tdgu4RLbSGah1fVoVHW4T4cLFDmsoKhTyVD8gCndNFm",
+    "program": "octaUNQtHpsmGrd4m4pftsjhE7zYwK4fVEgsDTKQ4BsXDRB",
+    "method": "probe_addr_view",
+    "probes": {
+      "baseline": "false"
+    },
+    "errors": {
+      "baseline": "No registered PVAC key for the selected test wallet"
+    },
+    "scope": "Read-only legacy program diagnostic; no paid traffic, encrypted settlement or Mainnet qualification."
+  },
+  "local_rust": {
+    "status": "PASS_COMPILED_AML_KEY_LOAD",
+    "production_parameter_key": true,
+    "public_network_qualified": false,
+    "test": "crates/octra-node-runtime/tests/fhe_load_pk.rs",
+    "negative_controls": [
+      "no registered key",
+      "registered key without a source",
+      "corrupt stored key",
+      "missing stored blob"
+    ],
+    "state_unchanged": true
+  },
+  "workflow": "fhe-load-pk-probe; fresh reports retained as workflow artifacts",
+  "read_only_observations": "fhe-load-pk-2026-10-17.json"
+}

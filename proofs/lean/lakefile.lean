@@ -28,3 +28,7 @@ lean_lib WireProtocol where
 @[default_target]
 lean_lib OctraVPN_V4 where
   roots := #[`OctraVPN_V4]
+
+@[default_target]
+lean_lib OctranetPayments where
+  roots := #[`OctranetPayments]

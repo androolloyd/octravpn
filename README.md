@@ -6,7 +6,7 @@
 
 A decentralized VPN — Tailscale-style mesh with on-chain coordination —
 that runs on Octra. Operators stake OCT, sessions escrow their traffic cost in
-OCT, and traffic flows over WireGuard. Settlement is **two-tx**: the operator
+OCT, and traffic flows over WireGuard. Existing v5 settlement is **two-tx**: the operator
 claims bytes and the agreed charge, then the client confirms that exact amount.
 The current application uses private admin credentials; historical owner,
 tailnet and slashing variants below retain their own separate deployment scope.
@@ -16,6 +16,16 @@ There is no VPN protocol commission; ordinary Octra transaction fees are
 separate. The [canary candidate](docs/audit/2026-10-11-canary-security.md)
 remains unqualified for launch. [First-party integration](docs/octra-vpn-inclusion.md)
 tracks Circle applications, ExEx and the Rust node's qualification boundaries.
+
+The staged [Octranet payment application](program/octranet-payments.aml) adds
+immutable per-class offers and payer-signed cumulative usage claims. Users exit
+the payment tier after a fixed **24-hour settlement window**; operator stake
+has a separate **seven-day unstake**. Unstaking stops new paid admission, and
+rebonding cannot revive old plans. The protocol takes no commission.
+[Design and launch boundaries](docs/architecture/octranet-payment-tier.md) and
+[adversarial review](docs/audit/octranet-payments-2026-10-17.md) distinguish the
+compiled application tests and abstract Lean proofs from the forwarding and
+portal work still required. This candidate is not deployed to Mainnet.
 
 **Rust node qualification (2026-10-15):** the `octra-node` executable connects the
 native validator driver, authenticated peers, transaction intake, canonical
@@ -446,16 +456,13 @@ cargo test --workspace
 
 ## What's blocked
 
-- **End-to-end HFHE settle / claim_earnings on devnet**: the devnet
-  RPC body cap was raised on 2026-05-18 — `octra cast register-pvac`
-  now confirms a ~4 MB PVAC pubkey on devnet. The remaining blocker
-  is chain-side: `fhe_load_pk` reverts inside AML for our contracts
-  even after a successful pubkey registration via
-  `octra_registerPvacPubkey` (see `docs/octra-dev-questions.md §1`
-  and `memory/octra_aml_fhe_load_pk_blocked.md`). The PVAC sidecar
-  has cleared the AES KAT gate and produces chain-compatible blobs;
-  the gap is the AML ↔ HFHE bridge being unwired for caller-supplied
-  pubkeys.
+- **Public HFHE settlement remains unqualified.** The May 20 key-load
+  blocker was historical. The October 17 recheck found no registered key
+  for its test wallet, outdated RPC arguments and a nonexistent probe method.
+  Actual compiled AML loads and serializes a production-profile key in the
+  local Rust runtime, including missing/corrupt-source controls. Public devnet
+  and Mainnet require fresh registered-key execution evidence before encrypted
+  settlement can be claimed. See [current observations](docs/audit/fhe-load-pk-status.json).
 
 ## Threat model
 

@@ -278,6 +278,7 @@ impl<A: Host> Node<A> {
             committed: Committed { head, assets },
             router,
             revocation,
+            observed_at: std::time::Instant::now(),
         })
     }
 

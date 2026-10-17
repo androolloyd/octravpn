@@ -18,7 +18,7 @@
 # let the rendered tape catch a bug than execute non-command JSON data
 # typed into a `cat > /tmp/foo.json` heredoc):
 #
-#   * `Type "<text>"`  and  `Type \`<text>\``  are extracted; the
+#   * Double-quoted, single-quoted and backtick `Type` lines are extracted; the
 #     surrounding quote / backtick is stripped, internal escaped
 #     quotes are unescaped.
 #   * A typed line that starts with `#` (after the quote strip) is
@@ -98,6 +98,11 @@ mapfile -t TYPED < <(
             line = substr($0, 7)
             line = substr(line, 1, length(line) - 1)
             print "CMD:" line
+            next
+        }
+        # VHS also accepts a single quote around the typed command.
+        substr($0, 1, 5) == "Type " && substr($0, 6, 1) == sprintf("%c", 39) {
+            print "CMD:" substr($0, 7, length($0) - 7)
             next
         }
         # Capture Sleep <dur>  — convert ms / s to seconds.
@@ -188,6 +193,7 @@ start_persistent_shell() {
     # that reference relative paths (`docker-compose.yml`, etc.) resolve
     # correctly regardless of where preflight-tape.sh was invoked from.
     printf 'cd %q\n' "${REPO_ROOT}" >&9
+    printf 'export TERM=xterm-256color\n' >&9
 }
 
 stop_persistent_shell() {
@@ -224,9 +230,12 @@ run_cmd_persistent() {
     # (mirroring vhs's `Type "FOO=..."` form used to thread the resolved
     # circle id through subsequent docker exec calls).
     local is_assignment=0
+    local persistent=0
     if [[ "${cmd}" =~ ^[[:space:]]*[A-Za-z_][A-Za-z_0-9]*= ]]; then
         is_assignment=1
+        persistent=1
     fi
+    case "${cmd}" in source\ *|.\ *|cd\ *|export\ *) persistent=1 ;; esac
     {
         # Honour any pre-existing `&&`/`||` chain by wrapping in a
         # subshell.  bash 4+ `timeout` isn't a builtin; we use the
@@ -234,7 +243,7 @@ run_cmd_persistent() {
         # background-PID kill if not (macOS dev hosts have neither
         # `timeout` nor `gtimeout` by default — Docker for Mac
         # includes coreutils though, so most paths are covered).
-        if (( is_assignment == 1 )); then
+        if (( persistent == 1 )); then
             # Run directly so `FOO=$(...)` persists across commands.
             # Auto-export the leading identifier so subsequent
             # `bash -c "cmd ... $FOO"` invocations (which run in a
@@ -246,9 +255,11 @@ run_cmd_persistent() {
             _ident=$(printf '%s' "${cmd}" \
                 | sed -nE 's/^[[:space:]]*([A-Za-z_][A-Za-z_0-9]*)=.*/\1/p')
             printf '{ %s ; } </dev/null\n' "${cmd}"
-            if [[ -n "${_ident}" ]]; then
+            printf '_OCTRA_PREFLIGHT_EXIT=$?\n'
+            if (( is_assignment == 1 )) && [[ -n "${_ident}" ]]; then
                 printf 'export %s\n' "${_ident}"
             fi
+            printf 'echo "%s:${_OCTRA_PREFLIGHT_EXIT}" 1>&2\n' "${sentinel}"
         elif command -v timeout >/dev/null 2>&1; then
             printf 'timeout %ss bash -c %q </dev/null\n' "${per_cmd_timeout}" "${cmd}"
         elif command -v gtimeout >/dev/null 2>&1; then
@@ -256,7 +267,9 @@ run_cmd_persistent() {
         else
             printf '{ %s ; } </dev/null\n' "${cmd}"
         fi
-        printf 'echo "%s:$?" 1>&2\n' "${sentinel}"
+        if (( persistent == 0 )); then
+            printf 'echo "%s:$?" 1>&2\n' "${sentinel}"
+        fi
     } >&9
     # Poll the stderr file for the sentinel; bail after 2× per-cmd
     # timeout so a single hung command never wedges the whole tape.
@@ -400,6 +413,10 @@ done
 printf '\nPREFLIGHT: %d/%d PASS, %d FAIL  (%s)\n' \
     "${passed}" "${total}" "${failed}" "$(basename "${TAPE}")"
 
+if (( total == 0 )); then
+    echo 'preflight-tape: no commands were checked' >&2
+    exit 1
+fi
 if (( failed > 0 )); then
     exit 1
 fi

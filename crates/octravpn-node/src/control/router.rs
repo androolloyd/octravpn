@@ -51,7 +51,13 @@ pub(crate) fn router_axum(state: Arc<ControlState>) -> Router {
         // See `docs/tailscale-interop-blocker.md` for what this
         // does *not* (yet) deliver — chiefly the real Tailscale
         // wire protocol behind `/key` + `/machine/{node_key}/…`.
-        .route("/admin/preauth", post(handlers::preauth::mint_preauth))
+        .route(
+            "/admin/preauth",
+            post(handlers::preauth::mint_preauth).layer(middleware::from_fn_with_state(
+                state.bearer_admin(),
+                octravpn_core::bearer::bearer_middleware,
+            )),
+        )
         // Wallet-native device enrollment. Both routes 404 when this
         // node isn't hosting a tailnet (`ControlState::enroll` is
         // `None`), so the surface stays invisible unless configured.

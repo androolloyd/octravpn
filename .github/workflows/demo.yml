@@ -53,7 +53,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: androolloyd/headscale-rs
-          ref: 7b6b71b245ceff25f27a400588d78dd28e6e340f
+          ref: 5662f202a8448364cb212a12c0489216c74ab6ca
           path: headscale-rs
 
       - name: Install vhs + ttyd + ffmpeg + espeak-ng
@@ -421,7 +421,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: androolloyd/headscale-rs
-          ref: 7b6b71b245ceff25f27a400588d78dd28e6e340f
+          ref: 5662f202a8448364cb212a12c0489216c74ab6ca
           path: headscale-rs
 
       - name: Install vhs + jq + openssl + espeak-ng

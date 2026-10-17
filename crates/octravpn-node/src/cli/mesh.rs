@@ -29,6 +29,12 @@ impl Subcommand for MeshArgs {
 
 #[derive(clap::Subcommand, Debug)]
 pub(crate) enum MeshCmd {
+    /// Run the shared native mesh service from a JSON configuration, including
+    /// private token files, DNS and operator-supplied TLS certificates.
+    Run {
+        #[arg(long)]
+        service_config: std::path::PathBuf,
+    },
     /// Mint a fresh preauth key. Writes the key to stdout as a single
     /// line — easy to consume from a shell harness:
     ///
@@ -177,6 +183,21 @@ pub(crate) enum MeshCmd {
 #[allow(clippy::unnecessary_wraps)]
 pub(crate) async fn run_mesh_cmd(sub: MeshCmd, cfg_path: &str) -> Result<()> {
     match sub {
+        MeshCmd::Run { service_config } => {
+            use std::io::Read;
+            let mut bytes = Vec::new();
+            std::fs::File::open(&service_config)?
+                .take(65_537)
+                .read_to_end(&mut bytes)?;
+            anyhow::ensure!(bytes.len() <= 65_536, "mesh configuration exceeds 64 KiB");
+            let mut config: crate::mesh_control::Config = serde_json::from_slice(&bytes)?;
+            config.resolve_paths(
+                std::fs::canonicalize(service_config)?
+                    .parent()
+                    .context("mesh configuration directory")?,
+            );
+            run_bound_service(config.bind().await?).await
+        }
         MeshCmd::MintPreauth {
             user,
             reusable,
@@ -308,310 +329,48 @@ async fn run_mesh_serve(
     serve_derp: bool,
     members_policy: Option<crate::members_policy::MembersPolicySync>,
 ) -> Result<()> {
-    use axum::{
-        extract::State,
-        http::{HeaderMap, StatusCode},
-        response::IntoResponse,
-        routing::post,
-        Json, Router,
-    };
-    use octravpn_mesh::{
-        ip_alloc::TailnetIpAllocator,
-        tailscale_wire::{
-            derp_config::{empty_derp_map, load_derp_map},
-            serve::{serve as wire_serve, ServeConfig, TrustedProxyConfig},
-            tls::{SanConfig, TlsMaterialSource},
-            MachineRegistry,
-        },
-        ServerNoiseKey, DEFAULT_PREAUTH_TTL,
-    };
-    use serde::{Deserialize, Serialize};
-    use std::{net::SocketAddr, sync::Arc};
-
-    // Admin token resolution: explicit > env > absent.
-    let admin_token = admin_token.or_else(|| std::env::var("OCTRAVPN_ADMIN_TOKEN").ok());
-    if serve_derp && https_listen.is_empty() {
-        anyhow::bail!(
-            "mesh serve --serve-derp requires --https-listen so DERP reuses the control TLS cert"
-        );
-    }
-
-    let state_dir_path = std::path::PathBuf::from(&state_dir);
-    let server_noise_key = Arc::new(
-        ServerNoiseKey::load_or_generate(&state_dir_path)
-            .context("load tailscale_wire noise static key")?,
-    );
-    // Wall 6: optional DERP-map fixture for the interop harness. The
-    // env var points at a JSON file in the same shape as the on-wire
-    // `DerpMap`. Unset (the production default) ⇒ empty map ⇒ same
-    // behaviour as pre-Wall-6. See
-    // `docs/tailscale-interop-blocker.md` 2026-05-19 §"Wall 6 closed".
-    let native_derp = if serve_derp {
-        Some(crate::native_derp::load_native_derp_runtime(
-            &state_dir_path,
-        )?)
-    } else {
-        None
-    };
-    let derp_map = if serve_derp {
-        // DERP reuses the control TLS cert on the HTTPS surface, so the
-        // self-advertised region must point at the port `--https-listen`
-        // actually binds (validated non-empty above), not a hardcoded 443.
-        let derp_port = https_listen
-            .parse::<SocketAddr>()
-            .context("parse https listen addr for DERP map")?
-            .port();
-        eprintln!(
-            "mesh serve: native DERP enabled on /derp (host_name={cert_hostname}:{derp_port}, key={})",
-            state_dir_path.join("derp.key").display()
-        );
-        crate::native_derp::self_derp_map(cert_hostname.clone(), derp_port)
-    } else {
-        match std::env::var("OCTRAVPN_DERP_MAP_PATH") {
-            Ok(path) if !path.is_empty() => {
-                let map = load_derp_map(std::path::Path::new(&path))
-                    .with_context(|| format!("load DERP map from {path}"))?;
-                eprintln!(
-                    "mesh serve: loaded DERP map from {path} ({} region(s))",
-                    map.regions.len()
-                );
-                map
-            }
-            _ => empty_derp_map(),
-        }
-    };
-    // Shared handles: the wire layer + the admin router both need to
-    // see the same `MachineRegistry` (so `GET /api/v1/machines` reflects
-    // the real wire roster) and the same `PolicyStore` (so
-    // `PUT /api/v1/policy` lands a doc the wire `/map` handler will see
-    // on its next poll). Cloning the `Arc`s is the standard headscale-rs
-    // wiring — see `tests/policy_e2e.rs` for the in-process proof.
-    let machines = Arc::new(MachineRegistry::new());
-    // Durable registrations: hydrate the in-memory registry from the SQLite
-    // store under --state-dir so a restart keeps node identities and IPs.
-    let stores = crate::mesh_store::MeshStore::open(&state_dir_path, machines.clone()).await?;
-    let registration_store = stores.machines.clone();
-    let policy = octravpn_mesh::policy::PolicyStore::new();
-    if members_policy.is_some() {
-        // The durable registry is already hydrated. Deny every packet until
-        // a fresh anchored set verifies, including after a restart.
-        crate::members_policy::install_boot_deny_all(&policy)?;
-    }
-    // The admin surface (when mounted) holds `Arc` clones of `machines`
-    // + `policy`, so a `PUT /api/v1/policy` mutates the same store the
-    // wire `/map` handler reads. An empty policy store ⇒ the wire layer
-    // falls back to `allow_all_packet_filter`. The PSK-gated knock layer
-    // is opt-in via `[control.knock]` in node.toml (env-sourced here);
-    // every other field takes the builder's octra defaults.
-    // Item 4: the anchored member set replaces the allow-all fallback in
-    // the same `PolicyStore` the wire `/map` handler reads, and — unless the
-    // operator turned enforcement off — also gates registration, so a
-    // non-member never reaches the roster at all. The gate is taken before
-    // `run` consumes the sync; both share one membership snapshot.
-    let registration_gate = members_policy
-        .as_ref()
-        .and_then(crate::members_policy::MembersPolicySync::registration_gate);
-    let ws = octravpn_mesh::WireStateBuilder::new(
-        server_noise_key.clone(),
-        stores.redeemer(None),
-        Arc::new(TailnetIpAllocator::new(tailnet_id)),
-        machines.clone(),
-        Arc::new(policy.clone()),
-        octravpn_mesh::tailscale_wire::DerpMapStore::shared(derp_map),
-    )
-    .registration_store(Some(registration_store.clone()))
-    .registration_gate(registration_gate)
-    .knock(load_knock_cfg_from_env())
-    .native_derp(native_derp.clone())
-    .build();
-    if let Some(sync) = members_policy {
-        tokio::spawn(sync.run(crate::members_policy::MembersPolicyWiring {
-            machines: machines.clone(),
-            policy: Arc::new(policy.clone()),
-            registration_store: Some(registration_store),
-        }));
-    }
-
-    eprintln!(
-        "mesh serve: noise pubkey mkey:{} listen={listen}",
-        server_noise_key.public_hex()
-    );
-
-    // /admin/preauth shim for the harness. Kept identical to the
-    // ControlState handler's behaviour (404 when no token, 404 on
-    // wrong token, 200+JSON on success) so the run-interop.sh probe
-    // succeeds.
-    #[derive(Clone)]
-    struct AdminCtx {
-        stores: crate::mesh_store::MeshStore,
-        token: Option<Arc<str>>,
-    }
-    #[derive(Deserialize)]
-    #[serde(rename_all = "snake_case", deny_unknown_fields)]
-    struct AdminReq {
-        #[serde(default = "default_user")]
-        user: String,
-        #[serde(default)]
-        reusable: bool,
-        #[serde(default)]
-        ttl_secs: Option<u64>,
-    }
-    fn default_user() -> String {
-        "default".into()
-    }
-    impl Default for AdminReq {
-        fn default() -> Self {
-            Self {
-                user: default_user(),
-                reusable: false,
-                ttl_secs: None,
-            }
-        }
-    }
-    #[derive(Serialize)]
-    struct AdminResp {
-        key: String,
-        user: String,
-        expires_at: u64,
-        reusable: bool,
-    }
-    async fn mint_handler(
-        State(ctx): State<AdminCtx>,
-        headers: HeaderMap,
-        body: axum::body::Bytes,
-    ) -> impl IntoResponse {
-        if let Err(response) =
-            octravpn_core::bearer::BearerCheck::hidden(ctx.token.clone()).check(&headers)
-        {
-            return response;
-        }
-        let req = if body.is_empty() {
-            AdminReq::default()
+    let config = crate::mesh_control::Config {
+        http_addr: Some(listen.parse().context("parse mesh HTTP address")?),
+        https_addr: if https_listen.is_empty() {
+            None
         } else {
-            match serde_json::from_slice::<AdminReq>(&body) {
-                Ok(request) => request,
-                Err(_) => {
-                    return (StatusCode::BAD_REQUEST, "invalid preauth request").into_response()
-                }
-            }
-        };
-        let Ok(pk) = ctx
-            .stores
-            .mint_for_user(
-                req.user,
-                req.ttl_secs.unwrap_or(DEFAULT_PREAUTH_TTL.as_secs()),
-                req.reusable,
-            )
-            .await
-        else {
-            return (StatusCode::SERVICE_UNAVAILABLE, "preauth mint unavailable").into_response();
-        };
-        Json(AdminResp {
-            key: pk.key,
-            user: pk.user,
-            expires_at: pk.expires_at,
-            reusable: pk.reusable,
-        })
-        .into_response()
-    }
-    // Share the bearer token between the two admin sub-routers (the
-    // legacy `POST /admin/preauth` shim + the unified
-    // `/api/v1/{machines,policy,...}` surface built below). Cloning
-    // the `Arc<str>` is cheap — both layers run the same byte-stable
-    // 404 reject path on missing / wrong tokens.
-    let admin_token_arc: Option<Arc<str>> = admin_token.map(Arc::from);
-    let admin_ctx = AdminCtx {
-        stores: stores.clone(),
-        token: admin_token_arc.clone(),
-    };
-    let legacy_preauth_router = Router::new()
-        .route("/admin/preauth", post(mint_handler))
-        .layer(axum::extract::DefaultBodyLimit::max(4096))
-        .with_state(admin_ctx);
-
-    // Unified admin surface — same routes the full Hub would mount
-    // (`/api/v1/machines` for the roster, `/api/v1/policy{,/validate}`
-    // for the live ACL store, `/api/v1/preauthkeys` for HTTP mint /
-    // expire, plus the operator HTML pages at `/admin/...`). Shares the
-    // `MachineRegistry` + `PolicyStore` constructed above with the wire
-    // layer, so `mesh status` / `mesh policy get` reflect (and mutate)
-    // the live state seen by `/map`.
-    //
-    // Wrapped in `octravpn_mesh::build_admin_router`, which layers a
-    // hidden-policy `BearerCheck` on top so every failed-auth response
-    // is byte-stable `(404, NGINX_404_BODY)` — preserves the Audit-3
-    // H-1 invariant `BearerCheck::Hidden` already enforces for
-    // `/admin/preauth` and `/events`.
-    let unified_admin_router = stores.admin_router(policy.clone(), admin_token_arc.clone());
-
-    let admin_router = legacy_preauth_router.merge(unified_admin_router);
-
-    // Dual-bind: plain HTTP on `listen` for /admin/preauth + curl
-    // probes; rustls-terminated HTTPS on `https_listen` for the
-    // forced-443 dial stock Tailscale clients make. Pass an empty
-    // string to https_listen to skip TLS (useful on hosts that can't
-    // bind 443).
-    let http_addr: SocketAddr = listen.parse().context("parse http listen addr")?;
-    let https_addr: Option<SocketAddr> = if https_listen.is_empty() {
-        None
-    } else {
-        Some(https_listen.parse().context("parse https listen addr")?)
-    };
-
-    let sans = SanConfig::with_hostname(&cert_hostname);
-    let cfg = ServeConfig {
-        http_addr: Some(http_addr),
-        https_addr,
-        state_dir: state_dir_path.clone(),
-        sans: sans.clone(),
-        tls_source: TlsMaterialSource::SelfSigned {
-            state_dir: state_dir_path,
-            sans,
+            Some(https_listen.parse().context("parse mesh HTTPS address")?)
         },
-        oidc: None,
-        metrics_addr: None,
-        acme_http01: None,
-        acme_http01_host: None,
-        acme_http01_addr: None,
-        trusted_proxies: TrustedProxyConfig::default(),
+        hostname: cert_hostname,
+        state_dir: state_dir.into(),
+        tailnet_id,
+        serve_derp,
+        derp_map: std::env::var_os("OCTRAVPN_DERP_MAP_PATH")
+            .filter(|path| !path.is_empty())
+            .map(Into::into),
+        ..Default::default()
     };
-    let handle = wire_serve(ws, cfg, admin_router)
-        .await
-        .context("mesh serve: bind wire surface")?;
-    if let Some(tls) = handle.tls.as_ref() {
-        eprintln!(
-            "mesh serve: HTTPS listening on {} (cert={}, key={})",
-            https_addr.unwrap(),
-            tls.cert_path.display(),
-            tls.key_path.display()
-        );
-        eprintln!("mesh serve: trust the cert in peer containers with `update-ca-certificates`");
-    }
-    eprintln!("mesh serve: HTTP listening on {http_addr}");
+    let token = admin_token
+        .or_else(|| std::env::var("OCTRAVPN_ADMIN_TOKEN").ok())
+        .map(std::sync::Arc::from);
+    let service =
+        crate::mesh_control::bind(config, token, members_policy, load_knock_cfg_from_env()?)
+            .await?;
+    run_bound_service(service).await
+}
 
-    // Wait for whichever listener exits first. Either bubbling up an
-    // error is fine — the harness teardown handles container restart.
-    let http_fut = handle
-        .http
-        .context("mesh serve: http listener disabled unexpectedly")?;
-    let https_fut = handle.https;
-    match https_fut {
-        Some(https_fut) => {
-            tokio::select! {
-                r = http_fut => r.context("mesh serve: http listener")?
-                    .context("mesh serve: http accept")?,
-                r = https_fut => r.context("mesh serve: https listener")?
-                    .context("mesh serve: https accept")?,
-            };
-        }
-        None => {
-            http_fut
-                .await
-                .context("mesh serve: http listener")?
-                .context("mesh serve: http accept")?;
-        }
+async fn run_bound_service(service: crate::mesh_control::Service) -> Result<()> {
+    eprintln!(
+        "mesh serve: HTTP={:?} HTTPS={:?}",
+        service.http_addr, service.https_addr
+    );
+    if let Some(cert) = &service.certificate {
+        eprintln!(
+            "mesh serve: trust TLS certificate {} in clients",
+            cert.display()
+        );
     }
-    Ok(())
+    let (stop, shutdown) = tokio::sync::watch::channel(false);
+    tokio::spawn(async move {
+        let _ = tokio::signal::ctrl_c().await;
+        stop.send_replace(true);
+    });
+    service.run(shutdown).await
 }
 
 /// Outcome of a successful daemon-bound preauth mint. Mirrors the
@@ -738,26 +497,15 @@ fn trim_body(s: &str, max: usize) -> String {
 /// Defaults to disabled when the env vars are absent — keeps existing
 /// deployments backward-compatible. See `docs/operators/tls-rotation.md`
 /// §"PSK-gated control plane" for the operator playbook.
-fn load_knock_cfg_from_env() -> octravpn_mesh::tailscale_wire::KnockConfig {
+fn load_knock_cfg_from_env() -> Result<octravpn_mesh::tailscale_wire::KnockConfig> {
     let enabled = std::env::var("OCTRAVPN_KNOCK_ENABLED")
         .is_ok_and(|v| !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false"));
     if !enabled {
-        return octravpn_mesh::tailscale_wire::KnockConfig::disabled();
+        return Ok(octravpn_mesh::tailscale_wire::KnockConfig::disabled());
     }
-    let Ok(raw) = std::env::var("OCTRAVPN_KNOCK_PSK") else {
-        eprintln!(
-            "mesh serve: OCTRAVPN_KNOCK_ENABLED set but OCTRAVPN_KNOCK_PSK missing; \
-             knock layer DISABLED (would otherwise reject every connection)"
-        );
-        return octravpn_mesh::tailscale_wire::KnockConfig::disabled();
-    };
-    let psk = match octravpn_mesh::knock::decode_psk(raw.trim()) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("mesh serve: OCTRAVPN_KNOCK_PSK decode failed ({e}); knock layer DISABLED");
-            return octravpn_mesh::tailscale_wire::KnockConfig::disabled();
-        }
-    };
+    let raw =
+        std::env::var("OCTRAVPN_KNOCK_PSK").context("knock enabled without OCTRAVPN_KNOCK_PSK")?;
+    let psk = octravpn_mesh::knock::decode_psk(raw.trim()).context("invalid knock PSK")?;
     let window_secs = std::env::var("OCTRAVPN_KNOCK_WINDOW_SECS")
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
@@ -765,5 +513,5 @@ fn load_knock_cfg_from_env() -> octravpn_mesh::tailscale_wire::KnockConfig {
     eprintln!("mesh serve: PSK-gated handshake ENABLED (window={window_secs}s)");
     let mut cfg = octravpn_mesh::tailscale_wire::KnockConfig::enabled(psk);
     cfg.window_secs = window_secs;
-    cfg
+    Ok(cfg)
 }

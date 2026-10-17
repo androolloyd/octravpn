@@ -95,7 +95,7 @@ impl Ports {
             let mut udp = Vec::new();
             let reserved = (0..5).all(|node| {
                 let port = base + node * 10;
-                for endpoint in [0, 1, 2, 3, 5] {
+                for endpoint in [0, 1, 2, 3, 5, 6, 7] {
                     let Ok(listener) = TcpListener::bind((Ipv4Addr::LOCALHOST, port + endpoint))
                     else {
                         return false;
@@ -127,14 +127,41 @@ async fn executable_devnet_transfers_browses_and_recovers() {
     let paths = devnet::init(&temp.path().join("network"), ports.base)
         .await
         .unwrap();
+    let token_file = temp.path().join("mesh-admin.token");
+    std::fs::write(&token_file, b"native-mesh-test-token").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&token_file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
     let configs = paths
         .iter()
-        .map(|p| {
+        .enumerate()
+        .map(|(index, p)| {
             let mut config = devnet::read(p).unwrap();
             config.gateway = Some(octra_node::gateway::Config {
                 listen: (std::net::Ipv4Addr::LOCALHOST, config.p2p.port() + 5).into(),
                 origin: "https://circles.example.ts.net".into(),
+                sites: std::collections::BTreeMap::new(),
+            portal: None,
             });
+            if index == 3 {
+                config.mesh = Some(octravpn_node::mesh_control::Config {
+                    state_dir: config.data.join("mesh"),
+                    admin_token_file: Some(token_file.clone()),
+                    http_addr: Some((Ipv4Addr::LOCALHOST, config.p2p.port() + 6).into()),
+                    https_addr: Some((Ipv4Addr::LOCALHOST, config.p2p.port() + 7).into()),
+                    dns: Some(
+                        serde_json::from_value(serde_json::json!({
+                            "base_domain":"octranet.test", "override_local_dns":false, "extra_records":[{
+                                "name":"circles.octranet.test", "type":"A", "value":"100.64.0.1"
+                            }]
+                        }))
+                        .unwrap(),
+                    ),
+                    ..Default::default()
+                });
+            }
             config
         })
         .collect::<Vec<_>>();
@@ -181,6 +208,65 @@ async fn executable_devnet_transfers_browses_and_recovers() {
         assert!(diagnostics["connected"].is_number());
         assert!(diagnostics["score_reasons"].is_object());
     }
+    let mesh = configs[3].mesh.as_ref().unwrap();
+    let mesh_base = format!("http://{}", mesh.http_addr.unwrap());
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if http
+                .get(format!("{mesh_base}/key?v=113"))
+                .send()
+                .await
+                .is_ok_and(|response| response.status().is_success())
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let mesh_key = http
+        .get(format!("{mesh_base}/key?v=113"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let policy = "// native-node persistent ACL\n{\"acls\":[]}";
+    assert_eq!(
+        http.put(format!("{mesh_base}/api/v1/policy"))
+            .bearer_auth("native-mesh-test-token")
+            .body(policy)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        reqwest::StatusCode::OK
+    );
+    let certificate = std::fs::read(mesh.state_dir.join("tls.crt")).unwrap();
+    let tls = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .add_root_certificate(reqwest::Certificate::from_pem(&certificate).unwrap())
+        .build()
+        .unwrap();
+    let tls_response = tls
+        .get(format!(
+            "https://localhost:{}/key?v=113",
+            mesh.https_addr.unwrap().port()
+        ))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(tls_response, mesh_key);
+    let mut stalled_tls = tokio::net::TcpStream::connect(mesh.https_addr.unwrap())
+        .await
+        .unwrap();
     let browser = format!("http://{}/open", configs[0].browser);
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
@@ -294,6 +380,17 @@ async fn executable_devnet_transfers_browses_and_recovers() {
     eprintln!("checkpoint: signed transfer committed on a peer");
     let (stop, task) = running.pop().unwrap();
     stopped(stop, task).await;
+    assert!(TcpListener::bind(mesh.http_addr.unwrap()).is_ok());
+    assert!(TcpListener::bind(mesh.https_addr.unwrap()).is_ok());
+    use tokio::io::AsyncReadExt;
+    let mut buffer = [0; 1];
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(3), stalled_tls.read(&mut buffer))
+            .await
+            .unwrap()
+            .unwrap(),
+        0
+    );
     let before = epoch(&http, &configs[0]).await.unwrap();
     reached(&http, &configs[0], before + 3).await;
     eprintln!("checkpoint: quorum advanced with one validator stopped");
@@ -301,6 +398,30 @@ async fn executable_devnet_transfers_browses_and_recovers() {
     reached(&http, &configs[3], before + 4).await;
     eprintln!("checkpoint: restarted validator caught up");
     gateway_read(&http, &configs[3]).await;
+    let restored: serde_json::Value = http
+        .get(format!("{mesh_base}/api/v1/policy"))
+        .bearer_auth("native-mesh-test-token")
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(restored["loaded"], true);
+    assert_eq!(restored["raw"], policy);
+    assert_eq!(
+        http.get(format!("{mesh_base}/key?v=113"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+        mesh_key
+    );
+    eprintln!("checkpoint: native mesh TLS, stable Noise identity and persisted ACL recovered");
     let (stop, task) = start(observer.clone());
     reached(&http, &observer, before + 4).await;
     gateway_read(&http, &observer).await;
@@ -355,6 +476,27 @@ async fn executable_devnet_transfers_browses_and_recovers() {
     for (stop, task) in running {
         stopped(stop, task).await;
     }
+    // Payment deadlines use the authenticated header clock, including after
+    // recovery. Neither a local commit date nor a substituted head can supply it.
+    let store = octra_node_runtime::canonical::CanonicalStore::open(
+        &configs[0].data.join("canonical.db"),
+        &configs[0].genesis.chain,
+    )
+    .await
+    .unwrap();
+    let head = store.head().await.unwrap();
+    use octra_node_protocol::consensus::{codec::Wire, Finalize};
+    let certificate = store.certificate(head.cursor.sequence).await.unwrap();
+    let finalized = Finalize::decode(&certificate).unwrap();
+    let clock =
+        octra_node_protocol::consensus::policy::time_of_seconds(finalized.header.ts).unwrap();
+    assert!(clock > 0);
+    let reader = store.reader();
+    assert_eq!(reader.epoch_time_ms(&head).await.unwrap(), Some(clock));
+    let mut substituted = head.clone();
+    substituted.date += 1;
+    assert!(reader.epoch_time_ms(&substituted).await.is_err());
+    store.close().await;
     for config in &configs[1..] {
         assert_eq!(archive(&configs[0].data, 2), archive(&config.data, 2));
     }

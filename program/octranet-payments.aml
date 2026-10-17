@@ -1,0 +1,401 @@
+// Ownerless Octranet payment accounts. Portal access is outside paid admission.
+// Program epoch_time is canonical milliseconds; this source needs no new opcode.
+// Receipts authorize cumulative class usage, not a claim of provable delivery.
+program OctranetPayments {
+  const DAY_MS: uint = 86400000
+  const OPERATOR_UNSTAKE_MS: uint = 604800000
+  const MIB: uint = 1048576
+  const MAX_UINT: uint = 18446744073709551615
+  const HEX: string = "0123456789abcdef"
+  const MAX_CLASSES: uint = 32
+
+  state {
+    domain: string
+    max_locked_value: uint
+    locked_value: uint
+    min_operator_stake: uint
+    operator_stake: map[address]uint
+    operator_unlock: map[address]uint
+    operator_generation: map[address]uint
+    operator_stopped: map[address]map[uint]uint
+    offer_count: uint
+    offer_owner: map[uint]address
+    offer_generation: map[uint]uint
+    offer_manifest: map[uint]string
+    offer_classes: map[uint]uint
+    offer_rate: map[uint]map[uint]uint
+    offer_sealed: map[uint]uint
+    generation: map[address]uint
+    active: map[address]uint
+    receipt_key: map[address]string
+    funds: map[address]uint
+    reserved: map[address]uint
+    exit_deadline: map[address]uint
+    plan_count: uint
+    plan_payer: map[uint]address
+    plan_generation: map[uint]uint
+    plan_offer: map[uint]uint
+    plan_budget: map[uint]uint
+    plan_opened_ms: map[uint]uint
+    plan_remaining: map[uint]uint
+    class_sequence: map[uint]map[uint]uint
+    class_bytes: map[uint]map[uint]uint
+    class_paid: map[uint]map[uint]uint
+    earnings: map[address]uint
+  }
+
+  event Registered(account: address, generation: uint)
+  event Funded(account: address, amount: uint)
+  event OfferCreated(offer: uint, operator: address, manifest: string)
+  event OfferSealed(offer: uint, classes: uint)
+  event PlanOpened(plan: uint, account: address, generation: uint, offer: uint, budget: uint)
+  event UsageCharged(plan: uint, traffic_class: uint, sequence: uint, total_bytes: uint, increment: uint)
+  event ExitRequested(account: address, deadline_ms: uint)
+  event Exited(account: address, remaining: uint)
+  event EarningsWithdrawn(operator: address, amount: uint)
+  event OperatorBonded(operator: address, amount: uint)
+  event OperatorUnstakeRequested(operator: address, deadline_ms: uint)
+  event OperatorUnstaked(operator: address, amount: uint)
+
+  constructor(domain: string, max_locked_value: uint, min_operator_stake: uint) {
+    require_digest(domain)
+    require(min_operator_stake >= 100000000, "operator stake below floor")
+    require(max_locked_value > min_operator_stake && max_locked_value <= MAX_UINT, "invalid custody cap")
+    self.domain = domain
+    self.max_locked_value = max_locked_value
+    self.min_operator_stake = min_operator_stake
+  }
+
+  private fn require_digest(text: string) {
+    require(len(text) == 64, "digest must be lowercase SHA256")
+    let i = 0
+    while i < 64 {
+      require(index_of(HEX, substr(text, i, 1)) >= 0, "digest must be lowercase SHA256")
+      i = i + 1
+    }
+  }
+
+  private fn require_clock() {
+    require(epoch_time > 0 && epoch_time <= MAX_UINT - OPERATOR_UNSTAKE_MS, "invalid canonical clock")
+  }
+
+  private fn account_open(account: address): bool {
+    return self.active[account] == 1 && self.exit_deadline[account] == 0
+  }
+
+  private fn operator_open(operator: address): bool {
+    return self.operator_stake[operator] >= self.min_operator_stake && self.operator_unlock[operator] == 0
+  }
+
+  payable fn bond_operator(): bool {
+    require(self.operator_unlock[caller] == 0, "operator unstaking")
+    require(value > 0 && value <= self.max_locked_value - self.locked_value, "custody cap exceeded")
+    if self.operator_stake[caller] == 0 {
+      require(self.operator_generation[caller] < MAX_UINT, "operator generation exhausted")
+      self.operator_generation[caller] = self.operator_generation[caller] + 1
+    }
+    self.operator_stake[caller] = self.operator_stake[caller] + value
+    self.locked_value = self.locked_value + value
+    emit OperatorBonded(caller, value)
+    return true
+  }
+
+  // Stop new paid admission immediately; neither a retry nor another person's
+  // transaction can shorten or extend this operator's seven-day deadline.
+  fn request_operator_unstake(): uint {
+    require_clock()
+    require(self.operator_stake[caller] > 0, "no operator stake")
+    if self.operator_unlock[caller] == 0 {
+      self.operator_unlock[caller] = epoch_time + OPERATOR_UNSTAKE_MS
+      self.operator_stopped[caller][self.operator_generation[caller]] = epoch_time
+      emit OperatorUnstakeRequested(caller, self.operator_unlock[caller])
+    }
+    return self.operator_unlock[caller]
+  }
+
+  nonreentrant fn withdraw_operator_stake(): uint {
+    require_clock()
+    require(self.operator_stake[caller] > 0 && self.operator_unlock[caller] > 0, "unstake not requested")
+    require(epoch_time >= self.operator_unlock[caller], "operator unstake window open")
+    let amount = self.operator_stake[caller]
+    self.operator_stake[caller] = 0
+    self.operator_unlock[caller] = 0
+    self.locked_value = self.locked_value - amount
+    require(transfer(caller, amount), "unstake transfer failed")
+    emit OperatorUnstaked(caller, amount)
+    return amount
+  }
+
+  // Receipt keys are scoped to a funding generation. Rotation cannot strand
+  // funded obligations: exit first, wait the fixed window, then register again.
+  fn register(receipt_key: string, signature: string): uint {
+    require(self.active[caller] == 0, "account already active")
+    require(self.funds[caller] == 0 && self.reserved[caller] == 0, "account not empty")
+    require(self.generation[caller] < MAX_UINT, "generation exhausted")
+    require(len(receipt_key) == 44 && len(signature) == 88, "invalid receipt key or signature")
+    let next = self.generation[caller] + 1
+    let message = concat("Octranet register v1|", self.domain)
+    message = concat(message, concat("|", self_addr))
+    message = concat(message, concat("|", caller))
+    message = concat(message, concat("|", to_string(next)))
+    require(ed25519_ok(receipt_key, message, signature), "receipt key possession failed")
+    self.generation[caller] = next
+    self.receipt_key[caller] = receipt_key
+    self.active[caller] = 1
+    self.exit_deadline[caller] = 0
+    emit Registered(caller, next)
+    return next
+  }
+
+  payable fn fund(account: address): bool {
+    require(account_open(account), "account not accepting funds")
+    require(value > 0 && value <= self.max_locked_value - self.locked_value, "custody cap exceeded")
+    self.funds[account] = self.funds[account] + value
+    self.locked_value = self.locked_value + value
+    emit Funded(account, value)
+    return true
+  }
+
+  // The Circle manifest contains enforceable selectors and the displayed
+  // rates. Clients compare every rate below to that hash-pinned manifest.
+  fn create_offer(manifest_hash: string): uint {
+    require(operator_open(caller), "operator unavailable")
+    require_digest(manifest_hash)
+    require(self.offer_count < MAX_UINT, "offers exhausted")
+    let id = self.offer_count
+    self.offer_count = id + 1
+    self.offer_owner[id] = caller
+    self.offer_generation[id] = self.operator_generation[caller]
+    self.offer_manifest[id] = manifest_hash
+    emit OfferCreated(id, caller, manifest_hash)
+    return id
+  }
+
+  fn append_class(offer: uint, rate_ou_per_mib: uint): uint {
+    require(offer < self.offer_count && self.offer_owner[offer] == caller, "not offer operator")
+    require(self.offer_sealed[offer] == 0, "offer immutable")
+    require(rate_ou_per_mib <= MAX_UINT, "rate exceeds uint64")
+    let id = self.offer_classes[offer]
+    require(id < MAX_CLASSES, "too many classes")
+    self.offer_rate[offer][id] = rate_ou_per_mib
+    self.offer_classes[offer] = id + 1
+    return id
+  }
+
+  fn seal_offer(offer: uint): bool {
+    require(offer < self.offer_count && self.offer_owner[offer] == caller, "not offer operator")
+    require(self.offer_sealed[offer] == 0 && self.offer_classes[offer] > 0, "invalid offer state")
+    require(operator_open(caller), "operator unavailable")
+    require(self.offer_generation[offer] == self.operator_generation[caller], "operator generation closed")
+    self.offer_sealed[offer] = 1
+    emit OfferSealed(offer, self.offer_classes[offer])
+    return true
+  }
+
+  fn open_plan(offer: uint, budget: uint): uint {
+    require_clock()
+    require(account_open(caller), "account exiting or inactive")
+    require(offer < self.offer_count && self.offer_sealed[offer] == 1, "offer not sealed")
+    require(operator_open(self.offer_owner[offer]), "operator unavailable")
+    require(self.offer_generation[offer] == self.operator_generation[self.offer_owner[offer]], "operator generation closed")
+    require(budget > 0 && budget <= self.funds[caller] - self.reserved[caller], "budget unavailable")
+    require(self.plan_count < MAX_UINT, "plans exhausted")
+    let id = self.plan_count
+    self.plan_count = id + 1
+    self.plan_payer[id] = caller
+    self.plan_generation[id] = self.generation[caller]
+    self.plan_offer[id] = offer
+    self.plan_budget[id] = budget
+    self.plan_opened_ms[id] = epoch_time
+    self.plan_remaining[id] = budget
+    self.reserved[caller] = self.reserved[caller] + budget
+    emit PlanOpened(id, caller, self.generation[caller], offer, budget)
+    return id
+  }
+
+  private fn usage_message(plan: uint, traffic_class: uint, sequence: uint, total_bytes: uint): string {
+    let message = concat("Octranet usage v1|", self.domain)
+    message = concat(message, concat("|", self_addr))
+    message = concat(message, concat("|", self.plan_payer[plan]))
+    message = concat(message, concat("|", to_string(self.plan_generation[plan])))
+    message = concat(message, concat("|", to_string(plan)))
+    message = concat(message, concat("|", to_string(self.plan_offer[plan])))
+    message = concat(message, concat("|", self.offer_manifest[self.plan_offer[plan]]))
+    message = concat(message, concat("|", to_string(traffic_class)))
+    message = concat(message, concat("|", to_string(sequence)))
+    return concat(message, concat("|", to_string(total_bytes)))
+  }
+
+  private fn operator_claim_open(offer: uint): bool {
+    let stopped = self.operator_stopped[self.offer_owner[offer]][self.offer_generation[offer]]
+    return stopped == 0 || epoch_time < stopped + DAY_MS
+  }
+
+  // Anyone can deliver the payer's exact authorization. The immutable offer
+  // selects the beneficiary; a relayer can neither redirect nor increase it.
+  nonreentrant fn claim(plan: uint, traffic_class: uint, sequence: uint, total_bytes: uint, signature: string): uint {
+    require_clock()
+    require(plan < self.plan_count, "plan not found")
+    let payer = self.plan_payer[plan]
+    require(self.active[payer] == 1 && self.plan_generation[plan] == self.generation[payer], "plan generation closed")
+    let deadline = self.exit_deadline[payer]
+    require(deadline == 0 || epoch_time < deadline, "claim window closed")
+    let offer = self.plan_offer[plan]
+    require(operator_claim_open(offer), "operator settlement window closed")
+    require(traffic_class < self.offer_classes[offer], "class not found")
+    require(sequence > 0 && sequence <= MAX_UINT, "invalid receipt sequence")
+    // A payer must not invalidate a larger authorization by racing a tiny
+    // receipt with a higher sequence. Cumulative usage, rather than sequence,
+    // determines redemption and duplicate protection.
+    require(total_bytes > self.class_bytes[plan][traffic_class] && total_bytes <= MAX_UINT, "usage already redeemed or exceeds uint64")
+    require(len(signature) == 88, "invalid signature size")
+    require(ed25519_ok(self.receipt_key[payer], usage_message(plan, traffic_class, sequence, total_bytes), signature), "invalid usage authorization")
+    let rate = self.offer_rate[offer][traffic_class]
+    let cumulative = (total_bytes * rate + MIB - 1) / MIB
+    require(cumulative >= self.class_paid[plan][traffic_class] && cumulative <= MAX_UINT, "charge exceeds uint64")
+    let increment = cumulative - self.class_paid[plan][traffic_class]
+    require(increment <= self.plan_remaining[plan], "plan budget exhausted")
+    require(increment <= self.reserved[payer] && increment <= self.funds[payer], "account budget exhausted")
+    if sequence > self.class_sequence[plan][traffic_class] {
+      self.class_sequence[plan][traffic_class] = sequence
+    }
+    self.class_bytes[plan][traffic_class] = total_bytes
+    self.class_paid[plan][traffic_class] = cumulative
+    self.plan_remaining[plan] = self.plan_remaining[plan] - increment
+    self.reserved[payer] = self.reserved[payer] - increment
+    self.funds[payer] = self.funds[payer] - increment
+    let operator = self.offer_owner[offer]
+    self.earnings[operator] = self.earnings[operator] + increment
+    emit UsageCharged(plan, traffic_class, sequence, total_bytes, increment)
+    return increment
+  }
+
+  // An operator's stopped generation cannot strand a payer's reserved budget.
+  // Release is available after its fixed receipt deadline; claims cannot revive
+  // the released plan, including after the operator bonds a new generation.
+  fn release_stopped_plan(plan: uint): uint {
+    require_clock()
+    require(plan < self.plan_count && self.plan_payer[plan] == caller, "not plan payer")
+    require(self.active[caller] == 1 && self.plan_generation[plan] == self.generation[caller], "plan generation closed")
+    let offer = self.plan_offer[plan]
+    let stopped = self.operator_stopped[self.offer_owner[offer]][self.offer_generation[offer]]
+    require(stopped > 0 && epoch_time >= stopped + DAY_MS, "operator settlement window open")
+    let amount = self.plan_remaining[plan]
+    self.plan_remaining[plan] = 0
+    self.reserved[caller] = self.reserved[caller] - amount
+    return amount
+  }
+
+  fn request_exit(): uint {
+    require_clock()
+    require(self.active[caller] == 1, "account inactive")
+    if self.exit_deadline[caller] == 0 {
+      self.exit_deadline[caller] = epoch_time + DAY_MS
+      emit ExitRequested(caller, self.exit_deadline[caller])
+    }
+    return self.exit_deadline[caller]
+  }
+
+  nonreentrant fn withdraw_remaining(): uint {
+    require_clock()
+    require(self.active[caller] == 1 && self.exit_deadline[caller] > 0, "exit not requested")
+    require(epoch_time >= self.exit_deadline[caller], "settlement window open")
+    let amount = self.funds[caller]
+    self.funds[caller] = 0
+    self.reserved[caller] = 0
+    self.active[caller] = 0
+    self.locked_value = self.locked_value - amount
+    if amount > 0 {
+      require(transfer(caller, amount), "withdrawal failed")
+    }
+    emit Exited(caller, amount)
+    return amount
+  }
+
+  nonreentrant fn withdraw_earnings(amount: uint): bool {
+    require(amount > 0 && amount <= self.earnings[caller], "earnings unavailable")
+    self.earnings[caller] = self.earnings[caller] - amount
+    self.locked_value = self.locked_value - amount
+    require(transfer(caller, amount), "earnings transfer failed")
+    emit EarningsWithdrawn(caller, amount)
+    return true
+  }
+
+  view fn get_funds(account: address): uint { return self.funds[account] }
+  view fn get_domain(): string { return self.domain }
+  view fn get_custody_cap(): uint { return self.max_locked_value }
+  view fn get_min_operator_stake(): uint { return self.min_operator_stake }
+  view fn get_reserved(account: address): uint { return self.reserved[account] }
+  view fn get_generation(account: address): uint { return self.generation[account] }
+  view fn get_receipt_key(account: address): string { return self.receipt_key[account] }
+  view fn get_exit_deadline_ms(account: address): uint { return self.exit_deadline[account] }
+  view fn get_active(account: address): uint { return self.active[account] }
+  view fn get_earnings(operator: address): uint { return self.earnings[operator] }
+  view fn get_operator_stake(operator: address): uint { return self.operator_stake[operator] }
+  view fn get_operator_unlock_ms(operator: address): uint { return self.operator_unlock[operator] }
+  view fn get_operator_available(operator: address): bool { return operator_open(operator) }
+  view fn get_operator_generation(operator: address): uint { return self.operator_generation[operator] }
+  view fn get_operator_stopped_ms(operator: address, generation: uint): uint { return self.operator_stopped[operator][generation] }
+  view fn get_operator_unstake_ms(): uint { return OPERATOR_UNSTAKE_MS }
+  view fn get_user_exit_ms(): uint { return DAY_MS }
+  view fn get_locked_value(): uint { return self.locked_value }
+  view fn get_plan_remaining(plan: uint): uint {
+    require(plan < self.plan_count, "plan not found")
+    return self.plan_remaining[plan]
+  }
+  view fn get_plan_budget(plan: uint): uint {
+    require(plan < self.plan_count, "plan not found")
+    return self.plan_budget[plan]
+  }
+  view fn get_plan_opened_ms(plan: uint): uint {
+    require(plan < self.plan_count, "plan not found")
+    return self.plan_opened_ms[plan]
+  }
+  view fn get_plan_payer(plan: uint): address {
+    require(plan < self.plan_count, "plan not found")
+    return self.plan_payer[plan]
+  }
+  view fn get_plan_generation(plan: uint): uint {
+    require(plan < self.plan_count, "plan not found")
+    return self.plan_generation[plan]
+  }
+  view fn get_plan_offer(plan: uint): uint {
+    require(plan < self.plan_count, "plan not found")
+    return self.plan_offer[plan]
+  }
+  view fn can_forward(plan: uint): bool {
+    if plan >= self.plan_count { return false }
+    let payer = self.plan_payer[plan]
+    let offer = self.plan_offer[plan]
+    let operator = self.offer_owner[offer]
+    return account_open(payer) && self.plan_generation[plan] == self.generation[payer] && self.plan_remaining[plan] > 0 && operator_open(operator) && self.offer_generation[offer] == self.operator_generation[operator]
+  }
+  view fn get_offer_manifest(offer: uint): string {
+    require(offer < self.offer_count, "offer not found")
+    return self.offer_manifest[offer]
+  }
+  view fn get_offer_owner(offer: uint): address {
+    require(offer < self.offer_count, "offer not found")
+    return self.offer_owner[offer]
+  }
+  view fn get_offer_generation(offer: uint): uint {
+    require(offer < self.offer_count, "offer not found")
+    return self.offer_generation[offer]
+  }
+  view fn get_offer_classes(offer: uint): uint {
+    require(offer < self.offer_count, "offer not found")
+    return self.offer_classes[offer]
+  }
+  view fn get_offer_sealed(offer: uint): uint {
+    require(offer < self.offer_count, "offer not found")
+    return self.offer_sealed[offer]
+  }
+  view fn get_offer_rate(offer: uint, traffic_class: uint): uint {
+    require(offer < self.offer_count && traffic_class < self.offer_classes[offer], "offer or class not found")
+    return self.offer_rate[offer][traffic_class]
+  }
+  view fn get_usage_message(plan: uint, traffic_class: uint, sequence: uint, total_bytes: uint): string {
+    require(plan < self.plan_count && traffic_class < self.offer_classes[self.plan_offer[plan]], "plan or class not found")
+    return usage_message(plan, traffic_class, sequence, total_bytes)
+  }
+}

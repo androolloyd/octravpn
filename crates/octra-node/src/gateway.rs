@@ -2,10 +2,11 @@
 use crate::{Host, Node, Shared};
 use anyhow::{ensure, Result};
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Router};
-use octra_browser::http::Gateway;
+use octra_browser::http::{Gateway, Portal};
 use octra_node_runtime::circle_assets::RetainedAssets;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeMap,
     net::SocketAddr,
     sync::{Arc, Mutex},
     time::Instant,
@@ -19,6 +20,12 @@ mod cache;
 pub struct Config {
     pub listen: SocketAddr,
     pub origin: String,
+    /// HTTPS DNS hostname to Circle. All website paths read canonical assets.
+    #[serde(default)]
+    pub sites: BTreeMap<String, String>,
+    /// Unpaid onboarding assets on `origin` only. Mutually exclusive with sites.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub portal: Option<Portal>,
 }
 
 pub struct Service {
@@ -29,6 +36,8 @@ pub struct Service {
 struct GatewayState {
     shared: Arc<Shared>,
     origin: String,
+    sites: BTreeMap<String, String>,
+    portal: Option<Portal>,
     retained: Mutex<cache::Cache<RetainedAssets>>,
 }
 
@@ -45,11 +54,21 @@ impl crate::published::Handle {
             "gateway backend must bind loopback"
         );
         Gateway::validate_origin(&config.origin)?;
+        ensure!(
+            config.portal.is_none() || config.sites.is_empty(),
+            "unpaid portal cannot grant broad Circle site access"
+        );
+        for (host, circle) in &config.sites {
+            Gateway::validate_origin(&format!("https://{host}"))?;
+            Gateway::validate_site(circle)?;
+        }
         Ok(Service {
             listener: TcpListener::bind(config.listen).await?,
             state: Arc::new(GatewayState {
                 shared: self.shared.clone(),
                 origin: config.origin,
+                sites: config.sites,
+                portal: config.portal,
                 retained: Mutex::new(cache::Cache::default()),
             }),
         })
@@ -116,7 +135,30 @@ async fn dispatch(
             current
         }
     };
-    let Ok(gateway) = Gateway::new(Arc::new(selected), &state.origin) else {
+    let host = request
+        .headers()
+        .get("host")
+        .and_then(|host| host.to_str().ok())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let host = host.strip_suffix(":443").unwrap_or(&host);
+    let site = state.sites.get(host);
+    let origin = if site.is_some() {
+        format!("https://{host}")
+    } else {
+        state.origin.clone()
+    };
+    let gateway = Gateway::new(Arc::new(selected), &origin).and_then(|gateway| {
+        if let Some(portal) = &state.portal {
+            gateway.with_portal(portal.clone())
+        } else {
+            match site {
+                Some(circle) => gateway.with_site(circle),
+                None => Ok(gateway),
+            }
+        }
+    });
+    let Ok(gateway) = gateway else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     match gateway.router().oneshot(request).await {

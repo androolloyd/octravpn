@@ -1,0 +1,557 @@
+//! Canonical snapshot adapter for the Octranet payment application. Offers stay
+//! in Circles; the existing Program clock governs custody and settlement.
+//! This reader does not grant packet forwarding without a host-owned meter.
+use anyhow::{ensure, Context, Result};
+use base64::{engine::general_purpose::STANDARD, Engine};
+use octra_exex::ChainIdentity;
+use octra_node_protocol::{aml::emit::internal_key, transaction::decode_base64};
+use octra_node_runtime::{
+    account_store,
+    canonical::Reader,
+    circle_assets,
+    program::store,
+    state_batch::{Snapshot, StateBatch},
+};
+use octravpn_core::{
+    parse_native_address,
+    payments::{Deployment, SignedUsage, Tariff},
+    Address, PublicKey,
+};
+use octravpn_node::admission::Revocation;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
+use crate::Committed;
+#[cfg(test)]
+mod tests;
+
+const DAY_MS: u64 = 86_400_000;
+const PLAN_MAX_AGE: Duration = Duration::from_secs(120);
+const TARIFF_BYTES: i64 = 65_536;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Config {
+    pub program: String,
+    pub code_hash: String,
+    pub factory: String,
+    pub factory_code_hash: String,
+    pub domain: String,
+    pub operator_circle: String,
+    pub offer: u64,
+}
+
+/// Full-chain origin, rather than an RPC hostname or short network label.
+pub fn network_domain(chain: &ChainIdentity) -> String {
+    let mut hash = Sha256::new();
+    hash.update(b"Octranet payments network v1\0");
+    hash.update(
+        u64::try_from(chain.chain_id.len())
+            .expect("chain identifier fits uint64")
+            .to_be_bytes(),
+    );
+    hash.update(chain.chain_id.as_bytes());
+    hash.update(chain.namespace_key());
+    hex::encode(hash.finalize())
+}
+
+pub struct Payments {
+    config: Config,
+    history: Reader,
+    deployment: Deployment,
+    operator: Address,
+    shared: Arc<crate::Shared>,
+}
+
+/// Read-only facts captured from one canonical publication.
+#[derive(Clone, Debug)]
+pub struct PlanData {
+    pub deployment: Deployment,
+    pub payer: Address,
+    pub receipt_key: PublicKey,
+    pub generation: u64,
+    pub plan: u64,
+    pub offer: u64,
+    pub operator_generation: u64,
+    pub manifest_hash: String,
+    pub tariff: Tariff,
+    pub original_budget_ou: u64,
+    pub remaining_ou: u64,
+    pub redeemed_bytes: Vec<u64>,
+    pub redeemed_ou: Vec<u64>,
+    pub opened_ms: u64,
+    pub canonical_ms: u64,
+    pub claim_deadline_ms: Option<u64>,
+}
+
+/// The lease and its bound facts cannot be replaced by an application caller.
+#[derive(Clone)]
+pub struct Plan {
+    data: PlanData,
+    eligible: bool,
+    claim_eligible: bool,
+    lease: Option<Lease>,
+}
+
+impl std::ops::Deref for Plan {
+    type Target = PlanData;
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+#[derive(Clone)]
+struct Lease {
+    revocation: Revocation,
+    expires: Instant,
+}
+
+impl std::fmt::Debug for Plan {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Plan")
+            .field("plan", &self.plan)
+            .field("offer", &self.offer)
+            .field("admissible", &self.admissible())
+            .field("claimable", &self.claimable())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Plan {
+    fn live(&self) -> bool {
+        self.lease
+            .as_ref()
+            .is_some_and(|lease| !lease.revocation.is_revoked() && Instant::now() < lease.expires)
+    }
+    pub fn admissible(&self) -> bool {
+        self.eligible && self.live()
+    }
+    pub fn claimable(&self) -> bool {
+        self.claim_eligible && self.live()
+    }
+    /// Validate a payer's exact authorization before queueing any relayed
+    /// transaction. Replays never produce another increment or change payee.
+    pub fn claim_increment(&self, signed: &SignedUsage) -> Result<u64> {
+        ensure!(self.live(), "Octranet canonical plan lease expired");
+        self.increment_at_snapshot(signed)
+    }
+    fn increment_at_snapshot(&self, signed: &SignedUsage) -> Result<u64> {
+        signed.verify()?;
+        let usage = &signed.usage;
+        ensure!(self.claim_eligible, "Octranet claim window closed");
+        ensure!(
+            usage.deployment == self.deployment
+                && usage.payer == self.payer
+                && usage.generation == self.generation
+                && usage.plan == self.plan
+                && usage.offer == self.offer
+                && usage.manifest_hash == self.manifest_hash
+                && signed.receipt_key == self.receipt_key,
+            "Octranet receipt binding differs"
+        );
+        let class = usize::from(usage.traffic_class);
+        let previous = self
+            .redeemed_bytes
+            .get(class)
+            .context("Octranet class not found")?;
+        ensure!(
+            usage.total_bytes > *previous,
+            "Octranet usage already redeemed"
+        );
+        let cumulative = self.tariff.charge(usage.traffic_class, usage.total_bytes)?;
+        let increment = cumulative
+            .checked_sub(self.redeemed_ou[class])
+            .context("Octranet charge decreased")?;
+        ensure!(
+            increment <= self.remaining_ou,
+            "Octranet plan budget exhausted"
+        );
+        Ok(increment)
+    }
+}
+
+impl Payments {
+    pub(crate) fn new(
+        config: Config,
+        history: Reader,
+        operator: Address,
+        shared: Arc<crate::Shared>,
+    ) -> Result<Self> {
+        ensure!(
+            config.domain == network_domain(history.chain()),
+            "Octranet domain differs from full chain origin"
+        );
+        let deployment = Deployment {
+            domain: config.domain.clone(),
+            program: parse_native_address(&config.program)?,
+        };
+        deployment.validate()?;
+        parse_native_address(&config.factory)?;
+        parse_native_address(&config.operator_circle)?;
+        digest(&config.code_hash)?;
+        digest(&config.factory_code_hash)?;
+        ensure!(
+            parse_native_address(operator.display())? == operator,
+            "Octranet operator address differs"
+        );
+        Ok(Self {
+            config,
+            history,
+            deployment,
+            operator,
+            shared,
+        })
+    }
+
+    pub async fn plan(&self, plan: u64) -> Result<Plan> {
+        let serving = self.shared.current()?;
+        let expires = serving.observed_at + PLAN_MAX_AGE;
+        ensure!(Instant::now() < expires, "Octranet canonical head is stale");
+        let mut result = self.project(&serving.committed, plan).await?;
+        ensure!(
+            !serving.revocation.is_revoked(),
+            "Octranet canonical snapshot changed"
+        );
+        ensure!(Instant::now() < expires, "Octranet canonical head is stale");
+        result.lease = Some(Lease {
+            revocation: serving.revocation.clone(),
+            expires,
+        });
+        Ok(result)
+    }
+
+    async fn project(&self, view: &Committed, plan: u64) -> Result<Plan> {
+        let octra_browser::Provenance::Canonical(identity) = view.provenance() else {
+            anyhow::bail!("Octranet requires canonical state");
+        };
+        let head = view.head();
+        ensure!(
+            identity.chain_id == self.history.chain().chain_id
+                && identity.origin == self.history.chain().origin
+                && identity.epoch == head.cursor.epoch.0
+                && identity.state_root == hex::encode(head.cursor.state_root.0)
+                && identity.ledger_root == head.ledger_root
+                && identity.irmin_commit == head.irmin_commit,
+            "Octranet canonical identity differs"
+        );
+        ensure!(
+            self.history.head_at(head.cursor.sequence).await? == *head,
+            "Octranet retained head differs"
+        );
+        let millis = self
+            .history
+            .epoch_time_ms(head)
+            .await?
+            .context("Octranet canonical epoch clock missing")?;
+        let now = u64::try_from(millis).context("Octranet canonical epoch clock invalid")?;
+        ensure!(now > 0, "Octranet canonical epoch clock invalid");
+        let plan = self.read_state(view.state(), plan, now)?;
+        // The storage primitive above binds bytes; the canonical resolver also
+        // enforces Circle visibility, activation, expiry and revocation policy.
+        use octra_browser::AssetResolver;
+        let url = octra_browser::OctUrl::parse(&format!(
+            "oct://{}/offers/{}/tariff.json",
+            self.config.operator_circle, plan.manifest_hash
+        ))?;
+        let asset = view.assets.resolve(&url).await?;
+        ensure!(
+            asset.bytes.as_ref() == plan.tariff.canonical_bytes()?,
+            "Octranet public tariff differs"
+        );
+        Ok(plan)
+    }
+
+    fn read_state(&self, snapshot: &Snapshot, plan: u64, now: u64) -> Result<Plan> {
+        check_program(
+            snapshot,
+            &self.config.program,
+            &self.config.code_hash,
+            Some(self.config.factory.as_bytes()),
+        )?;
+        check_program(
+            snapshot,
+            &self.config.factory,
+            &self.config.factory_code_hash,
+            None,
+        )?;
+        let state = Fields {
+            snapshot,
+            program: self.config.program.as_bytes(),
+        };
+        ensure!(
+            state.text(b"domain", &[])? == self.config.domain,
+            "Octranet deployment domain differs"
+        );
+        ensure!(
+            plan < state.uint(b"plan_count", &[])?,
+            "Octranet plan not found"
+        );
+        let plan_key = plan.to_string();
+        let offer = state.uint(b"plan_offer", &[&plan_key])?;
+        ensure!(
+            offer == self.config.offer && offer < state.uint(b"offer_count", &[])?,
+            "Octranet offer differs"
+        );
+        let offer_key = offer.to_string();
+        let operator = state.text(b"offer_owner", &[&offer_key])?;
+        ensure!(
+            operator == self.operator.display(),
+            "Octranet offer operator differs"
+        );
+        ensure!(
+            state.uint(b"offer_sealed", &[&offer_key])? == 1,
+            "Octranet offer not sealed"
+        );
+        let manifest = state.text(b"offer_manifest", &[&offer_key])?;
+        digest(&manifest)?;
+        let tariff = self.tariff(snapshot, &manifest)?;
+        ensure!(
+            tariff.operator() == &self.operator,
+            "Octranet tariff operator differs"
+        );
+        let classes = state.uint(b"offer_classes", &[&offer_key])?;
+        ensure!(
+            classes == tariff.classes().len() as u64,
+            "Octranet class count differs"
+        );
+        let payer_text = state.text(b"plan_payer", &[&plan_key])?;
+        let payer = parse_native_address(&payer_text)?;
+        let generation = state.uint(b"plan_generation", &[&plan_key])?;
+        let active_generation = state.uint(b"generation", &[&payer_text])?;
+        let active = state.uint(b"active", &[&payer_text])? == 1
+            && active_generation == generation
+            && generation > 0;
+        let receipt_key_text = state.text(b"receipt_key", &[&payer_text])?;
+        let key = decode_base64(receipt_key_text.as_bytes())?;
+        ensure!(
+            STANDARD.encode(&key) == receipt_key_text,
+            "Octranet receipt key encoding differs"
+        );
+        let receipt_key = PublicKey(
+            key.try_into()
+                .map_err(|_| anyhow::anyhow!("Octranet receipt key size differs"))?,
+        );
+        let mut redeemed_bytes = Vec::with_capacity(tariff.classes().len());
+        let mut redeemed_ou = Vec::with_capacity(tariff.classes().len());
+        for (class, terms) in tariff.classes().iter().enumerate() {
+            let class_key = class.to_string();
+            ensure!(
+                state.uint(b"offer_rate", &[&offer_key, &class_key])? == terms.rate_ou_per_mib,
+                "Octranet class rate differs"
+            );
+            let bytes = state.uint(b"class_bytes", &[&plan_key, &class_key])?;
+            let paid = state.uint(b"class_paid", &[&plan_key, &class_key])?;
+            ensure!(
+                tariff.charge(u8::try_from(class)?, bytes)? == paid,
+                "Octranet redeemed charge differs"
+            );
+            redeemed_bytes.push(bytes);
+            redeemed_ou.push(paid);
+        }
+        let total_paid = redeemed_ou
+            .iter()
+            .try_fold(0_u64, |sum, value| sum.checked_add(*value))
+            .context("Octranet redeemed total overflow")?;
+        let remaining = state.uint(b"plan_remaining", &[&plan_key])?;
+        let budget = state.uint(b"plan_budget", &[&plan_key])?;
+        ensure!(
+            budget > 0
+                && remaining
+                    .checked_add(total_paid)
+                    .is_some_and(|total| total <= budget),
+            "Octranet plan accounting differs"
+        );
+        let opened_ms = state.uint(b"plan_opened_ms", &[&plan_key])?;
+        ensure!(
+            opened_ms > 0 && opened_ms <= now,
+            "Octranet plan clock differs"
+        );
+        let reserved = state.uint(b"reserved", &[&payer_text])?;
+        let funds = state.uint(b"funds", &[&payer_text])?;
+        let minimum = state.uint(b"min_operator_stake", &[])?;
+        let locked = state.uint(b"locked_value", &[])?;
+        let cap = state.uint(b"max_locked_value", &[])?;
+        ensure!(
+            minimum >= 100_000_000 && cap > minimum && locked <= cap && reserved <= funds,
+            "Octranet custody accounting differs"
+        );
+        let liquid = account_store::load(
+            &StateBatch::from_snapshot(snapshot.clone()),
+            self.config.program.as_bytes(),
+        )?
+        .is_some_and(|account| account.balance >= locked.into());
+        let provider_generation = state.uint(b"offer_generation", &[&offer_key])?;
+        let provider_current = state.uint(b"operator_generation", &[&operator])?;
+        let provider_key = provider_generation.to_string();
+        let stopped = state.uint(b"operator_stopped", &[&operator, &provider_key])?;
+        let user_deadline = state.uint(b"exit_deadline", &[&payer_text])?;
+        ensure!(
+            stopped == 0 || stopped <= now,
+            "Octranet operator stop clock differs"
+        );
+        ensure!(
+            user_deadline == 0
+                || user_deadline
+                    .checked_sub(DAY_MS)
+                    .is_some_and(|requested| requested <= now),
+            "Octranet payer exit clock differs"
+        );
+        let provider_deadline = if stopped == 0 {
+            None
+        } else {
+            Some(
+                stopped
+                    .checked_add(DAY_MS)
+                    .context("Octranet operator deadline overflow")?,
+            )
+        };
+        let claim_deadline_ms = match (user_deadline, provider_deadline) {
+            (0, other) => other,
+            (value, None) => Some(value),
+            (value, Some(other)) => Some(value.min(other)),
+        };
+        let available = active && liquid && remaining <= reserved && remaining <= funds;
+        let provider_available = provider_generation > 0
+            && provider_generation == provider_current
+            && stopped == 0
+            && state.uint(b"operator_unlock", &[&operator])? == 0
+            && state.uint(b"operator_stake", &[&operator])? >= minimum;
+        Ok(Plan {
+            data: PlanData {
+                deployment: self.deployment.clone(),
+                payer,
+                receipt_key,
+                generation,
+                plan,
+                offer,
+                operator_generation: provider_generation,
+                manifest_hash: manifest,
+                tariff,
+                original_budget_ou: budget,
+                remaining_ou: remaining,
+                redeemed_bytes,
+                redeemed_ou,
+                opened_ms,
+                canonical_ms: now,
+                claim_deadline_ms,
+            },
+            eligible: available && provider_available && user_deadline == 0 && remaining > 0,
+            claim_eligible: available && claim_deadline_ms.is_none_or(|deadline| now < deadline),
+            lease: None,
+        })
+    }
+
+    fn tariff(&self, snapshot: &Snapshot, hash: &str) -> Result<Tariff> {
+        let path = format!("/offers/{hash}/tariff.json");
+        let asset = circle_assets::public_asset(
+            snapshot,
+            self.config.operator_circle.as_bytes(),
+            path.as_bytes(),
+            TARIFF_BYTES,
+        )?;
+        ensure!(
+            asset.resource_mode == b"public_resources"
+                && asset.meta.body_mode == octra_node_protocol::circles::ResourceMode::Public,
+            "Octranet tariff must be a public Circle asset"
+        );
+        ensure!(
+            asset.body_b64.len() <= (TARIFF_BYTES as usize).div_ceil(3) * 4,
+            "Octranet tariff encoding exceeds bound"
+        );
+        let raw = decode_base64(asset.body_b64)?;
+        ensure!(
+            raw.len() == usize::try_from(asset.meta.size_bytes)?
+                && hex::encode(Sha256::digest(&raw)) == hash
+                && asset.meta.blob_hash == hash.as_bytes(),
+            "Octranet tariff hash or size differs"
+        );
+        let tariff = Tariff::from_bytes(&raw)?;
+        ensure!(
+            tariff.canonical_bytes()? == raw && tariff.hash_hex()? == hash,
+            "Octranet tariff must use canonical bytes"
+        );
+        Ok(tariff)
+    }
+}
+
+impl<A: crate::Host> crate::Node<A> {
+    /// Bind payment reads to the same suspension and revocation capability as
+    /// the node's other native services. A history reader alone cannot grant it.
+    pub fn payments(&self, config: Config, operator: Address) -> Result<Payments> {
+        Payments::new(config, self.store.reader(), operator, self.shared.clone())
+    }
+}
+
+fn digest(value: &str) -> Result<()> {
+    ensure!(
+        value.len() == 64
+            && value
+                .bytes()
+                .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)),
+        "invalid Octranet digest"
+    );
+    Ok(())
+}
+
+fn check_program(state: &Snapshot, program: &str, hash: &str, owner: Option<&[u8]>) -> Result<()> {
+    let address = program.as_bytes();
+    let meta = store::meta(state, address)?.context("Octranet program not deployed")?;
+    ensure!(
+        meta.address == address
+            && meta.code_hash == hash.as_bytes()
+            && owner.is_none_or(|owner| meta.owner == owner),
+        "Octranet program metadata differs"
+    );
+    let raw = decode_base64(store::bytecode(state, address).context("Octranet bytecode missing")?)?;
+    ensure!(
+        hex::encode(Sha256::digest(&raw)) == hash,
+        "Octranet bytecode pin differs"
+    );
+    Ok(())
+}
+
+struct Fields<'a> {
+    snapshot: &'a Snapshot,
+    program: &'a [u8],
+}
+impl Fields<'_> {
+    fn bytes(&self, field: &[u8], indices: &[&str]) -> Option<&[u8]> {
+        let key = if indices.is_empty() {
+            field.to_vec()
+        } else {
+            let mut key = internal_key(b"map", field);
+            key.push(b'/');
+            for index in indices {
+                key.extend_from_slice(index.len().to_string().as_bytes());
+                key.push(b'#');
+                key.extend_from_slice(index.as_bytes());
+            }
+            key
+        };
+        self.snapshot
+            .get(&[b"contracts", self.program, b"storage", &key])
+    }
+    fn uint(&self, field: &[u8], indices: &[&str]) -> Result<u64> {
+        let Some(raw) = self.bytes(field, indices) else {
+            return Ok(0);
+        };
+        let text = std::str::from_utf8(raw)?;
+        let value: u64 = text.parse()?;
+        ensure!(
+            value.to_string() == text,
+            "noncanonical Octranet numeric state"
+        );
+        Ok(value)
+    }
+    fn text(&self, field: &[u8], indices: &[&str]) -> Result<String> {
+        Ok(std::str::from_utf8(
+            self.bytes(field, indices)
+                .context("Octranet state field missing")?,
+        )?
+        .to_owned())
+    }
+}

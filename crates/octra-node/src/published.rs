@@ -42,6 +42,7 @@ pub(crate) struct Serving {
     pub(crate) committed: Committed,
     pub(crate) router: Router,
     pub(crate) revocation: Revocation,
+    pub(crate) observed_at: Instant,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -57,6 +58,8 @@ struct State {
     // Identity, rather than a wrapping counter, prevents an old resume from
     // undoing a newer pause while it was awaiting disk or history validation.
     ticket: Arc<()>,
+    // Resuming the same retained head must not renew paid admission forever.
+    head_observed: Option<(Head, Instant)>,
 }
 pub(crate) struct Shared(Mutex<State>, pub(crate) watch::Sender<()>);
 impl Shared {
@@ -67,6 +70,7 @@ impl Shared {
                 publishing_assets: None,
                 reason: "awaiting catch-up".into(),
                 ticket: Arc::new(()),
+                head_observed: None,
             }),
             watch::channel(()).0,
         )
@@ -129,11 +133,20 @@ impl Shared {
         self.1.send_replace(());
         (state.ticket.clone(), was_serving.is_some())
     }
-    pub(crate) fn install(&self, ticket: &Arc<()>, serving: Serving) -> bool {
+    pub(crate) fn install(&self, ticket: &Arc<()>, mut serving: Serving) -> bool {
         let mut state = self.0.lock().expect("service state lock");
         if !Arc::ptr_eq(ticket, &state.ticket) {
             return false;
         }
+        let head = serving.committed.head();
+        serving.observed_at = match &state.head_observed {
+            Some((previous, observed)) if previous == head => *observed,
+            _ => {
+                let now = Instant::now();
+                state.head_observed = Some((head.clone(), now));
+                now
+            }
+        };
         state.serving = Some(Arc::new(serving));
         state.publishing_assets = None;
         self.1.send_replace(());

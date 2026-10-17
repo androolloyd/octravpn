@@ -1,0 +1,10 @@
+// Native child ownership is this program's address. There is no API that can
+// upgrade a child. Qualification must check both metadata and signed upgrades.
+contract OctranetPaymentsFactory {
+  event PaymentsDeployed(child: address)
+  fn deploy_payments(bytecode: string, domain: string, max_locked_value: uint, min_operator_stake: uint): address {
+    let child = deploy(bytecode, domain, max_locked_value, min_operator_stake)
+    emit PaymentsDeployed(child)
+    return child
+  }
+}

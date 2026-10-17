@@ -76,7 +76,19 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 pub fn read(path: &Path) -> Result<Config> {
-    Ok(serde_json::from_slice(&std::fs::read(path)?)?)
+    let mut config: Config = serde_json::from_slice(&std::fs::read(path)?)?;
+    if let Some(mesh) = config
+        .services
+        .as_mut()
+        .and_then(|services| services.mesh.as_mut())
+    {
+        mesh.resolve_paths(
+            std::fs::canonicalize(path)?
+                .parent()
+                .context("configuration directory")?,
+        );
+    }
+    Ok(config)
 }
 fn now() -> Result<f64> {
     Ok(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64())

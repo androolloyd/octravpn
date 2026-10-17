@@ -45,6 +45,8 @@ pub struct Config {
     pub tunnel: SocketAddr,
     #[serde(default)]
     pub gateway: Option<crate::gateway::Config>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh: Option<octravpn_node::mesh_control::Config>,
     #[serde(default)]
     pub compute_provider: bool,
     #[serde(default)]
@@ -100,6 +102,9 @@ pub fn read(path: &Path) -> Result<Config> {
             *path = parent.join(&*path);
         }
     }
+    if let Some(mesh) = &mut config.mesh {
+        mesh.resolve_paths(&parent);
+    }
     Ok(config)
 }
 
@@ -139,6 +144,14 @@ pub fn read_role(path: &Path) -> Result<RoleConfig> {
                 if file.is_relative() {
                     *file = parent.join(&*file);
                 }
+            }
+            if let Some(mesh) = role
+                .single
+                .services
+                .as_mut()
+                .and_then(|services| services.mesh.as_mut())
+            {
+                mesh.resolve_paths(&parent);
             }
             Ok(RoleConfig::Single(Box::new(role.single)))
         }
@@ -322,6 +335,7 @@ pub async fn run(config: Config, mut shutdown: watch::Receiver<bool>) -> Result<
                 control: config.control,
                 tunnel: config.tunnel,
                 gateway: config.gateway,
+                mesh: config.mesh,
             },
             transport: launch::Transport {
                 listen: config.p2p,

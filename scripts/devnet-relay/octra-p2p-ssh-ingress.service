@@ -1,0 +1,25 @@
+[Unit]
+Description=Octra authenticated P2P ingress through SSH
+After=network-online.target nftables.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+ExecStart=/usr/bin/python3 /usr/local/lib/octra-devnet/ssh_ingress.py serve
+Environment=PYTHONDONTWRITEBYTECODE=1
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_INET AF_UNIX
+SocketBindDeny=any
+SocketBindAllow=ipv4:tcp:20800
+MemoryMax=64M
+TasksMax=16
+
+[Install]
+WantedBy=multi-user.target

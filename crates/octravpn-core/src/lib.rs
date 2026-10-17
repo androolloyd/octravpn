@@ -23,6 +23,7 @@ pub mod enroll;
 pub mod identifier;
 pub mod ip_tunnel;
 pub mod onion;
+pub mod payments;
 pub mod receipt;
 pub mod receipt_journal;
 pub(crate) mod receipt_log;

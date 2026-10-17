@@ -49,10 +49,10 @@ octravpn-obfs4 = { path = "../octravpn-obfs4" }
 # is still built/published by headscale-rs — this dep just folds the
 # *operator-facing* surface into our single-binary install. See
 # `docs/operators/cli-migration.md`.
-headscale-cli = { git = "https://github.com/androolloyd/headscale-rs", rev = "7b6b71b245ceff25f27a400588d78dd28e6e340f" }
+headscale-cli = { git = "https://github.com/androolloyd/headscale-rs", rev = "5662f202a8448364cb212a12c0489216c74ab6ca" }
 # Native DERP runtime construction needs the relay primitive that
 # `headscale-api::tailscale_wire::derp::NativeDerpRuntime` wraps.
-headscale-core = { git = "https://github.com/androolloyd/headscale-rs", rev = "7b6b71b245ceff25f27a400588d78dd28e6e340f" }
+headscale-core = { git = "https://github.com/androolloyd/headscale-rs", rev = "5662f202a8448364cb212a12c0489216c74ab6ca" }
 
 anyhow      = { workspace = true }
 async-trait = { workspace = true }
@@ -109,8 +109,8 @@ socket2     = { version = "0.5", features = ["all"] }
 # gives it the SQLite store under [control].tailscale_wire_state_dir, so a
 # restart keeps node identities and tailnet IPs instead of forcing every
 # client to re-register. Same path-dep style as the mesh crate.
-headscale-api = { git = "https://github.com/androolloyd/headscale-rs", rev = "7b6b71b245ceff25f27a400588d78dd28e6e340f", default-features = false, features = ["admin"] }
-headscale-db = { git = "https://github.com/androolloyd/headscale-rs", rev = "7b6b71b245ceff25f27a400588d78dd28e6e340f" }
+headscale-api = { git = "https://github.com/androolloyd/headscale-rs", rev = "5662f202a8448364cb212a12c0489216c74ab6ca", default-features = false, features = ["admin"] }
+headscale-db = { git = "https://github.com/androolloyd/headscale-rs", rev = "5662f202a8448364cb212a12c0489216c74ab6ca" }
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["fs"] }
@@ -122,7 +122,7 @@ octravpn-mesh = { path = "../octravpn-mesh", features = ["test-helpers"] }
 # `headscale-api` with `default-features = false` (it only wants the
 # wire layer); we activate the admin feature here as a dev-dep so the
 # integration test can reach `admin::router` / `admin::AdminState`.
-headscale-api = { git = "https://github.com/androolloyd/headscale-rs", rev = "7b6b71b245ceff25f27a400588d78dd28e6e340f", default-features = false, features = ["admin"] }
+headscale-api = { git = "https://github.com/androolloyd/headscale-rs", rev = "5662f202a8448364cb212a12c0489216c74ab6ca", default-features = false, features = ["admin"] }
 chrono = { version = "0.4", features = ["serde"] }
 # `tower::ServiceExt::oneshot` drives the merged axum::Router in the
 # `tailscale_wire_integration` test without binding a real port.

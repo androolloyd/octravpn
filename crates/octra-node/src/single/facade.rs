@@ -125,6 +125,7 @@ impl Facade {
         Ok(self.bridge.install(
             &lease,
             Serving {
+                observed_at: std::time::Instant::now(),
                 committed: Committed {
                     head: lease.head.clone(),
                     assets,

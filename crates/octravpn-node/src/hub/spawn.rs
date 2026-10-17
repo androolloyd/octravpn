@@ -188,14 +188,16 @@ impl Hub {
                 // hydrate the registry from <state dir>/machines.sqlite so a
                 // daemon restart does not wipe node identities and IPs.
                 let machines = Arc::new(MachineRegistry::new());
-                let stores = crate::mesh_store::MeshStore::open(&dir, machines.clone()).await?;
+                let stores = crate::mesh_store::MeshStore::open(&dir, machines.clone())
+                    .await?
+                    .managed_policy(self.cfg.control.members_policy.enabled);
                 let registration_store = stores.machines.clone();
                 // Item 4: the policy store is hoisted so the members-policy
                 // sync task can replace the allow-all fallback with the
                 // packet filter rendered from the anchored member set.
                 // Config errors (no circle, no passphrase) fail boot here;
                 // the loop itself never returns.
-                let policy_store = Arc::new(octravpn_mesh::policy::PolicyStore::new());
+                let policy_store = Arc::new(stores.policy.clone());
                 let mut registration_gate = None;
                 if self.cfg.control.members_policy.enabled {
                     crate::members_policy::install_boot_deny_all(policy_store.as_ref())?;

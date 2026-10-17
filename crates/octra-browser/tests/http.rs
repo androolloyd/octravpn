@@ -6,7 +6,7 @@ use axum::{
 };
 use http_body_util::BodyExt;
 use octra_browser::{
-    http::{Browser, Gateway},
+    http::{Browser, Gateway, Portal},
     Asset, AssetResolver, Error, OctUrl, Provenance, SnapshotIdentity,
 };
 use std::{
@@ -151,6 +151,310 @@ async fn wrong_host_scope_and_changed_snapshot_never_serve_assets() {
 
 const GATEWAY_HOST: &str = "circles.example.ts.net";
 const GATEWAY_ORIGIN: &str = "https://circles.example.ts.net";
+
+fn portal_fixture() -> Arc<Resolver> {
+    Arc::new(Resolver {
+        assets: [
+            (("one".into(), "/index.html".into()), ("text/html".into(), br#"<h1>Join Octranet</h1><link rel="stylesheet" href="style.css"><a href="status.json">Account status</a><a href="oct://two/about">Other</a><script>fetch('https://evil/')</script>"#.to_vec())),
+            (("one".into(), "/style.css".into()), ("text/css".into(), b"body{background-image:url('/logo.svg')}".to_vec())),
+            (("one".into(), "/logo.svg".into()), ("image/svg+xml".into(), b"<svg xmlns='http://www.w3.org/2000/svg'/>".to_vec())),
+            (("one".into(), "/status.json".into()), ("application/json".into(), br#"{"paid_admission":false}"#.to_vec())),
+            (("one".into(), "/private.html".into()), ("text/html".into(), b"<h1>Not in the portal</h1>".to_vec())),
+            (("one".into(), "/docs/index.html".into()), ("text/html".into(), b"<h1>No implicit directory grant</h1>".to_vec())),
+            (("two".into(), "/index.html".into()), ("text/html".into(), b"<h1>Another Circle</h1>".to_vec())),
+        ].into(),
+        changed: AtomicBool::new(false),
+        reads: AtomicUsize::new(0),
+    })
+}
+
+fn portal() -> Portal {
+    Portal::new(
+        "one",
+        [
+            "/index.html",
+            "/style.css",
+            "/logo.svg",
+            "/status.json",
+            "/docs/index.html",
+        ]
+        .map(str::to_owned),
+    )
+    .unwrap()
+}
+
+#[test]
+fn portal_configuration_is_bounded_canonical_and_immutable() {
+    let configured = portal();
+    assert_eq!(configured.circle(), "one");
+    assert_eq!(configured.paths().len(), 5);
+    let encoded = serde_json::to_vec(&configured).unwrap();
+    let restored: Portal = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(restored.circle(), configured.circle());
+    assert_eq!(restored.paths(), configured.paths());
+    for path in [
+        "/",
+        "/docs/",
+        "/../index.html",
+        "/./index.html",
+        "//index.html",
+        "/a//index.html",
+        "/index.html?proxy=1",
+        "/index.html#fragment",
+        "/%69ndex.html",
+        "/%252e%252e/index.html",
+        "/index%2ehtml",
+        "/image*.png",
+        "/rpc",
+        "/app/request",
+        "/snapshots/a/one/index.html",
+        "/circles/one/index.html",
+        "/view/a/one/index.html",
+        "/o/oct://two/",
+        "/site/two/index.html",
+        "/back\\slash.css",
+        "/café.css",
+    ] {
+        assert!(
+            Portal::new("one", ["/index.html".into(), path.into()]).is_err(),
+            "{path}"
+        );
+    }
+    assert!(Portal::new("one", ["/style.css".into()]).is_err());
+    assert!(Portal::new("one", ["/index.html".into(), "/index.html".into()]).is_err());
+    assert!(Portal::new(
+        "one",
+        [
+            "/index.html".into(),
+            format!("/{}", "a".repeat(Portal::MAX_PATH_BYTES))
+        ]
+    )
+    .is_err());
+    assert!(Portal::new(
+        "one",
+        std::iter::once("/index.html".into())
+            .chain((0..Portal::MAX_PATHS).map(|i| format!("/{i}.css")))
+    )
+    .is_err());
+    for invalid in [
+        serde_json::json!({"circle":"one","paths":["/index.html"],"proxy":true}),
+        serde_json::json!({"circle":"one","paths":["/index.html","/%69ndex.html"]}),
+        serde_json::json!({"circle":"one/docs","paths":["/index.html"]}),
+    ] {
+        assert!(serde_json::from_value::<Portal>(invalid).is_err());
+    }
+    assert!(Gateway::new(portal_fixture(), GATEWAY_ORIGIN)
+        .unwrap()
+        .with_site("one")
+        .unwrap()
+        .with_portal(portal())
+        .is_err());
+    assert!(Gateway::new(portal_fixture(), GATEWAY_ORIGIN)
+        .unwrap()
+        .with_portal(portal())
+        .unwrap()
+        .with_site("one")
+        .is_err());
+}
+
+#[tokio::test]
+async fn portal_serves_only_its_explicit_canonical_assets_and_pinned_subresources() {
+    let gateway = Gateway::new(portal_fixture(), GATEWAY_ORIGIN)
+        .unwrap()
+        .with_portal(portal())
+        .unwrap()
+        .router();
+    let (status, headers, html) = request(gateway.clone(), "/", GATEWAY_HOST).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers["x-octra-epoch"], "3");
+    assert!(html.contains("Join Octranet"));
+    assert!(!html.contains("<script"));
+    assert!(html.contains("/circles/one/status.json"));
+    let stylesheet = format!("/snapshots/{}/one/style.css", provenance().id());
+    assert!(html.contains(&stylesheet));
+    let (status, _, css) = request(gateway.clone(), &stylesheet, GATEWAY_HOST).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(css.contains(&format!("/snapshots/{}/one/logo.svg", provenance().id())));
+    for path in ["/status.json", "/circles/one/status.json"] {
+        let (status, _, body) = request(gateway.clone(), path, GATEWAY_HOST).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, r#"{"paid_admission":false}"#);
+    }
+    let head = gateway
+        .oneshot(
+            Request::builder()
+                .method("HEAD")
+                .uri("/index.html")
+                .header("host", GATEWAY_HOST)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(head.status(), StatusCode::OK);
+    assert!(head
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn portal_refuses_route_encoding_query_circle_and_scope_escapes_before_lookup() {
+    let resolver = portal_fixture();
+    let gateway = Gateway::new(resolver.clone(), GATEWAY_ORIGIN)
+        .unwrap()
+        .with_portal(portal())
+        .unwrap()
+        .router();
+    for path in [
+        "/private.html",
+        "/docs/",
+        "/circles/two/index.html",
+        "/circles/one-other/index.html",
+        "/circles/one/private.html",
+        "/view/one/index.html",
+        "/o/oct://two/",
+        "/site/two/index.html",
+        "/open?u=oct://two/",
+        "/rpc",
+        "/app/request",
+        "/%69ndex.html",
+        "/%252e%252e/index.html",
+        "/%2e%2e/index.html",
+        "/a/../index.html",
+        "/a//index.html",
+        "//index.html",
+        "/index.html%3fproxy=1",
+        "/index.html?proxy=oct://two/",
+        "https://evil.example/index.html",
+    ] {
+        let (status, _, body) = request(gateway.clone(), path, GATEWAY_HOST).await;
+        assert!(!status.is_success(), "{path}");
+        assert!(!body.contains("Join Octranet"), "{path}");
+    }
+    for path in [
+        format!("/snapshots/{}/one/index.html", "f".repeat(64)),
+        format!("/snapshots/{}/two/index.html", provenance().id()),
+        format!("/snapshots/{}/one/private.html", provenance().id()),
+        format!("/snapshots/{}/one/index.html?x=1", provenance().id()),
+    ] {
+        assert!(
+            !request(gateway.clone(), &path, GATEWAY_HOST)
+                .await
+                .0
+                .is_success(),
+            "{path}"
+        );
+    }
+    assert_eq!(resolver.reads.load(Ordering::Relaxed), 0);
+    for method in ["POST", "PUT", "DELETE", "OPTIONS", "CONNECT"] {
+        let response = gateway
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri("/index.html")
+                    .header("host", GATEWAY_HOST)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::METHOD_NOT_ALLOWED,
+            "{method}"
+        );
+    }
+    assert_eq!(resolver.reads.load(Ordering::Relaxed), 0);
+}
+
+#[tokio::test]
+async fn portal_keeps_host_and_changed_provenance_fail_closed() {
+    let resolver = portal_fixture();
+    let gateway = Gateway::new(resolver.clone(), GATEWAY_ORIGIN)
+        .unwrap()
+        .with_portal(portal())
+        .unwrap()
+        .router();
+    for host in [
+        "evil.example",
+        "127.0.0.1",
+        "circles.example.ts.net.evil",
+        "circles.example.ts.net:80",
+    ] {
+        let response = gateway
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/index.html")
+                    .header("host", host)
+                    .header("x-forwarded-host", GATEWAY_HOST)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+    assert_eq!(resolver.reads.load(Ordering::Relaxed), 0);
+    resolver.changed.store(true, Ordering::Relaxed);
+    let (status, _, body) = request(gateway, "/index.html", GATEWAY_HOST).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(!body.contains("Join Octranet"));
+}
+
+#[tokio::test]
+async fn circle_website_paths_keep_host_snapshot_and_read_only_boundaries() {
+    let resolver = fixture();
+    let gateway = Gateway::new(resolver.clone(), GATEWAY_ORIGIN)
+        .unwrap()
+        .with_site("one")
+        .unwrap()
+        .router();
+    let (status, headers, html) = request(gateway.clone(), "/docs/?mode=join", GATEWAY_HOST).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers["x-octra-epoch"], "3");
+    assert!(html.contains(&format!(
+        "/snapshots/{}/one/docs/style.css",
+        provenance().id()
+    )));
+    assert!(html.contains("/circles/two/about?q=1#section"));
+    assert!(!html.contains("<script"));
+    assert_eq!(
+        request(gateway.clone(), "/unpublished", GATEWAY_HOST)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        request(gateway.clone(), "/docs/", "evil.example").await.0,
+        StatusCode::BAD_REQUEST
+    );
+    let stale = format!("/snapshots/{}/one/docs/", "f".repeat(64));
+    assert_eq!(
+        request(gateway.clone(), &stale, GATEWAY_HOST).await.0,
+        StatusCode::BAD_REQUEST
+    );
+    let response = gateway
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/docs/")
+                .header("host", GATEWAY_HOST)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+    for invalid in ["one/docs", "one?x", "one#x", "", "..", "one:443"] {
+        assert!(Gateway::validate_site(invalid).is_err(), "{invalid}");
+    }
+}
 
 #[tokio::test]
 async fn gateway_serves_documents_directly_and_pins_subresources() {

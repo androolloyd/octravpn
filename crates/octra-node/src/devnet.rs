@@ -60,6 +60,8 @@ pub struct Config {
     pub tunnel: SocketAddr,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gateway: Option<crate::gateway::Config>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh: Option<octravpn_node::mesh_control::Config>,
     #[serde(default)]
     pub compute_provider: bool,
     /// Local transport identities may observe without joining the validator set.
@@ -242,6 +244,7 @@ pub async fn init_with_applications(
             control: socket(3),
             tunnel: socket(4),
             gateway: None,
+            mesh: None,
             compute_provider: false,
             voting: true,
             vpn: None,
@@ -258,7 +261,15 @@ pub async fn init_with_applications(
     Ok(configs)
 }
 pub fn read(path: &Path) -> Result<Config> {
-    Ok(serde_json::from_slice(&std::fs::read(path)?)?)
+    let mut config: Config = serde_json::from_slice(&std::fs::read(path)?)?;
+    if let Some(mesh) = &mut config.mesh {
+        mesh.resolve_paths(
+            std::fs::canonicalize(path)?
+                .parent()
+                .context("configuration directory")?,
+        );
+    }
+    Ok(config)
 }
 pub use crate::identity::read as read_key;
 
@@ -331,6 +342,7 @@ pub async fn run(config: Config, shutdown: watch::Receiver<bool>) -> Result<()> 
                 control: config.control,
                 tunnel: config.tunnel,
                 gateway: config.gateway,
+                mesh: config.mesh,
             },
             transport: crate::launch::Transport {
                 listen: config.p2p,

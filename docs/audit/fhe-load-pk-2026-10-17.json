@@ -1,0 +1,247 @@
+{
+  "transport": "Direct HTTPS, stable User-Agent, no environment proxy",
+  "networks": {
+    "checked_at": "2026-10-17T01:41:24.501203+00:00",
+    "wallet": "oct8Tdgu4RLbSGah1fVoVHW4T4cLFDmsoKhTyVD8gCndNFm",
+    "networks": {
+      "devnet": {
+        "rpc": "https://devnet.octrascan.io/rpc",
+        "probes": {
+          "runtime": {
+            "response_bytes": 869,
+            "sha256": "d8575fb48924a3879fd37c3230c08341c331e5d17d4fba93a59480539767b98f",
+            "error": null,
+            "result_type": "dict",
+            "result": {
+              "schema": "octra-runtime-release-v1",
+              "schema_version": 1,
+              "node": "octra",
+              "node_version": "3.0.0",
+              "source_commit": "f7637a7eda10b78702ad56844707f7fd308db0e3",
+              "binary_hash": "8bd867ecb44c42145ba31694d191329d0ec44a58acfd67f69ee1dd2c133e63c8",
+              "consensus_standard": "octra_consensus",
+              "consensus_standard_hash": "4b40557ade107a3f6cb618319ea1ea005df7c3c6b03c527279bcb50c6b499d6f",
+              "activation_graph_hash": "5cabfc496c49dd3d3533dd9059a6843ce32c58d26d5d370705244e4f9b460881",
+              "consensus_profile": 16,
+              "consensus_rules_id": "finalized_rejection_commitment",
+              "runtime_profile_hash": "4b40557ade107a3f6cb618319ea1ea005df7c3c6b03c527279bcb50c6b499d6f",
+              "config_hash": "d985b44120a7e5d07e6b42b735880f8ca163610bdcdcb45422a680eba5abb30f",
+              "chain_id": "octra-devnet-9871-cluster",
+              "validator": "octFc3DDzWTASUVpvyFftXp9KLx1RdiYawGHRRCVz3wcoVZ",
+              "self_reported": true
+            }
+          },
+          "baseline": {
+            "response_bytes": 123,
+            "sha256": "56651bdffc6037fab365c9bf58b696a0d7f968074a7ce60c0fd2688f64364ed1",
+            "error": null,
+            "result_type": "dict",
+            "result": {
+              "address": "oct8Tdgu4RLbSGah1fVoVHW4T4cLFDmsoKhTyVD8gCndNFm",
+              "pvac_pubkey": null
+            }
+          },
+          "probe_load_pk": {
+            "response_bytes": 140,
+            "sha256": "45c896acc409f35cf20990df17b8a783fd07df25a8069665ecb20f5489613a73",
+            "error": {
+              "code": -32602,
+              "message": "invalid params",
+              "data": "missing required param: address (index 0)"
+            },
+            "result_type": "NoneType",
+            "result": null
+          }
+        }
+      },
+      "mainnet": {
+        "rpc": "https://octra.network/rpc",
+        "probes": {
+          "runtime": {
+            "response_bytes": 107,
+            "sha256": "6ae3f90a9f5e98f15e100aaae76c60c5095744f276224af646d8d4e2a152f980",
+            "error": {
+              "code": -32601,
+              "message": "method not found: octra_runtimeVersion"
+            },
+            "result_type": "NoneType",
+            "result": null
+          },
+          "baseline": {
+            "response_bytes": 123,
+            "sha256": "56651bdffc6037fab365c9bf58b696a0d7f968074a7ce60c0fd2688f64364ed1",
+            "error": null,
+            "result_type": "dict",
+            "result": {
+              "address": "oct8Tdgu4RLbSGah1fVoVHW4T4cLFDmsoKhTyVD8gCndNFm",
+              "pvac_pubkey": null
+            }
+          },
+          "probe_load_pk": {
+            "response_bytes": 140,
+            "sha256": "45c896acc409f35cf20990df17b8a783fd07df25a8069665ecb20f5489613a73",
+            "error": {
+              "code": -32602,
+              "message": "invalid params",
+              "data": "missing required param: address (index 0)"
+            },
+            "result_type": "NoneType",
+            "result": null
+          }
+        }
+      }
+    }
+  },
+  "current_abi": {
+    "checked_at": "2026-10-17T01:42:08.020234+00:00",
+    "wallet": "oct8Tdgu4RLbSGah1fVoVHW4T4cLFDmsoKhTyVD8gCndNFm",
+    "networks": {
+      "devnet": {
+        "rpc": "https://devnet.octrascan.io/rpc",
+        "probes": {
+          "node_status": {
+            "result": {
+              "epoch": 1706513,
+              "current_epoch": 1706513,
+              "validator": "octFc3DDzWTASUVpvyFftXp9KLx1RdiYawGHRRCVz3wcoVZ",
+              "roots": 0,
+              "timestamp": 1792201328.193611,
+              "network_version": "v3.0.0-irmin",
+              "head_epoch": 1706512,
+              "state_root": "4e411e49164908b8e0ad7be3a9002315650f6bb91223bfaf2ab79e1d5e0a8470",
+              "txid_hi": "2734881",
+              "irmin_commit": "434b51da131aebe3557bb224a9392aa800c02742e0ebde949dfb91722979822eb35686ca273186de7c7f7455557c11021650e0a687e8d7330269471606660b8e"
+            },
+            "error": null
+          },
+          "probe_info": {
+            "result": {
+              "address": "octaUNQtHpsmGrd4m4pftsjhE7zYwK4fVEgsDTKQ4BsXDRB",
+              "version": "1.0 Rehovot",
+              "code_hash": "3ffc3faa7dce3cd7f6b372a9ca439441dc295966720ab3d2ecdeee581787ebff",
+              "balance": "0",
+              "owner": "oct8Tdgu4RLbSGah1fVoVHW4T4cLFDmsoKhTyVD8gCndNFm"
+            },
+            "error": null
+          },
+          "probe_abi": {
+            "result": {
+              "address": "octaUNQtHpsmGrd4m4pftsjhE7zYwK4fVEgsDTKQ4BsXDRB",
+              "methods": [
+                {
+                  "name": "probe_self",
+                  "view": false
+                },
+                {
+                  "name": "probe_addr",
+                  "view": false
+                },
+                {
+                  "name": "probe_addr_view",
+                  "view": true
+                },
+                {
+                  "name": "get_last_pk_len",
+                  "view": true
+                },
+                {
+                  "name": "get_calls_succeeded",
+                  "view": true
+                }
+              ],
+              "instruction_count": 86
+            },
+            "error": null
+          },
+          "probe_load_pk": {
+            "result": null,
+            "error": {
+              "code": -32000,
+              "message": "method not found"
+            }
+          }
+        }
+      },
+      "mainnet": {
+        "rpc": "https://octra.network/rpc",
+        "probes": {
+          "node_status": {
+            "result": {
+              "epoch": 2154572,
+              "current_epoch": 2154572,
+              "validator": "oct7xCozDD9JEsbeVpo5C7HXp2BJbKqfmNUHmDDCCTtWcGb",
+              "roots": 0,
+              "timestamp": 1792201334.427195,
+              "network_version": "v3.0.0-irmin",
+              "head_epoch": 2154571,
+              "state_root": "53605885ac426b1cf20e959a5ac58929dc8353d5806d6b28ebf22c0a2239072d155dc3d8f429bcd0eeb7734aa9f1789fd388e116e7710db21824c89604c096f5",
+              "txid_hi": "172116769",
+              "irmin_commit": "279fc35317269e852f632d157f0d85bb44653d217e29010a06adda907c49ae06fe3942b3b9fd5050116dc8d689294bf33434b29b01956a916166afc139c16098"
+            },
+            "error": null
+          },
+          "probe_info": {
+            "result": null,
+            "error": {
+              "code": 112,
+              "message": "not found",
+              "data": "contract not found"
+            }
+          },
+          "probe_abi": {
+            "result": null,
+            "error": {
+              "code": 112,
+              "message": "not found",
+              "data": "contract not found"
+            }
+          },
+          "probe_load_pk": {
+            "result": null,
+            "error": {
+              "code": -32000,
+              "message": "bytecode not found"
+            }
+          }
+        }
+      }
+    }
+  },
+  "actual_devnet_method": {
+    "source": {
+      "jsonrpc": "2.0",
+      "result": {
+        "source": null
+      },
+      "id": "source"
+    },
+    "current_result": {
+      "jsonrpc": "2.0",
+      "result": {
+        "result": "0"
+      },
+      "id": "current_result"
+    },
+    "load_view": {
+      "jsonrpc": "2.0",
+      "error": {
+        "code": -32000,
+        "message": "execution reverted"
+      },
+      "id": "load_view"
+    },
+    "validator_key": {
+      "jsonrpc": "2.0",
+      "result": {
+        "address": "octFc3DDzWTASUVpvyFftXp9KLx1RdiYawGHRRCVz3wcoVZ",
+        "pvac_pubkey": null
+      },
+      "id": "validator_key"
+    }
+  },
+  "classification_controls": 6,
+  "network_writes": 0,
+  "mainnet_fhe_qualified": false,
+  "devnet_fhe_qualified": false,
+  "local_test_log_sha256": "335b3bdc62dadcff52d2cea100dfc502c352964dd9cc0ff63b632032ce64ca6a"
+}

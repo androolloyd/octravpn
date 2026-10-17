@@ -102,6 +102,20 @@ struct Entry {
     legacy: Option<Vec<u8>>,
 }
 impl Reader {
+    /// Canonical Program clock from this captured head's authenticated epoch
+    /// record. Irmin commit dates and the local wall clock are not substitutes.
+    /// Genesis/checkpoint anchors without a retained record return no clock.
+    pub async fn epoch_time_ms(&self, captured: &Head) -> Result<Option<i64>> {
+        let epoch = i64::try_from(captured.cursor.epoch.0).map_err(error)?;
+        self.epoch_entry(captured, epoch)
+            .await?
+            .map(|entry| {
+                octra_node_protocol::consensus::policy::time_of_seconds(entry.finalized.header.ts)
+                    .map_err(error)
+            })
+            .transpose()
+    }
+
     async fn epoch_entry(&self, captured: &Head, epoch: i64) -> Result<Option<Entry>> {
         if self.head_at(captured.cursor.sequence).await? != *captured {
             return Err(error("epoch journal captured head differs"));

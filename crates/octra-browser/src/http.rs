@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 use std::{net::IpAddr, sync::Arc};
 
 mod gateway;
-pub use gateway::Gateway;
+pub use gateway::{Gateway, Portal};
 
 #[derive(Clone)]
 pub struct Browser {

@@ -38,6 +38,7 @@ pub(crate) struct Services {
     pub control: SocketAddr,
     pub tunnel: SocketAddr,
     pub gateway: Option<crate::gateway::Config>,
+    pub mesh: Option<octravpn_node::mesh_control::Config>,
 }
 pub(crate) struct Transport {
     pub listen: SocketAddr,
@@ -711,6 +712,10 @@ pub(crate) async fn run(plan: Plan, mut shutdown: watch::Receiver<bool>) -> Resu
             bound = bound.with_settlement(publisher);
         }
         tasks.spawn(bound.run(stop.subscribe()));
+        if let Some(mesh) = services.mesh.clone() {
+            let service = mesh.bind().await?;
+            tasks.spawn(service.run(stop.subscribe()));
+        }
         if let Some(config) = services.gateway.clone() {
             let gateway = node.bind_gateway(config).await?;
             tasks.spawn(gateway.run(stop.subscribe()));

@@ -106,8 +106,7 @@ run_one() {
     echo "============================================================" >&2
     echo "=== Tape ${id}  (harness: ${harness:-(none)})" >&2
     echo "============================================================" >&2
-    if bash "${PREFLIGHT}" "${tape}" 2>&1 | tee "${log}" \
-        | tail -2 | head -1 | grep -q "0 FAIL"; then
+    if bash "${PREFLIGHT}" "${tape}" 2>&1 | tee "${log}"; then
         RESULT[${id}]=PASS
     else
         RESULT[${id}]=FAIL
@@ -144,7 +143,7 @@ for id in 00 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 22; 
         last=$(grep -E '^PREFLIGHT:' "${LOG_PATH[${id}]}" | tail -1)
     fi
     printf '%-6s %-20s %-8s %s\n' "${id}" "${TAPE_HARNESS[${id}]:-}" "${verdict}" "${last}"
-    if [[ "${verdict}" == FAIL ]]; then overall=1; fi
+    if [[ "${verdict}" != PASS ]]; then overall=1; fi
 done
 
 if (( overall == 0 )); then

@@ -9,6 +9,7 @@ use tokio::sync::watch;
 
 use crate::{Committed, Host, Node, Shared};
 mod keys;
+pub mod payments;
 mod pinned;
 pub(crate) mod settlement;
 pub(crate) mod storage;

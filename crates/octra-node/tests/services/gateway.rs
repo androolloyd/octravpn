@@ -41,6 +41,14 @@ fn put(state: &mut StateBatch, circle: &[u8], path: &str, typ: &str, body: &[u8]
 }
 fn site(state: &mut StateBatch, color: &str) {
     let circle = b"MiXeD";
+    put(state, circle, "/index.html", "text/html", br#"<h1>Octranet onboarding</h1><link rel="stylesheet" href="/docs/style.css"><a href="/status.json">Account status</a><a href="oct://Other/about">Another Circle</a>"#);
+    put(
+        state,
+        circle,
+        "/status.json",
+        "application/json",
+        br#"{"paid_admission":false}"#,
+    );
     for (path,typ,body) in [
         ("/docs/index.html","text/html",br#"<!doctype html><html><head><link rel="stylesheet" href="style.css"><style>@import "inline.css"; #inline{background-image:url('/mark.svg')}</style></head><body><h1 id="title" style="background-image:url('/mark.svg')">Canonical gateway</h1><div id="inline">Inline</div><img id="image" src="/mark.svg"><a id="next" href="oct://Other/about">Other Circle</a><script>document.body.dataset.hacked='yes'</script></body></html>"#.as_slice()),
         ("/docs/inline.css","text/css",b"#inline{color:rgb(3,4,5)}".as_slice()),
@@ -75,6 +83,9 @@ struct Fixture {
 }
 impl Fixture {
     async fn new() -> Self {
+        Self::with_portal(None).await
+    }
+    async fn with_portal(portal: Option<octra_browser::http::Portal>) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let mut state = genesis(b"MiXeD");
         site(&mut state, "rgb(20,100,160)");
@@ -98,6 +109,12 @@ impl Fixture {
             .bind_gateway(octra_node::gateway::Config {
                 listen: "127.0.0.1:0".parse().unwrap(),
                 origin: format!("https://{HOST}"),
+                sites: if portal.is_some() {
+                    std::collections::BTreeMap::default()
+                } else {
+                    [("octra.test".into(), "MiXeD".into())].into()
+                },
+                portal,
             })
             .await
             .unwrap();
@@ -145,10 +162,97 @@ impl Fixture {
 }
 
 #[tokio::test]
+async fn unpaid_portal_keeps_the_canonical_gateway_inside_its_asset_capability() {
+    let portal = octra_browser::http::Portal::new(
+        "MiXeD",
+        [
+            "/index.html",
+            "/status.json",
+            "/docs/style.css",
+            "/theme.css",
+            "/mark.svg",
+        ]
+        .map(str::to_owned),
+    )
+    .unwrap();
+    let fixture = Fixture::with_portal(Some(portal.clone())).await;
+    assert_eq!(fixture.get("/").await.status(), 503);
+    fixture.node.resume().await.unwrap();
+    let page = fixture.get("/").await;
+    assert_eq!(page.status(), 200);
+    let old = fixture.node.snapshot().unwrap().provenance().id();
+    let html = page.text().await.unwrap();
+    assert!(html.contains("Octranet onboarding"));
+    assert!(html.contains(&format!("/snapshots/{old}/MiXeD/docs/style.css")));
+    assert_eq!(
+        fixture.get("/status.json").await.text().await.unwrap(),
+        r#"{"paid_admission":false}"#
+    );
+    for path in [
+        "/circles/Other/about",
+        "/docs/",
+        "/view/whatever/MiXeD/",
+        "/open?u=oct://Other/about",
+        "/rpc",
+        "/status.json?proxy=1",
+    ] {
+        assert!(!fixture.get(path).await.status().is_success(), "{path}");
+    }
+    assert!(fixture
+        .node
+        .bind_gateway(octra_node::gateway::Config {
+            listen: "127.0.0.1:0".parse().unwrap(),
+            origin: format!("https://{HOST}"),
+            sites: [("octra.test".into(), "MiXeD".into())].into(),
+            portal: Some(portal),
+        })
+        .await
+        .is_err());
+    fixture.advance().await;
+    let css = fixture
+        .get(&format!("/snapshots/{old}/MiXeD/docs/style.css"))
+        .await;
+    assert_eq!(css.status(), 200);
+    assert!(css.text().await.unwrap().contains("rgb(20,100,160)"));
+    assert_eq!(
+        fixture
+            .get(&format!("/snapshots/{old}/Other/about"))
+            .await
+            .status(),
+        404
+    );
+    fixture.node.suspend("unpaid portal must not hide catch-up");
+    assert_eq!(fixture.get("/index.html").await.status(), 503);
+    assert_eq!(
+        fixture
+            .get(&format!("/snapshots/{old}/MiXeD/docs/style.css"))
+            .await
+            .status(),
+        503
+    );
+    fixture.shutdown().await;
+}
+
+#[tokio::test]
 async fn canonical_gateway_keeps_old_subresources_across_publication_and_refuses_suspended_reads() {
     let fixture = Fixture::new().await;
     assert_eq!(fixture.get("/circles/MiXeD/docs/").await.status(), 503);
     fixture.node.resume().await.unwrap();
+    let site = reqwest::Client::new()
+        .get(format!("{}/docs/", fixture.endpoint))
+        .header("host", "octra.test")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(site.status(), 200);
+    assert!(site.text().await.unwrap().contains("Canonical gateway"));
+    let wrong_host = reqwest::Client::new()
+        .get(format!("{}/docs/", fixture.endpoint))
+        .header("host", "unconfigured.test")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(wrong_host.status(), 404);
     let response = fixture.get("/circles/MiXeD/docs/").await;
     assert_eq!(response.status(), 200);
     let old = fixture.node.snapshot().unwrap().provenance().id();
