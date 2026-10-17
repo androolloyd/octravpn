@@ -9,6 +9,14 @@ upstream behavioral parity and public-network deployment remain unqualified.
 
 ## Recorded local evidence
 
+- The [guarded public release adoption](checkpoints/2026-10-17/service-public-adoption.json)
+  installed frozen normal release `2516b7c` after a clean old-process
+  exit at epoch 1,708,032. Existing canonical/outbox/archive prefixes,
+  checkpoint bindings, key, configuration and relay were preserved. The new
+  supervised process is alive and restoring retained state; authenticated
+  post-restart progress and serving admission remain pending. Payments are
+  unconfigured. [Operational scope](checkpoints/2026-10-17/service-public-adoption.md)
+  distinguishes launch from public service and Mainnet qualification.
 - The [automatic Service liveness checkpoint](checkpoints/2026-10-17/service-liveness.json)
   records 287 passing tests across 12 composed targets, four standalone ignores,
   strict lint, formatting and the unchanged 19-theorem abstract payment model.

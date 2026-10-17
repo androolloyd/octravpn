@@ -1,0 +1,176 @@
+{
+  "schema": "octra_guarded_public_adoption_v1",
+  "observed_at": "2026-10-17T10:39:48.253029+00:00",
+  "source_commit": "2516b7cd493e94d108a67ea6454c0c830a678c03",
+  "adopted_upstream": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "binary_sha256": "da211057d3eab0ea04506150739b4dbc2a46cdad3ec081b54dc3bbbef9910bd4",
+  "test_helpers": false,
+  "validation_checkpoint": "service-liveness.json",
+  "release_manifest_sha256": "f9adfffa7ba8d6c6cab4e505cf764c470c1e4bf007cbccf6d85a61c31b644259",
+  "build_log_sha256": "aa918fd6ef724c22ccb6d6c9bab71ab4393e20bfb45baaea31d74bec05102e56",
+  "local_source_snapshots": {
+    "/Users/androolloyd/Development/octra": {
+      "commit": "2516b7cd493e94d108a67ea6454c0c830a678c03",
+      "status": "",
+      "sha256": "0bb1c30f1cf2f503b41327ab7f16ad0b76498782e02a617a8e39e10831096283"
+    },
+    "/Users/androolloyd/Development/octra-foundry": {
+      "commit": "d5feaad7f14d6a381e2327dfd6738cae8df95b31",
+      "status": "",
+      "sha256": "0e75c6d7824a58af0106d1a916b69dbafe2747ccbbbba0877057bae53c848a22"
+    }
+  },
+  "cargo_features": {
+    "octra_node_runtime": [],
+    "octra_node": [],
+    "octra-node": []
+  },
+  "launch": {
+    "at": "2026-10-17T10:38:46.353387+00:00",
+    "pid": 84816,
+    "supervisor_pid": 84815,
+    "binary": "/Users/androolloyd/Development/octra/out/service-liveness-20261017/release/octra-node",
+    "binary_sha256": "da211057d3eab0ea04506150739b4dbc2a46cdad3ec081b54dc3bbbef9910bd4",
+    "source_commit": "2516b7cd493e94d108a67ea6454c0c830a678c03",
+    "release_manifest": "/Users/androolloyd/Development/octra/out/service-liveness-20261017/release/manifest.json",
+    "release_manifest_sha256": "f9adfffa7ba8d6c6cab4e505cf764c470c1e4bf007cbccf6d85a61c31b644259",
+    "config": "/Users/androolloyd/Development/octra/out/octranet-public-20261017/network.json",
+    "config_sha256": "77a1713c64c3baf2c57a67bb6a9f261bfb5280347bbe71358dbb0984e53c40eb",
+    "log": "/Users/androolloyd/Development/octra/out/service-liveness-20261017/public-adoption/observer.log",
+    "exit_evidence": "/Users/androolloyd/Development/octra/out/service-liveness-20261017/public-adoption/exit.json",
+    "retained_state": true,
+    "voting": false,
+    "payments": false,
+    "funds_spent": 0
+  },
+  "old_shutdown": {
+    "at": "2026-10-17T10:38:46.291812+00:00",
+    "old_pid": 87662,
+    "signal": "SIGTERM",
+    "forced": false,
+    "exit": {
+      "at": "2026-10-17T10:38:40.387268+00:00",
+      "pid": 87662,
+      "exit_code": 0
+    },
+    "elapsed_seconds": 7.232,
+    "retained_sequence": 10272,
+    "retained_epoch": 1708032,
+    "configuration_unchanged": true,
+    "identity_unchanged": true,
+    "relay_unchanged": true,
+    "state_reset": false
+  },
+  "process": {
+    "pid": 84816,
+    "ppid": 84815,
+    "started": "Sat Oct 17 07:38:46 2026",
+    "argv": [
+      "/Users/androolloyd/Development/octra/out/service-liveness-20261017/release/octra-node",
+      "run-network",
+      "--config",
+      "/Users/androolloyd/Development/octra/out/octranet-public-20261017/network.json"
+    ]
+  },
+  "storage_before": {
+    "sequence": 10272,
+    "epoch": 1708032,
+    "prefix": {
+      "epochs": {
+        "rows": 10273,
+        "sha256": "90ae562b894cbb5350430d649bd8d60da4da82c99b2624adaefe3b635bd84362"
+      },
+      "outbox": {
+        "rows": 10272,
+        "sha256": "9c4b8a3793284f882288e8f9767deef95ea1e2b87e10e06271eb554bfe588e34"
+      }
+    },
+    "archive_prefixes": [
+      {
+        "extension": "devnet-archive",
+        "namespace": "9ebcbe2009256807e94a63b2b4d11865fbe684a7acfcdea1fa96a25111a53981",
+        "through_sequence": 10272,
+        "digest": {
+          "rows": 10272,
+          "sha256": "35f8315c41785f1ff24a9e27603f691081cf768eb22ee08d18b98c9eae1a7c37"
+        }
+      }
+    ],
+    "checkpoints": [
+      {
+        "extension": "devnet-archive",
+        "namespace": "9ebcbe2009256807e94a63b2b4d11865fbe684a7acfcdea1fa96a25111a53981",
+        "sequence": 10272,
+        "epoch": 1708032,
+        "root": "75789ea6175799c6c0441197f3febe6cc97088b2811f8ba44fa35a26b1897262"
+      }
+    ]
+  },
+  "storage_stopped": {
+    "sequence": 10272,
+    "epoch": 1708032,
+    "prefix": {
+      "epochs": {
+        "rows": 10273,
+        "sha256": "90ae562b894cbb5350430d649bd8d60da4da82c99b2624adaefe3b635bd84362"
+      },
+      "outbox": {
+        "rows": 10272,
+        "sha256": "9c4b8a3793284f882288e8f9767deef95ea1e2b87e10e06271eb554bfe588e34"
+      }
+    },
+    "archive_prefixes": [
+      {
+        "extension": "devnet-archive",
+        "namespace": "9ebcbe2009256807e94a63b2b4d11865fbe684a7acfcdea1fa96a25111a53981",
+        "through_sequence": 10272,
+        "digest": {
+          "rows": 10272,
+          "sha256": "35f8315c41785f1ff24a9e27603f691081cf768eb22ee08d18b98c9eae1a7c37"
+        }
+      }
+    ],
+    "checkpoints": [
+      {
+        "extension": "devnet-archive",
+        "namespace": "9ebcbe2009256807e94a63b2b4d11865fbe684a7acfcdea1fa96a25111a53981",
+        "sequence": 10272,
+        "epoch": 1708032,
+        "root": "75789ea6175799c6c0441197f3febe6cc97088b2811f8ba44fa35a26b1897262"
+      }
+    ]
+  },
+  "continuity": "Existing canonical/outbox prefix and retained archive prefix unchanged across clean old shutdown; same identity/config/environment/data and relay. No database reset, second writer, role change or fee-spending operation.",
+  "latest_observation": {
+    "at": "2026-10-17T10:39:32.020742+00:00",
+    "pid": 84816,
+    "process_query_exit": 0,
+    "process": "84816 84815 Sat Oct 17 07:38:46 2026     00:46   0:21.51  56.7 238304 U    /Users/androolloyd/Development/octra/out/service-liveness-20261017/release/octra-node run-network --config /Users/androolloyd/Development/octra/out/octranet-public-20261017/network.json",
+    "exit_evidence": false,
+    "/operator/status": {
+      "error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    "/status": {
+      "error": "<urlopen error [Errno 61] Connection refused>"
+    }
+  },
+  "configuration": {
+    "voting": false,
+    "publisher": false,
+    "payments": false,
+    "ports_unchanged": true,
+    "relay_unchanged": true,
+    "identity_unchanged": true,
+    "state_reset": false,
+    "funds_spent": 0
+  },
+  "qualification": "Supervised process launch verified; startup restoration and post-restart authenticated progress are pending. Not a healthy public paid-service or Mainnet claim.",
+  "evidence_directory": "/Users/androolloyd/Development/octra/out/service-liveness-20261017",
+  "scripts_sha256": {
+    "adopt.py": "6f1e5bd3e2ce2088d4633d62a37b076feec6543e1537421400f83a85f0c67996",
+    "supervisor.py": "c0a18a0e08fada2cf7888ddf74cfe05ed8f3a845dbf4399be04df3480e02c3ab",
+    "audit-continuity.py": "22e2f46529021111bbacd6cbd9acdf8ac9df3e9028b2bd3fe109afef639fc774",
+    "build-release.py": "27651dd7d542a66b0636cfd766d558dfac2c7cd18f345842f46197c2297b7a6b",
+    "observe.py": "162a7fe86293011d3a58d2a416c396ef81af7558b6be460bbd02fb14ad4faa41"
+  }
+}
