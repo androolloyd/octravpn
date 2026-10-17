@@ -45,6 +45,12 @@ qualification. [Offline legacy repair](docs/rust-node/legacy-repair.md) resumes
 trusted native-format plans through a pinned compatibility backend; it does not
 rewind modern canonical history or supply an all-Rust physical backend.
 
+Retained finality audits can [reuse verified work within one process](docs/rust-node/checkpoints/2026-10-17/audit-reuse.md).
+Every audit still rereads the full prefix and authenticates historical validator
+authority; startup, exported records and new publication retain their complete
+verification gates. Demo jobs publish only fresh, complete recording groups
+bound to their GitHub run and source commit.
+
 The unchanged public devnet observer has [319 new retained epochs with matching
 canonical/ExEx continuity](docs/rust-node/checkpoints/2026-10-17/service-public-progress.md).
 Its paid service is unconfigured. Sustained public serving, stock Tailscale

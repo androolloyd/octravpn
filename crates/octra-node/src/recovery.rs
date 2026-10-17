@@ -129,6 +129,39 @@ impl<A: Host> Drop for Admission<A> {
         self.authority.detach();
     }
 }
+
+fn shutdown_requested(shutdown: &watch::Receiver<bool>) -> bool {
+    *shutdown.borrow() || shutdown.has_changed().is_err()
+}
+
+async fn run_until_shutdown(
+    inner: impl std::future::Future<Output = Result<()>>,
+    mut shutdown: watch::Receiver<bool>,
+) -> Result<()> {
+    if shutdown_requested(&shutdown) {
+        return Ok(());
+    }
+    let result = tokio::select! {
+        biased;
+        () = async {
+            while !*shutdown.borrow_and_update() {
+                if shutdown.changed().await.is_err() {
+                    break;
+                }
+            }
+        } => Ok(()),
+        result = inner => result,
+    };
+    // The inner poll may itself observe shutdown and finish before select
+    // polls the signal again. Recheck so that normal driver cancellation does
+    // not become an unexpected-stop error, while unsignalled failures survive.
+    if shutdown_requested(&shutdown) {
+        Ok(())
+    } else {
+        result
+    }
+}
+
 impl<A: Host> Service<A> {
     async fn build(&self) -> Result<Live<A>> {
         let height = i64::try_from(self.node.head().await?.cursor.epoch.0)?
@@ -479,22 +512,12 @@ impl<A: Host> Service<A> {
         .await??;
         Ok(head.cursor.sequence)
     }
-    pub(crate) async fn run(
-        self,
-        driver: Live<A>,
-        mut shutdown: watch::Receiver<bool>,
-    ) -> Result<()> {
+    pub(crate) async fn run(self, driver: Live<A>, shutdown: watch::Receiver<bool>) -> Result<()> {
         let _admission = Admission {
             node: self.node.clone(),
             authority: self.authority.clone(),
         };
-        if *shutdown.borrow() {
-            return Ok(());
-        }
-        tokio::select! {
-            result=self.run_inner(driver)=>result,
-            ()=async {while !*shutdown.borrow_and_update() {if shutdown.changed().await.is_err(){break;}}}=>Ok(()),
-        }
+        run_until_shutdown(Box::pin(self.run_inner(driver)), shutdown).await
     }
     async fn run_inner(&self, driver: Live<A>) -> Result<()> {
         // Public startup retains no signing or service admission until peer
@@ -807,7 +830,11 @@ impl<A: Host> Service<A> {
 mod tests {
     use super::*;
     use octra_node_protocol::consensus::Validator;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::{
+        future::{poll_fn, Future},
+        sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+        task::Poll,
+    };
 
     #[test]
     fn one_verified_ahead_head_cannot_stop_a_driver() {
@@ -866,6 +893,117 @@ mod tests {
     impl Drop for Active {
         fn drop(&mut self) {
             self.0.store(false, Ordering::SeqCst);
+        }
+    }
+
+    #[tokio::test]
+    async fn requested_shutdown_wins_over_an_already_ready_driver_completion() {
+        let (stop, signal) = watch::channel(false);
+        let (complete, completed) = tokio::sync::oneshot::channel::<Result<()>>();
+        let mut completed = Box::pin(completed);
+        let active = Arc::new(AtomicBool::new(true));
+        let guard = Active(active.clone());
+        let polls = Arc::new(AtomicUsize::new(0));
+        let polled = polls.clone();
+        let inner = poll_fn(move |cx| {
+            let _guard = &guard;
+            polled.fetch_add(1, Ordering::SeqCst);
+            match completed.as_mut().poll(cx) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(result) => Poll::Ready(result.unwrap()),
+            }
+        });
+        let mut supervisor = Box::pin(run_until_shutdown(inner, signal));
+        assert!(futures::poll!(supervisor.as_mut()).is_pending());
+        assert_eq!(polls.load(Ordering::SeqCst), 1);
+        stop.send_replace(true);
+        complete
+            .send(Err(anyhow::anyhow!(
+                "consensus driver stopped unexpectedly"
+            )))
+            .unwrap();
+        supervisor.await.unwrap();
+        // Both branches were ready. Shutdown is selected without polling the
+        // completion again, and cancellation drops its owned pending work.
+        assert_eq!(polls.load(Ordering::SeqCst), 1);
+        assert!(!active.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn shutdown_requested_during_the_inner_poll_dominates_its_error() {
+        let (stop, signal) = watch::channel(false);
+        let inner = poll_fn(move |_| {
+            stop.send_replace(true);
+            Poll::Ready(Err(anyhow::anyhow!(
+                "consensus driver stopped unexpectedly"
+            )))
+        });
+        run_until_shutdown(inner, signal).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn closing_shutdown_during_the_inner_poll_dominates_its_error() {
+        let (stop, signal) = watch::channel(false);
+        let mut stop = Some(stop);
+        let inner = poll_fn(move |_| {
+            drop(stop.take());
+            Poll::Ready(Err(anyhow::anyhow!(
+                "consensus driver stopped unexpectedly"
+            )))
+        });
+        run_until_shutdown(inner, signal).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn driver_failure_without_shutdown_is_preserved() {
+        let (_stop, signal) = watch::channel(false);
+        let error = run_until_shutdown(
+            async { anyhow::bail!("consensus driver stopped unexpectedly") },
+            signal,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.to_string(), "consensus driver stopped unexpectedly");
+    }
+
+    #[tokio::test]
+    async fn closing_shutdown_drops_pending_supervisor_work() {
+        let (stop, signal) = watch::channel(false);
+        let active = Arc::new(AtomicBool::new(true));
+        let guard = Active(active.clone());
+        let mut supervisor = Box::pin(run_until_shutdown(
+            async move {
+                let _guard = guard;
+                std::future::pending::<Result<()>>().await
+            },
+            signal,
+        ));
+        assert!(futures::poll!(supervisor.as_mut()).is_pending());
+        assert!(active.load(Ordering::SeqCst));
+        drop(stop);
+        supervisor.await.unwrap();
+        assert!(!active.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn initial_shutdown_drops_work_without_polling_it() {
+        for closed in [false, true] {
+            let (stop, signal) = watch::channel(!closed);
+            if closed {
+                drop(stop);
+            }
+            let active = Arc::new(AtomicBool::new(true));
+            let guard = Active(active.clone());
+            run_until_shutdown(
+                async move {
+                    let _guard = guard;
+                    panic!("work must not start after shutdown");
+                },
+                signal,
+            )
+            .await
+            .unwrap();
+            assert!(!active.load(Ordering::SeqCst));
         }
     }
 

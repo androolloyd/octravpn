@@ -25,7 +25,7 @@
 #             a build dep.
 #
 # Harness: demo/lib/3node-mesh-bringup.sh — boots mesh-control +
-# derp-1 + 3 tailscale peers + analytics, with `[control].admin_token`
+# native DERP + 3 tailscale peers + analytics, with `[control].admin_token`
 # set to `mesh-demo-token` so Shapes B and C have a real surface to
 # hit. Tape exits via the matching teardown so the next tape starts
 # clean.

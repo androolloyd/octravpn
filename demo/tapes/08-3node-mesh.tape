@@ -13,7 +13,6 @@
 # REQUIRES:
 #   - Docker Desktop (or equivalent) running.
 #   - Sibling repos under ../octra-foundry and ../headscale-rs.
-#   - openssl on the host (used to mint the derp-1 self-signed cert).
 #   - First-run cold cache: 5-10 minutes of cargo build.
 #
 # Re-run with: vhs demo/tapes/08-3node-mesh.tape

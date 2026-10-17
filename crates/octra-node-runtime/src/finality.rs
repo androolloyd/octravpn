@@ -4,6 +4,7 @@
 //! from the peer's certificate. This boundary verifies persisted native QCs;
 //! live voting, validator activation, transaction execution and catch-up outcome
 //! admission remain the driver's responsibility.
+mod audit_cache;
 pub mod history;
 pub mod proposal;
 mod vm_receipts;
@@ -11,7 +12,9 @@ use futures::TryStreamExt;
 use num_bigint::BigInt;
 use std::sync::Arc;
 
-use octra_exex::{native_history::NativeTransaction, CommittedEpochSource, Sequence, StateRoot};
+use octra_exex::{
+    native_history::NativeTransaction, CommittedEpoch, CommittedEpochSource, Sequence, StateRoot,
+};
 use octra_node_protocol::consensus::{
     catchup, codec::Wire, qc, relief::Mark, reward_attribution, CatchupEpochRecord,
     CatchupFinality, Finalize, RewardSource, ValidatorSet,
@@ -94,6 +97,49 @@ pub struct ExecutedEpoch {
 pub struct Publisher<A> {
     store: Arc<CanonicalStore>,
     authority: A,
+    audits: audit_cache::AuditCache,
+}
+
+/// Diagnostic counts for one complete retained-history audit. Reuse still
+/// requires fresh evidence reads and authenticated historical authority.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AuditReport {
+    pub verified: usize,
+    pub reused: usize,
+}
+
+#[derive(Clone, Copy)]
+struct Evidence<'a> {
+    base: &'a Head,
+    finalized: &'a Finalize,
+    state_root: StateRoot,
+    transactions: &'a [NativeTransaction],
+    receipts: &'a [Vec<u8>],
+    reward: &'a RewardSource,
+}
+
+struct RetainedRecord {
+    base: Head,
+    head: Head,
+    epoch: Arc<CommittedEpoch<NativeTransaction>>,
+    certificate: Vec<u8>,
+    finalized: Finalize,
+    receipts: Vec<Vec<u8>>,
+    proposal: Vec<u8>,
+    reward: RewardSource,
+}
+
+impl RetainedRecord {
+    fn evidence(&self) -> Evidence<'_> {
+        Evidence {
+            base: &self.base,
+            finalized: &self.finalized,
+            state_root: self.head.cursor.state_root,
+            transactions: &self.epoch.events,
+            receipts: &self.receipts,
+            reward: &self.reward,
+        }
+    }
 }
 
 impl<A: ValidatorHistory> Publisher<A> {
@@ -101,7 +147,11 @@ impl<A: ValidatorHistory> Publisher<A> {
     /// through the trusted raw storage API need their original finality and
     /// consensus receipts; missing evidence is never silently grandfathered in.
     pub async fn open(store: Arc<CanonicalStore>, authority: A) -> Result<Self> {
-        let publisher = Self { store, authority };
+        let publisher = Self {
+            store,
+            authority,
+            audits: audit_cache::AuditCache::default(),
+        };
         publisher.audit().await?;
         Ok(publisher)
     }
@@ -241,14 +291,14 @@ impl<A: ValidatorHistory> Publisher<A> {
         let epoch = next_epoch(base, &finalized)?;
         let root = canonical::execution_root(base, epoch, &executed.state, &executed.transactions)?;
         let (_, relief, validators) = self
-            .authenticate(
+            .authenticate(Evidence {
                 base,
-                &finalized,
-                root,
-                &executed.transactions,
-                &executed.consensus_receipts,
-                &executed.reward_source,
-            )
+                finalized: &finalized,
+                state_root: root,
+                transactions: &executed.transactions,
+                receipts: &executed.consensus_receipts,
+                reward: &executed.reward_source,
+            })
             .await?;
         vm_receipts::validate(&executed)?;
         let mut prepared = self
@@ -288,6 +338,12 @@ impl<A: ValidatorHistory> Publisher<A> {
     /// or explicit operator verification. Recheck the prefix on every resume:
     /// raw storage writes can change earlier evidence without moving the head.
     pub async fn audit(&self) -> Result<()> {
+        self.audit_report().await.map(|_| ())
+    }
+
+    /// As `audit`, with counts of fresh authentication and byte-identical
+    /// successful work reused in this process. Startup always begins cold.
+    pub async fn audit_report(&self) -> Result<AuditReport> {
         if self
             .store
             .chain()
@@ -298,25 +354,74 @@ impl<A: ValidatorHistory> Publisher<A> {
             return Err(invalid("local Single store cannot provide BFT finality"));
         }
         let end = self.store.head().await?;
-        futures::stream::iter((1..=end.cursor.sequence.0).map(Ok::<_, Error>))
-            .try_for_each_concurrent(4, |number| async move {
-                self.record(Sequence(number)).await.map(|_| ())
-            })
+        futures::stream::iter(
+            (1..=end.cursor.sequence.0).map(|number| {
+                Ok::<_, Error>(async move { self.audit_record(Sequence(number)).await })
+            }),
+        )
+        .try_buffer_unordered(4)
+        .try_fold(AuditReport::default(), |mut report, reused| async move {
+            if reused {
+                report.reused += 1;
+            } else {
+                report.verified += 1;
+            }
+            Ok(report)
+        })
+        .await
+    }
+
+    async fn audit_record(&self, sequence: Sequence) -> Result<bool> {
+        let retained = self.retained_record(sequence).await?;
+        // A digest never replaces fresh selected-path/relief authentication.
+        // Use this exact authority both in the key and on a cache miss.
+        let rules = self
+            .rules(&retained.base, retained.head.cursor.epoch.0)
             .await?;
-        Ok(())
+        let key = audit_cache::Inputs {
+            chain: self.store.chain(),
+            base: &retained.base,
+            head: &retained.head,
+            epoch: &retained.epoch,
+            certificate: &retained.certificate,
+            receipts: &retained.receipts,
+            proposal: &retained.proposal,
+            reward: &retained.reward,
+            rules: &rules,
+        }
+        .key();
+        if self.audits.contains(sequence, &key) {
+            return Ok(true);
+        }
+        self.authenticate_with_rules(retained.evidence(), rules)?;
+        // Never remember failed, cancelled or incomplete authentication.
+        self.audits.insert(sequence, key);
+        Ok(false)
     }
 
     async fn authenticate(
         &self,
-        base: &Head,
-        finalized: &Finalize,
-        state_root: StateRoot,
-        transactions: &[NativeTransaction],
-        receipts: &[Vec<u8>],
-        reward: &RewardSource,
+        evidence: Evidence<'_>,
     ) -> Result<(CatchupEpochRecord, Option<Mark>, ValidatorSet)> {
+        let epoch = next_epoch(evidence.base, evidence.finalized)?;
+        let rules = self.rules(evidence.base, epoch).await?;
+        self.authenticate_with_rules(evidence, rules)
+    }
+
+    fn authenticate_with_rules(
+        &self,
+        evidence: Evidence<'_>,
+        rules: EpochRules,
+    ) -> Result<(CatchupEpochRecord, Option<Mark>, ValidatorSet)> {
+        let Evidence {
+            base,
+            finalized,
+            state_root,
+            transactions,
+            receipts,
+            reward,
+        } = evidence;
         let epoch = next_epoch(base, finalized)?;
-        let rules = self.rules(base, epoch).await?;
         let set = rules.validators;
         let expected_set =
             octra_node_protocol::consensus::hash::validator_set_hash(&set).map_err(invalid)?;
@@ -415,6 +520,13 @@ impl<A: ValidatorHistory> Publisher<A> {
     /// Export a retained epoch only after rechecking its QC, execution
     /// commitments, receipt policy and historical reward binding.
     pub async fn record(&self, sequence: Sequence) -> Result<CatchupEpochRecord> {
+        let retained = self.retained_record(sequence).await?;
+        self.authenticate(retained.evidence())
+            .await
+            .map(|(record, _, _)| record)
+    }
+
+    async fn retained_record(&self, sequence: Sequence) -> Result<RetainedRecord> {
         let previous = sequence
             .0
             .checked_sub(1)
@@ -431,7 +543,8 @@ impl<A: ValidatorHistory> Publisher<A> {
         if epoch.cursor != head.cursor || epoch.parent_root != base.cursor.state_root {
             return Err(invalid("canonical outbox binding differs"));
         }
-        let finalized = decode(&self.store.certificate(sequence).await?)?;
+        let certificate = self.store.certificate(sequence).await?;
+        let finalized = decode(&certificate)?;
         if head.cursor.epoch.0 != next_epoch(&base, &finalized)? {
             return Err(invalid("retained epoch differs from finality"));
         }
@@ -440,16 +553,16 @@ impl<A: ValidatorHistory> Publisher<A> {
         if proposal != finalized.proposal_id {
             return Err(invalid("retained reward proposal differs from finality"));
         }
-        self.authenticate(
-            &base,
-            &finalized,
-            head.cursor.state_root,
-            &epoch.events,
-            &receipts,
-            &reward,
-        )
-        .await
-        .map(|(record, _, _)| record)
+        Ok(RetainedRecord {
+            base,
+            head,
+            epoch,
+            certificate,
+            finalized,
+            receipts,
+            proposal,
+            reward,
+        })
     }
 
     /// A read-only allocation boundary for the native HTTP range service. The

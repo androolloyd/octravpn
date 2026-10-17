@@ -281,6 +281,61 @@ async fn canonical_authority_activates_and_reaudits_signed_history_after_restart
     let db = sqlx::SqlitePool::connect(&format!("sqlite:{}", path.display()))
         .await
         .unwrap();
+    assert_eq!(publisher.audit_report().await.unwrap().reused, 66);
+    // Warm record fingerprints must not bypass fresh selected-path reads, even
+    // when snapshot material and every retained head are already in memory.
+    let genesis = store.retained_head(Sequence(0)).await.unwrap();
+    let root_hash = hex::decode(&genesis.ledger_root).unwrap();
+    let original: Vec<u8> = sqlx::query_scalar("SELECT data FROM node_objects WHERE hash=?")
+        .bind(&root_hash)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE node_objects SET data=x'00' WHERE hash=?")
+        .bind(&root_hash)
+        .execute(&db)
+        .await
+        .unwrap();
+    assert!(publisher.audit().await.is_err());
+    sqlx::query("UPDATE node_objects SET data=? WHERE hash=?")
+        .bind(original)
+        .bind(&root_hash)
+        .execute(&db)
+        .await
+        .unwrap();
+    assert_eq!(publisher.audit_report().await.unwrap().reused, 66);
+    let child: Vec<u8> = sqlx::query_scalar("SELECT child FROM node_edges WHERE parent=? LIMIT 1")
+        .bind(&root_hash)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM node_edges WHERE parent=? AND child=?")
+        .bind(&root_hash)
+        .bind(&child)
+        .execute(&db)
+        .await
+        .unwrap();
+    assert!(publisher.audit().await.is_err());
+    sqlx::query("INSERT INTO node_edges(parent,child) VALUES(?,?)")
+        .bind(&root_hash)
+        .bind(&child)
+        .execute(&db)
+        .await
+        .unwrap();
+    assert_eq!(publisher.audit_report().await.unwrap().reused, 66);
+    // The selected child is a directory, so flipping its stored kind is fatal.
+    sqlx::query("UPDATE node_objects SET contents=1 WHERE hash=?")
+        .bind(&child)
+        .execute(&db)
+        .await
+        .unwrap();
+    assert!(publisher.audit().await.is_err());
+    sqlx::query("UPDATE node_objects SET contents=0 WHERE hash=?")
+        .bind(&child)
+        .execute(&db)
+        .await
+        .unwrap();
+    assert_eq!(publisher.audit_report().await.unwrap().reused, 66);
     sqlx::query("DELETE FROM node_epoch_relief WHERE sequence=1")
         .execute(&db)
         .await

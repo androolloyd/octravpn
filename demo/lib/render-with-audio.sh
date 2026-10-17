@@ -28,6 +28,7 @@
 #     demo/lib/render-with-audio.sh                # all tapes
 #     demo/lib/render-with-audio.sh 06-tailscale   # one substring filter
 #     OCTRA_TTS=espeak-ng demo/lib/render-with-audio.sh   # force backend
+#     OCTRA_RECORDINGS_DIR=/tmp/fresh-recordings ...     # isolated CI output
 #
 # Requires: ffmpeg + python3 on PATH, plus a TTS backend.
 
@@ -36,7 +37,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 TAPES_DIR="${REPO_ROOT}/demo/tapes"
-RECORDINGS_DIR="${REPO_ROOT}/demo/recordings"
+RECORDINGS_DIR="${OCTRA_RECORDINGS_DIR:-${REPO_ROOT}/demo/recordings}"
 
 FILTER="${1:-}"
 

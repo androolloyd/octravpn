@@ -17,6 +17,7 @@
 # Usage:
 #     demo/lib/render-with-captions.sh                # all tapes
 #     demo/lib/render-with-captions.sh 06-tailscale   # one substring filter
+#     OCTRA_RECORDINGS_DIR=/tmp/fresh-recordings ... # isolated CI output
 #
 # Requires: ffmpeg on PATH.
 
@@ -26,7 +27,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 TAPES_DIR="${REPO_ROOT}/demo/tapes"
-RECORDINGS_DIR="${REPO_ROOT}/demo/recordings"
+RECORDINGS_DIR="${OCTRA_RECORDINGS_DIR:-${REPO_ROOT}/demo/recordings}"
 
 FILTER="${1:-}"
 

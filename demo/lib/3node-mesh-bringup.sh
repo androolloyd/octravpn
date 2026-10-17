@@ -25,7 +25,6 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 COMPOSE_FILE="${REPO_ROOT}/docker-compose.mesh-demo.yml"
-INTEROP_DIR="${REPO_ROOT}/docker/devnet/tailscale-interop"
 
 # Demo-local state lives under demo/.mesh-state so a `docker compose
 # down -v` leaves the cert + audit dir behind for inspection. The
@@ -121,46 +120,10 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 1b — mint the derp-1 TLS cert (shared with the interop fixture).
-# We reuse the interop fixture's `derp-certs/` directory by reference,
-# so a single openssl invocation services both stacks.
-# ---------------------------------------------------------------------------
-
-step "Step 1b: ensure derp-1 self-signed cert"
-
-mkdir -p "${INTEROP_DIR}/derp-certs"
-DERP_CERT="${INTEROP_DIR}/derp-certs/derp-1.crt"
-DERP_KEY="${INTEROP_DIR}/derp-certs/derp-1.key"
-if [[ ! -s "${DERP_CERT}" || ! -s "${DERP_KEY}" ]]; then
-    if ! command -v openssl >/dev/null 2>&1; then
-        echo "OPENSSL MISSING: needed to mint derp-1 self-signed cert" >&2
-        exit 10
-    fi
-    openssl req -x509 -newkey rsa:2048 -nodes \
-        -keyout "${DERP_KEY}" \
-        -out "${DERP_CERT}" \
-        -days 30 \
-        -subj "/CN=derp-1" \
-        -addext "subjectAltName=DNS:derp-1" \
-        >/dev/null 2>&1 || {
-            echo "OPENSSL FAIL: could not mint derp-1 cert" >&2
-            exit 10
-        }
-    chmod 0644 "${DERP_CERT}" "${DERP_KEY}"
-    echo "minted derp-1 cert at ${DERP_CERT}" >&2
-else
-    echo "derp-1 cert already present at ${DERP_CERT}; reusing" >&2
-fi
-
-# ---------------------------------------------------------------------------
 # Step 2 — bring up the stack.
 # ---------------------------------------------------------------------------
 
 step "Step 2: docker compose up"
-docker compose -f "${COMPOSE_FILE}" build derp-1 >&2 || {
-    echo "DERPER BUILD FAIL: could not build the derper sidecar image" >&2
-    exit 10
-}
 docker compose -f "${COMPOSE_FILE}" up -d >&2 || {
     echo "COMPOSE FAIL: could not start mesh-control + peers + analytics" >&2
     exit 10
@@ -256,23 +219,21 @@ for peer in tsi-peer-1 tsi-peer-2 tsi-peer-3; do
     ' || echo "WARN: cert install failed in ${peer}; continuing" >&2
 done
 
-step "Step 4c: wait for derp-1 probe endpoint"
+step "Step 4c: wait for native DERP on mesh-control"
 DERP_READY=""
 for _ in $(seq 1 30); do
-    if docker exec tsi-peer-1 sh -c \
-        'wget -qO- --no-check-certificate https://derp-1/derp/probe 2>/dev/null || \
-         curl -fsSk https://derp-1/derp/probe 2>/dev/null' >/dev/null 2>&1; then
+    if curl -ksf --max-time 3 https://127.0.0.1:8443/derp/probe >/dev/null 2>&1; then
         DERP_READY=1
         break
     fi
     sleep 1
 done
 if [[ -z "${DERP_READY}" ]]; then
-    echo "DERP-1 NOT READY: probe endpoint never returned 200" >&2
-    docker compose -f "${COMPOSE_FILE}" logs derp-1 >&2 | tail -30 || true
+    echo "NATIVE DERP NOT READY: probe endpoint never returned 200" >&2
+    docker compose -f "${COMPOSE_FILE}" logs --tail 30 mesh-control >&2 || true
     exit 10
 fi
-echo "derp-1 probe ok" >&2
+echo "native DERP probe ok" >&2
 
 step "Step 5: tailscale up on each of 3 peers"
 LOGIN_SERVER="https://mesh-control"

@@ -9,6 +9,17 @@ upstream behavioral parity and public-network deployment remain unqualified.
 
 ## Recorded local evidence
 
+- The [retained-audit checkpoint](checkpoints/2026-10-17/audit-reuse.json) records
+  1,744 passing tests across 23 targets, 39 unchanged bounded Lean theorems,
+  strict lint and a normal-feature Service regression. Audit-only reuse keeps
+  fresh evidence and validator-authority reads on every lookup; startup,
+  publication and exported records retain full verification. Six deterministic
+  controls and the composed service test cover the corrected shutdown race.
+  [Review and limits](checkpoints/2026-10-17/audit-reuse.md) preserve initial
+  failures and separate local validation from sustained public serving.
+  The pinned Headscale API component passes 786 tests under its own lockfile.
+  Demo artifact integrity has nine regressions; fresh remote rendering remains
+  a separate gate.
 - The [prepaid channel revision](../audit/octranet-prepaid-2026-10-17.md) qualifies
   1,719 passing tests across 20 targets, 39 bounded Lean theorems, strict lint
   and a frozen-source four-validator/two-kernel gate. It covers

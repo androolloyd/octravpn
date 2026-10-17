@@ -3,8 +3,8 @@
 # 3-peer Tailscale mesh demo stack, modelled directly on the proven
 # `docker/devnet/tailscale-interop/docker-compose.yml`. Three stock
 # `tailscale/tailscale:latest` clients (`tsi-peer-1/2/3`) join one
-# `mesh-control` running `octravpn-node mesh serve` over the same
-# `derp-1` sidecar the interop test ships. An `analytics` container
+# `mesh-control` running `octravpn-node mesh serve --serve-derp`.
+# Control and native Rust DERP share its HTTPS listener. An `analytics` container
 # runs `octravpn-analytics` against the mesh-control's audit-log dir
 # (which, in the current Hub-free `mesh serve` shape, is empty — the
 # endpoints respond but counters stay flat; see the demo tape 10's
@@ -51,10 +51,6 @@ x-ts-peer-template: &ts-peer-template
           mkdir -p /usr/local/share/ca-certificates
           cp /mnt/mesh-control-state/tailscale-wire/tls.crt \
              /usr/local/share/ca-certificates/octravpn-mesh-control.crt
-          if [ -s /mnt/derp-certs/derp-1.crt ]; then
-              cp /mnt/derp-certs/derp-1.crt \
-                 /usr/local/share/ca-certificates/octravpn-derp-1.crt
-          fi
           update-ca-certificates 2>&1 | tail -3 || true
       else
           echo "WARN: TLS cert not present; tailscaled may fail TLS verification" >&2
@@ -77,7 +73,6 @@ services:
     environment:
       OCTRAVPN_ADMIN_TOKEN: "mesh-demo-token"
       RUST_LOG: "info,octravpn_node=debug,headscale_api::tailscale_wire=debug"
-      OCTRAVPN_DERP_MAP_PATH: "/work/derp-map.json"
     command:
       - "octravpn-node"
       - "mesh"
@@ -85,6 +80,7 @@ services:
       - "--listen=0.0.0.0:51821"
       - "--https-listen=0.0.0.0:443"
       - "--cert-hostname=mesh-control"
+      - "--serve-derp"
       - "--state-dir=/work/state/tailscale-wire"
       - "--tailnet-id=mesh-demo"
     ports:
@@ -106,34 +102,6 @@ services:
       - type: bind
         source: ./demo/.mesh-state
         target: /work/state
-      - type: bind
-        source: ./docker/devnet/tailscale-interop/derp-map.json
-        target: /work/derp-map.json
-        read_only: true
-    networks:
-      - mesh-demo
-
-  derp-1:
-    # Reuse the interop fixture's Dockerfile verbatim — there is no
-    # second DERP image needed; the demo's network is single-region.
-    build:
-      context: ./docker/devnet/tailscale-interop
-      dockerfile: Dockerfile.derper
-    image: octravpn-interop-derper:latest
-    container_name: mesh-demo-derp-1
-    hostname: derp-1
-    command:
-      - "-hostname=derp-1"
-      - "-certmode=manual"
-      - "-certdir=/derp-certs"
-      - "-http-port=-1"
-      - "-a=:443"
-      - "-stun=false"
-    volumes:
-      - type: bind
-        source: ./docker/devnet/tailscale-interop/derp-certs
-        target: /derp-certs
-        read_only: true
     networks:
       - mesh-demo
 
@@ -150,10 +118,6 @@ services:
         source: ./demo/.mesh-state
         target: /mnt/mesh-control-state
         read_only: true
-      - type: bind
-        source: ./docker/devnet/tailscale-interop/derp-certs
-        target: /mnt/derp-certs
-        read_only: true
 
   tsi-peer-2:
     <<: *ts-peer-template
@@ -168,10 +132,6 @@ services:
         source: ./demo/.mesh-state
         target: /mnt/mesh-control-state
         read_only: true
-      - type: bind
-        source: ./docker/devnet/tailscale-interop/derp-certs
-        target: /mnt/derp-certs
-        read_only: true
 
   tsi-peer-3:
     <<: *ts-peer-template
@@ -185,10 +145,6 @@ services:
       - type: bind
         source: ./demo/.mesh-state
         target: /mnt/mesh-control-state
-        read_only: true
-      - type: bind
-        source: ./docker/devnet/tailscale-interop/derp-certs
-        target: /mnt/derp-certs
         read_only: true
 
   # Tape 10 (analytics tour) queries this container. The audit dir is

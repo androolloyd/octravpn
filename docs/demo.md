@@ -5,10 +5,27 @@ CLI segments are declared as VHS `.tape` files under `demo/tapes/` and
 regenerate on a single command (`demo/run-demo.sh`); the browser
 segments are captured by a human-with-OBS following the cues below.
 
-The final cut is a 5-minute headline that proves "stock tailscale joins
-our control plane, settles a paid session against a deployed contract,
-and the operator can audit every byte after the fact." A 15-minute deep
-dive expands each segment with the underlying technical material.
+These tapes cover separate mesh, Circle, historical v3 payment and operational
+fixtures. A stock Tailscale join and ping do not establish paid-service
+integration. The [current prepaid application](architecture/octranet-payment-tier.md)
+has its own [qualification evidence](audit/octranet-prepaid-status.json);
+public paid onboarding and Mainnet remain open gates. The segments below are
+the historical v3 editing runbook, not a current prepaid launch claim.
+
+## Fresh recording publication
+
+The GitHub demo workflow uses native Rust DERP on the mesh-control HTTPS
+listener. Each job stages only successfully generated GIF/MP4 files for its
+assigned tapes in a fresh directory. Matching tracked VTT files supply narration;
+captioned and narrated derivatives are generated from those fresh videos.
+Manifests bind files to the source commit, workflow run and SHA256 hashes.
+Incomplete, missing, stale or overlapping groups cannot be auto-published.
+Successful partial artifacts remain available to diagnose failed groups.
+
+Run `python3 -B demo/lib/test_ci_recordings.py` for the artifact regressions.
+These tests and Compose validation do not replace actual VHS, stock-Tailscale
+or public-RPC runs. Instruction-only tapes must describe steps as instructions,
+without claiming that the installer, payment or network action was executed.
 
 ## Audience + length
 
@@ -25,7 +42,7 @@ dive expands each segment with the underlying technical material.
      octravpn-node. The node makes Octra chain RPC calls, and speaks
      /key + /machine/ to a headscale-rs mesh. A stock tailscale CLI
      connects to the same mesh via TS2021; the mesh returns map data
-     and forwards relayed traffic over a derper sidecar. -->
+     and forwards relayed traffic over native Rust DERP. -->
 ```mermaid
 graph LR
   client[octravpn client] -->|oct://| portal[Portal HTTP]
@@ -34,7 +51,7 @@ graph LR
   node -->|/key + /machine/| mesh[headscale-rs]
   tailscale[tailscale CLI] -->|TS2021| mesh
   mesh -->|map| tailscale
-  mesh -->|DERP| derp[derper sidecar]
+  mesh -->|DERP| derp[Native Rust DERP]
 ```
 
 The diagram is the first card of the recording. Hold for 6 seconds
@@ -45,8 +62,8 @@ while the voiceover frames the demo.
 - Final 2 seconds of the `06-tailscale-interop.mp4` recording —
   specifically the "OK: tailscale interop succeeded" line and the
   `tailscale ping` round trip immediately above it.
-- Voiceover (single sentence): "A stock Tailscale client just paid an
-  operator on Octra to relay this ping."
+- Voiceover: "A stock Tailscale client joined our control plane and
+  relayed this ping. Payment is qualified separately."
 
 ## Segment 1: chain-side (1 min)
 

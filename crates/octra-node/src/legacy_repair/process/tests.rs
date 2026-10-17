@@ -28,8 +28,10 @@ impl Fixture {
     fn session(&self) -> Session {
         let mut session =
             Session::open(&self.backend, &self.sha, &self.data, "fixture-chain").unwrap();
-        session.timeout = Duration::from_secs(2);
-        session.close_timeout = Duration::from_millis(100);
+        // Successful helper startup/EOF is not a scheduler-latency test.
+        // Stalled-I/O cases below set their short deadlines explicitly.
+        session.timeout = Duration::from_secs(30);
+        session.close_timeout = CLOSE_TIMEOUT;
         session
     }
     fn retained(&self) {
@@ -160,6 +162,7 @@ fn stalled_request_pipe_and_missing_reply_have_finite_deadlines() {
         let mut session = fixture.session();
         session.receive().unwrap();
         session.timeout = Duration::from_millis(100);
+        session.close_timeout = Duration::from_millis(100);
         let start = Instant::now();
         let error = session.request(&request).unwrap_err();
         assert!(error.to_string().contains("deadline exceeded"));
@@ -174,6 +177,7 @@ fn stalled_greeting_and_close_reap_only_the_owned_helper() {
     let fixture = Fixture::new(BUSY);
     let mut session = fixture.session();
     session.timeout = Duration::from_millis(100);
+    session.close_timeout = Duration::from_millis(100);
     assert!(session.receive().is_err());
     assert!(session.child.is_none());
     fixture.retained();
@@ -181,6 +185,7 @@ fn stalled_greeting_and_close_reap_only_the_owned_helper() {
     let fixture = Fixture::new(&format!("{GREETING}\n{BUSY}"));
     let mut session = fixture.session();
     session.receive().unwrap();
+    session.close_timeout = Duration::from_millis(100);
     let start = Instant::now();
     assert!(session.close().is_err());
     assert!(start.elapsed() < Duration::from_secs(5));

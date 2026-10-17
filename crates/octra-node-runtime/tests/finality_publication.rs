@@ -20,6 +20,41 @@ use serde_json::Value;
 mod common;
 use common::{certificate, root, sign, Authority};
 
+#[derive(Clone)]
+struct ObservedAuthority {
+    inner: Authority,
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+    available: Arc<std::sync::atomic::AtomicBool>,
+    policy: Arc<std::sync::atomic::AtomicU8>,
+}
+
+#[async_trait::async_trait]
+impl ValidatorHistory for ObservedAuthority {
+    async fn resolve(
+        &self,
+        parent: &Head,
+        epoch: u64,
+        relief: ReliefSource,
+    ) -> Result<EpochRules, String> {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.calls.fetch_add(1, SeqCst);
+        if !self.available.load(SeqCst) {
+            return Err("injected historical authority failure".into());
+        }
+        let mut rules = self.inner.resolve(parent, epoch, relief).await?;
+        match self.policy.load(SeqCst) {
+            1 => rules.receipts.required = true,
+            2 => rules.receipts.crypto_active = true,
+            3 => rules.receipts.stealth_minimum += 1,
+            // This public threshold is omitted from ValidatorSet::encode,
+            // but is consumed by quorum verification even for this fixture.
+            4 => rules.validators.quorum_weight += 1,
+            _ => {}
+        }
+        Ok(rules)
+    }
+}
+
 fn transaction_fixture() -> Vec<NativeTransaction> {
     let fixture: Value = serde_json::from_str(include_str!(
         "../../octra-exex/tests/fixtures/native-history.json"
@@ -540,6 +575,197 @@ async fn restart_reauthenticates_history_and_detects_missing_or_modified_evidenc
         .await
         .unwrap();
     assert!(Publisher::open(store, authority).await.is_err());
+}
+
+#[tokio::test]
+async fn audit_reuses_verified_work_but_always_reloads_authority_and_policy() {
+    use octra_node_runtime::finality::AuditReport;
+    use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering::SeqCst};
+    let dir = tempfile::tempdir().unwrap();
+    let (store, authority) = fixture(&dir.path().join("node.db")).await;
+    let observed = ObservedAuthority {
+        inner: authority.clone(),
+        calls: Arc::new(AtomicUsize::new(0)),
+        available: Arc::new(AtomicBool::new(true)),
+        policy: Arc::new(AtomicU8::new(0)),
+    };
+    let publisher = Publisher::open(store.clone(), observed.clone())
+        .await
+        .unwrap();
+    const COUNT: usize = 128;
+    for _ in 0..COUNT {
+        let (base, state) = store.snapshot().await.unwrap();
+        let mut transactions = transaction_fixture();
+        for (offset, transaction) in transactions.iter_mut().enumerate() {
+            transaction.txid = base.txid_hi + 1 + offset as i64;
+        }
+        let executed = execution(&base, state, transactions);
+        let cert = certificate(&base, &executed, &authority).encode().unwrap();
+        publisher
+            .prepare(&base, &cert, executed)
+            .await
+            .unwrap()
+            .commit()
+            .await
+            .unwrap();
+    }
+    observed.calls.store(0, SeqCst);
+    let cold = std::time::Instant::now();
+    assert_eq!(
+        publisher.audit_report().await.unwrap(),
+        AuditReport {
+            verified: COUNT,
+            reused: 0
+        }
+    );
+    let cold = cold.elapsed();
+    assert_eq!(observed.calls.load(SeqCst), COUNT);
+    let warm = std::time::Instant::now();
+    assert_eq!(
+        publisher.audit_report().await.unwrap(),
+        AuditReport {
+            verified: 0,
+            reused: COUNT
+        }
+    );
+    let warm = warm.elapsed();
+    assert_eq!(observed.calls.load(SeqCst), 2 * COUNT);
+    eprintln!("audit workload: {COUNT} signed transaction epochs; cold={cold:?}, warm={warm:?}");
+    // Policy changes invalidate every entry, even when they do not change the
+    // result for this public fixture. Return to the same policy then hits.
+    for policy in 1..=3 {
+        observed.policy.store(policy, SeqCst);
+        assert_eq!(
+            publisher.audit_report().await.unwrap(),
+            AuditReport {
+                verified: COUNT,
+                reused: 0
+            }
+        );
+        assert_eq!(
+            publisher.audit_report().await.unwrap(),
+            AuditReport {
+                verified: 0,
+                reused: COUNT
+            }
+        );
+    }
+    observed.policy.store(4, SeqCst);
+    assert!(
+        matches!(publisher.audit().await, Err(Error::Invalid(reason)) if reason.contains("quorum"))
+    );
+    assert!(publisher.audit().await.is_err());
+    observed.policy.store(3, SeqCst);
+    assert_eq!(publisher.audit_report().await.unwrap().reused, COUNT);
+    observed.available.store(false, SeqCst);
+    assert!(matches!(publisher.audit().await, Err(Error::Authority(_))));
+    observed.available.store(true, SeqCst);
+    assert_eq!(publisher.audit_report().await.unwrap().reused, COUNT);
+    // Export remains independently authenticated; the audit cache is not an
+    // export capability and cannot conceal an unavailable authority.
+    observed.available.store(false, SeqCst);
+    assert!(matches!(
+        publisher.record(Sequence(1)).await,
+        Err(Error::Authority(_))
+    ));
+}
+
+#[tokio::test]
+async fn warm_audit_rejects_modified_proposal_reward_and_outbox_without_head_movement() {
+    use sqlx::Row;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("node.db");
+    let (store, authority) = fixture(&path).await;
+    let publisher = Publisher::open(store.clone(), authority.clone())
+        .await
+        .unwrap();
+    for _ in 0..3 {
+        let (base, state) = store.snapshot().await.unwrap();
+        let executed = execution(
+            &base,
+            state,
+            if base.cursor.sequence.0 == 0 {
+                transaction_fixture()
+            } else {
+                vec![]
+            },
+        );
+        // Legacy finality binds the supplied reward attribution. Prior-mode
+        // v4 without a parent intentionally permits arbitrary valid rewards.
+        let mut finalized = certificate(&base, &executed, &authority);
+        finalized.header.proto_version = 3;
+        sign(&mut finalized, authority.seed);
+        let cert = finalized.encode().unwrap();
+        publisher
+            .prepare(&base, &cert, executed)
+            .await
+            .unwrap()
+            .commit()
+            .await
+            .unwrap();
+    }
+    assert_eq!(publisher.audit_report().await.unwrap().verified, 3);
+    assert_eq!(publisher.audit_report().await.unwrap().reused, 3);
+    let head = store.head().await.unwrap();
+    let db = sqlx::sqlite::SqlitePoolOptions::new()
+        .connect_with(sqlx::sqlite::SqliteConnectOptions::new().filename(&path))
+        .await
+        .unwrap();
+    let row = sqlx::query("SELECT proposal,source FROM node_epoch_rewards WHERE sequence=1")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    let proposal: Vec<u8> = row.get("proposal");
+    let source: Vec<u8> = row.get("source");
+    let mut reward = common::reward_source(1);
+    reward.reward_members[0].reward_weight += 1;
+    let mut encoded = octra_node_protocol::oce1::Writer::new();
+    octra_node_protocol::consensus::reward::put(&mut encoded, &reward).unwrap();
+    let events: Vec<u8> = sqlx::query_scalar(
+        "SELECT events FROM exex_committed_epoch WHERE sequence='0000000000000001'",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    let mut transactions: Vec<NativeTransaction> = serde_json::from_slice(&events).unwrap();
+    transactions[0].identity[0] ^= 1;
+    let changes = [
+        (
+            "UPDATE node_epoch_rewards SET proposal=? WHERE sequence=1",
+            vec![99; 32],
+            proposal,
+        ),
+        (
+            "UPDATE node_epoch_rewards SET source=? WHERE sequence=1",
+            encoded.into_bytes(),
+            source,
+        ),
+        (
+            "UPDATE exex_committed_epoch SET events=? WHERE sequence='0000000000000001'",
+            serde_json::to_vec(&transactions).unwrap(),
+            events,
+        ),
+    ];
+    for (query, changed, original) in changes {
+        sqlx::query(query).bind(changed).execute(&db).await.unwrap();
+        assert_eq!(store.head().await.unwrap(), head);
+        // A failure must never populate the cache, even after repeated audits.
+        assert!(publisher.audit().await.is_err(), "{query}");
+        assert!(publisher.audit().await.is_err(), "{query}");
+        assert!(publisher.record(Sequence(1)).await.is_err(), "{query}");
+        assert!(
+            Publisher::open(store.clone(), authority.clone())
+                .await
+                .is_err(),
+            "{query}"
+        );
+        sqlx::query(query)
+            .bind(original)
+            .execute(&db)
+            .await
+            .unwrap();
+        assert_eq!(publisher.audit_report().await.unwrap().reused, 3);
+    }
 }
 
 #[tokio::test]
