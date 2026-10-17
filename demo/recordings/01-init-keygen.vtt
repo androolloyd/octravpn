@@ -1,19 +1,19 @@
 WEBVTT
 
-00:00:00.000 --> 00:00:03.500
-narrator: cold start — a clean scratch directory on disk.
+00:00:00.000 --> 00:00:07.000
+narrator: Start a throwaway key-generation container.
 
-00:00:03.500 --> 00:00:06.500
-narrator: octravpn init writes a config.toml and the node wallet key.
+00:00:12.000 --> 00:00:20.000
+narrator: Clear the scratch directory, then run client initialization.
 
-00:00:06.500 --> 00:00:08.400
-narrator: ls confirms the on-disk layout the daemon expects.
+00:00:22.000 --> 00:00:27.000
+narrator: List the generated files.
 
-00:00:08.400 --> 00:00:11.700
-narrator: keygen mints a second key for the operator bond wallet.
+00:00:28.000 --> 00:00:35.000
+narrator: Generate a demonstration bond key and inspect the directory.
 
-00:00:11.700 --> 00:00:13.500
-narrator: bond.key is now present beside the node key.
+00:00:36.000 --> 00:00:43.000
+narrator: Identity prints a wallet address; it does not register it.
 
-00:00:13.500 --> 00:00:17.000
-narrator: identity prints the public key the chain will recognise.
+00:00:43.000 --> 00:00:48.000
+narrator: Remove the fixture; this tape transfers no funds.

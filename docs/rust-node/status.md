@@ -19,7 +19,9 @@ upstream behavioral parity and public-network deployment remain unqualified.
   failures and separate local validation from sustained public serving.
   The pinned Headscale API component passes 786 tests under its own lockfile.
   Demo artifact integrity has nine regressions; fresh remote rendering remains
-  a separate gate.
+  a separate gate. The [normal observer adoption](checkpoints/2026-10-17/audit-reuse-public-adoption.json)
+  preserves the existing chain at epoch 1,708,425 after a clean old-process exit.
+  Cold startup remains under observation and paid service is unconfigured.
 - The [prepaid channel revision](../audit/octranet-prepaid-2026-10-17.md) qualifies
   1,719 passing tests across 20 targets, 39 bounded Lean theorems, strict lint
   and a frozen-source four-validator/two-kernel gate. It covers

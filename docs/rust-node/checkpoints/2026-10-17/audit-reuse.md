@@ -65,3 +65,12 @@ The 128-epoch signed-transaction fixture measured a 50.161 ms cold audit and
 28.751125 ms warm audit. The second scan reused all 128 successes while resolving
 authority 128 more times. This is one local diagnostic measurement, not a public
 throughput or availability qualification.
+
+The frozen normal image from `7b2522636ceedeccb059415cadbca9a8a36ff829` is now
+[adopted by the existing public observer](audit-reuse-public-adoption.json),
+preserving epoch 1,708,425 after a clean exit of the previous process. Startup
+continuity matches the canonical/outbox/archive prefix and ExEx checkpoint.
+Cold startup is under observation; public serving and paid service remain
+unqualified. No funds were spent and no state, key, relay or configuration was
+reset. The separate [media-only follow-up](demo-integrity.json) preserves all
+compiled node inputs while adding current narration and exact negative controls.

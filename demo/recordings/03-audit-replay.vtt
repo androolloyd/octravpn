@@ -1,16 +1,19 @@
 WEBVTT
 
-00:00:00.000 --> 00:00:06.000
-narrator: replay walks the HMAC-chained audit log plus the receipts.
+00:00:00.000 --> 00:00:08.000
+narrator: Prepare eight synthetic audit records and an empty receipt journal.
 
-00:00:06.000 --> 00:00:12.000
-narrator: the same data in JSONL — ready to pipe into jq or splunk.
+00:00:18.000 --> 00:00:27.000
+narrator: Replay the fixture records in the terminal.
 
-00:00:12.000 --> 00:00:22.000
-narrator: verify recomputes every HMAC and checks receipt monotonicity.
+00:00:32.000 --> 00:00:41.000
+narrator: Request JSON output for the same synthetic records.
 
-00:00:22.000 --> 00:00:28.000
-narrator: a zero exit code is what a healthcheck cron pins to.
+00:00:45.000 --> 00:00:54.000
+narrator: Run the HMAC verifier and inspect its result.
 
-00:00:28.000 --> 00:00:33.900
-narrator: any tamper would fail verify and surface here.
+00:00:55.000 --> 00:00:59.000
+narrator: An empty journal does not exercise live receipt progression.
+
+00:00:59.000 --> 00:01:02.000
+narrator: Remove the fixture.

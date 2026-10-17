@@ -1,34 +1,25 @@
 WEBVTT
 
-00:00:00.000 --> 00:00:05.000
-narrator: tour the analytics indexer surface — three endpoints.
+00:00:00.000 --> 00:00:07.000
+narrator: Start the mesh and analytics containers.
 
-00:00:05.000 --> 00:00:15.000
-narrator: bring the mesh and analytics indexer up together.
+00:00:10.000 --> 00:00:16.000
+narrator: Read Prometheus-format metrics.
 
-00:00:40.000 --> 00:00:50.000
-narrator: the indexer scans the audit-dir on a fixed cadence.
+00:00:19.000 --> 00:00:25.000
+narrator: Inspect the analytics health response.
 
-00:01:20.000 --> 00:01:30.000
-narrator: a Hub-free mesh writes no audit log; counters stay at zero.
+00:00:28.000 --> 00:00:35.000
+narrator: Query session counts in one-minute buckets.
 
-00:01:55.000 --> 00:02:05.000
-narrator: bringup completes — the analytics surface is live.
+00:00:39.000 --> 00:00:45.000
+narrator: Query preauthorization counts in the same format.
 
-00:02:05.000 --> 00:02:14.000
-narrator: /metrics returns Prometheus text counters for scraping.
+00:00:48.000 --> 00:00:57.000
+narrator: The node metrics probe is optional and includes a fallback message.
 
-00:02:15.000 --> 00:02:24.000
-narrator: /analytics/health surfaces last-scan and audit-dir state.
+00:00:58.000 --> 00:01:04.000
+narrator: This fixture's empty audit directory does not establish paid traffic accounting.
 
-00:02:25.000 --> 00:02:34.000
-narrator: /analytics/series buckets session-open counts per minute.
-
-00:02:35.000 --> 00:02:44.000
-narrator: the same surface for preauth_minted on a 1-minute bucket.
-
-00:02:45.000 --> 00:02:54.000
-narrator: the node also exposes its own /metrics when Hub-mounted.
-
-00:02:55.000 --> 00:03:04.000
-narrator: teardown — observability shape demonstrated end-to-end.
+00:01:05.000 --> 00:01:09.000
+narrator: Remove the fixture.

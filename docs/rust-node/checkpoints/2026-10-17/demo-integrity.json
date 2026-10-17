@@ -1,0 +1,303 @@
+{
+  "at": "2026-10-17T13:33:36.311572+00:00",
+  "source_files": {
+    ".github/workflows/demo.yml": "d7b60edcc8626a041a688fa9167003d23d5c84c0661f3e581ccfc03e382a5739",
+    "demo/lib/gen-vtts.py": "e88f3fbc866697a9e69bb83c11cc41ba22d336d1270d8a8144f302ee2664a550",
+    "demo/lib/negative-checks.py": "a3025dc88b80b4cdee03d3b7110fe1762d955560244985b0b32cfb6eb6bfd4f1",
+    "demo/lib/test_negative_checks.py": "13426f9cfa21a940ce6a1736dcdd44a292cb6477784724a583eb6deacb5ab7c2",
+    "demo/recordings/00-master-tour.vtt": "3be8d154e6ddc528941c50d29da23d54201419cc7e2965360b4aaa6e6194d3ef",
+    "demo/recordings/01-init-keygen.vtt": "c417a99c7396cd55d934d506ff910de85f20a6ab4bf86231e80bec202c885da7",
+    "demo/recordings/02-portal-fetch.vtt": "ba897c1a679fc1fd9862de58e87c4148808958a94012c5fcc710e355064c2761",
+    "demo/recordings/03-audit-replay.vtt": "0e279fe1b66ad560c8965ee39039f505aa449ae05cc9b85ebafd5f96d2f33c37",
+    "demo/recordings/04-mesh-preauth.vtt": "0c375bd1ddd6c7855de5bddb91cb7b97debbe1bda26d21fdf47e74ba47d7d3fa",
+    "demo/recordings/05-v3-smoke.vtt": "ea34ecf253de16f4b7dc794fcaa6261ef240e141f3f014cef17b835c1adb6186",
+    "demo/recordings/06-tailscale-interop.vtt": "b2af8ac5da58701aec7ba7a114034d47e80898b72ab7b0fb8df1c4eae6501af9",
+    "demo/recordings/07-headscale-cli.vtt": "9582ea4e852af8171400ac26f5c228541526dd79ae2ac295c429e238bdc0e1f1",
+    "demo/recordings/08-3node-mesh.vtt": "77a480662e70e50cf3a16a56edebac89b4bcefebf56f4e01b26a33d1ea5763ed",
+    "demo/recordings/09-traffic-patterns.vtt": "d2255b2b207a92ead62d57f918450a60a3bdbd632ed80fb7b6363778f84a31db",
+    "demo/recordings/10-metrics-grafana.vtt": "75b1f18df4579065eeb43720042229b293068bb821b002735adcd748268b3d76",
+    "demo/recordings/11-user-install-linux.vtt": "a169f3ca7418e9705f20822f1580ca056370dc2dc089a5f5175b83434311ff05",
+    "demo/recordings/12-user-install-macos.vtt": "c29a1a45a8c6fb219f2377a034b0108bce7e6b071687e46247789b96003d5a5e",
+    "demo/recordings/13-user-ssh-peer.vtt": "0ce84f25191659ffa65f7972da88d08590950b6b26d577bfc43d8f9652766807",
+    "demo/recordings/14-user-web-traffic.vtt": "376ab022106cb46549093eff4e1a9a2d505952f488ebe5c6395edff9b1f27b21",
+    "demo/recordings/15-user-oct-url-public.vtt": "b84fc20af4f986c09ee13a9a726ef5fa3356afc9d76ab4140d78b65fdd939b0c",
+    "demo/recordings/16-user-oct-url-sealed.vtt": "27b80ba40ed21bba8196368d7f7a30b8c1fd29cc9a48b7359d5215598d5eac54",
+    "demo/recordings/17-operator-onboarding.vtt": "39ea99789d4ce4a52183000885da3ecd87fed07ae58c2fdeda0feb0c73d9b5fa",
+    "demo/recordings/18-tailnet-owner-policy.vtt": "68d93093fde3c3fe42192d48996667612aa013e5313e55649303a516124ff065",
+    "demo/recordings/19-circle-update-atomic.vtt": "5a9642c2130f859b2c654980977c0bfcb9d6d541862d8c4c02794e919ef148e5",
+    "demo/recordings/20-pvac-rotation.vtt": "ce668c24c97686a7f2da246c3648021ec6aeae3323fea4e7f43fbdf1a9037963",
+    "demo/recordings/21-audit-verify.vtt": "4bc779da61aba105e66949c4feb4abae813dd5a40a266e383c06910292735e83",
+    "demo/recordings/22-headscale-cli-tour.vtt": "596b45d7fcccd7d00c4a3ff3bbb972a4dd947f02a7b4fc97bb7a97400d00c757",
+    "demo/tapes/00-master-tour.tape": "ad19c875420fa82a973293d5f823280a6ab985429b6b194fd5a68c52e8e376a2",
+    "demo/tapes/01-init-keygen.tape": "e03bc233fe5b3da2353683a1448973df70b496d784c76838e5869f2a1f236279",
+    "demo/tapes/02-portal-fetch.tape": "2e1836779a3ee99351de4d5caea3df1191757074961e907f15afc798e2cba0ad",
+    "demo/tapes/03-audit-replay.tape": "f7239fd68fb07ac78e7c928fac5c5be4cb7092ccccac2b30f737cad52f994275",
+    "demo/tapes/04-mesh-preauth.tape": "58038e57fc65b8504d9c79a9fbf4e6211752a681120488e9ba9cc2fe87202263",
+    "demo/tapes/05-v3-smoke.tape": "008b53ea97a29b0093ed8a9ae7a850b894cbacc4527646f9f2ec2bf504766c2d",
+    "demo/tapes/06-tailscale-interop.tape": "34cc16df74ba4528dbd8640c9e54c53606c3d8728ef77390dfa90beb2b5ef0b9",
+    "demo/tapes/07-headscale-cli.tape": "5aebd6bdf2893f70fdf9a65695d30e84e08cde3879505946a0a45063598a000d",
+    "demo/tapes/08-3node-mesh.tape": "bf3cfc8db96986ebe1b3a017ebd76f8d4a37b3471f22ed41bd301d835edb051b",
+    "demo/tapes/09-traffic-patterns.tape": "9c5b7a095cf66a571adf190c6b62b9c81bfa1cf277caafd64245bc2908f73bfc",
+    "demo/tapes/10-metrics-grafana.tape": "657504db5a11463fbf0cd8a36a375baa87ea3467976dbe175b8ded4257cbd55e",
+    "demo/tapes/11-user-install-linux.tape": "c1be2bc0d4e82544c74caf29110f0fd1c9e5b8c8b53124fc4c33390454213108",
+    "demo/tapes/12-user-install-macos.tape": "29b6945faedae25d28bf1f2153737e5548f15547c514a297322c0309951fb5fb",
+    "demo/tapes/13-user-ssh-peer.tape": "637cfb3a0464c913aec9221c2e624301338a3145fe05970ff59ad3f5a28e6d25",
+    "demo/tapes/14-user-web-traffic.tape": "47dcccf2b2a92a0e5a22ca01c96214ee5eaeac7d0491c2a62d2e8b6898de6ce9",
+    "demo/tapes/15-user-oct-url-public.tape": "eb3420004c6d531514549f71165b729312e91822025d2016b77642d362075511",
+    "demo/tapes/16-user-oct-url-sealed.tape": "a256103eed8bed278f640a905a414055db7902dd063ef6d585206939466b838f",
+    "demo/tapes/17-operator-onboarding.tape": "0f065d8c5f0491647c6982fa1343643939283d497421bff199623b3c76ccd2e0",
+    "demo/tapes/18-tailnet-owner-policy.tape": "84a85fa349079bad7313eac6d31908457b37b6b00b12c1e14e844f771cbbb3df",
+    "demo/tapes/19-circle-update-atomic.tape": "2d9f2c148095af0b3e322f33ab17501a071af43a91cbcf563c67500317980a9b",
+    "demo/tapes/20-pvac-rotation.tape": "62ff4d970af123ac3a80b43b4cc0f5801132fc5ce0a34af22af0611215cd6a4a",
+    "demo/tapes/21-audit-verify.tape": "e61583bd09587d80bbc00e1c4c85186540ffb9b6768d375949b2efe23392dc01",
+    "demo/tapes/22-headscale-cli-tour.tape": "e8eb6fe1372288bbf32e57f0decd80bc7d3621b19ad389cfc573cee2832fe4f0"
+  },
+  "source_files_unchanged": true,
+  "checks": [
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "demo/lib/test_ci_recordings.py"
+      ],
+      "exit_code": 0
+    },
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "demo/lib/test_negative_checks.py"
+      ],
+      "exit_code": 0
+    },
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "demo/lib/gen-vtts.py",
+        "--check"
+      ],
+      "exit_code": 0
+    },
+    {
+      "argv": [
+        "ruby",
+        "-rpsych",
+        "-e",
+        "Psych.parse_file(ARGV[0]); puts \"workflow parsed\"",
+        ".github/workflows/demo.yml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "mock_tests": {
+    "artifact_integrity": 9,
+    "negative_controls": 6
+  },
+  "captions": [
+    {
+      "tape": "demo/tapes/00-master-tour.tape",
+      "caption": "demo/recordings/00-master-tour.vtt",
+      "sha256": "3be8d154e6ddc528941c50d29da23d54201419cc7e2965360b4aaa6e6194d3ef",
+      "cues": 6,
+      "vhs_syntax_valid": true
+    },
+    {
+      "tape": "demo/tapes/01-init-keygen.tape",
+      "caption": "demo/recordings/01-init-keygen.vtt",
+      "sha256": "c417a99c7396cd55d934d506ff910de85f20a6ab4bf86231e80bec202c885da7",
+      "cues": 6,
+      "vhs_syntax_valid": true
+    },
+    {
+      "tape": "demo/tapes/02-portal-fetch.tape",
+      "caption": "demo/recordings/02-portal-fetch.vtt",
+      "sha256": "ba897c1a679fc1fd9862de58e87c4148808958a94012c5fcc710e355064c2761",
+      "cues": 7,
+      "vhs_syntax_valid": true
+    },
+    {
+      "tape": "demo/tapes/03-audit-replay.tape",
+      "caption": "demo/recordings/03-audit-replay.vtt",
+      "sha256": "0e279fe1b66ad560c8965ee39039f505aa449ae05cc9b85ebafd5f96d2f33c37",
+      "cues": 6,
+      "vhs_syntax_valid": true
+    },
+    {
+      "tape": "demo/tapes/04-mesh-preauth.tape",
+      "caption": "demo/recordings/04-mesh-preauth.vtt",
+      "sha256": "0c375bd1ddd6c7855de5bddb91cb7b97debbe1bda26d21fdf47e74ba47d7d3fa",
+      "cues": 7,
+      "vhs_syntax_valid": true
+    },
+    {
+      "tape": "demo/tapes/05-v3-smoke.tape",
+      "caption": "demo/recordings/05-v3-smoke.vtt",
+      "sha256": "ea34ecf253de16f4b7dc794fcaa6261ef240e141f3f014cef17b835c1adb6186",
+      "cues": 8,
+      "vhs_syntax_valid": true
+    },
+    {
+      "tape": "demo/tapes/06-tailscale-interop.tape",
+      "caption": "demo/recordings/06-tailscale-interop.vtt",
+      "sha256": "b2af8ac5da58701aec7ba7a114034d47e80898b72ab7b0fb8df1c4eae6501af9",
+      "cues": 8,
+      "vhs_syntax_valid": true
+    },
+    {
+      "tape": "demo/tapes/07-headscale-cli.tape",
+      "caption": "demo/recordings/07-headscale-cli.vtt",
+      "sha256": "9582ea4e852af8171400ac26f5c228541526dd79ae2ac295c429e238bdc0e1f1",
+      "cues": 7,
+      "vhs_syntax_valid": true
+    },
+    {
+      "tape": "demo/tapes/08-3node-mesh.tape",
+      "caption": "demo/recordings/08-3node-mesh.vtt",
+      "sha256": "77a480662e70e50cf3a16a56edebac89b4bcefebf56f4e01b26a33d1ea5763ed",
+      "cues": 6,
+      "vhs_syntax_valid": true
+    },
+    {
+      "tape": "demo/tapes/09-traffic-patterns.tape",
+      "caption": "demo/recordings/09-traffic-patterns.vtt",
+      "sha256": "d2255b2b207a92ead62d57f918450a60a3bdbd632ed80fb7b6363778f84a31db",
+      "cues": 8,
+      "vhs_syntax_valid": true
+    },
+    {
+      "tape": "demo/tapes/10-metrics-grafana.tape",
+      "caption": "demo/recordings/10-metrics-grafana.vtt",
+      "sha256": "75b1f18df4579065eeb43720042229b293068bb821b002735adcd748268b3d76",
+      "cues": 8,
+      "vhs_syntax_valid": true
+    },
+    {
+      "tape": "demo/tapes/11-user-install-linux.tape",
+      "caption": "demo/recordings/11-user-install-linux.vtt",
+      "sha256": "a169f3ca7418e9705f20822f1580ca056370dc2dc089a5f5175b83434311ff05",
+      "cues": 7,
+      "vhs_syntax_valid": true
+    },
+    {
+      "tape": "demo/tapes/12-user-install-macos.tape",
+      "caption": "demo/recordings/12-user-install-macos.vtt",
+      "sha256": "c29a1a45a8c6fb219f2377a034b0108bce7e6b071687e46247789b96003d5a5e",
+      "cues": 7,
+      "vhs_syntax_valid": true
+    },
+    {
+      "tape": "demo/tapes/13-user-ssh-peer.tape",
+      "caption": "demo/recordings/13-user-ssh-peer.vtt",
+      "sha256": "0ce84f25191659ffa65f7972da88d08590950b6b26d577bfc43d8f9652766807",
+      "cues": 8,
+      "vhs_syntax_valid": true
+    },
+    {
+      "tape": "demo/tapes/14-user-web-traffic.tape",
+      "caption": "demo/recordings/14-user-web-traffic.vtt",
+      "sha256": "376ab022106cb46549093eff4e1a9a2d505952f488ebe5c6395edff9b1f27b21",
+      "cues": 8,
+      "vhs_syntax_valid": true
+    },
+    {
+      "tape": "demo/tapes/15-user-oct-url-public.tape",
+      "caption": "demo/recordings/15-user-oct-url-public.vtt",
+      "sha256": "b84fc20af4f986c09ee13a9a726ef5fa3356afc9d76ab4140d78b65fdd939b0c",
+      "cues": 8,
+      "vhs_syntax_valid": true
+    },
+    {
+      "tape": "demo/tapes/16-user-oct-url-sealed.tape",
+      "caption": "demo/recordings/16-user-oct-url-sealed.vtt",
+      "sha256": "27b80ba40ed21bba8196368d7f7a30b8c1fd29cc9a48b7359d5215598d5eac54",
+      "cues": 8,
+      "vhs_syntax_valid": true
+    },
+    {
+      "tape": "demo/tapes/17-operator-onboarding.tape",
+      "caption": "demo/recordings/17-operator-onboarding.vtt",
+      "sha256": "39ea99789d4ce4a52183000885da3ecd87fed07ae58c2fdeda0feb0c73d9b5fa",
+      "cues": 8,
+      "vhs_syntax_valid": true
+    },
+    {
+      "tape": "demo/tapes/18-tailnet-owner-policy.tape",
+      "caption": "demo/recordings/18-tailnet-owner-policy.vtt",
+      "sha256": "68d93093fde3c3fe42192d48996667612aa013e5313e55649303a516124ff065",
+      "cues": 8,
+      "vhs_syntax_valid": true
+    },
+    {
+      "tape": "demo/tapes/19-circle-update-atomic.tape",
+      "caption": "demo/recordings/19-circle-update-atomic.vtt",
+      "sha256": "5a9642c2130f859b2c654980977c0bfcb9d6d541862d8c4c02794e919ef148e5",
+      "cues": 8,
+      "vhs_syntax_valid": true
+    },
+    {
+      "tape": "demo/tapes/20-pvac-rotation.tape",
+      "caption": "demo/recordings/20-pvac-rotation.vtt",
+      "sha256": "ce668c24c97686a7f2da246c3648021ec6aeae3323fea4e7f43fbdf1a9037963",
+      "cues": 7,
+      "vhs_syntax_valid": true
+    },
+    {
+      "tape": "demo/tapes/21-audit-verify.tape",
+      "caption": "demo/recordings/21-audit-verify.vtt",
+      "sha256": "4bc779da61aba105e66949c4feb4abae813dd5a40a266e383c06910292735e83",
+      "cues": 6,
+      "vhs_syntax_valid": true
+    },
+    {
+      "tape": "demo/tapes/22-headscale-cli-tour.tape",
+      "caption": "demo/recordings/22-headscale-cli-tour.vtt",
+      "sha256": "596b45d7fcccd7d00c4a3ff3bbb972a4dd947f02a7b4fc97bb7a97400d00c757",
+      "cues": 8,
+      "vhs_syntax_valid": true
+    }
+  ],
+  "generator_roundtrip": true,
+  "captions_parsed_with_ffprobe": true,
+  "all_vhs_syntax_valid": true,
+  "frozen_node_commit": "7b2522636ceedeccb059415cadbca9a8a36ff829",
+  "frozen_node_binary_sha256": "b2b624507f242f033709ca1a4f3eaa9b8eaa482ac9ecd49dde1526929e8abb37",
+  "compiled_node_inputs_unchanged": true,
+  "changed_after_node_freeze": [
+    ".github/workflows/demo.yml",
+    "demo/lib/gen-vtts.py",
+    "demo/recordings/00-master-tour.vtt",
+    "demo/recordings/01-init-keygen.vtt",
+    "demo/recordings/02-portal-fetch.vtt",
+    "demo/recordings/03-audit-replay.vtt",
+    "demo/recordings/04-mesh-preauth.vtt",
+    "demo/recordings/05-v3-smoke.vtt",
+    "demo/recordings/06-tailscale-interop.vtt",
+    "demo/recordings/07-headscale-cli.vtt",
+    "demo/recordings/08-3node-mesh.vtt",
+    "demo/recordings/09-traffic-patterns.vtt",
+    "demo/recordings/10-metrics-grafana.vtt",
+    "demo/recordings/11-user-install-linux.vtt",
+    "demo/recordings/12-user-install-macos.vtt",
+    "demo/recordings/22-headscale-cli-tour.vtt",
+    "demo/tapes/02-portal-fetch.tape",
+    "demo/tapes/09-traffic-patterns.tape",
+    "demo/tapes/14-user-web-traffic.tape",
+    "demo/tapes/16-user-oct-url-sealed.tape",
+    "demo/tapes/20-pvac-rotation.tape",
+    "demo/tapes/21-audit-verify.tape"
+  ],
+  "log_sha256": "3d0201f4115c5d757b29d24cc865c1edf195bec9db199409bae10cf3e448361f",
+  "actual_vhs_render_qualified": false,
+  "actual_caption_alignment_qualified": false,
+  "actual_public_rpc_or_crypto_qualified": false,
+  "scope": "Media-only follow-up after freezing the normal node; exact compiled node inputs remain unchanged. Mock tests and parser checks do not qualify Docker, public RPC, fresh video rendering or caption alignment."
+}

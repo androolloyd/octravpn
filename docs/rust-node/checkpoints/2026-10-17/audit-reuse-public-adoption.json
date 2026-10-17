@@ -1,0 +1,80 @@
+{
+  "format": "octra-audit-reuse-public-adoption-v1",
+  "at": "2026-10-17T13:35:43.571831+00:00",
+  "launch": {
+    "at": "2026-10-17T13:25:54.019723+00:00",
+    "pid": 52612,
+    "supervisor_pid": 52611,
+    "binary": "/Users/androolloyd/Development/octra/out/audit-reuse-20261017/release/octra-node",
+    "binary_sha256": "b2b624507f242f033709ca1a4f3eaa9b8eaa482ac9ecd49dde1526929e8abb37",
+    "source_commit": "7b2522636ceedeccb059415cadbca9a8a36ff829",
+    "release_manifest": "/Users/androolloyd/Development/octra/out/audit-reuse-20261017/release/manifest.json",
+    "release_manifest_sha256": "4efcfa42226d2673c34d305d4adb3a667b1131b2845ba27ab1bb62076c1f95e0",
+    "config": "/Users/androolloyd/Development/octra/out/octranet-public-20261017/network.json",
+    "config_sha256": "77a1713c64c3baf2c57a67bb6a9f261bfb5280347bbe71358dbb0984e53c40eb",
+    "log": "/Users/androolloyd/Development/octra/out/audit-reuse-20261017/public-adoption/observer.log",
+    "exit_evidence": "/Users/androolloyd/Development/octra/out/audit-reuse-20261017/public-adoption/exit.json",
+    "retained_state": true,
+    "voting": false,
+    "payments": false,
+    "funds_spent": 0
+  },
+  "stop": {
+    "at": "2026-10-17T13:25:53.956737+00:00",
+    "old_pid": 84816,
+    "signal": "SIGTERM",
+    "forced": false,
+    "exit": {
+      "at": "2026-10-17T13:25:48.074623+00:00",
+      "pid": 84816,
+      "exit_code": 0,
+      "supervisor_error": null
+    },
+    "elapsed_seconds": 8.868,
+    "retained_sequence": 10665,
+    "retained_epoch": 1708425,
+    "configuration_unchanged": true,
+    "identity_unchanged": true,
+    "relay_unchanged": true,
+    "state_reset": false
+  },
+  "retained_sequence": 10665,
+  "retained_epoch": 1708425,
+  "checkpoints": [
+    {
+      "extension": "devnet-archive",
+      "namespace": "9ebcbe2009256807e94a63b2b4d11865fbe684a7acfcdea1fa96a25111a53981",
+      "sequence": 10665,
+      "epoch": 1708425,
+      "root": "93ff90909af7e624685d138dfbef78cc419b993c9d04e0e4c26aff68cb3dd5d0"
+    }
+  ],
+  "canonical_outbox_archive_prefix_preserved": true,
+  "continuity_scope": "Read-only retained prefix, canonical/outbox/checkpoint/archive consistency; not independent QC verification",
+  "release_manifest_sha256": "4efcfa42226d2673c34d305d4adb3a667b1131b2845ba27ab1bb62076c1f95e0",
+  "startup_continuity_sha256": "032585660593b1908200dcc760e5cdd7852566966ebf170814440ec777af21ef",
+  "latest_status": {
+    "at": "2026-10-17T13:35:02.159585+00:00",
+    "pid": 52612,
+    "process_query_exit": 0,
+    "process": "52612 52611 Sat Oct 17 10:25:54 2026     09:08   4:06.89  77.0 33258016 R    /Users/androolloyd/Development/octra/out/audit-reuse-20261017/release/octra-node run-network --config /Users/androolloyd/Development/octra/out/octranet-public-20261017/network.json",
+    "exit_evidence": false,
+    "/operator/status": {
+      "error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    "/operator/peers": {
+      "error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    "/status": {
+      "error": "<urlopen error [Errno 61] Connection refused>"
+    }
+  },
+  "voting": false,
+  "payments_configured": false,
+  "funds_spent": 0,
+  "state_reset": false,
+  "relay_unchanged": true,
+  "public_paid_qualified": false,
+  "sustained_serving_qualified": false,
+  "mainnet_deployed": false
+}

@@ -76,9 +76,13 @@ jobs:
         with:
           workspaces: octra -> target
 
-      - name: Recording artifact integrity regressions
+      - name: Recording integrity and negative-control regressions
         working-directory: octra
-        run: python3 -B demo/lib/test_ci_recordings.py
+        run: |
+          python3 -B demo/lib/test_ci_recordings.py
+          python3 -B demo/lib/test_negative_checks.py
+          python3 -B demo/lib/gen-vtts.py --check
+          for tape in demo/tapes/*.tape; do vhs validate "$tape"; done
 
       - name: Build octravpn binaries needed by tapes (host)
         working-directory: octra

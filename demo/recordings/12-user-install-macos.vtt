@@ -1,28 +1,22 @@
 WEBVTT
 
 00:00:00.000 --> 00:00:05.000
-narrator: the same join flow on macOS — Homebrew tailscale CLI.
+narrator: macOS setup instructions; Homebrew commands are comments.
 
-00:00:05.000 --> 00:00:15.000
-narrator: brew install tailscale ships the daemon and the CLI binary.
+00:00:07.000 --> 00:00:12.000
+narrator: The App Store path is also a written instruction.
 
-00:00:15.000 --> 00:00:25.000
-narrator: launch the daemon as a launchd service on first run.
+00:00:13.000 --> 00:00:16.000
+narrator: Version queries inspect the available CLI.
 
-00:00:25.000 --> 00:00:35.000
-narrator: tailscale up points at the operator URL with the preauth key.
+00:00:17.000 --> 00:00:23.000
+narrator: The example join command is not run.
 
-00:00:35.000 --> 00:00:45.000
-narrator: macOS prompts once for a Network Extension permission grant.
+00:00:24.000 --> 00:00:28.000
+narrator: Status inspects the runner's current environment.
 
-00:00:45.000 --> 00:00:55.000
-narrator: the system tray shows the issued 100.64.x.x address.
+00:00:29.000 --> 00:00:33.000
+narrator: The peer ping example remains commented out.
 
-00:00:55.000 --> 00:01:05.000
-narrator: peer enumeration matches the linux flow — same wire protocol.
-
-00:01:05.000 --> 00:01:15.000
-narrator: ping to a peer confirms direct WireGuard, no DERP fallback.
-
-00:01:15.000 --> 00:01:25.000
-narrator: the macOS host is now joined to the same tailnet.
+00:00:33.500 --> 00:00:37.500
+narrator: The pictured pong does not demonstrate a macOS connection.

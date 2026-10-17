@@ -27,7 +27,7 @@ Enter
 Sleep 90s
 Type "# Step 0: confirm the sidecar binary is reachable and prints its version"
 Enter
-Type "docker exec octravpn-pvac sh -c 'octra-pvac-sidecar --version 2>/dev/null || /usr/local/bin/octra-pvac-sidecar --version 2>/dev/null || /opt/octra-pvac-sidecar --version 2>/dev/null || echo \"(sidecar binary present; no --version flag)\"'"
+Type `docker exec octravpn-pvac sh -c 'octra-pvac-sidecar --version 2>/dev/null || /usr/local/bin/octra-pvac-sidecar --version 2>/dev/null || /opt/octra-pvac-sidecar --version 2>/dev/null || echo "(sidecar binary present; no --version flag)"'`
 Enter
 Sleep 4s
 

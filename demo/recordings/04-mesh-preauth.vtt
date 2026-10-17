@@ -1,16 +1,22 @@
 WEBVTT
 
-00:00:00.000 --> 00:00:05.000
-narrator: mint a single-use preauth key for one user.
+00:00:00.000 --> 00:00:08.000
+narrator: Start the local mesh fixture and admin endpoint.
 
-00:00:05.000 --> 00:00:10.500
-narrator: the key is one-shot — usable by exactly one tailscale up.
+00:00:20.000 --> 00:00:28.000
+narrator: This tape demonstrates minting; it does not redeem the new keys.
 
-00:00:10.500 --> 00:00:17.000
-narrator: a reusable key with a 24-hour TTL suits fleet rollouts.
+00:02:04.000 --> 00:02:11.000
+narrator: Local minting creates a key outside the running daemon's store.
 
-00:00:17.000 --> 00:00:22.000
-narrator: the same surface is exposed over HTTP for daemon callers.
+00:02:17.000 --> 00:02:26.000
+narrator: Remote minting sends a request to the running daemon.
 
-00:00:22.000 --> 00:00:27.700
-narrator: POST /admin/preauth, Bearer-gated, JSON body — identical shape.
+00:02:31.000 --> 00:02:40.000
+narrator: The reusable variant requests a twenty-four-hour lifetime.
+
+00:02:56.000 --> 00:03:06.000
+narrator: Send the equivalent preauthorization request through the admin HTTP API.
+
+00:03:12.000 --> 00:03:18.000
+narrator: Remove the fixture after inspecting the returned keys.

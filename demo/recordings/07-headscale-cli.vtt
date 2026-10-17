@@ -1,16 +1,22 @@
 WEBVTT
 
-00:00:00.000 --> 00:00:04.000
-narrator: point the headscale CLI at the in-repo demo config.
+00:00:00.000 --> 00:00:08.000
+narrator: Start the mesh fixture with its embedded admin CLI.
 
-00:00:04.000 --> 00:00:10.000
-narrator: users create alice — alice is now a namespace owner.
+00:00:20.000 --> 00:00:28.000
+narrator: These commands manage control-plane users and keys, not traffic purchases.
 
-00:00:10.000 --> 00:00:15.000
-narrator: users list shows alice alongside any earlier accounts.
+00:02:04.000 --> 00:02:14.000
+narrator: Create Alice and inspect the command result.
 
-00:00:15.000 --> 00:00:21.000
-narrator: mint a preauth key alice can paste into tailscale up.
+00:02:16.000 --> 00:02:24.000
+narrator: List users before choosing the target user for a key.
 
-00:00:21.000 --> 00:00:26.100
-narrator: nodes list enumerates the machines joined to the tailnet.
+00:02:26.000 --> 00:02:35.000
+narrator: The key command requests user ID one; check that user's identity.
+
+00:02:40.000 --> 00:02:48.000
+narrator: List nodes registered with the fixture.
+
+00:02:49.000 --> 00:02:53.000
+narrator: Remove the local mesh.

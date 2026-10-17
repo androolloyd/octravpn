@@ -63,7 +63,7 @@ Enter
 # can't reach tailnet IPs with wget — apps need to dial via
 # `tailscale nc` (or the tailscale SOCKS proxy).  We listen on
 # peer-2 with busybox nc and pull via `tailscale nc` from peer-1.
-Type "docker exec -d tsi-peer-2 sh -c 'while true; do printf \"HTTP/1.0 200 OK\\r\\nContent-Type: text/plain\\r\\n\\r\\nhello-from-peer-2\\n\" | nc -l -p 8080; done'"
+Type `docker exec -d tsi-peer-2 sh -c 'while true; do printf "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\nhello-from-peer-2\n" | nc -l -p 8080; done'`
 Enter
 Sleep 3s
 Type `docker exec tsi-peer-1 sh -c "(printf 'GET / HTTP/1.0\r\nHost: x\r\n\r\n'; sleep 1) | tailscale --socket=/var/run/tailscale/tailscaled.sock nc $PEER2_IP 8080 | tail -1"`

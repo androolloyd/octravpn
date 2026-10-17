@@ -1,0 +1,25 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:08.000
+narrator: This terminal fixture requests sealed Circle assets from public devnet.
+
+00:00:18.000 --> 00:00:26.000
+narrator: The passphrase is supplied by environment, not a browser interaction.
+
+00:01:03.000 --> 00:01:13.000
+narrator: Probe portal health and read the Circle ID.
+
+00:01:17.000 --> 00:01:27.000
+narrator: Fetch the sealed JSON asset and inspect the response.
+
+00:01:31.000 --> 00:01:41.000
+narrator: open-url requests opening the same asset; no browser is recorded.
+
+00:01:44.000 --> 00:01:53.000
+narrator: The negative control requires the same asset to decrypt with the correct passphrase.
+
+00:01:54.000 --> 00:02:03.000
+narrator: Wrong-passphrase success requires exact exit five, the decrypt diagnostic, and no plaintext.
+
+00:02:04.000 --> 00:02:10.000
+narrator: Teardown follows; this tape does not qualify paid traffic.

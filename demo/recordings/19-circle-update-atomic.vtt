@@ -1,0 +1,25 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:08.000
+narrator: Prepare Circle requests against the configured public devnet RPC.
+
+00:00:18.000 --> 00:00:26.000
+narrator: Public RPC availability and write credentials determine whether requests can succeed.
+
+00:01:03.000 --> 00:01:13.000
+narrator: Read the demo Circle ID from the running container.
+
+00:01:19.000 --> 00:01:29.000
+narrator: Write the replacement policy payload inside the fixture.
+
+00:01:35.000 --> 00:01:45.000
+narrator: Dry-run describes the requested update without broadcasting.
+
+00:01:53.000 --> 00:02:03.000
+narrator: Commit requests blob writes and the anchor update; inspect the result.
+
+00:02:12.000 --> 00:02:21.000
+narrator: List orphan candidates; masked command exits do not prove an empty result.
+
+00:02:23.000 --> 00:02:27.000
+narrator: Remove the devnet fixture.

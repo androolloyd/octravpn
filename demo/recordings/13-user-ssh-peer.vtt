@@ -1,0 +1,25 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:07.000
+narrator: The SSH fixture starts three stock Tailscale peers.
+
+00:00:16.000 --> 00:00:24.000
+narrator: Traffic uses the local mesh; paid exit service is outside this test.
+
+00:02:02.000 --> 00:02:12.000
+narrator: Inspect peer one's roster and peer two's tailnet address.
+
+00:02:23.000 --> 00:02:33.000
+narrator: Dropbear and a temporary SSH key prepare the target.
+
+00:02:47.000 --> 00:02:57.000
+narrator: Copy the public key to peer two's authorized keys.
+
+00:03:03.000 --> 00:03:13.000
+narrator: Read peer two's address for this fixture connection.
+
+00:03:15.000 --> 00:03:25.000
+narrator: SSH uses tailscale nc as its proxy; check for session_ok.
+
+00:03:31.000 --> 00:03:36.000
+narrator: Teardown removes the fixture containers.

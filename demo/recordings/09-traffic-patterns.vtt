@@ -1,34 +1,25 @@
 WEBVTT
 
-00:00:00.000 --> 00:00:05.000
-narrator: drive real traffic across the three-peer mesh.
+00:00:00.000 --> 00:00:08.000
+narrator: Bring up the local three-peer mesh.
 
-00:00:05.000 --> 00:00:15.000
-narrator: the bringup script is idempotent — fast when already up.
+00:00:11.000 --> 00:00:20.000
+narrator: Read peer two and peer three's assigned tailnet addresses.
 
-00:00:40.000 --> 00:00:50.000
-narrator: docker compose pulls cached images; build is warm.
+00:00:25.000 --> 00:00:35.000
+narrator: Request peer one's ping to peer two and inspect the result.
 
-00:01:30.000 --> 00:01:40.000
-narrator: the mesh converges to READY before the traffic burst.
+00:00:39.000 --> 00:00:49.000
+narrator: Repeat the ping toward peer three.
 
-00:02:05.000 --> 00:02:14.000
-narrator: discover peer-2 and peer-3 IPs from peer-1 status output.
+00:00:56.000 --> 00:01:05.000
+narrator: Start a fixed HTTP responder on peer two.
 
-00:02:14.000 --> 00:02:24.000
-narrator: control-plane ping rides the encrypted tailscale plane.
+00:01:07.000 --> 00:01:17.000
+narrator: Send a GET through tailscale nc; this is peer traffic.
 
-00:02:28.000 --> 00:02:38.000
-narrator: a second ping to peer-3 confirms full-mesh reachability.
+00:01:19.000 --> 00:01:28.000
+narrator: Read the admin policy; no paid settlement is exercised.
 
-00:02:45.000 --> 00:02:55.000
-narrator: a tiny busybox HTTP target boots inside peer-2.
-
-00:02:55.000 --> 00:03:04.000
-narrator: peer-1 fetches bytes from peer-2 — the data plane is live.
-
-00:03:04.000 --> 00:03:13.000
-narrator: the policy CRUD endpoint is the placeholder for post-Hub.
-
-00:03:18.000 --> 00:03:28.000
-narrator: teardown — a clean handoff to the metrics tape.
+00:01:31.000 --> 00:01:38.000
+narrator: Remove the local mesh.

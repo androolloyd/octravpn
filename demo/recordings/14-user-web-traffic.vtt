@@ -1,0 +1,25 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:07.000
+narrator: Three peer containers form the local mesh fixture.
+
+00:00:20.000 --> 00:00:28.000
+narrator: This tape exercises peer HTTP, not a paid internet exit.
+
+00:02:02.000 --> 00:02:10.000
+narrator: Read peer two's assigned tailnet address.
+
+00:02:15.000 --> 00:02:25.000
+narrator: A netcat loop prepares a fixed HTTP response on port 8080.
+
+00:02:30.000 --> 00:02:40.000
+narrator: Send GET through tailscale nc and inspect the returned body.
+
+00:02:43.000 --> 00:02:53.000
+narrator: Send HEAD over the same path and inspect the status line.
+
+00:02:54.000 --> 00:03:02.000
+narrator: The exit-node section is commentary; it executes no internet traffic.
+
+00:03:03.000 --> 00:03:08.000
+narrator: Remove the fixture after the peer HTTP requests.

@@ -1,0 +1,19 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:08.000
+narrator: Prepare eight synthetic audit records and an empty receipt journal.
+
+00:00:18.000 --> 00:00:26.000
+narrator: Run the clean verifier, then modify only the first record while keeping valid JSON.
+
+00:00:27.000 --> 00:00:34.000
+narrator: Both verifications use the original HMAC key explicitly.
+
+00:00:35.000 --> 00:00:42.000
+narrator: Require clean exit zero, then exact exit one and a line-one MAC mismatch.
+
+00:00:43.000 --> 00:00:49.000
+narrator: Missing files, parse errors, and unexpected success cannot satisfy this negative control.
+
+00:00:49.500 --> 00:00:52.000
+narrator: Local audit checks do not prove delivery.

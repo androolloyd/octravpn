@@ -1,0 +1,22 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:08.000
+narrator: Start the separate PVAC sidecar fixture.
+
+00:00:18.000 --> 00:00:26.000
+narrator: This tape runs IPC operations; it does not submit a chain transaction.
+
+00:01:35.000 --> 00:01:45.000
+narrator: The version probe has a fallback message, not a version assertion.
+
+00:01:52.000 --> 00:02:02.000
+narrator: Send keygen a fixed demonstration seed and show a truncated response.
+
+00:02:12.000 --> 00:02:22.000
+narrator: Request the sidecar's AES known-answer test over JSON IPC.
+
+00:02:24.000 --> 00:02:32.000
+narrator: Broadcast and RPC-limit notes are comments, not executed checks.
+
+00:02:34.000 --> 00:02:39.000
+narrator: Stop the sidecar fixture.

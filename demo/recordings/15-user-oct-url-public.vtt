@@ -1,0 +1,25 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:08.000
+narrator: Despite its filename, this is a sealed-asset portal CLI fixture.
+
+00:00:18.000 --> 00:00:26.000
+narrator: It depends on the configured public devnet RPC and demo Circle.
+
+00:01:02.000 --> 00:01:12.000
+narrator: Probe local portal health and read the fixture's Circle ID.
+
+00:01:19.000 --> 00:01:29.000
+narrator: Request opening index.html with the demonstration passphrase.
+
+00:01:34.000 --> 00:01:42.000
+narrator: Fetch CSS with response headers.
+
+00:01:45.000 --> 00:01:54.000
+narrator: Fetch JSON with the same configured passphrase.
+
+00:02:00.000 --> 00:02:10.000
+narrator: Write the binary asset and inspect the local file size.
+
+00:02:13.000 --> 00:02:19.000
+narrator: Commands can mask errors; inspect their output before assuming success.

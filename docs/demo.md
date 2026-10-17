@@ -27,6 +27,16 @@ These tests and Compose validation do not replace actual VHS, stock-Tailscale
 or public-RPC runs. Instruction-only tapes must describe steps as instructions,
 without claiming that the installer, payment or network action was executed.
 
+The [media source checkpoint](rust-node/checkpoints/2026-10-17/demo-integrity.json)
+validates all 23 current tape scripts and matching caption sources, nine artifact
+regressions and six negative-control regressions. The generator's `--check`
+verifies that tracked narration matches its cue table. Tapes 02/16 require a
+successful fetch of the same asset before accepting exact decrypt exit 5 with
+no plaintext. Tape 21 requires exact clean success, then exact verification
+failure for a valid-JSON mutation under the original HMAC key. Parse errors,
+missing keys and unrelated network failures cannot satisfy those controls.
+Fresh rendering and alignment against the resulting videos remain separate.
+
 ## Audience + length
 
 - **Headline cut, 5 minutes** — Octra mainnet stakeholders, prospective

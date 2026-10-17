@@ -40,7 +40,7 @@ Type "# Stand up a tiny HTTP responder on peer-2 (nc-based; the"
 Enter
 Type "# tailscale image's busybox lacks the httpd applet)."
 Enter
-Type "docker exec -d tsi-peer-2 sh -c 'while true; do printf \"HTTP/1.0 200 OK\\r\\nContent-Type: text/plain\\r\\n\\r\\nhello-from-peer-2\\n\" | nc -l -p 8080; done'"
+Type `docker exec -d tsi-peer-2 sh -c 'while true; do printf "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\nhello-from-peer-2\n" | nc -l -p 8080; done'`
 Enter
 Sleep 3s
 

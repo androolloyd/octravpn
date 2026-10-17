@@ -1,0 +1,25 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:06.000
+narrator: Start the local three-peer control-plane fixture.
+
+00:00:08.000 --> 00:00:15.000
+narrator: Write an example policy for traffic from Alice to Bob.
+
+00:00:16.000 --> 00:00:20.000
+narrator: The rule is directional; it does not grant reverse traffic.
+
+00:00:22.000 --> 00:00:31.000
+narrator: Run the embedded policy checker and inspect its output.
+
+00:00:33.000 --> 00:00:42.000
+narrator: Submit the policy through the fixture's admin HTTP API.
+
+00:00:46.000 --> 00:00:54.000
+narrator: Request the current policy; inspect any reported errors.
+
+00:00:58.000 --> 00:01:08.000
+narrator: List nodes; this tape does not test packet-level policy enforcement.
+
+00:01:09.000 --> 00:01:14.000
+narrator: Remove the mesh fixture.

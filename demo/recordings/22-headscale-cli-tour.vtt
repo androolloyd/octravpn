@@ -1,28 +1,25 @@
 WEBVTT
 
-00:00:00.000 --> 00:00:05.000
-narrator: a guided tour of the headscale CLI surface.
+00:00:00.000 --> 00:00:07.000
+narrator: Start the embedded Headscale CLI fixture.
 
-00:00:05.000 --> 00:00:15.000
-narrator: users — the namespace that owns nodes and keys.
+00:00:10.000 --> 00:00:18.000
+narrator: Attempt user creation and request the user list.
 
-00:00:15.000 --> 00:00:25.000
-narrator: preauthkeys — single-use or reusable, scoped to a user.
+00:00:28.000 --> 00:00:37.000
+narrator: List nodes registered with the fixture's control plane.
 
-00:00:25.000 --> 00:00:35.000
-narrator: nodes — every machine that has run tailscale up.
+00:00:40.000 --> 00:00:49.000
+narrator: Request a reusable key for user ID one; verify which user that is.
 
-00:00:35.000 --> 00:00:45.000
-narrator: routes — subnets advertised by a peer for split-tunnel reach.
+00:00:52.000 --> 00:01:00.000
+narrator: The next key listing selects Alice by name.
 
-00:00:45.000 --> 00:00:55.000
-narrator: policy — the HUJSON ACL document, set and gotten via CLI.
+00:01:02.000 --> 00:01:11.000
+narrator: Request the stored policy and inspect any reported errors.
 
-00:00:55.000 --> 00:01:05.000
-narrator: api-keys — long-lived tokens for ops automation.
+00:01:13.000 --> 00:01:22.000
+narrator: Tailnet status is an attempted admin call, not a paid-service check.
 
-00:01:05.000 --> 00:01:15.000
-narrator: every command mirrors the upstream headscale shape 1-for-1.
-
-00:01:15.000 --> 00:01:25.000
-narrator: existing tailscale-ops runbooks transfer with zero rewrites.
+00:01:23.000 --> 00:01:28.000
+narrator: Remove the fixture.

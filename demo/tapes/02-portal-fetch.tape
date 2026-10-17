@@ -65,9 +65,9 @@ Type "docker exec octravpn-portal-demo cat /tmp/policy.json"
 Enter
 Sleep 3s
 
-Type "# wrong passphrase => sealed envelope detects + refuses to render"
+Type "# assert correct-pass control, exact decrypt exit 5, and no plaintext"
 Enter
-Type `docker exec -e OCTRAVPN_SEALED_PASSPHRASE=wrong octravpn-portal-demo sh -c 'octravpn --config /etc/octravpn/config.toml fetch oct://$CIRCLE/sealed.json || echo sealed-decrypt-failed-expected'`
+Type "python3 demo/lib/negative-checks.py sealed"
 Enter
 Sleep 5s
 

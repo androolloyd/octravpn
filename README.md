@@ -51,9 +51,11 @@ authority; startup, exported records and new publication retain their complete
 verification gates. Demo jobs publish only fresh, complete recording groups
 bound to their GitHub run and source commit.
 
-The unchanged public devnet observer has [319 new retained epochs with matching
-canonical/ExEx continuity](docs/rust-node/checkpoints/2026-10-17/service-public-progress.md).
-Its paid service is unconfigured. Sustained public serving, stock Tailscale
+The public devnet observer has adopted the
+[qualified normal release](docs/rust-node/checkpoints/2026-10-17/audit-reuse-public-adoption.json)
+from retained epoch 1,708,425, preserving its canonical/ExEx/archive prefix, key,
+configuration and relay. Cold startup is still being observed; paid service is
+unconfigured. Sustained public serving, stock Tailscale
 payment/onboarding, portal funding, DNS/TLS and Mainnet remain open qualification
 gates. This prepaid candidate is **not deployed to Mainnet**. Local build
 artifacts and tests do not establish public deployment readiness.

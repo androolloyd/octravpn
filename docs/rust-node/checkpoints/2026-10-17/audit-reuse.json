@@ -780,7 +780,7 @@
   "mainnet_deployed": false,
   "public_paid_qualified": false,
   "sustained_public_serving_qualified": false,
-  "public_observer_updated": false,
+  "public_observer_updated": true,
   "proof_scope": "39 unchanged bounded Lean payment-model theorems; not a proof of finality-cache, full AML semantics or Internet delivery",
   "media_scope": "Nine artifact-integrity regressions plus workflow/Compose/shell checks; fresh remote VHS/Tailscale/public-RPC run still required",
   "initial_attempts": [
@@ -854,5 +854,13 @@
       "report_sha256": "8d46c11bc4e6be5c4ad1260a4beb66f92511869ffbf6469c56fcbede68876551",
       "log_sha256": "96a31e04347c85d9baf9c214ebe2fd6ff4cd10ceef7f2b6f0d0563938a26fbf7"
     }
-  ]
+  ],
+  "public_adoption_checkpoint": "audit-reuse-public-adoption.json",
+  "normal_release": {
+    "source_commit": "7b2522636ceedeccb059415cadbca9a8a36ff829",
+    "binary_sha256": "b2b624507f242f033709ca1a4f3eaa9b8eaa482ac9ecd49dde1526929e8abb37",
+    "test_helpers": false,
+    "toolchain": "rustc 1.96.0 (ac68faa20 2026-05-25)\nbinary: rustc\ncommit-hash: ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96\ncommit-date: 2026-05-25\nhost: aarch64-apple-darwin\nrelease: 1.96.0\nLLVM version: 22.1.2",
+    "lock_sha256": "41a91382953a23309f5a507b583da6c19faf4f1a0ee95ce485bea0706ef41269"
+  }
 }
