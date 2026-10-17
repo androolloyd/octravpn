@@ -1,0 +1,588 @@
+{
+  "schema": "octra_peer_recovery_diagnostics_checkpoint_v1",
+  "observed_at": "2026-10-17T08:18:22.199124+00:00",
+  "base_commit": "f69473bd331ad36b22b8da7c29ee6f2660a9b72c",
+  "adopted_upstream": "7f9be4489870645cfcc95439638cde40f5da9f50",
+  "scope": "Bounded local connection diagnostics, independently authenticated checkpoint-floor allocation lifetime, seven-day policy revalidation and separate public observer continuity",
+  "source_sha256": {
+    "crates/octra-node-protocol/src/network/proxy.rs": "67bde7c681111e738e4e70dbef9cdf792ec3eb80c6519c591eecdbd9bfd5312a",
+    "crates/octra-node-protocol/src/network/proxy/tests.rs": "1350fe168f13035a3c34fea7485d8b68a752c29c3573f531c52ed83ba8026f0c",
+    "crates/octra-node-protocol/src/network/swarm.rs": "72487e8d4749b70ad10e34053f3e1dfb16d915abcf92310ce5b592ace646b44f",
+    "crates/octra-node-protocol/src/network/swarm/diagnostics.rs": "2e4ae02a353c3127ddbaba087bb179fd111ab6f5539bd00b6a446502e5eb5edf",
+    "crates/octra-node-protocol/src/network/swarm/service.rs": "db33208af1f255209227e3e21d91e99d483ab772025e31d130df1f338ca64bf9",
+    "crates/octra-node-protocol/src/network/swarm/service/tests.rs": "fc21e5e9709dbf33bf90123dc75a948eeca302ac1ff7ecfd10c755ff1646a548",
+    "crates/octra-node-protocol/tests/network_swarm.rs": "87b33913347148bb66345f9442c5d5a2adb622a5368676c334f315fffd3f05d2",
+    "crates/octra-node-protocol/tests/network_swarm/diagnostics.rs": "00b6bce86f5cf42f54d0bfc4a5801aea546f13840f3f878a5e8f9de66b756ec2",
+    "crates/octra-node-runtime/src/canonical/bootstrap.rs": "c1727cf164d48f2f92fc7bc565a4d293d5e0a1264acb4f008017795032202639",
+    "crates/octra-node/src/rpc.rs": "6308e2a86f99f66d505fc35a87999619d0ab1e7327d48be70723281f19b896a0",
+    "crates/octra-node/src/snapshot_export/tests.rs": "0010551f90e242fb7f0e2df638ba58d760778774338f618d28fff1137c65c9bb",
+    "crates/octra-node/src/snapshot_export/tests/bootstrap_recovery.rs": "1b6a215782605e0feb233e4061db515fcc93bf75017b8a8e86526fcb5b467213",
+    "program/octranet-payments.aml": "96e494be368351b4cc4832f0d78541813d842f4ab84229749b75a66fcb6c211b",
+    "proofs/lean/OctranetPayments.lean": "3269c304583047605c4b5f8ad8ca669710a0a03bd017eba75f63a12180793d83",
+    "proofs/lean/lean-toolchain": "f3ea78fdd417d39483583b721709727c225eeea0c0e9d29283de43f577411095",
+    "docs/economics.md": "65fff24803c2d67bfe28827911584d2d5557bc06c5adb6155fdfd85fc7a7197d"
+  },
+  "final_source_snapshot_sha256": "fe7475a88ecba497794069deb8987965858d8ca49fac47db341f471d79ee5e62",
+  "source_snapshot_directory": "/Users/androolloyd/Development/octra/out/peer-recovery-diagnostics-20261017",
+  "validation": {
+    "passed": 305,
+    "failed": 0,
+    "ignored": 4,
+    "targets": 25,
+    "rows": [
+      {
+        "target": "unittests src/lib.rs",
+        "passed": 95,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/devnet.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/services.rs",
+        "passed": 23,
+        "failed": 0,
+        "ignored": 1,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/single_native.rs",
+        "passed": 17,
+        "failed": 0,
+        "ignored": 2,
+        "stage": "combined-release"
+      },
+      {
+        "target": "unittests src/lib.rs",
+        "passed": 42,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/catchup_agreement.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/consensus_catchup_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/consensus_recovery_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/health_policy_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/network_driver.rs",
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/network_parity.rs",
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/network_session.rs",
+        "passed": 7,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/network_swarm.rs",
+        "passed": 10,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "network-swarm-corrected"
+      },
+      {
+        "target": "tests/network_upgrade.rs",
+        "passed": 6,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/peer_policy_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/swarm_policy_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/upgrade_config_parity.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "unittests src/lib.rs",
+        "passed": 50,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/bundle_queries.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/canonical_authority.rs",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/canonical_recovery.rs",
+        "passed": 7,
+        "failed": 0,
+        "ignored": 1,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/epoch_roots.rs",
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/finality_publication.rs",
+        "passed": 6,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/finality_queries.rs",
+        "passed": 7,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      },
+      {
+        "target": "tests/octranet_payments.rs",
+        "passed": 14,
+        "failed": 0,
+        "ignored": 0,
+        "stage": "combined-release"
+      }
+    ],
+    "stages": {
+      "strict-clippy": {
+        "source_snapshot_sha256": "e8e357561328f90c395e2f0739b7c10fd29078c08fc4b762a842abe888ab8258",
+        "name": "strict-clippy",
+        "argv": [
+          "cargo",
+          "clippy",
+          "--offline",
+          "--locked",
+          "--release",
+          "--features",
+          "octra-node/test-helpers",
+          "-p",
+          "octra-node-protocol",
+          "-p",
+          "octra-node-runtime",
+          "-p",
+          "octra-node",
+          "--lib",
+          "--bins",
+          "--tests",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra",
+        "exit_code": 0,
+        "elapsed_seconds": 31.452,
+        "log_sha256": "4a46770d41b5966c44f17ba2dbfed65e53d2f147618f1db3b19de7f4222c262b"
+      },
+      "combined-release": {
+        "source_snapshot_sha256": "e8e357561328f90c395e2f0739b7c10fd29078c08fc4b762a842abe888ab8258",
+        "name": "combined-release",
+        "argv": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--release",
+          "--no-fail-fast",
+          "--features",
+          "octra-node/test-helpers",
+          "-p",
+          "octra-node",
+          "-p",
+          "octra-node-protocol",
+          "-p",
+          "octra-node-runtime",
+          "--lib",
+          "--test",
+          "services",
+          "--test",
+          "devnet",
+          "--test",
+          "single_native",
+          "--test",
+          "health_policy_parity",
+          "--test",
+          "consensus_catchup_parity",
+          "--test",
+          "consensus_recovery_parity",
+          "--test",
+          "catchup_agreement",
+          "--test",
+          "epoch_roots",
+          "--test",
+          "canonical_recovery",
+          "--test",
+          "canonical_authority",
+          "--test",
+          "octranet_payments",
+          "--test",
+          "bundle_queries",
+          "--test",
+          "finality_queries",
+          "--test",
+          "finality_publication",
+          "--test",
+          "network_parity",
+          "--test",
+          "network_upgrade",
+          "--test",
+          "network_session",
+          "--test",
+          "upgrade_config_parity",
+          "--test",
+          "peer_policy_parity",
+          "--test",
+          "network_driver",
+          "--test",
+          "swarm_policy_parity",
+          "--test",
+          "network_swarm"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra",
+        "exit_code": 101,
+        "elapsed_seconds": 447.631,
+        "log_sha256": "dabb46772bfa491f2bd3f0189e3db9207e796237124335027274e99f4a4e78ac"
+      },
+      "network-swamp-debug": {
+        "source_snapshot_sha256": "26e1aa02d679c1b6856633264d54d581b452ab7a9a5733cb23ad6e8e22cb04fc",
+        "name": "network-swamp-debug",
+        "argv": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--release",
+          "-p",
+          "octra-node-protocol",
+          "--test",
+          "network_swarm",
+          "diagnostics::refused_tcp_and_graceful_early_close_have_distinct_outcomes",
+          "--",
+          "--exact",
+          "--nocapture"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra",
+        "exit_code": 101,
+        "elapsed_seconds": 25.064,
+        "log_sha256": "77773e378eef92f001a53159aa54428214d1e4e016edfa9385ea2766046d0e51"
+      },
+      "network-swarm-final": {
+        "source_snapshot_sha256": "e5593af7437cca8bfa6c0cbed5a2571e257bcd330e9e88c3a14b1cd4b23882a9",
+        "name": "network-swarm-final",
+        "argv": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--release",
+          "-p",
+          "octra-node-protocol",
+          "--test",
+          "network_swarm"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra",
+        "exit_code": 101,
+        "elapsed_seconds": 6.705,
+        "log_sha256": "42eb0848e22cf02709f574bd847ac00a97950427843c000913ffac6fc6e1fce8"
+      },
+      "network-swarm-corrected": {
+        "source_snapshot_sha256": "fe7475a88ecba497794069deb8987965858d8ca49fac47db341f471d79ee5e62",
+        "name": "network-swarm-corrected",
+        "argv": [
+          "cargo",
+          "test",
+          "--offline",
+          "--locked",
+          "--release",
+          "-p",
+          "octra-node-protocol",
+          "--test",
+          "network_swarm"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra",
+        "exit_code": 0,
+        "elapsed_seconds": 1.776,
+        "log_sha256": "f0db82ff095571f23f5fb0dbf076f549c47d34787cf7930c1f09925239e99c80"
+      },
+      "strict-clippy-final": {
+        "source_snapshot_sha256": "fe7475a88ecba497794069deb8987965858d8ca49fac47db341f471d79ee5e62",
+        "name": "strict-clippy-final",
+        "argv": [
+          "cargo",
+          "clippy",
+          "--offline",
+          "--locked",
+          "--release",
+          "--features",
+          "octra-node/test-helpers",
+          "-p",
+          "octra-node-protocol",
+          "-p",
+          "octra-node-runtime",
+          "-p",
+          "octra-node",
+          "--lib",
+          "--bins",
+          "--tests",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra",
+        "exit_code": 0,
+        "elapsed_seconds": 0.793,
+        "log_sha256": "a92ace0315839f4b8797b62fb044d298b30b17a43fabb4e3335b02390c0623bf"
+      },
+      "lean": {
+        "source_snapshot_sha256": "26e1aa02d679c1b6856633264d54d581b452ab7a9a5733cb23ad6e8e22cb04fc",
+        "name": "lean",
+        "argv": [
+          "lake",
+          "build",
+          "OctranetPayments"
+        ],
+        "cwd": "/Users/androolloyd/Development/octra/proofs/lean",
+        "exit_code": 0,
+        "elapsed_seconds": 0.83,
+        "log_sha256": "a30d6eefe7ccec7803482bd446c3d48f7cc46ed86ba99cb839fca134dd7a5a3d"
+      },
+      "format-final": {
+        "argv": [
+          "rustfmt",
+          "--edition",
+          "2021",
+          "--check",
+          "--config",
+          "skip_children=true",
+          "crates/octra-node-protocol/src/network/proxy.rs",
+          "crates/octra-node-protocol/src/network/proxy/tests.rs",
+          "crates/octra-node-protocol/src/network/swarm.rs",
+          "crates/octra-node-protocol/src/network/swarm/diagnostics.rs",
+          "crates/octra-node-protocol/src/network/swarm/service.rs",
+          "crates/octra-node-protocol/src/network/swarm/service/tests.rs",
+          "crates/octra-node-protocol/tests/network_swarm.rs",
+          "crates/octra-node-protocol/tests/network_swarm/diagnostics.rs",
+          "crates/octra-node-runtime/src/canonical/bootstrap.rs",
+          "crates/octra-node/src/rpc.rs",
+          "crates/octra-node/src/snapshot_export/tests.rs",
+          "crates/octra-node/src/snapshot_export/tests/bootstrap_recovery.rs"
+        ],
+        "exit_code": 0,
+        "source_sha256": {
+          "crates/octra-node-protocol/src/network/proxy.rs": "67bde7c681111e738e4e70dbef9cdf792ec3eb80c6519c591eecdbd9bfd5312a",
+          "crates/octra-node-protocol/src/network/proxy/tests.rs": "1350fe168f13035a3c34fea7485d8b68a752c29c3573f531c52ed83ba8026f0c",
+          "crates/octra-node-protocol/src/network/swarm.rs": "72487e8d4749b70ad10e34053f3e1dfb16d915abcf92310ce5b592ace646b44f",
+          "crates/octra-node-protocol/src/network/swarm/diagnostics.rs": "2e4ae02a353c3127ddbaba087bb179fd111ab6f5539bd00b6a446502e5eb5edf",
+          "crates/octra-node-protocol/src/network/swarm/service.rs": "db33208af1f255209227e3e21d91e99d483ab772025e31d130df1f338ca64bf9",
+          "crates/octra-node-protocol/src/network/swarm/service/tests.rs": "fc21e5e9709dbf33bf90123dc75a948eeca302ac1ff7ecfd10c755ff1646a548",
+          "crates/octra-node-protocol/tests/network_swarm.rs": "87b33913347148bb66345f9442c5d5a2adb622a5368676c334f315fffd3f05d2",
+          "crates/octra-node-protocol/tests/network_swarm/diagnostics.rs": "00b6bce86f5cf42f54d0bfc4a5801aea546f13840f3f878a5e8f9de66b756ec2",
+          "crates/octra-node-runtime/src/canonical/bootstrap.rs": "c1727cf164d48f2f92fc7bc565a4d293d5e0a1264acb4f008017795032202639",
+          "crates/octra-node/src/rpc.rs": "6308e2a86f99f66d505fc35a87999619d0ab1e7327d48be70723281f19b896a0",
+          "crates/octra-node/src/snapshot_export/tests.rs": "0010551f90e242fb7f0e2df638ba58d760778774338f618d28fff1137c65c9bb",
+          "crates/octra-node/src/snapshot_export/tests/bootstrap_recovery.rs": "1b6a215782605e0feb233e4061db515fcc93bf75017b8a8e86526fcb5b467213"
+        },
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "changed_after_initial_combined": [
+      "crates/octra-node-protocol/tests/network_swarm/diagnostics.rs"
+    ],
+    "composition": "24 unchanged targets from initial combined run plus final corrected ten-test network_swarm target; final lint on same source snapshot",
+    "compiled_payment_tests": 14,
+    "abstract_lean_theorems": 19,
+    "proof_limit": "Lean is an abstract model; these checks do not establish AML/compiler/VM refinement or seven elapsed production days"
+  },
+  "operator_policy": {
+    "operator_unstake_ms": 604800000,
+    "payer_exit_ms": 86400000,
+    "stopped_operator_claim_ms": 86400000,
+    "deadline": "first request; retries preserve the original deadline",
+    "new_paid_admission": "stops immediately on request",
+    "commission": 0,
+    "aml_changed": false
+  },
+  "diagnostics": {
+    "endpoint": "GET /operator/peers",
+    "field": "connections",
+    "storage": "fixed direction/phase/outcome enum product; saturating u64 counts",
+    "lifecycle": "reset each run; old-generation completions ignored; unpolled session cancellation records once",
+    "native_wire_changed": false,
+    "admission_retry_authentication_changed": false,
+    "remote_text_or_payload_retained": false
+  },
+  "checkpoint_restore": {
+    "independent_floor_authentication": true,
+    "independent_current_authentication": true,
+    "change": "drop authenticated floor tree before restoring a distinct current head",
+    "regression": "signed floor65, real QC66 suffix, immutable ExEx parent, independent floor-only and current-only corruption refusal",
+    "production_memory_bound_measured": false
+  },
+  "public_observer": {
+    "source_commit": "f69473bd331ad36b22b8da7c29ee6f2660a9b72c",
+    "binary_sha256": "c95e3dd21e476de5e66202edec6dd8713b14d9872707d3af216fa726a13512b9",
+    "config_sha256": "77a1713c64c3baf2c57a67bb6a9f261bfb5280347bbe71358dbb0984e53c40eb",
+    "pid": 87662,
+    "supervisor_pid": 87661,
+    "identity_unchanged": true,
+    "configuration_unchanged": true,
+    "relay_unchanged": true,
+    "state_reset": false,
+    "voting": false,
+    "payment_configured": false,
+    "funds_spent": 0,
+    "new_diagnostics_installed": false,
+    "new_memory_change_installed": false,
+    "retained_sequence": 9751,
+    "retained_epoch": 1707511,
+    "continuity": {
+      "at": "2026-10-17T08:11:17.474164+00:00",
+      "captured_sequence": 9814,
+      "captured_epoch": 1707574,
+      "epochs": 63,
+      "transactions": 525,
+      "scope": "Read-only post-restart canonical/outbox/archive/checkpoint consistency; signature/execution authenticity remains the running node publisher boundary, not independently reverified by this script",
+      "sha256": "f6e268883afe2d3783719b98072810a895b62e5276f9e57b8e8fe08ad2f3d0b1"
+    },
+    "latest_observation": {
+      "at": "2026-10-17T08:15:50.271728+00:00",
+      "alive": true,
+      "exit_evidence": false,
+      "status": {
+        "http": 200,
+        "body": {
+          "chain_id": "octra-devnet-9871-cluster",
+          "epoch": 1707599,
+          "peers": 20,
+          "pending": 0,
+          "serving": true,
+          "state_root": "5b2d18a0511ec0dbc0520dfebd1f7b6b6721c959dfb9b3c07d76fa3ab8c11bbc",
+          "suspension_reason": null,
+          "vpn_program": null,
+          "vpn_settlement": "unconfigured"
+        }
+      },
+      "native_status": {
+        "http": 200,
+        "body": {
+          "current_epoch": 1707600,
+          "validator": "oct1JBUrYbeTQazQ39LQn4ZjnPLHfDpLGXouqon1jZhJfYP",
+          "root_count": 0,
+          "timestamp": 1792224953.19359,
+          "total_accounts": 149092,
+          "total_supply": "996214490.605319",
+          "circulating_supply": "996214490.605319",
+          "encrypted_supply": "12406337.119224",
+          "active_accounts": 141541,
+          "network_version": "v3.0.0-irmin",
+          "storage_backend": "sqlite",
+          "head_epoch": 1707599,
+          "state_root": "5b2d18a0511ec0dbc0520dfebd1f7b6b6721c959dfb9b3c07d76fa3ab8c11bbc",
+          "txid_hi": "2744532",
+          "irmin_commit": "334f2a122d17768478c3eb719788bba9a64429491b33608abcf179f8384e227c02aabc76dff1bf916b69e46c0de9ede311d5ac3f0dfdf801d7fe926fa62dc293"
+        }
+      }
+    },
+    "circle_probe": [
+      {
+        "name": "loopback",
+        "url": "http://127.0.0.1:20805/circles/octEhmrASH9EQutvxdMXsRrE5iRm4M7fQb3YYLV9dKMPXDV/index.html",
+        "at": "2026-10-17T08:17:03.842810+00:00",
+        "http": 404,
+        "headers": {
+          "content-type": "text/html; charset=utf-8"
+        },
+        "body_bytes": 5478,
+        "body_sha256": "10df53cb05101ba4c3970320231383ac3398a5b260a62dc8604a518f38a5f150",
+        "body_truncated": false
+      },
+      {
+        "name": "tailnet-https",
+        "url": "https://andrews-macbook-pro.tailcd562a.ts.net/circles/octEhmrASH9EQutvxdMXsRrE5iRm4M7fQb3YYLV9dKMPXDV/index.html",
+        "at": "2026-10-17T08:17:03.856024+00:00",
+        "http": 404,
+        "headers": {
+          "Content-Type": "text/html; charset=utf-8"
+        },
+        "body_bytes": 5478,
+        "body_sha256": "10df53cb05101ba4c3970320231383ac3398a5b260a62dc8604a518f38a5f150",
+        "body_truncated": false
+      }
+    ],
+    "qualification": "Bounded successful serving sample after authenticated catch-up; no stable public Circle or paid-service qualification"
+  },
+  "review": {
+    "concrete_production_defect_found": false,
+    "tests_corrected": "The TCP refusal fixture originally held a bound non-listening socket, which did not complete the connect before the fixture deadline on macOS. A held alternate loopback address also did not complete. The final fixture releases a reserved local listener immediately before dialing the closed port; exact Refused and graceful RemoteClose assertions pass. All failure logs retained.",
+    "memory_review": "Floor still runs reader restore, persisted-counter and root verification before release; latest state independently restored. No canonical, certificate, finality, vote-journal or ExEx rewind.",
+    "unresolved": [
+      "Positive legacy nonjournaled empty-fork repair needs a real legacy storage adapter and staged restart lifecycle",
+      "Complete adopted native orchestration parity",
+      "Stable public Circle asset delivery and paid routing, stock Tailscale/onboarding and public TLS qualification",
+      "Measured retained-state startup resource bounds",
+      "Mainnet alpha qualification remains incomplete"
+    ]
+  }
+}

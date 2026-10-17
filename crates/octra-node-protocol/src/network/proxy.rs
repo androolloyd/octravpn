@@ -16,15 +16,38 @@ pub fn validate(proxy: SocketAddr) -> Result<(), Error> {
 
 /// Open a TCP transport within ten seconds, including DNS and proxy negotiation.
 pub async fn connect(endpoint: &Endpoint, proxy: Option<SocketAddr>) -> Result<TcpStream, Error> {
-    tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        connect_inner(endpoint, proxy),
-    )
-    .await
-    .map_err(|_| Error::from("P2P transport connect timeout"))?
+    connect_diagnosed(endpoint, proxy)
+        .await
+        .map_err(|failure| failure.error)
 }
 
-async fn connect_inner(endpoint: &Endpoint, proxy: Option<SocketAddr>) -> Result<TcpStream, Error> {
+pub(super) struct Failure {
+    pub error: Error,
+    pub socks_reply: Option<u8>,
+}
+
+pub(super) async fn connect_diagnosed(
+    endpoint: &Endpoint,
+    proxy: Option<SocketAddr>,
+) -> Result<TcpStream, Failure> {
+    let mut socks_reply = None;
+    let result = match tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        connect_inner(endpoint, proxy, &mut socks_reply),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => Err(Error::from("P2P transport connect timeout")),
+    };
+    result.map_err(|error| Failure { error, socks_reply })
+}
+
+async fn connect_inner(
+    endpoint: &Endpoint,
+    proxy: Option<SocketAddr>,
+    socks_reply: &mut Option<u8>,
+) -> Result<TcpStream, Error> {
     let host = std::str::from_utf8(&endpoint.host).map_err(|e| Error::from(e.to_string()))?;
     let Some(proxy) = proxy else {
         let address = tokio::net::lookup_host((host, endpoint.port))
@@ -61,6 +84,9 @@ async fn connect_inner(endpoint: &Endpoint, proxy: Option<SocketAddr>) -> Result
         let mut reply = [0; 4];
         stream.read_exact(&mut reply).await?;
         if reply[..3] != [5, 0, 0] {
+            if reply[0] == 5 && reply[2] == 0 {
+                *socks_reply = Some(reply[1]);
+            }
             return Err(std::io::Error::other("SOCKS5 CONNECT refused"));
         }
         let length = match reply[3] {

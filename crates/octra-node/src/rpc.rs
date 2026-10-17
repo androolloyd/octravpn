@@ -200,6 +200,7 @@ fn peer_diagnostics(swarm: &Swarm) -> Json<serde_json::Value> {
         "public_sources": diagnostics.public_sources,
         "risks": diagnostics.risks.iter().map(|risk| String::from_utf8_lossy(risk).into_owned()).collect::<Vec<_>>(),
         "score_reasons": score_reasons,
+        "connections": swarm.connection_diagnostics(),
     }))
 }
 fn router_base_with_limit(host: Arc<Context>, maximum: usize) -> Router {

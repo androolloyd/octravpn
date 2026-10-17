@@ -4,6 +4,13 @@ The traffic commission was removed on 2026-10-12. Directory/signaling pricing
 and older encrypted-accounting sections below include design proposals; they
 are not a claim that the current RC implements every service.
 
+The staged [Octranet payment application](../program/octranet-payments.aml)
+fixes operator unstaking at **seven days** (604,800,000 canonical milliseconds)
+from the first request. Retries preserve that deadline. Payer exits and claims
+against a stopped operator have separate 24-hour settlement windows. The
+[payment-tier design](architecture/octranet-payment-tier.md) describes this
+application; the historical v1 epoch-based parameters below do not configure it.
+
 This document specifies the economic model: who pays whom, in what
 direction, at what price, with what incentives, and why we believe
 the protocol is incentive-compatible against the threat model in
@@ -630,7 +637,7 @@ doesn't work, it's visible immediately.
 
 ---
 
-## 14. Parameter table (full)
+## 14. Historical v1 parameter table
 
 Set in the `OctraVPN` constructor (`program/main.aml`). Governance
 (via `set_params`) can adjust within constructor-enforced bounds.

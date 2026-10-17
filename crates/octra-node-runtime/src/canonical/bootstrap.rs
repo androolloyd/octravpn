@@ -163,11 +163,18 @@ impl CanonicalStore {
             snapshots: Arc::default(),
         };
         store.verify_history().await?;
+        let head = store.head().await?;
         let restored = reader::restore(&store.pool, &store.anchor).await?;
         if hex::encode(restored.root().map_err(error)?) != store.anchor.ledger_root {
             return Err(error("checkpoint state differs"));
         }
-        store.snapshots.remember(&store.anchor, restored)?;
+        if head == store.anchor {
+            store.snapshots.remember(&store.anchor, restored)?;
+        } else {
+            // Authenticate the floor even when only the suffix is served, but
+            // release its independent tree before restoring the current head.
+            drop(restored);
+        }
         store.snapshot().await?;
         store.index_vm_receipts().await?;
         store.index_transactions().await?;

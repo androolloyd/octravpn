@@ -43,6 +43,11 @@ and checks the selected canonical consensus configuration before voting.
 Public startup and recovery also apply the adopted [peer health admission policy](docs/rust-node/root-recovery.md)
 before serving or signing; the [connected recovery checkpoint](docs/rust-node/checkpoints/2026-10-17/recovery-health-policy.md)
 records local qualification and its limits.
+The [peer recovery follow-up](docs/rust-node/checkpoints/2026-10-17/peer-recovery-diagnostics.md)
+adds bounded connection diagnostics and authenticated checkpoint allocation
+cleanup. It records a successful public serving sample and canonical/ExEx
+continuity on the previously qualified image; stable public Circle asset delivery
+and paid service remain unqualified.
 
 **Rust node qualification (2026-10-15):** the `octra-node` executable connects the
 native validator driver, authenticated peers, transaction intake, canonical

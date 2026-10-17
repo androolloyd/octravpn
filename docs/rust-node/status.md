@@ -9,6 +9,20 @@ upstream behavioral parity and public-network deployment remain unqualified.
 
 ## Recorded local evidence
 
+- The [peer diagnostics and recovery checkpoint](checkpoints/2026-10-17/peer-recovery-diagnostics.json)
+  records 305 passing tests across 25 composed targets, four intentional helper
+  ignores, strict lint, formatting, 14 compiled payment AML tests and 19 abstract
+  Lean theorems. Local connection counters are bounded and independent of native
+  wire diagnostics. Checkpoint opening releases an independently authenticated
+  floor before restoring a distinct current head; corruption of either tree
+  remains rejected. The [review](checkpoints/2026-10-17/peer-recovery-diagnostics.md)
+  preserves the initial TCP fixture failures and final source boundaries.
+  Separately, public observer `f69473b` resumed its retained state: 63 epochs and
+  525 transactions matched canonical history and ExEx. A bounded later sample
+  saw serving admission enabled with 20 peers, while the requested old Circle
+  asset returned 404 through loopback and tailnet HTTPS. Payments remain
+  unconfigured; the new diagnostics/allocation changes are not installed there.
+  Stable public Circle delivery, paid service and Mainnet remain unqualified.
 - The [native health admission checkpoint](checkpoints/2026-10-17/recovery-health-policy.json)
   records 265 passing tests across 17 final targets, with four intentional helper
   ignores. It includes 1,898 comparisons against adopted OCaml policy bodies,

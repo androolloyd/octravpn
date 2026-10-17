@@ -122,6 +122,35 @@ async fn rejected_proxy_never_falls_back_to_reachable_direct_target() {
 }
 
 #[tokio::test]
+async fn fixed_socks_failure_reply_is_available_without_changing_public_errors() {
+    for reply in [2, 3, 4, 5, 6, 7, 8, 255] {
+        let proxy = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = proxy.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = proxy.accept().await.unwrap();
+            request(&mut stream).await;
+            stream
+                .write_all(&[5, reply, 0, 1, 0, 0, 0, 0, 0, 0])
+                .await
+                .unwrap();
+        });
+        let failure = connect_diagnosed(
+            &Endpoint {
+                host: b"peer.invalid".to_vec(),
+                port: 19000,
+            },
+            Some(address),
+        )
+        .await
+        .err()
+        .unwrap();
+        assert_eq!(failure.socks_reply, Some(reply));
+        assert_eq!(failure.error.as_bytes(), b"SOCKS5 CONNECT refused");
+        server.await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn malformed_proxy_negotiation_is_refused() {
     for reply in [vec![4, 0], vec![5, 2], vec![5, 0, 5, 0, 0, 9]] {
         let proxy = TcpListener::bind("127.0.0.1:0").await.unwrap();

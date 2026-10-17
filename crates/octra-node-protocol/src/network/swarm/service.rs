@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2023-2026 Octra Labs <dev@octra.org>
 use super::{
-    guard, now, policy, Arc, BTreeSet, Connection, Direction, Duration, Endpoint, Error, Future,
-    Handler, JoinSet, PeerClass, Pin, Swarm, TcpListener, TcpStream,
+    diagnostics, guard, now, policy, Arc, BTreeSet, Connection, Direction, Duration, Endpoint,
+    Error, Future, Handler, JoinSet, Outcome, PeerClass, Phase, Pin, Swarm, TcpListener, TcpStream,
 };
 use rand::rngs::OsRng;
 use tokio::{
     sync::{mpsc, Semaphore},
     time::{Instant, MissedTickBehavior},
 };
+#[cfg(test)]
+mod tests;
 type Task = Pin<Box<dyn Future<Output = ()> + Send>>;
 #[derive(Clone)]
 struct Spawner(mpsc::Sender<Task>);
@@ -41,6 +43,35 @@ struct DialGuard {
     generation: u64,
     endpoint: Vec<u8>,
 }
+struct SessionCompletion {
+    swarm: Swarm,
+    generation: u64,
+    direction: Direction,
+    completed: bool,
+}
+impl SessionCompletion {
+    fn finish(mut self, result: Result<(), Error>) {
+        let outcome = match result {
+            Ok(()) => Outcome::LocalClose,
+            Err(error) => diagnostics::failure(Phase::Session, &error),
+        };
+        self.completed = true;
+        self.swarm
+            .note(self.generation, self.direction, Phase::Session, outcome);
+    }
+}
+impl Drop for SessionCompletion {
+    fn drop(&mut self) {
+        if !self.completed {
+            self.swarm.note(
+                self.generation,
+                self.direction,
+                Phase::Session,
+                Outcome::Cancelled,
+            );
+        }
+    }
+}
 impl Drop for DialGuard {
     fn drop(&mut self) {
         let mut s = self.swarm.state();
@@ -66,27 +97,42 @@ async fn launch(
     spawn: Spawner,
 ) -> bool {
     let peer_id = connection.peer().node_id.clone();
-    let Ok(Some((peer, driver))) = swarm.install(generation, direction, connection, remote_host)
-    else {
-        return swarm
-            .state()
-            .peers
-            .get(&peer_id)
-            .is_some_and(|p| p.peer.is_connected());
+    let installed = swarm.install(generation, direction, connection, remote_host);
+    let (peer, driver) = match installed {
+        Ok(Some(installed)) => installed,
+        result => {
+            if result.is_err() {
+                swarm.note(generation, direction, Phase::Admission, Outcome::Other);
+            }
+            return swarm
+                .state()
+                .peers
+                .get(&peer_id)
+                .is_some_and(|p| p.peer.is_connected());
+        }
     };
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         handler.connected(peer.clone());
     }));
     let owner = swarm.clone();
+    // Construct before enqueueing: cancellation while this future is still
+    // queued must have exactly one local outcome as well.
+    let completion = SessionCompletion {
+        swarm: swarm.clone(),
+        generation,
+        direction,
+        completed: false,
+    };
     if !spawn
         .spawn(async move {
-            let _ = driver
+            let result = driver
                 .run(move |peer, frame| {
                     let owner = owner.clone();
                     let handler = handler.clone();
                     async move { owner.handle(handler.as_ref(), peer, frame).await }
                 })
                 .await;
+            completion.finish(result);
         })
         .await
     {
@@ -111,17 +157,50 @@ async fn dial(
     {
         let s = swarm.state();
         if !s.running || s.generation != generation || !swarm.capacity(&s, PeerClass::Validator) {
+            let outcome = if s.running {
+                Outcome::Capacity
+            } else {
+                Outcome::Stopped
+            };
+            drop(s);
+            swarm.note(generation, Direction::Outbound, Phase::Admission, outcome);
             return false;
         }
     }
     let proxy = swarm.state().proxy;
-    let Ok(stream) = super::super::proxy::connect(endpoint, proxy).await else {
-        return false;
+    let stream = match super::super::proxy::connect_diagnosed(endpoint, proxy).await {
+        Ok(stream) => {
+            swarm.note(
+                generation,
+                Direction::Outbound,
+                Phase::Transport,
+                Outcome::Accepted,
+            );
+            stream
+        }
+        Err(failure) => {
+            swarm.note(
+                generation,
+                Direction::Outbound,
+                Phase::Transport,
+                failure.socks_reply.map_or_else(
+                    || diagnostics::failure(Phase::Transport, &failure.error),
+                    diagnostics::proxy_reply,
+                ),
+            );
+            return false;
+        }
     };
     let Ok(local) = swarm.hello(listen_port) else {
+        swarm.note(
+            generation,
+            Direction::Outbound,
+            Phase::Handshake,
+            Outcome::Config,
+        );
         return false;
     };
-    let Ok(connection) = super::super::session::dial(
+    let result = super::super::session::dial(
         stream,
         &local,
         &swarm.0.key,
@@ -129,9 +208,26 @@ async fn dial(
         &mut OsRng,
         swarm.0.config.timeouts,
     )
-    .await
-    else {
-        return false;
+    .await;
+    let connection = match result {
+        Ok(connection) => {
+            swarm.note(
+                generation,
+                Direction::Outbound,
+                Phase::Handshake,
+                Outcome::Accepted,
+            );
+            connection
+        }
+        Err(error) => {
+            swarm.note(
+                generation,
+                Direction::Outbound,
+                Phase::Handshake,
+                diagnostics::failure(Phase::Handshake, &error),
+            );
+            return false;
+        }
     };
     launch(
         swarm,
@@ -283,6 +379,7 @@ pub(super) async fn run(
             .ok_or_else(|| Error::from("swarm generation exhausted"))?;
         s.started = true;
         s.running = true;
+        s.connections = diagnostics::Counters::default();
         swarm.0.stop.send_replace(false);
         s.generation
     };
@@ -330,19 +427,28 @@ pub(super) async fn run(
                 match accepted{
                     Err(e)=>match accept_delay(attempt,&e){Some(delay)=>{attempt=(attempt+1).min(7);next_accept=Instant::now()+delay;},None=>break Err(Error::from(e.to_string()))},
                     Ok((stream,address))=>{
+                        swarm.note(generation,Direction::Inbound,Phase::Transport,Outcome::Accepted);
                         attempt=0;next_accept=Instant::now();
                         let key=address.ip().to_string().into_bytes();
                         let allowed={let mut s=swarm.state();
-                            if s.guard.admit(guard::Config::default(),now(),&key).is_err()||!(swarm.capacity(&s,PeerClass::Validator)||(swarm.accepts_observers(&s)&&swarm.capacity(&s,PeerClass::Observer))){continue;}
+                            if let Err(reason)=s.guard.admit(guard::Config::default(),now(),&key){
+                                s.connections.record(Direction::Inbound,Phase::Admission,if reason=="banned"{Outcome::Banned}else{Outcome::ConnectionBudget});
+                                continue;
+                            }
+                            if !(swarm.capacity(&s,PeerClass::Validator)||(swarm.accepts_observers(&s)&&swarm.capacity(&s,PeerClass::Observer))){
+                                s.connections.record(Direction::Inbound,Phase::Admission,Outcome::Capacity);
+                                continue;
+                            }
                             if swarm.accepts_observers(&s){Vec::new()}else{swarm.0.config.allowed_public_keys.clone()}
                         };
-                        let Ok(permit)=pending.clone().try_acquire_owned()else{continue;};
+                        let Ok(permit)=pending.clone().try_acquire_owned()else{swarm.note(generation,Direction::Inbound,Phase::Admission,Outcome::PendingLimit);continue;};
                         let owner=swarm.clone();let handler=handler.clone();let spawn=spawn.clone();
                         tasks.spawn(async move{
-                            let Ok(local)=owner.hello(port)else{return;};
+                            let Ok(local)=owner.hello(port)else{owner.note(generation,Direction::Inbound,Phase::Handshake,Outcome::Config);return;};
                             let result=super::super::session::accept(stream,&local,&owner.0.key,&allowed,&mut OsRng,owner.0.config.timeouts).await;
                             drop(permit);
-                            match result{Ok(connection)=>{launch(owner,generation,Direction::Inbound,connection,key.clone(),handler,spawn).await;},Err(e)=>{
+                            match result{Ok(connection)=>{owner.note(generation,Direction::Inbound,Phase::Handshake,Outcome::Accepted);launch(owner,generation,Direction::Inbound,connection,key.clone(),handler,spawn).await;},Err(e)=>{
+                                owner.note(generation,Direction::Inbound,Phase::Handshake,diagnostics::failure(Phase::Handshake,&e));
                                 if let Some(reason)=guard::handshake_penalty(e.as_bytes()){owner.state().guard.report(guard::Config::default(),now(),&key,reason.as_bytes());}
                             }}
                         });

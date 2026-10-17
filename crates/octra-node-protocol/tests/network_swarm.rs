@@ -17,6 +17,8 @@ use tokio::{
     task::JoinHandle,
 };
 const WAIT: Duration = Duration::from_secs(5);
+#[path = "network_swarm/diagnostics.rs"]
+mod diagnostics;
 struct Inbox(mpsc::UnboundedSender<(Vec<u8>, Frame)>);
 impl Handler for Inbox {
     fn message(&self, peer: Peer, frame: Frame) -> MessageFuture {

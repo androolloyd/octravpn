@@ -20,6 +20,7 @@ use octra_node_runtime::{
     state_batch::StateBatch,
 };
 use std::{collections::BTreeMap, fs, time::SystemTime};
+mod bootstrap_recovery;
 fn key(id: u8) -> SigningKey {
     SigningKey::from_bytes(&[id; 32])
 }

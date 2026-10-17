@@ -26,7 +26,9 @@ use tokio::{
     sync::{watch, Notify},
     task::JoinSet,
 };
+mod diagnostics;
 mod service;
+pub use diagnostics::{Connections, Count as ConnectionCount, Outcome, Phase};
 
 pub type MessageFuture = Pin<Box<dyn Future<Output = Result<(), Error>> + Send>>;
 pub trait Handler: Send + Sync + 'static {
@@ -75,6 +77,7 @@ struct State {
     due: BTreeMap<Vec<u8>, f64>,
     relayed: super::peer_diag::Relayed,
     proxy: Option<std::net::SocketAddr>,
+    connections: diagnostics::Counters,
 }
 struct Inner {
     config: Config,
@@ -119,6 +122,7 @@ impl Swarm {
             due: BTreeMap::new(),
             relayed: super::peer_diag::Relayed::default(),
             proxy: None,
+            connections: diagnostics::Counters::default(),
         };
         Ok(Self(Arc::new(Inner {
             node_id: handshake::node_id(&key.verifying_key().to_bytes()),
@@ -131,6 +135,25 @@ impl Swarm {
     }
     fn state(&self) -> MutexGuard<'_, State> {
         self.0.state.lock().expect("swarm state poisoned")
+    }
+    fn note(&self, generation: u64, direction: Direction, phase: Phase, outcome: Outcome) {
+        let mut state = self.state();
+        if state.generation == generation {
+            state.connections.record(direction, phase, outcome);
+        }
+    }
+    /// Current-run local outcomes, separate from native peer diagnostics and
+    /// their wire-compatible JSON. No peer identity or error payload is stored.
+    pub fn connection_diagnostics(&self) -> Connections {
+        let state = self.state();
+        Connections {
+            generation: state.generation,
+            running: state.running,
+            proxy: state.proxy.is_some(),
+            dialing: state.dialing.len(),
+            record_dialing: state.record_dialing.len(),
+            outcomes: state.connections.snapshot(),
+        }
     }
     /// Select a local transport before startup. This changes neither peer
     /// identity admission nor validator membership, and has no direct fallback.
@@ -393,12 +416,22 @@ impl Swarm {
         let mut s = self.state();
         let hello = connection.peer();
         let id = &hello.node_id;
-        if !s.running
-            || s.generation != generation
-            || id == self.node_id()
-            || hello.config_hash != self.transport_hash(self.epoch(&s), &s.active_hash)?
-            || s.guard.is_banned(now(), &guard::identity_key(id))
-        {
+        if s.generation != generation {
+            return Ok(None);
+        }
+        let rejected = if !s.running {
+            Some(Outcome::Stopped)
+        } else if id == self.node_id() {
+            Some(Outcome::SelfConnection)
+        } else if hello.config_hash != self.transport_hash(self.epoch(&s), &s.active_hash)? {
+            Some(Outcome::Config)
+        } else if s.guard.is_banned(now(), &guard::identity_key(id)) {
+            Some(Outcome::Banned)
+        } else {
+            None
+        };
+        if let Some(outcome) = rejected {
+            s.connections.record(direction, Phase::Admission, outcome);
             return Ok(None);
         }
         let role = policy::role(s.validators.as_deref(), id);
@@ -410,16 +443,24 @@ impl Swarm {
                 existing.direction,
                 existing.peer.is_connected(),
             ) {
+                s.connections
+                    .record(direction, Phase::Admission, Outcome::Duplicate);
                 return Ok(None);
             }
             existing.peer.close();
-        } else if (role == PeerClass::Observer && !self.accepts_observers(&s))
-            || !self.capacity(&s, role)
-        {
+        } else if role == PeerClass::Observer && !self.accepts_observers(&s) {
+            s.connections
+                .record(direction, Phase::Admission, Outcome::Observer);
+            return Ok(None);
+        } else if !self.capacity(&s, role) {
+            s.connections
+                .record(direction, Phase::Admission, Outcome::Capacity);
             return Ok(None);
         }
         let (peer, driver) = connection.into_driver()?;
         peer.set_peer_class(role);
+        s.connections
+            .record(direction, Phase::Admission, Outcome::Accepted);
         s.peers.insert(
             peer.hello().node_id.clone(),
             Slot {
